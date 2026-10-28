@@ -140,7 +140,7 @@ for (const suffix of ['brainllm', 'brainll']) {
     engines: { node: '>=22' },
     dependencies: { [`${SCOPE}/brainllm`]: version },
   })
-  writeFileSync(join(create, 'README.md'), `# ${SCOPE}/create-${suffix}\n\nThe BRAINLLM project initializer. After the first public release:\n\n\`\`\`sh\nnpm create ${SCOPE}/${suffix}@latest my-app\ncd my-app\nnpm run dev\n\`\`\`\n\nRuns the same pinned BRAINLLM compiler and installs the generated app dependencies. Pass \`-- --no-install\` to skip dependency installation.\n\n` + npmReadme)
+  writeFileSync(join(create, 'README.md'), `# ${SCOPE}/create-${suffix}\n\nThe BRAINLLM project initializer. Create an app:\n\n\`\`\`sh\nnpm create ${SCOPE}/${suffix}@latest my-app\ncd my-app\nnpm run dev\n\`\`\`\n\nRuns the same pinned BRAINLLM compiler and installs the generated app dependencies. Pass \`-- --no-install\` to skip dependency installation.\n\n` + npmReadme)
   creators.push(create)
 }
 

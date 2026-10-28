@@ -174,8 +174,8 @@ brief. It can install the compiler, read the language contract and work through 
 try the actual workflow and tell the agent what should change. You stay in charge of the product and what ships.
 
 BRAINLLM's CLI is the starting point; `brain mcp` also connects through clients that support MCP over stdio.
-Your agent needs an environment with Git, Rust stable and Node 22+, plus Chrome for browser-based checks. It should
-report a missing prerequisite or permission instead of claiming success.
+Your agent needs Node 22+ and Chrome for browser-based checks on macOS or Linux. Git and Rust stable are needed
+only when building the compiler from source or contributing. It should report missing prerequisites honestly.
 
 **Paste this into your coding agent:**
 
@@ -194,17 +194,16 @@ Build my frontend with BRAINLLM.
 Product brief: [describe the app, its users and the first useful workflow].
 
 1. Inspect the workspace and available tools. Preserve existing files and secrets.
-   If BRAINLLM is not installed, clone https://github.com/chrisifm/BRAINLLM.git
-   into a new directory and run cargo install --locked --path crates/brain-cli.
-   Verify Rust stable, Node 22+ and Chrome for browser checks. Report missing
-   prerequisites instead of pretending installation succeeded.
-2. Create a separate app with brain new. Read its AGENTS.md and brain spec.
+   Verify Node 22+ and Chrome for browser checks. Create a separate app with
+   npm create @christianirack/brainll@latest my-app. If npm is unavailable,
+   follow the source-install instructions in the README. Report missing prerequisites.
+2. Enter the generated app. Read its AGENTS.md and run npx brain spec.
    Only use implemented features in the served spec; do not invent APIs.
-3. Read brain map --json. Generate the needed views and components with brain add.
+3. Read npx brain map --json. Generate the needed views and components with brain add.
    Implement the first complete user workflow, including loading, empty, error
    and success states. Add meaningful behavior tests.
-4. Run brain fix, then brain check --json. Resolve remaining diagnostics.
-   Run brain doctor and brain build. Exercise the workflow in the browser.
+4. Run npx brain fix, then npx brain check --json. Resolve remaining diagnostics.
+   Run npx brain doctor and npx brain build. Exercise the workflow in the browser.
 5. Report actual test results, remaining gaps and how to run the app. Stop
    temporary processes and close only browser resources you created.
    Do not publish or deploy without my instruction.
@@ -221,8 +220,17 @@ owned fork or authorized review branch. Never weaken checks or merge automatical
 <details>
 <summary>Prefer to install it yourself? Here are the commands.</summary>
 
-The supported setup here builds from source. The npm package layout exists in the repository, but registry
-publication is a separate release step.
+Use the public initializer (no npm account required):
+
+```sh
+npm create @christianirack/brainll@latest my-app
+cd my-app
+npm run dev
+```
+
+`npm create @christianirack/brainllm@latest my-app` is the canonical spelling with identical behavior.
+Inside the generated app, use `npx brain` for CLI commands and `npm run build` for production.
+The compiler is prebuilt; Rust is needed only for the source installation below.
 
 ```sh
 git clone https://github.com/chrisifm/BRAINLLM.git
@@ -233,13 +241,13 @@ cd my-app
 brain run
 ```
 
-Until the npm release is public, use the installed `brain` commands directly. This source workflow does not require
-`npm install` in the generated app; its package manifest prepares the future npm distribution.
+With a source installation, use the installed `brain` commands directly. That workflow does not require
+`npm install` in the generated app.
 
 Cargo installs `brain` into its bin directory; make sure that directory is on your `PATH`. Stop the dev server with
 Ctrl+C. From the app directory, run `brain doctor` to validate it and `brain build` to create production output.
-For an MCP client, configure the installed `brain` executable with the argument `mcp` and the app as its working
-directory. Follow that client's configuration instructions; merely copying a prompt does not grant tool access.
+For an MCP client in an npm-created app, use command `npx` with arguments `["brain", "mcp"]` and the app as its
+working directory. With a source installation, use the installed `brain` executable and argument `mcp`. Follow that client's configuration instructions; merely copying a prompt does not grant tool access.
 
 </details>
 
