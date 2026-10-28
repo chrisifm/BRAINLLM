@@ -13,10 +13,10 @@ export function normalize(rows) {
     const avatar = new URL(row.avatar_url)
     if (avatar.protocol !== 'https:' || avatar.hostname !== 'avatars.githubusercontent.com' || avatar.username || avatar.password || avatar.hash) throw new Error('Untrusted avatar URL; previous attribution preserved')
     if (!Number.isSafeInteger(row.contributions) || row.contributions < 0) throw new Error('Invalid contribution count')
-    accounts.set(row.login, { login: row.login, profileUrl: `https://github.com/${encodeURIComponent(row.login)}`, avatarUrl: avatar.href, contributions: row.contributions, type: row.type })
+    accounts.set(row.login, { login: row.login, profileUrl: `https://github.com/${encodeURIComponent(row.login)}`, avatarUrl: avatar.href, type: row.type })
   }
   if (!accounts.size) throw new Error('Empty contributor response; previous attribution preserved')
-  return [...accounts.values()].sort((a, b) => b.contributions - a.contributions || a.login.localeCompare(b.login, 'en'))
+  return [...accounts.values()].sort((a, b) => a.login.localeCompare(b.login, 'en'))
 }
 
 export async function collect(fetcher = fetch, token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN) {
