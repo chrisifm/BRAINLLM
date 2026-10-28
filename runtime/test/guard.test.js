@@ -326,12 +326,16 @@ test('QA #290: create 1,000 rows, clear, run, ten times (jsfb) never trips the r
   assert.ok(!reported.slice(before).some(m => /B0908/.test(m)), reported.slice(before).join(' | '))
 })
 
-test('QA #290: a real loop (an fx that writes what it reads, through a microtask) still trips at the default budget', async () => {
+test('QA #290: a real loop (an fx that writes what it reads, through a microtask) still trips at the default budget', async t => {
+  // A component created near the process clock boundary still gets a full first window.
+  let clock = 999
+  t.mock.method(performance, 'now', () => clock)
   const n = sig(0)
   const Spin = guard(() => {
     const r = tpl('<b class="spin"></b>')()
     fx(() => {
       const v = n.v
+      if (v === 1500) clock = 1001
       queueMicrotask(() => (n.v = v + 1))
     })
     return r

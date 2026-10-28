@@ -866,6 +866,8 @@ the component, the signal and the line (a timer that legitimately ticks, such as
 and the measured growth (e.g. "+40 nodes/s, +1 item/tick in `items`"). `brain.json` → `"probe": { "seconds": 30 }`.
 
 **3. Runtime circuit breaker (prod and dev) — RUNTIME**
+- Timing correction (2026-10-28): the first runs window begins at component creation, not clock zero. A controlled
+  clock regression verifies that crossing the process second boundary cannot shorten a new instance's budget.
 - B0902 (exists): an effect that re-runs > 100 times in one flush is stopped.
 - Per component instance budgets: DOM nodes (default 200 000) and list rows (default 100 000), measured once per flush
   with a native count, runs of one effect per second (default 1 000), and continuous work per flush (default 200 ms).
