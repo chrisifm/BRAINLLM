@@ -1,0 +1,13 @@
+<meta props="start:num=0 label:str='Clicks'">
+
+<script>
+  let n = sig(start)
+  let dbl = drv(() => n * 2)
+  fx(() => log(n))
+</script>
+
+<button on:click={n++} class:hot={n > 10}>{label}: {n} × 2 = {dbl}</button>
+
+<style>
+  button { padding: var(--space-2); &.hot { color: var(--bad); } }
+</style>

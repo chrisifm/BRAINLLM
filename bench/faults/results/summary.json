@@ -1,0 +1,511 @@
+{
+ "bench": "faults",
+ "task": 176,
+ "date": "2026-10-26T08:57:43.840Z",
+ "brainSha256": "23b9532638cc",
+ "brainSource": "~/tmp/brainllm-main-target/debug/brain",
+ "work": "~/tmp/brainllm-faults",
+ "node": "v22.21.1",
+ "modes": [
+  "dev",
+  "prod"
+ ],
+ "pass": true,
+ "failures": 0,
+ "blocked": {},
+ "runtimeMs": {
+  "total": 72559,
+  "build": 2058,
+  "dev": 30834,
+  "prod": 39299
+ },
+ "innerLines": {
+  "throw": 6,
+  "render": 26,
+  "fx": 10,
+  "drv": 8,
+  "resource": 12,
+  "click": 15,
+  "async": 20,
+  "ssr": 22
+ },
+ "rows": [
+  {
+   "fault": "render",
+   "title": "render (markup expression)",
+   "mode": "dev",
+   "c1": {
+    "pass": true,
+    "brief": "fallbacks [\"in Middle: \\\"This section could not load. Retry\\\"\"]; siblings 6/6 count; nav ok"
+   },
+   "c2": {
+    "pass": true,
+    "brief": "remounted: \"render-ok drv-ok res-ok inner 0 Throw in click handler Throw\", inner counter 0→1; Retry with the fault still on → falls back again with Retry"
+   },
+   "c3": {
+    "pass": true,
+    "brief": "brain_errors: 2 entry; frames comp/inner.brain:6, comp/inner.brain:26 (want inner.brain:6 or 26); runtime brain-err has it as comp/inner.brain:6 ([object Object])"
+   },
+   "c4": {
+    "pass": null,
+    "brief": "n/a — not a handler"
+   },
+   "c5": {
+    "pass": null,
+    "brief": "n/a — dev compile errors only"
+   }
+  },
+  {
+   "fault": "render",
+   "title": "render (markup expression)",
+   "mode": "prod",
+   "c1": {
+    "pass": true,
+    "brief": "fallbacks [\"in Middle: \\\"This section could not load. Retry\\\"\"]; siblings 6/6 count; nav ok"
+   },
+   "c2": {
+    "pass": true,
+    "brief": "remounted: \"render-ok drv-ok res-ok inner 0 Throw in click handler Throw\", inner counter 0→1; Retry with the fault still on → falls back again with Retry"
+   },
+   "c3": {
+    "pass": null,
+    "brief": "n/a — brain_errors is a dev-server tool; production has no error sink for client errors (§42)"
+   },
+   "c4": {
+    "pass": null,
+    "brief": "n/a — not a handler"
+   },
+   "c5": {
+    "pass": null,
+    "brief": "n/a — dev compile errors only"
+   }
+  },
+  {
+   "fault": "fx",
+   "title": "fx",
+   "mode": "dev",
+   "c1": {
+    "pass": true,
+    "brief": "fallbacks [\"in Middle: \\\"This section could not load. Retry\\\"\"]; siblings 6/6 count; nav ok"
+   },
+   "c2": {
+    "pass": true,
+    "brief": "remounted: \"render-ok drv-ok res-ok inner 0 Throw in click handler Throw\", inner counter 0→1"
+   },
+   "c3": {
+    "pass": true,
+    "brief": "brain_errors: 1 entry; frames comp/inner.brain:6, comp/inner.brain:10 (want inner.brain:6 or 10); runtime brain-err has it as comp/inner.brain:6 ([object Object])"
+   },
+   "c4": {
+    "pass": null,
+    "brief": "n/a — not a handler"
+   },
+   "c5": {
+    "pass": null,
+    "brief": "n/a — dev compile errors only"
+   }
+  },
+  {
+   "fault": "fx",
+   "title": "fx",
+   "mode": "prod",
+   "c1": {
+    "pass": true,
+    "brief": "fallbacks [\"in Middle: \\\"This section could not load. Retry\\\"\"]; siblings 6/6 count; nav ok"
+   },
+   "c2": {
+    "pass": true,
+    "brief": "remounted: \"render-ok drv-ok res-ok inner 0 Throw in click handler Throw\", inner counter 0→1"
+   },
+   "c3": {
+    "pass": null,
+    "brief": "n/a — brain_errors is a dev-server tool; production has no error sink for client errors (§42)"
+   },
+   "c4": {
+    "pass": null,
+    "brief": "n/a — not a handler"
+   },
+   "c5": {
+    "pass": null,
+    "brief": "n/a — dev compile errors only"
+   }
+  },
+  {
+   "fault": "drv",
+   "title": "drv",
+   "mode": "dev",
+   "c1": {
+    "pass": true,
+    "brief": "fallbacks [\"in Middle: \\\"This section could not load. Retry\\\"\"]; siblings 6/6 count; nav ok"
+   },
+   "c2": {
+    "pass": true,
+    "brief": "remounted: \"render-ok drv-ok res-ok inner 0 Throw in click handler Throw\", inner counter 0→1"
+   },
+   "c3": {
+    "pass": true,
+    "brief": "brain_errors: 1 entry; frames comp/inner.brain:6, comp/inner.brain:8 (want inner.brain:6 or 8); runtime brain-err has it as comp/inner.brain:6 ([object Object])"
+   },
+   "c4": {
+    "pass": null,
+    "brief": "n/a — not a handler"
+   },
+   "c5": {
+    "pass": null,
+    "brief": "n/a — dev compile errors only"
+   }
+  },
+  {
+   "fault": "drv",
+   "title": "drv",
+   "mode": "prod",
+   "c1": {
+    "pass": true,
+    "brief": "fallbacks [\"in Middle: \\\"This section could not load. Retry\\\"\"]; siblings 6/6 count; nav ok"
+   },
+   "c2": {
+    "pass": true,
+    "brief": "remounted: \"render-ok drv-ok res-ok inner 0 Throw in click handler Throw\", inner counter 0→1"
+   },
+   "c3": {
+    "pass": null,
+    "brief": "n/a — brain_errors is a dev-server tool; production has no error sink for client errors (§42)"
+   },
+   "c4": {
+    "pass": null,
+    "brief": "n/a — not a handler"
+   },
+   "c5": {
+    "pass": null,
+    "brief": "n/a — dev compile errors only"
+   }
+  },
+  {
+   "fault": "resource",
+   "title": "resource() without {:catch}",
+   "mode": "dev",
+   "c1": {
+    "pass": true,
+    "brief": "fallbacks [\"in Middle: \\\"This section could not load. Retry\\\"\"]; siblings 6/6 count; nav ok"
+   },
+   "c2": {
+    "pass": true,
+    "brief": "remounted: \"render-ok drv-ok res-ok inner 0 Throw in click handler Throw\", inner counter 0→1"
+   },
+   "c3": {
+    "pass": true,
+    "brief": "brain_errors: 1 entry; frames comp/inner.brain:12 (want inner.brain:6 or 12); runtime brain-err has it as comp/inner.brain:12 ([object Object])"
+   },
+   "c4": {
+    "pass": null,
+    "brief": "n/a — not a handler"
+   },
+   "c5": {
+    "pass": null,
+    "brief": "n/a — dev compile errors only"
+   }
+  },
+  {
+   "fault": "resource",
+   "title": "resource() without {:catch}",
+   "mode": "prod",
+   "c1": {
+    "pass": true,
+    "brief": "fallbacks [\"in Middle: \\\"This section could not load. Retry\\\"\"]; siblings 6/6 count; nav ok"
+   },
+   "c2": {
+    "pass": true,
+    "brief": "remounted: \"render-ok drv-ok res-ok inner 0 Throw in click handler Throw\", inner counter 0→1"
+   },
+   "c3": {
+    "pass": null,
+    "brief": "n/a — brain_errors is a dev-server tool; production has no error sink for client errors (§42)"
+   },
+   "c4": {
+    "pass": null,
+    "brief": "n/a — not a handler"
+   },
+   "c5": {
+    "pass": null,
+    "brief": "n/a — dev compile errors only"
+   }
+  },
+  {
+   "fault": "click",
+   "title": "click handler (sync)",
+   "mode": "dev",
+   "c1": {
+    "pass": true,
+    "brief": "fallbacks 0; siblings 6/6 count; nav ok"
+   },
+   "c2": {
+    "pass": null,
+    "brief": "n/a — the component never falls back"
+   },
+   "c3": {
+    "pass": true,
+    "brief": "brain_errors: 1 entry; frames comp/inner.brain:6, comp/inner.brain:15 (want inner.brain:6 or 15); runtime brain-err has it as comp/inner.brain:6 ([object Object])"
+   },
+   "c4": {
+    "pass": true,
+    "brief": "Inner kept; handler ran (inner counter 1), then counts 1→2; toast \"Something went wrong. Try again.\""
+   },
+   "c5": {
+    "pass": null,
+    "brief": "n/a — dev compile errors only"
+   }
+  },
+  {
+   "fault": "click",
+   "title": "click handler (sync)",
+   "mode": "prod",
+   "c1": {
+    "pass": true,
+    "brief": "fallbacks 0; siblings 6/6 count; nav ok"
+   },
+   "c2": {
+    "pass": null,
+    "brief": "n/a — the component never falls back"
+   },
+   "c3": {
+    "pass": null,
+    "brief": "n/a — brain_errors is a dev-server tool; production has no error sink for client errors (§42)"
+   },
+   "c4": {
+    "pass": true,
+    "brief": "Inner kept; handler ran (inner counter 1), then counts 1→2; toast \"Something went wrong. Try again.\""
+   },
+   "c5": {
+    "pass": null,
+    "brief": "n/a — dev compile errors only"
+   }
+  },
+  {
+   "fault": "async",
+   "title": "async handler (rejects after await)",
+   "mode": "dev",
+   "c1": {
+    "pass": true,
+    "brief": "fallbacks 0; siblings 6/6 count; nav ok"
+   },
+   "c2": {
+    "pass": null,
+    "brief": "n/a — the component never falls back"
+   },
+   "c3": {
+    "pass": true,
+    "brief": "brain_errors: 1 entry; frames comp/inner.brain:6, comp/inner.brain:20 (want inner.brain:6 or 20); runtime brain-err has it as comp/inner.brain:6 ([object Object])"
+   },
+   "c4": {
+    "pass": true,
+    "brief": "Inner kept; handler ran (inner counter 1), then counts 1→2; toast \"Something went wrong. Try again.\""
+   },
+   "c5": {
+    "pass": null,
+    "brief": "n/a — dev compile errors only"
+   }
+  },
+  {
+   "fault": "async",
+   "title": "async handler (rejects after await)",
+   "mode": "prod",
+   "c1": {
+    "pass": true,
+    "brief": "fallbacks 0; siblings 6/6 count; nav ok"
+   },
+   "c2": {
+    "pass": null,
+    "brief": "n/a — the component never falls back"
+   },
+   "c3": {
+    "pass": null,
+    "brief": "n/a — brain_errors is a dev-server tool; production has no error sink for client errors (§42)"
+   },
+   "c4": {
+    "pass": true,
+    "brief": "Inner kept; handler ran (inner counter 1), then counts 1→2; toast \"Something went wrong. Try again.\""
+   },
+   "c5": {
+    "pass": null,
+    "brief": "n/a — dev compile errors only"
+   }
+  },
+  {
+   "fault": "ssr",
+   "title": "SSR render (server.mjs, ?boom=1)",
+   "mode": "dev",
+   "c1": {
+    "pass": true,
+    "brief": "fallbacks [\"in Middle: \\\"This section could not load. Retry\\\"\"]; siblings 6/6 count; nav ok"
+   },
+   "c2": {
+    "pass": true,
+    "brief": "remounted: \"render-ok drv-ok res-ok inner 0 Throw in click handler Throw\", inner counter 0→1"
+   },
+   "c3": {
+    "pass": true,
+    "brief": "brain_errors: 1 entry; frames comp/inner.brain:6, comp/inner.brain:22 (want inner.brain:6 or 22); runtime brain-err has it as comp/inner.brain:6 (no comp)"
+   },
+   "c4": {
+    "pass": null,
+    "brief": "n/a — not a handler"
+   },
+   "c5": {
+    "pass": null,
+    "brief": "n/a — dev compile errors only"
+   }
+  },
+  {
+   "fault": "ssr",
+   "title": "SSR render (server.mjs, ?boom=1)",
+   "mode": "prod",
+   "c1": {
+    "pass": true,
+    "brief": "HTML 200, fallback in Middle true, Inner in HTML false; fallbacks [\"in Middle: \\\"This section could not load. Retry\\\"\"]; siblings 6/6 count; nav ok"
+   },
+   "c2": {
+    "pass": true,
+    "brief": "remounted: \"render-ok drv-ok res-ok inner 0 Throw in click handler Throw\", inner counter 0→1"
+   },
+   "c3": {
+    "pass": true,
+    "brief": "app.log: \"component failed during SSR\" rid cdfa950f-821d-4915-8aba-e4cd6ece81a0 comp comp/inner.brain where render"
+   },
+   "c4": {
+    "pass": null,
+    "brief": "n/a — not a handler"
+   },
+   "c5": {
+    "pass": null,
+    "brief": "n/a — dev compile errors only"
+   }
+  },
+  {
+   "fault": "prerender",
+   "title": "prerender (build time)",
+   "mode": "dev",
+   "c1": {
+    "pass": true,
+    "brief": "fallbacks [\"in Middle: \\\"This section could not load. Retry\\\"\"]; siblings 6/6 count; nav ok"
+   },
+   "c2": {
+    "pass": true,
+    "brief": "remounted: \"render-ok drv-ok res-ok inner 0 Throw in click handler Throw\", inner counter 0→1"
+   },
+   "c3": {
+    "pass": true,
+    "brief": "brain_errors: 1 entry; frames comp/inner.brain:6, comp/inner.brain:22 (want inner.brain:6 or 22); runtime brain-err has it as comp/inner.brain:6 (no comp)"
+   },
+   "c4": {
+    "pass": null,
+    "brief": "n/a — not a handler"
+   },
+   "c5": {
+    "pass": null,
+    "brief": "n/a — dev compile errors only"
+   }
+  },
+  {
+   "fault": "prerender",
+   "title": "prerender (build time)",
+   "mode": "prod",
+   "c1": {
+    "pass": true,
+    "brief": "HTML 200, fallback in Middle true, Inner in HTML false; fallbacks [\"in Middle: \\\"This section could not load. Retry\\\"\"]; siblings 6/6 count; nav ok"
+   },
+   "c2": {
+    "pass": true,
+    "brief": "remounted: \"render-ok drv-ok res-ok inner 0 Throw in click handler Throw\", inner counter 0→1"
+   },
+   "c3": {
+    "pass": true,
+    "brief": "brain build reported it"
+   },
+   "c4": {
+    "pass": null,
+    "brief": "n/a — not a handler"
+   },
+   "c5": {
+    "pass": null,
+    "brief": "n/a — dev compile errors only"
+   }
+  },
+  {
+   "fault": "load",
+   "title": "load() throws (?load=1)",
+   "mode": "dev",
+   "c1": {
+    "pass": true,
+    "brief": "HTTP 500; view shows \"Something went wrong\" (want the _error.brain page); layout nav kept, navigation ok"
+   },
+   "c2": {
+    "pass": null,
+    "brief": "n/a — a failing load() renders _error.brain (§22), no component Retry"
+   },
+   "c3": {
+    "pass": true,
+    "brief": "dev log: [load] views/ssr.brain: Error: fault:load"
+   },
+   "c4": {
+    "pass": null,
+    "brief": "n/a — not a handler"
+   },
+   "c5": {
+    "pass": null,
+    "brief": "n/a — dev compile errors only"
+   }
+  },
+  {
+   "fault": "load",
+   "title": "load() throws (?load=1)",
+   "mode": "prod",
+   "c1": {
+    "pass": true,
+    "brief": "HTTP 200 (streamed route: headers sent before load(); logged as \"load failed (streamed)\" with the page reference 6d2bc56b-a0ac-4b4c-9fff-b8e6b577581b); view shows \"Something went wrong\" (want the _error.brain page); layout nav kept, navigation ok"
+   },
+   "c2": {
+    "pass": null,
+    "brief": "n/a — a failing load() renders _error.brain (§22), no component Retry"
+   },
+   "c3": {
+    "pass": true,
+    "brief": "app.log: \"load failed\" rid 78f05d09-b803-41bf-a7b0-a0a3906c52f8 status 200, page reference 78f05d09-b803-41bf-a7b0-a0a3906c52f8"
+   },
+   "c4": {
+    "pass": null,
+    "brief": "n/a — not a handler"
+   },
+   "c5": {
+    "pass": null,
+    "brief": "n/a — dev compile errors only"
+   }
+  },
+  {
+   "fault": "compile",
+   "title": "compile error in Inner (dev, HMR)",
+   "mode": "dev",
+   "c1": {
+    "pass": null,
+    "brief": "n/a — see C5"
+   },
+   "c2": {
+    "pass": null,
+    "brief": "n/a — see C5"
+   },
+   "c3": {
+    "pass": null,
+    "brief": "n/a — see C5"
+   },
+   "c4": {
+    "pass": null,
+    "brief": "n/a — see C5"
+   },
+   "c5": {
+    "pass": true,
+    "brief": "brain check: B0113 comp/inner.brain:5 `hits.push()` mutates the sig in place and the view is not notified; on save: error box in Inner's place, Inner gone, 6/6 siblings count; fresh load while broken: box in Inner's place (\"comp/inner.brain does not compile B0113 5:3 `hits.push()` mutates the \"), 6/6 siblings count; after the fix: Inner back via HMR (no reload)"
+   }
+  }
+ ],
+ "failureList": [],
+ "buildOutputTail": "phase compress 511 ms 35 items\nphase write 12 ms\nwarning: views/pre.brain: component failed during prerender of /pre: comp/inner.brain (render): fault:ssr; the page shows its fallback\nwarning: views/pre.brain: component failed during prerender of /pre: comp/inner.brain (render): fault:ssr; the page shows its fallback\nwarning: no sitemap.xml: it needs absolute URLs; fix: `brain build --site https://your-domain` or \"site\" in brain.json\n"
+}

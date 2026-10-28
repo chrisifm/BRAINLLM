@@ -1,0 +1,32 @@
+<meta props="title:str='To do'">
+
+<script>
+  let items = s([])
+  let draft = s('')
+  let filter = s('all')
+  let nextId = 1
+  let visible = d(() => filter === 'done' ? items.filter(it => it.done) : filter === 'open' ? items.filter(it => !it.done) : items)
+  let remaining = d(() => items.filter(it => !it.done).length)
+  const addItem = () => {
+    if (draft.trim() === '') return
+    items = [...items, { id: nextId++, text: draft.trim(), done: false }]
+    draft = ''
+  }
+  const toggleItem = (id) => { items = items.map(it => it.id === id ? { ...it, done: !it.done } : it) }
+  const removeItem = (id) => { items = items.filter(it => it.id !== id) }
+</script>
+
+<section>
+  <h2>{title}</h2>
+  <form on:submit={addItem}><input bind:value={draft} /><button>Add</button></form>
+  <ul>
+    {#each visible as it (it.id)}
+      <li class:done={it.done}>
+        <input type="checkbox" checked={it.done} on:change={toggleItem(it.id)} />
+        {it.text} <button on:click={removeItem(it.id)}>×</button>
+      </li>
+    {:empty}<li>Nothing here.</li>
+    {/each}
+  </ul>
+  <footer>{remaining} left <button on:click={filter = 'all'}>All</button> <button on:click={filter = 'open'}>Open</button> <button on:click={filter = 'done'}>Done</button></footer>
+</section>

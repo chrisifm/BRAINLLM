@@ -1,0 +1,53 @@
+<meta props="error:any retry:fn? login:str='/login'">
+<script>
+  // One message and one action per error kind (INTERNALS §40.2), for {:catch e} and failed resources. Offline and
+  // network errors retry by themselves when the connection comes back; 429 retries after its Retry-After. A cancelled
+  // request (kind 'aborted') shows nothing.
+  const text = (e) => {
+    if (!e) return ''
+    if (e.kind === 'offline') return 'You are offline.'
+    if (e.kind === 'network') return 'The connection was lost.'
+    if (e.kind === 'timeout') return 'The server took too long to answer.'
+    if (e.kind === 'schema') return 'The server sent something unexpected.'
+    if (e.status === 401) return 'Sign in to continue.'
+    if (e.status === 403) return e.message && e.message !== 'Forbidden' ? 'You do not have permission: ' + e.message : 'You do not have permission to see this.'
+    if (e.status === 404) return 'Not found.'
+    if (e.status === 422) return 'Check the highlighted fields.'
+    if (e.status === 429) return 'Too many requests. Trying again in ' + (e.retryAfter || 30) + ' seconds.'
+    return 'Something went wrong on our side.'
+  }
+  const canRetry = (e) => !!retry && !!e && (e.kind !== 'http' || e.status >= 500)
+  const signIn = () => login + (globalThis.location ? '?next=' + encodeURIComponent(location.pathname + location.search) : '')
+  fx(() => {
+    if (!retry || !error || (error.kind !== 'offline' && error.kind !== 'network') || !globalThis.addEventListener) return // no window events while the server renders
+    const again = () => retry()
+    globalThis.addEventListener('online', again)
+    return () => globalThis.removeEventListener('online', again)
+  })
+  fx(() => {
+    if (!retry || !error || error.status !== 429) return
+    const t = setTimeout(() => retry(), (error.retryAfter || 30) * 1000)
+    return () => clearTimeout(t)
+  })
+</script>
+{#if error && error.kind !== 'aborted'}
+<div class="error-state" role="alert">
+  <p>{text(error)}</p>
+  {#if error && error.status === 401}<a href={signIn()}>Sign in</a>{/if}
+  {#if canRetry(error)}<button type="button" on:click={retry()}>Retry</button>{/if}
+  {#if error && error.id && error.status >= 500}<small>Reference: {error.id}</small>{/if}
+</div>
+{/if}
+<style>
+  .error-state {
+    display: grid; justify-items: start; gap: var(--space-2); padding: var(--space-4); font: 14px/1.5 var(--font);
+    color: var(--fg); background: var(--glass); border: 1px solid var(--glass-edge); border-radius: var(--radius);
+  }
+  p { margin: 0; }
+  a { color: var(--accent); }
+  button {
+    font: inherit; padding: var(--space-1) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm);
+    color: var(--fg); background: var(--surface); cursor: pointer;
+  }
+  small { color: var(--muted); }
+</style>

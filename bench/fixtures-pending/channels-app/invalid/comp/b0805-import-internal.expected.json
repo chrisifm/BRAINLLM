@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0805",
+    "level": "error",
+    "file": "channels-app/invalid/comp/b0805-import-internal.brain",
+    "line": 2,
+    "col": 12,
+    "msg": "`qty` is internal to `../../comp/product-card.brain`: a component only exports itself",
+    "fix": "import the component (`import Name from '…'`) and talk to it through props, `bind:`, events or `bind:api`; shared state goes in `channels/`"
+  }
+]

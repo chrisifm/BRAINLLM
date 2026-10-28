@@ -1,0 +1,12 @@
+<meta props="gap:str='3' align:str='center' justify:str='start' wrap:bool=true">
+<script>
+  // a horizontal flow that wraps on narrow screens; justify: start | center | end | between
+  // spacing props take a token step from tokens.cssbrain (0–6 → --space-N), never raw CSS
+  const sp = (n) => (n == null || n === '' ? null : String(n) === '0' ? '0' : 'var(--space-' + n + ')')
+  const jc = (j) => (j === 'between' ? 'space-between' : j === 'start' || j === 'end' ? 'flex-' + j : j)
+</script>
+<div class="row" class:nowrap={!wrap} style:gap={sp(gap)} style:align-items={align} style:justify-content={jc(justify)}><slot /></div>
+<style>
+  .row { display: flex; flex-wrap: wrap; min-width: 0; }
+  .row.nowrap { flex-wrap: nowrap; }
+</style>

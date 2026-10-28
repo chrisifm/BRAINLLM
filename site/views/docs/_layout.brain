@@ -1,0 +1,21 @@
+<div class="docs">
+  <nav class="side" aria-label="Documentation">
+    <a href="/docs">Overview</a>
+    <a href="/docs/files">Files and generators</a>
+    <a href="/docs/components">Components</a>
+    <a href="/docs/markup">Markup</a>
+    <a href="/docs/styles">Styles and accessibility</a>
+    <a href="/docs/seo">SEO and AI visibility</a>
+    <a href="/docs/data">Data, forms and server</a>
+    <a href="/docs/cli">CLI and testing</a>
+  </nav>
+  <slot />
+</div>
+
+<style>
+  .docs { max-width: 72rem; margin: 0 auto; padding: var(--space-5) var(--space-4); display: grid; grid-template-columns: 14rem minmax(0, 1fr); gap: var(--space-6); }
+  .side { display: grid; align-content: start; gap: var(--space-2); position: sticky; top: var(--space-4); }
+  .side a { color: var(--muted); text-decoration: none; }
+  .side a:hover, .side a[aria-current="page"] { color: var(--fg); }
+  @media (max-width: 48rem) { .docs { grid-template-columns: minmax(0, 1fr); } .side { position: static; } }
+</style>

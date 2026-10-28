@@ -1,0 +1,22 @@
+<meta seo title="Server render" description="The innermost component fails while the server renders this page when the query asks for it; load fails when the query asks for that." canonical="/ssr">
+<script>
+  import Controls from '../comp/controls.brain'
+  import Outer from '../comp/outer.brain'
+  import Sibling from '../comp/sibling.brain'
+  export async function load(ctx) {
+    if (ctx.query.load === '1') throw new Error('fault:load')
+    return { boom: ctx.query.boom === '1' }
+  }
+  let n = sig(0)
+</script>
+<main class="page">
+  <h1>Server render</h1>
+  <Controls />
+  <button type="button" data-p="view-inc" on:click={n++}>view {n}</button>
+  <Outer ssr={props.boom} />
+  <Sibling name="view-sib" />
+  <p><a data-p="nav-about" href="/about">About</a></p>
+</main>
+<style>
+  .page { max-width: 80ch; margin: 0 auto; padding: var(--space-4); display: grid; gap: var(--space-3); }
+</style>

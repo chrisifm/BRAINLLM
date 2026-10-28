@@ -1,0 +1,22 @@
+[
+ {"id":"01-counter","brief":"A view /counter with a counter: increment, decrement and reset buttons, shows whether the number is even or odd."},
+ {"id":"02-todo","brief":"A view /todos: add tasks, mark done, delete, filter All/Active/Done, count of remaining tasks."},
+ {"id":"03-login","brief":"A view /login with an email + password form, client-side validation (email format, password >= 8 chars), shows errors under each field and disables the submit button while submitting (simulate with a 1s promise)."},
+ {"id":"04-product-list","brief":"A view /products that loads a product list in load() (fake data: id, name, price, stock), shows a table with sorting by name or price and a text search box."},
+ {"id":"05-product-detail","brief":"A route views/products/[id].brain that loads one product by ctx.params.id in load() and shows name, price, stock badge (in stock / sold out) and an add-to-cart button that shows a confirmation message."},
+ {"id":"06-tabs","brief":"A view /settings with three tabs (Profile, Notifications, Security) implemented by hand with buttons and role=tablist semantics; each tab has a small form."},
+ {"id":"07-modal","brief":"A view /team listing team members; clicking 'Remove' opens a confirmation dialog (<dialog>) with Cancel and Confirm; confirm removes the member."},
+ {"id":"08-pagination","brief":"A view /logs with 95 fake log entries generated in script, paginated 10 per page with Previous/Next buttons and 'page X of Y'."},
+ {"id":"09-cart","brief":"A view /cart: line items with quantity steppers, remove button, subtotal, 16% tax and total formatted as currency; empty state when no items."},
+ {"id":"10-search-debounce","brief":"A view /search with an input that filters a list of 30 city names after a 300ms debounce (use fx with cleanup for the timer), showing the number of matches and an empty state."},
+ {"id":"11-stopwatch","brief":"A view /stopwatch with start, stop, lap and reset; shows elapsed mm:ss.cs and the list of laps. Clean up the interval."},
+ {"id":"12-accordion","brief":"A view /faq with 5 questions as an accordion; only one open at a time; buttons with aria-expanded."},
+ {"id":"13-dashboard-kpis","brief":"A view /dashboard with 4 KPI cards (revenue, orders, customers, conversion) from load() and a list of the 5 latest orders with status badges."},
+ {"id":"14-signup-wizard","brief":"A view /signup: 3-step wizard (account, profile, confirm) with Back/Next, a progress indicator 'Step N of 3', and a final summary."},
+ {"id":"15-theme-toggle","brief":"A view /appearance with a toggle between light and dark preference stored in localStorage (read it on mount in fx), and a preview card."},
+ {"id":"16-comments","brief":"A view /post with an article body and a comments section: list comments, add a comment with name and text (both required), newest first."},
+ {"id":"17-kanban","brief":"A view /board with three columns (To do, Doing, Done); each card has buttons to move it left or right; add a card to To do."},
+ {"id":"18-filters","brief":"A view /catalog with checkbox filters by category, a price range select, and the list of matching items with the count; a 'Clear filters' button."},
+ {"id":"19-contact","brief":"A view /contact with a contact form (name, email, topic select, message textarea), character counter for the message (max 500), and a success message after submit."},
+ {"id":"20-users-crud","brief":"A view /users: table of users (name, email, role) with add, inline edit and delete; role is a select; validate email; show 'No users' when empty."}
+]

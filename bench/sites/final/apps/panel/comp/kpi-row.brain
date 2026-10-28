@@ -1,0 +1,15 @@
+<meta props="total:any active:any money:fn billed:any avg:any">
+
+<section class="kpis" aria-label="Key figures">
+  <div class="kpi"><p class="k-label">Total customers</p><p class="k-value">{total}</p></div>
+  <div class="kpi"><p class="k-label">Active customers</p><p class="k-value">{active}</p></div>
+  <div class="kpi"><p class="k-label">Billed this month</p><p class="k-value">{money(billed)}</p></div>
+  <div class="kpi"><p class="k-label">Average ticket</p><p class="k-value">{money(avg)}</p></div>
+</section>
+
+<style>
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-3); }
+  .kpi { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: var(--space-3) var(--space-4); }
+  .k-label { margin: 0; color: var(--muted); font-size: .9rem; }
+  .k-value { margin: var(--space-1) 0 0; font-size: 1.6rem; font-weight: 650; }
+</style>

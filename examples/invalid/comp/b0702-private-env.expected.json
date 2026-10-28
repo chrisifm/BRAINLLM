@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0702",
+    "level": "error",
+    "file": "invalid/comp/b0702-private-env.brain",
+    "line": 2,
+    "col": 15,
+    "msg": "`import.meta.env.STRIPE_SECRET` is a private variable and this code reaches the browser",
+    "fix": "read it on the server (`load()` or `server: async function`) and pass only the value; if it really is public, rename it to `PUBLIC_STRIPE_SECRET`"
+  }
+]

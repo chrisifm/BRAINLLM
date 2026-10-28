@@ -1,0 +1,7 @@
+[
+  {
+    "id": "env-api-url",
+    "brief": "A small status dashboard. The home view / shows the site name and fetches a JSON list of services from an external API whose base URL depends on the environment: in development it is http://localhost:4000, in staging it is https://staging-api.statusboard.test and in production it is https://api.statusboard.test. Show a loading state, an empty state and an error state with Retry. The browser must read that base URL from configuration, never hardcoded. An /about view explains the dashboard. The server also needs a secret access token, STATUS_API_TOKEN, used only on the server (in a load function or a server function) and never sent to the browser; leave its production value for the host to provide.",
+    "pages": 2
+  }
+]

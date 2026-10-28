@@ -1,0 +1,6 @@
+<p class="msg">Hello</p>
+
+<style>
+  body { margin: 0; }
+  .msg { color: var(--fg); }
+</style>

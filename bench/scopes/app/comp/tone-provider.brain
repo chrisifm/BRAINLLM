@@ -1,0 +1,16 @@
+<meta props="tone:str">
+<script>
+  import { Tone } from '../channels/tone.jsbrain'
+  import ToneReader from './tone-reader.brain'
+  let t = sig(tone)
+  provide(Tone, t)
+  const shift = () => { t = t + '+' }
+</script>
+<div class="provider" data-tone={tone}>
+  <button type="button" class="shift" on:click={shift}>Shift {tone}</button>
+  <ToneReader where="own-markup" />
+  <slot />
+</div>
+<style>
+  .provider { display: grid; gap: var(--space-1); }
+</style>

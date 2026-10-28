@@ -1,0 +1,13 @@
+{
+  "name": "brainllm-xbrowser-bench",
+  "private": true,
+  "description": "Cross-browser smoke matrix (test tool only, not a dependency of the framework). See README.md.",
+  "type": "module",
+  "scripts": {
+    "setup": "npm i && npx playwright install webkit firefox chromium",
+    "run": "node run.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.64.0"
+  }
+}

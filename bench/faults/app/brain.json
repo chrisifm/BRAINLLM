@@ -1,0 +1,17 @@
+{
+  "name": "faults-test",
+  "cache": {
+    "http": true,
+    "sw": false,
+    "offline": false
+  },
+  "seo": {
+    "minScore": 80
+  },
+  "budget": {
+    "viewKB": 30
+  },
+  "lint": {
+    "B1101": "off"
+  }
+}

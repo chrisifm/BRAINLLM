@@ -1,0 +1,29 @@
+<meta props="item:obj? save:fn submitLabel:str='Save'" emits="cancel">
+
+<script>
+  // save(values) returns a promise; throwing { errors: { name: '…' } } puts each message under its field
+  // `init` fills the fields: the item being edited, or the defaults of a new one
+  let f = form({ name: 'str!<=80', status: 'str!', price: 'num>=0' }, {
+    init: item ? { name: item.name, status: item.status, price: String(item.price) } : { status: 'active' },
+    submit: async (v) => {
+      await save(v)
+    },
+  })
+</script>
+
+<form class="form" on:submit={f.submit}>
+  <Input label="Name" bind:value={f.v.name} error={f.err.name} />
+  <Select label="Status" placeholder="Choose a status" options={[{ value: 'active', label: 'Active' }, { value: 'archived', label: 'Archived' }]} bind:value={f.v.status} error={f.err.status} />
+  <Input label="Price" type="number" bind:value={f.v.price} error={f.err.price} />
+  {#if f.error}<p class="err" role="alert">{f.error}</p>{/if}
+  <div class="actions">
+    <Button type="submit" busy={f.busy}>{submitLabel}</Button>
+    <Button variant="ghost" on:click={emit('cancel')}>Cancel</Button>
+  </div>
+</form>
+
+<style>
+  .form { display: grid; gap: var(--space-3); }
+  .actions { display: flex; gap: var(--space-2); }
+  .err { margin: 0; color: var(--bad); }
+</style>

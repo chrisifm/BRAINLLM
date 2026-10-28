@@ -1,0 +1,22 @@
+<meta seo title="Tree" description="Mounted components in their hierarchy, with hydration state.">
+<script>
+  import inspector from '../channels/inspector.jsbrain'
+  // depth-first order from the parent links (inst records carry `parent`)
+  const rows = drv(() => {
+    const list = inspector.inst, out = []
+    const walk = (parent, depth) => {
+      for (const i of list.filter((x) => (x.parent ?? null) === parent)) {
+        out.push({ ...i, depth, label: '  '.repeat(depth) + (i.name || i.h), island: i.island || '' })
+        walk(i.id, depth + 1)
+      }
+    }
+    walk(null, 0)
+    return out
+  })
+  const cols = [{ key: 'label', label: 'Component' }, { key: 'f', label: 'File' }, { key: 'island', label: 'Island' }, { key: 'id', label: 'Id' }]
+</script>
+<h1>Tree</h1>
+<Table caption="Mounted components" rows={rows} columns={cols} sortable={false} empty="No component mounted yet." />
+<style>
+  h1 { margin: 0 0 var(--space-4); font-size: 22px; }
+</style>

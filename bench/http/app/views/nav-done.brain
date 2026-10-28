@@ -1,0 +1,7 @@
+<meta seo title="Navigation target page" description="Destination of the navigation scenario; reaching it must abort the previous page's background requests.">
+<main class="page">
+  <h1 data-probe="nav-done">Navigation done</h1>
+</main>
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); }
+</style>

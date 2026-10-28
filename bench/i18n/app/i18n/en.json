@@ -1,0 +1,31 @@
+{
+  "site.brand": "Polyglot probe",
+  "nav.home": "Home",
+  "nav.about": "About us",
+  "nav.counter": "Counter",
+  "home.title": "A site in three languages",
+  "home.lead": "Every visible word on this page comes from a key in the locale file.",
+  "home.cta": "Open the counter",
+  "about.title": "About this probe",
+  "about.body": "This site checks pages per locale, right-to-left layout and dictionary loading.",
+  "counter.title": "Click counter",
+  "counter.hello": "Hello {name}, welcome back",
+  "counter.clicks": {
+    "one": "{n} click so far",
+    "other": "{n} clicks so far"
+  },
+  "counter.add": "Add one",
+  "counter.date": "Release date: {date}",
+  "counter.amount": "Large number: {value}",
+  "counter.price": "Price: {price}",
+  "notfound.title": "Page not found",
+  "notfound.body": "The address may be mistyped, or the page was moved.",
+  "notfound.back": "Back to the home page",
+  "offline.title": "You are offline",
+  "offline.body": "This page has not been saved on this device yet.",
+  "offline.back": "Try the home page",
+  "nav.home_href": "/",
+  "nav.about_href": "/about",
+  "nav.counter_href": "/counter",
+  "nav.languages": "Languages"
+}

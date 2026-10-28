@@ -1,0 +1,11 @@
+<meta props="gap:str='4' cols:num? min:str='16rem'">
+<script>
+  // equal columns: `cols` fixed, else as many as fit with a minimum width (auto-fit, one column on phones)
+  // spacing props take a token step from tokens.cssbrain (0–6 → --space-N), never raw CSS
+  const sp = (n) => (n == null || n === '' ? null : String(n) === '0' ? '0' : 'var(--space-' + n + ')')
+  const tpl = (c, m) => (c ? 'repeat(' + c + ', minmax(0, 1fr))' : 'repeat(auto-fit, minmax(min(' + m + ', 100%), 1fr))')
+</script>
+<div class="grid" style:gap={sp(gap)} style:grid-template-columns={tpl(cols, min)}><slot /></div>
+<style>
+  .grid { display: grid; min-width: 0; }
+</style>

@@ -1,0 +1,10 @@
+{
+  "brief": "Marketing landing page for \"Nubo\", an e-invoicing SaaS for small businesses. Sections in this order: hero (headline, subheadline and call-to-action button), features (6 cards with a title and text), pricing (3 plans: Basic, Pro and Enterprise, each with a monthly price, a list of benefits and a button; the Pro plan highlighted; a monthly/yearly toggle that applies a 20% discount to the yearly price), FAQ (6 questions that expand and collapse) and a contact form (name, email and message; live validation: name not empty, email contains @, message of 10 characters or more; Send button disabled while invalid; on submit it shows \"Thanks, we'll be in touch soon\"). A single view with <meta seo>. Accessible (SPEC §8) and using only the available tokens.",
+  "files": [
+    { "path": "comp/feature-card.brain", "role": "feature card: props title:str and text:str" },
+    { "path": "comp/pricing.brain", "role": "table of 3 plans with a monthly/yearly toggle (20% yearly discount) and the Pro plan highlighted" },
+    { "path": "comp/faq.brain", "role": "list of 6 questions that expand and collapse, one open at a time" },
+    { "path": "comp/contact-form.brain", "role": "contact form with live validation and a sent state" },
+    { "path": "views/index.brain", "role": "the view: <meta seo>, hero and features (uses FeatureCard), Pricing, Faq and ContactForm, with a single <h1> and a single <main>" }
+  ]
+}

@@ -1,0 +1,31 @@
+import { tpl, insert, attr } from "/@brain/brain.js";
+import { dev } from "/@brain/brain-dev.js";
+const $t0 = tpl("<span data-b=\"dxj2kp\" class=\"badge\"><!></span>");
+function Badge($p = {}) {
+  const $r3 = $t0();
+  const $e1 = $r3;
+  const $e2 = $r3.firstChild;
+  attr($e1, "data-tone", () => ($p.tone ?? 'neutral'));
+  insert(null, () => $p.text, $e2);
+  return $r3;
+}
+Badge.h = "dxj2kp";
+export default dev(Badge);
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiYmFkZ2UuYnJhaW4uanMiLCJzb3VyY2VzIjpbImJhZGdlLmJyYWluIl0sInNvdXJjZXNDb250ZW50IjpbIjxtZXRhIHByb3BzPVwidG9uZTpzdHI9J25ldXRyYWwnIHRleHQ6c3RyXCI+XG5cbjxzcGFuIGNsYXNzPVwiYmFkZ2VcIiBkYXRhLXRvbmU9e3RvbmV9Pnt0ZXh0fTwvc3Bhbj5cblxuPHN0eWxlPlxuICAuYmFkZ2UgeyBwYWRkaW5nOiAwIHZhcigtLXNwYWNlLTEpOyBib3JkZXItcmFkaXVzOiB2YXIoLS1yYWRpdXMpOyBjb2xvcjogdmFyKC0tbXV0ZWQpO1xuICAgICZbZGF0YS10b25lPW9rXSB7IGNvbG9yOiB2YXIoLS1vayk7IH1cbiAgICAmW2RhdGEtdG9uZT1iYWRdIHsgY29sb3I6IHZhcigtLWJhZCk7IH0gfVxuPC9zdHlsZT5cbiJdLCJuYW1lcyI6W10sIm1hcHBpbmdzIjoiOzs7Ozs7O0FBRUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBOyJ9
+
+/* ---- css ---- */
+@layer ui {
+  @scope ([data-b="dxj2kp"]) to ([data-b]) {
+    :where(:scope):is(.badge), .badge {
+      padding: 0 var(--space-1);
+      border-radius: var(--radius);
+      color: var(--muted);
+      &[data-tone=ok] {
+        color: var(--ok);
+      }
+      &[data-tone=bad] {
+        color: var(--bad);
+      }
+    }
+  }
+}

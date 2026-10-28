@@ -1,0 +1,47 @@
+[
+  {
+    "code": "B1002",
+    "level": "info",
+    "file": "doctor-app/channels/sidebar.jsbrain",
+    "line": 1,
+    "col": 16,
+    "msg": "`store` used by a single component (`comp/sidebar.brain`)",
+    "fix": "use `let open = sig(false)` inside `sidebar.brain` and delete the channel"
+  },
+  {
+    "code": "B1003",
+    "level": "info",
+    "file": "doctor-app/views/home.brain",
+    "line": 11,
+    "col": 3,
+    "msg": "context `Locale` has a single direct consumer (`Greeting`)",
+    "fix": "pass it as a prop: `<Greeting locale={locale} />`"
+  },
+  {
+    "code": "B1006",
+    "level": "info",
+    "file": "doctor-app/views/home.brain",
+    "line": 19,
+    "col": 3,
+    "msg": "`TinyNote` is used once and has fewer than 10 lines",
+    "fix": "inline its markup and delete `comp/tiny-note.brain`"
+  },
+  {
+    "code": "B1007",
+    "level": "info",
+    "file": "doctor-app/comp/bad-badge.brain",
+    "line": 2,
+    "col": 1,
+    "msg": "`BadBadge` is nearly identical to `OkBadge`",
+    "fix": "one `Badge` with a `tone:str='ok'` prop"
+  },
+  {
+    "code": "B1008",
+    "level": "info",
+    "file": "doctor-app/views/home.brain",
+    "line": 18,
+    "col": 3,
+    "msg": "`user` passes through 4 levels of props without being used (Level1 → Level2 → Level3 → Leaf)",
+    "fix": "`provide(User, user)` in the view and `use(User)` in `Leaf`"
+  }
+]

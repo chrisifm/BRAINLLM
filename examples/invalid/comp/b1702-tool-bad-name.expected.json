@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1702",
+    "level": "error",
+    "file": "invalid/comp/b1702-tool-bad-name.brain",
+    "line": 1,
+    "col": 7,
+    "msg": "tool name `addTask` is not snake_case",
+    "fix": "rename it to `add_task` (and its function)"
+  }
+]

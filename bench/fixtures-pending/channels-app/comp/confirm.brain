@@ -1,0 +1,11 @@
+<meta props="text:str" emits="ok" expose="open">
+<script>
+  let dlg = ref()
+  const open = () => dlg.showModal()
+  const accept = () => { dlg.close(); emit('ok') }
+</script>
+<dialog bind:ref={dlg} aria-label="Confirm">
+  <p>{text}</p>
+  <button type="button" on:click={dlg.close()}>Cancel</button>
+  <button type="button" on:click={accept}>Confirm</button>
+</dialog>

@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0201",
+    "level": "warning",
+    "file": "invalid/comp/b0201-document.brain",
+    "line": 3,
+    "col": 14,
+    "msg": "direct access to `document` from BrainScript",
+    "fix": "create `let el = ref()`, put `bind:ref={el}` on the node and use `el`"
+  }
+]

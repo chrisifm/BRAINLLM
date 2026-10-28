@@ -1,0 +1,21 @@
+<meta seo title="Posts" description="Every post of this app, generated from lib/posts.jsbrain: an example of a list page linked to dynamic routes.">
+
+<script>
+  import posts from '../../lib/posts.jsbrain'
+
+  // static list: no load(), so the page is prerendered at build time
+  let list = posts.all()
+</script>
+
+<main class="page">
+  <h1>Posts</h1>
+  <ul>
+    {#each list as p (p.id)}
+      <li><a href={`/posts/${p.id}`}>{p.title}</a> · {p.summary}</li>
+    {/each}
+  </ul>
+</main>
+
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+</style>

@@ -1,0 +1,21 @@
+<script>
+  import { Theme } from '../channels/theme.jsbrain'
+  import cart from '../channels/cart.jsbrain'
+  import toast from '../channels/toast.jsbrain'
+  import Confirm from './confirm.brain'
+  let theme = use(Theme)
+  let total = drv(() => cart.items.reduce((s, it) => s + it.price * it.qty, 0))
+  let confirm = sig(null)
+  const clear = () => {
+    cart.items = []
+    toast.send('Cart emptied')
+  }
+</script>
+<aside class:dark={theme === 'dark'} aria-label="Cart">
+  <p>{cart.items.length} products · {total.toFixed(2)} MXN</p>
+  <button type="button" on:click={confirm.open()}>Empty</button>
+  <Confirm bind:api={confirm} text="Empty the cart?" on:ok={clear} />
+</aside>
+<style>
+  .dark { background: var(--fg); color: var(--bg); }
+</style>

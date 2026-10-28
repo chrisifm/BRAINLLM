@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0307",
+    "level": "warning",
+    "file": "invalid/comp/b0307-unreachable-selector.brain",
+    "line": 3,
+    "col": 3,
+    "msg": "`main` never matches: this component writes no `<main>`; child components and slot content are outside its `@scope`",
+    "fix": "remove the selector, or style a class this component writes (page-level styles go in the `reset` layer)"
+  }
+]

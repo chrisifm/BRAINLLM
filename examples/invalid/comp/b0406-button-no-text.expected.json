@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0406",
+    "level": "error",
+    "file": "invalid/comp/b0406-button-no-text.brain",
+    "line": 5,
+    "col": 1,
+    "msg": "`<button>` without accessible text",
+    "fix": "add visible text or `aria-label=\"…\"`"
+  }
+]

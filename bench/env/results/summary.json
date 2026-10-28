@@ -1,0 +1,276 @@
+{
+ "date": "2026-10-13T21:07:30.493Z",
+ "brain": "/private/tmp/claude-501/-Users-chris-Projects-WEB-BRAINLLM/d83c019e-0f2f-49dc-b700-76a0cf0fa2b1/scratchpad/target/release/brain",
+ "brainSha": "0b51a8261ff3",
+ "work": "/private/tmp/claude-501/-Users-chris-Projects-WEB-BRAINLLM/d83c019e-0f2f-49dc-b700-76a0cf0fa2b1/scratchpad/bench274/env-work",
+ "passed": 29,
+ "failed": 0,
+ "leaks": 0,
+ "checks": [
+  {
+   "id": "1a",
+   "name": "brain new: the §29 tree (36 paths)",
+   "ok": true,
+   "evidence": "all 36 paths present (exit 0)",
+   "owner": null
+  },
+  {
+   "id": "1b",
+   "name": ".brain_env: shared block + [development] [staging] [production], example in sync, gitignored",
+   "ok": true,
+   "evidence": "sections: development, staging, production · shared keys: PUBLIC_SITE_NAME, PUBLIC_SITE_URL · example values: 0 · example keys match: true · .gitignore has .brain_env: true",
+   "owner": null
+  },
+  {
+   "id": "1c",
+   "name": "untouched app: brain doctor exits 0",
+   "ok": true,
+   "evidence": "exit 0: errors  none captured while the tests ran | build   ok · build j9jw6ox6 | seo     6 page(s) scored 91–100 (minimum 80) | leaks   none after the tests unmounted (GC forced) | ✓ no errors",
+   "owner": null
+  },
+  {
+   "id": "1d",
+   "name": "untouched app: brain build (static) succeeds",
+   "ok": true,
+   "evidence": "exit 0: summary 10 pages · 164.3 KB gz total · SEO 91–95 · 0 written, 115 unchanged · 335 ms",
+   "owner": null
+  },
+  {
+   "id": "1e",
+   "name": "SEO audit: every indexable page ≥ 80",
+   "ok": true,
+   "evidence": "/about 95, / 91, /posts/hello-world 95, /posts 95, /posts/second-post 95, /login 100 · noindex (not scored): /403, *, /_offline, /account",
+   "owner": null
+  },
+  {
+   "id": "2-staging",
+   "name": "build --env staging: its PUBLIC_API_URL in the client bundle, the other env's absent, no private value in dist",
+   "ok": true,
+   "evidence": "exit 0 · own value in 4 file(s) (_b/kod9sikt.js, _b/kod9sikt.js.gz, about/index.html) · other env value in 0 · private values in dist: none",
+   "owner": null
+  },
+  {
+   "id": "2-production",
+   "name": "build --env production: its PUBLIC_API_URL in the client bundle, the other env's absent, no private value in dist",
+   "ok": true,
+   "evidence": "exit 0 · own value in 8 file(s) (_b/fdr2vl3b.js, _b/fdr2vl3b.js.gz, about/index.html) · other env value in 0 · private values in dist: none",
+   "owner": null
+  },
+  {
+   "id": "2-diff",
+   "name": "staging and production bundles carry different PUBLIC_* values",
+   "ok": true,
+   "evidence": "staging → stg value only: true · production → prod value only: true",
+   "owner": null
+  },
+  {
+   "id": "2-site-url",
+   "name": "PUBLIC_SITE_URL follows --env (canonical, sitemap)",
+   "ok": true,
+   "evidence": "staging: stg url in 20 file(s), prod url in 0 · production: prod url in 38, stg url in 0",
+   "owner": null
+  },
+  {
+   "id": "3",
+   "name": "process env PUBLIC_API_URL overrides [production]",
+   "ok": true,
+   "evidence": "exit 0 · override in 8 client file(s) · file value in 0",
+   "owner": null
+  },
+  {
+   "id": "4",
+   "name": "empty [production] key: build --env production fails with B0720 (host env fills it)",
+   "ok": true,
+   "evidence": "exit 2 · B0720 in output: true · names DATABASE_URL: true · values leaked: 0 · same build with DATABASE_URL in the process env: exit 0 · \"error: B0720 .brain_env:20:1 variable `DATABASE_URL` has no value in `production`; fix: set `DATABASE_URL=…` under `[production]` in .brain_env or in the host's\"",
+   "owner": null
+  },
+  {
+   "id": "5-check",
+   "name": "brain check --json: no .brain_env value",
+   "ok": true,
+   "evidence": "exit 0 · 3 bytes captured",
+   "owner": null
+  },
+  {
+   "id": "5-doctor",
+   "name": "brain doctor --json: no .brain_env value",
+   "ok": true,
+   "evidence": "exit 0 · 2990 bytes captured",
+   "owner": null
+  },
+  {
+   "id": "5-map",
+   "name": "brain map --json: no .brain_env value",
+   "ok": true,
+   "evidence": "exit 0 · 3851 bytes captured · env keys listed: {\"development\":[\"API_TIMEOUT_MS\",\"BRAIN_SECRET\",\"DATABASE_URL\",\"DEMO_PASSWORD\",\"PUBLIC_API_URL\",\"PUBLIC_SITE_NAME\",\"PUBLIC_SITE_URL\"],\"staging\":[\"API_TIMEOUT_MS\",\"DATABASE_URL\",\"PUBLIC_API_URL\",\"PUBLIC_SITE_NAME\",\"PUBLIC_SITE_URL\"],\"production\":[\"API_TIMEOUT_MS\",\"DATABASE_URL\",\"INTERNAL_TOKEN\",\"PUBLIC_API_URL\",\"PUBLIC_SITE_NAME\",\"PUBLIC_SITE_URL\"]}",
+   "owner": null
+  },
+  {
+   "id": "5-mcp-tools_list",
+   "name": "MCP tools/list: no .brain_env value",
+   "ok": true,
+   "evidence": "answered · 24542 bytes",
+   "owner": null
+  },
+  {
+   "id": "5-mcp-brain_check",
+   "name": "MCP brain_check: no .brain_env value",
+   "ok": true,
+   "evidence": "answered · 160 bytes",
+   "owner": null
+  },
+  {
+   "id": "5-mcp-brain_doctor",
+   "name": "MCP brain_doctor: no .brain_env value",
+   "ok": true,
+   "evidence": "answered · 6146 bytes",
+   "owner": null
+  },
+  {
+   "id": "5-mcp-brain_map",
+   "name": "MCP brain_map: no .brain_env value",
+   "ok": true,
+   "evidence": "answered · 8456 bytes",
+   "owner": null
+  },
+  {
+   "id": "5-mcp-brain_info",
+   "name": "MCP brain_info: no .brain_env value",
+   "ok": true,
+   "evidence": "answered · 2550 bytes",
+   "owner": null
+  },
+  {
+   "id": "5-mcp-brain_read_brain_env",
+   "name": "MCP brain_read .brain_env: no .brain_env value",
+   "ok": true,
+   "evidence": "answered · 137 bytes · {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"`.brain_env` is outside the app or a secrets file\"}],\"isError\":true}}",
+   "owner": null
+  },
+  {
+   "id": "5-mcp-brain_read_brain_env_example",
+   "name": "MCP brain_read .brain_env.example: no .brain_env value",
+   "ok": true,
+   "evidence": "answered · 145 bytes · {\"jsonrpc\":\"2.0\",\"id\":8,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"`.brain_env.example` is outside the app or a secrets file\"}],\"isError\":true}}",
+   "owner": null
+  },
+  {
+   "id": "5-mcp-stderr",
+   "name": "MCP stderr: no .brain_env value",
+   "ok": true,
+   "evidence": "answered · 0 bytes",
+   "owner": null
+  },
+  {
+   "id": "5-run",
+   "name": "brain run log (startup + requests): no .brain_env value",
+   "ok": true,
+   "evidence": "port 51017 · /about 200, /views/about.brain 200, / 200, /login 200, /nope-404 404 · 517 bytes of log · pid 27121 stopped",
+   "owner": null
+  },
+  {
+   "id": "5-run-env",
+   "name": "brain run: [development] PUBLIC_* substituted in the dev module, no private value in responses",
+   "ok": true,
+   "evidence": "/views/about.brain has dev PUBLIC_API_URL: true · raw process.env.PUBLIC_ left: false · prod value: false · private values in responses: none",
+   "owner": null
+  },
+  {
+   "id": "5-selftest",
+   "name": "leak scanner finds every value in .brain_env itself",
+   "ok": true,
+   "evidence": "14/14",
+   "owner": null
+  },
+  {
+   "id": "5-total",
+   "name": "leaks found across every captured output",
+   "ok": true,
+   "evidence": "0 leaks · 14 values searched literally",
+   "owner": null
+  },
+  {
+   "id": "6",
+   "name": "fixtures-pending/env: B0720–B0724 + no-leak (5/5 OK)",
+   "ok": true,
+   "evidence": "exit 0 · OK B0724 via `brain check --json .` | OK B0723 via `brain check --json .` | OK B0720 via `brain build --json --env production` | OK B0721 via `brain check --json .` | OK B0722 via `brain doctor --json`",
+   "owner": null
+  },
+  {
+   "id": "7-env140b-haiku-5-5",
+   "name": "LLM gate env140b-haiku-5-5: URL per section in .brain_env as PUBLIC_*, token server-only, no .env, no hardcoded URL, doctor 0",
+   "ok": true,
+   "evidence": "{\"brainEnv\":true,\"urlKey\":\"PUBLIC_API_URL\",\"urlPerSection\":true,\"urlPublic\":true,\"tokenKeys\":[\"STATUS_API_TOKEN\"],\"tokenServerOnly\":true,\"tokenProdEmptyOrAbsent\":true,\"dotEnv\":[],\"hardcoded\":[],\"tokenInClient\":[],\"doctor\":0,\"harnessDone\":true}",
+   "owner": null
+  },
+  {
+   "id": "7-env140b-sonnet-5-5",
+   "name": "LLM gate env140b-sonnet-5-5: URL per section in .brain_env as PUBLIC_*, token server-only, no .env, no hardcoded URL, doctor 0",
+   "ok": true,
+   "evidence": "{\"brainEnv\":true,\"urlKey\":\"PUBLIC_API_URL\",\"urlPerSection\":true,\"urlPublic\":true,\"tokenKeys\":[\"STATUS_API_TOKEN\"],\"tokenServerOnly\":true,\"tokenProdEmptyOrAbsent\":true,\"dotEnv\":[],\"hardcoded\":[],\"tokenInClient\":[],\"doctor\":0,\"harnessDone\":true}",
+   "owner": null
+  }
+ ],
+ "llm": [
+  {
+   "tag": "env140b-haiku-5-5",
+   "notes": [],
+   "metrics": {
+    "done": true,
+    "views": "13/2",
+    "toolCalls": 39,
+    "turns": 40,
+    "cost": 0.021973979999999997,
+    "s": 94,
+    "final": "The statusboard app is built and `brain_doctor` reports ok (0 check errors, 4/4 tests passing, build and SEO green).\n\n- **Home (`/`)**: fetches services through `api/services.jsbrain`, which takes its base URL from `PUBLIC_API_URL`. It shows loading, empty and error states, and the error state has a"
+   },
+   "assert": {
+    "brainEnv": true,
+    "urlKey": "PUBLIC_API_URL",
+    "urlPerSection": true,
+    "urlPublic": true,
+    "tokenKeys": [
+     "STATUS_API_TOKEN"
+    ],
+    "tokenServerOnly": true,
+    "tokenProdEmptyOrAbsent": true,
+    "dotEnv": [],
+    "hardcoded": [],
+    "tokenInClient": [],
+    "doctor": 0,
+    "harnessDone": true
+   },
+   "ok": true
+  },
+  {
+   "tag": "env140b-sonnet-5-5",
+   "notes": [],
+   "metrics": {
+    "done": true,
+    "views": "13/2",
+    "toolCalls": 13,
+    "turns": 14,
+    "cost": 0.13941180000000003,
+    "s": 35,
+    "final": "The dashboard is built and `brain_doctor` reports `ok: true` with no errors. I didn't open it in a browser, and the doctor run doesn't exercise the home view against a live API. One `fetch()` warning (B1107) and two short-description SEO warnings (B1804, on `/` and `/about`) remain.\n\n- **Home (`/`)*"
+   },
+   "assert": {
+    "brainEnv": true,
+    "urlKey": "PUBLIC_API_URL",
+    "urlPerSection": true,
+    "urlPublic": true,
+    "tokenKeys": [
+     "STATUS_API_TOKEN"
+    ],
+    "tokenServerOnly": true,
+    "tokenProdEmptyOrAbsent": true,
+    "dotEnv": [],
+    "hardcoded": [],
+    "tokenInClient": [],
+    "doctor": 0,
+    "harnessDone": true
+   },
+   "ok": true
+  }
+ ]
+}

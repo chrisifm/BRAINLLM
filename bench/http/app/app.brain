@@ -1,0 +1,22 @@
+<meta seo titleTemplate="%s · http-bench" og:image="/og.png">
+<meta http base="/api" timeout="4s" retry="2" login="/login">
+
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <title>http-bench</title>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/">http-bench</a>
+  </header>
+  <slot />
+</body>
+</html>
+
+<style>
+  .top { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) var(--space-5); }
+  .brand { font-weight: 650; text-decoration: none; color: var(--fg); }
+</style>

@@ -1,0 +1,12 @@
+# Installed deps and build output of the references (reproduce with run.sh).
+node_modules/
+dist/
+# Raw hyperfine exports; only results/summary.json and results/summary.md are kept.
+results/*
+!results/summary.json
+!results/summary.md
+!results/compiler-cache-lookup.json
+# run.sh is ignored by a global gitignore on the author machine; it is part of this benchmark.
+!run.sh
+# brain check / build state of the fixture when it is built in place.
+.brain/

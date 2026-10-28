@@ -1,0 +1,9 @@
+<script>
+  let list = ref()
+  const toTop = (row) => {
+    list.moveBefore(row, list.firstChild)
+  }
+</script>
+<ul bind:ref={list}>
+  <li><button type="button" on:click={(e) => toTop(e.currentTarget.parentNode)}>Move up</button></li>
+</ul>

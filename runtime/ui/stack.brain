@@ -1,0 +1,10 @@
+<meta props="gap:str='3' align:str='stretch'">
+<script>
+  // a vertical flow: children one under the other with a token gap; align: start | center | end | stretch
+  // spacing props take a token step from tokens.cssbrain (0–6 → --space-N), never raw CSS
+  const sp = (n) => (n == null || n === '' ? null : String(n) === '0' ? '0' : 'var(--space-' + n + ')')
+</script>
+<div class="stack" style:gap={sp(gap)} style:align-items={align}><slot /></div>
+<style>
+  .stack { display: flex; flex-direction: column; min-width: 0; }
+</style>

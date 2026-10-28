@@ -1,0 +1,18 @@
+Component Badge level=Micro file=ui/badge.brain
+  prop@1:14 tone:str = 'neutral'
+  prop@1:33 text:str
+  template
+    <span>@3:1 class="badge" data-tone={tone}
+      interp@3:38 {text}
+  style@5:8
+    .badge {
+      padding: 0 var(--space-1);
+      border-radius: var(--radius);
+      color: var(--muted);
+      &[data-tone=ok] {
+        color: var(--ok);
+      }
+      &[data-tone=bad] {
+        color: var(--bad);
+      }
+    }

@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0308",
+    "level": "warning",
+    "file": "invalid/comp/b0308-line-as-background.brain",
+    "line": 3,
+    "col": 11,
+    "msg": "`--line` as `background`: it is the border token",
+    "fix": "use `--surface` for a fill (or `--bg`)"
+  }
+]

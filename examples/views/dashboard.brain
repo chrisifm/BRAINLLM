@@ -1,0 +1,94 @@
+<meta seo title="User admin" description="Create, edit, activate and delete the users of the example app, with search and an inline edit form." canonical="/dashboard">
+
+<script>
+  import Badge from '../ui/badge.brain'
+  import UserForm from '../comp/user-form.brain'
+  import api from '../lib/api.js'
+  import fmt from '../lib/format.jsbrain'
+
+  export async function load(ctx) {
+    return { users: await api.list(ctx) }
+  }
+
+  let users = sig(props.users)
+  let query = sig('')
+  let editing = sig(null)
+  let busy = sig(false)
+  let error = sig('')
+
+  let shown = drv(() => {
+    const q = query.trim().toLowerCase()
+    if (q === '') return users
+    return users.filter(u => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
+  })
+  let activeCount = drv(() => users.filter(u => u.active).length)
+
+  const save = async (data) => {
+    busy = true
+    error = ''
+    try {
+      const saved = data.id === null ? await api.create(data) : await api.update(data)
+      users = data.id === null
+        ? [...users, saved]
+        : users.map(u => u.id === saved.id ? saved : u)
+      editing = null
+    } catch (e) {
+      error = e.message
+    }
+    busy = false
+  }
+
+  const remove = async (id) => {
+    error = ''
+    try {
+      await api.remove(id)
+      users = users.filter(u => u.id !== id)
+    } catch (e) {
+      error = e.message
+    }
+  }
+</script>
+
+<main class="dash">
+  <header>
+    <h1>Users</h1>
+    <span>{activeCount} active of {fmt.plural(users.length, 'user', 'users')}</span>
+    <input bind:value={query} placeholder="Search by name or email" aria-label="Search users" />
+    <button on:click={editing = {}}>New</button>
+  </header>
+
+  {#if error !== ''}
+    <p class="error" role="alert">{error}</p>
+  {/if}
+
+  {#if editing !== null}
+    <UserForm user={editing.id ? editing : null} busy={busy} on:save={save} on:cancel={editing = null} />
+  {/if}
+
+  <table>
+    <thead><tr><th>Name</th><th>Email</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      {#each shown as u (u.id)}
+        <tr>
+          <td>{u.name}</td>
+          <td>{u.email}</td>
+          <td><Badge tone={u.active ? 'ok' : 'bad'} text={u.active ? 'Active' : 'Inactive'} /></td>
+          <td>
+            <button on:click={editing = u}>Edit</button>
+            <button on:click={remove(u.id)}>Delete</button>
+          </td>
+        </tr>
+      {:empty}
+        <tr><td colspan="4">{query === '' ? 'No users yet.' : 'No results for this search.'}</td></tr>
+      {/each}
+    </tbody>
+  </table>
+</main>
+
+<style>
+  .dash { display: grid; gap: var(--space-3); padding: var(--space-3); background: var(--bg); color: var(--fg); }
+  header { display: flex; gap: var(--space-2); align-items: center; }
+  .error { color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: var(--space-1) var(--space-2); text-align: left; }
+</style>

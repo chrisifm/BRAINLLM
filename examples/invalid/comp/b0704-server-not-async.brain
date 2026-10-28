@@ -1,0 +1,4 @@
+<script>
+  server: function save(ctx, data) { return data }
+</script>
+<button type="button" on:click={save(1)}>Save</button>

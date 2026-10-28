@@ -1,0 +1,96 @@
+<meta seo lastmod="2026-10-13" title="The web framework written for LLMs" description="BRAINLLM is a web framework built for language models: one .brain file per component, direct DOM updates and errors that name the exact fix." canonical="/">
+
+<main class="home">
+  <section class="hero" aria-labelledby="hero-title">
+    <p class="eyebrow">For models first, for people too</p>
+    <h1 id="hero-title">The web framework written for LLMs</h1>
+    <p class="lead">BRAINLLM lets a language model build a whole web app: one file per component, a closed and predictable syntax, and a compiler that answers every mistake with the exact fix.</p>
+    <p class="cta"><a class="primary" href="/docs">Read the docs</a> <a href="#loop">See the loop</a></p>
+  </section>
+
+  <section aria-labelledby="why">
+    <h2 id="why">Why BRAINLLM</h2>
+    <div class="grid">
+      <article>
+        <h3>One file per component</h3>
+        <p>A <code>.brain</code> file holds the contract, the script, the markup and the scoped styles, in that order. The model reads one file and knows everything about the component.</p>
+      </article>
+      <article>
+        <h3>Errors that carry the fix</h3>
+        <p>Every diagnostic has a code, a message and a fix. When the correction is unique it also carries exact edits, so <code>brain fix</code> applies it without guessing.</p>
+      </article>
+      <article>
+        <h3>Direct DOM, tiny runtime</h3>
+        <p>Signals, the same idea as the <a href="https://github.com/tc39/proposal-signals">TC39 Signals proposal</a>, update the exact nodes that changed. There is no virtual DOM, and the runtime core stays under 4 KB gzip.</p>
+      </article>
+      <article>
+        <h3>Its own toolchain</h3>
+        <p>Compiler, bundler, minifier, dev server with hot reload, CLI and MCP server live in one Rust binary called <code>brain</code>. No Vite, webpack, esbuild or Babel.</p>
+      </article>
+      <article>
+        <h3>Accessible and findable by default</h3>
+        <p>The build fails on missing alt text, skipped headings or unlabeled inputs, and it writes robots.txt, sitemaps, llms.txt and structured data for you.</p>
+      </article>
+      <article>
+        <h3>Made for agents</h3>
+        <p>Every command accepts <code>--json</code> and exists as a <a href="https://modelcontextprotocol.io/">Model Context Protocol</a> tool, so an agent can scaffold, check, fix, test and ship without a human in the loop.</p>
+      </article>
+    </div>
+  </section>
+
+  <section aria-labelledby="component">
+    <h2 id="component">A component</h2>
+    <p>Props are declared in a <code>meta</code> tag, state is a plain variable wrapped in <code>sig</code>, and derived values use <code>drv</code>. Assigning to a signal updates the page; there is nothing else to learn about reactivity.</p>
+    <pre><code raw><meta props="label:str='Clicks'">
+<script>
+  let n = sig(0)
+  let double = drv(() => n * 2)
+</script>
+<button type="button" on:click={n++}>{label}: {n}</button>
+<p>Double: {double}</p>
+<style>
+  button { padding: var(--space-2) var(--space-4); }
+</style></code></pre>
+    <p>Learn the full syntax in <a href="/docs/components">Components</a> and <a href="/docs/markup">Markup</a>.</p>
+  </section>
+
+  <section aria-labelledby="loop">
+    <h2 id="loop">The loop</h2>
+    <p>A model works in four steps and repeats them until the project is clean:</p>
+    <ol class="steps">
+      <li><strong>Add</strong> a file with <code>brain add view pricing</code>, which writes the pattern for you.</li>
+      <li><strong>Edit</strong> it, reading <code>brain spec</code> instead of guessing the API.</li>
+      <li><strong>Check</strong> with <code>brain fix</code> and <code>brain check --json</code>, applying each fix literally.</li>
+      <li><strong>Finish</strong> when <code>brain doctor</code> exits with zero.</li>
+    </ol>
+    <p>This is what a diagnostic looks like:</p>
+    <pre><code raw>{"code":"B0113","file":"comp/list.brain","line":4,"col":3,
+ "msg":"items.push mutates a sig in place",
+ "fix":"copy and reassign: items = [...items, item]",
+ "edits":[{"line":4,"col":3,"endLine":4,"endCol":18,"text":"items = [...items, item]"}]}</code></pre>
+    <p>The <a href="/docs/cli">CLI reference</a> lists every command.</p>
+  </section>
+
+  <section aria-labelledby="start">
+    <h2 id="start">Start a project</h2>
+    <pre><code raw>brain new my-app
+cd my-app
+brain run</code></pre>
+    <p>The new app already has a layout, a home page, an about page, design tokens and icons. Continue with <a href="/docs/files">Files and generators</a> to see where each piece goes.</p>
+  </section>
+</main>
+
+<style>
+  .home { max-width: 72rem; margin: 0 auto; padding: var(--space-5) var(--space-4); display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-6); }
+  .hero { display: grid; gap: var(--space-3); padding: var(--space-6) 0; }
+  .eyebrow { margin: 0; color: var(--accent); font-weight: 600; }
+  h1 { font-size: clamp(2.2rem, 6vw, 3.6rem); max-width: 18ch; }
+  .lead { margin: 0; color: var(--muted); font-size: 1.2rem; max-width: 60ch; }
+  .cta { display: flex; gap: var(--space-4); margin: 0; }
+  .primary { background: var(--accent); color: var(--on-accent); padding: var(--space-2) var(--space-4); border-radius: var(--radius-sm); text-decoration: none; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: var(--space-4); margin-top: var(--space-4); }
+  article { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: var(--space-4); }
+  article p { margin: var(--space-2) 0 0; color: var(--muted); }
+  pre { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--space-4); overflow-x: auto; }
+  .steps { display: grid; gap: var(--space-2); padding-left: var(--space-5); }
+</style>

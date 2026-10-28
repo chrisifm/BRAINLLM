@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0408",
+    "level": "error",
+    "file": "invalid/comp/b0408-color-mix.brain",
+    "line": 4,
+    "col": 37,
+    "msg": "insufficient contrast between `color-mix(in srgb, var(--fg), #000 40%) (#101010)` and `--accent` (4.05:1, minimum 4.5:1)",
+    "fix": "darken the text color or lighten `--accent` until it reaches 4.5:1"
+  }
+]

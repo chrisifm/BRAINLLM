@@ -1,0 +1,3 @@
+// Who is signed in, shared by every component (the nav reads it). The server is the source of truth (signed
+// cookie); this store mirrors it in the browser and stays in sync across tabs.
+export default store({ user: null }, { sync: 'storage' })

@@ -1,0 +1,8 @@
+{
+  "$schema": "./node_modules/@christianirack/brainllm/brain.schema.json",
+  "name": "i18n153",
+  "cache": { "http": true, "sw": true, "offline": true, "precacheKB": 2048 },
+  "seo": { "minScore": 80 },
+  "budget": { "viewKB": 30 },
+  "i18n": { "default": "en", "locales": ["en", "es", "ar"] }
+}

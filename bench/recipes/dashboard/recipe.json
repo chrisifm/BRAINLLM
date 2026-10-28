@@ -1,0 +1,9 @@
+{
+  "name": "dashboard",
+  "title": "Dashboard: KPIs + sortable table",
+  "description": "A dashboard view with a period switch (<Tabs>), a responsive KPI grid (ui/kpi: label, value, change vs previous period with an accessible direction) and a sortable data table component (comp/data-table: column headers are buttons, aria-sort, empty state). Demo numbers come from lib/dashboard-data.jsbrain; swap it for an api() resource.",
+  "params": { "title": { "type": "string", "default": "Dashboard" }, "kpis": { "type": "array", "items": { "label": "string", "value": "number", "unit": "string" } }, "columns": { "type": "array", "items": { "key": "string", "label": "string", "num": "boolean" } } },
+  "files": ["lib/dashboard-data.jsbrain", "ui/kpi.brain", "ui/kpi.test.brain", "comp/data-table.brain", "comp/data-table.test.brain", "views/dashboard.brain"],
+  "uses": ["Tabs", "Grid"],
+  "notes": "Uses its own comp/data-table instead of the kit <Table>, which currently fails `brain build` (B0116). Link /dashboard from the nav."
+}

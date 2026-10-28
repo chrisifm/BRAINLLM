@@ -1,0 +1,425 @@
+{
+ "bench": "http",
+ "date": "2026-10-13T15:19:30.687Z",
+ "brainSha256": "4cca4e74f4c3",
+ "modes": [
+  "dev",
+  "prod"
+ ],
+ "verdict": "PASS",
+ "counts": {
+  "PASS": 51,
+  "FAIL": 0,
+  "BLOCKED": 0
+ },
+ "leftOut": {},
+ "features": {
+  "dev": {
+   "metaHttp": true
+  },
+  "prod": {
+   "metaHttp": true
+  }
+ },
+ "runtimeMs": {
+  "total": 70656,
+  "dev": 35161,
+  "prod": 34725,
+  "build": 813
+ },
+ "rows": [
+  {
+   "id": "S01",
+   "title": "HTTP status → ApiError kind http, status, message, x-request-id, is(403)",
+   "owner": "RUNTIME runtime/brain-data.js",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "404 http/404 id rid-1; 403 is(403)=true; requests 1+1"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "404 http/404 id rid-1; 403 is(403)=true; requests 1+1"
+    }
+   }
+  },
+  {
+   "id": "S02",
+   "title": "422 → e.errors per field",
+   "owner": "RUNTIME runtime/brain-data.js",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "422 errors {\"email\":\"Invalid email\"}"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "422 errors {\"email\":\"Invalid email\"}"
+    }
+   }
+  },
+  {
+   "id": "S03",
+   "title": "429/503 with Retry-After > 10 s → not retried, e.retryAfter",
+   "owner": "RUNTIME runtime/brain-data.js",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "429 retryAfter 60 · 503 retryAfter 60 id rid-2; 1 request each"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "429 retryAfter 60 · 503 retryAfter 60 id rid-2; 1 request each"
+    }
+   }
+  },
+  {
+   "id": "S04",
+   "title": "response not matching `out` → kind 'schema'",
+   "owner": "RUNTIME runtime/brain-data.js",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "kind schema: GET /f/typed: the response does not match its schema: value: expected a list"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "kind schema: GET /f/typed: the response does not match its schema: value: expected a list"
+    }
+   }
+  },
+  {
+   "id": "S05",
+   "title": "connection reset → kind 'network'; GET retried ×2, POST never",
+   "owner": "RUNTIME runtime/brain-data.js",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "POST network ×1 · GET network ×3"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "POST network ×1 · GET network ×3"
+    }
+   }
+  },
+  {
+   "id": "S06",
+   "title": "no answer → kind 'timeout' at the policy timeout (default 10 s)",
+   "owner": "RUNTIME runtime/brain-data.js",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "kind timeout after 4002 ms (policy 4000 ms from <meta http>)"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "kind timeout after 4002 ms (policy 4000 ms from <meta http>)"
+    }
+   }
+  },
+  {
+   "id": "S07",
+   "title": "safe methods retried on 502/503/504/network with 300 ms then 600 ms (±25 %)",
+   "owner": "RUNTIME runtime/brain-data.js",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "GET 502→504→200 backoffs 234/591 ms · PUT ×2 · DELETE ×2"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "GET 502→504→200 backoffs 263/485 ms · PUT ×2 · DELETE ×2"
+    }
+   }
+  },
+  {
+   "id": "S08",
+   "title": "POST and PATCH are never retried",
+   "owner": "RUNTIME runtime/brain-data.js",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "POST 503 ×1 · PATCH 502 ×1"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "POST 503 ×1 · PATCH 502 ×1"
+    }
+   }
+  },
+  {
+   "id": "S09",
+   "title": "Retry-After (≤ 10 s) honoured on 429 and 503",
+   "owner": "RUNTIME runtime/brain-data.js",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "Retry-After 1 s → waited 1002 ms (429) and 1008 ms (503)"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "Retry-After 1 s → waited 1002 ms (429) and 1002 ms (503)"
+    }
+   }
+  },
+  {
+   "id": "S10",
+   "title": ".cancel() rejects with kind 'aborted', finally runs, nothing else surfaces",
+   "owner": "RUNTIME runtime/brain-data.js · runtime/brain-guard.js",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "catch \"caught aborted\", finally yes; uncaught cancel silent (0 surfaces); server aborted true/true"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "catch \"caught aborted\", finally yes; uncaught cancel silent (0 surfaces); server aborted true/true"
+    }
+   }
+  },
+  {
+   "id": "S11",
+   "title": "identical GETs in flight share one request",
+   "owner": "RUNTIME runtime/brain-data.js",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "2 components, 1 request(s)"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "2 components, 1 request(s)"
+    }
+   }
+  },
+  {
+   "id": "S12",
+   "title": "max 6 per origin; a user action goes before waiting background requests",
+   "owner": "RUNTIME runtime/brain-data.js",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "peak 6; action after 6 background GETs; settle order low0,low1,low2,low3,low4,low5,act,low6,low7,low8,low9"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "peak 6; action after 6 background GETs; settle order low0,low1,low2,low3,low4,low5,act,low6,low7,low8,low9"
+    }
+   }
+  },
+  {
+   "id": "S13",
+   "title": "client navigation aborts background (prefetch) requests, keeps user ones",
+   "owner": "RUNTIME runtime/brain-data.js",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "client nav=true; background 3/3 aborted; user request 200"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "client nav=true; background 3/3 aborted; user request 200"
+    }
+   }
+  },
+  {
+   "id": "S14",
+   "title": "offline: GET answers from cache (stale), write fails at once, nothing sent",
+   "owner": "RUNTIME runtime/brain-data.js",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "read {\"ok\":true,\"stale\":true,\"n\":2,\"ms\":0}; GET times 31 ms; write offline in 1 ms; server saw GET×1 POST×0"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "read {\"ok\":true,\"stale\":true,\"n\":2,\"ms\":0}; GET times 13 ms; write offline in 0 ms; server saw GET×1 POST×0"
+    }
+   }
+  },
+  {
+   "id": "S15",
+   "title": "unmount and re-run abort the resource request silently ({:catch} not rendered)",
+   "owner": "RUNTIME runtime/brain-data.js",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "unmount aborted=true; re-run aborted→200; error surfaces 0"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "unmount aborted=true; re-run aborted→200; error surfaces 0"
+    }
+   }
+  },
+  {
+   "id": "S16",
+   "title": "a write re-runs the resources of its path; refetch() forces a reload",
+   "owner": "RUNTIME runtime/brain-data.js",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "GETs 3 (mount, after write, refetch); final \"items 3\""
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "GETs 3 (mount, after write, refetch); final \"items 3\""
+    }
+   }
+  },
+  {
+   "id": "S17",
+   "title": "upload (in: 'file'): multipart with .progress 0→1",
+   "owner": "RUNTIME runtime/brain-data.js",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "17 progress values (15 between 0 and 1), 2.1 s, 8388898 bytes"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "17 progress values (15 between 0 and 1), 2.0 s, 8388898 bytes"
+    }
+   }
+  },
+  {
+   "id": "S18",
+   "title": "an upload in flight can be cancelled (kind 'aborted', finally runs, silent)",
+   "owner": "RUNTIME runtime/brain-data.js",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "\"caught aborted\", finally yes, aborted at 1113383 bytes"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "\"caught aborted\", finally yes, aborted at 1048576 bytes"
+    }
+   }
+  },
+  {
+   "id": "S19",
+   "title": "401 → login?next=<current path> (from <meta http login>)",
+   "owner": "RUNTIME runtime/brain-data.js",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "→ /login?next=%2Flogin-gate"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "→ /login?next=%2Flogin-gate%2F"
+    }
+   }
+  },
+  {
+   "id": "S20",
+   "title": "<meta http base> prefixes api() paths",
+   "owner": "COMPILER crates/brain-codegen (<meta http>) · TOOLCHAIN",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "raw path /api/f/policy"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "raw path /api/f/policy"
+    }
+   }
+  },
+  {
+   "id": "S21",
+   "title": "<ErrorState> renders message + action per kind",
+   "owner": "RUNTIME runtime/ui/error-state.brain · COMPILER (kit registration)",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "network: \"The connection was lost. Retry\" +retry · forbidden: \"You do not have permission: orders.read\" · missing: \"Not found.\" · invalid: \"Check the highlighted fields.\" · limited: \"Too many requests. Trying again in 60 se\" · server: \"Something went wrong on our side. Retry \" +retry"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "network: \"The connection was lost. Retry\" +retry · forbidden: \"You do not have permission: orders.read\" · missing: \"Not found.\" · invalid: \"Check the highlighted fields.\" · limited: \"Too many requests. Trying again in 60 se\" · server: \"Something went wrong on our side. Retry \" +retry"
+    }
+   }
+  },
+  {
+   "id": "S22",
+   "title": "online() follows the connection state",
+   "owner": "RUNTIME runtime/brain-data.js · COMPILER (scope)",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "online → offline → online"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "online → offline → online"
+    }
+   }
+  },
+  {
+   "id": "S23",
+   "title": "api/_http.jsbrain http({ headers }) adds headers to every request",
+   "owner": "COMPILER (http in scope) · TOOLCHAIN (loading _http)",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "x-bench=from-http-headers"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "x-bench=from-http-headers"
+    }
+   }
+  },
+  {
+   "id": "S24",
+   "title": "request feed: dev logs every api() call; prod emits none",
+   "owner": "TOOLCHAIN crates/brain-serve",
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "evidence": "page events 1; terminal: [net] GET /api/f/k404 404 1 ms 21 B"
+    },
+    "prod": {
+     "status": "PASS",
+     "evidence": "brain:net events in prod: 0"
+    }
+   }
+  },
+  {
+   "id": "C1",
+   "title": "B1104: unknown attribute or value in <meta http>",
+   "owner": "COMPILER crates/brain-check",
+   "modes": {
+    "static": {
+     "status": "PASS",
+     "evidence": "B1104 app.brain:2 `timeout=\"soon\"` is not valid in `<meta http>` · B1104 app.brain:2 `<meta http>` has no attribute `bogus`"
+    }
+   }
+  },
+  {
+   "id": "C2",
+   "title": "warning: fetch() used directly in app code (INTERNALS §40.5 names it B1103)",
+   "owner": "COMPILER crates/brain-check",
+   "modes": {
+    "static": {
+     "status": "PASS",
+     "evidence": "B1107 views/fetchy.brain:4 `fetch()` in app code skips typed errors, safe retries, dedupe, cancel on unmount and caching"
+    }
+   }
+  },
+  {
+   "id": "C3",
+   "title": "B1106: load() with independent awaits (waterfall)",
+   "owner": "COMPILER crates/brain-check",
+   "modes": {
+    "static": {
+     "status": "PASS",
+     "evidence": "B1106 views/waterfall.brain:6 `load` awaits 2 independent requests one after another"
+    }
+   }
+  }
+ ]
+}

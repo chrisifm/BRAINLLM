@@ -1,0 +1,69 @@
+<script>
+  import inspector from '../channels/inspector.jsbrain'
+  import fold from '../lib/fold.jsbrain'
+  // The dev server under inspection: the same origin (the debugger on :P+1 proxies it) or `?src=http://localhost:5180`
+  const src = (globalThis.location && new URLSearchParams(location.search).get('src')) || ''
+  const metrics = api(src + '/@brain/metrics', { get: {} })
+  const poll = async () => {
+    try {
+      const j = await metrics.get({ since: inspector.since })
+      let s = inspector.$snap()
+      for (const b of j.batches || []) s = fold(s, typeof b === 'string' ? JSON.parse(b) : b)
+      s = fold(s, j.leaks || [])
+      inspector.$set({ ...s, connected: true, since: j.now, now: j.now })
+    } catch {
+      inspector.connected = false
+    }
+  }
+  mounted(() => { poll() })
+  every('1s', poll)
+  const leakCount = drv(() => inspector.leaks.length)
+  const errCount = drv(() => inspector.errors.length)
+  const host = drv(() => src.replace(/^https?:\/\//, '') || 'this dev server')
+</script>
+<div class="shell">
+  <aside aria-label="Debugger navigation">
+    <div class="brand"><span class="logo" aria-hidden="true">B</span><span>BRAINLLM<small>Devtools</small></span></div>
+    <nav aria-label="Views">
+      <a href="/">Overview</a>
+      <a href="/tree">Tree</a>
+      <a href="/memory">Memory{#if leakCount}<span class="n bad">{leakCount}</span>{/if}</a>
+      <a href="/latency">Latency</a>
+      <a href="/network">Network</a>
+      <a href="/events">Events</a>
+      <a href="/errors">Errors{#if errCount}<span class="n bad">{errCount}</span>{/if}</a>
+      <a href="/problems">Problems</a>
+      <a href="/doctor">Doctor</a>
+    </nav>
+    <p class="label">Data</p>
+    <nav aria-label="Data">
+      <a href="/state">State</a>
+      <a href="/storage">Storage</a>
+      <a href="/connections">Connections</a>
+      <a href="/timers">Timers</a>
+    </nav>
+    <p class="label">Session</p>
+    <p class="session" class:off={!inspector.connected}><span class="dot" aria-hidden="true"></span>{inspector.connected ? 'Connected to' : 'Waiting for'} <b>{host}</b></p>
+  </aside>
+  <main><slot /></main>
+</div>
+<style>
+  .shell { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 100vh; }
+  aside { position: sticky; top: 0; height: 100vh; padding: var(--space-5) var(--space-4); border-right: 1px solid var(--line); background: var(--glass); backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6); }
+  .brand { display: flex; align-items: center; gap: var(--space-2); font-weight: 650; margin-bottom: var(--space-5); }
+  .brand small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
+  .logo { display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-sm); color: var(--on-accent); background: var(--accent); }
+  nav { display: grid; gap: var(--space-1); }
+  nav a { display: flex; justify-content: space-between; padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); color: var(--fg); text-decoration: none; font-size: 14px; }
+  nav a:hover { background: var(--surface); }
+  nav a[aria-current='page'] { background: var(--surface); color: var(--accent); font-weight: 600; }
+  .n { min-width: 18px; padding: 0 var(--space-1); border-radius: 9px; font-size: 12px; text-align: center; }
+  .n.bad { color: var(--on-accent); background: var(--bad); }
+  .label { margin: var(--space-4) 0 var(--space-1); font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .session { font-size: 13px; color: var(--muted); }
+  .dot { display: inline-block; width: 8px; height: 8px; margin-right: var(--space-1); border-radius: 50%; background: var(--ok); }
+  .session.off .dot { background: var(--bad); }
+  main { padding: var(--space-5); min-width: 0; }
+  @media (max-width: 760px) { .shell { grid-template-columns: 1fr; } aside { position: static; height: auto; } }
+  @supports not (backdrop-filter: blur(1px)) { aside { background: var(--surface); } }
+</style>

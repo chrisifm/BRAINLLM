@@ -1,0 +1,40 @@
+<meta seo title="Error states from the kit" description="The kit's ErrorState renders one message and one action per error kind: network, forbidden, not found, invalid fields, rate limited and server errors.">
+<script>
+  import fault from '../api/fault.jsbrain'
+  let errs = sig({})
+  let retried = sig(0)
+  const keep = (id, e) => (errs = { ...errs, [id]: e })
+  const again = () => (retried = retried + 1)
+  let started = sig('')
+  const load = async () => {
+    started = 'yes'
+    for (const [id, run] of [
+      ['network', () => fault.post({ name: 'reset' })],
+      ['forbidden', () => fault.get({ name: 'k403' })],
+      ['missing', () => fault.get({ name: 'k404' })],
+      ['invalid', () => fault.post({ name: 'k422' })],
+      ['limited', () => fault.get({ name: 'k429long' })],
+      ['server', () => fault.get({ name: 'k503long' })],
+    ]) {
+      try {
+        await run()
+      } catch (e) {
+        keep(id, e)
+      }
+    }
+  }
+</script>
+<main class="page">
+  <h1>Error states</h1>
+  <button type="button" data-a="load" on:click={load}>load</button>
+  <output data-r="started">{started}</output> <output data-r="retried">{retried}</output>
+  <div data-r="network"><ErrorState error={errs.network} retry={again} /></div>
+  <div data-r="forbidden"><ErrorState error={errs.forbidden} retry={again} /></div>
+  <div data-r="missing"><ErrorState error={errs.missing} retry={again} /></div>
+  <div data-r="invalid"><ErrorState error={errs.invalid} retry={again} /></div>
+  <div data-r="limited"><ErrorState error={errs.limited} retry={again} /></div>
+  <div data-r="server"><ErrorState error={errs.server} retry={again} /></div>
+</main>
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+</style>

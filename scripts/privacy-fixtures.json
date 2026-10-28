@@ -1,0 +1,44 @@
+[
+  {
+    "path": "bench/install/README.md",
+    "rule": "home-path",
+    "sha256": "0d9f74285dfd125ba0536fc6f1719fc58502de65ba596ef1700a01005ea0f42c",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
+    "path": "bench/install/run.mjs",
+    "rule": "home-path",
+    "sha256": "0d9f74285dfd125ba0536fc6f1719fc58502de65ba596ef1700a01005ea0f42c",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
+    "path": "bench/start/run.mjs",
+    "rule": "credential",
+    "sha256": "a860374a395e85d36d25fa5fdf2591b8af1ae68e2d99ae2ecf3342ad96fb07f7",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
+    "path": "crates/brain-cli/src/env.rs",
+    "rule": "credential-url",
+    "sha256": "950c41a821615abb8554473910fabc7f6face0d8c066e5c631d60ebdf00e8d3c",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
+    "path": "crates/brain-check/tests/server.rs",
+    "rule": "private-key",
+    "sha256": "3021d90eb9437b2d8f30e8363695c4418b5e5f1870801b5c317e9398ee0f572d",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
+    "path": "crates/brain-check/tests/server.rs",
+    "rule": "credential",
+    "sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
+    "path": "examples/invalid/comp/b0703-secret-literal.brain",
+    "rule": "credential",
+    "sha256": "949a0eca02907f675812d79d696689f6ef9bc0742afcbc06fef6493158669911",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  }
+]

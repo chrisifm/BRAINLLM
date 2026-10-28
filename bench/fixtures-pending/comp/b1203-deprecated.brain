@@ -1,0 +1,5 @@
+<meta props="code:str">
+<script>
+  let short = drv(() => code.substr(0, 3))
+</script>
+<p>{short}</p>

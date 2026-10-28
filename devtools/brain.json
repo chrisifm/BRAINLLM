@@ -1,0 +1,7 @@
+{
+  "name": "BRAINLLM devtools",
+  "lang": "en",
+  "cache": { "http": false, "sw": false, "offline": false },
+  "seo": { "minScore": 0 },
+  "budget": { "viewKB": 30 }
+}

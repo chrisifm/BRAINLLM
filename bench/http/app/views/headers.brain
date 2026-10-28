@@ -1,0 +1,21 @@
+<meta seo title="State-dependent headers" description="Headers that depend on state come from a function in api/_http.jsbrain and are added to every api() request.">
+<script>
+  import fault from '../api/fault.jsbrain'
+  import describe from '../lib/describe.jsbrain'
+  let res = sig('')
+  const ping = async () => {
+    res = 'running'
+    try {
+      res = describe(await fault.get({ name: 'headers' }), 0)
+    } catch (e) {
+      res = describe(e, 0)
+    }
+  }
+</script>
+<main class="page">
+  <h1>State-dependent headers</h1>
+  <button type="button" data-a="ping" on:click={ping}>ping</button> <output data-r="ping">{res}</output>
+</main>
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); }
+</style>

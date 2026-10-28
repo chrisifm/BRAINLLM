@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0405",
+    "level": "info",
+    "file": "invalid/views/b0405-two-main.brain",
+    "line": 4,
+    "col": 1,
+    "msg": "the view has more than one `<main>` (normalized to `<section>`)",
+    "fix": "keep a single `<main>` per page; the rest are `<section>`"
+  }
+]

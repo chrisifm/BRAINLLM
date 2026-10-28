@@ -1,0 +1,49 @@
+<meta props="plans:list discount:num=0.2" emits="choose:obj">
+
+<script>
+  // plans: [{ id, name, price, featured?, perks: ['…'] }] · price is per month
+  let yearly = sig(false)
+  const shown = (p) => (yearly ? Math.round(p.price * (1 - discount) * 100) / 100 : p.price)
+  const choose = (p) => emit('choose', { plan: p.id, period: yearly ? 'yearly' : 'monthly' })
+</script>
+
+<section class="pricing" aria-labelledby="pricing-title">
+  <h2 id="pricing-title">Plans</h2>
+  <div class="toggle" role="group" aria-label="Billing period">
+    <button type="button" aria-pressed={yearly ? 'false' : 'true'} class:on={!yearly} on:click={yearly = false}>Monthly</button>
+    <button type="button" aria-pressed={yearly ? 'true' : 'false'} class:on={yearly} on:click={yearly = true}>Yearly (save {Math.round(discount * 100)}%)</button>
+  </div>
+  <ul class="grid">
+    {#each plans as p (p.id)}
+      <li class="plan" class:featured={p.featured}>
+        <h3>{p.name}{#if p.featured} <span class="tag">Most popular</span>{/if}</h3>
+        <p class="price"><strong>${shown(p)}</strong> <span>per month{yearly ? ', billed yearly' : ''}</span></p>
+        <ul class="perks">
+          {#each p.perks as perk (perk)}<li>{perk}</li>{/each}
+        </ul>
+        <button type="button" class="choose" class:primary={p.featured} on:click={choose(p)}>Choose {p.name}</button>
+      </li>
+    {:empty}
+      <li class="none">No plans available right now.</li>
+    {/each}
+  </ul>
+</section>
+
+<style>
+  .pricing { display: grid; gap: var(--space-4); }
+  h2 { margin: 0; text-align: center; font-size: 1.6rem; }
+  .toggle { display: flex; justify-content: center; gap: var(--space-2); }
+  button { font: inherit; font-weight: 600; padding: var(--space-2) var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--fg); background: var(--surface); cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .toggle .on, .choose.primary { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+  .grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: var(--space-4); }
+  .plan { display: grid; gap: var(--space-3); align-content: start; padding: var(--space-4); background: var(--glass); border: 1px solid var(--glass-edge); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+  .plan.featured { border: 2px solid var(--accent); }
+  h3 { margin: 0; font-size: 1.15rem; }
+  .tag { font-size: .75rem; color: var(--accent); }
+  .price { margin: 0; }
+  .price strong { font-size: 2rem; font-variant-numeric: tabular-nums; }
+  .price span { color: var(--muted); font-size: .9rem; }
+  .perks { margin: 0; padding: 0 0 0 var(--space-4); display: grid; gap: var(--space-1); color: var(--muted); }
+  .none { color: var(--muted); text-align: center; }
+</style>

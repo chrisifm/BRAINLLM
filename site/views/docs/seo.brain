@@ -1,0 +1,30 @@
+<meta seo lastmod="2026-10-13" title="SEO and AI visibility" description="Page metadata, generated robots.txt, sitemaps and llms.txt, automatic social cards, structured data and the AI crawler policy in BRAINLLM." canonical="/docs/seo">
+
+<main class="doc">
+  <h1>SEO and AI visibility</h1>
+  <p>Every view declares its title and description, and the build does the rest: canonical URLs, social cards, structured data, sitemaps, robots.txt and the files language models read. You write the content; the framework writes the plumbing.</p>
+  <h2>Page metadata</h2>
+  <pre><code raw><meta seo title="Pricing" description="Plans for teams of every size, with a free tier for up to ten people."></code></pre>
+  <p>A view's <code>meta seo</code> tag takes <code>title</code>, <code>description</code> and optionally <code>canonical</code>, <code>og:image</code>, <code>schema</code> and <code>robots</code>. The values may be expressions over the props that <code>load</code> returns, including structured data with <code>jsonld</code>:</p>
+  <pre><code raw><meta seo title={props.user.name} description={props.user.bio}
+  jsonld={{ '@type': 'Person', name: props.user.name }}></code></pre>
+  <p>Site defaults such as a title template and the default social image live in the <code>meta seo</code> tag of <code>app.brain</code>, for example <code>titleTemplate="%s · Acme"</code>. Any other tag goes in a <code>head</code> block of the view, merged and deduplicated by name or property. Views with a parameter, such as <code>[id]</code>, list their pages with <code>export async function paths()</code> so they are prerendered and appear in the sitemap. The sitemap date comes from <code>lastmod</code> in the meta tag or from a content entry's frontmatter date.</p>
+  <h2>Generated files</h2>
+  <p><code>brain build</code> writes robots.txt, sitemap.xml following the <a href="https://www.sitemaps.org/protocol.html">sitemaps protocol</a>, llms.txt and llms-full.txt following the <a href="https://llmstxt.org/">llms.txt proposal</a>, and manifest.webmanifest. Never write those files by hand, never hand-write Open Graph defaults, and never paste Google tags into a page: analytics, Tag Manager and site verification come from the <code>google</code> key of <code>brain.json</code>, with consent denied until the app grants it.</p>
+  <h2>Social cards and AI crawlers</h2>
+  <pre><code raw>{
+  "name": "Acme",
+  "site": "https://acme.dev",
+  "social": { "x": "@acme", "instagram": "https://www.instagram.com/acme" },
+  "seo": { "minScore": 80, "ai": "allow" }
+}</code></pre>
+  <p>Social profiles go in the <code>social</code> key of <code>brain.json</code>. The build then writes every missing <a href="https://ogp.me/">Open Graph</a> and Twitter tag, so links shared on Facebook, LinkedIn, X, WhatsApp or Slack show a proper card, and it links the site to those profiles in its structured data. The <code>seo.ai</code> key sets the policy for AI crawlers: <code>allow</code>, <code>search-only</code> or <code>block</code>.</p>
+  <h2>The audit</h2>
+  <p>The build scores every page from 0 to 100: title and description length, one heading level one, alt text, canonical, internal links, duplicate titles, social image and more. Each finding comes with a fix, and pages under <code>seo.minScore</code> fail <code>brain doctor</code>. Broken internal links and anchors fail the build itself, because a published page should never point at a page that does not exist. Continue with <a href="/docs/data">Data, forms and server</a>.</p>
+</main>
+
+<style>
+  .doc { display: grid; gap: var(--space-3); max-width: 72ch; }
+  .doc p { margin: 0; }
+  pre { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--space-4); overflow-x: auto; }
+</style>

@@ -1,0 +1,42 @@
+<meta seo title="Memory" description="Heap over time, memory per component and detected leaks (B0601, B0602).">
+<script>
+  import inspector from '../channels/inspector.jsbrain'
+  // heap sparkline: last samples scaled to a 600×80 box
+  const points = drv(() => {
+    const h = inspector.heap.filter((x) => x.used)
+    if (h.length < 2) return ''
+    const max = Math.max(...h.map((x) => x.used)), min = Math.min(...h.map((x) => x.used)), span = max - min || 1
+    return h.map((x, i) => `${(i / (h.length - 1)) * 600},${80 - ((x.used - min) / span) * 76 - 2}`).join(' ')
+  })
+  const rows = drv(() => inspector.comps.map((c) => ({ ...c, id: c.h, kb: Math.round(c.est / 1024) })).sort((a, b) => b.kb - a.kb))
+  const cols = [{ key: 'name', label: 'Component' }, { key: 'inst', label: 'Instances' }, { key: 'sig', label: 'sig' }, { key: 'drv', label: 'drv' }, { key: 'fx', label: 'fx' }, { key: 'nodes', label: 'Nodes' }, { key: 'kb', label: 'Est. KB' }]
+</script>
+<h1>Memory</h1>
+<section class="card" aria-label="Heap over time">
+  {#if points}
+    <svg viewBox="0 0 600 80" preserveAspectRatio="none" role="img" aria-label="Heap over the last minutes"><polyline points={points} /></svg>
+  {:else}
+    <p class="muted">Collecting heap samples…</p>
+  {/if}
+</section>
+<section class="card" aria-label="Leaks">
+  <h2>Detected leaks</h2>
+  {#if inspector.leaks.length}
+    {#each inspector.leaks as l (l.code + l.h + l.msg)}
+      <p class="leak"><b>{l.code}</b> <span>{l.file || l.name}</span> — {l.msg}<br><small>{l.fix}</small></p>
+    {/each}
+  {:else}
+    <p class="muted">No leaks detected.</p>
+  {/if}
+</section>
+<Table caption="Memory per component" rows={rows} columns={cols} empty="No component mounted yet." />
+<style>
+  h1 { margin: 0 0 var(--space-4); font-size: 22px; }
+  h2 { margin: 0 0 var(--space-2); font-size: 15px; }
+  .card { margin-bottom: var(--space-4); padding: var(--space-4); border-radius: var(--radius); border: 1px solid var(--glass-edge); background: var(--glass); box-shadow: var(--shadow); }
+  svg { width: 100%; height: 80px; }
+  polyline { fill: none; stroke: var(--accent); stroke-width: 2; }
+  .leak { margin: var(--space-2) 0; }
+  .leak b { color: var(--bad); }
+  .leak small, .muted { color: var(--muted); }
+</style>

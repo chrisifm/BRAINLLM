@@ -1,0 +1,65 @@
+<meta props="brand:str='Acme' links:list account:list=[]">
+
+<script>
+  // links: [{ href: '/', label: 'Home' }] · account: [{ href: '/account', label: 'Your account' }]
+  // Two disclosures: the link list on narrow screens and the account list. Escape closes both and returns focus.
+  let open = sig(false)
+  let acct = sig(false)
+  let btn = ref()
+  let acctBtn = ref()
+  const keys = (e) => {
+    if (e.key !== 'Escape') return
+    if (acct) {
+      acct = false
+      acctBtn.focus()
+    } else if (open) {
+      open = false
+      btn.focus()
+    }
+  }
+  const close = () => {
+    open = false
+    acct = false
+  }
+</script>
+
+<header class="bar" on:keydown={keys}>
+  <a class="brand" href="/">{brand}</a>
+  <button type="button" class="toggle" bind:ref={btn} aria-expanded={open ? 'true' : 'false'} aria-controls="navbar-links" on:click={open = !open}>Menu</button>
+  <nav aria-label="Main" class="links" class:open={open} id="navbar-links">
+    {#each links as l (l.href)}
+      <a href={l.href} on:click={close}>{l.label}</a>
+    {/each}
+  </nav>
+  {#if account.length}
+    <div class="account">
+      <button type="button" class="acct-btn" bind:ref={acctBtn} aria-expanded={acct ? 'true' : 'false'} aria-controls="navbar-account" on:click={acct = !acct}>Account</button>
+      <ul id="navbar-account" class="acct-list" hidden={!acct}>
+        {#each account as a (a.href)}
+          <li><a href={a.href} on:click={close}>{a.label}</a></li>
+        {/each}
+      </ul>
+    </div>
+  {/if}
+</header>
+
+<style>
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-5); background: var(--glass); border-bottom: 1px solid var(--line); }
+  .brand { font-weight: 650; text-decoration: none; color: var(--fg); margin-right: auto; }
+  .links { display: flex; gap: var(--space-4); }
+  .links a { text-decoration: none; color: var(--muted); padding: var(--space-1) 0; }
+  .links a:hover, .links a[aria-current="page"] { color: var(--fg); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button { padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--fg); background: var(--surface); font-weight: 600; cursor: pointer; }
+  .toggle { display: none; }
+  .account { position: relative; }
+  .acct-list { position: absolute; right: 0; top: calc(100% + 6px); min-width: 180px; list-style: none; margin: 0; padding: var(--space-1); display: grid; z-index: 50; background: var(--glass); border: 1px solid var(--glass-edge); border-radius: var(--radius); box-shadow: var(--shadow); }
+  .acct-list[hidden] { display: none; }
+  .acct-list a { display: block; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); text-decoration: none; color: var(--fg); }
+  .acct-list a:hover { background: var(--surface); }
+  @media (max-width: 720px) {
+    .toggle { display: inline-block; }
+    .links { display: none; flex-basis: 100%; flex-direction: column; gap: var(--space-2); order: 3; }
+    .links.open { display: flex; }
+  }
+</style>

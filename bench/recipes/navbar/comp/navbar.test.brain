@@ -1,0 +1,34 @@
+<script>
+  import Navbar from './navbar.brain'
+
+  const links = [{ href: '/', label: 'Home' }, { href: '/about', label: 'About' }, { href: '/posts', label: 'Posts' }]
+  const account = [{ href: '/account', label: 'Your account' }, { href: '/login', label: 'Sign in' }]
+
+  test('shows the brand and one link per entry', async () => {
+    await mount(Navbar, { brand: 'Nimbus', links })
+    expect(text('.brand')).toBe('Nimbus')
+    expect(count('.links a')).toBe(3)
+  })
+
+  test('the Menu button toggles the links and reports its state', async () => {
+    await mount(Navbar, { links })
+    expect(attr('.toggle', 'aria-expanded')).toBe('false')
+    await click('.toggle')
+    expect(attr('.toggle', 'aria-expanded')).toBe('true')
+    expect(hasClass('.links', 'open')).toBeTruthy()
+  })
+
+  test('the account list stays hidden until its button opens it', async () => {
+    await mount(Navbar, { links, account })
+    expect(count('.acct-list a')).toBe(2)
+    expect(attr('.acct-list', 'hidden') !== null).toBeTruthy()
+    await click('.acct-btn')
+    expect(attr('.acct-btn', 'aria-expanded')).toBe('true')
+    expect(attr('.acct-list', 'hidden')).toBe(null)
+  })
+
+  test('without account items there is no account button', async () => {
+    await mount(Navbar, { links })
+    expect(count('.account')).toBe(0)
+  })
+</script>

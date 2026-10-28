@@ -1,0 +1,38 @@
+<meta props="links:list label:str='Main'">
+
+<script>
+  // links: [{ href: '/', label: 'Home' }] · on narrow screens the list hides behind the Menu button
+  let open = sig(false)
+  let btn = ref()
+  const keys = (e) => {
+    if (e.key !== 'Escape' || !open) return
+    open = false
+    btn.focus()
+  }
+</script>
+
+<nav aria-label={label} on:keydown={keys}>
+  <button type="button" class="toggle" bind:ref={btn} aria-expanded={open ? 'true' : 'false'} aria-controls="app-nav-list" on:click={open = !open}>Menu</button>
+  <ul id="app-nav-list" class:open={open}>
+    {#each links as l (l.href)}
+      <li><a href={l.href} on:click={open = false}>{l.label}</a></li>
+    {:empty}
+      <li class="none">No pages yet.</li>
+    {/each}
+  </ul>
+</nav>
+
+<style>
+  nav { display: grid; gap: var(--space-2); }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
+  a { display: block; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); text-decoration: none; color: var(--muted); }
+  a:hover, a[aria-current="page"] { color: var(--fg); background: var(--surface); }
+  a:focus-visible, .toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .none { color: var(--muted); padding: var(--space-2) var(--space-3); }
+  .toggle { display: none; justify-self: start; padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--fg); background: var(--surface); font-weight: 600; cursor: pointer; }
+  @media (max-width: 720px) {
+    .toggle { display: inline-block; }
+    ul { display: none; }
+    ul.open { display: grid; }
+  }
+</style>

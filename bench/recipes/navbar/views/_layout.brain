@@ -1,0 +1,22 @@
+<script>
+  import Navbar from '../comp/navbar.brain'
+  import session from '../channels/session.jsbrain'
+  // one entry per view, so every page stays linked
+  const links = [
+    { href: '/', label: 'Home' },
+    { href: '/about', label: 'About' },
+    { href: '/posts', label: 'Posts' },
+  ]
+  const account = drv(() => session.user
+    ? [{ href: '/account', label: 'Your account' }]
+    : [{ href: '/login', label: 'Sign in' }, { href: '/account', label: 'Your account' }])
+</script>
+
+<div class="shell">
+  <Navbar brand="Acme" links={links} account={account} />
+  <slot />
+</div>
+
+<style>
+  .shell { display: grid; gap: var(--space-2); }
+</style>

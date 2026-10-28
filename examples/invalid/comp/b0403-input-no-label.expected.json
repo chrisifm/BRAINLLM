@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0403",
+    "level": "error",
+    "file": "invalid/comp/b0403-input-no-label.brain",
+    "line": 5,
+    "col": 1,
+    "msg": "`<input>` without `<label>` or `aria-label`",
+    "fix": "wrap it in `<label>Text <input …/></label>` or add `aria-label=\"…\"`"
+  }
+]

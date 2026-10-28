@@ -1,0 +1,26 @@
+<script>
+  import ConfirmDialog from './confirm-dialog.brain'
+
+  const props = { label: 'Remove', title: 'Remove Ana?', message: 'Ana loses access at once.', confirmLabel: 'Remove', danger: true }
+
+  test('the dialog stays closed until the trigger is clicked', async () => {
+    await mount(ConfirmDialog, props)
+    expect(attr('dialog', 'open')).toBe(null)
+    await click('.trigger')
+    expect(attr('dialog', 'open') !== null).toBeTruthy()
+    expect(text('dialog h2')).toBe('Remove Ana?')
+  })
+
+  test('Confirm emits once and closes; Cancel closes without emitting', async () => {
+    let n = 0
+    await mount(ConfirmDialog, { ...props, 'on:confirm': () => { n = n + 1 } })
+    await click('.trigger')
+    await click('.footer button:first-child')
+    expect(attr('dialog', 'open')).toBe(null)
+    expect(n).toBe(0)
+    await click('.trigger')
+    await click('.footer button:last-child')
+    expect(attr('dialog', 'open')).toBe(null)
+    expect(n).toBe(1)
+  })
+</script>

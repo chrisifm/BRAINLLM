@@ -1,0 +1,15 @@
+[package]
+name = "brain-serve"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+notify = "8.2.0"
+brain-min = { path = "../brain-min" }
+brain-pack = { path = "../brain-pack" }
+brain-lex = { path = "../brain-lex" }
+brain-parse = { path = "../brain-parse" }
+brain-check = { path = "../brain-check" }
+brain-seo = { path = "../brain-seo" }

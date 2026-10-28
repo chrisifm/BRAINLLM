@@ -1,0 +1,4 @@
+<script>
+  import { qty } from '../../comp/product-card.brain'
+</script>
+<p>{qty}</p>

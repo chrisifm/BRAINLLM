@@ -1,0 +1,6 @@
+<script>
+  let n = sig(0)
+  fx(() => { document.querySelector('#out').textContent = n })
+</script>
+
+<p id="out">{n}</p>

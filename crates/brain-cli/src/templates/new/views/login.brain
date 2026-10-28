@@ -1,0 +1,51 @@
+<meta seo title="Sign in" description="Sign in to your account. In development the demo password lives in .brain_env; production uses your real provider.">
+
+<script>
+  import auth from '../server/auth.jsbrain'
+  import session from '../channels/session.jsbrain'
+
+  export async function load() {
+    return { configured: auth.configured() }
+  }
+  server: async function login(ctx, v) {
+    const user = auth.check(v.email, v.password)
+    if (!user) throw { errors: { password: 'Wrong email or password' } }
+    ctx.session.set(user)
+    // back to the page that asked for the login; only a path of this app (no open redirect)
+    const next = /^\/(?![\/\\])/.test(ctx.query.next ?? '') ? ctx.query.next : '/account'
+    // without JS the form post answers 303 to `redirect`; with JS the submit below navigates there
+    return { redirect: next, user }
+  }
+  let f = form({ email: 'email!', password: 'str!' }, {
+    submit: async (v) => {
+      const r = await login(v)
+      session.user = r.user
+      // the RPC call does not carry this page's ?next=, so read it here (same rule: a path of this app)
+      const next = new URLSearchParams(location.search).get('next') ?? ''
+      navigate(/^\/(?![\/\\])/.test(next) ? next : r.redirect)
+    },
+  })
+</script>
+
+<main class="page">
+  <h1>Sign in</h1>
+  {#if props.configured}
+    <form on:submit={f.submit}>
+      <label>Email <input type="email" autocomplete="email" bind:value={f.v.email}></label>
+      {#if f.err.email}<p class="err">{f.err.email}</p>{/if}
+      <label>Password <input type="password" autocomplete="current-password" bind:value={f.v.password}></label>
+      {#if f.err.password}<p class="err">{f.err.password}</p>{/if}
+      {#if f.error}<p role="alert">{f.error}</p>{/if}
+      <Button type="submit" loading={f.busy}>Sign in</Button>
+    </form>
+  {:else}
+    <p role="status">Authentication is not configured. Set up a real provider in server/auth.jsbrain (the demo login exists only in development).</p>
+  {/if}
+</main>
+
+<style>
+  .page { max-width: 40ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+  form { display: grid; gap: var(--space-3); }
+  label { display: grid; gap: var(--space-1); }
+  .err { margin: 0; color: var(--bad); }
+</style>

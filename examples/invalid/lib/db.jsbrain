@@ -1,0 +1,2 @@
+<meta server>
+export default { all: async () => [] }

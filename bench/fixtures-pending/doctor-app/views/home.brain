@@ -1,0 +1,22 @@
+<meta seo title="Home" description="Test project for brain doctor (B1002, B1003, B1006, B1007, B1008).">
+<script>
+  import { Locale } from '../channels/locale.jsbrain'
+  import Sidebar from '../comp/sidebar.brain'
+  import Greeting from '../comp/greeting.brain'
+  import Level1 from '../comp/level1.brain'
+  import TinyNote from '../comp/tiny-note.brain'
+  import OkBadge from '../comp/ok-badge.brain'
+  import BadBadge from '../comp/bad-badge.brain'
+  let locale = sig('fr')
+  provide(Locale, locale)
+  const user = { name: 'Ana' }
+</script>
+<main>
+  <h1>Home</h1>
+  <Sidebar />
+  <Greeting />
+  <Level1 user={user} />
+  <TinyNote />
+  <OkBadge text="Active" />
+  <BadBadge text="Expired" />
+</main>

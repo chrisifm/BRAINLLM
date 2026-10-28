@@ -1,0 +1,6 @@
+<meta props="posts:list">
+<ul>
+  {#each posts as p (p.id)}
+    <li>{p.title}: {[...p.tags].sort().join(', ')}</li>
+  {/each}
+</ul>

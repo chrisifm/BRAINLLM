@@ -1,0 +1,33 @@
+<meta seo title="Plan, track and ship your projects" description="One workspace for plans, tasks and reports. Start free, invite your team and see progress at a glance." canonical="/">
+
+<script>
+  import Hero from '../ui/hero.brain'
+  import FeatureGrid from '../ui/feature-grid.brain'
+  import Faq from '../comp/faq.brain'
+  import CtaBand from '../ui/cta-band.brain'
+
+  const features = [
+    { id: 'plan', title: 'Plan in minutes', text: 'Turn a goal into milestones and tasks with owners and due dates, then adjust the plan by dragging it.' },
+    { id: 'track', title: 'Track without meetings', text: 'Everyone updates their own tasks; the project page shows what is done, what is late and who is blocked.' },
+    { id: 'report', title: 'Reports that write themselves', text: 'Weekly summaries go to stakeholders by email with the numbers that changed and the risks that appeared.' },
+  ]
+  const faq = [
+    { id: 'trial', q: 'Is there a free plan?', a: 'Yes. The Free plan has no time limit and covers one project; upgrade only when you need more.' },
+    { id: 'import', q: 'Can I import my current tasks?', a: 'Yes. Import a CSV export from most task tools, or paste a list and every line becomes a task.' },
+    { id: 'security', q: 'Where is my data stored?', a: 'In encrypted databases with daily backups. You can export everything at any time.' },
+  ]
+</script>
+
+<main class="page">
+  <Hero title="Plan, track and ship your projects" lead="One workspace for plans, tasks and reports. Your team sees the same picture, and you stop chasing status updates." primary={{ href: '/login', label: 'Start free' }} secondary={{ href: '/about', label: 'Learn more' }} />
+  <FeatureGrid title="Everything a small team needs" features={features} />
+  <p class="note">Read the latest notes from the team in <a href="/posts">our posts</a>, or learn <a href="/about">who builds the product</a> and why.</p>
+  <Faq items={faq} />
+  <CtaBand title="Start your first project today" text="It takes two minutes and needs no credit card." href="/login" label="Create your workspace" />
+</main>
+
+<style>
+  .page { max-width: 68rem; margin: 0 auto; padding: 0 var(--space-4) var(--space-6); display: grid; gap: var(--space-5); }
+  .note { margin: 0; text-align: center; color: var(--muted); }
+  a { color: var(--accent); }
+</style>

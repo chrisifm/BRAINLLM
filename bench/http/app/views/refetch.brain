@@ -1,0 +1,25 @@
+<meta seo title="Refetch after a write" description="A write to a path re-runs every resource reading that path, and refetch() forces a reload of one resource.">
+<script>
+  import items from '../api/items.jsbrain'
+  let list = resource(items.get)
+  let added = sig('')
+  const add = async () => {
+    added = 'running'
+    await items.post({ id: 3, name: 'third' })
+    added = 'yes'
+  }
+  let refetched = sig(0)
+  const reload = () => {
+    refetched = refetched + 1
+    list.refetch()
+  }
+</script>
+<main class="page">
+  <h1>Refetch after a write</h1>
+  {#await list}<p data-r="list">loading</p>{:then l}<p data-r="list">items {l.length}</p>{:catch e}<p data-r="list">error {e.kind}</p>{/await}
+  <button type="button" data-a="add" on:click={add}>add</button> <output data-r="added">{added}</output>
+  <button type="button" data-a="refetch" on:click={reload}>refetch</button> <output data-r="refetched">{refetched || ""}</output>
+</main>
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+</style>

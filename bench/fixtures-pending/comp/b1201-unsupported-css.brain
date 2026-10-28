@@ -1,0 +1,7 @@
+<script>
+  let note = sig('')
+</script>
+<label>Note <textarea bind:value={note}></textarea></label>
+<style>
+  textarea { field-sizing: content; }
+</style>

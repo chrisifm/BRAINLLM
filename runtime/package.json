@@ -1,0 +1,9 @@
+{
+  "name": "@brainllm/runtime",
+  "private": true,
+  "type": "module",
+  "description": "BRAINLLM runtime (SPEC §6): ES modules with no build step and no dependencies.",
+  "scripts": {
+    "test": "node --expose-gc --test \"test/**/*.test.js\""
+  }
+}

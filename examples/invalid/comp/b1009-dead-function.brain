@@ -1,0 +1,6 @@
+<script>
+  let n = sig(0)
+  const inc = () => { n++ }
+  const reset = () => { n = 0 }
+</script>
+<button type="button" on:click={inc}>{n}</button>

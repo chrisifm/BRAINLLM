@@ -1,0 +1,37 @@
+<meta seo title="Pricing" description="Simple monthly or yearly pricing: start free, upgrade when your team grows, cancel at any time. Yearly billing saves 20 percent.">
+
+<script>
+  import PricingTable from '../comp/pricing-table.brain'
+
+  const plans = [
+    { id: 'free', name: 'Free', price: 0, perks: ['1 project', 'Community support', 'Basic reports'] },
+    { id: 'pro', name: 'Pro', price: 29, featured: true, perks: ['Unlimited projects', '5 team members', 'Priority email support', 'Advanced reports'] },
+    { id: 'team', name: 'Team', price: 79, perks: ['Everything in Pro', '25 team members', 'Single sign-on', 'Dedicated onboarding'] },
+  ]
+  const choose = (c) => navigate('/signup?plan=' + c.plan + '&period=' + c.period)
+</script>
+
+<main class="page">
+  <h1>Pricing</h1>
+  <p class="lead">Start free and upgrade when your team grows. Every plan includes unlimited viewers, daily backups and data export at any time. Change or cancel your plan whenever you want: the change applies at the next billing date and nothing is charged twice.</p>
+  <PricingTable plans={plans} discount={0.2} on:choose={choose} />
+  <section class="faq" aria-labelledby="billing-questions">
+    <h2 id="billing-questions">Billing questions</h2>
+    <h3>Can I switch between monthly and yearly billing?</h3>
+    <p>Yes. Switching to yearly billing applies the discount from the next billing date, and switching back keeps the remaining paid months.</p>
+    <h3>What happens when I cancel?</h3>
+    <p>Your plan stays active until the end of the paid period. After that the account moves to the Free plan and your data stays available for export.</p>
+    <p>Questions about larger teams? Read more <a href="/about">about us</a> and get in touch.</p>
+  </section>
+</main>
+
+<style>
+  .page { max-width: 68rem; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-5); }
+  h1 { text-align: center; margin: 0; }
+  .lead { max-width: 60ch; margin: 0 auto; text-align: center; color: var(--muted); }
+  .faq { max-width: 60ch; margin: 0 auto; display: grid; gap: var(--space-2); }
+  .faq h2 { margin: 0; font-size: 1.3rem; }
+  .faq h3 { margin: var(--space-2) 0 0; font-size: 1rem; }
+  .faq p { margin: 0; color: var(--muted); }
+  a { color: var(--accent); }
+</style>

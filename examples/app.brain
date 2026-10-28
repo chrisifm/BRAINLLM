@@ -1,0 +1,26 @@
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.svg">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="top">
+    <nav aria-label="Main">
+      <a href="/">Home</a>
+      <a href="/dashboard">Users</a>
+    </nav>
+  </header>
+  <div id="content">
+    <slot />
+  </div>
+  <footer class="bottom">BRAINLLM · examples</footer>
+</body>
+</html>
+
+<style>
+  .skip { position: absolute; left: -999px; &:focus { left: var(--space-2); } }
+  .top, .bottom { padding: var(--space-2) var(--space-3); color: var(--muted); }
+  nav { display: flex; gap: var(--space-3); }
+</style>

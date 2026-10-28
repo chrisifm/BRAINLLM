@@ -1,0 +1,23 @@
+{
+ "claude-haiku-5-5|spec": {
+  "firstPass": 20,
+  "n": 20,
+  "specSha": "fcbe47d50dc7",
+  "run": "results/claude-haiku-5-5-gate-b0304.json",
+  "at": "2026-10-13T08:15:18.095Z"
+ },
+ "claude-haiku-5-5|mcp": {
+  "firstPass": 16,
+  "n": 20,
+  "specSha": "3fca38d5a226",
+  "run": "results/claude-haiku-5-5-mcp-a.json",
+  "at": "2026-10-13T06:59:57.890Z"
+ },
+ "claude-sonnet-5-5|spec": {
+  "firstPass": 20,
+  "n": 20,
+  "specSha": "b351664c21d8",
+  "run": "results/claude-sonnet-5-5-served.json",
+  "at": "2026-10-13T07:08:27.619Z"
+ }
+}

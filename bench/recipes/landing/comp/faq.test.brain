@@ -1,0 +1,20 @@
+<script>
+  import Faq from './faq.brain'
+
+  const items = [{ id: 'trial', q: 'Is there a free trial?', a: 'Yes, 14 days.' }, { id: 'cancel', q: 'Can I cancel?', a: 'At any time.' }]
+
+  test('answers start closed', async () => {
+    await mount(Faq, { items })
+    expect(count('button[aria-expanded="false"]')).toBe(2)
+    expect(count('.answer[hidden]')).toBe(2)
+  })
+
+  test('a question opens and closes its own answer only', async () => {
+    await mount(Faq, { items })
+    await click('.item:first-child button')
+    expect(attr('.item:first-child button', 'aria-expanded')).toBe('true')
+    expect(count('.answer[hidden]')).toBe(1)
+    await click('.item:first-child button')
+    expect(count('.answer[hidden]')).toBe(2)
+  })
+</script>

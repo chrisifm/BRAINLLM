@@ -1,0 +1,10 @@
+<meta client height="320">
+
+<script>
+  let box = ref()
+  mounted(() => {
+    box.dataset.mounted = 'yes'
+  })
+</script>
+
+<canvas bind:ref={box} aria-label="Probe chart" width="600" height="320"></canvas>

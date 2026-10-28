@@ -1,0 +1,5 @@
+<script>
+  export const LIMIT = 10
+  let used = sig(0)
+</script>
+<p>{used} of {LIMIT}</p>

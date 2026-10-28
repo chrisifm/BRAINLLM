@@ -1,0 +1,4 @@
+<p>{label}</p>
+<script>
+  let label = sig('Ready')
+</script>

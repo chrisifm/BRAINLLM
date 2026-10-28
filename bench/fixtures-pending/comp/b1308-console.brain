@@ -1,0 +1,8 @@
+<script>
+  let n = sig(0)
+  const inc = () => {
+    n++
+    console.log('n', n)
+  }
+</script>
+<button type="button" on:click={inc}>{n}</button>

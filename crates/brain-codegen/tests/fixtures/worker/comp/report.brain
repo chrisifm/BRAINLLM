@@ -1,0 +1,10 @@
+<script>
+import stats from '../lib/stats.worker.jsbrain'
+import { parseCsv } from '../lib/parse.worker.jsbrain'
+let avg = sig(0)
+const run = async (text) => {
+  const rows = await parseCsv(text)
+  avg = await stats.mean(rows.map((r) => Number(r[0])))
+}
+</script>
+<button on:click={run('1\n2\n3')}>Average: {avg}</button>

@@ -1,0 +1,11 @@
+<meta props="n:num=1000">
+<script>
+  import Cell from './cell.brain'
+  const ids = Array.from({ length: n }, (_, i) => i)
+</script>
+<div class="pad">
+  {#each ids as i (i)}<Cell i={i} />{/each}
+</div>
+<style>
+  .pad { display: flex; flex-wrap: wrap; gap: var(--space-1); max-height: 160px; overflow: auto; }
+</style>

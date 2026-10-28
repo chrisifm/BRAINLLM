@@ -1,0 +1,7 @@
+<script>
+  let n = sig(0)
+  fx(() => {
+    n = n + 1
+  })
+</script>
+<p>{n}</p>

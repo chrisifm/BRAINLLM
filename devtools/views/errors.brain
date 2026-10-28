@@ -1,0 +1,47 @@
+<meta seo title="Errors" description="Runtime errors grouped by fingerprint, with the component, the .brain stack and the breadcrumbs before each one.">
+<script>
+  import inspector from '../channels/inspector.jsbrain'
+  let open = sig('')
+  const rows = drv(() => [...inspector.errors].sort((a, b) => (b.at || 0) - (a.at || 0)))
+  const where = (e) => (e.comp ? (e.comp.file || e.comp.name || e.comp.h) : 'outside a component')
+  const toggle = (fp) => { open = open === fp ? '' : fp }
+</script>
+<h1>Errors</h1>
+{#if rows.length}
+  <ul class="list">
+    {#each rows as e (e.fp)}
+      <li class="err">
+        <button type="button" class="head" aria-expanded={open === e.fp} on:click={toggle(e.fp)}>
+          <b class="code">{e.code || 'Error'}</b>
+          <span class="msg">{e.msg}</span>
+          <span class="meta">{where(e)} · {e.where} · ×{e.n || 1}</span>
+        </button>
+        {#if open === e.fp}
+          <div class="body">
+            {#if e.line}<p><b>Line</b> {e.line}</p>{/if}
+            <p><b>Stack</b></p>
+            <pre>{Array.isArray(e.stack) ? e.stack.join('\n') : e.stack || '—'}</pre>
+            <p><b>Breadcrumbs</b> (oldest first)</p>
+            <ol class="crumbs">
+              {#each e.crumbs || [] as c, i (i)}<li><code>{c.k}</code> {c.d}</li>{/each}
+            </ol>
+          </div>
+        {/if}
+      </li>
+    {/each}
+  </ul>
+{:else}
+  <p class="muted">No errors. Each runtime error appears here once per fingerprint, with how many times it happened.</p>
+{/if}
+<style>
+  h1 { margin: 0 0 var(--space-4); font-size: 22px; }
+  .list { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+  .err { border-radius: var(--radius); border: 1px solid var(--glass-edge); background: var(--glass); box-shadow: var(--shadow); }
+  .head { display: grid; grid-template-columns: auto 1fr; gap: var(--space-1) var(--space-3); width: 100%; padding: var(--space-3) var(--space-4); text-align: left; border: 0; background: transparent; cursor: pointer; }
+  .code { color: var(--bad); }
+  .meta { grid-column: 2; font-size: 12px; color: var(--muted); }
+  .body { padding: 0 var(--space-4) var(--space-4); font-size: 14px; }
+  pre { overflow: auto; padding: var(--space-3); border-radius: var(--radius-sm); background: var(--surface); font-size: 12px; }
+  .crumbs { margin: 0; padding-left: var(--space-5); font-size: 13px; }
+  .muted { color: var(--muted); }
+</style>

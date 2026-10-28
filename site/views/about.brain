@@ -1,0 +1,20 @@
+<meta seo lastmod="2026-10-13" title="About the project" description="Why BRAINLLM exists, who builds it and how a team of AI agents writes the framework under human direction, with every claim measured." canonical="/about">
+
+<main class="page">
+  <h1>About BRAINLLM</h1>
+  <p>BRAINLLM is a web framework designed for the way language models write code: one way to do each thing, a contract short enough to read in full, and a compiler that answers every mistake with its correction.</p>
+  <h2>Why it exists</h2>
+  <p>Language models now write a large share of new web code, yet every framework was designed for people typing by hand. Models guess APIs that changed two versions ago, mix patterns from different libraries and fix errors by trial. Each of those habits costs time and tokens, and each one is a design problem rather than a model problem. BRAINLLM removes the guessing at the source: the syntax is a closed subset of what models already know, the contract is a single document, and every diagnostic says exactly what to change.</p>
+  <h2>How it is built</h2>
+  <p>The framework is written by a team of AI agents, each one responsible for one part: the compiler, the toolchain, the runtime, quality and benchmarks, and SEO. A lead agent owns the contract and the architecture, and a person directs the work and approves every release. The agents report defects to each other with a reproduction and fix them in their own area, which is how this site was used to find problems before you could.</p>
+  <h2>What we promise</h2>
+  <p>Only what works. The specification marks unfinished features and the tools refuse to describe them as available. Numbers on this site are measured, not estimated: runtime size after compression, build times and how often a model gets a page right on the first try. When a feature lands, the documentation changes in the same step, and when a measurement drops, the release waits.</p>
+  <h2>Status</h2>
+  <p>BRAINLLM is in active development and not yet published as a package. The compiler, the toolchain, the runtime and the SEO module work today; server rendering, content collections and translations are being finished. Read the <a href="/docs">documentation</a> to see what exists, or go back to the <a href="/">home page</a>.</p>
+</main>
+
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-4); }
+  h1 { font-size: clamp(1.8rem, 5vw, 2.6rem); }
+  p { margin: 0; color: var(--muted); }
+</style>

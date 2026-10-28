@@ -1,0 +1,29 @@
+<meta props="label:str value:str~ options:list placeholder:str? name:str? required:bool=false disabled:bool=false error:str? help:str?">
+<script>
+  // options: ['a', 'b'] or [{ value: 'a', label: 'A' }]
+  const items = drv(() => options.map((o) => (typeof o === 'object' ? o : { value: String(o), label: String(o) })))
+  let sel = ref()
+  // a <select> value only sticks once its options exist: re-apply it after they render
+  fx(() => {
+    const n = items.length
+    if (!sel || !n) return
+    sel.value = value || ''
+  })
+</script>
+<Field label={label} error={error} help={help}>
+  <select bind:ref={sel} name={name} required={required} disabled={disabled} aria-label={label} bind:value={value}>
+    {#if placeholder}<option value="" disabled>{placeholder}</option>{/if}
+    {#each items as o (o.value)}
+      <option value={o.value}>{o.label}</option>
+    {/each}
+  </select>
+</Field>
+<style>
+  select {
+    width: 100%; min-height: 40px; padding: var(--space-2) var(--space-3);
+    font: 15px/1.4 var(--font); color: var(--fg); background: var(--surface);
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+  }
+  select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  select[aria-invalid='true'] { border-color: var(--bad); }
+</style>

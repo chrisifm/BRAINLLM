@@ -1,0 +1,21 @@
+Component Counter level=Comp file=comp/counter.brain
+  prop@1:14 start:num = 0
+  prop@1:26 label:str = 'Clicks'
+  script
+    let n = sig(start)@4:3
+    let dbl = drv(() => (n * 2))@5:3
+    expr@6:3 fx(() => log(n))
+  template
+    <button>@9:1 on:click={(n++)} class:hot={(n > 10)}
+      interp@9:43 {label}
+      text@9:50 ":"
+      interp@9:52 {n}
+      text@9:55 "× 2 ="
+      interp@9:62 {dbl}
+  style@11:8
+    button {
+      padding: var(--space-2);
+      &.hot {
+        color: var(--bad);
+      }
+    }

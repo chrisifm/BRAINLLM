@@ -1,0 +1,36 @@
+<meta seo title="Set up your workspace" description="Three short steps: your account, your plan and a final review before the workspace is created." robots="noindex">
+
+<script>
+  import OnboardingWizard from '../comp/onboarding-wizard.brain'
+
+  server: async function createWorkspace(ctx, d) {
+    if (typeof d.name !== 'string' || !d.name.trim()) throw new Error('A name is required.')
+    if (typeof d.email !== 'string' || !d.email.includes('@')) throw new Error('A valid email is required.')
+    if (!['free', 'pro', 'team'].includes(d.plan)) throw new Error('Unknown plan.')
+    // create the workspace here (database, billing provider)
+    return { ok: true }
+  }
+  let busy = sig(false)
+  let error = sig('')
+  const finish = async (d) => {
+    busy = true
+    error = ''
+    try {
+      await createWorkspace(d)
+      navigate('/account')
+    } catch (e) {
+      error = 'The workspace could not be created. Try again in a moment.'
+    } finally {
+      busy = false
+    }
+  }
+</script>
+
+<main class="page">
+  <h1>Welcome</h1>
+  <OnboardingWizard busy={busy} error={error} on:finish={finish} />
+</main>
+
+<style>
+  .page { max-width: 40rem; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-4); }
+</style>

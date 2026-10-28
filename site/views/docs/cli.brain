@@ -1,0 +1,45 @@
+<meta seo lastmod="2026-10-13" title="CLI and testing" description="Every brain command, the JSON error format with exact edits, the four-step development loop and component tests with mount and click." canonical="/docs/cli">
+
+<main class="doc">
+  <h1>CLI and testing</h1>
+  <p>One binary does everything: <code>brain</code>. Every command accepts <code>--json</code> for machine-readable output and is also available as a <a href="https://modelcontextprotocol.io/">Model Context Protocol</a> tool through <code>brain mcp</code>, so an agent can drive a project end to end.</p>
+  <pre><code raw>brain new my-app      # create an app
+brain run             # dev server with hot reload
+brain add view pricing
+brain fix             # apply every exact edit
+brain check --json    # remaining problems
+brain test
+brain doctor          # everything at once; non-zero on any error
+brain build           # production build into dist/</code></pre>
+  <h2>Main commands</h2>
+  <p><code>brain new</code> creates an app, <code>brain run</code> serves it with hot reload that keeps component state, <code>brain build</code> writes the production build, and <code>brain doctor</code> runs every check at once: the checker, the tests, over-engineering and leak detection. The build minifies, mangles, and removes dead code and <code>log()</code> calls without any flags.</p>
+  <h2>Granular commands</h2>
+  <p><code>brain add</code> generates files, <code>brain check --json</code> lists problems, <code>brain fix</code> applies every exact edit from the checker, <code>brain test</code> runs the tests, <code>brain spec</code> prints the contract, and <code>brain map --json</code> prints the whole project graph: routes, components, props, channels and tests. Read the map instead of opening files one by one.</p>
+  <h2>The error format</h2>
+  <pre><code raw>{"code":"B0401","file":"views/home.brain","line":12,"col":5,
+ "msg":"<img> without alt",
+ "fix":"describe the image in alt; use alt=\"\" only for decorative images",
+ "edits":[]}</code></pre>
+  <p>Every problem has a code, a position, a message and a fix. When the correction is unique, <code>edits</code> holds exact replacements you may apply as they are; judgment calls such as alt text never get automatic edits. The code families are B00 structure, B01 script, B02 markup, B03 CSS, B04 accessibility, B05 SEO and B07 server and secrets.</p>
+  <h2>The loop</h2>
+  <ol class="list">
+    <li>Create a file with <code>brain add</code>.</li>
+    <li>Edit it.</li>
+    <li>Run <code>brain fix</code>, then <code>brain check --json</code>, and apply each remaining fix literally until the list is empty.</li>
+    <li>Finish with <code>brain doctor</code>.</li>
+  </ol>
+  <h2>Tests</h2>
+  <pre><code raw>test('counts clicks', async () => {
+  await mount(Counter, { label: 'Clicks' })
+  await click('button')
+  expect(text('button')).toBe('Clicks: 1')
+})</code></pre>
+  <p>Tests live next to the component in a <code>.test.brain</code> file. <code>mount</code> renders a component with props, <code>click</code> and <code>type</code> interact with it, <code>text</code>, <code>attr</code>, <code>hasClass</code> and <code>count</code> read the result, and <code>expect</code> compares with <code>toBe</code>, <code>toEqual</code> or <code>toBeTruthy</code>. Back to the <a href="/docs">documentation overview</a>.</p>
+</main>
+
+<style>
+  .doc { display: grid; gap: var(--space-3); max-width: 72ch; }
+  .doc p { margin: 0; }
+  .list { display: grid; gap: var(--space-1); padding-left: var(--space-5); }
+  pre { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--space-4); overflow-x: auto; }
+</style>

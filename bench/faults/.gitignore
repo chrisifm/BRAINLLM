@@ -1,0 +1,5 @@
+# Raw per-mode probe data: regenerate with `node bench/faults/run.mjs`.
+results/raw/
+app/dist/
+app/.brain/
+app/logs/

@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1102",
+    "level": "error",
+    "file": "invalid/api/b1102-cache.jsbrain",
+    "line": 1,
+    "col": 61,
+    "msg": "cache duration `soon` is not valid",
+    "fix": "write a number and one unit: `cache: '30s'`, `'10m'` or `'2h'`"
+  }
+]

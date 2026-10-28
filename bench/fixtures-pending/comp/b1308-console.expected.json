@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1308",
+    "level": "info",
+    "file": "comp/b1308-console.brain",
+    "line": 5,
+    "col": 5,
+    "msg": "`console.log` in BrainScript (normalized to `log`)",
+    "fix": "use `log('n', n)`: it is stripped in build"
+  }
+]

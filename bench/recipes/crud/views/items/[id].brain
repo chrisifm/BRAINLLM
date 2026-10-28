@@ -1,0 +1,60 @@
+<meta seo title="Item" description="One item: its details, an edit form and the delete action." robots="noindex">
+
+<script>
+  import item from '../../api/item.jsbrain'
+  import ItemForm from '../../comp/item-form.brain'
+
+  export async function load(ctx) {
+    return { id: ctx.params.id }
+  }
+  let one = resource(() => item.get({ id: props.id }))
+  let editing = sig(false)
+  let removing = sig(false)
+  const update = async (v) => {
+    await item.put({ ...v, id: Number(props.id) })
+    editing = false
+  }
+  const remove = async () => {
+    removing = true
+    try {
+      await item.delete({ id: props.id })
+      navigate('/items')
+    } finally {
+      removing = false
+    }
+  }
+</script>
+
+<main class="page">
+  <p><a href="/items">← All items</a></p>
+  <h1>Item {props.id}</h1>
+  {#await one}
+    <p aria-busy="true">Loading…</p>
+  {:then it}
+    <h2>{it.name}</h2>
+    {#if editing}
+      <ItemForm item={it} save={update} on:cancel={editing = false} />
+    {:else}
+      <dl>
+        <dt>Status</dt><dd>{it.status}</dd>
+        <dt>Price</dt><dd>${Number(it.price).toFixed(2)}</dd>
+      </dl>
+      <div class="actions">
+        <Button on:click={editing = true}>Edit</Button>
+        <Button variant="danger" busy={removing} on:click={remove}>Delete</Button>
+      </div>
+    {/if}
+  {:catch e}
+    <ErrorState error={e} retry={one.refetch} />
+  {/await}
+</main>
+
+<style>
+  .page { max-width: 48rem; margin: 0 auto; padding: var(--space-5) var(--space-4); display: grid; gap: var(--space-3); }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-2) var(--space-4); margin: 0; }
+  dt { color: var(--muted); }
+  dd { margin: 0; }
+  .actions { display: flex; gap: var(--space-2); }
+  h2 { margin: 0; font-size: 1.2rem; }
+  a { color: var(--accent); }
+</style>

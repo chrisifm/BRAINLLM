@@ -1,0 +1,21 @@
+<meta seo title="App-wide HTTP policy" description="The meta http tag in app.brain sets base, timeout, retry and login once for every api() call of the app.">
+<script>
+  import fault from '../api/fault.jsbrain'
+  import describe from '../lib/describe.jsbrain'
+  let res = sig('')
+  const ping = async () => {
+    res = 'running'
+    try {
+      res = describe(await fault.get({ name: 'policy' }), 0)
+    } catch (e) {
+      res = describe(e, 0)
+    }
+  }
+</script>
+<main class="page">
+  <h1>App-wide policy</h1>
+  <button type="button" data-a="ping" on:click={ping}>ping</button> <output data-r="ping">{res}</output>
+</main>
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+</style>

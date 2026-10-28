@@ -1,0 +1,8 @@
+<script>
+  let price = sig(100)
+  let total = sig(0)
+  fx(() => {
+    total = price * 1.16
+  })
+</script>
+<p>{total}</p>

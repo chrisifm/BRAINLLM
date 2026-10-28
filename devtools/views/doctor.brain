@@ -1,0 +1,51 @@
+<meta seo title="Doctor" description="Loops and over-engineering: static findings of the whole project and the runtime cut-offs.">
+<script>
+  import inspector from '../channels/inspector.jsbrain'
+  // static: B09xx loops (cycles, recursion, unbounded growth, timers) and B10xx over-engineering (pass-through drv,
+  // write-only fx, unused props, dead code), from the dev server's `brain check --json`
+  const src = (globalThis.location && new URLSearchParams(location.search).get('src')) || ''
+  const problems = api(src + '/@brain/problems', { get: {} })
+  const data = resource(problems.get, { every: '3s' })
+  const of = (list, fam) => list.filter((p) => String(p.code).startsWith(fam))
+  // runtime: effects cut after 100 re-runs in a flush (B0902) and components stopped by their budget (B0908)
+  const cut = drv(() => inspector.errors.filter((e) => e.code === 'B0902' || e.code === 'B0908' || /^B09(02|08)/.test(e.msg || '')))
+</script>
+<h1>Doctor</h1>
+<section class="card" aria-label="Loops at runtime">
+  <h2>Stopped at runtime <span class="n">{cut.length}</span></h2>
+  {#each cut as e (e.fp)}
+    <p class="row"><code>{e.code}</code> {e.comp ? e.comp.file || e.comp.name : ''} — {e.msg} <small>×{e.n || 1}</small></p>
+  {:empty}
+    <p class="muted">No effect loop or runaway component this session.</p>
+  {/each}
+</section>
+{#await data}
+  <p class="muted">Checking the project…</p>
+{:then list}
+  <section class="card" aria-label="Loops">
+    <h2>Loops · B09xx <span class="n">{of(list, 'B09').length}</span></h2>
+    {#each of(list, 'B09') as p, i (i)}
+      <p class="row"><code>{p.code}</code> {p.file}:{p.line} — {p.msg}<br><small>fix: {p.fix}</small></p>
+    {:empty}
+      <p class="muted">No loop found by the checker.</p>
+    {/each}
+  </section>
+  <section class="card" aria-label="Over-engineering">
+    <h2>Over-engineering · B10xx <span class="n">{of(list, 'B10').length}</span></h2>
+    {#each of(list, 'B10') as p, i (i)}
+      <p class="row"><code>{p.code}</code> {p.file}:{p.line} — {p.msg}<br><small>fix: {p.fix}</small></p>
+    {:empty}
+      <p class="muted">Nothing over-engineered: no pass-through drv, write-only fx, unused props or dead code.</p>
+    {/each}
+  </section>
+{:catch e}
+  <ErrorState error={e} retry={data.refetch} />
+{/await}
+<style>
+  h1 { margin: 0 0 var(--space-4); font-size: 22px; }
+  h2 { margin: 0 0 var(--space-2); font-size: 15px; }
+  .card { margin-bottom: var(--space-4); padding: var(--space-4); border-radius: var(--radius); border: 1px solid var(--glass-edge); background: var(--glass); box-shadow: var(--shadow); }
+  .row { margin: var(--space-2) 0; font-size: 14px; }
+  .n { font-size: 12px; color: var(--muted); font-weight: 400; }
+  small, .muted { color: var(--muted); }
+</style>

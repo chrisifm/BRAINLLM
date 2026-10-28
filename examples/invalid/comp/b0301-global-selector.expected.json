@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0301",
+    "level": "error",
+    "file": "invalid/comp/b0301-global-selector.brain",
+    "line": 4,
+    "col": 3,
+    "msg": "global selector `body` in a component <style>",
+    "fix": "move the global style to the `reset` layer or use a component class"
+  }
+]

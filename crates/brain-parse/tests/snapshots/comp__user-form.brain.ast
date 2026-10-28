@@ -1,0 +1,34 @@
+Component UserForm level=Comp file=comp/user-form.brain
+  prop@1:14 user:obj?
+  prop@1:24 busy:bool = false
+  meta@1:41 emits=Some("save:obj cancel")
+  script
+    let name = sig((user ? user.name : ''))@4:3
+    let email = sig((user ? user.email : ''))@5:3
+    let active = sig((user ? user.active : true))@6:3
+    let valid = drv(() => ((name.trim() !== '') && email.includes('@')))@8:3
+    const save = () => { 2 stmts }@10:3
+      fn@10:16
+        if@11:5 ((!valid) || busy)
+          return@11:25 
+        expr@12:5 emit('save', { id: (user ? user.id : null), name: name.trim(), email: email.trim(), active })
+  template
+    <form>@16:1 on:submit={save}
+      <label>@17:3
+        text@17:10 "Name"
+        <input>@17:15 bind:value={name}
+      <label>@18:3
+        text@18:10 "Email"
+        <input>@18:16 type="email" bind:value={email}
+      <label>@19:3
+        <input>@19:10 type="checkbox" bind:checked={active}
+        text@19:57 "Active"
+      <button>@20:3 disabled={((!valid) || busy)}
+        interp@20:37 {(busy ? 'Saving…' : 'Save')}
+      <button>@21:3 type="button" on:click={emit('cancel')}
+        text@21:51 "Cancel"
+  style@24:8
+    form {
+      display: grid;
+      gap: var(--space-2);
+    }

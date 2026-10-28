@@ -1,0 +1,8 @@
+<meta seo title="Online signal" description="online() is a signal that follows the browser's connection state and its online and offline events.">
+<main class="page">
+  <h1>Online signal</h1>
+  <output data-r="online">{online() ? 'online' : 'offline'}</output>
+</main>
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); }
+</style>

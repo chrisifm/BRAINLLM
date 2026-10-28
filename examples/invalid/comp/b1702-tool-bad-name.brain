@@ -1,0 +1,5 @@
+<meta tools="addTask: Add a task (text:str!)">
+<script>
+  const addTask = ({ text }) => text
+</script>
+<p>Tasks</p>

@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0407",
+    "level": "error",
+    "file": "invalid/comp/b0407-tabindex.brain",
+    "line": 1,
+    "col": 18,
+    "msg": "`tabindex` greater than 0 breaks the focus order",
+    "fix": "use `tabindex=\"0\"` or remove it"
+  }
+]

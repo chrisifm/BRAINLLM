@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0305",
+    "level": "warning",
+    "file": "invalid/comp/b0305-spacing-literal.brain",
+    "line": 3,
+    "col": 11,
+    "msg": "literal spacing `13px` in `padding`: spacing comes from tokens",
+    "fix": "use a spacing token (`var(--space-N)`) declared in tokens.cssbrain"
+  }
+]

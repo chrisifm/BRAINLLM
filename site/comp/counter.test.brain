@@ -1,0 +1,15 @@
+<script>
+  import Counter from './counter.brain'
+
+  test('shows the start value and its double', async () => {
+    await mount(Counter, { start: 2, label: 'Clicks' })
+    expect(text('button')).toBe('Clicks: 2 × 2 = 4')
+  })
+
+  test('counts each click', async () => {
+    await mount(Counter, {})
+    await click('button')
+    await click('button')
+    expect(text('button')).toBe('Clicks: 2 × 2 = 4')
+  })
+</script>

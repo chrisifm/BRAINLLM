@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0901",
+    "level": "error",
+    "file": "invalid/comp/b0901-fx-self-cycle.brain",
+    "line": 3,
+    "col": 3,
+    "msg": "`fx` writes `n`, which it also reads: direct cycle",
+    "fix": "if it counts runs read with `untrack(() => n)`; if `n` derives from something else, make it a `drv`"
+  }
+]

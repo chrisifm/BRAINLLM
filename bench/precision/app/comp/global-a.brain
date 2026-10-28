@@ -1,0 +1,5 @@
+<meta props="i:num">
+<script>
+  import shop from '../channels/shop.jsbrain'
+</script>
+<span class="ga" data-k={'ga-' + i}>{shop.a}</span>

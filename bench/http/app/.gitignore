@@ -1,0 +1,4 @@
+dist/
+.brain/
+.brain_env
+.DS_Store

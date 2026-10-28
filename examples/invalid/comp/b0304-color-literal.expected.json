@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0304",
+    "level": "error",
+    "file": "invalid/comp/b0304-color-literal.brain",
+    "line": 3,
+    "col": 11,
+    "msg": "literal color `red` in `color`: colors come from tokens",
+    "fix": "use a color token instead of a literal: `var(--fg)`"
+  }
+]

@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0125",
+    "level": "info",
+    "file": "invalid/comp/b0125-block-order.brain",
+    "line": 2,
+    "col": 1,
+    "msg": "`<script>` after the markup: blocks go in the order `<meta>`, `<script>`, markup, `<style>` (reordered)",
+    "fix": "move `<script>` before the markup"
+  }
+]

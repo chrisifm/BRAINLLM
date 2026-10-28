@@ -1,0 +1,1 @@
+export const parseCsv = (text) => text.split('\n').map((l) => l.split(','))

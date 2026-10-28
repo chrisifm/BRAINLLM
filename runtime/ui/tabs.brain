@@ -1,0 +1,33 @@
+<meta props="tabs:list value:str~ label:str">
+<script>
+  // tabs: [{ id: 'a', label: 'Overview' }] · the parent renders the panel of `value` in the slot
+  let list = ref()
+  const current = drv(() => tabs.find((t) => t.id === value) || tabs[0])
+  const keys = (e) => {
+    const i = tabs.findIndex((t) => t.id === value)
+    let j = -1
+    if (e.key === 'ArrowRight') j = (i + 1) % tabs.length
+    else if (e.key === 'ArrowLeft') j = (i - 1 + tabs.length) % tabs.length
+    else if (e.key === 'Home') j = 0
+    else if (e.key === 'End') j = tabs.length - 1
+    if (j < 0) return
+    e.preventDefault()
+    value = tabs[j].id
+    list.querySelectorAll('[role=tab]')[j].focus()
+  }
+</script>
+<div class="tabs">
+  <div class="list" role="tablist" aria-label={label} bind:ref={list} on:keydown={keys}>
+    {#each tabs as t (t.id)}
+      <button type="button" role="tab" aria-selected={t.id === value ? 'true' : 'false'} tabindex={t.id === value ? 0 : -1} on:click={value = t.id}>{t.label}</button>
+    {/each}
+  </div>
+  <div class="panel" role="tabpanel" aria-label={current ? current.label : label} tabindex="0"><slot /></div>
+</div>
+<style>
+  .list { display: flex; gap: var(--space-1); padding: var(--space-1); border-radius: var(--radius); background: var(--glass); border: 1px solid var(--glass-edge); width: fit-content; }
+  [role=tab] { font: 600 14px/1.2 var(--font); padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-sm); color: var(--muted); background: transparent; cursor: pointer; }
+  [role=tab][aria-selected='true'] { color: var(--fg); background: var(--surface); box-shadow: var(--shadow); }
+  [role=tab]:focus-visible, .panel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .panel { padding: var(--space-4) 0; }
+</style>

@@ -1,0 +1,15 @@
+<meta props="title:str text:str href:str label:str">
+
+<section class="cta" aria-labelledby="cta-title">
+  <h2 id="cta-title">{title}</h2>
+  <p>{text}</p>
+  <a href={href}>{label}</a>
+</section>
+
+<style>
+  .cta { display: grid; justify-items: center; gap: var(--space-3); text-align: center; padding: var(--space-6) var(--space-4); background: var(--glass); border: 1px solid var(--glass-edge); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+  h2 { margin: 0; font-size: 1.6rem; }
+  p { margin: 0; color: var(--muted); max-width: 50ch; }
+  a { padding: var(--space-3) var(--space-5); border-radius: var(--radius); text-decoration: none; font-weight: 600; color: var(--on-accent); background: var(--accent); }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>

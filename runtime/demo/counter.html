@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Counter · runtime BRAINLLM</title>
+<style>body{font:16px system-ui;margin:2rem}button.hot{background:#ffd5d5}li{margin:.2rem 0}</style>
+<div id="app"></div>
+<script type="module">
+// Hand-written exactly as the codegen would emit it (SPEC §6).
+import { sig, drv, tpl, insert, cls, on, list, when, mount } from '../brain.js'
+const T = tpl('<section><button id="inc"><!>: <!> × 2 = <!></button> <button id="rev">reverse</button><!><ul><!></ul></section>')
+const Li = tpl('<li></li>')
+function Counter($p) {
+  const n = sig($p.start ?? 0)
+  const dbl = drv(() => n.v * 2)
+  const items = sig([])
+  const r = T(), inc = r.firstChild, rev = inc.nextSibling.nextSibling, a3 = rev.nextSibling, ul = a3.nextSibling
+  const a0 = inc.firstChild, a1 = a0.nextSibling.nextSibling, a2 = a1.nextSibling.nextSibling
+  on(inc, 'click', () => { n.v++; items.v = [...items.v, { id: n.v, t: 'item ' + n.v }] })
+  on(rev, 'click', () => { items.v = items.v.slice().reverse() })
+  cls(inc, 'hot', () => n.v > 3)
+  insert(inc, () => $p.label ?? 'Clicks', a0)
+  insert(inc, () => n.v, a1)
+  insert(inc, () => dbl.v, a2)
+  when(r, () => n.v > 3, () => ' 🔥 hot', null, a3)
+  list(ul, () => items.v, it => it.id, it => { const li = Li(); insert(li, () => it.v.t); return li }, ul.firstChild, () => 'no items')
+  return r
+}
+window.stop = mount(Counter, document.getElementById('app'), { start: 0 })
+</script>

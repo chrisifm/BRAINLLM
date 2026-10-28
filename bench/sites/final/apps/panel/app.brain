@@ -1,0 +1,13 @@
+<meta seo titleTemplate="%s · Nubo Admin" og:image="/og.png">
+
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <title>Nubo Admin</title>
+</head>
+<body>
+  <slot />
+</body>
+</html>

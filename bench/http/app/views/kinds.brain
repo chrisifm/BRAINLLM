@@ -1,0 +1,73 @@
+<meta seo title="Error kinds, retries and cancel" description="Each button runs one api() call against a scripted endpoint and prints the typed result: kind, status, request id, retries and cancellation.">
+<script>
+  import fault from '../api/fault.jsbrain'
+  import typed from '../api/typed.jsbrain'
+  import describe from '../lib/describe.jsbrain'
+
+  let res = sig({})
+  const set = (id, v) => (res = { ...res, [id]: v })
+  // every action: one call, its outcome as one JSON line in <output data-r={id}>
+  const acts = [
+    { id: 'get404', run: () => fault.get({ name: 'k404' }) },
+    { id: 'get403', run: () => fault.get({ name: 'k403' }) },
+    { id: 'post422', run: () => fault.post({ name: 'k422', email: 'x' }) },
+    { id: 'get429long', run: () => fault.get({ name: 'k429long' }) },
+    { id: 'get503long', run: () => fault.get({ name: 'k503long' }) },
+    { id: 'schema', run: () => typed.get() },
+    { id: 'postReset', run: () => fault.post({ name: 'reset' }) },
+    { id: 'getReset', run: () => fault.get({ name: 'reset3' }) },
+    { id: 'timeout', run: () => fault.post({ name: 'slow' }) },
+    { id: 'getRetry', run: () => fault.get({ name: 'flaky' }) },
+    { id: 'putRetry', run: () => fault.put({ name: 'flaky-put' }) },
+    { id: 'deleteRetry', run: () => fault.delete({ name: 'flaky-delete' }) },
+    { id: 'post503', run: () => fault.post({ name: 'k503' }) },
+    { id: 'patch502', run: () => fault.patch({ name: 'k502' }) },
+    { id: 'ra429', run: () => fault.get({ name: 'ra429' }) },
+    { id: 'ra503', run: () => fault.get({ name: 'ra503' }) },
+  ]
+  const call = async (a) => {
+    const t0 = Date.now()
+    set(a.id, 'running')
+    try {
+      set(a.id, describe(await a.run(), Date.now() - t0))
+    } catch (e) {
+      set(a.id, describe(e, Date.now() - t0))
+    }
+  }
+  // .cancel() rejects with kind 'aborted' so the author's finally runs (#228); framework surfaces stay silent
+  const cancel = async () => {
+    set('cancel', 'pending')
+    const p = fault.get({ name: 'hang' })
+    setTimeout(() => p.cancel(), 300)
+    try {
+      await p
+      set('cancel', 'then')
+    } catch (e) {
+      set('cancel', 'caught ' + e.kind)
+    } finally {
+      set('cancelFinally', 'yes')
+    }
+  }
+  // the author does not catch: an aborted request must not become a toast or a reported error
+  const cancelUncaught = async () => {
+    set('cancelUncaught', 'pending')
+    const p = fault.get({ name: 'hang2' })
+    setTimeout(() => p.cancel(), 300)
+    await p
+    set('cancelUncaught', 'then')
+  }
+</script>
+<main class="page">
+  <h1>Error kinds, retries and cancel</h1>
+  <ul>
+    {#each acts as a (a.id)}
+      <li><button type="button" data-a={a.id} on:click={call(a)}>{a.id}</button> <output data-r={a.id}>{res[a.id] || ''}</output></li>
+    {/each}
+    <li><button type="button" data-a="cancel" on:click={cancel}>cancel</button> <output data-r="cancel">{res.cancel || ''}</output> <output data-r="cancelFinally">{res.cancelFinally || ''}</output></li>
+    <li><button type="button" data-a="cancelUncaught" on:click={cancelUncaught}>cancelUncaught</button> <output data-r="cancelUncaught">{res.cancelUncaught || ''}</output></li>
+  </ul>
+</main>
+<style>
+  .page { max-width: 90ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+  output { font-size: 12px; color: var(--muted); }
+</style>

@@ -1,0 +1,14 @@
+<script>
+  import toast from '../channels/toast.jsbrain'
+  const SHOW_MS = 2500
+  let msg = sig('')
+  fx(() => {
+    const off = toast.on((m) => {
+      msg = m
+      const id = setTimeout(() => { msg = '' }, SHOW_MS)
+      return () => clearTimeout(id)
+    })
+    return off
+  })
+</script>
+{#if msg}<p role="status">{msg}</p>{/if}

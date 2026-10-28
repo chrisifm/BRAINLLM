@@ -1,0 +1,2556 @@
+{
+  "date": "2026-10-13T21:40:34.801Z",
+  "playwright": "1.64.0",
+  "browsers": {
+    "webkit": "27.2",
+    "firefox": "157.0",
+    "chromium": "156.0.8078.4"
+  },
+  "brain": {
+    "path": "~/tmp/qa286/bin/brain",
+    "sha256_12": "e9453256ff44"
+  },
+  "node": "v26.8.1",
+  "builds": {
+    "tasks": {
+      "ok": true,
+      "ms": 127,
+      "binary": "current",
+      "jsContentType": "text/javascript; charset=utf-8"
+    },
+    "landing": {
+      "ok": true,
+      "ms": 105,
+      "binary": "current",
+      "jsContentType": "text/javascript; charset=utf-8"
+    },
+    "my-project": {
+      "ok": true,
+      "ms": 98,
+      "binary": "current",
+      "jsContentType": "text/javascript; charset=utf-8"
+    },
+    "biglist": {
+      "ok": true,
+      "ms": 253,
+      "binary": "current",
+      "jsContentType": "text/javascript; charset=utf-8"
+    }
+  },
+  "cells": [
+    {
+      "app": "tasks",
+      "mode": "dev",
+      "browser": "webkit",
+      "routes": [
+        {
+          "path": "/about",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        },
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "empty state",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "add 3 tasks (type + submit)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "empty submit is ignored",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "toggle checkbox → done + count",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "filters Done / Open / All (keyed re-insert in the middle)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "remove first row",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "counter click + derived + class:hot",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on the counter",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: text typed before the island resumes is kept",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [
+        "dev server log: impact {\"seq\":1,\"file\":\"comp/counter.brain\",\"errors\":0,\"new\":[],\"fixed\":[],\"bytes\":[{\"view\":\"views/home.brain\",\"route\":\"/\",\"before\":15686,\"after\":15694,\"delta\":8}],\"seo\":[],\"ms\":42} | impact {\"seq\":2,\"file\":\"comp/counter.brain\",\"errors\":0,\"new\":[],\"fixed\":[],\"bytes\":[{\"view\":\"views/home.brain\",\"route\":\"/\",\"before\":15694,\"after\":15690,\"delta\":-4}],\"seo\":[],\"ms\":126} | impact {\"seq\":3,\"file\":\"comp/counter.brain\",\"errors\":0,\"new\":[],\"fixed\":[],\"bytes\":[{\"view\":\"views/home.brain\",\"route\":\"/\",\"before\":15690,\"after\":15686,\"delta\":-4}],\"seo\":[],\"ms\":42}"
+      ],
+      "nav": {
+        "ok": true,
+        "steps": [
+          {
+            "name": "link /about → / (view link)",
+            "ok": true,
+            "why": "h1, URL or document identity wrong"
+          },
+          {
+            "name": "view is interactive after client nav (add task)",
+            "ok": true,
+            "why": "adding a task after navigation did nothing"
+          },
+          {
+            "name": "link / → /about (injected link)",
+            "ok": true,
+            "why": "h1 or document identity wrong"
+          },
+          {
+            "name": "back → /",
+            "ok": true,
+            "why": "h1 \"My tasks\", url http://127.0.0.1:5342/"
+          },
+          {
+            "name": "list and \"N left\" agree after back",
+            "ok": true,
+            "why": "rows [\"Delta\"] vs left 1"
+          },
+          {
+            "name": "forward → /about",
+            "ok": true,
+            "why": "h1 or document identity wrong"
+          }
+        ],
+        "router": "History API (pushState)",
+        "viewTransitions": "available, not used",
+        "storeAfterBack": {
+          "rows": [
+            "Delta"
+          ],
+          "left": 1,
+          "consistent": true
+        },
+        "counters": {
+          "push": 2,
+          "nav": 4,
+          "vt": 0,
+          "vtDone": 0,
+          "vtSkipped": [],
+          "hasNav": true,
+          "hasVT": true
+        }
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": false,
+        "schedulerYield": false,
+        "schedulerPostTask": false
+      },
+      "hmr": {
+        "ok": true,
+        "style": {
+          "ok": true,
+          "applied": true,
+          "noReload": true,
+          "events": [
+            "css"
+          ]
+        },
+        "script": {
+          "ok": true,
+          "applied": true,
+          "noReload": true,
+          "expected": "3 × 2 = 9",
+          "got": "Focus sessions: 3 × 2 = 9",
+          "events": [
+            "js"
+          ]
+        },
+        "restore": {
+          "ok": true,
+          "kind": "style + script in one save",
+          "textOk": true,
+          "styleOk": true,
+          "got": {
+            "text": "Focus sessions: 3 × 2 = 6",
+            "letterSpacing": "normal"
+          },
+          "noReload": true,
+          "events": [
+            "js",
+            "css"
+          ]
+        }
+      },
+      "list": null,
+      "browserVersion": "27.2",
+      "ms": 7606,
+      "routesSkipped": []
+    },
+    {
+      "app": "tasks",
+      "mode": "dev",
+      "browser": "firefox",
+      "routes": [
+        {
+          "path": "/about",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        },
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "empty state",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "add 3 tasks (type + submit)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "empty submit is ignored",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "toggle checkbox → done + count",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "filters Done / Open / All (keyed re-insert in the middle)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "remove first row",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "counter click + derived + class:hot",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on the counter",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: text typed before the island resumes is kept",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [
+        "dev server log: impact {\"seq\":1,\"file\":\"comp/counter.brain\",\"errors\":0,\"new\":[],\"fixed\":[],\"bytes\":[{\"view\":\"views/home.brain\",\"route\":\"/\",\"before\":15686,\"after\":15694,\"delta\":8}],\"seo\":[],\"ms\":42} | impact {\"seq\":2,\"file\":\"comp/counter.brain\",\"errors\":0,\"new\":[],\"fixed\":[],\"bytes\":[{\"view\":\"views/home.brain\",\"route\":\"/\",\"before\":15694,\"after\":15690,\"delta\":-4}],\"seo\":[],\"ms\":126} | impact {\"seq\":3,\"file\":\"comp/counter.brain\",\"errors\":0,\"new\":[],\"fixed\":[],\"bytes\":[{\"view\":\"views/home.brain\",\"route\":\"/\",\"before\":15690,\"after\":15686,\"delta\":-4}],\"seo\":[],\"ms\":42}"
+      ],
+      "nav": {
+        "ok": true,
+        "steps": [
+          {
+            "name": "link /about → / (view link)",
+            "ok": true,
+            "why": "h1, URL or document identity wrong"
+          },
+          {
+            "name": "view is interactive after client nav (add task)",
+            "ok": true,
+            "why": "adding a task after navigation did nothing"
+          },
+          {
+            "name": "link / → /about (injected link)",
+            "ok": true,
+            "why": "h1 or document identity wrong"
+          },
+          {
+            "name": "back → /",
+            "ok": true,
+            "why": "h1 \"My tasks\", url http://127.0.0.1:5342/"
+          },
+          {
+            "name": "list and \"N left\" agree after back",
+            "ok": true,
+            "why": "rows [\"Delta\"] vs left 1"
+          },
+          {
+            "name": "forward → /about",
+            "ok": true,
+            "why": "h1 or document identity wrong"
+          }
+        ],
+        "router": "History API (pushState)",
+        "viewTransitions": "available, not used",
+        "storeAfterBack": {
+          "rows": [
+            "Delta"
+          ],
+          "left": 1,
+          "consistent": true
+        },
+        "counters": {
+          "push": 2,
+          "nav": 4,
+          "vt": 0,
+          "vtDone": 0,
+          "vtSkipped": [],
+          "hasNav": true,
+          "hasVT": true
+        }
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": true,
+        "schedulerYield": true,
+        "schedulerPostTask": true
+      },
+      "hmr": {
+        "ok": true,
+        "style": {
+          "ok": true,
+          "applied": true,
+          "noReload": true,
+          "events": [
+            "css"
+          ]
+        },
+        "script": {
+          "ok": true,
+          "applied": true,
+          "noReload": true,
+          "expected": "3 × 2 = 9",
+          "got": "Focus sessions: 3 × 2 = 9",
+          "events": [
+            "js"
+          ]
+        },
+        "restore": {
+          "ok": true,
+          "kind": "style + script in one save",
+          "textOk": true,
+          "styleOk": true,
+          "got": {
+            "text": "Focus sessions: 3 × 2 = 6",
+            "letterSpacing": "normal"
+          },
+          "noReload": true,
+          "events": [
+            "css",
+            "js"
+          ]
+        }
+      },
+      "list": null,
+      "browserVersion": "157.0",
+      "ms": 8120,
+      "routesSkipped": []
+    },
+    {
+      "app": "tasks",
+      "mode": "dev",
+      "browser": "chromium",
+      "routes": [
+        {
+          "path": "/about",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        },
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "empty state",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "add 3 tasks (type + submit)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "empty submit is ignored",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "toggle checkbox → done + count",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "filters Done / Open / All (keyed re-insert in the middle)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "remove first row",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "counter click + derived + class:hot",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on the counter",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: text typed before the island resumes is kept",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [
+        "dev server log: impact {\"seq\":1,\"file\":\"comp/counter.brain\",\"errors\":0,\"new\":[],\"fixed\":[],\"bytes\":[{\"view\":\"views/home.brain\",\"route\":\"/\",\"before\":15686,\"after\":15694,\"delta\":8}],\"seo\":[],\"ms\":42} | impact {\"seq\":2,\"file\":\"comp/counter.brain\",\"errors\":0,\"new\":[],\"fixed\":[],\"bytes\":[{\"view\":\"views/home.brain\",\"route\":\"/\",\"before\":15694,\"after\":15690,\"delta\":-4}],\"seo\":[],\"ms\":126} | impact {\"seq\":3,\"file\":\"comp/counter.brain\",\"errors\":0,\"new\":[],\"fixed\":[],\"bytes\":[{\"view\":\"views/home.brain\",\"route\":\"/\",\"before\":15690,\"after\":15686,\"delta\":-4}],\"seo\":[],\"ms\":42}"
+      ],
+      "nav": {
+        "ok": true,
+        "steps": [
+          {
+            "name": "link /about → / (view link)",
+            "ok": true,
+            "why": "h1, URL or document identity wrong"
+          },
+          {
+            "name": "view is interactive after client nav (add task)",
+            "ok": true,
+            "why": "adding a task after navigation did nothing"
+          },
+          {
+            "name": "link / → /about (injected link)",
+            "ok": true,
+            "why": "h1 or document identity wrong"
+          },
+          {
+            "name": "back → /",
+            "ok": true,
+            "why": "h1 \"My tasks\", url http://127.0.0.1:5342/"
+          },
+          {
+            "name": "list and \"N left\" agree after back",
+            "ok": true,
+            "why": "rows [\"Delta\"] vs left 1"
+          },
+          {
+            "name": "forward → /about",
+            "ok": true,
+            "why": "h1 or document identity wrong"
+          }
+        ],
+        "router": "History API (pushState)",
+        "viewTransitions": "available, not used",
+        "storeAfterBack": {
+          "rows": [
+            "Delta"
+          ],
+          "left": 1,
+          "consistent": true
+        },
+        "counters": {
+          "push": 2,
+          "nav": 4,
+          "vt": 0,
+          "vtDone": 0,
+          "vtSkipped": [],
+          "hasNav": true,
+          "hasVT": true
+        }
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": true,
+        "schedulerYield": true,
+        "schedulerPostTask": true
+      },
+      "hmr": {
+        "ok": true,
+        "style": {
+          "ok": true,
+          "applied": true,
+          "noReload": true,
+          "events": [
+            "css"
+          ]
+        },
+        "script": {
+          "ok": true,
+          "applied": true,
+          "noReload": true,
+          "expected": "3 × 2 = 9",
+          "got": "Focus sessions: 3 × 2 = 9",
+          "events": [
+            "js"
+          ]
+        },
+        "restore": {
+          "ok": true,
+          "kind": "style + script in one save",
+          "textOk": true,
+          "styleOk": true,
+          "got": {
+            "text": "Focus sessions: 3 × 2 = 6",
+            "letterSpacing": "normal"
+          },
+          "noReload": true,
+          "events": [
+            "css",
+            "js"
+          ]
+        }
+      },
+      "list": null,
+      "browserVersion": "156.0.8078.4",
+      "ms": 6897,
+      "routesSkipped": []
+    },
+    {
+      "app": "tasks",
+      "mode": "build",
+      "browser": "webkit",
+      "routes": [
+        {
+          "path": "/about",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        },
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "empty state",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "add 3 tasks (type + submit)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "empty submit is ignored",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "toggle checkbox → done + count",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "filters Done / Open / All (keyed re-insert in the middle)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "remove first row",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "counter click + derived + class:hot",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on the counter",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: text typed before the island resumes is kept",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [],
+      "nav": {
+        "ok": true,
+        "steps": [
+          {
+            "name": "link /about → / (view link)",
+            "ok": true,
+            "why": "h1, URL or document identity wrong"
+          },
+          {
+            "name": "view is interactive after client nav (add task)",
+            "ok": true,
+            "why": "adding a task after navigation did nothing"
+          },
+          {
+            "name": "link / → /about (injected link)",
+            "ok": true,
+            "why": "h1 or document identity wrong"
+          },
+          {
+            "name": "back → /",
+            "ok": true,
+            "why": "h1 \"My tasks\", url http://127.0.0.1:5344/"
+          },
+          {
+            "name": "list and \"N left\" agree after back",
+            "ok": true,
+            "why": "rows [\"Delta\"] vs left 1"
+          },
+          {
+            "name": "forward → /about",
+            "ok": true,
+            "why": "h1 or document identity wrong"
+          }
+        ],
+        "router": "Navigation API",
+        "viewTransitions": "4 started, 4 finished, 0 skipped",
+        "storeAfterBack": {
+          "rows": [
+            "Delta"
+          ],
+          "left": 1,
+          "consistent": true
+        },
+        "counters": {
+          "push": 0,
+          "nav": 4,
+          "vt": 4,
+          "vtDone": 4,
+          "vtSkipped": [],
+          "hasNav": true,
+          "hasVT": true
+        }
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": false,
+        "schedulerYield": false,
+        "schedulerPostTask": false
+      },
+      "hmr": null,
+      "list": null,
+      "browserVersion": "27.2",
+      "ms": 5972,
+      "routesSkipped": []
+    },
+    {
+      "app": "tasks",
+      "mode": "build",
+      "browser": "firefox",
+      "routes": [
+        {
+          "path": "/about",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        },
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "empty state",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "add 3 tasks (type + submit)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "empty submit is ignored",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "toggle checkbox → done + count",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "filters Done / Open / All (keyed re-insert in the middle)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "remove first row",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "counter click + derived + class:hot",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on the counter",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: text typed before the island resumes is kept",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [],
+      "nav": {
+        "ok": true,
+        "steps": [
+          {
+            "name": "link /about → / (view link)",
+            "ok": true,
+            "why": "h1, URL or document identity wrong"
+          },
+          {
+            "name": "view is interactive after client nav (add task)",
+            "ok": true,
+            "why": "adding a task after navigation did nothing"
+          },
+          {
+            "name": "link / → /about (injected link)",
+            "ok": true,
+            "why": "h1 or document identity wrong"
+          },
+          {
+            "name": "back → /",
+            "ok": true,
+            "why": "h1 \"My tasks\", url http://127.0.0.1:5344/"
+          },
+          {
+            "name": "list and \"N left\" agree after back",
+            "ok": true,
+            "why": "rows [\"Delta\"] vs left 1"
+          },
+          {
+            "name": "forward → /about",
+            "ok": true,
+            "why": "h1 or document identity wrong"
+          }
+        ],
+        "router": "Navigation API",
+        "viewTransitions": "4 started, 4 finished, 0 skipped",
+        "storeAfterBack": {
+          "rows": [
+            "Delta"
+          ],
+          "left": 1,
+          "consistent": true
+        },
+        "counters": {
+          "push": 0,
+          "nav": 4,
+          "vt": 4,
+          "vtDone": 4,
+          "vtSkipped": [],
+          "hasNav": true,
+          "hasVT": true
+        }
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": true,
+        "schedulerYield": true,
+        "schedulerPostTask": true
+      },
+      "hmr": null,
+      "list": null,
+      "browserVersion": "157.0",
+      "ms": 7149,
+      "routesSkipped": []
+    },
+    {
+      "app": "tasks",
+      "mode": "build",
+      "browser": "chromium",
+      "routes": [
+        {
+          "path": "/about",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        },
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "empty state",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "add 3 tasks (type + submit)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "empty submit is ignored",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "toggle checkbox → done + count",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "filters Done / Open / All (keyed re-insert in the middle)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "remove first row",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "counter click + derived + class:hot",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on the counter",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: text typed before the island resumes is kept",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [],
+      "nav": {
+        "ok": true,
+        "steps": [
+          {
+            "name": "link /about → / (view link)",
+            "ok": true,
+            "why": "h1, URL or document identity wrong"
+          },
+          {
+            "name": "view is interactive after client nav (add task)",
+            "ok": true,
+            "why": "adding a task after navigation did nothing"
+          },
+          {
+            "name": "link / → /about (injected link)",
+            "ok": true,
+            "why": "h1 or document identity wrong"
+          },
+          {
+            "name": "back → /",
+            "ok": true,
+            "why": "h1 \"My tasks\", url http://127.0.0.1:5344/"
+          },
+          {
+            "name": "list and \"N left\" agree after back",
+            "ok": true,
+            "why": "rows [\"Delta\"] vs left 1"
+          },
+          {
+            "name": "forward → /about",
+            "ok": true,
+            "why": "h1 or document identity wrong"
+          }
+        ],
+        "router": "Navigation API",
+        "viewTransitions": "4 started, 4 finished, 0 skipped",
+        "storeAfterBack": {
+          "rows": [
+            "Delta"
+          ],
+          "left": 1,
+          "consistent": true
+        },
+        "counters": {
+          "push": 0,
+          "nav": 4,
+          "vt": 4,
+          "vtDone": 4,
+          "vtSkipped": [],
+          "hasNav": true,
+          "hasVT": true
+        }
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": true,
+        "schedulerYield": true,
+        "schedulerPostTask": true
+      },
+      "hmr": null,
+      "list": null,
+      "browserVersion": "156.0.8078.4",
+      "ms": 5630,
+      "routesSkipped": []
+    },
+    {
+      "app": "landing",
+      "mode": "dev",
+      "browser": "webkit",
+      "routes": [
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "pricing plans (nested keyed each)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "waitlist: invalid email does not submit",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "waitlist: valid email → thanks (if/else)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "counter click + derived",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on the counter",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: text typed before the island resumes is kept",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [
+        "dev server log: impact {\"seq\":1,\"file\":\"comp/counter.brain\",\"errors\":0,\"new\":[],\"fixed\":[],\"bytes\":[{\"view\":\"views/home.brain\",\"route\":\"/\",\"before\":9640,\"after\":9650,\"delta\":10}],\"seo\":[],\"ms\":34} | impact {\"seq\":2,\"file\":\"comp/counter.brain\",\"errors\":0,\"new\":[],\"fixed\":[],\"bytes\":[{\"view\":\"views/home.brain\",\"route\":\"/\",\"before\":9650,\"after\":9648,\"delta\":-2}],\"seo\":[],\"ms\":88} | impact {\"seq\":3,\"file\":\"comp/counter.brain\",\"errors\":0,\"new\":[],\"fixed\":[],\"bytes\":[{\"view\":\"views/home.brain\",\"route\":\"/\",\"before\":9648,\"after\":9640,\"delta\":-8}],\"seo\":[],\"ms\":33}"
+      ],
+      "nav": {
+        "ok": true,
+        "steps": [
+          {
+            "name": "link / → /?xb=1 (injected link)",
+            "ok": true,
+            "why": "url http://127.0.0.1:5346/?xb=1, reloaded false"
+          },
+          {
+            "name": "back → /",
+            "ok": true,
+            "why": "url http://127.0.0.1:5346/"
+          },
+          {
+            "name": "forward → /?xb=1",
+            "ok": true,
+            "why": "url http://127.0.0.1:5346/?xb=1"
+          }
+        ],
+        "router": "History API (pushState)",
+        "viewTransitions": "available, not used",
+        "counters": {
+          "push": 1,
+          "nav": 3,
+          "vt": 0,
+          "vtDone": 0,
+          "vtSkipped": [],
+          "hasNav": true,
+          "hasVT": true
+        }
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": false,
+        "schedulerYield": false,
+        "schedulerPostTask": false
+      },
+      "hmr": {
+        "ok": true,
+        "style": {
+          "ok": true,
+          "applied": true,
+          "noReload": true,
+          "events": [
+            "css"
+          ]
+        },
+        "script": {
+          "ok": true,
+          "applied": true,
+          "noReload": true,
+          "expected": "1 × 2 = 3",
+          "got": "Demo clicks: 1 × 2 = 3",
+          "events": [
+            "js"
+          ]
+        },
+        "restore": {
+          "ok": true,
+          "kind": "style + script in one save",
+          "textOk": true,
+          "styleOk": true,
+          "got": {
+            "text": "Demo clicks: 1 × 2 = 2",
+            "letterSpacing": "normal"
+          },
+          "noReload": true,
+          "events": [
+            "css",
+            "js"
+          ]
+        }
+      },
+      "list": null,
+      "browserVersion": "27.2",
+      "ms": 6316,
+      "routesSkipped": []
+    },
+    {
+      "app": "landing",
+      "mode": "dev",
+      "browser": "firefox",
+      "routes": [
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "pricing plans (nested keyed each)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "waitlist: invalid email does not submit",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "waitlist: valid email → thanks (if/else)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "counter click + derived",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on the counter",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: text typed before the island resumes is kept",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [
+        "dev server log: impact {\"seq\":1,\"file\":\"comp/counter.brain\",\"errors\":0,\"new\":[],\"fixed\":[],\"bytes\":[{\"view\":\"views/home.brain\",\"route\":\"/\",\"before\":9640,\"after\":9650,\"delta\":10}],\"seo\":[],\"ms\":34} | impact {\"seq\":2,\"file\":\"comp/counter.brain\",\"errors\":0,\"new\":[],\"fixed\":[],\"bytes\":[{\"view\":\"views/home.brain\",\"route\":\"/\",\"before\":9650,\"after\":9648,\"delta\":-2}],\"seo\":[],\"ms\":88} | impact {\"seq\":3,\"file\":\"comp/counter.brain\",\"errors\":0,\"new\":[],\"fixed\":[],\"bytes\":[{\"view\":\"views/home.brain\",\"route\":\"/\",\"before\":9648,\"after\":9640,\"delta\":-8}],\"seo\":[],\"ms\":33}"
+      ],
+      "nav": {
+        "ok": true,
+        "steps": [
+          {
+            "name": "link / → /?xb=1 (injected link)",
+            "ok": true,
+            "why": "url http://127.0.0.1:5346/?xb=1, reloaded false"
+          },
+          {
+            "name": "back → /",
+            "ok": true,
+            "why": "url http://127.0.0.1:5346/"
+          },
+          {
+            "name": "forward → /?xb=1",
+            "ok": true,
+            "why": "url http://127.0.0.1:5346/?xb=1"
+          }
+        ],
+        "router": "History API (pushState)",
+        "viewTransitions": "available, not used",
+        "counters": {
+          "push": 1,
+          "nav": 3,
+          "vt": 0,
+          "vtDone": 0,
+          "vtSkipped": [],
+          "hasNav": true,
+          "hasVT": true
+        }
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": true,
+        "schedulerYield": true,
+        "schedulerPostTask": true
+      },
+      "hmr": {
+        "ok": true,
+        "style": {
+          "ok": true,
+          "applied": true,
+          "noReload": true,
+          "events": [
+            "css"
+          ]
+        },
+        "script": {
+          "ok": true,
+          "applied": true,
+          "noReload": true,
+          "expected": "1 × 2 = 3",
+          "got": "Demo clicks: 1 × 2 = 3",
+          "events": [
+            "js"
+          ]
+        },
+        "restore": {
+          "ok": true,
+          "kind": "style + script in one save",
+          "textOk": true,
+          "styleOk": true,
+          "got": {
+            "text": "Demo clicks: 1 × 2 = 2",
+            "letterSpacing": "normal"
+          },
+          "noReload": true,
+          "events": [
+            "css",
+            "js"
+          ]
+        }
+      },
+      "list": null,
+      "browserVersion": "157.0",
+      "ms": 7019,
+      "routesSkipped": []
+    },
+    {
+      "app": "landing",
+      "mode": "dev",
+      "browser": "chromium",
+      "routes": [
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "pricing plans (nested keyed each)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "waitlist: invalid email does not submit",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "waitlist: valid email → thanks (if/else)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "counter click + derived",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on the counter",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: text typed before the island resumes is kept",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [
+        "dev server log: impact {\"seq\":1,\"file\":\"comp/counter.brain\",\"errors\":0,\"new\":[],\"fixed\":[],\"bytes\":[{\"view\":\"views/home.brain\",\"route\":\"/\",\"before\":9640,\"after\":9650,\"delta\":10}],\"seo\":[],\"ms\":34} | impact {\"seq\":2,\"file\":\"comp/counter.brain\",\"errors\":0,\"new\":[],\"fixed\":[],\"bytes\":[{\"view\":\"views/home.brain\",\"route\":\"/\",\"before\":9650,\"after\":9648,\"delta\":-2}],\"seo\":[],\"ms\":88} | impact {\"seq\":3,\"file\":\"comp/counter.brain\",\"errors\":0,\"new\":[],\"fixed\":[],\"bytes\":[{\"view\":\"views/home.brain\",\"route\":\"/\",\"before\":9648,\"after\":9640,\"delta\":-8}],\"seo\":[],\"ms\":33}"
+      ],
+      "nav": {
+        "ok": true,
+        "steps": [
+          {
+            "name": "link / → /?xb=1 (injected link)",
+            "ok": true,
+            "why": "url http://127.0.0.1:5346/?xb=1, reloaded false"
+          },
+          {
+            "name": "back → /",
+            "ok": true,
+            "why": "url http://127.0.0.1:5346/"
+          },
+          {
+            "name": "forward → /?xb=1",
+            "ok": true,
+            "why": "url http://127.0.0.1:5346/?xb=1"
+          }
+        ],
+        "router": "History API (pushState)",
+        "viewTransitions": "available, not used",
+        "counters": {
+          "push": 1,
+          "nav": 3,
+          "vt": 0,
+          "vtDone": 0,
+          "vtSkipped": [],
+          "hasNav": true,
+          "hasVT": true
+        }
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": true,
+        "schedulerYield": true,
+        "schedulerPostTask": true
+      },
+      "hmr": {
+        "ok": true,
+        "style": {
+          "ok": true,
+          "applied": true,
+          "noReload": true,
+          "events": [
+            "css"
+          ]
+        },
+        "script": {
+          "ok": true,
+          "applied": true,
+          "noReload": true,
+          "expected": "1 × 2 = 3",
+          "got": "Demo clicks: 1 × 2 = 3",
+          "events": [
+            "js"
+          ]
+        },
+        "restore": {
+          "ok": true,
+          "kind": "style + script in one save",
+          "textOk": true,
+          "styleOk": true,
+          "got": {
+            "text": "Demo clicks: 1 × 2 = 2",
+            "letterSpacing": "normal"
+          },
+          "noReload": true,
+          "events": [
+            "css",
+            "js"
+          ]
+        }
+      },
+      "list": null,
+      "browserVersion": "156.0.8078.4",
+      "ms": 5751,
+      "routesSkipped": []
+    },
+    {
+      "app": "landing",
+      "mode": "build",
+      "browser": "webkit",
+      "routes": [
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "pricing plans (nested keyed each)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "waitlist: invalid email does not submit",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "waitlist: valid email → thanks (if/else)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "counter click + derived",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on the counter",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: text typed before the island resumes is kept",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [],
+      "nav": {
+        "ok": null,
+        "steps": [],
+        "router": "none shipped (single route)",
+        "viewTransitions": "n/a"
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": false,
+        "schedulerYield": false,
+        "schedulerPostTask": false
+      },
+      "hmr": null,
+      "list": null,
+      "browserVersion": "27.2",
+      "ms": 4151,
+      "routesSkipped": []
+    },
+    {
+      "app": "landing",
+      "mode": "build",
+      "browser": "firefox",
+      "routes": [
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "pricing plans (nested keyed each)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "waitlist: invalid email does not submit",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "waitlist: valid email → thanks (if/else)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "counter click + derived",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on the counter",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: text typed before the island resumes is kept",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [],
+      "nav": {
+        "ok": null,
+        "steps": [],
+        "router": "none shipped (single route)",
+        "viewTransitions": "n/a"
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": true,
+        "schedulerYield": true,
+        "schedulerPostTask": true
+      },
+      "hmr": null,
+      "list": null,
+      "browserVersion": "157.0",
+      "ms": 5291,
+      "routesSkipped": []
+    },
+    {
+      "app": "landing",
+      "mode": "build",
+      "browser": "chromium",
+      "routes": [
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "pricing plans (nested keyed each)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "waitlist: invalid email does not submit",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "waitlist: valid email → thanks (if/else)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "counter click + derived",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on the counter",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: text typed before the island resumes is kept",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [],
+      "nav": {
+        "ok": null,
+        "steps": [],
+        "router": "none shipped (single route)",
+        "viewTransitions": "n/a"
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": true,
+        "schedulerYield": true,
+        "schedulerPostTask": true
+      },
+      "hmr": null,
+      "list": null,
+      "browserVersion": "156.0.8078.4",
+      "ms": 3739,
+      "routesSkipped": []
+    },
+    {
+      "app": "my-project",
+      "mode": "dev",
+      "browser": "webkit",
+      "routes": [
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "starter prompt in textarea (bind:value)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "steps list",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "copy button → \"Copied\" (async handler + clipboard)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on \"Copy prompt\"",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [],
+      "nav": {
+        "ok": true,
+        "steps": [
+          {
+            "name": "link / → /?xb=1 (injected link)",
+            "ok": true,
+            "why": "url http://127.0.0.1:5350/?xb=1, reloaded false"
+          },
+          {
+            "name": "back → /",
+            "ok": true,
+            "why": "url http://127.0.0.1:5350/"
+          },
+          {
+            "name": "forward → /?xb=1",
+            "ok": true,
+            "why": "url http://127.0.0.1:5350/?xb=1"
+          }
+        ],
+        "router": "History API (pushState)",
+        "viewTransitions": "available, not used",
+        "counters": {
+          "push": 1,
+          "nav": 3,
+          "vt": 0,
+          "vtDone": 0,
+          "vtSkipped": [],
+          "hasNav": true,
+          "hasVT": true
+        }
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": false,
+        "schedulerYield": false,
+        "schedulerPostTask": false
+      },
+      "hmr": null,
+      "list": null,
+      "browserVersion": "27.2",
+      "ms": 3685,
+      "routesSkipped": []
+    },
+    {
+      "app": "my-project",
+      "mode": "dev",
+      "browser": "firefox",
+      "routes": [
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "starter prompt in textarea (bind:value)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "steps list",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "copy button → \"Copied\" (async handler + clipboard)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on \"Copy prompt\"",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [],
+      "nav": {
+        "ok": true,
+        "steps": [
+          {
+            "name": "link / → /?xb=1 (injected link)",
+            "ok": true,
+            "why": "url http://127.0.0.1:5350/?xb=1, reloaded false"
+          },
+          {
+            "name": "back → /",
+            "ok": true,
+            "why": "url http://127.0.0.1:5350/"
+          },
+          {
+            "name": "forward → /?xb=1",
+            "ok": true,
+            "why": "url http://127.0.0.1:5350/?xb=1"
+          }
+        ],
+        "router": "History API (pushState)",
+        "viewTransitions": "available, not used",
+        "counters": {
+          "push": 1,
+          "nav": 3,
+          "vt": 0,
+          "vtDone": 0,
+          "vtSkipped": [],
+          "hasNav": true,
+          "hasVT": true
+        }
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": true,
+        "schedulerYield": true,
+        "schedulerPostTask": true
+      },
+      "hmr": null,
+      "list": null,
+      "browserVersion": "157.0",
+      "ms": 4868,
+      "routesSkipped": []
+    },
+    {
+      "app": "my-project",
+      "mode": "dev",
+      "browser": "chromium",
+      "routes": [
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "starter prompt in textarea (bind:value)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "steps list",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "copy button → \"Copied\" (async handler + clipboard)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on \"Copy prompt\"",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [],
+      "nav": {
+        "ok": true,
+        "steps": [
+          {
+            "name": "link / → /?xb=1 (injected link)",
+            "ok": true,
+            "why": "url http://127.0.0.1:5350/?xb=1, reloaded false"
+          },
+          {
+            "name": "back → /",
+            "ok": true,
+            "why": "url http://127.0.0.1:5350/"
+          },
+          {
+            "name": "forward → /?xb=1",
+            "ok": true,
+            "why": "url http://127.0.0.1:5350/?xb=1"
+          }
+        ],
+        "router": "History API (pushState)",
+        "viewTransitions": "available, not used",
+        "counters": {
+          "push": 1,
+          "nav": 3,
+          "vt": 0,
+          "vtDone": 0,
+          "vtSkipped": [],
+          "hasNav": true,
+          "hasVT": true
+        }
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": true,
+        "schedulerYield": true,
+        "schedulerPostTask": true
+      },
+      "hmr": null,
+      "list": null,
+      "browserVersion": "156.0.8078.4",
+      "ms": 3008,
+      "routesSkipped": []
+    },
+    {
+      "app": "my-project",
+      "mode": "build",
+      "browser": "webkit",
+      "routes": [
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "starter prompt in textarea (bind:value)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "steps list",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "copy button → \"Copied\" (async handler + clipboard)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on \"Copy prompt\"",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [],
+      "nav": {
+        "ok": null,
+        "steps": [],
+        "router": "none shipped (single route)",
+        "viewTransitions": "n/a"
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": false,
+        "schedulerYield": false,
+        "schedulerPostTask": false
+      },
+      "hmr": null,
+      "list": null,
+      "browserVersion": "27.2",
+      "ms": 3196,
+      "routesSkipped": []
+    },
+    {
+      "app": "my-project",
+      "mode": "build",
+      "browser": "firefox",
+      "routes": [
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "starter prompt in textarea (bind:value)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "steps list",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "copy button → \"Copied\" (async handler + clipboard)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on \"Copy prompt\"",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [],
+      "nav": {
+        "ok": null,
+        "steps": [],
+        "router": "none shipped (single route)",
+        "viewTransitions": "n/a"
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": true,
+        "schedulerYield": true,
+        "schedulerPostTask": true
+      },
+      "hmr": null,
+      "list": null,
+      "browserVersion": "157.0",
+      "ms": 5045,
+      "routesSkipped": []
+    },
+    {
+      "app": "my-project",
+      "mode": "build",
+      "browser": "chromium",
+      "routes": [
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "starter prompt in textarea (bind:value)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "steps list",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "copy button → \"Copied\" (async handler + clipboard)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on \"Copy prompt\"",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [],
+      "nav": {
+        "ok": null,
+        "steps": [],
+        "router": "none shipped (single route)",
+        "viewTransitions": "n/a"
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": true,
+        "schedulerYield": true,
+        "schedulerPostTask": true
+      },
+      "hmr": null,
+      "list": null,
+      "browserVersion": "156.0.8078.4",
+      "ms": 2686,
+      "routesSkipped": []
+    },
+    {
+      "app": "biglist",
+      "mode": "dev",
+      "browser": "webkit",
+      "routes": [
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "empty state",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "fill 1000 keyed rows (chunked render)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "reverse keeps node identity and order",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "swap ends + remove first",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on \"Fill 1000\"",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [],
+      "nav": {
+        "ok": true,
+        "steps": [
+          {
+            "name": "link / → /?xb=1 (injected link)",
+            "ok": true,
+            "why": "url http://127.0.0.1:5354/?xb=1, reloaded false"
+          },
+          {
+            "name": "back → /",
+            "ok": true,
+            "why": "url http://127.0.0.1:5354/"
+          },
+          {
+            "name": "forward → /?xb=1",
+            "ok": true,
+            "why": "url http://127.0.0.1:5354/?xb=1"
+          }
+        ],
+        "router": "History API (pushState)",
+        "viewTransitions": "available, not used",
+        "counters": {
+          "push": 1,
+          "nav": 3,
+          "vt": 0,
+          "vtDone": 0,
+          "vtSkipped": [],
+          "hasNav": true,
+          "hasVT": true
+        }
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": false,
+        "schedulerYield": false,
+        "schedulerPostTask": false
+      },
+      "hmr": null,
+      "list": {
+        "fill": {
+          "sync": 1000,
+          "frames": 0,
+          "ms": 6,
+          "final": 1000
+        },
+        "reverse": {
+          "sameNode": true,
+          "focusKept": false
+        }
+      },
+      "browserVersion": "27.2",
+      "ms": 4607,
+      "routesSkipped": [
+        "/403 (scaffold route, not part of the probe)",
+        "* (scaffold route, not part of the probe)",
+        "/about (scaffold route, not part of the probe)",
+        "/account (scaffold route, not part of the probe)",
+        "/login (scaffold route, not part of the probe)",
+        "/posts/:id (scaffold route, not part of the probe)",
+        "/posts (scaffold route, not part of the probe)"
+      ]
+    },
+    {
+      "app": "biglist",
+      "mode": "dev",
+      "browser": "firefox",
+      "routes": [
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "empty state",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "fill 1000 keyed rows (chunked render)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "reverse keeps node identity and order",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "swap ends + remove first",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on \"Fill 1000\"",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [],
+      "nav": {
+        "ok": true,
+        "steps": [
+          {
+            "name": "link / → /?xb=1 (injected link)",
+            "ok": true,
+            "why": "url http://127.0.0.1:5354/?xb=1, reloaded false"
+          },
+          {
+            "name": "back → /",
+            "ok": true,
+            "why": "url http://127.0.0.1:5354/"
+          },
+          {
+            "name": "forward → /?xb=1",
+            "ok": true,
+            "why": "url http://127.0.0.1:5354/?xb=1"
+          }
+        ],
+        "router": "History API (pushState)",
+        "viewTransitions": "available, not used",
+        "counters": {
+          "push": 1,
+          "nav": 3,
+          "vt": 0,
+          "vtDone": 0,
+          "vtSkipped": [],
+          "hasNav": true,
+          "hasVT": true
+        }
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": true,
+        "schedulerYield": true,
+        "schedulerPostTask": true
+      },
+      "hmr": null,
+      "list": {
+        "fill": {
+          "sync": 1000,
+          "frames": 0,
+          "ms": 32,
+          "final": 1000
+        },
+        "reverse": {
+          "sameNode": true,
+          "focusKept": true
+        }
+      },
+      "browserVersion": "157.0",
+      "ms": 7652,
+      "routesSkipped": [
+        "/403 (scaffold route, not part of the probe)",
+        "* (scaffold route, not part of the probe)",
+        "/about (scaffold route, not part of the probe)",
+        "/account (scaffold route, not part of the probe)",
+        "/login (scaffold route, not part of the probe)",
+        "/posts/:id (scaffold route, not part of the probe)",
+        "/posts (scaffold route, not part of the probe)"
+      ]
+    },
+    {
+      "app": "biglist",
+      "mode": "dev",
+      "browser": "chromium",
+      "routes": [
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "empty state",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "fill 1000 keyed rows (chunked render)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "reverse keeps node identity and order",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "swap ends + remove first",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on \"Fill 1000\"",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [],
+      "nav": {
+        "ok": true,
+        "steps": [
+          {
+            "name": "link / → /?xb=1 (injected link)",
+            "ok": true,
+            "why": "url http://127.0.0.1:5354/?xb=1, reloaded false"
+          },
+          {
+            "name": "back → /",
+            "ok": true,
+            "why": "url http://127.0.0.1:5354/"
+          },
+          {
+            "name": "forward → /?xb=1",
+            "ok": true,
+            "why": "url http://127.0.0.1:5354/?xb=1"
+          }
+        ],
+        "router": "History API (pushState)",
+        "viewTransitions": "available, not used",
+        "counters": {
+          "push": 1,
+          "nav": 3,
+          "vt": 0,
+          "vtDone": 0,
+          "vtSkipped": [],
+          "hasNav": true,
+          "hasVT": true
+        }
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": true,
+        "schedulerYield": true,
+        "schedulerPostTask": true
+      },
+      "hmr": null,
+      "list": {
+        "fill": {
+          "sync": 1000,
+          "frames": 0,
+          "ms": 9,
+          "final": 1000
+        },
+        "reverse": {
+          "sameNode": true,
+          "focusKept": true
+        }
+      },
+      "browserVersion": "156.0.8078.4",
+      "ms": 3654,
+      "routesSkipped": [
+        "/403 (scaffold route, not part of the probe)",
+        "* (scaffold route, not part of the probe)",
+        "/about (scaffold route, not part of the probe)",
+        "/account (scaffold route, not part of the probe)",
+        "/login (scaffold route, not part of the probe)",
+        "/posts/:id (scaffold route, not part of the probe)",
+        "/posts (scaffold route, not part of the probe)"
+      ]
+    },
+    {
+      "app": "biglist",
+      "mode": "build",
+      "browser": "webkit",
+      "routes": [
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "empty state",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "fill 1000 keyed rows (chunked render)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "reverse keeps node identity and order",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "swap ends + remove first",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on \"Fill 1000\"",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [],
+      "nav": {
+        "ok": true,
+        "steps": [
+          {
+            "name": "link / → /?xb=1 (injected link)",
+            "ok": true,
+            "why": "url http://127.0.0.1:5356/?xb=1, reloaded false"
+          },
+          {
+            "name": "back → /",
+            "ok": true,
+            "why": "url http://127.0.0.1:5356/"
+          },
+          {
+            "name": "forward → /?xb=1",
+            "ok": true,
+            "why": "url http://127.0.0.1:5356/?xb=1"
+          }
+        ],
+        "router": "Navigation API",
+        "viewTransitions": "3 started, 3 finished, 0 skipped",
+        "counters": {
+          "push": 0,
+          "nav": 3,
+          "vt": 3,
+          "vtDone": 3,
+          "vtSkipped": [],
+          "hasNav": true,
+          "hasVT": true
+        }
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": false,
+        "schedulerYield": false,
+        "schedulerPostTask": false
+      },
+      "hmr": null,
+      "list": {
+        "fill": {
+          "sync": 1000,
+          "frames": 0,
+          "ms": 5,
+          "final": 1000
+        },
+        "reverse": {
+          "sameNode": true,
+          "focusKept": false
+        }
+      },
+      "browserVersion": "27.2",
+      "ms": 4543,
+      "routesSkipped": [
+        "/403 (scaffold route, not part of the probe)",
+        "* (scaffold route, not part of the probe)",
+        "/about (scaffold route, not part of the probe)",
+        "/account (scaffold route, not part of the probe)",
+        "/login (scaffold route, not part of the probe)",
+        "/posts/:id (scaffold route, not part of the probe)",
+        "/posts (scaffold route, not part of the probe)"
+      ]
+    },
+    {
+      "app": "biglist",
+      "mode": "build",
+      "browser": "firefox",
+      "routes": [
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "empty state",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "fill 1000 keyed rows (chunked render)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "reverse keeps node identity and order",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "swap ends + remove first",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on \"Fill 1000\"",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [],
+      "nav": {
+        "ok": true,
+        "steps": [
+          {
+            "name": "link / → /?xb=1 (injected link)",
+            "ok": true,
+            "why": "url http://127.0.0.1:5356/?xb=1, reloaded false"
+          },
+          {
+            "name": "back → /",
+            "ok": true,
+            "why": "url http://127.0.0.1:5356/"
+          },
+          {
+            "name": "forward → /?xb=1",
+            "ok": true,
+            "why": "url http://127.0.0.1:5356/?xb=1"
+          }
+        ],
+        "router": "Navigation API",
+        "viewTransitions": "3 started, 3 finished, 0 skipped",
+        "counters": {
+          "push": 0,
+          "nav": 2,
+          "vt": 3,
+          "vtDone": 3,
+          "vtSkipped": [],
+          "hasNav": true,
+          "hasVT": true
+        }
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": true,
+        "schedulerYield": true,
+        "schedulerPostTask": true
+      },
+      "hmr": null,
+      "list": {
+        "fill": {
+          "sync": 1000,
+          "frames": 0,
+          "ms": 7,
+          "final": 1000
+        },
+        "reverse": {
+          "sameNode": true,
+          "focusKept": true
+        }
+      },
+      "browserVersion": "157.0",
+      "ms": 6215,
+      "routesSkipped": [
+        "/403 (scaffold route, not part of the probe)",
+        "* (scaffold route, not part of the probe)",
+        "/about (scaffold route, not part of the probe)",
+        "/account (scaffold route, not part of the probe)",
+        "/login (scaffold route, not part of the probe)",
+        "/posts/:id (scaffold route, not part of the probe)",
+        "/posts (scaffold route, not part of the probe)"
+      ]
+    },
+    {
+      "app": "biglist",
+      "mode": "build",
+      "browser": "chromium",
+      "routes": [
+        {
+          "path": "/",
+          "status": 200,
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "interactions": [
+        {
+          "name": "empty state",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "fill 1000 keyed rows (chunked render)",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "reverse keeps node identity and order",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "swap ends + remove first",
+          "ok": true,
+          "why": ""
+        },
+        {
+          "name": "first: human-speed click (150 ms press) on \"Fill 1000\"",
+          "ok": true,
+          "why": ""
+        }
+      ],
+      "errors": [],
+      "notes": [],
+      "nav": {
+        "ok": true,
+        "steps": [
+          {
+            "name": "link / → /?xb=1 (injected link)",
+            "ok": true,
+            "why": "url http://127.0.0.1:5356/?xb=1, reloaded false"
+          },
+          {
+            "name": "back → /",
+            "ok": true,
+            "why": "url http://127.0.0.1:5356/"
+          },
+          {
+            "name": "forward → /?xb=1",
+            "ok": true,
+            "why": "url http://127.0.0.1:5356/?xb=1"
+          }
+        ],
+        "router": "Navigation API",
+        "viewTransitions": "3 started, 3 finished, 0 skipped",
+        "counters": {
+          "push": 0,
+          "nav": 1,
+          "vt": 3,
+          "vtDone": 3,
+          "vtSkipped": [],
+          "hasNav": true,
+          "hasVT": true
+        }
+      },
+      "features": {
+        "navigationAPI": true,
+        "viewTransitions": true,
+        "moveBefore": true,
+        "schedulerYield": true,
+        "schedulerPostTask": true
+      },
+      "hmr": null,
+      "list": {
+        "fill": {
+          "sync": 1000,
+          "frames": 0,
+          "ms": 4,
+          "final": 1000
+        },
+        "reverse": {
+          "sameNode": true,
+          "focusKept": true
+        }
+      },
+      "browserVersion": "156.0.8078.4",
+      "ms": 3327,
+      "routesSkipped": [
+        "/403 (scaffold route, not part of the probe)",
+        "* (scaffold route, not part of the probe)",
+        "/about (scaffold route, not part of the probe)",
+        "/account (scaffold route, not part of the probe)",
+        "/login (scaffold route, not part of the probe)",
+        "/posts/:id (scaffold route, not part of the probe)",
+        "/posts (scaffold route, not part of the probe)"
+      ]
+    }
+  ]
+}

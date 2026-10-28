@@ -1,0 +1,25 @@
+Component Index level=View file=views/index.brain
+  meta@1:7 seo=None
+  meta@1:11 title=Some("BRAINLLM examples")
+  meta@1:37 description=Some("Small BRAINLLM examples: a counter with derived state and a to-do list with keyed items, filters and an empty state.")
+  meta@1:168 canonical=Some("/")
+  script
+    import@4:3 Counter from "../comp/counter.brain"
+    import@5:3 Todo from "../comp/todo.brain"
+  template
+    <main>@8:1
+      <h1>@9:3
+        text@9:7 "BRAINLLM examples"
+      <p>@10:3
+        text@10:6 "Each block below is one component. The"
+        <a>@10:45 href="/dashboard"
+          text@10:66 "user admin"
+        text@10:80 "shows data loading, forms and CRUD."
+      <section>@11:3 aria-labelledby="counter-title"
+        <h2>@12:5 id="counter-title"
+          text@12:28 "Counter"
+        component Counter@13:5
+      <section>@15:3 aria-labelledby="todo-title"
+        <h2>@16:5 id="todo-title"
+          text@16:25 "To-do list"
+        component Todo@17:5

@@ -1,0 +1,436 @@
+{
+  "date": "2026-10-13T21:31:59.041Z",
+  "versions": {
+    "brain binary sha256 (12)": "e9453256ff44",
+    "brain binary size (bytes)": "4262432",
+    "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+    "node": "v26.8.1",
+    "npm": "11.19.0",
+    "vite": "8.3.4",
+    "svelte": "5.57.2",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "react / react-dom": "19.3.0 / 19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "hyperfine": "1.20.0",
+    "cpu": "Apple M5, 10 cores",
+    "memory (GiB)": "24",
+    "load average 1/5/15 min (start → end of timing)": "9.97 14.19 15.03 → 13.78 14.38 15.04",
+    "os": "macOS 26.6.2 (25.6.0)"
+  },
+  "timing": {
+    "brain-cold": {
+      "command": "~/tmp/qa286/build-work/bin/brain build",
+      "runs": 20,
+      "median": 55.3,
+      "mean": 65.4,
+      "stddev": 38.7,
+      "min": 43.7,
+      "max": 221.9
+    },
+    "brain-start": {
+      "command": "~/tmp/qa286/build-work/bin/brain help",
+      "runs": 20,
+      "median": 3.8,
+      "mean": 3.8,
+      "stddev": 0.4,
+      "min": 3,
+      "max": 4.5
+    },
+    "brain-warm": {
+      "command": "~/tmp/qa286/build-work/bin/brain build",
+      "runs": 20,
+      "median": 48.2,
+      "mean": 47.2,
+      "stddev": 13.4,
+      "min": 29.4,
+      "max": 86
+    },
+    "react-cold": {
+      "command": "npx vite build --logLevel silent",
+      "runs": 20,
+      "median": 352.5,
+      "mean": 350.9,
+      "stddev": 61.1,
+      "min": 278.3,
+      "max": 512.7
+    },
+    "react-warm": {
+      "command": "npx vite build --logLevel silent",
+      "runs": 20,
+      "median": 338.7,
+      "mean": 346.5,
+      "stddev": 57.1,
+      "min": 278,
+      "max": 562
+    },
+    "svelte-cold": {
+      "command": "npx vite build --logLevel silent",
+      "runs": 20,
+      "median": 378.4,
+      "mean": 421.2,
+      "stddev": 106.9,
+      "min": 309.7,
+      "max": 665.4
+    },
+    "svelte-warm": {
+      "command": "npx vite build --logLevel silent",
+      "runs": 20,
+      "median": 357.8,
+      "mean": 370.2,
+      "stddev": 43.2,
+      "min": 322.6,
+      "max": 489.8
+    },
+    "vite-start": {
+      "command": "npx vite --version",
+      "runs": 20,
+      "median": 251.2,
+      "mean": 252.7,
+      "stddev": 41.4,
+      "min": 183.8,
+      "max": 329.2
+    }
+  },
+  "bytes": {
+    "brain": {
+      "label": "BRAINLLM",
+      "files": [
+        {
+          "file": "_b/1hqq6mge.css",
+          "raw": 163,
+          "gz": 139,
+          "br": 118
+        },
+        {
+          "file": "_b/54xu4jzh.js",
+          "raw": 0,
+          "gz": 20,
+          "br": 1
+        },
+        {
+          "file": "_b/6ecyojt1.js",
+          "raw": 338,
+          "gz": 249,
+          "br": 229
+        },
+        {
+          "file": "_b/9dnhdxed.js",
+          "raw": 6988,
+          "gz": 3153,
+          "br": 2837
+        },
+        {
+          "file": "_b/bzsivz2u.js",
+          "raw": 3905,
+          "gz": 1954,
+          "br": 1703
+        },
+        {
+          "file": "_b/j4wvmyh0.js",
+          "raw": 806,
+          "gz": 469,
+          "br": 403
+        },
+        {
+          "file": "_b/lmf04nzt.js",
+          "raw": 2607,
+          "gz": 1419,
+          "br": 1209
+        },
+        {
+          "file": "_b/mvshex02.js",
+          "raw": 1418,
+          "gz": 631,
+          "br": 539
+        },
+        {
+          "file": "_b/x9swiwsi.js",
+          "raw": 434,
+          "gz": 286,
+          "br": 239
+        },
+        {
+          "file": "_b/xihp5q0c.js",
+          "raw": 3172,
+          "gz": 1253,
+          "br": 1090
+        },
+        {
+          "file": "_b/zij5q0tj.js",
+          "raw": 8388,
+          "gz": 3178,
+          "br": 2793
+        },
+        {
+          "file": "_offline.html",
+          "raw": 534,
+          "gz": 370,
+          "br": 239
+        },
+        {
+          "file": "sw.js",
+          "raw": 5777,
+          "gz": 2569,
+          "br": 2144
+        }
+      ],
+      "total": {
+        "raw": 28219,
+        "gz": 12751,
+        "br": 11161
+      },
+      "js": {
+        "raw": 28056,
+        "gz": 12612,
+        "br": 11043
+      },
+      "css": {
+        "raw": 163,
+        "gz": 139,
+        "br": 118
+      },
+      "html": {
+        "raw": 0,
+        "gz": 0,
+        "br": 0
+      },
+      "offlineExtra": {
+        "raw": 6311,
+        "gz": 2939,
+        "br": 2383
+      },
+      "route": {
+        "path": "/dashboard",
+        "htmlSource": "GET /dashboard from dist/server.mjs",
+        "html": {
+          "raw": 4971,
+          "gz": 2293,
+          "br": 1856
+        },
+        "css": {
+          "raw": 163,
+          "gz": 139,
+          "br": 118
+        },
+        "js": {
+          "raw": 19668,
+          "gz": 9434,
+          "br": 8250
+        },
+        "cssFiles": [
+          "_b/1hqq6mge.css"
+        ],
+        "jsFiles": [
+          "_b/54xu4jzh.js",
+          "_b/6ecyojt1.js",
+          "_b/9dnhdxed.js",
+          "_b/bzsivz2u.js",
+          "_b/j4wvmyh0.js",
+          "_b/lmf04nzt.js",
+          "_b/mvshex02.js",
+          "_b/x9swiwsi.js",
+          "_b/xihp5q0c.js"
+        ],
+        "total": {
+          "raw": 24802,
+          "gz": 11866,
+          "br": 10224
+        }
+      },
+      "firstRoute": {
+        "files": [
+          "_b/54xu4jzh.js",
+          "_b/6ecyojt1.js",
+          "_b/9dnhdxed.js",
+          "_b/bzsivz2u.js",
+          "_b/j4wvmyh0.js",
+          "_b/lmf04nzt.js",
+          "_b/mvshex02.js",
+          "_b/x9swiwsi.js",
+          "_b/xihp5q0c.js"
+        ],
+        "js": {
+          "raw": 19668,
+          "gz": 9434,
+          "br": 8250
+        }
+      }
+    },
+    "svelte": {
+      "label": "Svelte 5 + Vite",
+      "files": [
+        {
+          "file": "assets/index-DhHglChh.js",
+          "raw": 41733,
+          "gz": 16237,
+          "br": 14747
+        },
+        {
+          "file": "assets/index-Dvnwz4MV.css",
+          "raw": 941,
+          "gz": 412,
+          "br": 345
+        },
+        {
+          "file": "index.html",
+          "raw": 969,
+          "gz": 470,
+          "br": 302
+        }
+      ],
+      "total": {
+        "raw": 43643,
+        "gz": 17119,
+        "br": 15394
+      },
+      "js": {
+        "raw": 41733,
+        "gz": 16237,
+        "br": 14747
+      },
+      "css": {
+        "raw": 941,
+        "gz": 412,
+        "br": 345
+      },
+      "html": {
+        "raw": 969,
+        "gz": 470,
+        "br": 302
+      },
+      "offlineExtra": {
+        "raw": 0,
+        "gz": 0,
+        "br": 0
+      },
+      "route": {
+        "path": "/",
+        "htmlSource": "dist/index.html",
+        "html": {
+          "raw": 969,
+          "gz": 470,
+          "br": 302
+        },
+        "css": {
+          "raw": 941,
+          "gz": 412,
+          "br": 345
+        },
+        "js": {
+          "raw": 41733,
+          "gz": 16237,
+          "br": 14747
+        },
+        "cssFiles": [
+          "assets/index-Dvnwz4MV.css"
+        ],
+        "jsFiles": [
+          "assets/index-DhHglChh.js"
+        ],
+        "total": {
+          "raw": 43643,
+          "gz": 17119,
+          "br": 15394
+        }
+      },
+      "firstRoute": {
+        "files": [
+          "assets/index-DhHglChh.js"
+        ],
+        "js": {
+          "raw": 41733,
+          "gz": 16237,
+          "br": 14747
+        }
+      }
+    },
+    "react": {
+      "label": "React 19 + Vite",
+      "files": [
+        {
+          "file": "assets/index-C15t65u3.css",
+          "raw": 833,
+          "gz": 385,
+          "br": 326
+        },
+        {
+          "file": "assets/index-TNuyrJbz.js",
+          "raw": 222960,
+          "gz": 68954,
+          "br": 59449
+        },
+        {
+          "file": "index.html",
+          "raw": 969,
+          "gz": 472,
+          "br": 293
+        }
+      ],
+      "total": {
+        "raw": 224762,
+        "gz": 69811,
+        "br": 60068
+      },
+      "js": {
+        "raw": 222960,
+        "gz": 68954,
+        "br": 59449
+      },
+      "css": {
+        "raw": 833,
+        "gz": 385,
+        "br": 326
+      },
+      "html": {
+        "raw": 969,
+        "gz": 472,
+        "br": 293
+      },
+      "offlineExtra": {
+        "raw": 0,
+        "gz": 0,
+        "br": 0
+      },
+      "route": {
+        "path": "/",
+        "htmlSource": "dist/index.html",
+        "html": {
+          "raw": 969,
+          "gz": 472,
+          "br": 293
+        },
+        "css": {
+          "raw": 833,
+          "gz": 385,
+          "br": 326
+        },
+        "js": {
+          "raw": 222960,
+          "gz": 68954,
+          "br": 59449
+        },
+        "cssFiles": [
+          "assets/index-C15t65u3.css"
+        ],
+        "jsFiles": [
+          "assets/index-TNuyrJbz.js"
+        ],
+        "total": {
+          "raw": 224762,
+          "gz": 69811,
+          "br": 60068
+        }
+      },
+      "firstRoute": {
+        "files": [
+          "assets/index-TNuyrJbz.js"
+        ],
+        "js": {
+          "raw": 222960,
+          "gz": 68954,
+          "br": 59449
+        }
+      }
+    }
+  }
+}

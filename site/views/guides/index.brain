@@ -1,0 +1,42 @@
+<meta seo title="Guides" description="Step-by-step BRAINLLM guides: build an app with a language model, turn compiler errors into fixes and make every page findable.">
+
+<script>
+  import { page } from 'brain:content'
+  export async function load() {
+    return page('guides', 1)
+  }
+</script>
+
+<main class="page">
+  <h1>Guides</h1>
+  <p>Each guide follows one BRAINLLM task from start to finish, with the commands you type and the output you get back,
+    so you can repeat it on your own machine.</p>
+  <p>Together they show how the framework is meant to be used: a language model writes the app, the compiler checks every
+    file it writes and answers each mistake with the edit that fixes it, and the build publishes pages that people,
+    search engines and AI assistants can read. Any diagnostic code they mention can be looked up with
+    <code>brain explain</code>.</p>
+  <p>They are written for two readers at once. If you are a developer, they explain what each step does and why the
+    framework works that way. If you are handing the work to a model, every guide is also published as Markdown and
+    listed in llms.txt, so the model reads the same instructions you do, without a browser.</p>
+  <p>Each guide stands on its own. When a step needs more detail, it links to the reference: the
+    <a href="/docs/cli">CLI and testing page</a> covers every command and the JSON error format, and the
+    <a href="/docs">documentation</a> covers files, components, markup, styles, data and SEO one topic at a time. If a
+    guide and the spec ever disagree, the spec wins: it is the only document that defines what an app can contain. New
+    guides appear at the top of this list.</p>
+  <ul class="entries">
+    {#each props.entries as e (e.slug)}
+      <li>
+        <h2><a href={e.url}>{e.title}</a></h2>
+        <p>{e.description}</p>
+        {#if e.date}<time datetime={e.date}>{e.date}</time>{/if}
+      </li>
+    {/each}
+  </ul>
+  {#if props.next}<p><a href={props.next} rel="next">Older entries</a></p>{/if}
+</main>
+
+<style>
+  .entries { display: grid; gap: var(--space-5); padding: 0; list-style: none; }
+  h2 { margin: 0; font-size: 1.25rem; }
+  time { color: var(--muted); font-size: .875rem; }
+</style>

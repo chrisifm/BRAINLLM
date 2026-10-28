@@ -1,0 +1,81 @@
+Component Todo level=Comp file=comp/todo.brain
+  prop@1:14 title:str = 'To do'
+  script
+    let items = sig([])@4:3
+    let text = sig('')@5:3
+    let filter = sig('all')@6:3
+    let nextId = 1@7:3
+    let visible = drv(() => { 3 stmts })@9:3
+      fn@9:21
+        if@10:5 (filter === 'done')
+          return@10:28 items.filter((it) => it.done)
+        if@11:5 (filter === 'open')
+          return@11:28 items.filter((it) => (!it.done))
+        return@12:5 items
+    let left = drv(() => items.filter((it) => (!it.done)).length)@14:3
+    const add = () => { 4 stmts }@16:3
+      fn@16:15
+        const t = text.trim()@17:5
+        if@18:5 (t === '')
+          return@18:19 
+        expr@19:5 (items = [...items, { id: (nextId++), text: t, done: false }])
+        expr@20:5 (text = '')
+    const toggle = (id) => { 1 stmts }@22:3
+      fn@22:18
+        expr@23:5 (items = items.map((it) => ((it.id === id) ? { ...it, done: (!it.done) } : it)))
+    const remove = (id) => { 1 stmts }@25:3
+      fn@25:18
+        expr@26:5 (items = items.filter((it) => (it.id !== id)))
+  template
+    <section>@30:1 class="todo"
+      <h2>@31:3
+        interp@31:7 {title}
+      <form>@32:3 on:submit={add}
+        <input>@33:5 bind:value={text} placeholder="What needs doing?" aria-label="New task"
+        <button>@34:5 disabled={(text.trim() === '')}
+          text@34:43 "Add"
+      <ul>@37:3
+        each@38:5 visible as it (it.id)
+          <li>@39:7 class:done={it.done}
+            <input>@40:9 type="checkbox" checked={it.done} on:change={toggle(it.id)} aria-label={`Mark ${it.text}`}
+            <span>@41:9
+              interp@41:15 {it.text}
+            <button>@42:9 on:click={remove(it.id)} aria-label="Delete"
+              text@42:62 "×"
+        empty
+          <li>@45:7 class="empty"
+            text@45:25 "Nothing here."
+      <footer>@49:3
+        <span>@50:5
+          interp@50:11 {left}
+          text@50:17 "left"
+        <button>@51:5 class:on={(filter === 'all')} on:click={(filter = 'all')}
+          text@51:67 "All"
+        <button>@52:5 class:on={(filter === 'open')} on:click={(filter = 'open')}
+          text@52:69 "Open"
+        <button>@53:5 class:on={(filter === 'done')} on:click={(filter = 'done')}
+          text@53:69 "Done"
+  style@57:8
+    .todo {
+      display: grid;
+      gap: var(--space-2);
+    }
+    form {
+      display: flex;
+      gap: var(--space-1);
+    }
+    li {
+      display: flex;
+      gap: var(--space-2);
+      align-items: center;
+      &.done span {
+        text-decoration: line-through;
+        color: var(--muted);
+      }
+    }
+    .empty {
+      color: var(--muted);
+    }
+    footer button.on {
+      color: var(--accent);
+    }

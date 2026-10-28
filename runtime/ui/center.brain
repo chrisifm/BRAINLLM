@@ -1,0 +1,11 @@
+<meta props="max:str='60ch' gutter:str='4' text:bool=false">
+<script>
+  // a centered column with a maximum width and side gutters (a token step); text: also center the text
+  // spacing props take a token step from tokens.cssbrain (0–6 → --space-N), never raw CSS
+  const sp = (n) => (n == null || n === '' ? null : String(n) === '0' ? '0' : 'var(--space-' + n + ')')
+</script>
+<div class="center" class:text={text} style:max-width={max} style:padding-inline={sp(gutter)}><slot /></div>
+<style>
+  .center { box-sizing: content-box; margin-inline: auto; }
+  .center.text { text-align: center; }
+</style>

@@ -1,0 +1,15 @@
+<script>
+  import Hero from './hero.brain'
+
+  test('renders the headline and both calls to action', async () => {
+    await mount(Hero, { title: 'Ship faster', lead: 'All in one place.', primary: { href: '/signup', label: 'Start free' }, secondary: { href: '/about', label: 'Learn more' } })
+    expect(text('h1')).toBe('Ship faster')
+    expect(count('a')).toBe(2)
+    expect(attr('a.primary', 'href')).toBe('/signup')
+  })
+
+  test('the secondary link is optional', async () => {
+    await mount(Hero, { title: 'Ship faster', lead: 'All in one place.', primary: { href: '/signup', label: 'Start free' } })
+    expect(count('a')).toBe(1)
+  })
+</script>

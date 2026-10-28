@@ -1,0 +1,10 @@
+<script>
+  import fault from '../api/fault.jsbrain'
+  let data = resource(() => fault.get({ name: 'slowcard' }))
+</script>
+<section class="card">
+  {#await data}<p data-r="slowcard">loading</p>{:then v}<p data-r="slowcard">loaded</p>{:catch e}<p data-r="slowcard">error {e.kind}</p>{/await}
+</section>
+<style>
+  .card { padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius); }
+</style>

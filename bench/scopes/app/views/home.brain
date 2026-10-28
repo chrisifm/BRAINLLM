@@ -1,0 +1,59 @@
+<meta seo title="Welcome to BRAINLLM" description="Your BRAINLLM project is running. Paste the prompt into any LLM to start building." canonical="/">
+<script>
+  let prompt = sig(`You are building a web app with BRAINLLM, an AI-native framework.
+1. Run \`brain spec\` and read it fully. Nothing outside it exists.
+2. Run \`brain map --json\` to see this project.
+3. Create files only with \`brain add <kind> <name>\` (view, comp, ui, test, lib).
+4. After every change run \`brain fix\`, then \`brain check --json\`; apply each remaining "fix" until it returns [].
+5. You are done only when \`brain doctor\` exits 0.
+
+Task: <describe the app you want>`)
+  let copied = sig(false)
+  const copy = async () => {
+    await navigator.clipboard.writeText(prompt)
+    copied = true
+  }
+</script>
+<main class="hero">
+  <svg class="mark" viewBox="0 0 120 100" role="img" aria-label="BRAINLLM">
+    <g>
+      <rect fill="#ffc2d8" x="22" y="14" width="16" height="16" rx="4" /><rect fill="#ffb0cc" x="40" y="8" width="16" height="16" rx="4" /><rect fill="#ff9cbf" x="62" y="8" width="16" height="16" rx="4" /><rect fill="#f985b0" x="80" y="14" width="16" height="16" rx="4" />
+      <rect fill="#f06fa1" x="12" y="32" width="16" height="16" rx="4" /><rect fill="#e65a92" x="30" y="30" width="16" height="16" rx="4" /><rect fill="#e04a87" x="48" y="26" width="10" height="16" rx="4" opacity=".9" /><rect fill="#ffc2d8" x="62" y="26" width="10" height="16" rx="4" opacity=".9" /><rect fill="#ffb0cc" x="74" y="30" width="16" height="16" rx="4" /><rect fill="#ff9cbf" x="92" y="32" width="16" height="16" rx="4" />
+      <rect fill="#f985b0" x="16" y="50" width="16" height="16" rx="4" /><rect fill="#f06fa1" x="34" y="48" width="16" height="16" rx="4" /><rect fill="#e65a92" x="70" y="48" width="16" height="16" rx="4" /><rect fill="#e04a87" x="88" y="50" width="16" height="16" rx="4" />
+      <rect fill="#ffc2d8" x="28" y="68" width="16" height="16" rx="4" /><rect fill="#ffb0cc" x="46" y="66" width="12" height="16" rx="4" opacity=".85" /><rect fill="#ff9cbf" x="62" y="66" width="12" height="16" rx="4" opacity=".85" /><rect fill="#f985b0" x="76" y="68" width="16" height="16" rx="4" /><rect fill="#f06fa1" x="66" y="84" width="10" height="10" rx="3" />
+    </g>
+  </svg>
+  <p class="eyebrow">AI-driven development. Humans optional.</p>
+  <h1>Your BRAINLLM app is alive.</h1>
+  <p class="lead">Paste this prompt into any LLM, describe what you want, and let it build views, components and styles.</p>
+  <section class="card" aria-labelledby="pt">
+    <div class="card-head">
+      <h2 id="pt">Starter prompt</h2>
+      <button type="button" class="primary" on:click={copy}>{copied ? 'Copied' : 'Copy prompt'}</button>
+    </div>
+    <label for="prompt" class="visually-hidden">Prompt for your LLM</label>
+    <textarea id="prompt" readonly rows="10" bind:value={prompt}></textarea>
+  </section>
+  <ol class="steps">
+    <li><code>brain run</code> develop with hot reload</li>
+    <li><code>brain doctor</code> check everything</li>
+    <li><code>brain build</code> ship to production</li>
+  </ol>
+</main>
+<style>
+  .hero { max-width: 760px; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; justify-items: center; gap: var(--space-4); text-align: center; }
+  .mark { width: 112px; height: auto; filter: drop-shadow(0 12px 24px rgba(224, 69, 127, .25)); }
+  .eyebrow { margin: 0; font-size: .8rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  h1 { font-size: clamp(2.2rem, 6vw, 3.6rem); font-weight: 650; }
+  .lead { margin: 0; max-width: 56ch; color: var(--muted); font-size: 1.1rem; }
+  .card { width: 100%; text-align: left; background: var(--glass); border: 1px solid var(--glass-edge); border-radius: var(--radius-lg); box-shadow: var(--shadow); padding: var(--space-4); -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%); }
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); }
+  h2 { font-size: 1rem; font-weight: 600; }
+  textarea { width: 100%; resize: vertical; font-family: ui-monospace, "SF Mono", monospace; font-size: .85rem; line-height: 1.55; background: var(--surface); }
+  .primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
+  .steps { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-3); color: var(--muted); }
+  .steps li { background: var(--glass); border: 1px solid var(--glass-edge); border-radius: 999px; padding: var(--space-1) var(--space-3); box-shadow: var(--shadow); }
+  code { color: var(--fg); font-weight: 600; }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  @supports not (backdrop-filter: blur(1px)) { .card { background: var(--surface); } }
+</style>

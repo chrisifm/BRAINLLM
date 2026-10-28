@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0124",
+    "level": "error",
+    "file": "invalid/lib/b0124-two-exports.jsbrain",
+    "line": 2,
+    "col": 1,
+    "msg": "a `.jsbrain` module has one export; this one has 2",
+    "fix": "export a single object (`export default { a, b }`) or move the extra export to its own file"
+  }
+]

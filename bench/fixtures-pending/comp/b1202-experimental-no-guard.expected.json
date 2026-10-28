@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1202",
+    "level": "warning",
+    "file": "comp/b1202-experimental-no-guard.brain",
+    "line": 4,
+    "col": 10,
+    "msg": "`Element.moveBefore()` is experimental/limited and used without feature detection",
+    "fix": "guard it: `if ('moveBefore' in Element.prototype) list.moveBefore(row, ref) else list.insertBefore(row, ref)`"
+  }
+]

@@ -1,0 +1,5 @@
+<script>
+  let name = sig('Ana')
+  let label = drv(() => name)
+</script>
+<p>{label}</p>

@@ -1,0 +1,2 @@
+<meta props="user:obj">
+<p>{user.name}</p>

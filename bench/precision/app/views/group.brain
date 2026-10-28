@@ -1,0 +1,14 @@
+<meta seo title="Group state precision" description="Two subtrees each provide their own store; a write in one subtree must mutate only its readers of that field, among a thousand components.">
+<script>
+  import GroupRoot from '../comp/group-root.brain'
+  import Pad from '../comp/pad.brain'
+</script>
+<main class="page">
+  <h1>Group state</h1>
+  <GroupRoot g="one" />
+  <GroupRoot g="two" />
+  <Pad n={1000} />
+</main>
+<style>
+  .page { max-width: 120ch; margin: 0 auto; padding: var(--space-4); display: grid; gap: var(--space-2); }
+</style>

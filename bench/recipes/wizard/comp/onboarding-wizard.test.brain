@@ -1,0 +1,39 @@
+<script>
+  import OnboardingWizard from './onboarding-wizard.brain'
+
+  const nextBtn = '.actions button:last-child'
+
+  test('Next does not leave the first step while it has errors', async () => {
+    await mount(OnboardingWizard, {})
+    await click(nextBtn)
+    expect(text('[aria-current=step]').includes('Account')).toBeTruthy()
+    expect(text('.wizard').includes('Enter your name')).toBeTruthy()
+  })
+
+  test('a valid step moves forward and Back keeps what was typed', async () => {
+    await mount(OnboardingWizard, {})
+    await type('input[aria-label="Your name"]', 'Ana')
+    await type('input[aria-label="Work email"]', 'ana@example.com')
+    await click(nextBtn)
+    expect(text('[aria-current=step]').includes('Plan')).toBeTruthy()
+    await click('.actions button:first-child')
+    expect(text('[aria-current=step]').includes('Account')).toBeTruthy()
+    await click(nextBtn)
+    expect(text('[aria-current=step]').includes('Plan')).toBeTruthy()
+  })
+
+  test('the plan step needs a choice', async () => {
+    await mount(OnboardingWizard, {})
+    await type('input[aria-label="Your name"]', 'Ana')
+    await type('input[aria-label="Work email"]', 'ana@example.com')
+    await click(nextBtn)
+    await click(nextBtn)
+    expect(text('.wizard').includes('Choose a plan')).toBeTruthy()
+    expect(text('[aria-current=step]').includes('Plan')).toBeTruthy()
+  })
+
+  test('a server error is shown on the wizard', async () => {
+    await mount(OnboardingWizard, { error: 'The workspace could not be created.' })
+    expect(text('.err')).toBe('The workspace could not be created.')
+  })
+</script>

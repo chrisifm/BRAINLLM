@@ -1,0 +1,7 @@
+[
+  {
+    "id": "i18n-bilingual",
+    "brief": "A small bilingual website for a neighborhood bakery, in English and Spanish, with English as the default language. Two pages: a home page at / with a headline, a short welcome paragraph and a list of three opening-hour lines, and a contact page at /contact with the address, a phone number and a short note about deliveries. Every page has a navigation bar with links to both pages and a language switch that takes the visitor to the same page in the other language. All visible text must exist in both languages; do not hardcode any visible text in the views. For the Spanish texts, write the English text followed by the tag [es] (for example 'Fresh bread every morning [es]') instead of a real translation.",
+    "pages": 2
+  }
+]

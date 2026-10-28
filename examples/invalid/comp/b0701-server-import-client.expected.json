@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0701",
+    "level": "error",
+    "file": "invalid/comp/b0701-server-import-client.brain",
+    "line": 4,
+    "col": 45,
+    "msg": "`db` comes from a server module (`<meta server>`) and this code reaches the browser",
+    "fix": "use `db` only inside `export async function load(ctx)` or `server: async function f(ctx, …)` and call that function from the client"
+  }
+]

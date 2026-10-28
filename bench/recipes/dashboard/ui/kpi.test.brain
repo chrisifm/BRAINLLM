@@ -1,0 +1,23 @@
+<script>
+  import Kpi from './kpi.brain'
+
+  test('formats money and says the direction of the change', async () => {
+    await mount(Kpi, { label: 'Revenue', value: 12400, unit: '$', delta: 8.2 })
+    expect(text('.name')).toBe('Revenue')
+    expect(text('.value')).toBe('$12,400')
+    expect(hasClass('.delta', 'up')).toBeTruthy()
+    expect(text('.delta').includes('up')).toBeTruthy()
+  })
+
+  test('a drop is marked down', async () => {
+    await mount(Kpi, { label: 'New customers', value: 42, delta: -4.5 })
+    expect(hasClass('.delta', 'down')).toBeTruthy()
+    expect(text('.delta').includes('4.5%')).toBeTruthy()
+  })
+
+  test('without a delta there is no change line', async () => {
+    await mount(Kpi, { label: 'Refund rate', value: 1.8, unit: '%' })
+    expect(text('.value')).toBe('1.8%')
+    expect(count('.delta')).toBe(0)
+  })
+</script>

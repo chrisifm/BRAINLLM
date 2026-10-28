@@ -1,0 +1,30 @@
+<script>
+  import ItemList from './item-list.brain'
+
+  const items = [
+    { id: 1, name: 'Desk lamp', status: 'active', price: 30 },
+    { id: 2, name: 'Desk chair', status: 'archived', price: 120 },
+    { id: 3, name: 'Monitor', status: 'active', price: 210.5 },
+  ]
+
+  test('shows every item with a link to its page', async () => {
+    await mount(ItemList, { items })
+    expect(count('tbody a')).toBe(3)
+    expect(attr('tbody tr:first-child a', 'href')).toBe('/items/1')
+    expect(text('.count')).toBe('3 of 3')
+  })
+
+  test('the search narrows the list by name', async () => {
+    await mount(ItemList, { items })
+    await type('input[type=search]', 'desk')
+    expect(count('tbody a')).toBe(2)
+  })
+
+  test('no match and no data say different things', async () => {
+    await mount(ItemList, { items })
+    await type('input[type=search]', 'sofa')
+    expect(text('.empty')).toBe('No items match these filters.')
+    await mount(ItemList, { items: [] })
+    expect(text('.empty').includes('No items yet')).toBeTruthy()
+  })
+</script>

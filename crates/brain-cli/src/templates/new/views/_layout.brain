@@ -1,0 +1,15 @@
+<script>
+  import session from '../channels/session.jsbrain'
+</script>
+
+<div class="shell">
+  <p class="who" aria-live="polite">
+    {#if session.user}Signed in as {session.user.email}{:else}<a href="/login">Sign in</a>{/if}
+  </p>
+  <slot />
+</div>
+
+<style>
+  .shell { display: grid; gap: var(--space-2); }
+  .who { margin: 0; padding: 0 var(--space-5); text-align: right; color: var(--muted); font-size: .9rem; }
+</style>

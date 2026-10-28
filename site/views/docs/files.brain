@@ -1,0 +1,47 @@
+<meta seo lastmod="2026-10-13" title="Files and generators" description="Where every file of a BRAINLLM app lives, how file names become routes and components, and the brain add command that creates each one." canonical="/docs/files">
+
+<main class="doc">
+  <h1>Files and generators</h1>
+  <p>Every kind of file has one folder, one naming rule and one generator. You never decide where a file goes: the layout below is fixed, and the tools read it to build the route graph, the component list and the tests.</p>
+  <h2>The layout</h2>
+  <pre><code raw>app.brain          entry: html lang, common head, layout, slot for the view
+tokens.cssbrain    design tokens
+views/home.brain   route /
+views/users.brain  route /users
+views/users/[id].brain       route /users/:id
+views/users/_layout.brain    wraps every view in views/users/
+views/404.brain    not found page
+comp/user-card.brain         stateful component UserCard
+ui/badge.brain     stateless component Badge
+lib/format.jsbrain logic without markup</code></pre>
+  <p>The entry point is <code>app.brain</code>. It sets the document language, the shared head and the page frame, and it renders the current view where it places <code>&lt;slot /&gt;</code>. There is no HTML file anywhere in a BRAINLLM app; the build produces the <a href="https://html.spec.whatwg.org/multipage/">HTML</a> pages from the views.</p>
+  <h2>Routes come from file names</h2>
+  <p>Each file in <code>views/</code> is a route. <code>views/users.brain</code> answers <code>/users</code>, and a folder with a bracketed file, such as <code>views/users/[id].brain</code>, answers <code>/users/:id</code> with the parameter available as <code>ctx.params.id</code> in the view's <code>load</code> function. A file named <code>_layout.brain</code> wraps every view of its folder, and <code>views/404.brain</code> is the page for unknown addresses.</p>
+  <h2>Components and logic</h2>
+  <p>Components live in <code>comp/</code> when they hold state and in <code>ui/</code> when they only present what they receive. The component name is the file name in PascalCase, so <code>user-card.brain</code> is used as <code>UserCard</code>. Logic without markup goes in <code>lib/*.jsbrain</code>, with one export per file. Tests sit next to the component they test, as <code>user-card.test.brain</code>.</p>
+  <h2>Generate, do not hand-create</h2>
+  <p>Create every file with <code>brain add</code>. The generator writes the pattern already in place: the contract in a <code>meta</code> tag, typed stubs, accessible markup and a colocated test.</p>
+  <table>
+    <caption>Generators</caption>
+    <thead><tr><th scope="col">Kind</th><th scope="col">Command</th><th scope="col">Path</th></tr></thead>
+    <tbody>
+      <tr><td>view</td><td><code>brain add view users/[id]</code></td><td><code>views/users/[id].brain</code></td></tr>
+      <tr><td>layout</td><td><code>brain add layout users</code></td><td><code>views/users/_layout.brain</code></td></tr>
+      <tr><td>comp</td><td><code>brain add comp user-card --props "user:obj"</code></td><td><code>comp/user-card.brain</code></td></tr>
+      <tr><td>ui</td><td><code>brain add ui badge</code></td><td><code>ui/badge.brain</code></td></tr>
+      <tr><td>test</td><td><code>brain add test user-card</code></td><td><code>comp/user-card.test.brain</code></td></tr>
+      <tr><td>lib</td><td><code>brain add lib format</code></td><td><code>lib/format.jsbrain</code></td></tr>
+    </tbody>
+  </table>
+  <h2>Imports</h2>
+  <p>Import only files that exist; <code>brain map --json</code> lists them together with routes, props and tests. Framework primitives and the built-in UI kit need no import at all. Next, read <a href="/docs/components">Components</a> to see what goes inside a file.</p>
+</main>
+
+<style>
+  .doc { display: grid; gap: var(--space-3); max-width: 72ch; }
+  .doc p { margin: 0; }
+  pre { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--space-4); overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; }
+  caption { text-align: left; font-weight: 600; padding-bottom: var(--space-2); }
+  th, td { border-bottom: 1px solid var(--line); padding: var(--space-2); text-align: left; }
+</style>

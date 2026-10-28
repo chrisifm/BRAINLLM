@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1301",
+    "level": "warning",
+    "file": "comp/b1301-await-in-for-of.brain",
+    "line": 8,
+    "col": 22,
+    "msg": "`await` inside `for-of` over independent items: the calls run serially",
+    "fix": "`names = await Promise.all(ids.map(getName))`"
+  }
+]

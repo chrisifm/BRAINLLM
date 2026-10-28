@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0409",
+    "level": "error",
+    "file": "invalid/comp/b0409-reduced-motion.brain",
+    "line": 4,
+    "col": 11,
+    "msg": "animation without `@media (prefers-reduced-motion: reduce)`",
+    "fix": "add `@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }`"
+  }
+]

@@ -1,0 +1,10 @@
+[
+ {"id":"c1-props","expect":"props","detect":"<meta props=\"[^\"~]*\"","brief":"Write ui/avatar.brain: shows a user's photo and name given by its parent; it never changes them."},
+ {"id":"c2-model","expect":"model ~","detect":":[a-z]+~","brief":"Write comp/rating-input.brain: 1–5 star picker whose selected value the parent reads and can also set (two-way)."},
+ {"id":"c3-events","expect":"emits + emit","detect":"emits=\"[^\"]+\"[\\s\\S]*emit\\(","brief":"Write comp/file-row.brain: shows a file name with a Delete button; the parent decides what deleting means."},
+ {"id":"c4-slots","expect":"slots","detect":"<slot","brief":"Write ui/card.brain: a bordered container with a title area and a footer area whose content the parent supplies."},
+ {"id":"c5-expose","expect":"expose + bind:api","detect":"expose=\"[^\"]+\"","brief":"Write comp/search-box.brain: an input the parent can programmatically focus and clear (e.g. on Ctrl+K)."},
+ {"id":"c6-context","expect":"provide/use + key","detect":"use\\(","brief":"Write comp/price-tag.brain: displays a price in the currency chosen at the top of the app (MXN/USD); it is nested 5 levels deep. Also write channels/currency.jsbrain if needed."},
+ {"id":"c7-store","expect":"store in channels/","detect":"store\\(","brief":"Write channels/favorites.jsbrain and comp/fav-button.brain: a heart button on product cards; a header badge elsewhere in the app shows the favorites count; keep it across tabs."},
+ {"id":"c8-bus","expect":"bus in channels/","detect":"bus\\(","brief":"Write channels/analytics.jsbrain and comp/buy-button.brain: clicking Buy fires an analytics event that several unrelated listeners may log; nothing is stored."}
+]

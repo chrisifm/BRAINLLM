@@ -1,0 +1,5 @@
+<meta fallback="Setup failed">
+<script>
+  const parsed = JSON.parse('{')
+</script>
+<p class="never">{parsed.x}</p>

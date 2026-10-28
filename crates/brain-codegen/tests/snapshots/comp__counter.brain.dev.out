@@ -1,0 +1,36 @@
+import { guard } from "/@brain/brain-guard.js";
+import { sig, drv, fx, tpl, insert, cls, on } from "/@brain/brain.js";
+import { dev } from "/@brain/brain-dev.js";
+const $t0 = tpl("<button data-b=\"rs62nv\"><!>: <!> × 2 = <!></button>");
+function Counter($p = {}) {
+  const n = sig(($p.start ?? 0), "n");
+  const dbl = drv(() => n.v * 2);
+  fx(() => console.log(n.v));
+  const $r5 = $t0();
+  const $e1 = $r5;
+  const $e2 = $r5.firstChild;
+  const $e3 = $e2.nextSibling.nextSibling;
+  const $e4 = $e3.nextSibling.nextSibling;
+  on($e1, "click", () => { n.v++; });
+  cls($e1, "hot", () => n.v > 10);
+  insert(null, () => ($p.label ?? 'Clicks'), $e2);
+  insert(null, () => n.v, $e3);
+  insert(null, () => dbl.v, $e4);
+  return $r5;
+}
+Counter.h = "rs62nv";
+Counter.f = "comp/counter.brain";
+export default dev(guard(Counter));
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiY291bnRlci5icmFpbi5qcyIsInNvdXJjZXMiOlsiY291bnRlci5icmFpbiJdLCJzb3VyY2VzQ29udGVudCI6WyI8bWV0YSBwcm9wcz1cInN0YXJ0Om51bT0wIGxhYmVsOnN0cj0nQ2xpY2tzJ1wiPlxuXG48c2NyaXB0PlxuICBsZXQgbiA9IHNpZyhzdGFydClcbiAgbGV0IGRibCA9IGRydigoKSA9PiBuICogMilcbiAgZngoKCkgPT4gbG9nKG4pKVxuPC9zY3JpcHQ+XG5cbjxidXR0b24gb246Y2xpY2s9e24rK30gY2xhc3M6aG90PXtuID4gMTB9PntsYWJlbH06IHtufSDDlyAyID0ge2RibH08L2J1dHRvbj5cblxuPHN0eWxlPlxuICBidXR0b24geyBwYWRkaW5nOiB2YXIoLS1zcGFjZS0yKTsgJi5ob3QgeyBjb2xvcjogdmFyKC0tYmFkKTsgfSB9XG48L3N0eWxlPlxuIl0sIm5hbWVzIjpbXSwibWFwcGluZ3MiOiI7Ozs7O0FBR0E7QUFDQTtBQUNBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUdBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBOyJ9
+
+/* ---- css ---- */
+@layer comp {
+  @scope ([data-b="rs62nv"]) to ([data-b]) {
+    :where(:scope):is(button), button {
+      padding: var(--space-2);
+      &.hot {
+        color: var(--bad);
+      }
+    }
+  }
+}

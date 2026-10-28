@@ -1,0 +1,48 @@
+<meta props="customer:obj? saving:bool=false error:str=''" emits="save:obj cancel">
+<script>
+  let name = sig(customer ? customer.name : '')
+  let email = sig(customer ? customer.email : '')
+  let plan = sig(customer ? customer.plan : 'Free')
+  let nameErr = sig('')
+  let emailErr = sig('')
+  const submit = () => {
+    nameErr = name.trim() === '' ? 'Name is required' : ''
+    emailErr = email.includes('@') ? '' : 'Email must contain @'
+    if (nameErr !== '' || emailErr !== '') return
+    emit('save', { name: name.trim(), email: email.trim(), plan })
+  }
+</script>
+<form class="form" on:submit={submit} aria-labelledby="form-title" novalidate>
+  <h2 id="form-title">{customer ? 'Edit customer' : 'New customer'}</h2>
+  <div class="field">
+    <label for="c-name">Name</label>
+    <input id="c-name" bind:value={name} aria-invalid={nameErr !== ''} aria-describedby="c-name-err" />
+    <p id="c-name-err" class="err" role="alert">{nameErr}</p>
+  </div>
+  <div class="field">
+    <label for="c-email">Email</label>
+    <input id="c-email" type="text" bind:value={email} aria-invalid={emailErr !== ''} aria-describedby="c-email-err" />
+    <p id="c-email-err" class="err" role="alert">{emailErr}</p>
+  </div>
+  <div class="field">
+    <label for="c-plan">Plan</label>
+    <select id="c-plan" bind:value={plan}>
+      <option value="Free">Free</option>
+      <option value="Pro">Pro</option>
+      <option value="Business">Business</option>
+    </select>
+  </div>
+  {#if error !== ''}<p class="err" role="alert">{error}</p>{/if}
+  <div class="actions">
+    <button type="submit" class="primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+    <button type="button" disabled={saving} on:click={() => emit('cancel')}>Cancel</button>
+  </div>
+</form>
+<style>
+  .form { display: grid; gap: var(--space-3); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: var(--space-4); }
+  h2 { margin: 0; font-size: 1.1rem; }
+  .field { display: grid; gap: var(--space-1); }
+  .err { margin: 0; color: var(--bad); min-height: 1em; font-size: .9rem; }
+  .actions { display: flex; gap: var(--space-2); }
+  .primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
+</style>

@@ -1,0 +1,27 @@
+<meta seo title="Form" description="Kit form components with form()." canonical="/form">
+<script>
+  import toast from '../channels/toast.jsbrain'
+  let f = form({ email: 'email!', plan: 'str!', terms: 'bool!' }, {
+    submit: async (v) => {
+      await new Promise((r) => setTimeout(r, 20))
+      toast.send({ text: 'Saved ' + v.email, kind: 'ok' })
+    },
+  })
+  let tab = sig('a')
+  const rows = Array.from({ length: 300 }, (_, i) => ({ id: i + 1, name: 'Row ' + (i + 1), n: (i * 37) % 101 }))
+  const cols = [{ key: 'id', label: 'ID' }, { key: 'name', label: 'Name' }, { key: 'n', label: 'Score' }]
+</script>
+<main>
+  <h1>Form</h1>
+  <form on:submit={f.submit} novalidate>
+    <Input label="Email" name="email" bind:value={f.v.email} error={f.err.email} />
+    <Select label="Plan" name="plan" options={['Free', 'Pro']} placeholder="Choose a plan" bind:value={f.v.plan} error={f.err.plan} />
+    <Checkbox label="I accept the terms" name="terms" bind:checked={f.v.terms} error={f.err.terms} />
+    <Button type="submit" busy={f.busy}>Save</Button>
+  </form>
+  <Tabs label="Sections" tabs={[{ id: 'a', label: 'Overview' }, { id: 'b', label: 'Details' }]} bind:value={tab}>
+    {#if tab === 'a'}<p>Overview panel</p>{:else}<p>Details panel</p>{/if}
+  </Tabs>
+  <Table caption="Scores" rows={rows} columns={cols} height={400} />
+  <Toast from={toast} ms={50} />
+</main>

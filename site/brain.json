@@ -1,0 +1,19 @@
+{
+  "name": "BRAINLLM",
+  "description": "The web framework written for LLMs: one .brain file per component, direct DOM without a virtual DOM, and a Rust toolchain that explains every error.",
+  "lang": "en",
+  "cache": {
+    "http": true,
+    "sw": true,
+    "offline": true,
+    "precacheKB": 2048
+  },
+  "seo": {
+    "minScore": 95,
+    "ai": "allow",
+    "og": "always"
+  },
+  "budget": {
+    "viewKB": 30
+  }
+}

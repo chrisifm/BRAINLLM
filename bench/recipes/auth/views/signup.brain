@@ -1,0 +1,49 @@
+<meta seo title="Create an account" description="Create an account with your email and a password of at least 8 characters. In development the demo provider signs you in at once.">
+
+<script>
+  import auth from '../server/auth.jsbrain'
+  import session from '../channels/session.jsbrain'
+
+  export async function load() {
+    return { configured: auth.configured() }
+  }
+  server: async function signup(ctx, v) {
+    if (typeof v.email !== 'string' || !v.email.includes('@')) throw { errors: { email: 'Enter a valid email' } }
+    if (typeof v.password !== 'string' || v.password.length < 8) throw { errors: { password: 'Use at least 8 characters' } }
+    const user = auth.register(v.email)
+    if (!user) throw { errors: { email: 'Sign-up is not available' } }
+    ctx.session.set(user)
+    return { user }
+  }
+  let f = form({ email: 'email!', password: 'str!', confirm: 'str!' }, {
+    submit: async (v) => {
+      if (v.password.length < 8) throw { errors: { password: 'Use at least 8 characters' } }
+      if (v.password !== v.confirm) throw { errors: { confirm: 'The passwords do not match' } }
+      const r = await signup({ email: v.email, password: v.password })
+      session.user = r.user
+      navigate('/account')
+    },
+  })
+</script>
+
+<main class="page">
+  <h1>Create an account</h1>
+  {#if props.configured}
+    <form on:submit={f.submit}>
+      <Input label="Email" type="email" autocomplete="email" bind:value={f.v.email} error={f.err.email} />
+      <Input label="Password" type="password" autocomplete="new-password" help="At least 8 characters" bind:value={f.v.password} error={f.err.password} />
+      <Input label="Repeat the password" type="password" autocomplete="new-password" bind:value={f.v.confirm} error={f.err.confirm} />
+      {#if f.error}<p role="alert" class="err">{f.error}</p>{/if}
+      <Button type="submit" busy={f.busy}>Create account</Button>
+    </form>
+    <p>Already have an account? <a href="/login">Sign in</a></p>
+  {:else}
+    <p role="status">Sign-up is not configured. Connect a real provider in server/auth.jsbrain (the demo exists only in development).</p>
+  {/if}
+</main>
+
+<style>
+  .page { max-width: 40ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+  form { display: grid; gap: var(--space-3); }
+  .err { margin: 0; color: var(--bad); }
+</style>

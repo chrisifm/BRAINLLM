@@ -1,0 +1,5 @@
+<script>
+  let n = sig(0)
+</script>
+
+<div on:click={n++}>{n}</div>

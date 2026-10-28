@@ -1,0 +1,27 @@
+<script>
+  import AppNav from './app-nav.brain'
+
+  const links = [{ href: '/', label: 'Home' }, { href: '/about', label: 'About' }]
+
+  test('renders one link per entry, in order', async () => {
+    await mount(AppNav, { links })
+    expect(count('li a')).toBe(2)
+    expect(text('li:first-child a')).toBe('Home')
+    expect(attr('li:last-child a', 'href')).toBe('/about')
+  })
+
+  test('the Menu button opens and closes the list and says so', async () => {
+    await mount(AppNav, { links })
+    expect(attr('.toggle', 'aria-expanded')).toBe('false')
+    await click('.toggle')
+    expect(attr('.toggle', 'aria-expanded')).toBe('true')
+    expect(hasClass('ul', 'open')).toBeTruthy()
+    await click('.toggle')
+    expect(attr('.toggle', 'aria-expanded')).toBe('false')
+  })
+
+  test('an empty list says there are no pages', async () => {
+    await mount(AppNav, { links: [] })
+    expect(text('.none')).toBe('No pages yet.')
+  })
+</script>

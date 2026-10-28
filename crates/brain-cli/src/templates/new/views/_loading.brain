@@ -1,0 +1,11 @@
+<main class="page" aria-busy="true" aria-label="Loading">
+  <div class="bar wide"></div>
+  <div class="bar"></div>
+  <div class="bar"></div>
+</main>
+
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+  .bar { height: 1rem; border-radius: var(--radius-sm); background: var(--surface); }
+  .wide { height: 2rem; width: 60%; }
+</style>

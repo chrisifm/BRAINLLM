@@ -1,0 +1,8 @@
+<script>
+  import shared from '../channels/shared.jsbrain'
+  const bump = () => { shared.count = shared.count + 100 }
+</script>
+<div class="store-b">
+  <span class="val">{shared.count}</span>
+  <button type="button" class="inc" on:click={bump}>B +100</button>
+</div>

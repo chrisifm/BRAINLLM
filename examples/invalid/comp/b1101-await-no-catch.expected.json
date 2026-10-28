@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1101",
+    "level": "error",
+    "file": "invalid/comp/b1101-await-no-catch.brain",
+    "line": 5,
+    "col": 1,
+    "msg": "`{#await users}` on a resource without `{:catch}` and an empty state (`{:empty}` in its `{#each}`)",
+    "fix": "add `{:catch e}<ErrorState error={e} retry={users.refetch} />` and `{:empty}` in the `{#each}`"
+  }
+]

@@ -1,0 +1,5 @@
+<script>
+  let q = sig('')
+</script>
+
+<input bind:value={q} />

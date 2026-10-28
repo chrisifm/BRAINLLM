@@ -1,0 +1,8 @@
+<script>
+  const TICK_MS = 1000
+  let n = sig(0)
+  fx(() => {
+    setInterval(() => { n++ }, TICK_MS)
+  })
+</script>
+<p>{n}</p>

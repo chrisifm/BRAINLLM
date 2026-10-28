@@ -1,0 +1,9 @@
+{
+  "name": "modal",
+  "title": "Modal flows: confirm and edit in a dialog",
+  "description": "Two dialog components on the kit <Dialog> (native modal: focus moves in, the page is inert, Escape closes): comp/confirm-dialog (trigger button, message, Cancel/Confirm, danger style, emits confirm) and comp/rename-dialog (a form() inside a dialog: validation, busy state, server errors under the field, closes on success). views/team.brain uses both on a list of members.",
+  "params": { "title": { "type": "string" }, "confirmLabel": { "type": "string", "default": "Confirm" }, "danger": { "type": "boolean", "default": false } },
+  "files": ["comp/confirm-dialog.brain", "comp/confirm-dialog.test.brain", "comp/rename-dialog.brain", "comp/rename-dialog.test.brain", "views/team.brain"],
+  "uses": ["Dialog", "Input", "Button"],
+  "notes": "Open a dialog from code with expose: <ConfirmDialog bind:api={d} /> then d.open(). Tests pass emit handlers as props named 'on:<event>'. Link /team from the nav."
+}

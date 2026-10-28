@@ -1,0 +1,6 @@
+<script>
+  import Confirm from '../../comp/confirm.brain'
+  let dlg = sig(null)
+</script>
+<button type="button" on:click={dlg.close()}>Close</button>
+<Confirm bind:api={dlg} text="Are you sure?" />

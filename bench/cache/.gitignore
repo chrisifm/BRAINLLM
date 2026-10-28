@@ -1,0 +1,3 @@
+results/*
+!results/summary.json
+!results/summary.md

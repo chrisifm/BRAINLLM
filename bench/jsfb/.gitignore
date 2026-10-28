@@ -1,0 +1,4 @@
+# Raw runner output (large); reproduce with the commands in README.md. summary.json is committed.
+results/raw/
+brainllm/dist/
+brainllm/.brain/

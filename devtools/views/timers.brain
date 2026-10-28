@@ -1,0 +1,11 @@
+<meta seo title="Timers" description="Active timeouts, intervals and animation frames with the component and line that created them.">
+<script>
+  import inspector from '../channels/inspector.jsbrain'
+  const rows = drv(() => inspector.timers.filter((t) => t.st === 'on').map((t) => ({ ...t, who: t.own ? t.own.name + ' · ' + t.own.o : 'module', clean: t.cleanup === false ? 'missing' : t.cleanup ? 'yes' : '' })))
+  const cols = [{ key: 'kind', label: 'Kind' }, { key: 'ms', label: 'ms' }, { key: 'who', label: 'Created by' }, { key: 'line', label: 'Line' }, { key: 'clean', label: 'Cleanup' }]
+</script>
+<h1>Timers</h1>
+<Table caption="Active timers" rows={rows} columns={cols} empty="No active timer." />
+<style>
+  h1 { margin: 0 0 var(--space-4); font-size: 22px; }
+</style>

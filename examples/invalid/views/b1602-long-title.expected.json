@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1602",
+    "level": "warning",
+    "file": "invalid/views/b1602-long-title.brain",
+    "line": 1,
+    "col": 11,
+    "msg": "`title` has 77 characters; search results cut it after 60",
+    "fix": "shorten the title to 60 characters or fewer"
+  }
+]

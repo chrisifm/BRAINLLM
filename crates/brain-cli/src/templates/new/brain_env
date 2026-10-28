@@ -1,0 +1,18 @@
+# Variables for every environment (rules: `brain spec --topic server`). Never commit this file: .brain_env.example lists the keys.
+# Lines before any [section] are shared. Only PUBLIC_* keys reach the browser; the rest stay on the server.
+PUBLIC_SITE_NAME={{name}}
+PUBLIC_SITE_URL=http://localhost:5180
+
+[development]
+# `brain run` uses this section. The demo login and the dev session key exist only here: a deployed app has
+# neither (set BRAIN_SECRET in the host environment, 32+ random bytes, and a real provider in server/auth.jsbrain).
+DEMO_PASSWORD=demo
+BRAIN_SECRET={{secret}}
+
+[staging]
+# `brain build --env staging` uses this section.
+PUBLIC_SITE_URL=https://staging.example.com
+
+[production]
+# `brain build` and `brain start` use this section. An empty value must come from the host's environment.
+PUBLIC_SITE_URL=https://example.com

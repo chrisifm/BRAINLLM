@@ -1,0 +1,1126 @@
+{
+ "at": "2026-10-14T00:48:25.331Z",
+ "sites": [
+  {
+   "site": "landing",
+   "label": "sonnet",
+   "model": "claude-sonnet-5-5",
+   "primary": true,
+   "generation": {
+    "done": true,
+    "doctorExit": 0,
+    "routesVsBrief": "6/1",
+    "wallS": 51.6,
+    "toolCalls": 26,
+    "calls": {
+     "mcp__brain__brain_spec": 1,
+     "mcp__brain__brain_new": 1,
+     "mcp__brain__brain_read": 3,
+     "mcp__brain__brain_card": 2,
+     "mcp__brain__brain_remove": 13,
+     "mcp__brain__brain_write": 2,
+     "mcp__brain__brain_doctor": 2,
+     "mcp__brain__brain_edit": 1,
+     "mcp__brain__brain_env_keys": 1
+    },
+    "turns": 27,
+    "inputTokens": 197579,
+    "outputTokens": 7368,
+    "costUsd": 0.21686819999999998,
+    "stuckLoops": 0,
+    "humanInterventions": 0,
+    "timedOut": false,
+    "brainSha": "018520473d6e",
+    "specSha": "e745bbfd456e"
+   },
+   "quality": {
+    "doctorExit": 0,
+    "tests": "0/0",
+    "testExit": 0,
+    "buildAsGeneratedExit": 0,
+    "buildAsGeneratedErrors": 0,
+    "patch": null,
+    "distOk": true,
+    "dist": {
+     "sourceExtLeaked": [],
+     "sourceMaps": [],
+     "missingGz": [],
+     "brSiblings": 0,
+     "snippets": {
+      "nginx": true,
+      "caddy": true,
+      "headers": true
+     }
+    },
+    "contentTypeOk": true,
+    "contentTypeChecked": 12,
+    "encodings": {
+     "gzip": 12
+    },
+    "lighthouse": {
+     "/": {
+      "version": "13.5.0",
+      "a11y": 100,
+      "seo": 100,
+      "failing": []
+     }
+    },
+    "brainSeo": [
+     {
+      "route": "/",
+      "score": 91,
+      "findings": [
+       "B1808(info)",
+       "B1812(info)",
+       "B1831(info)"
+      ]
+     }
+    ],
+    "smoke": {
+     "passed": 12,
+     "total": 12,
+     "failed": [],
+     "consoleErrors": 0
+    }
+   },
+   "performance": {
+    "buildColdMs": {
+     "meanMs": 128.7,
+     "stddevMs": 21.3,
+     "n": 10,
+     "median": 120.42,
+     "p95": 165.16,
+     "min": 104.39,
+     "max": 165.16
+    },
+    "buildWarmMs": {
+     "meanMs": 31.8,
+     "stddevMs": 1.6,
+     "n": 10,
+     "median": 31.06,
+     "p95": 35.95,
+     "min": 30.45,
+     "max": 35.95
+    },
+    "mainRoute": "/",
+    "bytes": {
+     "/": {
+      "html": {
+       "files": 1,
+       "raw": 12492,
+       "gz": 4046,
+       "br": 3305
+      },
+      "js": {
+       "files": 5,
+       "raw": 30890,
+       "gz": 12670,
+       "br": 11198
+      },
+      "css": {
+       "files": 1,
+       "raw": 1582,
+       "gz": 762,
+       "br": 667
+      },
+      "other": {
+       "files": 2,
+       "raw": 724,
+       "gz": 472,
+       "br": 401
+      },
+      "totalHtmlJsCss": {
+       "raw": 44964,
+       "gz": 17478,
+       "br": 15170
+      },
+      "requests": 10,
+      "duplicateRequests": 1,
+      "duplicated": [
+       "/_b/gdiv1rd4.svg"
+      ],
+      "transferred": 22821
+     }
+    },
+    "firstRouteJs": {
+     "files": 5,
+     "raw": 30890,
+     "gz": 12670,
+     "br": 11198
+    },
+    "hmr": {
+     "component": "views/home.brain",
+     "style": {
+      "applied": [
+       "css"
+      ],
+      "tool": {
+       "n": 20,
+       "median": 2.55,
+       "p95": 4.04,
+       "min": 2.06,
+       "max": 4.05
+      },
+      "compile": {
+       "n": 20,
+       "median": 1.66,
+       "p95": 2.7,
+       "min": 1.3,
+       "max": 2.96
+      },
+      "client": {
+       "n": 20,
+       "median": 0.84,
+       "p95": 1.18,
+       "min": 0.75,
+       "max": 1.39
+      },
+      "total": {
+       "n": 20,
+       "median": 32.2,
+       "p95": 36.53,
+       "min": 23.46,
+       "max": 56.43
+      },
+      "errors": 0
+     },
+     "script": {
+      "applied": [
+       "js"
+      ],
+      "tool": {
+       "n": 20,
+       "median": 2.61,
+       "p95": 3.96,
+       "min": 2.41,
+       "max": 8.02
+      },
+      "compile": {
+       "n": 20,
+       "median": 0.66,
+       "p95": 1.29,
+       "min": 0.58,
+       "max": 5.02
+      },
+      "client": {
+       "n": 20,
+       "median": 1.95,
+       "p95": 2.67,
+       "min": 1.79,
+       "max": 3
+      },
+      "total": {
+       "n": 20,
+       "median": 32.42,
+       "p95": 36.68,
+       "min": 24.95,
+       "max": 51.23
+      },
+      "errors": 0
+     },
+     "statePreserved": true,
+     "reloaded": false
+    }
+   },
+   "binary": {
+    "brainSha": "018520473d6e",
+    "specSha": "e745bbfd456e"
+   }
+  },
+  {
+   "site": "panel",
+   "label": "sonnet",
+   "model": "claude-sonnet-5-5",
+   "primary": true,
+   "generation": {
+    "done": true,
+    "doctorExit": 0,
+    "routesVsBrief": "9/1",
+    "wallS": 80.1,
+    "toolCalls": 42,
+    "calls": {
+     "mcp__brain__brain_spec": 2,
+     "mcp__brain__brain_new": 1,
+     "mcp__brain__brain_read": 4,
+     "mcp__brain__brain_map": 1,
+     "mcp__brain__brain_card": 5,
+     "mcp__brain__brain_remove": 12,
+     "mcp__brain__brain_write": 8,
+     "mcp__brain__brain_split": 1,
+     "mcp__brain__brain_doctor": 1,
+     "mcp__brain__brain_run_start": 1,
+     "mcp__brain__brain_navigate": 1,
+     "mcp__brain__brain_click": 2,
+     "mcp__brain__brain_type": 2,
+     "mcp__brain__brain_eval": 1
+    },
+    "turns": 43,
+    "inputTokens": 434563,
+    "outputTokens": 11795,
+    "costUsd": 0.27898989999999996,
+    "stuckLoops": 0,
+    "humanInterventions": 0,
+    "timedOut": false,
+    "brainSha": "018520473d6e",
+    "specSha": "e745bbfd456e"
+   },
+   "quality": {
+    "doctorExit": 0,
+    "tests": "0/0",
+    "testExit": 0,
+    "buildAsGeneratedExit": 0,
+    "buildAsGeneratedErrors": 0,
+    "patch": null,
+    "distOk": true,
+    "dist": {
+     "sourceExtLeaked": [],
+     "sourceMaps": [],
+     "missingGz": [],
+     "brSiblings": 0,
+     "snippets": {
+      "nginx": true,
+      "caddy": true,
+      "headers": true
+     }
+    },
+    "contentTypeOk": true,
+    "contentTypeChecked": 21,
+    "encodings": {
+     "gzip": 21
+    },
+    "lighthouse": {
+     "/": {
+      "version": "13.5.0",
+      "a11y": 100,
+      "seo": 100,
+      "failing": []
+     },
+     "/invoices": {
+      "version": "13.5.0",
+      "a11y": 100,
+      "seo": 100,
+      "failing": []
+     },
+     "/settings": {
+      "version": "13.5.0",
+      "a11y": 100,
+      "seo": 100,
+      "failing": []
+     }
+    },
+    "brainSeo": [
+     {
+      "route": "/",
+      "score": 91,
+      "findings": [
+       "B1808(info)",
+       "B1812(info)"
+      ]
+     },
+     {
+      "route": "/invoices",
+      "score": 87,
+      "findings": [
+       "B1804(warning)",
+       "B1808(info)",
+       "B1812(info)"
+      ]
+     },
+     {
+      "route": "/settings",
+      "score": 87,
+      "findings": [
+       "B1804(warning)",
+       "B1808(info)",
+       "B1812(info)"
+      ]
+     }
+    ],
+    "smoke": {
+     "passed": 13,
+     "total": 13,
+     "failed": [],
+     "consoleErrors": 0
+    }
+   },
+   "performance": {
+    "buildColdMs": {
+     "meanMs": 167.2,
+     "stddevMs": 33,
+     "n": 10,
+     "median": 159.19,
+     "p95": 228.45,
+     "min": 124.35,
+     "max": 228.45
+    },
+    "buildWarmMs": {
+     "meanMs": 46.3,
+     "stddevMs": 6.5,
+     "n": 10,
+     "median": 43.3,
+     "p95": 62,
+     "min": 40.97,
+     "max": 62
+    },
+    "mainRoute": "/",
+    "bytes": {
+     "/": {
+      "html": {
+       "files": 1,
+       "raw": 8979,
+       "gz": 3277,
+       "br": 2656
+      },
+      "js": {
+       "files": 10,
+       "raw": 36017,
+       "gz": 14973,
+       "br": 13264
+      },
+      "css": {
+       "files": 1,
+       "raw": 1582,
+       "gz": 762,
+       "br": 667
+      },
+      "other": {
+       "files": 2,
+       "raw": 711,
+       "gz": 463,
+       "br": 384
+      },
+      "totalHtmlJsCss": {
+       "raw": 46578,
+       "gz": 19012,
+       "br": 16587
+      },
+      "requests": 15,
+      "duplicateRequests": 1,
+      "duplicated": [
+       "/_b/gdiv1rd4.svg"
+      ],
+      "transferred": 26987
+     },
+     "/invoices": {
+      "html": {
+       "files": 1,
+       "raw": 5255,
+       "gz": 2286,
+       "br": 1883
+      },
+      "js": {
+       "files": 7,
+       "raw": 25372,
+       "gz": 11348,
+       "br": 10070
+      },
+      "css": {
+       "files": 1,
+       "raw": 1582,
+       "gz": 762,
+       "br": 667
+      },
+      "other": {
+       "files": 2,
+       "raw": 711,
+       "gz": 463,
+       "br": 384
+      },
+      "totalHtmlJsCss": {
+       "raw": 32209,
+       "gz": 14396,
+       "br": 12620
+      },
+      "requests": 11,
+      "duplicateRequests": 0,
+      "duplicated": [],
+      "transferred": 0
+     },
+     "/settings": {
+      "html": {
+       "files": 1,
+       "raw": 5265,
+       "gz": 2295,
+       "br": 1877
+      },
+      "js": {
+       "files": 7,
+       "raw": 25382,
+       "gz": 11357,
+       "br": 10073
+      },
+      "css": {
+       "files": 1,
+       "raw": 1582,
+       "gz": 762,
+       "br": 667
+      },
+      "other": {
+       "files": 2,
+       "raw": 711,
+       "gz": 463,
+       "br": 384
+      },
+      "totalHtmlJsCss": {
+       "raw": 32229,
+       "gz": 14414,
+       "br": 12617
+      },
+      "requests": 11,
+      "duplicateRequests": 0,
+      "duplicated": [],
+      "transferred": 0
+     }
+    },
+    "firstRouteJs": {
+     "files": 10,
+     "raw": 36017,
+     "gz": 14973,
+     "br": 13264
+    },
+    "hmr": {
+     "component": "comp/customer-form.brain",
+     "style": {
+      "applied": [
+       "css"
+      ],
+      "tool": {
+       "n": 20,
+       "median": 1.26,
+       "p95": 1.92,
+       "min": 1.13,
+       "max": 4.71
+      },
+      "compile": {
+       "n": 20,
+       "median": 0.43,
+       "p95": 0.89,
+       "min": 0.39,
+       "max": 0.94
+      },
+      "client": {
+       "n": 20,
+       "median": 0.78,
+       "p95": 1.03,
+       "min": 0.71,
+       "max": 3.77
+      },
+      "total": {
+       "n": 20,
+       "median": 31.85,
+       "p95": 34.95,
+       "min": 28.57,
+       "max": 35.71
+      },
+      "errors": 0
+     },
+     "script": {
+      "applied": [
+       "js"
+      ],
+      "tool": {
+       "n": 20,
+       "median": 1.78,
+       "p95": 2.32,
+       "min": 1.57,
+       "max": 17.67
+      },
+      "compile": {
+       "n": 20,
+       "median": 0.27,
+       "p95": 0.52,
+       "min": 0.25,
+       "max": 1.24
+      },
+      "client": {
+       "n": 20,
+       "median": 1.51,
+       "p95": 1.93,
+       "min": 1.31,
+       "max": 16.43
+      },
+      "total": {
+       "n": 20,
+       "median": 32.86,
+       "p95": 36.54,
+       "min": 26.89,
+       "max": 47.07
+      },
+      "errors": 0
+     },
+     "statePreserved": true,
+     "reloaded": false
+    }
+   },
+   "binary": {
+    "brainSha": "018520473d6e",
+    "specSha": "e745bbfd456e"
+   }
+  },
+  {
+   "site": "landing",
+   "label": "haiku",
+   "model": "claude-haiku-5-5",
+   "primary": false,
+   "generation": {
+    "done": true,
+    "doctorExit": 0,
+    "routesVsBrief": "6/1",
+    "wallS": 137.1,
+    "toolCalls": 59,
+    "calls": {
+     "mcp__brain__brain_spec": 3,
+     "mcp__brain__brain_map": 1,
+     "mcp__brain__brain_new": 1,
+     "mcp__brain__brain_read": 7,
+     "mcp__brain__brain_card": 2,
+     "mcp__brain__brain_write": 2,
+     "mcp__brain__brain_remove": 9,
+     "mcp__brain__brain_doctor": 3,
+     "mcp__brain__brain_edit": 5,
+     "mcp__brain__brain_run_start": 1,
+     "mcp__brain__brain_navigate": 2,
+     "mcp__brain__brain_type": 8,
+     "mcp__brain__brain_click": 3,
+     "mcp__brain__brain_eval": 8,
+     "mcp__brain__brain_errors": 1,
+     "mcp__brain__brain_why": 2,
+     "mcp__brain__brain_run_stop": 1
+    },
+    "turns": 60,
+    "inputTokens": 1018892,
+    "outputTokens": 24275,
+    "costUsd": 0.03258219,
+    "stuckLoops": 0,
+    "humanInterventions": 0,
+    "timedOut": false,
+    "brainSha": "018520473d6e",
+    "specSha": "e745bbfd456e"
+   },
+   "quality": {
+    "doctorExit": 0,
+    "tests": "2/2",
+    "testExit": 0,
+    "buildAsGeneratedExit": 0,
+    "buildAsGeneratedErrors": 0,
+    "patch": null,
+    "distOk": true,
+    "dist": {
+     "sourceExtLeaked": [],
+     "sourceMaps": [],
+     "missingGz": [],
+     "brSiblings": 0,
+     "snippets": {
+      "nginx": true,
+      "caddy": true,
+      "headers": true
+     }
+    },
+    "contentTypeOk": true,
+    "contentTypeChecked": 13,
+    "encodings": {
+     "gzip": 13
+    },
+    "lighthouse": {
+     "/": {
+      "version": "13.5.0",
+      "a11y": 100,
+      "seo": 100,
+      "failing": []
+     }
+    },
+    "brainSeo": [
+     {
+      "route": "/",
+      "score": 96,
+      "findings": [
+       "B1812(info)",
+       "B1834(info)"
+      ]
+     }
+    ],
+    "smoke": {
+     "passed": 10,
+     "total": 10,
+     "failed": [],
+     "consoleErrors": 0
+    }
+   },
+   "performance": {
+    "buildColdMs": {
+     "meanMs": 112.5,
+     "stddevMs": 5,
+     "n": 10,
+     "median": 111.58,
+     "p95": 121.59,
+     "min": 106.05,
+     "max": 121.59
+    },
+    "buildWarmMs": {
+     "meanMs": 39.2,
+     "stddevMs": 4.5,
+     "n": 10,
+     "median": 37.29,
+     "p95": 45.7,
+     "min": 32.55,
+     "max": 45.7
+    },
+    "mainRoute": "/",
+    "bytes": {
+     "/": {
+      "html": {
+       "files": 1,
+       "raw": 8737,
+       "gz": 3215,
+       "br": 2647
+      },
+      "js": {
+       "files": 5,
+       "raw": 31304,
+       "gz": 12759,
+       "br": 11271
+      },
+      "css": {
+       "files": 2,
+       "raw": 5736,
+       "gz": 1820,
+       "br": 1561
+      },
+      "other": {
+       "files": 2,
+       "raw": 755,
+       "gz": 501,
+       "br": 431
+      },
+      "totalHtmlJsCss": {
+       "raw": 45777,
+       "gz": 17794,
+       "br": 15479
+      },
+      "requests": 11,
+      "duplicateRequests": 1,
+      "duplicated": [
+       "/_b/gdiv1rd4.svg"
+      ],
+      "transferred": 23639
+     }
+    },
+    "firstRouteJs": {
+     "files": 5,
+     "raw": 31304,
+     "gz": 12759,
+     "br": 11271
+    },
+    "hmr": {
+     "component": "views/home.brain",
+     "style": {
+      "applied": [
+       "css"
+      ],
+      "tool": {
+       "n": 20,
+       "median": 2.47,
+       "p95": 3.08,
+       "min": 2.28,
+       "max": 7.31
+      },
+      "compile": {
+       "n": 20,
+       "median": 1.6,
+       "p95": 2.18,
+       "min": 1.51,
+       "max": 4.49
+      },
+      "client": {
+       "n": 20,
+       "median": 0.84,
+       "p95": 1.1,
+       "min": 0.75,
+       "max": 2.82
+      },
+      "total": {
+       "n": 20,
+       "median": 33.52,
+       "p95": 37.72,
+       "min": 26.88,
+       "max": 38.07
+      },
+      "errors": 0
+     },
+     "script": {
+      "applied": [
+       "js"
+      ],
+      "tool": {
+       "n": 20,
+       "median": 2.7,
+       "p95": 3.25,
+       "min": 2.45,
+       "max": 5.46
+      },
+      "compile": {
+       "n": 20,
+       "median": 0.68,
+       "p95": 1.13,
+       "min": 0.62,
+       "max": 3.14
+      },
+      "client": {
+       "n": 20,
+       "median": 1.99,
+       "p95": 2.17,
+       "min": 1.82,
+       "max": 2.32
+      },
+      "total": {
+       "n": 20,
+       "median": 34.36,
+       "p95": 37.85,
+       "min": 20.65,
+       "max": 38.26
+      },
+      "errors": 0
+     },
+     "statePreserved": true,
+     "reloaded": false
+    }
+   },
+   "binary": {
+    "brainSha": "018520473d6e",
+    "specSha": "e745bbfd456e"
+   }
+  },
+  {
+   "site": "panel",
+   "label": "haiku",
+   "model": "claude-haiku-5-5",
+   "primary": false,
+   "generation": {
+    "done": true,
+    "doctorExit": 0,
+    "routesVsBrief": "9/1",
+    "wallS": 198.2,
+    "toolCalls": 74,
+    "calls": {
+     "mcp__brain__brain_spec": 8,
+     "mcp__brain__brain_info": 1,
+     "mcp__brain__brain_new": 1,
+     "mcp__brain__brain_read": 14,
+     "mcp__brain__brain_card": 3,
+     "mcp__brain__brain_api_call": 1,
+     "mcp__brain__brain_remove": 13,
+     "mcp__brain__brain_write": 15,
+     "mcp__brain__brain_split": 1,
+     "mcp__brain__brain_edit": 6,
+     "mcp__brain__brain_check": 1,
+     "mcp__brain__brain_doctor": 3,
+     "mcp__brain__brain_add": 1,
+     "mcp__brain__brain_run_start": 1,
+     "mcp__brain__brain_navigate": 1,
+     "mcp__brain__brain_eval": 2,
+     "mcp__brain__brain_type": 1,
+     "mcp__brain__brain_run_stop": 1
+    },
+    "turns": 75,
+    "inputTokens": 1595641,
+    "outputTokens": 40033,
+    "costUsd": 0.04919738000000001,
+    "stuckLoops": 0,
+    "humanInterventions": 0,
+    "timedOut": false,
+    "brainSha": "018520473d6e",
+    "specSha": "e745bbfd456e"
+   },
+   "quality": {
+    "doctorExit": 0,
+    "tests": "2/2",
+    "testExit": 0,
+    "buildAsGeneratedExit": 0,
+    "buildAsGeneratedErrors": 0,
+    "patch": null,
+    "distOk": true,
+    "dist": {
+     "sourceExtLeaked": [],
+     "sourceMaps": [],
+     "missingGz": [],
+     "brSiblings": 0,
+     "snippets": {
+      "nginx": true,
+      "caddy": true,
+      "headers": true
+     }
+    },
+    "contentTypeOk": true,
+    "contentTypeChecked": 25,
+    "encodings": {
+     "gzip": 25
+    },
+    "lighthouse": {
+     "/": {
+      "version": "13.5.0",
+      "a11y": 100,
+      "seo": 100,
+      "failing": []
+     },
+     "/invoices": {
+      "version": "13.5.0",
+      "a11y": 100,
+      "seo": 100,
+      "failing": []
+     },
+     "/settings": {
+      "version": "13.5.0",
+      "a11y": 100,
+      "seo": 100,
+      "failing": []
+     }
+    },
+    "brainSeo": [
+     {
+      "route": "/",
+      "score": 91,
+      "findings": [
+       "B1808(info)",
+       "B1812(info)"
+      ]
+     },
+     {
+      "route": "/invoices",
+      "score": 91,
+      "findings": [
+       "B1808(info)",
+       "B1812(info)"
+      ]
+     },
+     {
+      "route": "/settings",
+      "score": 91,
+      "findings": [
+       "B1808(info)",
+       "B1812(info)"
+      ]
+     }
+    ],
+    "smoke": {
+     "passed": 13,
+     "total": 13,
+     "failed": [],
+     "consoleErrors": 0
+    }
+   },
+   "performance": {
+    "buildColdMs": {
+     "meanMs": 188.8,
+     "stddevMs": 35.4,
+     "n": 10,
+     "median": 170.26,
+     "p95": 251.7,
+     "min": 157.34,
+     "max": 251.7
+    },
+    "buildWarmMs": {
+     "meanMs": 70.4,
+     "stddevMs": 12.6,
+     "n": 10,
+     "median": 63.94,
+     "p95": 96.32,
+     "min": 57.52,
+     "max": 96.32
+    },
+    "mainRoute": "/",
+    "bytes": {
+     "/": {
+      "html": {
+       "files": 1,
+       "raw": 6175,
+       "gz": 2753,
+       "br": 2257
+      },
+      "js": {
+       "files": 13,
+       "raw": 39517,
+       "gz": 16680,
+       "br": 14707
+      },
+      "css": {
+       "files": 2,
+       "raw": 6715,
+       "gz": 1849,
+       "br": 1570
+      },
+      "other": {
+       "files": 2,
+       "raw": 717,
+       "gz": 470,
+       "br": 392
+      },
+      "totalHtmlJsCss": {
+       "raw": 52407,
+       "gz": 21282,
+       "br": 18534
+      },
+      "requests": 19,
+      "duplicateRequests": 1,
+      "duplicated": [
+       "/_b/gdiv1rd4.svg"
+      ],
+      "transferred": 31160
+     },
+     "/invoices": {
+      "html": {
+       "files": 1,
+       "raw": 5445,
+       "gz": 2347,
+       "br": 1902
+      },
+      "js": {
+       "files": 7,
+       "raw": 25387,
+       "gz": 11346,
+       "br": 10039
+      },
+      "css": {
+       "files": 1,
+       "raw": 1582,
+       "gz": 762,
+       "br": 667
+      },
+      "other": {
+       "files": 2,
+       "raw": 717,
+       "gz": 470,
+       "br": 392
+      },
+      "totalHtmlJsCss": {
+       "raw": 32414,
+       "gz": 14455,
+       "br": 12608
+      },
+      "requests": 11,
+      "duplicateRequests": 0,
+      "duplicated": [],
+      "transferred": 0
+     },
+     "/settings": {
+      "html": {
+       "files": 1,
+       "raw": 5423,
+       "gz": 2327,
+       "br": 1897
+      },
+      "js": {
+       "files": 7,
+       "raw": 25368,
+       "gz": 11333,
+       "br": 10030
+      },
+      "css": {
+       "files": 1,
+       "raw": 1582,
+       "gz": 762,
+       "br": 667
+      },
+      "other": {
+       "files": 2,
+       "raw": 717,
+       "gz": 470,
+       "br": 392
+      },
+      "totalHtmlJsCss": {
+       "raw": 32373,
+       "gz": 14422,
+       "br": 12594
+      },
+      "requests": 11,
+      "duplicateRequests": 0,
+      "duplicated": [],
+      "transferred": 0
+     }
+    },
+    "firstRouteJs": {
+     "files": 13,
+     "raw": 39517,
+     "gz": 16680,
+     "br": 14707
+    },
+    "hmr": {
+     "component": "comp/customer-form.brain",
+     "style": {
+      "applied": [
+       "css"
+      ],
+      "tool": {
+       "n": 20,
+       "median": 1.69,
+       "p95": 2.15,
+       "min": 1.32,
+       "max": 3.03
+      },
+      "compile": {
+       "n": 20,
+       "median": 0.78,
+       "p95": 1.15,
+       "min": 0.59,
+       "max": 2.17
+      },
+      "client": {
+       "n": 20,
+       "median": 0.87,
+       "p95": 1,
+       "min": 0.71,
+       "max": 1.01
+      },
+      "total": {
+       "n": 20,
+       "median": 31.68,
+       "p95": 35.16,
+       "min": 24.93,
+       "max": 36.01
+      },
+      "errors": 0
+     },
+     "script": {
+      "applied": [
+       "js"
+      ],
+      "tool": {
+       "n": 20,
+       "median": 2.25,
+       "p95": 4.52,
+       "min": 1.85,
+       "max": 18.52
+      },
+      "compile": {
+       "n": 20,
+       "median": 0.38,
+       "p95": 0.88,
+       "min": 0.33,
+       "max": 1.86
+      },
+      "client": {
+       "n": 20,
+       "median": 1.82,
+       "p95": 3.84,
+       "min": 1.48,
+       "max": 16.66
+      },
+      "total": {
+       "n": 20,
+       "median": 33.51,
+       "p95": 39.37,
+       "min": 28.95,
+       "max": 52.67
+      },
+      "errors": 0
+     },
+     "statePreserved": true,
+     "reloaded": false
+    }
+   },
+   "binary": {
+    "brainSha": "018520473d6e",
+    "specSha": "e745bbfd456e"
+   }
+  }
+ ]
+}

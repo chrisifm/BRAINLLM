@@ -1,0 +1,12 @@
+{
+  "iterations": 10000,
+  "bytes": 1050,
+  "parsedSeconds": 0.562137625,
+  "directSeconds": 0.012978917,
+  "speedup": 43.31159718488068,
+  "kind": "cache-key microbenchmark, not full-build timing",
+  "platform": "Darwin arm64",
+  "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+  "command": "cargo run --release -p brain-codegen --example cache_lookup",
+  "sourceSha256": "55d8f115d6f49425ee187bda2c64389ca9f0639443199b5896f50ac86b8f3a8d"
+}

@@ -1,0 +1,1 @@
+export default api('/f/:name', { get: {}, post: {}, put: {}, patch: {}, delete: {} })

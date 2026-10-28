@@ -1,0 +1,37 @@
+{
+  "name": "navbar",
+  "title": "Navbar with responsive menu and account menu",
+  "description": "A top navigation component: brand, links, a Menu button that shows the links on narrow screens and an Account disclosure list (aria-expanded, Escape closes and returns focus). views/_layout.brain renders it on every view (account items follow the session store); app.brain keeps only the document shell.",
+  "params": {
+    "brand": {
+      "type": "string",
+      "default": "Acme"
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "href": "string",
+        "label": "string"
+      }
+    },
+    "account": {
+      "type": "array",
+      "items": {
+        "href": "string",
+        "label": "string"
+      }
+    }
+  },
+  "files": [
+    "app.brain",
+    "views/_layout.brain",
+    "comp/navbar.brain",
+    "comp/navbar.test.brain"
+  ],
+  "replaces": [
+    "app.brain",
+    "views/_layout.brain"
+  ],
+  "uses": [],
+  "notes": "Pass every view in `links` so each page stays linked. Uses plain disclosures instead of the kit <Menu>: <Menu>, <Table> and <Toast> currently fail `brain build` (B0116 on ui/ components with state)."
+}

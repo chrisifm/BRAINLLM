@@ -1,0 +1,20 @@
+<meta props="people:list=[]">
+
+<script>
+  // Regression case (QA #277): a <label for={expr}> names the control whose id is the same expression,
+  // so B0403 must stay silent. Expected diagnostics: none.
+</script>
+
+<ul>
+  {#each people as p (p.id)}
+    <li>
+      <label for={'name-' + p.id}>Name</label>
+      <input id={'name-' + p.id} value={p.name} />
+      <label for={`role-${p.id}`}>Role</label>
+      <select id={`role-${p.id}`} value={p.role}>
+        <option value="admin">Admin</option>
+        <option value="member">Member</option>
+      </select>
+    </li>
+  {/each}
+</ul>

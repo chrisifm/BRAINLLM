@@ -1,0 +1,36 @@
+<meta seo title="Offline behaviour" description="While offline, GETs answer from the cache marked stale and writes fail at once with kind offline, without reaching the network.">
+<script>
+  import items from '../api/items.jsbrain'
+  import describe from '../lib/describe.jsbrain'
+  let list = resource(items.get)
+  let res = sig({})
+  const set = (id, v) => (res = { ...res, [id]: v })
+  const read = async () => {
+    const t0 = Date.now()
+    const p = items.get()
+    const stale = !!p.stale
+    try {
+      const v = await p
+      set('read', JSON.stringify({ ok: true, stale, n: v.length, ms: Date.now() - t0 }))
+    } catch (e) {
+      set('read', describe(e, Date.now() - t0))
+    }
+  }
+  const write = async () => {
+    const t0 = Date.now()
+    try {
+      set('write', describe(await items.post({ id: 9, name: 'offline' }), Date.now() - t0))
+    } catch (e) {
+      set('write', describe(e, Date.now() - t0))
+    }
+  }
+</script>
+<main class="page">
+  <h1>Offline</h1>
+  {#await list}<p data-r="list">loading</p>{:then l}<p data-r="list">items {l.length}</p>{:catch e}<p data-r="list">error {e.kind}</p>{/await}
+  <button type="button" data-a="read" on:click={read}>read</button> <output data-r="read">{res.read || ''}</output>
+  <button type="button" data-a="write" on:click={write}>write</button> <output data-r="write">{res.write || ''}</output>
+</main>
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+</style>

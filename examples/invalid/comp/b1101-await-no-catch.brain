@@ -1,0 +1,9 @@
+<script>
+  import usersApi from '../api/users.jsbrain'
+  let users = resource(usersApi.get)
+</script>
+{#await users}
+  <p>Loading…</p>
+{:then list}
+  <ul>{#each list as u (u.id)}<li>{u.email}</li>{/each}</ul>
+{/await}

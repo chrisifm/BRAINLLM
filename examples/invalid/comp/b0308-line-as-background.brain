@@ -1,0 +1,4 @@
+<p class="note">Saved</p>
+<style>
+  .note { background: var(--line); }
+</style>

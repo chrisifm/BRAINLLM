@@ -1,0 +1,34 @@
+<meta props="label:str error:str? help:str?">
+<script>
+  let box = ref()
+  let hint = ref()
+  let err = ref()
+  // links the slotted control to its help and error text (aria-describedby / aria-invalid)
+  fx(() => {
+    if (!box || !hint || !err) return
+    const c = box.querySelector('input, select, textarea')
+    if (!c) return
+    const ids = []
+    if (help) ids.push(hint.id)
+    if (error) ids.push(err.id)
+    if (ids.length) c.setAttribute('aria-describedby', ids.join(' '))
+    else c.removeAttribute('aria-describedby')
+    if (error) c.setAttribute('aria-invalid', 'true')
+    else c.removeAttribute('aria-invalid')
+  })
+</script>
+<div class="field" bind:ref={box}>
+  <label>
+    <span class="label">{label}</span>
+    <slot />
+  </label>
+  <p id="hint" class="help" bind:ref={hint} hidden={!help}>{help}</p>
+  <p id="err" class="error" role="alert" bind:ref={err} hidden={!error}>{error}</p>
+</div>
+<style>
+  .field { display: grid; gap: var(--space-1); }
+  label { display: grid; gap: var(--space-1); }
+  .label { font: 600 14px/1.3 var(--font); color: var(--fg); }
+  .help { font-size: 13px; color: var(--muted); margin: 0; }
+  .error { font-size: 13px; color: var(--bad); margin: 0; }
+</style>

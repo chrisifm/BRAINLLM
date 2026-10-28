@@ -1,0 +1,63 @@
+<meta props="title:str='To do'">
+
+<script>
+  let items = sig([])
+  let text = sig('')
+  let filter = sig('all')
+  let nextId = 1
+
+  let visible = drv(() => {
+    if (filter === 'done') return items.filter(it => it.done)
+    if (filter === 'open') return items.filter(it => !it.done)
+    return items
+  })
+  let left = drv(() => items.filter(it => !it.done).length)
+
+  const add = () => {
+    const t = text.trim()
+    if (t === '') return
+    items = [...items, { id: nextId++, text: t, done: false }]
+    text = ''
+  }
+  const toggle = (id) => {
+    items = items.map(it => it.id === id ? { ...it, done: !it.done } : it)
+  }
+  const remove = (id) => {
+    items = items.filter(it => it.id !== id)
+  }
+</script>
+
+<section class="todo">
+  <h2>{title}</h2>
+  <form on:submit={add}>
+    <input bind:value={text} placeholder="What needs doing?" aria-label="New task" />
+    <button disabled={text.trim() === ''}>Add</button>
+  </form>
+
+  <ul>
+    {#each visible as it (it.id)}
+      <li class:done={it.done}>
+        <input type="checkbox" checked={it.done} on:change={toggle(it.id)} aria-label={`Mark ${it.text}`} />
+        <span>{it.text}</span>
+        <button on:click={remove(it.id)} aria-label="Delete">×</button>
+      </li>
+    {:empty}
+      <li class="empty">Nothing here.</li>
+    {/each}
+  </ul>
+
+  <footer>
+    <span>{left} left</span>
+    <button class:on={filter === 'all'} on:click={filter = 'all'}>All</button>
+    <button class:on={filter === 'open'} on:click={filter = 'open'}>Open</button>
+    <button class:on={filter === 'done'} on:click={filter = 'done'}>Done</button>
+  </footer>
+</section>
+
+<style>
+  .todo { display: grid; gap: var(--space-2); }
+  form { display: flex; gap: var(--space-1); }
+  li { display: flex; gap: var(--space-2); align-items: center; &.done span { text-decoration: line-through; color: var(--muted); } }
+  .empty { color: var(--muted); }
+  footer button.on { color: var(--accent); }
+</style>

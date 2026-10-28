@@ -1,0 +1,29 @@
+<meta props="orders:any retry:fn?">
+
+<script>
+  import LoadingState from '../ui/loading-state.brain'
+  import EmptyState from '../ui/empty-state.brain'
+  // orders: a promise of [{ id, customer, total }] (a resource) · retry: refetches it
+</script>
+
+{#await orders}
+  <LoadingState rows={4} label="Loading orders" />
+{:then list}
+  {#if list.length}
+    <ul class="orders">
+      {#each list as o (o.id)}
+        <li><span>#{o.id} · {o.customer}</span><span class="total">${Number(o.total).toFixed(2)}</span></li>
+      {/each}
+    </ul>
+  {:else}
+    <EmptyState title="No orders yet" text="Orders appear here as soon as a customer buys something." action={{ href: '/', label: 'Back to the home page' }} />
+  {/if}
+{:catch e}
+  <ErrorState error={e} retry={retry} />
+{/await}
+
+<style>
+  .orders { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+  li { display: flex; justify-content: space-between; gap: var(--space-3); padding: var(--space-3); background: var(--glass); border: 1px solid var(--glass-edge); border-radius: var(--radius); }
+  .total { font-variant-numeric: tabular-nums; font-weight: 600; }
+</style>

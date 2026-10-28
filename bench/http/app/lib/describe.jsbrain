@@ -1,0 +1,5 @@
+// One JSON line per settled call, read by bench/http/run.mjs from <output data-r="…">.
+export default function describe(e, ms) {
+  if (!e || !e.kind) return JSON.stringify({ ok: true, value: e === undefined ? null : e, ms })
+  return JSON.stringify({ ok: false, kind: e.kind, status: e.status ?? null, id: e.id ?? null, is403: e.is(403), errors: e.errors ?? null, retryAfter: e.retryAfter ?? null, message: e.message, ms })
+}

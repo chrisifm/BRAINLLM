@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "brain.schema.json",
+  "title": "brain.json",
+  "description": "BRAINLLM app configuration. Precedence: flag > BRAIN_* variable > brain.json > defaults.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string",
+      "description": "App name (SEO, web manifest)."
+    },
+    "description": {
+      "type": "string"
+    },
+    "lang": {
+      "type": "string",
+      "description": "Default document language, e.g. \"en\"."
+    },
+    "site": {
+      "type": "string",
+      "format": "uri",
+      "description": "Public origin, e.g. https://example.com. Prefer PUBLIC_SITE_URL in .brain_env."
+    },
+    "base": {
+      "type": "string",
+      "pattern": "^/([^/?#\\s]+/)*$",
+      "default": "/",
+      "description": "Path the app is hosted under: starts and ends with \"/\", e.g. \"/app/\". brain run, brain build and brain start serve every URL under it."
+    },
+    "cache": {
+      "type": "object",
+      "properties": {
+        "http": {
+          "type": "boolean",
+          "default": true
+        },
+        "sw": {
+          "type": "boolean",
+          "default": true
+        },
+        "offline": {
+          "type": "boolean",
+          "default": true
+        },
+        "data": {
+          "type": "boolean",
+          "default": true
+        },
+        "precacheKB": {
+          "type": "number",
+          "minimum": 0,
+          "default": 2048
+        }
+      }
+    },
+    "seo": {
+      "type": "object",
+      "properties": {
+        "minScore": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 80
+        },
+        "sitemap": {
+          "type": "boolean",
+          "default": true
+        },
+        "llms": {
+          "type": "boolean",
+          "default": true
+        },
+        "llmsFull": {
+          "type": "boolean",
+          "default": true
+        },
+        "manifest": {
+          "type": "boolean",
+          "default": true
+        },
+        "indexnow": {
+          "type": "boolean",
+          "default": false
+        },
+        "markdown": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "properties": {
+        "viewKB": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Gzipped KB allowed per view."
+        }
+      }
+    },
+    "i18n": {
+      "type": "object",
+      "properties": {
+        "default": {
+          "type": "string"
+        },
+        "locales": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ext": {
+      "type": "string",
+      "enum": [
+        "web",
+        "brain"
+      ],
+      "default": "web",
+      "description": "Published file names: web (.html/.js/.css) or brain (.brain/.jsbrain/.cssbrain, with Content-Type set by _headers, nginx and Caddy). brain build --ext overrides it."
+    },
+    "lint": {
+      "type": "object",
+      "description": "Per-rule level, e.g. {\"B1307\": \"off\"}. Only the quality families (B09xx-B13xx) can be changed; other overrides are ignored.",
+      "propertyNames": {
+        "pattern": "^B(09|1[0-3])[0-9]{2}$"
+      },
+      "additionalProperties": {
+        "enum": [
+          "off",
+          "info",
+          "warning",
+          "error"
+        ]
+      }
+    },
+    "targets": {
+      "enum": [
+        "baseline-widely",
+        "baseline-newly"
+      ],
+      "default": "baseline-widely",
+      "description": "Browser support target of the B12xx compatibility rules: Baseline widely available (default) or newly available."
+    }
+  }
+}

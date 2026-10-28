@@ -1,0 +1,4 @@
+<meta seo title="Two main" description="Invalid case." canonical="/two-main">
+
+<main><h1>One</h1></main>
+<main><p>Two</p></main>

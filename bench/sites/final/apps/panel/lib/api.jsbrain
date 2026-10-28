@@ -1,0 +1,42 @@
+// Customer API contract. In-memory mock today; swap the bodies for fetch() calls to a real API later.
+// Customer = { id: num, name: str, email: str, plan: 'Free'|'Pro'|'Business', status: 'active'|'inactive', billed: num }
+const db = {
+  nextId: 6,
+  rows: [
+    { id: 1, name: 'Ada Lovelace', email: 'ada@analytical.io', plan: 'Business', status: 'active', billed: 199 },
+    { id: 2, name: 'Grace Hopper', email: 'grace@cobol.dev', plan: 'Pro', status: 'active', billed: 49 },
+    { id: 3, name: 'Alan Turing', email: 'alan@bombe.org', plan: 'Pro', status: 'inactive', billed: 0 },
+    { id: 4, name: 'Linus Torvalds', email: 'linus@kernel.org', plan: 'Free', status: 'active', billed: 0 },
+    { id: 5, name: 'Margaret Hamilton', email: 'margaret@apollo.space', plan: 'Business', status: 'active', billed: 199 },
+  ],
+}
+const PRICE = { Free: 0, Pro: 49, Business: 199 }
+const wait = () => new Promise((r) => setTimeout(r, 300))
+
+export default {
+  list: async () => {
+    await wait()
+    return db.rows.map((r) => ({ ...r }))
+  },
+  create: async (data) => {
+    await wait()
+    const row = { id: db.nextId, name: data.name, email: data.email, plan: data.plan, status: 'active', billed: PRICE[data.plan] ?? 0 }
+    db.nextId = db.nextId + 1
+    db.rows = [...db.rows, row]
+    return { ...row }
+  },
+  update: async (id, data) => {
+    await wait()
+    const old = db.rows.find((r) => r.id === id)
+    if (!old) throw new Error('Customer not found')
+    const row = { ...old, name: data.name, email: data.email, plan: data.plan, billed: old.status === 'active' ? (PRICE[data.plan] ?? 0) : 0 }
+    db.rows = db.rows.map((r) => (r.id === id ? row : r))
+    return { ...row }
+  },
+  remove: async (id) => {
+    await wait()
+    if (!db.rows.some((r) => r.id === id)) throw new Error('Customer not found')
+    db.rows = db.rows.filter((r) => r.id !== id)
+    return true
+  },
+}

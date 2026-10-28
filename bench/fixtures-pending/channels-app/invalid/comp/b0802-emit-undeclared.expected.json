@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0802",
+    "level": "info",
+    "file": "channels-app/invalid/comp/b0802-emit-undeclared.brain",
+    "line": 3,
+    "col": 27,
+    "msg": "event `select` is not declared in `<meta emits>`",
+    "fix": "add it to the declaration: `<meta emits=\"close select\">`, or emit one of: close"
+  }
+]

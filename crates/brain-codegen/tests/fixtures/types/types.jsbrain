@@ -1,0 +1,1 @@
+export const User = { id: 'num!', name: 'str!', email: 'email!' }

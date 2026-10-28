@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Web Components · runtime BRAINLLM</title>
+<b-counter label="Votes" id="dsd"><template shadowrootmode="open"><button>SSR: 0</button></template></b-counter>
+<b-counter label="Other" id="b"></b-counter>
+<form id="f"><b-toggle name="ok" id="t"></b-toggle></form>
+<pre id="out"></pre>
+<script type="module">
+import { sig, tpl, insert, on, attr } from '../brain.js'
+import { define } from '../brain-wc.js'
+const T = tpl('<div><button><!>: <!></button><select><option>a</option><option>b</option></select><!></div>')
+function Counter($p) {
+  const n = sig(0), picked = sig('a')
+  const r = T(), b = r.firstChild, a0 = b.firstChild, a1 = a0.nextSibling.nextSibling, s = b.nextSibling
+  on(b, 'click', () => { n.v++; $p['on:inc']?.(n.v) })
+  on(s, 'change', e => (picked.v = e.target.value))           // change is not composed: delegated on the shadow root
+  insert(b, () => $p.label, a0); insert(b, () => n.v, a1)
+  insert(r, () => ' picked=' + picked.v, s.nextSibling)
+  return r
+}
+Counter.p = ['label']
+define('b-counter', Counter, 'button{color:rgb(200,0,0)}')
+function Toggle($p) {
+  const on1 = sig(false), r = tpl('<button type="button">off</button>')()
+  on(r, 'click', () => { on1.v = !on1.v; $p.$internals.setFormValue(on1.v ? 'yes' : null) })
+  insert(r, () => (on1.v ? 'on' : 'off')); r.firstChild.remove()
+  return r
+}
+Toggle.form = true
+define('b-toggle', Toggle)
+const R = {}, $ = id => document.getElementById(id), sr = id => $(id).shadowRoot
+R.dsdReused = sr('dsd').textContent.startsWith('Votes: 0')
+R.sharedSheet = sr('dsd').adoptedStyleSheets[0] === sr('b').adoptedStyleSheets[0]
+R.colorApplied = getComputedStyle(sr('b').querySelector('button')).color
+let got; $('b').addEventListener('inc', e => (got = e.detail))
+sr('b').querySelector('button').click(); sr('b').querySelector('button').click()
+R.clickInShadow = sr('b').querySelector('button').textContent
+R.emitComposed = got
+$('b').setAttribute('label', 'Changed'); await Promise.resolve()
+R.reactiveAttribute = sr('b').querySelector('button').textContent
+$('b').label = 'ByProperty'; await Promise.resolve()
+R.reactiveProperty = sr('b').querySelector('button').textContent
+const sel = sr('b').querySelector('select'); sel.value = 'b'; sel.dispatchEvent(new Event('change', { bubbles: true }))
+R.changeNotComposed = sr('b').textContent.includes('picked=b')
+sr('t').querySelector('button').click()
+R.formInternals = new FormData($('f')).get('ok')
+const host = $('b'); document.body.append(host); await Promise.resolve(); await Promise.resolve()
+host.shadowRoot.querySelector('button').click()
+R.survivesMove = host.shadowRoot.querySelector('button').textContent
+$('out').textContent = JSON.stringify(R, null, 1); window.R = R
+</script>

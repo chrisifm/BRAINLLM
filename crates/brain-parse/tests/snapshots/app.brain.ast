@@ -1,0 +1,36 @@
+App App level=Comp file=app.brain
+  template
+    <html>@1:1 lang="en"
+      <head>@2:1
+        <meta>@3:3 charset="utf-8"
+        <meta>@4:3 name="viewport" content="width=device-width, initial-scale=1"
+        <link>@5:3 rel="icon" href="/favicon.svg"
+      <body>@7:1
+        <a>@8:3 class="skip" href="#content"
+          text@8:35 "Skip to content"
+        <header>@9:3 class="top"
+          <nav>@10:5 aria-label="Main"
+            <a>@11:7 href="/"
+              text@11:19 "Home"
+            <a>@12:7 href="/dashboard"
+              text@12:28 "Users"
+        <div>@15:3 id="content"
+          slot@16:5
+        <footer>@18:3 class="bottom"
+          text@18:26 "BRAINLLM · examples"
+  style@22:8
+    .skip {
+      position: absolute;
+      left: -999px;
+      &:focus {
+        left: var(--space-2);
+      }
+    }
+    .top, .bottom {
+      padding: var(--space-2) var(--space-3);
+      color: var(--muted);
+    }
+    nav {
+      display: flex;
+      gap: var(--space-3);
+    }

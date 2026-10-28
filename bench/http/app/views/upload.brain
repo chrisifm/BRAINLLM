@@ -1,0 +1,45 @@
+<meta seo title="Upload with progress" description="An in file endpoint sends multipart and exposes its progress from zero to one; an upload can be cancelled.">
+<script>
+  import files from '../api/files.jsbrain'
+  import describe from '../lib/describe.jsbrain'
+  let up = sig(null)
+  let res = sig({})
+  const set = (id, v) => (res = { ...res, [id]: v })
+  const blob = (mb) => new Blob([new Uint8Array(mb * 1024 * 1024)], { type: 'application/octet-stream' })
+  const send = async () => {
+    const t0 = Date.now()
+    set('send', 'running')
+    const p = files.post({ file: blob(8), name: 'big.bin' })
+    up = p
+    try {
+      set('send', describe(await p, Date.now() - t0))
+    } catch (e) {
+      set('send', describe(e, Date.now() - t0))
+    }
+  }
+  const abort = async () => {
+    set('abort', 'pending')
+    const p = files.post({ file: blob(8), name: 'cancelled.bin' })
+    setTimeout(() => p.cancel(), 400)
+    try {
+      await p
+      set('abort', 'then')
+    } catch (e) {
+      set('abort', 'caught ' + e.kind)
+    } finally {
+      set('abortFinally', 'yes')
+    }
+  }
+</script>
+<main class="page">
+  <h1>Upload with progress</h1>
+  <button type="button" data-a="send" on:click={send}>send</button>
+  <output data-r="progress">{up ? up.progress : ''}</output>
+  <output data-r="send">{res.send || ''}</output>
+  <button type="button" data-a="abort" on:click={abort}>abort</button>
+  <output data-r="abort">{res.abort || ''}</output>
+  <output data-r="abortFinally">{res.abortFinally || ''}</output>
+</main>
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+</style>

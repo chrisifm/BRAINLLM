@@ -1,0 +1,32 @@
+<script>
+  let r = route()
+  const links = [
+    { href: '/', label: 'Customers' },
+    { href: '/invoices', label: 'Invoices' },
+    { href: '/settings', label: 'Settings' },
+  ]
+</script>
+
+<div class="shell">
+  <aside class="side">
+    <p class="brand">Nubo Admin</p>
+    <nav aria-label="Main">
+      {#each links as l (l.href)}
+        <a href={l.href} aria-current={r.path === l.href ? 'page' : undefined} class:active={r.path === l.href}>{l.label}</a>
+      {/each}
+    </nav>
+  </aside>
+  <div class="content"><slot /></div>
+</div>
+
+<style>
+  .shell { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+  .side { background: var(--surface); border-right: 1px solid var(--line); padding: var(--space-4); }
+  .brand { margin: 0 0 var(--space-4); font-weight: 650; font-size: 1.2rem; color: var(--fg); }
+  nav { display: grid; gap: var(--space-1); }
+  nav a { padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); text-decoration: none; color: var(--muted); }
+  nav a:hover { color: var(--fg); }
+  nav a.active { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+  .content { min-width: 0; }
+  @media (max-width: 700px) { .shell { grid-template-columns: 1fr; } .side { border-right: 0; border-bottom: 1px solid var(--line); } }
+</style>

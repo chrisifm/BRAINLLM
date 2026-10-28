@@ -1,0 +1,9 @@
+{
+  "name": "wizard",
+  "title": "Multi-step wizard",
+  "description": "A three-step onboarding wizard: ui/steps (progress list with aria-current=\"step\"), comp/onboarding-wizard (one step at a time, Next validates only the current step and moves focus to the first error, Back keeps the values, a review step, Finish emits the collected data and shows a busy state) and views/onboarding.brain, which saves through a server function that validates again.",
+  "params": { "steps": { "type": "array", "items": { "id": "string", "label": "string", "fields": "string[]" }, "default": [{ "id": "account", "label": "Account", "fields": ["name", "email"] }, { "id": "plan", "label": "Plan", "fields": ["plan"] }, { "id": "review", "label": "Review", "fields": [] }] } },
+  "files": ["ui/steps.brain", "comp/onboarding-wizard.brain", "comp/onboarding-wizard.test.brain", "views/onboarding.brain"],
+  "uses": ["Input", "Select", "Button"],
+  "notes": "Add a step: one entry in `steps`, its fields, one {#if step === n} block and its rule in `problems()`. Link /onboarding from the nav or after sign-up."
+}

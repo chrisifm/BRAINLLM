@@ -1,0 +1,23 @@
+<meta props="user:obj?" emits="signout">
+
+<script>
+  // user: the signed-in user ({ email, role }) or nothing; the parent signs out on `signout`
+</script>
+
+<div class="status" aria-live="polite">
+  {#if user}
+    <span class="who">{user.email}</span>
+    {#if user.role === 'admin'}<a href="/admin">Administration</a>{/if}
+    <button type="button" on:click={emit('signout')}>Sign out</button>
+  {:else}
+    <a href="/login">Sign in</a>
+    <a href="/signup">Create an account</a>
+  {/if}
+</div>
+
+<style>
+  .status { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-3); font-size: .9rem; color: var(--muted); }
+  a { color: var(--accent); }
+  button { padding: var(--space-1) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--fg); background: var(--surface); cursor: pointer; }
+  button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>

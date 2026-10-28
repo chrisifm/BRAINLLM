@@ -1,0 +1,5 @@
+<meta emits="close">
+<script>
+  const pick = () => emit('select', 1)
+</script>
+<button type="button" on:click={pick}>Pick</button>

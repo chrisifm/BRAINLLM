@@ -1,0 +1,10 @@
+<meta props="i:num">
+<script>
+  let n = sig(0)
+  const inc = () => (n = n + 1)
+</script>
+<div class="cell" data-k={'cell-' + i}><span class="v" data-n={n}>{n}</span><button type="button" class="inc" on:click={inc}>+</button></div>
+<style>
+  .cell { display: inline-flex; gap: var(--space-1); font-size: 10px; }
+  .inc { font-size: 10px; padding: 0; }
+</style>

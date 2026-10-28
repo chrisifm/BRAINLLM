@@ -1,0 +1,35 @@
+<meta seo titleTemplate="%s · BRAINLLM" og:image="/og.png">
+
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <title>BRAINLLM</title>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/">BRAINLLM</a>
+    <nav aria-label="Main">
+      <a href="/">Home</a>
+      <a href="/docs">Docs</a>
+      <a href="/about">About</a>
+      <a href="/guides">Guides</a>
+    </nav>
+  </header>
+  <slot />
+  <footer class="bottom">
+    <p>BRAINLLM · a web framework whose first user is a language model.</p>
+  </footer>
+</body>
+</html>
+
+<style>
+  .top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-3) var(--space-5); }
+  .brand { font-weight: 700; text-decoration: none; color: var(--fg); letter-spacing: .02em; }
+  .top nav { display: flex; gap: var(--space-4); }
+  .top nav a { text-decoration: none; color: var(--muted); }
+  .top nav a:hover, .top nav a[aria-current="page"] { color: var(--fg); }
+  .bottom { padding: var(--space-5); color: var(--muted); text-align: center; }
+  .bottom p { margin: 0; }
+</style>

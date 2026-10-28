@@ -1,0 +1,11 @@
+<script>
+  let { tone = 'neutral', text } = $props()
+</script>
+
+<span class="badge" data-tone={tone}>{text}</span>
+
+<style>
+  .badge { padding: 0 var(--space-1); border-radius: var(--radius); color: var(--muted);
+    &[data-tone=ok] { color: var(--ok); }
+    &[data-tone=bad] { color: var(--bad); } }
+</style>

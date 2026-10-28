@@ -1,0 +1,11 @@
+<meta props="size:str='lg' gutter:str='4'">
+<script>
+  // the page's content width: sm 40rem · md 56rem · lg 72rem · xl 90rem · full; gutters are a token step
+  // spacing props take a token step from tokens.cssbrain (0–6 → --space-N), never raw CSS
+  const sp = (n) => (n == null || n === '' ? null : String(n) === '0' ? '0' : 'var(--space-' + n + ')')
+  const W = { sm: '40rem', md: '56rem', lg: '72rem', xl: '90rem', full: 'none' }
+</script>
+<div class="container" style:max-width={W[size] || W.lg} style:padding-inline={sp(gutter)}><slot /></div>
+<style>
+  .container { width: 100%; box-sizing: border-box; margin-inline: auto; }
+</style>

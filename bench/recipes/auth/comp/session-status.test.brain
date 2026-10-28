@@ -1,0 +1,22 @@
+<script>
+  import SessionStatus from './session-status.brain'
+
+  test('anonymous: offers sign in and sign up', async () => {
+    await mount(SessionStatus, {})
+    expect(count('a[href="/login"]')).toBe(1)
+    expect(count('a[href="/signup"]')).toBe(1)
+    expect(count('button')).toBe(0)
+  })
+
+  test('a member sees the email and a sign-out button, no admin link', async () => {
+    await mount(SessionStatus, { user: { email: 'ana@example.com', role: 'member' } })
+    expect(text('.who')).toBe('ana@example.com')
+    expect(count('button')).toBe(1)
+    expect(count('a[href="/admin"]')).toBe(0)
+  })
+
+  test('an admin also gets the administration link', async () => {
+    await mount(SessionStatus, { user: { email: 'admin@example.com', role: 'admin' } })
+    expect(count('a[href="/admin"]')).toBe(1)
+  })
+</script>

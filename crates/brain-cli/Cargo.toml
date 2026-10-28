@@ -1,0 +1,23 @@
+[package]
+name = "brain-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Single `brain` binary: BRAINLLM CLI, dev server, build and MCP"
+
+[[bin]]
+name = "brain"
+path = "src/main.rs"
+
+[dependencies]
+brain-serve = { path = "../brain-serve" }
+brain-parse = { path = "../brain-parse" }
+brain-check = { path = "../brain-check" }
+brain-codegen = { path = "../brain-codegen" }
+brain-css = { path = "../brain-css" }
+brain-mcp = { path = "../brain-mcp" }
+brain-min = { path = "../brain-min" }
+brain-pack = { path = "../brain-pack" }
+brain-seo = { path = "../brain-seo" }
+libc = "0.2"

@@ -1,0 +1,6 @@
+// Every page under views/admin/ needs a signed-in user with the admin role. Anonymous visitors go to the login page
+// and come back after; signed-in users without the role get the 403 page naming what is missing.
+export default (ctx) => {
+  if (!ctx.user) return redirect('/login?next=' + ctx.url.pathname)
+  return ctx.user.role === 'admin' ? true : deny('the admin role')
+}

@@ -1,0 +1,29 @@
+import { tpl, insert, attr } from "/@brain/brain.js";
+const $t0 = tpl("<span data-b=\"dxj2kp\" class=\"badge\"><!></span>");
+function Badge($p = {}) {
+  const $r3 = $t0();
+  const $e1 = $r3;
+  const $e2 = $r3.firstChild;
+  attr($e1, "data-tone", () => ($p.tone ?? 'neutral'));
+  insert(null, () => $p.text, $e2);
+  return $r3;
+}
+Badge.h = "dxj2kp";
+export default Badge;
+
+/* ---- css ---- */
+@layer ui {
+  @scope ([data-b="dxj2kp"]) to ([data-b]) {
+    :where(:scope):is(.badge), .badge {
+      padding: 0 var(--space-1);
+      border-radius: var(--radius);
+      color: var(--muted);
+      &[data-tone=ok] {
+        color: var(--ok);
+      }
+      &[data-tone=bad] {
+        color: var(--bad);
+      }
+    }
+  }
+}

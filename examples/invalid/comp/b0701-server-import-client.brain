@@ -1,0 +1,7 @@
+<script>
+  import db from '../lib/db.jsbrain'
+  let rows = sig([])
+  const reload = async () => { rows = await db.all() }
+</script>
+<button type="button" on:click={reload}>Reload</button>
+<p>{rows.length}</p>

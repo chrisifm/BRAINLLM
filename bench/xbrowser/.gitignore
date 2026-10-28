@@ -1,0 +1,7 @@
+# Playwright is installed only to reproduce this benchmark.
+node_modules/
+package-lock.json
+# Only the summaries are kept.
+results/*
+!results/summary.json
+!results/summary.md

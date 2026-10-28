@@ -1,0 +1,6 @@
+:root {
+  --fg: #1a1a1a;
+  --bg: #f5f5f7;
+  --faint: #c8c8cc;
+  --accent: #0071e3;
+}

@@ -1,0 +1,9 @@
+<meta seo title="Settings" description="Settings of the Nubo Admin panel.">
+<main class="page">
+  <h1>Settings</h1>
+  <p>Workspace settings will appear here.</p>
+</main>
+<style>
+  .page { padding: var(--space-5); }
+  p { color: var(--muted); }
+</style>

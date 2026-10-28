@@ -1,0 +1,13 @@
+# BRAINLLM
+
+> Web framework built for LLMs. One `.brain` file = one component (HTML + BrainScript + CSS). `brain` (Rust) compiles it to direct DOM, no virtual DOM. Read SPEC.md fully before writing code; nothing outside it exists.
+
+## Docs
+- [SPEC.md](SPEC.md): the whole contract, with a reference component. Also printed by `brain spec`.
+- [examples/](examples/): valid apps and invalid cases with their expected error.
+- [MIGRATION.md](docs/MIGRATION.md): incremental migration from React, Angular, Vue and Svelte, with parity tests.
+- [EVOLUTION.md](docs/EVOLUTION.md): improve the compiler through isolated, tested proposals and reversible activation.
+- [CONTRIBUTING.md](CONTRIBUTING.md): framework invariants, verification and required maintainer review.
+
+## Loop
+`brain add` → edit → `brain check --json` → apply each `fix` literally until `[]` → `brain test`. MCP: `brain mcp`.

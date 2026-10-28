@@ -1,0 +1,12 @@
+<meta seo title="Polyglot probe home" description="A three-locale probe site: English, a second locale and a right-to-left locale, every visible string read from a key.">
+
+<main class="page">
+  <h1>{t('home.title')}</h1>
+  <p class="lead">{t('home.lead')}</p>
+  <p><a href="/counter">{t('home.cta')}</a></p>
+</main>
+
+<style>
+  .page { max-width: 68ch; margin-inline: auto; padding-block: var(--space-6); padding-inline: var(--space-4); display: grid; gap: var(--space-4); text-align: start; }
+  .lead { margin: 0; color: var(--muted); }
+</style>

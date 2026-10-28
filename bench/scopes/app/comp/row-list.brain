@@ -1,0 +1,17 @@
+<meta props="size:num=200">
+<script>
+  const make = (n) => Array.from({ length: n }, (_, i) => ({ id: i + 1, label: 'Row ' + (i + 1), hits: 0 }))
+  let rows = sig(make(size))
+  const bump = () => { rows = rows.map(r => r.id === 57 ? { ...r, hits: r.hits + 1 } : r) }
+</script>
+<div class="rows">
+  <button type="button" class="bump" on:click={bump}>Bump row 57</button>
+  <ul>
+    {#each rows as r (r.id)}
+      <li data-id={r.id}><span class="lbl">{r.label}</span> <span class="hits">{r.hits}</span></li>
+    {/each}
+  </ul>
+</div>
+<style>
+  ul { max-height: 120px; overflow: auto; }
+</style>

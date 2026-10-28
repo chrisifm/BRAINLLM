@@ -1,0 +1,30 @@
+<meta seo titleTemplate="%s · scopes-test" og:image="/og.png">
+
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <title>scopes-test</title>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/">scopes-test</a>
+    <nav aria-label="Main">
+      <a href="/">Home</a>
+      <a href="/about">About</a>
+      <a href="/scopes">Scopes</a>
+      <a href="/errors">Errors</a>
+    </nav>
+  </header>
+  <slot />
+</body>
+</html>
+
+<style>
+  .top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-3) var(--space-5); }
+  .brand { font-weight: 650; text-decoration: none; color: var(--fg); }
+  nav { display: flex; gap: var(--space-4); }
+  nav a { text-decoration: none; color: var(--muted); }
+  nav a:hover, nav a[aria-current="page"] { color: var(--fg); }
+</style>

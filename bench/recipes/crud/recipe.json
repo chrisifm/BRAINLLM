@@ -1,0 +1,9 @@
+{
+  "name": "crud",
+  "title": "CRUD from an api() schema",
+  "description": "One entity end to end: the shared type (types.jsbrain), the typed endpoints (api/items.jsbrain for the collection, api/item.jsbrain for one record), a list view with text and status filters plus an inline create form, a detail view with edit and delete, and two components (item-list with the filters, item-form with validation and server-error mapping) with tests.",
+  "params": { "entity": { "type": "string", "default": "item", "replaces": ["item", "Item"] }, "plural": { "type": "string", "default": "items", "replaces": ["items", "Items"] }, "fields": { "type": "object", "default": { "id": "num!", "name": "str!<=80", "status": "str!", "price": "num>=0" } }, "base": { "type": "string", "default": "/api/items", "description": "backend path of the collection" } },
+  "files": ["types.jsbrain", "api/items.jsbrain", "api/item.jsbrain", "views/items/index.brain", "views/items/[id].brain", "comp/item-list.brain", "comp/item-list.test.brain", "comp/item-form.brain", "comp/item-form.test.brain"],
+  "uses": ["Input", "Select", "Button", "ErrorState"],
+  "notes": "api() is the typed client of an existing backend at /api/items; responses are validated against Item. Link /items from the nav."
+}

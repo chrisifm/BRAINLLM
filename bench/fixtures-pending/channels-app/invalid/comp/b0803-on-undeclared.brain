@@ -1,0 +1,6 @@
+<script>
+  import ProductCard from '../../comp/product-card.brain'
+  const p = { id: 1, name: 'Coffee', price: 120 }
+  const log1 = () => log('x')
+</script>
+<ProductCard product={p} on:remove={log1} />

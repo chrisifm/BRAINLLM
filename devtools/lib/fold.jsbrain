@@ -1,0 +1,47 @@
+// Folds the inspector's records (brain-inspect FORMAT v2, runtime/brain-inspect.js) into the debugger's state. Pure:
+// takes the previous state and a batch of records, returns the next state. Records with `id` replace earlier ones with
+// the same id; lists keep the newest first and are capped so a long session never grows without bound.
+const CAP = 300
+const keep = (list, r) => [r, ...list].slice(0, CAP)
+const byId = (list, r) => {
+  const i = list.findIndex((x) => x.id === r.id)
+  if (i < 0) return keep(list, r)
+  return list.map((x, j) => (j === i ? { ...x, ...r } : x))
+}
+const byKey = (list, r, k) => {
+  const i = list.findIndex((x) => x[k] === r[k])
+  return i < 0 ? [r, ...list] : list.map((x, j) => (j === i ? { ...x, ...r } : x))
+}
+
+// fold(state, batch): `batch` is one inspector message `{ seq, d: [records] }` (or a plain list of records). A page
+// reload restarts `seq`: the live data (instances, components, state, timers, connections) starts over, the history
+// (network, errors, leaks, heap) stays. The `comp` records of a batch are the full list of live component types.
+export default function fold(s, batch) {
+  const records = Array.isArray(batch) ? batch : (batch && batch.d) || []
+  let next = { ...s }
+  if (batch && typeof batch.seq === 'number') {
+    if (batch.seq < (s.seq ?? -1)) next = { ...next, inst: [], comps: [], state: {}, graph: {}, timers: [], conns: [] }
+    next.seq = batch.seq
+  }
+  const comps = records.filter((r) => r.k === 'comp')
+  if (comps.length) next.comps = comps
+  for (const r of records) {
+    if (r.k === 'heap') next.heap = [...next.heap, { at: r.at, used: r.used }].slice(-CAP)
+    else if (r.k === 'inst') next.inst = byId(next.inst, r)
+    else if (r.k === 'gone') next.inst = next.inst.filter((x) => x.id !== r.id)
+    else if (r.k === 'ev') next.ev = keep(next.ev, r)
+    else if (r.k === 'jank') next.jank = keep(next.jank, r)
+    else if (r.k === 'inp') next.inp = keep(next.inp, r)
+    else if (r.k === 'upd') next.upd = keep(next.upd, r)
+    else if (r.k === 'handler') next.handlers = keep(next.handlers, r)
+    else if (r.k === 'net') next.net = byId(next.net, r)
+    else if (r.k === 'store') next.storage = keep(next.storage, r)
+    else if (r.k === 'conn') next.conns = byId(next.conns, r)
+    else if (r.k === 'timer') next.timers = byId(next.timers, r)
+    else if (r.k === 'state') next.state = { ...next.state, [r.id]: r }
+    else if (r.k === 'graph') next.graph = { ...next.graph, [r.h]: r }
+    else if (r.k === 'leak' && !next.leaks.some((l) => l.code === r.code && l.h === r.h && l.msg === r.msg)) next.leaks = [r, ...next.leaks]
+    else if (r.k === 'err') next.errors = byKey(next.errors, r, 'fp')
+  }
+  return next
+}

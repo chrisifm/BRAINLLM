@@ -1,0 +1,7 @@
+<meta props="caption:str">
+<div class="field">
+  <label for="email" data-probe="lf-label">{caption}</label>
+  <input id="email" type="email" aria-describedby="hint" data-probe="lf-input">
+  <small id="hint" data-probe="lf-hint">We never share it.</small>
+  <a href="#email" data-probe="lf-link">Jump to field</a>
+</div>

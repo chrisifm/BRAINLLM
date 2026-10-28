@@ -1,0 +1,6 @@
+<script>
+  import { Theme } from '../../channels/theme.jsbrain'
+  import { Lang } from '../channels/lang.jsbrain'
+  let lang = use(Lang)
+</script>
+<p>{lang}</p>

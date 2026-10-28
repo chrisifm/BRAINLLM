@@ -1,0 +1,114 @@
+{
+ "bench": "scopes",
+ "date": "2026-10-13T21:05:00.775Z",
+ "brainSha256": "a7a460dff990",
+ "modes": [
+  "dev",
+  "prod"
+ ],
+ "pass": true,
+ "passed": {
+  "dev": "12/12",
+  "prod": "12/12"
+ },
+ "runtimeMs": {
+  "total": 10238,
+  "build": 1497,
+  "dev": 4484,
+  "prod": 5117
+ },
+ "table": [
+  {
+   "id": 1,
+   "rule": "Local state per instance",
+   "dev": true,
+   "prod": true,
+   "evidence": "One: 3 × 2 = 6 · Two: 0 × 2 = 0 · Three: 0 × 2 = 0"
+  },
+  {
+   "id": 2,
+   "rule": "Context per subtree",
+   "dev": true,
+   "prod": true,
+   "evidence": "after shift: red→red+, inner blue-inner, green green, outside none"
+  },
+  {
+   "id": 3,
+   "rule": "Global store shared, field-precise",
+   "dev": true,
+   "prod": true,
+   "evidence": "A=101 B=101 other=1; other write touched 1 node(s) in #far-other"
+  },
+  {
+   "id": 4,
+   "rule": "Precise updates",
+   "dev": true,
+   "prod": true,
+   "evidence": "counter click: 2 node(s); 200-row bump: 1 node(s) in row-57"
+  },
+  {
+   "id": 5,
+   "rule": "CSS same-name isolation",
+   "dev": true,
+   "prod": true,
+   "evidence": "17 probes + 430 component spans as expected"
+  },
+  {
+   "id": 6,
+   "rule": "IDs per instance",
+   "dev": true,
+   "prod": true,
+   "evidence": "inputs email-1 / email-2; dup ids 0"
+  },
+  {
+   "id": 7,
+   "rule": "Events reach only the direct parent",
+   "dev": true,
+   "prod": true,
+   "evidence": "leaf a→mid only (view 0); b relayed as \"b-relayed\"; DOM ping events 0"
+  },
+  {
+   "id": 8,
+   "rule": "Slots keep the author's scope",
+   "dev": true,
+   "prod": true,
+   "evidence": "slotted content styled and bound by its author"
+  },
+  {
+   "id": 9,
+   "rule": "Error isolation",
+   "dev": true,
+   "prod": true,
+   "evidence": "handler throw: #boom1 kept, clicks 1; drv throw → \"Boom failed Retry\"; setup throw → \"Setup failed Retry\"; neighbours \"After: 2 × 2 = 4\", \"Before: 1 × 2 = 2\", \"After: 1 × 2 = 2\""
+  },
+  {
+   "id": 10,
+   "rule": "CSS cannot escape its component",
+   "dev": true,
+   "prod": true,
+   "evidence": "body 16px, main 16px, sibling p 31px"
+  },
+  {
+   "id": 11,
+   "rule": "JS same names stay module-local",
+   "dev": true,
+   "prod": true,
+   "evidence": "counts 1/0/1010; leaked globals 0"
+  },
+  {
+   "id": 12,
+   "rule": "Custom property per instance",
+   "dev": true,
+   "prod": true,
+   "evidence": "plain rgb(0, 98, 196), custom rgb(10, 20, 30), view rgb(0, 98, 196)"
+  }
+ ],
+ "missingClickTargets": {
+  "dev": [],
+  "prod": []
+ },
+ "consoleErrors": {
+  "dev": 3,
+  "prod": 3
+ }
+}

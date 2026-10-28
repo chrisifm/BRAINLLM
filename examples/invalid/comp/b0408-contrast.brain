@@ -1,0 +1,5 @@
+<p class="hint">Hint</p>
+
+<style>
+  .hint { color: var(--faint); background: var(--bg); }
+</style>

@@ -1,0 +1,154 @@
+import { guard } from "/@brain/brain-guard.js";
+import { sig, drv, tpl, insert, attr, on, list, when } from "/@brain/brain.js";
+import UserForm from "../comp/user-form.brain";
+import api from "../lib/api.js";
+import fmt from "../lib/format.jsbrain";
+const $t0 = tpl("<p class=\"error\" role=\"alert\"><!></p>");
+const $t1 = tpl("<!><!>");
+const $t2 = tpl("<span data-b=\"dxj2kp\" class=\"badge\"><!></span>");
+const $t3 = tpl("<tr><td><!></td> <td><!></td> <td><!></td> <td><button>Edit</button> <button>Delete</button></td></tr>");
+const $t4 = tpl("<tr><td colspan=\"4\"><!></td></tr>");
+const $t5 = tpl("<main data-b=\"0m3tc1\" class=\"dash\"><header><h1>Users</h1> <span><!> active of <!></span> <input placeholder=\"Search by name or email\" aria-label=\"Search users\"> <button>New</button></header> <!> <!> <table><thead><tr><th>Name</th><th>Email</th><th>Status</th><th></th></tr></thead> <tbody><!></tbody></table></main>");
+function Dashboard($p = {}) {
+  const users = sig($p.users);
+  const query = sig('');
+  const editing = sig(null);
+  const busy = sig(false);
+  const error = sig('');
+  const shown = drv(() => {
+    const q = query.v.trim().toLowerCase();
+    if (q === '') {
+      return users.v;
+    }
+    return users.v.filter((u) => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
+  });
+  const activeCount = drv(() => users.v.filter((u) => u.active).length);
+  const save = async (data) => {
+    busy.v = true;
+    error.v = '';
+    try {
+      const saved = data.id === null ? await api.create(data) : await api.update(data);
+      users.v = data.id === null ? [...users.v, saved] : users.v.map((u) => u.id === saved.id ? saved : u);
+      editing.v = null;
+    } catch (e) {
+      error.v = e.message;
+    }
+    busy.v = false;
+  };
+  const remove = async (id) => {
+    error.v = '';
+    try {
+      await api.remove(id);
+      users.v = users.v.filter((u) => u.id !== id);
+    } catch (e) {
+      error.v = e.message;
+    }
+  };
+  const $r23 = $t5();
+  const $e1 = $r23.firstChild.firstChild.nextSibling.nextSibling.firstChild;
+  const $e2 = $e1.nextSibling.nextSibling;
+  const $e3 = $r23.firstChild.firstChild.nextSibling.nextSibling.nextSibling.nextSibling;
+  const $e4 = $e3.nextSibling.nextSibling;
+  const $e5 = $r23.firstChild.nextSibling.nextSibling;
+  const $e8 = $e5.nextSibling.nextSibling;
+  const $e11 = $e8.nextSibling.nextSibling.firstChild.nextSibling.nextSibling.firstChild;
+  insert(null, () => activeCount.v, $e1);
+  insert(null, () => fmt.plural(users.v.length, 'user', 'users'), $e2);
+  attr($e3, "value", () => query.v);
+  on($e3, "input", (e) => { query.v = e.target.value; });
+  on($e4, "click", () => { editing.v = {}; });
+  when(null, () => error.v !== '', () => {
+    const $r7 = $t0();
+    const $e6 = $r7.firstChild;
+    insert(null, () => error.v, $e6);
+    return $r7;
+  }, null, $e5);
+  when(null, () => editing.v !== null, () => {
+    const $r10 = $t1();
+    const $e9 = $r10.firstChild;
+    insert(null, UserForm({ get "user"() { return editing.v.id ? editing.v : null; }, get "busy"() { return busy.v; }, "on:save": save, "on:cancel": () => { editing.v = null; } }), $e9);
+    return $r10;
+  }, null, $e8);
+  list(null, () => shown.v, (u) => u.id, (u) => {
+    const $r20 = $t3();
+    const $e12 = $r20.firstChild.firstChild;
+    const $e13 = $r20.firstChild.nextSibling.nextSibling.firstChild;
+    const $e14 = $r20.firstChild.nextSibling.nextSibling.nextSibling.nextSibling.firstChild;
+    const $e18 = $r20.firstChild.nextSibling.nextSibling.nextSibling.nextSibling.nextSibling.nextSibling.firstChild;
+    const $e19 = $e18.nextSibling.nextSibling;
+    insert(null, () => u.v.name, $e12);
+    insert(null, () => u.v.email, $e13);
+    {
+      const $r17 = $t2();
+      const $e15 = $r17;
+      const $e16 = $r17.firstChild;
+      attr($e15, "data-tone", () => (u.v.active ? 'ok' : 'bad'));
+      insert(null, () => (u.v.active ? 'Active' : 'Inactive'), $e16);
+      insert(null, $r17, $e14);
+    }
+    on($e18, "click", () => { editing.v = u.v; });
+    on($e19, "click", () => { remove(u.v.id); });
+    return $r20;
+  }, $e11, () => {
+    const $r22 = $t4();
+    const $e21 = $r22.firstChild.firstChild;
+    insert(null, () => query.v === '' ? 'No users yet.' : 'No results for this search.', $e21);
+    return $r22;
+  });
+  return $r23;
+}
+Dashboard.h = "0m3tc1";
+Dashboard.seo = ($p) => ({ "title": "User admin", "description": "Create, edit, activate and delete the users of the example app, with search and an inline edit form.", "canonical": "/dashboard" });
+Dashboard.f = "views/dashboard.brain";
+export default guard(Dashboard);
+
+/* ---- css ---- */
+@layer view {
+  @scope ([data-b="0m3tc1"]) to ([data-b]) {
+    :where(:scope):is(.dash), .dash {
+      display: grid;
+      gap: var(--space-3);
+      padding: var(--space-3);
+      background: var(--bg);
+      color: var(--fg);
+    }
+    :where(:scope):is(header), header {
+      display: flex;
+      gap: var(--space-2);
+      align-items: center;
+    }
+    :where(:scope):is(.error), .error {
+      color: var(--bad);
+    }
+    :where(:scope):is(table), table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    :where(:scope):is(td), td, :where(:scope):is(th), th {
+      padding: var(--space-1) var(--space-2);
+      text-align: left;
+    }
+  }
+}
+@layer ui {
+  @scope ([data-b="dxj2kp"]) to ([data-b]) {
+    :where(:scope):is(.badge), .badge {
+      padding: 0 var(--space-1);
+      border-radius: var(--radius);
+      color: var(--muted);
+      &[data-tone=ok] {
+        color: var(--ok);
+      }
+      &[data-tone=bad] {
+        color: var(--bad);
+      }
+    }
+  }
+}
+
+/* ---- server ---- */
+import api from "../lib/api.js";
+export async function load(ctx) {
+  return { users: await api.list(ctx) };
+}
+export const seo = (props) => ({ "title": "User admin", "description": "Create, edit, activate and delete the users of the example app, with search and an inline edit form.", "canonical": "/dashboard" });

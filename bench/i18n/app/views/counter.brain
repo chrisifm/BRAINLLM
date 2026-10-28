@@ -1,0 +1,25 @@
+<meta seo title="Polyglot probe counter" description="An interactive counter that shows a plural message, a placeholder and locale formatted dates and numbers in every language.">
+<script>
+  let n = sig(1)
+  const name = 'Ada'
+  const released = '2026-03-14T12:00:00Z'
+</script>
+
+<main class="page">
+  <h1>{t('counter.title')}</h1>
+  <p id="hello">{t('counter.hello', { name })}</p>
+  <div class="row">
+    <button type="button" id="add" on:click={n++}>{t('counter.add')}</button>
+    <output id="clicks">{t('counter.clicks', { n })}</output>
+  </div>
+  <p id="date">{t('counter.date', { date: fmt.date(released) })}</p>
+  <p id="number">{t('counter.amount', { value: fmt.number(1234567.5) })}</p>
+  <p id="price">{t('counter.price', { price: fmt.money(1999.5, 'USD') })}</p>
+</main>
+
+<style>
+  .page { max-width: 68ch; margin-inline: auto; padding-block: var(--space-6); padding-inline: var(--space-4); display: grid; gap: var(--space-3); text-align: start; }
+  .row { display: flex; align-items: center; gap: var(--space-3); }
+  button { padding-block: var(--space-2); padding-inline: var(--space-4); border-radius: var(--radius); }
+  p { margin: 0; }
+</style>

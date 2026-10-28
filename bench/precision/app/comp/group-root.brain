@@ -1,0 +1,14 @@
+<meta props="g:str">
+<script>
+  import { Cart } from '../channels/cart.jsbrain'
+  import GroupReader from './group-reader.brain'
+  provide(Cart, store({ x: 0, y: 0 }))
+  const cart = use(Cart)
+  const five = [0, 1, 2, 3, 4]
+  const incX = () => { cart.x = cart.x + 1 }
+</script>
+<section class="group" data-k={'group-' + g}>
+  <button type="button" data-a={'incX-' + g} on:click={incX}>x +1</button>
+  {#each five as i (i)}<GroupReader g={g} i={i} field="x" />{/each}
+  {#each five as i (i)}<GroupReader g={g} i={i} field="y" />{/each}
+</section>

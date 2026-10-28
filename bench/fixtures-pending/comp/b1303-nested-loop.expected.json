@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1303",
+    "level": "warning",
+    "file": "comp/b1303-nested-loop.brain",
+    "line": 3,
+    "col": 70,
+    "msg": "`items.find` inside `items.map`: O(n²) over the same list",
+    "fix": "build `const byId = new Map(items.map((b) => [b.id, b]))` and use `byId.get(a.parentId)`"
+  }
+]

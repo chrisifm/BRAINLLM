@@ -1,0 +1,3 @@
+const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length
+const sorted = (xs) => [...xs].sort((a, b) => a - b)
+export default { mean, sorted }

@@ -1,0 +1,16 @@
+<meta props="rows:num=3 label:str='Loading'">
+
+<div class="loading" role="status" aria-busy="true" aria-label={label}>
+  {#each Array.from({ length: rows }, (_, i) => i) as i (i)}
+    <div class="bar" style:width={90 - (i % 3) * 15 + '%'}></div>
+  {/each}
+</div>
+
+<style>
+  .loading { display: grid; gap: var(--space-2); padding: var(--space-3) 0; }
+  .bar { height: 14px; border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--line); }
+  @media (prefers-reduced-motion: no-preference) {
+    .bar { animation: pulse 1.2s ease-in-out infinite; }
+    @keyframes pulse { 50% { opacity: .5; } }
+  }
+</style>

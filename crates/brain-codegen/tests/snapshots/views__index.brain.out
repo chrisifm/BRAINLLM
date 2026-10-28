@@ -1,0 +1,22 @@
+import { guard } from "/@brain/brain-guard.js";
+import { tpl, insert } from "/@brain/brain.js";
+import Counter from "../comp/counter.brain";
+import Todo from "../comp/todo.brain";
+const $t0 = tpl("<main data-b=\"c8wsyf\"><h1>BRAINLLM examples</h1> <p>Each block below is one component. The <a href=\"/dashboard\">user admin</a> shows data loading, forms and CRUD.</p> <section aria-labelledby=\"counter-title\"><h2 id=\"counter-title\">Counter</h2> <!></section> <section aria-labelledby=\"todo-title\"><h2 id=\"todo-title\">To-do list</h2> <!></section></main>");
+function Index($p = {}) {
+  const $r3 = $t0();
+  const $e1 = $r3.firstChild.nextSibling.nextSibling.nextSibling.nextSibling.firstChild.nextSibling.nextSibling;
+  const $e2 = $r3.firstChild.nextSibling.nextSibling.nextSibling.nextSibling.nextSibling.nextSibling.firstChild.nextSibling.nextSibling;
+  insert(null, Counter({  }), $e1);
+  insert(null, Todo({  }), $e2);
+  return $r3;
+}
+Index.h = "c8wsyf";
+Index.seo = ($p) => ({ "title": "BRAINLLM examples", "description": "Small BRAINLLM examples: a counter with derived state and a to-do list with keyed items, filters and an empty state.", "canonical": "/" });
+Index.f = "views/index.brain";
+export default guard(Index);
+
+/* ---- css ---- */
+
+/* ---- server ---- */
+export const seo = (props) => ({ "title": "BRAINLLM examples", "description": "Small BRAINLLM examples: a counter with derived state and a to-do list with keyed items, filters and an empty state.", "canonical": "/" });

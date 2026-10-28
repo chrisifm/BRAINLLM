@@ -1,0 +1,26 @@
+<script>
+  import CardB from '../ui/card-b.brain'
+  import SlotHost from './slot-host.brain'
+  import MultiRoot from './multi-root.brain'
+  let label = sig('parent-state')
+</script>
+<section class="card-a" data-probe="a-root">
+  <h2 class="title" data-probe="a-h2">Card A</h2>
+  <p data-probe="a-p">Card A paragraph</p>
+  <button type="button" class="btn" data-probe="a-btn">A button</button>
+  <span class="plain" data-probe="a-plain-span">A plain span</span>
+  <CardB heading="Card B inside A">
+    <p class="title" data-probe="a-slot-into-b">{label}</p>
+  </CardB>
+  <MultiRoot />
+  <SlotHost>
+    <p class="slotted" data-probe="a-slot-into-host">{label}</p>
+  </SlotHost>
+</section>
+<style>
+  .title { color: var(--ok); font-size: 17px; }
+  .btn { color: var(--ok); font-size: 17px; }
+  h2 { border-top: 3px solid var(--line); }
+  p { color: var(--ok); font-size: 17px; border-top: 3px solid var(--line); }
+  .slotted { text-decoration: underline; }
+</style>

@@ -1,0 +1,40 @@
+<meta seo lastmod="2026-10-13" title="Data, forms and server" description="The built-in UI kit, validated forms, typed API contracts, server-only code, secrets and runtime error handling in BRAINLLM." canonical="/docs/data">
+
+<main class="doc">
+  <h1>Data, forms and server</h1>
+  <p>Data flows in three ways: typed API contracts for remote data, forms for user input, and server code for anything that touches secrets. Each one comes with validation built in, so bad data is stopped at the edge, the first rule of the <a href="https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html">OWASP input validation guide</a>.</p>
+  <h2>The UI kit</h2>
+  <p>Before writing a control, use the built-in kit: <code>Button</code>, <code>Input</code>, <code>Select</code>, <code>Checkbox</code>, <code>Dialog</code>, <code>Table</code>, <code>Tabs</code>, <code>Toast</code>, <code>Menu</code> and <code>Field</code>. They need no import, use the design tokens, are accessible, and cover every state: loading, disabled, error and empty.</p>
+  <h2>Forms</h2>
+  <pre><code raw>let f = form({ email: 'email!', age: 'num>=18' }, {
+  submit: async (v) => await signup(v),
+})
+// markup
+<form on:submit={f.submit}>
+  <Input label="Email" bind:value={f.v.email} />
+  <Button type="submit">Sign up</Button>
+</form></code></pre>
+  <p>A form takes a schema such as <code>email: 'email!'</code> or <code>name: 'str!&lt;=80'</code>, where <code>!</code> means required and the types are <code>str</code>, <code>num</code>, <code>bool</code>, <code>email</code>, <code>url</code> and <code>date</code>, lists and nested objects. Field errors appear in <code>f.err</code>, the busy state in <code>f.busy</code>, and a failure of the whole form in <code>f.error</code>. A server can return field errors by throwing an object with an <code>errors</code> key.</p>
+  <h2>Typed APIs</h2>
+  <pre><code raw>// api/users.jsbrain
+export default api('/users', { get: { out: '[User]' }, post: { in: 'User', out: 'User' } })
+// types.jsbrain
+export const User = { id: 'num!', email: 'email!' }</code></pre>
+  <p>A contract in <code>api/</code> describes an endpoint's input and output types. <code>resource(usersApi.get)</code> gives you a promise for an <code>await</code> block, which must cover loading, error and empty, and every response is validated against the type.</p>
+  <h2>Server code and secrets</h2>
+  <p>A view's <code>load</code> function runs only on the server. Files that start with <code>meta server</code> run only on the server too, and may be used only inside <code>load</code> or server functions. A server function is declared with the <code>server:</code> label and called from the client like a normal async function:</p>
+  <pre><code raw>server: async function save(ctx, data) {
+  // runs only on the server; validate data here
+}
+// client side
+await save(data)</code></pre>
+  <p>Client code may read only environment variables prefixed with <code>PUBLIC_</code>; anything else stays on the server.</p>
+  <h2>Errors at runtime</h2>
+  <p>Errors in effects, derived values and handlers are caught, so the app keeps working and the error is reported. An effect that runs more than a hundred times in one update is stopped. A component can show a fallback with <code>meta fallback</code>, and every captured error is listed by <code>brain doctor</code>. Continue with <a href="/docs/cli">CLI and testing</a>.</p>
+</main>
+
+<style>
+  .doc { display: grid; gap: var(--space-3); max-width: 72ch; }
+  .doc p { margin: 0; }
+  pre { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--space-4); overflow-x: auto; }
+</style>

@@ -1,0 +1,13 @@
+<meta server>
+// Demo authentication. DEMO_PASSWORD exists only in the [development] block of .brain_env, so a deployed app has
+// no demo login: replace check() and register() with your real provider (database lookup, OAuth…).
+// Demo roles: an email starting with admin@ is an admin, everyone else a member.
+const configured = () => Boolean(process.env.DEMO_PASSWORD)
+const roleOf = (email) => (email.startsWith('admin@') ? 'admin' : 'member')
+
+export default {
+  configured,
+  check: (email, password) => configured() && password === process.env.DEMO_PASSWORD ? { email, role: roleOf(email) } : null,
+  // the demo keeps no accounts: a valid sign-up signs the user in; a real provider stores the account here
+  register: (email) => configured() ? { email, role: roleOf(email) } : null,
+}

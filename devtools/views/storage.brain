@@ -1,0 +1,11 @@
+<meta seo title="Storage" description="Cookies, localStorage, sessionStorage, IndexedDB and Cache Storage, with who read or wrote each key.">
+<script>
+  import inspector from '../channels/inspector.jsbrain'
+  const rows = drv(() => inspector.storage.map((s, i) => ({ ...s, id: i, who: s.own ? s.own.name : s.foreign ? 'third party' : 'module', flags: s.flags || '' })))
+  const cols = [{ key: 'area', label: 'Area' }, { key: 'op', label: 'Op' }, { key: 'key', label: 'Key' }, { key: 'flags', label: 'Flags' }, { key: 'who', label: 'By' }, { key: 'line', label: 'Line' }]
+</script>
+<h1>Storage</h1>
+<Table caption="Storage operations" rows={rows} columns={cols} empty="No storage access yet." />
+<style>
+  h1 { margin: 0 0 var(--space-4); font-size: 22px; }
+</style>

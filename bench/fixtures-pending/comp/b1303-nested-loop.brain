@@ -1,0 +1,7 @@
+<meta props="items:list">
+<script>
+  let withParent = drv(() => items.map((a) => ({ ...a, parent: items.find((b) => b.id === a.parentId) })))
+</script>
+<ul>
+  {#each withParent as it (it.id)}<li>{it.name}</li>{/each}
+</ul>

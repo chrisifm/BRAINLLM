@@ -1,0 +1,10 @@
+// Example content for the posts routes: replace it with your data source (an api/ client or content/).
+const all = [
+  { id: 'hello-world', title: 'Hello, world', summary: 'The first post of this app: how routes, data loading and SEO fit together in a few lines.', body: 'Every post page is generated at build time from the list below: paths() names the pages and load() gives each one its data. Edit lib/posts.jsbrain or point it at an API.' },
+  { id: 'second-post', title: 'A second post', summary: 'A second example page, built from the same view and the same data module as the first one.', body: 'Dynamic routes use one view for many URLs. The id in the address arrives as ctx.params.id in load().' },
+]
+
+export default {
+  all: () => all,
+  find: (id) => all.find((p) => p.id === id) ?? null,
+}

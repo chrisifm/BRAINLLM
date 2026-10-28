@@ -1,0 +1,1 @@
+export default api('/users', { get: { out: '[User]', cache: '10m' }, post: { in: 'User', out: 'User' } })

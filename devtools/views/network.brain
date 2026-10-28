@@ -1,0 +1,11 @@
+<meta seo title="Network" description="Every fetch and XHR with the component and the code that started it.">
+<script>
+  import inspector from '../channels/inspector.jsbrain'
+  const rows = drv(() => inspector.net.map((n) => ({ ...n, who: n.own ? n.own.name + ' · ' + n.own.o : n.foreign ? 'third party' : 'module', kb: n.b == null ? '' : (n.b / 1024).toFixed(1) })))
+  const cols = [{ key: 'm', label: 'Method' }, { key: 'url', label: 'URL' }, { key: 'st', label: 'Status' }, { key: 'ms', label: 'ms' }, { key: 'kb', label: 'KB' }, { key: 'who', label: 'Started by' }, { key: 'line', label: 'Line' }]
+</script>
+<h1>Network</h1>
+<Table caption="Requests" rows={rows} columns={cols} empty="No request yet." />
+<style>
+  h1 { margin: 0 0 var(--space-4); font-size: 22px; }
+</style>

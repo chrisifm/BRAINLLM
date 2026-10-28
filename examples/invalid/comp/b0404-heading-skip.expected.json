@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0404",
+    "level": "error",
+    "file": "invalid/comp/b0404-heading-skip.brain",
+    "line": 3,
+    "col": 3,
+    "msg": "skipped heading level: `<h4>` after `<h2>`",
+    "fix": "use `<h3>`"
+  }
+]

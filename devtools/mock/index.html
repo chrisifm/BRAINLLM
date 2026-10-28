@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BRAINLLM Devtools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Visual mock of the debugger (SPEC §9.1). Sample data. In the final product the Geist font is embedded in the binary. */
+  :root{
+    --bg:#f5f5f7; --bg-alt:#fafafa; --surface:#fff; --ink:#1d1d1f; --ink-soft:#6e6e73; --line:#e8e8ed;
+    --accent:#0071e3;
+    --ok:#1d7a4c; --ok-bg:#f0f5f2; --warn:#9a6700; --warn-bg:#fdf8ef; --bad:#b3261e; --bad-bg:#faf0ef;
+    --glass-tint:rgba(255,255,255,.72); --glass-border:rgba(255,255,255,.9); --glass-blur:24px; --glass-sat:180%;
+    --glass-ease:cubic-bezier(.22,1,.36,1);
+    --glass-shadow:0 1px 0 rgba(255,255,255,.9) inset,0 0 0 .5px rgba(0,0,0,.04),0 2px 8px rgba(0,0,0,.04),0 18px 44px -14px rgba(0,0,0,.14);
+    --font:'Geist',ui-sans-serif,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:var(--font);color:var(--ink);font-size:13.5px;line-height:1.45;font-variant-numeric:tabular-nums;
+    background:radial-gradient(ellipse 1200px 700px at 15% 0%,rgba(255,255,255,.95),transparent 60%),
+      radial-gradient(ellipse 900px 700px at 100% 30%,rgba(0,0,0,.03),transparent 60%),var(--bg);background-attachment:fixed}
+  .glass{background:var(--glass-tint);-webkit-backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-sat));
+    backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-sat));border:1px solid var(--glass-border);box-shadow:var(--glass-shadow);border-radius:16px}
+  @supports not (backdrop-filter:blur(1px)){.glass{background:var(--surface)}}
+
+  .app{display:grid;grid-template-columns:232px 1fr;min-height:100vh}
+  aside{position:sticky;top:0;height:100vh;padding:18px 14px;border-right:1px solid var(--line);
+    background:rgba(255,255,255,.55);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}
+  .brand{display:flex;align-items:center;gap:10px;padding:4px 8px 18px;font-weight:700;letter-spacing:-.01em}
+  .logo{width:28px;height:28px;border-radius:8px;background:var(--ink);color:#fff;display:grid;place-items:center;font-size:13px}
+  .brand small{display:block;font-weight:500;color:var(--ink-soft);font-size:11.5px}
+  nav a{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:9px;color:var(--ink-soft);text-decoration:none;font-weight:500}
+  nav a svg{width:16px;height:16px;flex:none}
+  nav a:hover{background:rgba(0,0,0,.04);color:var(--ink)}
+  nav a[aria-current]{background:var(--surface);color:var(--ink);box-shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 3px rgba(0,0,0,.06)}
+  nav a .n{margin-left:auto;font-size:11px;padding:1px 7px;border-radius:99px;background:var(--bad-bg);color:var(--bad);font-weight:600}
+  .navlabel{font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.08em;padding:16px 10px 6px}
+  .session{margin-top:18px;padding:10px;font-size:12px}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ok);margin-right:6px;box-shadow:0 0 0 3px var(--ok-bg)}
+
+  main{padding:18px 26px 48px;min-width:0}
+  .top{display:flex;align-items:center;gap:12px;padding:10px 14px;margin-bottom:18px}
+  .top h1{font-size:16px;margin:0;font-weight:600}
+  .crumb{color:var(--ink-soft)}
+  .spacer{flex:1}
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:99px;border:1px solid var(--line);background:var(--surface);font-size:12px;color:var(--ink-soft)}
+  button{font:inherit;cursor:pointer;border-radius:9px;border:1px solid var(--line);background:var(--surface);padding:7px 12px;font-weight:500;color:var(--ink)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin-bottom:18px}
+  .kpi{padding:14px 16px}
+  .kpi .l{display:flex;align-items:center;gap:7px;color:var(--ink-soft);font-size:12px;font-weight:500}
+  .kpi .l svg{width:15px;height:15px}
+  .kpi .v{font-size:24px;font-weight:600;letter-spacing:-.02em;margin-top:6px}
+  .kpi .v small{font-size:13px;color:var(--ink-soft);font-weight:500}
+  .kpi .d{font-size:12px;margin-top:2px}
+  .up{color:var(--bad)} .down{color:var(--ok)} .flat{color:var(--ink-soft)}
+
+  .grid2{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:14px;margin-bottom:14px}
+  .card{padding:16px}
+  .card h2{font-size:13.5px;margin:0 0 2px;font-weight:600}
+  .card .sub{color:var(--ink-soft);font-size:12px;margin-bottom:12px}
+  .head{display:flex;align-items:flex-start;gap:10px}
+  .seg{display:inline-flex;margin-left:auto;background:rgba(0,0,0,.04);border-radius:9px;padding:2px}
+  .seg button{border:0;background:transparent;padding:4px 10px;font-size:12px;color:var(--ink-soft)}
+  .seg button[aria-pressed=true]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+
+  svg.chart{width:100%;height:220px;display:block}
+  .legend{display:flex;gap:14px;font-size:11.5px;color:var(--ink-soft);margin-top:6px;flex-wrap:wrap}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{text-align:left;font-weight:500;color:var(--ink-soft);padding:7px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  td.num,th.num{text-align:right}
+  tr:last-child td{border-bottom:0}
+  tbody tr:hover{background:rgba(0,113,227,.04)}
+  .cname{font-weight:600}
+  .cname span{color:var(--ink-soft);font-weight:400;margin-left:4px}
+  .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;width:70px;display:inline-block;vertical-align:middle;margin-left:8px}
+  .bar b{display:block;height:100%;background:var(--ink)}
+  .pill{font-size:11px;padding:2px 8px;border-radius:99px;font-weight:600}
+  .p-ok{background:var(--ok-bg);color:var(--ok)} .p-warn{background:var(--warn-bg);color:var(--warn)} .p-bad{background:var(--bad-bg);color:var(--bad)}
+
+  .leak{display:flex;gap:10px;padding:10px;border-radius:12px;background:var(--bad-bg);margin-bottom:8px}
+  .leak.w{background:var(--warn-bg)}
+  .leak b{font-weight:600}
+  .leak code{font-family:inherit;background:rgba(0,0,0,.05);padding:1px 5px;border-radius:5px}
+  .leak .fix{color:var(--ink-soft);font-size:12px;margin-top:3px}
+
+  .tl{position:relative;height:150px}
+  .tl .row{position:absolute;left:120px;right:0;height:18px}
+  .tl .lab{position:absolute;left:0;width:112px;font-size:11.5px;color:var(--ink-soft);text-align:right;line-height:18px}
+  .tl .seg2{position:absolute;height:18px;border-radius:5px;font-size:10.5px;color:#fff;padding:0 6px;line-height:18px;overflow:hidden;white-space:nowrap}
+  .s-net{background:#8e8e93} .s-mount{background:var(--ink)} .s-upd{background:var(--accent)} .s-hmr{background:var(--warn)}
+
+  .wf td{padding:7px 8px}
+  .wf .ord{color:var(--ink-soft);width:28px}
+  .wf .track{position:relative;height:16px;min-width:340px;background:linear-gradient(90deg,rgba(0,0,0,.04) 1px,transparent 1px) 0 0/10% 100%}
+  .wf .ph{position:absolute;top:2px;height:12px;border-radius:3px}
+  .ph-dl{background:#c7c7cc} .ph-ev{background:#8e8e93} .ph-mo{background:var(--ink)} .ph-pa{background:var(--accent)} .ph-hy{background:var(--warn)}
+  .wf tr.sel{background:rgba(0,113,227,.06)}
+  .detail{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-top:12px;padding:12px;border-radius:12px;background:rgba(0,0,0,.03)}
+  .detail div span{display:block;font-size:11px;color:var(--ink-soft)} .detail div b{font-size:14px;font-weight:600}
+  @media (max-width:1100px){.kpis{grid-template-columns:repeat(3,1fr)}.grid2{grid-template-columns:1fr}}
+  @media (prefers-reduced-motion:no-preference){nav a,button,tbody tr{transition:background .2s var(--glass-ease)}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside aria-label="Debugger navigation">
+    <div class="brand"><div class="logo" aria-hidden="true">B</div><div>BRAINLLM<small>Devtools · :5181</small></div></div>
+    <nav>
+      <a href="#" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Overview</a>
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5h6M7 10h9M10 15h7M5 20h4"/></svg>Load log</a>
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 3v12M6 9h8a4 4 0 0 1 4 4v2M18 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM6 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></svg>Tree</a>
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16"/></svg>Load</a>
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="6" width="16" height="12" rx="2"/><path d="M8 6V3m4 3V3m4 3V3M8 21v-3m4 3v-3m4 3v-3"/></svg>Memory<span class="n">2</span></a>
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/></svg>Latency</a>
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 7h10M7 7l3-3M7 7l3 3M17 17H7m10 0-3-3m3 3-3 3"/></svg>Network</a>
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Events</a>
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="19" cy="19" r="2"/><path d="M7 12h5l5-6M12 12l5 6"/></svg>Graph</a>
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h10M3 12h16M3 18h7"/></svg>Timeline</a>
+    </nav>
+    <div class="navlabel">Data</div>
+    <nav>
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h6"/></svg>State</a>
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>Storage</a>
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M12 20h.01"/></svg>Connections<span class="n" style="background:var(--ok-bg);color:var(--ok)">2</span></a>
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>Timers</a>
+      <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>Routes &amp; env</a>
+    </nav>
+    <div class="navlabel">Session</div>
+    <div class="glass session"><span class="dot" aria-hidden="true"></span>Connected to <b>localhost:5180</b><br><span class="crumb">Tab 1 of 2 · /users</span></div>
+  </aside>
+
+  <main>
+    <div class="glass top">
+      <h1>Overview <span class="crumb">· /users</span></h1>
+      <span class="chip">Last 5 min</span>
+      <span class="chip">HMR 14:32:08 · 6 ms</span>
+      <div class="spacer"></div>
+      <button type="button">Heap snapshot</button>
+      <button type="button" class="primary">Pause recording</button>
+    </div>
+
+    <section class="kpis" aria-label="Indicators">
+      <div class="glass kpi"><div class="l"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Live components</div><div class="v">148 <small>/ 12 types</small></div><div class="d flat">3 inert islands</div></div>
+      <div class="glass kpi"><div class="l"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="6" width="16" height="12" rx="2"/></svg>Heap JS</div><div class="v">4.82 <small>MB</small></div><div class="d up">+0.61 MB in 5 min</div></div>
+      <div class="glass kpi"><div class="l"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>Leaks</div><div class="v" style="color:var(--bad)">2</div><div class="d">1 B0601 · 1 B0602</div></div>
+      <div class="glass kpi"><div class="l"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/></svg>Update p95</div><div class="v">3.4 <small>ms</small></div><div class="d down">−1.1 ms after HMR</div></div>
+      <div class="glass kpi"><div class="l"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 7h10M7 7l3-3M17 17H7m10 0-3-3"/></svg>Requests</div><div class="v">37 <small>· 2 failed</small></div><div class="d flat">p95 182 ms</div></div>
+    </section>
+
+    <div class="grid2">
+      <section class="glass card" aria-labelledby="mem-t">
+        <div class="head"><div><h2 id="mem-t">Memory over time</h2><div class="sub">JS heap measured every second, with each event marked</div></div>
+          <div class="seg" role="group" aria-label="Range"><button type="button" aria-pressed="false">1 min</button><button type="button" aria-pressed="true">5 min</button><button type="button" aria-pressed="false">Session</button></div></div>
+        <svg class="chart" viewBox="0 0 600 220" role="img" aria-label="Heap from 4.21 to 4.82 MB in 5 minutes, with jumps at the UserTable load and at the HMR">
+          <g stroke="#e8e8ed"><line x1="40" y1="20" x2="600" y2="20"/><line x1="40" y1="80" x2="600" y2="80"/><line x1="40" y1="140" x2="600" y2="140"/><line x1="40" y1="200" x2="600" y2="200"/></g>
+          <g fill="#6e6e73" font-size="10"><text x="0" y="24">5.0</text><text x="0" y="84">4.6</text><text x="0" y="144">4.2</text><text x="0" y="204">3.8</text></g>
+          <defs><linearGradient id="fillg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1d1d1f" stop-opacity=".14"/><stop offset="1" stop-color="#1d1d1f" stop-opacity="0"/></linearGradient></defs>
+          <path d="M40 150 L80 148 L120 149 L150 118 L190 116 L230 117 L270 115 L300 112 L330 92 L370 94 L410 90 L450 86 L480 60 L520 58 L560 55 L600 52 L600 200 L40 200Z" fill="url(#fillg)"/>
+          <path d="M40 150 L80 148 L120 149 L150 118 L190 116 L230 117 L270 115 L300 112 L330 92 L370 94 L410 90 L450 86 L480 60 L520 58 L560 55 L600 52" fill="none" stroke="#1d1d1f" stroke-width="2"/>
+          <g stroke-dasharray="3 3"><line x1="150" y1="20" x2="150" y2="200" stroke="#6e6e73"/><line x1="330" y1="20" x2="330" y2="200" stroke="#0071e3"/><line x1="480" y1="20" x2="480" y2="200" stroke="#9a6700"/></g>
+          <g font-size="10.5"><text x="155" y="34" fill="#6e6e73">UserTable load +0.18 MB</text><text x="335" y="34" fill="#0071e3">mount ×40 rows</text><text x="485" y="34" fill="#9a6700">HMR UserForm</text></g>
+        </svg>
+        <div class="legend"><span><i style="background:#1d1d1f"></i>Heap</span><span><i style="background:#6e6e73"></i>Module load</span><span><i style="background:#0071e3"></i>Mount / update</span><span><i style="background:#9a6700"></i>HMR</span></div>
+      </section>
+
+      <section class="glass card" aria-labelledby="leak-t">
+        <h2 id="leak-t">Detected leaks</h2><div class="sub">Instances still alive after 2 GC cycles</div>
+        <div class="leak"><span class="pill p-bad">B0601</span><div><b>UserRow</b> · 40 instances retained<div class="fix">Retained by the <code>fx</code> in <code>comp/user-row.brain:14</code>, which registers <code>window.onresize</code> without cleanup. Fix: <code>return () =&gt; removeEventListener('resize', h)</code></div></div></div>
+        <div class="leak w"><span class="pill p-warn">B0602</span><div><b>Clock</b> · <code>setInterval</code> not cleared<div class="fix"><code>comp/clock.brain:6</code>. Fix: return <code>() =&gt; clearInterval(id)</code> from the <code>fx</code></div></div></div>
+        <button type="button" style="margin-top:6px">Copy diagnosis for the LLM</button>
+      </section>
+    </div>
+
+    <section class="glass card" aria-labelledby="log-t" style="margin-bottom:14px">
+      <div class="head"><div><h2 id="log-t">Load log · /users</h2><div class="sub">Each component in the order it appeared, by phase, since navigation (0 ms)</div></div>
+        <div style="margin-left:auto;display:flex;gap:8px"><button type="button">Pause on each load</button><button type="button">Isolate selected</button></div></div>
+      <div style="overflow-x:auto">
+      <table class="wf">
+        <thead><tr><th>#</th><th>Component</th><th>Cause</th><th class="num">Start</th><th class="num">Total</th><th class="num">Weight gz</th><th>Waterfall 0 – 200 ms</th></tr></thead>
+        <tbody>
+          <tr><td class="ord">1</td><td class="cname">App<span>app.brain</span></td><td>document</td><td class="num">0 ms</td><td class="num">4.1 ms</td><td class="num">0.6 KB</td><td><div class="track"><i class="ph ph-ev" style="left:0;width:1%"></i><i class="ph ph-mo" style="left:1%;width:1%"></i></div></td></tr>
+          <tr><td class="ord">2</td><td class="cname">Users<span>views/</span></td><td>route /users</td><td class="num">4 ms</td><td class="num">81 ms</td><td class="num">1.4 KB</td><td><div class="track"><i class="ph ph-dl" style="left:2%;width:5%"></i><i class="ph ph-ev" style="left:7%;width:1%"></i><i class="ph ph-dl" style="left:8%;width:30%" title="load: GET /api/users"></i><i class="ph ph-mo" style="left:38%;width:2%"></i><i class="ph ph-pa" style="left:40%;width:1%"></i></div></td></tr>
+          <tr class="sel"><td class="ord">3</td><td class="cname">UserTable<span>comp/</span></td><td>import from Users</td><td class="num">80 ms</td><td class="num">24.8 ms</td><td class="num">2.1 KB</td><td><div class="track"><i class="ph ph-dl" style="left:40%;width:4%"></i><i class="ph ph-ev" style="left:44%;width:1%"></i><i class="ph ph-mo" style="left:45%;width:4%"></i><i class="ph ph-pa" style="left:49%;width:3%"></i></div></td></tr>
+          <tr><td class="ord">4</td><td class="cname">UserRow ×40<span>comp/</span></td><td>{#each} in UserTable</td><td class="num">92 ms</td><td class="num">8.4 ms</td><td class="num">0.9 KB</td><td><div class="track"><i class="ph ph-mo" style="left:46%;width:4%"></i></div></td></tr>
+          <tr><td class="ord">5</td><td class="cname">Clock<span>comp/</span></td><td>{#if visible}</td><td class="num">104 ms</td><td class="num">1.2 ms</td><td class="num">0.4 KB</td><td><div class="track"><i class="ph ph-mo" style="left:52%;width:1%"></i></div></td></tr>
+          <tr><td class="ord">6</td><td class="cname">UserForm<span>comp/ · island</span></td><td>click on "New"</td><td class="num">1 840 ms</td><td class="num">31 ms</td><td class="num">1.7 KB</td><td><div class="track"><i class="ph ph-hy" style="left:92%;width:8%" title="off scale: 1 840 ms"></i></div></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="legend"><span><i style="background:#c7c7cc"></i>Download / network</span><span><i style="background:#8e8e93"></i>Evaluation</span><span><i style="background:#1d1d1f"></i>Mount</span><span><i style="background:#0071e3"></i>First paint</span><span><i style="background:#9a6700"></i>Hydration</span></div>
+      <div class="detail" aria-label="UserTable detail">
+        <div><span>Selected</span><b>UserTable</b></div>
+        <div><span>Download</span><b>7.9 ms</b></div>
+        <div><span>Evaluation</span><b>1.6 ms</b></div>
+        <div><span>Mount</span><b>6.8 ms</b></div>
+        <div><span>Memory on mount</span><b>+188 KB</b></div>
+        <div><span>Triggered</span><b>40 children · 1 request</b></div>
+      </div>
+    </section>
+
+    <section class="glass card" aria-labelledby="comp-t" style="margin-bottom:14px">
+      <div class="head"><div><h2 id="comp-t">Components</h2><div class="sub">Load, memory, latency and network per component type</div></div>
+        <div class="seg" role="group" aria-label="Sort by"><button type="button" aria-pressed="true">Memory</button><button type="button" aria-pressed="false">Latency</button><button type="button" aria-pressed="false">Network</button></div></div>
+      <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Component</th><th class="num">Instances</th><th class="num">Chunk gz</th><th class="num">Load</th><th class="num">Mount</th><th class="num">Memory</th><th class="num">sig / fx</th><th class="num">Update p95</th><th class="num">Requests</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td class="cname">UserRow<span>comp/</span></td><td class="num">40</td><td class="num">0.9 KB</td><td class="num">—</td><td class="num">0.21 ms</td><td class="num">412 KB<span class="bar"><b style="width:92%"></b></span></td><td class="num">80 / 40</td><td class="num">0.4 ms</td><td class="num">0</td><td><span class="pill p-bad">Leak</span></td></tr>
+          <tr><td class="cname">UserTable<span>comp/</span></td><td class="num">1</td><td class="num">2.1 KB</td><td class="num">18 ms</td><td class="num">6.8 ms</td><td class="num">188 KB<span class="bar"><b style="width:42%"></b></span></td><td class="num">6 / 4</td><td class="num">3.4 ms</td><td class="num">12</td><td><span class="pill p-ok">Healthy</span></td></tr>
+          <tr><td class="cname">Users<span>views/</span></td><td class="num">1</td><td class="num">1.4 KB</td><td class="num">11 ms</td><td class="num">2.2 ms</td><td class="num">96 KB<span class="bar"><b style="width:22%"></b></span></td><td class="num">3 / 2</td><td class="num">1.1 ms</td><td class="num">21</td><td><span class="pill p-warn">2 errors 500</span></td></tr>
+          <tr><td class="cname">UserForm<span>comp/</span></td><td class="num">1</td><td class="num">1.7 KB</td><td class="num">9 ms</td><td class="num">1.9 ms</td><td class="num">54 KB<span class="bar"><b style="width:12%"></b></span></td><td class="num">7 / 3</td><td class="num">0.9 ms</td><td class="num">4</td><td><span class="pill p-ok">Healthy</span></td></tr>
+          <tr><td class="cname">Clock<span>comp/</span></td><td class="num">1</td><td class="num">0.4 KB</td><td class="num">4 ms</td><td class="num">0.3 ms</td><td class="num">12 KB<span class="bar"><b style="width:3%"></b></span></td><td class="num">1 / 1</td><td class="num">0.1 ms</td><td class="num">0</td><td><span class="pill p-warn">Timer</span></td></tr>
+          <tr><td class="cname">Button<span>ui/</span></td><td class="num">96</td><td class="num">0.2 KB</td><td class="num">—</td><td class="num">0.02 ms</td><td class="num">31 KB<span class="bar"><b style="width:7%"></b></span></td><td class="num">0 / 0</td><td class="num">—</td><td class="num">0</td><td><span class="pill p-ok">Healthy</span></td></tr>
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <div class="grid2">
+      <section class="glass card" aria-labelledby="net-t">
+        <h2 id="net-t">Attributed network</h2><div class="sub">Each call with the component and the origin that made it</div>
+        <table>
+          <thead><tr><th>Component · origin</th><th>Call</th><th class="num">Status</th><th class="num">ms</th><th class="num">Bytes</th></tr></thead>
+          <tbody>
+            <tr><td class="cname">Users<span>load</span></td><td>GET /api/users?page=2</td><td class="num"><span class="pill p-ok">200</span></td><td class="num">142</td><td class="num">18.4 KB</td></tr>
+            <tr><td class="cname">UserTable<span>fx</span></td><td>GET /api/users/count</td><td class="num"><span class="pill p-ok">200</span></td><td class="num">38</td><td class="num">0.1 KB</td></tr>
+            <tr><td class="cname">Users<span>on:click</span></td><td>DELETE /api/users/88</td><td class="num"><span class="pill p-bad">500</span></td><td class="num">182</td><td class="num">0.3 KB</td></tr>
+            <tr><td class="cname">UserForm<span>on:submit</span></td><td>POST /api/users</td><td class="num"><span class="pill p-ok">201</span></td><td class="num">96</td><td class="num">0.6 KB</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="glass card" aria-labelledby="tl-t">
+        <h2 id="tl-t">Timeline of the last navigation</h2><div class="sub">0 – 120 ms</div>
+        <div class="tl" role="img" aria-label="Network from 0 to 70 ms, Users mount from 70 to 80 ms, UserTable mount from 80 to 92 ms and row update from 92 to 110 ms">
+          <div class="lab" style="top:4px">Network · load</div><div class="row" style="top:4px"><div class="seg2 s-net" style="left:0;width:58%">GET /api/users 70 ms</div></div>
+          <div class="lab" style="top:34px">Users</div><div class="row" style="top:34px"><div class="seg2 s-mount" style="left:58%;width:9%">mount</div></div>
+          <div class="lab" style="top:64px">UserTable</div><div class="row" style="top:64px"><div class="seg2 s-mount" style="left:67%;width:10%">mount 6.8</div></div>
+          <div class="lab" style="top:94px">UserRow ×40</div><div class="row" style="top:94px"><div class="seg2 s-upd" style="left:77%;width:15%">list LIS</div></div>
+          <div class="lab" style="top:124px">HMR</div><div class="row" style="top:124px"><div class="seg2 s-hmr" style="left:93%;width:7%">6</div></div>
+        </div>
+      </section>
+    </div>
+    <div class="grid2" style="margin-top:14px">
+      <section class="glass card" aria-labelledby="st-t">
+        <div class="head"><div><h2 id="st-t">Project storage</h2><div class="sub">Only what the app code wrote or read · 3 foreign entries hidden</div></div>
+          <div class="seg" role="group" aria-label="Type"><button type="button" aria-pressed="true">Cookies</button><button type="button" aria-pressed="false">Local</button><button type="button" aria-pressed="false">Session</button><button type="button" aria-pressed="false">IndexedDB</button><button type="button" aria-pressed="false">Cache</button></div></div>
+        <table>
+          <thead><tr><th>Key</th><th>Value</th><th>Flags</th><th>Expires</th><th>Used by</th></tr></thead>
+          <tbody>
+            <tr><td class="cname">session</td><td>•••••••• <button type="button" style="padding:2px 7px;font-size:11px">Show</button></td><td><span class="pill p-ok">HttpOnly</span> <span class="pill p-ok">Secure</span> Lax</td><td>7 days</td><td>Users <span class="crumb">load</span></td></tr>
+            <tr><td class="cname">theme</td><td>"light"</td><td>Lax</td><td>1 year</td><td>ThemeToggle <span class="crumb">:9</span></td></tr>
+            <tr><td class="cname">locale</td><td>"es-MX"</td><td><span class="pill p-warn">No SameSite</span></td><td>session</td><td>LangPicker <span class="crumb">:12</span></td></tr>
+          </tbody>
+        </table>
+        <div class="sub" style="margin:12px 0 6px">IndexedDB</div>
+        <table>
+          <thead><tr><th>Database · store</th><th class="num">Records</th><th class="num">Size</th><th>Used by</th></tr></thead>
+          <tbody>
+            <tr><td class="cname">app-cache<span>users</span></td><td class="num">412</td><td class="num">96 KB</td><td>UserTable <span class="crumb">fx</span></td></tr>
+            <tr><td class="cname">app-cache<span>drafts</span></td><td class="num">3</td><td class="num">2 KB</td><td>UserForm <span class="crumb">on:input</span></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="glass card" aria-labelledby="cx-t">
+        <h2 id="cx-t">Active connections and timers</h2><div class="sub">Open now, with their owner component</div>
+        <table>
+          <thead><tr><th>Type · URL</th><th>Owner</th><th class="num">In / out</th><th>State</th></tr></thead>
+          <tbody>
+            <tr><td class="cname">WebSocket<span>/ws/notifications</span></td><td>Bell</td><td class="num">48 / 2</td><td><span class="pill p-ok">Open</span></td></tr>
+            <tr><td class="cname">EventSource<span>/api/stream</span></td><td>Users</td><td class="num">12 / —</td><td><span class="pill p-ok">Open</span></td></tr>
+          </tbody>
+        </table>
+        <div class="sub" style="margin:12px 0 6px">Timers</div>
+        <table>
+          <thead><tr><th>Type</th><th>Owner · line</th><th class="num">Interval</th><th>Cleanup</th></tr></thead>
+          <tbody>
+            <tr><td class="cname">setInterval</td><td>Clock <span class="crumb">clock.brain:6</span></td><td class="num">1 000 ms</td><td><span class="pill p-bad">Missing</span></td></tr>
+            <tr><td class="cname">setTimeout</td><td>Toast <span class="crumb">toast.brain:11</span></td><td class="num">3 000 ms</td><td><span class="pill p-ok">Yes</span></td></tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+  </main>
+</div>
+</body>
+</html>

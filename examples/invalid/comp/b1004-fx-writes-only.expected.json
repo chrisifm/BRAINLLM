@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1004",
+    "level": "warning",
+    "file": "invalid/comp/b1004-fx-writes-only.brain",
+    "line": 4,
+    "col": 3,
+    "msg": "`fx` that only computes `total` from other signals",
+    "fix": "`let total = drv(() => (price * 1.16))`"
+  }
+]

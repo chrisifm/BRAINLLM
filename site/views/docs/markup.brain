@@ -1,0 +1,45 @@
+<meta seo lastmod="2026-10-13" title="Markup and communication" description="Interpolation, events, two-way bindings, conditionals, keyed lists, slots, and the eight ways BRAINLLM components talk to each other." canonical="/docs/markup">
+
+<main class="doc">
+  <h1>Markup</h1>
+  <p>Markup is HTML with a few additions for data, events and structure. Text interpolation is always escaped, as the <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html">OWASP XSS prevention guide</a> recommends, so <code raw>{user.name}</code> can never inject HTML; raw HTML is only possible through <code raw>{@html sanitize(x)}</code>.</p>
+  <pre><code raw><p class:active={selected} style:color={tone}>{user.name}</p>
+<button type="button" on:click={save}>Save</button>
+<input aria-label="Name" bind:value={name} />
+{#if loading}<p>Loading…</p>{:else if error}<p>{error}</p>{:else}<p>Ready</p>{/if}
+{#each users as user (user.id)}
+  <UserCard user={user} on:select={open} />
+{:empty}
+  <p>No users yet.</p>
+{/each}</code></pre>
+  <h2>Data and events</h2>
+  <p>Curly braces insert an expression into text or an attribute. <code>class:name</code> toggles a class from a boolean and <code>style:property</code> sets one style property. <code>on:event</code> takes a function reference or a statement; <code>on:submit</code> prevents the default page reload for you.</p>
+  <h2>Bindings</h2>
+  <p><code>bind:value</code> and <code>bind:checked</code> keep a form control and a signal in sync in both directions, and they also accept a field of a signal object, such as <code raw>bind:checked={prefs.email}</code>. <code>bind:ref</code> stores the DOM node in a <code>ref()</code> for the rare cases that need it.</p>
+  <h2>Conditionals, lists and promises</h2>
+  <p><code>if</code> blocks support <code>else if</code> and <code>else</code>. <code>each</code> blocks need a key in parentheses so the list moves nodes instead of rebuilding them; a list of plain values is keyed by the value itself. An <code>:empty</code> branch renders when the list has no items. <code>await</code> blocks render a pending, a resolved and a rejected branch for a promise.</p>
+  <h2>Slots</h2>
+  <p>A component renders the content its parent passes with <code>&lt;slot /&gt;</code>, and named content with <code>&lt;slot name="footer" /&gt;</code>. That is how containers such as cards, dialogs and layouts are written.</p>
+  <h2>How components communicate</h2>
+  <p>Components are isolated. Pick the first option that fits, in this order:</p>
+  <ol class="list">
+    <li>Show data from the parent: props.</li>
+    <li>Tell the parent something happened: <code>emit</code> in the child and <code>on:</code> in the parent.</li>
+    <li>Wrap content: slots.</li>
+    <li>An editable control: a bindable <code>~</code> prop and <code>bind:value</code>.</li>
+    <li>An imperative action such as open or focus: <code>expose</code> in the child and <code>bind:api</code> in the parent.</li>
+    <li>Data needed many levels down: <code>provide</code> and <code>use</code>.</li>
+    <li>State shared by distant parts of the page: a <code>store</code> in <code>channels/</code>.</li>
+    <li>A broadcast without state, such as a toast or analytics: a <code>bus</code> in <code>channels/</code>.</li>
+  </ol>
+  <pre><code raw><Dialog bind:api={dialog} />
+<button type="button" on:click={dialog.open()}>Open</button></code></pre>
+  <p>There are no globals and no <code>window</code> properties. Continue with <a href="/docs/styles">Styles and accessibility</a>.</p>
+</main>
+
+<style>
+  .doc { display: grid; gap: var(--space-3); max-width: 72ch; }
+  .doc p { margin: 0; }
+  .list { display: grid; gap: var(--space-1); padding-left: var(--space-5); }
+  pre { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--space-4); overflow-x: auto; }
+</style>

@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0408",
+    "level": "error",
+    "file": "invalid/comp/b0408-opacity-text.brain",
+    "line": 3,
+    "col": 29,
+    "msg": "`opacity: .5` on a rule that sets a text color: the contrast can no longer be verified",
+    "fix": "use a text color token that is already muted, for example `color: var(--muted)`, and remove `opacity`"
+  }
+]

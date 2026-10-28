@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1001",
+    "level": "warning",
+    "file": "invalid/comp/b1001-drv-passthrough.brain",
+    "line": 3,
+    "col": 15,
+    "msg": "`drv` that only returns the signal `name`",
+    "fix": "use `name` directly and delete `label`"
+  }
+]

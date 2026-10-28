@@ -1,0 +1,17 @@
+[
+  {
+    "id": "h1-auth",
+    "brief": "A view /account that shows the signed-in user's name and email loaded through an api() contract. If the API answers 401 the user must be sent to the login page with a return path; a 403 shows an accessible 'You do not have access' state; any other failure shows an error state with a Retry button. Add a 'Sign out' button that calls a POST endpoint and is disabled while the request is in flight.",
+    "pages": 1
+  },
+  {
+    "id": "h2-upload",
+    "brief": "A view /upload with a file input (images only, max 5 MB, validated before sending) that uploads the chosen file through an api() endpoint, shows an accessible progress bar from 0 to 100 %, a Cancel button that aborts the upload without showing an error, and a success message with the returned file URL. Errors from the server show next to the input.",
+    "pages": 1
+  },
+  {
+    "id": "h3-paginated",
+    "brief": "A view /orders that lists orders (number, customer, total, status) loaded page by page from an api() endpoint that returns { items, next }. Show a loading state, an empty state, an error state with Retry, and a 'Load more' button that appends the next page and disappears when there is no next page. A Refresh button reloads the first page.",
+    "pages": 1
+  }
+]

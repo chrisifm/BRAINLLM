@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1703",
+    "level": "error",
+    "file": "invalid/comp/b1703-tool-untyped-param.brain",
+    "line": 1,
+    "col": 7,
+    "msg": "parameter `text` of tool `add_task` has no valid type",
+    "fix": "write `text:str` (types: str num bool list obj email url date any; `!` = required)"
+  }
+]

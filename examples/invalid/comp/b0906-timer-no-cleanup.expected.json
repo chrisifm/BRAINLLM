@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0906",
+    "level": "error",
+    "file": "invalid/comp/b0906-timer-no-cleanup.brain",
+    "line": 5,
+    "col": 5,
+    "msg": "`setInterval` inside `fx` without cleanup: it outlives the component",
+    "fix": "create it inside `fx` and return the cleanup (`clearInterval`): `fx(() => { const id = setInterval(tick, 1000); return () => clearInterval(id) })`"
+  }
+]

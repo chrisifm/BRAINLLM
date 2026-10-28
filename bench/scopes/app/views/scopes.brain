@@ -1,0 +1,101 @@
+<meta seo title="Scopes" description="Encapsulation bench: local state, context, stores, precise updates, CSS, ids, events, slots and errors." canonical="/scopes">
+<script>
+  import Counter from '../comp/counter.brain'
+  import ToneProvider from '../comp/tone-provider.brain'
+  import ToneReader from '../comp/tone-reader.brain'
+  import StoreA from '../comp/store-a.brain'
+  import StoreB from '../comp/store-b.brain'
+  import StoreOther from '../comp/store-other.brain'
+  import RowList from '../comp/row-list.brain'
+  import CardA from '../comp/card-a.brain'
+  import CardB from '../ui/card-b.brain'
+  import LabeledField from '../comp/labeled-field.brain'
+  import LeafEmitter from '../comp/leaf-emitter.brain'
+  import MidRelay from '../comp/mid-relay.brain'
+  import Boom from '../comp/boom.brain'
+  import JsA from '../comp/js-a.brain'
+  import JsB from '../comp/js-b.brain'
+  import TintBox from '../comp/tint-box.brain'
+  import EscapeProbe from '../comp/escape-probe.brain'
+  let viewHits = sig(0)
+  let sibHits = sig(0)
+  let lastPing = sig('')
+  const onMid = (who) => { viewHits++; lastPing = who }
+  const onSib = () => { sibHits++ }
+</script>
+<main class="scopes">
+  <h1>Scopes</h1>
+
+  <section id="r1" aria-label="Local state">
+    <div id="c1"><Counter label="One" /></div>
+    <div id="c2"><Counter label="Two" /></div>
+    <div id="c3"><Counter label="Three" /></div>
+  </section>
+
+  <section id="r2" aria-label="Context">
+    <div id="ctx-red"><ToneProvider tone="red"><ToneReader where="slot-red" /><div class="deep"><ToneProvider tone="blue-inner"><ToneReader where="slot-inner" /></ToneProvider></div></ToneProvider></div>
+    <div id="ctx-green"><ToneProvider tone="green"><ToneReader where="slot-green" /></ToneProvider></div>
+    <div id="ctx-none"><ToneReader where="outside" /></div>
+  </section>
+
+  <section id="r3" aria-label="Store">
+    <div id="far-a"><div><div><StoreA /></div></div></div>
+    <div id="far-other"><StoreOther /></div>
+    <div id="far-b"><div><StoreB /></div></div>
+  </section>
+
+  <section id="r4" aria-label="Keyed list">
+    <RowList />
+  </section>
+
+  <section id="r5" aria-label="CSS">
+    <h2 class="title" data-probe="v-h2">View title</h2>
+    <p data-probe="v-p">View paragraph</p>
+    <button type="button" class="btn" data-probe="v-btn">View button</button>
+    <em data-probe="v-em">View em</em>
+    <EscapeProbe />
+    <p data-probe="v-after-escape">After escape probe</p>
+    <CardA />
+    <CardB heading="Card B in view">
+      <p class="title" data-probe="v-slot-into-b">view slot content</p>
+    </CardB>
+  </section>
+
+  <section id="r6" aria-label="Ids">
+    <div id="lf1"><LabeledField caption="First email" /></div>
+    <div id="lf2"><LabeledField caption="Second email" /></div>
+    <p id="anchor-target">View anchor</p>
+  </section>
+
+  <section id="r7" aria-label="Events">
+    <MidRelay on:ping={onMid} />
+    <LeafEmitter name="sib" on:ping={onSib} />
+    <span class="view-hits">{viewHits}</span> <span class="sib-hits">{sibHits}</span> <span class="last-ping">{lastPing}</span>
+  </section>
+
+  <section id="r9" aria-label="Errors">
+    <div id="boom1"><Boom /></div>
+    <div id="boom2"><Boom /></div>
+    <div id="after-boom"><Counter label="After" /></div>
+  </section>
+
+  <section id="r11" aria-label="Same names">
+    <div id="js-a1"><JsA /></div>
+    <div id="js-a2"><JsA /></div>
+    <div id="js-b1"><JsB /></div>
+  </section>
+
+  <section id="r12" aria-label="Custom property">
+    <div id="tint-plain"><TintBox /></div>
+    <div id="tint-custom"><TintBox tint="rgb(10, 20, 30)" /></div>
+  </section>
+</main>
+<style>
+  .scopes { padding: var(--space-4); display: grid; gap: var(--space-4); }
+  .title { color: var(--accent); font-size: 31px; }
+  .btn { color: var(--accent); font-size: 31px; }
+  h2 { border-top: 7px solid var(--line); }
+  p { color: var(--accent); font-size: 31px; border-top: 7px solid var(--line); }
+  span { border-top: 7px solid var(--line); }
+  em { font-size: 31px; }
+</style>

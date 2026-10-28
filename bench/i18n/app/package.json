@@ -1,0 +1,14 @@
+{
+  "name": "app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "brain run",
+    "build": "brain build",
+    "doctor": "brain doctor",
+    "start": "brain start"
+  },
+  "devDependencies": {
+    "@christianirack/brainllm": "0.1.0"
+  }
+}

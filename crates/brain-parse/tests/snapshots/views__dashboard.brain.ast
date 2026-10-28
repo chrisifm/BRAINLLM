@@ -1,0 +1,113 @@
+Component Dashboard level=View file=views/dashboard.brain
+  meta@1:7 seo=None
+  meta@1:11 title=Some("User admin")
+  meta@1:30 description=Some("Create, edit, activate and delete the users of the example app, with search and an inline edit form.")
+  meta@1:145 canonical=Some("/dashboard")
+  script
+    import@4:3 Badge from "../ui/badge.brain"
+    import@5:3 UserForm from "../comp/user-form.brain"
+    import@6:3 api from "../lib/api.js"
+    import@7:3 fmt from "../lib/format.jsbrain"
+    export@9:3
+      async function load(ctx)@9:10
+        return@10:5 { users: (await api.list(ctx)) }
+    let users = sig(props.users)@13:3
+    let query = sig('')@14:3
+    let editing = sig(null)@15:3
+    let busy = sig(false)@16:3
+    let error = sig('')@17:3
+    let shown = drv(() => { 3 stmts })@19:3
+      fn@19:19
+        const q = query.trim().toLowerCase()@20:5
+        if@21:5 (q === '')
+          return@21:19 users
+        return@22:5 users.filter((u) => (u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)))
+    let activeCount = drv(() => users.filter((u) => u.active).length)@24:3
+    const save = async (data) => { 4 stmts }@26:3
+      fn@26:16
+        expr@27:5 (busy = true)
+        expr@28:5 (error = '')
+        try@29:5
+          const saved = ((data.id === null) ? (await api.create(data)) : (await api.update(data)))@30:7
+          expr@31:7 (users = ((data.id === null) ? [...users, saved] : users.map((u) => ((u.id === saved.id) ? saved : u))))
+          expr@34:7 (editing = null)
+        catch e
+          expr@36:7 (error = e.message)
+        expr@38:5 (busy = false)
+    const remove = async (id) => { 2 stmts }@41:3
+      fn@41:18
+        expr@42:5 (error = '')
+        try@43:5
+          expr@44:7 (await api.remove(id))
+          expr@45:7 (users = users.filter((u) => (u.id !== id)))
+        catch e
+          expr@47:7 (error = e.message)
+  template
+    <main>@52:1 class="dash"
+      <header>@53:3
+        <h1>@54:5
+          text@54:9 "Users"
+        <span>@55:5
+          interp@55:11 {activeCount}
+          text@55:24 "active of"
+          interp@55:35 {fmt.plural(users.length, 'user', 'users')}
+        <input>@56:5 bind:value={query} placeholder="Search by name or email" aria-label="Search users"
+        <button>@57:5 on:click={(editing = {  })}
+          text@57:37 "New"
+      if@60:3 (error !== '')
+        <p>@61:5 class="error" role="alert"
+          interp@61:35 {error}
+      if@64:3 (editing !== null)
+        component UserForm@65:5 user={(editing.id ? editing : null)} busy={busy} on:save={save} on:cancel={(editing = null)}
+      <table>@68:3
+        <thead>@69:5
+          <tr>@69:12
+            <th>@69:16
+              text@69:20 "Name"
+            <th>@69:29
+              text@69:33 "Email"
+            <th>@69:43
+              text@69:47 "Status"
+            <th>@69:58
+        <tbody>@70:5
+          each@71:7 shown as u (u.id)
+            <tr>@72:9
+              <td>@73:11
+                interp@73:15 {u.name}
+              <td>@74:11
+                interp@74:15 {u.email}
+              <td>@75:11
+                component Badge@75:15 tone={(u.active ? 'ok' : 'bad')} text={(u.active ? 'Active' : 'Inactive')}
+              <td>@76:11
+                <button>@77:13 on:click={(editing = u)}
+                  text@77:44 "Edit"
+                <button>@78:13 on:click={remove(u.id)}
+                  text@78:45 "Delete"
+          empty
+            <tr>@82:9
+              <td>@82:13 colspan="4"
+                interp@82:29 {((query === '') ? 'No users yet.' : 'No results for this search.')}
+  style@88:8
+    .dash {
+      display: grid;
+      gap: var(--space-3);
+      padding: var(--space-3);
+      background: var(--bg);
+      color: var(--fg);
+    }
+    header {
+      display: flex;
+      gap: var(--space-2);
+      align-items: center;
+    }
+    .error {
+      color: var(--bad);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    td, th {
+      padding: var(--space-1) var(--space-2);
+      text-align: left;
+    }

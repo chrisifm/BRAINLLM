@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0903",
+    "level": "error",
+    "file": "invalid/comp/b0903-recursion-no-base.brain",
+    "line": 6,
+    "col": 3,
+    "msg": "the component renders itself with no base case",
+    "fix": "wrap the call in `{#if depth < max}…{/if}`"
+  }
+]

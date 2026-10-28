@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0405",
+    "level": "info",
+    "file": "invalid/views/b0405-two-h1.brain",
+    "line": 5,
+    "col": 3,
+    "msg": "the view has more than one `<h1>` (normalized to `<h2>`)",
+    "fix": "keep a single `<h1>`; the others are `<h2>`"
+  }
+]

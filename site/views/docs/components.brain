@@ -1,0 +1,35 @@
+<meta seo lastmod="2026-10-13" title="Components and BrainScript" description="The four blocks of a .brain file, typed props, the closed BrainScript subset of JavaScript and the reactive primitives sig, drv and fx." canonical="/docs/components">
+
+<main class="doc">
+  <h1>Components</h1>
+  <p>A component is one <code>.brain</code> file with up to four blocks, always in the same order: the contract, the script, the markup and the styles. Only the markup is required.</p>
+  <pre><code raw><meta props="user:obj label:str='Hi' size:num?">
+<script> BrainScript </script>
+MARKUP
+<style> CSS </style></code></pre>
+  <h2>Props</h2>
+  <p>The <code>meta props</code> attribute declares every input as <code>name:type=default</code>. A trailing <code>?</code> makes a prop optional; with neither a default nor a question mark it is required. The types are <code>str</code>, <code>num</code>, <code>bool</code>, <code>list</code>, <code>obj</code>, <code>fn</code> and <code>any</code>. A <code>~</code> after the type marks a bindable prop that the child may write, <code>emits</code> lists the events the component sends, and <code>expose</code> names the methods a parent may call.</p>
+  <h2>BrainScript</h2>
+  <p>The script block uses a closed subset of JavaScript that a model can write without surprises. It is plain <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript">JavaScript</a> with the risky parts removed. You get <code>let</code> and <code>const</code>, arrow and regular functions, <code>if</code>, <code>for-of</code>, <code>try</code>, <code>await</code>, destructuring, spread, template strings, the JavaScript built-ins and the Web APIs. Imports point at other <code>.brain</code>, <code>.jsbrain</code> or <code>.js</code> files.</p>
+  <p>Classes, <code>this</code>, <code>var</code>, <code>with</code>, <code>eval</code>, generators, getters and setters, labels, <code>for-in</code>, classic <code>for</code>, <code>while</code> and <code>switch</code> are not part of the language. Each one has a simpler replacement, and the checker names it when you reach for the old form.</p>
+  <h2>Reactive primitives</h2>
+  <p>State is a plain variable created with <code>sig</code>. Reading it subscribes the code that reads it, and assigning to it updates exactly what depends on it. Derived values use <code>drv</code> and are read-only. Side effects use <code>fx</code>, which may return a cleanup function for timers and listeners.</p>
+  <pre><code raw>let items = sig([])
+let left = drv(() => items.filter((it) => !it.done).length)
+const add = (text) => {
+  items = [...items, { id: Date.now(), text, done: false }]
+}
+fx(() => {
+  const t = setInterval(() => log(left), 1000)
+  return () => clearInterval(t)
+})</code></pre>
+  <p>Never change a signal in place: <code>items.push(x)</code> is an error, because only an assignment notifies. Copy and reassign instead, as in the example above. Other primitives cover the rest of a component's needs: <code>emit</code> sends an event to the parent, <code>ref</code> with <code>bind:ref</code> gives access to a DOM node, <code>log</code> prints during development and disappears in the build, and <code>provide</code> with <code>use</code> share context with descendants.</p>
+  <h2>Views</h2>
+  <p>A view may export <code>async function load(ctx)</code>. It runs only on the server, and what it returns reaches the markup as <code>props</code>. Continue with <a href="/docs/markup">Markup</a> to render that data.</p>
+</main>
+
+<style>
+  .doc { display: grid; gap: var(--space-3); max-width: 72ch; }
+  .doc p { margin: 0; }
+  pre { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--space-4); overflow-x: auto; }
+</style>

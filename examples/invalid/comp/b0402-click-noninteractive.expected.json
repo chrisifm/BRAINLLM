@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0402",
+    "level": "error",
+    "file": "invalid/comp/b0402-click-noninteractive.brain",
+    "line": 5,
+    "col": 1,
+    "msg": "`on:click` on `<div>`, which is not interactive",
+    "fix": "use `<button type=\"button\">` instead of `<div>`"
+  }
+]

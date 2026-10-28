@@ -1,0 +1,7 @@
+<script>
+  let started = sig(0)
+  fx(() => {
+    started = Date.now()
+  })
+</script>
+<p>{started}</p>

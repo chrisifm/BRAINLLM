@@ -1,0 +1,6 @@
+<meta props="g:str i:num field:str">
+<script>
+  import { Cart } from '../channels/cart.jsbrain'
+  const cart = use(Cart)
+</script>
+<span class="gr" data-k={g + '-' + field + '-' + i}>{field === 'x' ? cart.x : cart.y}</span>

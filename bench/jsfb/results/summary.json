@@ -1,0 +1,342 @@
+{
+ "generatedFrom": "bench/jsfb/results/raw",
+ "statistic": "median",
+ "frameworks": {
+  "angular-cf-v22.2.0-keyed": {
+   "medians": {
+    "01_run1k": 44,
+    "02_replace1k": 45.1,
+    "03_update10th1k_x16": 25.3,
+    "04_select1k": 8.3,
+    "05_swap1k": 17.1,
+    "06_remove-one-1k": 21,
+    "07_create10k": 331.2,
+    "08_create1k-after1k_x2": 46.9,
+    "09_clear1k_x8": 31.7,
+    "21_ready-memory": 1.533,
+    "22_run-memory": 4.623,
+    "25_run-clear-memory": 2.232,
+    "41_size-uncompressed": 147,
+    "42_size-compressed": 45.5,
+    "43_first-paint": 498.3
+   },
+   "ci95": {
+    "01_run1k": 0.58,
+    "02_replace1k": 1.97,
+    "03_update10th1k_x16": 3.09,
+    "04_select1k": 0.52,
+    "05_swap1k": 2.42,
+    "06_remove-one-1k": 2.13,
+    "07_create10k": 3.69,
+    "08_create1k-after1k_x2": 3.19,
+    "09_clear1k_x8": 3.41
+   },
+   "runs": {
+    "01_run1k": 15,
+    "02_replace1k": 15,
+    "03_update10th1k_x16": 15,
+    "04_select1k": 25,
+    "05_swap1k": 15,
+    "06_remove-one-1k": 15,
+    "07_create10k": 15,
+    "08_create1k-after1k_x2": 15,
+    "09_clear1k_x8": 15
+   },
+   "geomean": {
+    "cpuWeightedVsFastest": 1.9698184253820081,
+    "cpuWeightedVsVanillajs": 1.9620209124010084,
+    "memoryVsFastest": 2.889956956484511,
+    "startupVsFastest": 1.1097995545657016,
+    "sizeVsFastest": 15.38704201420476
+   }
+  },
+  "brainllm-v0.1.0-keyed": {
+   "medians": {
+    "01_run1k": 24.9,
+    "02_replace1k": 28.1,
+    "03_update10th1k_x16": 17.6,
+    "04_select1k": 7.3,
+    "05_swap1k": 18.7,
+    "06_remove-one-1k": 13.2,
+    "07_create10k": 266.9,
+    "08_create1k-after1k_x2": 30.4,
+    "09_clear1k_x8": 14,
+    "21_ready-memory": 0.585,
+    "22_run-memory": 4.009,
+    "25_run-clear-memory": 0.901,
+    "41_size-uncompressed": 22.3,
+    "42_size-compressed": 10.2,
+    "43_first-paint": 480.3
+   },
+   "ci95": {
+    "01_run1k": 0.56,
+    "02_replace1k": 0.83,
+    "03_update10th1k_x16": 0.87,
+    "04_select1k": 0.38,
+    "05_swap1k": 1.59,
+    "06_remove-one-1k": 0.52,
+    "07_create10k": 5,
+    "08_create1k-after1k_x2": 0.62,
+    "09_clear1k_x8": 0.22
+   },
+   "runs": {
+    "01_run1k": 15,
+    "02_replace1k": 15,
+    "03_update10th1k_x16": 15,
+    "04_select1k": 25,
+    "05_swap1k": 15,
+    "06_remove-one-1k": 15,
+    "07_create10k": 15,
+    "08_create1k-after1k_x2": 15,
+    "09_clear1k_x8": 15
+   },
+   "geomean": {
+    "cpuWeightedVsFastest": 1.2776741930658067,
+    "cpuWeightedVsVanillajs": 1.2726165283706523,
+    "memoryVsFastest": 1.4775532110027583,
+    "startupVsFastest": 1.0697104677060134,
+    "sizeVsFastest": 2.837548486974135
+   }
+  },
+  "react-hooks-v19.2.0-keyed": {
+   "medians": {
+    "01_run1k": 25.5,
+    "02_replace1k": 28.4,
+    "03_update10th1k_x16": 17.3,
+    "04_select1k": 7.9,
+    "05_swap1k": 105.8,
+    "06_remove-one-1k": 14.7,
+    "07_create10k": 426.1,
+    "08_create1k-after1k_x2": 28.7,
+    "09_clear1k_x8": 17.4,
+    "21_ready-memory": 1.178,
+    "22_run-memory": 4.427,
+    "25_run-clear-memory": 1.976,
+    "41_size-uncompressed": 190.3,
+    "42_size-compressed": 51.4,
+    "43_first-paint": 484
+   },
+   "ci95": {
+    "01_run1k": 1.46,
+    "02_replace1k": 0.6,
+    "03_update10th1k_x16": 0.6,
+    "04_select1k": 2.02,
+    "05_swap1k": 1.42,
+    "06_remove-one-1k": 0.34,
+    "07_create10k": 23.52,
+    "08_create1k-after1k_x2": 0.56,
+    "09_clear1k_x8": 0.31
+   },
+   "runs": {
+    "01_run1k": 15,
+    "02_replace1k": 15,
+    "03_update10th1k_x16": 15,
+    "04_select1k": 25,
+    "05_swap1k": 15,
+    "06_remove-one-1k": 15,
+    "07_create10k": 15,
+    "08_create1k-after1k_x2": 15,
+    "09_clear1k_x8": 15
+   },
+   "geomean": {
+    "cpuWeightedVsFastest": 1.4890413320093225,
+    "cpuWeightedVsVanillajs": 1.4831469719170536,
+    "memoryVsFastest": 2.505309519497538,
+    "startupVsFastest": 1.0779510022271714,
+    "sizeVsFastest": 18.60765852417258
+   }
+  },
+  "solid-v1.9.3-keyed": {
+   "medians": {
+    "01_run1k": 22.2,
+    "02_replace1k": 22.7,
+    "03_update10th1k_x16": 15.9,
+    "04_select1k": 5.5,
+    "05_swap1k": 18.3,
+    "06_remove-one-1k": 12.6,
+    "07_create10k": 226.5,
+    "08_create1k-after1k_x2": 25.4,
+    "09_clear1k_x8": 11.5,
+    "21_ready-memory": 0.592,
+    "22_run-memory": 2.685,
+    "25_run-clear-memory": 0.774,
+    "41_size-uncompressed": 11.5,
+    "42_size-compressed": 4.5,
+    "43_first-paint": 456.6
+   },
+   "ci95": {
+    "01_run1k": 1.03,
+    "02_replace1k": 0.3,
+    "03_update10th1k_x16": 2.09,
+    "04_select1k": 0.74,
+    "05_swap1k": 0.61,
+    "06_remove-one-1k": 0.98,
+    "07_create10k": 4.27,
+    "08_create1k-after1k_x2": 0.38,
+    "09_clear1k_x8": 0.44
+   },
+   "runs": {
+    "01_run1k": 15,
+    "02_replace1k": 15,
+    "03_update10th1k_x16": 15,
+    "04_select1k": 25,
+    "05_swap1k": 15,
+    "06_remove-one-1k": 15,
+    "07_create10k": 15,
+    "08_create1k-after1k_x2": 15,
+    "09_clear1k_x8": 15
+   },
+   "geomean": {
+    "cpuWeightedVsFastest": 1.1040147748546527,
+    "cpuWeightedVsVanillajs": 1.0996445397978478,
+    "memoryVsFastest": 1.2338136150880734,
+    "startupVsFastest": 1.0169265033407573,
+    "sizeVsFastest": 1.3534616385696516
+   }
+  },
+  "svelte-v5.42.1-keyed": {
+   "medians": {
+    "01_run1k": 22.9,
+    "02_replace1k": 23.9,
+    "03_update10th1k_x16": 16.9,
+    "04_select1k": 6.7,
+    "05_swap1k": 18,
+    "06_remove-one-1k": 12.9,
+    "07_create10k": 226.6,
+    "08_create1k-after1k_x2": 25,
+    "09_clear1k_x8": 12.4,
+    "21_ready-memory": 0.67,
+    "22_run-memory": 2.868,
+    "25_run-clear-memory": 0.984,
+    "41_size-uncompressed": 26.6,
+    "42_size-compressed": 9.7,
+    "43_first-paint": 449
+   },
+   "ci95": {
+    "01_run1k": 0.14,
+    "02_replace1k": 0.34,
+    "03_update10th1k_x16": 0.71,
+    "04_select1k": 0.35,
+    "05_swap1k": 1.09,
+    "06_remove-one-1k": 0.6,
+    "07_create10k": 3.57,
+    "08_create1k-after1k_x2": 0.42,
+    "09_clear1k_x8": 0.34
+   },
+   "runs": {
+    "01_run1k": 15,
+    "02_replace1k": 15,
+    "03_update10th1k_x16": 15,
+    "04_select1k": 25,
+    "05_swap1k": 15,
+    "06_remove-one-1k": 15,
+    "07_create10k": 15,
+    "08_create1k-after1k_x2": 15,
+    "09_clear1k_x8": 15
+   },
+   "geomean": {
+    "cpuWeightedVsFastest": 1.1459048324248196,
+    "cpuWeightedVsVanillajs": 1.141368775857022,
+    "memoryVsFastest": 1.4228896088186385,
+    "startupVsFastest": 1,
+    "sizeVsFastest": 3.022160043318955
+   }
+  },
+  "vanillajs-keyed": {
+   "medians": {
+    "01_run1k": 21.4,
+    "02_replace1k": 20.9,
+    "03_update10th1k_x16": 14,
+    "04_select1k": 3.5,
+    "05_swap1k": 14.8,
+    "06_remove-one-1k": 13,
+    "07_create10k": 201.8,
+    "08_create1k-after1k_x2": 24.8,
+    "09_clear1k_x8": 9.6,
+    "21_ready-memory": 0.539,
+    "22_run-memory": 1.865,
+    "25_run-clear-memory": 0.652,
+    "41_size-uncompressed": 11.3,
+    "42_size-compressed": 2.5,
+    "43_first-paint": 511.5
+   },
+   "ci95": {
+    "01_run1k": 0.24,
+    "02_replace1k": 0.84,
+    "03_update10th1k_x16": 0.96,
+    "04_select1k": 0.56,
+    "05_swap1k": 2.17,
+    "06_remove-one-1k": 0.83,
+    "07_create10k": 1.95,
+    "08_create1k-after1k_x2": 0.54,
+    "09_clear1k_x8": 0.59
+   },
+   "runs": {
+    "01_run1k": 15,
+    "02_replace1k": 15,
+    "03_update10th1k_x16": 15,
+    "04_select1k": 25,
+    "05_swap1k": 15,
+    "06_remove-one-1k": 15,
+    "07_create10k": 15,
+    "08_create1k-after1k_x2": 15,
+    "09_clear1k_x8": 15
+   },
+   "geomean": {
+    "cpuWeightedVsFastest": 1.0039742252142754,
+    "cpuWeightedVsVanillajs": 1,
+    "memoryVsFastest": 1,
+    "startupVsFastest": 1.1391982182628062,
+    "sizeVsFastest": 1
+   }
+  },
+  "vue-v3.5.39-keyed": {
+   "medians": {
+    "01_run1k": 26,
+    "02_replace1k": 27.6,
+    "03_update10th1k_x16": 16,
+    "04_select1k": 5.8,
+    "05_swap1k": 17.4,
+    "06_remove-one-1k": 14.4,
+    "07_create10k": 244,
+    "08_create1k-after1k_x2": 27.4,
+    "09_clear1k_x8": 13.7,
+    "21_ready-memory": 0.863,
+    "22_run-memory": 3.886,
+    "25_run-clear-memory": 1.188,
+    "41_size-uncompressed": 64.3,
+    "42_size-compressed": 23.3,
+    "43_first-paint": 449.5
+   },
+   "ci95": {
+    "01_run1k": 0.81,
+    "02_replace1k": 0.6,
+    "03_update10th1k_x16": 1.12,
+    "04_select1k": 0.5,
+    "05_swap1k": 6.38,
+    "06_remove-one-1k": 0.77,
+    "07_create10k": 3.6,
+    "08_create1k-after1k_x2": 0.45,
+    "09_clear1k_x8": 0.43
+   },
+   "runs": {
+    "01_run1k": 15,
+    "02_replace1k": 15,
+    "03_update10th1k_x16": 15,
+    "04_select1k": 25,
+    "05_swap1k": 15,
+    "06_remove-one-1k": 15,
+    "07_create10k": 15,
+    "08_create1k-after1k_x2": 15,
+    "09_clear1k_x8": 15
+   },
+   "geomean": {
+    "cpuWeightedVsFastest": 1.2291546202153558,
+    "cpuWeightedVsVanillajs": 1.224289019922818,
+    "memoryVsFastest": 1.8246528146368028,
+    "startupVsFastest": 1.0011135857461024,
+    "sizeVsFastest": 7.282394821505024
+   }
+  }
+ }
+}

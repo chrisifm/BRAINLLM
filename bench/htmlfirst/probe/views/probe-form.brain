@@ -1,0 +1,34 @@
+<meta seo title="Probe form" description="QA probe for task 157: a form() whose submit is a server function, with validation, field errors from the server, a failure and a redirect.">
+
+<script>
+  server: async function send(ctx, v) {
+    if (v.name === 'taken') throw { errors: { name: 'That name is taken' } }
+    if (v.name === 'boom') throw new Error('probe failure')
+    if (v.name === 'go') return { redirect: '/about' }
+    return { ok: true }
+  }
+  let f = form({ name: 'str!<=40', email: 'email!', age: 'num>=18' }, { submit: send })
+</script>
+
+<main class="page">
+  <h1>Probe form</h1>
+  <p>QA probe page for the HTML-first form checks.</p>
+  <form on:submit={f.submit}>
+    <label>Name <input bind:value={f.v.name}></label>
+    {#if f.err.name}<p class="err">{f.err.name}</p>{/if}
+    <label>Email <input type="email" bind:value={f.v.email}></label>
+    {#if f.err.email}<p class="err">{f.err.email}</p>{/if}
+    <label>Age <input type="number" bind:value={f.v.age}></label>
+    {#if f.err.age}<p class="err">{f.err.age}</p>{/if}
+    {#if f.error}<p role="alert">{f.error}</p>{/if}
+    <button type="submit">Send</button>
+  </form>
+  <p><a href="/about">About</a></p>
+</main>
+
+<style>
+  .page { max-width: 40ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+  form { display: grid; gap: var(--space-3); }
+  label { display: grid; gap: var(--space-1); }
+  .err { margin: 0; color: var(--bad); }
+</style>

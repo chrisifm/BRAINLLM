@@ -1,0 +1,5 @@
+.todo { display: grid; gap: var(--space-2);
+  & form { display: flex; gap: var(--space-1); }
+  & li { display: flex; gap: var(--space-2); align-items: center; &.done span { text-decoration: line-through; color: var(--muted); } }
+  & .empty { color: var(--muted); }
+  & footer button.on { color: var(--accent); } }

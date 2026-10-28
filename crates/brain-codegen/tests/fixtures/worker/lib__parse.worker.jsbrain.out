@@ -1,0 +1,3 @@
+export const parseCsv = (text) => text.split('\n').map((l) => l.split(','));
+import { serve as $serve } from "/@brain/brain-worker.js";
+$serve({ parseCsv });

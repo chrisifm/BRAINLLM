@@ -1,0 +1,6 @@
+const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+const sorted = (xs) => [...xs].sort((a, b) => a - b);
+const $default = { mean, sorted };
+export default $default;
+import { serve as $serve } from "/@brain/brain-worker.js";
+$serve({ default: $default });

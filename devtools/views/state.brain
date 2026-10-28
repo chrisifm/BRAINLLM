@@ -1,0 +1,11 @@
+<meta seo title="State" description="Live signals per component instance: value, who last wrote it and how many times.">
+<script>
+  import inspector from '../channels/inspector.jsbrain'
+  const rows = drv(() => Object.values(inspector.state).flatMap((s) => (s.sigs || []).map((g, i) => ({ id: s.id + ':' + i, inst: s.id, n: g.n, v: JSON.stringify(g.v), w: g.w || '', c: g.c || 0 }))))
+  const cols = [{ key: 'inst', label: 'Instance' }, { key: 'n', label: 'Signal' }, { key: 'v', label: 'Value' }, { key: 'w', label: 'Last writer' }, { key: 'c', label: 'Writes' }]
+</script>
+<h1>State</h1>
+<Table caption="Signals" rows={rows} columns={cols} empty="No state captured yet." />
+<style>
+  h1 { margin: 0 0 var(--space-4); font-size: 22px; }
+</style>

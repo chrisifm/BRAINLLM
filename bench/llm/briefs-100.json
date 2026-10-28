@@ -1,0 +1,402 @@
+[
+ {
+  "id": "001-counter",
+  "brief": "A view /counter with a counter: increment, decrement and reset buttons, shows whether the number is even or odd."
+ },
+ {
+  "id": "002-todo",
+  "brief": "A view /todos: add tasks, mark done, delete, filter All/Active/Done, count of remaining tasks."
+ },
+ {
+  "id": "003-login",
+  "brief": "A view /login with an email + password form, client-side validation (email format, password >= 8 chars), shows errors under each field and disables the submit button while submitting (simulate with a 1s promise)."
+ },
+ {
+  "id": "004-product-list",
+  "brief": "A view /products that loads a product list in load() (fake data: id, name, price, stock), shows a table with sorting by name or price and a text search box."
+ },
+ {
+  "id": "005-product",
+  "brief": "A view /product that receives one product from load() (fake data) and shows name, price, a stock badge (in stock / sold out) and an add-to-cart button that shows a confirmation message."
+ },
+ {
+  "id": "006-tabs",
+  "brief": "A view /settings with three tabs (Profile, Notifications, Security) implemented by hand with buttons and role=tablist semantics; each tab has a small form."
+ },
+ {
+  "id": "007-modal",
+  "brief": "A view /team listing team members; clicking 'Remove' opens a confirmation dialog (<dialog>) with Cancel and Confirm; confirm removes the member."
+ },
+ {
+  "id": "008-pagination",
+  "brief": "A view /logs with 95 fake log entries generated in script, paginated 10 per page with Previous/Next buttons and 'page X of Y'."
+ },
+ {
+  "id": "009-cart",
+  "brief": "A view /cart: line items with quantity steppers, remove button, subtotal, 16% tax and total formatted as currency; empty state when no items."
+ },
+ {
+  "id": "010-search-debounce",
+  "brief": "A view /search with an input that filters a list of 30 city names after a 300ms debounce (use fx with cleanup for the timer), showing the number of matches and an empty state."
+ },
+ {
+  "id": "011-stopwatch",
+  "brief": "A view /stopwatch with start, stop, lap and reset; shows elapsed mm:ss.cs and the list of laps. Clean up the interval."
+ },
+ {
+  "id": "012-accordion",
+  "brief": "A view /faq with 5 questions as an accordion; only one open at a time; buttons with aria-expanded."
+ },
+ {
+  "id": "013-dashboard-kpis",
+  "brief": "A view /dashboard with 4 KPI cards (revenue, orders, customers, conversion) from load() and a list of the 5 latest orders with status badges."
+ },
+ {
+  "id": "014-signup-wizard",
+  "brief": "A view /signup: 3-step wizard (account, profile, confirm) with Back/Next, a progress indicator 'Step N of 3', and a final summary."
+ },
+ {
+  "id": "015-theme-toggle",
+  "brief": "A view /appearance with a toggle between light and dark preference stored in localStorage (read it on mount in fx), and a preview card."
+ },
+ {
+  "id": "016-comments",
+  "brief": "A view /post with an article body and a comments section: list comments, add a comment with name and text (both required), newest first."
+ },
+ {
+  "id": "017-kanban",
+  "brief": "A view /board with three columns (To do, Doing, Done); each card has buttons to move it left or right; add a card to To do."
+ },
+ {
+  "id": "018-filters",
+  "brief": "A view /catalog with checkbox filters by category, a price range select, and the list of matching items with the count; a 'Clear filters' button."
+ },
+ {
+  "id": "019-contact",
+  "brief": "A view /contact with a contact form (name, email, topic select, message textarea), character counter for the message (max 500), and a success message after submit."
+ },
+ {
+  "id": "020-users-crud",
+  "brief": "A view /users: table of users (name, email, role) with add, inline edit and delete; role is a select; validate email; show 'No users' when empty."
+ },
+ {
+  "id": "021-invoice",
+  "brief": "A view /invoice showing an invoice with line items, quantities, unit prices, subtotal, discount input (percent) and total."
+ },
+ {
+  "id": "022-weather",
+  "brief": "A view /weather that loads a 5-day forecast in load() (fake data) and shows each day with min/max temperature and a toggle °C/°F."
+ },
+ {
+  "id": "023-profile-edit",
+  "brief": "A view /profile with a form to edit display name, bio (max 160 chars with counter) and a save button that shows 'Saved'."
+ },
+ {
+  "id": "024-notifications",
+  "brief": "A view /notifications listing notifications with read/unread state, 'mark all as read' and a filter Unread only."
+ },
+ {
+  "id": "025-calendar-month",
+  "brief": "A view /calendar showing the days of the current month in a 7-column grid with previous/next month buttons."
+ },
+ {
+  "id": "026-timer-pomodoro",
+  "brief": "A view /pomodoro with a 25-minute work timer and 5-minute break, start/pause/reset, and a session counter. Clean up the interval."
+ },
+ {
+  "id": "027-color-picker",
+  "brief": "A view /palette where the user adds colors by hex input, sees swatches with their hex value, and can remove them."
+ },
+ {
+  "id": "028-quiz",
+  "brief": "A view /quiz with 5 multiple-choice questions shown one at a time, score at the end and a restart button."
+ },
+ {
+  "id": "029-expense-tracker",
+  "brief": "A view /expenses: add expenses (description, amount, category select), list them, total per category."
+ },
+ {
+  "id": "030-password-strength",
+  "brief": "A view /password with a password input that shows a strength meter (weak/medium/strong) and the rules met."
+ },
+ {
+  "id": "031-unit-converter",
+  "brief": "A view /convert that converts between km, miles and meters as the user types, both directions."
+ },
+ {
+  "id": "032-tip-calculator",
+  "brief": "A view /tip: bill amount, tip percent buttons (10/15/20) and number of people; shows tip and total per person."
+ },
+ {
+  "id": "033-chat",
+  "brief": "A view /chat with a message list and an input to send messages; each message shows author and time; newest at the bottom."
+ },
+ {
+  "id": "034-file-list",
+  "brief": "A view /files listing files (name, size, modified date) with sorting by any column and a selected-row highlight."
+ },
+ {
+  "id": "035-shopping-list",
+  "brief": "A view /groceries: add items with quantity, check them off, and a 'remove checked' button."
+ },
+ {
+  "id": "036-bmi",
+  "brief": "A view /bmi with height (cm) and weight (kg) inputs, computes BMI and shows the category."
+ },
+ {
+  "id": "037-countdown",
+  "brief": "A view /launch with a countdown to a fixed date showing days, hours, minutes and seconds. Clean up the timer."
+ },
+ {
+  "id": "038-reading-list",
+  "brief": "A view /books: add books (title, author), mark as read, rate 1–5 stars with buttons, filter by read/unread."
+ },
+ {
+  "id": "039-habit-tracker",
+  "brief": "A view /habits: list of habits with 7 checkboxes for the days of the week and a weekly completion percentage."
+ },
+ {
+  "id": "040-recipe",
+  "brief": "A view /recipe showing ingredients for a number of servings; changing servings scales the quantities."
+ },
+ {
+  "id": "041-poll",
+  "brief": "A view /poll with a question, 4 options as radio buttons, a vote button and the results as percentages after voting."
+ },
+ {
+  "id": "042-leaderboard",
+  "brief": "A view /leaderboard loading players with scores in load(), sorted descending, with the top 3 highlighted."
+ },
+ {
+  "id": "043-docs-nav",
+  "brief": "A view /docs with a sidebar list of 6 sections and a content area; clicking a section shows its content and updates a breadcrumb."
+ },
+ {
+  "id": "044-order-tracking",
+  "brief": "A view /track showing an order's steps (placed, packed, shipped, delivered) with the current step highlighted."
+ },
+ {
+  "id": "045-pricing",
+  "brief": "A view /pricing with 3 plans, a monthly/yearly toggle that changes the prices (yearly 20% off), and a highlighted recommended plan."
+ },
+ {
+  "id": "046-newsletter",
+  "brief": "A view /newsletter with an email input, validation, consent checkbox required, and a thank-you state after submit."
+ },
+ {
+  "id": "047-image-gallery",
+  "brief": "A view /gallery with 8 images (with alt text) in a grid; clicking one opens it larger in a <dialog> with next/previous."
+ },
+ {
+  "id": "048-inventory",
+  "brief": "A view /inventory: table of products with stock; buttons to add or remove stock; rows with stock below 5 are flagged."
+ },
+ {
+  "id": "049-event-rsvp",
+  "brief": "A view /rsvp: event details and a form with name, number of guests (1–5 select) and dietary notes; shows a confirmation."
+ },
+ {
+  "id": "050-notes",
+  "brief": "A view /notes with a textarea and a live character and word count, plus a list of saved notes."
+ },
+ {
+  "id": "051-job-board",
+  "brief": "A view /jobs loading job posts in load() with filters by remote/onsite and by seniority, and a count of results."
+ },
+ {
+  "id": "052-seat-picker",
+  "brief": "A view /seats with a 6×8 grid of seat buttons; taken seats are disabled; selected seats and total price are shown."
+ },
+ {
+  "id": "053-currency-list",
+  "brief": "A view /rates showing exchange rates from load() with a base amount input that multiplies every rate."
+ },
+ {
+  "id": "054-support-tickets",
+  "brief": "A view /tickets: list of tickets with priority badges, status select per ticket, and a filter by status."
+ },
+ {
+  "id": "055-progress-steps",
+  "brief": "A view /onboarding with a checklist of 5 setup tasks, a progress bar with percentage and a 'complete' message at 100%."
+ },
+ {
+  "id": "056-api-keys",
+  "brief": "A view /keys listing API keys (masked), with buttons to reveal one, copy it (show 'Copied'), and revoke it with confirmation."
+ },
+ {
+  "id": "057-team-directory",
+  "brief": "A view /directory loading people in load() with a search box and grouping by department."
+ },
+ {
+  "id": "058-metrics-table",
+  "brief": "A view /metrics with a table of 10 metrics and a toggle to show only metrics that changed more than 5%."
+ },
+ {
+  "id": "059-booking",
+  "brief": "A view /booking with date input, time slot buttons (9:00–17:00 hourly), selected slot and a confirm button."
+ },
+ {
+  "id": "060-faq-search",
+  "brief": "A view /help with a search box filtering FAQ entries and showing how many matched."
+ },
+ {
+  "id": "061-cookie-consent",
+  "brief": "A view /privacy with page content and a cookie consent panel with accept all, reject, and save preferences (3 checkboxes)."
+ },
+ {
+  "id": "062-music-player",
+  "brief": "A view /player with a playlist of 6 songs, play/pause, next/previous and the current song highlighted (no real audio)."
+ },
+ {
+  "id": "063-address-form",
+  "brief": "A view /address with street, city, state select, postal code (5 digits) and country, with per-field errors."
+ },
+ {
+  "id": "064-cart-coupon",
+  "brief": "A view /checkout with an order summary and a coupon input; code SAVE10 applies 10%, others show an error."
+ },
+ {
+  "id": "065-star-rating",
+  "brief": "A view /review with a 1–5 star rating control made of buttons, a review textarea and a submit that shows the review."
+ },
+ {
+  "id": "066-language-switch",
+  "brief": "A view /welcome with text in English, Spanish and Portuguese and buttons to switch language."
+ },
+ {
+  "id": "067-sales-filter",
+  "brief": "A view /sales loading 30 sales in load(), with a date range (two date inputs) and a total of the filtered sales."
+ },
+ {
+  "id": "068-kanban-wip",
+  "brief": "A view /sprint with columns To do / In progress / Done where In progress allows at most 3 cards (show a warning)."
+ },
+ {
+  "id": "069-contact-list",
+  "brief": "A view /contacts: alphabetical contact list grouped by first letter, with add and delete."
+ },
+ {
+  "id": "070-loan-calculator",
+  "brief": "A view /loan with amount, annual rate and years, showing the monthly payment and total interest."
+ },
+ {
+  "id": "071-blog-list",
+  "brief": "A view /blog loading posts in load() with title, date, excerpt and tags; clicking a tag filters the list."
+ },
+ {
+  "id": "072-settings-toggles",
+  "brief": "A view /preferences with 5 toggle switches (checkboxes with labels) and a 'reset to defaults' button."
+ },
+ {
+  "id": "073-text-stats",
+  "brief": "A view /text-stats with a textarea, live counts of characters, words and sentences, and reading time."
+ },
+ {
+  "id": "074-roles-matrix",
+  "brief": "A view /roles with a matrix of users × permissions as checkboxes, and a save button that shows a summary of changes."
+ },
+ {
+  "id": "075-stock-ticker",
+  "brief": "A view /stocks with 5 symbols whose prices change every 2 seconds (simulated) with up/down indicators. Clean up the interval."
+ },
+ {
+  "id": "076-survey",
+  "brief": "A view /survey with 3 questions (text, radio, checkbox group) and a summary of the answers after submit."
+ },
+ {
+  "id": "077-schedule",
+  "brief": "A view /schedule showing a weekly timetable (Mon–Fri × 8 hours) from load(), with today's column highlighted."
+ },
+ {
+  "id": "078-uploads",
+  "brief": "A view /uploads simulating file uploads: an 'add file' button adds a row with a progress bar that fills over 3 seconds."
+ },
+ {
+  "id": "079-order-form",
+  "brief": "A view /order with product select, quantity, delivery option radios (standard/express +$50) and a live total."
+ },
+ {
+  "id": "080-maintenance",
+  "brief": "A view /maintenance showing a maintenance message, an estimated time, and a 'retry' button that re-checks a fake status."
+ },
+ {
+  "id": "081-compare",
+  "brief": "A view /compare with 3 phones side by side in a table and checkboxes to choose which spec rows to show."
+ },
+ {
+  "id": "082-tags-input",
+  "brief": "A view /tags with an input that adds a tag on Enter, shows tags as chips with remove buttons, no duplicates."
+ },
+ {
+  "id": "083-bar-chart",
+  "brief": "A view /traffic loading 7 days of visits in load() and drawing a simple bar chart with divs and heights in %."
+ },
+ {
+  "id": "084-ideas-voting",
+  "brief": "A view /ideas: list of ideas with upvote/downvote buttons, sorted by score, and a form to add an idea."
+ },
+ {
+  "id": "085-membership",
+  "brief": "A view /account showing plan, renewal date and usage bars (storage, seats) from load(), and an upgrade button."
+ },
+ {
+  "id": "086-returns",
+  "brief": "A view /returns with an order number input, a reason select, a details textarea and a status after submit."
+ },
+ {
+  "id": "087-memory-game",
+  "brief": "A view /memory with 12 cards (6 pairs) face down; flip two, keep matched pairs open, count moves."
+ },
+ {
+  "id": "088-tic-tac-toe",
+  "brief": "A view /tictactoe: 3×3 board of buttons, alternating X and O, winner detection and reset."
+ },
+ {
+  "id": "089-playlist-builder",
+  "brief": "A view /playlist: search a list of 20 songs and add/remove them to a playlist with total duration."
+ },
+ {
+  "id": "090-grades",
+  "brief": "A view /grades: students with 3 grades each, average per student, class average, and failing students highlighted."
+ },
+ {
+  "id": "091-carousel",
+  "brief": "A view /tour with 4 slides (heading + text), previous/next buttons, dot buttons and 'slide N of 4'."
+ },
+ {
+  "id": "092-traffic-light",
+  "brief": "A view /signals simulating a traffic light cycling red→green→yellow every 2 seconds with start/stop. Clean up the interval."
+ },
+ {
+  "id": "093-invite-team",
+  "brief": "A view /invite with a list of email inputs (add/remove rows), validation, and a 'send invites' summary."
+ },
+ {
+  "id": "094-parking",
+  "brief": "A view /parking with an entry time input and exit time input, computing hours and the fee ($20/hour, max $150)."
+ },
+ {
+  "id": "095-crud-products",
+  "brief": "A view /admin-products: table with add/edit/delete products (name, price, category), validation and empty state."
+ },
+ {
+  "id": "096-weekly-report",
+  "brief": "A view /report loading weekly KPIs in load() with change vs last week as +/− percentages colored ok/bad."
+ },
+ {
+  "id": "097-access-log",
+  "brief": "A view /access with a list of login events from load(), a filter by result (success/failed) and a count of failed logins."
+ },
+ {
+  "id": "098-shortcuts",
+  "brief": "A view /shortcuts listing keyboard shortcuts in a table with a search box that filters by action or key."
+ },
+ {
+  "id": "099-garden",
+  "brief": "A view /garden with a list of plants, each with a watering interval in days and a 'watered today' button that resets its counter."
+ },
+ {
+  "id": "100-library-loans",
+  "brief": "A view /loans listing borrowed books with due dates from load(), overdue ones flagged, and a 'return' button per book."
+ }
+]

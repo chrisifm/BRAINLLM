@@ -1,0 +1,12 @@
+<meta seo title="Deduplication of identical GETs" description="Two components read the same endpoint at mount; identical GETs in flight must share one request to the server.">
+<script>
+  import FeedCard from '../comp/feed-card.brain'
+</script>
+<main class="page">
+  <h1>Deduplication</h1>
+  <FeedCard label="first" />
+  <FeedCard label="second" />
+</main>
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+</style>

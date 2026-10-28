@@ -1,0 +1,15 @@
+<script>
+  import Login from './login.brain'
+
+  test('an empty form shows the validation errors without calling the server', async () => {
+    await mount(Login, { configured: true })
+    await click('button[type=submit]')
+    expect(count('.err')).toBe(2)
+  })
+
+  test('without a configured provider there is no form, only the notice', async () => {
+    await mount(Login, { configured: false })
+    expect(count('form')).toBe(0)
+    expect(text('[role=status]').includes('not configured')).toBeTruthy()
+  })
+</script>

@@ -1,0 +1,11 @@
+<meta seo title="Fault injection" description="Fault injection bench for component isolation: a component nested three levels deep fails on demand while the rest of the page keeps working." canonical="/">
+
+<main class="page">
+  <h1>Fault injection bench</h1>
+  <p>The <a href="/lab">lab</a> makes a component three levels deep fail in its render, effect, derived value, handlers or resource. The <a href="/ssr">server render page</a> and the <a href="/pre">prerendered page</a> make it fail on the server.</p>
+</main>
+
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-4); }
+  p { margin: 0; color: var(--muted); }
+</style>

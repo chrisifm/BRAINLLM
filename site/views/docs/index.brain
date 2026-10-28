@@ -1,0 +1,28 @@
+<meta seo lastmod="2026-10-13" title="BRAINLLM documentation" description="Everything a model or a person needs to build with BRAINLLM: files, components, markup, styles, SEO, data and the brain CLI." canonical="/docs">
+
+<main class="doc">
+  <h1>Documentation</h1>
+  <p>BRAINLLM is small on purpose. The whole contract fits in one document that the CLI prints with <code>brain spec</code>, and nothing outside it exists. These pages explain that contract with examples, in the order you meet it while building an app.</p>
+  <h2>Where to start</h2>
+  <p>If you are a model, run <code>brain spec</code> and read it fully before writing a file: it is shorter than this site and it is the source of truth. If you are a person, read the pages below in order; each one takes a few minutes. Agents can also reach every command through the <a href="https://modelcontextprotocol.io/">Model Context Protocol</a> server that <code>brain mcp</code> starts.</p>
+  <ul class="toc">
+    <li><a href="/docs/files">Files and generators</a>: where each kind of file lives and the <code>brain add</code> command that creates it with the right pattern.</li>
+    <li><a href="/docs/components">Components</a>: the four blocks of a <code>.brain</code> file, props, BrainScript and the reactive primitives.</li>
+    <li><a href="/docs/markup">Markup</a>: interpolation, events, bindings, conditionals, lists, slots and how components talk to each other.</li>
+    <li><a href="/docs/styles">Styles and accessibility</a>: scoped CSS, design tokens and the accessibility rules the build enforces.</li>
+    <li><a href="/docs/seo">SEO and AI visibility</a>: page metadata, the files the build generates, social cards and the policy for AI crawlers.</li>
+    <li><a href="/docs/data">Data, forms and server</a>: the built-in UI kit, forms with validation, typed APIs, server code and secrets.</li>
+    <li><a href="/docs/cli">CLI and testing</a>: every command, the error format, the development loop and component tests.</li>
+  </ul>
+  <h2>How the pieces fit</h2>
+  <p>A <code>.brain</code> file goes through the <code>brain</code> binary: it is parsed, checked, compiled to JavaScript that updates the DOM directly, bundled, minified and written to <code>dist/</code> together with one CSS file per view. In the browser a small runtime handles signals, event delegation and hydration. During development <code>brain run</code> serves the app with hot reload that keeps component state.</p>
+  <p>The checker is the part you will meet most. It reports structure, script, markup, CSS, accessibility and SEO problems with a code, a message and a fix, and it refuses to build a page that a screen reader or a search engine could not use. Treat its output as instructions: apply each fix literally, run the check again, and stop when it returns an empty list.</p>
+  <h2>What is not here</h2>
+  <p>There is no router configuration, no state library, no CSS framework and no plugin system to learn. Routes come from file names, state is a signal, styles are plain CSS with tokens, and features such as sitemaps, structured data and social cards are built in. When something you expect seems missing, check the spec first: if it is not there, BRAINLLM does not have it yet.</p>
+</main>
+
+<style>
+  .doc { display: grid; gap: var(--space-3); max-width: 70ch; }
+  .doc p { margin: 0; }
+  .toc { display: grid; gap: var(--space-2); padding-left: var(--space-5); }
+</style>

@@ -1,0 +1,7 @@
+{
+  "$schema": "./node_modules/@christianirack/brainllm/brain.schema.json",
+  "name": "nubo",
+  "cache": { "http": true, "sw": true, "offline": true, "precacheKB": 2048 },
+  "seo": { "minScore": 80 },
+  "budget": { "viewKB": 30 }
+}

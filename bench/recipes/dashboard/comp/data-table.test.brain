@@ -1,0 +1,28 @@
+<script>
+  import DataTable from './data-table.brain'
+
+  const columns = [{ key: 'product', label: 'Product' }, { key: 'orders', label: 'Orders', num: true }]
+  const rows = [{ id: 1, product: 'Pro', orders: 95 }, { id: 2, product: 'Starter', orders: 120 }, { id: 3, product: 'Team', orders: 40 }]
+
+  test('renders one row per record with formatted numbers', async () => {
+    await mount(DataTable, { rows, columns, caption: 'Sales' })
+    expect(count('tbody tr')).toBe(3)
+    expect(text('caption')).toBe('Sales')
+  })
+
+  test('a header click sorts ascending, a second click descending', async () => {
+    await mount(DataTable, { rows, columns, caption: 'Sales' })
+    await click('th:nth-child(2) button')
+    expect(text('tbody tr:first-child td:nth-child(2)')).toBe('40')
+    expect(attr('th:nth-child(2)', 'aria-sort')).toBe('ascending')
+    await click('th:nth-child(2) button')
+    expect(text('tbody tr:first-child td:nth-child(2)')).toBe('120')
+    expect(attr('th:nth-child(2)', 'aria-sort')).toBe('descending')
+  })
+
+  test('no rows shows the empty message across every column', async () => {
+    await mount(DataTable, { rows: [], columns, caption: 'Sales', empty: 'Nothing sold yet.' })
+    expect(text('.empty')).toBe('Nothing sold yet.')
+    expect(attr('.empty', 'colspan')).toBe('2')
+  })
+</script>

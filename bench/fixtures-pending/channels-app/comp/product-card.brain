@@ -1,0 +1,12 @@
+<meta props="product:obj" emits="add:obj">
+<script>
+  import Price from '../ui/price.brain'
+  import QtyInput from './qty-input.brain'
+  let qty = sig(1)
+</script>
+<article>
+  <h3>{product.name}</h3>
+  <Price amount={product.price} />
+  <QtyInput bind:value={qty} label={'Quantity of ' + product.name} />
+  <button type="button" on:click={emit('add', { ...product, qty })}>Add</button>
+</article>

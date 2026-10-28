@@ -1,0 +1,109 @@
+import { guard } from "/@brain/brain-guard.js";
+import { sig, drv, tpl, insert, attr, cls, on, list } from "/@brain/brain.js";
+import { dev } from "/@brain/brain-dev.js";
+const $t0 = tpl("<li><input type=\"checkbox\"> <span><!></span> <button aria-label=\"Delete\">×</button></li>");
+const $t1 = tpl("<li class=\"empty\">Nothing here.</li>");
+const $t2 = tpl("<section data-b=\"lxd7ly\" class=\"todo\"><h2><!></h2> <form><input placeholder=\"What needs doing?\" aria-label=\"New task\"> <button>Add</button></form> <ul><!></ul> <footer><span><!> left</span> <button>All</button> <button>Open</button> <button>Done</button></footer></section>");
+function Todo($p = {}) {
+  const items = sig([], "items");
+  const text = sig('', "text");
+  const filter = sig('all', "filter");
+  let nextId = 1;
+  const visible = drv(() => {
+    if (filter.v === 'done') {
+      return items.v.filter((it) => it.done);
+    }
+    if (filter.v === 'open') {
+      return items.v.filter((it) => !it.done);
+    }
+    return items.v;
+  });
+  const left = drv(() => items.v.filter((it) => !it.done).length);
+  const add = () => {
+    const t = text.v.trim();
+    if (t === '') {
+      return;
+    }
+    items.v = [...items.v, { id: nextId++, text: t, done: false }];
+    text.v = '';
+  };
+  const toggle = (id) => {
+    items.v = items.v.map((it) => it.id === id ? { ...it, done: !it.done } : it);
+  };
+  const remove = (id) => {
+    items.v = items.v.filter((it) => it.id !== id);
+  };
+  const $r16 = $t2();
+  const $e1 = $r16.firstChild.firstChild;
+  const $e2 = $r16.firstChild.nextSibling.nextSibling;
+  const $e3 = $e2.firstChild;
+  const $e4 = $e3.nextSibling.nextSibling;
+  const $e5 = $e2.nextSibling.nextSibling.firstChild;
+  const $e12 = $e2.nextSibling.nextSibling.nextSibling.nextSibling.firstChild.firstChild;
+  const $e13 = $e2.nextSibling.nextSibling.nextSibling.nextSibling.firstChild.nextSibling.nextSibling;
+  const $e14 = $e13.nextSibling.nextSibling;
+  const $e15 = $e14.nextSibling.nextSibling;
+  insert(null, () => ($p.title ?? 'To do'), $e1);
+  on($e2, "submit", (e) => { e.preventDefault(); (add)(e); });
+  attr($e3, "value", () => text.v);
+  on($e3, "input", (e) => { text.v = e.target.value; });
+  attr($e4, "disabled", () => text.v.trim() === '');
+  list(null, () => visible.v, (it) => it.id, (it) => {
+    const $r10 = $t0();
+    const $e6 = $r10;
+    const $e7 = $r10.firstChild;
+    const $e8 = $e7.nextSibling.nextSibling.firstChild;
+    const $e9 = $e7.nextSibling.nextSibling.nextSibling.nextSibling;
+    cls($e6, "done", () => it.v.done);
+    attr($e7, "checked", () => it.v.done);
+    on($e7, "change", () => { toggle(it.v.id); });
+    attr($e7, "aria-label", () => `Mark ${it.v.text}`);
+    insert(null, () => it.v.text, $e8);
+    on($e9, "click", () => { remove(it.v.id); });
+    return $r10;
+  }, $e5, () => {
+    const $r11 = $t1();
+    return $r11;
+  });
+  insert(null, () => left.v, $e12);
+  cls($e13, "on", () => filter.v === 'all');
+  on($e13, "click", () => { filter.v = 'all'; });
+  cls($e14, "on", () => filter.v === 'open');
+  on($e14, "click", () => { filter.v = 'open'; });
+  cls($e15, "on", () => filter.v === 'done');
+  on($e15, "click", () => { filter.v = 'done'; });
+  return $r16;
+}
+Todo.h = "lxd7ly";
+Todo.f = "comp/todo.brain";
+export default dev(guard(Todo));
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoidG9kby5icmFpbi5qcyIsInNvdXJjZXMiOlsidG9kby5icmFpbiJdLCJzb3VyY2VzQ29udGVudCI6WyI8bWV0YSBwcm9wcz1cInRpdGxlOnN0cj0nVG8gZG8nXCI+XG5cbjxzY3JpcHQ+XG4gIGxldCBpdGVtcyA9IHNpZyhbXSlcbiAgbGV0IHRleHQgPSBzaWcoJycpXG4gIGxldCBmaWx0ZXIgPSBzaWcoJ2FsbCcpXG4gIGxldCBuZXh0SWQgPSAxXG5cbiAgbGV0IHZpc2libGUgPSBkcnYoKCkgPT4ge1xuICAgIGlmIChmaWx0ZXIgPT09ICdkb25lJykgcmV0dXJuIGl0ZW1zLmZpbHRlcihpdCA9PiBpdC5kb25lKVxuICAgIGlmIChmaWx0ZXIgPT09ICdvcGVuJykgcmV0dXJuIGl0ZW1zLmZpbHRlcihpdCA9PiAhaXQuZG9uZSlcbiAgICByZXR1cm4gaXRlbXNcbiAgfSlcbiAgbGV0IGxlZnQgPSBkcnYoKCkgPT4gaXRlbXMuZmlsdGVyKGl0ID0+ICFpdC5kb25lKS5sZW5ndGgpXG5cbiAgY29uc3QgYWRkID0gKCkgPT4ge1xuICAgIGNvbnN0IHQgPSB0ZXh0LnRyaW0oKVxuICAgIGlmICh0ID09PSAnJykgcmV0dXJuXG4gICAgaXRlbXMgPSBbLi4uaXRlbXMsIHsgaWQ6IG5leHRJZCsrLCB0ZXh0OiB0LCBkb25lOiBmYWxzZSB9XVxuICAgIHRleHQgPSAnJ1xuICB9XG4gIGNvbnN0IHRvZ2dsZSA9IChpZCkgPT4ge1xuICAgIGl0ZW1zID0gaXRlbXMubWFwKGl0ID0+IGl0LmlkID09PSBpZCA/IHsgLi4uaXQsIGRvbmU6ICFpdC5kb25lIH0gOiBpdClcbiAgfVxuICBjb25zdCByZW1vdmUgPSAoaWQpID0+IHtcbiAgICBpdGVtcyA9IGl0ZW1zLmZpbHRlcihpdCA9PiBpdC5pZCAhPT0gaWQpXG4gIH1cbjwvc2NyaXB0PlxuXG48c2VjdGlvbiBjbGFzcz1cInRvZG9cIj5cbiAgPGgyPnt0aXRsZX08L2gyPlxuICA8Zm9ybSBvbjpzdWJtaXQ9e2FkZH0+XG4gICAgPGlucHV0IGJpbmQ6dmFsdWU9e3RleHR9IHBsYWNlaG9sZGVyPVwiV2hhdCBuZWVkcyBkb2luZz9cIiBhcmlhLWxhYmVsPVwiTmV3IHRhc2tcIiAvPlxuICAgIDxidXR0b24gZGlzYWJsZWQ9e3RleHQudHJpbSgpID09PSAnJ30+QWRkPC9idXR0b24+XG4gIDwvZm9ybT5cblxuICA8dWw+XG4gICAgeyNlYWNoIHZpc2libGUgYXMgaXQgKGl0LmlkKX1cbiAgICAgIDxsaSBjbGFzczpkb25lPXtpdC5kb25lfT5cbiAgICAgICAgPGlucHV0IHR5cGU9XCJjaGVja2JveFwiIGNoZWNrZWQ9e2l0LmRvbmV9IG9uOmNoYW5nZT17dG9nZ2xlKGl0LmlkKX0gYXJpYS1sYWJlbD17YE1hcmsgJHtpdC50ZXh0fWB9IC8+XG4gICAgICAgIDxzcGFuPntpdC50ZXh0fTwvc3Bhbj5cbiAgICAgICAgPGJ1dHRvbiBvbjpjbGljaz17cmVtb3ZlKGl0LmlkKX0gYXJpYS1sYWJlbD1cIkRlbGV0ZVwiPsOXPC9idXR0b24+XG4gICAgICA8L2xpPlxuICAgIHs6ZW1wdHl9XG4gICAgICA8bGkgY2xhc3M9XCJlbXB0eVwiPk5vdGhpbmcgaGVyZS48L2xpPlxuICAgIHsvZWFjaH1cbiAgPC91bD5cblxuICA8Zm9vdGVyPlxuICAgIDxzcGFuPntsZWZ0fSBsZWZ0PC9zcGFuPlxuICAgIDxidXR0b24gY2xhc3M6b249e2ZpbHRlciA9PT0gJ2FsbCd9IG9uOmNsaWNrPXtmaWx0ZXIgPSAnYWxsJ30+QWxsPC9idXR0b24+XG4gICAgPGJ1dHRvbiBjbGFzczpvbj17ZmlsdGVyID09PSAnb3Blbid9IG9uOmNsaWNrPXtmaWx0ZXIgPSAnb3Blbid9Pk9wZW48L2J1dHRvbj5cbiAgICA8YnV0dG9uIGNsYXNzOm9uPXtmaWx0ZXIgPT09ICdkb25lJ30gb246Y2xpY2s9e2ZpbHRlciA9ICdkb25lJ30+RG9uZTwvYnV0dG9uPlxuICA8L2Zvb3Rlcj5cbjwvc2VjdGlvbj5cblxuPHN0eWxlPlxuICAudG9kbyB7IGRpc3BsYXk6IGdyaWQ7IGdhcDogdmFyKC0tc3BhY2UtMik7IH1cbiAgZm9ybSB7IGRpc3BsYXk6IGZsZXg7IGdhcDogdmFyKC0tc3BhY2UtMSk7IH1cbiAgbGkgeyBkaXNwbGF5OiBmbGV4OyBnYXA6IHZhcigtLXNwYWNlLTIpOyBhbGlnbi1pdGVtczogY2VudGVyOyAmLmRvbmUgc3BhbiB7IHRleHQtZGVjb3JhdGlvbjogbGluZS10aHJvdWdoOyBjb2xvcjogdmFyKC0tbXV0ZWQpOyB9IH1cbiAgLmVtcHR5IHsgY29sb3I6IHZhcigtLW11dGVkKTsgfVxuICBmb290ZXIgYnV0dG9uLm9uIHsgY29sb3I6IHZhcigtLWFjY2VudCk7IH1cbjwvc3R5bGU+XG4iXSwibmFtZXMiOltdLCJtYXBwaW5ncyI6Ijs7Ozs7OztBQUdBO0FBQ0E7QUFDQTtBQUNBO0FBRUE7QUFDQTtBQUFBO0FBQUE7QUFDQTtBQUFBO0FBQUE7QUFDQTtBQUFBO0FBRUE7QUFFQTtBQUNBO0FBQ0E7QUFBQTtBQUFBO0FBQ0E7QUFDQTtBQUFBO0FBRUE7QUFDQTtBQUFBO0FBRUE7QUFDQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFLQTtBQUNBO0FBQ0E7QUFBQTtBQUNBO0FBSUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQ0E7QUFDQTtBQUFBO0FBQUE7QUFDQTtBQUNBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQVFBO0FBQ0E7QUFBQTtBQUNBO0FBQUE7QUFDQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTsifQ==
+
+/* ---- css ---- */
+@layer comp {
+  @scope ([data-b="lxd7ly"]) to ([data-b]) {
+    :where(:scope):is(.todo), .todo {
+      display: grid;
+      gap: var(--space-2);
+    }
+    :where(:scope):is(form), form {
+      display: flex;
+      gap: var(--space-1);
+    }
+    :where(:scope):is(li), li {
+      display: flex;
+      gap: var(--space-2);
+      align-items: center;
+      &.done span {
+        text-decoration: line-through;
+        color: var(--muted);
+      }
+    }
+    :where(:scope):is(.empty), .empty {
+      color: var(--muted);
+    }
+    :where(:scope):is(footer) button.on, footer button.on {
+      color: var(--accent);
+    }
+  }
+}

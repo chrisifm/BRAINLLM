@@ -1,0 +1,9 @@
+{
+  "name": "settings",
+  "title": "Settings page (tabs, form, server save)",
+  "description": "views/account/settings.brain behind the scaffold's account guard: <Tabs> for Profile and Notifications, one form() with validation and an `f.ok` saved message, checkboxes bound to the same form, and a server function that validates again and saves. load() reads the current values for the signed-in user.",
+  "params": { "fields": { "type": "object", "default": { "name": "str!<=60", "email": "email!", "newsletter": "bool", "product": "bool" } }, "path": { "type": "string", "default": "account/settings" } },
+  "files": ["views/account/settings.brain", "views/account/settings.test.brain"],
+  "uses": ["Tabs", "Input", "Checkbox", "Button"],
+  "notes": "saveSettings() is where persistence goes (database, provider API). Link /account/settings from the account page or nav."
+}

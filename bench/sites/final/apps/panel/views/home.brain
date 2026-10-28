@@ -1,0 +1,173 @@
+<meta seo title="Customers" description="Manage Nubo customers: search, filter by plan, create, edit and delete accounts." canonical="/">
+<script>
+  import KpiRow from '../comp/kpi-row.brain'
+  import api from '../lib/api.jsbrain'
+  import CustomerForm from '../comp/customer-form.brain'
+
+  let customers = sig([])
+  let loading = sig(true)
+  let loadError = sig('')
+  let q = sig('')
+  let planFilter = sig('all')
+  let formOpen = sig(false)
+  let editing = sig(null)
+  let saving = sig(false)
+  let saveError = sig('')
+  let deletingId = sig(0)
+  let actionError = sig('')
+
+  const load = async () => {
+    loading = true
+    loadError = ''
+    try {
+      customers = await api.list()
+    } catch (e) {
+      loadError = e && e.message ? e.message : 'Could not load customers'
+    }
+    loading = false
+  }
+  mounted(() => { load() })
+
+  const total = drv(() => customers.length)
+  const active = drv(() => customers.filter(c => c.status === 'active').length)
+  const billed = drv(() => customers.reduce((s, c) => s + c.billed, 0))
+  const avg = drv(() => (active > 0 ? billed / active : 0))
+  const money = (n) => '$' + (Math.round(n * 100) / 100).toFixed(2)
+
+  const visible = drv(() => {
+    const term = q.trim().toLowerCase()
+    return customers.filter(c =>
+      (planFilter === 'all' || c.plan === planFilter) &&
+      (term === '' || c.name.toLowerCase().includes(term) || c.email.toLowerCase().includes(term)))
+  })
+
+  const openNew = () => { editing = null; saveError = ''; formOpen = true }
+  const openEdit = (c) => { editing = c; saveError = ''; formOpen = true }
+  const closeForm = () => { formOpen = false; editing = null }
+  const clearFilters = () => { q = ''; planFilter = 'all' }
+
+  const save = async (e) => {
+    saving = true
+    saveError = ''
+    try {
+      if (editing) {
+        const saved = await api.update(editing.id, e.detail ?? e)
+        customers = customers.map(c => (c.id === saved.id ? saved : c))
+      } else {
+        const saved = await api.create(e.detail ?? e)
+        customers = [...customers, saved]
+      }
+      closeForm()
+    } catch (err) {
+      saveError = err && err.message ? err.message : 'Could not save the customer'
+    }
+    saving = false
+  }
+
+  const remove = async (c) => {
+    deletingId = c.id
+    actionError = ''
+    try {
+      await api.remove(c.id)
+      customers = customers.filter(x => x.id !== c.id)
+    } catch (err) {
+      actionError = err && err.message ? err.message : 'Could not delete the customer'
+    }
+    deletingId = 0
+  }
+</script>
+
+<main class="page">
+  <header class="top">
+    <h1>Customers</h1>
+    <button type="button" class="primary" on:click={openNew}>New customer</button>
+  </header>
+
+  <KpiRow total={total} active={active} money={money} billed={billed} avg={avg} />
+
+  {#if formOpen}
+    <CustomerForm customer={editing} saving={saving} error={saveError} on:save={save} on:cancel={closeForm} />
+  {/if}
+
+  {#if actionError !== ''}<p class="err" role="alert">{actionError}</p>{/if}
+
+  <section aria-labelledby="list-title" class="list">
+    <h2 id="list-title">All customers</h2>
+    <div class="filters">
+      <div class="field">
+        <label for="f-q">Search by name or email</label>
+        <input id="f-q" type="search" bind:value={q} />
+      </div>
+      <div class="field">
+        <label for="f-plan">Plan</label>
+        <select id="f-plan" bind:value={planFilter}>
+          <option value="all">All plans</option>
+          <option value="Free">Free</option>
+          <option value="Pro">Pro</option>
+          <option value="Business">Business</option>
+        </select>
+      </div>
+    </div>
+
+    {#if loading}
+      <p class="state" role="status">Loading customers…</p>
+    {:else if loadError !== ''}
+      <div class="state" role="alert">
+        <p>{loadError}</p>
+        <button type="button" on:click={load}>Retry</button>
+      </div>
+    {:else if customers.length === 0}
+      <div class="state">
+        <p>No customers yet. Create the first one.</p>
+        <button type="button" class="primary" on:click={openNew}>New customer</button>
+      </div>
+    {:else if visible.length === 0}
+      <div class="state">
+        <p>No results for this filter.</p>
+        <button type="button" on:click={clearFilters}>Clear filters</button>
+      </div>
+    {:else}
+      <table>
+        <caption class="sr">Customers</caption>
+        <thead>
+          <tr><th scope="col">Name</th><th scope="col">Email</th><th scope="col">Plan</th><th scope="col">Status</th><th scope="col">Actions</th></tr>
+        </thead>
+        <tbody>
+          {#each visible as c (c.id)}
+            <tr>
+              <td>{c.name}</td>
+              <td>{c.email}</td>
+              <td>{c.plan}</td>
+              <td><span class="status" class:on={c.status === 'active'}>{c.status === 'active' ? 'Active' : 'Inactive'}</span></td>
+              <td class="row-actions">
+                <button type="button" disabled={deletingId === c.id} on:click={() => openEdit(c)} aria-label={'Edit ' + c.name}>Edit</button>
+                <button type="button" disabled={deletingId === c.id} on:click={() => remove(c)} aria-label={'Delete ' + c.name}>{deletingId === c.id ? 'Deleting…' : 'Delete'}</button>
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    {/if}
+  </section>
+</main>
+
+<style>
+  .page { display: grid; gap: var(--space-4); padding: var(--space-5); }
+  .top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+  h1 { margin: 0; font-size: 1.6rem; }
+  h2 { margin: 0; font-size: 1.1rem; }
+  .primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
+  .list { display: grid; gap: var(--space-3); }
+  .filters { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+  .field { display: grid; gap: var(--space-1); }
+  .state { display: grid; justify-items: start; gap: var(--space-2); padding: var(--space-4); border: 1px dashed var(--line); border-radius: var(--radius); }
+  .state p { margin: 0; color: var(--muted); }
+  .err { margin: 0; color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: .9rem; }
+  .row-actions { display: flex; gap: var(--space-2); }
+  .status { color: var(--muted); }
+  .status.on { color: var(--ok); font-weight: 600; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>

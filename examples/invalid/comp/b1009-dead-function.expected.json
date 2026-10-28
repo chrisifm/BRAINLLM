@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1009",
+    "level": "warning",
+    "file": "invalid/comp/b1009-dead-function.brain",
+    "line": 4,
+    "col": 9,
+    "msg": "`reset` is never used",
+    "fix": "delete it or wire it to a control"
+  }
+]

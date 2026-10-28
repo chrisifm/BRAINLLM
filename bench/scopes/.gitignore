@@ -1,0 +1,2 @@
+# Raw per-mode probe data: regenerate with `node bench/scopes/run.mjs`.
+results/raw/

@@ -1,0 +1,34 @@
+<meta seo title={props.entry.title} description={props.entry.description}>
+
+<script>
+  import { entries, entry } from 'brain:content'
+  export function paths() {
+    return entries('guides').map((e) => ({ slug: e.slug }))
+  }
+  export async function load(ctx) {
+    return { entry: entry('guides', ctx.params.slug) }
+  }
+</script>
+
+<main class="page">
+  <article>
+    <h1>{props.entry.title}</h1>
+    <p class="meta">
+      {#if props.entry.date}<time datetime={props.entry.date}>{props.entry.date}</time>{/if}
+      <span>{props.entry.readingMinutes} min read</span>
+    </p>
+    {@html sanitize(props.entry.html)}
+    {#if props.entry.tags.length}
+      <p>Tags:
+        {#each props.entry.tags as t (t)}
+          <a href={`/guides/tag/${t.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>{t}</a>
+        {/each}
+      </p>
+    {/if}
+  </article>
+  <p><a href="/guides">All entries of Guides</a></p>
+</main>
+
+<style>
+  .meta { display: flex; gap: var(--space-3); color: var(--muted); font-size: .875rem; }
+</style>

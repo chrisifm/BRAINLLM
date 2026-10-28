@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0127",
+    "level": "error",
+    "file": "invalid/lib/b0127-dom-in-worker.worker.jsbrain",
+    "line": 1,
+    "col": 31,
+    "msg": "`document` does not exist in a Web Worker",
+    "fix": "return plain data from the worker function and update the page (signals, DOM) where you call it"
+  }
+]

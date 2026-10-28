@@ -1,0 +1,45 @@
+<meta props="from:obj ms:num=3000 max:num=3 dismissLabel:str='Dismiss'">
+<script>
+  // from: a bus from channels/ (`export default bus('toast')`); send a string or { text, kind: 'ok' | 'error' }
+  let items = sig([])
+  let next = 0
+  const dismiss = (id) => { items = items.filter((x) => x.id !== id) }
+  fx(() => {
+    let timers = []
+    const off = from.on((m) => {
+      const t = typeof m === 'object' && m ? m : { text: String(m) }
+      next = next + 1
+      const id = next
+      items = [...items, { id, text: t.text, kind: t.kind || 'info' }].slice(-max)
+      const h = setTimeout(() => {
+        timers = timers.filter((x) => x !== h)
+        dismiss(id)
+      }, ms)
+      timers = [...timers, h]
+    })
+    return () => {
+      off()
+      for (const h of timers) clearTimeout(h)
+    }
+  })
+</script>
+<div class="toasts" role="status" aria-live="polite">
+  {#each items as t (t.id)}
+    <div class="toast" class:ok={t.kind === 'ok'} class:bad={t.kind === 'error'}>
+      <span>{t.text}</span>
+      <button type="button" aria-label={dismissLabel} on:click={dismiss(t.id)}>×</button>
+    </div>
+  {/each}
+</div>
+<style>
+  .toasts { position: fixed; right: 16px; bottom: 16px; display: grid; gap: var(--space-2); z-index: 1000; }
+  .toast {
+    display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); min-width: 240px;
+    font: 14px/1.4 var(--font); color: var(--fg); background: var(--glass); border: 1px solid var(--glass-edge);
+    border-radius: var(--radius); box-shadow: var(--shadow); backdrop-filter: blur(20px) saturate(1.4);
+  }
+  .toast.ok { border-color: var(--ok); }
+  .toast.bad { border-color: var(--bad); }
+  .toast span { flex: 1; }
+  button { font-size: 18px; line-height: 1; border: 0; color: var(--muted); background: transparent; cursor: pointer; }
+</style>

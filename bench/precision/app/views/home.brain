@@ -1,0 +1,12 @@
+<meta seo title="Precision bench" description="MutationObserver precision harness: one write must mutate exactly the DOM nodes bound to the written field." canonical="/">
+<main class="page">
+  <h1>Precision bench</h1>
+  <ul>
+    <li><a href="/scale">Local and global state</a></li>
+    <li><a href="/group">Group state</a></li>
+    <li><a href="/list">Keyed list</a></li>
+  </ul>
+</main>
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); }
+</style>

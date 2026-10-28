@@ -1,0 +1,7 @@
+<meta seo title="Sign in" description="Sign-in target of the 401 scenario: the HTTP client redirects here with the next parameter set to the page that failed." robots="noindex">
+<main class="page">
+  <h1 data-probe="login">Sign in</h1>
+</main>
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); }
+</style>

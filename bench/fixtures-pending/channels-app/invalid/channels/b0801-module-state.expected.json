@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0801",
+    "level": "error",
+    "file": "channels-app/invalid/channels/b0801-module-state.jsbrain",
+    "line": 1,
+    "col": 5,
+    "msg": "module-level mutable state `count` outside `store()`",
+    "fix": "move it to `channels/` as `export default store({ count: 0 })` or make it `const`"
+  }
+]

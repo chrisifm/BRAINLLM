@@ -1,0 +1,14 @@
+<meta seo title="Errors" description="Error isolation bench: a component that throws while it is created, next to a healthy counter." canonical="/errors">
+<script>
+  import Counter from '../comp/counter.brain'
+  import SetupThrow from '../comp/setup-throw.brain'
+</script>
+<main class="errors">
+  <h1>Errors</h1>
+  <div id="before"><Counter label="Before" /></div>
+  <div id="bad"><SetupThrow /></div>
+  <div id="after"><Counter label="After" /></div>
+</main>
+<style>
+  .errors { padding: var(--space-4); }
+</style>

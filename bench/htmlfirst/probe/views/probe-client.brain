@@ -1,0 +1,16 @@
+<meta seo title="Probe client" description="QA probe for task 157: a client-only component marked with meta client between two blocks of text, to measure layout shift.">
+
+<script>
+  import ProbeChart from '../comp/probe-chart.brain'
+</script>
+
+<main class="page">
+  <h1>Probe client</h1>
+  <p id="before">Text above the client-only component.</p>
+  <ProbeChart />
+  <p id="after">Text below the client-only component.</p>
+</main>
+
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+</style>

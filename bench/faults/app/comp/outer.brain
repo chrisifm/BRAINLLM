@@ -1,0 +1,14 @@
+<meta props="ssr:bool=false">
+<script>
+  import Middle from './middle.brain'
+  import Sibling from './sibling.brain'
+  let n = sig(0)
+</script>
+<section class="outer" data-p="outer">
+  <button type="button" data-p="outer-inc" on:click={n++}>outer {n}</button>
+  <Middle ssr={ssr} />
+  <Sibling name="outer-sib" />
+</section>
+<style>
+  .outer { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius); }
+</style>

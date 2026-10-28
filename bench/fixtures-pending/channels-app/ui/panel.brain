@@ -1,0 +1,6 @@
+<meta props="title:str">
+<section aria-label={title}>
+  <h2>{title}</h2>
+  <slot />
+  <footer><slot name="footer" /></footer>
+</section>

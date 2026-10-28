@@ -1,0 +1,814 @@
+{
+ "task": 153,
+ "at": "2026-10-14T00:44:50.898Z",
+ "brainSha": "018520473d6e",
+ "scratch": "~/tmp/brainllm-i18n153",
+ "totals": {
+  "PASS": 80,
+  "FAIL": 0,
+  "BLOCKED": 0,
+  "INFO": 2
+ },
+ "results": [
+  {
+   "id": "check",
+   "group": "1 app",
+   "status": "PASS",
+   "evidence": "brain check --json . → []",
+   "owner": "COMPILER"
+  },
+  {
+   "id": "doctor",
+   "group": "1 app",
+   "status": "PASS",
+   "evidence": "brain doctor → exit 0 · SEO 82–95 over 9 pages",
+   "owner": "TOOLCHAIN"
+  },
+  {
+   "id": "probe: t() in <meta seo>",
+   "group": "1 app",
+   "status": "PASS",
+   "evidence": "es <title> \"A site in three languages [es] · Polyglot probe\"",
+   "owner": "COMPILER (seo object does not import t)"
+  },
+  {
+   "id": "localized <title> per locale",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "via t() in <meta seo>",
+   "owner": "COMPILER"
+  },
+  {
+   "id": "probe: <LangSwitch> builds",
+   "group": "1 app",
+   "status": "PASS",
+   "evidence": "layout with <LangSwitch /> builds",
+   "owner": "RUNTIME (runtime/ui/lang-switch.brain keeps sig() state in ui/, B0116)"
+  },
+  {
+   "id": "probe: t() in app.brain shell",
+   "group": "1 app",
+   "status": "PASS",
+   "evidence": "es shell shows \"(absent)\"",
+   "owner": "COMPILER/BUILD"
+  },
+  {
+   "id": "info: in-locale links",
+   "group": "1 app",
+   "status": "INFO",
+   "evidence": "href=\"/about\" on /es stays \"/about\" (switches the visitor to English); no localized link helper exists, so the example keeps per-locale paths in nav.*_href keys",
+   "owner": "RUNTIME/BUILD"
+  },
+  {
+   "id": "spec teaches i18n",
+   "group": "1 app",
+   "status": "PASS",
+   "evidence": "brain spec documents brain.json i18n",
+   "owner": "TOOLCHAIN #151 (spec)"
+  },
+  {
+   "id": "brain add locale",
+   "group": "1 app",
+   "status": "PASS",
+   "evidence": "exit 0, brain.json locales [\"en\",\"es\",\"ar\",\"fr\"], i18n/fr.json 26/26 keys",
+   "owner": "TOOLCHAIN #151"
+  },
+  {
+   "id": "brain i18n --missing",
+   "group": "1 app",
+   "status": "PASS",
+   "evidence": "exit 0: {\"default\":\"en\",\"locales\":{\"es\":{\"missing\":[],\"untranslated\":[]},\"ar\":{\"missing\":[],\"untranslated\":[]},\"fr\":{\"missing\":[],\"untranslated\":[\"about.body\",\"about.ti",
+   "owner": "TOOLCHAIN #151"
+  },
+  {
+   "id": "url en home",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "/ → 200, location /",
+   "owner": "BUILD"
+  },
+  {
+   "id": "html lang/dir en home",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "<html lang=\"en\" dir=\"ltr\" data-default-lang=\"en\">",
+   "owner": "BUILD"
+  },
+  {
+   "id": "texts en home",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "h1 \"A site in three languages\"",
+   "owner": "RUNTIME"
+  },
+  {
+   "id": "hreflang en home",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "ar=/ar en=/ es=/es x-default=/",
+   "owner": "SEO #152"
+  },
+  {
+   "id": "layout direction en home",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "brand x=24 nav x=253 direction ltr (brand left of nav)",
+   "owner": "BUILD/CSS"
+  },
+  {
+   "id": "network en home",
+   "group": "3 network",
+   "status": "PASS",
+   "evidence": "8 requests · dictionaries none (static page)",
+   "owner": "BUILD brain-pack i18n"
+  },
+  {
+   "id": "url en about",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "/about → 200, location /about",
+   "owner": "BUILD"
+  },
+  {
+   "id": "html lang/dir en about",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "<html lang=\"en\" dir=\"ltr\" data-default-lang=\"en\">",
+   "owner": "BUILD"
+  },
+  {
+   "id": "texts en about",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "h1 \"About this probe\"",
+   "owner": "RUNTIME"
+  },
+  {
+   "id": "hreflang en about",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "ar=/ar/about-us en=/about es=/es/about-us x-default=/about",
+   "owner": "SEO #152"
+  },
+  {
+   "id": "layout direction en about",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "brand x=24 nav x=253 direction ltr (brand left of nav)",
+   "owner": "BUILD/CSS"
+  },
+  {
+   "id": "network en about",
+   "group": "3 network",
+   "status": "PASS",
+   "evidence": "8 requests · dictionaries none (static page)",
+   "owner": "BUILD brain-pack i18n"
+  },
+  {
+   "id": "url en counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "/counter → 200, location /counter",
+   "owner": "BUILD"
+  },
+  {
+   "id": "html lang/dir en counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "<html lang=\"en\" dir=\"ltr\" data-default-lang=\"en\">",
+   "owner": "BUILD"
+  },
+  {
+   "id": "texts en counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "h1 \"Click counter\"",
+   "owner": "RUNTIME"
+  },
+  {
+   "id": "hreflang en counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "ar=/ar/counter en=/counter es=/es/counter x-default=/counter",
+   "owner": "SEO #152"
+  },
+  {
+   "id": "layout direction en counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "brand x=24 nav x=253 direction ltr (brand left of nav)",
+   "owner": "BUILD/CSS"
+  },
+  {
+   "id": "plural en counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "\"1 click so far\" → click → \"2 clicks so far\"",
+   "owner": "RUNTIME t()"
+  },
+  {
+   "id": "placeholder en counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "\"Hello Ada, welcome back\"",
+   "owner": "RUNTIME t()"
+  },
+  {
+   "id": "fmt en counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "Mar 14, 2026 · 1,234,567.5 · $1,999.50",
+   "owner": "RUNTIME fmt"
+  },
+  {
+   "id": "fmt prerender = browser en counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "identical",
+   "owner": "BUILD prerender (Intl data)"
+  },
+  {
+   "id": "network en counter",
+   "group": "3 network",
+   "status": "PASS",
+   "evidence": "13 requests · dictionaries i18n-counter-en.xsbfkue1.js (648 B)",
+   "owner": "BUILD brain-pack i18n"
+  },
+  {
+   "id": "url es home",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "/es → 200, location /es",
+   "owner": "BUILD"
+  },
+  {
+   "id": "html lang/dir es home",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "<html lang=\"es\" dir=\"ltr\" data-default-lang=\"en\">",
+   "owner": "BUILD"
+  },
+  {
+   "id": "texts es home",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "h1 \"A site in three languages [es]\"",
+   "owner": "RUNTIME"
+  },
+  {
+   "id": "hreflang es home",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "ar=/ar en=/ es=/es x-default=/",
+   "owner": "SEO #152"
+  },
+  {
+   "id": "layout direction es home",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "brand x=24 nav x=222 direction ltr (brand left of nav)",
+   "owner": "BUILD/CSS"
+  },
+  {
+   "id": "network es home",
+   "group": "3 network",
+   "status": "PASS",
+   "evidence": "8 requests · dictionaries none (static page)",
+   "owner": "BUILD brain-pack i18n"
+  },
+  {
+   "id": "url es about",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "/es/about-us → 200, location /es/about-us",
+   "owner": "BUILD"
+  },
+  {
+   "id": "html lang/dir es about",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "<html lang=\"es\" dir=\"ltr\" data-default-lang=\"en\">",
+   "owner": "BUILD"
+  },
+  {
+   "id": "texts es about",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "h1 \"About this probe [es]\"",
+   "owner": "RUNTIME"
+  },
+  {
+   "id": "hreflang es about",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "ar=/ar/about-us en=/about es=/es/about-us x-default=/about",
+   "owner": "SEO #152"
+  },
+  {
+   "id": "layout direction es about",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "brand x=24 nav x=222 direction ltr (brand left of nav)",
+   "owner": "BUILD/CSS"
+  },
+  {
+   "id": "network es about",
+   "group": "3 network",
+   "status": "PASS",
+   "evidence": "8 requests · dictionaries none (static page)",
+   "owner": "BUILD brain-pack i18n"
+  },
+  {
+   "id": "url es counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "/es/counter → 200, location /es/counter",
+   "owner": "BUILD"
+  },
+  {
+   "id": "html lang/dir es counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "<html lang=\"es\" dir=\"ltr\" data-default-lang=\"en\">",
+   "owner": "BUILD"
+  },
+  {
+   "id": "texts es counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "h1 \"Click counter [es]\"",
+   "owner": "RUNTIME"
+  },
+  {
+   "id": "hreflang es counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "ar=/ar/counter en=/counter es=/es/counter x-default=/counter",
+   "owner": "SEO #152"
+  },
+  {
+   "id": "layout direction es counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "brand x=24 nav x=222 direction ltr (brand left of nav)",
+   "owner": "BUILD/CSS"
+  },
+  {
+   "id": "plural es counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "\"1 click so far [es]\" → click → \"2 clicks so far [es]\"",
+   "owner": "RUNTIME t()"
+  },
+  {
+   "id": "placeholder es counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "\"Hello Ada, welcome back [es]\"",
+   "owner": "RUNTIME t()"
+  },
+  {
+   "id": "fmt es counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "14 mar 2026 · 1.234.567,5 · 1999,50 US$",
+   "owner": "RUNTIME fmt"
+  },
+  {
+   "id": "fmt prerender = browser es counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "identical",
+   "owner": "BUILD prerender (Intl data)"
+  },
+  {
+   "id": "network es counter",
+   "group": "3 network",
+   "status": "PASS",
+   "evidence": "13 requests · dictionaries i18n-counter-es.leiseelf.js (663 B)",
+   "owner": "BUILD brain-pack i18n"
+  },
+  {
+   "id": "url ar home",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "/ar → 200, location /ar",
+   "owner": "BUILD"
+  },
+  {
+   "id": "html lang/dir ar home",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "<html lang=\"ar\" dir=\"rtl\" data-default-lang=\"en\">",
+   "owner": "BUILD"
+  },
+  {
+   "id": "texts ar home",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "h1 \"A site in three languages [ar]\"",
+   "owner": "RUNTIME"
+  },
+  {
+   "id": "hreflang ar home",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "ar=/ar en=/ es=/es x-default=/",
+   "owner": "SEO #152"
+  },
+  {
+   "id": "layout direction ar home",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "brand x=585 nav x=242 direction rtl (brand must sit right of nav)",
+   "owner": "BUILD/CSS"
+  },
+  {
+   "id": "network ar home",
+   "group": "3 network",
+   "status": "PASS",
+   "evidence": "8 requests · dictionaries none (static page)",
+   "owner": "BUILD brain-pack i18n"
+  },
+  {
+   "id": "url ar about",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "/ar/about-us → 200, location /ar/about-us",
+   "owner": "BUILD"
+  },
+  {
+   "id": "html lang/dir ar about",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "<html lang=\"ar\" dir=\"rtl\" data-default-lang=\"en\">",
+   "owner": "BUILD"
+  },
+  {
+   "id": "texts ar about",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "h1 \"About this probe [ar]\"",
+   "owner": "RUNTIME"
+  },
+  {
+   "id": "hreflang ar about",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "ar=/ar/about-us en=/about es=/es/about-us x-default=/about",
+   "owner": "SEO #152"
+  },
+  {
+   "id": "layout direction ar about",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "brand x=585 nav x=242 direction rtl (brand must sit right of nav)",
+   "owner": "BUILD/CSS"
+  },
+  {
+   "id": "network ar about",
+   "group": "3 network",
+   "status": "PASS",
+   "evidence": "8 requests · dictionaries none (static page)",
+   "owner": "BUILD brain-pack i18n"
+  },
+  {
+   "id": "url ar counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "/ar/counter → 200, location /ar/counter",
+   "owner": "BUILD"
+  },
+  {
+   "id": "html lang/dir ar counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "<html lang=\"ar\" dir=\"rtl\" data-default-lang=\"en\">",
+   "owner": "BUILD"
+  },
+  {
+   "id": "texts ar counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "h1 \"Click counter [ar]\"",
+   "owner": "RUNTIME"
+  },
+  {
+   "id": "hreflang ar counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "ar=/ar/counter en=/counter es=/es/counter x-default=/counter",
+   "owner": "SEO #152"
+  },
+  {
+   "id": "layout direction ar counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "brand x=585 nav x=242 direction rtl (brand must sit right of nav)",
+   "owner": "BUILD/CSS"
+  },
+  {
+   "id": "plural ar counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "\"1 click so far [ar]\" → click → \"2 clicks so far [ar]\"",
+   "owner": "RUNTIME t()"
+  },
+  {
+   "id": "placeholder ar counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "\"Hello Ada, welcome back [ar]\"",
+   "owner": "RUNTIME t()"
+  },
+  {
+   "id": "fmt ar counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "14‏/03‏/2026 · 1,234,567.5 · ‏1,999.50 US$",
+   "owner": "RUNTIME fmt"
+  },
+  {
+   "id": "fmt prerender = browser ar counter",
+   "group": "2 browser",
+   "status": "PASS",
+   "evidence": "identical",
+   "owner": "BUILD prerender (Intl data)"
+  },
+  {
+   "id": "network ar counter",
+   "group": "3 network",
+   "status": "PASS",
+   "evidence": "13 requests · dictionaries i18n-counter-ar.e7f53ft6.js (662 B)",
+   "owner": "BUILD brain-pack i18n"
+  },
+  {
+   "id": "switch: nothing before",
+   "group": "3 network",
+   "status": "PASS",
+   "evidence": "open /counter: i18n-counter-en.xsbfkue1.js of 13 requests",
+   "owner": "BUILD brain-pack i18n"
+  },
+  {
+   "id": "switch en → es (link)",
+   "group": "3 network",
+   "status": "PASS",
+   "evidence": "→ /es/counter lang=es, \"1 click so far [es]\"; es dictionary fetched on click (i18n-counter-es.leiseelf.js)",
+   "owner": "RUNTIME router/LangSwitch"
+  },
+  {
+   "id": "info: hover prerender",
+   "group": "3 network",
+   "status": "INFO",
+   "evidence": "hovering the es link (speculation rules, eagerness moderate) already downloads 1 requests: /es/counter",
+   "owner": "BUILD"
+  },
+  {
+   "id": "switch es → ar (dir flips)",
+   "group": "3 network",
+   "status": "PASS",
+   "evidence": "→ /ar/counter lang=ar dir=rtl, brand x=585 nav x=242, ar dictionary loaded then",
+   "owner": "RUNTIME router"
+  },
+  {
+   "id": "llm claude-sonnet-5-5",
+   "group": "4 llm",
+   "status": "PASS",
+   "evidence": "i18n {\"default\":\"en\",\"locales\":[\"en\",\"es\"]} · files en+es · check [] · doctor 0 · views 5/2 · switch yes · add locale not called · seo.minScore 80 · 42 calls · 45 s",
+   "owner": null
+  },
+  {
+   "id": "llm claude-haiku-5-5",
+   "group": "4 llm",
+   "status": "PASS",
+   "evidence": "i18n {\"default\":\"en\",\"locales\":[\"en\",\"es\"]} · files en+es · check [] · doctor 0 · views 6/2 · switch yes · add locale not called · seo.minScore 80 · 98 calls · 155 s",
+   "owner": null
+  }
+ ],
+ "dictionaries": [
+  {
+   "file": "i18n-404-en.se3wmsjn.js",
+   "bytes": 389,
+   "gz": 240,
+   "keys": 11
+  },
+  {
+   "file": "i18n-about-ar.otxse7ce.js",
+   "bytes": 419,
+   "gz": 250,
+   "keys": 10
+  },
+  {
+   "file": "i18n-about-en.18693xbm.js",
+   "bytes": 373,
+   "gz": 239,
+   "keys": 10
+  },
+  {
+   "file": "i18n-about-es.fwl461y1.js",
+   "bytes": 419,
+   "gz": 250,
+   "keys": 10
+  },
+  {
+   "file": "i18n-counter-ar.e7f53ft6.js",
+   "bytes": 621,
+   "gz": 311,
+   "keys": 15
+  },
+  {
+   "file": "i18n-counter-en.xsbfkue1.js",
+   "bytes": 545,
+   "gz": 297,
+   "keys": 15
+  },
+  {
+   "file": "i18n-counter-es.leiseelf.js",
+   "bytes": 621,
+   "gz": 312,
+   "keys": 15
+  },
+  {
+   "file": "i18n-home-ar.km2o8swk.js",
+   "bytes": 450,
+   "gz": 256,
+   "keys": 11
+  },
+  {
+   "file": "i18n-home-en.wzgtirb3.js",
+   "bytes": 399,
+   "gz": 244,
+   "keys": 11
+  },
+  {
+   "file": "i18n-home-es.qk0zxwtz.js",
+   "bytes": 450,
+   "gz": 257,
+   "keys": 11
+  },
+  {
+   "file": "i18n-offline-ar.g7d31f81.js",
+   "bytes": 431,
+   "gz": 252,
+   "keys": 11
+  },
+  {
+   "file": "i18n-offline-en.yjuxhj9h.js",
+   "bytes": 380,
+   "gz": 239,
+   "keys": 11
+  },
+  {
+   "file": "i18n-offline-es.uxklot9e.js",
+   "bytes": 431,
+   "gz": 252,
+   "keys": 11
+  }
+ ],
+ "network": [
+  {
+   "page": "/",
+   "requests": 8,
+   "dictionaries": []
+  },
+  {
+   "page": "/about",
+   "requests": 8,
+   "dictionaries": []
+  },
+  {
+   "page": "/counter",
+   "requests": 13,
+   "dictionaries": [
+    {
+     "url": "/_b/i18n-counter-en.xsbfkue1.js",
+     "bytes": 648
+    }
+   ]
+  },
+  {
+   "page": "/es",
+   "requests": 8,
+   "dictionaries": []
+  },
+  {
+   "page": "/es/about-us",
+   "requests": 8,
+   "dictionaries": []
+  },
+  {
+   "page": "/es/counter",
+   "requests": 13,
+   "dictionaries": [
+    {
+     "url": "/_b/i18n-counter-es.leiseelf.js",
+     "bytes": 663
+    }
+   ]
+  },
+  {
+   "page": "/ar",
+   "requests": 8,
+   "dictionaries": []
+  },
+  {
+   "page": "/ar/about-us",
+   "requests": 8,
+   "dictionaries": []
+  },
+  {
+   "page": "/ar/counter",
+   "requests": 13,
+   "dictionaries": [
+    {
+     "url": "/_b/i18n-counter-ar.e7f53ft6.js",
+     "bytes": 662
+    }
+   ]
+  }
+ ],
+ "llm": [
+  {
+   "model": "claude-sonnet-5-5",
+   "tag": "i18n153-sonnet",
+   "id": "i18n-bilingual",
+   "brainSha": "1145365e8ce9",
+   "specSha": "e745bbfd456e",
+   "checks": {
+    "i18n": true,
+    "files": true,
+    "noB1403": true,
+    "doctor": true,
+    "routes": true
+   },
+   "codes": [],
+   "b1403": 0,
+   "languageSwitch": true,
+   "addLocaleCalls": 0,
+   "seoMinScore": 80,
+   "ownI18n": false,
+   "addLocaleUnknown": false,
+   "toolCalls": 42,
+   "calls": {
+    "mcp__brain__brain_spec": 1,
+    "mcp__brain__brain_new": 1,
+    "mcp__brain__brain_read": 8,
+    "mcp__brain__brain_remove": 16,
+    "mcp__brain__brain_write": 9,
+    "mcp__brain__brain_edit": 5,
+    "mcp__brain__brain_doctor": 2
+   },
+   "seconds": 45,
+   "cost": 0.22090660000000004,
+   "final": "The bakery site is built, and `brain_doctor` reports `ok: true` with 0 errors and 0 warnings. I didn't open the pages in a browser or test the language switch by hand.\n\n- **Pages:** `/` has the headline, welcome paragraph and three opening-hour lines. `/contact` has the address, phone number and del"
+  },
+  {
+   "model": "claude-haiku-5-5",
+   "tag": "i18n153-haiku",
+   "id": "i18n-bilingual",
+   "brainSha": "1145365e8ce9",
+   "specSha": "e745bbfd456e",
+   "checks": {
+    "i18n": true,
+    "files": true,
+    "noB1403": true,
+    "doctor": true,
+    "routes": true
+   },
+   "codes": [],
+   "b1403": 0,
+   "languageSwitch": true,
+   "addLocaleCalls": 0,
+   "seoMinScore": 80,
+   "ownI18n": false,
+   "addLocaleUnknown": false,
+   "toolCalls": 98,
+   "calls": {
+    "mcp__brain__brain_spec": 3,
+    "mcp__brain__brain_info": 1,
+    "mcp__brain__brain_new": 1,
+    "mcp__brain__brain_read": 16,
+    "mcp__brain__brain_card": 2,
+    "mcp__brain__brain_remove": 18,
+    "mcp__brain__brain_write": 16,
+    "mcp__brain__brain_check": 2,
+    "mcp__brain__brain_map": 2,
+    "mcp__brain__brain_run_start": 1,
+    "mcp__brain__brain_navigate": 8,
+    "mcp__brain__brain_eval": 9,
+    "mcp__brain__brain_add": 1,
+    "mcp__brain__brain_edit": 8,
+    "mcp__brain__brain_load": 2,
+    "mcp__brain__brain_errors": 1,
+    "mcp__brain__brain_logs": 1,
+    "mcp__brain__brain_build": 2,
+    "mcp__brain__brain_seo_preview": 1,
+    "mcp__brain__brain_doctor": 2,
+    "mcp__brain__brain_run_stop": 1
+   },
+   "seconds": 155,
+   "cost": 0.046726969999999986,
+   "final": "The bilingual bakery site is built and `brain_doctor` reports ok (0 check errors, 0 test failures, no leaks, build passes). Home (`/`) and contact (`/contact`) have translated text in `i18n/en.json` and `i18n/es.json`, with a nav and a language switch that go to the same page in the other language.\n"
+  }
+ ]
+}

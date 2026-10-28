@@ -1,0 +1,42 @@
+<meta seo lastmod="2026-10-13" title="Styles and accessibility" description="Scoped native CSS with design tokens, the color pairs that keep text readable, and the accessibility rules the BRAINLLM build enforces." canonical="/docs/styles">
+
+<main class="doc">
+  <h1>Styles and accessibility</h1>
+  <p>Styles are native CSS with <a href="https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_nesting">nesting</a>, scoped to the component automatically. There are no global selectors and no CSS framework: a component's styles cannot leak into another one.</p>
+  <pre><code raw>@mixin card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.panel {
+  @include card;
+  padding: var(--space-4);
+  & h2 { color: var(--fg); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .panel { transition: transform .2s ease; }
+}</code></pre>
+  <h2>Design tokens</h2>
+  <p>Color and spacing come only from the tokens in <code>tokens.cssbrain</code>. Color properties such as <code>color</code>, <code>background</code>, <code>border-color</code>, <code>fill</code> and <code>stroke</code>, and spacing properties such as <code>padding</code>, <code>margin</code>, <code>gap</code> and <code>inset</code>, must use a variable like <code>var(--accent)</code> or <code>var(--space-3)</code>. Sizes such as width, font size and radius are free.</p>
+  <p>The spacing scale goes from <code>--space-1</code> to <code>--space-6</code>, and the palette has <code>--fg</code>, <code>--muted</code>, <code>--bg</code>, <code>--surface</code>, <code>--line</code>, <code>--accent</code>, <code>--on-accent</code>, <code>--ok</code> and <code>--bad</code>, plus glass, shadow and scrim tokens for overlays.</p>
+  <h2>Readable text</h2>
+  <p>Only these text and background pairs are allowed, because they meet the <a href="https://www.w3.org/TR/WCAG22/#contrast-minimum">WCAG 2.2 AA contrast level</a>: <code>fg</code>, <code>muted</code>, <code>accent</code>, <code>ok</code> and <code>bad</code> on <code>bg</code>, and <code>on-accent</code> on <code>accent</code>, <code>ok</code> or <code>bad</code>. <code>--line</code> is for borders only. Text never uses <code>color-mix()</code> or opacity, and modal backdrops use <code>var(--scrim)</code>. Animations go inside a <code>prefers-reduced-motion: no-preference</code> media query.</p>
+  <h2>Accessibility the build enforces</h2>
+  <p>A page that fails any of these rules does not build:</p>
+  <ul class="list">
+    <li>every image has an <code>alt</code>;</li>
+    <li>only buttons and links take clicks;</li>
+    <li>every input, select and textarea has a label, or uses <code>Input</code> and <code>Select</code> from the kit;</li>
+    <li>heading levels are never skipped;</li>
+    <li>each view has exactly one <code>h1</code> and one <code>main</code>;</li>
+    <li>buttons have text, and no element has a positive <code>tabindex</code>.</li>
+  </ul>
+  <p>These rules are what a screen reader user needs to move through a page, and they also help search engines and language models understand its structure. Continue with <a href="/docs/seo">SEO and AI visibility</a>.</p>
+</main>
+
+<style>
+  .doc { display: grid; gap: var(--space-3); max-width: 72ch; }
+  .doc p { margin: 0; }
+  .list { display: grid; gap: var(--space-1); padding-left: var(--space-5); }
+  pre { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--space-4); overflow-x: auto; }
+</style>

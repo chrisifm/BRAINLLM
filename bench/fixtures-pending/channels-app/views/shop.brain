@@ -1,0 +1,25 @@
+<meta seo title="Shop" description="Example of the 8 communication channels between components.">
+<script>
+  import { Theme } from '../channels/theme.jsbrain'
+  import cart from '../channels/cart.jsbrain'
+  import Panel from '../ui/panel.brain'
+  import ProductCard from '../comp/product-card.brain'
+  import CartSummary from '../comp/cart-summary.brain'
+  import Toaster from '../comp/toaster.brain'
+  let theme = sig('light')
+  provide(Theme, theme)
+  const products = [{ id: 1, name: 'Coffee', price: 120 }, { id: 2, name: 'Mug', price: 85 }]
+  const add = (p) => { cart.items = [...cart.items, p] }
+</script>
+<main>
+  <h1>Shop</h1>
+  <label>Theme
+    <select bind:value={theme}><option value="light">Light</option><option value="dark">Dark</option></select>
+  </label>
+  <Panel title="Products">
+    {#each products as p (p.id)}<ProductCard product={p} on:add={add} />{/each}
+    <p slot="footer">Prices include VAT</p>
+  </Panel>
+  <CartSummary />
+  <Toaster />
+</main>

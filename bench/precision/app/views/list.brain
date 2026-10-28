@@ -1,0 +1,21 @@
+<meta seo title="Keyed list precision" description="A thousand keyed rows: updating one field, swapping two rows and removing one must touch only those rows.">
+<script>
+  const make = (n) => Array.from({ length: n }, (_, i) => ({ id: i + 1, label: 'Row ' + (i + 1), hits: 0 }))
+  let rows = sig(make(1000))
+  const bump = () => { rows = rows.map((r) => (r.id === 500 ? { ...r, hits: r.hits + 1 } : r)) }
+  const swap = () => {
+    const a = rows.findIndex((r) => r.id === 2)
+    const b = rows.findIndex((r) => r.id === 999)
+    rows = rows.map((r, k) => (k === a ? rows[b] : k === b ? rows[a] : r))
+  }
+  const drop = () => { rows = rows.filter((r) => r.id !== 500) }
+</script>
+<main class="page">
+  <h1>Keyed list</h1>
+  <p><button type="button" data-a="bump" on:click={bump}>bump 500</button> <button type="button" data-a="swap" on:click={swap}>swap 2 and 999</button> <button type="button" data-a="drop" on:click={drop}>remove 500</button></p>
+  <ul data-k="list">{#each rows as r (r.id)}<li data-k={'row-' + r.id}><span class="lbl">{r.label}</span><span class="hits">{r.hits}</span></li>{/each}</ul>
+</main>
+<style>
+  .page { max-width: 120ch; margin: 0 auto; padding: var(--space-4); display: grid; gap: var(--space-2); }
+  ul { max-height: 200px; overflow: auto; }
+</style>

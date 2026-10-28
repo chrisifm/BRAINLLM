@@ -1,0 +1,15 @@
+<meta props="heading:str">
+<div class="card-b" data-probe="b-root">
+  <h2 class="title" data-probe="b-h2">{heading}</h2>
+  <p data-probe="b-p">Card B paragraph</p>
+  <button type="button" class="btn" data-probe="b-btn">B button</button>
+  <slot />
+</div>
+<style>
+  .title { color: var(--bad); font-size: 23px; }
+  .btn { color: var(--bad); font-size: 23px; }
+  h2 { border-top: 5px solid var(--line); }
+  p { color: var(--bad); font-size: 23px; border-top: 5px solid var(--line); }
+  em { border-top: 5px solid var(--line); }
+  span { border-top: 5px solid var(--line); }
+</style>

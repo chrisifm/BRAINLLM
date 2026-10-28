@@ -1,0 +1,6 @@
+<meta props="where:str">
+<script>
+  import { Tone } from '../channels/tone.jsbrain'
+  let t = use(Tone)
+</script>
+<span class="tone" data-where={where}>{String(t)}</span>

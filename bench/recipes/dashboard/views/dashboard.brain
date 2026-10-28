@@ -1,0 +1,31 @@
+<meta seo title="Dashboard" description="Key numbers for the selected period and sales per product." robots="noindex">
+
+<script>
+  import dashboardData from '../lib/dashboard-data.jsbrain'
+  import Kpi from '../ui/kpi.brain'
+  import DataTable from '../comp/data-table.brain'
+
+  let period = sig('7d')
+  const periods = [{ id: '7d', label: 'Last 7 days' }, { id: '30d', label: 'Last 30 days' }, { id: '90d', label: 'Last 90 days' }]
+  const data = drv(() => dashboardData(period))
+  const columns = [{ key: 'product', label: 'Product' }, { key: 'orders', label: 'Orders', num: true }, { key: 'revenue', label: 'Revenue ($)', num: true }]
+</script>
+
+<main class="page">
+  <h1>Dashboard</h1>
+  <Tabs label="Period" tabs={periods} bind:value={period}>
+    <section aria-label="Key numbers">
+      <Grid min="12rem" gap="3">
+        {#each data.kpis as k (k.id)}
+          <Kpi label={k.label} value={k.value} unit={k.unit} delta={k.delta} />
+        {/each}
+      </Grid>
+    </section>
+    <DataTable caption="Sales per product" rows={data.rows} columns={columns} />
+  </Tabs>
+</main>
+
+<style>
+  .page { max-width: 72rem; margin: 0 auto; padding: var(--space-5) var(--space-4); display: grid; gap: var(--space-4); }
+  section { margin-bottom: var(--space-4); }
+</style>

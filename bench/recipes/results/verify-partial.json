@@ -1,0 +1,20 @@
+{
+ "at": "2026-10-13T18:56:10.471Z",
+ "brain": "~/Projects/WEB/BRAINLLM/target/release/brain",
+ "scratch": "~/tmp/brainllm-recipes",
+ "brainGen": "unknown command `gen`",
+ "ok": 1,
+ "n": 1,
+ "rows": [
+  {
+   "recipe": "states",
+   "files": 7,
+   "check": 0,
+   "doctor": 0,
+   "tests": "10/10",
+   "gen": "no brain gen",
+   "ok": true,
+   "problems": []
+  }
+ ]
+}

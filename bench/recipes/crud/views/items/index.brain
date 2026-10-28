@@ -1,0 +1,42 @@
+<meta seo title="Items" description="All items with search and status filters, and a form to create a new one." robots="noindex">
+
+<script>
+  import items from '../../api/items.jsbrain'
+  import ItemList from '../../comp/item-list.brain'
+  import ItemForm from '../../comp/item-form.brain'
+
+  let all = resource(() => items.get())
+  let creating = sig(false)
+  // a write to /api/items refreshes `all` by itself
+  const create = async (v) => {
+    await items.post(v)
+    creating = false
+  }
+</script>
+
+<main class="page">
+  <div class="head">
+    <h1>Items</h1>
+    {#if !creating}<Button on:click={creating = true}>New item</Button>{/if}
+  </div>
+  {#if creating}
+    <section class="card" aria-labelledby="new-item">
+      <h2 id="new-item">New item</h2>
+      <ItemForm save={create} submitLabel="Create" on:cancel={creating = false} />
+    </section>
+  {/if}
+  {#await all}
+    <p aria-busy="true">Loading items…</p>
+  {:then list}
+    <ItemList items={list} />
+  {:catch e}
+    <ErrorState error={e} retry={all.refetch} />
+  {/await}
+</main>
+
+<style>
+  .page { max-width: 64rem; margin: 0 auto; padding: var(--space-5) var(--space-4); display: grid; gap: var(--space-4); }
+  .head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+  .card { display: grid; gap: var(--space-3); padding: var(--space-4); background: var(--glass); border: 1px solid var(--glass-edge); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+  h2 { margin: 0; font-size: 1.1rem; }
+</style>

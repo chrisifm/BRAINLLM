@@ -1,0 +1,27 @@
+<script>
+  import AppNav from '../comp/app-nav.brain'
+  import session from '../channels/session.jsbrain'
+  // one entry per view: the sidebar renders them in this order (every page stays linked)
+  const links = [
+    { href: '/', label: 'Home' },
+    { href: '/about', label: 'About' },
+    { href: '/posts', label: 'Posts' },
+    { href: '/account', label: 'Account' },
+  ]
+</script>
+
+<Sidebar width="14rem" gap="0" min="60%">
+  <div slot="side" class="side"><AppNav links={links} /></div>
+  <div class="content">
+    <p class="who" aria-live="polite">
+      {#if session.user}Signed in as {session.user.email}{:else}<a href="/login">Sign in</a>{/if}
+    </p>
+    <slot />
+  </div>
+</Sidebar>
+
+<style>
+  .side { padding: var(--space-3); border-right: 1px solid var(--line); }
+  .content { padding: var(--space-4); display: grid; gap: var(--space-2); align-content: start; }
+  .who { margin: 0; text-align: right; color: var(--muted); font-size: .9rem; }
+</style>

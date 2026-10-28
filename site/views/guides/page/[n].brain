@@ -1,0 +1,33 @@
+<meta seo title={`Guides, page ${props.n}`} description={`Page ${props.n} of ${props.pages} of Guides: older entries with their summaries, dates and tags, newest first.`}>
+
+<script>
+  import { page, pages } from 'brain:content'
+  export function paths() {
+    return pages('guides')
+  }
+  export async function load(ctx) {
+    return page('guides', ctx.params.n)
+  }
+</script>
+
+<main class="page">
+  <h1>Guides, page {props.n}</h1>
+  <ul class="entries">
+    {#each props.entries as e (e.slug)}
+      <li>
+        <h2><a href={e.url}>{e.title}</a></h2>
+        <p>{e.description}</p>
+      </li>
+    {/each}
+  </ul>
+  <nav aria-label="Pages">
+    {#if props.prev}<a href={props.prev} rel="prev">Newer entries</a>{/if}
+    {#if props.next}<a href={props.next} rel="next">Older entries</a>{/if}
+  </nav>
+</main>
+
+<style>
+  .entries { display: grid; gap: var(--space-5); padding: 0; list-style: none; }
+  h2 { margin: 0; font-size: 1.25rem; }
+  nav { display: flex; gap: var(--space-4); }
+</style>

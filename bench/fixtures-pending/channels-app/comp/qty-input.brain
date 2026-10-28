@@ -1,0 +1,10 @@
+<meta props="value:num~ label:str">
+<script>
+  const dec = () => { if (value > 1) value = value - 1 }
+  const inc = () => { value = value + 1 }
+</script>
+<div role="group" aria-label={label}>
+  <button type="button" on:click={dec}>−</button>
+  <output>{value}</output>
+  <button type="button" on:click={inc}>+</button>
+</div>

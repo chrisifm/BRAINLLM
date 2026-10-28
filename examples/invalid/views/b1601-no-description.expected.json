@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1601",
+    "level": "error",
+    "file": "invalid/views/b1601-no-description.brain",
+    "line": 1,
+    "col": 7,
+    "msg": "the view has no `description`",
+    "fix": "add `description=\"…\"` (one sentence, ≤ 160 characters) or `description={props.…}` to `<meta seo>`"
+  }
+]

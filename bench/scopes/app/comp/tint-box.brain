@@ -1,0 +1,7 @@
+<meta props="tint:str?">
+<div class="tint" style:--accent={tint}>
+  <span class="swatch">Tinted text</span>
+</div>
+<style>
+  .swatch { color: var(--accent); border-top: 2px solid var(--accent); }
+</style>

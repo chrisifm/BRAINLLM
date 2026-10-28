@@ -1,0 +1,11 @@
+<script>
+  let label = sig('child-state')
+</script>
+<div class="slot-host" data-probe="host-root">
+  <span class="own" data-probe="host-own">{label}</span>
+  <slot />
+</div>
+<style>
+  .slotted { color: var(--bad); font-size: 13px; }
+  p { color: var(--bad); font-size: 13px; }
+</style>

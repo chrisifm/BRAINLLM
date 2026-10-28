@@ -1,0 +1,640 @@
+{
+  "date": "2026-10-13T21:40:51.588Z",
+  "brainSha": "e9453256ff44",
+  "firstExecMs": 132217,
+  "brainSource": "~/tmp/qa286/bin/brain",
+  "node": "v26.8.1",
+  "platform": "darwin arm64",
+  "work": "~/tmp/qa286/start-work",
+  "signatures": {
+    "srv": "v1vz6042",
+    "stat": "qatbfgbu"
+  },
+  "leftovers": [],
+  "cases": [
+    {
+      "id": "1a",
+      "name": "kill -9 of the child → back in < 1 s (fresh supervisor per rep)",
+      "pass": true,
+      "numbers": "n=10 median 81.1 ms · max 239.4 ms · min 53.1 ms",
+      "data": {
+        "reps": [
+          {
+            "rep": 0,
+            "ms": 86.7,
+            "oldPid": 18873,
+            "newPid": 18955,
+            "restarts": 1,
+            "lastExit": {
+              "code": -1,
+              "reason": "killed from outside (killed by signal 9)"
+            }
+          },
+          {
+            "rep": 1,
+            "ms": 122.7,
+            "oldPid": 19220,
+            "newPid": 19354,
+            "restarts": 1,
+            "lastExit": {
+              "code": -1,
+              "reason": "killed from outside (killed by signal 9)"
+            }
+          },
+          {
+            "rep": 2,
+            "ms": 239.4,
+            "oldPid": 19585,
+            "newPid": 19720,
+            "restarts": 1,
+            "lastExit": {
+              "code": -1,
+              "reason": "killed from outside (killed by signal 9)"
+            }
+          },
+          {
+            "rep": 3,
+            "ms": 85.9,
+            "oldPid": 20300,
+            "newPid": 20660,
+            "restarts": 1,
+            "lastExit": {
+              "code": -1,
+              "reason": "killed from outside (killed by signal 9)"
+            }
+          },
+          {
+            "rep": 4,
+            "ms": 81.1,
+            "oldPid": 20833,
+            "newPid": 20927,
+            "restarts": 1,
+            "lastExit": {
+              "code": -1,
+              "reason": "killed from outside (killed by signal 9)"
+            }
+          },
+          {
+            "rep": 5,
+            "ms": 53.1,
+            "oldPid": 21125,
+            "newPid": 21163,
+            "restarts": 1,
+            "lastExit": {
+              "code": -1,
+              "reason": "killed from outside (killed by signal 9)"
+            }
+          },
+          {
+            "rep": 6,
+            "ms": 68.4,
+            "oldPid": 21423,
+            "newPid": 21515,
+            "restarts": 1,
+            "lastExit": {
+              "code": -1,
+              "reason": "killed from outside (killed by signal 9)"
+            }
+          },
+          {
+            "rep": 7,
+            "ms": 79.5,
+            "oldPid": 21800,
+            "newPid": 21942,
+            "restarts": 1,
+            "lastExit": {
+              "code": -1,
+              "reason": "killed from outside (killed by signal 9)"
+            }
+          },
+          {
+            "rep": 8,
+            "ms": 90,
+            "oldPid": 22219,
+            "newPid": 22398,
+            "restarts": 1,
+            "lastExit": {
+              "code": -1,
+              "reason": "killed from outside (killed by signal 9)"
+            }
+          },
+          {
+            "rep": 9,
+            "ms": 68.8,
+            "oldPid": 22877,
+            "newPid": 23048,
+            "restarts": 1,
+            "lastExit": {
+              "code": -1,
+              "reason": "killed from outside (killed by signal 9)"
+            }
+          }
+        ],
+        "medianMs": 81.1,
+        "maxMs": 239.4
+      },
+      "failures": [],
+      "owner": "TOOLCHAIN"
+    },
+    {
+      "id": "1b",
+      "name": "12 kill -9 back to back on one supervisor → no crash loop, each < 1 s",
+      "pass": true,
+      "numbers": "recovery per kill (ms): 51.8, 73.9, 61.7, 137.9, 65.8, 68.1, 49.4, 54.4, 89.6, 91, 92, 65.9 · median 65.9 · max 137.9 · supervisor still serving · lastExit \"killed from outside (killed by signal 9)\" · restarts 12",
+      "data": {
+        "kills": [
+          {
+            "kill": 1,
+            "pid": 23245,
+            "ms": 51.8,
+            "supervisorExit": null
+          },
+          {
+            "kill": 2,
+            "pid": 23291,
+            "ms": 73.9,
+            "supervisorExit": null
+          },
+          {
+            "kill": 3,
+            "pid": 23359,
+            "ms": 61.7,
+            "supervisorExit": null
+          },
+          {
+            "kill": 4,
+            "pid": 23470,
+            "ms": 137.9,
+            "supervisorExit": null
+          },
+          {
+            "kill": 5,
+            "pid": 23584,
+            "ms": 65.8,
+            "supervisorExit": null
+          },
+          {
+            "kill": 6,
+            "pid": 23649,
+            "ms": 68.1,
+            "supervisorExit": null
+          },
+          {
+            "kill": 7,
+            "pid": 23727,
+            "ms": 49.4,
+            "supervisorExit": null
+          },
+          {
+            "kill": 8,
+            "pid": 23729,
+            "ms": 54.4,
+            "supervisorExit": null
+          },
+          {
+            "kill": 9,
+            "pid": 23745,
+            "ms": 89.6,
+            "supervisorExit": null
+          },
+          {
+            "kill": 10,
+            "pid": 23816,
+            "ms": 91,
+            "supervisorExit": null
+          },
+          {
+            "kill": 11,
+            "pid": 23845,
+            "ms": 92,
+            "supervisorExit": null
+          },
+          {
+            "kill": 12,
+            "pid": 23884,
+            "ms": 65.9,
+            "supervisorExit": null
+          }
+        ],
+        "exitCode": null,
+        "crashLoop": false,
+        "lastExit": {
+          "code": -1,
+          "reason": "killed from outside (killed by signal 9)"
+        },
+        "restarts": 12
+      },
+      "failures": [],
+      "owner": "TOOLCHAIN"
+    },
+    {
+      "id": "2",
+      "name": "RSS over --max-memory 1M (--rss-ms 200) → clean restart",
+      "pass": true,
+      "numbers": "log {\"t\":1791927598,\"src\":\"brain-start\",\"event\":\"memory\",\"rssKB\":53344,\"limitKB\":1024} · pid 24764 → 25241 · first 200 296.2 ms after watch start · lastExit \"memory\" · memoryRestarts 1 (68 after 15 s over the limit, supervisor still up)",
+      "data": {
+        "pid1": 24764,
+        "pid2": 25241,
+        "memoryEvent": {
+          "t": 1791927598,
+          "src": "brain-start",
+          "event": "memory",
+          "rssKB": 53344,
+          "limitKB": 1024
+        },
+        "exitEvent": {
+          "t": 1791927598,
+          "src": "brain-start",
+          "event": "exit",
+          "code": 0,
+          "reason": "memory"
+        },
+        "msToFirst200AfterDetectStart": 296.2,
+        "statusLastExit": {
+          "code": 0,
+          "reason": "memory"
+        },
+        "rssKB": [
+          53344
+        ],
+        "memoryRestarts": 1,
+        "afterSustainedOverLimit": {
+          "seconds": 15,
+          "supervisorExit": null,
+          "memoryRestarts": 68,
+          "memoryEvents": 69,
+          "crashLoop": false
+        }
+      },
+      "failures": [],
+      "owner": "TOOLCHAIN"
+    },
+    {
+      "id": "3",
+      "name": "brain reload ×3 under load (50 keep-alive clients, --instances 2)",
+      "pass": true,
+      "numbers": "20011 requests, 0 failed · during reloads: 3141 req, p99 179 ms (p50 4.8, max 198.2) · overall p99 156.4 ms",
+      "data": {
+        "keepAlive": true,
+        "patch": false,
+        "clients": 50,
+        "reloads": [
+          {
+            "reload": 1,
+            "cli": "{\"ok\":true,\"reload\":\"done\",\"build\":\"v1vz6042\"}",
+            "cliExit": 0,
+            "outcome": "reloaded",
+            "ms": 245.9,
+            "pidsBefore": [
+              41586,
+              41601
+            ],
+            "pidsAfter": [
+              43056,
+              43071
+            ]
+          },
+          {
+            "reload": 2,
+            "cli": "{\"ok\":true,\"reload\":\"done\",\"build\":\"v1vz6042\"}",
+            "cliExit": 0,
+            "outcome": "reloaded",
+            "ms": 377.8,
+            "pidsBefore": [
+              43056,
+              43071
+            ],
+            "pidsAfter": [
+              44176,
+              44193
+            ]
+          },
+          {
+            "reload": 3,
+            "cli": "{\"ok\":true,\"reload\":\"done\",\"build\":\"v1vz6042\"}",
+            "cliExit": 0,
+            "outcome": "reloaded",
+            "ms": 252.2,
+            "pidsBefore": [
+              44176,
+              44193
+            ],
+            "pidsAfter": [
+              45771,
+              45782
+            ]
+          }
+        ],
+        "total": 20011,
+        "failed": 0,
+        "failedKinds": {},
+        "duringReload": {
+          "requests": 3141,
+          "failed": 0,
+          "p50": 4.8,
+          "p99": 179,
+          "max": 198.2
+        },
+        "failuresPerReload": [
+          {
+            "reload": 1,
+            "failed": 0
+          },
+          {
+            "reload": 2,
+            "failed": 0
+          },
+          {
+            "reload": 3,
+            "failed": 0
+          }
+        ],
+        "overall": {
+          "p50": 3.9,
+          "p99": 156.4,
+          "max": 397.9
+        }
+      },
+      "failures": [],
+      "owner": "RUNTIME (server.mjs drain)"
+    },
+    {
+      "id": "3b",
+      "name": "brain reload ×3 under load (50 Connection: close clients, --instances 2)",
+      "pass": true,
+      "numbers": "38572 requests, 0 failed · during reloads: 3361 req, p99 115 ms (p50 5.1, max 141.8) · overall p99 38.1 ms",
+      "data": {
+        "keepAlive": false,
+        "patch": false,
+        "clients": 50,
+        "reloads": [
+          {
+            "reload": 1,
+            "cli": "{\"ok\":true,\"reload\":\"done\",\"build\":\"v1vz6042\"}",
+            "cliExit": 0,
+            "outcome": "reloaded",
+            "ms": 166.1,
+            "pidsBefore": [
+              47595,
+              47600
+            ],
+            "pidsAfter": [
+              48987,
+              48998
+            ]
+          },
+          {
+            "reload": 2,
+            "cli": "{\"ok\":true,\"reload\":\"done\",\"build\":\"v1vz6042\"}",
+            "cliExit": 0,
+            "outcome": "reloaded",
+            "ms": 119.2,
+            "pidsBefore": [
+              48987,
+              48998
+            ],
+            "pidsAfter": [
+              50351,
+              50352
+            ]
+          },
+          {
+            "reload": 3,
+            "cli": "{\"ok\":true,\"reload\":\"done\",\"build\":\"v1vz6042\"}",
+            "cliExit": 0,
+            "outcome": "reloaded",
+            "ms": 190.5,
+            "pidsBefore": [
+              50351,
+              50352
+            ],
+            "pidsAfter": [
+              51731,
+              51737
+            ]
+          }
+        ],
+        "total": 38572,
+        "failed": 0,
+        "failedKinds": {},
+        "duringReload": {
+          "requests": 3361,
+          "failed": 0,
+          "p50": 5.1,
+          "p99": 115,
+          "max": 141.8
+        },
+        "failuresPerReload": [
+          {
+            "reload": 1,
+            "failed": 0
+          },
+          {
+            "reload": 2,
+            "failed": 0
+          },
+          {
+            "reload": 3,
+            "failed": 0
+          }
+        ],
+        "overall": {
+          "p50": 4.6,
+          "p99": 38.1,
+          "max": 141.8
+        }
+      },
+      "failures": [],
+      "owner": "RUNTIME (server.mjs drain)"
+    },
+    {
+      "id": "3r",
+      "name": "brain reload to a build that crashes at startup, under load (50 keep-alive clients)",
+      "pass": true,
+      "numbers": "reload exit 1 after 88.2 ms, {\"ok\":false,\"error\":\"reload failed: a new instance exited before it was ready (exit code 1); the old instances keep serving; see logs/app.log\"} · instances 53156,53159 kept · 36871 requests, 0 failed (948 during the reload, p99 25.7 ms)",
+      "data": {
+        "cliExit": 1,
+        "cli": "{\"ok\":false,\"error\":\"reload failed: a new instance exited before it was ready (exit code 1); the old instances keep serving; see logs/app.log\"}",
+        "reloadMs": 88.2,
+        "pidsBefore": [
+          53156,
+          53159
+        ],
+        "pidsAfter": [
+          53156,
+          53159
+        ],
+        "total": 36871,
+        "failed": 0,
+        "failedKinds": {},
+        "duringReload": {
+          "requests": 948,
+          "failed": 0,
+          "p99": 25.7
+        },
+        "events": [
+          {
+            "t": 1791927624,
+            "src": "brain-start",
+            "event": "reload-failed",
+            "reason": "a new instance exited before it was ready (exit code 1); the old ones keep serving"
+          }
+        ]
+      },
+      "failures": [],
+      "owner": "TOOLCHAIN"
+    },
+    {
+      "id": "4a",
+      "name": "child dies before ready, always → crash loop, exit 1 within the 60 s window, stderr explains",
+      "pass": true,
+      "numbers": "exit 1 after 11.9 s · 9 restarts · events [\"exit\",\"restart\",\"exit\",\"restart\",\"exit\",\"restart\",\"exit\",\"restart\",\"exit\",\"restart\",\"exit\",\"restart\",\"exit\",\"restart\",\"exit\",\"restart\",\"exit\",\"restart\",\"exit\",\"crash-loop\",\"stopped\"]",
+      "data": {
+        "exitCode": 1,
+        "seconds": 11.9,
+        "restarts": 9,
+        "events": [
+          "exit",
+          "restart",
+          "exit",
+          "restart",
+          "exit",
+          "restart",
+          "exit",
+          "restart",
+          "exit",
+          "restart",
+          "exit",
+          "restart",
+          "exit",
+          "restart",
+          "exit",
+          "restart",
+          "exit",
+          "restart",
+          "exit",
+          "crash-loop",
+          "stopped"
+        ],
+        "stderr": "brain start: crash loop (10 crashes in 60 s); last 50 log lines (logs/app.log):\n      ^\n\nError: qa: boom at startup\n    at file://~/tmp/qa286/start-work/crash-start/dist/server.mjs:1:7\n    at ModuleJob.run (node:internal/modules/esm/module_job:569:25)\n    at async node:internal/modules/esm/loader:650:26\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)\n\nNode.js v26.8.1\n{\"t\":1791927631,\"src\":\"brain-start\",\"event\":\"exit\",\"code\":1,\"reason\":\"died before ready (exit code 1)\"}\n{\"t\":1791927633,\"src\":\"brain-start\",\"event\":\"restart\",\"reason\":\"died before ready (exit code 1)\"}\nfile://~/tmp/qa286/start-work/crash-start/dist/server.mjs:1\nthrow new Error('qa: boom at startup')\n      ^\n\nError: qa: boom at startup\n    at file://~/tmp/qa286/start-work/crash-start/dist/server.mjs:1:7\n    at ModuleJob.run (node:internal/modules/esm/module_job:569:25)\n    at async node:internal/modules/esm/loader:650:26\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)\n\nNode.js v26.8.1\n{\"t\":1791927633,\"src\":\"brain-start\",\"event\":\"exit\",\"code\":1,\"reason\":\"died before ready (exit code 1)\"}\n{\"t\":1791927635,\"src\":\"brain-start\",\"event\":\"restart\",\"reason\":\"died before ready (exit code 1)\"}\nfile://~/tmp/qa286/start-work/crash-start/dist/server.mjs:1\nthrow new Error('qa: boom at startup')\n      ^\n\nError: qa: boom at startup\n    at file://~/tmp/qa286/start-work/crash-start/dist/server.mjs:1:7\n    at ModuleJob.run (node:internal/modules/esm/module_job:569:25)\n    at async node:internal/modules/esm/loader:650:26\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)\n\nNode.js v26.8.1\n{\"t\":1791927636,\"src\":\"brain-start\",\"event\":\"exit\",\"code\":1,\"reason\":\"died before ready (exit code 1)\"}\n{\"t\":1791927638,\"src\":\"brain-start\",\"event\":\"restart\",\"reason\":\"died before ready (exit code 1)\"}\nfile://~/tmp/qa286/start-work/crash-start/dist/server.mjs:1\nthrow new Er",
+        "logHasError": true,
+        "firstExitReason": "died before ready (exit code 1)"
+      },
+      "failures": [],
+      "owner": "TOOLCHAIN"
+    },
+    {
+      "id": "4b",
+      "name": "ready once, then every restart crashes → crash loop, exit 1",
+      "pass": true,
+      "numbers": "exit 1 after 12.3 s (12.2 s after ready) · 9 restarts / 10 exits",
+      "data": {
+        "exitCode": 1,
+        "secondsFromStart": 12.3,
+        "secondsFromReady": 12.2,
+        "restarts": 9,
+        "exits": 10,
+        "crashLoopEvent": {
+          "t": 1791927650,
+          "src": "brain-start",
+          "event": "crash-loop",
+          "crashes": 10,
+          "windowS": 60
+        },
+        "stderrHead": [
+          "brain start: crash loop (10 crashes in 60 s); last 50 log lines (logs/app.log):",
+          "                                          ^",
+          ""
+        ],
+        "stderrHasChildError": true
+      },
+      "failures": [],
+      "owner": "TOOLCHAIN"
+    },
+    {
+      "id": "5",
+      "name": "--install reviewed (macOS plist run for real; systemd unit from source)",
+      "pass": true,
+      "numbers": "16/16 checks",
+      "data": {
+        "exit": 0,
+        "stdout": "wrote ~/tmp/qa286/start-work/install/.brain/run/dev.brainllm.install.plist\nenable it with:\n  cp ~/tmp/qa286/start-work/install/.brain/run/dev.brainllm.install.plist ~/Library/LaunchAgents/ && launchctl load -w ~/Library/LaunchAgents/dev.brainllm.install.plist",
+        "plistEnv": {
+          "PATH": "/opt/homebrew/bin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Library/Apple/usr/bin:~/.kimi-code/bin:/opt/homebrew/Cellar/openjdk@21/21.0.12.1/libexec/openjdk.jdk/Contents/Home/bin:~/Library/Android/sdk/platform-tools:~/Library/Android/sdk/emulator:~/Library/Android/sdk/cmdline-tools/latest/bin:~/.antigravity-ide/antigravity-ide/bin:~/.antigravity/antigravity/bin:/opt/homebrew/opt/postgresql@18/bin:/opt/homebrew/opt/fastlane/bin:~/.opencode/bin:~/.local/bin:/opt/homebrew/opt/php@8.3/sbin:/opt/homebrew/opt/php@8.3/bin:~/.nvm/versions/node/v22.21.1/bin:~/.cargo/bin:/Applications/iTerm.app/Contents/Resources/utilities:~/.docker/bin:~/go/bin"
+        },
+        "file": "~/tmp/qa286/start-work/install/.brain/run/dev.brainllm.install.plist",
+        "homeFiles": [],
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key><string>dev.brainllm.install</string>\n  <key>ProgramArguments</key>\n  <array>\n    <string>~/tmp/qa286/start-work/brain</string>\n    <string>start</string>\n    <string>--port</string>\n    <string>3999</string>\n    <string>--instances</string>\n    <string>2</string>\n    <string>--max-memory</string>\n    <string>300M</string>\n  </array>\n  <key>EnvironmentVariables</key>\n  <dict>\n    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Library/Apple/usr/bin:~/.kimi-code/bin:/opt/homebrew/Cellar/openjdk@21/21.0.12.1/libexec/openjdk.jdk/Contents/Home/bin:~/Library/Android/sdk/platform-tools:~/Library/Android/sdk/emulator:~/Library/Android/sdk/cmdline-tools/latest/bin:~/.antigravity-ide/antigravity-ide/bin:~/.antigravity/antigravity/bin:/opt/homebrew/opt/postgresql@18/bin:/opt/homebrew/opt/fastlane/bin:~/.opencode/bin:~/.local/bin:/opt/homebrew/opt/php@8.3/sbin:/opt/homebrew/opt/php@8.3/bin:~/.nvm/versions/node/v22.21.1/bin:~/.cargo/bin:/Applications/iTerm.app/Contents/Resources/utilities:~/.docker/bin:~/go/bin</string>\n  </dict>\n  <key>WorkingDirectory</key><string>~/tmp/qa286/start-work/install</string>\n  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><true/>\n</dict>\n</plist>\n",
+        "exe": "~/tmp/qa286/start-work/brain",
+        "exeIsWorkCopy": true,
+        "nodeDir": "/opt/homebrew/bin",
+        "launchdDefaultPath": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "underLaunchdEnv": {
+          "env": {
+            "PATH": "/opt/homebrew/bin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Library/Apple/usr/bin:~/.kimi-code/bin:/opt/homebrew/Cellar/openjdk@21/21.0.12.1/libexec/openjdk.jdk/Contents/Home/bin:~/Library/Android/sdk/platform-tools:~/Library/Android/sdk/emulator:~/Library/Android/sdk/cmdline-tools/latest/bin:~/.antigravity-ide/antigravity-ide/bin:~/.antigravity/antigravity/bin:/opt/homebrew/opt/postgresql@18/bin:/opt/homebrew/opt/fastlane/bin:~/.opencode/bin:~/.local/bin:/opt/homebrew/opt/php@8.3/sbin:/opt/homebrew/opt/php@8.3/bin:~/.nvm/versions/node/v22.21.1/bin:~/.cargo/bin:/Applications/iTerm.app/Contents/Resources/utilities:~/.docker/bin:~/go/bin",
+            "HOME": "~/tmp/qa286/start-work/home",
+            "USER": "chris"
+          },
+          "up": true,
+          "supervisorExit": null,
+          "events": [
+            "ready"
+          ]
+        },
+        "systemdTemplate": "[Unit]\nDescription=BRAINLLM app {name}\nAfter=network.target\n\n[Service]\n{user_line}WorkingDirectory={}\n{env}ExecStart={}\nExecReload=/bin/kill -HUP $MAINPID\nRestart=always\nKillSignal=SIGTERM\nTimeoutStopSec=15\n\n[Install]\nWantedBy=multi-user.target\n",
+        "checks": {
+          "exit 0": true,
+          "file written inside the app (.brain/run/)": true,
+          "nothing written under HOME": true,
+          "absolute brain path that exists": true,
+          "runs `start` with the given flags": true,
+          "WorkingDirectory is the app root": true,
+          "KeepAlive true (restart policy)": true,
+          "RunAtLoad true (boot)": true,
+          "no secret from .brain_env inlined": true,
+          "EnvironmentVariables PATH with node's directory first": true,
+          "prints the one command to enable it, no sudo": true,
+          "server app comes up with only the plist's environment (launchd)": true,
+          "systemd (source): User= line, never root": true,
+          "systemd (source): Environment=\"PATH=…\" quoted": true,
+          "systemd (source): quoted ExecStart and WorkingDirectory": true,
+          "systemd (source): Restart=always, ExecReload SIGHUP, TimeoutStopSec 15": true
+        }
+      },
+      "failures": [],
+      "owner": "TOOLCHAIN"
+    },
+    {
+      "id": "6",
+      "name": "static app served without Node",
+      "pass": true,
+      "numbers": "ETag \"qatbfgbu\" = build qatbfgbu · 304 304 · /_health {\"ok\":true,\"build\":\"qatbfgbu\"} · 0 child processes · 11 _headers checked",
+      "data": {
+        "signaturePrinted": "qatbfgbu",
+        "etag": "\"qatbfgbu\"",
+        "status304": 304,
+        "healthBody": "{\"ok\":true,\"build\":\"qatbfgbu\"}",
+        "descendants": [],
+        "expectedHeaders": {
+          "strict-transport-security": "max-age=63072000; includeSubDomains",
+          "x-content-type-options": "nosniff",
+          "referrer-policy": "strict-origin-when-cross-origin",
+          "cache-control": "no-cache",
+          "vary": "Accept-Encoding",
+          "x-brain-build": "qatbfgbu",
+          "x-frame-options": "DENY",
+          "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+          "cross-origin-opener-policy": "same-origin",
+          "content-security-policy": "default-src 'self'; script-src 'self' 'sha256-00YeCTOOoJBZxuwN+6aC0jJCzhdL0HTipWEz556DuDU=' 'sha256-PQ+0YkUaE63kbfmb7gvo3QssqHXsYRrC4VVxbLDFPV0=' 'sha256-YjgDBn+d+u+MD5Cjymwc7osz0mMx7wCYpfgnM5u62zE=' 'sha256-l8lmkmodVGm20YiiNTBLwLILJVGojvPf7QZYqrueWX8='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+          "link": "</_b/2fwaal7e.css>; rel=preload; as=style; integrity=\"sha384-JRb60xgPH72QDCMHo9WC2U/WW/AZhZL3W8QC93jhbQvg1fIivVAsrQYyZHDGOhoZ\", </_b/43n9m99s.js>; rel=modulepreload; integrity=\"sha384-VB6uA0jhua6IaTNmQIg5Afypg6pugjIUAj9tDdtsUaKSPsdQ61S++0YXayyfIRL6\", </_b/94xz6ysh.js>; rel=modulepreload; integrity=\"sha384-qsQPLVwxqbO78raRJDWq3/0b9S5YCb1oo9wwquWCkTRT6f+B1e4Mt2nTdXXnPmyr\", </_b/j4wvmyh0.js>; rel=modulepreload; integrity=\"sha384-+4OHYkOok7Qkw36i4IC6MFU4FelwqSH4ds9Bj/MGdjAmq9u9lluz2fx3dx7DroNF\", </_b/54xu4jzh.js>; rel=modulepreload; integrity=\"sha384-OLBgp1GsljhM2TJ+sbHjaiH9txEUvgdDTAzHv2P24donTt6/529l+9Ua0vFImLlb\", </_b/2ghcgb4q.js>; rel=modulepreload; integrity=\"sha384-eryVStF2ydUO6qV2V337zVen/9+/xDBtFlT/YV5e1TD56J4Tnffwwx9cXdzWov6V\", </_b/lmf04nzt.js>; rel=modulepreload; integrity=\"sha384-ssGoYsFFrcpr2hvK2r5wcbGbjBMN5mEaPKU0u5HaLPR46U/oZGkcdJ1vlNq9X2lP\""
+        },
+        "missingHeaders": [],
+        "headersFileStatus": 404,
+        "statusMode": "static",
+        "statusInstances": []
+      },
+      "failures": [],
+      "owner": "TOOLCHAIN"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "brief": "SaaS panel \"Nubo Admin\" for managing customers. Layout: navigation sidebar (Customers, Invoices, Settings; Customers active), top bar with the title and a \"New customer\" button, a row of 4 KPIs (total customers, active customers, billed this month and average ticket, all derived from the data), a CRUD table of customers (name, email, plan and status) with a text filter by name or email and a filter by plan, edit and delete per row, and a create/edit form (name, email and plan; validation: name not empty, email contains @). The view gets the customers with `load()` from `../lib/api.js` (list, create, update, remove; all async). Required states: loading while saving or deleting (button disabled and labeled \"Saving…\"), error with a message and a Retry button, and a distinct empty state for \"no customers\" and \"no results for the filter\". One view with <meta seo>. Accessible (SPEC §8) and using only the available tokens.",
+  "files": [
+    { "path": "lib/api.js", "role": "fake in-memory API (plain JS, export default { list, create, update, remove }, async with a 50 ms delay); already provided by the harness, do not rewrite it", "provided": true },
+    { "path": "comp/sidebar.brain", "role": "side navigation with prop active:str" },
+    { "path": "comp/kpi.brain", "role": "KPI card with props label:str and value:str" },
+    { "path": "comp/client-form.brain", "role": "create/edit form: props client:obj? and busy:bool=false; emits save(data) and cancel" },
+    { "path": "comp/client-table.brain", "role": "table with filters (text and plan), edit/delete per row (emits edit(client) and remove(id)), a distinct empty state for no data vs no results" },
+    { "path": "views/clients.brain", "role": "the view: <meta seo>, load(), sidebar, top bar, 4 derived KPIs, ClientTable, ClientForm, loading/error states with Retry" }
+  ]
+}

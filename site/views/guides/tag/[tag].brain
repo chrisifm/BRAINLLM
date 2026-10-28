@@ -1,0 +1,26 @@
+<meta seo robots="noindex, follow" title={`Guides tagged ${props.tag}`} description={`Every entry of Guides tagged ${props.tag}, newest first, with a short summary of each one and a link to read it in full.`}>
+
+<script>
+  import { tags, tagged } from 'brain:content'
+  export function paths() {
+    return tags('guides').map((t) => ({ tag: t.slug }))
+  }
+  export async function load(ctx) {
+    const t = tags('guides').find((x) => x.slug === ctx.params.tag)
+    return { tag: t ? t.tag : ctx.params.tag, entries: tagged('guides', ctx.params.tag) }
+  }
+</script>
+
+<main class="page">
+  <h1>Tagged {props.tag}</h1>
+  <ul class="entries">
+    {#each props.entries as e (e.slug)}
+      <li><a href={e.url}>{e.title}</a> · {e.description}</li>
+    {/each}
+  </ul>
+  <p><a href="/guides">All entries of Guides</a></p>
+</main>
+
+<style>
+  .entries { display: grid; gap: var(--space-3); padding-left: var(--space-5); }
+</style>

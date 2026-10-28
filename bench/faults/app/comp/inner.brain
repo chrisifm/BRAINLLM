@@ -1,0 +1,35 @@
+<meta props="ssr:bool=false">
+<script>
+  import faults from '../channels/faults.jsbrain'
+  let hits = sig(0)
+  const explode = (where) => {
+    throw new Error('fault:' + where)
+  }
+  let derived = drv(() => (faults.drv ? explode('drv') : 'drv-ok'))
+  fx(() => {
+    if (faults.fx) explode('fx')
+  })
+  let res = resource(() => (faults.resource ? Promise.reject(new Error('fault:resource')) : Promise.resolve('res-ok')))
+  const syncBoom = () => {
+    hits++
+    explode('click')
+  }
+  const asyncBoom = async () => {
+    hits++
+    await tick()
+    explode('async')
+  }
+  if (ssr && !faults.ssrHealed) explode('ssr')
+</script>
+<!-- the uncaught case §42 covers: no {:catch} on purpose; brain.json turns B1101 off for this bench app -->
+<div class="inner" data-p="inner">
+  <span data-p="inner-render">{faults.render ? explode('render') : 'render-ok'}</span>
+  <span data-p="inner-drv">{derived}</span>
+  {#await res}<span data-p="inner-res">res-loading</span>{:then v}<span data-p="inner-res">{v}</span>{/await}
+  <button type="button" data-p="inner-inc" on:click={hits++}>inner {hits}</button>
+  <button type="button" data-p="inner-sync" on:click={syncBoom}>Throw in click handler</button>
+  <button type="button" data-p="inner-async" on:click={asyncBoom}>Throw after await</button>
+</div>
+<style>
+  .inner { display: flex; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-2); border: 1px dashed var(--line); }
+</style>

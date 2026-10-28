@@ -1,0 +1,44 @@
+[
+  {
+    "id": "login-guard",
+    "recipe": "auth",
+    "brief": "Add accounts to the starter app. A sign-up page at /signup asks for an email, a password of at least 8 characters and the password repeated, with a validation message per field and a message when the two passwords differ; a valid sign-up signs the user in and goes to /account. An administration page at /admin is only for signed-in users with the admin role: anonymous visitors are sent to the login page and come back after signing in, signed-in users without the role get the permission-denied page naming the missing role. In the development demo, an email starting with admin@ has the admin role.",
+    "pages": 2,
+    "routes": ["views/signup.brain", "views/admin/index.brain|views/admin.brain"]
+  },
+  {
+    "id": "crud",
+    "recipe": "crud",
+    "brief": "Build a products admin on top of an existing REST API at /api/products (fields: id number, name text up to 80 characters, sku text, price number ≥ 0, status active or archived). Declare the typed endpoints with api(). A products page lists the products with a search box and a status filter, says when nothing matches, and has a form to create a product. Each product links to its detail page at /products/<id>, which shows the product, lets the user edit it with the same validated form and delete it. Cover loading, error and empty states.",
+    "pages": 2,
+    "routes": ["views/products/index.brain|views/products.brain", "views/products/[id].brain"]
+  },
+  {
+    "id": "dashboard",
+    "recipe": "dashboard",
+    "brief": "Build a sales dashboard at /dashboard. A period switch (last 7, 30 and 90 days) changes everything on the page. Four KPI cards show revenue, orders, new customers and refund rate, each with its change against the previous period (up in green, down in red, the direction readable by screen readers). Below, a table of sales per product (product, orders, revenue) can be sorted by clicking each column header. Take the numbers from a deterministic demo data module in lib/.",
+    "pages": 1,
+    "routes": ["views/dashboard.brain|views/dashboard/index.brain"]
+  },
+  {
+    "id": "pricing",
+    "recipe": "pricing",
+    "brief": "Build a public pricing page at /pricing with three plans (Free $0, Pro $29, Team $79 per month), each with its list of features; Pro is highlighted as the most popular. A Monthly/Yearly switch shows the yearly price with a 20% discount and says it is billed yearly. Choosing a plan sends the visitor to /signup?plan=<plan>&period=<monthly|yearly>. Add a short billing FAQ below the plans and link the page from the navigation.",
+    "pages": 1,
+    "routes": ["views/pricing.brain|views/pricing/index.brain"]
+  },
+  {
+    "id": "settings",
+    "recipe": "settings",
+    "brief": "Build a settings page at /account/settings for signed-in users only. Two tabs: Profile (name up to 60 characters, required; email, required and valid) and Notifications (two checkboxes: monthly news and product updates). One Save button validates the fields, saves them through a server function that validates again, and shows a 'Settings saved' confirmation; a server error is shown next to its field. Load the current values for the signed-in user.",
+    "pages": 1,
+    "routes": ["views/account/settings.brain|views/account/settings/index.brain"]
+  },
+  {
+    "id": "wizard",
+    "recipe": "wizard",
+    "brief": "Build an onboarding wizard at /onboarding with three steps and a progress indicator that marks the current step: 1) account (name and work email, both required, email valid), 2) plan (Free, Pro or Team, a choice is required), 3) review of everything entered. Next validates only the current step and stays on it with messages when something is wrong; Back keeps the values. Finish saves through a server function that validates again, shows a busy state, shows an error message on failure and goes to /account on success.",
+    "pages": 1,
+    "routes": ["views/onboarding.brain|views/onboarding/index.brain"]
+  }
+]

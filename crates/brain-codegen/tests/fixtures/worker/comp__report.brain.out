@@ -1,0 +1,24 @@
+import { guard } from "/@brain/brain-guard.js";
+import { sig, tpl, insert, on } from "/@brain/brain.js";
+import { worker as $worker } from "/@brain/brain-worker.js";
+const $w0 = $worker(new URL("../lib/stats.worker.jsbrain", import.meta.url));
+const stats = { mean: (...a) => $w0.call("default.mean", a), sorted: (...a) => $w0.call("default.sorted", a) };
+const $w1 = $worker(new URL("../lib/parse.worker.jsbrain", import.meta.url));
+const parseCsv = (...a) => $w1.call("parseCsv", a);
+const $t0 = tpl("<button data-b=\"32v5vr\">Average: <!></button>");
+function Report($p = {}) {
+  const avg = sig(0);
+  const run = async (text) => {
+    const rows = await parseCsv(text);
+    avg.v = await stats.mean(rows.map((r) => Number(r[0])));
+  };
+  const $r3 = $t0();
+  const $e1 = $r3;
+  const $e2 = $r3.firstChild.nextSibling;
+  on($e1, "click", () => { run('1\n2\n3'); });
+  insert(null, () => avg.v, $e2);
+  return $r3;
+}
+Report.h = "32v5vr";
+Report.f = "comp/report.brain";
+export default guard(Report);

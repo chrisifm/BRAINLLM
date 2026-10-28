@@ -1,0 +1,7 @@
+<meta props="depth:num">
+<script>
+  import B0903RecursionNoBase from './b0903-recursion-no-base.brain'
+</script>
+<div>
+  <B0903RecursionNoBase depth={depth + 1} />
+</div>

@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1305",
+    "level": "warning",
+    "file": "comp/b1305-heavy-in-each.brain",
+    "line": 4,
+    "col": 33,
+    "msg": "`sort` inside `{#each}`: recomputed on every render of every row",
+    "fix": "precompute with `let sorted = drv(() => posts.map((p) => ({ ...p, tagList: [...p.tags].sort().join(', ') })))` and iterate `sorted`"
+  }
+]

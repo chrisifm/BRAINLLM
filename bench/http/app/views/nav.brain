@@ -1,0 +1,19 @@
+<meta seo title="Navigation aborts background requests" description="Background prefetch requests are aborted when the user navigates to another page; a user request in flight is kept.">
+<script>
+  import fault from '../api/fault.jsbrain'
+  let started = sig('')
+  const start = () => {
+    for (const i of [0, 1, 2]) fault.get({ name: 'bg', i }, { prefetch: true }).catch(() => {})
+    fault.get({ name: 'fg' }).catch(() => {})
+    started = 'yes'
+  }
+</script>
+<main class="page">
+  <h1>Navigation aborts background requests</h1>
+  <button type="button" data-a="start" on:click={start}>start</button>
+  <output data-r="started">{started}</output>
+  <a data-a="go" href="/nav-done">Go to the next page</a>
+</main>
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+</style>

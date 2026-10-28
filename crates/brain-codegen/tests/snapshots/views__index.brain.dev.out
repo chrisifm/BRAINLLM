@@ -1,0 +1,24 @@
+import { guard } from "/@brain/brain-guard.js";
+import { tpl, insert } from "/@brain/brain.js";
+import { dev } from "/@brain/brain-dev.js";
+import Counter from "../comp/counter.brain";
+import Todo from "../comp/todo.brain";
+const $t0 = tpl("<main data-b=\"c8wsyf\"><h1>BRAINLLM examples</h1> <p>Each block below is one component. The <a href=\"/dashboard\">user admin</a> shows data loading, forms and CRUD.</p> <section aria-labelledby=\"counter-title\"><h2 id=\"counter-title\">Counter</h2> <!></section> <section aria-labelledby=\"todo-title\"><h2 id=\"todo-title\">To-do list</h2> <!></section></main>");
+function Index($p = {}) {
+  const $r3 = $t0();
+  const $e1 = $r3.firstChild.nextSibling.nextSibling.nextSibling.nextSibling.firstChild.nextSibling.nextSibling;
+  const $e2 = $r3.firstChild.nextSibling.nextSibling.nextSibling.nextSibling.nextSibling.nextSibling.firstChild.nextSibling.nextSibling;
+  insert(null, Counter({  }), $e1);
+  insert(null, Todo({  }), $e2);
+  return $r3;
+}
+Index.h = "c8wsyf";
+Index.seo = ($p) => ({ "title": "BRAINLLM examples", "description": "Small BRAINLLM examples: a counter with derived state and a to-do list with keyed items, filters and an empty state.", "canonical": "/" });
+Index.f = "views/index.brain";
+export default dev(guard(Index));
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiaW5kZXguYnJhaW4uanMiLCJzb3VyY2VzIjpbImluZGV4LmJyYWluIl0sInNvdXJjZXNDb250ZW50IjpbIjxtZXRhIHNlbyB0aXRsZT1cIkJSQUlOTExNIGV4YW1wbGVzXCIgZGVzY3JpcHRpb249XCJTbWFsbCBCUkFJTkxMTSBleGFtcGxlczogYSBjb3VudGVyIHdpdGggZGVyaXZlZCBzdGF0ZSBhbmQgYSB0by1kbyBsaXN0IHdpdGgga2V5ZWQgaXRlbXMsIGZpbHRlcnMgYW5kIGFuIGVtcHR5IHN0YXRlLlwiIGNhbm9uaWNhbD1cIi9cIj5cblxuPHNjcmlwdD5cbiAgaW1wb3J0IENvdW50ZXIgZnJvbSAnLi4vY29tcC9jb3VudGVyLmJyYWluJ1xuICBpbXBvcnQgVG9kbyBmcm9tICcuLi9jb21wL3RvZG8uYnJhaW4nXG48L3NjcmlwdD5cblxuPG1haW4+XG4gIDxoMT5CUkFJTkxMTSBleGFtcGxlczwvaDE+XG4gIDxwPkVhY2ggYmxvY2sgYmVsb3cgaXMgb25lIGNvbXBvbmVudC4gVGhlIDxhIGhyZWY9XCIvZGFzaGJvYXJkXCI+dXNlciBhZG1pbjwvYT4gc2hvd3MgZGF0YSBsb2FkaW5nLCBmb3JtcyBhbmQgQ1JVRC48L3A+XG4gIDxzZWN0aW9uIGFyaWEtbGFiZWxsZWRieT1cImNvdW50ZXItdGl0bGVcIj5cbiAgICA8aDIgaWQ9XCJjb3VudGVyLXRpdGxlXCI+Q291bnRlcjwvaDI+XG4gICAgPENvdW50ZXIgLz5cbiAgPC9zZWN0aW9uPlxuICA8c2VjdGlvbiBhcmlhLWxhYmVsbGVkYnk9XCJ0b2RvLXRpdGxlXCI+XG4gICAgPGgyIGlkPVwidG9kby10aXRsZVwiPlRvLWRvIGxpc3Q8L2gyPlxuICAgIDxUb2RvIC8+XG4gIDwvc2VjdGlvbj5cbjwvbWFpbj5cbiJdLCJuYW1lcyI6W10sIm1hcHBpbmdzIjoiOzs7Ozs7Ozs7O0FBWUE7QUFJQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTsifQ==
+
+/* ---- css ---- */
+
+/* ---- server ---- */
+export const seo = (props) => ({ "title": "BRAINLLM examples", "description": "Small BRAINLLM examples: a counter with derived state and a to-do list with keyed items, filters and an empty state.", "canonical": "/" });

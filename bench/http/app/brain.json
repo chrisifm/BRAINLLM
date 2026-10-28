@@ -1,0 +1,6 @@
+{
+  "name": "http-bench",
+  "cache": { "http": true, "sw": false, "offline": false, "precacheKB": 2048 },
+  "seo": { "minScore": 0 },
+  "budget": { "viewKB": 60 }
+}

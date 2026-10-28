@@ -1,0 +1,10 @@
+# Generated run output: reproduce with the commands in REPORT.md.
+phase0/results/
+llm/results/
+sites/results/
+sites/runs/
+autonomy/results/
+autonomy/*.log
+a11y-seo/results/
+hmr/results/
+llm/*.log

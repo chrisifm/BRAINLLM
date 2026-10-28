@@ -1,0 +1,107 @@
+import { guard } from "/@brain/brain-guard.js";
+import { sig, drv, tpl, insert, attr, cls, on, list } from "/@brain/brain.js";
+const $t0 = tpl("<li><input type=\"checkbox\"> <span><!></span> <button aria-label=\"Delete\">×</button></li>");
+const $t1 = tpl("<li class=\"empty\">Nothing here.</li>");
+const $t2 = tpl("<section data-b=\"lxd7ly\" class=\"todo\"><h2><!></h2> <form><input placeholder=\"What needs doing?\" aria-label=\"New task\"> <button>Add</button></form> <ul><!></ul> <footer><span><!> left</span> <button>All</button> <button>Open</button> <button>Done</button></footer></section>");
+function Todo($p = {}) {
+  const items = sig([]);
+  const text = sig('');
+  const filter = sig('all');
+  let nextId = 1;
+  const visible = drv(() => {
+    if (filter.v === 'done') {
+      return items.v.filter((it) => it.done);
+    }
+    if (filter.v === 'open') {
+      return items.v.filter((it) => !it.done);
+    }
+    return items.v;
+  });
+  const left = drv(() => items.v.filter((it) => !it.done).length);
+  const add = () => {
+    const t = text.v.trim();
+    if (t === '') {
+      return;
+    }
+    items.v = [...items.v, { id: nextId++, text: t, done: false }];
+    text.v = '';
+  };
+  const toggle = (id) => {
+    items.v = items.v.map((it) => it.id === id ? { ...it, done: !it.done } : it);
+  };
+  const remove = (id) => {
+    items.v = items.v.filter((it) => it.id !== id);
+  };
+  const $r16 = $t2();
+  const $e1 = $r16.firstChild.firstChild;
+  const $e2 = $r16.firstChild.nextSibling.nextSibling;
+  const $e3 = $e2.firstChild;
+  const $e4 = $e3.nextSibling.nextSibling;
+  const $e5 = $e2.nextSibling.nextSibling.firstChild;
+  const $e12 = $e2.nextSibling.nextSibling.nextSibling.nextSibling.firstChild.firstChild;
+  const $e13 = $e2.nextSibling.nextSibling.nextSibling.nextSibling.firstChild.nextSibling.nextSibling;
+  const $e14 = $e13.nextSibling.nextSibling;
+  const $e15 = $e14.nextSibling.nextSibling;
+  insert(null, () => ($p.title ?? 'To do'), $e1);
+  on($e2, "submit", (e) => { e.preventDefault(); (add)(e); });
+  attr($e3, "value", () => text.v);
+  on($e3, "input", (e) => { text.v = e.target.value; });
+  attr($e4, "disabled", () => text.v.trim() === '');
+  list(null, () => visible.v, (it) => it.id, (it) => {
+    const $r10 = $t0();
+    const $e6 = $r10;
+    const $e7 = $r10.firstChild;
+    const $e8 = $e7.nextSibling.nextSibling.firstChild;
+    const $e9 = $e7.nextSibling.nextSibling.nextSibling.nextSibling;
+    cls($e6, "done", () => it.v.done);
+    attr($e7, "checked", () => it.v.done);
+    on($e7, "change", () => { toggle(it.v.id); });
+    attr($e7, "aria-label", () => `Mark ${it.v.text}`);
+    insert(null, () => it.v.text, $e8);
+    on($e9, "click", () => { remove(it.v.id); });
+    return $r10;
+  }, $e5, () => {
+    const $r11 = $t1();
+    return $r11;
+  });
+  insert(null, () => left.v, $e12);
+  cls($e13, "on", () => filter.v === 'all');
+  on($e13, "click", () => { filter.v = 'all'; });
+  cls($e14, "on", () => filter.v === 'open');
+  on($e14, "click", () => { filter.v = 'open'; });
+  cls($e15, "on", () => filter.v === 'done');
+  on($e15, "click", () => { filter.v = 'done'; });
+  return $r16;
+}
+Todo.h = "lxd7ly";
+Todo.f = "comp/todo.brain";
+export default guard(Todo);
+
+/* ---- css ---- */
+@layer comp {
+  @scope ([data-b="lxd7ly"]) to ([data-b]) {
+    :where(:scope):is(.todo), .todo {
+      display: grid;
+      gap: var(--space-2);
+    }
+    :where(:scope):is(form), form {
+      display: flex;
+      gap: var(--space-1);
+    }
+    :where(:scope):is(li), li {
+      display: flex;
+      gap: var(--space-2);
+      align-items: center;
+      &.done span {
+        text-decoration: line-through;
+        color: var(--muted);
+      }
+    }
+    :where(:scope):is(.empty), .empty {
+      color: var(--muted);
+    }
+    :where(:scope):is(footer) button.on, footer button.on {
+      color: var(--accent);
+    }
+  }
+}

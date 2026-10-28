@@ -1,0 +1,507 @@
+{
+  "task": 102,
+  "date": "2026-10-28",
+  "version": "0.1.0",
+  "node": "v22.21.1",
+  "npm": "10.9.4",
+  "host": "darwin-arm64",
+  "work": "~/tmp/brainllm-install",
+  "buildAndPackMs": 0,
+  "totalMs": 12684,
+  "ok": true,
+  "leftoverPidsKilled": [],
+  "steps": [
+    {
+      "id": "1",
+      "name": "SHA256SUMS",
+      "pass": true,
+      "ms": 18,
+      "numbers": {
+        "entries": 5,
+        "tarballs": 4,
+        "tarballsCovered": 4
+      },
+      "checks": [
+        {
+          "name": "darwin-arm64/brain matches",
+          "ok": true,
+          "detail": "ca04d3944d39"
+        },
+        {
+          "name": "christianirack-brainllm-darwin-arm64-0.1.0.tgz matches",
+          "ok": true,
+          "detail": "5da072b21b6a"
+        },
+        {
+          "name": "christianirack-brainllm-0.1.0.tgz matches",
+          "ok": true,
+          "detail": "de2a170b5585"
+        },
+        {
+          "name": "christianirack-create-brainllm-0.1.0.tgz matches",
+          "ok": true,
+          "detail": "7051358c2df0"
+        },
+        {
+          "name": "christianirack-brainllm-runtime-0.1.0.tgz matches",
+          "ok": true,
+          "detail": "5c2d8b2593a8"
+        },
+        {
+          "name": "every .tgz has a SHA256SUMS entry",
+          "ok": true,
+          "detail": "4/4 covered; SHA256SUMS lists the native binaries (<os>-<arch>/brain), not the tarballs"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "name": "npm i launcher + platform → npx brain --version",
+      "pass": true,
+      "ms": 4117,
+      "numbers": {
+        "installMs": 1016,
+        "versionMs": 2590,
+        "versionWarmMs": 229
+      },
+      "checks": [
+        {
+          "name": "npm i exits 0",
+          "ok": true,
+          "detail": "1016 ms"
+        },
+        {
+          "name": "`npx brain --version` prints `brain 0.1.0`",
+          "ok": true,
+          "detail": "\"brain 0.1.0\""
+        },
+        {
+          "name": "`--version --json` is JSON with the version",
+          "ok": true,
+          "detail": "{\"name\":\"brain\",\"version\":\"0.1.0\"}"
+        },
+        {
+          "name": "no other platform binary installed",
+          "ok": true,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "name": "brain new demo → npm i -D → doctor → build → start",
+      "pass": true,
+      "ms": 5905,
+      "numbers": {
+        "installMs": 785,
+        "doctorMs": 3876,
+        "buildMs": 266,
+        "distFiles": 117,
+        "htmlFiles": 12,
+        "distBytes": 403485,
+        "buildSummary": "summary 10 pages · 169.8 KB gz total · SEO 91–95 · 0 written, 117 unchanged · 174 ms",
+        "buildPages": 10,
+        "seoRange": "91–95",
+        "seoScores": {
+          "/about": 95,
+          "/": 91,
+          "/posts/hello-world": 95,
+          "/posts": 95,
+          "/posts/second-post": 95,
+          "/login": 100
+        },
+        "seoMin": 91,
+        "seoIndexable": 6,
+        "startToHealthMs": 164,
+        "stopMs": 51
+      },
+      "checks": [
+        {
+          "name": "`npx brain new demo` exits 0",
+          "ok": true,
+          "detail": "265 ms"
+        },
+        {
+          "name": "demo/package.json pins @christianirack/brainllm 0.1.0",
+          "ok": true,
+          "detail": "{\"@christianirack/brainllm\":\"0.1.0\"}"
+        },
+        {
+          "name": "`npm i -D` the tarballs inside demo exits 0",
+          "ok": true,
+          "detail": "785 ms"
+        },
+        {
+          "name": "`npx brain doctor` exits 0",
+          "ok": true,
+          "detail": "3876 ms"
+        },
+        {
+          "name": "`npm run build` exits 0",
+          "ok": true,
+          "detail": "266 ms"
+        },
+        {
+          "name": "dist/ exists with pages",
+          "ok": true,
+          "detail": "12 .html files, 117 files"
+        },
+        {
+          "name": "build prints SEO scores; `brain seo audit` ok",
+          "ok": true,
+          "detail": "summary 10 pages · 169.8 KB gz total · SEO 91–95 · 0 written, 117 unchanged · 174 ms · audit ok true, 6 indexable pages scored"
+        },
+        {
+          "name": "GET /_health → 200 {ok, build}",
+          "ok": true,
+          "detail": "{\"ok\":true,\"build\":\"mn97pybv\"}"
+        },
+        {
+          "name": "GET / → 200",
+          "ok": true,
+          "detail": "status 200, 10063 bytes"
+        },
+        {
+          "name": "`brain stop` ends the supervisor",
+          "ok": true,
+          "detail": "stop exit 0, npm start exit 0"
+        },
+        {
+          "name": "nothing listens on the port after stop",
+          "ok": true,
+          "detail": "ECONNREFUSED"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "name": "npm i create + launcher + platform → npx create-brainllm app2 --no-install",
+      "pass": true,
+      "ms": 1658,
+      "numbers": {
+        "installMs": 689,
+        "createMs": 654,
+        "checkMs": 314
+      },
+      "checks": [
+        {
+          "name": "npm i exits 0",
+          "ok": true,
+          "detail": "689 ms"
+        },
+        {
+          "name": "`npx create-brainllm app2 --no-install` exits 0",
+          "ok": true,
+          "detail": "654 ms"
+        },
+        {
+          "name": "app2 has app.brain + tokens.cssbrain + package.json",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "no node_modules in app2 (--no-install honored)",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "app2 pins @christianirack/brainllm 0.1.0",
+          "ok": true,
+          "detail": "{\"@christianirack/brainllm\":\"0.1.0\"}"
+        },
+        {
+          "name": "`brain check --json` → []",
+          "ok": true,
+          "detail": "[]"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "name": "runtime package exports",
+      "pass": true,
+      "ms": 193,
+      "numbers": {
+        "exportsField": {
+          ".": "./brain.js",
+          "./*": "./*"
+        },
+        "jsFiles": 29,
+        "resolved": 29,
+        "namedExports": 19
+      },
+      "checks": [
+        {
+          "name": "npm i runtime exits 0",
+          "ok": true,
+          "detail": "169 ms"
+        },
+        {
+          "name": "`.` resolves to brain.js",
+          "ok": true,
+          "detail": "file://~/tmp/brainllm-install/s5/node_modules/@christianirack/brainllm-runtime/brain.js"
+        },
+        {
+          "name": "every shipped .js/.mjs resolves through `./*`",
+          "ok": true,
+          "detail": "29/29"
+        },
+        {
+          "name": "`import(\"@christianirack/brainllm-runtime\")` evaluates in Node",
+          "ok": true,
+          "detail": "19 named exports"
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "name": "offline install + no writes outside the work dir",
+      "pass": true,
+      "ms": 693,
+      "numbers": {
+        "offlineInstallMs": 201,
+        "offlineRegistryRequests": 0,
+        "onlineRegistryGets": 26,
+        "onlineRegistryStatus": [
+          "404"
+        ],
+        "newHomeEntries": [],
+        "newDotNpmEntries": [],
+        "npmLogsFromThisRun": 0
+      },
+      "checks": [
+        {
+          "name": "`npm i --offline` with an empty cache exits 0",
+          "ok": true,
+          "detail": "201 ms"
+        },
+        {
+          "name": "`npx --offline brain --version` = brain 0.1.0",
+          "ok": true,
+          "detail": "brain 0.1.0"
+        },
+        {
+          "name": "the offline run made 0 registry requests",
+          "ok": true,
+          "detail": "0 GET"
+        },
+        {
+          "name": "no run made a registry write (PUT/POST/DELETE/PATCH)",
+          "ok": true,
+          "detail": "0"
+        },
+        {
+          "name": "no new top-level entries in ~",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "no new entries in ~/.npm and no npm log of this run there",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "work dir holds the cache and logs",
+          "ok": true,
+          "detail": "~/tmp/brainllm-install/npm-cache"
+        }
+      ]
+    },
+    {
+      "id": "7",
+      "name": "package hygiene",
+      "pass": true,
+      "ms": 41,
+      "numbers": {
+        "packages": [
+          {
+            "name": "@christianirack/brainllm",
+            "files": 4,
+            "tgzKB": 3,
+            "unpackedKB": 8.2
+          },
+          {
+            "name": "@christianirack/brainllm-darwin-arm64",
+            "files": 3,
+            "tgzKB": 2196.1,
+            "unpackedKB": 4227.7
+          },
+          {
+            "name": "@christianirack/brainllm-runtime",
+            "files": 54,
+            "tgzKB": 103.7,
+            "unpackedKB": 300.4
+          },
+          {
+            "name": "@christianirack/create-brainllm",
+            "files": 3,
+            "tgzKB": 1.1,
+            "unpackedKB": 2
+          }
+        ]
+      },
+      "checks": [
+        {
+          "name": "every package has a README.md",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "launcher: bin.brain, engines.node, 7 optionalDependencies",
+          "ok": true,
+          "detail": "{\"license\":\"UNLICENSED\",\"engines\":{\"node\":\">=18\"},\"bin\":{\"brain\":\"bin/brain.js\"},\"os\":null,\"cpu\":null,\"optionalDependencies\":7,\"exports\":null,\"repository\":null,\"type\":null}"
+        },
+        {
+          "name": "optionalDependencies name the 7 platforms at the same version",
+          "ok": true,
+          "detail": "@christianirack/brainllm-darwin-arm64, @christianirack/brainllm-darwin-x64, @christianirack/brainllm-linux-x64, @christianirack/brainllm-linux-arm64, @christianirack/brainllm-linux-x64-musl, @christianirack/brainllm-win32-x64, @christianirack/brainllm-win32-arm64"
+        },
+        {
+          "name": "platform package: os [darwin], cpu [arm64], bin/brain executable",
+          "ok": true,
+          "detail": "{\"license\":\"UNLICENSED\",\"engines\":null,\"bin\":null,\"os\":[\"darwin\"],\"cpu\":[\"arm64\"],\"optionalDependencies\":null,\"exports\":null,\"repository\":null,\"type\":null}"
+        },
+        {
+          "name": "create: bin.create-brainllm, engines.node",
+          "ok": true,
+          "detail": "{\"license\":\"UNLICENSED\",\"engines\":{\"node\":\">=18\"},\"bin\":{\"create-brainllm\":\"bin/create.js\"},\"os\":null,\"cpu\":null,\"optionalDependencies\":null,\"exports\":null,\"repository\":null,\"type\":null}"
+        },
+        {
+          "name": "runtime: type module + exports",
+          "ok": true,
+          "detail": "{\"license\":\"UNLICENSED\",\"engines\":null,\"bin\":null,\"os\":null,\"cpu\":null,\"optionalDependencies\":null,\"exports\":[\".\",\"./*\"],\"repository\":null,\"type\":\"module\"}"
+        },
+        {
+          "name": "no secret-like strings",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "JS/text packages ship no dev files and no absolute home paths",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "native binary embeds no absolute home paths",
+          "ok": true,
+          "detail": ""
+        }
+      ]
+    }
+  ],
+  "packages": [
+    {
+      "file": "christianirack-brainllm-0.1.0.tgz",
+      "name": "@christianirack/brainllm",
+      "files": 4,
+      "tgzBytes": 3115,
+      "unpackedBytes": 8372,
+      "readme": true,
+      "licenseFile": false,
+      "fields": {
+        "license": "UNLICENSED",
+        "engines": {
+          "node": ">=18"
+        },
+        "bin": {
+          "brain": "bin/brain.js"
+        },
+        "os": null,
+        "cpu": null,
+        "optionalDependencies": 7,
+        "exports": null,
+        "repository": null,
+        "type": null
+      },
+      "issues": []
+    },
+    {
+      "file": "christianirack-brainllm-darwin-arm64-0.1.0.tgz",
+      "name": "@christianirack/brainllm-darwin-arm64",
+      "files": 3,
+      "tgzBytes": 2248808,
+      "unpackedBytes": 4329163,
+      "readme": true,
+      "licenseFile": false,
+      "fields": {
+        "license": "UNLICENSED",
+        "engines": null,
+        "bin": null,
+        "os": [
+          "darwin"
+        ],
+        "cpu": [
+          "arm64"
+        ],
+        "optionalDependencies": null,
+        "exports": null,
+        "repository": null,
+        "type": null
+      },
+      "issues": []
+    },
+    {
+      "file": "christianirack-brainllm-runtime-0.1.0.tgz",
+      "name": "@christianirack/brainllm-runtime",
+      "files": 54,
+      "tgzBytes": 106194,
+      "unpackedBytes": 307656,
+      "readme": true,
+      "licenseFile": false,
+      "fields": {
+        "license": "UNLICENSED",
+        "engines": null,
+        "bin": null,
+        "os": null,
+        "cpu": null,
+        "optionalDependencies": null,
+        "exports": [
+          ".",
+          "./*"
+        ],
+        "repository": null,
+        "type": "module"
+      },
+      "issues": []
+    },
+    {
+      "file": "christianirack-create-brainllm-0.1.0.tgz",
+      "name": "@christianirack/create-brainllm",
+      "files": 3,
+      "tgzBytes": 1110,
+      "unpackedBytes": 2078,
+      "readme": true,
+      "licenseFile": false,
+      "fields": {
+        "license": "UNLICENSED",
+        "engines": {
+          "node": ">=18"
+        },
+        "bin": {
+          "create-brainllm": "bin/create.js"
+        },
+        "os": null,
+        "cpu": null,
+        "optionalDependencies": null,
+        "exports": null,
+        "repository": null,
+        "type": null
+      },
+      "issues": []
+    }
+  ],
+  "findings": [
+    {
+      "owner": "Chris / TOOLCHAIN (npm/pack.mjs)",
+      "severity": "blocker for publishing",
+      "what": "no LICENSE file in any package; license field is \"UNLICENSED\" (npm shows it as not licensed for use)",
+      "fix": "Chris picks the license; then pack.mjs copies LICENSE into every package (already a known pre-publish item in npm/README.md)"
+    },
+    {
+      "owner": "TOOLCHAIN (npm/pack.mjs)",
+      "severity": "low",
+      "what": "no `repository`/`homepage` in any package.json (npm provenance needs `repository` to match the repo)",
+      "fix": "add once the public repository exists (npm/README.md already lists it)"
+    }
+  ]
+}

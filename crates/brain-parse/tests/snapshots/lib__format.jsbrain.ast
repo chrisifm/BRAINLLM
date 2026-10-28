@@ -1,0 +1,6 @@
+Module Format level=Comp file=lib/format.jsbrain
+  script
+    const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })@2:1
+    const day = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium' })@3:1
+    export default@5:1 { money: (n) => money.format(n), date: (iso) => day.format(new Date(iso)), initials: (name) => name.split(' ').filter((p) => (p !== '')).slice(0, 2).map((p) => p[0].toUpperCase()).join(''), plural: (n, one, many) => `${n} ${((n === 1) ? one : many)}` }
+  template

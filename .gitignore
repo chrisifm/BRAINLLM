@@ -1,0 +1,17 @@
+target/
+node_modules/
+dist/
+.env
+.env*
+.DS_Store
+*.log
+.brain/
+.brain_env
+.brain_env.*
+*.pem
+*.p12
+*.pfx
+.npmrc
+.netrc
+.claude/tmp-tasks/
+RESUME*.md

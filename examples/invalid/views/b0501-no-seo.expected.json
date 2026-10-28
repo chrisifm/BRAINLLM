@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0501",
+    "level": "error",
+    "file": "invalid/views/b0501-no-seo.brain",
+    "line": 1,
+    "col": 1,
+    "msg": "the view does not declare `<meta seo …>`",
+    "fix": "add `<meta seo title=\"…\" description=\"…\" canonical=\"/route\">` at the top of the file"
+  }
+]

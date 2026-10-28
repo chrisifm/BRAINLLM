@@ -1,0 +1,436 @@
+{
+ "site": "landing",
+ "label": "haiku",
+ "at": "2026-10-14T00:45:18.089Z",
+ "src": "~/Projects/WEB/BRAINLLM/bench/autonomy/results/final21b-haiku/landing",
+ "scratch": "~/tmp/brainllm-final21b/haiku-landing",
+ "brainSha": "018520473d6e",
+ "specSha": "e745bbfd456e",
+ "brain": "~/tmp/qa277/brain",
+ "doctor": {
+  "exit": 0,
+  "ms": 2220,
+  "errors": 0,
+  "warnings": 0,
+  "diags": [],
+  "seo": [
+   {
+    "route": "/",
+    "score": 96
+   }
+  ]
+ },
+ "test": {
+  "exit": 0,
+  "files": 1,
+  "tests": 2,
+  "passed": 2,
+  "failed": [],
+  "a11y": []
+ },
+ "buildAsGenerated": {
+  "exit": 0,
+  "errors": []
+ },
+ "buildCold": {
+  "meanMs": 112.5,
+  "stddevMs": 5,
+  "n": 10,
+  "median": 111.58,
+  "p95": 121.59,
+  "min": 106.05,
+  "max": 121.59
+ },
+ "buildWarm": {
+  "meanMs": 39.2,
+  "stddevMs": 4.5,
+  "n": 10,
+  "median": 37.29,
+  "p95": 45.7,
+  "min": 32.55,
+  "max": 45.7
+ },
+ "buildId": "3vmy989v",
+ "dist": {
+  "files": 34,
+  "sourceExtLeaked": [],
+  "sourceMaps": [],
+  "missingGz": [],
+  "brSiblings": 0,
+  "snippets": {
+   "nginx": true,
+   "caddy": true,
+   "headers": true
+  },
+  "totalShipped": {
+   "files": 34,
+   "raw": 153563
+  },
+  "ok": true
+ },
+ "routes": [
+  "/"
+ ],
+ "start": {
+  "up": true
+ },
+ "contentType": {
+  "checked": 13,
+  "bad": [],
+  "encodings": {
+   "gzip": 13
+  },
+  "ok": true
+ },
+ "bytes": {
+  "/": {
+   "html": {
+    "files": 1,
+    "raw": 8737,
+    "gz": 3215,
+    "br": 2647
+   },
+   "js": {
+    "files": 5,
+    "raw": 31304,
+    "gz": 12759,
+    "br": 11271
+   },
+   "css": {
+    "files": 2,
+    "raw": 5736,
+    "gz": 1820,
+    "br": 1561
+   },
+   "other": {
+    "files": 3,
+    "raw": 1016,
+    "gz": 688,
+    "br": 598
+   },
+   "totalHtmlJsCss": {
+    "raw": 45777,
+    "gz": 17794,
+    "br": 15479
+   },
+   "transferred": 23639,
+   "firstRouteJs": {
+    "files": 5,
+    "raw": 31304,
+    "gz": 12759,
+    "br": 11271
+   },
+   "requests": 11,
+   "missing": [],
+   "resources": [
+    {
+     "path": "/",
+     "file": "index.html",
+     "kind": "html",
+     "raw": 8737,
+     "gz": 3215,
+     "br": 2647,
+     "transferred": 4961
+    },
+    {
+     "path": "/_b/2fwaal7e.css",
+     "file": "_b/2fwaal7e.css",
+     "kind": "css",
+     "raw": 1582,
+     "gz": 762,
+     "br": 667,
+     "transferred": 1106
+    },
+    {
+     "path": "/_b/w5klx1me.js",
+     "file": "_b/w5klx1me.js",
+     "kind": "js",
+     "raw": 6810,
+     "gz": 3028,
+     "br": 2774,
+     "transferred": 3380
+    },
+    {
+     "path": "/_b/fdkqja08.css",
+     "file": "_b/fdkqja08.css",
+     "kind": "css",
+     "raw": 4154,
+     "gz": 1058,
+     "br": 894,
+     "transferred": 1403
+    },
+    {
+     "path": "/_b/t5em1ebc.js",
+     "file": "_b/t5em1ebc.js",
+     "kind": "js",
+     "raw": 4424,
+     "gz": 2125,
+     "br": 1868,
+     "transferred": 2477
+    },
+    {
+     "path": "/_b/i3r9acr4.js",
+     "file": "_b/i3r9acr4.js",
+     "kind": "js",
+     "raw": 8323,
+     "gz": 2789,
+     "br": 2371,
+     "transferred": 3141
+    },
+    {
+     "path": "/_b/32pnrpge.js",
+     "file": "_b/32pnrpge.js",
+     "kind": "js",
+     "raw": 2600,
+     "gz": 1390,
+     "br": 1194,
+     "transferred": 1742
+    },
+    {
+     "path": "/manifest.webmanifest",
+     "file": "manifest.webmanifest",
+     "kind": "other",
+     "raw": 494,
+     "gz": 314,
+     "br": 264,
+     "transferred": 608
+    },
+    {
+     "path": "/_b/8r91251g.js",
+     "file": "_b/8r91251g.js",
+     "kind": "js",
+     "raw": 9147,
+     "gz": 3427,
+     "br": 3064,
+     "transferred": 3779
+    },
+    {
+     "path": "/_b/gdiv1rd4.svg",
+     "file": "_b/gdiv1rd4.svg",
+     "kind": "other",
+     "raw": 261,
+     "gz": 187,
+     "br": 167,
+     "transferred": 521
+    },
+    {
+     "path": "/_b/gdiv1rd4.svg",
+     "file": "_b/gdiv1rd4.svg",
+     "kind": "other",
+     "raw": 261,
+     "gz": 187,
+     "br": 167,
+     "transferred": 521
+    }
+   ]
+  }
+ },
+ "lighthouse": {
+  "/": {
+   "version": "13.5.0",
+   "a11y": 100,
+   "seo": 100,
+   "failing": []
+  }
+ },
+ "brainSeo": {
+  "exit": 0,
+  "minScore": 80,
+  "pages": [
+   {
+    "route": "/",
+    "score": 96,
+    "findings": [
+     "B1812(info)",
+     "B1834(info)"
+    ]
+   }
+  ]
+ },
+ "smoke": {
+  "checks": [
+   {
+    "name": "pricing: toggle exposes aria-pressed/aria-checked=\"true\" when on",
+    "pass": true,
+    "evidence": {
+     "pressedAttr": "true",
+     "checkedAttr": null,
+     "state": true,
+     "reQueried": true
+    }
+   },
+   {
+    "name": "pricing toggle: yearly = monthly −20 %",
+    "pass": true,
+    "evidence": {
+     "control": "BUTTON:Yearly Save 20%",
+     "monthly": [
+      19,
+      49,
+      129
+     ],
+     "yearly": [
+      15.2,
+      39.2,
+      103.2
+     ],
+     "ratios": [
+      0.8,
+      0.8,
+      0.8
+     ]
+    }
+   },
+   {
+    "name": "pricing: Pro plan highlighted",
+    "pass": true,
+    "evidence": {
+     "pro": "2px | rgb(0, 98, 196) | rgb(255, 255, 255) | rgba(0, 0, 0, 0.04) 0px 1px 2px 0px, rgba(0, 0, 0, 0.14) 0px 12px 32px -12px | none",
+     "basic": "1px | rgb(210, 210, 215) | rgb(255, 255, 255) | rgba(0, 0, 0, 0.04) 0px 1px 2px 0px, rgba(0, 0, 0, 0.14) 0px 12px 32px -12px | none",
+     "proClass": "plan h",
+     "proText": "Most popular Pro $ 39.20 per month Bille",
+     "badge": true
+    }
+   },
+   {
+    "name": "FAQ: 6 items expand and collapse",
+    "pass": true,
+    "evidence": {
+     "buttons": 0,
+     "details": 6,
+     "s0": false,
+     "s1": true,
+     "s2": false
+    }
+   },
+   {
+    "name": "contact: Send disabled while empty",
+    "pass": true,
+    "evidence": {
+     "found": true,
+     "disabled": true
+    }
+   },
+   {
+    "name": "contact: live validation flags email without @ and message < 10 chars",
+    "pass": true,
+    "evidence": {
+     "disabled": true,
+     "invalid": [
+      "false",
+      "true",
+      "true"
+     ],
+     "errors": [
+      "Please enter an email address that contains @.",
+      "Please write at least 10 characters."
+     ]
+    }
+   },
+   {
+    "name": "contact: Send enabled when valid",
+    "pass": true,
+    "evidence": {
+     "disabled": false
+    }
+   },
+   {
+    "name": "contact: submit shows the thank-you message",
+    "pass": true,
+    "evidence": {
+     "url": "/"
+    }
+   },
+   {
+    "name": "no console errors",
+    "pass": true,
+    "evidence": []
+   },
+   {
+    "name": "no SRI integrity mismatch warnings",
+    "pass": true,
+    "evidence": []
+   }
+  ],
+  "consoleErrors": [],
+  "consoleWarnings": [],
+  "passed": 10,
+  "total": 10
+ },
+ "hmr": {
+  "component": "views/home.brain",
+  "stateBefore": "true",
+  "style": {
+   "applied": [
+    "css"
+   ],
+   "tool": {
+    "n": 20,
+    "median": 2.47,
+    "p95": 3.08,
+    "min": 2.28,
+    "max": 7.31
+   },
+   "compile": {
+    "n": 20,
+    "median": 1.6,
+    "p95": 2.18,
+    "min": 1.51,
+    "max": 4.49
+   },
+   "client": {
+    "n": 20,
+    "median": 0.84,
+    "p95": 1.1,
+    "min": 0.75,
+    "max": 2.82
+   },
+   "total": {
+    "n": 20,
+    "median": 33.52,
+    "p95": 37.72,
+    "min": 26.88,
+    "max": 38.07
+   },
+   "errors": 0
+  },
+  "script": {
+   "applied": [
+    "js"
+   ],
+   "tool": {
+    "n": 20,
+    "median": 2.7,
+    "p95": 3.25,
+    "min": 2.45,
+    "max": 5.46
+   },
+   "compile": {
+    "n": 20,
+    "median": 0.68,
+    "p95": 1.13,
+    "min": 0.62,
+    "max": 3.14
+   },
+   "client": {
+    "n": 20,
+    "median": 1.99,
+    "p95": 2.17,
+    "min": 1.82,
+    "max": 2.32
+   },
+   "total": {
+    "n": 20,
+    "median": 34.36,
+    "p95": 37.85,
+    "min": 20.65,
+    "max": 38.26
+   },
+   "errors": 0
+  },
+  "stateAfter": "true",
+  "statePreserved": true,
+  "reloaded": false,
+  "compileErrors": []
+ }
+}

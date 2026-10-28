@@ -1,0 +1,10 @@
+[package]
+name = "brain-css"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "CSS parser and transforms for .brain components (mixins, tokens, @layer + @scope)"
+
+[dependencies]
+brain-lex = { path = "../brain-lex" }

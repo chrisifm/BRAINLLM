@@ -1,0 +1,1 @@
+export default api('/f/feed', { get: {} })

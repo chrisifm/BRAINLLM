@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0120",
+    "level": "error",
+    "file": "invalid/comp/b0120-export-const.brain",
+    "line": 2,
+    "col": 3,
+    "msg": "`export` only exists in `.jsbrain` modules",
+    "fix": "remove `export`: a .brain only exports its component; shared code goes in `lib/x.jsbrain`"
+  }
+]

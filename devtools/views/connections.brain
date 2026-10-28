@@ -1,0 +1,11 @@
+<meta seo title="Connections" description="Open WebSockets, EventSources, BroadcastChannels and Workers with their traffic and owner.">
+<script>
+  import inspector from '../channels/inspector.jsbrain'
+  const rows = drv(() => inspector.conns.map((c) => ({ ...c, who: c.own ? c.own.name : 'module' })))
+  const cols = [{ key: 'kind', label: 'Kind' }, { key: 'url', label: 'URL' }, { key: 'st', label: 'State' }, { key: 'in', label: 'In' }, { key: 'out', label: 'Out' }, { key: 'who', label: 'Owner' }]
+</script>
+<h1>Connections</h1>
+<Table caption="Connections" rows={rows} columns={cols} empty="No connection open." />
+<style>
+  h1 { margin: 0 0 var(--space-4); font-size: 22px; }
+</style>

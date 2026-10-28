@@ -1,0 +1,5 @@
+<script>
+  import { Locale } from '../channels/locale.jsbrain'
+  let locale = use(Locale)
+</script>
+<p>{locale === 'fr' ? 'Bonjour' : 'Hello'}</p>

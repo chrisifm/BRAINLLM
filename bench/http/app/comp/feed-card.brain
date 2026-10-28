@@ -1,0 +1,12 @@
+<meta props="label:str">
+<script>
+  import feed from '../api/feed.jsbrain'
+  let data = resource(feed.get)
+</script>
+<section class="card" data-card={label}>
+  <h2>{label}</h2>
+  {#await data}<p class="state">loading</p>{:then v}<p class="state">{v && v.n != null ? 'n=' + v.n : 'empty'}</p>{:catch e}<p class="state">error {e.kind}</p>{/await}
+</section>
+<style>
+  .card { padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius); }
+</style>

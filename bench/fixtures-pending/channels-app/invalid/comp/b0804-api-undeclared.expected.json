@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0804",
+    "level": "error",
+    "file": "channels-app/invalid/comp/b0804-api-undeclared.brain",
+    "line": 5,
+    "col": 37,
+    "msg": "`dlg.close` is not exposed by `<Confirm>`",
+    "fix": "`<Confirm>` exposes: open; or add `close` to its `<meta expose>`"
+  }
+]

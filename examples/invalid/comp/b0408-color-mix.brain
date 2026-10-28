@@ -1,0 +1,5 @@
+<button class="cta" type="button">Buy now</button>
+
+<style>
+  .cta { background: var(--accent); color: color-mix(in srgb, var(--fg), #000 40%); }
+</style>

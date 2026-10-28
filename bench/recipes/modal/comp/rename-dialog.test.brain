@@ -1,0 +1,23 @@
+<script>
+  import RenameDialog from './rename-dialog.brain'
+
+  test('opens with the current name and saves the new one, then closes', async () => {
+    let got = ''
+    await mount(RenameDialog, { name: 'Ana', save: async (v) => { got = v } })
+    await click('.trigger')
+    expect(attr('dialog', 'open') !== null).toBeTruthy()
+    await type('input[aria-label="New name"]', 'Ana Ruiz')
+    await click('button[type=submit]')
+    expect(got).toBe('Ana Ruiz')
+    expect(attr('dialog', 'open')).toBe(null)
+  })
+
+  test('a server error keeps the dialog open with the message under the field', async () => {
+    await mount(RenameDialog, { name: 'Ana', save: async () => { throw { errors: { name: 'That name is taken' } } } })
+    await click('.trigger')
+    await type('input[aria-label="New name"]', 'Bea')
+    await click('button[type=submit]')
+    expect(attr('dialog', 'open') !== null).toBeTruthy()
+    expect(text('dialog').includes('That name is taken')).toBeTruthy()
+  })
+</script>

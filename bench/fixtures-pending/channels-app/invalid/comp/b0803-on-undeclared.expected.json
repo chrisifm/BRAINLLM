@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0803",
+    "level": "error",
+    "file": "channels-app/invalid/comp/b0803-on-undeclared.brain",
+    "line": 6,
+    "col": 26,
+    "msg": "`<ProductCard>` does not declare the event `remove`",
+    "fix": "`<ProductCard>` emits: add"
+  }
+]

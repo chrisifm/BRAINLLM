@@ -1,0 +1,17 @@
+<meta seo title="Orders" description="Recent orders with their customer and total." robots="noindex">
+
+<script>
+  import orders from '../api/orders.jsbrain'
+  import OrderList from '../comp/order-list.brain'
+
+  let recent = resource(() => orders.get())
+</script>
+
+<main class="page">
+  <h1>Orders</h1>
+  <OrderList orders={recent} retry={recent.refetch} />
+</main>
+
+<style>
+  .page { max-width: 48rem; margin: 0 auto; padding: var(--space-5) var(--space-4); display: grid; gap: var(--space-3); }
+</style>

@@ -1,0 +1,18 @@
+[
+  {
+    "id": "f1-signup",
+    "brief": "A view /signup with a registration form: email (required, valid format), password (required, at least 8 characters), confirm password (must match) and an 'I accept the terms' checkbox (required). Show each field's validation message next to the field. On submit, call an async server function that rejects the email 'taken@example.com' with a field error 'This email is already registered'; show that error on the email field. Disable the submit button while the request is in flight and show a success message when it succeeds."
+  },
+  {
+    "id": "f2-checkout-address",
+    "brief": "A view /checkout with a shipping address form: full name, street, city, postal code (5 digits), country (select with three options) and phone (optional). Validate on submit and show messages per field. The async save function returns a server error for postal code '00000' ('This postal code is not served'); show it on the postal code field and keep the other values. Prevent double submission and show a confirmation summary of the saved address after success."
+  },
+  {
+    "id": "f3-profile-settings",
+    "brief": "A view /settings/profile that edits a user profile loaded with initial values (display name, bio up to 160 characters with a live counter, website URL optional but valid if present, and a public/private toggle). Save calls an async function; if the display name is 'admin' the server answers with a field error 'This name is reserved'. Show a form-level error banner when the server fails without field errors, with a Retry button. The Save button is disabled when nothing changed."
+  },
+  {
+    "id": "f4-invite-team",
+    "brief": "A view /team/invite: a form to invite a teammate with email (required, valid), role (select: viewer, editor, admin) and an optional message (max 200 characters). After a successful submit the invited person appears in a list below the form and the form resets. The async invite function rejects duplicate emails already in the list with a field error, and rejects role 'admin' for the domain example.org with a form-level error. Show both kinds of errors accessibly (associated with the field, or announced for the form)."
+  }
+]

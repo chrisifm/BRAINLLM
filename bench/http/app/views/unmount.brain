@@ -1,0 +1,21 @@
+<meta seo title="Cancel on unmount" description="A component whose resource is still loading is removed, and a resource re-runs while its first request is in flight; both aborts must stay silent.">
+<script>
+  import fault from '../api/fault.jsbrain'
+  import SlowCard from '../comp/slow-card.brain'
+  let show = sig(true)
+  const hide = () => (show = false)
+  // a resource that re-runs while its first request is still in flight: the first run is aborted silently
+  let q = sig(1)
+  let data = resource(() => fault.get({ name: 'rerun', q }))
+  const bump = () => (q = q + 1)
+</script>
+<main class="page">
+  <h1>Cancel on unmount</h1>
+  <button type="button" data-a="hide" on:click={hide}>hide</button>
+  {#if show}<SlowCard />{:else}<p data-r="hidden">hidden</p>{/if}
+  <button type="button" data-a="bump" on:click={bump}>bump</button> <output data-r="q">{q}</output>
+  {#await data}<p data-r="rerun">loading</p>{:then v}<p data-r="rerun">loaded q={v.q}</p>{:catch e}<p data-r="rerun">error {e.kind}</p>{/await}
+</main>
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+</style>

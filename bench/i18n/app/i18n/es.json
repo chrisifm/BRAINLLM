@@ -1,0 +1,31 @@
+{
+  "site.brand": "Polyglot probe [es]",
+  "nav.home": "Home [es]",
+  "nav.about": "About us [es]",
+  "nav.counter": "Counter [es]",
+  "home.title": "A site in three languages [es]",
+  "home.lead": "Every visible word on this page comes from a key in the locale file. [es]",
+  "home.cta": "Open the counter [es]",
+  "about.title": "About this probe [es]",
+  "about.body": "This site checks pages per locale, right-to-left layout and dictionary loading. [es]",
+  "counter.title": "Click counter [es]",
+  "counter.hello": "Hello {name}, welcome back [es]",
+  "counter.clicks": {
+    "one": "{n} click so far [es]",
+    "other": "{n} clicks so far [es]"
+  },
+  "counter.add": "Add one [es]",
+  "counter.date": "Release date: {date} [es]",
+  "counter.amount": "Large number: {value} [es]",
+  "counter.price": "Price: {price} [es]",
+  "notfound.title": "Page not found [es]",
+  "notfound.body": "The address may be mistyped, or the page was moved. [es]",
+  "notfound.back": "Back to the home page [es]",
+  "offline.title": "You are offline [es]",
+  "offline.body": "This page has not been saved on this device yet. [es]",
+  "offline.back": "Try the home page [es]",
+  "nav.home_href": "/es",
+  "nav.about_href": "/es/about-us",
+  "nav.counter_href": "/es/counter",
+  "nav.languages": "Languages [es]"
+}

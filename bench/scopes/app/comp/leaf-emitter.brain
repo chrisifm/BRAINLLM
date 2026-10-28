@@ -1,0 +1,2 @@
+<meta props="name:str" emits="ping:str">
+<button type="button" class="leaf" data-leaf={name} on:click={emit('ping', name)}>Ping {name}</button>

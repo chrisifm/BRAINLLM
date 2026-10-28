@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1701",
+    "level": "error",
+    "file": "invalid/comp/b1701-tool-no-function.brain",
+    "line": 1,
+    "col": 7,
+    "msg": "tool `add_task` has no function `add_task` in the <script>",
+    "fix": "write `const add_task = async ({ text }) => { … }` — it runs when an agent calls the tool"
+  }
+]

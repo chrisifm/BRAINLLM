@@ -1,0 +1,20 @@
+<meta props="title:str description:str='' site:str='' url:str=''">
+
+<main class="og">
+  <p class="site">{site}</p>
+  <h1>{title}</h1>
+  <p class="desc">{description}</p>
+  <p class="url">{url}</p>
+</main>
+
+<style>
+  .og {
+    width: 1200px; height: 630px; padding: var(--space-6); display: grid; align-content: space-between;
+    background: radial-gradient(900px 500px at 100% 0%, var(--bg), var(--surface) 70%);
+    color: var(--fg); font-family: var(--font); border-top: var(--space-2) solid var(--accent);
+  }
+  .site { margin: 0; color: var(--accent); font-size: 32px; font-weight: 700; letter-spacing: .02em; }
+  h1 { font-size: 76px; line-height: 1.04; letter-spacing: -.02em; max-width: 1050px; }
+  .desc { margin: 0; color: var(--muted); font-size: 32px; max-width: 1000px; }
+  .url { margin: 0; color: var(--muted); font-size: 24px; }
+</style>

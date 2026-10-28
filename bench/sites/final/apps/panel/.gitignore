@@ -1,0 +1,5 @@
+dist/
+.brain/
+.brain_env
+node_modules/
+.DS_Store

@@ -1,0 +1,12 @@
+<meta seo title="You are offline" description="This page is not available without a connection yet. Pages you already visited keep working offline in your language." robots="noindex">
+
+<main class="page">
+  <h1>{t('offline.title')}</h1>
+  <p>{t('offline.body')}</p>
+  <p><a href="/">{t('offline.back')}</a></p>
+</main>
+
+<style>
+  .page { max-width: 60ch; margin-inline: auto; padding-block: var(--space-6); padding-inline: var(--space-4); display: grid; gap: var(--space-3); text-align: center; }
+  p { margin: 0; color: var(--muted); }
+</style>

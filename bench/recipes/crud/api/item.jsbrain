@@ -1,0 +1,1 @@
+export default api('/api/items/:id', { get: { out: 'Item' }, put: { in: 'Item', out: 'Item' }, delete: {} })

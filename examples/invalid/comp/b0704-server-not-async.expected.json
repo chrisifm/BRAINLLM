@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0704",
+    "level": "error",
+    "file": "invalid/comp/b0704-server-not-async.brain",
+    "line": 2,
+    "col": 3,
+    "msg": "a `server:` function must be `async`",
+    "fix": "write `server: async function name(ctx, data) { … }`"
+  }
+]

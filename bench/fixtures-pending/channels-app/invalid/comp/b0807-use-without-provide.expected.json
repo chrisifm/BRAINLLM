@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0807",
+    "level": "warning",
+    "file": "channels-app/invalid/comp/b0807-use-without-provide.brain",
+    "line": 4,
+    "col": 14,
+    "msg": "`use(Lang)` but no component provides `Lang`",
+    "fix": "call `provide(Lang, value)` in an ancestor, or give the key a default: `key('…', default)`"
+  }
+]

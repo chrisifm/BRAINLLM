@@ -1,0 +1,8 @@
+<meta props="name:str='sibling'">
+<script>
+  let n = sig(0)
+</script>
+<button type="button" class="sib" data-p={name} on:click={n++}>{name} {n}</button>
+<style>
+  .sib { padding: var(--space-1) var(--space-3); border-radius: var(--radius-sm); }
+</style>

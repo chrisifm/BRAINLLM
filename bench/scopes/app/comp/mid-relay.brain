@@ -1,0 +1,13 @@
+<meta emits="ping:str">
+<script>
+  import LeafEmitter from './leaf-emitter.brain'
+  let aHits = sig(0)
+  let bHits = sig(0)
+  const onA = () => { aHits++ }
+  const onB = (who) => { bHits++; emit('ping', who + '-relayed') }
+</script>
+<div class="mid">
+  <LeafEmitter name="a" on:ping={onA} />
+  <LeafEmitter name="b" on:ping={onB} />
+  <span class="a-hits">{aHits}</span> <span class="b-hits">{bHits}</span>
+</div>

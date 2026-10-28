@@ -1,0 +1,1 @@
+export const Item = { id: 'num!', name: 'str!<=80', status: 'str!', price: 'num>=0' }

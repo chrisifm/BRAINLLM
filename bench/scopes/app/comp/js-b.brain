@@ -1,0 +1,12 @@
+<script>
+  import shared from '../channels/shared.jsbrain'
+  let count = sig(1000)
+  const items = ['b1', 'b2', 'b3']
+  function toggle() { count = count + 10 }
+  const handleClick = () => toggle()
+  let open = sig(true)
+</script>
+<div class="js js-b">
+  <span class="count">{count}</span> <span class="items">{items.join(',')}</span> <span class="store">{shared.count}</span>
+  <button type="button" class="go" on:click={handleClick}>JsB +10</button>
+</div>

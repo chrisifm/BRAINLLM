@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1304",
+    "level": "warning",
+    "file": "comp/b1304-fx-no-deps.brain",
+    "line": 3,
+    "col": 3,
+    "msg": "`fx` with no reactive reads: it runs only once",
+    "fix": "move it out of `fx` as mount code: `let started = sig(Date.now())`"
+  }
+]

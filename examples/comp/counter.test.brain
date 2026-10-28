@@ -1,0 +1,22 @@
+<script>
+  import Counter from './counter.brain'
+
+  test('shows the initial value and its double', async () => {
+    await mount(Counter, { start: 2, label: 'Clicks' })
+    expect(text('button')).toBe('Clicks: 2 × 2 = 4')
+  })
+
+  test('increments on every click', async () => {
+    await mount(Counter, {})
+    await click('button')
+    await click('button')
+    expect(text('button')).toBe('Clicks: 2 × 2 = 4')
+  })
+
+  test('adds the hot class once it passes 10', async () => {
+    await mount(Counter, { start: 10 })
+    expect(hasClass('button', 'hot')).toBe(false)
+    await click('button')
+    expect(hasClass('button', 'hot')).toBe(true)
+  })
+</script>

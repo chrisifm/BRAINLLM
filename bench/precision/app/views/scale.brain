@@ -1,0 +1,22 @@
+<meta seo title="Precise updates at scale" description="A thousand stateful components plus twenty readers of a global store; one write must mutate only the nodes bound to the written field.">
+<script>
+  import shop from '../channels/shop.jsbrain'
+  import Pad from '../comp/pad.brain'
+  import GlobalA from '../comp/global-a.brain'
+  import GlobalB from '../comp/global-b.brain'
+  const ten = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  const incA = () => { shop.a = shop.a + 1 }
+  const sameA = () => { shop.a = shop.a }
+  const incB = () => { shop.b = shop.b + 1 }
+</script>
+<main class="page">
+  <h1>Precise updates at scale</h1>
+  <p><button type="button" data-a="incA" on:click={incA}>a +1</button> <button type="button" data-a="sameA" on:click={sameA}>a = a</button> <button type="button" data-a="incB" on:click={incB}>b +1</button></p>
+  <p class="readers">{#each ten as i (i)}<GlobalA i={i} />{/each}</p>
+  <p class="readers">{#each ten as i (i)}<GlobalB i={i} />{/each}</p>
+  <Pad n={1000} />
+</main>
+<style>
+  .page { max-width: 120ch; margin: 0 auto; padding: var(--space-4); display: grid; gap: var(--space-2); }
+  .readers { display: flex; gap: var(--space-2); }
+</style>

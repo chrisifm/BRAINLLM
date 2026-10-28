@@ -1,0 +1,4 @@
+<script>
+  import sidebar from '../channels/sidebar.jsbrain'
+</script>
+<button type="button" on:click={sidebar.open = !sidebar.open}>Menu</button>

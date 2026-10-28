@@ -1,0 +1,28 @@
+<meta props="label:str value:num unit:str='' delta:num?">
+
+<script>
+  // delta: change vs the previous period in %, positive is good · the direction is spelled out for screen readers
+  const shown = drv(() => (unit === '$' ? '$' + value.toLocaleString('en-US') : value.toLocaleString('en-US') + unit))
+  const dir = drv(() => (delta == null ? '' : delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat'))
+</script>
+
+<article class="kpi">
+  <p class="name">{label}</p>
+  <p class="value">{shown}</p>
+  {#if delta != null}
+    <p class="delta" class:up={delta > 0} class:down={delta < 0}>
+      <span aria-hidden="true">{delta > 0 ? '▲' : delta < 0 ? '▼' : '•'}</span>
+      {Math.abs(delta)}% <span class="sr">{dir}</span> vs previous period
+    </p>
+  {/if}
+</article>
+
+<style>
+  .kpi { display: grid; gap: var(--space-1); padding: var(--space-4); background: var(--glass); border: 1px solid var(--glass-edge); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+  .name { margin: 0; font-size: .85rem; font-weight: 600; color: var(--muted); }
+  .value { margin: 0; font-size: 1.8rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .delta { margin: 0; font-size: .85rem; color: var(--muted); }
+  .delta.up { color: var(--ok); }
+  .delta.down { color: var(--bad); }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>

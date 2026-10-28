@@ -1,0 +1,38 @@
+<meta props="label:str='Language'">
+<script>
+  // links to this same page in every language of the site (none with a single language); each name in itself
+  const langs = alternates()
+  // the browser prefers another language the site has: offered once, never an automatic redirect. A ui/ component has
+  // no state (B0116): closing hides the hint's own element and remembers the answer.
+  const hint = suggest()
+  const close = (e) => {
+    dismiss()
+    e.target.parentNode.setAttribute('hidden', '')
+  }
+</script>
+{#if langs.length}
+  <nav class="lang" aria-label={label}>
+    <ul>
+      {#each langs as l (l.locale)}
+        <li><a href={l.href} hreflang={l.locale} lang={l.locale} aria-current={l.current ? 'page' : null}>{l.name}</a></li>
+      {/each}
+    </ul>
+    {#if hint}
+      <p class="hint" lang={hint.locale}>
+        <a href={hint.href} hreflang={hint.locale} on:click={dismiss()}>{hint.name}</a>
+        <button type="button" aria-label="Dismiss" on:click={close}>×</button>
+      </p>
+    {/if}
+  </nav>
+{/if}
+<style>
+  .lang { display: flex; align-items: center; gap: var(--space-3); font: 14px/1.3 var(--font); }
+  ul { display: flex; gap: var(--space-1); list-style: none; margin: 0; padding: 0; }
+  a { color: var(--muted); text-decoration: none; padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); }
+  a[aria-current='page'] { color: var(--fg); background: var(--surface); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .hint { display: flex; align-items: center; gap: var(--space-1); margin: 0; padding: var(--space-1) var(--space-2); border: 1px solid var(--glass-edge); border-radius: var(--radius-sm); background: var(--glass); }
+  .hint a { color: var(--accent); }
+  .hint[hidden] { display: none; } /* closed: display:flex above would otherwise win over [hidden] */
+  button { border: 0; background: transparent; color: var(--muted); font-size: 16px; cursor: pointer; }
+</style>

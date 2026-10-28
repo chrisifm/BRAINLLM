@@ -1,0 +1,9 @@
+[package]
+name = "brain-lex"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Spans, diagnostics and the BrainScript lexer"
+
+[dependencies]

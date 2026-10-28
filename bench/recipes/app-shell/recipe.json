@@ -1,0 +1,51 @@
+{
+  "name": "app-shell",
+  "title": "App shell: top bar + collapsible sidebar",
+  "description": "Application layout: app.brain keeps the static top bar (brand, account link, skip link); views/_layout.brain wraps every view in a sidebar navigation that collapses behind a Menu button on narrow screens (Escape closes it), plus the session line. The links live in one list in views/_layout.brain.",
+  "params": {
+    "brand": {
+      "type": "string",
+      "default": "Acme",
+      "replaces": "Acme"
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "href": "string",
+        "label": "string"
+      },
+      "default": [
+        {
+          "href": "/",
+          "label": "Home"
+        },
+        {
+          "href": "/about",
+          "label": "About"
+        },
+        {
+          "href": "/posts",
+          "label": "Posts"
+        },
+        {
+          "href": "/account",
+          "label": "Account"
+        }
+      ]
+    }
+  },
+  "files": [
+    "app.brain",
+    "views/_layout.brain",
+    "comp/app-nav.brain",
+    "comp/app-nav.test.brain"
+  ],
+  "replaces": [
+    "app.brain",
+    "views/_layout.brain"
+  ],
+  "uses": [
+    "Sidebar"
+  ],
+  "notes": "Add one entry to `links` in views/_layout.brain per new view, so every page stays linked. Components (<Sidebar>, <AppNav>) belong in views/_layout.brain, never in app.brain (B0132)."
+}

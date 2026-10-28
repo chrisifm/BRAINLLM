@@ -1,0 +1,9 @@
+{
+  "name": "states",
+  "title": "Loading, empty and error states",
+  "description": "The three non-happy states of async data, ready to reuse: ui/loading-state (skeleton rows, aria-busy, shimmer only without reduced motion), ui/empty-state (what is missing and what to do, optional action link) and comp/order-list, which renders a promise with {#await}: loading → skeleton, error → kit <ErrorState> with Retry, empty → empty state, data → the list. views/orders.brain feeds it from an api() resource.",
+  "params": { "entity": { "type": "string", "default": "order" }, "emptyTitle": { "type": "string" }, "emptyAction": { "type": "object", "properties": { "href": "string", "label": "string" } } },
+  "files": ["ui/loading-state.brain", "ui/empty-state.brain", "ui/empty-state.test.brain", "comp/order-list.brain", "comp/order-list.test.brain", "api/orders.jsbrain", "views/orders.brain"],
+  "uses": ["ErrorState"],
+  "notes": "Pass a promise (a resource) and a retry function to the list; every state is covered by the {#await} block. Link /orders from the nav."
+}

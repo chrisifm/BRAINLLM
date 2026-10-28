@@ -1,0 +1,19 @@
+<meta seo title="Queue and priorities per origin" description="Ten background GETs and one user action: at most six requests per origin, and the action goes ahead of the waiting background ones.">
+<script>
+  import fault from '../api/fault.jsbrain'
+  let order = sig([])
+  const done = (k) => (order = [...order, k])
+  const burst = () => {
+    order = ['start']
+    for (const i of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]) fault.get({ name: 'q', i }, { priority: 'low' }).then(() => done('low' + i), () => done('lowerr' + i))
+    fault.post({ name: 'act' }).then(() => done('act'), () => done('acterr'))
+  }
+</script>
+<main class="page">
+  <h1>Queue and priorities</h1>
+  <button type="button" data-a="burst" on:click={burst}>burst</button>
+  <output data-r="order">{order.join(',')}</output>
+</main>
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+</style>

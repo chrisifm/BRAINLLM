@@ -1,0 +1,25 @@
+<script>
+  import Settings from './settings.brain'
+
+  const settings = { name: 'Ana', email: 'ana@example.com', newsletter: false, product: true }
+
+  test('opens on the profile tab with both fields', async () => {
+    await mount(Settings, { settings })
+    expect(attr('[role=tab]:first-child', 'aria-selected')).toBe('true')
+    expect(count('input[aria-label="Name"]')).toBe(1)
+    expect(count('input[type=checkbox]')).toBe(0)
+  })
+
+  test('the notifications tab shows the two checkboxes', async () => {
+    await mount(Settings, { settings })
+    await click('[role=tab]:last-child')
+    expect(count('input[type=checkbox]')).toBe(2)
+  })
+
+  test('an empty name is caught before saving', async () => {
+    await mount(Settings, { settings: { ...settings, name: '' } })
+    await click('button[type=submit]')
+    expect(count('[role=alert]') >= 1).toBeTruthy()
+    expect(count('[role=status]')).toBe(0)
+  })
+</script>

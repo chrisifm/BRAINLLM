@@ -1,0 +1,28 @@
+<meta seo title="Your account" description="The signed-in user's account page: an example of a view protected by a folder guard." robots="noindex">
+
+<script>
+  import session from '../../channels/session.jsbrain'
+
+  export async function load(ctx) {
+    return { user: ctx.user }
+  }
+  server: async function logout(ctx) {
+    ctx.session.clear()
+    return true
+  }
+  const out = async () => {
+    await logout()
+    session.user = null
+    navigate('/')
+  }
+</script>
+
+<main class="page">
+  <h1>Your account</h1>
+  <p>Signed in as <strong>{props.user.email}</strong>.</p>
+  <button type="button" on:click={out}>Sign out</button>
+</main>
+
+<style>
+  .page { max-width: 60ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+</style>

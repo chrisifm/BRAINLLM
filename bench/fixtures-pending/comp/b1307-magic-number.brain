@@ -1,0 +1,9 @@
+<script>
+  let shown = sig(false)
+  const flash = () => {
+    shown = true
+    setTimeout(() => { shown = false }, 3000)
+  }
+</script>
+<button type="button" on:click={flash}>Save</button>
+{#if shown}<p role="status">Saved</p>{/if}

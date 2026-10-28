@@ -1,0 +1,22 @@
+<meta seo title="HTTP client bench" description="Index of the HTTP client scenarios: each page drives one behaviour of api() against the fault-injection server." canonical="/">
+<main class="page">
+  <h1>HTTP client bench</h1>
+  <ul>
+    <li><a href="/kinds">Error kinds, retries and cancel</a></li>
+    <li><a href="/dedupe">Deduplication</a></li>
+    <li><a href="/queue">Queue and priorities</a></li>
+    <li><a href="/nav">Navigation aborts background requests</a></li>
+    <li><a href="/offline">Offline</a></li>
+    <li><a href="/unmount">Cancel on unmount</a></li>
+    <li><a href="/refetch">Refetch after a write</a></li>
+    <li><a href="/upload">Upload with progress</a></li>
+    <li><a href="/login-gate">401 redirects to sign in</a></li>
+    <li><a href="/policy">App-wide policy</a></li>
+    <li><a href="/error-states">Error states from the kit</a></li>
+    <li><a href="/online">Online signal</a></li>
+    <li><a href="/headers">State-dependent headers</a></li>
+  </ul>
+</main>
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+</style>

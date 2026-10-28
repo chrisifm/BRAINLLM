@@ -1,0 +1,10 @@
+{
+  "name": "auth",
+  "title": "Auth pages + role guard",
+  "description": "Completes the scaffold's login: a sign-up page (form() with validation, password confirmation and server errors), a role-protected admin folder (_guard.jsbrain: anonymous → login with ?next=, signed in without the role → 403 naming the missing role) and a session status component (sign-in link or the user and a sign-out button). server/auth.jsbrain gains a role and a demo register().",
+  "params": { "role": { "type": "string", "default": "admin", "replaces": "admin" }, "folder": { "type": "string", "default": "admin", "description": "views/<folder>/ is the protected folder" } },
+  "files": ["server/auth.jsbrain", "views/signup.brain", "views/signup.test.brain", "views/admin/_guard.jsbrain", "views/admin/index.brain", "comp/session-status.brain", "comp/session-status.test.brain"],
+  "replaces": ["server/auth.jsbrain"],
+  "uses": ["Input", "Button"],
+  "notes": "The demo provider exists only while DEMO_PASSWORD is set ([development] in .brain_env); replace check() and register() with a real provider. In the demo an email starting with admin@ gets the admin role."
+}

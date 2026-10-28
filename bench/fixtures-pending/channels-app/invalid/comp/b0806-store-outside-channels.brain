@@ -1,0 +1,4 @@
+<script>
+  let prefs = store({ dark: false })
+</script>
+<p>{prefs.dark ? 'Dark' : 'Light'}</p>

@@ -1,0 +1,55 @@
+<meta seo title="Settings" description="Your profile and notification settings." robots="noindex">
+
+<script>
+  export async function load(ctx) {
+    // replace with a lookup of the stored settings for ctx.user
+    return { settings: { name: ctx.user.name ?? '', email: ctx.user.email, newsletter: false, product: true } }
+  }
+  server: async function saveSettings(ctx, v) {
+    if (typeof v.name !== 'string' || !v.name.trim() || v.name.length > 60) throw { errors: { name: 'Enter a name of up to 60 characters' } }
+    if (typeof v.email !== 'string' || !v.email.includes('@')) throw { errors: { email: 'Enter a valid email' } }
+    // persist here (database, provider API); the session keeps the new name and email
+    ctx.session.set({ ...ctx.user, name: v.name.trim(), email: v.email })
+    return true
+  }
+  let tab = sig('profile')
+  const tabs = [{ id: 'profile', label: 'Profile' }, { id: 'notifications', label: 'Notifications' }]
+  let f = form({ name: 'str!<=60', email: 'email!', newsletter: 'bool', product: 'bool' }, {
+    init: props.settings,
+    submit: async (v) => {
+      await saveSettings(v)
+    },
+  })
+</script>
+
+<main class="page">
+  <h1>Settings</h1>
+  <form on:submit={f.submit}>
+    <Tabs label="Settings sections" tabs={tabs} bind:value={tab}>
+      {#if tab === 'profile'}
+        <div class="fields">
+          <Input label="Name" autocomplete="name" bind:value={f.v.name} error={f.err.name} />
+          <Input label="Email" type="email" autocomplete="email" bind:value={f.v.email} error={f.err.email} />
+        </div>
+      {:else}
+        <fieldset class="fields">
+          <legend>Email me about</legend>
+          <Checkbox label="News and tips (monthly)" bind:checked={f.v.newsletter} />
+          <Checkbox label="Product updates" bind:checked={f.v.product} />
+        </fieldset>
+      {/if}
+    </Tabs>
+    {#if f.error}<p class="err" role="alert">{f.error}</p>{/if}
+    {#if f.ok}<p class="ok" role="status">Settings saved.</p>{/if}
+    <Button type="submit" busy={f.busy}>Save settings</Button>
+  </form>
+</main>
+
+<style>
+  .page { max-width: 44rem; margin: 0 auto; padding: var(--space-5) var(--space-4); display: grid; gap: var(--space-4); }
+  form { display: grid; gap: var(--space-3); justify-items: start; }
+  .fields { display: grid; gap: var(--space-3); width: 100%; border: 0; padding: 0; margin: 0; }
+  legend { font-weight: 600; margin-bottom: var(--space-2); }
+  .err { margin: 0; color: var(--bad); }
+  .ok { margin: 0; color: var(--ok); }
+</style>

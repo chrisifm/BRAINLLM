@@ -1,0 +1,821 @@
+{
+  "task": 157,
+  "section": "INTERNALS §38",
+  "date": "2026-10-13",
+  "binary": {
+    "path": "~/tmp/brainllm-htmlfirst/bin/brain",
+    "sha256_12": "2b83cfa6ec91"
+  },
+  "node": "v26.8.1",
+  "apps": {
+    "scaffold": "~/tmp/brainllm-htmlfirst/scaf",
+    "examples": "~/tmp/brainllm-htmlfirst/ex",
+    "examplesWorkaround": null
+  },
+  "total": 89,
+  "passed": 89,
+  "failed": 0,
+  "rows": [
+    {
+      "app": "scaffold",
+      "target": "build",
+      "check": "`brain build` succeeds",
+      "mode": "build",
+      "pass": true,
+      "evidence": "exit 0; summary 13 pages · 218.2 KB gz total · SEO 86–95 · 133 written, 0 unchanged · 243 ms",
+      "owner": ""
+    },
+    {
+      "app": "examples",
+      "target": "build",
+      "check": "`brain build` succeeds as shipped",
+      "mode": "build",
+      "pass": true,
+      "evidence": "exit 0; ok",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "brain start",
+      "check": "serves dist + server.mjs (/_health 200)",
+      "mode": "start",
+      "pass": true,
+      "evidence": "port 58056",
+      "owner": ""
+    },
+    {
+      "app": "examples",
+      "target": "brain start",
+      "check": "serves dist + server.mjs (/_health 200)",
+      "mode": "start",
+      "pass": true,
+      "evidence": "port 58059",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/",
+      "check": "renders meaningful HTML (h1 + main text, no spinner)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 200 url /; h1 \"Your BRAINLLM app is alive.\"; main text 312 chars",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/",
+      "check": "every internal link loads its page (5)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "/ /about /posts /account /login",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/about",
+      "check": "renders meaningful HTML (h1 + main text, no spinner)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 200 url /about; h1 \"About scaf\"; main text 492 chars",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/about",
+      "check": "every internal link loads its page (5)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "/ /about /posts /account /login",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/posts",
+      "check": "renders meaningful HTML (h1 + main text, no spinner)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 200 url /posts; h1 \"Posts\"; main text 217 chars",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/posts",
+      "check": "every internal link loads its page (7)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "/ /about /posts /account /login /posts/hello-world /posts/second-post",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/posts/hello-world",
+      "check": "renders meaningful HTML (h1 + main text, no spinner)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 200 url /posts/hello-world; h1 \"Hello, world\"; main text 192 chars",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/posts/hello-world",
+      "check": "every internal link loads its page (5)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "/ /about /posts /account /login",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/posts/second-post",
+      "check": "renders meaningful HTML (h1 + main text, no spinner)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 200 url /posts/second-post; h1 \"A second post\"; main text 124 chars",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/posts/second-post",
+      "check": "every internal link loads its page (5)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "/ /about /posts /account /login",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/login",
+      "check": "renders meaningful HTML (h1 + main text, no spinner)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 200 url /login; h1 \"Sign in\"; main text 30 chars",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/login",
+      "check": "every internal link loads its page (5)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "/ /about /posts /account /login",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/account",
+      "check": "renders meaningful HTML (h1 + main text, no spinner)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 303→200 url /login?next=/account; h1 \"Sign in\"; main text 30 chars",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/account",
+      "check": "every internal link loads its page (5)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "/ /about /posts /account /login",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/403",
+      "check": "renders meaningful HTML (h1 + main text, no spinner)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 200 url /403; h1 \"Access denied\"; main text 69 chars",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/403",
+      "check": "every internal link loads its page (5)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "/ /about /posts /account /login",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/no-such-page",
+      "check": "renders meaningful HTML (h1 + main text, no spinner)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 404 url /no-such-page; h1 \"Page not found\"; main text 99 chars",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/no-such-page",
+      "check": "every internal link loads its page (5)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "/ /about /posts /account /login",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-form",
+      "check": "renders meaningful HTML (h1 + main text, no spinner)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 200 url /probe-form; h1 \"Probe form\"; main text 82 chars",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-form",
+      "check": "every internal link loads its page (5)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "/ /about /posts /account /login",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-client",
+      "check": "renders meaningful HTML (h1 + main text, no spinner)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 200 url /probe-client; h1 \"Probe client\"; main text 88 chars",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-client",
+      "check": "every internal link loads its page (5)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "/ /about /posts /account /login",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/login",
+      "check": "form() with a `server:` submit is a real <form method=\"post\"> (name= on fields, hidden _brain)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "method post; _brain \"xq8y/login\"; names email,password,_brain",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-form",
+      "check": "form() with a `server:` submit is a real <form method=\"post\"> (name= on fields, hidden _brain)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "method post; _brain \"vx8w/send\"; names name,email,age,_brain",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/login",
+      "check": "wrong credentials → 422, same page, typed email kept, \"Wrong email or password\" shown",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 422 url /login?next=/posts; values {\"email\":\"qa@example.com\"}; messages [\"Wrong email or password\"]; POSTs 1",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/login",
+      "check": "invalid input → 422, value kept, form() messages shown",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 422; values {\"email\":\"not-an-email\"}; messages [\"Enter a valid email\",\"Required\"]",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/login",
+      "check": "right credentials → 303 to the `next` page (/posts)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "docs 303 → /posts, 200; final url /posts; POSTs 1",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/account",
+      "check": "after the no-JS login the session works (account shows the user)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "url /account; \"Your account\\n\\nSigned in as qa@example.com.\\n\\nSign out\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-form",
+      "check": "invalid → 422, same page, typed values kept, form() messages",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 422 url /probe-form; values {\"name\":\"\",\"email\":\"bad\",\"age\":\"12\"}; messages [\"Required\",\"Enter a valid email\",\"Must be at least 18\"]; POSTs 1",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-form",
+      "check": "server { errors } → shown on its field",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 422 url /probe-form; values {\"name\":\"taken\",\"email\":\"qa@example.com\",\"age\":\"20\"}; messages [\"That name is taken\"]; POSTs 1",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-form",
+      "check": "unexpected server failure → generic message",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 422 url /probe-form; values {\"name\":\"boom\",\"email\":\"qa@example.com\",\"age\":\"20\"}; messages [\"Something went wrong. Try again.\"]; POSTs 1",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-form",
+      "check": "valid, function returns { redirect: \"/about\" } → 303 to /about",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 303→200 url /about; values {}; messages []; POSTs 1",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-form",
+      "check": "valid → 303 PRG to the same page",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 303→200 url /probe-form; values {\"name\":\"\",\"email\":\"\",\"age\":\"\"}; messages []; POSTs 1",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-client",
+      "check": "<meta client> renders a reserved-size placeholder",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "placeholder height 320px (meta client height=\"320\"); #after top 573px",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "POST /probe-form",
+      "check": "cross-site POST (Origin: https://evil.example) → 403",
+      "mode": "raw HTTP",
+      "pass": true,
+      "evidence": "status 403; body \"Cross-origin form post\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "POST /probe-form",
+      "check": "cross-site POST (Sec-Fetch-Site: cross-site, no Origin) → 403",
+      "mode": "raw HTTP",
+      "pass": true,
+      "evidence": "status 403; body \"Cross-origin form post\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "POST /probe-form",
+      "check": "missing Origin and Sec-Fetch-Site → 403",
+      "mode": "raw HTTP",
+      "pass": true,
+      "evidence": "status 403; body \"Cross-origin form post\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "POST /probe-form",
+      "check": "JSON body → 415",
+      "mode": "raw HTTP",
+      "pass": true,
+      "evidence": "status 415; body \"Forms are sent as application/x-www-form-urlencoded\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "POST /probe-form",
+      "check": "unknown _brain (unknown hash) → 400",
+      "mode": "raw HTTP",
+      "pass": true,
+      "evidence": "status 400; body \"Unknown form\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "POST /probe-form",
+      "check": "unknown _brain (known hash, unknown function) → 400",
+      "mode": "raw HTTP",
+      "pass": true,
+      "evidence": "status 400; body \"Unknown form\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "POST /probe-form",
+      "check": "missing _brain → 400",
+      "mode": "raw HTTP",
+      "pass": true,
+      "evidence": "status 400; body \"Unknown form\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "POST /probe-form",
+      "check": "control: same origin (Origin) → 303",
+      "mode": "raw HTTP",
+      "pass": true,
+      "evidence": "status 303 location /probe-form; body \"\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "POST /probe-form",
+      "check": "control: same origin (Sec-Fetch-Site only) → 303",
+      "mode": "raw HTTP",
+      "pass": true,
+      "evidence": "status 303 location /probe-form; body \"\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/",
+      "check": "renders and hydrates",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "url /; hydrated true; h1 \"Your BRAINLLM app is alive.\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/",
+      "check": "links navigate on the client (window probe survives, no load event, same page as no-JS)",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "/about /posts /account /login",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/about",
+      "check": "renders and hydrates",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "url /about; hydrated true; h1 \"About scaf\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/about",
+      "check": "links navigate on the client (window probe survives, no load event, same page as no-JS)",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "/ /posts /account /login",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/posts",
+      "check": "renders and hydrates",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "url /posts; hydrated true; h1 \"Posts\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/posts",
+      "check": "links navigate on the client (window probe survives, no load event, same page as no-JS)",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "/ /about /account /login /posts/hello-world /posts/second-post",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/posts/hello-world",
+      "check": "renders and hydrates",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "url /posts/hello-world; hydrated true; h1 \"Hello, world\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/posts/hello-world",
+      "check": "links navigate on the client (window probe survives, no load event, same page as no-JS)",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "/ /about /posts /account /login",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/posts/second-post",
+      "check": "renders and hydrates",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "url /posts/second-post; hydrated true; h1 \"A second post\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/posts/second-post",
+      "check": "links navigate on the client (window probe survives, no load event, same page as no-JS)",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "/ /about /posts /account /login",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/login",
+      "check": "renders and hydrates",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "url /login; hydrated true; h1 \"Sign in\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/login",
+      "check": "links navigate on the client (window probe survives, no load event, same page as no-JS)",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "/ /about /posts /account",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/account",
+      "check": "renders and hydrates",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "url /login?next=/account; hydrated true; h1 \"Sign in\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/account",
+      "check": "links navigate on the client (window probe survives, no load event, same page as no-JS)",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "/ /about /posts /login",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/403",
+      "check": "renders and hydrates",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "url /403; hydrated true; h1 \"Access denied\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/403",
+      "check": "links navigate on the client (window probe survives, no load event, same page as no-JS)",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "/ /about /posts /account /login",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-form",
+      "check": "renders and hydrates",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "url /probe-form; hydrated true; h1 \"Probe form\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-form",
+      "check": "links navigate on the client (window probe survives, no load event, same page as no-JS)",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "/ /about /posts /account /login",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-client",
+      "check": "renders and hydrates",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "url /probe-client; hydrated true; h1 \"Probe client\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-client",
+      "check": "links navigate on the client (window probe survives, no load event, same page as no-JS)",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "/ /about /posts /account /login",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/login",
+      "check": "after a native POST (422) form() hydrates from the server state (email kept, error shown)",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "status 422; after hydration values {\"email\":\"qa@example.com\"} messages [\"Wrong email or password\"]",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/login",
+      "check": "wrong credentials: double click sends one POST, error shown, no reload (matches no-JS message)",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "POSTs 1 [\"/_r/xq8y/login\"]; full loads 0; messages [\"Wrong email or password\"]",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/login",
+      "check": "right credentials: one POST, client navigation to `next` (/posts), probe survives",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "POSTs 1; url /posts; probe kept; full loads 0; header \"Signed in as qa@example.com\"",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-form",
+      "check": "after a native POST (422) form() hydrates from the server state (values + messages)",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "status 422; hydrated true; values {\"name\":\"\",\"email\":\"bad\",\"age\":\"12\"}; messages [\"Required\",\"Enter a valid email\",\"Must be at least 18\"]",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-form",
+      "check": "invalid: no POST, same messages as no-JS",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "POSTs 0; url /probe-form (no-JS /probe-form); messages [\"Required\",\"Enter a valid email\",\"Must be at least 18\"] (no-JS [\"Required\",\"Enter a valid email\",\"Must be at least 18\"]); probe kept; full loads 0",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-form",
+      "check": "server { errors }: one POST (double click), same field message as no-JS",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "POSTs 1; url /probe-form (no-JS /probe-form); messages [\"That name is taken\"] (no-JS [\"That name is taken\"]); probe kept; full loads 0",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-form",
+      "check": "server failure: one POST, same generic message as no-JS",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "POSTs 1; url /probe-form (no-JS /probe-form); messages [\"Something went wrong. Try again.\"] (no-JS [\"Something went wrong. Try again.\"]); probe kept; full loads 0",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-form",
+      "check": "{ redirect: \"/about\" }: one POST, client navigation to /about like no-JS",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "POSTs 1; url /about (no-JS /about); messages [] (no-JS []); probe kept; full loads 0",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-form",
+      "check": "valid: one POST (double click), no error, stays on /probe-form like the no-JS PRG",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "POSTs 1; url /probe-form (no-JS /probe-form); messages [] (no-JS []); probe kept; full loads 0",
+      "owner": ""
+    },
+    {
+      "app": "scaffold",
+      "target": "/probe-client",
+      "check": "client mounts in place: no layout jump vs the placeholder",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "canvas 320px mounted \"yes\"; #after top 573px (no-JS 573px, jump 0px); CLS 0.0000",
+      "owner": ""
+    },
+    {
+      "app": "examples",
+      "target": "/",
+      "check": "renders meaningful HTML (h1 + main text, no spinner)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 200 url /; h1 \"BRAINLLM examples\"; main text 185 chars",
+      "owner": ""
+    },
+    {
+      "app": "examples",
+      "target": "/",
+      "check": "every internal link loads its page (2)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "/ /dashboard",
+      "owner": ""
+    },
+    {
+      "app": "examples",
+      "target": "/dashboard",
+      "check": "renders meaningful HTML (h1 + main text, no spinner)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 200 url /dashboard; h1 \"Users\"; main text 145 chars",
+      "owner": ""
+    },
+    {
+      "app": "examples",
+      "target": "/dashboard",
+      "check": "every internal link loads its page (2)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "/ /dashboard",
+      "owner": ""
+    },
+    {
+      "app": "examples",
+      "target": "/no-such-page",
+      "check": "renders meaningful HTML (h1 + main text, no spinner)",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "status 404 url /no-such-page; h1 \"Not found\"; main text 9 chars",
+      "owner": ""
+    },
+    {
+      "app": "examples",
+      "target": "/ (todo)",
+      "check": "client-only form (no `server:` submit) stays a plain form, not a POST",
+      "mode": "no-JS",
+      "pass": true,
+      "evidence": "method get; _brain \"\"",
+      "owner": ""
+    },
+    {
+      "app": "examples",
+      "target": "/",
+      "check": "renders and hydrates",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "url /; hydrated true; h1 \"BRAINLLM examples\"",
+      "owner": ""
+    },
+    {
+      "app": "examples",
+      "target": "/",
+      "check": "links navigate on the client (window probe survives, no load event, same page as no-JS)",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "/dashboard",
+      "owner": ""
+    },
+    {
+      "app": "examples",
+      "target": "/dashboard",
+      "check": "renders and hydrates",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "url /dashboard; hydrated true; h1 \"Users\"",
+      "owner": ""
+    },
+    {
+      "app": "examples",
+      "target": "/dashboard",
+      "check": "links navigate on the client (window probe survives, no load event, same page as no-JS)",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "/",
+      "owner": ""
+    },
+    {
+      "app": "examples",
+      "target": "/ (todo)",
+      "check": "client-only form submits without a reload",
+      "mode": "JS",
+      "pass": true,
+      "evidence": "items [\"buy milk\"]; full loads 0",
+      "owner": ""
+    },
+    {
+      "app": "run",
+      "target": "cleanup",
+      "check": "no process left",
+      "mode": "run",
+      "pass": true,
+      "evidence": "stopped 2 supervisors and their children",
+      "owner": ""
+    }
+  ]
+}

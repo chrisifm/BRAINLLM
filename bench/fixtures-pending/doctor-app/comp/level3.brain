@@ -1,0 +1,5 @@
+<meta props="user:obj">
+<script>
+  import Leaf from './leaf.brain'
+</script>
+<div><Leaf user={user} /></div>

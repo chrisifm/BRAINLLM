@@ -1,0 +1,273 @@
+{
+ "bench": "precision",
+ "date": "2026-10-13T20:47:42.179Z",
+ "brainSha256": "a7a460dff990",
+ "modes": [
+  "dev",
+  "prod"
+ ],
+ "verdict": "PASS",
+ "counts": {
+  "PASS": 16,
+  "FAIL": 0,
+  "BLOCKED": 0
+ },
+ "leftOut": {},
+ "runtimeMs": {
+  "total": 53949,
+  "dev": 10473,
+  "prod": 42650,
+  "build": 33775
+ },
+ "consoleErrors": {
+  "dev": [],
+  "prod": []
+ },
+ "firstInteraction": {
+  "dev": {
+   "P1": {
+    "mutations": 0,
+    "ms": 84,
+    "sample": []
+   },
+   "P2": {
+    "mutations": 0,
+    "ms": 97,
+    "sample": []
+   },
+   "P3": {
+    "mutations": 0,
+    "ms": 96,
+    "sample": []
+   },
+   "P4": {
+    "mutations": 0,
+    "ms": 92,
+    "sample": []
+   },
+   "P5": {
+    "mutations": 0,
+    "ms": 93,
+    "sample": []
+   },
+   "P6": {
+    "mutations": 0,
+    "ms": 87,
+    "sample": []
+   },
+   "P7": {
+    "mutations": 0,
+    "ms": 92,
+    "sample": []
+   },
+   "P8": {
+    "mutations": 0,
+    "ms": 90,
+    "sample": []
+   }
+  },
+  "prod": {
+   "P1": {
+    "mutations": 0,
+    "ms": 93,
+    "sample": []
+   },
+   "P2": {
+    "mutations": 0,
+    "ms": 87,
+    "sample": []
+   },
+   "P3": {
+    "mutations": 0,
+    "ms": 88,
+    "sample": []
+   },
+   "P4": {
+    "mutations": 0,
+    "ms": 84,
+    "sample": []
+   },
+   "P5": {
+    "mutations": 0,
+    "ms": 86,
+    "sample": []
+   },
+   "P6": {
+    "mutations": 4,
+    "ms": 99,
+    "sample": [
+     "?>div+main.page",
+     "?>div+#comment",
+     "?>div-main.page",
+     "?>div-script"
+    ]
+   },
+   "P7": {
+    "mutations": 4,
+    "ms": 94,
+    "sample": [
+     "?>div+main.page",
+     "?>div+#comment",
+     "?>div-main.page",
+     "?>div-script"
+    ]
+   },
+   "P8": {
+    "mutations": 4,
+    "ms": 96,
+    "sample": [
+     "?>div+main.page",
+     "?>div+#comment",
+     "?>div-main.page",
+     "?>div-script"
+    ]
+   }
+  }
+ },
+ "rows": [
+  {
+   "id": "P1",
+   "title": "local state: one counter among 1 000 components",
+   "owner": "RUNTIME runtime/brain.js (signals, keyed lists)",
+   "expected": 2,
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "mutated": 2,
+     "evidence": "2 mutation(s) = expected 2 (118 ms)"
+    },
+    "prod": {
+     "status": "PASS",
+     "mutated": 2,
+     "evidence": "2 mutation(s) = expected 2 (96 ms)"
+    }
+   }
+  },
+  {
+   "id": "P2",
+   "title": "global store: write one field (10 readers of it, 10 of another field)",
+   "owner": "RUNTIME runtime/brain.js (signals, keyed lists) · channels store",
+   "expected": 10,
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "mutated": 10,
+     "evidence": "10 mutation(s) = expected 10 (115 ms)"
+    },
+    "prod": {
+     "status": "PASS",
+     "mutated": 10,
+     "evidence": "10 mutation(s) = expected 10 (99 ms)"
+    }
+   }
+  },
+  {
+   "id": "P3",
+   "title": "global store: write an equal value (Object.is) → nothing",
+   "owner": "RUNTIME runtime/brain.js (signals, keyed lists) · channels store",
+   "expected": 0,
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "mutated": 0,
+     "evidence": "0 mutation(s) = expected 0 (98 ms)"
+    },
+    "prod": {
+     "status": "PASS",
+     "mutated": 0,
+     "evidence": "0 mutation(s) = expected 0 (82 ms)"
+    }
+   }
+  },
+  {
+   "id": "P4",
+   "title": "global store: write the other field",
+   "owner": "RUNTIME runtime/brain.js (signals, keyed lists) · channels store",
+   "expected": 10,
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "mutated": 10,
+     "evidence": "10 mutation(s) = expected 10 (113 ms)"
+    },
+    "prod": {
+     "status": "PASS",
+     "mutated": 10,
+     "evidence": "10 mutation(s) = expected 10 (98 ms)"
+    }
+   }
+  },
+  {
+   "id": "P5",
+   "title": "group state: provide(Cart, store()) per subtree; write x in subtree one",
+   "owner": "RUNTIME #169 (store in provide) · COMPILER #170",
+   "expected": 5,
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "mutated": 5,
+     "evidence": "5 mutation(s) = expected 5 (113 ms)"
+    },
+    "prod": {
+     "status": "PASS",
+     "mutated": 5,
+     "evidence": "5 mutation(s) = expected 5 (96 ms)"
+    }
+   }
+  },
+  {
+   "id": "P6",
+   "title": "1 000-row keyed list: update one row field",
+   "owner": "RUNTIME runtime/brain.js (signals, keyed lists)",
+   "expected": 1,
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "mutated": 1,
+     "evidence": "1 mutation(s) = expected 1 (107 ms)"
+    },
+    "prod": {
+     "status": "PASS",
+     "mutated": 1,
+     "evidence": "1 mutation(s) = expected 1 (97 ms)"
+    }
+   }
+  },
+  {
+   "id": "P7",
+   "title": "1 000-row keyed list: swap rows 2 and 999 (moves only those two)",
+   "owner": "RUNTIME runtime/brain.js (signals, keyed lists)",
+   "expected": 4,
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "mutated": 4,
+     "evidence": "4 mutation(s) = expected 4; order ok (111 ms)"
+    },
+    "prod": {
+     "status": "PASS",
+     "mutated": 4,
+     "evidence": "4 mutation(s) = expected 4; order ok (93 ms)"
+    }
+   }
+  },
+  {
+   "id": "P8",
+   "title": "1 000-row keyed list: remove one row",
+   "owner": "RUNTIME runtime/brain.js (signals, keyed lists)",
+   "expected": 1,
+   "modes": {
+    "dev": {
+     "status": "PASS",
+     "mutated": 1,
+     "evidence": "1 mutation(s) = expected 1 (114 ms)"
+    },
+    "prod": {
+     "status": "PASS",
+     "mutated": 1,
+     "evidence": "1 mutation(s) = expected 1 (97 ms)"
+    }
+   }
+  }
+ ]
+}

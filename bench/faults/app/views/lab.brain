@@ -1,0 +1,18 @@
+<meta seo title="Lab" description="Turn a fault on in the innermost component (render, effect, derived value, handler, async handler or resource) and check that only it falls back." canonical="/lab">
+<script>
+  import Controls from '../comp/controls.brain'
+  import Outer from '../comp/outer.brain'
+  import Sibling from '../comp/sibling.brain'
+  let n = sig(0)
+</script>
+<main class="page">
+  <h1>Lab</h1>
+  <Controls />
+  <button type="button" data-p="view-inc" on:click={n++}>view {n}</button>
+  <Outer />
+  <Sibling name="view-sib" />
+  <p><a data-p="nav-about" href="/about">About</a></p>
+</main>
+<style>
+  .page { max-width: 80ch; margin: 0 auto; padding: var(--space-4); display: grid; gap: var(--space-3); }
+</style>

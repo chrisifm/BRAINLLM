@@ -1,0 +1,9 @@
+<span class="probe" data-probe="esc-own">Escape probe</span>
+<style>
+  :scope ~ p { font-size: 41px; }
+  main { font-size: 41px; }
+  @media (min-width: 1px) { body { font-size: 41px; } }
+  :where(html) p { font-size: 41px; }
+  .a body { font-size: 41px; }
+  ::selection { color: var(--bad); }
+</style>

@@ -1,0 +1,1 @@
+export default store({ count: 0, other: 0 })

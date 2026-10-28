@@ -1,0 +1,21 @@
+<meta seo title="Sign-in gate for 401" description="A 401 anywhere redirects to the login page of the app-wide policy with next set to the current path.">
+<script>
+  import fault from '../api/fault.jsbrain'
+  import describe from '../lib/describe.jsbrain'
+  let res = sig('')
+  const me = async () => {
+    res = 'running'
+    try {
+      res = describe(await fault.get({ name: 'me' }), 0)
+    } catch (e) {
+      res = describe(e, 0)
+    }
+  }
+</script>
+<main class="page">
+  <h1>401 redirects to sign in</h1>
+  <button type="button" data-a="me" on:click={me}>me</button> <output data-r="me">{res}</output>
+</main>
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+</style>

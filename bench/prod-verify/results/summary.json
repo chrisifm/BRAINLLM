@@ -1,0 +1,153 @@
+{
+  "date": "2026-10-13",
+  "brain": "99a6e970b4ee",
+  "node": "v26.8.1",
+  "firstExecMs": 15793,
+  "leftovers": 0,
+  "results": [
+    {
+      "id": "233a-build",
+      "name": "static blog is prerendered",
+      "command": "brain build",
+      "expected": "exit 0; dist/blog/index.html with 3 titles; sitemap lists 3 entries; llms.txt lists them; blog.md and blog/second-post.md exist",
+      "actual": "{\"build\":0,\"index\":true,\"indexTitles\":3,\"sitemapEntries\":3,\"llms\":true,\"md\":true}",
+      "pass": true
+    },
+    {
+      "id": "233a-start",
+      "name": "static blog served by brain start",
+      "command": "brain start → GET /blog, /blog/second-post, /blog/tag/news, /blog/rss.xml",
+      "expected": "200 everywhere; /blog has the 3 titles; the entry has its body; the news tag lists 2; no module errors",
+      "actual": "{\"up\":true,\"list\":200,\"listTitles\":3,\"entry\":200,\"entryBody\":true,\"tag\":200,\"tagTitles\":2,\"rss\":200,\"moduleErrors\":0}",
+      "pass": true
+    },
+    {
+      "id": "233a-node",
+      "name": "static blog served by node dist/server.mjs",
+      "command": "node dist/server.mjs → GET /blog, /blog/second-post, /blog/tag/news, /blog/rss.xml",
+      "expected": "200 everywhere; /blog has the 3 titles; the entry has its body; the news tag lists 2; no module errors",
+      "actual": "{\"up\":true,\"list\":200,\"listTitles\":3,\"entry\":200,\"entryBody\":true,\"tag\":200,\"tagTitles\":2,\"rss\":200,\"moduleErrors\":0}",
+      "pass": true
+    },
+    {
+      "id": "233b-build",
+      "name": "dynamic blog index is SSR, not prerendered",
+      "command": "brain build",
+      "expected": "exit 0; no dist/blog/index.html; /blog in dist/_server/manifest.json with a server module",
+      "actual": "{\"build\":0,\"prerendered\":false,\"route\":true,\"server\":\"_server/j39lhgwm.mjs\",\"buildErr\":\"\"}",
+      "pass": true
+    },
+    {
+      "id": "233b-start",
+      "name": "dynamic blog served by brain start",
+      "command": "brain start → GET /blog, /blog?tag=caching|news|nope, /blog/third-post",
+      "expected": "/blog 200 with 3 titles; ?tag=caching only \"Second post about caching\"; ?tag=news 2; ?tag=nope 0; /blog/third-post 200 with its body; no module errors in stdout/stderr or logs/app.log",
+      "actual": "{\"up\":true,\"all\":[200,3],\"caching\":[200,[\"Second post about caching\"]],\"news\":[200,2],\"none\":[200,0],\"entry\":[200,true],\"moduleErrors\":[]}",
+      "pass": true
+    },
+    {
+      "id": "233b-node",
+      "name": "dynamic blog served by node dist/server.mjs",
+      "command": "node dist/server.mjs → GET /blog, /blog?tag=caching|news|nope, /blog/third-post",
+      "expected": "/blog 200 with 3 titles; ?tag=caching only \"Second post about caching\"; ?tag=news 2; ?tag=nope 0; /blog/third-post 200 with its body; no module errors in stdout/stderr or logs/app.log",
+      "actual": "{\"up\":true,\"all\":[200,3],\"caching\":[200,[\"Second post about caching\"]],\"news\":[200,2],\"none\":[200,0],\"entry\":[200,true],\"moduleErrors\":[]}",
+      "pass": true
+    },
+    {
+      "id": "233b-portable",
+      "name": "dynamic blog served by node dist/server.mjs, .brain/ moved away",
+      "command": "node dist/server.mjs, .brain/ moved away → GET /blog, /blog?tag=caching|news|nope, /blog/third-post",
+      "expected": "/blog 200 with 3 titles; ?tag=caching only \"Second post about caching\"; ?tag=news 2; ?tag=nope 0; /blog/third-post 200 with its body; no module errors in stdout/stderr or logs/app.log",
+      "actual": "{\"up\":true,\"all\":[200,3],\"caching\":[200,[\"Second post about caching\"]],\"news\":[200,2],\"none\":[200,0],\"entry\":[200,true],\"moduleErrors\":[]}",
+      "pass": true
+    },
+    {
+      "id": "253-build",
+      "name": "build emits route.cache and route.loading",
+      "command": "brain build",
+      "expected": "exit 0; manifest /clock cache 2; /slow has loading (the _loading view)",
+      "actual": "{\"build\":0,\"clockCache\":2,\"slowLoading\":\"/_b/ohgufczo.js\",\"slowStream\":true}",
+      "pass": true
+    },
+    {
+      "id": "253a-hit",
+      "name": "two requests within N s share one render",
+      "command": "brain start → GET /clock at 0, 0.5, 1.5 s",
+      "expected": "same stamp; cache-control public, s-maxage=2",
+      "actual": "[{\"label\":\"cold\",\"atMs\":8,\"ms\":7,\"status\":200,\"stamp\":\"1791933142626-ldkm7e\",\"cc\":\"public, s-maxage=2, stale-while-revalidate=2\"},{\"label\":\"0.5 s\",\"atMs\":511,\"ms\":1,\"status\":200,\"stamp\":\"1791933142626-ldkm7e\",\"cc\":\"public, s-maxage=2, stale-while-revalidate=2\"},{\"label\":\"1.5 s\",\"atMs\":1509,\"ms\":1,\"status\":200,\"stamp\":\"1791933142626-ldkm7e\",\"cc\":\"public, s-maxage=2, stale-while-revalidate=2\"}]",
+      "pass": true
+    },
+    {
+      "id": "253a-swr",
+      "name": "first request after N s gets the stale copy and triggers a refresh",
+      "command": "GET /clock at 2.3 s then 2.8 s",
+      "expected": "at 2.3 s the old stamp (stale-while-revalidate, per server.mjs and INTERNALS §35 wording \"served while a fresh one renders\"); at 2.8 s a new stamp",
+      "actual": "[{\"label\":\"2.3 s (expired, < 2N)\",\"atMs\":2303,\"ms\":1,\"status\":200,\"stamp\":\"1791933142626-ldkm7e\",\"cc\":\"public, s-maxage=2, stale-while-revalidate=2\"},{\"label\":\"2.8 s (after background refresh)\",\"atMs\":2804,\"ms\":1,\"status\":200,\"stamp\":\"1791933144927-xtnxgo\",\"cc\":\"public, s-maxage=2, stale-while-revalidate=2\"}]",
+      "pass": true
+    },
+    {
+      "id": "253a-expire",
+      "name": "after 2N s a request renders again",
+      "command": "GET /clock at 7.5 s",
+      "expected": "a new stamp, different from the refreshed one",
+      "actual": "{\"label\":\"7.5 s (> 2N since last render)\",\"atMs\":7503,\"ms\":2,\"status\":200,\"stamp\":\"1791933150126-5hmjmz\",\"cc\":\"public, s-maxage=2, stale-while-revalidate=2\"}",
+      "pass": true
+    },
+    {
+      "id": "253a-session",
+      "name": "a session cookie bypasses the cache",
+      "command": "GET /clock twice with cookie __Host-session",
+      "expected": "two fresh stamps, both different from the cached one",
+      "actual": "[{\"label\":\"with session cookie\",\"atMs\":7508,\"ms\":4,\"status\":200,\"stamp\":\"1791933150128-o4yfvb\",\"cc\":\"no-cache\"},{\"label\":\"with session cookie again\",\"atMs\":7511,\"ms\":3,\"status\":200,\"stamp\":\"1791933150132-sm4ytj\",\"cc\":\"no-cache\"}]",
+      "pass": true
+    },
+    {
+      "id": "253b-ssr-stream",
+      "name": "SSR of a slow load streams the shell first",
+      "command": "GET /slow (load waits 1500 ms)",
+      "expected": "first chunk (head + layout) well before 1500 ms; the full page has the content after ≥ 1500 ms",
+      "actual": "{\"status\":200,\"firstChunkMs\":1,\"totalMs\":1503,\"firstChunkHasShell\":true,\"firstChunkHasLoading\":false,\"firstChunkHasContent\":false,\"finalHasContent\":true}",
+      "pass": true
+    },
+    {
+      "id": "253b-ssr-loading",
+      "name": "_loading.brain markup during SSR",
+      "command": "GET /slow, inspect the streamed chunks that arrive before the content",
+      "expected": "SPEC line 16: \"_loading.brain shows while load runs\" → the loading markup is in the streamed region before the content, sent before load() ends",
+      "actual": "{\"chunks\":[1,2,1502],\"earlyHasLoading\":true,\"earlyLastMs\":2,\"contentMs\":1502,\"firstChunkHasLoading\":false}",
+      "pass": true
+    },
+    {
+      "id": "253b-client-loading",
+      "name": "client navigation to the slow route shows _loading first",
+      "command": "headless Chrome: open /, __brainNavigate(\"/slow\"), observe the DOM",
+      "expected": "loading markup appears ~150 ms after the navigation (router threshold) and before the content (~1500 ms); same document (no reload)",
+      "actual": "{\"router\":true,\"loadingAt\":154,\"contentAt\":1506,\"contentWhileLoading\":false,\"path\":\"/slow\",\"sameDocument\":true,\"reloaded\":null}",
+      "pass": true
+    },
+    {
+      "id": "253b-ssr-final",
+      "name": "a direct load of the streamed route ends with only the content",
+      "command": "headless Chrome: open /slow, wait for load",
+      "expected": "content present; no [aria-label=\"Loading\"] node and no brain:loading marker comment left",
+      "actual": "{\"content\":true,\"loadingNodes\":0,\"markers\":0}",
+      "pass": true
+    },
+    {
+      "id": "253b-client-fast",
+      "name": "a fast navigation never shows _loading",
+      "command": "headless Chrome: open /, __brainNavigate(\"/about\")",
+      "expected": "content arrives, no loading markup at any time",
+      "actual": "{\"router\":true,\"loadingAt\":null,\"contentAt\":12,\"contentWhileLoading\":false,\"path\":\"/about\",\"sameDocument\":true,\"reloaded\":null}",
+      "pass": true
+    },
+    {
+      "id": "253-logs",
+      "name": "no server errors logged during #253",
+      "command": "logs/app.log + supervisor output",
+      "expected": "no error lines",
+      "actual": "[]",
+      "pass": true
+    }
+  ]
+}

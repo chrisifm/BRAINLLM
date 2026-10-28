@@ -1,0 +1,3 @@
+# build output and the dev server's state
+dist/
+.brain/

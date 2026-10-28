@@ -1,0 +1,11 @@
+<meta seo title="Events" description="Handlers run per component, with how many times and how long.">
+<script>
+  import inspector from '../channels/inspector.jsbrain'
+  const rows = drv(() => Object.values(inspector.handlers.reduce((a, h) => { const k = h.name + ' · ' + h.type; const x = a[k] || (a[k] = { id: k, comp: h.name, type: h.type, n: 0, ms: 0 }); x.n++; x.ms = +(x.ms + h.ms).toFixed(2); return a }, {})))
+  const cols = [{ key: 'comp', label: 'Component' }, { key: 'type', label: 'Event' }, { key: 'n', label: 'Runs' }, { key: 'ms', label: 'Total ms' }]
+</script>
+<h1>Events</h1>
+<Table caption="Handlers" rows={rows} columns={cols} empty="No handler has run yet." />
+<style>
+  h1 { margin: 0 0 var(--space-4); font-size: 22px; }
+</style>

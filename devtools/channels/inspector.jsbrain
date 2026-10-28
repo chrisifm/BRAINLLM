@@ -1,0 +1,7 @@
+// What the debugger knows about the app under inspection: the inspector's records folded by lib/fold.jsbrain.
+// views/_layout.brain polls the dev server (`/@brain/metrics?since=`) and writes here; each view reads what it shows.
+export default store({
+  connected: false, since: 0, now: 0, seq: -1,
+  heap: [], inst: [], comps: [], ev: [], jank: [], inp: [], upd: [], handlers: [],
+  net: [], storage: [], conns: [], timers: [], state: {}, graph: {}, leaks: [], errors: [],
+})

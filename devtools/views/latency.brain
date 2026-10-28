@@ -1,0 +1,11 @@
+<meta seo title="Latency" description="The slowest updates: which signal write re-ran how many effects and touched how many nodes.">
+<script>
+  import inspector from '../channels/inspector.jsbrain'
+  const rows = drv(() => [...inspector.upd].sort((a, b) => b.ms - a.ms).slice(0, 20).map((u, i) => ({ ...u, id: i })))
+  const cols = [{ key: 'sig', label: 'Signal' }, { key: 'w', label: 'Written by' }, { key: 'fx', label: 'Effects' }, { key: 'nodes', label: 'Nodes' }, { key: 'ms', label: 'ms' }]
+</script>
+<h1>Latency</h1>
+<Table caption="Worst 20 updates" rows={rows} columns={cols} empty="No update recorded yet." />
+<style>
+  h1 { margin: 0 0 var(--space-4); font-size: 22px; }
+</style>

@@ -1,0 +1,17 @@
+<meta props="side:str='left' width:str='16rem' gap:str='4' min:str='50%'">
+<script>
+  // a sidebar next to the main content that stacks above it when the main column would get narrower than `min`
+  // (no media query). Content goes in <div slot="side"> and the default slot.
+  // spacing props take a token step from tokens.cssbrain (0–6 → --space-N), never raw CSS
+  const sp = (n) => (n == null || n === '' ? null : String(n) === '0' ? '0' : 'var(--space-' + n + ')')
+</script>
+<div class="sidebar" class:right={side === 'right'} style:gap={sp(gap)}>
+  <div class="side" style:flex-basis={width}><slot name="side" /></div>
+  <div class="main" style:min-width={min}><slot /></div>
+</div>
+<style>
+  .sidebar { display: flex; flex-wrap: wrap; }
+  .sidebar.right { flex-direction: row-reverse; }
+  .side { flex-grow: 1; }
+  .main { flex-basis: 0; flex-grow: 999; }
+</style>

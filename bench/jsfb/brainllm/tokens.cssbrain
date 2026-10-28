@@ -1,0 +1,9 @@
+/* The benchmark ships its own Bootstrap stylesheet (/css/currentStyle.css); no reset, tokens only. */
+:root {
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --space-6: 32px;
+  --radius: 4px; --radius-sm: 2px; --radius-lg: 6px;
+  --fg: #333333; --muted: #666666; --bg: #ffffff; --surface: #ffffff; --line: #dddddd;
+  --accent: #337ab7; --ok: #3c763d; --bad: #a94442; --on-accent: #ffffff;
+  --font: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --glass: #ffffff; --glass-edge: #ffffff; --shadow: none;
+}

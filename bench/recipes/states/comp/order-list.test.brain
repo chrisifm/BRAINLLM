@@ -1,0 +1,29 @@
+<script>
+  import OrderList from './order-list.brain'
+
+  test('a pending promise shows the skeleton', async () => {
+    await mount(OrderList, { orders: new Promise(() => {}) })
+    expect(attr('[role=status]', 'aria-busy')).toBe('true')
+    expect(count('.bar')).toBe(4)
+  })
+
+  test('data renders one row per order', async () => {
+    await mount(OrderList, { orders: Promise.resolve([{ id: 7, customer: 'Ana', total: 12.5 }, { id: 8, customer: 'Bruno', total: 3 }]) })
+    expect(count('.orders li')).toBe(2)
+    expect(text('.orders li:first-child .total')).toBe('$12.50')
+  })
+
+  test('an empty answer shows the empty state, not a blank list', async () => {
+    await mount(OrderList, { orders: Promise.resolve([]) })
+    expect(text('.title')).toBe('No orders yet')
+    expect(count('.orders')).toBe(0)
+  })
+
+  test('a server error shows the error state with Retry', async () => {
+    let n = 0
+    await mount(OrderList, { orders: Promise.reject({ kind: 'http', status: 500, message: 'boom' }), retry: () => { n = n + 1 } })
+    expect(text('.error-state p')).toBe('Something went wrong on our side.')
+    await click('.error-state button')
+    expect(n).toBe(1)
+  })
+</script>

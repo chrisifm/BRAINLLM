@@ -1,0 +1,17 @@
+<meta seo title="Administration" description="Administration area, visible only to users with the admin role." robots="noindex">
+
+<script>
+  export async function load(ctx) {
+    return { user: ctx.user }
+  }
+</script>
+
+<main class="page">
+  <h1>Administration</h1>
+  <p>Signed in as <strong>{props.user.email}</strong> with the <strong>{props.user.role}</strong> role.</p>
+  <p>Put the admin views in this folder: the guard protects each of them.</p>
+</main>
+
+<style>
+  .page { max-width: 60ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+</style>

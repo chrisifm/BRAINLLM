@@ -1,0 +1,29 @@
+<script>
+  import PricingTable from './pricing-table.brain'
+
+  const plans = [
+    { id: 'basic', name: 'Basic', price: 10, perks: ['1 user', 'Email support'] },
+    { id: 'pro', name: 'Pro', price: 30, featured: true, perks: ['5 users', 'Priority support'] },
+  ]
+
+  test('lists every plan with its monthly price and marks the featured one', async () => {
+    await mount(PricingTable, { plans })
+    expect(count('.plan')).toBe(2)
+    expect(text('.plan:first-child .price strong')).toBe('$10')
+    expect(hasClass('.plan:last-child', 'featured')).toBeTruthy()
+    expect(attr('.toggle button:first-child', 'aria-pressed')).toBe('true')
+  })
+
+  test('yearly applies the discount and says how it is billed', async () => {
+    await mount(PricingTable, { plans, discount: 0.2 })
+    await click('.toggle button:last-child')
+    expect(text('.plan:last-child .price strong')).toBe('$24')
+    expect(text('.plan:last-child .price').includes('billed yearly')).toBeTruthy()
+    expect(attr('.toggle button:last-child', 'aria-pressed')).toBe('true')
+  })
+
+  test('no plans shows a message instead of an empty grid', async () => {
+    await mount(PricingTable, { plans: [] })
+    expect(text('.none')).toBe('No plans available right now.')
+  })
+</script>

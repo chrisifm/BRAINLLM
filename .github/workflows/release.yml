@@ -1,0 +1,84 @@
+# BRAINLLM release (INTERNALS §23): builds `brain` for the 7 npm platforms, packs the npm packages with
+# npm/pack.mjs --require-all, and publishes them with provenance ONLY on a `v*` tag, after a manual approval in the
+# `npm-publish` environment. Any other run (pull request, manual dispatch) stops after packing: the tarballs and
+# SHA256SUMS are uploaded as an artifact to inspect.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { key: darwin-arm64, os: macos-14, target: aarch64-apple-darwin }
+          - { key: darwin-x64, os: macos-13, target: x86_64-apple-darwin }
+          - { key: linux-x64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
+          - { key: linux-arm64, os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu }
+          - { key: linux-x64-musl, os: ubuntu-22.04, target: x86_64-unknown-linux-musl, musl: true }
+          - { key: win32-x64, os: windows-2022, target: x86_64-pc-windows-msvc, exe: .exe }
+          - { key: win32-arm64, os: windows-11-arm, target: aarch64-pc-windows-msvc, exe: .exe }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+      - if: matrix.musl
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      # no machine paths in the binary (dependency panic locations): the registry and the checkout get neutral prefixes
+      - shell: bash
+        run: RUSTFLAGS="--remap-path-prefix=$GITHUB_WORKSPACE=/brainllm --remap-path-prefix=$HOME=~" cargo build --release --locked -p brain-cli --target ${{ matrix.target }}
+      - shell: bash
+        run: |
+          mkdir -p bins/${{ matrix.key }}
+          cp target/${{ matrix.target }}/release/brain${{ matrix.exe }} bins/${{ matrix.key }}/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brain-${{ matrix.key }}
+          path: bins
+
+  pack:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/download-artifact@v4
+        with: { path: bins, pattern: brain-*, merge-multiple: true }
+      - run: node npm/pack.mjs --bins bins --require-all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-packages
+          path: |
+            npm/dist/*.tgz
+            npm/dist/SHA256SUMS
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: pack
+    runs-on: ubuntu-22.04
+    # a person approves every publish in this environment (repository settings → Environments)
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, registry-url: 'https://registry.npmjs.org' }
+      - uses: actions/download-artifact@v4
+        with: { name: npm-packages, path: pkgs }
+      # platform packages first, so the launcher's optional dependencies exist when it appears
+      - run: |
+          for f in pkgs/christianirack-brainllm-*-*.tgz; do case "$f" in *runtime*) ;; *) npm publish "$f" --provenance --access public ;; esac; done
+          npm publish pkgs/christianirack-brainllm-runtime-*.tgz --provenance --access public
+          npm publish pkgs/christianirack-brainllm-[0-9]*.tgz --provenance --access public
+          npm publish pkgs/christianirack-create-brainllm-*.tgz --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -1,0 +1,47 @@
+import { guard } from "/@brain/brain-guard.js";
+import { sig, drv, tpl, insert, attr, on } from "/@brain/brain.js";
+const $t0 = tpl("<form data-b=\"3ivexe\"><label>Name <input></label> <label>Email <input type=\"email\"></label> <label><input type=\"checkbox\"> Active</label> <button><!></button> <button type=\"button\">Cancel</button></form>");
+function UserForm($p = {}) {
+  const name = sig($p.user ? $p.user.name : '');
+  const email = sig($p.user ? $p.user.email : '');
+  const active = sig($p.user ? $p.user.active : true);
+  const valid = drv(() => name.v.trim() !== '' && email.v.includes('@'));
+  const save = () => {
+    if (!valid.v || ($p.busy ?? false)) {
+      return;
+    }
+    $p["on:save"]?.({ id: $p.user ? $p.user.id : null, name: name.v.trim(), email: email.v.trim(), active: active.v });
+  };
+  const $r8 = $t0();
+  const $e1 = $r8;
+  const $e2 = $r8.firstChild.firstChild.nextSibling;
+  const $e3 = $r8.firstChild.nextSibling.nextSibling.firstChild.nextSibling;
+  const $e4 = $r8.firstChild.nextSibling.nextSibling.nextSibling.nextSibling.firstChild;
+  const $e5 = $r8.firstChild.nextSibling.nextSibling.nextSibling.nextSibling.nextSibling.nextSibling;
+  const $e6 = $e5.firstChild;
+  const $e7 = $e5.nextSibling.nextSibling;
+  on($e1, "submit", (e) => { e.preventDefault(); (save)(e); });
+  attr($e2, "value", () => name.v);
+  on($e2, "input", (e) => { name.v = e.target.value; });
+  attr($e3, "value", () => email.v);
+  on($e3, "input", (e) => { email.v = e.target.value; });
+  attr($e4, "checked", () => active.v);
+  on($e4, "change", (e) => { active.v = e.target.checked; });
+  attr($e5, "disabled", () => !valid.v || ($p.busy ?? false));
+  insert(null, () => ($p.busy ?? false) ? 'Saving…' : 'Save', $e6);
+  on($e7, "click", () => { $p["on:cancel"]?.(); });
+  return $r8;
+}
+UserForm.h = "3ivexe";
+UserForm.f = "comp/user-form.brain";
+export default guard(UserForm);
+
+/* ---- css ---- */
+@layer comp {
+  @scope ([data-b="3ivexe"]) to ([data-b]) {
+    :where(:scope):is(form), form {
+      display: grid;
+      gap: var(--space-2);
+    }
+  }
+}

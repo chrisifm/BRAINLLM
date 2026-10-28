@@ -1,0 +1,838 @@
+{
+ "site": "panel",
+ "label": "haiku",
+ "at": "2026-10-14T00:47:10.809Z",
+ "src": "~/Projects/WEB/BRAINLLM/bench/autonomy/results/final21b-haiku/panel",
+ "scratch": "~/tmp/brainllm-final21b/haiku-panel",
+ "brainSha": "018520473d6e",
+ "specSha": "e745bbfd456e",
+ "brain": "~/tmp/qa277/brain",
+ "doctor": {
+  "exit": 0,
+  "ms": 2343,
+  "errors": 0,
+  "warnings": 0,
+  "diags": [],
+  "seo": [
+   {
+    "route": "/",
+    "score": 91
+   },
+   {
+    "route": "/invoices",
+    "score": 91
+   },
+   {
+    "route": "/settings",
+    "score": 91
+   }
+  ]
+ },
+ "test": {
+  "exit": 0,
+  "files": 1,
+  "tests": 2,
+  "passed": 2,
+  "failed": [],
+  "a11y": []
+ },
+ "buildAsGenerated": {
+  "exit": 0,
+  "errors": []
+ },
+ "buildCold": {
+  "meanMs": 188.8,
+  "stddevMs": 35.4,
+  "n": 10,
+  "median": 170.26,
+  "p95": 251.7,
+  "min": 157.34,
+  "max": 251.7
+ },
+ "buildWarm": {
+  "meanMs": 70.4,
+  "stddevMs": 12.6,
+  "n": 10,
+  "median": 63.94,
+  "p95": 96.32,
+  "min": 57.52,
+  "max": 96.32
+ },
+ "buildId": "9hd3cb6k",
+ "dist": {
+  "files": 48,
+  "sourceExtLeaked": [],
+  "sourceMaps": [],
+  "missingGz": [],
+  "brSiblings": 0,
+  "snippets": {
+   "nginx": true,
+   "caddy": true,
+   "headers": true
+  },
+  "totalShipped": {
+   "files": 48,
+   "raw": 187459
+  },
+  "ok": true
+ },
+ "routes": [
+  "/",
+  "/invoices",
+  "/settings"
+ ],
+ "start": {
+  "up": true
+ },
+ "contentType": {
+  "checked": 25,
+  "bad": [],
+  "encodings": {
+   "gzip": 25
+  },
+  "ok": true
+ },
+ "bytes": {
+  "/": {
+   "html": {
+    "files": 1,
+    "raw": 6175,
+    "gz": 2753,
+    "br": 2257
+   },
+   "js": {
+    "files": 13,
+    "raw": 39517,
+    "gz": 16680,
+    "br": 14707
+   },
+   "css": {
+    "files": 2,
+    "raw": 6715,
+    "gz": 1849,
+    "br": 1570
+   },
+   "other": {
+    "files": 3,
+    "raw": 978,
+    "gz": 657,
+    "br": 559
+   },
+   "totalHtmlJsCss": {
+    "raw": 52407,
+    "gz": 21282,
+    "br": 18534
+   },
+   "transferred": 31160,
+   "firstRouteJs": {
+    "files": 13,
+    "raw": 39517,
+    "gz": 16680,
+    "br": 14707
+   },
+   "requests": 19,
+   "missing": [],
+   "resources": [
+    {
+     "path": "/",
+     "file": "index.html",
+     "kind": "html",
+     "raw": 6175,
+     "gz": 2753,
+     "br": 2257,
+     "transferred": 5753
+    },
+    {
+     "path": "/_b/2fwaal7e.css",
+     "file": "_b/2fwaal7e.css",
+     "kind": "css",
+     "raw": 1582,
+     "gz": 762,
+     "br": 667,
+     "transferred": 1106
+    },
+    {
+     "path": "/_b/l0dadn0g.js",
+     "file": "_b/l0dadn0g.js",
+     "kind": "js",
+     "raw": 3291,
+     "gz": 1194,
+     "br": 1039,
+     "transferred": 1546
+    },
+    {
+     "path": "/_b/rxwyclrm.js",
+     "file": "_b/rxwyclrm.js",
+     "kind": "js",
+     "raw": 3099,
+     "gz": 1068,
+     "br": 930,
+     "transferred": 1420
+    },
+    {
+     "path": "/_b/mz422ccn.js",
+     "file": "_b/mz422ccn.js",
+     "kind": "js",
+     "raw": 1903,
+     "gz": 690,
+     "br": 605,
+     "transferred": 1041
+    },
+    {
+     "path": "/_b/3va2jjnx.js",
+     "file": "_b/3va2jjnx.js",
+     "kind": "js",
+     "raw": 1586,
+     "gz": 734,
+     "br": 659,
+     "transferred": 1085
+    },
+    {
+     "path": "/_b/b4tb6nol.js",
+     "file": "_b/b4tb6nol.js",
+     "kind": "js",
+     "raw": 373,
+     "gz": 244,
+     "br": 208,
+     "transferred": 595
+    },
+    {
+     "path": "/_b/bm24mf1e.js",
+     "file": "_b/bm24mf1e.js",
+     "kind": "js",
+     "raw": 252,
+     "gz": 180,
+     "br": 131,
+     "transferred": 531
+    },
+    {
+     "path": "/_b/aggegrfx.css",
+     "file": "_b/aggegrfx.css",
+     "kind": "css",
+     "raw": 5133,
+     "gz": 1087,
+     "br": 903,
+     "transferred": 1432
+    },
+    {
+     "path": "/_b/l2m2za8p.js",
+     "file": "_b/l2m2za8p.js",
+     "kind": "js",
+     "raw": 4090,
+     "gz": 1556,
+     "br": 1357,
+     "transferred": 1908
+    },
+    {
+     "path": "/_b/aix1efi6.js",
+     "file": "_b/aix1efi6.js",
+     "kind": "js",
+     "raw": 1085,
+     "gz": 608,
+     "br": 519,
+     "transferred": 959
+    },
+    {
+     "path": "/_b/gjvteat0.js",
+     "file": "_b/gjvteat0.js",
+     "kind": "js",
+     "raw": 857,
+     "gz": 436,
+     "br": 359,
+     "transferred": 787
+    },
+    {
+     "path": "/_b/t5em1ebc.js",
+     "file": "_b/t5em1ebc.js",
+     "kind": "js",
+     "raw": 4424,
+     "gz": 2125,
+     "br": 1868,
+     "transferred": 2477
+    },
+    {
+     "path": "/_b/32pnrpge.js",
+     "file": "_b/32pnrpge.js",
+     "kind": "js",
+     "raw": 2600,
+     "gz": 1390,
+     "br": 1194,
+     "transferred": 1742
+    },
+    {
+     "path": "/manifest.webmanifest",
+     "file": "manifest.webmanifest",
+     "kind": "other",
+     "raw": 456,
+     "gz": 283,
+     "br": 225,
+     "transferred": 577
+    },
+    {
+     "path": "/_b/w5klx1me.js",
+     "file": "_b/w5klx1me.js",
+     "kind": "js",
+     "raw": 6810,
+     "gz": 3028,
+     "br": 2774,
+     "transferred": 3380
+    },
+    {
+     "path": "/_b/8r91251g.js",
+     "file": "_b/8r91251g.js",
+     "kind": "js",
+     "raw": 9147,
+     "gz": 3427,
+     "br": 3064,
+     "transferred": 3779
+    },
+    {
+     "path": "/_b/gdiv1rd4.svg",
+     "file": "_b/gdiv1rd4.svg",
+     "kind": "other",
+     "raw": 261,
+     "gz": 187,
+     "br": 167,
+     "transferred": 521
+    },
+    {
+     "path": "/_b/gdiv1rd4.svg",
+     "file": "_b/gdiv1rd4.svg",
+     "kind": "other",
+     "raw": 261,
+     "gz": 187,
+     "br": 167,
+     "transferred": 521
+    }
+   ]
+  },
+  "/invoices": {
+   "html": {
+    "files": 1,
+    "raw": 5445,
+    "gz": 2347,
+    "br": 1902
+   },
+   "js": {
+    "files": 7,
+    "raw": 25387,
+    "gz": 11346,
+    "br": 10039
+   },
+   "css": {
+    "files": 1,
+    "raw": 1582,
+    "gz": 762,
+    "br": 667
+   },
+   "other": {
+    "files": 2,
+    "raw": 717,
+    "gz": 470,
+    "br": 392
+   },
+   "totalHtmlJsCss": {
+    "raw": 32414,
+    "gz": 14455,
+    "br": 12608
+   },
+   "transferred": 0,
+   "firstRouteJs": {
+    "files": 7,
+    "raw": 25387,
+    "gz": 11346,
+    "br": 10039
+   },
+   "requests": 11,
+   "missing": [],
+   "resources": [
+    {
+     "path": "/invoices",
+     "file": "invoices/index.html",
+     "kind": "html",
+     "raw": 5445,
+     "gz": 2347,
+     "br": 1902,
+     "transferred": 0
+    },
+    {
+     "path": "/_b/2fwaal7e.css",
+     "file": "_b/2fwaal7e.css",
+     "kind": "css",
+     "raw": 1582,
+     "gz": 762,
+     "br": 667,
+     "transferred": 0
+    },
+    {
+     "path": "/_b/gjvteat0.js",
+     "file": "_b/gjvteat0.js",
+     "kind": "js",
+     "raw": 857,
+     "gz": 436,
+     "br": 359,
+     "transferred": 0
+    },
+    {
+     "path": "/_b/r4hq6vvj.js",
+     "file": "_b/r4hq6vvj.js",
+     "kind": "js",
+     "raw": 464,
+     "gz": 332,
+     "br": 261,
+     "transferred": 0
+    },
+    {
+     "path": "/_b/aix1efi6.js",
+     "file": "_b/aix1efi6.js",
+     "kind": "js",
+     "raw": 1085,
+     "gz": 608,
+     "br": 519,
+     "transferred": 0
+    },
+    {
+     "path": "/_b/32pnrpge.js",
+     "file": "_b/32pnrpge.js",
+     "kind": "js",
+     "raw": 2600,
+     "gz": 1390,
+     "br": 1194,
+     "transferred": 0
+    },
+    {
+     "path": "/_b/t5em1ebc.js",
+     "file": "_b/t5em1ebc.js",
+     "kind": "js",
+     "raw": 4424,
+     "gz": 2125,
+     "br": 1868,
+     "transferred": 0
+    },
+    {
+     "path": "/_b/8r91251g.js",
+     "file": "_b/8r91251g.js",
+     "kind": "js",
+     "raw": 9147,
+     "gz": 3427,
+     "br": 3064,
+     "transferred": 0
+    },
+    {
+     "path": "/_b/w5klx1me.js",
+     "file": "_b/w5klx1me.js",
+     "kind": "js",
+     "raw": 6810,
+     "gz": 3028,
+     "br": 2774,
+     "transferred": 0
+    },
+    {
+     "path": "/manifest.webmanifest",
+     "file": "manifest.webmanifest",
+     "kind": "other",
+     "raw": 456,
+     "gz": 283,
+     "br": 225,
+     "transferred": 0
+    },
+    {
+     "path": "/_b/gdiv1rd4.svg",
+     "file": "_b/gdiv1rd4.svg",
+     "kind": "other",
+     "raw": 261,
+     "gz": 187,
+     "br": 167,
+     "transferred": 0
+    }
+   ]
+  },
+  "/settings": {
+   "html": {
+    "files": 1,
+    "raw": 5423,
+    "gz": 2327,
+    "br": 1897
+   },
+   "js": {
+    "files": 7,
+    "raw": 25368,
+    "gz": 11333,
+    "br": 10030
+   },
+   "css": {
+    "files": 1,
+    "raw": 1582,
+    "gz": 762,
+    "br": 667
+   },
+   "other": {
+    "files": 2,
+    "raw": 717,
+    "gz": 470,
+    "br": 392
+   },
+   "totalHtmlJsCss": {
+    "raw": 32373,
+    "gz": 14422,
+    "br": 12594
+   },
+   "transferred": 0,
+   "firstRouteJs": {
+    "files": 7,
+    "raw": 25368,
+    "gz": 11333,
+    "br": 10030
+   },
+   "requests": 11,
+   "missing": [],
+   "resources": [
+    {
+     "path": "/settings",
+     "file": "settings/index.html",
+     "kind": "html",
+     "raw": 5423,
+     "gz": 2327,
+     "br": 1897,
+     "transferred": 0
+    },
+    {
+     "path": "/_b/2fwaal7e.css",
+     "file": "_b/2fwaal7e.css",
+     "kind": "css",
+     "raw": 1582,
+     "gz": 762,
+     "br": 667,
+     "transferred": 0
+    },
+    {
+     "path": "/_b/gjvteat0.js",
+     "file": "_b/gjvteat0.js",
+     "kind": "js",
+     "raw": 857,
+     "gz": 436,
+     "br": 359,
+     "transferred": 0
+    },
+    {
+     "path": "/_b/zqlkpro7.js",
+     "file": "_b/zqlkpro7.js",
+     "kind": "js",
+     "raw": 445,
+     "gz": 319,
+     "br": 252,
+     "transferred": 0
+    },
+    {
+     "path": "/_b/32pnrpge.js",
+     "file": "_b/32pnrpge.js",
+     "kind": "js",
+     "raw": 2600,
+     "gz": 1390,
+     "br": 1194,
+     "transferred": 0
+    },
+    {
+     "path": "/_b/t5em1ebc.js",
+     "file": "_b/t5em1ebc.js",
+     "kind": "js",
+     "raw": 4424,
+     "gz": 2125,
+     "br": 1868,
+     "transferred": 0
+    },
+    {
+     "path": "/_b/aix1efi6.js",
+     "file": "_b/aix1efi6.js",
+     "kind": "js",
+     "raw": 1085,
+     "gz": 608,
+     "br": 519,
+     "transferred": 0
+    },
+    {
+     "path": "/_b/w5klx1me.js",
+     "file": "_b/w5klx1me.js",
+     "kind": "js",
+     "raw": 6810,
+     "gz": 3028,
+     "br": 2774,
+     "transferred": 0
+    },
+    {
+     "path": "/_b/8r91251g.js",
+     "file": "_b/8r91251g.js",
+     "kind": "js",
+     "raw": 9147,
+     "gz": 3427,
+     "br": 3064,
+     "transferred": 0
+    },
+    {
+     "path": "/manifest.webmanifest",
+     "file": "manifest.webmanifest",
+     "kind": "other",
+     "raw": 456,
+     "gz": 283,
+     "br": 225,
+     "transferred": 0
+    },
+    {
+     "path": "/_b/gdiv1rd4.svg",
+     "file": "_b/gdiv1rd4.svg",
+     "kind": "other",
+     "raw": 261,
+     "gz": 187,
+     "br": 167,
+     "transferred": 0
+    }
+   ]
+  }
+ },
+ "lighthouse": {
+  "/": {
+   "version": "13.5.0",
+   "a11y": 100,
+   "seo": 100,
+   "failing": []
+  },
+  "/invoices": {
+   "version": "13.5.0",
+   "a11y": 100,
+   "seo": 100,
+   "failing": []
+  },
+  "/settings": {
+   "version": "13.5.0",
+   "a11y": 100,
+   "seo": 100,
+   "failing": []
+  }
+ },
+ "brainSeo": {
+  "exit": 0,
+  "minScore": 80,
+  "pages": [
+   {
+    "route": "/",
+    "score": 91,
+    "findings": [
+     "B1808(info)",
+     "B1812(info)"
+    ]
+   },
+   {
+    "route": "/invoices",
+    "score": 91,
+    "findings": [
+     "B1808(info)",
+     "B1812(info)"
+    ]
+   },
+   {
+    "route": "/settings",
+    "score": 91,
+    "findings": [
+     "B1808(info)",
+     "B1812(info)"
+    ]
+   }
+  ]
+ },
+ "smoke": {
+  "checks": [
+   {
+    "name": "panel: customers load without any user interaction (8 s)",
+    "pass": true,
+    "evidence": null
+   },
+   {
+    "name": "KPIs derived: total = rows, active = active rows, average = billed / active (±0.5 display rounding)",
+    "pass": true,
+    "evidence": {
+     "kpi": {
+      "total": 8,
+      "active": 6,
+      "billed": 394,
+      "ticket": 65.67
+     },
+     "rows": 8,
+     "activeRows": 6
+    }
+   },
+   {
+    "name": "filter by name / email",
+    "pass": true,
+    "evidence": {
+     "name": "ada",
+     "nameRows": 1,
+     "email": "navy.dev",
+     "emailRows": 1
+    }
+   },
+   {
+    "name": "empty state for \"no results for the filter\"",
+    "pass": true,
+    "evidence": {
+     "rows": 0,
+     "text": true
+    }
+   },
+   {
+    "name": "filter by plan",
+    "pass": true,
+    "evidence": {
+     "plan": "Starter",
+     "value": "starter",
+     "rows": 3,
+     "expected": 3
+    }
+   },
+   {
+    "name": "create: form opens",
+    "pass": true,
+    "evidence": null
+   },
+   {
+    "name": "create: validation blocks empty name and email without @",
+    "pass": true,
+    "evidence": {
+     "rows": 8,
+     "errors": [
+      "Name is required.",
+      "Email must contain \"@\"."
+     ]
+    }
+   },
+   {
+    "name": "create: button disabled and labeled \"Saving…\" while saving",
+    "pass": true,
+    "evidence": {
+     "text": "Saving…",
+     "disabled": true
+    }
+   },
+   {
+    "name": "create: row added and KPIs update",
+    "pass": true,
+    "evidence": {
+     "kpi": {
+      "total": 9,
+      "active": 7,
+      "billed": 523,
+      "ticket": 74.71
+     }
+    }
+   },
+   {
+    "name": "edit: form prefilled and row updated",
+    "pass": true,
+    "evidence": {
+     "prefilled": "QA Smoke"
+    }
+   },
+   {
+    "name": "delete: row removed and KPIs back",
+    "pass": true,
+    "evidence": {
+     "kpi": {
+      "total": 8,
+      "active": 6,
+      "billed": 394,
+      "ticket": 65.67
+     }
+    }
+   },
+   {
+    "name": "no console errors",
+    "pass": true,
+    "evidence": []
+   },
+   {
+    "name": "no SRI integrity mismatch warnings",
+    "pass": true,
+    "evidence": []
+   }
+  ],
+  "consoleErrors": [],
+  "consoleWarnings": [],
+  "passed": 13,
+  "total": 13
+ },
+ "hmr": {
+  "component": "comp/customer-form.brain",
+  "stateBefore": "HMR state",
+  "style": {
+   "applied": [
+    "css"
+   ],
+   "tool": {
+    "n": 20,
+    "median": 1.69,
+    "p95": 2.15,
+    "min": 1.32,
+    "max": 3.03
+   },
+   "compile": {
+    "n": 20,
+    "median": 0.78,
+    "p95": 1.15,
+    "min": 0.59,
+    "max": 2.17
+   },
+   "client": {
+    "n": 20,
+    "median": 0.87,
+    "p95": 1,
+    "min": 0.71,
+    "max": 1.01
+   },
+   "total": {
+    "n": 20,
+    "median": 31.68,
+    "p95": 35.16,
+    "min": 24.93,
+    "max": 36.01
+   },
+   "errors": 0
+  },
+  "script": {
+   "applied": [
+    "js"
+   ],
+   "tool": {
+    "n": 20,
+    "median": 2.25,
+    "p95": 4.52,
+    "min": 1.85,
+    "max": 18.52
+   },
+   "compile": {
+    "n": 20,
+    "median": 0.38,
+    "p95": 0.88,
+    "min": 0.33,
+    "max": 1.86
+   },
+   "client": {
+    "n": 20,
+    "median": 1.82,
+    "p95": 3.84,
+    "min": 1.48,
+    "max": 16.66
+   },
+   "total": {
+    "n": 20,
+    "median": 33.51,
+    "p95": 39.37,
+    "min": 28.95,
+    "max": 52.67
+   },
+   "errors": 0
+  },
+  "stateAfter": "HMR state",
+  "statePreserved": true,
+  "reloaded": false,
+  "compileErrors": []
+ }
+}

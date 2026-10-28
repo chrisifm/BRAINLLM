@@ -1,0 +1,35 @@
+<meta seo title="Overview" description="Live components, heap, leaks and update latency of the app under inspection.">
+<script>
+  import inspector from '../channels/inspector.jsbrain'
+  const live = drv(() => inspector.comps.reduce((n, c) => n + c.inst, 0))
+  const heapMB = drv(() => {
+    const h = inspector.heap.at(-1)
+    return h && h.used ? (h.used / 1048576).toFixed(2) : '—'
+  })
+  const p95 = drv(() => {
+    const ms = inspector.upd.map((u) => u.ms).sort((a, b) => a - b)
+    return ms.length ? ms[Math.floor(ms.length * 0.95)].toFixed(1) : '—'
+  })
+  const rows = drv(() => inspector.comps.map((c) => ({ ...c, id: c.h, mb: (c.est / 1024).toFixed(1) })))
+  const cols = [
+    { key: 'name', label: 'Component' }, { key: 'inst', label: 'Instances' }, { key: 'sig', label: 'sig' },
+    { key: 'fx', label: 'fx' }, { key: 'nodes', label: 'Nodes' }, { key: 'mb', label: 'Est. KB' }, { key: 'runs', label: 'Runs' },
+  ]
+</script>
+<h1>Overview</h1>
+<section class="kpis" aria-label="Indicators">
+  <div class="kpi"><p class="l">Live components</p><p class="v">{live} <small>/ {inspector.comps.length} types</small></p></div>
+  <div class="kpi"><p class="l">Heap JS</p><p class="v">{heapMB} <small>MB</small></p></div>
+  <div class="kpi"><p class="l">Leaks</p><p class="v" class:bad={inspector.leaks.length}>{inspector.leaks.length}</p></div>
+  <div class="kpi"><p class="l">Update p95</p><p class="v">{p95} <small>ms</small></p></div>
+</section>
+<Table caption="Components" rows={rows} columns={cols} rowKey="id" empty="No component mounted yet." height={420} />
+<style>
+  h1 { margin: 0 0 var(--space-4); font-size: 22px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--space-3); margin-bottom: var(--space-5); }
+  .kpi { padding: var(--space-4); border-radius: var(--radius); border: 1px solid var(--glass-edge); background: var(--glass); box-shadow: var(--shadow); }
+  .l { margin: 0; font-size: 12px; color: var(--muted); }
+  .v { margin: var(--space-1) 0 0; font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .v small { font-size: 13px; font-weight: 400; color: var(--muted); }
+  .v.bad { color: var(--bad); }
+</style>

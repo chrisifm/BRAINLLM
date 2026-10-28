@@ -1,0 +1,9 @@
+<meta server>
+// Demo authentication. DEMO_PASSWORD exists only in the [development] block of .brain_env, so a deployed app has
+// no demo login: replace check() with your real provider (database lookup, OAuth…).
+const configured = () => Boolean(process.env.DEMO_PASSWORD)
+
+export default {
+  configured,
+  check: (email, password) => configured() && password === process.env.DEMO_PASSWORD ? { email } : null,
+}

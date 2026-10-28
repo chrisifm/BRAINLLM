@@ -1,0 +1,19 @@
+<meta seo title="BRAINLLM examples" description="Small BRAINLLM examples: a counter with derived state and a to-do list with keyed items, filters and an empty state." canonical="/">
+
+<script>
+  import Counter from '../comp/counter.brain'
+  import Todo from '../comp/todo.brain'
+</script>
+
+<main>
+  <h1>BRAINLLM examples</h1>
+  <p>Each block below is one component. The <a href="/dashboard">user admin</a> shows data loading, forms and CRUD.</p>
+  <section aria-labelledby="counter-title">
+    <h2 id="counter-title">Counter</h2>
+    <Counter />
+  </section>
+  <section aria-labelledby="todo-title">
+    <h2 id="todo-title">To-do list</h2>
+    <Todo />
+  </section>
+</main>

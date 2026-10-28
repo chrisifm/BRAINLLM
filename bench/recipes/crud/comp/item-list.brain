@@ -1,0 +1,46 @@
+<meta props="items:list">
+
+<script>
+  // items: [{ id, name, status, price }] · filters run in the browser over the loaded page
+  let q = sig('')
+  let status = sig('all')
+  const shown = drv(() => items.filter((it) =>
+    (status === 'all' || it.status === status) && it.name.toLowerCase().includes(q.trim().toLowerCase())))
+  const money = (n) => '$' + Number(n || 0).toFixed(2)
+</script>
+
+<section class="list" aria-labelledby="item-list-title">
+  <h2 id="item-list-title">Items</h2>
+  <div class="filters">
+    <Input label="Search by name" type="search" bind:value={q} />
+    <Select label="Status" options={[{ value: 'all', label: 'All' }, { value: 'active', label: 'Active' }, { value: 'archived', label: 'Archived' }]} bind:value={status} />
+  </div>
+  <p class="count" aria-live="polite">{shown.length} of {items.length}</p>
+  <table>
+    <thead><tr><th scope="col">Name</th><th scope="col">Status</th><th scope="col">Price</th></tr></thead>
+    <tbody>
+      {#each shown as it (it.id)}
+        <tr>
+          <td><a href={'/items/' + it.id}>{it.name}</a></td>
+          <td>{it.status}</td>
+          <td class="num">{money(it.price)}</td>
+        </tr>
+      {:empty}
+        <tr><td colspan="3" class="empty">{items.length ? 'No items match these filters.' : 'No items yet. Create the first one above.'}</td></tr>
+      {/each}
+    </tbody>
+  </table>
+</section>
+
+<style>
+  .list { display: grid; gap: var(--space-3); }
+  h2 { margin: 0; font-size: 1.1rem; }
+  .filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: var(--space-3); }
+  .count { margin: 0; color: var(--muted); font-size: .9rem; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; }
+  .num { text-align: right; }
+  .empty { text-align: center; color: var(--muted); padding: var(--space-5); }
+  a { color: var(--accent); }
+</style>

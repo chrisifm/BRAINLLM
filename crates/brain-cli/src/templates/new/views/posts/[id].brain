@@ -1,0 +1,23 @@
+<meta seo title={props.post.title} description={props.post.summary}>
+
+<script>
+  import posts from '../../lib/posts.jsbrain'
+
+  // one page per post at build time; load() runs for each with ctx.params.id
+  export async function paths() {
+    return posts.all().map((p) => ({ id: p.id }))
+  }
+  export async function load(ctx) {
+    return { post: posts.find(ctx.params.id) }
+  }
+</script>
+
+<main class="page">
+  <p><a href="/posts">All posts</a></p>
+  <h1>{props.post.title}</h1>
+  <p>{props.post.body}</p>
+</main>
+
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+</style>

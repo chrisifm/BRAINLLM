@@ -1,0 +1,14 @@
+<script>
+  import EmptyState from './empty-state.brain'
+
+  test('says what is missing and offers the action', async () => {
+    await mount(EmptyState, { title: 'No orders yet', text: 'Orders appear here when customers buy.', action: { href: '/products', label: 'Add a product' } })
+    expect(text('.title')).toBe('No orders yet')
+    expect(attr('a', 'href')).toBe('/products')
+  })
+
+  test('the action is optional', async () => {
+    await mount(EmptyState, { title: 'Nothing here', text: 'Try another filter.' })
+    expect(count('a')).toBe(0)
+  })
+</script>

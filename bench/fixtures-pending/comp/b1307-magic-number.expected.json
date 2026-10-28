@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1307",
+    "level": "warning",
+    "file": "comp/b1307-magic-number.brain",
+    "line": 5,
+    "col": 41,
+    "msg": "magic time number `3000`",
+    "fix": "declare `const FLASH_MS = 3000` (or a token) and use it in `setTimeout`"
+  }
+]

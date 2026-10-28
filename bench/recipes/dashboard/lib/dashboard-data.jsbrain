@@ -1,0 +1,18 @@
+// Demo numbers for the dashboard, deterministic per period. Replace with a resource() over an api() endpoint.
+export default function dashboardData(period) {
+  const f = period === '90d' ? 12 : period === '30d' ? 4 : 1
+  return {
+    kpis: [
+      { id: 'revenue', label: 'Revenue', value: 12400 * f, unit: '$', delta: 8.2 },
+      { id: 'orders', label: 'Orders', value: 310 * f, unit: '', delta: 3.1 },
+      { id: 'customers', label: 'New customers', value: 42 * f, unit: '', delta: -4.5 },
+      { id: 'refunds', label: 'Refund rate', value: 1.8, unit: '%', delta: 0 },
+    ],
+    rows: [
+      { id: 1, product: 'Starter plan', orders: 120 * f, revenue: 2280 * f },
+      { id: 2, product: 'Pro plan', orders: 95 * f, revenue: 5605 * f },
+      { id: 3, product: 'Team plan', orders: 40 * f, revenue: 3960 * f },
+      { id: 4, product: 'Add-on storage', orders: 55 * f, revenue: 555 * f },
+    ],
+  }
+}

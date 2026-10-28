@@ -1,0 +1,6 @@
+{
+  "name": "scopes-test",
+  "cache": { "http": true, "sw": true, "offline": true, "precacheKB": 2048 },
+  "seo": { "minScore": 80 },
+  "budget": { "viewKB": 30 }
+}

@@ -1,0 +1,160 @@
+<meta seo title="E-invoicing for small businesses" description="Nubo makes e-invoicing simple for small businesses: create, send and track compliant invoices in minutes." canonical="/">
+<script>
+  const features = [
+    { id: 'f1', title: 'Compliant invoices', text: 'Every invoice follows the latest e-invoicing standards, so you never worry about rejections.' },
+    { id: 'f2', title: 'Send in seconds', text: 'Create an invoice from a template and deliver it to your client with one click.' },
+    { id: 'f3', title: 'Payment tracking', text: 'See at a glance what is paid, pending or overdue, with automatic reminders.' },
+    { id: 'f4', title: 'Recurring billing', text: 'Schedule monthly or yearly invoices for regular clients and forget about them.' },
+    { id: 'f5', title: 'Bank-grade security', text: 'Your data is encrypted at rest and in transit, with daily backups.' },
+    { id: 'f6', title: 'Accountant access', text: 'Invite your accountant to export reports and tax summaries without sharing a password.' }
+  ]
+  const plans = [
+    { id: 'basic', name: 'Basic', price: 9, featured: false, perks: ['Up to 20 invoices a month', '1 user', 'Email support'], cta: 'Start with Basic' },
+    { id: 'pro', name: 'Pro', price: 29, featured: true, perks: ['Unlimited invoices', '5 users', 'Recurring billing', 'Priority support'], cta: 'Go Pro' },
+    { id: 'ent', name: 'Enterprise', price: 99, featured: false, perks: ['Unlimited everything', 'Unlimited users', 'Custom integrations', 'Dedicated manager'], cta: 'Contact sales' }
+  ]
+  const faqs = [
+    { id: 'q1', q: 'What is e-invoicing?', a: 'E-invoicing means issuing invoices in a structured digital format that can be processed automatically by your client and the tax authority.' },
+    { id: 'q2', q: 'Can I try Nubo for free?', a: 'Yes. Every plan includes a 14-day free trial and no credit card is required.' },
+    { id: 'q3', q: 'Can I change plans later?', a: 'Absolutely. You can upgrade or downgrade at any time and the difference is prorated.' },
+    { id: 'q4', q: 'How does the yearly discount work?', a: 'Paying yearly gives you 20% off the monthly price of every plan.' },
+    { id: 'q5', q: 'Is my data safe?', a: 'Yes. Data is encrypted, backed up daily and stored in European data centers.' },
+    { id: 'q6', q: 'Can I import my existing clients?', a: 'You can import clients and past invoices from a CSV file in a few clicks.' }
+  ]
+
+  let yearly = sig(false)
+  const price = (p) => yearly ? (p * 0.8).toFixed(2).replace(/\.00$/, '') : String(p)
+
+  let openFaq = sig('')
+  const toggleFaq = (id) => { openFaq = openFaq === id ? '' : id }
+
+  let name = sig('')
+  let email = sig('')
+  let message = sig('')
+  let sent = sig(false)
+  let nameOk = drv(() => name.trim() !== '')
+  let emailOk = drv(() => email.includes('@'))
+  let messageOk = drv(() => message.trim().length >= 10)
+  let valid = drv(() => nameOk && emailOk && messageOk)
+  const submit = () => {
+    if (!valid) return
+    sent = true
+  }
+</script>
+<main>
+  <section class="hero" aria-labelledby="hero-title">
+    <h1 id="hero-title">Invoicing that gets out of your way</h1>
+    <p class="lead">Nubo is the e-invoicing platform for small businesses. Create, send and track compliant invoices in minutes.</p>
+    <a class="btn primary" href="#pricing">Get started free</a>
+  </section>
+
+  <section id="features" aria-labelledby="features-title">
+    <h2 id="features-title">Everything you need to get paid</h2>
+    <ul class="grid">
+      {#each features as f (f.id)}
+        <li class="card">
+          <h3>{f.title}</h3>
+          <p>{f.text}</p>
+        </li>
+      {/each}
+    </ul>
+  </section>
+
+  <section id="pricing" aria-labelledby="pricing-title">
+    <h2 id="pricing-title">Simple pricing</h2>
+    <div class="toggle">
+      <button type="button" class:primary={!yearly} aria-pressed={!yearly} on:click={yearly = false}>Monthly</button>
+      <button type="button" class:primary={yearly} aria-pressed={yearly} on:click={yearly = true}>Yearly (-20%)</button>
+    </div>
+    <ul class="grid">
+      {#each plans as p (p.id)}
+        <li class="card plan" class:featured={p.featured}>
+          <h3>{p.name}</h3>
+          {#if p.featured}<p class="badge">Most popular</p>{/if}
+          <p class="price">${price(p.price)}<span class="per"> / month{yearly ? ', billed yearly' : ''}</span></p>
+          <ul class="perks">
+            {#each p.perks as perk (perk)}
+              <li>{perk}</li>
+            {/each}
+          </ul>
+          <a class="btn" class:primary={p.featured} href="#contact">{p.cta}</a>
+        </li>
+      {/each}
+    </ul>
+  </section>
+
+  <section id="faq" aria-labelledby="faq-title">
+    <h2 id="faq-title">Frequently asked questions</h2>
+    <div class="faq">
+      {#each faqs as f (f.id)}
+        <div class="item">
+          <h3>
+            <button type="button" aria-expanded={openFaq === f.id} aria-controls={'a-' + f.id} on:click={toggleFaq(f.id)}>{f.q}</button>
+          </h3>
+          <div id={'a-' + f.id} role="region" aria-labelledby={'h-' + f.id} hidden={openFaq !== f.id}>
+            <p>{f.a}</p>
+          </div>
+        </div>
+      {/each}
+    </div>
+  </section>
+
+  <section id="contact" aria-labelledby="contact-title">
+    <h2 id="contact-title">Contact us</h2>
+    {#if sent}
+      <p class="thanks" role="status">Thanks, we'll be in touch soon</p>
+    {:else}
+      <form class="form" on:submit={submit}>
+        <div class="field">
+          <label for="c-name">Name</label>
+          <input id="c-name" type="text" bind:value={name} aria-invalid={!nameOk} aria-describedby="e-name" />
+          <p id="e-name" class="err" aria-live="polite">{nameOk ? '' : 'Name is required'}</p>
+        </div>
+        <div class="field">
+          <label for="c-email">Email</label>
+          <input id="c-email" type="text" bind:value={email} aria-invalid={!emailOk} aria-describedby="e-email" />
+          <p id="e-email" class="err" aria-live="polite">{emailOk ? '' : 'Email must contain @'}</p>
+        </div>
+        <div class="field">
+          <label for="c-msg">Message</label>
+          <textarea id="c-msg" rows="5" bind:value={message} aria-invalid={!messageOk} aria-describedby="e-msg"></textarea>
+          <p id="e-msg" class="err" aria-live="polite">{messageOk ? '' : 'Message needs at least 10 characters'}</p>
+        </div>
+        <button type="submit" class="btn primary" disabled={!valid}>Send</button>
+      </form>
+    {/if}
+  </section>
+</main>
+<style>
+  main { max-width: 1040px; margin: 0 auto; padding: 0 var(--space-4) var(--space-6); display: grid; gap: var(--space-6); }
+  section { display: grid; gap: var(--space-4); }
+  h2 { font-size: 1.8rem; text-align: center; }
+  h3 { font-size: 1.1rem; margin: 0; }
+  .hero { justify-items: center; text-align: center; padding: var(--space-6) 0; }
+  h1 { font-size: clamp(2.2rem, 6vw, 3.6rem); font-weight: 650; }
+  .lead { margin: 0; max-width: 56ch; color: var(--muted); font-size: 1.15rem; }
+  .grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--space-4); }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: var(--space-4); display: grid; gap: var(--space-2); align-content: start; }
+  .card p { margin: 0; color: var(--muted); }
+  .plan.featured { border: 2px solid var(--accent); box-shadow: var(--shadow); }
+  .badge { color: var(--accent); font-weight: 600; }
+  .price { color: var(--fg); font-size: 2rem; font-weight: 650; }
+  .per { font-size: .9rem; font-weight: 400; color: var(--muted); }
+  .perks { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--space-1); }
+  .toggle { display: flex; justify-content: center; gap: var(--space-2); }
+  .btn { display: inline-block; text-align: center; text-decoration: none; padding: var(--space-2) var(--space-4); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--fg); font-weight: 600; cursor: pointer; }
+  .primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  button { padding: var(--space-2) var(--space-4); border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  button:disabled { cursor: not-allowed; opacity: .5; }
+  .faq { display: grid; gap: var(--space-2); max-width: 720px; margin: 0 auto; width: 100%; }
+  .item { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+  .item h3 { margin: 0; }
+  .item button { width: 100%; text-align: left; border: 0; background: var(--surface); font-weight: 600; font-size: 1rem; }
+  .item p { margin: 0; padding: 0 var(--space-4) var(--space-3); color: var(--muted); }
+  .form { display: grid; gap: var(--space-3); max-width: 520px; margin: 0 auto; width: 100%; }
+  .field { display: grid; gap: var(--space-1); }
+  input, textarea { padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--fg); font: inherit; }
+  .err { margin: 0; color: var(--bad); font-size: .9rem; min-height: 1.2em; }
+  .thanks { text-align: center; color: var(--ok); font-size: 1.2rem; margin: 0; }
+</style>

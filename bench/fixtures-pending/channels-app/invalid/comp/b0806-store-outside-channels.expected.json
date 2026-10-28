@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0806",
+    "level": "error",
+    "file": "channels-app/invalid/comp/b0806-store-outside-channels.brain",
+    "line": 2,
+    "col": 15,
+    "msg": "`store()` only exists in `channels/*.jsbrain`",
+    "fix": "move it to `channels/<name>.jsbrain` as `export default store(…)` and import it here"
+  }
+]

@@ -1,0 +1,1351 @@
+{
+  "date": "2026-10-13T23:03:55.700Z",
+  "runs": 3,
+  "binary": {
+    "path": "../../../tmp/brain-qa293",
+    "sha12": "6422654bbfa0",
+    "version": "brain 0.1.0"
+  },
+  "chrome": "Google Chrome 155.0.8059.40",
+  "throttling": "Network.emulateNetworkConditions latency 150 ms, down 1.60 Mbps, up 750 Kbps on the page and every service-worker target; CPU 4x; 412×915 mobile viewport",
+  "apps": [
+    {
+      "app": "tasks",
+      "origin": "example tasks",
+      "dupBytes": 0,
+      "routes": [
+        "/",
+        "/about"
+      ],
+      "runs": 3,
+      "first": {
+        "bytes": 30457,
+        "requests": 18,
+        "lcp": 708,
+        "jsCss200Bytes": 20138
+      },
+      "second": {
+        "bytes": 3415,
+        "requests": 4,
+        "lcp": 236,
+        "jsCss200Bytes": 0
+      },
+      "secondRequestsSeen": [
+        "/ 304",
+        "/manifest.webmanifest 304",
+        "/sw.js 304",
+        "/sw.js 304"
+      ],
+      "swState": [
+        "activated",
+        "activated",
+        "activated"
+      ],
+      "controlledOnSecond": [
+        true,
+        true,
+        true
+      ],
+      "offline": [
+        {
+          "route": "/",
+          "ok": true
+        },
+        {
+          "route": "/about",
+          "ok": true
+        }
+      ],
+      "offlineUnvisited": {
+        "h1": "You are offline",
+        "errorPage": false,
+        "navError": null
+      },
+      "pass": {
+        "zeroJsCss": true,
+        "lcpLower": true,
+        "offline": true
+      },
+      "notes": []
+    },
+    {
+      "app": "landing",
+      "origin": "example landing",
+      "dupBytes": 0,
+      "routes": [
+        "/"
+      ],
+      "runs": 3,
+      "first": {
+        "bytes": 20779,
+        "requests": 13,
+        "lcp": 800,
+        "jsCss200Bytes": 11595
+      },
+      "second": {
+        "bytes": 2427,
+        "requests": 3,
+        "lcp": 204,
+        "jsCss200Bytes": 0
+      },
+      "secondRequestsSeen": [
+        "/ 304",
+        "/manifest.webmanifest 304",
+        "/sw.js 304"
+      ],
+      "swState": [
+        "activated",
+        "activated",
+        "activated"
+      ],
+      "controlledOnSecond": [
+        true,
+        true,
+        true
+      ],
+      "offline": [
+        {
+          "route": "/",
+          "ok": true
+        }
+      ],
+      "offlineUnvisited": {
+        "h1": "You are offline",
+        "errorPage": false,
+        "navError": null
+      },
+      "pass": {
+        "zeroJsCss": true,
+        "lcpLower": true,
+        "offline": true
+      },
+      "notes": []
+    },
+    {
+      "app": "my-project",
+      "origin": "example my-project",
+      "dupBytes": 0,
+      "routes": [
+        "/"
+      ],
+      "runs": 3,
+      "first": {
+        "bytes": 20757,
+        "requests": 12,
+        "lcp": 1124,
+        "jsCss200Bytes": 10827
+      },
+      "second": {
+        "bytes": 2304,
+        "requests": 3,
+        "lcp": 232,
+        "jsCss200Bytes": 0
+      },
+      "secondRequestsSeen": [
+        "/ 304",
+        "/manifest.webmanifest 304",
+        "/sw.js 304",
+        "/sw.js 304"
+      ],
+      "swState": [
+        "activated",
+        "activated",
+        "activated"
+      ],
+      "controlledOnSecond": [
+        true,
+        true,
+        true
+      ],
+      "offline": [
+        {
+          "route": "/",
+          "ok": true
+        }
+      ],
+      "offlineUnvisited": {
+        "h1": "You are offline",
+        "errorPage": false,
+        "navError": null
+      },
+      "pass": {
+        "zeroJsCss": true,
+        "lcpLower": true,
+        "offline": true
+      },
+      "notes": []
+    },
+    {
+      "app": "fresh",
+      "origin": "fresh `brain new`",
+      "dupBytes": 0,
+      "routes": [
+        "/",
+        "/403",
+        "/about",
+        "/posts",
+        "/posts/hello-world",
+        "/posts/second-post"
+      ],
+      "runs": 3,
+      "first": {
+        "bytes": 52035,
+        "requests": 31,
+        "lcp": 876,
+        "jsCss200Bytes": 35214
+      },
+      "second": {
+        "bytes": 3685,
+        "requests": 4,
+        "lcp": 264,
+        "jsCss200Bytes": 0
+      },
+      "secondRequestsSeen": [
+        "/ 304",
+        "/sw.js 304",
+        "/manifest.webmanifest 304",
+        "/sw.js 304"
+      ],
+      "swState": [
+        "activated",
+        "activated",
+        "activated"
+      ],
+      "controlledOnSecond": [
+        true,
+        true,
+        true
+      ],
+      "offline": [
+        {
+          "route": "/",
+          "ok": true
+        },
+        {
+          "route": "/403",
+          "ok": true
+        },
+        {
+          "route": "/about",
+          "ok": true
+        },
+        {
+          "route": "/posts",
+          "ok": true
+        },
+        {
+          "route": "/posts/hello-world",
+          "ok": true
+        },
+        {
+          "route": "/posts/second-post",
+          "ok": true
+        }
+      ],
+      "offlineUnvisited": {
+        "h1": "You are offline",
+        "errorPage": false,
+        "navError": null
+      },
+      "pass": {
+        "zeroJsCss": true,
+        "lcpLower": true,
+        "offline": true
+      },
+      "notes": []
+    },
+    {
+      "app": "data",
+      "origin": "`brain new` + api() + resource() + public/",
+      "dupBytes": 0,
+      "routes": [
+        "/",
+        "/403",
+        "/about",
+        "/posts",
+        "/posts/hello-world",
+        "/posts/second-post"
+      ],
+      "runs": 3,
+      "first": {
+        "bytes": 56933,
+        "requests": 35,
+        "lcp": 704,
+        "jsCss200Bytes": 40263
+      },
+      "second": {
+        "bytes": 3843,
+        "requests": 3,
+        "lcp": 336,
+        "jsCss200Bytes": 0
+      },
+      "secondRequestsSeen": [
+        "/ 304",
+        "/manifest.webmanifest 304",
+        "/sw.js 304"
+      ],
+      "swState": [
+        "activated",
+        "activated",
+        "activated"
+      ],
+      "controlledOnSecond": [
+        true,
+        true,
+        true
+      ],
+      "offline": [
+        {
+          "route": "/",
+          "ok": true
+        },
+        {
+          "route": "/403",
+          "ok": true
+        },
+        {
+          "route": "/about",
+          "ok": true
+        },
+        {
+          "route": "/posts",
+          "ok": true
+        },
+        {
+          "route": "/posts/hello-world",
+          "ok": true
+        },
+        {
+          "route": "/posts/second-post",
+          "ok": true
+        }
+      ],
+      "offlineUnvisited": {
+        "h1": "You are offline",
+        "errorPage": false,
+        "navError": null
+      },
+      "pass": {
+        "zeroJsCss": true,
+        "lcpLower": true,
+        "offline": true
+      },
+      "notes": []
+    }
+  ],
+  "manifest": {
+    "icons": [
+      "/_b/gdiv1rd4.svg",
+      "/_b/14bhc8bp.png",
+      "/_b/i3h3vxfy.png"
+    ],
+    "missing": []
+  },
+  "dev": {
+    "fresh": {
+      "url": "http://127.0.0.1:55268/",
+      "h1": "Your BRAINLLM app is alive.",
+      "title": "Welcome to BRAINLLM · fresh",
+      "lcp": 891.6999998092651,
+      "fcp": 775.7699999809265,
+      "regs": 0,
+      "controlled": false,
+      "caches": [],
+      "pass": true
+    },
+    "before": {
+      "sw": "activated",
+      "url": "http://127.0.0.1:55314/",
+      "h1": "Your BRAINLLM app is alive.",
+      "title": "Welcome to BRAINLLM · fresh",
+      "lcp": 800,
+      "fcp": 792,
+      "regs": 1,
+      "controlled": true,
+      "caches": [
+        "brain-1yjm75wb",
+        "brain:meta"
+      ]
+    },
+    "samePort": true,
+    "after1": {
+      "url": "http://127.0.0.1:55314/",
+      "h1": "Your BRAINLLM app is alive.",
+      "title": "Welcome to BRAINLLM · fresh",
+      "lcp": 60.15999984741211,
+      "fcp": 20.93499994277954,
+      "regs": 0,
+      "controlled": false,
+      "caches": []
+    },
+    "after2": {
+      "url": "http://127.0.0.1:55314/",
+      "h1": "Your BRAINLLM app is alive.",
+      "title": "Welcome to BRAINLLM · fresh",
+      "lcp": 71.94999980926514,
+      "fcp": 32.424999713897705,
+      "regs": 0,
+      "controlled": false,
+      "caches": []
+    },
+    "pass": true
+  },
+  "optOuts": {
+    "variants": {
+      "default": {
+        "cache": null,
+        "files": {
+          "_headers": true,
+          "nginx": true
+        },
+        "build": [
+          "phase compress 1.3 ms 45 items",
+          "phase write 7.2 ms",
+          "warning: B1105 views/home.brain:15:3 `{:catch}` of `items` shows one message for every failure (offline, 401, 403, 5xx…); fix: render `<ErrorState error={e} retry={items.refetch} />` (it names the missing permission and links to sign in)"
+        ]
+      },
+      "sw": {
+        "cache": {
+          "sw": false
+        },
+        "files": {
+          "_headers": true,
+          "nginx": true
+        },
+        "build": [
+          "phase compress 11 ms 45 items",
+          "phase write 11 ms",
+          "warning: B1105 views/home.brain:15:3 `{:catch}` of `items` shows one message for every failure (offline, 401, 403, 5xx…); fix: render `<ErrorState error={e} retry={items.refetch} />` (it names the missing permission and links to sign in)"
+        ]
+      },
+      "http": {
+        "cache": {
+          "http": false
+        },
+        "files": {
+          "_headers": true,
+          "nginx": true
+        },
+        "build": [
+          "phase compress 18 ms 44 items",
+          "phase write 8.0 ms",
+          "warning: B1105 views/home.brain:15:3 `{:catch}` of `items` shows one message for every failure (offline, 401, 403, 5xx…); fix: render `<ErrorState error={e} retry={items.refetch} />` (it names the missing permission and links to sign in)"
+        ]
+      },
+      "offline": {
+        "cache": {
+          "offline": false
+        },
+        "files": {
+          "_headers": true,
+          "nginx": true
+        },
+        "build": [
+          "phase compress 13 ms 43 items",
+          "phase write 12 ms",
+          "warning: B1105 views/home.brain:15:3 `{:catch}` of `items` shows one message for every failure (offline, 401, 403, 5xx…); fix: render `<ErrorState error={e} retry={items.refetch} />` (it names the missing permission and links to sign in)"
+        ]
+      },
+      "data": {
+        "cache": {
+          "data": false
+        },
+        "files": {
+          "_headers": true,
+          "nginx": true
+        },
+        "build": [
+          "phase write 14 ms",
+          "warning: B1102 api/items.jsbrain:1:58 `cache` is ignored: brain.json sets `\"cache\": { \"data\": false }`; fix: remove `cache`, or turn data caching back on in brain.json",
+          "warning: B1105 views/home.brain:15:3 `{:catch}` of `items` shows one message for every failure (offline, 401, 403, 5xx…); fix: render `<ErrorState error={e} retry={items.refetch} />` (it names the missing permission and links to sign in)"
+        ]
+      }
+    },
+    "prerenderedPlainResource": "<main data-b=\"bhng\" class=\"home\"><h1>Items</h1> <p class=\"loading\">Loading…</p><!----> <a href=\"/about\">About</a> <img src=\"/_b/8pkghzb1.svg\" alt=\"Logo\" width=\"32\" height=\"32\"></main>",
+    "chunksWithUnhashedLogo": [],
+    "sameBuildDefaultVsDataFalse": false,
+    "headers": {
+      "default": {
+        "html": {
+          "path": "/",
+          "status": 200,
+          "cacheControl": "no-cache",
+          "etag": "\"9071137e89ab58f9\""
+        },
+        "about": {
+          "path": "/about",
+          "status": 200,
+          "cacheControl": "no-cache",
+          "etag": "\"f74a4bed1a9eabe9\""
+        },
+        "js": {
+          "path": "/_b/io24njpj.js",
+          "status": 200,
+          "cacheControl": "public, max-age=31536000, immutable",
+          "etag": "\"9fb74a5bfb484720\""
+        },
+        "css": {
+          "path": "/_b/2fwaal7e.css",
+          "status": 200,
+          "cacheControl": "public, max-age=31536000, immutable",
+          "etag": "\"d6a5bd61803633fc\""
+        },
+        "img": {
+          "path": "/_b/8pkghzb1.svg",
+          "status": 200,
+          "cacheControl": "public, max-age=31536000, immutable",
+          "etag": "\"01e47777f51f7339\""
+        },
+        "unhashedPublic": {
+          "path": "/notes.txt",
+          "status": 200,
+          "cacheControl": "no-cache",
+          "etag": "\"f572d396fae92066\""
+        },
+        "sw": {
+          "path": "/sw.js",
+          "status": 200,
+          "cacheControl": "no-cache",
+          "etag": "\"0bc5db9c575b346a\""
+        },
+        "registerSnippet": true,
+        "swIsKill": false
+      },
+      "sw": {
+        "html": {
+          "path": "/",
+          "status": 200,
+          "cacheControl": "no-cache",
+          "etag": "\"ab11b754510cf422\""
+        },
+        "about": {
+          "path": "/about",
+          "status": 200,
+          "cacheControl": "no-cache",
+          "etag": "\"ad5625ece4b0d5c2\""
+        },
+        "js": {
+          "path": "/_b/io24njpj.js",
+          "status": 200,
+          "cacheControl": "public, max-age=31536000, immutable",
+          "etag": "\"9fb74a5bfb484720\""
+        },
+        "css": {
+          "path": "/_b/2fwaal7e.css",
+          "status": 200,
+          "cacheControl": "public, max-age=31536000, immutable",
+          "etag": "\"d6a5bd61803633fc\""
+        },
+        "img": {
+          "path": "/_b/8pkghzb1.svg",
+          "status": 200,
+          "cacheControl": "public, max-age=31536000, immutable",
+          "etag": "\"01e47777f51f7339\""
+        },
+        "unhashedPublic": {
+          "path": "/notes.txt",
+          "status": 200,
+          "cacheControl": "no-cache",
+          "etag": "\"f572d396fae92066\""
+        },
+        "sw": {
+          "path": "/sw.js",
+          "status": 200,
+          "cacheControl": "no-cache",
+          "etag": "\"7276b6f4710285f3\""
+        },
+        "registerSnippet": false,
+        "swIsKill": true
+      },
+      "http": {
+        "html": {
+          "path": "/",
+          "status": 200,
+          "cacheControl": null,
+          "etag": "\"458408628012890e\""
+        },
+        "about": {
+          "path": "/about",
+          "status": 200,
+          "cacheControl": null,
+          "etag": "\"7ea7bc4e6901d908\""
+        },
+        "js": {
+          "path": "/_b/io24njpj.js",
+          "status": 200,
+          "cacheControl": null,
+          "etag": "\"9fb74a5bfb484720\""
+        },
+        "css": {
+          "path": "/_b/2fwaal7e.css",
+          "status": 200,
+          "cacheControl": null,
+          "etag": "\"d6a5bd61803633fc\""
+        },
+        "img": {
+          "path": "/logo.svg",
+          "status": 200,
+          "cacheControl": null,
+          "etag": "\"01e47777f51f7339\""
+        },
+        "unhashedPublic": {
+          "path": "/notes.txt",
+          "status": 200,
+          "cacheControl": null,
+          "etag": "\"f572d396fae92066\""
+        },
+        "sw": {
+          "path": "/sw.js",
+          "status": 200,
+          "cacheControl": null,
+          "etag": "\"f014cea3c4f61690\""
+        },
+        "registerSnippet": true,
+        "swIsKill": false
+      },
+      "offline": {
+        "html": {
+          "path": "/",
+          "status": 200,
+          "cacheControl": "no-cache",
+          "etag": "\"4ce177f2742000dc\""
+        },
+        "about": {
+          "path": "/about",
+          "status": 200,
+          "cacheControl": "no-cache",
+          "etag": "\"6521b11e72b0c4f2\""
+        },
+        "js": {
+          "path": "/_b/io24njpj.js",
+          "status": 200,
+          "cacheControl": "public, max-age=31536000, immutable",
+          "etag": "\"9fb74a5bfb484720\""
+        },
+        "css": {
+          "path": "/_b/2fwaal7e.css",
+          "status": 200,
+          "cacheControl": "public, max-age=31536000, immutable",
+          "etag": "\"d6a5bd61803633fc\""
+        },
+        "img": {
+          "path": "/_b/8pkghzb1.svg",
+          "status": 200,
+          "cacheControl": "public, max-age=31536000, immutable",
+          "etag": "\"01e47777f51f7339\""
+        },
+        "unhashedPublic": {
+          "path": "/notes.txt",
+          "status": 200,
+          "cacheControl": "no-cache",
+          "etag": "\"f572d396fae92066\""
+        },
+        "sw": {
+          "path": "/sw.js",
+          "status": 200,
+          "cacheControl": "no-cache",
+          "etag": "\"cfc5e8dee27992e3\""
+        },
+        "registerSnippet": true,
+        "swIsKill": false
+      },
+      "data": {
+        "html": {
+          "path": "/",
+          "status": 200,
+          "cacheControl": "no-cache",
+          "etag": "\"2b43244b0110b480\""
+        },
+        "about": {
+          "path": "/about",
+          "status": 200,
+          "cacheControl": "no-cache",
+          "etag": "\"0026790bc4a17c0d\""
+        },
+        "js": {
+          "path": "/_b/io24njpj.js",
+          "status": 200,
+          "cacheControl": "public, max-age=31536000, immutable",
+          "etag": "\"9fb74a5bfb484720\""
+        },
+        "css": {
+          "path": "/_b/2fwaal7e.css",
+          "status": 200,
+          "cacheControl": "public, max-age=31536000, immutable",
+          "etag": "\"d6a5bd61803633fc\""
+        },
+        "img": {
+          "path": "/_b/8pkghzb1.svg",
+          "status": 200,
+          "cacheControl": "public, max-age=31536000, immutable",
+          "etag": "\"01e47777f51f7339\""
+        },
+        "unhashedPublic": {
+          "path": "/notes.txt",
+          "status": 200,
+          "cacheControl": "no-cache",
+          "etag": "\"f572d396fae92066\""
+        },
+        "sw": {
+          "path": "/sw.js",
+          "status": 200,
+          "cacheControl": "no-cache",
+          "etag": "\"2aa36256bed35626\""
+        },
+        "registerSnippet": true,
+        "swIsKill": false
+      },
+      "plain": {
+        "html": {
+          "path": "/",
+          "status": 200,
+          "cacheControl": "no-cache",
+          "etag": "\"b61c510d348057fa\""
+        },
+        "about": {
+          "path": "/about",
+          "status": 200,
+          "cacheControl": "no-cache",
+          "etag": "\"9ef834b157e6e2be\""
+        },
+        "js": {
+          "path": "/_b/io24njpj.js",
+          "status": 200,
+          "cacheControl": "public, max-age=31536000, immutable",
+          "etag": "\"9fb74a5bfb484720\""
+        },
+        "css": {
+          "path": "/_b/2fwaal7e.css",
+          "status": 200,
+          "cacheControl": "public, max-age=31536000, immutable",
+          "etag": "\"d6a5bd61803633fc\""
+        },
+        "img": {
+          "path": "/_b/8pkghzb1.svg",
+          "status": 200,
+          "cacheControl": "public, max-age=31536000, immutable",
+          "etag": "\"01e47777f51f7339\""
+        },
+        "unhashedPublic": {
+          "path": "/notes.txt",
+          "status": 200,
+          "cacheControl": "no-cache",
+          "etag": "\"f572d396fae92066\""
+        },
+        "sw": {
+          "path": "/sw.js",
+          "status": 200,
+          "cacheControl": "no-cache",
+          "etag": "\"454f442429f0a381\""
+        },
+        "registerSnippet": true,
+        "swIsKill": false
+      }
+    },
+    "sw": {
+      "fresh": {
+        "url": "http://127.0.0.1:55403/",
+        "h1": "Items",
+        "title": "Data · data",
+        "lcp": 704,
+        "fcp": 696,
+        "regs": 0,
+        "controlled": false,
+        "caches": []
+      },
+      "pastVisitor": {
+        "before": {
+          "sw": "activated",
+          "url": "http://127.0.0.1:55427/",
+          "h1": "Items",
+          "title": "Data · data",
+          "lcp": 744,
+          "fcp": 744,
+          "regs": 1,
+          "controlled": true,
+          "caches": [
+            "brain-lkn0sj50",
+            "brain:meta"
+          ]
+        },
+        "after1": {
+          "url": "http://127.0.0.1:55427/",
+          "h1": "Items",
+          "title": "Data · data",
+          "lcp": 44,
+          "fcp": 28,
+          "regs": 0,
+          "controlled": false,
+          "caches": []
+        },
+        "after2": {
+          "url": "http://127.0.0.1:55427/about",
+          "h1": "About",
+          "title": "About · data",
+          "lcp": 60,
+          "fcp": 60,
+          "regs": 0,
+          "controlled": false,
+          "caches": []
+        },
+        "pass": true
+      },
+      "snippetInHtml": false,
+      "killWorker": true,
+      "pass": true
+    },
+    "http": {
+      "files": {
+        "_headers": true,
+        "nginx": true
+      },
+      "immutable": false,
+      "anyCacheControl": [],
+      "publicHashed": false,
+      "note": "ETag comes from the emulated static host (Netlify/Cloudflare Pages add one to every file), not from the build",
+      "pass": true
+    },
+    "offline": {
+      "offline": [
+        {
+          "route": "/",
+          "expectedH1": "Items",
+          "h1": "Press space to play",
+          "ok": false,
+          "errorPage": true,
+          "navError": "net::ERR_INTERNET_DISCONNECTED",
+          "url": "chrome-error://chromewebdata/"
+        },
+        {
+          "route": "/about",
+          "expectedH1": "About",
+          "h1": "Press space to play",
+          "ok": false,
+          "errorPage": true,
+          "navError": "net::ERR_INTERNET_DISCONNECTED",
+          "url": "chrome-error://chromewebdata/"
+        }
+      ],
+      "unvisited": {
+        "h1": "Press space to play",
+        "errorPage": true,
+        "navError": "net::ERR_INTERNET_DISCONNECTED"
+      },
+      "swState": "activated",
+      "offlineBuilt": [],
+      "pass": true
+    },
+    "data": {
+      "default": {
+        "swState": "activated",
+        "memory": {
+          "firstLoadMs": 1511,
+          "aboutMs": 23,
+          "msToItemsOnBack": 20,
+          "clientImgSrc": "/_b/8pkghzb1.svg"
+        },
+        "caches": {
+          "brain-lkn0sj50": [
+            "/_b/2fwaal7e.css",
+            "/_b/1h8jo55x.js",
+            "/_b/9hjqcbxx.js",
+            "/_b/4k04fpvv.js",
+            "/_offline/",
+            "/_b/dw608mpy.js",
+            "/_b/04t2nxow.js",
+            "/_b/l4jecs0r.js",
+            "/_b/m5mweaaw.js",
+            "/_b/l6de2uvo.js",
+            "/_b/z7rfzfz6.js",
+            "/_b/zk32gmnh.js",
+            "/_b/5oicptok.js",
+            "/_b/8ffjjc3f.js",
+            "/_b/io24njpj.js",
+            "/_b/76hf7ozp.js",
+            "/_b/4q4wv6tq.js",
+            "/_b/qbw84mwc.js",
+            "/_b/8pmysmpi.js",
+            "/_b/pmklqxk8.js",
+            "/_b/jjhd0ziu.js",
+            "/_b/u8pnjrr5.js",
+            "/_b/9drmo5wr.js",
+            "/_b/78rvsayr.js",
+            "/_b/q6p6o3h4.js",
+            "/_b/yy0eiv0a.js",
+            "/_b/phr9qa75.js",
+            "/_b/5gb797jc.js",
+            "/_b/wn8pgt68.js",
+            "/_b/8pkghzb1.svg"
+          ],
+          "brain:meta": [
+            "/__brain_generations"
+          ],
+          "brain:data": [
+            "/api/items"
+          ]
+        },
+        "swCachedPrivate": [],
+        "dataCacheHasItems": true,
+        "swCachedApi": [],
+        "nextVisitMsToItems": 21,
+        "nextVisitApiHits": 1
+      },
+      "off": {
+        "swState": "activated",
+        "memory": {
+          "firstLoadMs": 1514,
+          "aboutMs": 20,
+          "msToItemsOnBack": 1513,
+          "clientImgSrc": "/_b/8pkghzb1.svg"
+        },
+        "caches": {
+          "brain-q0bqnx1y": [
+            "/_offline/",
+            "/_b/2fwaal7e.css",
+            "/_b/1h8jo55x.js",
+            "/_b/l4jecs0r.js",
+            "/_b/9hjqcbxx.js",
+            "/_b/4k04fpvv.js",
+            "/_b/dw608mpy.js",
+            "/_b/04t2nxow.js",
+            "/_b/m5mweaaw.js",
+            "/_b/l6de2uvo.js",
+            "/_b/z7rfzfz6.js",
+            "/_b/zk32gmnh.js",
+            "/_b/5oicptok.js",
+            "/_b/8ffjjc3f.js",
+            "/_b/io24njpj.js",
+            "/_b/76hf7ozp.js",
+            "/_b/8pmysmpi.js",
+            "/_b/4q4wv6tq.js",
+            "/_b/qbw84mwc.js",
+            "/_b/pmklqxk8.js",
+            "/_b/jjhd0ziu.js",
+            "/_b/u8pnjrr5.js",
+            "/_b/9drmo5wr.js",
+            "/_b/78rvsayr.js",
+            "/_b/yy0eiv0a.js",
+            "/_b/q6p6o3h4.js",
+            "/_b/5gb797jc.js",
+            "/_b/phr9qa75.js",
+            "/_b/wn8pgt68.js",
+            "/_b/8pkghzb1.svg"
+          ],
+          "brain:meta": [
+            "/__brain_generations"
+          ]
+        },
+        "swCachedPrivate": [],
+        "dataCacheHasItems": false,
+        "swCachedApi": [],
+        "nextVisitMsToItems": 1510,
+        "nextVisitApiHits": 1
+      },
+      "metaEmitted": true,
+      "b1102Build": true,
+      "b1102Check": true,
+      "b1102": true,
+      "layerOff": true,
+      "pass": true,
+      "toolchainParsesKey": true
+    }
+  },
+  "signature": {
+    "identical": {
+      "printed": [
+        "w8u1ftmu",
+        "w8u1ftmu",
+        "w8u1ftmu"
+      ],
+      "places": {
+        "meta": "w8u1ftmu",
+        "sw": "w8u1ftmu",
+        "headers": [
+          "w8u1ftmu"
+        ],
+        "nginx": "w8u1ftmu"
+      },
+      "sameDirDiff": [],
+      "otherDirDiff": [],
+      "placesAgree": true,
+      "identicalPass": true,
+      "mutations": {
+        ".brain (visible text)": {
+          "printed": "ylairrak",
+          "changed": true,
+          "filesChanged": 34
+        },
+        ".cssbrain (one hex digit)": {
+          "printed": "h0uni6wo",
+          "changed": true,
+          "filesChanged": 30
+        },
+        "public/ referenced (favicon.svg)": {
+          "printed": "l9h32y6w",
+          "changed": true,
+          "filesChanged": 34
+        },
+        "public/ unreferenced (notes.txt)": {
+          "printed": "fhr83bzj",
+          "changed": true,
+          "filesChanged": 29
+        }
+      },
+      "pass": true
+    },
+    "health": {
+      "printed": "6c7zi5at",
+      "servedBy": "node dist/server.mjs (PORT/HOST)",
+      "pid": 1366,
+      "health": {
+        "ok": true,
+        "build": "6c7zi5at"
+      },
+      "pages": {
+        "/": {
+          "status": 200,
+          "xBrainBuild": "6c7zi5at",
+          "etag": "\"6c7zi5at\"",
+          "cacheControl": "no-cache"
+        },
+        "/about": {
+          "status": 200,
+          "xBrainBuild": "6c7zi5at",
+          "etag": null,
+          "cacheControl": "no-cache"
+        },
+        "/sw.js": {
+          "status": 200,
+          "xBrainBuild": null,
+          "etag": null,
+          "cacheControl": "no-cache"
+        }
+      },
+      "brainStart": "exists",
+      "healthPass": true,
+      "headerPass": true,
+      "staticEtagIsSignature": true,
+      "swNoCache": true,
+      "pass": true
+    },
+    "deploy": {
+      "sigA": "w3ho0n4f",
+      "sigB": "rjtf6c6s",
+      "swBefore": "activated+controlling",
+      "before": {
+        "url": "http://127.0.0.1:55580/",
+        "h1": "My tasks",
+        "build": "w3ho0n4f",
+        "regs": 1,
+        "controller": "http://127.0.0.1:55580/sw.js",
+        "caches": [
+          "brain-w3ho0n4f",
+          "brain:meta"
+        ]
+      },
+      "aboutMs": 56,
+      "afterAbout": {
+        "url": "http://127.0.0.1:55580/about",
+        "h1": "About B",
+        "build": "rjtf6c6s",
+        "regs": 1,
+        "controller": "http://127.0.0.1:55580/sw.js",
+        "caches": [
+          "brain-w3ho0n4f",
+          "brain:meta",
+          "brain-rjtf6c6s"
+        ]
+      },
+      "homeMs": 102,
+      "afterHome": {
+        "url": "http://127.0.0.1:55580/",
+        "h1": "My tasks B",
+        "build": "rjtf6c6s",
+        "regs": 1,
+        "controller": "http://127.0.0.1:55580/sw.js",
+        "caches": [
+          "brain-w3ho0n4f",
+          "brain:meta",
+          "brain-rjtf6c6s"
+        ]
+      },
+      "navs": [
+        "same-document /about",
+        "document /about",
+        "load",
+        "same-document /"
+      ],
+      "requests": [
+        {
+          "url": "/about",
+          "status": 200,
+          "source": "network",
+          "build": "rjtf6c6s",
+          "file": "both"
+        },
+        {
+          "url": "/_b/m68pmrn6.css",
+          "status": 200,
+          "source": "sw",
+          "build": null,
+          "file": "both"
+        },
+        {
+          "url": "/about",
+          "status": 200,
+          "source": "sw",
+          "build": "rjtf6c6s",
+          "file": "both"
+        },
+        {
+          "url": "/_b/m68pmrn6.css",
+          "status": 200,
+          "source": "sw",
+          "build": null,
+          "file": "both"
+        },
+        {
+          "url": "/_b/m5mweaaw.js",
+          "status": 200,
+          "source": "sw",
+          "build": null,
+          "file": "both"
+        },
+        {
+          "url": "/_b/36i2gf0n.js",
+          "status": 200,
+          "source": "sw",
+          "build": null,
+          "file": "both"
+        },
+        {
+          "url": "/_b/5oicptok.js",
+          "status": 200,
+          "source": "sw",
+          "build": null,
+          "file": "both"
+        },
+        {
+          "url": "/manifest.webmanifest",
+          "status": 200,
+          "source": "sw",
+          "build": null,
+          "file": "both"
+        },
+        {
+          "url": "/_b/04t2nxow.js",
+          "status": 200,
+          "source": "sw",
+          "build": null,
+          "file": "both"
+        },
+        {
+          "url": "/",
+          "status": 200,
+          "source": "network",
+          "build": "rjtf6c6s",
+          "file": "both"
+        },
+        {
+          "url": "/_b/m68pmrn6.css",
+          "status": 200,
+          "source": "sw",
+          "build": null,
+          "file": "both"
+        },
+        {
+          "url": "/_b/dpxqb7w7.js",
+          "status": 200,
+          "source": "sw",
+          "build": null,
+          "file": "both"
+        },
+        {
+          "url": "/_b/l7n9uzlq.js",
+          "status": 200,
+          "source": "sw",
+          "build": null,
+          "file": "both"
+        },
+        {
+          "url": "/_b/yz70gwtv.js",
+          "status": 200,
+          "source": "sw",
+          "build": null,
+          "file": "both"
+        },
+        {
+          "url": "/_b/yo2x72rp.js",
+          "status": 200,
+          "source": "sw",
+          "build": null,
+          "file": "B-only"
+        },
+        {
+          "url": "/_b/541u32ld.js",
+          "status": 200,
+          "source": "sw",
+          "build": null,
+          "file": "both"
+        },
+        {
+          "url": "/_b/wac82a6q.js",
+          "status": 200,
+          "source": "sw",
+          "build": null,
+          "file": "both"
+        },
+        {
+          "url": "/_b/izjkkzis.js",
+          "status": 200,
+          "source": "sw",
+          "build": null,
+          "file": "both"
+        }
+      ],
+      "server": [
+        "/about 200 (served from B)",
+        "/about 304 (served from B)",
+        "/manifest.webmanifest 304 (served from B)",
+        "/sw.js 200 (served from B)",
+        "/_offline.html 200 (served from B)",
+        "/_b/yo2x72rp.js 200 (served from B)",
+        "/sw.js 304 (served from B)",
+        "/ 200 (served from B)"
+      ],
+      "swRequests": [
+        {
+          "url": "/about",
+          "status": 200,
+          "file": "both"
+        },
+        {
+          "url": "/manifest.webmanifest",
+          "status": 200,
+          "file": "both"
+        },
+        {
+          "url": "/sw.js",
+          "status": 200,
+          "file": "both"
+        },
+        {
+          "url": "/_b/m68pmrn6.css",
+          "status": 200,
+          "file": "both"
+        },
+        {
+          "url": "/_b/m5mweaaw.js",
+          "status": 200,
+          "file": "both"
+        },
+        {
+          "url": "/_b/36i2gf0n.js",
+          "status": 200,
+          "file": "both"
+        },
+        {
+          "url": "/_offline.html",
+          "status": 200,
+          "file": "both"
+        },
+        {
+          "url": "/_b/5oicptok.js",
+          "status": 200,
+          "file": "both"
+        },
+        {
+          "url": "/_b/dpxqb7w7.js",
+          "status": 200,
+          "file": "both"
+        },
+        {
+          "url": "/_b/l7n9uzlq.js",
+          "status": 200,
+          "file": "both"
+        },
+        {
+          "url": "/_b/yz70gwtv.js",
+          "status": 200,
+          "file": "both"
+        },
+        {
+          "url": "/_b/541u32ld.js",
+          "status": 200,
+          "file": "both"
+        },
+        {
+          "url": "/_b/wac82a6q.js",
+          "status": 200,
+          "file": "both"
+        },
+        {
+          "url": "/_b/yo2x72rp.js",
+          "status": 200,
+          "file": "B-only"
+        },
+        {
+          "url": "/_b/04t2nxow.js",
+          "status": 200,
+          "file": "both"
+        },
+        {
+          "url": "/_b/izjkkzis.js",
+          "status": 200,
+          "file": "both"
+        }
+      ],
+      "oldFiles": [],
+      "oldHtml": [],
+      "pass": true
+    },
+    "chunk": {
+      "sigA": "bro3mgze",
+      "sigB": "7q97i05g",
+      "chunk": "/_b/m8p5dtjr.js",
+      "adapted": "tasks `/` has no island (it reads the tasks channel, so the build mounts it on load); the case runs on a copy whose `/` is the same task form with local state",
+      "chunkInB": false,
+      "navs": [],
+      "final": {
+        "url": "http://127.0.0.1:55610/",
+        "h1": "My tasks",
+        "build": "bro3mgze",
+        "regs": 1,
+        "controller": "http://127.0.0.1:55610/sw.js",
+        "caches": [
+          "brain-bro3mgze",
+          "brain:meta",
+          "brain-7q97i05g"
+        ]
+      },
+      "sw": "activated+controlling",
+      "homeMs": 70,
+      "chunkFetchedBeforeDeploy": [
+        "200 (served from A)"
+      ],
+      "preloaded": true,
+      "removedFromCaches": 1,
+      "used1": true,
+      "navigationApiEvents": [],
+      "afterReload": {
+        "url": "http://127.0.0.1:55610/",
+        "h1": "My tasks",
+        "build": "bro3mgze",
+        "regs": 1,
+        "controller": "http://127.0.0.1:55610/sw.js",
+        "caches": [
+          "brain-bro3mgze",
+          "brain:meta",
+          "brain-7q97i05g"
+        ]
+      },
+      "used2": true,
+      "islandAlive": true,
+      "fullLoads": 0,
+      "chunkRequests": [],
+      "reloadKeys": [],
+      "pass": false,
+      "blocked": "precondition not met: the tab fetched A's island chunk /_b/m8p5dtjr.js before the deploy (200 (served from A); A's / lists it in <link rel=\"modulepreload\">), so deleting it afterwards cannot be observed: the island resumed from memory (document loads 0, island adds a task: true)"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0401",
+    "level": "error",
+    "file": "invalid/comp/b0401-img-alt.brain",
+    "line": 1,
+    "col": 1,
+    "msg": "`<img>` without `alt`",
+    "fix": "add `alt=\"description\"` (or `alt=\"\"` if it is decorative)"
+  }
+]

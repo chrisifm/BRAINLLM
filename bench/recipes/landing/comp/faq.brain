@@ -1,0 +1,34 @@
+<meta props="title:str='Frequently asked questions' items:list">
+
+<script>
+  // items: [{ id: 'cancel', q: 'Can I cancel?', a: 'Yes…' }] · each answer opens on its own (several may be open)
+  let open = sig([])
+  const toggle = (id) => {
+    open = open.includes(id) ? open.filter((x) => x !== id) : [...open, id]
+  }
+</script>
+
+<section class="faq" aria-labelledby="faq-title">
+  <h2 id="faq-title">{title}</h2>
+  <div class="list">
+    {#each items as it (it.id)}
+      <div class="item">
+        <h3>
+          <button type="button" aria-expanded={open.includes(it.id) ? 'true' : 'false'} aria-controls={'faq-' + it.id} on:click={toggle(it.id)}>{it.q}</button>
+        </h3>
+        <div id={'faq-' + it.id} class="answer" hidden={!open.includes(it.id)}><p>{it.a}</p></div>
+      </div>
+    {/each}
+  </div>
+</section>
+
+<style>
+  .faq { display: grid; gap: var(--space-4); padding: var(--space-5) 0; max-width: 60ch; margin: 0 auto; }
+  h2 { margin: 0; text-align: center; font-size: 1.6rem; }
+  .list { display: grid; gap: var(--space-2); }
+  .item { border-bottom: 1px solid var(--line); }
+  h3 { margin: 0; }
+  button { width: 100%; text-align: left; font: inherit; font-weight: 600; padding: var(--space-3) 0; color: var(--fg); background: none; border: 0; cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .answer p { margin: 0 0 var(--space-3); color: var(--muted); }
+</style>

@@ -1,0 +1,33 @@
+<script>
+  import Signup from './signup.brain'
+
+  test('an empty form shows a required error per field and does not submit', async () => {
+    await mount(Signup, { configured: true })
+    await click('button[type=submit]')
+    expect(count('[role=alert]') >= 3).toBeTruthy()
+  })
+
+  test('a short password is rejected before calling the server', async () => {
+    await mount(Signup, { configured: true })
+    await type('input[aria-label="Email"]', 'ana@example.com')
+    await type('input[aria-label="Password"]', 'short')
+    await type('input[aria-label="Repeat the password"]', 'short')
+    await click('button[type=submit]')
+    expect(text('form').includes('Use at least 8 characters')).toBeTruthy()
+  })
+
+  test('a repeated password that differs is rejected before calling the server', async () => {
+    await mount(Signup, { configured: true })
+    await type('input[aria-label="Email"]', 'ana@example.com')
+    await type('input[aria-label="Password"]', 'long enough 1')
+    await type('input[aria-label="Repeat the password"]', 'long enough 2')
+    await click('button[type=submit]')
+    expect(text('form').includes('The passwords do not match')).toBeTruthy()
+  })
+
+  test('without a provider there is no form, only the notice', async () => {
+    await mount(Signup, { configured: false })
+    expect(count('form')).toBe(0)
+    expect(text('[role=status]').includes('not configured')).toBeTruthy()
+  })
+</script>

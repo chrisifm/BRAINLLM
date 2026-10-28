@@ -1,0 +1,26 @@
+<script>
+  import ItemForm from './item-form.brain'
+
+  test('an empty form shows the required errors and does not save', async () => {
+    let saved = 0
+    await mount(ItemForm, { save: async () => { saved = saved + 1 } })
+    await click('button[type=submit]')
+    expect(saved).toBe(0)
+    expect(count('[role=alert]') >= 2).toBeTruthy()
+  })
+
+  test('an existing item fills the fields and saves them as typed values', async () => {
+    let got = null
+    await mount(ItemForm, { item: { id: 4, name: 'Lamp', status: 'archived', price: 30 }, save: async (v) => { got = v } })
+    await click('button[type=submit]')
+    expect(got).toEqual({ name: 'Lamp', status: 'archived', price: 30 })
+  })
+
+  test('a server error lands under its field', async () => {
+    await mount(ItemForm, { save: async () => { throw { errors: { name: 'That name is taken' } } } })
+    await type('input[aria-label="Name"]', 'Lamp')
+    await type('input[aria-label="Price"]', '10')
+    await click('button[type=submit]')
+    expect(text('form').includes('That name is taken')).toBeTruthy()
+  })
+</script>

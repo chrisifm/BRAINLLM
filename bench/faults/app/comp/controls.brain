@@ -1,0 +1,13 @@
+<script>
+  import faults from '../channels/faults.jsbrain'
+</script>
+<div class="controls" data-p="controls">
+  <button type="button" data-ctl="render" on:click={faults.render = !faults.render}>render {faults.render ? 'on' : 'off'}</button>
+  <button type="button" data-ctl="fx" on:click={faults.fx = !faults.fx}>fx {faults.fx ? 'on' : 'off'}</button>
+  <button type="button" data-ctl="drv" on:click={faults.drv = !faults.drv}>drv {faults.drv ? 'on' : 'off'}</button>
+  <button type="button" data-ctl="resource" on:click={faults.resource = !faults.resource}>resource {faults.resource ? 'on' : 'off'}</button>
+  <button type="button" data-ctl="ssrHealed" on:click={faults.ssrHealed = !faults.ssrHealed}>ssr healed {faults.ssrHealed ? 'yes' : 'no'}</button>
+</div>
+<style>
+  .controls { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+</style>

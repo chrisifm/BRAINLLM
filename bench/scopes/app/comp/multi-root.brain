@@ -1,0 +1,11 @@
+<script>
+  let show = sig(true)
+  const tags = ['x', 'y']
+</script>
+<p class="title" data-probe="m-root1">Multi root one</p>
+<p class="title" data-probe="m-root2">Multi root two</p>
+{#if show}<p class="title" data-probe="m-cond">Conditional root</p>{/if}
+{#each tags as t (t)}<p class="title" data-probe={'m-each-' + t}>Each root {t}</p>{/each}
+<style>
+  .title { color: var(--muted); font-size: 11px; }
+</style>

@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1302",
+    "level": "warning",
+    "file": "comp/b1302-fetch-no-catch.brain",
+    "line": 4,
+    "col": 5,
+    "msg": "`fetch` without error handling: a network failure or 4xx/5xx goes uncaught",
+    "fix": "add `.catch((e) => { error = e })` and check `r.ok`, or use `resource(api.get)` with `{:catch}`"
+  }
+]

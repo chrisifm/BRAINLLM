@@ -1,0 +1,12 @@
+<meta props="size:str?">
+<script>
+  // inside a Stack or Row: with no size it takes the remaining space (pushes the next items to the end); with a
+  // token step it is a fixed gap of that size
+  // spacing props take a token step from tokens.cssbrain (0–6 → --space-N), never raw CSS
+  const sp = (n) => (n == null || n === '' ? null : String(n) === '0' ? '0' : 'var(--space-' + n + ')')
+</script>
+<span class="spacer" class:grow={!size} style:flex-basis={sp(size)} aria-hidden="true"></span>
+<style>
+  .spacer { display: block; flex-shrink: 0; }
+  .spacer.grow { flex-grow: 1; }
+</style>

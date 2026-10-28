@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1603",
+    "level": "error",
+    "file": "invalid/views/b1603-jsonld-no-type.brain",
+    "line": 1,
+    "col": 105,
+    "msg": "JSON-LD without `@type`: search engines ignore it",
+    "fix": "add the schema.org type: `jsonld={{ '@type': 'Article', headline: props.post.title }}`"
+  }
+]

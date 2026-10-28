@@ -1,0 +1,13 @@
+<meta fallback="Boom failed">
+<script>
+  let broken = sig(false)
+  let clicks = sig(0)
+  let val = drv(() => broken ? JSON.parse('{').x : 'fine')
+  const explode = () => { clicks++; JSON.parse('{') }
+  const breakDrv = () => { broken = true }
+</script>
+<div class="boom">
+  <span class="val">{val}</span> <span class="clicks">{clicks}</span>
+  <button type="button" class="explode" on:click={explode}>Throw in handler</button>
+  <button type="button" class="break" on:click={breakDrv}>Throw in drv</button>
+</div>

@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0126",
+    "level": "error",
+    "file": "invalid/comp/b0126-no-markup.brain",
+    "line": 1,
+    "col": 1,
+    "msg": "the component has no markup",
+    "fix": "add the markup it renders after `<script>`; logic without markup goes in `lib/x.jsbrain`"
+  }
+]

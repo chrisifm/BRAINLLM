@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1201",
+    "level": "error",
+    "file": "comp/b1201-unsupported-css.brain",
+    "line": 6,
+    "col": 14,
+    "msg": "`field-sizing` is not in the `baseline-widely` target (Baseline: limited)",
+    "fix": "remove it or put it inside `@supports (field-sizing: content) { … }`; or raise `\"targets\"` in `brain.json`"
+  }
+]

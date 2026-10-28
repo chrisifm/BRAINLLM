@@ -1,0 +1,27 @@
+[
+  {
+    "id": "habits",
+    "brief": "Build a habit tracker. The home page lists the user's habits with today's check-off state and a streak count per habit. A second page lets the user add a habit (name, required; target days per week, 1-7) with validation messages, and a third page shows one habit's last 30 days as a grid of days. Keep the data in memory on the client; checking a habit off updates its streak immediately.",
+    "pages": 3
+  },
+  {
+    "id": "inventory",
+    "brief": "Build a small inventory admin. A products page shows a table (name, SKU, stock, price) with a search box and a filter for low stock (fewer than 5 units). Each row links to a product detail page where the stock can be increased or decreased and the product can be deleted after a confirmation dialog. A third page creates a product with a validated form. Use an in-memory data module with async functions so it can later be replaced by a real API.",
+    "pages": 3
+  },
+  {
+    "id": "events",
+    "brief": "Build an event RSVP site. The landing page introduces a conference with a hero, a schedule of five talks and a call to action. An RSVP page has a form (name, email, number of guests 0-3, dietary notes) that shows a success state after submit and prevents double submission. An admin page lists the RSVPs received so far with a total guest count.",
+    "pages": 3
+  },
+  {
+    "id": "recipes",
+    "brief": "Build a recipe book. The home page shows recipe cards with a title, prep time and tags, filterable by tag. A recipe page shows ingredients with a servings selector that scales the quantities, and the steps as an ordered list. A favorites page lists the recipes the user starred; the star toggle is available on cards and on the recipe page and stays in sync between both.",
+    "pages": 3
+  },
+  {
+    "id": "support",
+    "brief": "Build a customer support inbox. The inbox page lists tickets with subject, customer, status (open, pending, closed) and age, with tabs per status that show a count. Opening a ticket shows the conversation and a reply box; sending a reply appends it and can change the status. A settings page lets the agent edit a signature that is appended to every reply.",
+    "pages": 3
+  }
+]

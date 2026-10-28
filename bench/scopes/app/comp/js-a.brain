@@ -1,0 +1,12 @@
+<script>
+  import shared from '../channels/shared.jsbrain'
+  let count = sig(0)
+  const items = ['a1', 'a2']
+  function toggle() { count = count + 1 }
+  const handleClick = () => toggle()
+  let open = sig(false)
+</script>
+<div class="js js-a">
+  <span class="count">{count}</span> <span class="items">{items.join(',')}</span> <span class="store">{shared.count}</span>
+  <button type="button" class="go" on:click={handleClick}>JsA +1</button>
+</div>

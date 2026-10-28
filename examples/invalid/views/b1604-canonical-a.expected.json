@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1604",
+    "level": "error",
+    "file": "invalid/views/b1604-canonical-a.brain",
+    "line": 1,
+    "col": 59,
+    "msg": "canonical `/pricing` is also declared by views/b1604-canonical-b.brain",
+    "fix": "give each view its own canonical URL (the route it is served at)"
+  }
+]

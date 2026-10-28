@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1005",
+    "level": "warning",
+    "file": "invalid/comp/b1005-unused-prop.brain",
+    "line": 1,
+    "col": 24,
+    "msg": "prop `subtitle` is never used",
+    "fix": "remove it from `<meta props>` or render it"
+  }
+]

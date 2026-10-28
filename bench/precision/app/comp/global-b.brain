@@ -1,0 +1,5 @@
+<meta props="i:num">
+<script>
+  import shop from '../channels/shop.jsbrain'
+</script>
+<span class="gb" data-k={'gb-' + i}>{shop.b}</span>

@@ -1,0 +1,5 @@
+<meta props="user:obj">
+<script>
+  import Level3 from './level3.brain'
+</script>
+<div><Level3 user={user} /></div>

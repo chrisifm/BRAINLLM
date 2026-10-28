@@ -1,0 +1,14 @@
+<meta props="ids:list">
+<script>
+  let names = sig([])
+  const getName = async (id) => 'user ' + id
+  const loadAll = async () => {
+    let out = []
+    for (const id of ids) {
+      out = [...out, await getName(id)]
+    }
+    names = out
+  }
+</script>
+<button type="button" on:click={loadAll}>Load</button>
+<p>{names.join(', ')}</p>

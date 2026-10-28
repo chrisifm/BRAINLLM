@@ -1,0 +1,17 @@
+<meta props="message:str='' rid:str=''">
+
+<script>
+  const retry = () => location.reload()
+</script>
+
+<main class="page" role="alert">
+  <h1>Something went wrong</h1>
+  <p>{message || 'The page could not be loaded.'}</p>
+  <p class="rid">Reference: {rid}</p>
+  <button type="button" on:click={retry}>Try again</button>
+</main>
+
+<style>
+  .page { max-width: 60ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); justify-items: center; text-align: center; }
+  .rid { color: var(--muted); font-size: .85rem; }
+</style>

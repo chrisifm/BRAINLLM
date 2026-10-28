@@ -1,0 +1,10 @@
+{
+  "name": "landing",
+  "title": "Landing sections: hero, features, FAQ, call to action",
+  "description": "Replaces views/home.brain with a landing page built from four sections: ui/hero (headline, lead, primary and secondary links), ui/feature-grid (cards from a list), comp/faq (accordion: one button per question with aria-expanded/aria-controls, several open at once) and ui/cta-band. The page carries enough text and internal links for the SEO audit.",
+  "params": { "headline": { "type": "string" }, "lead": { "type": "string" }, "features": { "type": "array", "items": { "id": "string", "title": "string", "text": "string" } }, "faq": { "type": "array", "items": { "id": "string", "q": "string", "a": "string" } }, "cta": { "type": "object", "properties": { "title": "string", "href": "string", "label": "string" } } },
+  "files": ["views/home.brain", "ui/hero.brain", "ui/hero.test.brain", "ui/feature-grid.brain", "ui/cta-band.brain", "comp/faq.brain", "comp/faq.test.brain"],
+  "replaces": ["views/home.brain"],
+  "uses": ["Container"],
+  "notes": "Section headings are h2 (the hero holds the page's only h1). Keep internal links in the copy (B1812)."
+}

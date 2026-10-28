@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1203",
+    "level": "warning",
+    "file": "comp/b1203-deprecated.brain",
+    "line": 3,
+    "col": 30,
+    "msg": "`String.prototype.substr` is deprecated",
+    "fix": "use `code.slice(0, 3)`"
+  }
+]

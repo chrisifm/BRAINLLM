@@ -1,0 +1,12 @@
+<meta seo title="Page not found" description="This page is not available. Go back to the home page of the polyglot probe site to keep browsing in your language." robots="noindex">
+
+<main class="page">
+  <h1>{t('notfound.title')}</h1>
+  <p>{t('notfound.body')}</p>
+  <p><a href="/">{t('notfound.back')}</a></p>
+</main>
+
+<style>
+  .page { max-width: 60ch; margin-inline: auto; padding-block: var(--space-6); padding-inline: var(--space-4); display: grid; gap: var(--space-3); text-align: center; }
+  p { margin: 0; color: var(--muted); }
+</style>

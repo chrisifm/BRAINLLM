@@ -1,0 +1,9 @@
+{
+  "name": "pricing",
+  "title": "Pricing page",
+  "description": "A public pricing view and a pricing-table component: plans from one list, a Monthly/Yearly switch (aria-pressed, yearly discount), a highlighted plan, a feature list per plan and a choose button that emits the plan and billing period (the view sends the visitor to sign-up with them).",
+  "params": { "plans": { "type": "array", "items": { "id": "string", "name": "string", "price": "number", "featured": "boolean", "perks": "string[]" } }, "yearlyDiscount": { "type": "number", "default": 0.2 } },
+  "files": ["comp/pricing-table.brain", "comp/pricing-table.test.brain", "views/pricing.brain"],
+  "uses": [],
+  "notes": "Prices are per month; yearly shows the discounted monthly price billed yearly. Link /pricing from the nav."
+}

@@ -1,0 +1,4 @@
+<script>
+  const key = import.meta.env.STRIPE_SECRET
+</script>
+<p>{key ? 'ready' : 'no key'}</p>

@@ -1,0 +1,6 @@
+<meta props="text:str">
+<span class="badge ok">{text}</span>
+<style>
+  .badge { padding: var(--space-1) var(--space-2); border-radius: var(--radius); }
+  .ok { color: var(--ok); }
+</style>
