@@ -1,7 +1,7 @@
-# BRAINLLM release (INTERNALS §23): builds `brain` for the 7 npm platforms, packs the npm packages with
-# npm/pack.mjs --require-all, and publishes them with provenance ONLY on a `v*` tag, after a manual approval in the
-# `npm-publish` environment. Any other run (pull request, manual dispatch) stops after packing: the tarballs and
-# SHA256SUMS are uploaded as an artifact to inspect.
+# Builds and packs all seven npm platforms. Tag pushes publish only after protected-environment approval.
+# Manual dispatch defaults to packing only; publish=true explicitly requests protected publication.
+# artifact_run reuses a reviewed tag-run archive after verifying that only this workflow changed.
+# Reused artifacts avoid recompiling unchanged native code when recovering a publication-workflow failure.
 name: release
 
 on:
