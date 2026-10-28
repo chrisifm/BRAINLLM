@@ -14,7 +14,7 @@ pages, validates accounts and writes two outputs:
 
 The snapshot has `schemaVersion`, `repository` and `contributors`. Each record contains `login`, `profileUrl`,
 `avatarUrl`, `contributions` and `type`. Profile labels use GitHub logins; no additional profile lookup is needed.
-GitHub's contribution counts are not a score of contribution quality. Accounts are sorted by count, then login.
+Accounts are sorted by login. Commit counts are omitted so an attribution merge cannot trigger another update solely for its own commit.
 
 Run `node scripts/sync-contributors.mjs` locally to refresh from the public API. An optional `GH_TOKEN` or
 `GITHUB_TOKEN` is read from the environment for rate limits; never put it in a file or commit. Anonymous email-only
