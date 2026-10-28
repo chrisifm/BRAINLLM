@@ -80,6 +80,7 @@ jobs:
     environment: npm-publish
     permissions:
       contents: read
+      actions: read
       id-token: write
     steps:
       - uses: actions/setup-node@v4
