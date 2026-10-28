@@ -451,16 +451,33 @@ B1101 if an `{#await}` on a resource does not cover `{:catch}` or the empty list
 `<n>s|m|h` in an `api()` schema (edit when the fix is unambiguous, e.g. `10 minutes` → `10m`; §35). `brain run --mock` responds
 with deterministic synthetic data derived from the schema.
 
-## 16. Visual verification and budgets
-`brain shot <route>` via CDP: PNG 390×844 and 1440×900 + AX tree JSON in `.brain/shots/`; `--baseline` saves,
-without the flag it compares (pixel diff and AX tree diff). `brain.json` → `budget` (viewKB gz, mountMs p95, heapMB); the build and
-`brain test` fail naming the culprit component.
+## 16. Visual verification and budgets (2026-10-28)
+`brain shot <route>` owns a temporary dev server and Chrome session; both close after the operation.
+Static preview/start reject symlinks in requested files, directories, gzip variants, headers and fallback pages.
+The served `dist/` must remain trusted; these checks are not a filesystem sandbox against concurrent replacement.
+Default viewports are 390×844 and 1280×800. PNGs and accessibility text go to `.brain/shots/`.
+`--baseline <name>` compares against `baselines/<name>-<width>x<height>.png`; only `--update-baseline` changes
+that tracked baseline. `--max-diff` is a changed-pixel fraction in [0,1], default exact. Different dimensions fail.
+Animation/transition/caret rendering is disabled for capture, but dynamic data and external fonts can still vary.
+Pin browser, OS, fonts and app data for stable comparisons. The accessibility outline includes roles and names;
+it is not an AX-tree diff or a complete layout model. MCP `brain_shot` offers the same comparison for one viewport.
+PNG decoding is bounded by bytes, dimensions and a deadline. Output/baseline paths reject traversal and symlinks.
+Build `budget.viewKB` measures emitted JS + CSS + HTML per route (KiB=1024 bytes), including dynamic dependencies
+conservatively, excluding media/fonts. It uses gzip sizes when emitted and raw bytes otherwise. Invalid or unknown
+budget fields fail instead of silently disabling enforcement. `mountMs` p95 and `heapMB` remain planned and are
+rejected explicitly until a real browser measurement contract is implemented.
 
-## 17. AST editing and migrations
-`brain edit` applies operations on the AST and re-prints the file preserving formatting: add-prop, remove-prop,
-rename (component, prop, sig; updates uses across the whole project), move, extract (block → new component).
-`brain undo` reverts from `.brain/journal/` (one entry per `brain` operation). `SPEC` carries a version; `brain
-migrate` applies codemods between versions and leaves it green with `brain check`.
+## 17. AST editing and migrations (2026-10-28)
+`brain edit` applies checked source-span edits: add-prop, remove-prop, component-file rename, move and extract.
+Rename/move update resolved imports while preserving local aliases. Extract delegates to the AST-backed card splitter.
+Ambiguous dynamic references and relative CSS URLs in moved components are rejected rather than guessed.
+The preflight snapshot is bounded to 2,048 files, 32 MiB total, 2 MiB per file and depth 32. Symlinks and overwrites
+are rejected. The checker runs before/after; normal I/O errors roll back changed files. This is not a durable
+transaction against power loss or SIGKILL. A kernel lock coordinates AST edits and MCP text writers; source
+checks before each write and conditional rollback preserve detected external changes. This is optimistic detection,
+not an atomic compare-and-swap with unrelated editors. MCP records one undo entry per changed file; undo that many steps to
+revert a multi-file operation. CLI `brain undo` and version-to-version `brain migrate` remain planned.
+Framework migration from React/Vue/Angular uses the separate staged workflow in `docs/MIGRATION.md`.
 
 ## 18. Protection: loops, leaks, overengineering and native error capture
 **Loops (B09xx):** B0901 at build: an `fx` writes a signal it reads itself (direct cycle) or a sig→fx→sig cycle

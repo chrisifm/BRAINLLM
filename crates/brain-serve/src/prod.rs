@@ -46,9 +46,25 @@ pub fn headers_for(rules: &Rules, path: &str) -> Vec<(String, String)> {
     out
 }
 
+// Every served candidate, including gzip and fallback pages, must be a regular file
+// reached without following symlinks below the configured output directory.
+fn regular_output(dist: &Path, file: &Path) -> bool {
+    if !std::fs::symlink_metadata(dist).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink()) { return false; }
+    let Ok(relative) = file.strip_prefix(dist) else { return false };
+    let mut cursor = dist.to_path_buf();
+    for part in relative.components() {
+        if !matches!(part, Component::Normal(_)) { return false; }
+        cursor.push(part);
+        let Ok(meta) = std::fs::symlink_metadata(&cursor) else { return false };
+        if meta.file_type().is_symlink() { return false; }
+    }
+    file.is_file()
+}
+
 /// The build signature (`<meta name="brain-build">` of the home page, else of the 404 page; `.html` or `.brain`).
 pub fn signature(dist: &Path) -> Option<String> {
     for f in ["index.html", "404.html", "index.brain", "404.brain"] {
+        if !regular_output(dist, &dist.join(f)) { continue; }
         if let Ok(html) = std::fs::read_to_string(dist.join(f)) {
             if let Some(i) = html.find("name=\"brain-build\" content=\"") {
                 let rest = &html[i + 28..];
@@ -72,7 +88,7 @@ impl Static {
         Static {
             pre: base.trim_end_matches('/').to_string(),
             dist: dist.to_path_buf(),
-            rules: std::fs::read_to_string(dist.join("_headers")).map(|s| parse_headers(&s)).unwrap_or_default(),
+            rules: if regular_output(dist, &dist.join("_headers")) { std::fs::read_to_string(dist.join("_headers")).map(|s| parse_headers(&s)).unwrap_or_default() } else { Vec::new() },
             build: signature(dist).unwrap_or_default(),
         }
     }
@@ -90,7 +106,7 @@ impl Static {
         } else {
             vec![base.clone(), base.join("index.html"), base.join("index.brain"), self.dist.join(format!("{rel}.html")), self.dist.join(format!("{rel}.brain"))]
         };
-        cands.into_iter().find(|p| p.is_file())
+        cands.into_iter().find(|p| regular_output(&self.dist, p))
     }
 
     /// Serves one connection (one request; `Connection: close`).
@@ -115,7 +131,7 @@ impl Static {
         };
         let (status, file) = match inner.as_deref().and_then(|p| self.resolve(p)) {
             Some(f) => (200, f),
-            None => match ["404.html", "404.brain"].iter().map(|f| self.dist.join(f)).find(|f| f.is_file()) {
+            None => match ["404.html", "404.brain"].iter().map(|f| self.dist.join(f)).find(|f| regular_output(&self.dist, f)) {
                 Some(f) => (404, f),
                 None => return write(&mut s, 404, &[("Content-Type".into(), "text/plain".into())], b"not found", head),
             },
@@ -138,13 +154,14 @@ impl Static {
         }
         let gz = PathBuf::from(format!("{name}.gz"));
         let accepts = req.header("accept-encoding").is_some_and(|a| a.contains("gzip"));
-        let body = if accepts && gz.is_file() {
+        let has_gzip = regular_output(&self.dist, &gz);
+        let body = if accepts && has_gzip {
             hs.push(("Content-Encoding".into(), "gzip".into()));
             std::fs::read(&gz)?
         } else {
             std::fs::read(&file)?
         };
-        if !hs.iter().any(|(k, _)| k.eq_ignore_ascii_case("vary")) && gz.is_file() {
+        if !hs.iter().any(|(k, _)| k.eq_ignore_ascii_case("vary")) && has_gzip {
             hs.push(("Vary".into(), "Accept-Encoding".into()));
         }
         write(&mut s, status, &hs, &body, head)
@@ -215,5 +232,48 @@ mod tests {
         let chunk = headers_for(&r, "/_b/x.js");
         assert!(chunk.iter().any(|(k, v)| k == "Cache-Control" && v.contains("immutable")) && chunk.iter().any(|(k, _)| k == "X-Frame-Options"));
         assert!(!headers_for(&r, "/about").iter().any(|(k, _)| k == "Cache-Control"), "exact rules do not leak");
+    }
+}
+
+#[cfg(all(test, unix))]
+mod confinement_tests {
+    use super::*;
+    use std::io::Read;
+    use std::os::unix::fs::symlink;
+    #[test]
+    fn static_handler_rejects_symlink_files_directories_fallback_and_gzip() {
+        let root = std::env::temp_dir().join(format!("brain-prod-confinement-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("dist/about")).unwrap();
+        std::fs::create_dir_all(root.join("private")).unwrap();
+        let dist = root.join("dist");
+        std::fs::write(root.join("private/secret.txt"), "PRIVATE_SENTINEL").unwrap();
+        std::fs::write(dist.join("about/index.html"), "public-page").unwrap();
+        std::fs::write(dist.join("asset.js"), "public-script").unwrap();
+        std::fs::write(dist.join("about/index.html.gz"), "compressed-public").unwrap();
+        for name in ["leak.txt", "404.html", "asset.js.gz", "_headers"] {
+            symlink(root.join("private/secret.txt"), dist.join(name)).unwrap();
+        }
+        symlink(root.join("private"), dist.join("linked")).unwrap();
+        let request = |path: &str, gzip: bool| {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let handler = Static::load(&dist, "/app");
+            let task = std::thread::spawn(move || handler.handle(listener.accept().unwrap().0).unwrap());
+            let mut client = TcpStream::connect(addr).unwrap();
+            client.set_read_timeout(Some(std::time::Duration::from_secs(3))).unwrap();
+            write!(client, "GET {path} HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: {}\r\n\r\n", if gzip {"gzip"} else {"identity"}).unwrap();
+            let mut response = String::new();client.read_to_string(&mut response).unwrap();task.join().unwrap();response
+        };
+        for path in ["/app/leak.txt", "/app/linked/secret.txt", "/app/missing"] {
+            let response = request(path, true);
+            assert!(response.starts_with("HTTP/1.1 404"), "{response}");
+            assert!(!response.contains("PRIVATE_SENTINEL"));
+        }
+        let plain = request("/app/about", false);assert!(plain.ends_with("public-page"));
+        let compressed = request("/app/about", true);
+        assert!(compressed.contains("Content-Encoding: gzip") && compressed.ends_with("compressed-public"));
+        let safe = request("/app/asset.js", true);
+        assert!(safe.ends_with("public-script") && !safe.contains("Content-Encoding: gzip"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

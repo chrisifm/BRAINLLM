@@ -1,0 +1,9 @@
+{
+  "versions": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "vite": "8.3.4"
+  },
+  "lockSha256": "cd12037c8944e4d45131e8f566886b9d4841071d21fb1c4e5391988a7375e5eb"
+}

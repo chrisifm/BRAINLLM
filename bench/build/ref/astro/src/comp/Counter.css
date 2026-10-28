@@ -1,0 +1,1 @@
+.counter { padding: var(--space-2); &.hot { color: var(--bad); } }

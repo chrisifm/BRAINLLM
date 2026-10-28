@@ -93,29 +93,27 @@ If you like reading raw timings more than launch posts, this part is for you. In
 run and keep the result even when it disagrees with ours.
 
 
-The checked-in build benchmark records **7.0× faster warm builds than React 19 + Vite**, and **7.4× faster than
-Svelte 5 + Vite**, for the frozen dashboard fixture.
+**Seven stacks. The same dashboard workflow. 140 measured builds.**
 
-| Warm production build | Median, 20 runs |
-|---|---:|
-| BRAINLLM | **48.2 ms** |
-| React 19 + Vite | 338.7 ms |
-| Svelte 5 + Vite | 357.8 ms |
+| Warm production build | Median, 20 runs | Standard deviation |
+|---|---:|---:|
+| BRAINLLM | 34.32 ms | 13.23 ms |
+| React + Vite | 155.49 ms | 16.71 ms |
+| Vue + Vite | 211.76 ms | 53.56 ms |
+| Svelte + Vite | 243.53 ms | 56.14 ms |
+| Astro + React island | 504.78 ms | 77.45 ms |
+| Angular CLI | 1,262.50 ms | 69.03 ms |
+| React + webpack | 1,334.54 ms | 560.99 ms |
 
-These are historical results from the recorded `e9453256ff44` binary, on a shared Apple M5 machine. The benchmark
-uses equivalent dashboard implementations with different default output strategies: BRAINLLM server-renders the
-route; the references load its data in the client. This is a build-time comparison for that fixture, not a claim
-about every app, rendering speed or current tool versions.
+All seven implementations passed the same nine Chrome interaction checks, including create, search, edit and delete.
+These measurements use frozen BRAINLLM source `7889787`, Apple M5 with 24 GiB RAM, Node 26.12.0 and two warmups per
+stack. Builds run serially on a shared machine. Variance matters: inspect the raw samples, especially webpack's.
+The output strategies differ (including SSR, client rendering and an Astro React island); this comparison measures
+production build duration for this fixture, not universal app performance or feature equivalence.
 
-Read the [method and output differences](bench/build/README.md), [results](bench/build/results/summary.md),
-[versions and machine](bench/build/results/versions.json), and raw timings for
-[BRAINLLM](bench/build/results/hf-brain-warm.json), [React](bench/build/results/hf-react-warm.json) and
-[Svelte](bench/build/results/hf-svelte-warm.json). Reproduce with `bench/build/run.sh`.
-
-The same recorded dashboard comparison measured **11.59 KiB gzip** for BRAINLLM's initial route payload,
-**16.72 KiB** for Svelte + Vite and **68.17 KiB** for React + Vite: HTML, CSS and JavaScript compressed per file.
-The service worker and offline page are listed separately. The [payload table](bench/build/results/summary.md)
-shows exactly what was counted; these are fixture measurements, not a promise for every site.
+Read the [expanded method, versions, payloads and results](bench/build/expanded.md). The original three-stack
+[historical results](bench/build/results/summary.md) remain available unchanged. Use `bench/build/expanded.mjs`
+with the documented frozen binary and scratch-directory setup to reproduce this seven-stack run.
 
 **Ask your agent to challenge the result:**
 
@@ -150,6 +148,22 @@ The compiler pipeline is written in Rust. Browser automation drives real Chrome 
 regression checks. Those checks establish the flows they exercise; they do not imply universal browser or app
 compatibility. The repository's recorded LLM evaluations identify the models, tasks and frozen revisions so you can inspect
 what each result actually establishes.
+
+## Tools for an agent that finishes the job
+
+| The agent needs to… | The compiler provides… |
+|---|---|
+| Start with consistent files | Generators for views, components, channels, services, typed APIs, schemas, route guards and server modules |
+| Refactor without guessing imports | Checked AST edits for props, component-file rename, move and extraction |
+| Inspect what it built | Chrome screenshots, accessibility outlines and explicit visual baseline comparisons |
+| Keep routes small | Enforced `viewKB` budgets for emitted JS + CSS + HTML |
+| Defer optional UI | Visible, idle or keyboard-accessible interaction loading; async image decoding |
+| Fix and verify | `brain doctor --fix` applies mechanical edits before the full quality check |
+| Let you try production output | A temporary local `brain preview` server with owned-process cleanup |
+
+Browser tooling and the preview supervisor currently require macOS or Linux. Screenshot baselines need stable browser,
+font and app-data inputs. Runtime mount-time/heap budgets remain planned; the compiler rejects those settings rather
+than pretending to measure them. See the [implemented contract](SPEC.md) and [tool internals](docs/INTERNALS.md).
 
 ## Give your agent its first task
 

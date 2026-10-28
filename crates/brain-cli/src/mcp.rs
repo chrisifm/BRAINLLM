@@ -378,12 +378,18 @@ pub fn run() -> Result<(), String> {
     // ---------- modules and files ----------
     tools.push(Tool {
         name: "brain_add",
-        description: "Creates a file from a template: view (views/), comp (comp/), ui (ui/) or test (<name>.test.brain next to the component). props: \"name:type[?][=default] ...\" with types str num bool list obj fn any. Fill the template in; do not write files from scratch.",
+        description: "Creates a file from a checked template, including channel, service, api, type, guard and server modules. Type additions preserve existing declarations. props: \"name:type[?][=default] ...\" with types str num bool list obj fn any. Fill the template in; do not write files from scratch.",
         input_schema: schema(
             [
-                ("kind", "string", "view | comp | ui | test"),
+                ("kind", "string", "view | comp | ui | test | layout | lib | locale | collection | channel | service | api | type | guard | server"),
                 ("name", "string", "component name (kebab or PascalCase)"),
                 ("props", "string", "typed props, e.g. \"user:obj active:bool=false note:str?\""),
+                ("store", "string", "channel literal object initializer"),
+                ("bus", "boolean", "generate an event bus channel"),
+                ("key", "boolean", "generate a context key channel (default)"),
+                ("get", "string", "API GET response schema"),
+                ("post", "string", "API POST input:output schemas"),
+                ("fields", "string", "type fields, e.g. id:num! email:email!"),
                 ("app", "string", "app folder; defaults to the current one"),
             ],
             &["kind", "name"],
@@ -391,8 +397,21 @@ pub fn run() -> Result<(), String> {
         output_schema: out([("file", "string")]),
         run: Box::new(|a| {
             let root = app(a)?;
-            let p = scaffold::add(&root, &need(a, "kind")?, &need(a, "name")?, &arg(a, "props").unwrap_or_default())?;
-            journal_record(&root, &p, None);
+            for key in ["props", "store", "get", "post", "fields"] {
+                if a.get(key).is_some_and(|v| v.as_str().is_none()) { return Err(format!("`{key}` must be a string")); }
+            }
+            for key in ["bus", "key"] {
+                if a.get(key).is_some_and(|v| !matches!(v, Json::Bool(_))) { return Err(format!("`{key}` must be a boolean")); }
+            }
+            let kind = need(a, "kind")?;
+            let before = if kind == "type" { std::fs::read_to_string(root.join("types.jsbrain")).ok() } else { None };
+            let options = scaffold::AddOptions {
+                props: arg(a, "props").unwrap_or_default(), store: arg(a, "store"),
+                bus: a.get("bus") == Some(&Json::Bool(true)), key: a.get("key") == Some(&Json::Bool(true)),
+                get: arg(a, "get"), post: arg(a, "post"), fields: arg(a, "fields"),
+            };
+            let p = scaffold::add_with_options(&root, &kind, &need(a, "name")?, &options)?;
+            journal_record(&root, &p, before.as_deref());
             Ok(Json::obj([("file", Json::str(p.strip_prefix(&root).unwrap_or(&p).display().to_string()))]).stringify())
         }),
     });
@@ -403,6 +422,7 @@ pub fn run() -> Result<(), String> {
         output_schema: out([("file", "string"), ("created", "boolean"), ("diags", "array")]),
         run: Box::new(|a| {
             let root = app(a)?;
+            let _writer = crate::edit::writer_lock(&root)?;
             let rel = need(a, "path")?;
             let content = a.get("content").and_then(Json::as_str).ok_or("missing argument `content`")?;
             if content.len() > 200_000 {
@@ -418,15 +438,30 @@ pub fn run() -> Result<(), String> {
     });
     tools.push(Tool {
         name: "brain_edit",
-        description: "Exact text replacement in a project file: `old` must appear exactly once (or pass `all: true`). Returns the file's diagnostics from brain_check. Reversible with brain_undo.",
+        description: "Checked AST edits with op=add-prop/remove-prop/rename/move/extract. Rename changes a component file and its import paths, not JavaScript symbols. Without op, exact old/new replacement remains supported. Reversible with brain_undo.",
         input_schema: schema(
-            [("path", "string", "path relative to the app"), ("old", "string", "exact text to replace"), ("new", "string", "replacement text"), ("all", "boolean", "replace every occurrence"), ("app", "string", "app folder")],
-            &["path", "old", "new"],
+            [("path", "string", "path relative to the app"), ("old", "string", "exact text to replace"), ("new", "string", "replacement text"), ("all", "boolean", "replace every occurrence"), ("app", "string", "app folder"), ("op", "string", "add-prop | remove-prop | rename | move | extract"), ("declaration", "string", "one typed prop, e.g. title:str?"), ("name", "string", "prop name or PascalCase component name"), ("to", "string", "destination comp/ or ui/ .brain path"), ("selector", "string", "subtree selector for extract")],
+            &["path"],
         ),
-        output_schema: out([("file", "string"), ("replaced", "number"), ("diags", "array")]),
+        output_schema: out([("file", "string"), ("replaced", "number"), ("diags", "array"), ("changed", "array"), ("checked", "boolean")]),
         run: Box::new(|a| {
             let root = app(a)?;
             let rel = need(a, "path")?;
+            if a.get("op").is_some() {
+                let op = need(a, "op")?;
+                if ["old", "new", "all"].iter().any(|k| a.get(k).is_some()) { return Err("AST op cannot be combined with old/new/all text edit fields".into()); }
+                use crate::edit::Operation;
+                let operation = match op.as_str() {
+                    "add-prop" => Operation::AddProp { declaration: need(a, "declaration")? },
+                    "remove-prop" => Operation::RemoveProp { name: need(a, "name")? },
+                    "rename" => Operation::Rename { name: need(a, "name")? },
+                    "move" => Operation::Move { to: need(a, "to")? },
+                    "extract" => Operation::Extract { selector: need(a, "selector")?, name: need(a, "name")? },
+                    _ => return Err("unknown edit op; use add-prop, remove-prop, rename, move or extract".into()),
+                };
+                return crate::edit::apply(&root, &rel, operation, &mut |path, before| journal_record(&root, path, before)).map(|j| j.stringify());
+            }
+            let _writer = crate::edit::writer_lock(&root)?;
             let (old, new) = (need(a, "old")?, a.get("new").and_then(Json::as_str).ok_or("missing argument `new`")?.to_string());
             let p = writable(&root, &rel)?;
             let src = std::fs::read_to_string(&p).map_err(|e| format!("{rel}: {e}; fix: create it with brain_write or brain_add"))?;
@@ -659,26 +694,25 @@ pub fn run() -> Result<(), String> {
     #[cfg(unix)]
     tools.push(Tool {
         name: "brain_shot",
-        description: "Screenshot of a route in the debug browser (managed dev server) plus an accessibility audit. Saves a PNG under .brain/shots/ and returns its path.",
+        description: "Screenshot and accessibility text/audit from the managed debug browser. Optional named PNG baseline compares pixels within maxDiff (0..1). updateBaseline explicitly replaces that baseline. Returns files, text, comparison and ok; caller must inspect ok.",
         input_schema: schema(
-            [("route", "string", "route, e.g. /users/42"), ("width", "number", "viewport width (default 1280; 390 = phone)"), ("height", "number", "viewport height (default 800)")],
+            [("route", "string", "local route, e.g. /users/42"), ("width", "number", "viewport width, default 1280"), ("height", "number", "viewport height, default 800"), ("baseline", "string", "named visual baseline"), ("updateBaseline", "boolean", "explicitly accept current pixels as baseline"), ("maxDiff", "number", "allowed changed-pixel ratio, default 0")],
             &["route"],
         ),
-        output_schema: out([("file", "string"), ("page", "object"), ("a11y", "array")]),
+        output_schema: out([("ok", "boolean"), ("file", "string"), ("textFile", "string"), ("text", "string"), ("page", "object"), ("a11y", "array"), ("comparison", "object")]),
         run: {
             let st = st.clone();
             Box::new(move |a| {
                 let root = crate::app_root()?;
                 let route = need(a, "route")?;
-                let (w, h) = (num(a, "width").unwrap_or(1280.0) as u32, num(a, "height").unwrap_or(800.0) as u32);
-                let (file, issues, page) = st.with_browser(|b| b.shot(&root, &route, w, h))?;
-                let a11y = Json::Arr(
-                    issues
-                        .iter()
-                        .map(|i| Json::obj([("code", Json::str(i.code)), ("role", Json::str(&i.role)), ("node", Json::str(&i.node)), ("msg", Json::str(&i.msg)), ("fix", Json::str(i.fix))]))
-                        .collect(),
-                );
-                Ok(Json::obj([("file", Json::str(file.display().to_string())), ("page", page), ("a11y", a11y)]).stringify())
+                let dimension = |key: &str, default: f64| -> Result<u32,String> {
+                    let n = num(a,key).unwrap_or(default);
+                    if !n.is_finite() || n.fract() != 0.0 || !(1.0..=4096.0).contains(&n) { return Err(format!("{key} must be an integer from 1 to 4096")); }
+                    Ok(n as u32)
+                };
+                let (w,h) = (dimension("width",1280.0)?,dimension("height",800.0)?);
+                let opts = crate::shot::Options { baseline: arg(a,"baseline"), update: a.get("updateBaseline") == Some(&Json::Bool(true)), max_diff: num(a,"maxDiff").unwrap_or(0.0) };
+                st.with_browser(|b| crate::shot::capture(b,&root,&route,w,h,&opts)).map(|j|j.stringify())
             })
         },
     });

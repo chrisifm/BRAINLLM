@@ -1,0 +1,8 @@
+{
+  "versions": {
+    "vue": "3.5.44",
+    "vite": "8.3.4",
+    "@vitejs/plugin-vue": "6.0.10"
+  },
+  "lockSha256": "6e18496d17e749e6c9dbbea5155f289d0fb34a5804a13b29dc4274a0fc550b00"
+}

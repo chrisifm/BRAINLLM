@@ -23,6 +23,7 @@ dependencies = [
  "brain-check",
  "brain-codegen",
  "brain-css",
+ "brain-lex",
  "brain-mcp",
  "brain-min",
  "brain-pack",
