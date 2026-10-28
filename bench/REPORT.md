@@ -1,5 +1,9 @@
 # BRAINLLM — QA report (every number with a reproducible source)
 
+> Historical measurements: license and repository metadata describe the original runs. The current source is
+> MIT licensed and public; consult LICENSE and README. For build timings, prefer the linked raw result files
+> when older narrative values differ.
+
 Every number comes with the command that produces it and its raw-data file. Anything that cannot be measured yet
 names the task it depends on. Raw run output (`*/results/`, `sites/runs/`) is generated and git-ignored
 (`bench/.gitignore`): rerun the command to get it.

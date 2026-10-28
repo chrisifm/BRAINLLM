@@ -174,7 +174,7 @@ export function guard(C, fb, budget) {
     // breaker state of this instance (see NP.r above)
     const x = {
       b: budget ? { ...BUDGET, ...budget } : BUDGET,
-      t0: 0,
+      t0: now(), // the first runs window belongs to this instance, not the process clock epoch
       rt: -1e9, // last rows walk (performance.now() starts near 0 with the page)
       rn: 0, // nodes at that walk: a list that grew by a quarter is walked again sooner
       max: 0, // most runs of one effect in this second

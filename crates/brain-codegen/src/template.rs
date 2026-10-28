@@ -561,8 +561,12 @@ impl Gen<'_> {
                 let rest = ComponentRef { name: String::new(), attrs: r.attrs.iter().filter(|a| a.name != "lazy").cloned().collect(), children: r.children.clone(), span: r.span };
                 let props = self.component_call(&rest);
                 let el = self.fresh("l");
+                let tag = if mode == "interaction" { "button" } else { "div" };
+                let setup = if mode == "interaction" {
+                    format!("{el}.setAttribute(\"type\", \"button\"); {el}.textContent = {};", js_str("Load component"))
+                } else { format!("{el}.setAttribute(\"role\", \"status\"); {el}.textContent = \"Loading component…\";") };
                 format!(
-                    "const {el} = document.createElement(\"div\"); {el}.setAttribute(\"data-lazy\", \"\"); {}(null, {el}, {anchor}); lazy({el}, () => import({}), {}, {});",
+                    "const {el} = document.createElement(\"{tag}\"); {el}.setAttribute(\"data-lazy\", \"\"); {setup} {}(null, {el}, {anchor}); lazy({el}, () => import({}), {}, {});",
                     self.rt("insert"),
                     js_str(&src),
                     js_str(&mode),

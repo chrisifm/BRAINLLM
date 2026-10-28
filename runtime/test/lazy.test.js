@@ -164,3 +164,27 @@ test('#131 a lazy chunk deleted by a deploy reloads the page once; afterwards it
   globalThis.location = loc
   delete globalThis.reportError
 })
+
+test('interaction: keyboard activation ignores other keys and a failed import can retry', async () => {
+  const errors = [], h = host();
+  let attempts = 0, el;
+  globalThis.reportError = e => errors.push(e.message);
+  mount(() => (el = lazy(hole(), async () => {
+    if (++attempts === 1) throw Error('temporary import failure');
+    return () => doc.createTextNode('ready');
+  }, 'interaction')), h);
+  const key = value => Object.assign(new Event('keydown', { bubbles: true, cancelable: true }), { key: value });
+  el.dispatchEvent(key('Tab'));
+  await tick();
+  assert.equal(attempts, 0);
+  el.dispatchEvent(key('Enter'));
+  await tick();
+  assert.equal(attempts, 1);
+  assert.equal(el.getAttribute('aria-busy'), 'false');
+  assert.deepEqual(errors, ['temporary import failure']);
+  el.dispatchEvent(key(' '));
+  await tick();
+  assert.equal(attempts, 2);
+  assert.equal(h.textContent, 'ready');
+  delete globalThis.reportError;
+});

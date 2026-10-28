@@ -8,6 +8,7 @@ cargo build --locked -p brain-cli
 cargo test --locked --workspace
 npm test --prefix runtime
 node --test scripts/test/*.test.mjs
+node --test npm/test/*.test.mjs
 node bench/fixtures-check.mjs
 node scripts/privacy-audit.mjs
 scripts/check-english.sh

@@ -4,6 +4,7 @@
 //                                            per platform, so npm installs only the matching binary
 //   @christianirack/brainllm-<os>-<arch>     the native `brain` binary (7 platforms; `os`/`cpu`/`libc` select it)
 //   @christianirack/create-brainllm          `npm create @christianirack/brainllm <app>`
+//   @christianirack/create-brainll           shorthand initializer with the same pinned compiler
 //   @christianirack/brainllm-runtime         the runtime ES modules (already embedded in the binary; for tooling)
 //
 //   node npm/pack.mjs [--dry-run] [--bins <dir>] [--require-all] [--no-build]
@@ -53,9 +54,20 @@ const stage = join(out, 'stage')
 rmSync(out, { recursive: true, force: true })
 mkdirSync(stage, { recursive: true })
 
-// repository/homepage join once the public repo exists (Chris decides where); nothing is invented here
-const writePkg = (dir, pkg) =>
-  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: pkg.name, version, ...pkg, license, author: 'Christian Irack Flores Maldonado <christian@irack.mx> (https://ingenieria.dev)', repository: { type: 'git', url: 'git+https://github.com/chrisifm/BRAINLLM.git' }, homepage: 'https://github.com/chrisifm/BRAINLLM#readme' }, null, 2) + '\n')
+// Every scoped package is public, MIT licensed and attributed to the principal author.
+const writePkg = (dir, pkg) => {
+  copyFileSync(join(root, 'LICENSE'), join(dir, 'LICENSE'))
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: pkg.name, version, ...pkg, license, author: 'Christian Irack Flores Maldonado <christian@irack.mx> (https://ingenieria.dev)', repository: { type: 'git', url: 'git+https://github.com/chrisifm/BRAINLLM.git' }, homepage: 'https://chrisifm.github.io/BRAINLLM/', publishConfig: { access: 'public', registry: 'https://registry.npmjs.org/' } }, null, 2) + '\n')
+}
+
+// npm renders the same marketing story; repository-relative resources become public URLs.
+const npmReadme = readFileSync(join(root, 'README.md'), 'utf8')
+  .replace(/(!?\[[^\]]*\]\()([^\s)]+)(\))/g, (all, start, path, end) => {
+    if (/^(?:[a-z]+:|#|\/\/)/i.test(path)) return all
+    return `${start}https://github.com/chrisifm/BRAINLLM/${start.startsWith('!') ? 'raw' : 'blob'}/main/${path}${end}`
+  })
+  .replace(/src="(?![a-z]+:|\/\/)([^"]+)"/gi, (_, path) => `src="https://raw.githubusercontent.com/chrisifm/BRAINLLM/main/${path}"`)
+
 
 // 1. platform packages
 const sums = []
@@ -63,7 +75,7 @@ const built = []
 const missing = []
 for (const p of PLATFORMS) {
   const exe = 'brain' + (p.exe ?? '')
-  const cands = [binsAt && join(binsAt, p.key, exe), p.triple === hostTriple && join(root, 'target/npm/release', exe), join(root, 'target', p.triple, 'release', exe)].filter(Boolean)
+  const cands = binsAt ? [join(binsAt, p.key, exe)] : [p.triple === hostTriple && join(root, 'target/npm/release', exe), join(root, 'target', p.triple, 'release', exe)].filter(Boolean)
   const src = cands.find((c) => existsSync(c))
   if (!src) {
     missing.push(p.key)
@@ -108,22 +120,29 @@ writePkg(main, {
   description: 'BRAINLLM: a web framework designed for LLMs to write. The `brain` CLI, dev server, build and MCP server.',
   bin: { brain: 'bin/brain.js' },
   files: ['bin', 'brain.schema.json', 'README.md'],
-  engines: { node: '>=18' },
+  engines: { node: '>=22' },
   optionalDependencies: Object.fromEntries(PLATFORMS.map((p) => [`${SCOPE}/brainllm-${p.key}`, version])),
   keywords: ['framework', 'llm', 'ai', 'compiler', 'mcp', 'web'],
 })
 
-// 3. create package
-const create = join(stage, 'create-brainllm')
-cpSync(join(here, 'create-brainllm'), create, { recursive: true })
-writePkg(create, {
-  name: `${SCOPE}/create-brainllm`,
-  description: 'npm create @christianirack/brainllm <app>: a new BRAINLLM app with its brain version pinned.',
-  bin: { 'create-brainllm': 'bin/create.js' },
-  files: ['bin', 'README.md'],
-  engines: { node: '>=18' },
-  dependencies: { [`${SCOPE}/brainllm`]: version },
-})
+writeFileSync(join(main, 'README.md'), npmReadme)
+
+// 3. create packages: canonical spelling and the requested brainll shorthand
+const creators = []
+for (const suffix of ['brainllm', 'brainll']) {
+  const create = join(stage, `create-${suffix}`)
+  cpSync(join(here, 'create-brainllm'), create, { recursive: true })
+  writePkg(create, {
+    name: `${SCOPE}/create-${suffix}`,
+    description: `npm create ${SCOPE}/${suffix} <app>: a new BRAINLLM app with its brain version pinned.`,
+    bin: { [`create-${suffix}`]: 'bin/create.js' },
+    files: ['bin', 'README.md'],
+    engines: { node: '>=22' },
+    dependencies: { [`${SCOPE}/brainllm`]: version },
+  })
+  writeFileSync(join(create, 'README.md'), `# ${SCOPE}/create-${suffix}\n\nThe BRAINLLM project initializer. After the first public release:\n\n\`\`\`sh\nnpm create ${SCOPE}/${suffix}@latest my-app\ncd my-app\nnpm run dev\n\`\`\`\n\nRuns the same pinned BRAINLLM compiler and installs the generated app dependencies. Pass \`-- --no-install\` to skip dependency installation.\n\n` + npmReadme)
+  creators.push(create)
+}
 
 // 4. runtime package: the ES modules without tests, demos or benchmarks
 const rt = join(stage, 'brainllm-runtime')
@@ -147,7 +166,7 @@ writePkg(rt, {
 
 // 5. npm pack (never publish)
 const rows = []
-for (const dir of [...built.map((b) => b.dir), main, create, rt]) {
+for (const dir of [...built.map((b) => b.dir), main, ...creators, rt]) {
   const res = JSON.parse(execFileSync('npm', ['pack', '--json', '--pack-destination', out, ...(dry ? ['--dry-run'] : [])], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }))[0]
   rows.push(`${res.name.padEnd(42)} ${String(res.entryCount).padStart(4)} files  ${(res.size / 1024).toFixed(0).padStart(7)} KB  ${dry ? '(dry run)' : res.filename}`)
 }
@@ -157,4 +176,4 @@ writeFileSync(join(out, 'SHA256SUMS'), sums.join('\n') + (sums.length ? '\n' : '
 console.log(`BRAINLLM ${version} (${license})`)
 console.log(rows.join('\n'))
 console.log(missing.length ? `skipped (no binary here; CI builds them): ${missing.join(', ')}` : 'all 7 platforms packed')
-console.log(`${dry ? 'dry run: nothing written to npm/dist besides the stage' : `tarballs + SHA256SUMS in ${out}`}; publish only with Chris's OK (npm/README.md)`)
+console.log(`${dry ? 'dry run: staging files and checksums only; no tarballs or publication' : `tarballs + SHA256SUMS in ${out}`}; publish only with Chris's OK (npm/README.md)`)

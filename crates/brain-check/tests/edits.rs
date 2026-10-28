@@ -19,8 +19,8 @@ fn fixed(path: &str, src: &str, ctx: &Ctx, code: &str) -> String {
     for e in &d.edits {
         assert!(e.line > 0 && e.col > 0 && e.end_line >= e.line, "{e:?}");
     }
-    let out = Diag::apply(src, &d.edits).expect("edits aplicables");
-    assert!(!check(path, &out, ctx).iter().any(|x| x.code == code), "{code} sigue tras aplicar:\n{out}");
+    let out = Diag::apply(src, &d.edits).expect("applicable edits");
+    assert!(!check(path, &out, ctx).iter().any(|x| x.code == code), "{code} remains after applying:\n{out}");
     out
 }
 

@@ -136,6 +136,8 @@ let why = null;
 let insp = null;
 let mockOn = null;
 export async function route(data) {
+  const el = document.getElementById('brain-view');
+  el.dataset.brainReady = 'false';
   data ??= JSON.parse(document.getElementById('brain-route').textContent);
   const { mount } = await import(base + '/@brain/brain.js');
   // `brain run --mock[=seed]` (#266): api() answers fake, deterministic data from its schema (RUNTIME's brain-mock.js)
@@ -154,13 +156,14 @@ export async function route(data) {
   const V = (await import(at(data.v))).default;
   const L = [];
   for (const l of data.l) L.push((await import(at(l))).default);
-  const el = document.getElementById('brain-view');
   if (typeof dispose === 'function') dispose();
   el.replaceChildren();
   let tree = () => V(data.p);
   for (let i = L.length - 1; i > 0; i--) { const inner = tree, C = L[i]; tree = () => C({ children: inner }); }
   dispose = L.length ? mount(L[0], el, { children: tree }) : mount(V, el, data.p);
   current();
+  // Document load can precede these dynamic imports. MCP must wait for the actual mounted view.
+  el.dataset.brainReady = 'true';
 }
 // `_loading.brain` while the next page's load runs (§22): shown only if the response takes over 150 ms, so fast
 // navigations never flash it

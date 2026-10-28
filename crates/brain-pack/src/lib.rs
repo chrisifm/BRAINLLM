@@ -1108,6 +1108,24 @@ fn build_inner(
             }
         }
         reach.sort();
+        // Keep lazy component CSS in the route stylesheet, but preload only static JS imports.
+        // A dynamic import is an explicit loading boundary, including its transitive dependencies.
+        let mut preload = HashSet::new();
+        let mut pending: Vec<Node> = std::iter::once(Node::File(view.clone())).chain(layouts.iter().cloned().map(Node::File)).collect();
+        while let Some(n) = pending.pop() {
+            if !preload.insert(n.clone()) { continue; }
+            let emitted = files.get(&key_of(&url_of[&n])).map(String::as_str).unwrap_or("");
+            let tokens = brain_min::lex::lex(emitted)?;
+            let static_specs: HashSet<&str> = tokens.windows(2).filter_map(|w| {
+                (w[1].kind == brain_min::lex::Kind::Str && (w[0].ident("from") || w[0].ident("import")))
+                    .then(|| &w[1].text[1..w[1].text.len() - 1])
+            }).collect();
+            for (spec, child) in &modules[&n].deps {
+                if !modules[&n].workers.contains(spec) && url_of.get(child).is_some_and(|url| static_specs.contains(url.as_str())) {
+                    pending.push(child.clone());
+                }
+            }
+        }
         let live_urls: Vec<(&String, Option<&[&str]>)> = LIVE.iter().filter_map(|(n, names)| url_of.get(&Node::Runtime(n.to_string())).map(|u| (u, *names))).collect();
         let live = reach.iter().any(|n| {
             let src = files.get(&key_of(&url_of[n])).map(String::as_str).unwrap_or("");
@@ -1153,7 +1171,7 @@ fn build_inner(
         let layout_urls: Vec<String> = layouts.iter().map(|l| url_of[&Node::File(l.clone())].clone()).collect();
         let mut script = String::new();
         if interactive {
-            for n in &reach {
+            for n in reach.iter().filter(|n| preload.contains(*n)) {
                 head.push_str(&format!("<link rel=\"modulepreload\" href=\"{}\">", url_of[n]));
             }
             let mut imports = format!("{http_import}import{{m}}from\"{core}\";import V from\"{v}\";");
@@ -1685,23 +1703,22 @@ fn build_inner(
     for p in pages.iter().filter(|p| !p.route.starts_with('!')) {
         let (mut js_raw, mut js_min, mut js_gz, mut css, mut css_gz) = (0, 0, 0, 0, 0);
         let mut seen = HashSet::new();
-        // every /_b/ asset referenced by the page, plus the static imports of each JS chunk (transitively)
-        let mut queue: Vec<String> = p.html.match_indices("/_b/").map(|(i, _)| p.html[i + 1..].chars().take_while(|c| !matches!(c, '"' | '\'' | ' ' | ')')).collect()).collect();
+        // Conservative route graph: count each emitted JS/CSS asset once, including lazy chunks.
+        // Images/fonts are separate payloads, not view code. Incompressible files transfer raw bytes.
+        let mut queue: Vec<String> = p.html.match_indices("/_b/").map(|(i, _)| p.html[i + 1..].chars().take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/')).collect()).collect();
         while let Some(f) = queue.pop() {
-            if !seen.insert(f.clone()) {
-                continue;
-            }
+            if !seen.insert(f.clone()) { continue; }
             let Some(c) = files.get(&f) else { continue };
-            let z = binary.get(&format!("{f}.gz")).map_or(0, Vec::len);
+            let z = transfer_size(c.as_bytes(), binary.get(&format!("{f}.gz")).map(Vec::as_slice));
             if f.ends_with(".css") || f.ends_with(".cssbrain") {
                 css += c.len();
                 css_gz += z;
-            } else {
+            } else if f.ends_with(".js") || f.ends_with(".jsbrain") {
                 js_min += c.len();
                 js_gz += z;
                 js_raw += raw_of.get(&f).copied().unwrap_or(c.len());
-                for (i, _) in c.match_indices("/_b/") {
-                    queue.push(c[i + 1..].chars().take_while(|ch| *ch != '"').collect());
+                for (_, _, spec) in specifiers(c)? {
+                    if spec.starts_with(&format!("{pre}/_b/")) { queue.push(key_of(&spec)); }
                 }
             }
         }
@@ -1713,10 +1730,22 @@ fn build_inner(
             css,
             css_gz,
             html: p.html.len(),
-            html_gz: binary.get(&format!("{}.gz", p.file)).map_or(0, Vec::len),
+            html_gz: transfer_size(p.html.as_bytes(), binary.get(&format!("{}.gz", p.file)).map(Vec::as_slice)),
         });
     }
     Ok(Output { files, binary, pages, warnings, report, signature })
+}
+
+/// Match production serving: precompressed bytes exist only when smaller than raw output.
+fn transfer_size(raw: &[u8], gzip: Option<&[u8]>) -> usize {
+    gzip.map_or(raw.len(), |compressed| compressed.len().min(raw.len()))
+}
+
+#[test]
+fn transfer_size_counts_uncompressed_payload_instead_of_zero() {
+    assert_eq!(transfer_size(b"abcd", None), 4);
+    assert_eq!(transfer_size(b"abcd", Some(b"ab")), 2);
+    assert_eq!(transfer_size(b"abcd", Some(b"larger header")), 4);
 }
 
 /// `Comp.h = "abcd"` of a compiled (possibly minified) view chunk.

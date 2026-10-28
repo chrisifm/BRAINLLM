@@ -93,11 +93,13 @@
     },
     "budget": {
       "type": "object",
+      "additionalProperties": false,
+      "description": "Build byte budgets. mountMs and heapMB are planned browser measurements and are rejected until implemented.",
       "properties": {
         "viewKB": {
           "type": "number",
           "minimum": 0,
-          "description": "Gzipped KB allowed per view."
+          "description": "Maximum KiB (1024 bytes) of emitted JS, CSS and HTML per route. Uses gzip when smaller, otherwise raw bytes; includes the conservatively reachable JS graph, including lazy chunks. Excludes images/fonts. Exceeding this value fails build."
         }
       }
     },

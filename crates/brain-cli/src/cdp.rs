@@ -5,7 +5,7 @@ use brain_mcp::Json;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
-use std::os::fd::FromRawFd;
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 unsafe extern "C" {
+    #[cfg(not(target_os = "linux"))]
     fn pipe(fds: *mut i32) -> i32;
     fn dup2(src: i32, dst: i32) -> i32;
     fn close(fd: i32) -> i32;
@@ -31,7 +32,7 @@ pub struct Chrome {
     next: u64,
     timed_out: Arc<AtomicBool>,
     watchdog: Option<(mpsc::Sender<()>, std::thread::JoinHandle<()>)>,
-    /// Longest wait for one answer; `None` = only the session watchdog (`brain test`, whose evaluations run tests).
+    /// Total write/answer budget. With `None`, answers use the session watchdog; writes still have 30 s.
     pub deadline: Option<Duration>,
     /// Modal dialogs the page opened (and we dismissed) since the caller last took them: `confirm: Leave this page?…`.
     pub dialogs: Vec<String>,
@@ -68,10 +69,51 @@ pub fn find_chrome() -> Option<PathBuf> {
 
 fn os_pipe() -> io::Result<[i32; 2]> {
     let mut fds = [0i32; 2];
-    if unsafe { pipe(fds.as_mut_ptr()) } != 0 {
+    // Atomic on Linux: concurrent subprocesses must never inherit another session's CDP endpoints.
+    #[cfg(target_os = "linux")]
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
         return Err(io::Error::last_os_error());
     }
+    #[cfg(not(target_os = "linux"))]
+    {
+        if unsafe { pipe(fds.as_mut_ptr()) } != 0 { return Err(io::Error::last_os_error()); }
+        for fd in fds {
+            if unsafe { libc::fcntl(fd,libc::F_SETFD,libc::FD_CLOEXEC) } < 0 {
+                let error=io::Error::last_os_error();
+                unsafe { close(fds[0]);close(fds[1]); }
+                return Err(error);
+            }
+        }
+    }
     Ok(fds)
+}
+
+/// A full CDP pipe must not bypass the command deadline before response waiting starts.
+fn write_until(file:&mut File, mut bytes:&[u8], deadline:std::time::Instant)->io::Result<()> {
+    let fd=file.as_raw_fd();
+    let flags=unsafe{libc::fcntl(fd,libc::F_GETFL)};
+    if flags<0 || unsafe{libc::fcntl(fd,libc::F_SETFL,flags|libc::O_NONBLOCK)}<0 {return Err(io::Error::last_os_error())}
+    while !bytes.is_empty() {
+        let left=deadline.checked_duration_since(std::time::Instant::now()).filter(|d|!d.is_zero()).ok_or_else(||io::Error::new(io::ErrorKind::TimedOut,"CDP write deadline exceeded"))?;
+        match file.write(bytes) {
+            Ok(0)=>return Err(io::Error::new(io::ErrorKind::WriteZero,"Chrome pipe accepted no bytes")),
+            Ok(n)=>bytes=&bytes[n..],
+            Err(e) if e.kind()==io::ErrorKind::Interrupted=>continue,
+            Err(e) if e.kind()==io::ErrorKind::WouldBlock=>{
+                let mut poll=libc::pollfd{fd,events:libc::POLLOUT,revents:0};
+                let millis=left.as_millis().saturating_add(1).min(i32::MAX as u128) as i32;
+                let status=unsafe{libc::poll(&mut poll,1,millis)};
+                if status<0 {
+                    let error=io::Error::last_os_error();
+                    if error.kind()!=io::ErrorKind::Interrupted{return Err(error)}
+                } else if poll.revents&(libc::POLLERR|libc::POLLHUP|libc::POLLNVAL)!=0 {
+                    return Err(io::Error::new(io::ErrorKind::BrokenPipe,"Chrome pipe closed during write"));
+                }
+            }
+            Err(e)=>return Err(e),
+        }
+    }
+    Ok(())
 }
 
 impl Chrome {
@@ -171,6 +213,7 @@ impl Chrome {
 
     /// Sends a command and waits for its response; intermediate events are discarded.
     pub fn call(&mut self, session: Option<&str>, method: &str, params: Json) -> Result<Json, String> {
+        let start=std::time::Instant::now();
         self.next += 1;
         let id = self.next;
         let mut msg = vec![("id".to_string(), Json::Num(id as f64)), ("method".into(), Json::str(method)), ("params".into(), params)];
@@ -179,8 +222,7 @@ impl Chrome {
         }
         let mut bytes = Json::Obj(msg).stringify().into_bytes();
         bytes.push(0);
-        self.w.write_all(&bytes).and_then(|_| self.w.flush()).map_err(|e| self.io_err(e))?;
-        let start = std::time::Instant::now();
+        self.write_command(&bytes,start+self.deadline.unwrap_or(Duration::from_secs(30)))?;
         // what the page did while we waited, to say why an answer never came
         let mut seen: Vec<String> = Vec::new();
         loop {
@@ -209,7 +251,7 @@ impl Chrome {
                         seen.push(format!("a `{kind}` dialog (dismissed)"));
                         let msg = if kind == "beforeunload" && p("message").is_empty() { "Leave this page? (a dirty form blocked the navigation; it stayed)".to_string() } else { p("message") };
                         self.dialogs.push(format!("{kind}: {msg}"));
-                        self.send(v.get("sessionId").and_then(Json::as_str), "Page.handleJavaScriptDialog", Json::obj([("accept", Json::Bool(false))]))?;
+                        self.send(v.get("sessionId").and_then(Json::as_str), "Page.handleJavaScriptDialog", Json::obj([("accept", Json::Bool(false))]),self.deadline.map_or_else(||std::time::Instant::now()+Duration::from_secs(30),|d|start+d))?;
                     } else if ev == "Runtime.executionContextDestroyed" || ev == "Page.frameNavigated" {
                         if !seen.iter().any(|s| s.starts_with("a navigation")) {
                             seen.push("a navigation (the page context was destroyed)".into());
@@ -226,7 +268,7 @@ impl Chrome {
     }
 
     /// Writes a command without waiting for its answer (it is discarded when it arrives).
-    fn send(&mut self, session: Option<&str>, method: &str, params: Json) -> Result<(), String> {
+    fn send(&mut self, session: Option<&str>, method: &str, params: Json, deadline:std::time::Instant) -> Result<(), String> {
         self.next += 1;
         let mut msg = vec![("id".to_string(), Json::Num(self.next as f64)), ("method".into(), Json::str(method)), ("params".into(), params)];
         if let Some(s) = session {
@@ -234,7 +276,15 @@ impl Chrome {
         }
         let mut bytes = Json::Obj(msg).stringify().into_bytes();
         bytes.push(0);
-        self.w.write_all(&bytes).and_then(|_| self.w.flush()).map_err(|e| self.io_err(e))
+        self.write_command(&bytes,deadline)
+    }
+
+    fn write_command(&mut self,bytes:&[u8],deadline:std::time::Instant)->Result<(),String>{
+        write_until(&mut self.w,bytes,deadline).map_err(|e|{
+            // A timed-out partial JSON frame cannot be retried on this stream. Stop only this session.
+            unsafe{kill(-(self.child.id() as i32),9);}
+            format!("CDP transport write failed: {e}; the owned browser session was stopped")
+        })
     }
 
     fn late(&self, method: &str, d: Duration, seen: &[String]) -> String {
@@ -301,6 +351,52 @@ fn nanos() -> u128 {
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
+
+    #[test]
+    fn cdp_endpoints_do_not_leak_into_unrelated_exec_children() {
+        let fds=os_pipe().unwrap();
+        // SAFETY: owned pipe endpoints are wrapped exactly once and closed on every test exit.
+        let read=unsafe {File::from_raw_fd(fds[0])};
+        let write=unsafe {File::from_raw_fd(fds[1])};
+        for fd in fds {
+            let flags=unsafe{libc::fcntl(fd,libc::F_GETFD)};
+            assert!(flags>=0,"owned pipe descriptor must be valid");
+            assert_ne!(flags&libc::FD_CLOEXEC,0);
+        }
+        let directory=if cfg!(target_os="linux"){"/proc/self/fd"}else{"/dev/fd"};
+        let script=format!("test ! -e {directory}/{} && test ! -e {directory}/{}",fds[0],fds[1]);
+        assert!(Command::new("/bin/sh").args(["-c",&script]).status().unwrap().success());
+        drop((read,write));
+    }
+
+    #[test]
+    fn full_pipe_bounds_call_and_send_and_reaps_only_owned_child() {
+        for send_only in [false,true] {
+            let fds=os_pipe().unwrap();
+            let _reader=unsafe{File::from_raw_fd(fds[0])};
+            let mut writer=unsafe{File::from_raw_fd(fds[1])};
+            let error=write_until(&mut writer,&vec![b'x';8*1024*1024],std::time::Instant::now()+Duration::from_millis(30)).unwrap_err();
+            assert_eq!(error.kind(),io::ErrorKind::TimedOut);
+            let mut command=Command::new("/bin/sh");
+            command.args(["-c","sleep 60"]).process_group(0);
+            let child=command.spawn().unwrap();let pid=child.id();
+            let (_sender,rx)=mpsc::channel();
+            let profile=std::env::temp_dir().join(format!("brain-cdp-write-{}-{}",std::process::id(),nanos()));
+            std::fs::create_dir_all(&profile).unwrap();
+            let mut chrome=Chrome{child,w:writer,rx,next:0,timed_out:Arc::new(AtomicBool::new(false)),watchdog:None,deadline:Some(Duration::from_millis(40)),dialogs:vec![],_profile:TempDir(profile.clone())};
+            let start=std::time::Instant::now();
+            let error=if send_only {
+                chrome.send(None,"Page.handleJavaScriptDialog",Json::Obj(vec![]),start+Duration::from_millis(40)).unwrap_err()
+            } else {
+                chrome.call(None,"Target.createTarget",Json::Obj(vec![])).unwrap_err()
+            };
+            assert!(error.contains("write deadline exceeded"),"{error}");
+            assert!(start.elapsed()<Duration::from_secs(1));
+            drop(chrome);
+            assert!(!profile.exists());
+            assert_eq!(unsafe{kill(pid as i32,0)},-1,"owned child must be reaped");
+        }
+    }
 
     #[test]
     fn dropping_a_blocked_browser_cancels_its_watchdog_and_reaps_the_child() {

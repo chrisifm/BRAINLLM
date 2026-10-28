@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-28T16:53:50.103Z",
+  "sourceCommit": "7889787",
+  "binarySha256": "29d7693f5a6fa93713d6e4691bdfde7e8a59a70ffcd0f701a7acccf3b25498c2",
+  "node": "v26.12.0",
+  "platform": "darwin",
+  "release": "25.6.0",
+  "arch": "arm64",
+  "cpu": "Apple M5",
+  "cores": 10,
+  "memoryBytes": 25769803776,
+  "runs": 20,
+  "warmups": 2,
+  "loadBefore": [
+    4.39501953125,
+    6.04345703125,
+    5.2333984375
+  ],
+  "commandPolicy": "Direct native executable or node + installed CLI; no npx/npm launcher in timed builds",
+  "timeoutMs": 600000,
+  "parallelBuilds": 1,
+  "loadAfter": [
+    7.32373046875,
+    6.63916015625,
+    5.5478515625
+  ],
+  "finishedAt": "2026-10-28T16:55:24.114Z"
+}

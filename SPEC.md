@@ -42,14 +42,12 @@ pattern already in place (contract `<meta>`, typed stubs, a11y-correct markup, a
 | view (nested) | `view users/[id]` | `views/users/[id].brain` | dynamic route (`ctx.params.id`) |
 | layout | `layout users` | `views/users/_layout.brain` | wraps every view in its folder (`<slot />`) |
 | lib | `lib format` | `lib/format.jsbrain` | pure functions, no markup |
-<!--planned:#87-->
 | channel | `channel cart --store "{items:[]}"` · `--bus` · `--key` | `channels/cart.jsbrain` | shared state, event bus or context key |
 | service | `service payments` | `services/payments.jsbrain` | injectable dependency (`provide`/`use`) |
 | api | `api users --get "[User]" --post "User:User"` | `api/users.jsbrain` | typed endpoint + client |
 | type | `type User --fields "id:num! email:email!"` | `types.jsbrain` | shared data shape |
 | guard | `guard admin` | `views/admin/_guard.jsbrain` | protects a folder of routes |
 | server | `server users-db` | `server/users-db.jsbrain` | server-only module (`<meta server>`) |
-<!--/planned-->
 Names: files kebab-case, components PascalCase from the file name, one export per `.jsbrain`. Keep this layout;
 `brain map` and every tool assume it.
 
@@ -87,10 +85,9 @@ Signals are plain variables: `n++`, `items = [...items, x]`. Never mutate in pla
 · `bind:value|checked|ref={x}` · `{#if c}…{:else if d}…{:else}…{/if}` · `{#each list as it (it.id)}…{:empty}…{/each}`
 (key required; list of primitives → key by value: `{#each perks as perk (perk)}`) · `{#await p}…{:then v}…{:catch e}…{/await}`
 · `<slot />` `<slot name="x" />` · `<Comp a={b} on:ev={f} />`.
-<!--planned:#66-->
 Lazy components: `<Chart lazy />` loads when visible · `lazy="idle"` · `lazy="interaction"`. Images: `<Img src alt width height>`
-(lazy, decoding async, LCP priority set by the compiler).
-<!--/planned-->
+(lazy, decoding async, LCP priority set by the compiler). Interaction mode renders an accessible load button;
+CSS remains eager to preserve styles when the deferred component appears.
 Text interpolation is escaped. `id`s in `comp/` and `ui/`, static or computed (`id={'faq-' + it.id}`), keep their name
 in the first instance (so `/page#id` links work); later instances get `~2`, `~3`… and their `for`, `aria-*` and
 `href="#…"` references follow. Ids in views and layouts stay as written.
@@ -209,19 +206,25 @@ Production: `brain start` (serves `dist/`, restarts on crash, logs to `logs/app.
 Hosted under a sub-path: `brain.json` `"base": "/app/"`; keep writing app-absolute links and paths (`<a href="/about">`,
 `redirect('/login')`); the build adds the base everywhere.
 Granular: `brain add view|comp|ui <name> --props "…"` · `brain check --json` · `brain test` · `brain spec [--topic x]`.
+Also: `brain preview` (temporary loopback server for `dist/`, Unix) · `brain explain <code>` ·
+`brain doctor --fix` (apply mechanical fixes, then run the full doctor). Config: `brain.json`.
 <!--planned:#68-->
-Also: `brain preview` (serve dist/) · `brain explain <code>` · `brain doctor --fix`. Config: `brain.json`. Exit codes: 0 ok · 1 project errors · 2 usage · 3 internal.
+Unified exit codes across all commands: 0 ok · 1 project errors · 2 usage · 3 internal.
 <!--/planned-->
 `brain fix` applies every `edits` from `brain check` and re-checks (run it before editing by hand).
 `brain map --json`: whole project graph (routes, components, props, channels, tests); read it instead of opening files.
+`brain shot <route>` (Unix + Chrome): PNG and accessibility outline for mobile/desktop. Use `--viewport mobile|desktop|both`,
+`--text` for the outline, `--baseline <name>` to compare, and explicitly add `--update-baseline` to approve a new image.
+`--max-diff <0..1>` sets the allowed changed-pixel fraction (default 0). A mismatch or accessibility issue fails the check.
+`brain.json` `{"budget":{"viewKB":30}}` fails the build when a route exceeds 30 KiB of emitted JS + CSS + HTML.
+This conservative total includes deferred JS dependencies; it is not a measurement of initial network transfer.
 <!--planned:#40-->
-`brain doctor` (over-engineering, loops, leaks, dead code) · `brain shot <route>` (screenshot + a11y tree, mobile and
-desktop, diff vs baseline) · `brain undo` · `brain migrate`. Budgets in `brain.json`:
-`{"budget":{"viewKB":30,"mountMs":16,"heapMB":20}}` fail the build.
+CLI `brain undo` and version-to-version `brain migrate`; runtime budgets `mountMs` (p95) and `heapMB`.
 <!--/planned-->
-<!--planned:#37-->
-`brain edit add-prop|remove-prop|rename|move|extract …` (AST edits; prefer over text edits).
-<!--/planned-->
+`brain edit add-prop <file> <declaration>` · `remove-prop <file> <prop>` · `rename <file> <NewName>` ·
+`move <file> <destination>` · `extract <file> <selector> <NewName>` (AST edits; prefer over text edits).
+Rename changes a component filename and its resolved imports, preserving local aliases; it does not rename JavaScript
+bindings. Changes pass the checker before writing. Unsupported ambiguous references are rejected.
 Prefer composing over writing: `brain gen --list --json` shows recipes (app shell, navbar, auth, CRUD from an api schema,
 dashboard, settings, pricing, landing sections, wizard, modal); `brain gen <recipe> --params '{…}'` creates files that
 already pass `brain doctor`. Layout without CSS: `<Stack gap="3">` `<Row>` `<Grid cols="3">` `<Center>` `<Sidebar>`

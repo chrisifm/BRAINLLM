@@ -112,6 +112,148 @@ pub fn outer_root(from: &Path) -> Option<PathBuf> {
     from.ancestors().filter(|d| is_app_dir(d)).last().map(Path::to_path_buf)
 }
 
+/// Options shared by the CLI and MCP generators. Flags outside their kind are rejected.
+#[derive(Default)]
+pub struct AddOptions {
+    pub props: String,
+    pub store: Option<String>,
+    pub bus: bool,
+    pub key: bool,
+    pub get: Option<String>,
+    pub post: Option<String>,
+    pub fields: Option<String>,
+}
+
+pub fn add_with_options(root: &Path, kind: &str, name: &str, o: &AddOptions) -> Result<PathBuf, String> {
+    if (o.store.is_some() || o.bus || o.key) && kind != "channel"
+        || (o.get.is_some() || o.post.is_some()) && kind != "api"
+        || o.fields.is_some() && kind != "type"
+        || !o.props.is_empty() && !matches!(kind, "view" | "comp" | "ui" | "micro")
+    { return Err("options do not match the file kind; fix: use channel store/bus/key, api get/post, type fields or component props".into()); }
+    if !matches!(kind, "channel" | "service" | "api" | "type" | "guard" | "server") {
+        return add(root, kind, name, &o.props);
+    }
+    if !valid_ident(name) { return Err("invalid name; fix: letters, digits, underscores or hyphens, starting with a letter".into()); }
+    let stem = kebab(name);
+    let (rel, body) = match kind {
+        "channel" => {
+            if usize::from(o.store.is_some()) + usize::from(o.bus) + usize::from(o.key) > 1 { return Err("choose only one of --store, --bus or --key".into()); }
+            let expr = if let Some(value) = &o.store {
+                validate_store(value)?;
+                format!("store({value})")
+            } else if o.bus { format!("bus('{}')", stem) } else { format!("key('{}')", stem) };
+            (format!("channels/{stem}.jsbrain"), format!("export default {expr}\n"))
+        }
+        "service" => (format!("services/{stem}.jsbrain"), format!("// Import this key, provide its implementation in app.brain, then use it in components.\nexport default key('{stem}')\n")),
+        "server" => (format!("server/{stem}.jsbrain"), "<meta server>\n// Server-only helpers. Add functions to this object.\nexport default {}\n".into()),
+        "guard" => (format!("views/{stem}/_guard.jsbrain"), "// Deny anonymous access; adapt this condition to the route's authorization rules.\nexport default (ctx) => (ctx.user ? true : deny('Sign in to continue'))\n".into()),
+        "api" => {
+            if o.get.is_none() && o.post.is_none() { return Err("api needs --get <type> or --post <input>:<output>".into()); }
+            let mut methods = Vec::new();
+            if let Some(out) = &o.get { validate_shape(root, out)?; methods.push(format!("get: {{ out: '{}' }}", out)); }
+            if let Some(post) = &o.post {
+                let (input, out) = post.split_once(':').ok_or("--post needs input:output, e.g. User:User")?;
+                validate_shape(root, input)?; validate_shape(root, out)?;
+                methods.push(format!("post: {{ in: '{input}', out: '{out}' }}"));
+            }
+            (format!("api/{stem}.jsbrain"), format!("export default api('/{stem}', {{ {} }})\n", methods.join(", ")))
+        }
+        "type" => {
+            if !name.starts_with(|c: char| c.is_ascii_uppercase()) || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                return Err("type names must be PascalCase identifiers, e.g. User".into());
+            }
+            let fields = o.fields.as_ref().filter(|s| !s.trim().is_empty()).ok_or("type needs --fields, e.g. id:num! email:email!")?;
+            let mut seen = std::collections::HashSet::new();
+            let mut pairs = Vec::new();
+            for field in fields.split_whitespace() {
+                let (key, shape) = field.split_once(':').ok_or("fields must be name:type pairs")?;
+                if !valid_ident(key) || key.contains('-') || !seen.insert(key) || matches!(key, "__proto__" | "constructor" | "prototype") { return Err("invalid or duplicate field name".into()); }
+                validate_shape(root, shape)?;
+                pairs.push(format!("{key}: '{shape}'"));
+            }
+            ("types.jsbrain".into(), format!("export const {name} = {{ {} }}\n", pairs.join(", ")))
+        }
+        _ => unreachable!(),
+    };
+    let path = root.join(&rel);
+    // Refuse directory/file symlinks before reading or writing; the new-file operation is exclusive.
+    let mut cursor = root.to_path_buf();
+    for part in Path::new(&rel).components() {
+        cursor.push(part);
+        if fs::symlink_metadata(&cursor).is_ok_and(|m| m.file_type().is_symlink()) { return Err("generator paths cannot cross symlinks".into()); }
+    }
+    if kind == "type" && path.exists() {
+        return append_type(root, &path, name, &body);
+    }
+    validate_generated(root, &path, &body)?;
+    fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    use std::io::Write;
+    let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&path).map_err(|e| format!("cannot create {rel}: {e}; fix: choose a new name"))?;
+    file.write_all(body.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+fn validate_generated(_root: &Path, path: &Path, body: &str) -> Result<(), String> {
+    let c = brain_parse::parse(body, path).map_err(|d| format!("invalid generated source: {d:?}"))?;
+    let (ctx, _) = brain_check::load_ctx(path, &c);
+    let errors: Vec<_> = brain_check::check(&c, &ctx).into_iter().filter(|d| !d.is_warning() && !d.is_info()).collect();
+    if errors.is_empty() { Ok(()) } else { Err(format!("generated file does not pass check: {errors:?}")) }
+}
+
+fn validate_shape(root: &Path, shape: &str) -> Result<(), String> {
+    // Supported schema tokens only; quotes, code and additional declarations can never enter a template.
+    let plain = shape.strip_suffix('!').unwrap_or(shape);
+    let plain = plain.strip_prefix('[').and_then(|s| s.strip_suffix(']')).unwrap_or(plain);
+    let valid = matches!(plain, "str" | "num" | "bool" | "email" | "url" | "date" | "obj" | "list" | "any")
+        || brain_check::types::exported(root).is_some_and(|names| names.contains(plain));
+    if !valid { return Err(format!("unsupported or undeclared schema `{shape}`; fix: use a primitive or an existing types.jsbrain export")); }
+    Ok(())
+}
+
+fn validate_store(value: &str) -> Result<(), String> {
+    use brain_parse::ast::{Expr, ObjProp, Stmt};
+    fn safe_key(key: &brain_parse::ast::PropKey) -> bool {
+        use brain_parse::ast::PropKey;
+        match key {
+            PropKey::Ident(i) => !matches!(i.name.as_str(), "__proto__" | "constructor" | "prototype"),
+            PropKey::Str { value, .. } => !matches!(value.as_str(), "__proto__" | "constructor" | "prototype"),
+            PropKey::Num { .. } => true,
+            PropKey::Computed(_) => false,
+        }
+    }
+    fn literal(e: &Expr) -> bool {
+        match e {
+            Expr::Str { .. } | Expr::Num { .. } | Expr::Bool { .. } | Expr::Null(_) => true,
+            Expr::Unary { op: "-", arg, .. } => matches!(arg.as_ref(), Expr::Num { .. }),
+            Expr::Array { elems, .. } => elems.iter().all(|e| e.as_ref().is_some_and(literal)),
+            Expr::Object { props, .. } => props.iter().all(|p| matches!(p, ObjProp::KeyValue { key, value, .. } if safe_key(key) && literal(value))),
+            _ => false,
+        }
+    }
+    if value.len() > 65536 { return Err("store initializer exceeds 64 KiB".into()); }
+    let c = brain_parse::parse(&format!("export default {value}"), Path::new("channels/validate.jsbrain")).map_err(|_| "--store must be a literal object")?;
+    match c.script.as_slice() {
+        [Stmt::ExportDefault { expr: Expr::Object { .. }, .. }] if matches!(&c.script[0], Stmt::ExportDefault { expr, .. } if literal(expr)) => Ok(()),
+        _ => Err("--store must be a literal object, with no functions, references or extra statements".into()),
+    }
+}
+
+fn append_type(root: &Path, path: &Path, name: &str, body: &str) -> Result<PathBuf, String> {
+    use std::io::{Read, Write};
+    // Kernel-owned lock releases even if the generating agent is killed; no stale sidecar can block future work.
+    let mut file = fs::OpenOptions::new().read(true).append(true).open(path).map_err(|e| e.to_string())?;
+    file.try_lock().map_err(|_| "another type generator is active; retry after it finishes")?;
+    if file.metadata().map_err(|e| e.to_string())?.len() > 1024 * 1024 { return Err("types.jsbrain exceeds generator limit".into()); }
+    let mut previous = String::new();
+    file.read_to_string(&mut previous).map_err(|e| e.to_string())?;
+    let parsed = brain_parse::parse(&previous, path).map_err(|_| "fix existing types.jsbrain before adding another type")?;
+    if brain_check::scope::top_bindings(&parsed).contains_key(name) { return Err(format!("type `{name}` already exists")); }
+    let next = format!("{previous}\n{body}");
+    validate_generated(root, path, &next)?;
+    file.write_all(format!("\n{body}").as_bytes()).map_err(|e| e.to_string())?;
+    Ok(path.to_path_buf())
+}
+
 pub fn add(root: &Path, kind: &str, name: &str, props: &str) -> Result<PathBuf, String> {
     match kind {
         "test" => return add_test(root, name),
@@ -682,6 +824,69 @@ mod tests {
             assert!(diags.is_empty(), "{}: {}", rel.display(), crate::compiler::Diag::list_to_json(&diags));
         }
         fs::remove_dir_all(&app).unwrap();
+    }
+
+    #[test]
+    fn module_generators_validate_and_preserve_files() {
+        let root = tmp("modules"); new_app(&root).unwrap();
+        let make = |kind, name, o| add_with_options(&root, kind, name, &o).unwrap_or_else(|e| panic!("{kind} {name}: {e}"));
+        make("type", "User", AddOptions { fields: Some("id:num! email:email!".into()), ..Default::default() });
+        let original = fs::read_to_string(root.join("types.jsbrain")).unwrap();
+        make("type", "Order", AddOptions { fields: Some("id:num!".into()), ..Default::default() });
+        assert!(fs::read_to_string(root.join("types.jsbrain")).unwrap().starts_with(&original));
+        make("channel", "cart", AddOptions { store: Some("{items:[], count:0}".into()), ..Default::default() });
+        make("channel", "events", AddOptions { bus: true, ..Default::default() });
+        make("channel", "theme", AddOptions::default());
+        make("service", "payments", AddOptions::default());
+        make("server", "users-db", AddOptions::default());
+        make("guard", "admin", AddOptions::default());
+        make("api", "users", AddOptions { get: Some("[User]".into()), post: Some("User:User".into()), ..Default::default() });
+        assert!(add_with_options(&root, "api", "users", &AddOptions { get: Some("list".into()), ..Default::default() }).is_err());
+        assert!(add_with_options(&root, "type", "User", &AddOptions { fields: Some("id:num!".into()), ..Default::default() }).is_err());
+        assert!(fs::read_to_string(root.join("api/users.jsbrain")).unwrap().contains("'[User]'"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn module_generators_reject_untrusted_options_without_writing() {
+        let root = tmp("module-invalid"); new_app(&root).unwrap();
+        for value in ["run()", "{}; export default {}", "{x: fetch('/private')}", "{[run()]:1}", "{__proto__:{}}", "{nested:{constructor:1}}"] {
+            assert!(add_with_options(&root, "channel", "bad", &AddOptions { store: Some(value.into()), ..Default::default() }).is_err(), "{value}");
+        }
+        for name in ["../outside", "x/y", "..", "/tmp/escape"] {
+            assert!(add_with_options(&root, "server", name, &AddOptions::default()).is_err());
+        }
+        assert!(add_with_options(&root, "service", "bad", &AddOptions { bus: true, ..Default::default() }).is_err());
+        assert!(add_with_options(&root, "channel", "bad", &AddOptions { bus: true, key: true, ..Default::default() }).is_err());
+        assert!(add_with_options(&root, "api", "bad", &AddOptions { get: Some("NoSuchType".into()), ..Default::default() }).is_err());
+        assert!(add_with_options(&root, "type", "Bad", &AddOptions { fields: Some("x:num x:str".into()), ..Default::default() }).is_err());
+        assert!(!root.join("channels/bad.jsbrain").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn module_type_lock_is_nonblocking_and_released() {
+        let root = tmp("module-lock"); new_app(&root).unwrap();
+        add_with_options(&root, "type", "First", &AddOptions { fields: Some("id:num!".into()), ..Default::default() }).unwrap();
+        let lock = fs::OpenOptions::new().read(true).write(true).open(root.join("types.jsbrain")).unwrap();
+        lock.try_lock().unwrap();
+        let options = AddOptions { fields: Some("id:num!".into()), ..Default::default() };
+        assert!(add_with_options(&root, "type", "Second", &options).unwrap_err().contains("active"));
+        drop(lock);
+        add_with_options(&root, "type", "Second", &options).unwrap();
+        assert!(!root.join(".brain-add-type.lock").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn module_generator_refuses_symlink_directories() {
+        let root = tmp("module-symlink"); new_app(&root).unwrap();
+        fs::remove_dir_all(root.join("services")).unwrap();
+        std::os::unix::fs::symlink(root.join("lib"), root.join("services")).unwrap();
+        assert!(add_with_options(&root, "service", "escape", &AddOptions::default()).unwrap_err().contains("symlinks"));
+        assert!(!root.join("lib/escape.jsbrain").exists());
+        fs::remove_dir_all(root).unwrap();
     }
 
     /// Every reasonable text/background pair of the scaffold tokens passes B0408 (QA: the LLM could not find a valid pair).

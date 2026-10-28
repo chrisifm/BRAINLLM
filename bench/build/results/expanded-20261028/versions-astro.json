@@ -1,0 +1,9 @@
+{
+  "versions": {
+    "astro": "7.4.3",
+    "@astrojs/react": "7.1.2",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "lockSha256": "ec6cd4b88140238b7980051700118fa3369a1c27d353cbe3b1eb8682148b3ef3"
+}

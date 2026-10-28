@@ -1,0 +1,14 @@
+{
+  "name": "brain-bench-astro-react",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "astro build"
+  },
+  "dependencies": {
+    "astro": "7.4.3",
+    "@astrojs/react": "7.1.2",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  }
+}

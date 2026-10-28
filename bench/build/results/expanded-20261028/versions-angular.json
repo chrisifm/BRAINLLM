@@ -1,0 +1,16 @@
+{
+  "versions": {
+    "@angular/common": "22.2.3",
+    "@angular/compiler": "22.2.3",
+    "@angular/core": "22.2.3",
+    "@angular/forms": "22.2.3",
+    "@angular/platform-browser": "22.2.3",
+    "rxjs": "7.8.2",
+    "tslib": "2.8.1",
+    "@angular/build": "22.2.5",
+    "@angular/cli": "22.2.5",
+    "@angular/compiler-cli": "22.2.3",
+    "typescript": "6.0.3"
+  },
+  "lockSha256": "c0320d4fe6a4d88fac33ea16b3e735bbd8f6018d5f2b37e3331baad376ff67fa"
+}

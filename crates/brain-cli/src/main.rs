@@ -2,7 +2,14 @@
 
 #[cfg(unix)]
 mod browser;
+#[cfg(unix)]
+mod shot;
 mod card;
+mod brand;
+mod edit;
+mod budget;
+#[cfg(unix)]
+mod preview;
 mod impact;
 #[cfg(unix)]
 mod cdp;
@@ -37,15 +44,18 @@ main:
   brain new <app>                    creates the app (app.brain, tokens.cssbrain, views/, comp/, ui/, AGENTS.md)
   brain run [--port 5180] [--base /app/] [--mock[=seed]] [--profile] [--inspect-port N | --no-inspect]  dev server with hot reload; the debugger on port+1
   brain build [--site https://…] [--report] [--ext web|brain]   production (--report: bytes per page before/after each pass)
-  brain doctor                       everything at once: check + tests + overengineering + leaks; exit ≠ 0 on any error
+  brain preview [--port 4173]         temporary local preview of dist/; Ctrl+C to stop
+  brain doctor [--fix]                everything at once: check + tests + overengineering + leaks; exit ≠ 0 on any error
   brain start [--port 3000] [--instances N] [--install]   serves dist/ in production (static or server.mjs)
   brain stop | reload | status       control the running `brain start` (zero-downtime reload)
 
 granular:
-  brain add view|comp|ui <name> [--props \"a:num=0 b:str?\"]   (also layout, lib, collection <name>, locale <xx>)
+  brain add view|comp|ui <name> [--props \"a:num=0 b:str?\"]   (also layout, lib, channel, service, api, type, guard, server, collection, locale)
   brain check [path]                 errors and warnings with an exact fix
   brain explain <code>               what a diagnostic code means, why, and a minimal correct example
   brain fix [path]                   applies the mechanical fixes and checks again
+  brain edit <operation> <file> ...  checked AST edits: add-prop, remove-prop, rename, move, extract
+  brain shot [route] [--text] [--baseline name] [--update-baseline]  Chrome screenshot and accessibility outline
   brain test [path] [--timeout 60] [--heap]   *.test.brain in headless Chrome + accessibility audit (+ leaks)
   brain map                          project graph: routes, components and props, modules, tests, tokens
   brain spec [--topic X] [--all]     the spec for the LLM (topics: files script markup channels css a11y tests cli)
@@ -151,6 +161,22 @@ fn main() -> ExitCode {
         Some("doctor") => return cmd_doctor(&args[1..]),
         Some("fix") => return cmd_fix(&args[1..]),
         Some("explain") => cmd_explain(&args[1..]),
+        Some("edit") => cmd_edit(&args[1..]),
+        #[cfg(unix)]
+        Some("shot") => {
+            let result = app_root().and_then(|root| shot::run(&root,&args[1..]));
+            return match result {
+                Ok(j) => {
+                    if args.iter().any(|a| a == "--text") && !want_json(&args) {
+                        if let Some(brain_mcp::Json::Arr(shots)) = j.get("shots") { for shot in shots { println!("{}", shot.get("text").and_then(brain_mcp::Json::as_str).unwrap_or("")); } }
+                    } else { println!("{}",j.stringify()); }
+                    if j.get("ok") == Some(&brain_mcp::Json::Bool(true)) {ExitCode::SUCCESS} else {ExitCode::FAILURE}
+                },
+                Err(e) => { if want_json(&args) {println!("{}",error_json(&e))} else {eprintln!("error: {e}")}; ExitCode::from(2) }
+            };
+        },
+        #[cfg(unix)]
+        Some("preview") => app_root().and_then(|r| preview::run(&r, &args[1..])),
         // §43: one component's contract, and extracting a subtree into a new component
         Some("card") => match args.get(1) {
             Some(c) => app_root().and_then(|r| card::card(&r, c)).map(|j| println!("{}", j.stringify())),
@@ -293,11 +319,32 @@ fn cmd_new(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn cmd_edit(args: &[String]) -> Result<(), String> {
+    if args.iter().any(|a| a.starts_with("--") && a != "--json") { return Err("unknown brain edit flag; fix: use positional operation arguments and optional --json".into()); }
+    let values: Vec<&str> = args.iter().filter(|a| *a != "--json").map(String::as_str).collect();
+    let op = match values.as_slice() {
+        ["add-prop", _, declaration] => edit::Operation::AddProp { declaration: (*declaration).into() },
+        ["remove-prop", _, name] => edit::Operation::RemoveProp { name: (*name).into() },
+        ["rename", _, name] => edit::Operation::Rename { name: (*name).into() },
+        ["move", _, to] => edit::Operation::Move { to: (*to).into() },
+        ["extract", _, selector, name] => edit::Operation::Extract { selector: (*selector).into(), name: (*name).into() },
+        _ => return Err("usage: brain edit add-prop <file> <declaration> | remove-prop <file> <prop> | rename <file> <NewName> | move <file> <destination> | extract <file> <selector> <NewName>".into()),
+    };
+    let result = edit::apply(&app_root()?, values[1], op, &mut |_, _| {})?;
+    println!("{}", result.stringify());
+    Ok(())
+}
+
 fn cmd_add(args: &[String]) -> Result<(), String> {
-    let pos = positional(args, &["--props"]);
+    let pos = positional(args, &["--props", "--store", "--get", "--post", "--fields"]);
     let [kind, name] = <[String; 2]>::try_from(pos).map_err(|_| "usage: brain add view|comp|ui <name> [--props \"...\"]".to_string())?;
     let root = app_root()?;
-    let p = scaffold::add(&root, &kind, &name, &flag(args, "--props").unwrap_or_default())?;
+    let options = scaffold::AddOptions {
+        props: flag(args, "--props").unwrap_or_default(), store: flag(args, "--store"),
+        bus: args.iter().any(|a| a == "--bus"), key: args.iter().any(|a| a == "--key"),
+        get: flag(args, "--get"), post: flag(args, "--post"), fields: flag(args, "--fields"),
+    };
+    let p = scaffold::add_with_options(&root, &kind, &name, &options)?;
     let rel = p.strip_prefix(&root).unwrap_or(&p).display().to_string();
     if want_json(args) {
         println!("{}", brain_mcp::Json::obj([("file", brain_mcp::Json::str(rel))]).stringify());
@@ -608,6 +655,7 @@ pub(crate) fn diags_json(diags: &[compiler::Diag]) -> String {
 }
 
 fn cmd_check(args: &[String]) -> ExitCode {
+    let identity = brand::Session::start(args, "Checking your frontend against its contract.");
     let json = args.iter().any(|a| a == "--json");
     let (n, diags) = match run_check(positional(args, &[]).first().map(PathBuf::from)) {
         Ok(r) => r,
@@ -633,6 +681,7 @@ fn cmd_check(args: &[String]) -> ExitCode {
         let w = diags.iter().filter(|d| d.is_warning()).count();
         eprintln!("{n} file(s), {} error(s), {w} warning(s)", diags.len() - w);
     }
+    identity.finish(if diags.iter().all(|d| d.is_warning()) { "Check complete. Ready for your next idea." } else { "Issues found. Review the diagnostics and suggested fixes." });
     // Warnings (today B0201) are reported but do not fail.
     if diags.iter().all(|d| d.is_warning()) { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
@@ -694,6 +743,7 @@ pub(crate) fn run_build_with(root: &Path, site: Option<String>, env_name: &str, 
     std::fs::create_dir_all(&dist).map_err(|e| e.to_string())?;
     // robots.txt, sitemap.xml, llms.txt, manifest and the head rewrite come from brain-seo's finish (inside bundle)
     bundle(root, &dist, site.as_deref(), env_name, &mut rep, progress)?;
+    budget::enforce(root, &rep.report)?;
     Ok(rep)
 }
 
@@ -1054,6 +1104,7 @@ pub(crate) fn build_json(r: &BuildReport) -> brain_mcp::Json {
 static BUILD_EXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 fn cmd_build(args: &[String]) -> Result<(), String> {
+    let identity = brand::Session::start(args, "Turning your frontend into browser-ready output.");
     if let Some(e) = flag(args, "--ext").or_else(|| std::env::var("BRAIN_EXT").ok().filter(|v| !v.is_empty())) {
         if e != "web" && e != "brain" {
             return Err(format!("invalid --ext `{e}`; fix: `--ext web` (.html/.js/.css, the default) or `--ext brain` (.brain/.jsbrain/.cssbrain)"));
@@ -1068,7 +1119,11 @@ fn cmd_build(args: &[String]) -> Result<(), String> {
     }
     let res = run_build_with(&root, flag(args, "--site"), &env::name(args, "production"), Some(&pr));
     pr.end();
-    let rep = res?;
+    let rep = match res {
+        Ok(rep) => rep,
+        Err(error) => { identity.finish("Build stopped. Resolve the diagnostic and try again."); return Err(error); }
+    };
+    identity.finish("Build complete. Your intent, compiled.");
     if want_json(args) {
         println!("{}", build_json(&rep).stringify());
         return Ok(());
@@ -1102,6 +1157,7 @@ reload, restart with backoff, crash-loop exit 1, /_health, RSS limit, logs/app.l
 BRAIN_INSTANCES, BRAIN_MAX_MEMORY, BRAIN_NODE.
 ";
 
+#[cfg(unix)]
 fn cmd_start(args: &[String]) -> ExitCode {
     if args.iter().any(|a| a == "--help" || a == "-h") {
         print!("{START_USAGE}");
@@ -1247,8 +1303,8 @@ pub(crate) fn run_tests(target: Option<PathBuf>, timeout: u64) -> Result<Vec<tes
         return Ok(vec![]);
     }
     let opts = brain_serve::Options { root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: head_prepend(), runtime: runtime_files(), env: Some(env::loader(&root, "development")), base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None };
-    let (addr, _) = brain_serve::start(opts, compile_fn(root.clone(), true), false).map_err(|e| format!("could not start the test server: {e}"))?;
-    testrun::run(&format!("http://{addr}"), &root, &files, std::time::Duration::from_secs(timeout))
+    let dev = brain_serve::start_dev(opts, compile_fn(root.clone(), true), false, None).map_err(|e| format!("could not start the test server: {e}"))?;
+    testrun::run(&dev.url(), &root, &files, std::time::Duration::from_secs(timeout))
 }
 
 #[cfg(unix)]
@@ -1442,7 +1498,13 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
 
 fn cmd_doctor(args: &[String]) -> ExitCode {
     let target = positional(args, &[]).first().map(PathBuf::from);
-    match run_doctor(target) {
+    let checked = if args.iter().any(|a| a == "--fix") {
+        run_fix(target.clone()).and_then(|fix| run_doctor(target).map(|(ok, mut report)| {
+            if let brain_mcp::Json::Obj(ref mut fields) = report { fields.push(("fix".into(), fix)); }
+            (ok, report)
+        }))
+    } else { run_doctor(target) };
+    match checked {
         Err(e) => {
             if want_json(args) { println!("{}", error_json(&e)) } else { eprintln!("error: {e}") }
             ExitCode::from(2)
@@ -1564,6 +1626,7 @@ fn cmd_dev(args: &[String]) -> Result<(), String> {
     };
     let opts = brain_serve::Options { root: root.clone(), host: host.clone(), port, head_prepend: head_prepend(), runtime: runtime_files(), env: Some(env::loader(&root, &env::name(args, "development"))), base, diagnose: Some(dev_diagnose(&root)), problems: Some(dev_problems(&root)), upstream: None, mock };
     let mode = term::detect(args, term::stderr_tty(), &term::env_var);
+    let identity = brand::Session::start(args, "Wiring your frontend for the next idea.");
     let boot = std::time::Instant::now();
     let view = (mode == term::Mode::Rich).then(|| Arc::new(term::DevView::new(term::utf8(&term::env_var))));
     // --profile (#86.4): one JSON line per edit on stdout, `{"profile":"edit","path","ms","js","css"}` (ms = file
@@ -1614,6 +1677,7 @@ fn cmd_dev(args: &[String]) -> Result<(), String> {
     );
     let _ = std::fs::create_dir_all(root.join(".brain"));
     let _ = std::fs::write(dev_json_path(&root), &info);
+    identity.finish("Dev server ready. Save a change and keep building.");
     if want_json(args) {
         println!("{info}");
     } else if let Some(v) = &view {

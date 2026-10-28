@@ -1,0 +1,328 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-28T16:57:52.219Z",
+  "chrome": {
+    "protocolVersion": "1.3",
+    "product": "Chrome/156.0.8078.49",
+    "revision": "@29eb03535d5f2f4f899b95f22a92413ffde5284e",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+    "jsVersion": "15.6.75.19"
+  },
+  "results": [
+    {
+      "id": "brain",
+      "route": "/dashboard",
+      "steps": [
+        "search filters users",
+        "empty search state",
+        "new form validation",
+        "create user",
+        "edit form populated",
+        "update user",
+        "cancel form visible",
+        "cancel preserves rows",
+        "delete user"
+      ],
+      "exceptions": [],
+      "resources": [
+        {
+          "path": "/dashboard",
+          "type": "Document",
+          "rawBytes": 4705,
+          "gzipBytes": 2163
+        },
+        {
+          "path": "/_b/1hqq6mge.css",
+          "type": "Stylesheet",
+          "rawBytes": 163,
+          "gzipBytes": 139
+        },
+        {
+          "path": "/_b/lwnm1ghd.js",
+          "type": "Script",
+          "rawBytes": 4426,
+          "gzipBytes": 2153
+        },
+        {
+          "path": "/_b/470a5m11.js",
+          "type": "Script",
+          "rawBytes": 1418,
+          "gzipBytes": 633
+        },
+        {
+          "path": "/_b/32pnrpge.js",
+          "type": "Script",
+          "rawBytes": 2600,
+          "gzipBytes": 1402
+        },
+        {
+          "path": "/_b/x9swiwsi.js",
+          "type": "Script",
+          "rawBytes": 434,
+          "gzipBytes": 286
+        },
+        {
+          "path": "/_b/841cycba.js",
+          "type": "Script",
+          "rawBytes": 6752,
+          "gzipBytes": 3049
+        },
+        {
+          "path": "/_b/6ecyojt1.js",
+          "type": "Script",
+          "rawBytes": 338,
+          "gzipBytes": 249
+        },
+        {
+          "path": "/_b/ugu2llji.js",
+          "type": "Script",
+          "rawBytes": 3172,
+          "gzipBytes": 1252
+        }
+      ],
+      "routeRawBytes": 24008,
+      "routeGzipBytes": 11326,
+      "note": "Initial successful Document/Stylesheet/Script responses after data readiness; gzip level9 per body; images and later resources excluded"
+    },
+    {
+      "id": "react",
+      "route": "/",
+      "steps": [
+        "search filters users",
+        "empty search state",
+        "new form validation",
+        "create user",
+        "edit form populated",
+        "update user",
+        "cancel form visible",
+        "cancel preserves rows",
+        "delete user"
+      ],
+      "exceptions": [],
+      "resources": [
+        {
+          "path": "/",
+          "type": "Document",
+          "rawBytes": 969,
+          "gzipBytes": 472
+        },
+        {
+          "path": "/assets/index-C15t65u3.css",
+          "type": "Stylesheet",
+          "rawBytes": 833,
+          "gzipBytes": 385
+        },
+        {
+          "path": "/assets/index-TNuyrJbz.js",
+          "type": "Script",
+          "rawBytes": 222960,
+          "gzipBytes": 68954
+        }
+      ],
+      "routeRawBytes": 224762,
+      "routeGzipBytes": 69811,
+      "note": "Initial successful Document/Stylesheet/Script responses after data readiness; gzip level9 per body; images and later resources excluded"
+    },
+    {
+      "id": "svelte",
+      "route": "/",
+      "steps": [
+        "search filters users",
+        "empty search state",
+        "new form validation",
+        "create user",
+        "edit form populated",
+        "update user",
+        "cancel form visible",
+        "cancel preserves rows",
+        "delete user"
+      ],
+      "exceptions": [],
+      "resources": [
+        {
+          "path": "/",
+          "type": "Document",
+          "rawBytes": 969,
+          "gzipBytes": 470
+        },
+        {
+          "path": "/assets/index-Dvnwz4MV.css",
+          "type": "Stylesheet",
+          "rawBytes": 941,
+          "gzipBytes": 412
+        },
+        {
+          "path": "/assets/index-DhHglChh.js",
+          "type": "Script",
+          "rawBytes": 41733,
+          "gzipBytes": 16237
+        }
+      ],
+      "routeRawBytes": 43643,
+      "routeGzipBytes": 17119,
+      "note": "Initial successful Document/Stylesheet/Script responses after data readiness; gzip level9 per body; images and later resources excluded"
+    },
+    {
+      "id": "vue",
+      "route": "/",
+      "steps": [
+        "search filters users",
+        "empty search state",
+        "new form validation",
+        "create user",
+        "edit form populated",
+        "update user",
+        "cancel form visible",
+        "cancel preserves rows",
+        "delete user"
+      ],
+      "exceptions": [],
+      "resources": [
+        {
+          "path": "/",
+          "type": "Document",
+          "rawBytes": 969,
+          "gzipBytes": 472
+        },
+        {
+          "path": "/assets/index-BvTKuTvi.css",
+          "type": "Stylesheet",
+          "rawBytes": 833,
+          "gzipBytes": 390
+        },
+        {
+          "path": "/assets/index-C8G94gw1.js",
+          "type": "Script",
+          "rawBytes": 69646,
+          "gzipBytes": 27052
+        }
+      ],
+      "routeRawBytes": 71448,
+      "routeGzipBytes": 27914,
+      "note": "Initial successful Document/Stylesheet/Script responses after data readiness; gzip level9 per body; images and later resources excluded"
+    },
+    {
+      "id": "angular",
+      "route": "/",
+      "steps": [
+        "search filters users",
+        "empty search state",
+        "new form validation",
+        "create user",
+        "edit form populated",
+        "update user",
+        "cancel form visible",
+        "cancel preserves rows",
+        "delete user"
+      ],
+      "exceptions": [],
+      "resources": [
+        {
+          "path": "/",
+          "type": "Document",
+          "rawBytes": 1611,
+          "gzipBytes": 794
+        },
+        {
+          "path": "/styles-ZSWKCPC7.css",
+          "type": "Stylesheet",
+          "rawBytes": 843,
+          "gzipBytes": 391
+        },
+        {
+          "path": "/main-6W7FLSFC.js",
+          "type": "Script",
+          "rawBytes": 174644,
+          "gzipBytes": 54724
+        }
+      ],
+      "routeRawBytes": 177098,
+      "routeGzipBytes": 55909,
+      "note": "Initial successful Document/Stylesheet/Script responses after data readiness; gzip level9 per body; images and later resources excluded"
+    },
+    {
+      "id": "astro",
+      "route": "/",
+      "steps": [
+        "search filters users",
+        "empty search state",
+        "new form validation",
+        "create user",
+        "edit form populated",
+        "update user",
+        "cancel form visible",
+        "cancel preserves rows",
+        "delete user"
+      ],
+      "exceptions": [],
+      "resources": [
+        {
+          "path": "/",
+          "type": "Document",
+          "rawBytes": 7354,
+          "gzipBytes": 3051
+        },
+        {
+          "path": "/_astro/Dashboard.C6SeWjky.js",
+          "type": "Script",
+          "rawBytes": 3891,
+          "gzipBytes": 1660
+        },
+        {
+          "path": "/_astro/client.DRd094VK.js",
+          "type": "Script",
+          "rawBytes": 212836,
+          "gzipBytes": 65667
+        },
+        {
+          "path": "/_astro/react.wTRAdqw8.js",
+          "type": "Script",
+          "rawBytes": 7909,
+          "gzipBytes": 3024
+        }
+      ],
+      "routeRawBytes": 231990,
+      "routeGzipBytes": 73402,
+      "note": "Initial successful Document/Stylesheet/Script responses after data readiness; gzip level9 per body; images and later resources excluded"
+    },
+    {
+      "id": "react-webpack",
+      "route": "/",
+      "steps": [
+        "search filters users",
+        "empty search state",
+        "new form validation",
+        "create user",
+        "edit form populated",
+        "update user",
+        "cancel form visible",
+        "cancel preserves rows",
+        "delete user"
+      ],
+      "exceptions": [],
+      "resources": [
+        {
+          "path": "/",
+          "type": "Document",
+          "rawBytes": 813,
+          "gzipBytes": 438
+        },
+        {
+          "path": "/assets/16b107fe0e8cc2411d7c.css",
+          "type": "Stylesheet",
+          "rawBytes": 1031,
+          "gzipBytes": 474
+        },
+        {
+          "path": "/assets/26da7c46cd8ecfb47746.js",
+          "type": "Script",
+          "rawBytes": 222213,
+          "gzipBytes": 69517
+        }
+      ],
+      "routeRawBytes": 224057,
+      "routeGzipBytes": 70429,
+      "note": "Initial successful Document/Stylesheet/Script responses after data readiness; gzip level9 per body; images and later resources excluded"
+    }
+  ]
+}

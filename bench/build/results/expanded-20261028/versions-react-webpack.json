@@ -1,0 +1,15 @@
+{
+  "versions": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "webpack": "5.112.2",
+    "webpack-cli": "7.2.3",
+    "babel-loader": "10.1.1",
+    "@babel/core": "8.0.9",
+    "@babel/preset-react": "8.0.1",
+    "css-loader": "7.1.5",
+    "mini-css-extract-plugin": "2.10.2",
+    "html-webpack-plugin": "5.6.8"
+  },
+  "lockSha256": "55b76cb36a1d113c506ddf96d4a8931fe0becb1c1043defc9c0bd9c77d709ae2"
+}

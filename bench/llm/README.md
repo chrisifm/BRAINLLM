@@ -34,3 +34,12 @@ level 3 (the scaffold ships `<main><h1>` and the model fills it in).
 `node bench/llm/gate.mjs results/<run>.json [--accept]` exits 1 if the run is not stable or if the first-try rate
 drops by more than 1 view (noise with n=20) against `baseline.json` (per model and mode). `--accept` raises the
 baseline only if the run passes and does not get worse. Current baseline (`baseline.json`): Haiku spec 19/20 (spec `f60e94771d1d`), Haiku mcp 16/20 (spec `3fca38d5a226`), Sonnet spec 20/20 (spec `b351664c21d8`).
+
+## 2026-10-28 toolchain completion check
+
+A deterministic replay of the 20 first-attempt sources in `claude-haiku-5-5-gate277a` against the updated compiler
+returned **19/20**, matching that historical run, with zero infrastructure failures. The remaining users-CRUD source
+references a missing API module and omits the empty state (B0119/B1101). The historical gate also passes its accepted
+one-case tolerance. This reuses recorded source; it is **not a fresh model evaluation of the expanded specification**.
+No model was called, no baseline was changed and no new first-pass-generation claim follows from this replay.
+A fresh frozen model/spec/compiler run remains required before treating the newly documented features as LLM-benchmarked.

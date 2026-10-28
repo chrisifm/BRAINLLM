@@ -11,6 +11,7 @@ name = "brain"
 path = "src/main.rs"
 
 [dependencies]
+brain-lex = { path = "../brain-lex" }
 brain-serve = { path = "../brain-serve" }
 brain-parse = { path = "../brain-parse" }
 brain-check = { path = "../brain-check" }

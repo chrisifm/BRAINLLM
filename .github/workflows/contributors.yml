@@ -1,0 +1,73 @@
+name: contributors
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '23 8 * * 1'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: contributor-attribution
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Prepare the attribution review branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp scripts/sync-contributors.mjs "$RUNNER_TEMP/sync-contributors.mjs"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          branch=$(gh pr list --state open --limit 100 --json headRefName --jq '[.[] | .headRefName | select(startswith("automation/contributors-"))][0] // empty')
+          if [[ -n "$branch" ]]; then
+            [[ "$branch" =~ ^automation/contributors-[a-z0-9-]+$ ]] || exit 1
+            git fetch origin "$branch"
+            git checkout -B "$branch" "origin/$branch"
+            git merge origin/main --no-edit
+          else
+            branch="automation/contributors-${GITHUB_RUN_ID}"
+            git checkout -b "$branch"
+          fi
+          echo "CONTRIBUTOR_BRANCH=$branch" >> "$GITHUB_ENV"
+      - name: Refresh public account attribution
+        run: node "$RUNNER_TEMP/sync-contributors.mjs" --root "$GITHUB_WORKSPACE"
+      - name: Propose the update for principal-author review
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add README.md docs/site/contributors.json
+          if git diff --cached --quiet; then
+            echo 'Contributor attribution is current.'
+            exit 0
+          fi
+          git commit -m 'docs: refresh public contributor attribution'
+          gh auth setup-git
+          git push origin "HEAD:$CONTRIBUTOR_BRANCH"
+          existing=$(gh pr list --head "$CONTRIBUTOR_BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [[ -z "$existing" ]]; then
+            cat > "$RUNNER_TEMP/contributors-pr.md" <<'BODY'
+          Refresh the README contributor section and landing snapshot from GitHub's public contributor API. Includes credited public user and bot accounts; no anonymous emails or private profile data.
+
+          Principal-author review and the required verification checks must pass before merge. This workflow never merges its PR. For this GITHUB_TOKEN-created PR, use Approve workflows to run in the PR merge box to start verification. If no run appears, a maintainer must dispatch verification for this branch explicitly.
+          BODY
+            gh pr create --base main --head "$CONTRIBUTOR_BRANCH" --title 'docs: refresh public contributor attribution' --body-file "$RUNNER_TEMP/contributors-pr.md"
+          fi

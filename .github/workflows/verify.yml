@@ -25,4 +25,10 @@ jobs:
         with:
           node-version: 22
       - run: rustup toolchain install stable --profile minimal
+      - name: Ensure verification tools
+        run: |
+          if ! command -v rg >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install --yes ripgrep
+          fi
       - run: bash scripts/verify.sh

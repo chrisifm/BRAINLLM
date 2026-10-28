@@ -1,15 +1,16 @@
-# @christianirack/brainllm
+# BRAINLLM
 
-BRAINLLM is a web framework designed for LLMs to write: one `brain` binary with the compiler, dev server, production
-build and MCP server.
+## The web compiler for LLMs.
 
-```sh
-npm create @christianirack/brainllm my-app
-cd my-app && npx brain run
-```
+Your LLM owns the frontend. Give it a language built for the job.
 
-- `brain spec` prints the language spec the model writes against; `brain mcp` exposes every command as an MCP tool.
-- The binary for your platform comes from an optional dependency (`@christianirack/brainllm-<os>-<arch>`); no
-  postinstall script and no download.
-- A global `brain` runs the version the project pins in its `package.json`. `BRAIN_BINARY=<path>` runs another binary.
-- `brain.schema.json` is the JSON Schema of `brain.json`.
+BRAINLLM brings a component language, diagnostics, a Rust compiler and MCP tools into one agent workflow. You define
+the intent, inspect the result and decide what ships. The model reads the spec, builds the frontend and checks its
+work against a concrete contract.
+
+This package is the native compiler launcher. The package build copies the full root marketing README here and
+converts its image/document links to absolute public URLs. See the
+[public repository](https://github.com/chrisifm/BRAINLLM) for current installation availability and measured benchmarks.
+
+The platform binary is an optional dependency, with no install-time download script. `BRAIN_BINARY` can select a
+local build. MIT licensed; principal author Christian Irack Flores Maldonado.

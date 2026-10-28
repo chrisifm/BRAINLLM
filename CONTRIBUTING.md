@@ -33,6 +33,9 @@ the map; read it fully before changing anything. Three documents, three audience
 | `bench/llm/` | LLM benchmark (`run.mjs`, `analyze.mjs`, `gate.mjs`, `baseline.json`) | the release gate |
 
 ## Commands
+Verification requires Rust stable, Node 22+, Git and ripgrep (`rg`). Browser integration tests also need Chrome.
+CI ensures ripgrep is available; fixture discovery uses Node without a separate file-search tool.
+
 ```bash
 cargo test --workspace                 # all Rust crates
 npm test --prefix runtime              # runtime (Node 22+)

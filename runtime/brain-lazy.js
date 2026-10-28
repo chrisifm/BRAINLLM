@@ -25,10 +25,11 @@ function reloadOnce() {
 
 export function lazy(el, imp, mode, props = {}) {
   const owner = I.owner()
-  let dead = false, stop = () => {}, clicked = null, built
+  let dead = false, stop = () => {}, retry = () => {}, clicked = null, built
   const go = () => {
     if (dead) return
     stop()
+    el.setAttribute('aria-busy', 'true')
     return (el.$l ||= Promise.resolve()
       .then(imp)
       .then(m => {
@@ -43,6 +44,9 @@ export function lazy(el, imp, mode, props = {}) {
       })
       .catch(e => {
         el.$l = null
+        if (dead) return
+        el.setAttribute('aria-busy', 'false')
+        retry()
         if (!reloadOnce()) G.reportError ? reportError(e) : queueMicrotask(() => { throw e })
       }))
   }
@@ -57,10 +61,15 @@ export function lazy(el, imp, mode, props = {}) {
     }
   } else if (mode === 'interaction') {
     const f = e => {
+      if (e.type === 'keydown') {
+        if (e.key !== 'Enter' && e.key !== ' ') return
+        e.preventDefault()
+      }
       if (e.type === 'click') (clicked = e), e.preventDefault(), e.stopPropagation()
       go()
     }
-    for (const t of ACT) el.addEventListener(t, f, t === 'click')
+    retry = () => { for (const t of ACT) el.addEventListener(t, f, t === 'click') }
+    retry()
     stop = () => {
       for (const t of ACT) el.removeEventListener(t, f, t === 'click')
     }
