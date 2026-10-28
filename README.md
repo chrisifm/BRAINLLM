@@ -233,6 +233,9 @@ cd my-app
 brain run
 ```
 
+Until the npm release is public, use the installed `brain` commands directly. This source workflow does not require
+`npm install` in the generated app; its package manifest prepares the future npm distribution.
+
 Cargo installs `brain` into its bin directory; make sure that directory is on your `PATH`. Stop the dev server with
 Ctrl+C. From the app directory, run `brain doctor` to validate it and `brain build` to create production output.
 For an MCP client, configure the installed `brain` executable with the argument `mcp` and the app as its working
