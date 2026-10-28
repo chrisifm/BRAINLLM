@@ -1,14 +1,13 @@
-# First public npm release
+# Publishing npm releases
 
-The public GitHub repository and a local pack are not an npm release. This change prepares public packages; it does
-not authenticate, upload tarballs or claim the initializers are already available.
+A release requires public registry publication and anonymous installation verification. Building a local pack alone
+does not publish packages. Check the registry for current versions; the checklist below applies to each release.
 
 ## Verified preparation (2026-10-28)
 
 [Build-and-pack run 40730233593](https://github.com/chrisifm/BRAINLLM/actions/runs/40730233593) passed for all seven
 native platforms and produced the npm tarballs from source `d5c3171`. Publication was skipped as intended for manual
-dispatch. The `npm-publish` environment now requires approval by the principal author. The public npm registry still
-has no initializers for this project; registry authentication and anonymous installation verification remain outstanding.
+dispatch. The `npm-publish` environment now requires approval by the principal author. Registry authentication and anonymous installation verification are required for every public release.
 Later source changes require a new build-and-pack run before release.
 
 ## Release requirements

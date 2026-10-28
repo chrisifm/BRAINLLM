@@ -727,6 +727,7 @@ const BADGE: &str = r#"<span class="badge"><slot /></span>
 
 /// For any agent that opens the project (Claude Code, Codex, Cursor…): what to read and which loop to follow.
 const AGENTS_MD: &str = r#"# AGENTS.md — app BRAINLLM
+For an npm-created app, prefix shell commands below with `npx` (for example `npx brain spec`). A source installation provides a global `brain` command.
 1. Before writing code read `brain spec` (or `brain spec --topic <topic>`); what is not there does not exist.
 2. Read `brain map --json` to see existing routes, components, props and modules; import only what it lists. To use a component read `brain card <name>` (its contract), never its body; `brain map --reads cart.total` lists who reads a store field. A component over 150 lines gets B1010: run the `brain split` it suggests.
 3. Create files with `brain add view|comp|ui <name> --props "…"` and complete them; do not write them from scratch.

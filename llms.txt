@@ -3,13 +3,13 @@
 > Web framework built for LLMs. One `.brain` file = one component (HTML + BrainScript + CSS). `brain` (Rust) compiles it to direct DOM, no virtual DOM. Before writing app code, read the installed compiler's `brain spec`; it is the implemented contract. Raw SPEC.md also contains explicitly planned sections.
 
 ## Start an app
-1. Read [README.md](README.md#give-your-agent-its-first-task) for setup and prerequisites: Git, Rust stable, Node 22+, and Chrome for browser checks on macOS/Linux.
-2. Install from a separate checkout: `git clone https://github.com/chrisifm/BRAINLLM.git`, enter that checkout, then `cargo install --locked --path crates/brain-cli`. Ensure Cargo's bin directory is on PATH.
-3. Run `brain new my-app` in the intended parent directory; enter the new app and read its AGENTS.md, `brain spec`, and `brain map --json`.
-4. Implement a small complete workflow using generators and the supported syntax. Run `brain fix`, `brain check --json`, `brain doctor`, and `brain build`. Run `brain run` and inspect the actual app.
+1. Read [README.md](README.md#give-your-agent-its-first-task). Use Node 22+; Chrome browser checks require macOS/Linux.
+2. Create a separate app: `npm create @christianirack/brainll@latest my-app`. No npm account is required. Enter the app directory; its dependencies are installed by the initializer.
+3. Read its AGENTS.md, `npx brain spec`, and `npx brain map --json`. The installed compiler's spec defines supported behavior.
+4. Implement a small complete workflow using generators. Run `npx brain fix`, `npx brain check --json`, `npx brain doctor`, and `npm run build`. Run `npm run dev` and inspect the app.
 5. Report the preview URL, behavior checks and remaining failures. Close only temporary resources you own; retain a preview requested for review.
 
-npm distribution is not published yet. Source installation uses the global `brain` directly; no `npm install` is required in the generated app for this workflow. The generated package manifest describes the future npm installation path.
+Source fallback: clone this repository separately, then `cargo install --locked --path crates/brain-cli`. Git and Rust stable are required for that path. Use the global `brain` to create and operate the app; no npm install is required for the source workflow.
 
 ## Docs
 - [SPEC.md](SPEC.md): the whole contract, with a reference component. Also printed by `brain spec`.
