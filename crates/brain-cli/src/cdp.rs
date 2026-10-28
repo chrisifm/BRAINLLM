@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 unsafe extern "C" {
+    #[cfg(not(target_os = "linux"))]
     fn pipe(fds: *mut i32) -> i32;
     fn dup2(src: i32, dst: i32) -> i32;
     fn close(fd: i32) -> i32;
@@ -68,8 +69,21 @@ pub fn find_chrome() -> Option<PathBuf> {
 
 fn os_pipe() -> io::Result<[i32; 2]> {
     let mut fds = [0i32; 2];
-    if unsafe { pipe(fds.as_mut_ptr()) } != 0 {
+    // Atomic on Linux: concurrent subprocesses must never inherit another session's CDP endpoints.
+    #[cfg(target_os = "linux")]
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
         return Err(io::Error::last_os_error());
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        if unsafe { pipe(fds.as_mut_ptr()) } != 0 { return Err(io::Error::last_os_error()); }
+        for fd in fds {
+            if unsafe { libc::fcntl(fd,libc::F_SETFD,libc::FD_CLOEXEC) } < 0 {
+                let error=io::Error::last_os_error();
+                unsafe { close(fds[0]);close(fds[1]); }
+                return Err(error);
+            }
+        }
     }
     Ok(fds)
 }
@@ -301,6 +315,23 @@ fn nanos() -> u128 {
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
+
+    #[test]
+    fn cdp_endpoints_do_not_leak_into_unrelated_exec_children() {
+        let fds=os_pipe().unwrap();
+        // SAFETY: owned pipe endpoints are wrapped exactly once and closed on every test exit.
+        let read=unsafe {File::from_raw_fd(fds[0])};
+        let write=unsafe {File::from_raw_fd(fds[1])};
+        for fd in fds {
+            let flags=unsafe{libc::fcntl(fd,libc::F_GETFD)};
+            assert!(flags>=0,"owned pipe descriptor must be valid");
+            assert_ne!(flags&libc::FD_CLOEXEC,0);
+        }
+        let directory=if cfg!(target_os="linux"){"/proc/self/fd"}else{"/dev/fd"};
+        let script=format!("test ! -e {directory}/{} && test ! -e {directory}/{}",fds[0],fds[1]);
+        assert!(Command::new("/bin/sh").args(["-c",&script]).status().unwrap().success());
+        drop((read,write));
+    }
 
     #[test]
     fn dropping_a_blocked_browser_cancels_its_watchdog_and_reaps_the_child() {
