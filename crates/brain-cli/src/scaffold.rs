@@ -733,7 +733,7 @@ const AGENTS_MD: &str = r#"# AGENTS.md — app BRAINLLM
 4. Loop: edit → `brain check --json` → apply `brain fix`, then each remaining error's `fix` → repeat until `[]`.
 5. A diag with `"stuck": true` failed the same way 3 checks in a row: stop patching, read its `explain` (why + correct example) or `brain explain <code>`, and rewrite that part.
 6. Done means `brain doctor` exits 0 (check + tests + accessibility + leaks). Not before; never claim a task done with doctor failing.
-7. `brain run` serves the app and prints one `impact {…}` line per save: new/fixed diagnostics and Δ bytes per view. Per-environment values (API URLs, tokens) go in `.brain_env` through MCP `brain_env_set {key, section, value}`; `brain_env_keys` lists the keys, never the values. Every command accepts `--json` and exists in MCP (`brain mcp`); a command that fails internally exits 3 and prints the next command to run.
+7. `brain run` serves the app and prints one `impact {…}` line per save: new/fixed diagnostics and Δ bytes per view. Per-environment values (API URLs, tokens) go in `.brain_env` through MCP `brain_env_set {key, section, value}`; `brain_env_keys` lists the keys, never the values. Use the CLI or discover the available tools through `brain mcp`. Prefer structured output where supported. Inspect the exit status and result; unified exit codes are still planned.
 "#;
 
 const PACKAGE_JSON: &str = r#"{
