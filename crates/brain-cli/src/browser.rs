@@ -41,13 +41,30 @@ impl Browser {
             return Err(format!("`{route}` is not a local route; fix: pass something like `/users/42`"));
         }
         let url = format!("{}{route}", self.origin);
-        self.chrome.call(Some(&self.session), "Page.navigate", Json::obj([("url", Json::str(&url))]))?;
-        for _ in 0..300 {
-            if self.chrome.eval(&self.session, "document.readyState === 'complete'")? == Json::Bool(true) {
-                break;
-            }
+        // Page.navigate can acknowledge before the old document is replaced. Its readyState may still be
+        // complete, so waiting on readyState alone occasionally types into the page we are leaving.
+        self.chrome.eval(&self.session, "globalThis.__brainMcpNavigationPending = true")?;
+        let nav = self.chrome.call(Some(&self.session), "Page.navigate", Json::obj([("url", Json::str(&url))]))?;
+        if let Some(error) = nav.get("errorText").and_then(Json::as_str) { return Err(format!("navigation failed: {error}")); }
+        let document = if nav.get("loaderId").is_some() {
+            // Redirects may legitimately change the final URL; the old-context marker still proves replacement.
+            "!globalThis.__brainMcpNavigationPending".to_string()
+        } else {
+            format!("location.href === new URL({}, location.href).href", Json::str(&url).stringify())
+        };
+        let ready = format!("{document} && document.readyState === 'complete'");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let previous = self.chrome.deadline;
+        let reached = loop {
+            let Some(left) = deadline.checked_duration_since(std::time::Instant::now()) else { break false };
+            self.chrome.deadline = Some(left);
+            // Context destruction during a real navigation is expected; retry only inside the total budget.
+            if self.chrome.eval(&self.session, &ready).ok() == Some(Json::Bool(true)) { break true; }
             std::thread::sleep(Duration::from_millis(10));
-        }
+        };
+        self.chrome.deadline = previous;
+        if !reached { return Err("navigation did not reach the requested document within 10 seconds".into()); }
+        self.chrome.eval(&self.session, "delete globalThis.__brainMcpNavigationPending")?;
         // two frames: the view modules have run and mounted
         self.chrome.eval(&self.session, "new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))")?;
         let info = self.chrome.eval(

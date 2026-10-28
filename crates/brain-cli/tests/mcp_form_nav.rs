@@ -60,8 +60,12 @@ fn submit_that_navigates_does_not_ask_to_leave() {
     let r = tool(&mut call, "brain_eval", r#"{"expr":"1"}"#);
     assert!(!r.contains("dialogs"), "{r}");
     // control: an unsaved form still asks before a client navigation
-    tool(&mut call, "brain_navigate", r#"{"route":"/new"}"#);
-    tool(&mut call, "brain_type", r#"{"selector":"input[name=name]","text":"Desk"}"#);
+    let back = tool(&mut call, "brain_navigate", r#"{"route":"/new"}"#);
+    assert!(!back.contains("isError\":true") && back.contains("/new"), "{back}");
+    let typed = tool(&mut call, "brain_type", r#"{"selector":"input[name=name]","text":"Desk"}"#);
+    assert!(!typed.contains("isError\":true") && typed.contains("Desk"), "{typed}");
+    let dirty = tool(&mut call, "brain_eval", r#"{"expr":"[...(globalThis.__brainDirty || [])].some(f => f.dirty && !f.busy)"}"#);
+    assert!(dirty.contains("\"value\":true"), "the control form must actually be dirty: {dirty}");
     let r = tool(&mut call, "brain_eval", r#"{"expr":"(globalThis.__brainNavigate || ((u) => location.assign(u)))('/about'), 1"}"#);
     let later = tool(&mut call, "brain_eval", r#"{"expr":"location.pathname"}"#);
     assert!(r.contains("dialogs") || later.contains("dialogs") || later.contains("/new"), "{r} {later}");

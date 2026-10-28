@@ -675,6 +675,11 @@ The MCP server is the AI's main interface: everything the CLI does and more, wit
   CDP automation only exist in dev and on `127.0.0.1`; no tool reads `.env` or returns secrets.
 
 ## 25. Agent autonomy contract (fixed 2026-10-13, Chris: "a solid LLM experience that does not depend on humans")
+Browser readiness correction (2026-10-28): `Page.navigate` acknowledgment is not proof that the new document is
+ready. The MCP browser marks the old context and waits for its replacement plus complete readiness under one
+10 s polling budget; same-document navigation checks the destination URL. Redirects may legitimately change the
+final URL. Browser regressions assert successful navigation, typing and dirty form state before testing prompts.
+
 Reliability update (2026-10-28): private CLI Chrome instances run in their own process group. Dropping an
 instance cancels and joins its watchdog before reaping the browser, kills only that owned group (including workers),
 and removes its temporary profile; teardown never waits for a stalled CDP `Browser.close`. CDP input is bounded to
