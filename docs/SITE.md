@@ -13,15 +13,14 @@ Run `scripts/check-english.sh` and `node scripts/privacy-audit.mjs` before publi
 
 ## Publish
 
-Only publish after the maintainer authorizes the website change. The `gh-pages` branch contains the contents of
-`docs/site/` at its root, plus `.nojekyll`; it must never contain local environment files, build caches or private
-app data. GitHub Pages is configured to serve `/` from that branch. Deployments do not publish an npm package or
-merge compiler changes into `main`.
+The website is published directly from `docs/site/` on `main` through `.github/workflows/pages.yml`.
+GitHub Pages uses the GitHub Actions publishing source; no separate deployment branch is needed.
+Changes pass principal-author review before integration. The workflow has a ten-minute deadline and serializes
+website deployments. It uploads only the static site directory and never publishes npm packages.
 
-Use an isolated checkout of `gh-pages`, copy only the reviewed site files, commit and push without force. For the
-first deployment, create that branch in an isolated repository. Keep the framework checkout intact. Record the
-source commit in the deployment commit message. Confirm the Pages build succeeded and fetch the public URL before
-reporting the landing as live. To revert, make a new deployment commit restoring the last verified site.
+After merging an approved website change, inspect the Pages deployment and fetch the public URL before reporting
+it live. For a manual redeployment, dispatch the `pages` workflow on `main`. Revert through a reviewed source
+change on `main` and redeploy. Never include local environment files, build caches or private app data.
 
 Update the repository homepage to the public URL. The principal-author review rule still governs framework
 contributions. The website contributor section uses public GitHub profiles and a checked-in fallback snapshot;

@@ -35,3 +35,10 @@ test('invalid, empty and partial API failures preserve existing README and snaps
   assert.throws(() => normalize([{ ...account(), avatar_url: 'https://untrusted.invalid/icon.png' }]))
   assert.throws(() => render('<!-- contributors:start -->', normalize([account()])))
 })
+
+test('attribution stays stable when only commit counts change', () => {
+  const initial = normalize([account('beta'), account('alpha')])
+  const updated = normalize([{ ...account('alpha'), contributions: 10 }, { ...account('beta'), contributions: 20 }])
+  assert.deepEqual(updated, initial)
+  assert.equal(render('# Project\n', updated), render('# Project\n', initial))
+})
