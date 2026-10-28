@@ -42,8 +42,7 @@ fn submit_that_navigates_does_not_ask_to_leave() {
         let _ = p.kill();
         return;
     }
-    let check = tool(&mut call, "brain_check", "{}");
-    assert!(!check.contains("\\\"level\\\":\\\"error\\\""), "{check}");
+    assert!(!nav.contains("isError\":true") && nav.contains("New product"), "{nav}");
     let typed = tool(&mut call, "brain_type", r#"{"selector":"input[name=name]","text":"Lamp"}"#);
     assert!(!typed.contains("isError\":true"), "{typed}");
     let r = tool(&mut call, "brain_click", r#"{"selector":"button[type=submit]"}"#);

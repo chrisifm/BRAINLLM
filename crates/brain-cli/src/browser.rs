@@ -52,7 +52,7 @@ impl Browser {
         } else {
             format!("location.href === new URL({}, location.href).href", Json::str(&url).stringify())
         };
-        let ready = format!("{document} && document.readyState === 'complete'");
+        let ready = format!("{document} && document.readyState === 'complete' && (!document.getElementById('brain-route') || document.getElementById('brain-view')?.dataset.brainReady === 'true')");
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         let previous = self.chrome.deadline;
         let reached = loop {
@@ -63,9 +63,9 @@ impl Browser {
             std::thread::sleep(Duration::from_millis(10));
         };
         self.chrome.deadline = previous;
-        if !reached { return Err("navigation did not reach the requested document within 10 seconds".into()); }
+        if !reached { return Err("navigation did not reach a ready document and mounted view within 10 seconds".into()); }
         self.chrome.eval(&self.session, "delete globalThis.__brainMcpNavigationPending")?;
-        // two frames: the view modules have run and mounted
+        // The view is mounted; let its layout and paint settle for screenshots.
         self.chrome.eval(&self.session, "new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))")?;
         let info = self.chrome.eval(
             &self.session,
