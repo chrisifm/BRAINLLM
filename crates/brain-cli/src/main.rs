@@ -3,6 +3,7 @@
 #[cfg(unix)]
 mod browser;
 mod card;
+mod brand;
 mod impact;
 #[cfg(unix)]
 mod cdp;
@@ -608,6 +609,7 @@ pub(crate) fn diags_json(diags: &[compiler::Diag]) -> String {
 }
 
 fn cmd_check(args: &[String]) -> ExitCode {
+    let identity = brand::Session::start(args, "Checking your frontend against its contract.");
     let json = args.iter().any(|a| a == "--json");
     let (n, diags) = match run_check(positional(args, &[]).first().map(PathBuf::from)) {
         Ok(r) => r,
@@ -633,6 +635,7 @@ fn cmd_check(args: &[String]) -> ExitCode {
         let w = diags.iter().filter(|d| d.is_warning()).count();
         eprintln!("{n} file(s), {} error(s), {w} warning(s)", diags.len() - w);
     }
+    identity.finish(if diags.iter().all(|d| d.is_warning()) { "Check complete. Ready for your next idea." } else { "Issues found. Review the diagnostics and suggested fixes." });
     // Warnings (today B0201) are reported but do not fail.
     if diags.iter().all(|d| d.is_warning()) { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
@@ -1054,6 +1057,7 @@ pub(crate) fn build_json(r: &BuildReport) -> brain_mcp::Json {
 static BUILD_EXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 fn cmd_build(args: &[String]) -> Result<(), String> {
+    let identity = brand::Session::start(args, "Turning your frontend into browser-ready output.");
     if let Some(e) = flag(args, "--ext").or_else(|| std::env::var("BRAIN_EXT").ok().filter(|v| !v.is_empty())) {
         if e != "web" && e != "brain" {
             return Err(format!("invalid --ext `{e}`; fix: `--ext web` (.html/.js/.css, the default) or `--ext brain` (.brain/.jsbrain/.cssbrain)"));
@@ -1068,7 +1072,11 @@ fn cmd_build(args: &[String]) -> Result<(), String> {
     }
     let res = run_build_with(&root, flag(args, "--site"), &env::name(args, "production"), Some(&pr));
     pr.end();
-    let rep = res?;
+    let rep = match res {
+        Ok(rep) => rep,
+        Err(error) => { identity.finish("Build stopped. Resolve the diagnostic and try again."); return Err(error); }
+    };
+    identity.finish("Build complete. Your intent, compiled.");
     if want_json(args) {
         println!("{}", build_json(&rep).stringify());
         return Ok(());
@@ -1564,6 +1572,7 @@ fn cmd_dev(args: &[String]) -> Result<(), String> {
     };
     let opts = brain_serve::Options { root: root.clone(), host: host.clone(), port, head_prepend: head_prepend(), runtime: runtime_files(), env: Some(env::loader(&root, &env::name(args, "development"))), base, diagnose: Some(dev_diagnose(&root)), problems: Some(dev_problems(&root)), upstream: None, mock };
     let mode = term::detect(args, term::stderr_tty(), &term::env_var);
+    let identity = brand::Session::start(args, "Wiring your frontend for the next idea.");
     let boot = std::time::Instant::now();
     let view = (mode == term::Mode::Rich).then(|| Arc::new(term::DevView::new(term::utf8(&term::env_var))));
     // --profile (#86.4): one JSON line per edit on stdout, `{"profile":"edit","path","ms","js","css"}` (ms = file
@@ -1614,6 +1623,7 @@ fn cmd_dev(args: &[String]) -> Result<(), String> {
     );
     let _ = std::fs::create_dir_all(root.join(".brain"));
     let _ = std::fs::write(dev_json_path(&root), &info);
+    identity.finish("Dev server ready. Save a change and keep building.");
     if want_json(args) {
         println!("{info}");
     } else if let Some(v) = &view {

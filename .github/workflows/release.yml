@@ -16,15 +16,17 @@ jobs:
   build:
     strategy:
       fail-fast: false
+      max-parallel: 3
       matrix:
         include:
-          - { key: darwin-arm64, os: macos-14, target: aarch64-apple-darwin }
-          - { key: darwin-x64, os: macos-13, target: x86_64-apple-darwin }
+          - { key: darwin-arm64, os: macos-15, target: aarch64-apple-darwin }
+          - { key: darwin-x64, os: macos-15-intel, target: x86_64-apple-darwin }
           - { key: linux-x64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
           - { key: linux-arm64, os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu }
           - { key: linux-x64-musl, os: ubuntu-22.04, target: x86_64-unknown-linux-musl, musl: true }
           - { key: win32-x64, os: windows-2022, target: x86_64-pc-windows-msvc, exe: .exe }
           - { key: win32-arm64, os: windows-11-arm, target: aarch64-pc-windows-msvc, exe: .exe }
+    timeout-minutes: 30
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -80,5 +82,6 @@ jobs:
           npm publish pkgs/christianirack-brainllm-runtime-*.tgz --provenance --access public
           npm publish pkgs/christianirack-brainllm-[0-9]*.tgz --provenance --access public
           npm publish pkgs/christianirack-create-brainllm-*.tgz --provenance --access public
+          npm publish pkgs/christianirack-create-brainll-[0-9]*.tgz --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

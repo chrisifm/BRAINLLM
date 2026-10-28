@@ -1,31 +1,225 @@
+<p align="center"><img src="docs/site/assets/logo.png" width="88" alt="BRAINLLM brain mark"></p>
+
 # BRAINLLM
 
-**The web framework whose first user is a language model.**
+### The web compiler for LLMs.
 
-A model reads an 18 KB spec, writes one `.brain` file per component, and gets every mistake back from the compiler
-with the exact edit to apply. What ships is direct-DOM JavaScript on a 3.1 KB runtime: no virtual DOM, and no Vite,
-webpack, esbuild or Babel anywhere in the toolchain.
+**Your LLM owns the frontend. Give it a language built for the job.**
 
-Build from source today with `cargo build --release -p brain-cli`, then run `./target/release/brain new my-app`.
-The npm commands below describe the prepared distribution; registry publication is a separate release step.
+![BRAINLLM — The web compiler for LLMs](docs/site/assets/cover.png)
 
-## Why it exists
+BRAINLLM gives coding agents a compact language, a single specification and a compiler that tells them how to fix
+mistakes. The model builds the frontend. You set the direction, inspect the result and decide what ships.
 
-Models already know HTML, JavaScript and CSS. What trips them up is everything around those: ten ways to do the same
-thing, APIs that changed after their training cutoff, and errors that say what failed but not what to write instead.
+`.brain` components compile to direct-DOM JavaScript and scoped CSS. The Rust toolchain handles parsing, checking,
+code generation, bundling and minification. The agent can operate it through the CLI or MCP.
 
-BRAINLLM takes those choices away:
+**Build with it. Let your LLM make it better.** Every run is a chance to spot a compiler bug, an expensive step or
+a confusing diagnostic. The agent can turn that finding into a tested proposal and, when configured, push it
+automatically to a review branch. Maintainers decide what merges.
 
-- **One spec, and nothing outside it.** [`SPEC.md`](SPEC.md) (also `brain spec`) is normative: if it is not in the
-  spec, it does not exist. The model reads it instead of guessing.
-- **One file per component.** Markup, script and style live together in a `.brain` file. The script is BrainScript,
-  a closed subset of JavaScript with no classes, no `this` and no in-place mutation of state.
-- **One place for every file.** Each kind of file has one folder, one naming rule and one generator
-  (`brain add view users`), so there is nothing to invent about project layout.
-- **Errors that carry the fix.** Every diagnostic names the change to make, and the JSON form includes the edit
-  itself, ready to apply.
+**[Visit the site](https://chrisifm.github.io/BRAINLLM/)** · **[Build your first app](#give-your-agent-its-first-task)** · **[Read the spec](SPEC.md)** · **[See the benchmarks](#show-me-the-numbers)** · **[Contribute](#build-the-tool-your-agent-needs)**
 
-## A component
+## A frontend language with the model in mind
+
+An agent writing your app needs a contract it can follow and feedback it can act on. BRAINLLM makes that loop
+explicit: read the spec, generate a component, check it, apply the fix, test the result.
+
+![An agent reads the BRAINLLM contract, writes a component and uses compiler feedback to validate the app](docs/site/assets/agent-loop.png)
+
+- **Less to guess.** `brain spec` defines the supported language. One component format, a prescribed project
+  structure and generators keep the model working inside a known contract.
+- **Feedback it can use.** Diagnostics include the file, location, rule and proposed fix. Mechanical fixes carry
+  exact replacement edits; `brain fix` applies them. Decisions that need judgment remain visible to the agent.
+- **Tools for the whole loop.** `brain map --json`, `brain check --json`, `brain doctor` and `brain build` let the
+  agent inspect, validate and compile its work. `brain mcp` exposes tools over stdio.
+- **Output for the browser.** Signals update the affected DOM nodes. The toolchain includes its own compiler,
+  bundler and minifier, with no Vite, webpack, esbuild or Babel in the build pipeline.
+
+BrainScript builds on HTML, CSS and a constrained subset of JavaScript. It is designed to reduce the choices an
+agent has to reconstruct while preserving code that a developer can read and review.
+
+## What your agent gets to work with
+
+| Capability | What it does for the app-building loop |
+|---|---|
+| A served language contract | `brain spec` gives the model the implemented syntax and conventions |
+| Components and reactive state | `.brain` files combine markup, BrainScript and scoped styles; `sig`, `drv` and `fx` express updates |
+| Forms and data | Form validation, HTTP resources and server contracts give common app behavior a documented path |
+| Routes and layouts | Views, layouts, loaders and guards put navigation and access checks into the project structure |
+| Diagnostics and repairs | JSON diagnostics identify failures; supported mechanical edits can be applied with `brain fix` |
+| Context and automation | The project map, focused reads, CLI and MCP tools let an agent inspect and operate the app |
+| Verification and delivery | Tests, `brain doctor` and the production build make validation part of the workflow |
+| Tested compiler improvements | Isolated proposals, validation gates and optional review-branch pushes let the agent contribute fixes |
+
+Use [SPEC.md](SPEC.md), the served `brain spec` and [EVOLUTION.md](docs/EVOLUTION.md) for exact contracts and limits.
+
+## Where it fits in the frontend stack
+
+These tools occupy different layers. This is a comparison of their roles, not a universal speed ranking. Linked
+project documentation describes each tool; the BRAINLLM column explains the choice this project makes.
+
+| Project | Main role | How BRAINLLM approaches that part of the job |
+|---|---|---|
+| [React](https://react.dev/) | Library for building component-based user interfaces | A dedicated component language, compiler and agent workflow together |
+| [Angular](https://angular.dev/overview) | Web application framework with integrated tooling | A constrained language and normative spec built around LLM authorship |
+| [Vue](https://vuejs.org/guide/introduction.html) | Progressive framework for declarative, reactive interfaces | Prescribed component syntax and structure with compiler-guided repairs |
+| [Astro](https://docs.astro.build/en/concepts/why-astro/) | Web framework focused on content-driven sites and islands | A language and toolchain for agent-authored frontends, with its own rendering contracts |
+| [Vite](https://vite.dev/guide/) | Development server and production build tooling | An integrated Rust pipeline for `.brain` applications |
+| [webpack](https://webpack.js.org/concepts/) | Module bundler with loaders and plugins | Its own bundler and minifier as part of the compiler pipeline |
+| **BRAINLLM** | **Frontend language, compiler, runtime and agent contract** | **The model writes, checks and improves within one documented workflow** |
+
+Other projects also offer AI guidance and tooling. BRAINLLM's emphasis is the authoring contract itself. It does
+not run existing React, Angular or Vue components unchanged, and replacing a build tool alone is not a migration.
+The numerical comparison below covers only the measured React/Vite and Svelte/Vite fixture builds.
+
+## A form shouldn't need an ecosystem.
+
+Your agent came to build a button. Your stack handed it a committee.
+
+If setup decisions are consuming the session, give the model a toolchain with a defined contract.
+
+BRAINLLM brings component syntax, state, forms, routing and compiler feedback into one documented workflow. Its
+Rust toolchain owns the build pipeline, and the browser runtime has no third-party dependencies. Start with the
+web behavior you need; give the agent a smaller set of conventions to learn and check.
+
+**Less tooling. More web.**
+
+## Show me the numbers
+
+**Don't trust the headline. Run the benchmark.**
+
+If you like reading raw timings more than launch posts, this part is for you. Inspect the fixture, reproduce the
+run and keep the result even when it disagrees with ours.
+
+
+The checked-in build benchmark records **7.0× faster warm builds than React 19 + Vite**, and **7.4× faster than
+Svelte 5 + Vite**, for the frozen dashboard fixture.
+
+| Warm production build | Median, 20 runs |
+|---|---:|
+| BRAINLLM | **48.2 ms** |
+| React 19 + Vite | 338.7 ms |
+| Svelte 5 + Vite | 357.8 ms |
+
+These are historical results from the recorded `e9453256ff44` binary, on a shared Apple M5 machine. The benchmark
+uses equivalent dashboard implementations with different default output strategies: BRAINLLM server-renders the
+route; the references load its data in the client. This is a build-time comparison for that fixture, not a claim
+about every app, rendering speed or current tool versions.
+
+Read the [method and output differences](bench/build/README.md), [results](bench/build/results/summary.md),
+[versions and machine](bench/build/results/versions.json), and raw timings for
+[BRAINLLM](bench/build/results/hf-brain-warm.json), [React](bench/build/results/hf-react-warm.json) and
+[Svelte](bench/build/results/hf-svelte-warm.json). Reproduce with `bench/build/run.sh`.
+
+The same recorded dashboard comparison measured **11.59 KiB gzip** for BRAINLLM's initial route payload,
+**16.72 KiB** for Svelte + Vite and **68.17 KiB** for React + Vite: HTML, CSS and JavaScript compressed per file.
+The service worker and offline page are listed separately. The [payload table](bench/build/results/summary.md)
+shows exactly what was counted; these are fixture measurements, not a promise for every site.
+
+**Ask your agent to challenge the result:**
+
+```text
+Reproduce BRAINLLM's build benchmark and tell me what the evidence supports.
+First inspect bench/build/README.md, bench/build/run.sh, the frozen fixture,
+the React/Svelte reference implementations and their pinned dependencies.
+Explain the output differences and required tools before running anything.
+
+Run bench/build/run.sh in an isolated workspace using its documented settings.
+Keep the compared fixture implementations unchanged. Record the compiler hash,
+tool versions, hardware, machine load, warmups and sample count. Preserve the
+raw timings and report cold and warm medians in ms, plus the measured HTML,
+CSS and JavaScript payload in KiB gzip with every excluded asset identified.
+
+Compare the local results with the checked-in results. Report failures,
+limitations and regressions as observed. Do not claim a win unless the actual
+numbers support it. Do not upload results or publish anything automatically.
+Clean up only the temporary resources this run created.
+```
+
+A separate [cache-key microbenchmark](bench/build/results/compiler-cache-lookup.json) measured **43.3× faster key
+lookup** after removing an unnecessary parse: 10,000 lookups of a 1,050-byte input. That number measures this
+internal operation only. It is not a full-build speedup or a webpack comparison.
+
+The [benchmark report](bench/REPORT.md) also tracks agent-generated apps, browser behavior, payload size and
+failure recovery. Historical LLM results describe their frozen model/spec/compiler runs; they do not guarantee
+that a new prompt or compiler revision will pass. This project is open to developers and researchers who want to
+investigate how language design and compiler feedback affect agent behavior. Bring a hypothesis and a reproducer.
+
+The compiler pipeline is written in Rust. Browser automation drives real Chrome through CDP for interaction and
+regression checks. Those checks establish the flows they exercise; they do not imply universal browser or app
+compatibility. The repository's recorded LLM evaluations identify the models, tasks and frozen revisions so you can inspect
+what each result actually establishes.
+
+## Give your agent its first task
+
+**Connect your coding agent. Tell it what to build. Try the app.**
+
+Open a coding agent with access to your project files and terminal. Give it the prompt below and your product
+brief. It can install the compiler, read the language contract and work through the checks. Once the app runs,
+try the actual workflow and tell the agent what should change. You stay in charge of the product and what ships.
+
+BRAINLLM's CLI is the starting point; `brain mcp` also connects through clients that support MCP over stdio.
+Your agent needs an environment with Git, Rust stable and Node 22+, plus Chrome for browser-based checks. It should
+report a missing prerequisite or permission instead of claiming success.
+
+**Paste this into your coding agent:**
+
+```text
+Build my frontend with BRAINLLM.
+
+Product brief: [describe the app, its users and the first useful workflow].
+
+1. Inspect the workspace and available tools. Preserve existing files and secrets.
+   If BRAINLLM is not installed, clone https://github.com/chrisifm/BRAINLLM.git
+   into a new directory and run cargo install --locked --path crates/brain-cli.
+   Verify Rust stable, Node 22+ and Chrome for browser checks. Report missing
+   prerequisites instead of pretending installation succeeded.
+2. Create a separate app with brain new. Read its AGENTS.md and brain spec.
+   Only use implemented features in the served spec; do not invent APIs.
+3. Read brain map --json. Generate the needed views and components with brain add.
+   Implement the first complete user workflow, including loading, empty, error
+   and success states. Add meaningful behavior tests.
+4. Run brain fix, then brain check --json. Resolve remaining diagnostics.
+   Run brain doctor and brain build. Exercise the workflow in the browser.
+5. Report actual test results, remaining gaps and how to run the app. Stop
+   temporary processes and close only browser resources you created.
+   Do not publish or deploy without my instruction.
+
+At each completed workflow, look for a concrete compiler defect or measurable
+improvement. Read docs/EVOLUTION.md and docs/AGENT-IDEAS.md in the framework repo.
+Reproduce it, add a regression test and propose the smallest compatible fix.
+Only use automatic contribution when I have explicitly configured it for an
+owned fork or authorized review branch. Never weaken checks or merge automatically.
+```
+
+<details>
+<summary>Prefer to install it yourself? Here are the commands.</summary>
+
+The supported setup here builds from source. The npm package layout exists in the repository, but registry
+publication is a separate release step.
+
+```sh
+git clone https://github.com/chrisifm/BRAINLLM.git
+cd BRAINLLM
+cargo install --locked --path crates/brain-cli
+brain new my-app
+cd my-app
+brain run
+```
+
+Cargo installs `brain` into its bin directory; make sure that directory is on your `PATH`. Stop the dev server with
+Ctrl+C. From the app directory, run `brain doctor` to validate it and `brain build` to create production output.
+For an MCP client, configure the installed `brain` executable with the argument `mcp` and the app as its working
+directory. Follow that client's configuration instructions; merely copying a prompt does not grant tool access.
+
+</details>
+
+For an existing frontend, start with the [migration workflow](docs/MIGRATION.md). Its read-only planner recognizes
+React, Angular, Vue, Svelte, Next and Nuxt projects. Port one tested route or component at a time, preserve its
+behavior and keep a rollback path. It is an incremental workflow, not an automatic transpiler.
+
+## The code your agent handles
 
 ```html
 <meta props="start:num=0 label:str='Clicks'">
@@ -33,137 +227,116 @@ BRAINLLM takes those choices away:
 <script>
   let n = sig(start)
   let dbl = drv(() => n * 2)
-  fx(() => log(n))
 </script>
 
-<button on:click={n++} class:hot={n > 10}>{label}: {n} × 2 = {dbl}</button>
-
-<style>
-  button { padding: var(--space-2); &.hot { color: var(--bad); } }
-</style>
+<button on:click={n++}>{label}: {n} × 2 = {dbl}</button>
 ```
 
-State is a plain variable (`n++`), derived values update themselves, and the style is scoped to the component.
+The compiler handles signal reads and writes. Derived values update when their inputs change. Styles can live in
+the same file and are scoped to the component. The [served spec](SPEC.md) defines the supported syntax.
 
-## When the model gets it wrong
+## Readable intent. Lean browser output.
 
-```html
-<script>
-  let items = sig([])
-  const add = () => items.push('new')
-</script>
+An internal function named `back_to_home` can become a short identifier in production. The exact letter depends
+on scope and the other names in the module. Keep meaningful names where the agent reasons about the code; let the
+compiler shorten eligible bindings in what the browser receives.
+
+This example comes from the [minifier's scope regression tests](crates/brain-min/src/mangle.rs):
+
+```js
+// Before
+function outer(longName, other) {
+  const total = longName + other.value;
+  return total + window.x;
+}
+
+// After
+function a(a,b){const c=a+b.value;return c+window.x}
 ```
 
-```text
-$ brain check
-comp/todo-list.brain:3:21 error B0113 `items.push()` mutates the sig in place and the view is not notified
-  fix: reassign a copy: `items = [...items, item]`
-```
+Property names and external references retain their meaning. Exported bindings and other protected names follow
+the minifier's preservation rules. The source stays readable; the production artifact gets smaller identifiers.
+That saves output bytes, not automatically the tokens used by an LLM reading source. Reducing agent context cost
+is a separate design goal served by the language contract, focused reads and project map; quantify it with a
+measured agent workflow before claiming a token saving.
 
-`brain check --json` returns the same diagnostic with the replacement text and its exact range, so an agent applies it
-without reading anything else:
+## Errors should give the agent a next move.
 
-```json
-{"code":"B0113","line":3,"col":21,"fix":"reassign a copy: `items = [...items, item]`",
- "edits":[{"line":3,"col":21,"endLine":3,"endCol":38,"text":"items = [...items, 'new']"}]}
-```
+BRAINLLM includes protections at several stages of the app loop:
 
-`brain fix` applies every mechanical edit at once, and `brain explain B0113` says why the rule exists, with a correct
-example.
+- **Before it ships:** compiler checks cover supported language rules, accessibility and server/client boundaries.
+  Private environment values belong on the server; client access is restricted to `PUBLIC_` values.
+- **At the form:** schemas define required fields and supported types; server field errors return to the form.
+  The application still owns its business rules, authorization and server-side validation.
+- **When a component fails:** runtime boundaries capture render and reactive errors, report them and replace the
+  affected component with a fallback. A failing event handler reports the error while keeping the component.
+  Retry is bounded: three failures within ten seconds remove the retry button.
+- **When work runs away:** runtime budgets stop affected components that exceed monitored limits. The production
+  build also probes views with simulated timers for unbounded growth. `brain doctor` runs the project's checks,
+  tests and diagnostics; failed stages remain visible to the agent.
 
-## Quickstart
+These are implemented mechanisms, not a promise to catch every bug or repair every failure. The agent still needs
+to test the user's workflow. See [runtime behavior in the spec](SPEC.md#errors-at-runtime),
+[component boundaries](runtime/brain-guard.js) and [compiler diagnostics](crates/brain-check/).
 
-```sh
-npm create @christianirack/brainllm my-app
-cd my-app
-npm run dev          # brain run: dev server with hot reload
-```
+## Build the tool your agent needs
 
-Every new app comes with an `AGENTS.md` that gives the agent its loop:
+**Build with it. Let your LLM make it better.**
 
-1. Read `brain spec` and `brain map --json` (the routes, components and props that exist).
-2. Create files with `brain add view|comp|ui <name>`, then complete them.
-3. Edit, run `brain check --json`, apply the fixes, repeat until it prints `[]`.
-4. Done means `brain doctor` exits 0: check, tests, accessibility and leaks.
+![An LLM turns an observed problem into an isolated fix, runs validation and submits a contribution for human review](docs/site/assets/improvement-loop.png)
 
-Then `brain build` for production and `brain start` to serve it with a supervisor. Every command accepts `--json`,
-and `brain mcp` exposes the same commands as MCP tools over stdio. With Claude Code:
+A failed compilation can become a regression test. A repeated slow step can become a benchmark. A fix made while
+building your app can become a contribution that helps the next developer and their agent.
 
-```sh
-claude mcp add brain -- npx brain mcp
-```
+Found a compiler gap while building an app? Turn the smallest reproducible case into a regression test and a
+contribution. BRAINLLM includes an [evolution workflow](docs/EVOLUTION.md) for isolated proposals, validated compiler
+binaries and reversible activation. Configured automatic pushes go to review branches; merges require the
+principal author's review. This is an explicit development workflow, not a compiler that silently rewrites itself
+on every build. Read the [agent improvement playbook](docs/AGENT-IDEAS.md) for an opt-in prompt and concrete ideas
+to investigate.
 
-From source (Rust stable):
+Human developers and LLM contributors are welcome. Useful first contributions include reproducible compiler bugs,
+behavior-preserving migration examples, clearer diagnostics and performance improvements with before/after data.
 
-```sh
-cargo build --release -p brain-cli
-./target/release/brain new my-app
-```
+1. Read [CONTRIBUTING.md](CONTRIBUTING.md) and the relevant [internals](docs/INTERNALS.md).
+2. Make a focused change with a regression test and synthetic sample data.
+3. Run `bash scripts/verify.sh`. It builds the CLI and checks Rust, runtime, tooling, diagnostic fixtures, privacy
+   and repository language. Verification also requires ripgrep.
+4. Open a pull request with the problem, resulting behavior and actual validation evidence.
 
-## Measured, not promised
+Changes to what app authors write also require the frozen LLM benchmark workflow described in CONTRIBUTING.
+Never include app secrets, private source or customer data in a contribution.
 
-The numbers below are historical measurements from 2026-10-13, not results for every later source revision.
-Each comes with the command that reproduces it; the rows of
-[`bench/REPORT.md`](bench/REPORT.md) add the raw data file and the versions compared.
+## Know what you are adopting
 
-| What | Result | Source |
-|---|---|---|
-| Views written from the spec alone that pass `brain check` on the first try | 20 views, two runs per model, with today's 18 KB spec: **Sonnet 5.5 40/40 (100 %) · Haiku 5.5 37/40 (92.5 %)**; every view passes once the model applies the fixes | row 8 · `bench/llm/gate-twice.sh` (`bench/llm/run.mjs --mode spec`) |
-| Multi-page apps built from a one-paragraph brief with no human turns | **20/20** finished with `brain doctor` exit 0 (Haiku 5.5 and Sonnet 5.5, 5 apps per setup), 0 human interventions, 0 stuck loops | row 11 · `bench/autonomy/run.mjs` |
-| Runtime size | **3,147 B gzip** · 2,828 B brotli | row 5 · `brain build` on `examples/`, then `gzip -9` / `brotli -q 11` on the core chunk |
-| Bytes the browser receives for the same page (`/dashboard`, HTML + CSS + JS, gzip) | BRAINLLM **11.59 KiB** · Svelte 5 + Vite 16.72 KiB · React 19 + Vite 68.17 KiB | row 9 · `bench/build/run.sh` on the frozen app in `bench/build/app/` |
-| Bytes per page of this project's website (JS + CSS + HTML, gzip) | **7.6 KB** for the home page: 3,107 B of JS, 762 B of CSS, 3,707 B of HTML | the per-page lines of `brain build` in `site/` |
-| Production build of the example app, cache kept | **47.4 ms** median · Svelte 5 + Vite 578.1 ms · React 19 + Vite 437.2 ms, on a shared machine at load average 16–42 | row 7 · `bench/build/run.sh` |
-| Hot reload, file write to change applied in Chrome | **2.2 ms** median for a style edit, 1.8 ms for markup or script, state kept in all 60 edits (plus ~27 ms of macOS file-event latency) | row 10 · `node bench/hmr/run.mjs --reps 20` |
-| DOM writes when one field changes | exactly that field's nodes in **8/8** cases, dev and production, including a 1,000-row keyed list | row 17 · `node bench/precision/run.mjs` |
-| Component encapsulation | **12/12** rules in dev and production: local state, context, store and update precision, CSS isolation, ids, slots, error isolation | row 15 · `node bench/scopes/run.mjs` |
-| Cross-browser smoke: WebKit, Firefox, Chromium × dev and build × 4 apps, including a 1,000-row keyed list | **24/24 cells pass** | row 12 · `node bench/xbrowser/run.mjs` |
-| Second visit (Slow 4G, 4× CPU) | **0 B** of unchanged JS and CSS downloaded again in 5 apps, LCP 3.5–4.1× lower | row 14 · `node bench/cache/run.mjs` |
-| `brain start` under failure | back **87 ms** (median) after `kill -9`; **0 failed of 45,476** requests across three reloads under 50 clients (load average 5–21) | row 16 · `node bench/start/run.mjs` |
-| This project's website ([`site/`](site/)), served by `brain start` | `brain seo audit` **100** on all 14 indexable pages; Lighthouse 13.5.0 **100 / 100 / 100 / 100** on all 14, mobile and desktop | `brain build` · `brain seo audit` · `brain start` + `npx lighthouse@13.5.0` per sitemap URL |
+BRAINLLM is **0.1.0**. Start with a small app or an isolated route and test the behavior you need. Features marked
+as planned in the source specification are not a supported promise; `brain spec` serves the implemented contract.
+Third-party React, Angular and Vue components do not become BRAINLLM components automatically. Benchmark wins in
+build time do not imply that every runtime workload is faster.
 
-## Not there yet
+## Keep building
 
-BRAINLLM is at 0.1.0. Measured gaps, in the same report:
-
-- **Rendering speed.** On the js-framework-benchmark (keyed, CPU geomean, lower is better) BRAINLLM is at **2.46**
-  in an earlier run. The later run in report row 6 measures **1.28**, against vanillajs 1.00, Solid 1.10,
-  Svelte 1.15, Vue 1.23, React 1.49 and Angular 1.97. The fault-isolation regression was fixed; the target
-  of matching Solid remains unmet (`bench/jsfb/build.sh` + the official runner).
-- Parts of the spec are still marked as planned: lazy components and `<Img>`, the `channel`/`service`/`api`
-  generators, screenshots with baselines and budgets, and AST edits with `brain edit`. They are not available yet.
-- The license has not been chosen yet.
-
-## Repository
-
-| Path | What it is |
+| You want to… | Start here |
 |---|---|
-| `crates/brain-lex`, `brain-parse`, `brain-check` | tokenizer, parser with spans, checker with fix-carrying diagnostics |
-| `crates/brain-codegen`, `brain-css` | direct-DOM JavaScript and scoped CSS |
-| `crates/brain-pack`, `brain-min` | bundler, prerender, cache and signatures, minifier |
-| `crates/brain-serve`, `brain-mcp`, `brain-cli` | dev server with hot reload, MCP server, the `brain` binary |
-| `crates/brain-seo` | robots.txt, sitemaps, `llms.txt`, social cards, structured data, the SEO audit |
-| `runtime/` | the browser runtime, hand-written ES modules with no build step |
-| `examples/`, `bench/` | example app, benchmarks and the LLM tests behind every number above |
-| `site/` | the project website, built with BRAINLLM |
-| `npm/` | the npm packages: launcher, per-platform binaries, runtime, `create-brainllm` |
+| Give an agent the project context | [llms.txt](llms.txt) |
+| Write an app | [SPEC.md](SPEC.md) and `brain spec` |
+| Migrate an existing frontend | [Migration guide](docs/MIGRATION.md) |
+| Improve the compiler while using it | [Evolution workflow](docs/EVOLUTION.md) and [agent ideas](docs/AGENT-IDEAS.md) |
+| Understand the implementation | [Internals](docs/INTERNALS.md) and [crates](crates/) |
+| Inspect examples and reproduce measurements | [Examples](examples/) and [benchmarks](bench/) |
+| Contribute a change | [Contributor guide](CONTRIBUTING.md) |
 
-## Read next
-
-- [Migrate an existing React, Angular, Vue or Svelte app](docs/MIGRATION.md): a read-only planner and tested, incremental cutovers.
-- [Improve the compiler while using it](docs/EVOLUTION.md): isolated proposals, validated binaries and automatic review-branch contributions.
-
-Contributors can run `bash scripts/verify.sh` to build the current CLI and run all four required checks.
-The same command runs in the verification workflow. LLM generation benchmarks are separate: evaluate a frozen
-run with `node bench/llm/gate.mjs <run.json>`; historical gate results do not validate a newer spec or binary.
-
-- [`SPEC.md`](SPEC.md): everything an app author, human or model, can write.
-- [`docs/INTERNALS.md`](docs/INTERNALS.md): how the compiler, runtime and build work inside.
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md): invariants and the definition of done for
-  changes to the framework.
-- [`llms.txt`](llms.txt): the entry point for a model reading this repository.
+Released under the [MIT license](LICENSE).
 
 Created and maintained by **Christian Irack Flores Maldonado**, principal author.
-Contact: [christian@irack.mx](mailto:christian@irack.mx).
-Independent development: [ingenieria.dev](https://ingenieria.dev) · [irack.mx](https://irack.mx).
-Human and LLM contributions are welcome through pull requests; the principal author reviews changes before merge.
+[ingenieria.dev](https://ingenieria.dev) · [irack.mx](https://irack.mx) · [christian@irack.mx](mailto:christian@irack.mx)
+
+<!-- contributors:start -->
+## Built by contributors
+
+Every merged contribution helps the next developer and their agent. Thank you to the public GitHub accounts credited below.
+
+[<img src="https://avatars.githubusercontent.com/u/1562002?v=4" width="48" height="48" alt="chrisifm">](https://github.com/chrisifm) [chrisifm](https://github.com/chrisifm)
+
+Attribution is refreshed through a reviewed pull request. [How it works](docs/CONTRIBUTORS.md).
+<!-- contributors:end -->

@@ -611,6 +611,13 @@ Coverage against React/Next, Vue/Nuxt, Angular, Svelte/Kit and Astro; all with a
 | Offline/PWA | on by default, opt-out in `brain.json` (§35) | #121–#124 |
 
 ## 23. CLI and distribution with professional standards (fixed 2026-10-13)
+Identity update (2026-10-28): `brand::Session` adds a circuit-brain ASCII mark and task-specific start/completion
+messages to interactive `check`, `build` and `run`. Its duration is measured with `Instant`; no comparative speed
+claim is inferred. Both output streams must be terminals. JSON, profile, quiet/plain/off progress, CI, MCP and dumb
+terminals suppress branding even when rich progress is requested. `NO_COLOR` presence disables banner color.
+Branding writes only stderr, starts no background work, and leaves machine schemas unchanged. See
+[CLI-EXPERIENCE.md](CLI-EXPERIENCE.md).
+
 Local verification update (2026-10-27): `bash scripts/verify.sh` builds the CLI with the lockfile, then runs the
 workspace, runtime, fixtures and English checks. Building first is required because fixtures execute
 `target/debug/brain`; `cargo test` alone can leave that binary stale. The branch/PR verification workflow uses the
