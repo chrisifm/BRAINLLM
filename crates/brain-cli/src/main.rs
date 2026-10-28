@@ -1110,6 +1110,7 @@ reload, restart with backoff, crash-loop exit 1, /_health, RSS limit, logs/app.l
 BRAIN_INSTANCES, BRAIN_MAX_MEMORY, BRAIN_NODE.
 ";
 
+#[cfg(unix)]
 fn cmd_start(args: &[String]) -> ExitCode {
     if args.iter().any(|a| a == "--help" || a == "-h") {
         print!("{START_USAGE}");
