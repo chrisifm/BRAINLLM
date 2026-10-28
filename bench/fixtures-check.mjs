@@ -1,14 +1,17 @@
 // Compares `brain check --json examples/invalid` against each <case>.expected.json (code/file/line/col exact, msg/fix non-empty)
 // and checks that the valid examples produce no diagnostics. Usage: node bench/fixtures-check.mjs [path to brain]
 import { execFileSync } from 'node:child_process'
-import { readFileSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { readFileSync, existsSync, readdirSync } from 'node:fs'
+import { join, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const ROOT = new URL('..', import.meta.url).pathname
+const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const BRAIN = process.argv[2] ?? join(ROOT, 'target/debug/brain')
-const run = (p) => { try { return execFileSync(BRAIN, ['check', '--json', p], { cwd: join(ROOT, 'examples') }).toString() } catch (e) { return e.stdout.toString() } }
+const run = (p) => { try { return execFileSync(BRAIN, ['check', '--json', p], { cwd: join(ROOT, 'examples') }).toString() } catch (e) { if (!e.stdout) throw e; return e.stdout.toString() } }
 const got = JSON.parse(run('invalid') || '[]')
-const files = execFileSync('fd', ['-e', 'json', '.expected', 'invalid'], { cwd: join(ROOT, 'examples') }).toString().trim().split('\n')
+const files = readdirSync(join(ROOT, 'examples/invalid'), { recursive: true })
+  .filter(f => f.endsWith('.expected.json')).map(f => `invalid/${f.split(sep).join('/')}`).sort()
+if (!files.length) throw new Error('No expected diagnostic fixtures found')
 let fail = 0
 for (const f of files) {
   const want = JSON.parse(readFileSync(join(ROOT, 'examples', f), 'utf8'))
