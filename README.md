@@ -166,6 +166,15 @@ report a missing prerequisite or permission instead of claiming success.
 **Paste this into your coding agent:**
 
 ```text
+Build a small task app with BRAINLLM: add, complete and delete tasks,
+and save them locally. Follow https://github.com/chrisifm/BRAINLLM
+for setup. Run the checks and open the app for me.
+```
+
+<details>
+<summary>Expanded agent workflow for a custom project</summary>
+
+```text
 Build my frontend with BRAINLLM.
 
 Product brief: [describe the app, its users and the first useful workflow].
@@ -192,6 +201,8 @@ Reproduce it, add a regression test and propose the smallest compatible fix.
 Only use automatic contribution when I have explicitly configured it for an
 owned fork or authorized review branch. Never weaken checks or merge automatically.
 ```
+
+</details>
 
 <details>
 <summary>Prefer to install it yourself? Here are the commands.</summary>
