@@ -36,7 +36,7 @@
       <label>Password <input type="password" autocomplete="current-password" bind:value={f.v.password}></label>
       {#if f.err.password}<p class="err">{f.err.password}</p>{/if}
       {#if f.error}<p role="alert">{f.error}</p>{/if}
-      <Button type="submit" loading={f.busy}>Sign in</Button>
+      <Button type="submit" busy={f.busy}>Sign in</Button>
     </form>
   {:else}
     <p role="status">Authentication is not configured. Set up a real provider in server/auth.jsbrain (the demo login exists only in development).</p>

@@ -989,12 +989,15 @@ tokens, icons the author provides in `public/`; sizes are checked, not generated
 Mode v2 defaulting to denied until the app calls `consent('analytics')`; site verification becomes the meta tag.
 **WebMCP (agent tools)** — support verified 2026-10-13: Chrome origin trial (149+), API name moving from
 `navigator.modelContext` to `document.modelContext`; not a standard yet. Therefore:
+- Status (2026-10-29): the declarative `<form tool>` path ships. The imperative path is pending #106 (SPEC.md's
+  `<!--planned:#106-->` block): codegen emits `registerTools([...])` for `<meta tools>`, the runtime does not export
+  it yet, so `brain check` reports B0128 on `<meta tools>`.
 - RUNTIME `brain-mcp.js` (separate module): feature-detects either object; `registerTool({ name, description,
-  inputSchema, execute })` on mount, unregister on dispose; no-op when unsupported.
+  inputSchema, execute })` on mount, unregister on dispose; no-op when unsupported. (Pending #106.)
 - COMPILER: `<meta tools="name: description (param:type!, …)">` + a same-named function → schema from the same
-  mini-language as `form()`; declarative `<form tool=… tool-description=…>` is emitted with the attribute names the
-  current spec uses (one table in the codegen, updated when the spec settles). B1701 tool without a matching
-  function, B1702 name not snake_case or duplicated on the page, B1703 parameter without a type.
+  mini-language as `form()` (pending #106); declarative `<form tool=… tool-description=…>` is emitted with the
+  attribute names the current spec uses (one table in the codegen, updated when the spec settles). B1701 tool without
+  a matching function, B1702 name not snake_case or duplicated on the page, B1703 parameter without a type.
 - Tools run with the page's permissions only; anything destructive should ask for confirmation in the UI.
 
 ## 33. `brain-seo`: the SEO module (fixed 2026-10-13, Chris: "much more powerful than WordPress")

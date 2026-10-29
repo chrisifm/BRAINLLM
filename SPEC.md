@@ -8,8 +8,8 @@ Normative. Anything not here does not exist. Internals: docs/INTERNALS.md (not n
 - `views/docs/[...rest].brain` matches `/docs/a/b/c` with `ctx.params.rest = 'a/b/c'` (ranked after static and `[id]` routes).
 - Route files per folder: `_guard.jsbrain` (`export default (ctx) => ctx.user ? true : redirect('/login')`, runs on server
   and before client navigation; `deny('reason')` renders `views/403.brain`) · `_error.brain` · `_middleware.jsbrain`.
-  `ctx` = `{ params, query, user, cookies, url }`. In the browser there is no `ctx.user` (the session cookie is
-  HttpOnly): a guard that reads it and would stop the navigation makes a full page load, and the server guard decides.
+  `ctx` = `{ params, query, user, session, cookies, url, env }`. In the browser there is no `ctx.user` (the session
+  cookie is HttpOnly): a guard that reads it and would stop the navigation makes a full page load, and the server guard decides.
 - In code: `navigate('/x')` (router, no reload; never `location.assign`) · `let r = route()` → `r.path`, `r.params.id`,
   `r.query.q` (reactive).
 - `services/*.jsbrain` are injectable: `provide(Api, realApi)` in `app.brain`, `use(Api)` anywhere; tests swap them with
@@ -151,9 +151,11 @@ policy. Never hand-write `og:*` defaults, robots.txt or llms.txt.
 
 ## Agent tools (WebMCP)
 Expose what a page can do to browser AI agents. Declarative: `<form tool="search_products" tool-description="Search the
-catalog">` (each field's `<label>` becomes its description). Imperative, in a component:
-`<meta tools="add_task: Add a task (text:str!)">` + a function of the same name; it is registered while the component
-is mounted. Tool names are snake_case and unique per page.
+catalog">` (each field's `<label>` becomes its description). Tool names are snake_case and unique per page.
+<!--planned:#106-->
+Imperative, in a component: `<meta tools="add_task: Add a task (text:str!)">` + a function of the same name; it is
+registered while the component is mounted.
+<!--/planned-->
 
 ## Built-in ui/ kit (use before writing your own; no import needed)
 `<Button>` `<Input>` `<Select>` `<Checkbox>` `<Dialog>` `<Table>` `<Tabs>` `<Toast>` `<Menu>` `<Field>` — accessible,
@@ -161,7 +163,9 @@ token-styled, every state (loading, disabled, error, empty) covered.
 Forms: `let f = form(schema, { submit: async (v) => … })` → `bind:value={f.v.email}`, `f.err.email`, `f.busy`,
 `f.error` (form-level), `on:submit={f.submit}`. Schema: `{ email: 'email!', age: 'num>=18', name: 'str!<=80' }`
 (`!` required; types `str num bool email url date`, `[T]` list, a nested type object). Server errors: return or
-throw `{ errors: { email: 'Taken' } }` from `submit`; any other failure shows in `f.error`.
+throw `{ errors: { email: 'Taken' } }` from `submit`; any other failure shows in `f.error`. A server function that
+throws a plain `Error('msg')` answers 500 and the client sees a generic message (the real one is only in the server log):
+to show a reason, throw `{ errors: { field: 'msg' } }` (422, the message reaches the field).
 
 ## Data
 `api/*.jsbrain`: `export default api('/users', { get: { out: '[User]' }, post: { in: 'User', out: 'User' } })` and
@@ -196,13 +200,19 @@ Read them as `process.env.KEY` (server) or `process.env.PUBLIC_KEY` (anywhere). 
 `.jsbrain` files starting with `<meta server>` run only on the server and may be used only inside `load` or server
 functions. Server function in a `.brain`: `server: async function save(ctx, data) {…}`; the client calls
 `await save(data)` (no `ctx`). Validate `data` inside.
+Sessions: `ctx.session.set(user)` in a server function signs it into the `__Host-session` cookie (HttpOnly, Secure,
+SameSite=Lax, 7 days; `{ maxAge: seconds }` to change it; needs `BRAIN_SECRET` in `.brain_env`); every later request
+gets it as `ctx.user` (guards, `load`, server functions). `ctx.session.clear()` logs out. The cookie is signed, not
+encrypted: anyone holding it can read it, so store ids and display data, never tokens or secrets.
+`load` belongs to views: in `_layout.brain` it is not run.
 
 ## Tests (`*.test.brain`)
 `test(name, async () => {…})` · `await mount(Comp, props)` · `await click(sel)` · `await type(sel, text)` ·
 `text(sel)` `attr(sel, n)` `hasClass(sel, c)` `count(sel)` · `expect(x).toBe(y)|toEqual(y)|toBeTruthy()`.
 
 ## CLI (also MCP: `brain mcp`; every command accepts `--json`)
-Main: `brain new <app>` · `brain run` (dev server with hot reload, app :5180) · `brain build` (production) ·
+Main: `brain new <app>` · `brain run` (dev server with hot reload, app :5180; views render in the browser, so judge
+SEO and the no-JS HTML on `brain build` + `brain start`) · `brain build` (production) ·
 `brain doctor` (everything at once: check + tests + over-engineering + leaks; exits non-zero on any error).
 Production: `brain start` (serves `dist/`, restarts on crash, logs to `logs/app.log`) · `brain reload` (no downtime) ·
 `brain status` · `brain stop`. Never add PM2 or another process manager.
