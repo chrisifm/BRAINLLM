@@ -88,6 +88,50 @@
         "markdown": {
           "type": "boolean",
           "default": true
+        },
+        "ai": {
+          "enum": [
+            "allow",
+            "search-only",
+            "block"
+          ],
+          "default": "allow",
+          "description": "AI crawler policy in robots.txt: allow (training, answers, search), search-only (no training) or block (no AI crawler)"
+        },
+        "og": {
+          "enum": [
+            "missing",
+            "always",
+            "off"
+          ],
+          "default": "missing",
+          "description": "Generated Open Graph images: only for pages without og:image, for every page, or never"
+        },
+        "search": {
+          "type": "string",
+          "pattern": "\\{query\\}",
+          "description": "Site search URL with {query}, added as a SearchAction to the home page WebSite JSON-LD"
+        },
+        "news": {
+          "type": "object",
+          "required": [
+            "name",
+            "collections"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Publication name Google News shows"
+            },
+            "collections": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "Google News sitemap from these content collections"
         }
       }
     },
