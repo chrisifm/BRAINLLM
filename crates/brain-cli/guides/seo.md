@@ -9,8 +9,9 @@ page text, not after.
 2. Write the words a person would actually type or ask an assistant ("how to split a bill offline", not "Bill
    Splitting Solutions"). Prefer the plain, specific phrase over the brand term.
 3. Choose ONE primary query per page; two pages on the same query compete (B1817 cannibalization).
-4. Declare it: `<meta seo keyword="split a bill offline">`. The audit checks it in the title, the H1, the first
-   paragraph and the URL, at a natural density (B1816).
+4. Declare it: `<meta seo keyword="split a bill offline">` on every indexable view (missing = B0502). The audit
+   checks it in the title, the description, the H1, the first paragraph and the URL, at a natural density (B1816).
+   Without a keyword, a title or description off the H1's topic is B1836.
 5. Put it in: `title` (≤ 60 chars), `<h1>`, the first sentence, `description` (≤ 160 chars), and the route name
    (`brain add view split-a-bill-offline`). Lengths over the limits are B1602.
 
