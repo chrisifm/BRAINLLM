@@ -15,6 +15,7 @@ mod impact;
 mod cdp;
 mod compiler;
 mod env;
+mod guide;
 mod icons;
 pub(crate) mod map;
 mod mcp;
@@ -36,7 +37,7 @@ use std::sync::Arc;
 
 include!(concat!(env!("OUT_DIR"), "/runtime_files.rs"));
 
-const USAGE: &str = "brain — the BRAINLLM toolchain (every command accepts --json)
+pub(crate) const USAGE: &str = "brain — the BRAINLLM toolchain (every command accepts --json)
 
 main:
   brain --version                    prints the version (also -V, --json)
@@ -59,6 +60,7 @@ granular:
   brain test [path] [--timeout 60] [--heap]   *.test.brain in headless Chrome + accessibility audit (+ leaks)
   brain map                          project graph: routes, components and props, modules, tests, tokens
   brain spec [--topic X] [--all]     the spec for the LLM (topics: files script markup channels css a11y tests cli)
+  brain guide [topic] [--json]       playbooks per task: start views data forms server seo a11y webmcp tests i18n performance
   brain schema                       JSON Schema of brain.json
   brain i18n --missing [--json]      per language: keys missing (exit 1) and texts still in the default language
   brain theme <preset> | --list      writes tokens.cssbrain from a preset (glass, dark, paper, contrast)
@@ -155,6 +157,15 @@ fn main() -> ExitCode {
                     print!("{t}")
                 }
             })
+        }
+        // task playbooks (what to do, in which order, how to verify), embedded from crates/brain-cli/guides/
+        Some("guide") => {
+            let topic = positional(&args[1..], &[]).into_iter().next();
+            if want_json(&args) {
+                guide::json(topic.as_deref()).map(|j| println!("{}", j.stringify()))
+            } else {
+                guide::text(topic.as_deref()).map(|t| print!("{t}"))
+            }
         }
         // `dev` is a hidden alias of `run`: it is the name a model guesses from Vite/Next.
         Some("run") | Some("dev") => cmd_dev(&args[1..]),

@@ -45,6 +45,7 @@ agent has to reconstruct while preserving code that a developer can read and rev
 | Capability | What it does for the app-building loop |
 |---|---|
 | A served language contract | `brain spec` gives the model the implemented syntax and conventions |
+| Task playbooks | `brain guide <topic>` (also MCP `brain_guide`): steps, checks, common mistakes and an example per task (views, data, forms, server, SEO, accessibility, WebMCP, tests, i18n, performance) |
 | Components and reactive state | `.brain` files combine markup, BrainScript and scoped styles; `sig`, `drv` and `fx` express updates |
 | Forms and data | Form validation, HTTP resources and server contracts give common app behavior a documented path |
 | Routes and layouts | Views, layouts, loaders and guards put navigation and access checks into the project structure |

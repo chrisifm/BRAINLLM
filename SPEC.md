@@ -1,5 +1,6 @@
 # BRAINLLM SPEC
 Normative. Anything not here does not exist. Internals: docs/INTERNALS.md (not needed to write apps).
+Before each kind of task run `brain guide <topic>` (`brain guide` lists them): steps, checks, mistakes, example.
 
 ## Files
 - `app.brain` entry: `<html lang>`, common `<head>`, layout, `<slot />` for the view. No `.html` anywhere.
@@ -227,7 +228,8 @@ Production: `brain start` (serves `dist/`, restarts on crash, logs to `logs/app.
 `brain status` · `brain stop`. Never add PM2 or another process manager.
 Hosted under a sub-path: `brain.json` `"base": "/app/"`; keep writing app-absolute links and paths (`<a href="/about">`,
 `redirect('/login')`); the build adds the base everywhere.
-Granular: `brain add view|comp|ui <name> --props "…"` · `brain check --json` · `brain test` · `brain spec [--topic x]`.
+Granular: `brain add view|comp|ui <name> --props "…"` · `brain check --json` · `brain test` · `brain spec [--topic x]` ·
+`brain guide [topic]`.
 Also: `brain preview` (temporary loopback server for `dist/`, Unix) · `brain explain <code>` ·
 `brain doctor --fix` (apply mechanical fixes, then run the full doctor). Config: `brain.json`.
 <!--planned:#68-->

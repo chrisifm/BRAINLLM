@@ -713,12 +713,18 @@ The MCP server is the AI's main interface: everything the CLI does and more, wit
 
 | Group | Tools |
 |---|---|
-| Project | `brain_info` · `brain_spec {topic?}` · `brain_map` · `brain_new {name, template}` |
+| Project | `brain_info` · `brain_spec {topic?}` · `brain_guide {topic?}` · `brain_map` · `brain_new {name, template}` |
 | Modules and files | `brain_add {kind: view\|comp\|ui\|channel\|service\|api\|test, name, props?}` · `brain_edit {op: add-prop\|remove-prop\|rename\|move\|extract, …}` · `brain_remove {path, confirm}` · `brain_undo {steps}` · `brain_read {path}` (with summarized AST) |
 | Quality | `brain_check {path?}` · `brain_fix` · `brain_doctor {fix?}` · `brain_test {path?, heap?}` · `brain_shot {route, viewport?, baseline?}` · `brain_explain {code}` |
 | APIs and data | `brain_api_add {path, methods, types}` · `brain_api_call {path, method, body?}` (against the dev server, with the test session) · `brain_load {route}` (runs `load` and returns the props) · `brain_rpc {component, fn, args}` · `brain_mock {on}` |
 | Execution and debug | `brain_run_start` · `brain_run_status` · `brain_run_stop` (the dev server as a managed process) · `brain_logs {since?, level?}` · `brain_errors {since?}` · `brain_inspect {view: memory\|log\|latency\|network\|state\|storage\|connections\|timers}` · `brain_eval {expr, component?}` (dev only, in the live page, without access to HttpOnly cookies) · `brain_navigate {route}` · `brain_click\|type {selector}` (via CDP, to reproduce a bug) |
 | Build and delivery | `brain_build {analyze?}` · `brain_preview_start\|stop` · `brain_pack` (dry-run of the npm package). **There is no `brain_publish`:** publishing is Chris's action. |
+
+**Guides (2026-10-29).** `brain guide [topic] [--json]` and `brain_guide {topic?}` serve task playbooks embedded from
+`crates/brain-cli/guides/*.md` (`src/guide.rs`: start, views, data, forms, server, seo, a11y, webmcp, tests, i18n,
+performance). SPEC says what exists; a guide says what to do, in order, how to verify it and which code catches each
+mistake. Unit tests fail when a guide cites a diagnostic code `brain explain` does not know, a `brain <command>` that
+`brain --help` does not list, or text the English check rejects; planned features are named as planned in prose.
 
 - **MCP resources** (read without calling tools): `brain://spec`, `brain://map`, `brain://errors`, `brain://doctor`.
 - **MCP prompts:** `new-view`, `fix-all`, `debug-error {fingerprint}`, `add-api`: guided flows that chain tools.
@@ -1010,6 +1016,9 @@ Mode v2 defaulting to denied until the app calls `consent('analytics')`; site ve
   it yet, so `brain check` reports B0128 on `<meta tools>`.
 - RUNTIME `brain-mcp.js` (separate module): feature-detects either object; `registerTool({ name, description,
   inputSchema, execute })` on mount, unregister on dispose; no-op when unsupported. (Pending #106.)
+  `tool(name, description, params, run, { title, readOnly, consequential, untrusted })` adds `title` and
+  `annotations: { readOnlyHint, consequentialHint, untrustedContentHint }` (WebMCP draft 2026-10-27), only the keys
+  given (2026-10-29).
 - COMPILER: `<meta tools="name: description (param:type!, …)">` + a same-named function → schema from the same
   mini-language as `form()` (pending #106); declarative `<form tool=… tool-description=…>` is emitted with the
   attribute names the current spec uses (one table in the codegen, updated when the spec settles). B1701 tool without

@@ -331,6 +331,13 @@ pub fn run() -> Result<(), String> {
         }),
     });
     tools.push(Tool {
+        name: "brain_guide",
+        description: "Task playbooks: what to do for one kind of task, in which order, the commands that verify it, the diagnostic codes that catch common mistakes and a minimal correct example. Call it without `topic` for the list; read `start` first, then the topic of the task (e.g. `seo` before writing a page that must be found).",
+        input_schema: schema([("topic", "string", "start | views | data | forms | server | seo | a11y | webmcp | tests | i18n | performance; omit for the list")], &[]),
+        output_schema: None,
+        run: Box::new(|a| crate::guide::text(arg(a, "topic").as_deref())),
+    });
+    tools.push(Tool {
         name: "brain_map",
         description: "Project graph: routes (path, file, params, load), components (props with type/default, emits, expose, imports), .jsbrain modules (exports), tests, tokens, and `reverse` (who reads/writes each store field, context key and resource). Filter with view/comp/reads; components come 100 per page (total, nextCursor). Read it instead of opening files; use brain_card for one component's contract.",
         input_schema: schema(
@@ -1092,7 +1099,7 @@ pub fn run() -> Result<(), String> {
     let server = Server {
         name: "brain",
         version: env!("CARGO_PKG_VERSION"),
-        instructions: "BRAINLLM toolchain. Read `brain_spec` and `brain_map` before writing a .brain file; create files with `brain_add`; loop `brain_check` → `brain_fix` until clean; run the app with `brain_run_start` and reproduce bugs with `brain_navigate`/`brain_click`/`brain_eval`; finish with `brain_doctor`.",
+        instructions: "BRAINLLM toolchain. Read `brain_spec` and `brain_map` before writing a .brain file, and `brain_guide` (topic) before each kind of task; create files with `brain_add`; loop `brain_check` → `brain_fix` until clean; run the app with `brain_run_start` and reproduce bugs with `brain_navigate`/`brain_click`/`brain_eval`; finish with `brain_doctor`.",
         tools,
         resources,
         prompts,

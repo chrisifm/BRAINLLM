@@ -14,6 +14,15 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Site and README: the title, hero, metadata and footer say up front that BRAINLLM is a compiler written in Rust.
 ### Added
 
+- `brain guide [topic] [--json]` and the MCP tool `brain_guide`: task playbooks for agents embedded in the binary
+  (`start`, `views`, `data`, `forms`, `server`, `seo`, `a11y`, `webmcp`, `tests`, `i18n`, `performance`), each with
+  steps, verify commands, common mistakes with the diagnostic that catches them and a minimal correct example. The
+  `seo` guide starts from the target query and covers answer-first pages, FAQ, authors, freshness and the AI crawler
+  policy. Tests reject a guide that cites an unknown diagnostic code or command. `brain new`'s AGENTS.md, SPEC.md
+  and `brain --help` point to it.
+- WebMCP runtime `tool(name, description, params, run, { title, readOnly, consequential, untrusted })` passes
+  `title` and `annotations: { readOnlyHint, consequentialHint, untrustedContentHint }` to the registration (WebMCP
+  draft 2026-10-27).
 - B0411 (error): an `<a href>` with no accessible name (no text, `aria-label` or image with alt).
 - B0412 (warning): link text that is only a generic phrase such as "click here" or "read more".
 - B0413 (warning): an `alt` that is a file name or a lone generic word such as "image" or "logo".

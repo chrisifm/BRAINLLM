@@ -728,6 +728,8 @@ const BADGE: &str = r#"<span class="badge"><slot /></span>
 /// For any agent that opens the project (Claude Code, Codex, Cursor…): what to read and which loop to follow.
 const AGENTS_MD: &str = r#"# AGENTS.md — app BRAINLLM
 For an npm-created app, prefix shell commands below with `npx` (for example `npx brain spec`). A source installation provides a global `brain` command.
+Before each kind of task run `brain guide <topic>` (the playbook: steps, verify commands, common mistakes, example):
+`start` first, then `views` `data` `forms` `server` `seo` `a11y` `webmcp` `tests` `i18n` `performance`.
 1. Before writing code read `brain spec` (or `brain spec --topic <topic>`); what is not there does not exist.
 2. Read `brain map --json` to see existing routes, components, props and modules; import only what it lists. To use a component read `brain card <name>` (its contract), never its body; `brain map --reads cart.total` lists who reads a store field. A component over 150 lines gets B1010: run the `brain split` it suggests.
 3. Create files with `brain add view|comp|ui <name> --props "…"` and complete them; do not write them from scratch.
@@ -792,6 +794,7 @@ mod tests {
         let files = new_app(&app).unwrap();
         assert_eq!(files.len(), 39);
         assert!(app.join("AGENTS.md").is_file());
+        assert!(fs::read_to_string(app.join("AGENTS.md")).unwrap().contains("brain guide <topic>"));
         assert!(app.join("app.brain").is_file() && !app.join("index.html").exists());
         assert!(new_app(&app).is_err(), "must not overwrite a non-empty folder");
         assert_eq!(find_root(&app.join("views")), Some(app.clone()));
