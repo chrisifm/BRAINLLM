@@ -235,7 +235,9 @@ pub fn load_ctx(disk_path: &Path, c: &Component) -> (Ctx, Vec<PathBuf>) {
         ctx.cache_data_off = std::fs::read_to_string(root.join("brain.json")).ok().is_some_and(|j| cache_data_off(&j));
     }
     if c.level == Level::View && c.kind == FileKind::Component {
-        for anc in dir.ancestors() {
+        // without a project or app root, only the view's own folder can hold its guard (never walk up to `/`)
+        let bounded = project.is_some() || app_root(dir).is_some();
+        for anc in dir.ancestors().take(if bounded { usize::MAX } else { 1 }) {
             let g = anc.join("_guard.jsbrain");
             deps.push(g.clone()); // adding a guard later changes B0502
             if g.is_file() {

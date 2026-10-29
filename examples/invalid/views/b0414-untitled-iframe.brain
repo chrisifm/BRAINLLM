@@ -1,0 +1,6 @@
+<meta seo title="Untitled iframe" description="Invalid case." canonical="/untitled-iframe" keyword="untitled iframe">
+
+<main>
+  <h1>Untitled iframe</h1>
+  <iframe src="https://maps.example.com/embed"></iframe>
+</main>

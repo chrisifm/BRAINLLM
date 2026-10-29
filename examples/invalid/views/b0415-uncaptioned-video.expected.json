@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0415",
+    "level": "warning",
+    "file": "invalid/views/b0415-uncaptioned-video.brain",
+    "line": 5,
+    "col": 3,
+    "msg": "`<video>` without a captions track",
+    "fix": "add `<track kind=\"captions\" src=\"/captions.vtt\" srclang=\"en\" label=\"English\">` (a muted autoplay loop without `controls` needs none)"
+  }
+]

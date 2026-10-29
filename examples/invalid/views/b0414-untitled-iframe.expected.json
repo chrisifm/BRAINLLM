@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0414",
+    "level": "error",
+    "file": "invalid/views/b0414-untitled-iframe.brain",
+    "line": 5,
+    "col": 3,
+    "msg": "`<iframe>` without `title`",
+    "fix": "add `title=\"…\"` describing the embedded content"
+  }
+]

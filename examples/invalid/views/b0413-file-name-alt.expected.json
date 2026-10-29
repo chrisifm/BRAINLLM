@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0413",
+    "level": "warning",
+    "file": "invalid/views/b0413-file-name-alt.brain",
+    "line": 5,
+    "col": 3,
+    "msg": "`alt=\"IMG_2041.jpg\"` is a file name or a generic word, not a description",
+    "fix": "describe what the image shows (`alt=\"Team at the 2026 offsite\"`), or use `alt=\"\"` if it is decorative"
+  }
+]

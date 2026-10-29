@@ -9,9 +9,6 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
-### Documentation
-
-- Site and README: the title, hero, metadata and footer say up front that BRAINLLM is a compiler written in Rust.
 ### Added
 
 - `brain guide [topic] [--json]` and the MCP tool `brain_guide`: task playbooks for agents embedded in the binary
@@ -52,6 +49,12 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   leftover `<meta name="schema">` (a view's own `<head>` block) is turned into JSON-LD by the SEO step.
 - B1831 (questions without FAQ) no longer sells FAQPage as a Google rich result: Google stopped showing FAQ rich
   results on 2026-05-07; the markup stays because answer engines and Bing read it.
+- `brain check` on a view outside any app no longer walks up to `/` looking for `_guard.jsbrain`; only the view's
+  own folder is searched.
+
+### Documentation
+
+- Site and README: the title, hero, metadata and footer say up front that BRAINLLM is a compiler written in Rust.
 
 ## [0.2.0] - 2026-10-29
 

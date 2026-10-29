@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0411",
+    "level": "error",
+    "file": "invalid/views/b0411-unnamed-link.brain",
+    "line": 5,
+    "col": 3,
+    "msg": "`<a href>` without an accessible name",
+    "fix": "add link text, `aria-label=\"…\"` or an `<img alt=\"…\">` inside the link"
+  }
+]

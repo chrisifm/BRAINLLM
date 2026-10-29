@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0412",
+    "level": "warning",
+    "file": "invalid/views/b0412-generic-link.brain",
+    "line": 5,
+    "col": 39,
+    "msg": "link text `Read more` does not say where the link goes",
+    "fix": "name the destination (`Read the pricing guide`) or add `aria-label=\"…\"`"
+  }
+]

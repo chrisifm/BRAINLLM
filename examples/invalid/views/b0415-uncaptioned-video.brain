@@ -1,0 +1,6 @@
+<meta seo title="Uncaptioned video" description="Invalid case." canonical="/uncaptioned-video" keyword="uncaptioned video">
+
+<main>
+  <h1>Uncaptioned video</h1>
+  <video controls src="/demo.mp4"></video>
+</main>
