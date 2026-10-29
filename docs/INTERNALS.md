@@ -1073,7 +1073,10 @@ to appear in LLMs, traditional search and social networks"; implemented in brain
 - **Markdown copies for LLMs** (llmstxt.org convention, extension-replaced form): every indexable page also exists as
   Markdown (`/pricing.md`, `/` → `/index.md`), named from the route so the page file's extension never shows, linked
   with `<link rel="alternate" type="text/markdown">`; `llms.txt` points to them.
-  `seo.markdown` (default true).
+  `seo.markdown` (default true). Content negotiation (2026-10-29): `brain start` (server.mjs `serveTwin`, also before an
+  SSR route) and the Rust static server (`brain-serve` `prod.rs`) answer the page URL with its twin when `Accept` ranks
+  `text/markdown` above `text/html` (equal weight: the one listed first; an explicit type beats `*/*`, so browsers keep
+  HTML), and both representations carry `Vary: Accept`. No twin (`seo.markdown=false`, noindex pages) → HTML as before.
 - **Large previews:** indexable pages without their own robots meta get
   `max-image-preview:large, max-snippet:-1, max-video-preview:-1`.
 - **IndexNow** (opt-in, existing) also reaches Bing, which feeds Copilot and ChatGPT search.

@@ -1,5 +1,5 @@
 // server.mjs SEO details (INTERNALS §32-§33): `schema="T"` becomes a JSON-LD node in the SSR head (never a
-// `<meta name="schema">`).
+// `<meta name="schema">`), and a page's Markdown twin is served on `Accept: text/markdown` with `Vary: Accept`.
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
@@ -26,7 +26,9 @@ export const seo = p => ({ title: 'Thing ' + p.name, schema: 'Product', jsonld: 
 w('_server/pages/post.html', '<!doctype html><html><head><title>Post</title><link rel="canonical" href="https://x.test/posts/:slug"><script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Post"}</script></head><body><div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
 w('_server/pages/thing.html', '<!doctype html><html><head><title>Thing</title></head><body><div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
 w('index.html', '<!doctype html><title>Home</title><main><h1>Home</h1></main>')
+w('index.md', '# Home\n')
 w('pricing.html', '<!doctype html><title>Pricing</title><main><h1>Pricing</h1></main>')
+w('pricing.md', '# Pricing\n')
 w('about.html', '<!doctype html><title>About</title><main><h1>About</h1></main>')
 w('_server/manifest.json', JSON.stringify({
   v: 1, build: 'b1', core: '/_b/core.js',
@@ -36,7 +38,7 @@ w('_server/manifest.json', JSON.stringify({
   ],
 }))
 
-const { createServer } = await import('../server/server.mjs')
+const { createServer, prefersMarkdown } = await import('../server/server.mjs')
 const server = createServer({ dist, log() {} })
 await new Promise(r => server.listen(0, '127.0.0.1', r))
 const base = `http://127.0.0.1:${server.address().port}`
@@ -59,4 +61,29 @@ test('SSR: an explicit jsonld wins over the schema shortcut', async () => {
   const h = await (await get('/things/a')).text()
   assert.doesNotMatch(h, /name="schema"/)
   assert.deepEqual(ld(h).map(n => n.name), ['Own'])
+})
+
+test('Accept: text/markdown serves the Markdown twin of a static page, with Vary: Accept', async () => {
+  const md = await get('/pricing', { accept: 'text/markdown, text/html;q=0.5' })
+  assert.equal(md.headers.get('content-type'), 'text/markdown; charset=utf-8')
+  assert.match(md.headers.get('vary'), /\baccept\b/i)
+  assert.equal(await md.text(), '# Pricing\n')
+  const home = await get('/', { accept: 'text/markdown' })
+  assert.equal(await home.text(), '# Home\n')
+  // a browser keeps HTML; the HTML of a page with a twin also says it varies on Accept
+  const page = await get('/pricing', { accept: 'text/html,application/xhtml+xml,*/*;q=0.8' })
+  assert.match(await page.text(), /<h1>Pricing<\/h1>/)
+  assert.match(page.headers.get('vary') || '', /\baccept\b/i)
+  // text/html preferred over markdown → HTML
+  assert.match(await (await get('/pricing', { accept: 'text/html, text/markdown;q=0.9' })).text(), /<h1>/)
+  // no twin (seo.markdown=false, or a noindex page): HTML as before
+  const about = await get('/about', { accept: 'text/markdown' })
+  assert.match(await about.text(), /<h1>About<\/h1>/)
+})
+
+test('prefersMarkdown: explicit text/markdown above text/html; wildcards alone keep HTML', () => {
+  for (const a of ['text/markdown', 'text/markdown, */*', 'text/markdown, text/html', 'text/html;q=0.5, text/markdown', 'text/x-markdown'])
+    assert.equal(prefersMarkdown(a), true, a)
+  for (const a of [undefined, '', '*/*', 'text/html', 'text/html, text/markdown', 'text/markdown;q=0', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'text/markdown;q=0.5, */*'])
+    assert.equal(prefersMarkdown(a), false, String(a))
 })

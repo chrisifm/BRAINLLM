@@ -28,6 +28,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - B0413 (warning): an `alt` that is a file name or a lone generic word such as "image" or "logo".
 - B0414 (error): an `<iframe>` without `title` or `aria-label`.
 - B0415 (warning): a `<video>` with controls or sound that has no captions or subtitles track.
+- A page URL requested with `Accept: text/markdown` (preferred over `text/html`) answers its Markdown twin in
+  `brain start` and the static server, with `Vary: Accept`; browsers still get HTML. `seo.markdown=false` turns it off
+  together with the `.md` copies.
 
 ### Fixed
 

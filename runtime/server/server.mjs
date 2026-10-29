@@ -567,6 +567,15 @@ export function createServer(o = {}) {
   }
 
   // ---------- static ----------
+  // §33 content negotiation: `Accept` preferring text/markdown gets the page's Markdown twin (`/pricing` → pricing.md,
+  // `/` → index.md) when the build published one (`seo.markdown`, default true; never for noindex pages).
+  function serveTwin(req, res, url) {
+    if (!prefersMarkdown(req.headers.accept)) return false
+    const md = file(mdPath(decodeURIComponent(url.pathname)))
+    if (!md) return false
+    send(res, 200, req.method === 'HEAD' ? '' : readFileSync(md), { 'content-type': MIME['.md'], 'cache-control': 'public, max-age=3600', vary: 'accept' })
+    return true
+  }
   function serveStatic(req, res, url) {
     let p = decodeURIComponent(url.pathname)
     const candidates = p.endsWith('/') ? [p + 'index.html'] : [p, p + '.html', p + '/index.html']
@@ -575,9 +584,12 @@ export function createServer(o = {}) {
       if (!f) continue
       const ext = extname(f), type = FEEDS[basename(f)] || MIME[ext] || 'application/octet-stream'
       if (ext === '.html') {
+        // §33: the page's Markdown twin (`/pricing` → pricing.md) when the client prefers text/markdown
+        if (serveTwin(req, res, url)) return true
+        const md = file(mdPath(p))
         const page = readFileSync(f, 'utf8')
         // static HTML changes only with a deploy: its ETag is the build signature (content hash without a manifest)
-        return html(res, 200, page, {}, '"' + (mf.build || tag(page)) + '"'), true
+        return html(res, 200, page, md ? { vary: 'accept' } : {}, '"' + (mf.build || tag(page)) + '"'), true
       }
       const headers = {
         'content-type': type,
@@ -635,6 +647,7 @@ export function createServer(o = {}) {
         if (!m) continue
         // a form page without load is prerendered: GET serves that file (build ETag); only its POST needs the server
         if (!post && route.forms && serveStatic(req, res, url)) return
+        if (!post && serveTwin(req, res, url)) return
         return await (post ? formPost : ssr)(req, res, route, m.groups ? { ...m.groups } : {}, url, rid)
       }
       if (post) return send(res, 405, 'Method not allowed', { allow: 'GET, HEAD' })
@@ -899,6 +912,25 @@ function fillValues(n) {
     }
     fillValues(c)
   }
+}
+// `/` → index.md, `/docs/setup/` → docs/setup.md (brain-seo files::md_path)
+const mdPath = p => (p.replace(/^\/+|\/+$/g, '') || 'index') + '.md'
+// true when `Accept` ranks text/markdown above text/html (an equal weight goes to whichever is listed first);
+// wildcards alone never select Markdown, so browsers keep getting HTML
+export function prefersMarkdown(accept) {
+  if (!accept) return false
+  let md = -1, html = -1, mdAt = 0, htmlAt = 0, any = -1
+  accept.split(',').forEach((part, i) => {
+    const [type, ...params] = part.trim().toLowerCase().split(';')
+    const qp = params.map(x => x.trim()).find(x => x.startsWith('q='))
+    const q = qp ? Number(qp.slice(2)) : 1
+    if (!(q >= 0)) return
+    if (type === 'text/markdown' || type === 'text/x-markdown') (md = Math.max(md, q)), (mdAt = mdAt || i + 1)
+    else if (type === 'text/html' || type === 'application/xhtml+xml') (html = Math.max(html, q)), (htmlAt = htmlAt || i + 1)
+    else if (type === 'text/*' || type === '*/*') any = Math.max(any, q)
+  })
+  if (html < 0) (html = any), (htmlAt = Infinity) // an explicit type beats a wildcard of the same weight
+  return md > 0 && (md > html || (md === html && mdAt < htmlAt))
 }
 // SEO head from View.seo(props): title, description, canonical, og:*/twitter:*, JSON-LD and the view's <head> block
 // F5: the build writes an SSR route's canonical/og:url from its pattern (/jobs/:slug); the request has the real path.

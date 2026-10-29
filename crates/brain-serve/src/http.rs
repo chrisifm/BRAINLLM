@@ -103,6 +103,44 @@ pub fn respond_with<W: Write>(w: &mut W, status: u16, ctype: &str, body: &[u8], 
     w.flush()
 }
 
+/// True when `Accept` ranks `text/markdown` above `text/html` (equal weights: whichever is listed first; an explicit
+/// type beats a wildcard). Wildcards alone never pick Markdown, so browsers keep HTML. Same rule as server.mjs.
+pub fn prefers_markdown(accept: &str) -> bool {
+    let (mut md, mut html, mut any) = (-1.0f64, -1.0f64, -1.0f64);
+    let (mut md_at, mut html_at) = (usize::MAX, usize::MAX);
+    for (i, part) in accept.split(',').enumerate() {
+        let mut it = part.split(';');
+        let ty = it.next().unwrap_or("").trim().to_ascii_lowercase();
+        let q = it
+            .map(str::trim)
+            .find_map(|p| p.strip_prefix("q=").or_else(|| p.strip_prefix("Q=")))
+            .map_or(Some(1.0), |v| v.trim().parse::<f64>().ok());
+        let Some(q) = q.filter(|q| *q >= 0.0) else { continue };
+        match ty.as_str() {
+            "text/markdown" | "text/x-markdown" => {
+                md = md.max(q);
+                md_at = md_at.min(i);
+            }
+            "text/html" | "application/xhtml+xml" => {
+                html = html.max(q);
+                html_at = html_at.min(i);
+            }
+            "text/*" | "*/*" => any = any.max(q),
+            _ => {}
+        }
+    }
+    if html < 0.0 {
+        html = any;
+    }
+    md > 0.0 && (md > html || (md == html && md_at < html_at))
+}
+
+/// `/` -> `index.md`, `/docs/setup/` -> `docs/setup.md` (brain-seo `files::md_path`).
+pub fn md_path(url_path: &str) -> String {
+    let r = url_path.trim_matches('/');
+    if r.is_empty() { "index.md".into() } else { format!("{r}.md") }
+}
+
 pub fn mime(path: &str) -> &'static str {
     match path.rsplit('.').next().unwrap_or("") {
         "html" => "text/html; charset=utf-8",
@@ -144,6 +182,13 @@ mod tests {
         assert_eq!(mime("dist/blog/atom.xml"), "application/atom+xml; charset=utf-8");
         assert_eq!(mime("dist/manifest.webmanifest"), "application/manifest+json");
         assert_eq!(mime("dist/docs/seo.md"), "text/markdown; charset=utf-8");
+        for a in ["text/markdown", "text/markdown, */*", "text/markdown, text/html", "text/html;q=0.5, text/markdown", "text/x-markdown"] {
+            assert!(prefers_markdown(a), "{a}");
+        }
+        for a in ["", "*/*", "text/html", "text/html, text/markdown", "text/markdown;q=0", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "text/markdown;q=0.5, */*"] {
+            assert!(!prefers_markdown(a), "{a}");
+        }
+        assert_eq!((md_path("/"), md_path("/pricing"), md_path("/docs/setup/")), ("index.md".into(), "pricing.md".into(), "docs/setup.md".into()));
         for (f, m) in [("a.mp4", "video/mp4"), ("a.webm", "video/webm"), ("a.avif", "image/avif"), ("a.gif", "image/gif"), ("a.woff", "font/woff"), ("a.pdf", "application/pdf"), ("a.mp3", "audio/mpeg")] {
             assert_eq!(mime(f), m);
         }

@@ -136,10 +136,25 @@ impl Static {
                 None => return write(&mut s, 404, &[("Content-Type".into(), "text/plain".into())], b"not found", head),
             },
         };
-        let name = file.to_string_lossy().to_string();
+        let mut name = file.to_string_lossy().to_string();
         // in a build, `.brain` is a page and `.jsbrain`/`.cssbrain` its script and styles (in dev they are sources)
-        let html = name.ends_with(".html") || name.ends_with(".brain");
+        let mut html = name.ends_with(".html") || name.ends_with(".brain");
+        // §33: a page with a Markdown twin (`/pricing` -> pricing.md) answers it when `Accept` prefers text/markdown;
+        // both representations say `Vary: Accept` (no twin with seo.markdown=false or on noindex pages)
+        let twin = if status == 200 && html { inner.as_deref().map(|p| self.dist.join(crate::http::md_path(p))).filter(|f| regular_output(&self.dist, f)) } else { None };
+        let file = match &twin {
+            Some(md) if req.header("accept").is_some_and(crate::http::prefers_markdown) => {
+                name = md.to_string_lossy().to_string();
+                html = false;
+                md.clone()
+            }
+            _ => file,
+        };
         let mut hs = headers_for(&self.rules, &path);
+        if twin.is_some() {
+            hs.retain(|(k, _)| !k.eq_ignore_ascii_case("vary"));
+            hs.push(("Vary".into(), "Accept, Accept-Encoding".into()));
+        }
         hs.retain(|(k, _)| !k.eq_ignore_ascii_case("content-type"));
         hs.push(("Content-Type".into(), built_mime(&name).into()));
         if html && !self.build.is_empty() {
@@ -233,6 +248,38 @@ mod tests {
         assert!(chunk.iter().any(|(k, v)| k == "Cache-Control" && v.contains("immutable")) && chunk.iter().any(|(k, _)| k == "X-Frame-Options"));
         assert!(!headers_for(&r, "/about").iter().any(|(k, _)| k == "Cache-Control"), "exact rules do not leak");
     }
+
+    #[test]
+    fn markdown_twin_on_accept() {
+        use std::io::{Read, Write};
+        let dist = std::env::temp_dir().join(format!("brain-prod-md-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dist);
+        std::fs::create_dir_all(&dist).unwrap();
+        for (f, body) in [("index.html", "<h1>Home</h1>"), ("index.md", "# Home"), ("pricing.html", "<h1>Pricing</h1>"), ("pricing.md", "# Pricing"), ("about.html", "<h1>About</h1>")] {
+            std::fs::write(dist.join(f), body).unwrap();
+        }
+        let request = |path: &str, accept: &str| {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let handler = Static::load(&dist, "/");
+            let task = std::thread::spawn(move || handler.handle(listener.accept().unwrap().0).unwrap());
+            let mut client = TcpStream::connect(addr).unwrap();
+            write!(client, "GET {path} HTTP/1.1\r\nHost: localhost\r\nAccept: {accept}\r\n\r\n").unwrap();
+            let mut response = String::new();
+            client.read_to_string(&mut response).unwrap();
+            task.join().unwrap();
+            response
+        };
+        let md = request("/pricing", "text/markdown, text/html;q=0.5");
+        assert!(md.contains("Content-Type: text/markdown; charset=utf-8") && md.contains("Vary: Accept") && md.ends_with("# Pricing"), "{md}");
+        assert!(request("/", "text/markdown").ends_with("# Home"));
+        let page = request("/pricing", "text/html,*/*;q=0.8");
+        assert!(page.ends_with("<h1>Pricing</h1>") && page.contains("Vary: Accept"), "{page}");
+        // no twin (seo.markdown=false, noindex): HTML, no Vary on Accept
+        let about = request("/about", "text/markdown");
+        assert!(about.ends_with("<h1>About</h1>") && !about.contains("Vary: Accept"), "{about}");
+        std::fs::remove_dir_all(&dist).unwrap();
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -272,6 +319,9 @@ mod confinement_tests {
         let plain = request("/app/about", false);assert!(plain.ends_with("public-page"));
         let compressed = request("/app/about", true);
         assert!(compressed.contains("Content-Encoding: gzip") && compressed.ends_with("compressed-public"));
+        std::fs::write(dist.join("about.md"), "# About").unwrap();
+        let page = request("/app/about", false);
+        assert!(page.contains("Vary: Accept, Accept-Encoding") && page.ends_with("public-page"), "browsers keep HTML: {page}");
         let safe = request("/app/asset.js", true);
         assert!(safe.ends_with("public-script") && !safe.contains("Content-Encoding: gzip"));
         std::fs::remove_dir_all(root).unwrap();
