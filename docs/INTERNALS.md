@@ -102,7 +102,8 @@ COMPILER assigns the next free code there in the same change that emits it, then
   B0112 write to drv/prop/const · B0113 internal mutation of sig (push, obj.x=) · B0114 mutating an each item ·
   B0115 sig/drv outside the root · B0116 state in ui/ · B0117 load outside views or without async ·
   B0118 emit without a literal name · B0119 nonexistent import · B0120 `export default` in a .brain ·
-  B0121 (info) import of primitives or the `brain/ui` kit, removed automatically · B0130 `.v` written by the author on a sig, drv or ref
+  B0121 (info) import of primitives or the `brain/ui` kit, removed automatically · B0133 `f.v = …` / `f.err = …`
+  on a `form()` (edit `f.v = x` → `f.reset(x)`; the runtime throws on it too) · B0130 `.v` written by the author on a sig, drv or ref
   (warning, edit removes it; `form()`'s `f.v.email` is exempt) · B0129 `location.assign|replace('/x')` or
   `location.href = '/x'` with an app path (warning, edit to `navigate('/x')`) · B0124 more than one export in a
   `.jsbrain` (exempt: `types.jsbrain`, which holds one `export const` per type, and `i18n`/`content` data) · B0127 DOM, UI state or a `.brain`
@@ -443,6 +444,12 @@ focus trap), Table (sortable, virtualized >200 rows), Tabs, Toast (bus), Menu, F
 Each one complies with §8 and covers loading/disabled/error/empty. `form(schema, {submit})` in the runtime (`brain-form.js`):
 validates on blur and on submit, automatic `aria-invalid` + `aria-describedby`, blocks double submit (`busy`).
 Schema mini-language: `str num bool email url date` + `!` required + `<=N >=N` + `[T]` list + type name.
+2026-10-29: `f.v` and `f.err` are accessors whose setters throw (replacing them left the inputs bound to signals the
+form no longer read, so submit saw empty fields); B0133 catches it at compile time. Validation messages go through
+`msg(key, english, vars)` in `brain-schema.js`, which reads `globalThis.__brainDict` directly (no brain-i18n.js
+import): `form.*` keys of the page's locale, then the default locale, then English. brain-pack ships the `form.*`
+keys in the dictionary chunk of every page whose graph reaches `brain-schema.js`, even without a `t()` call.
+Known gap: a form posted without JS is validated by `callForm` outside a locale, so its messages stay English.
 
 ## 15. Data with contract
 `api(path, methods)` and types in `.jsbrain`. The compiler generates the client (native fetch) and a minimal validator per

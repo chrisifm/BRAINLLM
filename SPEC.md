@@ -163,7 +163,12 @@ token-styled, every state (loading, disabled, error, empty) covered.
 Forms: `let f = form(schema, { submit: async (v) => … })` → `bind:value={f.v.email}`, `f.err.email`, `f.busy`,
 `f.error` (form-level), `on:submit={f.submit}`. Schema: `{ email: 'email!', age: 'num>=18', name: 'str!<=80' }`
 (`!` required; types `str num bool email url date`, `[T]` list, a nested type object). Server errors: return or
-throw `{ errors: { email: 'Taken' } }` from `submit`; any other failure shows in `f.error`. A server function that
+throw `{ errors: { email: 'Taken' } }` from `submit`; any other failure shows in `f.error`. Initial values:
+`form(schema, { init: { email: '' } })`; values that arrive later (edit forms): `f.reset(values)`. Never replace
+`f.v` or `f.err` (B0133: the inputs would stay bound to the old fields). Validation messages are English unless
+`i18n/<locale>.json` has `form.required`, `form.min_chars`, `form.max_chars`, `form.min_items`, `form.max_items`,
+`form.item`, `form.list`, `form.number`, `form.min`, `form.max`, `form.email`, `form.url`, `form.date`,
+`form.error`, `form.check_failed` (`{n}` = the limit; plural objects allowed). A server function that
 throws a plain `Error('msg')` answers 500 and the client sees a generic message (the real one is only in the server log):
 to show a reason, throw `{ errors: { field: 'msg' } }` (422, the message reaches the field).
 

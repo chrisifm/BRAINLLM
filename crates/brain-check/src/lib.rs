@@ -1032,6 +1032,31 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// B0133: `f.v = { … }` / `f.err = { … }` on a `form()`. Those objects hold the live fields the inputs are bound
+    /// to; replacing them disconnects the form (the runtime throws, F10). Values load with `f.reset(values)`.
+    fn form_replace(&mut self, e: &Expr) {
+        let Expr::Assign { op, target, value, span } = e else { return };
+        let Expr::Member { obj, prop: MemberProp::Name(p), .. } = target.unparen() else { return };
+        let Expr::Ident(id) = obj.unparen() else { return };
+        if !matches!(p.name.as_str(), "v" | "err") || self.scopes.lookup(&id.name) != Some(Kind::Form) {
+            return;
+        }
+        let f = &id.name;
+        if p.name == "v" && *op == "=" {
+            let call = format!("{f}.reset({})", self.text(value.span()));
+            self.push_edits(
+                "B0133",
+                *span,
+                format!("`{f}.v` cannot be replaced: the inputs stay bound to the old fields"),
+                format!("load the values with `{call}`, or start from them with `form(schema, {{ init: … }})`"),
+                vec![(span.start, span.end, call)],
+            );
+        } else {
+            let fix = if p.name == "v" { format!("assign one field at a time (`{f}.v.email = …`) or call `{f}.reset(values)`") } else { format!("mark server errors with `{f}.errors({{ field: 'message' }})`") };
+            self.push("B0133", *span, format!("`{f}.{}` cannot be replaced", p.name), fix);
+        }
+    }
+
     /// B0130: `wide.v` on a reactive cell. Signals have one form: `{wide}`, `wide + 1`; the compiler adds `.v`.
     fn explicit_v(&mut self, e: &Expr) {
         let Expr::Member { obj, prop: MemberProp::Name(p), span, .. } = e else { return };
@@ -1045,6 +1070,7 @@ impl<'a> Checker<'a> {
 
     fn expr(&mut self, e: &Expr) {
         self.location_nav(e);
+        self.form_replace(e);
         self.explicit_v(e);
         match e {
             Expr::Ident(id) => self.ident_ref(id),

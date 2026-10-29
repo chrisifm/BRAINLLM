@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0133",
+    "level": "error",
+    "file": "invalid/comp/b0133-form-replace.brain",
+    "line": 3,
+    "col": 19,
+    "msg": "`f.v` cannot be replaced: the inputs stay bound to the old fields",
+    "fix": "load the values with `f.reset({ title: 'Draft' })`, or start from them with `form(schema, { init: … })`"
+  }
+]

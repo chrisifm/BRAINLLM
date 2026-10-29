@@ -1208,17 +1208,21 @@ fn build_inner(
             }
             keys.sort();
             keys.dedup();
-            if !keys.is_empty() {
+            // a page that validates (form(), api() schemas) reads its messages from the `form.*` keys (§14, §37)
+            let validates = reach.iter().any(|n| matches!(n, Node::Runtime(r) if r == "brain-schema.js"));
+            let mut entries: Vec<String> = Vec::new();
+            if !keys.is_empty() || validates {
                 let mine = read_dict(&input.root, loc);
                 let fallback = if loc == def { Vec::new() } else { read_dict(&input.root, def) };
                 let all = keys.iter().any(|k| k == "*");
-                let mut entries: Vec<String> = Vec::new();
                 let mut seen: HashSet<String> = HashSet::new();
                 for (k, v) in mine.iter().chain(fallback.iter()) {
-                    if (all || keys.contains(k)) && seen.insert(k.clone()) {
+                    if (all || keys.contains(k) || (validates && k.starts_with("form."))) && seen.insert(k.clone()) {
                         entries.push(format!("{}:{v}", prerender_json(k)));
                     }
                 }
+            }
+            if !keys.is_empty() || !entries.is_empty() {
                 let js = format!("import{{add}}from\"{rt}\";add({},{{{}}});\n", prerender_json(loc), entries.join(","));
                 let key = format!("_b/i18n-{}-{loc}.{}.{}", view_slug(view), content_hash(&js), ext.js());
                 dict_url = Some(format!("{pre}/{key}"));

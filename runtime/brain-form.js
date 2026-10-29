@@ -15,7 +15,7 @@
 // Unsaved changes (§41.5): `f.dirty` is true while values differ from the last saved ones (init, reset() or a successful
 // submit); leaving the page (client navigation or closing the tab) then asks first. No API.
 import { sig, fx, batch, untrack, _rt } from './brain.js'
-import { rule, check } from './brain-schema.js'
+import { rule, check, msg } from './brain-schema.js'
 
 export { rule, check } // server.mjs validates posted forms with the same rules (§38)
 
@@ -23,7 +23,7 @@ const I = _rt()
 
 const D = globalThis.document
 let seq = 0
-const GENERIC = 'Something went wrong. Try again.' // the text callForm (server.mjs) shows without JS
+const GENERIC = 'Something went wrong. Try again.' // the text callForm (server.mjs) shows without JS (key form.error)
 // navigate through the client router when it is loaded (no reload, base path applied), else a normal load
 const go = u => {
   const G = globalThis
@@ -124,7 +124,7 @@ export function form(schema, o = {}) {
     checking.v++
     return Promise.resolve()
       .then(() => c(v))
-      .then(m => m || '', e => (e && e.kind === 'aborted' ? '' : (e && e.message) || 'Could not check this value.'))
+      .then(m => m || '', e => (e && e.kind === 'aborted' ? '' : (e && e.message) || msg('form.check_failed', 'Could not check this value.')))
       .then(m => {
         if (untrack(() => x.s.v) === v) x.e.v = m // a stale answer (the value changed meanwhile) is ignored
         return untrack(() => x.e.v)
@@ -165,9 +165,24 @@ export function form(schema, o = {}) {
     })
   }
 
+  // `f.v` and `f.err` are the form's live fields: replacing the object (`f.v = { … }`) would leave the inputs bound to
+  // signals the form no longer reads (submit then sees every field empty), so it fails loudly instead (§14, B0133)
+  const fixed = k => {
+    throw Error(`form: \`${k}\` cannot be replaced; start from values with form(schema, { init }) or load them later with f.reset(values)`)
+  }
   const f = {
-    v,
-    err,
+    get v() {
+      return v
+    },
+    set v(_) {
+      fixed('f.v')
+    },
+    get err() {
+      return err
+    },
+    set err(_) {
+      fixed('f.err')
+    },
     get busy() {
       return busy.v
     },
@@ -247,7 +262,7 @@ export function form(schema, o = {}) {
         if (x && x.errors) mark(x.errors)
         // a server failure reads the same as without JS: 4xx and the author's own errors keep their message; 5xx and a
         // TypeError (the network dropped, or a bug) get the generic one
-        else if (!(x && x.kind === 'aborted')) error.v = (x && x.message && !(x.status >= 500) && x.name !== 'TypeError' && x.message) || GENERIC
+        else if (!(x && x.kind === 'aborted')) error.v = (x && x.message && !(x.status >= 500) && x.name !== 'TypeError' && x.message) || msg('form.error', GENERIC)
       } finally {
         busy.v = false
         if (fm) fm.removeAttribute('aria-busy')
