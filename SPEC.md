@@ -136,6 +136,8 @@ jsonld={{ '@type': 'Person', name: props.user.name }}>`. Site defaults live in `
 `<meta seo titleTemplate="%s · Nimbus" og:image="/og.png" twitter="@nimbus">`. Any other tag goes in a `<head>` block of
 the view (merged, deduplicated by name/property). `[id]` views list their pages with
 `export async function paths() { return [{ id: '1' }] }` so they are prerendered and appear in the sitemap.
+Live `[id]` views (SSR, no `paths()`) list their pages with `export async function sitemap({ env }) { return [{ id: '1',
+lastmod: '2026-10-01' }] }`: the server adds them to /sitemap.xml on each request (cached 5 min; needs `brain.json` `site`; past 50 000 URLs it splits into an index). Not with `paths()` in the same view (B0117).
 Sitemap date: `<meta seo lastmod="2026-10-13">` or the collection's frontmatter `date`; without one it is omitted.
 Collections: `brain add collection blog` turns `content/blog/*.md` (frontmatter `title description date updated? tags? cover?
 author? draft?`) into pages, tag pages, `/blog/rss.xml` and `/blog/atom.xml`. In `load()`/`paths()`, with no import:

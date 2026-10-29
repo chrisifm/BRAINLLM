@@ -56,6 +56,10 @@ export async function slow() { return new Promise(() => {}) }
 export async function boom() { throw new Error('secret stack detail') }
 export async function invalid() { throw Object.assign(new Error('Invalid input'), { errors: { email: 'Already taken' } }) }
 `)
+w('_server/offers.mjs', `export async function load(ctx) { return { id: ctx.params.slug, name: ctx.params.slug } }
+export async function sitemap(ctx) { return [{ slug: 'a b', lastmod: '2026-10-01' }, { slug: ctx.env.APP_NAME }, { other: 1 }] }
+`)
+w('sitemap.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>https://x.test/about</loc></url>\n</urlset>\n')
 w('_server/pages/user.html', '<!doctype html><html><head><title>Default</title><meta name="description" content="default"></head><body><div id="brain-view"><!--brain:ssr--><script type="module">mountView()</script></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
 w('_server/job.mjs', `export async function load(ctx) { return { id: ctx.params.slug, name: ctx.params.slug } }
 export const seo = p => ({ title: 'Job ' + p.name, canonical: p.name === 'canon' ? 'https://x.test/c/1' : undefined, $head: '<meta property="og:type" content="article">' })`)
@@ -79,6 +83,7 @@ w('_server/manifest.json', JSON.stringify({
     { path: '/users/:id', rx: '^/users/(?<id>(?![_.])[^/\\\\]+)/?$', view: '/_b/view.js', layouts: [], server: '_server/user.mjs', page: '_server/pages/user.html' },
     { path: '/tags/:t', rx: '^/tags/(?<t>(?![_.])[^/\\\\]+)/?$', view: '/_b/plain.js', layouts: [], server: '_server/tag.mjs', page: '_server/pages/tag.html' },
     { path: '/jobs/:slug', rx: '^/jobs/(?<slug>(?![_.])[^/\\\\]+)/?$', view: '/_b/view.js', layouts: [], server: '_server/job.mjs', page: '_server/pages/job.html' },
+    { path: '/offers/:slug', rx: '^/offers/(?<slug>(?![_.])[^/\\\\]+)/?$', view: '/_b/view.js', layouts: [], server: '_server/offers.mjs', page: '_server/pages/user.html', sitemap: true },
     { path: '/docs/*rest', rx: '^/docs/(?<rest>(?![_.])[^/\\\\]+(?:/(?![_.])[^/\\\\]+)*)/?$', view: '/_b/view.js', layouts: [], server: '_server/docs.mjs', page: '_server/pages/user.html' },
   ],
   rpc: { abc: '_server/rpc1.mjs' },
@@ -292,4 +297,45 @@ test('F5: an SSR route answers with its real URL in canonical and og:url, and a 
   assert.match(t, /<link rel="canonical" href="https:\/\/x\.test\/search\?a=1&amp;b=2">/)
   assert.ok(!t.includes('&amp;amp;'), t)
   assert.match(t, /<meta property="og:url" content="https:\/\/x\.test\/tags\/rust">/)
+})
+
+test('sitemap.xml: a dynamic view without paths() adds the pages its sitemap() lists at request time', async () => {
+  const r = await get('/sitemap.xml')
+  assert.equal(r.status, 200)
+  assert.match(r.headers.get('content-type'), /xml/)
+  const x = await r.text()
+  assert.ok(x.includes('<url><loc>https://x.test/about</loc></url>'), x)
+  assert.ok(x.includes('<url><loc>https://x.test/offers/a%20b</loc><lastmod>2026-10-01</lastmod></url>'), x)
+  assert.ok(x.includes('<url><loc>https://x.test/offers/shop</loc></url>'), x) // sitemap() gets ctx.env
+  assert.ok(!x.includes('undefined') && x.trim().endsWith('</urlset>'), x)
+  assert.equal(r.headers.get('cache-control'), 'public, max-age=300') // the same 5 min the list is kept
+  assert.equal((await get('/sitemap-dynamic.xml')).status, 404) // only a sitemap index gets that child
+  assert.equal((await get('/sitemap-static.xml')).status, 404) // and the static child only exists after a split
+})
+
+test('sitemap.xml: past 50 000 URLs in total it becomes an index of the static and dynamic files; one sitemap() run', async () => {
+  const d2 = mkdtempSync(join(tmpdir(), 'brain-dist-sm-'))
+  const w2 = (rel, s) => (mkdirSync(join(d2, rel, '..'), { recursive: true }), writeFileSync(join(d2, rel), s))
+  const staticXml = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>https://big.test/</loc></url>\n  <url><loc>https://big.test/about</loc></url>\n</urlset>\n'
+  w2('sitemap.xml', staticXml)
+  w2('_server/big.mjs', 'export async function sitemap() { globalThis.__bigRuns = (globalThis.__bigRuns || 0) + 1; await new Promise(r => setTimeout(r, 30)); return Array.from({ length: 50005 }, (_, i) => ({ id: i })) }\n')
+  w2('_server/manifest.json', JSON.stringify({ v: 1, build: 'big1', routes: [{ path: '/items/:id', rx: '^/items/(?<id>[^/]+)/?$', view: '/_b/view.js', layouts: [], server: '_server/big.mjs', page: '_server/pages/user.html', sitemap: true }] }))
+  const logs2 = []
+  const s2 = createServer({ dist: d2, timeout: 2000, log: (level, msg, x) => logs2.push({ level, msg, ...x }) })
+  await new Promise(r => s2.listen(0, '127.0.0.1', r))
+  try {
+    const b2 = `http://127.0.0.1:${s2.address().port}`
+    const [x1, x2] = await Promise.all([fetch(b2 + '/sitemap.xml'), fetch(b2 + '/sitemap.xml')].map(p => p.then(r => r.text())))
+    assert.equal(globalThis.__bigRuns, 1) // concurrent requests after expiry share one run
+    assert.equal(x1, x2)
+    assert.ok(x1.includes('<sitemapindex'), x1)
+    assert.ok(x1.includes('<sitemap><loc>https://big.test/sitemap-static.xml</loc></sitemap>'), x1)
+    assert.ok(x1.includes('<sitemap><loc>https://big.test/sitemap-dynamic.xml</loc></sitemap>'), x1)
+    assert.equal(await (await fetch(b2 + '/sitemap-static.xml')).text(), staticXml)
+    const dyn = await (await fetch(b2 + '/sitemap-dynamic.xml')).text()
+    assert.equal((dyn.match(/<url>/g) || []).length, 50000) // one file holds at most 50 000 URLs
+    assert.ok(logs2.some(l => l.level === 'warn' && l.dropped === 5), JSON.stringify(logs2))
+  } finally {
+    s2.close()
+  }
 })

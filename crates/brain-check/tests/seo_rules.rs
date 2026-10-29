@@ -39,6 +39,13 @@ fn paths_only_in_dynamic_views() {
     let src = "<meta seo title=\"T\" description=\"d\">\n<script>export async function paths() { return [] }</script>\n<main><h1>x</h1></main>";
     assert!(codes_in("views/u/[id].brain", src, &Ctx::default()).is_empty());
     assert_eq!(codes_in("views/u.brain", src, &Ctx::default()), ["B0117"]);
+    // sitemap() (pages listed at request time) follows the same rule
+    let sm = src.replace("paths()", "sitemap()");
+    assert!(codes_in("views/u/[id].brain", &sm, &Ctx::default()).is_empty());
+    assert_eq!(codes_in("views/u.brain", &sm, &Ctx::default()), ["B0117"]);
+    // both in one view: two contracts for the same pages
+    let both = src.replace("</script>", "export async function sitemap() { return [] }</script>");
+    assert_eq!(codes_in("views/u/[id].brain", &both, &Ctx::default()), ["B0117"]);
 }
 
 #[test]

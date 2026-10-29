@@ -8,6 +8,7 @@ const USER: &str = r#"<meta seo title={`User ${props.user.name}`} description="A
 <script>
 import fmt from '../../lib/fmt.jsbrain'
 export async function load(ctx) { return { user: { id: ctx.params.id, name: fmt(ctx.params.id) } } }
+export async function sitemap() { return [{ id: 'ada', lastmod: '2026-10-01' }] }
 server: async function rename(ctx, name) { if (!name) throw Object.assign(Error('Invalid input'), { errors: { name: 'required' } }); return fmt(name) }
 let user = sig(props.user)
 const go = async () => { user = { ...user, name: await rename('x') } }
@@ -106,6 +107,10 @@ fn ssr_and_rpc_through_the_real_server() {
     let user = route_of("/users/:id");
     let slow = route_of("/slow");
     assert!(user.contains("\"loading\":\"/_b/") && !user.contains("\"stream\"") && !user.contains("\"cache\""), "{user}");
+    // a dynamic view's sitemap() runs in server.mjs (it serves /sitemap.xml with those pages); never on the client
+    assert!(user.contains("\"sitemap\":true") && !slow.contains("\"sitemap\""), "{user}");
+    assert!(out.files.iter().any(|(k, v)| k.starts_with("_server/") && v.contains("function sitemap(")), "sitemap() is in a server module");
+    assert!(!out.files.iter().any(|(k, v)| k.starts_with("_b/") && v.contains("sitemap(")), "sitemap() never reaches the client");
     assert!(slow.contains("\"cache\":30") && slow.contains("\"stream\":true") && !slow.contains("\"loading\""), "{slow}");
     assert!(user.contains("\"links\":[\"</_b/") && user.contains("integrity=\\\"sha384-") && !mf.contains('\u{1}'), "{user}");
     let pick = out.files.iter().find(|(k, _)| k.starts_with("pick")).map(|(_, v)| v.clone()).unwrap_or_else(|| panic!("no pick page: {:?}", out.files.keys().collect::<Vec<_>>()));

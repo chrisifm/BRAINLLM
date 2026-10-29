@@ -596,11 +596,16 @@ impl<'a> Checker<'a> {
             }
             if let Stmt::Export { decl, span } = s
                 && let Stmt::Func(f) = decl.as_ref()
-                && f.name.as_ref().is_some_and(|n| n.name == "paths")
+                && let Some(name) = f.name.as_ref().map(|n| n.name.as_str()).filter(|n| matches!(*n, "paths" | "sitemap"))
             {
-                // §32: the params a dynamic route is prerendered for.
+                // §32: the params a dynamic route is prerendered for (`paths`) or listed in the sitemap at request
+                // time (`sitemap`, served by server.mjs).
                 if c.level != Level::View || !c.file.contains('[') {
-                    self.push("B0117", *span, "`paths()` only exists in dynamic views (`views/…/[id].brain`)", "remove it, or move it to the `[param].brain` view whose pages it lists");
+                    self.push("B0117", *span, &format!("`{name}()` only exists in dynamic views (`views/…/[id].brain`)"), "remove it, or move it to the `[param].brain` view whose pages it lists");
+                } else if name == "sitemap" && c.script.iter().any(|t| exports_fn(t, "paths")) {
+                    // paths() prerenders the pages and lists them in the build's sitemap; sitemap() is for views that
+                    // render at request time. Both would list the same pages twice under two contracts.
+                    self.push("B0117", *span, "a view exports both `paths()` and `sitemap()`", "keep `paths()` to prerender the pages (they are already in the sitemap), or remove it and keep `sitemap()` to render them at request time");
                 }
                 self.server_fn(f);
                 continue;
@@ -783,7 +788,7 @@ impl<'a> Checker<'a> {
                 }
             }
             Stmt::Export { decl, span } => {
-                let is_load = matches!(decl.as_ref(), Stmt::Func(f) if f.name.as_ref().is_some_and(|n| n.name == "load" || n.name == "paths"));
+                let is_load = matches!(decl.as_ref(), Stmt::Func(f) if f.name.as_ref().is_some_and(|n| matches!(n.name.as_str(), "load" | "paths" | "sitemap")));
                 // `load` outside a view is B0117.
                 if self.c.kind != FileKind::Module && !is_load {
                     self.push_edits("B0120", *span, "`export` only exists in `.jsbrain` modules", "remove `export`: a .brain only exports its component; shared code goes in `lib/x.jsbrain`", vec![(span.start, decl.span().start, String::new())]);
@@ -2550,4 +2555,9 @@ fn provided_names_in(src: &str) -> HashSet<String> {
             (!n.is_empty()).then_some(n)
         })
         .collect()
+}
+
+/// `export [async] function <name>(…)` at the top of a script.
+fn exports_fn(s: &Stmt, name: &str) -> bool {
+    matches!(s, Stmt::Export { decl, .. } if matches!(decl.as_ref(), Stmt::Func(f) if f.name.as_ref().is_some_and(|n| n.name == name)))
 }

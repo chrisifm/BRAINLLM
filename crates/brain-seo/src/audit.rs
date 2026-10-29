@@ -385,9 +385,10 @@ pub fn matches_pattern(pattern: &str, path: &str) -> bool {
             .all(|(x, y)| x.starts_with(':') && !y.is_empty() || x == y)
 }
 
-/// Whether a page is meant to rank: not noindex, not canonicalized to another URL, not a staging build.
+/// Whether a page is meant to rank: not the not-found page (`*`) or another special page (`!…`), not noindex, not
+/// canonicalized to another URL, not a staging build.
 pub fn indexable(cfg: &Config, route: &str, doc: &Doc) -> bool {
-    if cfg.staging
+    if route == "*" || route.starts_with('!') || cfg.staging
         || doc
             .meta("robots")
             .is_some_and(|r| r.to_ascii_lowercase().contains("noindex"))
