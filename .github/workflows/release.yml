@@ -109,6 +109,8 @@ jobs:
           path: pkgs
           run-id: ${{ inputs.artifact_run || github.run_id }}
           github-token: ${{ github.token }}
+      # npm Trusted Publishing (OIDC, no stored token) needs npm >= 11.5.1; Node 22 ships npm 10
+      - run: npm install -g npm@^11.5.1 && npm --version
       # platform packages first, so the launcher's optional dependencies exist when it appears
       - run: |
           for f in pkgs/christianirack-brainllm-*-*.tgz; do case "$f" in *runtime*) ;; *) npm publish "./$f" --provenance --access public ;; esac; done
