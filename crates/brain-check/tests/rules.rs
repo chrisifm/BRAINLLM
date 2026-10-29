@@ -155,3 +155,21 @@ fn navigation_through_location() {
     let d = diags("<script>\n  const go = () => location.assign('https://x.dev')\n  const r = route()\n  const n = () => navigate('/account')\n</script>\n<button on:click={go}>{r.params.id}</button><button on:click={n}>A</button>\n");
     assert!(d.iter().all(|d| d.code == "B0501"), "{d:?}");
 }
+
+#[test]
+fn replacing_form_fields() {
+    let diags = |src: &str| {
+        let c = brain_parse::parse(src, Path::new("comp/job-form.brain")).unwrap();
+        brain_check::check(&c, &Ctx::default())
+    };
+    let d = diags("<script>\n  let f = form({ title: 'str!' }, { submit: async (v) => v })\n  mounted(() => { f.v = { title: 'Draft' } })\n</script>\n<form on:submit={f.submit}><input aria-label=\"Title\" bind:value={f.v.title}><button>Save</button></form>\n");
+    let b: Vec<_> = d.iter().filter(|d| d.code == "B0133").collect();
+    assert_eq!(b.len(), 1, "{d:?}");
+    assert_eq!(b[0].edits[0].text, "f.reset({ title: 'Draft' })");
+    let d = diags("<script>\n  let f = form({ title: 'str!' }, { submit: async (v) => v })\n  const clear = () => { f.err = {} }\n</script>\n<form on:submit={f.submit}><input aria-label=\"Title\" bind:value={f.v.title}><button on:click={clear}>Save</button></form>\n");
+    let b: Vec<_> = d.iter().filter(|d| d.code == "B0133").collect();
+    assert!(b.len() == 1 && b[0].edits.is_empty(), "{d:?}");
+    // writing one field, f.reset() and an unrelated `x.v = …` are fine
+    let d = diags("<script>\n  let f = form({ title: 'str!' }, { submit: async (v) => v })\n  let box = { v: 1 }\n  mounted(() => { f.v.title = 'Draft'; f.reset({ title: 'Draft' }); box.v = 2 })\n</script>\n<form on:submit={f.submit}><input aria-label=\"Title\" bind:value={f.v.title}><button>Save</button></form>\n");
+    assert!(!d.iter().any(|d| d.code == "B0133"), "{d:?}");
+}

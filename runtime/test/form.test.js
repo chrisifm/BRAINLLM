@@ -264,3 +264,53 @@ test('QA #157: with JS, form() matches the no-JS flow: a { redirect } navigates;
   await own.submit()
   assert.equal(own.error, 'Pick a date first') // the author's own message stays
 })
+
+test('F10: replacing f.v or f.err throws an actionable error; the fields stay bound and reset() loads values', async () => {
+  let sent = null
+  const f = form({ email: 'email!', name: 'str' }, { submit: async v => (sent = v) })
+  const live = f.v
+  assert.throws(() => (f.v = { email: 'a@b.co', name: 'Ada' }), /f\.v.*cannot be replaced.*form\(schema, \{ init \}\).*f\.reset\(values\)/)
+  assert.throws(() => (f.err = {}), /f\.err.*cannot be replaced/)
+  assert.equal(f.v, live) // still the object the inputs are bound to
+  f.reset({ email: 'a@b.co', name: 'Ada' })
+  await f.submit()
+  assert.deepEqual(sent, { email: 'a@b.co', name: 'Ada' }) // the loaded values reach submit, no 'Required'
+  assert.equal(f.err.email, '')
+})
+
+test('F12: validation messages come from the page dictionary (form.* keys) and fall back to English', async () => {
+  const c = (r, v) => check(rule(r), v)
+  ;(globalThis.__brainDict ||= {}).xx = {
+    'form.required': 'Needed here',
+    'form.min_chars': { one: 'One character minimum', other: '{n} characters minimum' },
+    'form.item': 'Entry {n}: {error}',
+    'form.error': 'The server failed',
+  }
+  globalThis.__brainLocale = 'xx'
+  try {
+    assert.equal(c('str!', ''), 'Needed here')
+    assert.equal(c('bool!', false), 'Needed here')
+    assert.equal(c('str>=3', 'ab'), '3 characters minimum') // plural object chosen by n
+    assert.equal(c('str>=1', ''), '') // optional and empty
+    assert.equal(c('[str!]', ['ok', '']), 'Entry 2: Needed here')
+    assert.equal(c('email', 'a@b'), 'Enter a valid email') // key missing: English text
+    const f = form({ name: 'str!' }, { submit: async () => { throw Object.assign(new Error('x'), { status: 500 }) } })
+    await f.submit()
+    assert.equal(f.err.name, 'Needed here')
+    f.v.name = 'Ada'
+    await f.submit()
+    assert.equal(f.error, 'The server failed')
+  } finally {
+    delete globalThis.__brainDict.xx
+    globalThis.__brainLocale = null
+  }
+  assert.equal(c('str!', ''), 'Required')
+})
+
+test('f.errors(map) marks server errors on fields after submit (the API the B0133 fix points to)', () => {
+  const f = form({ email: 'email!', age: 'num' })
+  f.errors({ email: 'Taken', nope: 'ignored' })
+  assert.equal(f.err.email, 'Taken')
+  assert.equal(f.err.age, '')
+  assert.equal(f.err.nope, undefined)
+})

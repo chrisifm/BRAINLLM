@@ -1,0 +1,8 @@
+<script>
+  let f = form({ title: 'str!' }, { submit: async (v) => v })
+  mounted(() => { f.v = { title: 'Draft' } })
+</script>
+<form on:submit={f.submit}>
+  <input aria-label="Title" bind:value={f.v.title}>
+  <button>Save</button>
+</form>

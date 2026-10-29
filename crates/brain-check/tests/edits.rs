@@ -35,6 +35,10 @@ fn mechanical_fixes_apply() {
     let c = Ctx::default();
     assert_eq!(fixed("comp/x.brain", "<script>var n = 1</script><p>{n}</p>", &c, "B0103"), "<script>let n = 1</script><p>{n}</p>");
     assert_eq!(
+        fixed("comp/x.brain", "<script>let f = form({ a: 'str' })\nmounted(() => { f.v = { a: 'x' } })</script><input aria-label=\"A\" bind:value={f.v.a}>", &c, "B0133"),
+        "<script>let f = form({ a: 'str' })\nmounted(() => { f.reset({ a: 'x' }) })</script><input aria-label=\"A\" bind:value={f.v.a}>"
+    );
+    assert_eq!(
         fixed("comp/x.brain", "<script>let xs = sig([])</script>{#each xs as it}<p>{it.name}</p>{/each}", &c, "B0202"),
         "<script>let xs = sig([])</script>{#each xs as it (it.id)}<p>{it.name}</p>{/each}"
     );

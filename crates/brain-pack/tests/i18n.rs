@@ -9,12 +9,14 @@ fn app() -> PathBuf {
     std::fs::create_dir_all(d.join("views")).unwrap();
     std::fs::create_dir_all(d.join("i18n")).unwrap();
     std::fs::write(d.join("brain.json"), "{\"name\":\"x\",\"i18n\":{\"default\":\"en\",\"locales\":[\"en\",\"es\",\"ar\"]}}").unwrap();
-    std::fs::write(d.join("i18n/en.json"), "{\n  \"home.title\": \"Welcome\",\n  \"home.count\": { \"one\": \"{n} click\", \"other\": \"{n} clicks\" },\n  \"about.title\": \"About us\",\n  \"unused\": \"Never shipped\"\n}\n").unwrap();
-    std::fs::write(d.join("i18n/es.json"), "{\n  \"home.title\": \"Welcome [es]\",\n  \"home.count\": { \"one\": \"{n} click [es]\", \"other\": \"{n} clicks [es]\" },\n  \"about.title\": \"About us [es]\",\n  \"unused\": \"Never [es]\"\n}\n").unwrap();
+    std::fs::write(d.join("i18n/en.json"), "{\n  \"home.title\": \"Welcome\",\n  \"home.count\": { \"one\": \"{n} click\", \"other\": \"{n} clicks\" },\n  \"about.title\": \"About us\",\n  \"unused\": \"Never shipped\",\n  \"form.required\": \"Required [en]\"\n}\n").unwrap();
+    std::fs::write(d.join("i18n/es.json"), "{\n  \"home.title\": \"Welcome [es]\",\n  \"home.count\": { \"one\": \"{n} click [es]\", \"other\": \"{n} clicks [es]\" },\n  \"about.title\": \"About us [es]\",\n  \"unused\": \"Never [es]\",\n  \"form.required\": \"Required [es]\"\n}\n").unwrap();
     std::fs::write(d.join("i18n/ar.json"), "{\n  \"home.title\": \"Welcome [ar]\",\n  \"home.count\": { \"one\": \"{n} click [ar]\", \"other\": \"{n} clicks [ar]\" },\n  \"about.title\": \"About us [ar]\",\n  \"unused\": \"x\"\n}\n").unwrap();
     std::fs::write(d.join("app.brain"), "<html lang=\"en\"><head><meta charset=\"utf-8\"><title>App</title></head><body><slot /></body></html>").unwrap();
     std::fs::write(d.join("views/home.brain"), "<meta seo title=\"Home\" description=\"Home\">\n<script>let n = sig(1)</script>\n<main><h1>{t('home.title')}</h1><button on:click={() => n++}>{t('home.count', { n })}</button></main>").unwrap();
     std::fs::write(d.join("views/about.brain"), "<meta seo title=\"About\" description=\"About\">\n<meta route es=\"/es/about-us\">\n<main><h1>{t('about.title')}</h1></main>").unwrap();
+    // a form with no t() call: its validation messages still need the form.* keys (F12)
+    std::fs::write(d.join("views/join.brain"), "<meta seo title=\"Join\" description=\"Join\">\n<script>let f = form({ email: 'email!' }, { submit: async (v) => v })</script>\n<main><h1>Join</h1><form on:submit={f.submit}><input aria-label=\"Email\" bind:value={f.v.email}><p>{f.err.email}</p><button>Join</button></form></main>").unwrap();
     d.canonicalize().unwrap()
 }
 
@@ -52,7 +54,7 @@ fn one_page_per_locale_with_its_dictionary() {
         progress: None,
         post: None,
     };
-    let views = vec![("/".to_string(), "views/home.brain".to_string()), ("/about".to_string(), "views/about.brain".to_string())];
+    let views = vec![("/".to_string(), "views/home.brain".to_string()), ("/about".to_string(), "views/about.brain".to_string()), ("/join".to_string(), "views/join.brain".to_string())];
     let out = brain_pack::build(&input, &views, &|_| vec![], &|_| vec![]).unwrap_or_else(|e| panic!("{e}"));
     let routes: Vec<&str> = out.pages.iter().map(|p| p.route.as_str()).collect();
     for r in ["/", "/about", "/es", "/es/about-us", "/ar", "/ar/about"] {
@@ -69,7 +71,11 @@ fn one_page_per_locale_with_its_dictionary() {
     let dict = es.split("<script type=\"module\">import\"").nth(1).expect("dictionary import").split('"').next().unwrap();
     assert!(dict.contains("/_b/i18n-home-es."), "{dict}");
     let d = &out.files[dict.trim_start_matches('/')];
-    assert!(d.contains("\"home.title\":\"Welcome [es]\"") && d.contains("\"home.count\"") && !d.contains("unused") && !d.contains("about.title"), "{d}");
+    assert!(d.contains("\"home.title\":\"Welcome [es]\"") && d.contains("\"home.count\"") && !d.contains("unused") && !d.contains("about.title") && !d.contains("form."), "{d}");
+    // a page that validates gets the form.* messages of its locale (F12)
+    let join = out.files.iter().find(|(k, _)| k.starts_with("_b/i18n-join-es.")).expect("join dictionary").1;
+    assert!(join.contains("\"form.required\":\"Required [es]\"") && !join.contains("home.title"), "{join}");
+    assert!(out.files["es/join/index.html"].contains("/_b/i18n-join-es."), "the page loads it");
     let ard = out.files.iter().find(|(k, _)| k.starts_with("_b/i18n-home-ar.")).unwrap().1;
     assert!(ard.contains("Welcome [ar]") && ard.contains("add(\"ar\""), "{ard}");
     // the static about page ships no dictionary
