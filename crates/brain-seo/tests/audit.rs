@@ -436,6 +436,35 @@ fn finish_adds_structured_data() {
 }
 
 #[test]
+fn schema_meta_becomes_json_ld() {
+    let dir = fresh_dir("schema-meta");
+    let mut pages = good_site();
+    pages[1].html = pages[1].html.replace(
+        "</head>",
+        "<meta name=\"schema\" content=\"Article\"></head>",
+    );
+    pages[1].lastmod = Some("2026-10-01".into());
+    finish(&cfg(), &dir, &mut pages, &[], &[]).unwrap();
+    let html = &pages[1].html;
+    assert!(!html.contains("name=\"schema\""), "{html}");
+    let ld = brain_seo::html::parse(html).jsonld.join("\n");
+    assert!(
+        ld.contains("\"@type\":\"Article\",\"headline\":\"Pricing — Acme offline task planner for teams\"")
+            && ld.contains("\"url\":\"https://acme.dev/pricing\"")
+            && ld.contains("\"dateModified\":\"2026-10-01\""),
+        "{ld}"
+    );
+    assert_eq!(
+        brain_seo::jsonld::declared_types(&brain_seo::html::parse(html))
+            .iter()
+            .filter(|t| *t == "Article")
+            .count(),
+        1
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn invalid_author_json_ld_is_reported() {
     let c = cfg();
     let mut pages = good_site();

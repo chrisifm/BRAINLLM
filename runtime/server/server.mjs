@@ -918,7 +918,8 @@ function head(page, seo, path) {
     h = rx.test(h) ? h.replace(rx, () => tag) : h.replace('</head>', () => tag + '</head>')
   }
   for (const [k, v] of Object.entries(seo)) {
-    if (v == null || k === '$head') continue
+    // `schema` becomes JSON-LD below and `lastmod` feeds it: neither is a meta tag (prerender seo_head does the same)
+    if (v == null || k === '$head' || k === 'schema' || k === 'lastmod') continue
     if (k === 'title') h = /<title>[\s\S]*?<\/title>/i.test(h) ? h.replace(/<title>[\s\S]*?<\/title>/i, () => `<title>${esc(v)}</title>`) : h.replace('</head>', () => `<title>${esc(v)}</title></head>`)
     else if (k === 'canonical') {
       const tag = `<link rel="canonical" href="${esc(v)}">`
@@ -927,6 +928,21 @@ function head(page, seo, path) {
     } else if (k === 'jsonld') h = h.replace('</head>', () => `<script type="application/ld+json">${jsonInHtml(v)}</script></head>`)
     else if (/^(og|twitter|article):/.test(k)) meta('property', k, v)
     else if (typeof v === 'string') meta('name', k, v)
+  }
+  // `<meta seo schema="Article">` without `jsonld` (§32): one node with this request's values. It replaces the node
+  // the build wrote into the template from the static attributes (same @type), so the page carries exactly one.
+  if (typeof seo.schema === 'string' && seo.jsonld == null && /^[A-Za-z]+$/.test(seo.schema)) {
+    const T = seo.schema
+    const canon = /<link[^>]*rel=["']canonical["'][^>]*href="([^"]*)"/i.exec(h)
+    const node = { '@context': 'https://schema.org', '@type': T }
+    if (seo.title != null) node[/^(Article|BlogPosting|NewsArticle|TechArticle|Report)$/.test(T) ? 'headline' : 'name'] = String(seo.title).slice(0, 110)
+    if (seo.description != null) node.description = String(seo.description)
+    if (canon) node.url = canon[1].replace(/&amp;/g, '&')
+    if (seo['og:image'] != null) node.image = String(seo['og:image']).replace(/^\/(?!\/)/, () => (canon && /^https?:\/\/[^/]+/.exec(node.url) || [''])[0] + '/')
+    if (seo.lastmod != null) node.dateModified = String(seo.lastmod)
+    const own = new RegExp(`<script[^>]*type=["']application/ld\\+json["'][^>]*>\\s*\\{"@context":"https://schema\\.org","@type":"${T}"[\\s\\S]*?</script>`, 'i')
+    const tag = `<script type="application/ld+json">${jsonInHtml(node)}</script>`
+    h = own.test(h) ? h.replace(own, () => tag) : h.replace('</head>', () => tag + '</head>')
   }
   if (seo.$head) {
     for (const [, attr, key] of seo.$head.matchAll(/<meta[^>]*\b(property|name)=["']([^"']+)["'][^>]*>/gi))

@@ -596,6 +596,16 @@ pub fn finish_with_og(
                 .iter()
                 .map(jsonld::script)
                 .collect();
+        // `<meta name="schema" content="T">` left in the page: JSON-LD instead of a meta tag (SPEC «SEO»)
+        if let Some(node) = jsonld::schema_shortcut(cfg, &route, d, p.lastmod.as_deref()) {
+            let declared = jsonld::declared_types(d);
+            if node.get("@type").and_then(Json::as_str).is_some_and(|t| !declared.iter().any(|h| h == t)) {
+                end_tags.push_str(&jsonld::script(&node));
+            }
+        }
+        if d.meta("schema").is_some() {
+            p.html = jsonld::drop_schema_meta(&p.html);
+        }
         end_tags.push_str(&social_end);
         if cfg.markdown && indexable {
             end_tags.push_str(&format!(

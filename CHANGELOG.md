@@ -33,6 +33,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 - An app whose name is a runtime helper (`brain new t`) builds again: a word `t` in server text or `logout(` no
   longer imports brain-i18n.js on the server.
+- `<meta seo schema="Article">` on an SSR page becomes one JSON-LD node built from that request's title,
+  description, canonical, `og:image` and `lastmod`; `brain start` used to write a `<meta name="schema">` tag and keep
+  the build's stale node. The build's node now carries `headline` for article types, `image` and `dateModified`, and a
+  leftover `<meta name="schema">` (a view's own `<head>` block) is turned into JSON-LD by the SEO step.
 
 ## [0.2.0] - 2026-10-29
 

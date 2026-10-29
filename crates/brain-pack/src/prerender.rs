@@ -523,15 +523,24 @@ pub fn seo_head(seo: &[(String, String)], site: Option<&str>, route: &str, gener
         let ld = if ld.ends_with(",}") { ld.replace(",}", "}") } else { ld };
         h.push_str(&format!("<script type=\"application/ld+json\">{}</script>", ld.replace("</", "<\\/")));
     } else if let Some(schema) = get("schema") {
+        // `schema="Article"` (SPEC «SEO»): the page's own values; article types need `headline` (server.mjs head()
+        // writes the same node for SSR pages and replaces this one, so keep the prefix `{"@context":…,"@type":"T"`)
         let mut ld = format!("{{\"@context\":\"https://schema.org\",\"@type\":{}", json_str(schema));
         if let Some(t) = &title {
-            ld.push_str(&format!(",\"name\":{}", json_str(t)));
+            let key = if matches!(schema, "Article" | "BlogPosting" | "NewsArticle" | "TechArticle" | "Report") { "headline" } else { "name" };
+            ld.push_str(&format!(",\"{key}\":{}", json_str(&t.chars().take(110).collect::<String>())));
         }
         if let Some(d) = get("description") {
             ld.push_str(&format!(",\"description\":{}", json_str(d)));
         }
         if let Some(c) = &canonical {
             ld.push_str(&format!(",\"url\":{}", json_str(c)));
+        }
+        if let Some(img) = get("og:image") {
+            ld.push_str(&format!(",\"image\":{}", json_str(&abs(img))));
+        }
+        if let Some(d) = get("lastmod") {
+            ld.push_str(&format!(",\"dateModified\":{}", json_str(d)));
         }
         ld.push('}');
         h.push_str(&format!("<script type=\"application/ld+json\">{}</script>", ld.replace("</", "<\\/")));
@@ -657,6 +666,21 @@ mod tests {
         assert!(o.contains("<title>View</title>") && !o.contains("<title>App</title>"), "{o}");
         assert!(o.contains("content=\"view\"") && !o.contains("content=\"app\""), "{o}");
         assert!(o.contains("hreflang=\"es\"") && o.contains("hreflang=\"en\"") && o.contains("/a.css"), "{o}");
+    }
+
+    #[test]
+    fn schema_shortcut_is_a_complete_node() {
+        let kv = |p: &[(&str, &str)]| p.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect::<Vec<_>>();
+        let seo = kv(&[("title", "Offline first"), ("description", "Why offline"), ("schema", "Article"), ("og:image", "/c.png"), ("lastmod", "2026-10-01")]);
+        let (_, h) = seo_head(&seo, Some("https://acme.dev"), "/blog/offline", "");
+        assert!(!h.contains("name=\"schema\"") && !h.contains("name=\"lastmod\""), "{h}");
+        assert!(
+            h.contains(r#"<script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Offline first","description":"Why offline","url":"https://acme.dev/blog/offline","image":"https://acme.dev/c.png","dateModified":"2026-10-01"}</script>"#),
+            "{h}"
+        );
+        // non-article types keep `name`
+        let (_, h) = seo_head(&kv(&[("title", "Tasks"), ("schema", "WebApplication")]), None, "/", "");
+        assert!(h.contains(r#""@type":"WebApplication","name":"Tasks""#), "{h}");
     }
 
     #[test]

@@ -983,7 +983,10 @@ specified elsewhere; ➕ = new in this section.
 ## 32. Dynamic metadata, generated SEO files and WebMCP (fixed 2026-10-13, dynamic sitemap 2026-10-29)
 **Metadata (COMPILER + TOOLCHAIN + RUNTIME)**
 - `<meta seo>` attributes accept expressions over `props` (the `load` result); `jsonld={obj}` serializes to
-  `<script type="application/ld+json">` (escaped `</`), and `schema="Article"` stays a shortcut. `app.brain`'s
+  `<script type="application/ld+json">` (escaped `</`), and `schema="Article"` stays a shortcut: one node of that
+  type from the page's title (`headline` for article types, else `name`), description, canonical, `og:image` and
+  `lastmod`, written by prerender `seo_head` and, for SSR pages, by server.mjs `head()`, which replaces the template's
+  node; never a `<meta name="schema">` (fixed 2026-10-29). `app.brain`'s
   `<meta seo>` holds site defaults (`titleTemplate`, `og:image`, `twitter`, `locale`); views override per page.
 - A view may contain a `<head>` block for anything else (alternate hreflang, preload, custom meta). Merged into the
   document head at SSR/prerender; deduplicated by `name`/`property`/`rel+hreflang`; on client navigation the router

@@ -240,6 +240,65 @@ pub fn article(cfg: &Config, route: &str, a: &Article) -> Json {
     Json::Obj(kv)
 }
 
+/// Article types whose name property is `headline` (the `schema="T"` shortcut fills it from the title).
+pub(crate) const ARTICLES: &[&str] = &["Article", "BlogPosting", "NewsArticle", "TechArticle", "Report"];
+
+/// `<meta seo schema="T">` left as `<meta name="schema" content="T">` (a view's own `<head>` block, an older build):
+/// the node it stands for, from the page's title, description, canonical, og:image and `lastmod`. None for anything
+/// that is not a plain type name.
+pub fn schema_shortcut(cfg: &Config, route: &str, doc: &Doc, lastmod: Option<&str>) -> Option<Json> {
+    let t = doc.metas.iter().find_map(|m| {
+        crate::html::attr(m, "name")
+            .filter(|n| n.eq_ignore_ascii_case("schema"))
+            .and_then(|_| crate::html::attr(m, "content"))
+    })?;
+    if t.is_empty() || !t.chars().all(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    let mut kv = vec![("@context".to_string(), s(CONTEXT)), ("@type".into(), s(t))];
+    if let Some(title) = doc.title.as_deref().filter(|x| !x.trim().is_empty()) {
+        let key = if ARTICLES.contains(&t) { "headline" } else { "name" };
+        kv.push((key.into(), s(&title.chars().take(110).collect::<String>())));
+    }
+    if let Some(d) = doc.meta("description") {
+        kv.push(("description".into(), s(d)));
+    }
+    if cfg.site.is_some() {
+        kv.push(("url".into(), s(&cfg.abs(route))));
+    }
+    if let Some(i) = doc.meta("og:image") {
+        kv.push(("image".into(), s(&cfg.abs(i))));
+    }
+    if let Some(d) = lastmod {
+        kv.push(("dateModified".into(), s(d)));
+    }
+    Some(Json::Obj(kv))
+}
+
+/// Removes every `<meta name="schema" …>` (the shortcut is never a meta tag in the output; `schema_shortcut` turns
+/// it into JSON-LD).
+pub fn drop_schema_meta(html: &str) -> String {
+    let lower = html.to_ascii_lowercase(); // same byte offsets as `html`
+    let mut out = String::with_capacity(html.len());
+    let mut at = 0;
+    while let Some(i) = lower[at..].find("<meta").map(|i| at + i) {
+        let Some(end) = lower[i..].find('>').map(|e| i + e + 1) else { break };
+        let tag = &html[i..end];
+        let doc = crate::html::parse(&format!("<head>{tag}</head>"));
+        let is_schema = doc
+            .metas
+            .iter()
+            .any(|m| crate::html::attr(m, "name").is_some_and(|n| n.eq_ignore_ascii_case("schema")));
+        out.push_str(&html[at..i]);
+        if !is_schema {
+            out.push_str(tag);
+        }
+        at = end;
+    }
+    out.push_str(&html[at..]);
+    out
+}
+
 /// Automatic blocks for one page, skipping any type the author already declared.
 pub fn auto(
     cfg: &Config,
