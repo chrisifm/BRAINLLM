@@ -584,6 +584,9 @@ fn build_inner(
     // views whose server module exports something the build evaluates (seo/head/paths), and those with paths()
     let mut has_server: HashSet<String> = HashSet::new();
     let mut has_paths: HashSet<String> = HashSet::new();
+    // dynamic views that list their pages at request time (`export async function sitemap()`): server.mjs adds them to
+    // /sitemap.xml
+    let mut has_sitemap: HashSet<String> = HashSet::new();
     // views whose forms post to a `server:` function (`export const $forms`, §38): server.mjs handles their POST
     let mut has_forms: HashSet<String> = HashSet::new();
     // views whose `load` only reads collections (#273): their data is fixed at build time, so they are prerendered
@@ -674,6 +677,9 @@ fn build_inner(
                     }
                     if u.server_js.contains("function paths(") {
                         has_paths.insert(rel.clone());
+                    }
+                    if u.server_js.contains("function sitemap(") {
+                        has_sitemap.insert(rel.clone());
                     }
                     if content_only_load(&u.server_js) {
                         content_load.insert(rel.clone());
@@ -1523,6 +1529,9 @@ fn build_inner(
                     let not_found = server_src.get(view.as_str()).is_some_and(|(_, sjs, _)| sjs.contains("notFound: true"));
                     if needs_server.contains(*view) && static_seo(&src) && !not_found {
                         chain.push_str(",\"stream\":true");
+                    }
+                    if has_sitemap.contains(*view) && routes::is_dynamic(&p.route) {
+                        chain.push_str(",\"sitemap\":true");
                     }
                     chain.push_str(&format!(",\"links\":\"{LINKS}{}\"", p.file));
                     if let Some(loc) = locale_of.get(&p.route) {

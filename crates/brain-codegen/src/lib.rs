@@ -1028,9 +1028,9 @@ fn generate_server(g: &mut Gen, c: &Component, opts: &Options) -> (String, Vec<S
     (format!("{content}{i18n}{imports}{body}"), fns)
 }
 
-/// `load` and `paths` (§32) run on the server only.
+/// `load`, `paths` and `sitemap` (§32) run on the server only.
 fn is_load(decl: &Stmt) -> bool {
-    matches!(decl, Stmt::Func(f) if f.name.as_ref().is_some_and(|n| n.name == "load" || n.name == "paths"))
+    matches!(decl, Stmt::Func(f) if f.name.as_ref().is_some_and(|n| matches!(n.name.as_str(), "load" | "paths" | "sitemap")))
 }
 
 /// `{ "title": …, "og:image": …, "jsonld": … }` from `<meta seo>` (the `seo` flag itself excluded).

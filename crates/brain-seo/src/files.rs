@@ -309,6 +309,26 @@ fn section(route: &str) -> String {
     }
 }
 
+/// Heading of a route's llms.txt section: the title of the section's own page (`/cases` titled «Customer stories» for
+/// `/cases/x`), which carries the wording, accents and casing the folder name lacks; else [`section`].
+fn section_title(route: &str, entries: &[Entry], site: &str) -> String {
+    let segs: Vec<&str> = route.split('/').filter(|s| !s.is_empty()).collect();
+    if let [first, _, ..] = segs.as_slice() {
+        let own = format!("/{first}");
+        if let Some(t) = entries
+            .iter()
+            .find(|e| e.route == own.as_str() || e.route == format!("{own}/"))
+            .and_then(|e| e.doc.title.clone())
+        {
+            let t = one_line(&strip_site(&t, site));
+            if !t.is_empty() {
+                return t;
+            }
+        }
+    }
+    section(route)
+}
+
 /// A page title without the site suffix a title template adds (`Pricing · Acme` → `Pricing`): llms.txt already
 /// names the site once, so repeating it on every line is noise for the model reading it.
 pub fn strip_site(title: &str, site_name: &str) -> String {
@@ -337,8 +357,9 @@ pub fn llms_txt(cfg: &Config, entries: &[Entry]) -> String {
     let mut groups: Vec<(String, Vec<&Entry>)> = Vec::new();
     let mut list: Vec<&Entry> = entries.iter().filter(|e| e.indexable).collect();
     list.sort_by(|a, b| (a.route != "/", a.route).cmp(&(b.route != "/", b.route)));
+    let site = site_name(cfg, entries);
     for e in list {
-        let s = section(e.route);
+        let s = section_title(e.route, entries, &site);
         match groups.iter_mut().find(|(g, _)| *g == s) {
             Some((_, v)) => v.push(e),
             None => groups.push((s, vec![e])),
@@ -348,10 +369,7 @@ pub fn llms_txt(cfg: &Config, entries: &[Entry]) -> String {
     for (g, list) in groups {
         o.push_str(&format!("\n## {g}\n\n"));
         for e in list {
-            let title = strip_site(
-                &e.doc.title.clone().unwrap_or_else(|| e.route.to_string()),
-                &site_name(cfg, entries),
-            );
+            let title = strip_site(&e.doc.title.clone().unwrap_or_else(|| e.route.to_string()), &site);
             let link = if cfg.markdown {
                 cfg.abs(&format!("/{}", encode_path(&md_path(e.route))))
             } else {
@@ -615,6 +633,41 @@ mod tests {
         assert_eq!(robots(&staging), "User-agent: *\nDisallow: /\n");
         assert!(sitemaps(&staging, &e).is_empty());
         assert!(sitemaps(&Config::default(), &e).is_empty());
+    }
+
+    #[test]
+    fn llms_sections_take_the_section_page_title() {
+        let cfg = Config {
+            site: Some("https://acme.dev".into()),
+            ..Config::default()
+        };
+        let d: Vec<(String, Doc)> = [
+            ("/", "<html><head><title>Acme</title></head><body><main><h1>Acme</h1></main></body></html>"),
+            ("/cases", "<html><head><title>Customer stories · Acme</title></head><body><main><h1>Customer stories</h1></main></body></html>"),
+            ("/cases/acme-labs", "<html><head><title>Acme Labs · Acme</title></head><body><main><h1>Acme Labs</h1></main></body></html>"),
+            ("/job-board/a", "<html><head><title>A</title></head><body><main><h1>A</h1></main></body></html>"),
+        ]
+        .iter()
+        .map(|(r, h)| (r.to_string(), parse(h)))
+        .collect();
+        let e = entries(&cfg, &d);
+        let txt = llms_txt(&cfg, &e);
+        assert!(txt.contains("\n## Customer stories\n\n- [Acme Labs](https://acme.dev/cases/acme-labs.md)"), "{txt}");
+        assert!(!txt.contains("## Cases"), "{txt}");
+        // without a page of its own, the folder name stays the heading
+        assert!(txt.contains("\n## Job board\n"), "{txt}");
+    }
+
+    #[test]
+    fn the_not_found_page_is_never_indexable() {
+        let cfg = Config {
+            site: Some("https://acme.dev".into()),
+            ..Config::default()
+        };
+        let d = parse("<html><head><title>Not found</title><meta name=description content='Lost'></head><body><main><h1>Lost</h1></main></body></html>");
+        assert!(!crate::audit::indexable(&cfg, "*", &d));
+        assert!(!crate::audit::indexable(&cfg, "!error:views/_error.brain", &d));
+        assert!(crate::audit::indexable(&cfg, "/lost", &d));
     }
 
     #[test]

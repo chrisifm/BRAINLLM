@@ -490,6 +490,59 @@ export function createServer(o = {}) {
     plain(r.status, r.body.error, r.headers)
   }
 
+  // ---------- dynamic sitemap (§32) ----------
+  // A dynamic view without paths() can export `sitemap()` (manifest route `sitemap: true`): it returns the params of its
+  // pages, plus an optional `lastmod`, at request time. /sitemap.xml is the build's file with those URLs added (a sitemap
+  // index gets one more child, /sitemap-dynamic.xml). Absolute URLs take the origin of the build's sitemap (brain.json
+  // `site`); a build without a sitemap serves none. The list is kept 5 min; a sitemap() that throws is logged and skipped.
+  const DYN = routes.filter(r => r.sitemap && r.server)
+  let dynList = null
+  const fill = (pattern, p) => {
+    let ok = true
+    const out = pattern.replace(/([:*])(\w+)/g, (_, k, n) => {
+      const v = p && p[n]
+      if (v == null || v === '') return (ok = false), ''
+      return k === '*' ? String(v).split('/').map(encodeURIComponent).join('/') : encodeURIComponent(String(v))
+    })
+    return ok ? out : null
+  }
+  const day = v => (v instanceof Date ? v.toISOString().slice(0, 10) : typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? v : null)
+  async function dynamicUrls(origin) {
+    if (dynList && Date.now() - dynList.at < 300000) return dynList.urls
+    const urls = []
+    for (const r of DYN) {
+      try {
+        const sm = await load(r.server)
+        const list = typeof sm.sitemap === 'function' ? await withTimeout(Promise.resolve().then(() => sm.sitemap({ env })), TIMEOUT) : []
+        for (const p of Array.isArray(list) ? list : []) {
+          const path = fill(r.path, p)
+          if (path && urls.length < 50000) urls.push({ loc: origin + withBase(path), lastmod: day(p.lastmod) })
+        }
+      } catch (e) {
+        log('error', 'sitemap() failed', { view: r.view, stack: String((e && e.stack) || e) })
+      }
+    }
+    dynList = { at: Date.now(), urls }
+    return urls
+  }
+  async function serveSitemap(req, res, url) {
+    const f = file('/sitemap.xml')
+    if (!f) return false
+    const text = readFileSync(f, 'utf8')
+    const origin = [...text.matchAll(/<loc>(https?:\/\/[^<]+)<\/loc>/g)].map(m => URL.canParse(m[1]) && new URL(m[1]).origin).find(Boolean)
+    if (!origin) return false
+    const index = text.includes('<sitemapindex')
+    if (url.pathname === '/sitemap-dynamic.xml' && !index) return false
+    const set = (await dynamicUrls(origin)).map(u => `  <url><loc>${esc(u.loc)}</loc>${u.lastmod ? `<lastmod>${esc(u.lastmod)}</lastmod>` : ''}</url>\n`).join('')
+    const out = url.pathname === '/sitemap-dynamic.xml'
+      ? `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${set}</urlset>\n`
+      : index
+        ? text.replace('</sitemapindex>', `  <sitemap><loc>${esc(origin + withBase('/sitemap-dynamic.xml'))}</loc></sitemap>\n</sitemapindex>`)
+        : text.replace('</urlset>', set + '</urlset>')
+    send(res, 200, req.method === 'HEAD' ? '' : out, { 'content-type': MIME['.xml'], 'cache-control': 'public, max-age=3600' })
+    return true
+  }
+
   // ---------- static ----------
   function serveStatic(req, res, url) {
     let p = decodeURIComponent(url.pathname)
@@ -562,6 +615,7 @@ export function createServer(o = {}) {
         return await (post ? formPost : ssr)(req, res, route, m.groups ? { ...m.groups } : {}, url, rid)
       }
       if (post) return send(res, 405, 'Method not allowed', { allow: 'GET, HEAD' })
+      if (DYN.length && (url.pathname === '/sitemap.xml' || url.pathname === '/sitemap-dynamic.xml') && (await serveSitemap(req, res, url))) return
       if (serveStatic(req, res, url)) return
       notFound(req, res)
     } catch (e) {

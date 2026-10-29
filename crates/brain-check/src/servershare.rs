@@ -65,7 +65,7 @@ fn is_server_fn(s: &Stmt) -> Option<&Func> {
     match s {
         Stmt::Server { func, .. } => Some(func),
         Stmt::Export { decl, .. } => match decl.as_ref() {
-            Stmt::Func(f) if f.name.as_ref().is_some_and(|n| matches!(n.name.as_str(), "load" | "paths")) => Some(f),
+            Stmt::Func(f) if f.name.as_ref().is_some_and(|n| matches!(n.name.as_str(), "load" | "paths" | "sitemap")) => Some(f),
             _ => None,
         },
         _ => None,

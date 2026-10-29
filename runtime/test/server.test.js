@@ -56,6 +56,10 @@ export async function slow() { return new Promise(() => {}) }
 export async function boom() { throw new Error('secret stack detail') }
 export async function invalid() { throw Object.assign(new Error('Invalid input'), { errors: { email: 'Already taken' } }) }
 `)
+w('_server/offers.mjs', `export async function load(ctx) { return { id: ctx.params.slug, name: ctx.params.slug } }
+export async function sitemap(ctx) { return [{ slug: 'a b', lastmod: '2026-10-01' }, { slug: ctx.env.APP_NAME }, { other: 1 }] }
+`)
+w('sitemap.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>https://x.test/about</loc></url>\n</urlset>\n')
 w('_server/pages/user.html', '<!doctype html><html><head><title>Default</title><meta name="description" content="default"></head><body><div id="brain-view"><!--brain:ssr--><script type="module">mountView()</script></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
 w('_server/job.mjs', `export async function load(ctx) { return { id: ctx.params.slug, name: ctx.params.slug } }
 export const seo = p => ({ title: 'Job ' + p.name, canonical: p.name === 'canon' ? 'https://x.test/c/1' : undefined, $head: '<meta property="og:type" content="article">' })`)
@@ -79,6 +83,7 @@ w('_server/manifest.json', JSON.stringify({
     { path: '/users/:id', rx: '^/users/(?<id>(?![_.])[^/\\\\]+)/?$', view: '/_b/view.js', layouts: [], server: '_server/user.mjs', page: '_server/pages/user.html' },
     { path: '/tags/:t', rx: '^/tags/(?<t>(?![_.])[^/\\\\]+)/?$', view: '/_b/plain.js', layouts: [], server: '_server/tag.mjs', page: '_server/pages/tag.html' },
     { path: '/jobs/:slug', rx: '^/jobs/(?<slug>(?![_.])[^/\\\\]+)/?$', view: '/_b/view.js', layouts: [], server: '_server/job.mjs', page: '_server/pages/job.html' },
+    { path: '/offers/:slug', rx: '^/offers/(?<slug>(?![_.])[^/\\\\]+)/?$', view: '/_b/view.js', layouts: [], server: '_server/offers.mjs', page: '_server/pages/user.html', sitemap: true },
     { path: '/docs/*rest', rx: '^/docs/(?<rest>(?![_.])[^/\\\\]+(?:/(?![_.])[^/\\\\]+)*)/?$', view: '/_b/view.js', layouts: [], server: '_server/docs.mjs', page: '_server/pages/user.html' },
   ],
   rpc: { abc: '_server/rpc1.mjs' },
@@ -292,4 +297,16 @@ test('F5: an SSR route answers with its real URL in canonical and og:url, and a 
   assert.match(t, /<link rel="canonical" href="https:\/\/x\.test\/search\?a=1&amp;b=2">/)
   assert.ok(!t.includes('&amp;amp;'), t)
   assert.match(t, /<meta property="og:url" content="https:\/\/x\.test\/tags\/rust">/)
+})
+
+test('sitemap.xml: a dynamic view without paths() adds the pages its sitemap() lists at request time', async () => {
+  const r = await get('/sitemap.xml')
+  assert.equal(r.status, 200)
+  assert.match(r.headers.get('content-type'), /xml/)
+  const x = await r.text()
+  assert.ok(x.includes('<url><loc>https://x.test/about</loc></url>'), x)
+  assert.ok(x.includes('<url><loc>https://x.test/offers/a%20b</loc><lastmod>2026-10-01</lastmod></url>'), x)
+  assert.ok(x.includes('<url><loc>https://x.test/offers/shop</loc></url>'), x) // sitemap() gets ctx.env
+  assert.ok(!x.includes('undefined') && x.trim().endsWith('</urlset>'), x)
+  assert.equal((await get('/sitemap-dynamic.xml')).status, 404) // only a sitemap index gets that child
 })
