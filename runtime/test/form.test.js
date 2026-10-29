@@ -306,3 +306,11 @@ test('F12: validation messages come from the page dictionary (form.* keys) and f
   }
   assert.equal(c('str!', ''), 'Required')
 })
+
+test('f.errors(map) marks server errors on fields after submit (the API the B0133 fix points to)', () => {
+  const f = form({ email: 'email!', age: 'num' })
+  f.errors({ email: 'Taken', nope: 'ignored' })
+  assert.equal(f.err.email, 'Taken')
+  assert.equal(f.err.age, '')
+  assert.equal(f.err.nope, undefined)
+})
