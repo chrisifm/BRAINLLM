@@ -38,6 +38,19 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   `brain start` and the static server, with `Vary: Accept`; browsers still get HTML. `seo.markdown=false` turns it off
   together with the `.md` copies.
 
+- Every built page names what built it: `<meta name="generator">` is followed by a comment with the BRAINLLM home page
+  and repository, llms.txt and llms-full.txt end with a `## Built with` section, and `brain start` answers with
+  `X-Powered-By: BRAINLLM (https://chrisifm.github.io/BRAINLLM/)`.
+- `rss.xml`, a site-wide feed like WordPress `/feed`, plus `<section>/rss.xml` for every section without a content
+  collection, and `sections.json`, one manifest of every section with its title, description, home page, feed and pages
+  (URL, Markdown copy, lastmod). Every page links both. On by default; `seo.feed` and `seo.sections` turn them off.
+- Predictive prefetch in the client router: internal links that scroll into view are fetched while the browser is
+  idle, hover, focus or touch fetch a link first, and the next navigation swaps from memory with the page's chunks
+  already preloaded. `data-prefetch="false"`, `<meta name="brain-prefetch" content="off">` and Save-Data turn it off.
+- `ai`, a primitive for Chrome's built-in AI (Gemini Nano): `ai.ready()`, `ai.prompt`, `ai.stream`, `ai.session`,
+  `ai.summarize`, `ai.translate`, `ai.detect`, `ai.write`, `ai.rewrite` and `ai.proofread`, feature-detected and
+  `'unavailable'` in other browsers and on the server. `brain guide ai` covers when and how to use it.
+
 ### Fixed
 
 - `brain seo audit` reads each view's `keyword`, so it reports the same B1816 findings as `brain build`.

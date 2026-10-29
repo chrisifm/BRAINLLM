@@ -533,6 +533,8 @@ The `.brain` author writes nothing different: the compiler or the runtime applie
 | View Transitions (same document) | Baseline 2025: Chrome 111+, Firefox 144+, Safari 18+ | RUNTIME | animated transition between views in the router |
 | `@view-transition` (cross-document) | Chrome 126+, Safari 18.2+; Firefox no | COMPILER | transition between prerendered pages |
 | Speculation Rules | Chrome 109+; Safari 26.2 behind flag (prefetch only); Firefox no | TOOLCHAIN | prerender of the probable route |
+| Predictive prefetch (IntersectionObserver + `requestIdleCallback` + `fetch priority: 'low'`) | Baseline (idle callback: Safari no, `setTimeout` fallback) | RUNTIME router | links in view are fetched while idle (2 at a time, 12 per view), hover/focus/touch first; the next navigation swaps from memory and its chunks get `modulepreload`. Off: `router({ prefetch: false })`, `<meta name="brain-prefetch" content="off">`, `data-prefetch="false"`; skips Save-Data/2G and log-out paths; `private` pages kept 30 s, others 5 min; requests carry `x-brain-prefetch: 1` (2026-10-29) |
+| Built-in AI: Prompt API, Summarizer, Translator, LanguageDetector, Writer, Rewriter, Proofreader | Chrome 138+ (Summarizer, Translator, LanguageDetector stable; Prompt API origin trial on the web, stable in extensions; the rest trials); other browsers no | RUNTIME `brain-ai.js` (`ai` primitive) | on-device Gemini Nano; `ai.ready()` answers 'unavailable' where absent and calls throw `code: 'unavailable'` (`brain guide ai`, docs checked 2026-10-29) |
 | `103 Early Hints` | Chrome 103+, Firefox 120+, Safari 17+ (HTTP/2+) | TOOLCHAIN | preload before the response |
 | Explicit compile hints `//# allFunctionsCalledOnLoad` | Chrome 136+ | COMPILER | only in the initial chunk of each view; never in deferred chunks |
 | Compression Dictionary Transport (`dcz`, RFC 9842) | Chrome 130+ | TOOLCHAIN | the previous build serves as dictionary: a returning user downloads only the delta; fallback gz/br |
@@ -1014,7 +1016,15 @@ Google can read their `noindex`, and are left out of the sitemap, like the not-f
 `paths()`; `lastmod` = the collection frontmatter date or `<meta seo lastmod="YYYY-MM-DD">`, omitted when there is no
 date, never the file mtime: invariant 8, deterministic builds), llms.txt (site name, description, every page with title, URL and
 description; a section is headed by its own page's title, `/cases` → «Customer stories», else the folder name), llms-full.txt (each page's prerendered main text as Markdown), manifest.webmanifest (name, colors from
-tokens, icons the author provides in `public/`; sizes are checked, not generated). All configurable in `brain.json`.
+tokens, icons the author provides in `public/`; sizes are checked, not generated)., rss.xml (the site feed, like
+WordPress `/feed`: every indexable page, newest `lastmod` first, 50 items, `<generator>`) and `<section>/rss.xml` for each
+section without a content collection (a collection keeps its richer RSS + Atom at the same path), sections.json (the
+manifest: site, generator, discovery files and every section with title, description, home page, feed and its pages
+with URL, Markdown copy and lastmod; `crates/brain-seo/src/sections.rs`). Every page gets `<link rel="alternate">` to
+`/rss.xml` and `/sections.json`; `seo.feed: false` / `seo.sections: false` turn them off. Attribution: next to
+`<meta name="generator">` each page carries `<!-- Built with BRAINLLM x.y.z … Home … Source … -->`, llms.txt and
+llms-full.txt end with `## Built with`, and `brain start` sends `X-Powered-By: BRAINLLM (<home>)` (2026-10-29).
+All configurable in `brain.json`.
 **Google tags**: from `brain.json` `"google"` only. Analytics/Tag Manager are injected with the CSP nonce and Consent
 Mode v2 defaulting to denied until the app calls `consent('analytics')`; site verification becomes the meta tag.
 **WebMCP (agent tools)** — support verified 2026-10-13: Chrome origin trial (149+), API name moving from
