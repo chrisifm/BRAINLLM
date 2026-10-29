@@ -8,6 +8,9 @@ A page feels slow, a build reports a budget, a list is long, or before shipping 
 - Views render on the server or at build; JS hydrates only what is interactive. Minify, mangle, dead-code removal and
   `log()` stripping happen in `brain build` with no flags.
 - Hashed immutable assets, a service worker and an in-memory `resource()` cache (`brain guide data`).
+- Predictive prefetch: internal links that scroll into view are fetched while the browser is idle, and hover or
+  focus moves a link to the front, so the next view swaps without waiting. `data-prefetch="false"` on a link (or an
+  ancestor) skips it; log-out paths, Save-Data and 2G are skipped by themselves.
 - Only the page's language is shipped (`brain guide i18n`). CSS is scoped per component.
 
 ## Steps

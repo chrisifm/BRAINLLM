@@ -600,3 +600,80 @@ test('#299: a form being submitted does not ask: its submit() may navigate on su
   globalThis.__brainDirty = new Set()
   r.stop()
 })
+
+test('predictive prefetch: visible links load while idle, intent jumps the queue, take() hands the page to the next navigation once', async () => {
+  globalThis.location = new URL('http://x.test/a')
+  const { predict } = await rt.sibling('brain-router.js')
+  const io = []
+  globalThis.IntersectionObserver = class {
+    constructor(f) {
+      this.f = f
+      io.push(this)
+    }
+    observe(el) {
+      ;(this.els ||= []).push(el)
+    }
+    unobserve() {}
+    disconnect() {}
+  }
+  globalThis.requestIdleCallback = f => setTimeout(f, 0)
+  const asked = []
+  const real = globalThis.fetch
+  globalThis.fetch = async (u, o) => (asked.push([new URL(u).pathname, o && o.headers && o.headers['x-brain-prefetch']]), real(u, o))
+  doc.body.textContent = ''
+  doc.body.innerHTML =
+    '<main><a href="/b">B</a><a href="/c">C</a><a href="/logout">Out</a><div data-prefetch="false"><a href="/m">M</a></div>' +
+    '<a href="https://other.test/x">X</a><a href="/a">Here</a><a href="/v" download>V</a></main>'
+  const p = predict({}, u => new URL(u).origin === 'http://x.test')
+  p.scan()
+  const links = io[0].els
+  io[0].f(links.map(target => ({ target, isIntersecting: true })))
+  await new Promise(r => setTimeout(r, 10))
+  assert.deepEqual(asked.map(a => a[0]).sort(), ['/b', '/c'])
+  assert.ok(asked.every(a => a[1] === '1'))
+  const r = await p.take('http://x.test/b#top')
+  assert.equal(await r.text(), pages['/b'])
+  assert.equal(await p.take('http://x.test/b'), null) // used once
+  // intent: hovering a link that was never visible fetches it at once
+  doc.body.innerHTML = '<main><a href="/login"><span>Sign in</span></a></main>'
+  doc.body.querySelector('span').dispatchEvent(Object.assign(new MouseEvent('pointerover', { bubbles: true })))
+  await new Promise(r => setTimeout(r, 10))
+  assert.ok(asked.some(a => a[0] === '/login'))
+  p.stop()
+  globalThis.fetch = real
+  delete globalThis.IntersectionObserver
+  delete globalThis.requestIdleCallback
+})
+
+test('predictive prefetch: off by option, by meta, and stale private pages are not reused', async () => {
+  globalThis.location = new URL('http://x.test/a')
+  const { predict } = await rt.sibling('brain-router.js')
+  assert.equal(await predict({ prefetch: false }, () => true).take('http://x.test/b'), null)
+  const m = doc.createElement('meta')
+  m.setAttribute('name', 'brain-prefetch')
+  m.setAttribute('content', 'off')
+  doc.head.appendChild(m)
+  let hits = 0
+  const was = globalThis.fetch
+  globalThis.fetch = async () => (hits++, null)
+  doc.body.innerHTML = '<main><a href="/b">B</a></main>'
+  const q = predict({}, () => true)
+  doc.body.querySelector('a').dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 5))
+  assert.equal(hits, 0)
+  q.stop()
+  m.remove()
+  globalThis.fetch = was
+  const real = globalThis.fetch
+  globalThis.fetch = async () => ({ ok: true, status: 200, headers: { get: k => (k === 'content-type' ? 'text/html' : k === 'cache-control' ? 'private, no-store' : null) }, text: async () => '<main></main>' })
+  doc.body.innerHTML = '<main><a href="/b">B</a></main>'
+  const p = predict({}, () => true)
+  doc.body.querySelector('a').dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 5))
+  const now = Date.now
+  Date.now = () => now() + 31000
+  assert.equal(await p.take('http://x.test/b'), null)
+  Date.now = now
+  p.stop()
+  globalThis.fetch = real
+})

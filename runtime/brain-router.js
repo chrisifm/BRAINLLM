@@ -90,6 +90,7 @@ export function router(o = {}) {
   const region = o.region || 'main'
   const parse = o.parse || (h => new DOMParser().parseFromString(h, 'text/html'))
   let seq = 0, through = null, stale = false
+  const ahead = predict(o, u => same(u))
   // Build signature (§35.7): the page's <meta name="brain-build">. A navigation response from another build, or the
   // service worker announcing one, turns client navigation into full loads so old and new code never mix.
   const build = () => {
@@ -160,7 +161,7 @@ export function router(o = {}) {
       G.dispatchEvent && G.dispatchEvent(new Event('brain:navigate'))
     } catch {}
     try {
-      r = await fetch(url, { headers: { 'x-brain-nav': '1' } })
+      r = (await ahead.take(url)) || (await fetch(url, { headers: { 'x-brain-nav': '1' } }))
       const b = r.headers && r.headers.get && r.headers.get('x-brain-build')
       if (b && build() && b !== build()) return void (my === seq && hard(url)) // a new deploy: load it whole
       const ct = (r.headers && r.headers.get && r.headers.get('content-type')) || 'text/html'
@@ -222,6 +223,7 @@ export function router(o = {}) {
       if (pb && document.head) document.head.appendChild(document.adoptNode ? document.adoptNode(pb) : pb)
       routed()
       current()
+      ahead.scan()
     }
     if (document.startViewTransition) {
       const vt = document.startViewTransition(swap)
@@ -267,10 +269,11 @@ export function router(o = {}) {
       })
     }
     nav.addEventListener('navigate', h)
+    ahead.scan()
     return (active = {
       go: (u, how) => nav.navigate(app(u), how === 'replace' ? { history: 'replace' } : undefined),
       check,
-      stop: () => ((active = null), nav.removeEventListener('navigate', h), sw && sw.removeEventListener && sw.removeEventListener('message', onMsg)),
+      stop: () => ((active = null), ahead.stop(), nav.removeEventListener('navigate', h), sw && sw.removeEventListener && sw.removeEventListener('message', onMsg)),
     })
   }
 
@@ -311,11 +314,132 @@ export function router(o = {}) {
   }
   document.addEventListener('click', click)
   G.addEventListener && G.addEventListener('popstate', pop)
+  ahead.scan()
   return (active = {
     go: (u, push = true) => go(app(u), push),
     check,
-    stop: () => ((active = null), document.removeEventListener('click', click), G.removeEventListener && G.removeEventListener('popstate', pop)),
+    stop: () => ((active = null), ahead.stop(), document.removeEventListener('click', click), G.removeEventListener && G.removeEventListener('popstate', pop)),
   })
+}
+
+// Predictive prefetch (§19, 2026-10-29): no dead time during a visit. Every internal link that scrolls into view is
+// fetched in the background while the browser is idle (at most 2 at a time, 12 per page), and hovering, focusing or
+// touching a link moves it to the front of the queue. The fetched page is kept in memory and the next navigation to it
+// swaps without waiting for the network; its module chunks get `<link rel=modulepreload>` so the view mounts at once.
+// The current view never waits: requests run at low priority and only when idle. Skipped: Save-Data and 2G (only
+// intent prefetches there, and never with Save-Data), `data-prefetch="false"` on the link or an ancestor, download or
+// target links, log-out style paths, and everything with `router({ prefetch: false })` or
+// `<meta name="brain-prefetch" content="off">`. A page served `private`/`no-store` is reused for 30 s, others for 5 min.
+// Each fetch says `x-brain-prefetch: 1`, so a server can tell it apart from a click.
+const FRESH = 300000, FRESH_PRIVATE = 30000, MAX_PAGE = 12, PARALLEL = 2
+const NOPE = /(^|\/)(log-?out|sign-?out|logoff)(\/|$)/i
+export function predict(o = {}, same = () => false) {
+  const off = { scan() {}, stop() {}, take: async () => null }
+  const meta = G.document && document.querySelector && document.querySelector('meta[name=brain-prefetch]')
+  if (o.prefetch === false || (meta && /^(off|false|0)$/i.test(meta.getAttribute('content') || '')) || !G.document || !G.fetch) return off
+  const net = G.navigator && navigator.connection
+  const thin = () => !!net && (net.saveData || /(^|-)2g$/.test(net.effectiveType || ''))
+  const cache = new Map(), queue = [], seen = new Set(), pre = new Set()
+  let busy = 0, count = 0, io = null, idle = 0
+  const key = h => {
+    try {
+      const u = new URL(h, location.href)
+      u.hash = ''
+      return u.href
+    } catch {
+      return null
+    }
+  }
+  const ok = a => {
+    if (!a || !a.getAttribute || !a.getAttribute('href') || a.getAttribute('target') || a.hasAttribute('download')) return null
+    for (let n = a; n && n.getAttribute; n = n.parentNode) if (n.getAttribute('data-prefetch') === 'false') return null
+    const k = key(a.href || a.getAttribute('href'))
+    if (!k || !same(k) || NOPE.test(new URL(k).pathname) || k === key(location.href)) return null
+    return k
+  }
+  // the next page's chunks: module scripts and static imports in its HTML
+  const chunks = html => {
+    if (!document.head) return
+    const re = /<script[^>]+type="module"[^>]+src="([^"]+)"|\bfrom\s*"([^"]+\.js)"|\bimport\(\s*"([^"]+\.js)"\s*\)/g
+    let m, n = 0
+    while ((m = re.exec(html)) && n < 8) {
+      const u = key(m[1] || m[2] || m[3])
+      if (!u || pre.has(u) || !same(u)) continue
+      pre.add(u), n++
+      const l = document.createElement('link')
+      l.setAttribute('rel', 'modulepreload')
+      l.setAttribute('href', u)
+      document.head.appendChild(l)
+    }
+  }
+  const get = k => {
+    const at = Date.now()
+    const p = fetch(k, { headers: { 'x-brain-nav': '1', 'x-brain-prefetch': '1' }, priority: 'low', credentials: 'same-origin' })
+      .then(async r => {
+        const ct = (r.headers && r.headers.get && r.headers.get('content-type')) || 'text/html'
+        if (!r.ok || !/html/.test(ct)) return null
+        const text = await r.text()
+        chunks(text)
+        const cc = (r.headers.get && r.headers.get('cache-control')) || ''
+        // a stand-in for the Response that load() reads: headers, status, redirect and the body once per use
+        return { ok: r.ok, status: r.status, redirected: r.redirected, url: r.url, headers: r.headers, text: async () => text, ttl: /private|no-store/i.test(cc) ? FRESH_PRIVATE : FRESH }
+      })
+      .catch(() => null)
+    cache.set(k, { at, p })
+    return p
+  }
+  const pump = () => {
+    while (busy < PARALLEL && queue.length) {
+      const k = queue.shift()
+      if (cache.has(k)) continue
+      busy++
+      get(k).finally(() => (busy--, pump()))
+    }
+  }
+  const later = f => (G.requestIdleCallback ? G.requestIdleCallback(f, { timeout: 2000 }) : setTimeout(f, 200))
+  const want = (k, now) => {
+    if (!k || cache.has(k)) return
+    const i = queue.indexOf(k)
+    if (i >= 0) queue.splice(i, 1)
+    if (now) queue.unshift(k), pump()
+    else if (count < MAX_PAGE) count++, queue.push(k), idle || (idle = 1) && later(() => ((idle = 0), pump()))
+  }
+  const intent = e => {
+    if (net && net.saveData) return
+    let a = e.target
+    while (a && a.tagName !== 'A') a = a.parentNode
+    want(ok(a), true)
+  }
+  const evs = ['pointerover', 'focusin', 'touchstart']
+  for (const t of evs) document.addEventListener(t, intent, { passive: true, capture: true })
+  if (G.IntersectionObserver)
+    io = new IntersectionObserver(
+      es => {
+        for (const e of es) if (e.isIntersecting) io.unobserve(e.target), thin() || want(ok(e.target), false)
+      },
+      { rootMargin: '200px' }
+    )
+  return {
+    scan() {
+      count = 0
+      queue.length = 0 // the previous view's links are no longer the likely next step
+      if (!io) return
+      for (const a of document.querySelectorAll('a[href]')) if (!seen.has(a)) seen.add(a), io.observe(a)
+    },
+    stop() {
+      io && io.disconnect()
+      for (const t of evs) document.removeEventListener(t, intent, { capture: true })
+      cache.clear()
+    },
+    // the prefetched page for this URL when it is still fresh (used once: a later visit fetches again)
+    async take(u) {
+      const k = key(u), c = k && cache.get(k)
+      if (!c) return null
+      cache.delete(k)
+      const r = await c.p
+      return r && Date.now() - c.at < r.ttl ? r : null
+    },
+  }
 }
 
 const HOLD = ['click', 'submit']
