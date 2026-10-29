@@ -151,3 +151,93 @@ pub fn manifest(cfg: &Config, entries: &[Entry], secs: &[Section], feeds: &[Stri
     kv.push(("sections".into(), Json::Arr(list)));
     Json::Obj(kv).stringify() + "\n"
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::html::{Doc, parse};
+
+    fn docs() -> Vec<(String, Doc)> {
+        [
+            ("/", "<html><head><title>Acme</title><meta name=description content='Tools for teams'></head><body><main><h1>Acme</h1></main></body></html>"),
+            ("/about", "<html><head><title>About</title></head><body><main><h1>About</h1></main></body></html>"),
+            ("/blog", "<html><head><title>Blog</title><meta name=description content='Notes from the team'></head><body><main><h1>Blog</h1></main></body></html>"),
+            ("/blog/a", "<html><head><title>First</title><meta name=description content='The first one'></head><body><main><h1>First</h1></main></body></html>"),
+            ("/blog/b", "<html><head><title>Second</title></head><body><main><h1>Second</h1></main></body></html>"),
+            ("/admin", "<html><head><title>Admin</title><meta name=robots content=noindex></head><body><main><h1>Admin</h1></main></body></html>"),
+        ]
+        .iter()
+        .map(|(r, h)| (r.to_string(), parse(h)))
+        .collect()
+    }
+
+    fn entries<'a>(cfg: &Config, d: &'a [(String, Doc)]) -> Vec<Entry<'a>> {
+        d.iter()
+            .map(|(r, doc)| Entry {
+                route: r,
+                url: cfg.abs(r),
+                doc,
+                lastmod: match r.as_str() {
+                    "/blog/a" => Some("2026-10-01"),
+                    "/blog/b" => Some("2026-10-20"),
+                    _ => None,
+                },
+                indexable: r != "/admin",
+                alternates: vec![],
+                videos: vec![],
+            })
+            .collect()
+    }
+
+    fn cfg() -> Config {
+        Config {
+            site: Some("https://acme.dev".into()),
+            built_with: Some(("BRAINLLM 0.3.0".into(), "https://brain.example/".into(), "https://git.example/brain".into())),
+            ..Config::default()
+        }
+    }
+
+    #[test]
+    fn pages_group_by_first_segment_with_their_section_home() {
+        let (c, d) = (cfg(), docs());
+        let e = entries(&c, &d);
+        let s = sections(&e, "Acme");
+        let ids: Vec<&str> = s.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["", "blog"]); // `/about` has no nested pages: it stays a top-level page; noindex is out
+        let routes = |i: usize| s[i].pages.iter().map(|e| e.route).collect::<Vec<_>>();
+        assert_eq!(routes(0), ["/", "/about"]);
+        assert_eq!(routes(1), ["/blog", "/blog/a", "/blog/b"]);
+        assert_eq!(s[1].home.map(|h| h.route), Some("/blog"));
+        assert_eq!((feed_path(""), feed_path("blog")), ("rss.xml".to_string(), "blog/rss.xml".to_string()));
+    }
+
+    #[test]
+    fn rss_lists_newest_first_and_names_the_generator() {
+        let (c, d) = (cfg(), docs());
+        let e = entries(&c, &d);
+        let s = sections(&e, "Acme");
+        let x = rss(&c, "Acme — Blog", "Notes", "/blog", "/blog/rss.xml", &s[1].pages).unwrap();
+        assert!(x.contains("<atom:link href=\"https://acme.dev/blog/rss.xml\" rel=\"self\""), "{x}");
+        assert!(x.contains("<generator>BRAINLLM 0.3.0</generator>"));
+        let (b, a) = (x.find("<title>Second</title>").unwrap(), x.find("<title>First</title>").unwrap());
+        assert!(b < a, "newest lastmod first: {x}");
+        assert!(x.contains("<description>The first one</description>"));
+        // feed readers need absolute URLs: no site, no feed
+        assert!(rss(&Config::default(), "t", "d", "/", "/rss.xml", &s[1].pages).is_none());
+    }
+
+    #[test]
+    fn manifest_lists_every_section_and_only_feeds_that_exist() {
+        let (c, d) = (cfg(), docs());
+        let e = entries(&c, &d);
+        let s = sections(&e, "Acme");
+        let j = Json::parse(&manifest(&c, &e, &s, &["blog/rss.xml".into()])).unwrap();
+        assert_eq!(j.get("generator").and_then(|g| g.get("source")).and_then(Json::as_str), Some("https://git.example/brain"));
+        let Some(Json::Arr(secs)) = j.get("sections") else { panic!("no sections") };
+        assert_eq!(secs.len(), 2);
+        assert!(matches!(secs[0].get("feed"), Some(Json::Null)), "the root feed was not written");
+        assert_eq!(secs[1].get("feed").and_then(Json::as_str), Some("https://acme.dev/blog/rss.xml"));
+        assert_eq!(secs[1].get("description").and_then(Json::as_str), Some("Notes from the team"));
+        assert!(matches!(secs[1].get("pages"), Some(Json::Arr(p)) if p.len() == 3));
+    }
+}
