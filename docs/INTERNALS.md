@@ -533,7 +533,7 @@ The `.brain` author writes nothing different: the compiler or the runtime applie
 | View Transitions (same document) | Baseline 2025: Chrome 111+, Firefox 144+, Safari 18+ | RUNTIME | animated transition between views in the router |
 | `@view-transition` (cross-document) | Chrome 126+, Safari 18.2+; Firefox no | COMPILER | transition between prerendered pages |
 | Speculation Rules | Chrome 109+; Safari 26.2 behind flag (prefetch only); Firefox no | — (removed 2026-10-29) | the router intercepts every click, so a prerender was never used; the router's predictive prefetch replaces it |
-| Predictive prefetch (IntersectionObserver + `requestIdleCallback` + `fetch priority: 'low'`) | Baseline (idle callback: Safari no, `setTimeout` fallback) | RUNTIME router | links in view are fetched while idle (2 at a time, 12 per view), hover/focus/touch first; the next navigation swaps from memory and its chunks get `modulepreload`. Off: `router({ prefetch: false })`, `<meta name="brain-prefetch" content="off">`, `data-prefetch="false"`; skips Save-Data/2G and log-out paths; `private` pages kept 30 s, others 5 min; requests carry `x-brain-prefetch: 1` (2026-10-29) |
+| Predictive prefetch (IntersectionObserver + `requestIdleCallback` + `fetch priority: 'low'`) | Baseline (idle callback: Safari no, `setTimeout` fallback) | RUNTIME router | links in view are fetched while idle (2 at a time, 12 per view), hover/focus/touch first; the next navigation swaps from memory and its chunks get `modulepreload`. Off: `router({ prefetch: false })`, `<meta name="brain-prefetch" content="off">`, `data-prefetch="false"`; skips Save-Data/2G, files, `/api/`, `/auth/`, log-out, unsubscribe and confirm paths and URLs with a token; any write (form submit, `api()` write, server function) forgets every fetched page; `private` pages kept 30 s, others 5 min; requests carry `x-brain-prefetch: 1` (`ctx.prefetch`) (2026-10-29) |
 | Built-in AI: Prompt API, Summarizer, Translator, LanguageDetector, Writer, Rewriter, Proofreader | Chrome 138+ (Summarizer, Translator, LanguageDetector stable; Prompt API origin trial on the web, stable in extensions; the rest trials); other browsers no | RUNTIME `brain-ai.js` (`ai` primitive) | on-device Gemini Nano; `ai.ready()` answers 'unavailable' where absent and calls throw `code: 'unavailable'` (`brain guide ai`, docs checked 2026-10-29) |
 | `103 Early Hints` | Chrome 103+, Firefox 120+, Safari 17+ (HTTP/2+) | TOOLCHAIN | preload before the response |
 | Explicit compile hints `//# allFunctionsCalledOnLoad` | Chrome 136+ | COMPILER | only in the initial chunk of each view; never in deferred chunks |
@@ -1220,7 +1220,7 @@ impossible while developing.
   error at compile time. The service worker is the framework's own use of workers.
 
 **6. Loading extras that also help the first visit** (mostly in place: §13, §19, §32)
-- Exact `modulepreload` per view, critical CSS inline, `103 Early Hints`, Speculation Rules prefetch of the probable
+- Exact `modulepreload` per view, critical CSS inline, `103 Early Hints`, the router's predictive prefetch of the
   next route, bfcache-safe pages (B0211), `<link rel="preconnect">` for every third-party origin in the CSP,
   `font-display: swap` plus a `preload` of the fonts the first screen uses, `fetchpriority="high"` on the LCP image,
   lazy images with dimensions (B1821).
@@ -1526,7 +1526,8 @@ initial value; `persist` and `sync` work for both.
   background requests yield to user actions, and navigation aborts the previous route's low-priority requests.
 - No waterfalls: `load` with independent awaits is a warning (B1106) with an edit to `Promise.all`; every
   `resource()` of a view starts in parallel at mount, and the router prefetches the next route's `load` data on
-  hover/viewport (Speculation Rules for documents, `api` prefetch for SPA navigation).
+  hover/viewport (the router's own background fetch; Speculation Rules were removed because the router intercepts
+  every click, so a browser prerender was never used).
 - After a write, every mounted `resource()` on the same path re-fetches by itself (a version signal per path), so
   screens never show stale lists; `refetch()` forces it.
 - Optimistic writes: `await todos.post(body, { optimistic: () => (list = [...list, body]) })` rolls back

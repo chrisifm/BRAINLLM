@@ -166,7 +166,7 @@ mod tests {
             ("/about", "<html><head><title>About</title></head><body><main><h1>About</h1></main></body></html>"),
             ("/blog", "<html><head><title>Blog</title><meta name=description content='Notes from the team'></head><body><main><h1>Blog</h1></main></body></html>"),
             ("/blog/a", "<html><head><title>First</title><meta name=description content='The first one'></head><body><main><h1>First</h1></main></body></html>"),
-            ("/blog/b", "<html><head><title>Second</title></head><body><main><h1>Second</h1></main></body></html>"),
+            ("/blog/b", "<html><head><title>Second · Acme</title></head><body><main><h1>Second</h1></main></body></html>"),
             ("/admin", "<html><head><title>Admin</title><meta name=robots content=noindex></head><body><main><h1>Admin</h1></main></body></html>"),
         ]
         .iter()
@@ -225,6 +225,7 @@ mod tests {
         let (b, a) = (x.find("<title>Second</title>").unwrap(), x.find("<title>First</title>").unwrap());
         assert!(b < a, "newest lastmod first: {x}");
         assert!(x.contains("<description>The first one</description>"));
+        assert!(!x.contains("Second · Acme"), "the site suffix is not part of an item title: {x}");
         // feed readers need absolute URLs: no site, no feed
         assert!(rss(&Config::default(), "t", "d", "/", "/rss.xml", &s[1].pages, "Acme").is_none());
     }

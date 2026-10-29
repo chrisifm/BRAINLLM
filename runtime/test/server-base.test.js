@@ -18,7 +18,7 @@ copyFileSync(join(here, '../shim/dom.js'), join(dist, '_server/dom.js'))
 w('_b/hello.js', `import { tpl } from '/app/_b/brain.js'\nexport default function Hello() { return tpl('<h1>Hello from the app</h1>')() }\n`)
 w('_b/post.js', `import { tpl, attr } from '/app/_b/brain.js'\nimport { route } from '/app/_b/brain-env.js'\nexport default function Post() { const r = route(), e = tpl('<p>' + [r.path, r.params.id, r.query.q].join(' ') + '<a>edit</a></p>')(); attr(e.lastChild, 'href', () => '/posts/' + r.params.id + '/edit'); return e }\n`)
 w('_server/guard.mjs', `export default () => ({ redirect: '/login' })`)
-w('_server/fns.mjs', `export async function ping(ctx, x) { return { pong: x, path: ctx.url.pathname } }`)
+w('_server/fns.mjs', `export async function ping(ctx, x) { return { pong: x, path: ctx.url.pathname, prefetch: ctx.prefetch } }`)
 w('_server/pages/p.html', '<!doctype html><html><head><title>t</title></head><body><div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
 w('index.html', '<!doctype html><title>Home</title><main>home</main>')
 w('index.md', '# Home')
@@ -59,7 +59,13 @@ test('pages, files and SSR under /app/; /app → 301; outside the base → 404; 
 test('RPC at /app/_r/ and app-path redirects get the base', async () => {
   const r = await fetch(base + '/app/_r/f/ping', { method: 'POST', headers: { 'x-brain-rpc': '1', origin: base, 'content-type': 'application/json' }, body: '[7]' })
   assert.equal(r.status, 200)
-  assert.equal((await r.json()).pong, 7)
+  const j = await r.json()
+  assert.equal(j.pong, 7)
+  assert.equal(j.prefetch, false)
+  // the router's background fetch says so (§19): ctx.prefetch lets a server skip side effects for a page nobody opened
+  const h = { 'x-brain-rpc': '1', 'x-brain-prefetch': '1', origin: base, 'content-type': 'application/json' }
+  const pre = await fetch(base + '/app/_r/f/ping', { method: 'POST', headers: h, body: '[7]' })
+  assert.equal((await pre.json()).prefetch, true)
   const g = await get('/app/private')
   assert.equal(g.status, 303)
   assert.equal(g.headers.get('location'), '/app/login')

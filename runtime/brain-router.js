@@ -335,7 +335,8 @@ export function router(o = {}) {
 // call, log-out included), so the next view never shows data from before the write or another session. Each fetch says
 // `x-brain-prefetch: 1` (`ctx.prefetch` in the server's `load`), so a server can tell it apart from a click.
 const FRESH = 300000, FRESH_PRIVATE = 30000, MAX_PAGE = 12, MAX_KEPT = 24, PARALLEL = 2
-const NOPE = /(^|\/)(log-?out|sign-?out|logoff|unsubscribe|confirm|verify|api|auth)(\/|$)|\.[a-z0-9]{2,5}$/i
+const NOPE = /(^|\/)(log-?out|sign-?out|logoff|unsubscribe|confirm|verify|api|auth)(\.html?)?(\/|$)/i
+const FILE = /\.(?!html?$)[a-z0-9]{2,5}$/i
 const SECRET = /(^|[?&])(token|code|key|sig|signature|auth|otp|state)=/i
 export function predict(o = {}, same = () => false) {
   const off = { scan() {}, stop() {}, take: async () => null }
@@ -360,7 +361,7 @@ export function predict(o = {}, same = () => false) {
     const k = key(a.href || a.getAttribute('href'))
     if (!k || !same(k) || k === key(location.href)) return null
     const u = new URL(k)
-    if ((NOPE.test(u.pathname) && !/\.html?$/i.test(u.pathname)) || SECRET.test(u.search)) return null
+    if (NOPE.test(u.pathname) || FILE.test(u.pathname) || SECRET.test(u.search)) return null
     return k
   }
   // the next page's chunks: module scripts and static imports in its HTML

@@ -694,11 +694,11 @@ test('predictive prefetch: action, file, api and token links are skipped; a writ
   })
   doc.body.innerHTML =
     '<main><a href="/unsubscribe">U</a><a href="/report.pdf">P</a><a href="/api/items">A</a><a href="/auth/google">G</a>' +
-    '<a href="/b?token=abc">T</a><a href="/c?page=2">C</a></main>'
+    '<a href="/logout.html">L</a><a href="/b?token=abc">T</a><a href="/docs/intro.html">D</a><a href="/c?page=2">C</a></main>'
   const p = predict({}, u => new URL(u).origin === 'http://x.test')
   for (const a of doc.body.querySelectorAll('a')) a.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
   await new Promise(r => setTimeout(r, 10))
-  assert.deepEqual(asked, ['/c?page=2'])
+  assert.deepEqual(asked.sort(), ['/c?page=2', '/docs/intro.html'])
   globalThis.dispatchEvent(new Event('brain:write'))
   assert.equal(await p.take('http://x.test/c?page=2'), null) // forgotten: it may show data from before the write
   doc.body.innerHTML = '<main><a href="/b">B</a><form></form></main>'
