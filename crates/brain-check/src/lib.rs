@@ -884,9 +884,13 @@ impl<'a> Checker<'a> {
             }
             return;
         }
-        // `redirect(url, status?)` / `deny(reason)` (§22): route guards, middleware and server code.
+        // `redirect(url, status?)` / `deny(reason)` (§22): route guards, middleware and server code; `notFound()` in
+        // server code (`load` answers a real 404).
         let route_file = self.c.file.rsplit('/').next().is_some_and(|f| f.starts_with("_guard.") || f.starts_with("_middleware."));
         if matches!(name, "redirect" | "deny") && (self.server_ctx || route_file) {
+            return;
+        }
+        if name == "notFound" && self.server_ctx {
             return;
         }
         if name == "import.meta" || (name == "process" && self.server_ctx) {

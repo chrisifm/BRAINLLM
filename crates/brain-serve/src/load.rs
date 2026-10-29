@@ -76,7 +76,8 @@ for await (const line of createInterface({ input: process.stdin })) {
     const v = await m[fn]({ ...ctx, env: process.env }, ...(args || []))
     out(`OK ${id} ${JSON.stringify(v ?? null)}\n`)
   } catch (e) {
-    if (e && e.errors && typeof e.errors === 'object') out(`BAD ${id} ${JSON.stringify({ error: e.message || 'Invalid input', errors: e.errors })}\n`)
+    if (e && e.notFound === true) out(`OK ${id} {"notFound":true,"status":404}\n`) // `throw notFound()`: answered as a 404 page
+    else if (e && e.errors && typeof e.errors === 'object') out(`BAD ${id} ${JSON.stringify({ error: e.message || 'Invalid input', errors: e.errors })}\n`)
     else out(`ERR ${id} ${JSON.stringify(String(e?.stack ?? e))}\n`)
   }
 }
@@ -345,6 +346,26 @@ mod tests {
         assert!(err.contains("Error: bad"), "{err}");
         std::fs::remove_dir_all(&d).unwrap();
     }
+    #[test]
+    fn sidecar_answers_not_found_from_load() {
+        if Command::new("node").arg("--version").output().is_err() {
+            return;
+        }
+        // F11: `throw notFound()` (compiled to this marker) and `return notFound()` both reach app_page as the 404 marker
+        let d = std::env::temp_dir().join(format!("brain-nf-load-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("nf.mjs");
+        std::fs::write(&f, "export async function load(ctx) { if (ctx.params.id === 'gone') throw ({ notFound: true, status: 404 }); if (ctx.params.id === 'ret') return ({ notFound: true, status: 404 }); return { id: ctx.params.id } }").unwrap();
+        let mut sc = Sidecar::spawn(&d, &[]).unwrap();
+        for id in ["gone", "ret"] {
+            let v = sc.call(&file_url(&f), "load", &format!("{{\"params\":{{\"id\":\"{id}\"}}}}")).unwrap();
+            assert!(v.starts_with("{\"notFound\":true"), "{id}: {v}");
+        }
+        assert_eq!(sc.call(&file_url(&f), "load", "{\"params\":{\"id\":\"7\"}}").unwrap(), "{\"id\":\"7\"}");
+        drop(sc);
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
     #[test]
     fn hung_load_is_killed_and_reaped_at_its_deadline() {
         let d = std::env::temp_dir().join(format!("brain-hung-load-{}", std::process::id()));

@@ -18,12 +18,19 @@ mkdirSync(join(dist, '_b'), { recursive: true })
 mkdirSync(join(dist, '_server', 'pages'), { recursive: true })
 copyFileSync(join(here, '../brain.js'), join(dist, '_b/core.js'))
 copyFileSync(join(here, '../shim/dom.js'), join(dist, '_server/dom.js'))
-w('_b/view.js', `import { tpl, insert } from '/_b/core.js'
-const t = tpl('<main><h1><!></h1><p>id <!></p><input></main>')
+w('_b/view.js', `import { tpl, insert, attr } from '/_b/core.js'
+const t = tpl('<main><h1><!></h1><p>id <!></p><select name="c"><option>All</option><option>Alpha</option></select><select name="d"><option>One</option><option>Two</option></select><input></main>')
 export default function User($p) {
-  const r = t(), h = r.firstChild, p = h.nextSibling
+  const r = t(), h = r.firstChild, p = h.nextSibling, s = p.nextSibling, s2 = s.nextSibling
   insert(null, () => $p.name, h.firstChild)
   insert(null, () => $p.id, p.lastChild)
+  // F9: <option value={o.value} selected={…}> and <select value={x}> as codegen emits them
+  attr(s.firstChild, 'value', () => '')
+  attr(s.lastChild, 'value', () => 'a')
+  attr(s.lastChild, 'selected', () => true)
+  attr(s2.firstChild, 'value', () => '1')
+  attr(s2.lastChild, 'value', () => '2')
+  attr(s2, 'value', () => '2')
   r.lastChild.value = $p.name
   return r
 }
@@ -34,6 +41,8 @@ w('_server/user.mjs', `export async function load(ctx) {
   if (id === 'slow') return new Promise(() => {})
   if (id === 'boom') throw new Error('db password is hunter2')
   if (id === 'private') return { redirect: '/login' }
+  if (id === 'gone') throw { notFound: true, status: 404 } // what \`throw notFound()\` compiles to (F11)
+  if (id === 'missing') return { notFound: true, status: 404 }
   return { id, name: 'Ada<b>', q: ctx.query.q || null, who: ctx.user && ctx.user.name }
 }
 `)
@@ -48,6 +57,15 @@ export async function boom() { throw new Error('secret stack detail') }
 export async function invalid() { throw Object.assign(new Error('Invalid input'), { errors: { email: 'Already taken' } }) }
 `)
 w('_server/pages/user.html', '<!doctype html><html><head><title>Default</title><meta name="description" content="default"></head><body><div id="brain-view"><!--brain:ssr--><script type="module">mountView()</script></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
+w('_server/job.mjs', `export async function load(ctx) { return { id: ctx.params.slug, name: ctx.params.slug } }
+export const seo = p => ({ title: 'Job ' + p.name, canonical: p.name === 'canon' ? 'https://x.test/c/1' : undefined, $head: '<meta property="og:type" content="article">' })`)
+w('_server/pages/job.html', '<!doctype html><html><head><title>Job</title><link rel="canonical" href="https://x.test/jobs/:slug"><meta property="og:url" content="https://x.test/jobs/:slug"><meta property="og:type" content="website"></head><body><div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
+w('_b/plain.js', `import { tpl, insert } from './core.js' // relative: the global /_b/ hook may point at another test's dist
+const t = tpl('<main><h1><!></h1></main>')
+export default function Plain($p) { const r = t(); insert(null, () => $p.name, r.firstChild.firstChild); return r }
+`)
+w('_server/tag.mjs', `export async function load(ctx) { return { id: ctx.params.t, name: ctx.params.t } }`)
+w('_server/pages/tag.html', '<!doctype html><html><head><title>Tag</title><link rel="canonical" href="https://x.test/search?a=1&amp;b=2"><meta property="og:url" content="https://x.test/tags/:t"></head><body><div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
 w('index.html', '<!doctype html><html><head><title>Home</title></head><body><main><h1>Home</h1></main><script type="module" src="/_b/app.js"></script></body></html>')
 w('about.html', '<!doctype html><title>About</title><main><h1>About</h1></main>')
 w('docs/index.html', '<!doctype html><title>Docs</title><main><h1>Docs</h1></main>')
@@ -59,6 +77,8 @@ w('_server/manifest.json', JSON.stringify({
   v: 1, build: 'b7c1', core: '/_b/core.js',
   routes: [
     { path: '/users/:id', rx: '^/users/(?<id>(?![_.])[^/\\\\]+)/?$', view: '/_b/view.js', layouts: [], server: '_server/user.mjs', page: '_server/pages/user.html' },
+    { path: '/tags/:t', rx: '^/tags/(?<t>(?![_.])[^/\\\\]+)/?$', view: '/_b/plain.js', layouts: [], server: '_server/tag.mjs', page: '_server/pages/tag.html' },
+    { path: '/jobs/:slug', rx: '^/jobs/(?<slug>(?![_.])[^/\\\\]+)/?$', view: '/_b/view.js', layouts: [], server: '_server/job.mjs', page: '_server/pages/job.html' },
     { path: '/docs/*rest', rx: '^/docs/(?<rest>(?![_.])[^/\\\\]+(?:/(?![_.])[^/\\\\]+)*)/?$', view: '/_b/view.js', layouts: [], server: '_server/docs.mjs', page: '_server/pages/user.html' },
   ],
   rpc: { abc: '_server/rpc1.mjs' },
@@ -81,6 +101,9 @@ test('SSR: params + query reach load, the view renders, props are embedded safel
   const h = await r.text()
   assert.match(h, /<h1>Ada&lt;b&gt;(<!---->)?<\/h1>/) // escaped interpolation from the real runtime
   assert.match(h, /<p>id 7(<!---->)?<\/p>/)
+  // F9: option values (including an empty one, serialized as a bare `value`) and the selected option are in the SSR HTML, so a GET form works before JS
+  assert.match(h, /<select name="c"><option value(?:="")?>All<\/option><option value="a" selected>Alpha<\/option><\/select>/)
+  assert.match(h, /<select name="d"><option value="1">One<\/option><option value="2" selected>Two<\/option><\/select>/)
   assert.match(h, /<input value="Ada&lt;b&gt;">|<input value="Ada<b>">/) // bind:value-like property copied to the attribute
   const props = JSON.parse(h.match(/id="brain-props">([^<]*)</)[1])
   assert.deepEqual(props, { id: '7', name: 'Ada<b>', q: 'x', who: null })
@@ -112,6 +135,12 @@ test('SSR: load timeout → 504 page, load error → generic 500 (stack only in 
   const red = await get('/users/private')
   assert.equal(red.status, 303)
   assert.equal(red.headers.get('location'), '/login')
+  // F11: notFound() from load → a real 404 with the app's 404 page, thrown or returned (no soft 404)
+  for (const id of ['gone', 'missing']) {
+    const nf = await get('/users/' + id)
+    assert.equal(nf.status, 404, id)
+    assert.match(await nf.text(), /Lost/)
+  }
 })
 
 test('static: clean URLs, index, gzip when accepted, immutable /_b/, 404 page, server code never served', async () => {
@@ -176,8 +205,18 @@ test('session: signed HttpOnly/Secure/SameSite cookie → ctx.user in RPC and lo
   assert.match(c, /^__Host-session=[^;]+; Path=\/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800$/)
   const cookie = c.split(';')[0]
   assert.deepEqual(await (await call('who', [], { cookie, 'x-forwarded-for': '1.1.1.2' })).json(), { name: 'Ada' })
-  const page = await (await get('/users/1', { cookie })).text()
+  const signedIn = await get('/users/1', { cookie })
+  // §35/F16: a page rendered for a session is never stored, so Back after logout cannot show it; anonymous stays no-cache
+  assert.equal(signedIn.headers.get('cache-control'), 'private, no-store')
+  assert.equal(signedIn.headers.get('etag'), null)
+  const page = await signedIn.text()
   assert.match(page, /"who":"Ada"/)
+  const stale = await get('/users/1', { cookie: '__Host-session=expired.x' }) // a dead cookie: still not stored
+  assert.equal(stale.headers.get('cache-control'), 'private, no-store')
+  await stale.text()
+  const anon = await get('/users/1')
+  assert.equal(anon.headers.get('cache-control'), 'no-cache')
+  await anon.text()
   const [k, v] = cookie.split('=')
   const [data, mac] = v.split('.')
   const forged = Buffer.from(JSON.stringify({ u: { name: 'Admin' }, exp: Date.now() + 1e6 })).toString('base64url')
@@ -204,7 +243,7 @@ test('ETag: SSR HTML weak, static HTML strong (stable across nonces) → 304 wit
   const r = await call('login', ['Ada'], { 'x-forwarded-for': '2.2.2.1' })
   assert.equal(r.headers.get('clear-site-data'), null)
   const out = await call('logout', [], { 'x-forwarded-for': '2.2.2.2' })
-  assert.equal(out.headers.get('clear-site-data'), '"cache", "storage"')
+  assert.equal(out.headers.get('clear-site-data'), '"storage"') // F16: "cache" made Chrome hold the logout response ~18 s
 })
 
 test('ctx.env: only what the supervisor passed, frozen (a write throws and changes nothing)', async () => {
@@ -235,4 +274,22 @@ test('#193 routes come from the manifest (rx, order): :param one segment, *rest 
   assert.match(doc, /<h1>a\/b\/c/)
   assert.match(doc, /<title>Doc a\/b\/c<\/title>/) // seo from the server module wins over the client chunk's V.seo
   assert.match(await (await get('/docs')).text(), /<h1>Docs<\/h1>/) // *rest needs ≥1 segment: /docs is the static docs/index.html
+})
+
+test('F5: an SSR route answers with its real URL in canonical and og:url, and a view <head> tag replaces the generated one', async () => {
+  const h = await (await get('/jobs/backend-dev')).text()
+  assert.match(h, /<link rel="canonical" href="https:\/\/x\.test\/jobs\/backend-dev">/)
+  assert.match(h, /<meta property="og:url" content="https:\/\/x\.test\/jobs\/backend-dev">/)
+  assert.ok(!h.includes(':slug'), 'no route pattern left in the head')
+  assert.equal((h.match(/property="og:type"/g) || []).length, 1, 'one og:type: the view head wins')
+  assert.match(h, /<meta property="og:type" content="article">/)
+  // a canonical from seo(props) also becomes og:url
+  const c = await (await get('/jobs/canon')).text()
+  assert.match(c, /<link rel="canonical" href="https:\/\/x\.test\/c\/1">/)
+  assert.match(c, /<meta property="og:url" content="https:\/\/x\.test\/c\/1">/)
+  // only the replaced path is escaped: an already escaped canonical is left as it was (no &amp;amp;)
+  const t = await (await get('/tags/rust')).text()
+  assert.match(t, /<link rel="canonical" href="https:\/\/x\.test\/search\?a=1&amp;b=2">/)
+  assert.ok(!t.includes('&amp;amp;'), t)
+  assert.match(t, /<meta property="og:url" content="https:\/\/x\.test\/tags\/rust">/)
 })

@@ -24,6 +24,8 @@ fn app() -> PathBuf {
     std::fs::write(d.join("views/users/[id].brain"), USER).unwrap();
     std::fs::write(d.join("views/users/_loading.brain"), "<main><p>Loading user…</p></main>").unwrap();
     std::fs::write(d.join("views/slow.brain"), "<meta seo title=\"Slow\" description=\"A slow page\">\n<meta cache=\"30\">\n<script>\nexport async function load() { return { n: 1 } }\n</script>\n<main><h1>Slow {props.n}</h1></main>").unwrap();
+    // F9: a prerendered <select bind:value> keeps its options' values and starts on the bound one
+    std::fs::write(d.join("views/pick.brain"), "<meta seo title=\"Pick\" description=\"Pick one\">\n<script>\nlet v = sig('b')\nlet opts = sig([{ id: 'a', n: 'A' }, { id: 'b', n: 'B' }])\n</script>\n<main><h1>Pick</h1><label>Choice <select bind:value={v}>{#each opts as o}<option value={o.id}>{o.n}</option>{/each}</select></label></main>").unwrap();
     std::fs::write(d.join("lib/fmt.jsbrain"), "export default (s) => 'User ' + String(s).toUpperCase()\n").unwrap();
     d.canonicalize().unwrap()
 }
@@ -86,7 +88,7 @@ fn ssr_and_rpc_through_the_real_server() {
         progress: None,
         post: Some(&post),
     };
-    let views = vec![("/".to_string(), "views/home.brain".to_string()), ("/users/:id".to_string(), "views/users/[id].brain".to_string()), ("/slow".to_string(), "views/slow.brain".to_string())];
+    let views = vec![("/".to_string(), "views/home.brain".to_string()), ("/pick".to_string(), "views/pick.brain".to_string()), ("/users/:id".to_string(), "views/users/[id].brain".to_string()), ("/slow".to_string(), "views/slow.brain".to_string())];
     let out = brain_pack::build(&input, &views, &|_| vec![], &|_| vec![]).unwrap_or_else(|e| panic!("{e}"));
 
     // shape of dist/
@@ -106,6 +108,8 @@ fn ssr_and_rpc_through_the_real_server() {
     assert!(user.contains("\"loading\":\"/_b/") && !user.contains("\"stream\"") && !user.contains("\"cache\""), "{user}");
     assert!(slow.contains("\"cache\":30") && slow.contains("\"stream\":true") && !slow.contains("\"loading\""), "{slow}");
     assert!(user.contains("\"links\":[\"</_b/") && user.contains("integrity=\\\"sha384-") && !mf.contains('\u{1}'), "{user}");
+    let pick = out.files.iter().find(|(k, _)| k.starts_with("pick")).map(|(_, v)| v.clone()).unwrap_or_else(|| panic!("no pick page: {:?}", out.files.keys().collect::<Vec<_>>()));
+    assert!(pick.contains("<option value=\"a\">A") && pick.contains("<option value=\"b\" selected>B"), "{pick}");
     let home = &out.files["index.html"];
     assert!(home.contains(",core:\"/_b/") && home.contains("loading:[{rx:\"^/users/"), "the router knows which loading view to show: {home}");
     let page = out.files.iter().find(|(k, v)| k.starts_with("_server/pages/") && v.contains("User")).map(|(_, v)| v).unwrap_or_else(|| out.files.iter().find(|(k, _)| k.starts_with("_server/pages/")).unwrap().1);

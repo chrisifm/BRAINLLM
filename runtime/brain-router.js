@@ -110,14 +110,20 @@ export function router(o = {}) {
     const url = new URL(u, location.href), path = strip(url.pathname) // guards see app paths (no base)
     for (const [pre, g] of gs) {
       if (!(path === pre || path.startsWith(pre.endsWith('/') ? pre : pre + '/'))) continue
-      let v
+      // The browser has no session (the cookie is HttpOnly): a guard that reads ctx.user cannot decide here. If it would
+      // stop the navigation, the server decides on a full load instead (F12b: `ctx.user ? true : redirect('/login')`
+      // used to send a signed-in user to /login on every client navigation).
+      let v, asked = false
+      const ctx = { url, path, query: Object.fromEntries(url.searchParams) }
+      Object.defineProperty(ctx, 'user', { enumerable: true, get: () => ((asked = true), undefined) })
       try {
-        v = await g({ url, path, query: Object.fromEntries(url.searchParams) })
+        v = await g(ctx)
       } catch (e) {
+        if (asked) return null
         return e && typeof e === 'object' && (R in e || 'redirect' in e) ? outcome(e) : null
       }
       v = outcome(v)
-      if (v !== true) return v
+      if (v !== true) return asked ? null : v
     }
     return true
   }

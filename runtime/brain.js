@@ -278,7 +278,7 @@ export function attr(el, k, f) {
     f,
     k.startsWith('style:')
       ? ((k = k.slice(6)), v => (v == null || v === false ? el.style.removeProperty(k) : el.style.setProperty(k, v)))
-      : /^(value|checked|selected)$/.test(k)
+      : /^(value|checked|selected)$/.test(k) && !(k == 'value' && el.tagName == 'OPTION') // an option's value is its attribute (SSR, value="")
         ? v => {
             if (el[k] !== v) el[k] = v
           }

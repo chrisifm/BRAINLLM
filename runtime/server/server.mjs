@@ -218,6 +218,10 @@ export function createServer(o = {}) {
     }
     if (!nocache && route.cache > 0 && !forms && !fixed && status === 200 && anonymous(req)) return cached(req, res, route, params, url, rid)
     const ctx = context(req, res, url, { params })
+    // a page rendered for a signed-in user is never stored (§35): after logout, Back must not show the previous
+    // user's page from the HTTP cache or bfcache. Anonymous pages keep `no-cache` + ETag.
+    const own = ctx.user != null || ctx.cookies[COOKIE] !== undefined
+    const keep = h => (own ? { ...h, 'cache-control': 'private, no-store' } : h)
     let props = fixed || {}, extra = {}
     if (!fixed && ((route.guards && route.guards.length) || (route.middleware && route.middleware.length))) {
       let r
@@ -234,7 +238,7 @@ export function createServer(o = {}) {
       if (r.deny !== undefined) return forbidden(req, res, url, rid, r.deny)
       extra = r.headers
     }
-    if (route.stream && route.server && !fixed && !forms && status === 200 && !res.$capture) return streamed(req, res, route, params, url, rid, ctx, extra)
+    if (route.stream && route.server && !fixed && !forms && status === 200 && !res.$capture) return streamed(req, res, route, params, url, rid, ctx, keep(extra || {}))
     try {
       if (!fixed && route.server) {
         const m = await load(route.server)
@@ -242,12 +246,13 @@ export function createServer(o = {}) {
       }
     } catch (e) {
       if (e && e.redirect) return send(res, e.status || 303, '', { location: withBase(e.redirect), ...ctx.session.headers() })
-      if (e instanceof HttpError && e.status === 404) return notFound(req, res)
+      if ((e instanceof HttpError && e.status === 404) || (e && e.notFound === true)) return notFound(req, res) // `throw notFound()` (F11)
       const status = e instanceof HttpError && e.status === 504 ? 504 : 500
       log('error', 'load failed', { rid, path: url.pathname, status, stack: String((e && e.stack) || e) })
       return status === 500 ? errorPage(req, res, route, params, url, rid) : failPage(res, status, rid)
     }
     if (props && props.redirect) return send(res, props.status || 303, '', { location: withBase(props.redirect), ...ctx.session.headers() })
+    if (props && props.notFound === true) return notFound(req, res) // `return notFound()` (F11)
     let body, seo, failed
     try {
       const at = { path: url.pathname, params: params || {}, query: Object.fromEntries(url.searchParams) } // route() (§41.5)
@@ -261,12 +266,12 @@ export function createServer(o = {}) {
     const page = readFileSync(file(route.page), 'utf8')
       .replace('<!--brain:ssr-->', () => body)
       .replace('<!--brain:props-->', () => jsonInHtml(props))
-    let out = head(page, seo)
+    let out = head(page, seo, url.pathname)
     // route params for route() in the browser (the client has no route table)
     if (params && Object.keys(params).length) out = out.replace('</head>', () => `<meta name="brain-params" content="${esc(JSON.stringify(params))}"></head>`)
     if (forms) out = out.replace('</body>', () => `<script type="application/json" id="brain-forms">${jsonInHtml(forms)}</script></body>`)
-    if (res.$capture) return res.$capture(out, { ...extra, ...ctx.session.headers() }, status)
-    html(res, status, out, { ...extra, ...ctx.session.headers() }, 'W/"' + tag(out) + '"')
+    if (res.$capture) return res.$capture(out, keep({ ...extra, ...ctx.session.headers() }), status)
+    html(res, status, out, keep({ ...extra, ...ctx.session.headers() }), own ? undefined : 'W/"' + tag(out) + '"')
   }
   // Streaming SSR (#232, `route.stream`: the build sets it when the view's <meta seo> is static and it has a load()):
   // the page up to the region (head, CSS, layout shell) is sent at once, the view when load() ends. The status and
@@ -293,7 +298,7 @@ export function createServer(o = {}) {
     const loadP = typeof sm.load === 'function' ? withTimeout(Promise.resolve().then(() => sm.load(ctx)), TIMEOUT) : Promise.resolve(null)
     loadP.catch(() => {}) // handled below; never an unhandled rejection while the loading view renders
     const at = { path: url.pathname, params: params || {}, query: Object.fromEntries(url.searchParams) }
-    res.write(n(head(top, seo0)))
+    res.write(n(head(top, seo0, url.pathname)))
     // QA #253: the folder's _loading.brain goes in the region with the first chunk (SPEC: shows while load runs),
     // between two marker comments; the last chunk starts with a script that removes them and what is between
     let clear = ''
@@ -322,9 +327,11 @@ export function createServer(o = {}) {
     let props
     try {
       props = (await loadP) ?? {}
-      if (props.redirect) throw props
+      if (props.redirect || props.notFound === true) throw props
     } catch (e) {
       if (e && e.redirect) return end(`<script>location.replace(${jsonInHtml(withBase(e.redirect))})</script>`)
+      // a streamed page already sent its 200 head: the region gets the not-found notice and the page is noindex
+      if (e && e.notFound === true) return end(`<meta name="robots" content="noindex"><p role="alert" class="brain-fallback">Page not found.</p>`, {}, bottom.replace(/<script type="module">(?:(?!<\/script>)[\s\S])*?brain-view[\s\S]*?<\/script>/g, ''))
       log('error', 'load failed (streamed)', { rid, path: url.pathname, status: 200, stack: String((e && e.stack) || e) }) // headers already out
       return fail()
     }
@@ -604,8 +611,11 @@ export function sessionFrom(cookies, secret) {
         set.push(cookie('', 0))
         cleared = true
       },
-      // logout wipes this origin's HTTP cache and storage on the device (§35: the next user sees nothing)
-      headers: () => ({ ...(set.length ? { 'set-cookie': set } : {}), ...(cleared ? { 'clear-site-data': '"cache", "storage"' } : {}) }),
+      // logout wipes this origin's storage on the device: localStorage, IndexedDB, the Cache API and service workers
+      // (§35: the next user sees nothing). Not "cache": Chrome clears the whole HTTP cache before it finishes the
+      // response, so the logout call took ~18 s (F16). Nothing private is in that cache: RPC is no-store and SSR
+      // HTML rendered with a session cookie is `private, no-store` (ssr() → keep).
+      headers: () => ({ ...(set.length ? { 'set-cookie': set } : {}), ...(cleared ? { 'clear-site-data': '"storage"' } : {}) }),
     },
   }
 }
@@ -798,14 +808,33 @@ function fillValues(n) {
     else if (t === 'input' && c.type !== 'password') {
       if (c.value != null && c.value !== '') c.setAttribute('value', String(c.value))
       if (c.checked === true) c.setAttribute('checked', '')
+    } else if (t === 'option' && c.selected === true) c.setAttribute('selected', '')
+    // <select value={x}>: the option with that value starts selected (an option's value is its attribute or text)
+    else if (t === 'select' && c.value != null && c.value !== '') {
+      const pick = o => {
+        for (const x of o.childNodes || []) {
+          if (x.nodeType !== 1) continue
+          if (x.tagName === 'OPTION' && (x.getAttribute('value') ?? x.textContent) === String(c.value)) x.setAttribute('selected', '')
+          else pick(x)
+        }
+      }
+      pick(c)
     }
     fillValues(c)
   }
 }
 // SEO head from View.seo(props): title, description, canonical, og:*/twitter:*, JSON-LD and the view's <head> block
-function head(page, seo) {
-  if (!seo) return page
+// F5: the build writes an SSR route's canonical/og:url from its pattern (/jobs/:slug); the request has the real path.
+// A view's own <head> tags replace the generated ones with the same name/property (one tag per key, SPEC «SEO»).
+function head(page, seo, path) {
   let h = page
+  if (path) {
+    // the attribute is already escaped HTML: only the request path that replaces a pattern is escaped
+    const real = v => v.replace(/^(https?:\/\/[^/]+)?(\/[^"]*)$/, (m, o = '', p) => (/\/[:*]/.test(p) ? o + esc(path) : m))
+    h = h.replace(/(<link[^>]*rel=["']canonical["'][^>]*href=")([^"]*)(")/i, (m, a, v, b) => a + real(v) + b)
+    h = h.replace(/(<meta[^>]*property=["']og:url["'][^>]*content=")([^"]*)(")/i, (m, a, v, b) => a + real(v) + b)
+  }
+  if (!seo) return h
   const meta = (attr, key, val) => {
     const tag = `<meta ${attr}="${esc(key)}" content="${esc(val)}">`
     const rx = new RegExp(`<meta[^>]*\\b${attr}=["']${key.replace(/[.*+?^${}()|[\]\\:]/g, '\\$&')}["'][^>]*>`, 'i')
@@ -817,11 +846,17 @@ function head(page, seo) {
     else if (k === 'canonical') {
       const tag = `<link rel="canonical" href="${esc(v)}">`
       h = /<link[^>]*rel=["']canonical["'][^>]*>/i.test(h) ? h.replace(/<link[^>]*rel=["']canonical["'][^>]*>/i, () => tag) : h.replace('</head>', () => tag + '</head>')
+      if (seo['og:url'] == null) meta('property', 'og:url', v) // og:url follows the canonical unless the view sets its own
     } else if (k === 'jsonld') h = h.replace('</head>', () => `<script type="application/ld+json">${jsonInHtml(v)}</script></head>`)
     else if (/^(og|twitter|article):/.test(k)) meta('property', k, v)
     else if (typeof v === 'string') meta('name', k, v)
   }
-  if (seo.$head) h = h.replace('</head>', () => seo.$head + '</head>')
+  if (seo.$head) {
+    for (const [, attr, key] of seo.$head.matchAll(/<meta[^>]*\b(property|name)=["']([^"']+)["'][^>]*>/gi))
+      h = h.replace(new RegExp(`<meta[^>]*\\b${attr}=["']${key.replace(/[.*+?^${}()|[\]\\:]/g, '\\$&')}["'][^>]*>`, 'gi'), '')
+    if (/<link[^>]*rel=["']canonical["']/i.test(seo.$head)) h = h.replace(/<link[^>]*rel=["']canonical["'][^>]*>/gi, '')
+    h = h.replace('</head>', () => seo.$head + '</head>')
+  }
   return h
 }
 // `/_b/<hash>.js` imports inside the chunks resolve to files in dist/ (same hook as the build's prerender)
