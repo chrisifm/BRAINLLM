@@ -28,7 +28,8 @@ Before each kind of task run `brain guide <topic>` (`brain guide` lists them): s
 - `brain new` already creates the whole layout: `views/ comp/ ui/ channels/ services/ api/ lib/ server/ content/
   public/`, `brain.json`, `.brain_env`. Put each file in its folder (each holds a README saying what goes there);
   never create other top-level folders.
-- Import only files that exist (`brain map --json` lists them). Primitives need no import.
+- Import only files that exist (`brain map --json` lists them; B0119). A store, helper or server module the app does
+  not have yet is declared in the file you are writing, or created first with `brain add`. Primitives need no import.
 - `*.test.brain` tests next to the component. Name = file in PascalCase (`user-card.brain` → `UserCard`).
 
 ## Architecture (generate, don't hand-create files)
@@ -141,8 +142,7 @@ jsonld={{ '@type': 'Person', name: props.user.name }}>`. Site defaults live in `
 `<meta seo titleTemplate="%s · Nimbus" og:image="/og.png" twitter="@nimbus">`. Any other tag goes in a `<head>` block of
 the view (merged, deduplicated by name/property). `[id]` views list their pages with
 `export async function paths() { return [{ id: '1' }] }` so they are prerendered and appear in the sitemap.
-Live `[id]` views (SSR, no `paths()`) list their pages with `export async function sitemap({ env }) { return [{ id: '1',
-lastmod: '2026-10-01' }] }`: the server adds them to /sitemap.xml on each request (cached 5 min; needs `brain.json` `site`; past 50 000 URLs it splits into an index). Not with `paths()` in the same view (B0117).
+Live `[id]` views (SSR, no `paths()`) export `sitemap({ env })` instead (`brain guide seo`; never both, B0117).
 Sitemap date: `<meta seo lastmod="2026-10-13">` or the collection's frontmatter `date`; without one it is omitted.
 Collections: `brain add collection blog` turns `content/blog/*.md` (frontmatter `title description date updated? tags? cover?
 author? draft?`) into pages, tag pages, `/blog/rss.xml` and `/blog/atom.xml`. In `load()`/`paths()`, with no import:
@@ -169,15 +169,8 @@ Forms: `let f = form(schema, { submit: async (v) => … })` → `bind:value={f.v
 `f.error` (form-level), `on:submit={f.submit}`. Schema: `{ email: 'email!', age: 'num>=18', name: 'str!<=80' }`
 (`!` required; types `str num bool email url date`, `[T]` list, a nested type object). Server errors: return or
 throw `{ errors: { email: 'Taken' } }` from `submit`, or mark them later with `f.errors({ email: 'Taken' })`; any other
-failure shows in `f.error`. Initial values:
-`form(schema, { init: { email: '' } })`; values that arrive later (edit forms): `f.reset(values)`. Never replace
-`f.v` or `f.err` (B0133: the inputs would stay bound to the old fields). Validation messages are English unless
-`i18n/<locale>.json` has `form.required`, `form.min_chars`, `form.max_chars`, `form.min_items`, `form.max_items`,
-`form.item`, `form.list`, `form.number`, `form.min`, `form.max`, `form.email`, `form.url`, `form.date`,
-`form.error`, `form.check_failed` (`{n}` = the limit, except in `form.item`: `{n}` = the 1-based item number and
-`{error}` = that item's message; plural objects allowed). A server function that throws a plain `Error('msg')`
-answers 500 and the client sees a generic message (the real one is only in the server log): to show a reason, throw
-`{ errors: { field: 'msg' } }` (422, the message reaches the field).
+failure shows in `f.error`. Initial values: `form(schema, { init })`; later values: `f.reset(values)`; never replace
+`f.v` or `f.err` (B0133). Translated messages, edit forms and server errors: `brain guide forms`.
 
 ## Data
 `api/*.jsbrain`: `export default api('/users', { get: { out: '[User]' }, post: { in: 'User', out: 'User' } })` and
@@ -212,10 +205,8 @@ Read them as `process.env.KEY` (server) or `process.env.PUBLIC_KEY` (anywhere). 
 `.jsbrain` files starting with `<meta server>` run only on the server and may be used only inside `load` or server
 functions. Server function in a `.brain`: `server: async function save(ctx, data) {…}`; the client calls
 `await save(data)` (no `ctx`). Validate `data` inside.
-Sessions: `ctx.session.set(user)` in a server function signs it into the `__Host-session` cookie (HttpOnly, Secure,
-SameSite=Lax, 7 days; `{ maxAge: seconds }` to change it; needs `BRAIN_SECRET` in `.brain_env`); every later request
-gets it as `ctx.user` (guards, `load`, server functions). `ctx.session.clear()` logs out. The cookie is signed, not
-encrypted: anyone holding it can read it, so store ids and display data, never tokens or secrets.
+Sessions: `ctx.session.set(user)` in a server function, `ctx.user` on later requests, `ctx.session.clear()` logs out
+(signed cookie, not encrypted: ids and display data only; setup in `brain guide server`).
 `load` belongs to views: in `_layout.brain` it is not run.
 
 ## Tests (`*.test.brain`)

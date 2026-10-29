@@ -54,6 +54,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Documentation
 
+- The served spec (`brain spec`) points to `brain guide forms|server|seo` for form messages, sessions and live
+  sitemaps instead of spelling them out, and says that a module the app does not have yet is declared in the file or
+  created with `brain add`: Haiku 5.5 had dropped to 17/20 first-try passes on the 0.2.0 spec (bench/llm/README.md).
 - Site and README: the title, hero, metadata and footer say up front that BRAINLLM is a compiler written in Rust.
 
 ## [0.2.0] - 2026-10-29

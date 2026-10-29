@@ -43,3 +43,19 @@ references a missing API module and omits the empty state (B0119/B1101). The his
 one-case tolerance. This reuses recorded source; it is **not a fresh model evaluation of the expanded specification**.
 No model was called, no baseline was changed and no new first-pass-generation claim follows from this replay.
 A fresh frozen model/spec/compiler run remains required before treating the newly documented features as LLM-benchmarked.
+
+## 2026-10-29 gate for 0.3.0 (fresh model runs, `--mode spec`, n=20 each)
+
+| Run | Served spec | Haiku 5.5 1st try | Sonnet 5.5 1st try | First-try failures |
+|---|---|---:|---:|---|
+| om020 (0.2.0 binary, `origin/main`) | `88d92fac2659` (22,155 B) | 17/20 | — | 3× B0119 (missing `server/`, `channels/`, `lib/` module) |
+| gate030 a · b (0.3.0 before the fix) | `a402f4d9d1f3` (22,763 B) | 17/20 · 17/20 | 20/20 | B0119 missing module, B0111 undeclared helper |
+| gate030 c · d (0.3.0, fixed spec) | `68ff3d58aea9` (21,765 B) | 18/20 · 19/20 | — | B0119 `../channels/cart.jsbrain` (both), B0111 `fmtLap` (c) |
+
+The drop came with 0.2.0, which grew the served spec by about 4 KB (sessions, form messages, live sitemaps) without a
+fresh run; it was not caused by the 0.3.0 rules (B0411–B0415, B0502 never fired on a first try). Fix, in §21 order:
+those passages moved to `brain guide forms|server|seo` behind a one-line pointer, and the existing import rule now says
+that a store, helper or server module the app does not have yet is declared in the file or created with `brain add`.
+Result: one of two Haiku runs passes the gate, the same profile as the accepted gate234 and gate274 pairs.
+Open: the cart brief still imports `../channels/cart.jsbrain` in both runs (once in six runs before 0.2.0); candidate
+fix is a B0119 edit that scaffolds the missing channel (`brain add channel`), which would make the fix mechanical.

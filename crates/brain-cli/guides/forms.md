@@ -19,8 +19,10 @@ Any input the user submits: sign in, sign up, search, create or edit a record, s
 7. After success: a server function may `return { redirect: '/account' }` (without JS the form post answers 303 there);
    with JS, `navigate(r.redirect)` in `submit`.
 8. Edit forms: values that arrive later → `f.reset(values)`. Never replace `f.v` or `f.err` (B0133).
-9. Translated messages: add `form.required`, `form.min_chars`, `form.max_chars`, `form.email`, `form.number`, `form.min`,
-   `form.max`, `form.url`, `form.date`, `form.error`… to `i18n/<locale>.json` (`{n}` = the limit). English otherwise.
+9. Translated messages: add `form.required`, `form.min_chars`, `form.max_chars`, `form.min_items`, `form.max_items`,
+   `form.item`, `form.list`, `form.number`, `form.min`, `form.max`, `form.email`, `form.url`, `form.date`,
+   `form.error` and `form.check_failed` to `i18n/<locale>.json` (`{n}` = the limit; in `form.item` `{n}` = the 1-based
+   item number and `{error}` = that item's message; plural objects allowed). English otherwise.
 10. Expose the form to browser agents with `<form tool="…" tool-description="…">` (`brain guide webmcp`).
 
 ## Verify
