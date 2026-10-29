@@ -218,6 +218,10 @@ export function createServer(o = {}) {
     }
     if (!nocache && route.cache > 0 && !forms && !fixed && status === 200 && anonymous(req)) return cached(req, res, route, params, url, rid)
     const ctx = context(req, res, url, { params })
+    // a page rendered for a signed-in user is never stored (§35): after logout, Back must not show the previous
+    // user's page from the HTTP cache or bfcache. Anonymous pages keep `no-cache` + ETag.
+    const own = ctx.user != null || ctx.cookies[COOKIE] !== undefined
+    const keep = h => (own ? { ...h, 'cache-control': 'private, no-store' } : h)
     let props = fixed || {}, extra = {}
     if (!fixed && ((route.guards && route.guards.length) || (route.middleware && route.middleware.length))) {
       let r
@@ -234,7 +238,7 @@ export function createServer(o = {}) {
       if (r.deny !== undefined) return forbidden(req, res, url, rid, r.deny)
       extra = r.headers
     }
-    if (route.stream && route.server && !fixed && !forms && status === 200 && !res.$capture) return streamed(req, res, route, params, url, rid, ctx, extra)
+    if (route.stream && route.server && !fixed && !forms && status === 200 && !res.$capture) return streamed(req, res, route, params, url, rid, ctx, keep(extra || {}))
     try {
       if (!fixed && route.server) {
         const m = await load(route.server)
@@ -266,8 +270,8 @@ export function createServer(o = {}) {
     // route params for route() in the browser (the client has no route table)
     if (params && Object.keys(params).length) out = out.replace('</head>', () => `<meta name="brain-params" content="${esc(JSON.stringify(params))}"></head>`)
     if (forms) out = out.replace('</body>', () => `<script type="application/json" id="brain-forms">${jsonInHtml(forms)}</script></body>`)
-    if (res.$capture) return res.$capture(out, { ...extra, ...ctx.session.headers() }, status)
-    html(res, status, out, { ...extra, ...ctx.session.headers() }, 'W/"' + tag(out) + '"')
+    if (res.$capture) return res.$capture(out, keep({ ...extra, ...ctx.session.headers() }), status)
+    html(res, status, out, keep({ ...extra, ...ctx.session.headers() }), own ? undefined : 'W/"' + tag(out) + '"')
   }
   // Streaming SSR (#232, `route.stream`: the build sets it when the view's <meta seo> is static and it has a load()):
   // the page up to the region (head, CSS, layout shell) is sent at once, the view when load() ends. The status and
@@ -609,7 +613,8 @@ export function sessionFrom(cookies, secret) {
       },
       // logout wipes this origin's storage on the device: localStorage, IndexedDB, the Cache API and service workers
       // (§35: the next user sees nothing). Not "cache": Chrome clears the whole HTTP cache before it finishes the
-      // response, so the logout call took ~18 s (F16); HTML is no-cache and RPC no-store, so nothing private is in it.
+      // response, so the logout call took ~18 s (F16). Nothing private is in that cache: RPC is no-store and SSR
+      // HTML rendered with a session cookie is `private, no-store` (ssr() → keep).
       headers: () => ({ ...(set.length ? { 'set-cookie': set } : {}), ...(cleared ? { 'clear-site-data': '"storage"' } : {}) }),
     },
   }
@@ -824,9 +829,10 @@ function fillValues(n) {
 function head(page, seo, path) {
   let h = page
   if (path) {
-    const real = v => v.replace(/^(https?:\/\/[^/]+)?(\/[^"]*)$/, (m, o = '', p) => (/\/[:*]/.test(p) ? o + path : m))
-    h = h.replace(/(<link[^>]*rel=["']canonical["'][^>]*href=")([^"]*)(")/i, (m, a, v, b) => a + esc(real(v)) + b)
-    h = h.replace(/(<meta[^>]*property=["']og:url["'][^>]*content=")([^"]*)(")/i, (m, a, v, b) => a + esc(real(v)) + b)
+    // the attribute is already escaped HTML: only the request path that replaces a pattern is escaped
+    const real = v => v.replace(/^(https?:\/\/[^/]+)?(\/[^"]*)$/, (m, o = '', p) => (/\/[:*]/.test(p) ? o + esc(path) : m))
+    h = h.replace(/(<link[^>]*rel=["']canonical["'][^>]*href=")([^"]*)(")/i, (m, a, v, b) => a + real(v) + b)
+    h = h.replace(/(<meta[^>]*property=["']og:url["'][^>]*content=")([^"]*)(")/i, (m, a, v, b) => a + real(v) + b)
   }
   if (!seo) return h
   const meta = (attr, key, val) => {

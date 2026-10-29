@@ -360,8 +360,9 @@ impl Gen<'_> {
                     let status = args.get(1).map(|s| self.expr(s)).unwrap_or_else(|| "303".into());
                     return format!("({{ redirect: {to}, status: {status} }})");
                 }
-                // `throw notFound()` (or return it) from `load`: the server answers 404 with views/404.brain (F11)
-                "notFound" if args.is_empty() => return "({ notFound: true, status: 404 })".into(),
+                // `throw notFound()` (or return it) from `load`: the server answers 404 with views/404.brain (F11).
+                // It takes no arguments: any given (`notFound('why')`) are ignored, never left as an undefined call.
+                "notFound" => return "({ notFound: true, status: 404 })".into(),
                 "deny" => {
                     let why = args.first().map(|r| self.expr(r)).unwrap_or_else(|| "\"forbidden\"".into());
                     return format!("({{ deny: {why} }})");

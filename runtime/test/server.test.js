@@ -60,6 +60,12 @@ w('_server/pages/user.html', '<!doctype html><html><head><title>Default</title><
 w('_server/job.mjs', `export async function load(ctx) { return { id: ctx.params.slug, name: ctx.params.slug } }
 export const seo = p => ({ title: 'Job ' + p.name, canonical: p.name === 'canon' ? 'https://x.test/c/1' : undefined, $head: '<meta property="og:type" content="article">' })`)
 w('_server/pages/job.html', '<!doctype html><html><head><title>Job</title><link rel="canonical" href="https://x.test/jobs/:slug"><meta property="og:url" content="https://x.test/jobs/:slug"><meta property="og:type" content="website"></head><body><div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
+w('_b/plain.js', `import { tpl, insert } from './core.js' // relative: the global /_b/ hook may point at another test's dist
+const t = tpl('<main><h1><!></h1></main>')
+export default function Plain($p) { const r = t(); insert(null, () => $p.name, r.firstChild.firstChild); return r }
+`)
+w('_server/tag.mjs', `export async function load(ctx) { return { id: ctx.params.t, name: ctx.params.t } }`)
+w('_server/pages/tag.html', '<!doctype html><html><head><title>Tag</title><link rel="canonical" href="https://x.test/search?a=1&amp;b=2"><meta property="og:url" content="https://x.test/tags/:t"></head><body><div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
 w('index.html', '<!doctype html><html><head><title>Home</title></head><body><main><h1>Home</h1></main><script type="module" src="/_b/app.js"></script></body></html>')
 w('about.html', '<!doctype html><title>About</title><main><h1>About</h1></main>')
 w('docs/index.html', '<!doctype html><title>Docs</title><main><h1>Docs</h1></main>')
@@ -71,6 +77,7 @@ w('_server/manifest.json', JSON.stringify({
   v: 1, build: 'b7c1', core: '/_b/core.js',
   routes: [
     { path: '/users/:id', rx: '^/users/(?<id>(?![_.])[^/\\\\]+)/?$', view: '/_b/view.js', layouts: [], server: '_server/user.mjs', page: '_server/pages/user.html' },
+    { path: '/tags/:t', rx: '^/tags/(?<t>(?![_.])[^/\\\\]+)/?$', view: '/_b/plain.js', layouts: [], server: '_server/tag.mjs', page: '_server/pages/tag.html' },
     { path: '/jobs/:slug', rx: '^/jobs/(?<slug>(?![_.])[^/\\\\]+)/?$', view: '/_b/view.js', layouts: [], server: '_server/job.mjs', page: '_server/pages/job.html' },
     { path: '/docs/*rest', rx: '^/docs/(?<rest>(?![_.])[^/\\\\]+(?:/(?![_.])[^/\\\\]+)*)/?$', view: '/_b/view.js', layouts: [], server: '_server/docs.mjs', page: '_server/pages/user.html' },
   ],
@@ -198,8 +205,18 @@ test('session: signed HttpOnly/Secure/SameSite cookie → ctx.user in RPC and lo
   assert.match(c, /^__Host-session=[^;]+; Path=\/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800$/)
   const cookie = c.split(';')[0]
   assert.deepEqual(await (await call('who', [], { cookie, 'x-forwarded-for': '1.1.1.2' })).json(), { name: 'Ada' })
-  const page = await (await get('/users/1', { cookie })).text()
+  const signedIn = await get('/users/1', { cookie })
+  // §35/F16: a page rendered for a session is never stored, so Back after logout cannot show it; anonymous stays no-cache
+  assert.equal(signedIn.headers.get('cache-control'), 'private, no-store')
+  assert.equal(signedIn.headers.get('etag'), null)
+  const page = await signedIn.text()
   assert.match(page, /"who":"Ada"/)
+  const stale = await get('/users/1', { cookie: '__Host-session=expired.x' }) // a dead cookie: still not stored
+  assert.equal(stale.headers.get('cache-control'), 'private, no-store')
+  await stale.text()
+  const anon = await get('/users/1')
+  assert.equal(anon.headers.get('cache-control'), 'no-cache')
+  await anon.text()
   const [k, v] = cookie.split('=')
   const [data, mac] = v.split('.')
   const forged = Buffer.from(JSON.stringify({ u: { name: 'Admin' }, exp: Date.now() + 1e6 })).toString('base64url')
@@ -270,4 +287,9 @@ test('F5: an SSR route answers with its real URL in canonical and og:url, and a 
   const c = await (await get('/jobs/canon')).text()
   assert.match(c, /<link rel="canonical" href="https:\/\/x\.test\/c\/1">/)
   assert.match(c, /<meta property="og:url" content="https:\/\/x\.test\/c\/1">/)
+  // only the replaced path is escaped: an already escaped canonical is left as it was (no &amp;amp;)
+  const t = await (await get('/tags/rust')).text()
+  assert.match(t, /<link rel="canonical" href="https:\/\/x\.test\/search\?a=1&amp;b=2">/)
+  assert.ok(!t.includes('&amp;amp;'), t)
+  assert.match(t, /<meta property="og:url" content="https:\/\/x\.test\/tags\/rust">/)
 })
