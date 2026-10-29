@@ -43,6 +43,9 @@ fn paths_only_in_dynamic_views() {
     let sm = src.replace("paths()", "sitemap()");
     assert!(codes_in("views/u/[id].brain", &sm, &Ctx::default()).is_empty());
     assert_eq!(codes_in("views/u.brain", &sm, &Ctx::default()), ["B0117"]);
+    // both in one view: two contracts for the same pages
+    let both = src.replace("</script>", "export async function sitemap() { return [] }</script>");
+    assert_eq!(codes_in("views/u/[id].brain", &both, &Ctx::default()), ["B0117"]);
 }
 
 #[test]

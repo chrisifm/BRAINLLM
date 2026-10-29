@@ -602,6 +602,10 @@ impl<'a> Checker<'a> {
                 // time (`sitemap`, served by server.mjs).
                 if c.level != Level::View || !c.file.contains('[') {
                     self.push("B0117", *span, &format!("`{name}()` only exists in dynamic views (`views/…/[id].brain`)"), "remove it, or move it to the `[param].brain` view whose pages it lists");
+                } else if name == "sitemap" && c.script.iter().any(|t| exports_fn(t, "paths")) {
+                    // paths() prerenders the pages and lists them in the build's sitemap; sitemap() is for views that
+                    // render at request time. Both would list the same pages twice under two contracts.
+                    self.push("B0117", *span, "a view exports both `paths()` and `sitemap()`", "keep `paths()` to prerender the pages (they are already in the sitemap), or remove it and keep `sitemap()` to render them at request time");
                 }
                 self.server_fn(f);
                 continue;
@@ -2551,4 +2555,9 @@ fn provided_names_in(src: &str) -> HashSet<String> {
             (!n.is_empty()).then_some(n)
         })
         .collect()
+}
+
+/// `export [async] function <name>(…)` at the top of a script.
+fn exports_fn(s: &Stmt, name: &str) -> bool {
+    matches!(s, Stmt::Export { decl, .. } if matches!(decl.as_ref(), Stmt::Func(f) if f.name.as_ref().is_some_and(|n| n.name == name)))
 }

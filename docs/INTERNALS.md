@@ -958,7 +958,7 @@ specified elsewhere; ➕ = new in this section.
   if that token breaks the AA pair, B0408 reports it on the next pass. B0125 (markup required) counts `<meta>` and
   `<script src|type>` in `app.brain`'s head as markup. B0126 exempts `*.test.brain`.
 
-## 32. Dynamic metadata, generated SEO files and WebMCP (fixed 2026-10-13)
+## 32. Dynamic metadata, generated SEO files and WebMCP (fixed 2026-10-13, dynamic sitemap 2026-10-29)
 **Metadata (COMPILER + TOOLCHAIN + RUNTIME)**
 - `<meta seo>` attributes accept expressions over `props` (the `load` result); `jsonld={obj}` serializes to
   `<script type="application/ld+json">` (escaped `</`), and `schema="Article"` stays a shortcut. `app.brain`'s
@@ -970,8 +970,12 @@ specified elsewhere; ➕ = new in this section.
 - A dynamic route without `paths()` (live content: SSR) may export `sitemap()` instead: it returns the params of its pages
   (`[{ slug: 'a', lastmod: '2026-10-01' }]`) and gets `{ env }`. The manifest marks the route `sitemap: true`, and
   server.mjs serves /sitemap.xml as the build's file plus those URLs (a sitemap index gets one more child,
-  `/sitemap-dynamic.xml`), with the origin of the build's own sitemap; the list is kept 5 min and capped at 50 000 URLs;
-  a throwing `sitemap()` is logged and skipped. B0117 outside a dynamic view, like `paths()`. Static hosting has no
+  `/sitemap-dynamic.xml`), with the origin of the build's own sitemap. One file holds at most 50 000 URLs: when the
+  build's URLs plus the dynamic ones pass that, /sitemap.xml becomes an index of `/sitemap-static.xml` (the build's
+  file) and `/sitemap-dynamic.xml`, and dynamic URLs past 50 000 are dropped with a warning. The list is kept 5 min
+  (`max-age=300`; requests after expiry share one run); a throwing `sitemap()` is logged and skipped. B0117 outside a
+  dynamic view, like `paths()`, and in a view that also exports `paths()` (those pages are prerendered and already
+  in the build's sitemap). Static hosting has no
   server, so the route needs `paths()` there. Not in llms.txt (built before any request).
 - B1601 view without description; B1602 title longer than 60 or description longer than 160 chars (warning);
   B1603 invalid JSON-LD (missing `@type`); B1604 duplicate canonical across views.

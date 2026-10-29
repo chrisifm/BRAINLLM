@@ -493,8 +493,11 @@ export function createServer(o = {}) {
   // ---------- dynamic sitemap (§32) ----------
   // A dynamic view without paths() can export `sitemap()` (manifest route `sitemap: true`): it returns the params of its
   // pages, plus an optional `lastmod`, at request time. /sitemap.xml is the build's file with those URLs added (a sitemap
-  // index gets one more child, /sitemap-dynamic.xml). Absolute URLs take the origin of the build's sitemap (brain.json
-  // `site`); a build without a sitemap serves none. The list is kept 5 min; a sitemap() that throws is logged and skipped.
+  // index gets one more child, /sitemap-dynamic.xml). A file holds at most 50 000 URLs (sitemaps.org): when the build's
+  // URLs plus the dynamic ones pass that, /sitemap.xml becomes an index of /sitemap-static.xml (the build's file) and
+  // /sitemap-dynamic.xml; dynamic URLs past 50 000 are dropped with a warning. Absolute URLs take the origin of the
+  // build's sitemap (brain.json `site`); a build without a sitemap serves none. The list is kept 5 min (one sitemap() run
+  // at a time when it expires) and the response says max-age=300; a sitemap() that throws is logged and skipped.
   const DYN = routes.filter(r => r.sitemap && r.server)
   let dynList = null
   const fill = (pattern, p) => {
@@ -507,23 +510,34 @@ export function createServer(o = {}) {
     return ok ? out : null
   }
   const day = v => (v instanceof Date ? v.toISOString().slice(0, 10) : typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? v : null)
-  async function dynamicUrls(origin) {
-    if (dynList && Date.now() - dynList.at < 300000) return dynList.urls
+  const MAX_URLS = 50000
+  let dynRun = null
+  async function collect(origin) {
     const urls = []
+    let dropped = 0
     for (const r of DYN) {
       try {
         const sm = await load(r.server)
         const list = typeof sm.sitemap === 'function' ? await withTimeout(Promise.resolve().then(() => sm.sitemap({ env })), TIMEOUT) : []
         for (const p of Array.isArray(list) ? list : []) {
           const path = fill(r.path, p)
-          if (path && urls.length < 50000) urls.push({ loc: origin + withBase(path), lastmod: day(p.lastmod) })
+          if (!path) continue
+          if (urls.length < MAX_URLS) urls.push({ loc: origin + withBase(path), lastmod: day(p.lastmod) })
+          else dropped++
         }
       } catch (e) {
         log('error', 'sitemap() failed', { view: r.view, stack: String((e && e.stack) || e) })
       }
     }
+    if (dropped) log('warn', 'sitemap(): more than 50000 URLs, the rest are not listed', { dropped })
     dynList = { at: Date.now(), urls }
     return urls
+  }
+  async function dynamicUrls(origin) {
+    if (dynList && Date.now() - dynList.at < 300000) return dynList.urls
+    // concurrent requests after expiry share one run of every sitemap()
+    if (!dynRun) dynRun = collect(origin).finally(() => (dynRun = null))
+    return dynRun
   }
   async function serveSitemap(req, res, url) {
     const f = file('/sitemap.xml')
@@ -532,14 +546,23 @@ export function createServer(o = {}) {
     const origin = [...text.matchAll(/<loc>(https?:\/\/[^<]+)<\/loc>/g)].map(m => URL.canParse(m[1]) && new URL(m[1]).origin).find(Boolean)
     if (!origin) return false
     const index = text.includes('<sitemapindex')
-    if (url.pathname === '/sitemap-dynamic.xml' && !index) return false
-    const set = (await dynamicUrls(origin)).map(u => `  <url><loc>${esc(u.loc)}</loc>${u.lastmod ? `<lastmod>${esc(u.lastmod)}</lastmod>` : ''}</url>\n`).join('')
-    const out = url.pathname === '/sitemap-dynamic.xml'
-      ? `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${set}</urlset>\n`
-      : index
-        ? text.replace('</sitemapindex>', `  <sitemap><loc>${esc(origin + withBase('/sitemap-dynamic.xml'))}</loc></sitemap>\n</sitemapindex>`)
-        : text.replace('</urlset>', set + '</urlset>')
-    send(res, 200, req.method === 'HEAD' ? '' : out, { 'content-type': MIME['.xml'], 'cache-control': 'public, max-age=3600' })
+    const urls = await dynamicUrls(origin)
+    // a urlset that would pass 50 000 URLs with the dynamic ones is split: index → static file + dynamic file
+    const split = !index && (text.match(/<url>/g) || []).length + urls.length > MAX_URLS
+    const xml = body => send(res, 200, req.method === 'HEAD' ? '' : body, { 'content-type': MIME['.xml'], 'cache-control': 'public, max-age=300' })
+    if (url.pathname === '/sitemap-static.xml') return split ? (xml(text), true) : false
+    if (url.pathname === '/sitemap-dynamic.xml' && !index && !split) return false
+    const child = p => `  <sitemap><loc>${esc(origin + withBase(p))}</loc></sitemap>\n`
+    const set = urls.map(u => `  <url><loc>${esc(u.loc)}</loc>${u.lastmod ? `<lastmod>${esc(u.lastmod)}</lastmod>` : ''}</url>\n`).join('')
+    xml(
+      url.pathname === '/sitemap-dynamic.xml'
+        ? `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${set}</urlset>\n`
+        : index
+          ? text.replace('</sitemapindex>', `${child('/sitemap-dynamic.xml')}</sitemapindex>`)
+          : split
+            ? `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${child('/sitemap-static.xml')}${child('/sitemap-dynamic.xml')}</sitemapindex>\n`
+            : text.replace('</urlset>', set + '</urlset>'),
+    )
     return true
   }
 
@@ -615,7 +638,7 @@ export function createServer(o = {}) {
         return await (post ? formPost : ssr)(req, res, route, m.groups ? { ...m.groups } : {}, url, rid)
       }
       if (post) return send(res, 405, 'Method not allowed', { allow: 'GET, HEAD' })
-      if (DYN.length && (url.pathname === '/sitemap.xml' || url.pathname === '/sitemap-dynamic.xml') && (await serveSitemap(req, res, url))) return
+      if (DYN.length && (url.pathname === '/sitemap.xml' || url.pathname === '/sitemap-dynamic.xml' || url.pathname === '/sitemap-static.xml') && (await serveSitemap(req, res, url))) return
       if (serveStatic(req, res, url)) return
       notFound(req, res)
     } catch (e) {
