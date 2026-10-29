@@ -54,8 +54,10 @@ test('Prompt API: stateless prompts run on clones of one base session; schema pa
 
 test('task models: created once per options, call options passed per call', async () => {
   let made = 0
-  globalThis.Translator = { availability: async () => 'available', create: async o => (made++, { translate: async t => `${o.sourceLanguage}>${o.targetLanguage}:${t}` }) }
+  globalThis.Translator = { availability: async o => (o.sourceLanguage === 'en' && o.targetLanguage === 'es' ? 'available' : 'unavailable'), create: async o => (made++, { translate: async t => `${o.sourceLanguage}>${o.targetLanguage}:${t}` }) }
   globalThis.Summarizer = { create: async o => ({ summarize: async (t, r) => `${o.type}|${r.context}|${t}` }) }
+  assert.equal(await ai.ready('translator', { from: 'en', to: 'es' }), 'available')
+  assert.equal(await ai.ready('translator', { from: 'en', to: 'xx' }), 'unavailable')
   assert.equal(await ai.translate('hi', { from: 'en', to: 'es' }), 'en>es:hi')
   assert.equal(await ai.translate('bye', { from: 'en', to: 'es' }), 'en>es:bye')
   assert.equal(made, 1)

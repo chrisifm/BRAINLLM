@@ -157,6 +157,8 @@ export function createServer(o = {}) {
     const { user, session: ses } = sessionFrom(cookies, secret)
     return {
       url, query: Object.fromEntries(url.searchParams), cookies, user, session: ses, env,
+      // `prefetch`: the router fetched this page ahead of a click (§19); a `load` with side effects can skip them
+      prefetch: req.headers['x-brain-prefetch'] === '1',
       req: { method: req.method, headers: req.headers, ip: ipOf(req) }, ...extra,
     }
   }

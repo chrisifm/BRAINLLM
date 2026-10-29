@@ -10,6 +10,9 @@ export async function rpc(id, a, oops, base) {
     j = t ? JSON.parse(t) : undefined
   } catch (e) {
     throw (oops(e, null, 'rpc'), e)
+  } finally {
+    // a server function may write or change the session: pages the router prefetched may be stale (§19)
+    if (globalThis.dispatchEvent && globalThis.Event) globalThis.dispatchEvent(new Event('brain:write'))
   }
   if (r.ok) return j
   const e = Object.assign(Error((j && j.error) || 'rpc ' + id + ': ' + r.status), { code: 'rpc', status: r.status, id, errors: j && j.errors })

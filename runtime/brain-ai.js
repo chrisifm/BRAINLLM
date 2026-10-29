@@ -3,7 +3,8 @@
 // `ai.ready()` answers 'unavailable' and the other calls throw an Error with `code: 'unavailable'`, so the app decides
 // what to show instead. What the model does is up to the app: the runtime only opens the door.
 //   await ai.ready()                       'available' | 'downloadable' | 'downloading' | 'unavailable' (Prompt API)
-//   await ai.ready('summarizer')           same for summarizer, translator, detector, writer, rewriter, proofreader
+//   await ai.ready('summarizer')           same for summarizer, detector, writer, rewriter, proofreader
+//   await ai.ready('translator', { from: 'en', to: 'es' })   the translator needs its two languages
 //   await ai.prompt('Name three colors', { system, schema, signal, onProgress })   → string (stateless call)
 //   for await (const part of ai.stream('Tell a story')) …                          → text chunks as they arrive
 //   const chat = await ai.session({ system })   native session: chat.prompt(), append(), clone(), destroy()
@@ -33,11 +34,13 @@ const native = kind => {
 }
 const missing = kind => Object.assign(Error(`Built-in AI is not available in this browser (${API[kind]})`), { code: 'unavailable' })
 
+// `{ from, to }` are the translator's languages, as in ai.translate (Translator.availability needs them)
+const langs = ({ from, to, ...o } = {}) => ({ ...o, ...(from ? { sourceLanguage: from } : {}), ...(to ? { targetLanguage: to } : {}) })
 async function ready(kind = 'prompt', options) {
   const N = native(kind)
   if (!N || !N.availability) return 'unavailable'
   try {
-    return await N.availability(options || {})
+    return await N.availability(langs(options))
   } catch {
     return 'unavailable'
   }

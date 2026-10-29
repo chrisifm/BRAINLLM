@@ -328,18 +328,22 @@ export function router(o = {}) {
 // swaps without waiting for the network; its module chunks get `<link rel=modulepreload>` so the view mounts at once.
 // The current view never waits: requests run at low priority and only when idle. Skipped: Save-Data and 2G (only
 // intent prefetches there, and never with Save-Data), `data-prefetch="false"` on the link or an ancestor, download or
-// target links, log-out style paths, and everything with `router({ prefetch: false })` or
-// `<meta name="brain-prefetch" content="off">`. A page served `private`/`no-store` is reused for 30 s, others for 5 min.
-// Each fetch says `x-brain-prefetch: 1`, so a server can tell it apart from a click.
-const FRESH = 300000, FRESH_PRIVATE = 30000, MAX_PAGE = 12, PARALLEL = 2
-const NOPE = /(^|\/)(log-?out|sign-?out|logoff)(\/|$)/i
+// target links, files (`.pdf`, `.zip`…), `/api/` and `/auth/`, action-style paths (log out, unsubscribe, confirm,
+// verify), URLs carrying a token in the query, and everything with `router({ prefetch: false })` or
+// `<meta name="brain-prefetch" content="off">`. A page served `private`/`no-store` is reused for 30 s, others for 5 min,
+// and any write empties the memory first: a form submit, a `brain:write` (brain-data writes, every server function
+// call, log-out included), so the next view never shows data from before the write or another session. Each fetch says
+// `x-brain-prefetch: 1` (`ctx.prefetch` in the server's `load`), so a server can tell it apart from a click.
+const FRESH = 300000, FRESH_PRIVATE = 30000, MAX_PAGE = 12, MAX_KEPT = 24, PARALLEL = 2
+const NOPE = /(^|\/)(log-?out|sign-?out|logoff|unsubscribe|confirm|verify|api|auth)(\/|$)|\.[a-z0-9]{2,5}$/i
+const SECRET = /(^|[?&])(token|code|key|sig|signature|auth|otp|state)=/i
 export function predict(o = {}, same = () => false) {
   const off = { scan() {}, stop() {}, take: async () => null }
   const meta = G.document && document.querySelector && document.querySelector('meta[name=brain-prefetch]')
   if (o.prefetch === false || (meta && /^(off|false|0)$/i.test(meta.getAttribute('content') || '')) || !G.document || !G.fetch) return off
   const net = G.navigator && navigator.connection
   const thin = () => !!net && (net.saveData || /(^|-)2g$/.test(net.effectiveType || ''))
-  const cache = new Map(), queue = [], seen = new Set(), pre = new Set()
+  const cache = new Map(), queue = [], seen = new WeakSet(), pre = new Set()
   let busy = 0, count = 0, io = null, idle = 0
   const key = h => {
     try {
@@ -354,7 +358,9 @@ export function predict(o = {}, same = () => false) {
     if (!a || !a.getAttribute || !a.getAttribute('href') || a.getAttribute('target') || a.hasAttribute('download')) return null
     for (let n = a; n && n.getAttribute; n = n.parentNode) if (n.getAttribute('data-prefetch') === 'false') return null
     const k = key(a.href || a.getAttribute('href'))
-    if (!k || !same(k) || NOPE.test(new URL(k).pathname) || k === key(location.href)) return null
+    if (!k || !same(k) || k === key(location.href)) return null
+    const u = new URL(k)
+    if ((NOPE.test(u.pathname) && !/\.html?$/i.test(u.pathname)) || SECRET.test(u.search)) return null
     return k
   }
   // the next page's chunks: module scripts and static imports in its HTML
@@ -372,7 +378,14 @@ export function predict(o = {}, same = () => false) {
       document.head.appendChild(l)
     }
   }
+  // drop what expired, then the oldest past MAX_KEPT (a Map keeps insertion order)
+  const prune = () => {
+    const now = Date.now()
+    for (const [k, c] of cache) if (now - c.at > FRESH) cache.delete(k)
+    for (const k of cache.keys()) if (cache.size >= MAX_KEPT) cache.delete(k)
+  }
   const get = k => {
+    prune()
     const at = Date.now()
     const p = fetch(k, { headers: { 'x-brain-nav': '1', 'x-brain-prefetch': '1' }, priority: 'low', credentials: 'same-origin' })
       .then(async r => {
@@ -412,6 +425,10 @@ export function predict(o = {}, same = () => false) {
   }
   const evs = ['pointerover', 'focusin', 'touchstart']
   for (const t of evs) document.addEventListener(t, intent, { passive: true, capture: true })
+  // a write makes every fetched page possibly stale (or another session's after log-out): forget them all
+  const forget = () => ((queue.length = 0), cache.clear())
+  document.addEventListener('submit', forget, { capture: true })
+  if (G.addEventListener) G.addEventListener('brain:write', forget)
   if (G.IntersectionObserver)
     io = new IntersectionObserver(
       es => {
@@ -429,6 +446,8 @@ export function predict(o = {}, same = () => false) {
     stop() {
       io && io.disconnect()
       for (const t of evs) document.removeEventListener(t, intent, { capture: true })
+      document.removeEventListener('submit', forget, { capture: true })
+      G.removeEventListener && G.removeEventListener('brain:write', forget)
       cache.clear()
     },
     // the prefetched page for this URL when it is still fresh (used once: a later visit fetches again)

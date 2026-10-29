@@ -676,4 +676,37 @@ test('predictive prefetch: off by option, by meta, and stale private pages are n
   Date.now = now
   p.stop()
   globalThis.fetch = real
+  delete globalThis.addEventListener, delete globalThis.removeEventListener, delete globalThis.dispatchEvent
+})
+
+test('predictive prefetch: action, file, api and token links are skipped; a write forgets every fetched page', async () => {
+  globalThis.location = new URL('http://x.test/a')
+  const { predict } = await rt.sibling('brain-router.js')
+  const asked = []
+  const real = globalThis.fetch
+  globalThis.fetch = async (u, o) => (asked.push(new URL(u).pathname + new URL(u).search), real(u, o))
+  // the window: brain-data and brain-rpc announce writes on it (a minimal emitter: the DOM shim owns `Event`)
+  const on = {}
+  Object.assign(globalThis, {
+    addEventListener: (t, f) => (on[t] ||= new Set()).add(f),
+    removeEventListener: (t, f) => on[t] && on[t].delete(f),
+    dispatchEvent: e => (on[e.type] || []).forEach(f => f(e)),
+  })
+  doc.body.innerHTML =
+    '<main><a href="/unsubscribe">U</a><a href="/report.pdf">P</a><a href="/api/items">A</a><a href="/auth/google">G</a>' +
+    '<a href="/b?token=abc">T</a><a href="/c?page=2">C</a></main>'
+  const p = predict({}, u => new URL(u).origin === 'http://x.test')
+  for (const a of doc.body.querySelectorAll('a')) a.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 10))
+  assert.deepEqual(asked, ['/c?page=2'])
+  globalThis.dispatchEvent(new Event('brain:write'))
+  assert.equal(await p.take('http://x.test/c?page=2'), null) // forgotten: it may show data from before the write
+  doc.body.innerHTML = '<main><a href="/b">B</a><form></form></main>'
+  doc.body.querySelector('a').dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 10))
+  doc.body.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true }))
+  assert.equal(await p.take('http://x.test/b'), null)
+  p.stop()
+  globalThis.fetch = real
+  delete globalThis.addEventListener, delete globalThis.removeEventListener, delete globalThis.dispatchEvent
 })

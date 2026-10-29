@@ -17,6 +17,8 @@ other browsers have none, so every feature built on it is an extra, never the on
 | `await ai.detect(text)` | `[{ detectedLanguage, confidence }]` | LanguageDetector, stable since Chrome 138 |
 | `await ai.write(task)` · `ai.rewrite(text, { tone })` · `ai.proofread(text)` | string or corrections | trials |
 `kind` is `prompt` (default), `summarizer`, `translator`, `detector`, `writer`, `rewriter` or `proofreader`.
+The translator needs its languages: `ai.ready('translator', { from: 'en', to: 'es' })` (without them it answers
+`'unavailable'`).
 
 ## Steps
 1. Check before showing the feature: `let can = sig(false)` and `mounted(async () => (can = (await ai.ready('summarizer')) !== 'unavailable'))`.

@@ -355,6 +355,8 @@ async function once(u, M, body, sg, pri, up) {
   } finally {
     release()
     if (low) LOW.delete(low)
+    // a write tells the router's prefetch that pages it fetched may be stale (§19)
+    if (M !== 'GET' && G.dispatchEvent && G.Event) G.dispatchEvent(new Event('brain:write'))
     if (G.__brainDev && G.dispatchEvent && G.CustomEvent) G.dispatchEvent(new CustomEvent('brain:net', { detail: { method: M, url, status: st, ms: Date.now() - t0, size: text.length } }))
   }
   let j
