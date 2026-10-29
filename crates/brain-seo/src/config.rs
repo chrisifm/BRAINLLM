@@ -590,4 +590,28 @@ mod tests {
             "0 turns the threshold off"
         );
     }
+
+    /// brain.schema.json (editor validation) lists exactly the `seo.*` keys this file reads: a key added on one side
+    /// only is a silent no-op for the user (schema) or invisible to the editor (config).
+    #[test]
+    fn schema_seo_keys_match_the_config() {
+        let schema = Json::parse(include_str!("../../brain-cli/schema/brain.schema.json")).unwrap();
+        let Some(Json::Obj(props)) = schema.get("properties").and_then(|p| p.get("seo")).and_then(|s| s.get("properties")) else {
+            panic!("schema has no properties.seo.properties")
+        };
+        let mut in_schema: Vec<&str> = props.iter().map(|(k, _)| k.as_str()).collect();
+        let src = include_str!("config.rs");
+        let src = &src[..src.find("#[cfg(test)]").unwrap()];
+        let mut read: Vec<&str> = vec![];
+        for pat in ["seo.get(\"", "b(seo, \"", "s(seo, \""] {
+            for (i, _) in src.match_indices(pat) {
+                let rest = &src[i + pat.len()..];
+                read.push(&rest[..rest.find('"').unwrap()]);
+            }
+        }
+        in_schema.sort_unstable();
+        read.sort_unstable();
+        read.dedup();
+        assert_eq!(in_schema, read, "seo keys: schema vs config.rs");
+    }
 }
