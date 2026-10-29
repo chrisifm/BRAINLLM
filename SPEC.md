@@ -127,7 +127,9 @@ Animations inside `@media (prefers-reduced-motion: no-preference)`.
 ## Accessibility (build fails otherwise)
 img has alt · clicks only on button/a · use `<Input label="…">` `<Select label="…">` from the kit (a raw
 input/select/textarea needs a `<label>`) · no heading level skips ·
-one h1 and one main per view · buttons have text · no tabindex > 0.
+one h1 and one main per view · buttons have text · links have a name (text, `aria-label` or img alt) · iframe
+has `title` · no tabindex > 0. Warnings: generic link text ("click here", "read more") · alt that is a file name or
+"image"/"logo" · `<video>` with controls or sound needs `<track kind="captions">`.
 
 ## SEO
 Every view: `<meta seo title="…" description="…" canonical? og:image? schema? robots?>`.

@@ -12,6 +12,14 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 ### Documentation
 
 - Site and README: the title, hero, metadata and footer say up front that BRAINLLM is a compiler written in Rust.
+### Added
+
+- B0411 (error): an `<a href>` with no accessible name (no text, `aria-label` or image with alt).
+- B0412 (warning): link text that is only a generic phrase such as "click here" or "read more".
+- B0413 (warning): an `alt` that is a file name or a lone generic word such as "image" or "logo".
+- B0414 (error): an `<iframe>` without `title` or `aria-label`.
+- B0415 (warning): a `<video>` with controls or sound that has no captions or subtitles track.
+
 ### Fixed
 
 - An app whose name is a runtime helper (`brain new t`) builds again: a word `t` in server text or `logout(` no

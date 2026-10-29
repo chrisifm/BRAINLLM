@@ -2062,8 +2062,33 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            "img" => {
+                if let Some(alt) = text_attr("alt")
+                    && poor_alt(&alt)
+                {
+                    self.push("B0413", e.span, format!("`alt=\"{}\"` is a file name or a generic word, not a description", alt.trim()), "describe what the image shows (`alt=\"Team at the 2026 offsite\"`), or use `alt=\"\"` if it is decorative");
+                }
+            }
             "button" if !labelled && !has_accessible_text(&e.children) => {
                 self.push("B0406", e.span, "`<button>` without accessible text", "add visible text or `aria-label=\"…\"`");
+            }
+            "a" if has("href") => {
+                let aria = has("aria-label") || has("aria-labelledby");
+                if !labelled && !has_accessible_text(&e.children) {
+                    self.push("B0411", e.span, "`<a href>` without an accessible name", "add link text, `aria-label=\"…\"` or an `<img alt=\"…\">` inside the link");
+                } else if !aria && let Some(t) = static_text(&e.children) {
+                    let norm = t.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+                    let norm = norm.trim_end_matches(|c: char| c.is_ascii_punctuation() || c.is_whitespace() || matches!(c, '…' | '→' | '›' | '»'));
+                    if GENERIC_LINK_TEXT.contains(&norm) {
+                        self.push("B0412", e.span, format!("link text `{}` does not say where the link goes", t.trim()), "name the destination (`Read the pricing guide`) or add `aria-label=\"…\"`");
+                    }
+                }
+            }
+            "iframe" if !has("title") && !has("aria-label") && !has("aria-labelledby") => {
+                self.push("B0414", e.span, "`<iframe>` without `title`", "add `title=\"…\"` describing the embedded content");
+            }
+            "video" if (has("controls") || !has("muted")) && !has_caption_track(&e.children) => {
+                self.push("B0415", e.span, "`<video>` without a captions track", "add `<track kind=\"captions\" src=\"/captions.vtt\" srclang=\"en\" label=\"English\">` (a muted autoplay loop without `controls` needs none)");
             }
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
                 let level = tag.as_bytes()[1] - b'0';
@@ -2301,6 +2326,68 @@ fn has_accessible_text(nodes: &[Node]) -> bool {
         Node::If(b) => b.branches.iter().any(|br| has_accessible_text(&br.body)),
         Node::Each(b) => has_accessible_text(&b.body),
         Node::Await(_) => true,
+    })
+}
+
+/// Link texts that do not say where the link goes (B0412), compared lowercased and without trailing punctuation.
+pub const GENERIC_LINK_TEXT: &[&str] = &["click here", "here", "read more", "more", "link", "learn more"];
+
+/// Extensions that make an `alt` a file name (B0413).
+const IMAGE_EXTENSIONS: &[&str] = &[".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".avif"];
+/// Words that alone describe nothing (B0413).
+const GENERIC_ALT: &[&str] = &["image", "photo", "picture", "logo", "icon", "img"];
+
+/// True when a non-empty `alt` is a file name (`hero.png`) or only a generic word (`image`), B0413. `alt=""` is fine.
+pub fn poor_alt(alt: &str) -> bool {
+    let a = alt.trim().to_lowercase();
+    if a.is_empty() {
+        return false;
+    }
+    let word = a.trim_end_matches(|c: char| c.is_ascii_punctuation());
+    GENERIC_ALT.contains(&word)
+        || a.split_whitespace().any(|w| {
+            let w = w.trim_end_matches([',', ';', ':', ')', '"', '\'']);
+            IMAGE_EXTENSIONS.iter().any(|x| w.ends_with(x) && w.len() > x.len())
+        })
+}
+
+/// The static text of a subtree, or `None` when any part is dynamic (an expression, a component, a slot or a block).
+fn static_text(nodes: &[Node]) -> Option<String> {
+    let mut out = String::new();
+    for n in nodes {
+        match n {
+            Node::Text(t) => out.push_str(&t.value),
+            Node::Element(e) => {
+                if e.attrs.iter().any(|a| a.name == "aria-label") {
+                    return None;
+                }
+                if e.tag == "img" {
+                    match e.attrs.iter().find(|a| a.name == "alt").map(|a| &a.value) {
+                        Some(AttrValue::Text(t)) => out.push_str(t),
+                        Some(AttrValue::None) | None => {}
+                        Some(_) => return None,
+                    }
+                }
+                out.push(' ');
+                out.push_str(&static_text(&e.children)?);
+                out.push(' ');
+            }
+            _ => return None,
+        }
+    }
+    Some(out)
+}
+
+/// A `<track kind="captions|subtitles">` among the children of a `<video>` (B0415).
+fn has_caption_track(nodes: &[Node]) -> bool {
+    nodes.iter().any(|n| match n {
+        Node::Element(e) => {
+            (e.tag == "track" && e.attrs.iter().any(|a| a.name == "kind" && matches!(&a.value, AttrValue::Text(t) if matches!(t.trim(), "captions" | "subtitles"))))
+                || has_caption_track(&e.children)
+        }
+        Node::If(b) => b.branches.iter().any(|br| has_caption_track(&br.body)) || b.otherwise.as_ref().is_some_and(|o| has_caption_track(o)),
+        Node::Each(b) => has_caption_track(&b.body),
+        _ => false,
     })
 }
 

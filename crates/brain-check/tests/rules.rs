@@ -173,3 +173,67 @@ fn replacing_form_fields() {
     let d = diags("<script>\n  let f = form({ title: 'str!' }, { submit: async (v) => v })\n  let box = { v: 1 }\n  mounted(() => { f.v.title = 'Draft'; f.reset({ title: 'Draft' }); box.v = 2 })\n</script>\n<form on:submit={f.submit}><input aria-label=\"Title\" bind:value={f.v.title}><button>Save</button></form>\n");
     assert!(!d.iter().any(|d| d.code == "B0133"), "{d:?}");
 }
+
+fn a11y(src: &str) -> Vec<&'static str> {
+    codes(src).into_iter().filter(|c| c.starts_with("B041")).collect()
+}
+
+#[test]
+fn link_without_accessible_name() {
+    assert_eq!(a11y("<a href=\"/cart\"></a>"), ["B0411"]);
+    assert_eq!(a11y("<a href=\"/cart\">   </a>"), ["B0411"]);
+    assert_eq!(a11y("<a href=\"/cart\"><span></span></a>"), ["B0411"]);
+    assert_eq!(a11y("<a href=\"/cart\"><img src=\"/cart.svg\" alt=\"\"></a>"), ["B0411"]);
+    // an icon link with aria-label, link text, an expression or an image with alt all have a name
+    assert!(a11y("<a href=\"/cart\" aria-label=\"Cart\"><span class=\"i\"></span></a>").is_empty());
+    assert!(a11y("<a href=\"/cart\" aria-labelledby=\"cart-label\"></a>").is_empty());
+    assert!(a11y("<a href=\"/cart\">Cart</a>").is_empty());
+    assert!(a11y("<script>let n = sig('Cart')</script><a href=\"/cart\">{n}</a>").is_empty());
+    assert!(a11y("<a href=\"/\"><img src=\"/acme.svg\" alt=\"Acme home\"></a>").is_empty());
+    // an anchor without href is not a link
+    assert!(a11y("<a id=\"top\"></a>").is_empty());
+}
+
+#[test]
+fn generic_link_text() {
+    for t in ["click here", "Here", "Read more", "read more…", "More", "link", "Learn more →", "  learn   more. "] {
+        assert_eq!(a11y(&format!("<a href=\"/pricing\">{t}</a>")), ["B0412"], "{t}");
+    }
+    assert_eq!(a11y("<a href=\"/pricing\"><strong>Read more</strong></a>"), ["B0412"]);
+    // aria-label overrides the visible text; a descriptive or dynamic text is fine
+    assert!(a11y("<a href=\"/pricing\" aria-label=\"Read more about pricing\">Read more</a>").is_empty());
+    assert!(a11y("<a href=\"/pricing\">Read the pricing guide</a>").is_empty());
+    assert!(a11y("<a href=\"/pricing\">More plans</a>").is_empty());
+    assert!(a11y("<script>let t = sig('x')</script><a href=\"/pricing\">Read more {t}</a>").is_empty());
+}
+
+#[test]
+fn alt_text_that_describes_nothing() {
+    for alt in ["hero.png", "IMG_2041.JPG", "photo of team.jpeg", "banner.webp", "logo.svg", "shot.avif", "a.gif", "image", "Photo", "picture", "logo", "icon", "img"] {
+        assert_eq!(a11y(&format!("<img src=\"/x.png\" alt=\"{alt}\">")), ["B0413"], "{alt}");
+    }
+    assert!(a11y("<img src=\"/x.png\" alt=\"\">").is_empty());
+    assert!(a11y("<img src=\"/x.png\" alt=\"Acme logo\">").is_empty());
+    assert!(a11y("<img src=\"/x.png\" alt=\"The team at the offsite\">").is_empty());
+    assert!(a11y("<img src=\"/x.png\" alt=\".png files explained\">").is_empty());
+    assert!(brain_check::poor_alt("hero.png") && !brain_check::poor_alt("") && !brain_check::poor_alt("Hero banner"));
+}
+
+#[test]
+fn iframe_without_title() {
+    assert_eq!(a11y("<iframe src=\"https://maps.example.com/embed\"></iframe>"), ["B0414"]);
+    assert!(a11y("<iframe src=\"https://maps.example.com/embed\" title=\"Map of our office\"></iframe>").is_empty());
+    assert!(a11y("<iframe src=\"https://maps.example.com/embed\" aria-label=\"Map of our office\"></iframe>").is_empty());
+}
+
+#[test]
+fn video_without_captions() {
+    assert_eq!(a11y("<video controls src=\"/demo.mp4\"></video>"), ["B0415"]);
+    assert_eq!(a11y("<video src=\"/demo.mp4\" autoplay></video>"), ["B0415"]);
+    assert_eq!(a11y("<video controls muted src=\"/demo.mp4\"></video>"), ["B0415"]);
+    assert_eq!(a11y("<video controls src=\"/demo.mp4\"><track kind=\"chapters\" src=\"/c.vtt\"></video>"), ["B0415"]);
+    assert!(a11y("<video controls src=\"/demo.mp4\"><track kind=\"captions\" src=\"/demo.vtt\" srclang=\"en\" label=\"English\"></video>").is_empty());
+    assert!(a11y("<video controls src=\"/demo.mp4\"><track kind=\"subtitles\" src=\"/demo.vtt\" srclang=\"en\" label=\"English\"></video>").is_empty());
+    // a muted autoplay loop without controls is decorative
+    assert!(a11y("<video autoplay muted loop playsinline src=\"/bg.mp4\"></video>").is_empty());
+}

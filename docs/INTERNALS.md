@@ -218,6 +218,15 @@ Shadow DOM, Declarative Shadow DOM for SSR, `adoptedStyleSheets` shared across i
 - B0407 `tabindex` > 0.
 - B0408 Contrast of color token pairs below 4.5:1, computed at build.
 - B0409 Animation without `prefers-reduced-motion`.
+- B0411 `<a href>` without an accessible name: no text, no `aria-label`/`aria-labelledby`/`title`, no `<img>` with a
+  non-empty `alt` (an expression, component or slot child counts as text).
+- B0412 (warning) Link text that is only a generic phrase (`GENERIC_LINK_TEXT`: "click here", "read more"…) and no
+  `aria-label`; only fully static text is compared.
+- B0413 (warning) `<img alt>` that is a file name (`.png`, `.jpg`, `.svg`…) or a lone generic word (`poor_alt`);
+  `alt=""` stays the way to mark a decorative image.
+- B0414 `<iframe>` without `title` or `aria-label`.
+- B0415 (warning) `<video>` with `controls` or without `muted` and no `<track kind="captions|subtitles">`; a muted
+  autoplay loop without `controls` is exempt.
 
 **SEO per view:**
 ```html
