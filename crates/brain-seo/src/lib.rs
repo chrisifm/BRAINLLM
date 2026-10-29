@@ -893,6 +893,12 @@ pub fn read_dist(dist: &Path) -> Result<(Vec<Page>, Assets), String> {
 /// `brain seo <audit|links|preview <route>> [--json]`, run in the app root. Returns `(exit code, stdout)`: 0 ok,
 /// 1 findings that fail, 2 usage.
 pub fn cli(root: &Path, args: &[String]) -> (i32, String) {
+    cli_with(root, args, &|_| None)
+}
+
+/// [`cli`] with the `keyword` of each route (it is never rendered, so `dist/` alone cannot tell B1816/B1836 apart):
+/// `brain seo` reads it from the view sources, like the build does.
+pub fn cli_with(root: &Path, args: &[String], keyword: &dyn Fn(&str) -> Option<String>) -> (i32, String) {
     let json = args.iter().any(|a| a == "--json");
     let flag = |name: &str| {
         args.iter()
@@ -931,7 +937,10 @@ pub fn cli(root: &Path, args: &[String]) -> (i32, String) {
     };
     let load = || -> Result<(Config, Vec<Page>, Report), String> {
         let mut cfg = Config::load(root)?;
-        let (pages, mut assets) = read_dist(&root.join("dist"))?;
+        let (mut pages, mut assets) = read_dist(&root.join("dist"))?;
+        for p in &mut pages {
+            p.keyword = keyword(&p.route);
+        }
         if pages.is_empty() {
             return Err("dist/ has no pages; fix: run `brain build` first".into());
         }

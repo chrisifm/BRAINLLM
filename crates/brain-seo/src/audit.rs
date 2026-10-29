@@ -250,6 +250,12 @@ pub const CATALOG: &[(&str, &str, &str, &str)] = &[
         "<p>According to the <a href=\"https://www.w3.org/TR/…\">W3C spec</a>, …</p>",
     ),
     (
+        "B1836",
+        "Title or description off the page topic",
+        "Without a focus keyword the H1 says what the page is about; a title or description that does not name it (\"Home\") gives search results and answer engines a snippet that matches no query.",
+        "<meta seo title=\"Offline task planner — Acme\" description=\"An offline task planner that syncs when you reconnect.\">",
+    ),
+    (
         "B1835",
         "Video not indexable",
         "Search engines index a video (rich result, video sitemap) only with a poster image and an upload date.",
@@ -805,6 +811,22 @@ fn page_checks(
                 format!("focus keyword \"{kw}\" density is {density:.1} % ({hits} uses in {words} words)"),
                 if density > 3.0 { "use synonyms instead of repeating the keyword".into() } else { format!("mention \"{kw}\" naturally a few more times") },
             );
+        }
+    } else if body && let Some((_, h1)) = doc.headings.iter().find(|(l, _)| *l == 1) {
+        // no keyword: the H1 is the page's topic, and the title and description (the result snippet) should name it
+        let terms = topic(None, doc);
+        for (place, text, attr_) in [("title", title, "title"), ("description", desc, "description")] {
+            if !text.is_empty() && mentions(text, &terms).is_none() {
+                s.note(
+                    "B1836",
+                    Level::Info,
+                    format!("the {place} does not name the page topic \"{}\" (its H1)", h1.trim()),
+                    format!(
+                        "reword `{attr_}=` of <meta seo> to contain the main words of the H1 (\"{}\"), or add `keyword=\"<the query>\"` and use it in the title, H1 and description",
+                        h1.trim()
+                    ),
+                );
+            }
         }
     }
     // main image (LCP candidate)

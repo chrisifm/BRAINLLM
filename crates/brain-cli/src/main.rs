@@ -217,7 +217,22 @@ fn main() -> ExitCode {
         Some("seo") => {
             // brain seo <audit|links|preview <route>|indexnow> [--json]: brain-seo over dist/
             let (code, out) = match app_root() {
-                Ok(root) => brain_seo::cli(&root, &args[1..]),
+                Ok(root) => {
+                    // `keyword` is not rendered: read it from the view of each route, as the build does
+                    let mut views = Vec::new();
+                    brain_files(&root.join("views"), &mut views);
+                    let by_route: HashMap<String, String> = views
+                        .iter()
+                        .filter_map(|f| {
+                            let rel = f.strip_prefix(&root).ok()?.to_string_lossy().replace('\\', "/");
+                            let route = map::route_of(&rel)?;
+                            let src = std::fs::read_to_string(f).ok()?;
+                            let c = brain_parse::parse(&src, Path::new(&rel)).ok()?;
+                            Some((route, brain_check::seo::view_info(&c).keyword?))
+                        })
+                        .collect();
+                    brain_seo::cli_with(&root, &args[1..], &|r| by_route.get(r).cloned())
+                }
                 Err(e) => (2, e),
             };
             println!("{out}");

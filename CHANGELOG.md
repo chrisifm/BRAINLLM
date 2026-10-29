@@ -31,12 +31,15 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `<meta seo keyword="…">` is part of the authoring contract: an indexable view without it is warning B0502, and
   B1816 now also asks for the keyword in the description (the home page `/` is not asked for it in its URL).
   `brain new`, `brain add view|collection`, the examples and the generated AGENTS.md carry a keyword.
+- B1836 (info): a page without `keyword` whose title or description does not name its H1 topic ("Home" over an
+  "Offline task planner" page). The `brain new` sample posts name their topic in the description.
 - A page URL requested with `Accept: text/markdown` (preferred over `text/html`) answers its Markdown twin in
   `brain start` and the static server, with `Vary: Accept`; browsers still get HTML. `seo.markdown=false` turns it off
   together with the `.md` copies.
 
 ### Fixed
 
+- `brain seo audit` reads each view's `keyword`, so it reports the same B1816 findings as `brain build`.
 - An app whose name is a runtime helper (`brain new t`) builds again: a word `t` in server text or `logout(` no
   longer imports brain-i18n.js on the server.
 - `<meta seo schema="Article">` on an SSR page becomes one JSON-LD node built from that request's title,

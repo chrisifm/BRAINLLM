@@ -259,6 +259,53 @@ fn keyword_placement() {
 }
 
 #[test]
+fn topic_coherence_without_keyword() {
+    let c = cfg();
+    let words = LONG.repeat(40);
+    let body = format!("<h1>Offline task planner</h1><p>{words} See <a href=\"/\">home</a>.</p>");
+    let desc = "An offline task planner for small teams: plan the week and track progress without a network.";
+    let run = |title: &str, desc: &str, keyword: Option<&str>| {
+        let mut pages = good_site();
+        pages[1] = Page { keyword: keyword.map(Into::into), ..page("/planner", title, desc, &body) };
+        let r = audit(&Site { cfg: &c, pages: &pages, routes: &[], assets: &[], redirects: &[], images: &[], i18n: None });
+        r.pages[1]
+            .findings
+            .iter()
+            .filter(|f| f.code == "B1836")
+            .map(|f| (f.level, f.msg.clone(), f.fix.clone()))
+            .collect::<Vec<_>>()
+    };
+    let off = run("Home", desc, None);
+    assert_eq!(off.len(), 1, "{off:?}");
+    assert_eq!(off[0].0, Level::Info);
+    assert_eq!(off[0].1, "the title does not name the page topic \"Offline task planner\" (its H1)");
+    assert!(off[0].2.contains("`title=`") && off[0].2.contains("\"Offline task planner\""), "{}", off[0].2);
+    assert!(run("Offline task planner — Acme", desc, None).is_empty());
+    // the description is checked the same way
+    let d = run("Offline task planner — Acme", "Plan the week and track progress without a network, free for small teams.", None);
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(d[0].1.starts_with("the description"));
+    // with a keyword, B1816 owns placement and B1836 stays silent
+    assert!(run("Home", desc, Some("offline task planner")).is_empty());
+}
+
+#[test]
+fn cli_audit_reads_keywords_from_the_caller() {
+    let dir = fresh_dir("cli-keyword");
+    for p in good_site() {
+        let f = dir.join("dist").join(&p.file);
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(f, p.html).unwrap();
+    }
+    std::fs::write(dir.join("brain.json"), r#"{"site":"https://acme.dev"}"#).unwrap();
+    // dist/ alone does not know the keyword, so placement is not checked
+    let (_, plain) = brain_seo::cli(&dir, &["audit".into()]);
+    assert!(!plain.contains("B1816"), "{plain}");
+    let (_, with) = brain_seo::cli_with(&dir, &["audit".into()], &|r| (r == "/pricing").then(|| "kanban board".to_string()));
+    assert!(with.contains("focus keyword \"kanban board\" is not in the title"), "{with}");
+}
+
+#[test]
 fn noindex_and_canonicalized_pages_are_not_scored() {
     let c = cfg();
     let mut pages = good_site();

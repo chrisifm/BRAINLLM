@@ -1,4 +1,4 @@
-<meta seo keyword="about {{name}}" title="About {{name}}" description="About {{name}}: what it is, who builds it and how to reach the team. Replace this text with the story of your project." canonical="/about">
+<meta seo keyword="about" title="About {{name}}" description="About {{name}}: what it is, who builds it and how to reach the team. Replace this text with the story of your project." canonical="/about">
 
 <main class="page">
   <h1>About {{name}}</h1>
