@@ -1919,3 +1919,21 @@ fn blog_posting_image_falls_back_to_the_social_card() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The site feed is written whenever a page links it, even when every indexable page is nested (no root section).
+#[test]
+fn site_feed_exists_without_top_level_pages() {
+    let dir = fresh_dir("feed-nested");
+    let mut pages = good_site();
+    for p in pages.iter_mut().filter(|p| !p.route.starts_with("/blog/")) {
+        p.html = p.html.replace("<head>", "<head><meta name=\"robots\" content=\"noindex\">");
+    }
+    let built = finish(&cfg(), &dir, &mut pages, &[], &[]).unwrap();
+    let file = |n: &str| built.files.iter().find(|(p, _)| p == n).map(|(_, c)| c.clone());
+    let feed = file("rss.xml").expect("rss.xml is linked from every page, so it must exist");
+    assert!(feed.contains("<link>https://acme.dev/blog/offline-task-planner</link>"), "{feed}");
+    assert!(pages.iter().all(|p| p.html.contains("href=\"/rss.xml\"")));
+    let m = file("sections.json").unwrap();
+    assert!(m.contains("\"feed\":\"https://acme.dev/rss.xml\""), "{m}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

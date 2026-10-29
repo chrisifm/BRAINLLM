@@ -298,6 +298,9 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, u64)>) {
     }
 }
 
+/// The site feed's discovery tag, on every page while `rss.xml` exists (§32).
+const FEED_LINK: &str = "<link rel=\"alternate\" type=\"application/rss+xml\" title=\"Site feed\" href=\"/rss.xml\">";
+
 /// The `brain build` step (INTERNALS §32): rewrites every page's `<head>` in place and returns the generated files.
 /// `assets` lists the other files of `dist/` (chunks, CSS); `public/` is added here. Fails on broken internal links
 /// or anchors (B1819/B1820), listing each one with its fix.
@@ -417,8 +420,9 @@ pub fn finish_with_og(
             _ => String::new(),
         };
         // WordPress-style discovery on every page: the site feed and the sections manifest (§32)
+        // a site URL is needed for a feed; a build with no indexable page writes none and drops the link below
         if cfg.feed && cfg.site.is_some() {
-            tags.push_str("<link rel=\"alternate\" type=\"application/rss+xml\" title=\"Site feed\" href=\"/rss.xml\">");
+            tags.push_str(FEED_LINK);
         }
         if cfg.sections {
             tags.push_str("<link rel=\"alternate\" type=\"application/json\" title=\"Sections\" href=\"/sections.json\">");
@@ -728,17 +732,21 @@ pub fn finish_with_og(
         let mut feeds = Vec::new();
         if cfg.feed {
             let desc = files::site_description(cfg, &entries).unwrap_or_else(|| name_for_feeds.clone());
-            for s in &secs {
-                let path = sections::feed_path(&s.id);
+            // the site feed covers every indexable page, whether or not there are top-level pages (the root section)
+            let all: Vec<&files::Entry> = entries.iter().filter(|e| e.indexable).collect();
+            let mut todo: Vec<(String, String, String, String, Vec<&files::Entry>)> =
+                vec![(sections::feed_path(""), name_for_feeds.clone(), desc.clone(), "/".into(), all)];
+            for s in secs.iter().filter(|s| !s.id.is_empty()) {
+                let d = s.home.and_then(|h| h.doc.meta("description")).map(str::to_string).unwrap_or_else(|| desc.clone());
+                todo.push((sections::feed_path(&s.id), format!("{name_for_feeds} — {}", s.title), d, format!("/{}", s.id), s.pages.clone()));
+            }
+            for (path, title, d, home, pages) in todo {
                 // a content collection already wrote its own (richer) feed at that path
                 if files.iter().any(|(f, _)| *f == path) {
                     feeds.push(path);
                     continue;
                 }
-                let pages: Vec<&files::Entry> = if s.id.is_empty() { entries.iter().filter(|e| e.indexable).collect() } else { s.pages.clone() };
-                let (title, home) = if s.id.is_empty() { (name_for_feeds.clone(), "/".to_string()) } else { (format!("{name_for_feeds} — {}", s.title), format!("/{}", s.id)) };
-                let d = s.home.and_then(|h| h.doc.meta("description")).map(str::to_string).unwrap_or_else(|| desc.clone());
-                if let Some(x) = sections::rss(cfg, &title, &d, &home, &format!("/{path}"), &pages) {
+                if let Some(x) = sections::rss(cfg, &title, &d, &home, &format!("/{path}"), &pages, &name_for_feeds) {
                     files.push((path.clone(), x));
                     feeds.push(path);
                 }
@@ -746,6 +754,12 @@ pub fn finish_with_og(
         }
         if cfg.sections {
             files.push(("sections.json".into(), sections::manifest(cfg, &entries, &secs, &feeds)));
+        }
+    }
+    // never link a feed that was not written (no indexable page at all)
+    if !files.iter().any(|(f, _)| f == "rss.xml") {
+        for p in pages.iter_mut() {
+            p.html = p.html.replace(FEED_LINK, "");
         }
     }
     if let Some(f) = google.file.clone() {

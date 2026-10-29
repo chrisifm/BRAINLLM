@@ -20,7 +20,9 @@ pub struct Section<'a> {
 
 /// Indexable pages grouped by section, top-level pages first, then sections by id.
 pub fn sections<'a>(entries: &'a [Entry<'a>], site: &str) -> Vec<Section<'a>> {
-    let deep = |id: &str| entries.iter().any(|e| e.indexable && seg(e.route).1 && seg(e.route).0 == id);
+    // first segments that have nested pages, computed once (linear in the number of pages)
+    let nested_ids: std::collections::HashSet<&str> = entries.iter().filter(|e| e.indexable && seg(e.route).1).map(|e| seg(e.route).0).collect();
+    let deep = |id: &str| nested_ids.contains(id);
     let mut out: Vec<Section> = Vec::new();
     for e in entries.iter().filter(|e| e.indexable) {
         let (first, nested) = seg(e.route);
@@ -50,7 +52,8 @@ fn seg(route: &str) -> (&str, bool) {
 
 /// RSS 2.0 of `pages`, newest `lastmod` first (undated pages last), at most [`FEED_MAX`] items. `None` without `site`
 /// (feed readers need absolute URLs) or without pages.
-pub fn rss(cfg: &Config, title: &str, description: &str, home: &str, path: &str, pages: &[&Entry]) -> Option<String> {
+/// Item titles drop the ` · site` suffix, as in `sections.json`.
+pub fn rss(cfg: &Config, title: &str, description: &str, home: &str, path: &str, pages: &[&Entry], site: &str) -> Option<String> {
     cfg.site.as_ref()?;
     let mut items: Vec<&&Entry> = pages.iter().collect();
     if items.is_empty() {
@@ -74,7 +77,7 @@ pub fn rss(cfg: &Config, title: &str, description: &str, home: &str, path: &str,
         o.push_str(&format!("<lastBuildDate>{d}</lastBuildDate>\n"));
     }
     for e in items.into_iter().take(FEED_MAX) {
-        let t = e.doc.title.clone().unwrap_or_else(|| e.route.to_string());
+        let t = files::strip_site(&e.doc.title.clone().unwrap_or_else(|| e.route.to_string()), site);
         o.push_str(&format!("<item>\n<title>{}</title>\n<link>{}</link>\n<guid isPermaLink=\"true\">{}</guid>\n", xml(&t), xml(&e.url), xml(&e.url)));
         if let Some(d) = e.lastmod.and_then(rfc822) {
             o.push_str(&format!("<pubDate>{d}</pubDate>\n"));
@@ -216,14 +219,14 @@ mod tests {
         let (c, d) = (cfg(), docs());
         let e = entries(&c, &d);
         let s = sections(&e, "Acme");
-        let x = rss(&c, "Acme — Blog", "Notes", "/blog", "/blog/rss.xml", &s[1].pages).unwrap();
+        let x = rss(&c, "Acme — Blog", "Notes", "/blog", "/blog/rss.xml", &s[1].pages, "Acme").unwrap();
         assert!(x.contains("<atom:link href=\"https://acme.dev/blog/rss.xml\" rel=\"self\""), "{x}");
         assert!(x.contains("<generator>BRAINLLM 0.3.0</generator>"));
         let (b, a) = (x.find("<title>Second</title>").unwrap(), x.find("<title>First</title>").unwrap());
         assert!(b < a, "newest lastmod first: {x}");
         assert!(x.contains("<description>The first one</description>"));
         // feed readers need absolute URLs: no site, no feed
-        assert!(rss(&Config::default(), "t", "d", "/", "/rss.xml", &s[1].pages).is_none());
+        assert!(rss(&Config::default(), "t", "d", "/", "/rss.xml", &s[1].pages, "Acme").is_none());
     }
 
     #[test]
