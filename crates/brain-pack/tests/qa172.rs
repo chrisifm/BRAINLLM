@@ -82,11 +82,12 @@ fn router_live_primitives_and_http_setup() {
     for (k, v) in out.files.iter().filter(|(k, _)| k.ends_with(".html")) {
         assert!(!v.contains("<meta http"), "{k} keeps <meta http>");
     }
-    // #35: the view's small stylesheet is inline inside the region (the router swaps it with the view), static
-    // pages are listed for prerender on hover, and _headers carries the page's preloads as `Link` (early hints)
+    // #35: the view's small stylesheet is inline inside the region (the router swaps it with the view), no
+    // Speculation Rules (the router intercepts clicks and prefetches itself), and _headers carries the page's preloads
+    // as `Link` (early hints)
     let region = home.split("<div id=\"brain-view\">").nth(1).unwrap();
     assert!(region.starts_with("<style>"), "{home}");
-    assert!(home.contains("<script type=\"speculationrules\">") && home.contains("\"href_matches\":[\"/\",\"/about\",\"/deb\",\"/feed\"]"), "{home}");
+    assert!(!home.contains("speculationrules"), "{home}");
     let h = &out.files["_headers"];
     let root_rule = h.split("\n/\n").nth(1).unwrap().split("\n/").next().unwrap();
     assert!(root_rule.contains("  Link: <") && root_rule.contains("rel=modulepreload; integrity=\"sha384-"), "the preload carries the SRI of the tag, or the browser downloads twice (QA #21 F5): {h}");

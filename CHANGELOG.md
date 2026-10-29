@@ -46,7 +46,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   (URL, Markdown copy, lastmod). Every page links both. On by default; `seo.feed` and `seo.sections` turn them off.
 - Predictive prefetch in the client router: internal links that scroll into view are fetched while the browser is
   idle, hover, focus or touch fetch a link first, and the next navigation swaps from memory with the page's chunks
-  already preloaded. `data-prefetch="false"`, `<meta name="brain-prefetch" content="off">` and Save-Data turn it off.
+  already preloaded. Any write (a form submit, an `api()` write, a server function call) forgets the fetched pages;
+  files, `/api/`, `/auth/`, log-out, unsubscribe and confirm links and URLs with a token are never fetched, and the
+  server's `load` sees `ctx.prefetch`. `data-prefetch="false"`, `<meta name="brain-prefetch" content="off">` and
+  Save-Data turn it off. Pages no longer carry Speculation Rules: the router intercepts every click, so the browser's
+  prerender was never used and only doubled the request.
 - `ai`, a primitive for Chrome's built-in AI (Gemini Nano): `ai.ready()`, `ai.prompt`, `ai.stream`, `ai.session`,
   `ai.summarize`, `ai.translate`, `ai.detect`, `ai.write`, `ai.rewrite` and `ai.proofread`, feature-detected and
   `'unavailable'` in other browsers and on the server. `brain guide ai` covers when and how to use it.

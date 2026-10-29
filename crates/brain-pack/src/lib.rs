@@ -1295,15 +1295,9 @@ fn build_inner(
     } else {
         String::new()
     };
-    // Speculation Rules (§13, §19): hovering a link to another static page prerenders it, so the click is instant.
-    // Only build-time pages: they have no server side effects (SSR and guarded routes are never listed).
-    let static_routes: Vec<String> = plans.iter().filter(|p| !p.ssr && !p.route.starts_with('!') && p.route != "*" && !routes::is_dynamic(&p.route)).map(|p| format!("{pre}{}", p.route)).collect();
-    let speculation = if !router_tag.is_empty() && static_routes.len() > 1 {
-        let list = static_routes.iter().map(|r| prerender_json(r)).collect::<Vec<_>>().join(",");
-        format!("<script type=\"speculationrules\">{{\"prerender\":[{{\"source\":\"document\",\"where\":{{\"href_matches\":[{list}]}},\"eagerness\":\"moderate\"}}]}}</script>")
-    } else {
-        String::new()
-    };
+    // No Speculation Rules (2026-10-29): the router intercepts every same-origin click, so a browser prerender was
+    // never activated and only doubled the request; the router's own predictive prefetch (brain-router.js `predict`)
+    // fetches the probable next pages instead.
     // Prerender is deterministic given the chunks it runs, and chunk URLs are content hashes: a job whose URLs did
     // not change reuses the cached HTML (.brain/cache/pre/), so only edited views start Node.
     // The server module's content (seo/head code) is part of the key; a build-time `load` reads live data, so its
@@ -1451,7 +1445,7 @@ fn build_inner(
             script = script.replacen("<script type=\"module\">", &format!("<script type=\"module\">import\"{d}\";"), 1);
         }
         // page scripts go INSIDE the region (the router recreates them after a swap); the router itself stays outside
-        let slot = format!("<div id=\"brain-view\">{}{body_html}{script}</div>{router_tag}{speculation}", p.css);
+        let slot = format!("<div id=\"brain-view\">{}{body_html}{script}</div>{router_tag}", p.css);
         let mut doc = shell.replace("<slot />", &slot).replace("<slot/>", &slot);
         if let (Some(loc), Some((def, _))) = (&p.locale, &i18n) {
             doc = html_lang(&doc, loc, def);
