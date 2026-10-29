@@ -12,6 +12,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 ### Documentation
 
 - Site and README: the title, hero, metadata and footer say up front that BRAINLLM is a compiler written in Rust.
+### Fixed
+
+- An app whose name is a runtime helper (`brain new t`) builds again: a word `t` in server text or `logout(` no
+  longer imports brain-i18n.js on the server.
 
 ## [0.2.0] - 2026-10-29
 

@@ -893,6 +893,16 @@ fn mentions(code: &str, name: &str) -> bool {
     })
 }
 
+/// `name(` or `name.` as a free identifier (not `logout(`, `x.t(` or a word inside a string such as "What t is").
+fn calls(code: &str, name: &str) -> bool {
+    let w = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
+    code.match_indices(name).any(|(i, _)| {
+        let before = &code[..i];
+        let member = before.ends_with('.') && !before.ends_with("...");
+        !member && !before.chars().next_back().is_some_and(w) && matches!(code[i + name.len()..].chars().next(), Some('(' | '.'))
+    })
+}
+
 /// A top-level `function f` or `const f = (…) => …`.
 fn as_fn(s: &Stmt) -> bool {
     matches!(s, Stmt::Func(_)) || matches!(s, Stmt::Var(v) if v.decls.len() == 1 && matches!(v.decls[0].init.as_ref().map(Expr::unparen), Some(Expr::Func(_))))
@@ -1023,7 +1033,7 @@ fn generate_server(g: &mut Gen, c: &Component, opts: &Options) -> (String, Vec<S
     let content = if content.is_empty() { String::new() } else { format!("import {{ {} }} from \"brain:content\";\n", content.join(", ")) };
     // §37: `t()`/`locale()`/`fmt` left in server code (`<meta seo title={t('…')}>`, `load`) read the request's locale.
     let dir = opts.runtime.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
-    let i18n: Vec<&str> = ["t", "locale", "fmt"].into_iter().filter(|n| !declared.contains(*n) && mentions(&body, n) && (body.contains(&format!("{n}(")) || body.contains(&format!("{n}.")))).collect();
+    let i18n: Vec<&str> = ["t", "locale", "fmt"].into_iter().filter(|n| !declared.contains(*n) && calls(&body, n)).collect();
     let i18n = if i18n.is_empty() { String::new() } else { format!("import {{ {} }} from {};\n", i18n.join(", "), js_str(&format!("{dir}/brain-i18n.js"))) };
     (format!("{content}{i18n}{imports}{body}"), fns)
 }

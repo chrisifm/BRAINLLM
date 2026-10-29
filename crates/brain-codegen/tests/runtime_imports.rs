@@ -144,6 +144,15 @@ fn runtime_169_options_and_members_compile() {
 }
 
 #[test]
+fn a_word_t_in_server_text_is_not_an_i18n_call() {
+    // An app named `t`: "What t is" in a string and `logout(` in a server function used to import brain-i18n.js on
+    // the server even though the build (no i18n/) never emits it.
+    let src = "<meta seo title=\"Account\" description=\"What t is and how t works for you\">\n<script>\n  export async function load(ctx) { return { user: ctx.user } }\n  server: async function logout(ctx) { ctx.session.clear(); return true }\n  const out = async () => { await logout() }\n</script>\n<main><h1>Account</h1><button type=\"button\" on:click={out}>Sign out</button></main>\n";
+    let o = brain_codegen::compile(src, Path::new("views/account.brain")).unwrap_or_else(|d| panic!("{d:#?}"));
+    assert!(!o.server_js.contains("brain-i18n.js"), "{}", o.server_js);
+}
+
+#[test]
 fn t_in_meta_seo_is_imported_on_the_server_and_app_shell_is_static() {
     let src = "<meta seo title={t('about.title')} description={t('about.description')}>\n<main><h1>About</h1></main>\n";
     let o = brain_codegen::compile(src, Path::new("views/about.brain")).unwrap_or_else(|d| panic!("{d:#?}"));
