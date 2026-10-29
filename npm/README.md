@@ -4,7 +4,7 @@ BRAINLLM is MIT licensed. Scoped packages are configured with `publishConfig.acc
 release does not require an npm account, paid plan or private-registry credentials. Publishing still requires an
 authorized maintainer of the `@christianirack` scope.
 
-The first public release is version `0.1.0`. Both initializers install the same pinned compiler; anonymous installation is supported. See the root README for the agent prompt and setup.
+The first public release was `0.1.0`; every release since is listed in the root `CHANGELOG.md`. Both initializers install the same pinned compiler; anonymous installation is supported. See the root README for the agent prompt and setup.
 
 | Package | Role |
 |---|---|

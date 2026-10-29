@@ -10,7 +10,7 @@ checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 
 [[package]]
 name = "brain-check"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "brain-css",
  "brain-parse",
@@ -18,7 +18,7 @@ dependencies = [
 
 [[package]]
 name = "brain-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "brain-check",
  "brain-codegen",
@@ -35,7 +35,7 @@ dependencies = [
 
 [[package]]
 name = "brain-codegen"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "brain-check",
  "brain-css",
@@ -44,29 +44,29 @@ dependencies = [
 
 [[package]]
 name = "brain-css"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "brain-lex",
 ]
 
 [[package]]
 name = "brain-lex"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "brain-mcp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "brain-lex",
 ]
 
 [[package]]
 name = "brain-min"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "brain-pack"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "brain-codegen",
  "brain-css",
@@ -75,7 +75,7 @@ dependencies = [
 
 [[package]]
 name = "brain-parse"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "brain-css",
  "brain-lex",
@@ -83,7 +83,7 @@ dependencies = [
 
 [[package]]
 name = "brain-seo"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "brain-check",
  "brain-lex",
@@ -91,7 +91,7 @@ dependencies = [
 
 [[package]]
 name = "brain-serve"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "brain-check",
  "brain-lex",
