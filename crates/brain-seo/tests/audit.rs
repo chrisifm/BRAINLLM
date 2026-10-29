@@ -1410,6 +1410,9 @@ fn geo_hints_are_info_and_keep_the_score() {
             .any(|m| m.starts_with("B1831 2 question headings")),
         "{msgs:?}"
     );
+    // FAQ rich results are gone from Google (2026-05-07): the rationale sells FAQPage to answer engines and Bing
+    let why = brain_seo::audit::CATALOG.iter().find(|c| c.0 == "B1831").unwrap().2;
+    assert!(why.contains("Bing") && why.contains("2026-05-07") && !why.contains("rich result,"), "{why}");
     assert!(
         msgs.iter().any(|m| m == "B1832 the article shows no date")
             && msgs

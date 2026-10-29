@@ -40,6 +40,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   description, canonical, `og:image` and `lastmod`; `brain start` used to write a `<meta name="schema">` tag and keep
   the build's stale node. The build's node now carries `headline` for article types, `image` and `dateModified`, and a
   leftover `<meta name="schema">` (a view's own `<head>` block) is turned into JSON-LD by the SEO step.
+- B1831 (questions without FAQ) no longer sells FAQPage as a Google rich result: Google stopped showing FAQ rich
+  results on 2026-05-07; the markup stays because answer engines and Bing read it.
 
 ## [0.2.0] - 2026-10-29
 

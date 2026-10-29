@@ -1046,7 +1046,7 @@ time from the prerendered HTML, the route graph and the content collections — 
 | Feeds & sitemaps | plugin | RSS 2.0 + Atom per collection, sitemap index + image sitemap, robots.txt, llms.txt, llms-full.txt (§32) |
 | Freshness | plugin | IndexNow ping on deploy (opt-in, key in env); `lastmod` from content dates |
 | Preview | plugin box | `brain seo preview <route>`: Google result snippet (title truncation by pixel width), social cards, JSON-LD — text for the LLM, HTML in devtools |
-| AI answers (GEO) | — | info hints that never change the score: B1830 answer first (opening paragraph ≤ 300 chars), B1831 question headings not grouped as `faq`, B1832 visible `<time>` + `dateModified` on articles, B1833 author as Person with `url`/`sameAs` (`authors` in brain.json fills it), B1834 long content without external sources |
+| AI answers (GEO) | — | info hints that never change the score: B1830 answer first (opening paragraph ≤ 300 chars), B1831 question headings not grouped as `faq` (the FAQPage markup is for answer engines and Bing: Google stopped showing FAQ rich results on 2026-05-07), B1832 visible `<time>` + `dateModified` on articles, B1833 author as Person with `url`/`sameAs` (`authors` in brain.json fills it), B1834 long content without external sources |
 | Video & news | — | `VideoObject` + video sitemap from `<video poster>` (duration from `data-duration` or the MP4 header), `sitemap-news.xml` from `seo.news` collections; B1835 video without poster/date |
 | Staging safety | manual | non-production builds (`--env staging`) force `noindex` + robots `Disallow: /` |
 | Performance as SEO | external tools | Core Web Vitals lab metrics from the runaway probe (§30) + LCP image size per page in the audit |

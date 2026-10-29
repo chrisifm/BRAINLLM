@@ -228,7 +228,7 @@ pub const CATALOG: &[(&str, &str, &str, &str)] = &[
     (
         "B1831",
         "Questions without FAQ",
-        "Question headings answered right below them become FAQPage structured data when grouped, which answer engines read directly.",
+        "Question headings answered right below them become FAQPage structured data when grouped, which answer engines and Bing read directly (Google no longer shows FAQ rich results since 2026-05-07).",
         "<section faq><details><summary>Is it free?</summary>Yes, for up to ten people.</details></section>",
     ),
     (
