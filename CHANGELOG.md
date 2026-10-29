@@ -33,6 +33,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   `brain new`, `brain add view|collection`, the examples and the generated AGENTS.md carry a keyword.
 - B1836 (info): a page without `keyword` whose title or description does not name its H1 topic ("Home" over an
   "Offline task planner" page). The `brain new` sample posts name their topic in the description.
+- Every page gets one JSON-LD `@graph` tying `WebSite`, `Organization`, `WebPage` (name, description, language,
+  `dateModified`, primary image, breadcrumb), `BreadcrumbList`, FAQ and `BlogPosting` together by `@id`; before,
+  `WebSite` and `Organization` were on the home page only and nothing said which page a node belonged to. A type
+  the author declares still replaces its automatic node.
 - A page URL requested with `Accept: text/markdown` (preferred over `text/html`) answers its Markdown twin in
   `brain start` and the static server, with `Vary: Accept`; browsers still get HTML. `seo.markdown=false` turns it off
   together with the `.md` copies.

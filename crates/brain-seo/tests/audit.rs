@@ -499,12 +499,22 @@ fn finish_adds_structured_data() {
     let ld = |i: usize| brain_seo::html::parse(&pages[i].html).jsonld;
     assert_eq!(
         brain_seo::jsonld::declared_types(&brain_seo::html::parse(&pages[0].html)),
-        vec!["WebSite", "Organization"]
+        vec!["WebSite", "Organization", "WebPage"]
+    );
+    // one @graph per page: WebSite and Organization everywhere, the page and its FAQ as one node
+    assert_eq!(
+        brain_seo::jsonld::declared_types(&brain_seo::html::parse(&pages[1].html)),
+        vec!["WebSite", "Organization", "WebPage", "FAQPage", "BreadcrumbList"]
     );
     assert!(
         ld(1)
             .iter()
-            .any(|b| b.contains("\"FAQPage\"") && b.contains("Is it free?"))
+            .any(|b| b.contains("\"@graph\"") && b.contains("\"@id\":\"https://acme.dev/pricing#webpage\"") && b.contains("Is it free?"))
+    );
+    assert!(
+        ld(2).join("\n").contains("\"mainEntityOfPage\":{\"@id\":\"https://acme.dev/blog/offline-task-planner#webpage\"}"),
+        "{:?}",
+        ld(2)
     );
     let post = ld(2).join("\n");
     assert!(

@@ -592,7 +592,7 @@ pub fn finish_with_og(
             a
         });
         let mut end_tags: String =
-            jsonld::auto(cfg, &route, d, &names, &name, article.as_ref(), &vids)
+            jsonld::auto(cfg, &route, d, &names, &name, article.as_ref(), &vids, p.lastmod.as_deref())
                 .iter()
                 .map(jsonld::script)
                 .collect();
