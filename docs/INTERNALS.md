@@ -527,7 +527,7 @@ The `.brain` author writes nothing different: the compiler or the runtime applie
 | `fetchpriority` / `loading="lazy"` / `decoding="async"` | Baseline | COMPILER | the LCP image of each view is detected at build |
 | Long Animation Frames API | Chrome 123+; Firefox and Safari no | RUNTIME inspector | "Jank" view: which component and script caused each long frame |
 | Event Timing | Baseline 2025: Chrome 76+, Firefox 89+, Safari 26.2+ | RUNTIME inspector | INP per component |
-| bfcache | all | COMPILER | `unload` forbidden (B0211); no `no-store` on pages |
+| bfcache | all | COMPILER | `unload` forbidden (B0211); no `no-store` on public pages (session pages are `no-store`, §35) |
 | Document Picture-in-Picture | Chrome 116+, Firefox 151+ (desktop); Safari no | devtools | mini panel in a floating window |
 
 ## 20. Native linter always on (fixed 2026-10-13)
@@ -1113,11 +1113,17 @@ impossible while developing.
 - `/_b/*` (content-hashed JS, CSS, fonts, images): `public, max-age=31536000, immutable`.
 - Assets in `public/` that HTML or CSS reference are copied into `/_b/` with a hash and their references rewritten,
   so they become immutable too. Unreferenced `public/` files: `no-cache` with an ETag (always revalidated, never stale).
-- HTML: `no-cache` plus a strong `ETag` (the build's content hash) → a repeat visit gets `304` with no body. Never
-  `no-store` on pages (it disables bfcache, §19). SSR HTML: `no-cache` and a weak ETag of the rendered body.
+- HTML: `no-cache` plus a strong `ETag` (the build's content hash) → a repeat visit gets `304` with no body. No
+  `no-store` on public pages (it disables bfcache, §19). Anonymous SSR HTML: `no-cache` and a weak ETag of the
+  rendered body. SSR HTML rendered with a session cookie (valid or stale): `private, no-store` and no ETag, so Back
+  after logout cannot show the previous user's page from the HTTP cache or bfcache (2026-10-29).
 - `/_r/` RPC and anything personal: `no-store`. Logout (`ctx.session.clear`) sends
   `Clear-Site-Data: "storage"` so the next user on the device sees nothing of the previous one (not `"cache"`:
   Chrome clears the whole HTTP cache before finishing that response, which held logout ~18 s; F16, 2026-10-29).
+  Nothing private needs that purge: RPC and session-bearing SSR HTML are never stored.
+- Back after logout is verified only in Chrome (2026-10-29: the page is re-fetched and the guard redirects);
+  Safari and Firefox are pending. Possible follow-up, not implemented: a `pageshow` (`persisted`) reload on session
+  pages, for a browser that still restores one from bfcache.
 - Precompressed `.gz` for every text asset (`.br` planned:#231), `Vary: Accept-Encoding`.
 
 **2. Service worker** (RUNTIME writes `runtime/sw/brain-sw.js`; TOOLCHAIN emits `dist/sw.js` with the build manifest)
