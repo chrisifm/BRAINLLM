@@ -285,7 +285,7 @@ pub fn site_name(cfg: &Config, entries: &[Entry]) -> String {
         .unwrap_or_else(|| "Site".into())
 }
 
-fn site_description(cfg: &Config, entries: &[Entry]) -> Option<String> {
+pub(crate) fn site_description(cfg: &Config, entries: &[Entry]) -> Option<String> {
     cfg.description.clone().or_else(|| {
         entries
             .iter()
@@ -311,7 +311,7 @@ fn section(route: &str) -> String {
 
 /// Heading of a route's llms.txt section: the title of the section's own page (`/cases` titled «Customer stories» for
 /// `/cases/x`), which carries the wording, accents and casing the folder name lacks; else [`section`].
-fn section_title(route: &str, entries: &[Entry], site: &str) -> String {
+pub(crate) fn section_title(route: &str, entries: &[Entry], site: &str) -> String {
     let segs: Vec<&str> = route.split('/').filter(|s| !s.is_empty()).collect();
     if let [first, _, ..] = segs.as_slice() {
         let own = format!("/{first}");
@@ -385,7 +385,18 @@ pub fn llms_txt(cfg: &Config, entries: &[Entry]) -> String {
             o.push('\n');
         }
     }
+    o.push_str(&built_with(cfg));
     o
+}
+
+/// Closing `## Built with` section of llms.txt and llms-full.txt: the generator, its home and its source.
+fn built_with(cfg: &Config) -> String {
+    match &cfg.built_with {
+        Some((generator, home, source)) => format!(
+            "\n## Built with\n\n- [{generator}]({home}): the web compiler for LLMs, written in Rust. Source: {source}\n"
+        ),
+        None => String::new(),
+    }
 }
 
 /// llms-full.txt: every indexable page's main content as Markdown, with root-relative links made absolute. Each page
@@ -401,6 +412,10 @@ pub fn llms_full(cfg: &Config, entries: &[Entry]) -> String {
     for e in list {
         o.push_str("\n---\n\n");
         o.push_str(&page_markdown(cfg, e));
+    }
+    if cfg.built_with.is_some() {
+        o.push_str("\n---\n");
+        o.push_str(&built_with(cfg));
     }
     o
 }
@@ -690,6 +705,20 @@ mod tests {
             "{full}"
         );
         assert!(full.contains("Source: https://acme.dev/blog/a") && !full.contains("Admin"));
+    }
+
+    #[test]
+    fn llms_files_close_with_what_built_the_site() {
+        let cfg = Config {
+            site: Some("https://acme.dev".into()),
+            built_with: Some(("BRAINLLM 0.3.0".into(), "https://brain.example/".into(), "https://git.example/brain".into())),
+            ..Config::default()
+        };
+        let d = docs();
+        let e = entries(&cfg, &d);
+        let tail = "\n## Built with\n\n- [BRAINLLM 0.3.0](https://brain.example/): the web compiler for LLMs, written in Rust. Source: https://git.example/brain\n";
+        assert!(llms_txt(&cfg, &e).ends_with(tail));
+        assert!(llms_full(&cfg, &e).ends_with(&format!("\n---\n{tail}")));
     }
 
     #[test]

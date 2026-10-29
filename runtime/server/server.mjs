@@ -43,6 +43,8 @@ const SECURITY = {
   'x-frame-options': 'DENY',
   'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
   'cross-origin-opener-policy': 'same-origin',
+  // what serves the app and where it lives, for crawlers and LLMs that read headers (no version: that stays in the HTML)
+  'x-powered-by': 'BRAINLLM (https://chrisifm.github.io/BRAINLLM/)',
 }
 // The build's policy (manifest `csp`, without hashes: the same one static hosting uses) plus this response's nonce in
 // script-src; without it, a default that lets api() reach HTTPS APIs of other origins.

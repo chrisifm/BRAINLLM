@@ -1,0 +1,153 @@
+//! Sections manifest and site feeds (INTERNALS §32). `sections.json` is the one place that lists every section of the
+//! site and documents it (title, description, home page, pages, Markdown copies, feeds), so a crawler or an agent can
+//! discover the whole site from one file. `rss.xml` is the site-wide feed (like WordPress `/feed`) and each section
+//! without a content collection gets `<section>/rss.xml`; collections keep their richer feed. On by default:
+//! `seo.sections: false` drops the manifest, `seo.feed: false` drops these feeds.
+
+use crate::config::Config;
+use crate::content::{FEED_MAX, rfc822};
+use crate::files::{self, Entry, xml};
+use brain_lex::Json;
+
+/// One section of the site: the first path segment (`/blog/a` → `blog`), or `""` for top-level pages.
+pub struct Section<'a> {
+    pub id: String,
+    pub title: String,
+    /// The section's own page (`/blog` for `/blog/a`), if it exists.
+    pub home: Option<&'a Entry<'a>>,
+    pub pages: Vec<&'a Entry<'a>>,
+}
+
+/// Indexable pages grouped by section, top-level pages first, then sections by id.
+pub fn sections<'a>(entries: &'a [Entry<'a>], site: &str) -> Vec<Section<'a>> {
+    let deep = |id: &str| entries.iter().any(|e| e.indexable && seg(e.route).1 && seg(e.route).0 == id);
+    let mut out: Vec<Section> = Vec::new();
+    for e in entries.iter().filter(|e| e.indexable) {
+        let (first, nested) = seg(e.route);
+        let id = if nested || (!first.is_empty() && deep(first)) { first.to_string() } else { String::new() };
+        let i = match out.iter().position(|s| s.id == id) {
+            Some(i) => i,
+            None => {
+                let title = if id.is_empty() { "Pages".into() } else { files::section_title(&format!("/{id}/x"), entries, site) };
+                out.push(Section { id: id.clone(), title, home: None, pages: vec![] });
+                out.len() - 1
+            }
+        };
+        if !id.is_empty() && !nested {
+            out[i].home = Some(e);
+        }
+        out[i].pages.push(e);
+    }
+    out.sort_by(|a, b| (!a.id.is_empty(), &a.id).cmp(&(!b.id.is_empty(), &b.id)));
+    out
+}
+
+/// `(first segment, has more segments)` of a route.
+fn seg(route: &str) -> (&str, bool) {
+    let mut it = route.split('/').filter(|s| !s.is_empty());
+    (it.next().unwrap_or(""), it.next().is_some())
+}
+
+/// RSS 2.0 of `pages`, newest `lastmod` first (undated pages last), at most [`FEED_MAX`] items. `None` without `site`
+/// (feed readers need absolute URLs) or without pages.
+pub fn rss(cfg: &Config, title: &str, description: &str, home: &str, path: &str, pages: &[&Entry]) -> Option<String> {
+    cfg.site.as_ref()?;
+    let mut items: Vec<&&Entry> = pages.iter().collect();
+    if items.is_empty() {
+        return None;
+    }
+    items.sort_by(|a, b| b.lastmod.cmp(&a.lastmod).then(a.route.cmp(b.route)));
+    let mut o = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<rss version=\"2.0\" xmlns:atom=\"http://www.w3.org/2005/Atom\">\n<channel>\n<title>{}</title>\n<link>{}</link>\n<description>{}</description>\n<atom:link href=\"{}\" rel=\"self\" type=\"application/rss+xml\"/>\n",
+        xml(title),
+        xml(&cfg.abs(home)),
+        xml(description),
+        xml(&cfg.abs(path))
+    );
+    if let Some(l) = &cfg.lang {
+        o.push_str(&format!("<language>{}</language>\n", xml(l)));
+    }
+    if let Some((g, ..)) = &cfg.built_with {
+        o.push_str(&format!("<generator>{}</generator>\n", xml(g)));
+    }
+    if let Some(d) = items.iter().filter_map(|e| e.lastmod).max().and_then(rfc822) {
+        o.push_str(&format!("<lastBuildDate>{d}</lastBuildDate>\n"));
+    }
+    for e in items.into_iter().take(FEED_MAX) {
+        let t = e.doc.title.clone().unwrap_or_else(|| e.route.to_string());
+        o.push_str(&format!("<item>\n<title>{}</title>\n<link>{}</link>\n<guid isPermaLink=\"true\">{}</guid>\n", xml(&t), xml(&e.url), xml(&e.url)));
+        if let Some(d) = e.lastmod.and_then(rfc822) {
+            o.push_str(&format!("<pubDate>{d}</pubDate>\n"));
+        }
+        if let Some(d) = e.doc.meta("description") {
+            o.push_str(&format!("<description>{}</description>\n", xml(d)));
+        }
+        o.push_str("</item>\n");
+    }
+    o.push_str("</channel>\n</rss>\n");
+    Some(o)
+}
+
+/// Feed path of a section (`blog/rss.xml`), the site feed for top-level pages.
+pub fn feed_path(id: &str) -> String {
+    if id.is_empty() { "rss.xml".into() } else { format!("{id}/rss.xml") }
+}
+
+/// `sections.json`: the site, what built it, its discovery files and every section with its pages. `feeds` holds the
+/// feed paths actually written (a section is only given a feed that exists).
+pub fn manifest(cfg: &Config, entries: &[Entry], secs: &[Section], feeds: &[String]) -> String {
+    let site = files::site_name(cfg, entries);
+    let url = |route: &str| Json::str(cfg.abs(route));
+    let feed = |p: String| if feeds.contains(&p) { url(&format!("/{p}")) } else { Json::Null };
+    let page = |e: &Entry| {
+        let mut kv = vec![
+            ("title".to_string(), Json::str(files::strip_site(&e.doc.title.clone().unwrap_or_else(|| e.route.into()), &site))),
+            ("url".into(), Json::str(e.url.clone())),
+        ];
+        if let Some(d) = e.doc.meta("description") {
+            kv.push(("description".into(), Json::str(d)));
+        }
+        if cfg.markdown {
+            kv.push(("markdown".into(), url(&format!("/{}", files::md_path(e.route)))));
+        }
+        if let Some(l) = e.lastmod {
+            kv.push(("lastmod".into(), Json::str(l)));
+        }
+        Json::Obj(kv)
+    };
+    let list = secs
+        .iter()
+        .map(|s| {
+            let description = s.home.and_then(|h| h.doc.meta("description")).map(Json::str).unwrap_or(Json::Null);
+            Json::Obj(vec![
+                ("id".into(), Json::str(s.id.clone())),
+                ("title".into(), Json::str(s.title.clone())),
+                ("description".into(), description),
+                ("url".into(), s.home.map(|h| Json::str(h.url.clone())).unwrap_or(Json::Null)),
+                ("feed".into(), feed(feed_path(&s.id))),
+                ("pages".into(), Json::Arr(s.pages.iter().map(|e| page(e)).collect())),
+            ])
+        })
+        .collect();
+    let mut kv = vec![("name".to_string(), Json::str(site))];
+    if let Some(d) = files::site_description(cfg, entries) {
+        kv.push(("description".into(), Json::str(d)));
+    }
+    kv.push(("url".into(), url("/")));
+    if let Some((g, home, source)) = &cfg.built_with {
+        kv.push(("generator".into(), Json::obj([("name", Json::str(g)), ("home", Json::str(home)), ("source", Json::str(source))])));
+    }
+    let mut discover = vec![("feed".to_string(), feed("rss.xml".into()))];
+    if cfg.sitemap {
+        discover.push(("sitemap".into(), url("/sitemap.xml")));
+    }
+    if cfg.llms {
+        discover.push(("llms".into(), url("/llms.txt")));
+    }
+    if cfg.llms_full {
+        discover.push(("llmsFull".into(), url("/llms-full.txt")));
+    }
+    kv.push(("discover".into(), Json::Obj(discover)));
+    kv.push(("sections".into(), Json::Arr(list)));
+    Json::Obj(kv).stringify() + "\n"
+}

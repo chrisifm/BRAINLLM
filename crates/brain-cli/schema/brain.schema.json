@@ -90,6 +90,16 @@
           "default": true,
           "description": "Publish a Markdown copy of every indexable page (/pricing.md), link it, and serve it on the page URL when Accept prefers text/markdown (Vary: Accept); false turns all three off"
         },
+        "feed": {
+          "type": "boolean",
+          "default": true,
+          "description": "Write rss.xml (site feed, like WordPress /feed) and <section>/rss.xml for each section without a content collection, linked from every page; false turns them off"
+        },
+        "sections": {
+          "type": "boolean",
+          "default": true,
+          "description": "Write sections.json, the manifest of every section (title, description, home page, feed and pages with URL, Markdown copy and lastmod), linked from every page; false turns it off"
+        },
         "ai": {
           "enum": [
             "allow",

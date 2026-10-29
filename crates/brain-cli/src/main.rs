@@ -948,6 +948,7 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
     if seo_cfg.name.is_none() {
         seo_cfg.name = env::value(root, env_name, "PUBLIC_SITE_NAME");
     }
+    seo_cfg.built_with = Some((format!("BRAINLLM {}", env!("CARGO_PKG_VERSION")), brain_pack::HOME.into(), brain_pack::REPO.into()));
     let seo_range: std::cell::Cell<Option<(u32, u32)>> = std::cell::Cell::new(None);
     let mut all_views = Vec::new();
     brain_files(&root.join("views"), &mut all_views);

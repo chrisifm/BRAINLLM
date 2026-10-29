@@ -21,6 +21,7 @@ pub mod markdown;
 pub mod og;
 pub mod preview;
 pub mod redirects;
+pub mod sections;
 pub mod social;
 pub mod video;
 
@@ -415,6 +416,13 @@ pub fn finish_with_og(
             (Some(i), Some(v)) => hreflang::head_tags(cfg, i, v),
             _ => String::new(),
         };
+        // WordPress-style discovery on every page: the site feed and the sections manifest (§32)
+        if cfg.feed && cfg.site.is_some() {
+            tags.push_str("<link rel=\"alternate\" type=\"application/rss+xml\" title=\"Site feed\" href=\"/rss.xml\">");
+        }
+        if cfg.sections {
+            tags.push_str("<link rel=\"alternate\" type=\"application/json\" title=\"Sections\" href=\"/sections.json\">");
+        }
         // a view's literal `canonical="/x"` is rendered once per locale: on `/es/x` it means the page itself, not the
         // default-locale version (which B1828 reports as an error); an untranslated content fallback keeps its own
         if let Some(i) = &i18n
@@ -715,6 +723,31 @@ pub fn finish_with_og(
     }
     let name_for_feeds = files::site_name(cfg, &entries);
     files.extend(content::feeds(cfg, &published, &name_for_feeds));
+    if cfg.feed || cfg.sections {
+        let secs = sections::sections(&entries, &name_for_feeds);
+        let mut feeds = Vec::new();
+        if cfg.feed {
+            let desc = files::site_description(cfg, &entries).unwrap_or_else(|| name_for_feeds.clone());
+            for s in &secs {
+                let path = sections::feed_path(&s.id);
+                // a content collection already wrote its own (richer) feed at that path
+                if files.iter().any(|(f, _)| *f == path) {
+                    feeds.push(path);
+                    continue;
+                }
+                let pages: Vec<&files::Entry> = if s.id.is_empty() { entries.iter().filter(|e| e.indexable).collect() } else { s.pages.clone() };
+                let (title, home) = if s.id.is_empty() { (name_for_feeds.clone(), "/".to_string()) } else { (format!("{name_for_feeds} — {}", s.title), format!("/{}", s.id)) };
+                let d = s.home.and_then(|h| h.doc.meta("description")).map(str::to_string).unwrap_or_else(|| desc.clone());
+                if let Some(x) = sections::rss(cfg, &title, &d, &home, &format!("/{path}"), &pages) {
+                    files.push((path.clone(), x));
+                    feeds.push(path);
+                }
+            }
+        }
+        if cfg.sections {
+            files.push(("sections.json".into(), sections::manifest(cfg, &entries, &secs, &feeds)));
+        }
+    }
     if let Some(f) = google.file.clone() {
         files.push(f);
     }

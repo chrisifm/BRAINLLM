@@ -122,6 +122,7 @@ test('SSR: params + query reach load, the view renders, props are embedded safel
   const nonce = r.headers.get('content-security-policy').match(/'nonce-([^']+)'/)[1]
   assert.equal((h.match(new RegExp(`<script nonce="${nonce.replace(/[+/=]/g, '\\$&')}"`, 'g')) || []).length, 3)
   assert.equal(r.headers.get('x-content-type-options'), 'nosniff')
+  assert.equal(r.headers.get('x-powered-by'), 'BRAINLLM (https://chrisifm.github.io/BRAINLLM/)')
   assert.equal(r.headers.get('x-brain-build'), 'b7c1')
   assert.match(r.headers.get('content-security-policy'), /frame-ancestors 'none'/)
   assert.match(r.headers.get('content-security-policy'), /connect-src 'self' https: wss:/) // api() may call HTTPS APIs

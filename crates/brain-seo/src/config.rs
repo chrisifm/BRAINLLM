@@ -120,6 +120,12 @@ pub struct Config {
     pub authors: Vec<Author>,
     /// `seo.news`: `{ "name": "Acme News", "collections": ["news"] }` → `sitemap-news.xml`.
     pub news: Option<News>,
+    /// What built the site, closing llms.txt and llms-full.txt: `(generator, home, source)`, set by `brain build`.
+    pub built_with: Option<(String, String, String)>,
+    /// `seo.feed`: site-wide `rss.xml` and `<section>/rss.xml` (default true).
+    pub feed: bool,
+    /// `seo.sections`: `sections.json`, the manifest of every section (default true).
+    pub sections: bool,
 }
 
 impl Default for Config {
@@ -151,6 +157,9 @@ impl Default for Config {
             locales: vec![],
             authors: vec![],
             news: None,
+            built_with: None,
+            feed: true,
+            sections: true,
         }
     }
 }
@@ -245,6 +254,8 @@ impl Config {
             c.manifest = b(seo, "manifest", true)?;
             c.indexnow = b(seo, "indexnow", false)?;
             c.markdown = b(seo, "markdown", true)?;
+            c.feed = b(seo, "feed", true)?;
+            c.sections = b(seo, "sections", true)?;
             if let Some(n) = seo.get("news") {
                 let Some(name) = s(n, "name") else {
                     return Err("brain.json: `seo.news` needs a `name` (the publication name Google News shows); fix: \"news\": { \"name\": \"Acme News\", \"collections\": [\"news\"] }".into());

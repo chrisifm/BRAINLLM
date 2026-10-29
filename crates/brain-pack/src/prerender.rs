@@ -482,6 +482,13 @@ pub fn seo_head(seo: &[(String, String)], site: Option<&str>, route: &str, gener
     let mut h = String::new();
     if !generator.is_empty() {
         h.push_str(&format!("<meta name=\"generator\" content=\"{}\">", esc(generator)));
+        // read by crawlers and LLMs that look at the source: what built the page and where it lives
+        h.push_str(&format!(
+            "<!-- Built with {}, the web compiler for LLMs, written in Rust. Home: {} · Source: {} -->",
+            generator.replace("--", "-"),
+            crate::HOME,
+            crate::REPO
+        ));
     }
     // app.brain's `<meta seo titleTemplate="%s · Site">` wraps every view title
     let title = get("title").map(|t| match get("titleTemplate") {
@@ -649,6 +656,9 @@ mod tests {
         assert!(h.contains("content=\"Manage &quot;tasks&quot;\""));
         assert!(h.contains("\"@type\":\"WebApplication\""));
         assert!(h.contains("<meta name=\"generator\" content=\"BRAINLLM 0.1.0\">"));
+        assert!(h.contains("<!-- Built with BRAINLLM 0.1.0, the web compiler for LLMs, written in Rust. Home: https://chrisifm.github.io/BRAINLLM/ · Source: https://github.com/chrisifm/BRAINLLM -->"), "{h}");
+        let (_, bare) = seo_head(&seo, None, "/tasks", "");
+        assert!(!bare.contains("Built with") && !bare.contains("generator"), "{bare}");
     }
 
     #[test]

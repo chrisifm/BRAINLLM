@@ -3,6 +3,9 @@
 //! view (its component styles, in `@layer` order) plus a shared tokens file, and one HTML page per static route.
 //! Compilation is injected (`Compile`) so this crate does not depend on the compiler front end.
 
+/// Where BRAINLLM lives: every built page names it next to `<meta name="generator">` (INTERNALS §32).
+pub const HOME: &str = "https://chrisifm.github.io/BRAINLLM/";
+pub const REPO: &str = "https://github.com/chrisifm/BRAINLLM";
 pub mod gzip;
 pub mod impact;
 pub mod cache;
