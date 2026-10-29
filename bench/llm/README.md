@@ -51,6 +51,7 @@ A fresh frozen model/spec/compiler run remains required before treating the newl
 | om020 (0.2.0 binary, `origin/main`) | `88d92fac2659` (22,155 B) | 17/20 | — | 3× B0119 (missing `server/`, `channels/`, `lib/` module) |
 | gate030 a · b (0.3.0 before the fix) | `a402f4d9d1f3` (22,763 B) | 17/20 · 17/20 | 20/20 | B0119 missing module, B0111 undeclared helper |
 | gate030 c · d (0.3.0, fixed spec) | `68ff3d58aea9` (21,765 B) | 18/20 · 19/20 | — | B0119 `../channels/cart.jsbrain` (both), B0111 `fmtLap` (c) |
+| gate030e a · b (feeds, prefetch, `ai`) | `96a9d18ffbd2` (22,249 B) | 20/20 · 20/20 | 20/20 · 20/20 | none |
 
 The drop came with 0.2.0, which grew the served spec by about 4 KB (sessions, form messages, live sitemaps) without a
 fresh run; it was not caused by the 0.3.0 rules (B0411–B0415, B0502 never fired on a first try). Fix, in §21 order:
@@ -59,3 +60,6 @@ that a store, helper or server module the app does not have yet is declared in t
 Result: one of two Haiku runs passes the gate, the same profile as the accepted gate234 and gate274 pairs.
 Open: the cart brief still imports `../channels/cart.jsbrain` in both runs (once in six runs before 0.2.0); candidate
 fix is a B0119 edit that scaffolds the missing channel (`brain add channel`), which would make the fix mechanical.
+
+After the review fixes (site feed always written, prefetch forgets on writes, Speculation Rules removed, the `ai`
+primitive and its one-line spec pointer), all four runs pass on the first try and the gate passes for both models.
