@@ -9,6 +9,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+### Documentation
+
+- Site and README: the title, hero, metadata and footer say up front that BRAINLLM is a compiler written in Rust.
+
 ## [0.2.0] - 2026-10-29
 
 ### Added

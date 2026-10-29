@@ -2,14 +2,15 @@
 
 # BRAINLLM
 
-### The web compiler for LLMs.
+### The web compiler for LLMs, built in Rust.
 
 **Your LLM owns the frontend. Give it a language built for the job.**
 
 ![BRAINLLM — The web compiler for LLMs](docs/site/assets/cover.png)
 
-BRAINLLM gives coding agents a compact language, a single specification and a compiler that tells them how to fix
-mistakes. The model builds the frontend. You set the direction, inspect the result and decide what ships.
+BRAINLLM gives coding agents a compact language, a single specification and a native compiler written in Rust that
+tells them how to fix mistakes. The model builds the frontend. You set the direction, inspect the result and decide
+what ships.
 
 `.brain` components compile to direct-DOM JavaScript and scoped CSS. The Rust toolchain handles parsing, checking,
 code generation, bundling and minification. The agent can operate it through the CLI or MCP.
