@@ -76,7 +76,8 @@ for await (const line of createInterface({ input: process.stdin })) {
     const v = await m[fn]({ ...ctx, env: process.env }, ...(args || []))
     out(`OK ${id} ${JSON.stringify(v ?? null)}\n`)
   } catch (e) {
-    if (e && e.errors && typeof e.errors === 'object') out(`BAD ${id} ${JSON.stringify({ error: e.message || 'Invalid input', errors: e.errors })}\n`)
+    if (e && e.notFound === true) out(`OK ${id} {"notFound":true,"status":404}\n`) // `throw notFound()`: answered as a 404 page
+    else if (e && e.errors && typeof e.errors === 'object') out(`BAD ${id} ${JSON.stringify({ error: e.message || 'Invalid input', errors: e.errors })}\n`)
     else out(`ERR ${id} ${JSON.stringify(String(e?.stack ?? e))}\n`)
   }
 }

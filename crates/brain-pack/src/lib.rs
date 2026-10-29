@@ -1519,7 +1519,9 @@ fn build_inner(
                     if let Some(n) = meta_attr(&src, "cache").and_then(|v| v.trim().parse::<u32>().ok()) {
                         chain.push_str(&format!(",\"cache\":{n}"));
                     }
-                    if needs_server.contains(*view) && static_seo(&src) {
+                    // a load() that can answer 404 (`notFound()`, F11) is not streamed: the status must not be out yet
+                    let not_found = server_src.get(view.as_str()).is_some_and(|(_, sjs, _)| sjs.contains("notFound: true"));
+                    if needs_server.contains(*view) && static_seo(&src) && !not_found {
                         chain.push_str(",\"stream\":true");
                     }
                     chain.push_str(&format!(",\"links\":\"{LINKS}{}\"", p.file));

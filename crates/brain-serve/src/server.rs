@@ -750,6 +750,8 @@ fn app_page(ctx: &Ctx, req: &http::Request) -> (u16, String, Option<String>) {
                     html_escape(&e)
                 ),
             ),
+            // `throw notFound()` / `return notFound()` from load (F11): views/404.brain with status 404, as in production
+            Ok(props) if props.starts_with("{\"notFound\":true") => (404, fixed_view(ctx, "views/404.brain", "{}", "Not found", &req.path)),
             Ok(props) => {
                 view_seo = view_meta(ctx, &r.view, &props);
                 // route().params on the client (RUNTIME #222): the same meta server.mjs writes on SSR pages with params

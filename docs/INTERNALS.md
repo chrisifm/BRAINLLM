@@ -627,6 +627,19 @@ Coverage against React/Next, Vue/Nuxt, Angular, Svelte/Kit and Astro; all with a
 | Transitions | View Transitions (§19) | #43 |
 | Offline/PWA | on by default, opt-out in `brain.json` (§35) | #121–#124 |
 
+2026-10-29 fixes from a real app:
+- Client guards get `ctx.user` as a getter with no value (the session cookie is HttpOnly). A guard that read it and
+  would cancel, redirect or deny returns `null` from `check()`: a full load, where server.mjs runs the same guard with
+  the session. Guards that never read `user` keep deciding on the client.
+- `notFound()` (codegen intrinsic → `{ notFound: true, status: 404 }`, server code only) thrown or returned from `load`:
+  server.mjs answers 404 with the app's 404 page; the dev sidecar answers `OK {"notFound":true…}` and brain-serve
+  renders `views/404.brain` with 404. A streamed route already sent its 200 head: it ends with a noindex notice.
+- server.mjs `head(page, seo, path)`: an SSR template's canonical/og:url carry the route pattern (`/jobs/:slug`);
+  they are rewritten to the request path, og:url follows a `seo(props).canonical` unless the view sets `og:url`, and a
+  tag in the view's `<head>` block replaces the generated tag with the same `name`/`property` (or canonical).
+- `<option value={x}>` is an attribute in the runtime (`attr`), so SSR emits it, including `value=""`; SSR also
+  reflects `selected` on options and marks the option matching `<select value={x}>`.
+
 ## 23. CLI and distribution with professional standards (fixed 2026-10-13)
 Identity update (2026-10-28): `brand::Session` adds a circuit-brain ASCII mark and task-specific start/completion
 messages to interactive `check`, `build` and `run`. Its duration is measured with `Instant`; no comparative speed
@@ -1103,7 +1116,8 @@ impossible while developing.
 - HTML: `no-cache` plus a strong `ETag` (the build's content hash) → a repeat visit gets `304` with no body. Never
   `no-store` on pages (it disables bfcache, §19). SSR HTML: `no-cache` and a weak ETag of the rendered body.
 - `/_r/` RPC and anything personal: `no-store`. Logout (`ctx.session.clear`) sends
-  `Clear-Site-Data: "cache", "storage"` so the next user on the device sees nothing of the previous one.
+  `Clear-Site-Data: "storage"` so the next user on the device sees nothing of the previous one (not `"cache"`:
+  Chrome clears the whole HTTP cache before finishing that response, which held logout ~18 s; F16, 2026-10-29).
 - Precompressed `.gz` for every text asset (`.br` planned:#231), `Vary: Accept-Encoding`.
 
 **2. Service worker** (RUNTIME writes `runtime/sw/brain-sw.js`; TOOLCHAIN emits `dist/sw.js` with the build manifest)

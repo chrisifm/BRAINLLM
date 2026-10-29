@@ -131,6 +131,17 @@ for (const j of JSON.parse(input)) {
         else if (t === 'input' && c.type !== 'password') {
           if (c.value != null && c.value !== '') c.setAttribute('value', String(c.value))
           if (c.checked === true) c.setAttribute('checked', '')
+        } else if (t === 'option' && c.selected === true) c.setAttribute('selected', '')
+        // <select value={x}>: the option with that value starts selected (an option's value is its attribute or text)
+        else if (t === 'select' && c.value != null && c.value !== '') {
+          const pick = o => {
+            for (const x of o.childNodes || []) {
+              if (x.nodeType !== 1) continue
+              if (x.tagName === 'OPTION' && (x.getAttribute('value') ?? x.textContent) === String(c.value)) x.setAttribute('selected', '')
+              else pick(x)
+            }
+          }
+          pick(c)
         }
         walk(c)
       }

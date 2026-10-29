@@ -339,6 +339,27 @@ test('#65 client guards share the server shapes: {redirect} object and deny → 
   r.stop()
 })
 
+test('F12b: a guard that reads ctx.user leaves the decision to the server (full load) instead of redirecting a signed-in user', async () => {
+  const st = hist(), hard = []
+  page()
+  const r = router({
+    parse,
+    hard: u => hard.push(u),
+    guards: {
+      '/account': c => (c.user ? true : redirect('/login')), // the SPEC's guard, thrown redirect
+      '/me': c => (c.user ? true : { redirect: '/login' }), // returned
+      '/pass': c => (c.user, true), // reads it but lets the navigation go on: stays a client navigation
+    },
+  })
+  await r.go('/account/settings')
+  await r.go('/me')
+  assert.deepEqual(hard, ['/account/settings', '/me']) // the server guard sees the session cookie and decides
+  assert.notEqual(location.pathname, '/login')
+  assert.equal(await r.check('/pass'), true)
+  r.stop()
+  void st
+})
+
 test('#216 base path: guards see app paths, go()/redirect get the base, paths outside the base are not client navigations', async () => {
   const st = hist(), hard = [], seen = []
   globalThis.location = new URL('http://x.test/app/')

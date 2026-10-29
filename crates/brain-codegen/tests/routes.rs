@@ -42,3 +42,14 @@ fn guard_redirect_and_deny_compile_to_plain_objects() {
     let d = brain_codegen::compile("<script>\nconst go = () => redirect('/x')\n</script>\n<button on:click={go}>x</button>", Path::new("comp/x.brain")).expect_err("B0111");
     assert!(d.iter().any(|d| d.code == "B0111"), "{d:#?}");
 }
+
+#[test]
+fn not_found_in_load_compiles_to_a_plain_object() {
+    // F11: `load` answers a real 404 (server.mjs and the dev sidecar read `notFound`); no import.
+    let src = "<meta seo title=\"Job\" description=\"Job\">\n<script>\nexport async function load(ctx) {\n  if (ctx.params.slug === 'gone') throw notFound()\n  return { slug: ctx.params.slug }\n}\n</script>\n<main><h1>{props.slug}</h1></main>";
+    let o = brain_codegen::compile(src, Path::new("views/jobs/[slug].brain")).unwrap_or_else(|d| panic!("{d:#?}"));
+    assert!(o.server_js.contains("throw ({ notFound: true, status: 404 })"), "{}", o.server_js);
+    // Client code has no notFound: it is still an undeclared name there.
+    let d = brain_codegen::compile("<script>\nconst go = () => notFound()\n</script>\n<button on:click={go}>x</button>", Path::new("comp/x.brain")).expect_err("B0111");
+    assert!(d.iter().any(|d| d.code == "B0111"), "{d:#?}");
+}

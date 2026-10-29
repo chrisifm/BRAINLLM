@@ -8,7 +8,8 @@ Normative. Anything not here does not exist. Internals: docs/INTERNALS.md (not n
 - `views/docs/[...rest].brain` matches `/docs/a/b/c` with `ctx.params.rest = 'a/b/c'` (ranked after static and `[id]` routes).
 - Route files per folder: `_guard.jsbrain` (`export default (ctx) => ctx.user ? true : redirect('/login')`, runs on server
   and before client navigation; `deny('reason')` renders `views/403.brain`) · `_error.brain` · `_middleware.jsbrain`.
-  `ctx` = `{ params, query, user, cookies, url }`.
+  `ctx` = `{ params, query, user, cookies, url }`. In the browser there is no `ctx.user` (the session cookie is
+  HttpOnly): a guard that reads it and would stop the navigation makes a full page load, and the server guard decides.
 - In code: `navigate('/x')` (router, no reload; never `location.assign`) · `let r = route()` → `r.path`, `r.params.id`,
   `r.query.q` (reactive).
 - `services/*.jsbrain` are injectable: `provide(Api, realApi)` in `app.brain`, `use(Api)` anywhere; tests swap them with
@@ -73,12 +74,12 @@ Signals are plain variables: `n++`, `items = [...items, x]`. Never mutate in pla
 | `sig(v)` | reactive state |
 | `drv(() => e)` | derived, read-only |
 | `fx(() => { …; return cleanup })` | side effect; return cleanup for listeners/timers |
-| `export async function load(ctx)` | views only, runs on server; result arrives as `props` |
+| `export async function load(ctx)` | views only, runs on server; result arrives as `props`. `throw notFound()` → 404 with `views/404.brain`; `throw redirect('/x')` → 303 |
 | `emit('ev', data?)` | event to parent (`on:ev` on the parent) |
 | `ref()` + `bind:ref={r}` | DOM node access (never `document`/`window`) |
 | `log(...)` | dev log, removed in build |
 | `provide(K, v)` · `use(K)` · `key('name')` | context; `K` exported from channels/ |
-| `store(init, {sync?:'tab'\|'storage'})` · `bus('name')` | only in `channels/*.jsbrain` |
+| `store(init, {sync?:'tab'\|'storage'})` · `bus('name')` | only in `channels/*.jsbrain`; never `sync: 'storage'` for the signed-in user (another tab's copy brings a logged-out user back): read the user from `load` |
 
 ## Markup
 `{expr}` · `attr={e}` · `class:x={bool}` · `style:prop={v}` · `on:ev={fnRef | statement}` (`on:submit` prevents default)
