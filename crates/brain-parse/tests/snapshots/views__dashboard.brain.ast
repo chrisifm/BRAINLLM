@@ -1,8 +1,9 @@
 Component Dashboard level=View file=views/dashboard.brain
   meta@1:7 seo=None
-  meta@1:11 title=Some("User admin")
-  meta@1:30 description=Some("Create, edit, activate and delete the users of the example app, with search and an inline edit form.")
-  meta@1:145 canonical=Some("/dashboard")
+  meta@1:11 keyword=Some("user admin")
+  meta@1:32 title=Some("User admin")
+  meta@1:51 description=Some("User admin for the example app: create, edit, activate and delete users, with search and an inline edit form.")
+  meta@1:175 canonical=Some("/dashboard")
   script
     import@4:3 Badge from "../ui/badge.brain"
     import@5:3 UserForm from "../comp/user-form.brain"

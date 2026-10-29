@@ -144,7 +144,7 @@ pub const CATALOG: &[(&str, &str, &str, &str)] = &[
     (
         "B1816",
         "Focus keyword placement",
-        "The focus keyword should appear in the title, the H1, the first paragraph and the URL, at a natural density.",
+        "The focus keyword should appear in the title, the H1, the first paragraph, the description and the URL, at a natural density.",
         "<meta seo keyword=\"task planner\" title=\"Task planner for teams\">",
     ),
     (
@@ -775,17 +775,20 @@ fn page_checks(
             .split_whitespace()
             .collect::<Vec<_>>()
             .join("-");
+        // the description is the snippet search results and LLM answers show: it names the query too
         let places = [
-            ("title", contains_ci(title, kw), 3),
-            ("h1", h1.iter().any(|h| contains_ci(h, kw)), 2),
-            ("first paragraph", contains_ci(&doc.first_paragraph, kw), 2),
-            ("URL", route.to_lowercase().contains(&slug), 1),
+            ("title", contains_ci(title, kw), 3, "`title=` of <meta seo>"),
+            ("h1", h1.iter().any(|h| contains_ci(h, kw)), 2, "<h1>"),
+            ("first paragraph", contains_ci(&doc.first_paragraph, kw), 2, "first sentence of the first <p> in <main>"),
+            ("description", contains_ci(desc, kw), 2, "`description=` of <meta seo>"),
+            // the home page carries the brand, not the query, in its URL
+            ("URL", route == "/" || route.to_lowercase().contains(&slug), 1, "route (file name under views/)"),
         ];
-        for (place, ok, w) in places {
+        for (place, ok, w, where_) in places {
             s.check(w, ok, "B1816", Level::Warning, || {
                 (
                     format!("focus keyword \"{kw}\" is not in the {place}"),
-                    format!("use \"{kw}\" in the {place}"),
+                    format!("write the exact words \"{kw}\" into the {where_}, worded naturally"),
                 )
             });
         }

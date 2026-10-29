@@ -1,4 +1,4 @@
-<meta seo title="Sign in" description="Sign in to your account. In development the demo password lives in .brain_env; production uses your real provider.">
+<meta seo keyword="sign in" title="Sign in" description="Sign in to your account. In development the demo password lives in .brain_env; production uses your real provider.">
 
 <script>
   import auth from '../server/auth.jsbrain'

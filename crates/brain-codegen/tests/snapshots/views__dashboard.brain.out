@@ -98,7 +98,7 @@ function Dashboard($p = {}) {
   return $r23;
 }
 Dashboard.h = "0m3tc1";
-Dashboard.seo = ($p) => ({ "title": "User admin", "description": "Create, edit, activate and delete the users of the example app, with search and an inline edit form.", "canonical": "/dashboard" });
+Dashboard.seo = ($p) => ({ "title": "User admin", "description": "User admin for the example app: create, edit, activate and delete users, with search and an inline edit form.", "canonical": "/dashboard" });
 Dashboard.f = "views/dashboard.brain";
 export default guard(Dashboard);
 
@@ -151,4 +151,4 @@ import api from "../lib/api.js";
 export async function load(ctx) {
   return { users: await api.list(ctx) };
 }
-export const seo = (props) => ({ "title": "User admin", "description": "Create, edit, activate and delete the users of the example app, with search and an inline edit form.", "canonical": "/dashboard" });
+export const seo = (props) => ({ "title": "User admin", "description": "User admin for the example app: create, edit, activate and delete users, with search and an inline edit form.", "canonical": "/dashboard" });

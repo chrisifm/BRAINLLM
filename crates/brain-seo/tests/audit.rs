@@ -205,9 +205,57 @@ fn keyword_placement() {
         .collect();
     assert_eq!(
         kw.len(),
-        5,
-        "title, h1, first paragraph, URL and density: {kw:?}"
+        6,
+        "title, h1, first paragraph, description, URL and density: {kw:?}"
     );
+    // the description is the snippet: a keyword missing only there is reported, with an exact fix
+    let mut pages = good_site();
+    pages[2].html = pages[2].html.replace(
+        "Why an offline task planner beats a web-only tool",
+        "Why working offline beats a web-only tool",
+    );
+    let r = audit(&Site {
+        cfg: &c,
+        pages: &pages,
+        routes: &[],
+        assets: &[],
+        redirects: &[],
+        images: &[],
+        i18n: None,
+    });
+    let kw: Vec<(&str, &str)> = r.pages[2]
+        .findings
+        .iter()
+        .filter(|f| f.code == "B1816" && f.level == Level::Warning)
+        .map(|f| (f.msg.as_str(), f.fix.as_str()))
+        .collect();
+    assert_eq!(
+        kw,
+        [(
+            "focus keyword \"offline task planner\" is not in the description",
+            "write the exact words \"offline task planner\" into the `description=` of <meta seo>, worded naturally"
+        )]
+    );
+    // the home page is "/": its URL never carries the query, so it is not asked to
+    let mut pages = good_site();
+    assert_eq!(pages[0].route, "/");
+    pages[0].keyword = Some("kanban board".into());
+    let r = audit(&Site {
+        cfg: &c,
+        pages: &pages,
+        routes: &[],
+        assets: &[],
+        redirects: &[],
+        images: &[],
+        i18n: None,
+    });
+    let home: Vec<&str> = r.pages[0]
+        .findings
+        .iter()
+        .filter(|f| f.code == "B1816")
+        .map(|f| f.msg.as_str())
+        .collect();
+    assert!(!home.is_empty() && !home.iter().any(|m| m.ends_with("URL")), "{home:?}");
 }
 
 #[test]

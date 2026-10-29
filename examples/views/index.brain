@@ -1,4 +1,4 @@
-<meta seo title="BRAINLLM examples" description="Small BRAINLLM examples: a counter with derived state and a to-do list with keyed items, filters and an empty state." canonical="/">
+<meta seo keyword="BRAINLLM examples" title="BRAINLLM examples" description="Small BRAINLLM examples: a counter with derived state and a to-do list with keyed items, filters and an empty state." canonical="/">
 
 <script>
   import Counter from '../comp/counter.brain'

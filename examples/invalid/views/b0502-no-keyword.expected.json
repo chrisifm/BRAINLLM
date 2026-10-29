@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0502",
+    "level": "warning",
+    "file": "invalid/views/b0502-no-keyword.brain",
+    "line": 1,
+    "col": 7,
+    "msg": "the view has no `keyword`: the page does not say which search query it should rank for",
+    "fix": "pick the query a reader would type to find this page (2-4 words, e.g. \"offline task planner\"), add `keyword=\"<that query>\"` to `<meta seo>`, and use those exact words in the title, the H1, the first sentence and the description; for a page that should not rank, add `robots=\"noindex\"` instead"
+  }
+]

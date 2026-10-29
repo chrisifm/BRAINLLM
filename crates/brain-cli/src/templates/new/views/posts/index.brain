@@ -1,4 +1,4 @@
-<meta seo title="Posts" description="Every post of this app, generated from lib/posts.jsbrain: an example of a list page linked to dynamic routes.">
+<meta seo keyword="posts" title="Posts" description="All posts of this app, generated from lib/posts.jsbrain: an example of a list page linked to dynamic routes.">
 
 <script>
   import posts from '../../lib/posts.jsbrain'
@@ -9,6 +9,7 @@
 
 <main class="page">
   <h1>Posts</h1>
+  <p>The posts of this app, each linked to its own page.</p>
   <ul>
     {#each list as p (p.id)}
       <li><a href={`/posts/${p.id}`}>{p.title}</a> · {p.summary}</li>

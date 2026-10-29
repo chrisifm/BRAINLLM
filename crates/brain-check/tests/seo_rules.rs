@@ -34,6 +34,49 @@ fn b16xx_metadata() {
     assert_eq!(codes_in("views/u.brain", &view("title=\"T\" description=\"d\" canonical=\"/u\""), &ctx), ["B1604"]);
 }
 
+fn b0502_in(path: &str, seo: &str, ctx: &Ctx) -> bool {
+    let src = view(seo);
+    let c = brain_parse::parse(&src, Path::new(path)).unwrap_or_else(|d| panic!("{d:?}"));
+    brain_check::check(&c, ctx).iter().any(|d| d.code == "B0502")
+}
+
+#[test]
+fn b0502_indexable_view_names_its_query() {
+    let ctx = Ctx::default();
+    let seo = "title=\"Users\" description=\"All users.\"";
+    assert!(b0502_in("views/u.brain", seo, &ctx));
+    assert!(!b0502_in("views/u.brain", &format!("keyword=\"users\" {seo}"), &ctx));
+    // pages that should not rank are not asked for a query
+    assert!(!b0502_in("views/u.brain", &format!("{seo} robots=\"noindex, follow\""), &ctx));
+    assert!(!b0502_in("views/_offline.brain", seo, &ctx));
+    assert!(!b0502_in("views/u/[id].brain", seo, &ctx));
+    assert!(!b0502_in("views/404.brain", seo, &ctx));
+    let guarded = Ctx { guarded: true, ..Ctx::default() };
+    assert!(!b0502_in("views/u.brain", seo, &guarded));
+    // the warning tells the author exactly what to write
+    let c = brain_parse::parse(&view(seo), Path::new("views/u.brain")).unwrap();
+    let d = brain_check::check(&c, &ctx).into_iter().find(|d| d.code == "B0502").unwrap();
+    assert_eq!(d.level, brain_parse::Severity::Warning);
+    assert!(d.fix.contains("keyword=\\\"") || d.fix.contains("keyword=\""), "{}", d.fix);
+}
+
+#[test]
+fn b0502_guard_folder_is_detected_from_disk() {
+    let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("b0502-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("views/account")).unwrap();
+    std::fs::write(root.join("brain.json"), "{}").unwrap();
+    std::fs::write(root.join("views/account/_guard.jsbrain"), "export default (ctx) => ctx.user ? null : '/login'\n").unwrap();
+    let src = view("title=\"Account\" description=\"Your account.\"");
+    for (rel, expect) in [("views/account/index.brain", false), ("views/open.brain", true)] {
+        std::fs::write(root.join(rel), &src).unwrap();
+        let c = brain_parse::parse(&src, Path::new(rel)).unwrap_or_else(|d| panic!("{d:?}"));
+        let (ctx, _) = brain_check::load_ctx(&root.join(rel), &c);
+        assert_eq!(ctx.guarded, !expect, "{rel}");
+        assert_eq!(brain_check::check(&c, &ctx).iter().any(|d| d.code == "B0502"), expect, "{rel}");
+    }
+}
+
 #[test]
 fn paths_only_in_dynamic_views() {
     let src = "<meta seo title=\"T\" description=\"d\">\n<script>export async function paths() { return [] }</script>\n<main><h1>x</h1></main>";

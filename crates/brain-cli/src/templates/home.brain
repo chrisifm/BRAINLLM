@@ -1,4 +1,4 @@
-<meta seo title="Welcome to BRAINLLM" description="Your BRAINLLM project is running. Paste the prompt into any LLM to start building." canonical="/">
+<meta seo keyword="BRAINLLM" title="Welcome to BRAINLLM" description="Your BRAINLLM project is running. Paste the prompt into any LLM to start building." canonical="/">
 <script>
   let prompt = sig(`You are building a web app with BRAINLLM, an AI-native framework.
 1. Run \`brain spec\` and read it fully. Nothing outside it exists.
@@ -23,7 +23,7 @@ Task: <describe the app you want>`)
       <rect fill="#ffc2d8" x="28" y="68" width="16" height="16" rx="4" /><rect fill="#ffb0cc" x="46" y="66" width="12" height="16" rx="4" opacity=".85" /><rect fill="#ff9cbf" x="62" y="66" width="12" height="16" rx="4" opacity=".85" /><rect fill="#f985b0" x="76" y="68" width="16" height="16" rx="4" /><rect fill="#f06fa1" x="66" y="84" width="10" height="10" rx="3" />
     </g>
   </svg>
-  <p class="eyebrow">AI-driven development. Humans optional.</p>
+  <p class="eyebrow">BRAINLLM: AI-driven development. Humans optional.</p>
   <h1>Your BRAINLLM app is alive.</h1>
   <p class="lead">Paste this prompt into any LLM, describe what you want, and let it build views, components and styles.</p>
   <section class="card" aria-labelledby="pt">

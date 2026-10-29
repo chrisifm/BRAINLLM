@@ -1,8 +1,8 @@
-<meta seo title="About" description="What {{name}} is, who builds it and how to reach the team. Replace this text with the story of your project." canonical="/about">
+<meta seo keyword="about {{name}}" title="About {{name}}" description="About {{name}}: what it is, who builds it and how to reach the team. Replace this text with the story of your project." canonical="/about">
 
 <main class="page">
   <h1>About {{name}}</h1>
-  <p>{{name}} is a web app built with BRAINLLM. This page tells visitors what the project does, who it is for and why it exists. Replace these paragraphs with your own words: a clear sentence about the problem you solve, one about the people you serve and one about what makes your approach different.</p>
+  <p>About {{name}}: a web app built with BRAINLLM. This page tells visitors what the project does, who it is for and why it exists. Replace these paragraphs with your own words: a clear sentence about the problem you solve, one about the people you serve and one about what makes your approach different.</p>
   <p>Search engines and assistants read this page to understand the whole site, so keep it specific. Mention the main things a visitor can do here and link to them, starting with the <a href="/">home page</a>.</p>
 </main>
 

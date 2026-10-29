@@ -28,6 +28,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - B0413 (warning): an `alt` that is a file name or a lone generic word such as "image" or "logo".
 - B0414 (error): an `<iframe>` without `title` or `aria-label`.
 - B0415 (warning): a `<video>` with controls or sound that has no captions or subtitles track.
+- `<meta seo keyword="…">` is part of the authoring contract: an indexable view without it is warning B0502, and
+  B1816 now also asks for the keyword in the description (the home page `/` is not asked for it in its URL).
+  `brain new`, `brain add view|collection`, the examples and the generated AGENTS.md carry a keyword.
 - A page URL requested with `Accept: text/markdown` (preferred over `text/html`) answers its Markdown twin in
   `brain start` and the static server, with `Vary: Accept`; browsers still get HTML. `seo.markdown=false` turns it off
   together with the `.md` copies.

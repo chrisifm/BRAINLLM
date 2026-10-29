@@ -133,7 +133,9 @@ has `title` · no tabindex > 0. Warnings: generic link text ("click here", "read
 "image"/"logo" · `<video>` with controls or sound needs `<track kind="captions">`.
 
 ## SEO
-Every view: `<meta seo title="…" description="…" canonical? og:image? schema? robots?>`.
+Every view: `<meta seo keyword="…" title="…" description="…" canonical? og:image? schema? robots?>`.
+Pick the query first; put it in the title, H1, first sentence and description. `keyword` is never rendered; an
+indexable view without it is B0502 (guarded, `robots="noindex"`, `_x`, `[id]` and error views are exempt).
 Values may be expressions from `load` props: `<meta seo title={props.user.name} description={props.user.bio}
 jsonld={{ '@type': 'Person', name: props.user.name }}>`. Site defaults live in `app.brain`:
 `<meta seo titleTemplate="%s · Nimbus" og:image="/og.png" twitter="@nimbus">`. Any other tag goes in a `<head>` block of

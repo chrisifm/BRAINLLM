@@ -1,8 +1,9 @@
 Component Index level=View file=views/index.brain
   meta@1:7 seo=None
-  meta@1:11 title=Some("BRAINLLM examples")
-  meta@1:37 description=Some("Small BRAINLLM examples: a counter with derived state and a to-do list with keyed items, filters and an empty state.")
-  meta@1:168 canonical=Some("/")
+  meta@1:11 keyword=Some("BRAINLLM examples")
+  meta@1:39 title=Some("BRAINLLM examples")
+  meta@1:65 description=Some("Small BRAINLLM examples: a counter with derived state and a to-do list with keyed items, filters and an empty state.")
+  meta@1:196 canonical=Some("/")
   script
     import@4:3 Counter from "../comp/counter.brain"
     import@5:3 Todo from "../comp/todo.brain"

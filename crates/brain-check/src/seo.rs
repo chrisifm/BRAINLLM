@@ -3,6 +3,7 @@
 //! - B1602 (warning) static `title` longer than 60 or `description` longer than 160 characters.
 //! - B1603 `jsonld={{…}}` object without `@type`.
 //! - B1604 the same static `canonical` in two views.
+//! - B0502 (warning) indexable view without `keyword` (the search query the page targets).
 
 use crate::Checker;
 use brain_parse::ast::*;
@@ -173,6 +174,20 @@ impl Checker<'_> {
         let info = view_info(c);
         let seo_span = c.meta.iter().find(|m| m.name == "seo").map(|m| m.span).unwrap_or_default();
         let attr = |name: &str| c.meta.iter().find(|m| m.name == name);
+        // B0502: an indexable page names the search query it should rank for (`keyword`, audit-only, never rendered).
+        // Skipped for pages not meant to rank: noindex, partials (`_x.brain`), dynamic routes, guarded folders and error pages.
+        let file_name = c.file.rsplit('/').next().unwrap_or("");
+        let noindex = matches!(info.attrs.iter().find(|(n, _)| n == "robots"), Some((_, SeoValue::Text(r))) if r.to_ascii_lowercase().contains("noindex"));
+        // dynamic routes (`[slug].brain`) take their query from the data of each page: not asked for one static keyword
+        let special = file_name.starts_with('_') || c.file.contains('[') || ["404.brain", "500.brain", "error.brain"].contains(&file_name);
+        if !info.attrs.iter().any(|(n, _)| n == "keyword") && !noindex && !special && !self.ctx.guarded {
+            self.push(
+                "B0502",
+                seo_span,
+                "the view has no `keyword`: the page does not say which search query it should rank for",
+                "pick the query a reader would type to find this page (2-4 words, e.g. \"offline task planner\"), add `keyword=\"<that query>\"` to `<meta seo>`, and use those exact words in the title, the H1, the first sentence and the description; for a page that should not rank, add `robots=\"noindex\"` instead",
+            );
+        }
         if !info.attrs.iter().any(|(n, _)| n == "description") {
             self.push("B1601", seo_span, "the view has no `description`", "add `description=\"…\"` (one sentence, ≤ 160 characters) or `description={props.…}` to `<meta seo>`");
         }

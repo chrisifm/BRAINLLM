@@ -121,7 +121,7 @@ COMPILER assigns the next free code there in the same change that emits it, then
   B1804 description wider than 920 px / 70 chars on mobile · B1805 H1 count · B1806 skipped heading level ·
   B1807 img without alt · B1808 thin content (< 300 words) · B1809 canonical missing or relative · B1810 no lang ·
   B1811 incomplete Open Graph · B1812 no outgoing internal links or internal nofollow · B1813 orphan page ·
-  B1814 duplicate title · B1815 duplicate description · B1816 focus keyword (title, H1, first paragraph, URL, density)
+  B1814 duplicate title · B1815 duplicate description · B1816 focus keyword (title, H1, first paragraph, description, URL except on `/`, density)
   · B1817 keyword cannibalization · B1818 invalid JSON-LD · B1819 broken internal link (error, fails the build) ·
   B1820 broken anchor (error, fails the build) · B1821 heavy LCP image or image without dimensions · B1822 staging build ·
   B1823 invalid collection frontmatter (error; a missing description is a warning) · B1824 duplicate slug in a
@@ -230,10 +230,13 @@ Shadow DOM, Declarative Shadow DOM for SSR, `adoptedStyleSheets` shared across i
 
 **SEO per view:**
 ```html
-<meta seo title="…" description="…" canonical="/path" og:image="/img.png" schema="Article">
+<meta seo keyword="…" title="…" description="…" canonical="/path" og:image="/img.png" schema="Article">
 ```
 The build emits `<title>`, the meta and Open Graph tags, JSON-LD, `sitemap.xml` and `robots.txt`, and prerenders to static
-HTML. A view that does not declare `seo` is error B0501.
+HTML. A view that does not declare `seo` is error B0501. An indexable view without `keyword` (the search query it targets,
+audit-only, never rendered) is warning B0502; exempt: `robots="noindex"`, `_x.brain`, `[param]` views, 404/500/error views
+and views under a folder with `_guard.jsbrain` (up to the app root, `Ctx.guarded`, the guard file is a dependency of
+the check cache).
 
 **Tests:** `comp/counter.test.brain` (BrainScript + `test()`/`expect()`/`click()`/`type()`) and `brain test`
 runs them in real headless Chrome via CDP, with its own Rust client. The same command audits the

@@ -34,6 +34,7 @@ The tokens used by the `<style>` blocks live in `invalid/tokens.cssbrain`; `--fa
 | B0408 | `comp/b0408-contrast.brain`, `comp/b0408-color-mix.brain`, `comp/b0408-opacity-text.brain` | token contrast < 4.5:1; `opacity` < 1 on a rule that sets `color` |
 | B0409 | `comp/b0409-reduced-motion.brain` | animation without `prefers-reduced-motion` |
 | B0501 | `views/b0501-no-seo.brain` | view without `<meta seo>` |
+| B0502 | `views/b0502-no-keyword.brain` | indexable view without `keyword` (warning) |
 | B0901 | `comp/b0901-fx-self-cycle.brain` | an `fx` that writes a sig it reads (cycle) |
 | B0903 | `comp/b0903-recursion-no-base.brain` | recursion without a base case |
 | B0906 | `comp/b0906-timer-no-cleanup.brain` | `setInterval` inside an `fx` without cleanup (§30) |

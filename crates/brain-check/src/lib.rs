@@ -69,6 +69,9 @@ pub struct Ctx {
     pub types: Option<HashSet<String>>,
     /// Static `canonical` of every view in the app → the view files declaring it (B1604). Empty when not scanned.
     pub canonicals: HashMap<String, Vec<String>>,
+    /// A `_guard.jsbrain` protects this view's folder (or an ancestor up to the app root): the page sits behind a
+    /// login, so it is not asked for a search `keyword` (B0502).
+    pub guarded: bool,
 }
 
 /// What a parent may use of a child component besides its props (INTERNALS §12).
@@ -230,6 +233,19 @@ pub fn load_ctx(disk_path: &Path, c: &Component) -> (Ctx, Vec<PathBuf>) {
             for locale in &i18n.locales { deps.push(root.join("i18n").join(format!("{locale}.json"))); }
         }
         ctx.cache_data_off = std::fs::read_to_string(root.join("brain.json")).ok().is_some_and(|j| cache_data_off(&j));
+    }
+    if c.level == Level::View && c.kind == FileKind::Component {
+        for anc in dir.ancestors() {
+            let g = anc.join("_guard.jsbrain");
+            deps.push(g.clone()); // adding a guard later changes B0502
+            if g.is_file() {
+                ctx.guarded = true;
+                break;
+            }
+            if project.as_deref() == Some(anc) || anc.join("brain.json").is_file() {
+                break;
+            }
+        }
     }
     if c.level == Level::View
         && c.meta.iter().any(|m| m.name == "canonical")

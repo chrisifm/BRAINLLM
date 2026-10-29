@@ -1,4 +1,4 @@
-<meta seo title="User admin" description="Create, edit, activate and delete the users of the example app, with search and an inline edit form." canonical="/dashboard">
+<meta seo keyword="user admin" title="User admin" description="User admin for the example app: create, edit, activate and delete users, with search and an inline edit form." canonical="/dashboard">
 
 <script>
   import Badge from '../ui/badge.brain'

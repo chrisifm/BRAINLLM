@@ -343,8 +343,10 @@ fn view_body(meta: &str, uses: &str, class: &str, comp: &str, route: Option<&str
         }
         Some(r) => {
             let title = crate::names::pascal(r.rsplit('/').next().filter(|x| !x.is_empty()).unwrap_or(stem));
+            // B0502: the page names its search query; the title is the starting point the author refines
+            let keyword = &title;
             format!(
-                "{meta}<meta seo title=\"{title}\" description=\"TODO: describe this page in one sentence (70 to 155 characters).\" canonical=\"{r}\">\n\n<main class=\"{class}\">\n  <h1>{title}</h1>\n  <p>TODO: write this page and link related pages, e.g. the <a href=\"/\">home page</a>.</p>\n{uses}</main>\n{style}"
+                "{meta}<meta seo keyword=\"{keyword}\" title=\"{title}\" description=\"TODO: describe {title} in one sentence (70 to 155 characters).\" canonical=\"{r}\">\n\n<main class=\"{class}\">\n  <h1>{title}</h1>\n  <p>TODO: write this page and link related pages, e.g. the <a href=\"/\">home page</a>.</p>\n{uses}</main>\n{style}"
             )
         }
         None => format!("{meta}<main class=\"{class}\">\n  <h1>{comp}</h1>\n{uses}</main>\n{style}"),
@@ -489,7 +491,7 @@ This entry lives in `content/{{name}}/hello-world.md`. Add more `.md` files next
 `title` and `description` are required. `date`, `updated`, `tags`, `cover`, `author` and `draft: true` are optional.
 "#;
 
-const COLLECTION_INDEX: &str = r#"<meta seo title="{{Title}}" description="Every entry of {{Title}}, newest first, with a short summary, its date and its tags. Each title opens the full entry.">
+const COLLECTION_INDEX: &str = r#"<meta seo keyword="{{Title}}" title="{{Title}}" description="Every entry of {{Title}}, newest first, with a short summary, its date and its tags. Each title opens the full entry.">
 
 <script>
   import { page } from 'brain:content'
@@ -735,8 +737,9 @@ Before each kind of task run `brain guide <topic>` (the playbook: steps, verify 
 3. Create files with `brain add view|comp|ui <name> --props "…"` and complete them; do not write them from scratch.
 4. Loop: edit → `brain check --json` → apply `brain fix`, then each remaining error's `fix` → repeat until `[]`.
 5. A diag with `"stuck": true` failed the same way 3 checks in a row: stop patching, read its `explain` (why + correct example) or `brain explain <code>`, and rewrite that part.
-6. Done means `brain doctor` exits 0 (check + tests + accessibility + leaks). Not before; never claim a task done with doctor failing.
-7. `brain run` serves the app and prints one `impact {…}` line per save: new/fixed diagnostics and Δ bytes per view. Per-environment values (API URLs, tokens) go in `.brain_env` through MCP `brain_env_set {key, section, value}`; `brain_env_keys` lists the keys, never the values. Use the CLI or discover the available tools through `brain mcp`. Prefer structured output where supported. Inspect the exit status and result; unified exit codes are still planned.
+6. SEO: every indexable view names its search query in `<meta seo keyword="…">`. Pick the query first; put it in the title, H1, first sentence and description.
+7. Done means `brain doctor` exits 0 (check + tests + accessibility + leaks). Not before; never claim a task done with doctor failing.
+8. `brain run` serves the app and prints one `impact {…}` line per save: new/fixed diagnostics and Δ bytes per view. Per-environment values (API URLs, tokens) go in `.brain_env` through MCP `brain_env_set {key, section, value}`; `brain_env_keys` lists the keys, never the values. Use the CLI or discover the available tools through `brain mcp`. Prefer structured output where supported. Inspect the exit status and result; unified exit codes are still planned.
 "#;
 
 const PACKAGE_JSON: &str = r#"{

@@ -1,4 +1,4 @@
-<meta seo title="Shop" description="Example of the 8 communication channels between components.">
+<meta seo keyword="shop" title="Shop" description="Shop example of the 8 communication channels between components.">
 <script>
   import { Theme } from '../channels/theme.jsbrain'
   import cart from '../channels/cart.jsbrain'
