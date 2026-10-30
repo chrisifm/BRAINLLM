@@ -1667,6 +1667,11 @@ short commits under the existing writer lock. Each file replacement is atomic; b
 journals and conditional recovery, not filesystem-wide atomic visibility. External editor races remain explicit.
 See [CHANGES.md](CHANGES.md) for request schemas, privacy, bounds and recovery.
 
+Development 0.4.1: state, preview-admission and writer leases explicitly unlock before descriptor close. A forked
+child or cloned descriptor must not extend a completed operation's lease. Real contention returns immediately;
+only interrupted lock syscalls receive up to three attempts. Filesystem errors retain their category. Retained-
+descriptor regressions verify both immediate reuse and continued exclusion while a successor holds the lock.
+
 `intelligence` builds static evidence across routes, imports, literal API calls, policies, resource hooks and jobs.
 Bounded graph pages, task context, impact, why and preventive checks distinguish compiler observations from runtime
 proof. [INTELLIGENCE.md](INTELLIGENCE.md) specifies unknown edges and context byte estimates.

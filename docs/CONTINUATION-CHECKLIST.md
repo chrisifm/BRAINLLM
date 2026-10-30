@@ -116,8 +116,9 @@ The inventory covers:
 All three slices use isolated branches and the next development version, 0.4.1-dev.0. They do not change the
 published 0.4.0 packages. Check off integration only after reviewing the diff and executing its actual regressions.
 
-- [ ] `fix/atomic-lock-lifecycle`: explicit state/preview lease release, bounded interrupted-lock handling and
-  retained-descriptor regressions. Implementation prepared; focused Rust verification in progress.
+- [x] `fix/atomic-lock-lifecycle`: explicit state/preview/writer lease release, bounded interrupted-lock handling
+  and retained-descriptor regressions. Before-fix writer regression failed; after-fix changes/edit tests passed
+  15/15. Reviewed commit 5277d43 is integrated as a72edc1 on development/0.4.1; complete batch gates remain required.
 - [ ] `fix/srcmap-literal-markers`: preserve author text resembling internal line markers. The published binary
   reproduced loss of five quoted/template/HTML examples; repair and map-correctness regressions in progress.
 - [ ] `feat/resource-admin-budget`: measure and finish opt-in administrative UI generation within the existing
