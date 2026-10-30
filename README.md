@@ -2,11 +2,23 @@
 
 # BRAINLLM
 
-### The web compiler for LLMs, built in Rust.
+### 🦀 The web compiler for LLMs, built in Rust. Blazing fast.
 
 **Your LLM owns the frontend. Give it a language built for the job.**
 
-![BRAINLLM — The web compiler for LLMs](docs/site/assets/cover.png)
+> **Written in Rust, from parser to minifier.** One native binary, no toolchain to install. Warm production builds
+> in **~34 ms**, about **4.5× faster than React + Vite** on [our open benchmark](#show-me-the-numbers).
+
+<p align="center">
+  <img src="https://img.shields.io/badge/built%20with-Rust-dea584?logo=rust&logoColor=white" alt="Built with Rust">
+  <a href="https://chrisifm.github.io/BRAINLLM/"><img src="https://img.shields.io/badge/website-chrisifm.github.io%2FBRAINLLM-0071e3" alt="Website"></a>
+  <a href="https://www.npmjs.com/package/@christianirack/brainllm"><img src="https://img.shields.io/npm/v/@christianirack/brainllm?color=cb3837" alt="npm version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/chrisifm/BRAINLLM" alt="License"></a>
+</p>
+
+<p align="center"><a href="https://chrisifm.github.io/BRAINLLM/"><img src="docs/site/assets/cover.png" alt="BRAINLLM — The web compiler for LLMs. Open the website: chrisifm.github.io/BRAINLLM"></a></p>
+
+<p align="center"><b>🌐 <a href="https://chrisifm.github.io/BRAINLLM/">chrisifm.github.io/BRAINLLM</a></b></p>
 
 BRAINLLM gives coding agents a compact language, a single specification and a native compiler written in Rust that
 tells them how to fix mistakes. The model builds the frontend. You set the direction, inspect the result and decide

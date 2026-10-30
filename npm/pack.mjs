@@ -67,6 +67,7 @@ const npmReadme = readFileSync(join(root, 'README.md'), 'utf8')
     return `${start}https://github.com/chrisifm/BRAINLLM/${start.startsWith('!') ? 'raw' : 'blob'}/main/${path}${end}`
   })
   .replace(/src="(?![a-z]+:|\/\/)([^"]+)"/gi, (_, path) => `src="https://raw.githubusercontent.com/chrisifm/BRAINLLM/main/${path}"`)
+  .replace(/href="(?![a-z]+:|\/\/|#)([^"]+)"/gi, (_, path) => `href="https://github.com/chrisifm/BRAINLLM/blob/main/${path}"`)
 
 
 // 1. platform packages
@@ -96,14 +97,14 @@ for (const p of PLATFORMS) {
   sums.push(`${createHash('sha256').update(bytes).digest('hex')}  ${p.key}/${exe}`)
   writePkg(dir, {
     name,
-    description: `The brain binary of BRAINLLM for ${p.key}. Installed automatically by ${SCOPE}/brainllm.`,
+    description: `The native Rust brain binary of BRAINLLM for ${p.key}. Installed automatically by ${SCOPE}/brainllm.`,
     os: [p.os],
     cpu: [p.cpu],
     ...(p.libc ? { libc: [p.libc] } : {}),
     files: ['bin'],
     preferUnplugged: true,
   })
-  writeFileSync(join(dir, 'README.md'), `# ${name}\n\nThe native \`brain\` binary for ${p.key}. Do not install it directly: install \`${SCOPE}/brainllm\`.\n`)
+  writeFileSync(join(dir, 'README.md'), `# ${name}\n\nThe native \`brain\` binary for ${p.key}, compiled from Rust. Do not install it directly: install \`${SCOPE}/brainllm\`.\n`)
   built.push({ name, dir, size: bytes.length })
 }
 if (missing.length && requireAll) {
@@ -117,12 +118,12 @@ cpSync(join(here, 'brainllm'), main, { recursive: true })
 copyFileSync(join(root, 'crates/brain-cli/schema/brain.schema.json'), join(main, 'brain.schema.json'))
 writePkg(main, {
   name: `${SCOPE}/brainllm`,
-  description: 'BRAINLLM: a web framework designed for LLMs to write. The `brain` CLI, dev server, build and MCP server.',
+  description: 'BRAINLLM: the web compiler for LLMs, built in Rust. One blazing-fast native binary: the `brain` CLI, dev server, build (~34 ms) and MCP server.',
   bin: { brain: 'bin/brain.js' },
   files: ['bin', 'brain.schema.json', 'README.md'],
   engines: { node: '>=22' },
   optionalDependencies: Object.fromEntries(PLATFORMS.map((p) => [`${SCOPE}/brainllm-${p.key}`, version])),
-  keywords: ['framework', 'llm', 'ai', 'compiler', 'mcp', 'web'],
+  keywords: ['framework', 'llm', 'ai', 'compiler', 'rust', 'fast', 'mcp', 'web'],
 })
 
 writeFileSync(join(main, 'README.md'), npmReadme)
@@ -134,7 +135,7 @@ for (const suffix of ['brainllm', 'brainll']) {
   cpSync(join(here, 'create-brainllm'), create, { recursive: true })
   writePkg(create, {
     name: `${SCOPE}/create-${suffix}`,
-    description: `npm create ${SCOPE}/${suffix} <app>: a new BRAINLLM app with its brain version pinned.`,
+    description: `npm create ${SCOPE}/${suffix} <app>: a new BRAINLLM app (the Rust-built web compiler for LLMs) with its brain version pinned.`,
     bin: { [`create-${suffix}`]: 'bin/create.js' },
     files: ['bin', 'README.md'],
     engines: { node: '>=22' },
@@ -157,7 +158,7 @@ for (const f of execFileSync('git', ['ls-files', '--cached', '--others', '--excl
 cpSync(join(here, 'brainllm-runtime', 'README.md'), join(rt, 'README.md'))
 writePkg(rt, {
   name: `${SCOPE}/brainllm-runtime`,
-  description: 'The BRAINLLM runtime: dependency-free ES modules (signals, DOM, router, data, forms, channels). The brain binary embeds this same version.',
+  description: 'The BRAINLLM runtime for the Rust-built web compiler for LLMs: dependency-free ES modules (signals, DOM, router, data, forms, channels). The brain binary embeds this same version.',
   type: 'module',
   exports: { '.': './brain.js', './*': './*' },
   sideEffects: false,

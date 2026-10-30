@@ -14,6 +14,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Releases: every `v*` tag publishes the 11 npm packages through npm Trusted Publishing (OIDC, no stored token, no
   approval step); `docs/NPM-RELEASE.md` describes the new flow (57264a4).
 
+### Documentation
+
+- README, npm package descriptions and the site lead with "built in Rust" and the ~34 ms build benchmark; the npm
+  README links the cover and the badges to the website.
+
 ## [0.3.0] - 2026-10-29
 
 ### Added
