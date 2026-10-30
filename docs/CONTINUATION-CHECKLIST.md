@@ -112,7 +112,7 @@ The inventory covers:
 
 ## Next-development implementation checkpoints
 
-Version: **0.4.1-dev.0**, branch `development/0.4.1`. Everything below is local development unless explicitly
+Version: **0.4.1-dev.0**, branch `development/0.4.1`, integration checkpoint `0a411f9`. Everything below is local development unless explicitly
 linked to a published release. npm remains 0.4.0. Candidate tests and an integrated complete gate are distinct.
 
 - [x] Atomic state/preview/writer leases release explicitly: 15 focused tests passed, including retained-descriptor
@@ -137,6 +137,13 @@ linked to a published release. npm remains 0.4.0. Candidate tests and an integra
 - [x] Node Upgrade bridge component completed and reviewed: fixed endpoint, filtered credentials, delegated Origin,
   bounded queues/writes/lifetime, coexistence with other Upgrade handlers and reconnect after closeAllConnections.
   Its 89 Node tests passed. Sources 5906096 + b5d6c5f are integrated as 8c6434a + fd52ab6; Rust embedding checks remain required.
+- [x] Rust development/static socket gateway component integrated as d03d2fc from 75bb2c0. All 64 component
+  library tests passed, including opaque TCP, HTTP/HMR and managed shutdown. Direct empty-context environment
+  regression added as d3fddb8; this additional regression still requires execution on the integrated tree.
+- [x] Scoped liveResource client, compiler registration, strict shared socket settings, CSP and optional private
+  manifest generation integrated as 0a411f9 from 4aa7b74. Candidate runtime 433/433 and focused Rust 87/87
+  passed (20 compiler, 63 packaging, four configuration). Unused applications retain identical asset bytes.
+  These are component results; CLI startup and Node manifest consumers remain separate acceptance items.
 
 All new Linux results above use **Rust 1.96.1 diagnostic tooling** unless noted otherwise. They are not the final
 Rust 1.99.1 release gate and do not establish cross-platform execution or whole-application memory coverage.
@@ -145,17 +152,18 @@ Rust 1.99.1 release gate and do not establish cross-platform execution or whole-
 
 - [x] Integrate Node bridge sources 5906096 + b5d6c5f locally (8c6434a + fd52ab6).
 - [ ] Run the actual pack/private-helper/dev-sidecar Rust embedding tests on the combined tree.
-- [ ] Complete `feat/dev-native-sockets`: opaque bounded Rust dev Upgrade transport, request read-ahead metadata,
-  fixed shared HTTP/SSR/socket authority, managed shutdown and preserved HTTP/HMR behavior. Coordinator-owned
-  server integration is applied. Component 75bb2c0 passed all 64 brain-serve library tests in Linux, including
-  opaque TCP, HTTP/HMR/load and static-production shutdown. Local integration and the additional empty-context
-  environment oracle remain pending; no ambient process environment may be added to ctx.env when its loader is absent.
-- [ ] Complete `feat/native-live-client`: liveResource(resourceHandle, options), owner cleanup, principal scope,
-  coalesced refresh, bounded reconnect and explicit capability/auth diagnostics. Twelve candidate Node/GC tests
-  passed for lifecycle scaffolding; compiler registry, single-source configuration, CSP and integrated client remain pending.
+- [x] Integrate the completed Rust development/static gateway component (d03d2fc).
+- [ ] Execute the added empty-context environment oracle and all serve tests on the combined tree. No ambient
+  process environment may be added to ctx.env when its loader is absent.
+- [x] Integrate the scoped liveResource client/compiler/configuration/packaging component (0a411f9).
+- [ ] Complete and verify CLI development/test/static startup and Node private-manifest consumers against the
+  actual combined gateway/configuration source, including selected-port Origin preflight and disabled defaults.
 - [ ] Wire one reviewed brain.json backend.origins/sockets configuration into backend startup, Node SSR manifest,
   Rust development proxy and exact public socket origin. Preserve disabled defaults and explicit operator overrides.
-- [ ] Validate all four PM2/nginx topologies with Upgrade routing, preserving Node cookie transformation where required.
+- [x] Candidate nginx deployment templates passed six actual parser/TLS/TCP checks: four disabled topologies and
+  two socket-enabled Rust topologies; query/method/protocol/body rejection and credential projection included.
+- [ ] Integrate deployment sources and verify compiler-rendered PM2/nginx configurations against those tested
+  templates. Node routing preserves its credential projection and bridge lifecycle; it does not rename cookies.
 - [ ] Run actual browser plus native PostgreSQL end-to-end CRUD/live/auth/session-switch/shutdown checks. Prefer an
   installed connected Viewer as documented; report headless fallback, AX and heap coverage precisely.
 - [ ] Re-run administrative budget/required/no-JS cases on the final combined tree. Keep the 30 KiB reference gate;
