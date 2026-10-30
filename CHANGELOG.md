@@ -9,6 +9,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-29
+
 ### Added
 
 - `brain guide [topic] [--json]` and the MCP tool `brain_guide`: task playbooks for agents embedded in the binary
@@ -114,6 +116,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - First public npm release for seven native platforms (macOS arm64/x64, Linux x64/arm64/musl, Windows x64/arm64),
   the runtime and the `npm create @christianirack/brainllm` and `npm create @christianirack/brainll` initializers (#5).
 
-[Unreleased]: https://github.com/chrisifm/BRAINLLM/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/chrisifm/BRAINLLM/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/chrisifm/BRAINLLM/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/chrisifm/BRAINLLM/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/chrisifm/BRAINLLM/releases/tag/v0.1.0
