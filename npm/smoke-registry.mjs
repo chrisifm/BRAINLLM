@@ -9,7 +9,27 @@ import { request } from 'node:http'
 
 const REGISTRY = 'https://registry.npmjs.org/'
 const OUTPUT = 2 * 1024 * 1024
-const USAGE = 'usage: node npm/smoke-registry.mjs --version <exact-version> [--timeout-ms 900000] [--no-dev]\nInstalls both published initializers anonymously, then runs version/check/build/doctor and a temporary dev HTTP probe. No publication or local BRAIN_BINARY override.'
+const NPM_CODES=new Set(['E404','E401','E403','E400','E429','E500','E502','E503','EUSAGE','EBADENGINE','EBADPLATFORM','ETARGET','EINTEGRITY','EAI_AGAIN','ETIMEDOUT','ECONNRESET','ECONNREFUSED','ENOTFOUND','ENOENT','EACCES','EPERM'])
+export function logSummary(bytes) {
+ const raw=Buffer.from(bytes).subarray(0,OUTPUT).toString('utf8'),codes=new Set()
+ for(const match of raw.matchAll(/\b(?:E[A-Z0-9_]+)\b/g))if(NPM_CODES.has(match[0]))codes.add(match[0])
+ return {npmCodes:[...codes].sort(),browserUnavailable:/Chrome not found/.test(raw),browserBridgeFailed:/Connected Viewer capability probe failed|Viewer runner failed|Viewer E2E failed/.test(raw),browserProfileRequired:/profile.{0,40}(?:required|must be selected)|(?:select|specify).{0,40}profile/i.test(raw)}
+}
+export function publicFailure(error, fallbackPhase='setup') {
+ const d=error?.detail||{},phase=typeof d.phase==='string'&&/^[a-z0-9-]{1,80}$/.test(d.phase)?d.phase:fallbackPhase
+ const reasons=new Map([
+  ['Exact published version is not visible anonymously','exact-version-unavailable'],['Initializer did not install the exact version','installed-version-mismatch'],['Installed launcher escaped its own app','installed-path-escape'],['Published native compiler version mismatch','native-version-mismatch'],['Published compiler did not emit its actual build','invalid-build-output'],['Published doctor did not pass','doctor-failed'],['Invalid owned dev listener metadata','invalid-dev-metadata'],['Published dev HTTP probe did not become ready','dev-http-not-ready'],['Registry smoke deadline','deadline'],['Registry smoke cancelled or capacity exhausted','cancelled-or-capacity'],['Cannot locate the installed npm CLI JavaScript entry','npm-cli-unavailable'],['Invalid bounded smoke metadata','invalid-metadata']])
+ const knownReasons=new Set(['nonzero-exit','spawn','deadline','cancelled','disk-limit','structured-output-limit','exact-version-unavailable','registry-version-response-mismatch','registry-invalid-json'])
+ const report={schemaVersion:1,ok:false,code:'REGISTRY_SMOKE_FAILED',phase,reason:knownReasons.has(d.reason)?d.reason:reasons.get(error?.message)||(error instanceof SyntaxError?'invalid-json':'unclassified-failure')}
+ for(const key of ['exitCode','checkErrors','failedTests','retryAttempts'])if(Number.isSafeInteger(d[key])&&d[key]>=0&&d[key]<=1000000)report[key]=d[key]
+ if(['SIGTERM','SIGKILL','SIGABRT'].includes(d.signal))report.signal=d.signal
+ if(Array.isArray(d.npmCodes))report.npmCodes=d.npmCodes.filter(code=>NPM_CODES.has(code)).slice(0,24)
+ if(Array.isArray(d.diagnosticCodes))report.diagnosticCodes=d.diagnosticCodes.filter(code=>/^B[0-9]{4}$/.test(code)).slice(0,16)
+ for(const key of ['browserUnavailable','browserBridgeFailed','browserProfileRequired','retainedFailureLogs'])if(d[key]===true)report[key]=true
+ if(knownReasons.has(d.lastAttemptReason))report.lastAttemptReason=d.lastAttemptReason
+ return report
+}
+const USAGE = 'usage: node npm/smoke-registry.mjs --version <exact-version> [--timeout-ms 900000] [--no-dev] [--keep-failure-logs]\nInstalls both published initializers anonymously, then runs version/check/build/doctor and a temporary dev HTTP probe. No publication or local BRAIN_BINARY override.'
 export function options(args) {
   const out = { version: null, timeout: 900000, dev: true }
   if (args.length === 1 && ['--help', '-h'].includes(args[0])) return { help: true }
@@ -17,6 +37,7 @@ export function options(args) {
     if (args[i] === '--version' && out.version === null) out.version = args[++i]
     else if (args[i] === '--timeout-ms' && /^\d+$/.test(args[i + 1] || '')) out.timeout = Number(args[++i])
     else if (args[i] === '--no-dev' && out.dev) out.dev = false
+    else if (args[i] === '--keep-failure-logs' && !out.keepFailureLogs) out.keepFailureLogs = true
     else throw Error('Invalid registry smoke arguments')
   }
   if (typeof out.version !== 'string' || !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/.test(out.version) || out.version.length > 100) throw Error('Use one exact semantic version, without tags, ranges or URLs')
@@ -112,6 +133,7 @@ export function childSession(args, { cwd, env, log, timeout, phase, active }) {
       if (reason || code !== 0 && !stopping) {
         const error = Error('Published package smoke phase failed')
         error.detail = { phase, exitCode: code, signal, reason: reason || 'nonzero-exit' }
+        try { Object.assign(error.detail,logSummary(readFileSync(log))) } catch {}
         try {
           const report = JSON.parse(Buffer.concat(chunks).toString('utf8'))
           const diagnostics = Array.isArray(report) ? report : report.check?.diags || report.diagnostics || []
@@ -155,7 +177,7 @@ export function httpProbe(url) {
     const req = request(url, { timeout: 3000, agent: false }, response => {
       let size = 0, html = ''
       response.on('data', chunk => { size += chunk.length; if (size > 512 * 1024) response.destroy(); else html += chunk.toString('utf8') })
-      response.once('end', () => resolveProbe(response.statusCode === 200 && /^text\/html\b/.test(response.headers['content-type'] || '') && /<main\b/i.test(html)))
+      response.once('end', () => resolveProbe(response.statusCode === 200 && /^text\/html\b/.test(response.headers['content-type'] || '') && /<(?:html|main)\b/i.test(html)))
       response.once('error', () => resolveProbe(false))
     })
     req.once('timeout', () => req.destroy()); req.once('error', () => resolveProbe(false)); req.end()
@@ -165,7 +187,7 @@ export async function smoke(config) {
   const root = mkdtempSync(join(tmpdir(), 'brain-registry-smoke-'))
   const active = new Set(), expires = Date.now() + config.timeout
   const env = anonymousEnvironment(root)
-  let cancelled = false, exhausted = false
+  let cancelled = false, exhausted = false, phase='setup', preserve=false
   const cancel = () => { cancelled = true; for (const job of active) job.stop('cancelled') }
   process.once('SIGINT', cancel); process.once('SIGTERM', cancel)
   let monitor
@@ -176,37 +198,44 @@ export async function smoke(config) {
     writeFileSync(join(root, 'package.json'), '{"private":true}\n')
     const npm = npmCli()
     const remaining = () => { if (cancelled || exhausted) throw Error('Registry smoke cancelled or capacity exhausted'); const left = expires - Date.now(); if (left <= 0) throw Error('Registry smoke deadline'); return left }
-    const run = async (args, cwd, phase, limit = 180000) => {
+    const run = async (args, cwd, nextPhase, limit = 180000) => {
+      phase=nextPhase
       console.log(JSON.stringify({ phase, version: config.version }))
       return childSession(args, { cwd, env, phase, timeout: Math.min(limit, remaining()), log: join(root, phase + '.log'), active }).done
     }
     monitor = setInterval(() => { try { diskBound(root) } catch { exhausted = true; for (const job of active) job.stop('disk-limit') } }, 2000)
     for (const pkg of ['brainllm', 'create-brainllm', 'create-brainll']) {
-      let available = false
+      let available = false, lastError=null
       for (let attempt = 0; attempt < 5 && !available; attempt++) {
-        try { const result = await run([npm, 'view', `@christianirack/${pkg}@${config.version}`, 'version', '--json'], root, `registry-${pkg}-${attempt}`, 30000); available = JSON.parse(result.stdout) === config.version } catch {}
+        try { const result = await run([npm, 'view', `@christianirack/${pkg}@${config.version}`, 'version', '--json'], root, `registry-${pkg}-${attempt}`, 30000); available = JSON.parse(result.stdout) === config.version; if(!available){lastError=Error('Registry version response mismatch');lastError.detail={phase,reason:'registry-version-response-mismatch',exitCode:result.code}} } catch(error) {lastError=error; if(error instanceof SyntaxError)lastError.detail={phase,reason:'registry-invalid-json'}}
         if (!available) { remaining(); await new Promise(resolveDelay => setTimeout(resolveDelay, Math.min(1000 * 2 ** attempt, remaining()))) }
       }
-      if (!available) throw Error('Exact published version is not visible anonymously')
+      if (!available) {const error=Error('Exact published version is not visible anonymously');error.detail={...lastError?.detail,phase,reason:'exact-version-unavailable',lastAttemptReason:lastError?.detail?.reason,retryAttempts:5};throw error}
     }
     const checks = []
     for (const [initializer, name] of [['brainllm', 'registry-long'], ['brainll', 'registry-short']]) {
       // npm create resolves the exact create-* package; its normal install path must install the pinned launcher.
       await run([npm, 'create', '--yes', `@christianirack/${initializer}@${config.version}`, name], root, `create-${initializer}`, 240000)
+      phase=`validate-install-${initializer}`
       const app = join(root, name), dependency = '@christianirack/brainllm'
       if (readJson(join(app, 'package.json')).devDependencies?.[dependency] !== config.version || readJson(join(app, 'node_modules', dependency, 'package.json')).version !== config.version) throw Error('Initializer did not install the exact version')
       const launcher = join(app, 'node_modules', dependency, 'bin', 'brain.js')
       if (!realpathSync(launcher).startsWith(realpathSync(app) + (process.platform === 'win32' ? '\\' : '/'))) throw Error('Installed launcher escaped its own app')
       const version = await run([launcher, '--version'], app, `version-${initializer}`)
+      phase=`validate-version-${initializer}`
       if (version.stdout.trim() !== `brain ${config.version}`) throw Error('Published native compiler version mismatch')
       await run([launcher, 'check', '--json'], app, `check-${initializer}`)
       const build = JSON.parse((await run([launcher, 'build', '--json'], app, `build-${initializer}`)).stdout)
+      phase=`validate-build-${initializer}`
       if (build.schemaVersion !== 1 || !Array.isArray(build.ledger) || !existsSync(join(app, 'dist', 'index.html'))) throw Error('Published compiler did not emit its actual build')
       const doctor = JSON.parse((await run([launcher, 'doctor', '--json'], app, `doctor-${initializer}`, 240000)).stdout)
+      phase=`validate-doctor-${initializer}`
       if (doctor.ok !== true) throw Error('Published doctor did not pass')
       let devHttp = 'disabled'
       if (config.dev) {
-        const phase = `dev-${initializer}`, dev = childSession([launcher, 'run', '--host', '127.0.0.1', '--port', '0', '--no-inspect', '--quiet', '--json'], { cwd: app, env, phase, active, timeout: Math.min(120000, remaining()), log: join(root, phase + '.log') })
+        phase = `dev-${initializer}`
+        console.log(JSON.stringify({phase,version:config.version}))
+        const dev = childSession([launcher, 'run', '--host', '127.0.0.1', '--port', '0', '--no-inspect', '--quiet', '--json'], { cwd: app, env, phase, active, timeout: Math.min(120000, remaining()), log: join(root, phase + '.log') })
         try {
           const until = Math.min(expires, Date.now() + 90000); let ready = false
           while (Date.now() < until && !dev.exited) {
@@ -225,11 +254,15 @@ export async function smoke(config) {
       checks.push({ initializer: `@christianirack/${initializer}`, version: config.version, check: true, build: true, doctor: true, browserTests: doctor.test?.skipped ? 'unsupported-on-platform' : 'executed', devHttp })
     }
     console.log(JSON.stringify({ schemaVersion: 1, ok: true, anonymous: true, registry: REGISTRY, platform: process.platform, arch: process.arch, version: config.version, checks }))
+  } catch(error) {
+    error.detail={...publicFailure(error,phase),retainedFailureLogs:config.keepFailureLogs===true}
+    if(config.keepFailureLogs){preserve=true;error.privateRoot=root;writeFileSync(join(root,'failure-summary.json'),JSON.stringify(publicFailure(error,phase),null,2)+'\n',{mode:0o600})}
+    throw error
   } finally {
     clearInterval(monitor); process.removeListener('SIGINT', cancel); process.removeListener('SIGTERM', cancel)
     for (const job of active) job.stop()
     await Promise.allSettled([...active].map(job => job.done))
-    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+    if(!preserve)rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   }
 }
 async function main() {
@@ -237,6 +270,6 @@ async function main() {
   try { config = options(process.argv.slice(2)); if (config.help) { console.log(USAGE); return } }
   catch { console.error(USAGE); process.exitCode = 2; return }
   try { await smoke(config) }
-  catch (error) { console.error(JSON.stringify({ schemaVersion: 1, ok: false, code: 'REGISTRY_SMOKE_FAILED', ...(error.detail || {}) })); process.exitCode = 1 }
+  catch (error) { console.error(JSON.stringify({ schemaVersion: 1, ok: false, code: 'REGISTRY_SMOKE_FAILED', ...publicFailure(error) })); process.exitCode = 1 }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main()

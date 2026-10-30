@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
-import { anonymousEnvironment, options, npmCli, childSession, httpProbe } from '../smoke-registry.mjs'
+import { anonymousEnvironment, options, npmCli, childSession, httpProbe, publicFailure, logSummary } from '../smoke-registry.mjs'
 
 test('registry smoke requires an exact version and a bounded deadline without running npm', () => {
   assert.equal(options(['--help']).help, true)
@@ -39,11 +39,39 @@ test('owned command deadlines terminate the child and release lifecycle bookkeep
   } finally { session?.stop(); await session?.done.catch(() => {}); rmSync(root, { recursive: true, force: true }) }
 })
 test('temporary dev HTTP probe checks an actual loopback HTML response and rejects errors', { timeout: 10000 }, async () => {
-  const server = createServer((req, res) => { res.writeHead(req.url === '/' ? 200 : 503, { 'content-type': 'text/html' }); res.end('<main>Owned smoke fixture</main>') })
+  const server = createServer((req, res) => { res.writeHead(['/','/client'].includes(req.url) ? 200 : 503, { 'content-type': 'text/html' }); res.end(req.url==='/client'?'<html><head></head><body><script type="module" src="/client.js"></script></body></html>':'<main>Owned smoke fixture</main>') })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   try {
     const url = `http://127.0.0.1:${server.address().port}`
     assert.equal(await httpProbe(url), true)
+    assert.equal(await httpProbe(url+'/client'), true)
     assert.equal(await httpProbe(url + '/unavailable'), false)
   } finally { await new Promise(resolve => server.close(resolve)) }
+})
+
+test('registry failures preserve the exact phase and allowlisted npm cause without private values',()=>{
+ const sentinel='PRIVATE_REGISTRY_FAILURE_SENTINEL'
+ const error=Error(sentinel)
+ error.detail={phase:'registry-brainllm-4',reason:'exact-version-unavailable',lastAttemptReason:'nonzero-exit',retryAttempts:5,exitCode:1,npmCodes:['E404',sentinel],diagnosticCodes:['B0720',sentinel],arbitrary:sentinel}
+ const report=publicFailure(error)
+ assert.equal(report.phase,'registry-brainllm-4');assert.equal(report.reason,'exact-version-unavailable');assert.equal(report.lastAttemptReason,'nonzero-exit')
+ assert.deepEqual(report.npmCodes,['E404']);assert.deepEqual(report.diagnosticCodes,['B0720']);assert.equal(report.retryAttempts,5)
+ assert.ok(!JSON.stringify(report).includes(sentinel))
+ assert.equal(publicFailure(Error('Initializer did not install the exact version'),'validate-install-brainllm').reason,'installed-version-mismatch')
+ assert.equal(logSummary(Buffer.from('Connected Viewer capability probe failed')).browserBridgeFailed,true)
+ assert.equal(logSummary(Buffer.from('Connected Viewer capability probe failed')).browserProfileRequired,false)
+ assert.equal(options(['--version','0.4.0','--keep-failure-logs']).keepFailureLogs,true)
+})
+test('an actual failing npm-like child retains its safe code and releases owned resources',async()=>{
+ const root=mkdtempSync(join(tmpdir(),'brain-registry-error-test-')),active=new Set()
+ try{
+  const secret='PRIVATE_CHILD_FAILURE_SENTINEL'
+  const job=childSession(['-e',`console.error('npm error code E404');console.error(${JSON.stringify(secret)});process.exit(1)`],{cwd:root,env:anonymousEnvironment(root),log:join(root,'phase.log'),timeout:5000,phase:'registry-brainllm-0',active})
+  await assert.rejects(job.done,error=>{
+   const report=publicFailure(error)
+   assert.equal(report.phase,'registry-brainllm-0');assert.equal(report.reason,'nonzero-exit');assert.equal(report.exitCode,1)
+   assert.deepEqual(report.npmCodes,['E404']);assert.ok(!JSON.stringify(report).includes(secret));return true
+  })
+  assert.equal(active.size,0);assert.equal(job.exited,true)
+ }finally{rmSync(root,{recursive:true,force:true})}
 })

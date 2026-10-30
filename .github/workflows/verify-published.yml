@@ -1,0 +1,36 @@
+# Verifies an already published version anonymously. Never packs, publishes or requests OIDC credentials.
+name: verify-published
+on:
+  push:
+    branches: ['fix/registry-smoke-0.4.0']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact public version to verify
+        type: string
+        default: '0.4.0'
+permissions:
+  contents: read
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        os: [ubuntu-22.04, macos-15, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      PUBLIC_VERSION: ${{ inputs.version || '0.4.0' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify registry-checker regressions
+        run: node --test npm/test/smoke-registry.test.mjs
+      - name: Verify both public initializers and complete real CLI journeys
+        shell: bash
+        run: node npm/smoke-registry.mjs --version "$PUBLIC_VERSION" --timeout-ms 900000

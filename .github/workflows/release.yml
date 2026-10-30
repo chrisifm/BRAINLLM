@@ -149,7 +149,7 @@ jobs:
             npm/dist/SHA256SUMS
 
   publish:
-    if: always() && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)) && (needs.pack.result == 'success' || (inputs.artifact_run != '' && !startsWith(inputs.artifact_run, 'native:')))
+    if: always() && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish)) && (needs.pack.result == 'success' || (inputs.artifact_run != '' && !startsWith(inputs.artifact_run, 'native:')))
     needs: pack
     runs-on: ubuntu-22.04
     outputs:
