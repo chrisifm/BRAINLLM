@@ -8,7 +8,7 @@ does not publish packages. Check the registry for current versions; the checklis
 [Build-and-pack run 40730233593](https://github.com/chrisifm/BRAINLLM/actions/runs/40730233593) passed for all seven
 native platforms and produced the npm tarballs from source `d5c3171`. Publication was skipped as intended for manual
 dispatch. Since 2026-10-29 every `v*` tag publishes on its own: npm trusts `release.yml` in the `npm-publish` environment
-(Trusted Publishing over OIDC, no stored token), and that environment only deploys from `v*` tags. Anonymous installation
+(Trusted Publishing over OIDC, no stored token), and that environment only deploys from `v*` tags and `main` (manual dispatch with `publish=true`). Anonymous installation
 verification is still required for every public release.
 Later source changes require a new build-and-pack run before release.
 
