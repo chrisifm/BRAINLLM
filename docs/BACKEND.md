@@ -63,7 +63,9 @@ are atomically replaced; a process crash requires journal recovery rather than a
 before writes. Keep generated views in your application and customize them deliberately. Creating a backend-only resource
 remains the default; this flag currently accompanies creation rather than retrofitting an existing contract.
 
-The 30 KiB default route budget is unchanged. Build and doctor your application after generation: customized layouts,
+The 30 KiB default route budget is unchanged. The mixed-field acceptance fixture uses a fixed 45-byte application
+name and currently reaches that cap exactly: it has no spare budget. This is a bounded reference, not a guarantee for
+other names, layouts, fonts or field counts. Build and doctor your application after generation: customized layouts,
 controls and field counts can change its route cost. A retained private change journal provides explicit rollback through
 the normal changes protocol; generation never automatically installs dependencies, starts Postgres or grants roles.
 
