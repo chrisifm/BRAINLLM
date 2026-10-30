@@ -53,7 +53,16 @@ jobs:
           mkdir -p bins/${{ matrix.key }}
           cp target/${{ matrix.target }}/release/brain${{ matrix.exe }} bins/${{ matrix.key }}/
       - name: Smoke the actual native release binary
-        run: node npm/smoke-native.mjs bins/${{ matrix.key }}/brain${{ matrix.exe }}
+        id: native-smoke
+        run: node npm/smoke-native.mjs bins/${{ matrix.key }}/brain${{ matrix.exe }} --diagnostic bins/${{ matrix.key }}/native-smoke-diagnostic.json
+      - name: Preserve a failed Windows smoke binary and safe phase report
+        if: failure() && startsWith(matrix.key, 'win32-') && steps.native-smoke.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostic-brain-${{ matrix.key }}
+          path: bins/${{ matrix.key }}/
+          retention-days: 3
+          if-no-files-found: error
       - name: Collect public Cargo and standard-library notices for this binary
         shell: bash
         run: |

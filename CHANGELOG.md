@@ -92,10 +92,13 @@ The following 34 points are the detailed feature inventory for this release. Def
   Proven flat literal form rules use tracked specialized validators; dynamic/bounded/nested schemas retain validation.
 - JavaScript ledgers include emitted `.mjs` SDK modules and their static dependencies.
 - Safe HMR template text/attribute edits preserve live nodes, focus and state; incompatible wiring has an explicit fallback.
-- npm packages carry keywords for LLM, coding-agent, frontend, fullstack and React-alternative searches.
+- npm packages foreground the Rust-powered full-stack compiler and carry precise LLM, frontend/backend, CLI,
+  Design System and testing discovery keywords, without claiming unrelated IoT, robotics or mathematics capabilities.
 
 ### Fixed
 
+- Server module file URLs use platform-native path conversion: Windows verbatim drive/UNC paths and reserved filename characters no longer corrupt module specifiers; modification-time cache busting is retained.
+- Native release smoke failures report their phase, allowed diagnostic/Node codes and known exit status before cleaning private scratch output.
 - Resources with no configured search fields no longer fail their first write: additive migration 7 handles PostgreSQL's null trigger-argument array without changing prior migration checksums.
 - Development HMR proof ranges account for prepended guard imports; location bookkeeping cannot mask the wrong generated string.
 - Feedback writers explicitly release their own file lock even when a child retains a duplicate descriptor. Locale generation keeps its existing writer guard while applying translation fixes.

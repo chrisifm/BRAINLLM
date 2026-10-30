@@ -22,6 +22,9 @@ test('public packages include licensing, portable marketing and both version-pin
       assert.equal(pkg.publishConfig.access, 'public')
       assert.equal(pkg.publishConfig.registry, 'https://registry.npmjs.org/')
       assert.notEqual(pkg.private, true)
+      for (const keyword of ['rust', 'llm', 'frontend', 'front-end', 'backend', 'back-end', 'cli', 'framework', 'testing', 'design-system']) {
+        assert.ok(pkg.keywords.includes(keyword), `${name} must expose its relevant discovery keywords`)
+      }
       const [pack] = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json'], { cwd: dir, encoding: 'utf8', timeout: 30000 }))
       const paths = pack.files.map(f => f.path)
       assert.ok(paths.includes('LICENSE'))

@@ -600,8 +600,11 @@ be turned off.
 - **Production server:** if the app has `load` or `server:` functions, `brain build` emits `dist/server.mjs`
   (Node, zero dependencies, `node:http`): SSR of the views with `load`, RPC at `/_r/`, and leaves the rest static. The
   nginx snippet does `proxy_pass` only for those routes and `/_r/`. Without `load` or `server:`, the output is 100 %
-  static. It runs under `brain start` (§34), the framework's own process manager; no PM2 or other third-party
-  manager is required or emitted.
+  static. It runs under `brain start` (§34), the framework's own process manager. Deployment tools also emit
+  optional PM2/nginx configurations; an external process manager is not required.
+- **Server file URLs (2026-10-30):** use `url::Url::from_file_path` for platform-native drive/verbatim/UNC paths,
+  byte-safe escaping and the modification-time cache key. Preserve literal Unix backslashes instead of treating
+  them as separators. Node ESM rejects those filenames; a rejection must never import a different nested file.
 
 ## 21. Goal: 100 % error-free (fixed 2026-10-13, requested by Chris)
 

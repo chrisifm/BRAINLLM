@@ -136,7 +136,9 @@ if (missing.length && requireAll) {
 // npm search ranks keywords: who we want to reach (LLM/agent builders, frontend and fullstack devs, React/Vite users)
 const KEYWORDS = [
   'llm', 'ai', 'ai-agents', 'coding-agent', 'agentic', 'claude-code', 'cursor', 'mcp', 'model-context-protocol',
-  'frontend', 'fullstack', 'web-framework', 'framework', 'compiler', 'rust', 'fast', 'performance',
+  'frontend', 'front-end', 'backend', 'back-end', 'fullstack', 'full-stack',
+  'cli', 'command-line', 'developer-tools', 'design-system', 'css', 'testing', 'e2e', 'postgresql', 'jwt',
+  'web-framework', 'framework', 'compiler', 'rust', 'fast', 'performance',
   'react-alternative', 'vite-alternative', 'signals', 'reactive', 'components', 'ssr', 'spa', 'web',
 ]
 
@@ -146,7 +148,7 @@ cpSync(join(here, 'brainllm'), main, { recursive: true })
 copyFileSync(join(root, 'crates/brain-cli/schema/brain.schema.json'), join(main, 'brain.schema.json'))
 writePkg(main, {
   name: `${SCOPE}/brainllm`,
-  description: 'BRAINLLM: the web compiler for LLMs, built in Rust. One blazing-fast native binary: the `brain` CLI, dev server, build (~34 ms) and MCP server.',
+  description: 'BRAINLLM: the Rust-powered full-stack web compiler for LLMs and AI agents. Native brain CLI, dev server, optimized builds, PostgreSQL backend and MCP server.',
   bin: { brain: 'bin/brain.js' },
   files: ['bin', 'brain.schema.json', 'README.md'],
   engines: { node: '>=22' },
@@ -163,7 +165,7 @@ for (const suffix of ['brainllm', 'brainll']) {
   cpSync(join(here, 'create-brainllm'), create, { recursive: true })
   writePkg(create, {
     name: `${SCOPE}/create-${suffix}`,
-    description: `npm create ${SCOPE}/${suffix} <app>: a new BRAINLLM app (the Rust-built web compiler for LLMs) with its brain version pinned.`,
+    description: `npm create ${SCOPE}/${suffix} <app>: a new BRAINLLM app (the Rust-powered full-stack web compiler for LLMs and AI agents) with its brain version pinned.`,
     bin: { [`create-${suffix}`]: 'bin/create.js' },
     files: ['bin', 'README.md'],
     engines: { node: '>=22' },

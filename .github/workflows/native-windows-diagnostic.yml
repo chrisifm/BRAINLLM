@@ -1,0 +1,69 @@
+# Isolated diagnostic builds only. No npm packing, publication, deployment or secrets.
+name: native-windows-diagnostic
+on:
+  push:
+    branches: ['diagnostic/windows-0.4.0']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-smoke:
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - {key: win32-x64, os: windows-2022, target: x86_64-pc-windows-msvc}
+          - {key: win32-arm64, os: windows-11-arm, target: aarch64-pc-windows-msvc}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+      - name: Record the exact compiler and flags for cache identity
+        shell: bash
+        run: |
+          rustc -vV > native-toolchain.txt
+          printf '%s\n' "--remap-path-prefix=$GITHUB_WORKSPACE=/brainllm --remap-path-prefix=$HOME=~" > native-flags.txt
+      - name: Restore source-bound native compilation cache
+        id: native-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git/db
+            target
+          key: native-diagnostic-${{ matrix.target }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'native-toolchain.txt', 'native-flags.txt', 'crates/**', 'runtime/**', 'SPEC.md', 'docs/**', '.github/workflows/native-windows-diagnostic.yml') }}
+      # Cargo still validates dependency/compiler fingerprints; a cache hit never skips the build or smoke.
+      - name: Build the actual remapped Windows compiler
+        shell: bash
+        run: RUSTFLAGS="$(cat native-flags.txt)" cargo build --release --locked -p brain-cli --target ${{ matrix.target }}
+      - name: Verify native Windows file URL imports and UNC paths
+        shell: bash
+        run: RUSTFLAGS="$(cat native-flags.txt)" cargo test --release --locked -p brain-serve --lib --target ${{ matrix.target }} --jobs 2 file_url_ -- --nocapture
+      - name: Save compilation cache even when the later smoke exposes a defect
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
+      - shell: bash
+        run: |
+          mkdir -p bins/${{ matrix.key }}
+          cp target/${{ matrix.target }}/release/brain.exe bins/${{ matrix.key }}/brain.exe
+      - name: Require the complete native smoke journey
+        run: node npm/smoke-native.mjs bins/${{ matrix.key }}/brain.exe --diagnostic bins/${{ matrix.key }}/native-smoke-diagnostic.json
+      - name: Preserve the exact diagnostic executable and safe report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostic-brain-${{ matrix.key }}
+          path: bins/${{ matrix.key }}/
+          retention-days: 3
+          if-no-files-found: warn

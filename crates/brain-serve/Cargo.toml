@@ -8,6 +8,7 @@ authors.workspace = true
 [dependencies]
 libc = "0.2.191"
 notify = "8.2.1"
+url = "2.5.8"
 brain-min = { path = "../brain-min" }
 brain-pack = { path = "../brain-pack" }
 brain-lex = { path = "../brain-lex" }

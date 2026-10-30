@@ -348,6 +348,7 @@ dependencies = [
  "brain-seo",
  "libc",
  "notify",
+ "url",
 ]
 
 [[package]]

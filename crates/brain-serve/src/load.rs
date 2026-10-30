@@ -673,17 +673,34 @@ pub fn file_url(p: &Path) -> String {
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(0, |d| d.as_nanos());
-    let s = p.to_string_lossy().replace('\\', "/");
-    let s = if s.starts_with('/') {
-        s
-    } else {
-        format!("/{s}")
-    };
+    // Keep native path semantics: in particular a Unix backslash is a filename byte, while
+    // Windows drive/verbatim/UNC prefixes are interpreted by the platform-aware URL library.
+    let native = url::Url::from_file_path(p).or_else(|_| {
+        std::path::absolute(p)
+            .ok()
+            .and_then(|absolute| url::Url::from_file_path(absolute).ok())
+            .ok_or(())
+    });
+    match native {
+        Ok(url) => cache_file_url(url, v),
+        // Preserve the String API but fail closed for unsupported native prefixes / unavailable cwd.
+        // NUL cannot name a filesystem entry, so this never falls back to an unrelated file or host.
+        Err(()) => format!("file:///%00?v={v}"),
+    }
+}
+
+fn cache_file_url(mut native: url::Url, revision: u128) -> String {
+    native.set_query(Some(&format!("v={revision}")));
+    // Node pathToFileURL escapes brackets in paths. Do not touch brackets in an IPv6 UNC authority.
+    let prefix = &native[..url::Position::BeforePath];
+    let path = &native[url::Position::BeforePath..url::Position::AfterPath];
+    let suffix = &native[url::Position::AfterPath..];
     format!(
-        "file://{}?v={v}",
-        s.replace(' ', "%20")
-            .replace('[', "%5B")
+        "{prefix}{}{suffix}",
+        path.replace('[', "%5B")
             .replace(']', "%5D")
+            .replace('^', "%5E")
+            .replace('|', "%7C")
     )
 }
 
@@ -695,6 +712,173 @@ pub fn server_path(root: &Path, rel: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_url_windows_serializations_match_node_and_native_windows_paths() {
+        let cases = [
+            (
+                concat!(r"C:\apps\name #?%[", "\u{e9}", "].mjs"),
+                "file:///C:/apps/name%20%23%3F%25%5B%C3%A9%5D.mjs",
+            ),
+            (
+                concat!(r"\\?\C:\apps\name #?%[", "\u{e9}", "].mjs"),
+                "file:///C:/apps/name%20%23%3F%25%5B%C3%A9%5D.mjs",
+            ),
+            (
+                r"\\server\share\name #%.mjs",
+                "file://server/share/name%20%23%25.mjs",
+            ),
+            (
+                r"\\?\UNC\server\share\name [x].mjs",
+                "file://server/share/name%20%5Bx%5D.mjs",
+            ),
+            ("C:/apps/file.mjs", "file:///C:/apps/file.mjs"),
+        ];
+        for (path, expected) in cases {
+            assert_eq!(
+                cache_file_url(url::Url::parse(expected).unwrap(), 17),
+                format!("{expected}?v=17")
+            );
+            #[cfg(windows)]
+            {
+                // Pure native conversion: synthetic UNC hosts must never trigger filesystem/network I/O.
+                let native = cache_file_url(url::Url::from_file_path(Path::new(path)).unwrap(), 17);
+                assert_eq!(native, format!("{expected}?v=17"), "{path}");
+            }
+            #[cfg(not(windows))]
+            let _ = path;
+        }
+        let rows = brain_lex::Json::Arr(
+            cases
+                .iter()
+                .map(|(path, expected)| {
+                    brain_lex::Json::Arr(vec![
+                        brain_lex::Json::str(*path),
+                        brain_lex::Json::str(*expected),
+                    ])
+                })
+                .collect(),
+        )
+        .stringify();
+        let code = "import assert from 'node:assert/strict';import{pathToFileURL}from'node:url';for(const[path,expected]of JSON.parse(process.argv[1])){const u=pathToFileURL(path,{windows:true});assert.equal(u.href,expected);assert.equal(u.hash,'');assert.equal(u.search,'')}console.log('WINDOWS_FILE_URL_ORACLE_OK')";
+        let output = Command::new("node")
+            .args(["--input-type=module", "-e", code, &rows])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("WINDOWS_FILE_URL_ORACLE_OK"));
+    }
+
+    #[test]
+    fn file_url_imports_reserved_unicode_paths_and_busts_node_module_cache() {
+        struct Root(PathBuf);
+        impl Drop for Root {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = Root(
+            std::env::temp_dir().join(format!("brain-file-url-{}-{stamp}", std::process::id())),
+        );
+        std::fs::create_dir_all(&root.0).unwrap();
+        let name = if cfg!(unix) {
+            "module ?#%[\u{e9}] ^|`{}.mjs"
+        } else {
+            "module #%[\u{e9}].mjs"
+        };
+        let file = root.0.join(name);
+        std::fs::write(&file, "export const value=1;\n").unwrap();
+        let set_time = |seconds| {
+            std::fs::File::options()
+                .write(true)
+                .open(&file)
+                .unwrap()
+                .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds))
+                .unwrap()
+        };
+        set_time(1000000000);
+        let canonical = file.canonicalize().unwrap();
+        let first = file_url(&canonical);
+        assert!(first.ends_with("?v=1000000000000000000"));
+        assert!(first.contains("%23%25%5B%C3%A9%5D"));
+        let parsed = url::Url::parse(&first).unwrap();
+        assert_eq!(
+            parsed.to_file_path().unwrap().canonicalize().unwrap(),
+            canonical
+        );
+        assert!(parsed.fragment().is_none());
+        set_time(1000000002);
+        let second = file_url(&canonical);
+        assert!(second.ends_with("?v=1000000002000000000"));
+        assert_ne!(first, second);
+        set_time(1000000000);
+        let first = brain_lex::Json::str(first).stringify();
+        let second = brain_lex::Json::str(second).stringify();
+        let code = format!(
+            "import assert from 'node:assert/strict';import{{writeFile}}from'node:fs/promises';const a=await import({first});assert.equal(a.value,1);await writeFile(new URL({first}),'export const value=2;');const b=await import({second});assert.equal(b.value,2);assert.equal((await import({first})).value,1);console.log('FILE_URL_IMPORT_OK')"
+        );
+        let output = Command::new("node")
+            .args(["--input-type=module", "-e", &code])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("FILE_URL_IMPORT_OK"));
+        #[cfg(unix)]
+        {
+            // Node ESM rejects encoded backslashes even on Unix. Preserve the literal path and fail
+            // instead of importing a different nested file after a Windows-style separator rewrite.
+            let literal = root.0.join("back\\slash.mjs");
+            let nested = root.0.join("back/slash.mjs");
+            std::fs::create_dir_all(nested.parent().unwrap()).unwrap();
+            std::fs::write(&literal, "export default 'literal';").unwrap();
+            std::fs::write(&nested, "export default 'nested';").unwrap();
+            let literal = brain_lex::Json::str(file_url(&literal)).stringify();
+            let nested = brain_lex::Json::str(file_url(&nested)).stringify();
+            let code = format!(
+                "import assert from 'node:assert/strict';await assert.rejects(import({literal}),e=>e.code==='ERR_INVALID_MODULE_SPECIFIER');assert.equal((await import({nested})).default,'nested');console.log('LITERAL_BACKSLASH_NOT_REDIRECTED')"
+            );
+            let output = Command::new("node")
+                .args(["--input-type=module", "-e", &code])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                String::from_utf8_lossy(&output.stdout)
+                    .contains("LITERAL_BACKSLASH_NOT_REDIRECTED")
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn file_url_preserves_unix_backslashes_and_non_utf8_filename_bytes() {
+        use std::os::unix::ffi::OsStringExt;
+        let path = PathBuf::from(std::ffi::OsString::from_vec(
+            b"/tmp/brain-file-url-back\\slash-\xff.mjs".to_vec(),
+        ));
+        let actual = file_url(&path);
+        assert!(actual.contains("back%5Cslash-%FF.mjs"), "{actual}");
+        assert_eq!(
+            url::Url::parse(&actual).unwrap().to_file_path().unwrap(),
+            path
+        );
+    }
 
     #[test]
     fn rewrites_only_relative_specifiers() {
