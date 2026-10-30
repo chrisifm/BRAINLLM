@@ -122,3 +122,20 @@ Verification covers the runtime with mock transport and forced GC, actual compil
 emitted-asset reachability, configuration bounds, build-signature invalidation and CSP sources. Full browser/native
 backend/proxy acceptance is a separate integration gate; these unit proofs do not claim distributed durability or a
 fixed whole-process browser-memory ceiling.
+
+## CLI startup authority
+
+The app dev server resolves `BRAIN_BACKEND_URL` once from the selected environment. Editing `.brain_env` while it
+runs may update other keys, but changing or enabling the native authority requires restarting that server. Native
+sockets still require the explicit origin declaration above. After binding, the CLI checks the actual numeric
+frontend URL against that declaration; if a busy port caused selection of another, unlisted port, it stops the
+owned server and reports a configuration fix. Live-enabled dev output reports that validated numeric URL.
+
+`brain test` keeps its ephemeral loopback port when sockets are disabled. With sockets enabled it uses the explicit
+development `PUBLIC_SITE_URL` HTTP loopback address and port instead: use `127.0.0.1` or `[::1]`, and declare the same
+origin in both lists. An HTTPS production site or a hostname alias is not an implicit local test origin. A busy
+port still fails closed unless the actually selected origin was deliberately declared.
+
+For a static production build, `brain start --env <name>` loads the private compiled manifest and the selected
+fixed backend authority before writing readiness/control metadata. It serves through the Rust static gateway and
+does not create `server.mjs`, copy private variables into browser code, or change global process environment.

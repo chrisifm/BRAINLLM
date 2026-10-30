@@ -356,6 +356,15 @@ pub fn start(root: &Path, o: &Opts) -> Result<i32, String> {
     }
     let listener = TcpListener::bind((o.host.as_str(), o.port)).map_err(|e| format!("cannot listen on {}:{}: {e}; fix: pick another --port", o.host, o.port))?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    // Resolve the selected environment once, before publishing readiness or control files.
+    // A compiled manifest enables sockets; the presence of a helper never enables them.
+    let static_gateway = if !dist.join("server.mjs").is_file() {
+        let target = crate::env::value(root, &o.env, "BRAIN_BACKEND_URL");
+        Some(brain_serve::prod::StaticGateway::load(&dist, &brain_pack::read_base(root), target.as_deref())
+            .map_err(|error| format!("Cannot initialize the production static gateway: {error}"))?)
+    } else {
+        None
+    };
     let rd = run_dir(root);
     std::fs::create_dir_all(&rd).map_err(|e| e.to_string())?;
     std::fs::write(rd.join("brain.pid"), std::process::id().to_string()).map_err(|e| e.to_string())?;
@@ -370,7 +379,7 @@ pub fn start(root: &Path, o: &Opts) -> Result<i32, String> {
     control(sock_path(root), status.clone(), stop.clone(), reload.clone()).map_err(|e| e.to_string())?;
     println!("brain start → {url}  (build {build})");
 
-    let code = if !dist.join("server.mjs").is_file() {
+    let code = if let Some(gateway) = static_gateway {
         // static: Rust serves dist/
         status.lock().unwrap().mode = "static".into();
         event(&log, "ready", &format!(",\"mode\":\"static\",\"url\":{}", brain_serve::json_str(&url)));
@@ -388,7 +397,8 @@ pub fn start(root: &Path, o: &Opts) -> Result<i32, String> {
                 std::thread::sleep(Duration::from_millis(50));
             }
         });
-        let r = brain_serve::prod::serve_static(listener, &dist, &brain_pack::read_base(root), stop.clone());
+        let r = brain_serve::prod::serve_static_with_gateway(listener, gateway, stop.clone());
+        stop.store(true, Ordering::SeqCst);
         let _ = watcher.join();
         r.map_err(|e| e.to_string())?;
         0

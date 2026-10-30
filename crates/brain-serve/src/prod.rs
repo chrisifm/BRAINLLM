@@ -600,7 +600,17 @@ pub fn serve_static(
     stop: Arc<AtomicBool>,
 ) -> io::Result<()> {
     let backend = std::env::var("BRAIN_BACKEND_URL").ok();
-    let st = Arc::new(StaticGateway::load(dist, base, backend.as_deref())?);
+    let gateway = StaticGateway::load(dist, base, backend.as_deref())?;
+    serve_static_with_gateway(listener, gateway, stop)
+}
+
+/// Serves an already validated gateway without reading or changing process environment.
+pub fn serve_static_with_gateway(
+    listener: TcpListener,
+    gateway: StaticGateway,
+    stop: Arc<AtomicBool>,
+) -> io::Result<()> {
+    let st = Arc::new(gateway);
     let active = Arc::new(AtomicUsize::new(0));
     listener.set_nonblocking(true)?;
     while !stop.load(Ordering::Relaxed) {

@@ -1499,7 +1499,72 @@ fn cmd_test(_: &[String]) -> ExitCode {
     ExitCode::from(2)
 }
 
-/// Runs the `*.test.brain` files of `target` (file, folder or the current app) in headless Chrome.
+/// Shared project startup: one fixed native authority, no ambient sidecar retargeting.
+/// The inspector keeps the legacy start_dev path because it is not an app gateway.
+pub(crate) fn start_project_dev(
+    mut options: brain_serve::Options,
+    compile: brain_serve::CompileFn,
+    watch: bool,
+    on_event: Option<brain_serve::EventFn>,
+    environment: &str,
+) -> Result<brain_serve::Dev, String> {
+    let root = options.root.clone();
+    let site = env::value(&root, environment, "PUBLIC_SITE_URL");
+    let settings = backend::socket_settings(&root, site.as_deref(), None)?;
+    let fixed_backend = env::value(&root, environment, "BRAIN_BACKEND_URL");
+    let native = match fixed_backend.as_deref() {
+        Some(target) => {
+            let mut proxy = brain_serve::NativeProxy::new(target)?.sockets(settings.enabled());
+            if let Some(origins) = &settings.allowed_origins { proxy = proxy.socket_origins(origins.clone())?; }
+            Some(proxy)
+        }
+        None if settings.enabled() => return Err("Native sockets require fixed BRAIN_BACKEND_URL in the selected environment; configure the backend or disable backend.sockets".into()),
+        None => None,
+    };
+    let previous = options.env.take();
+    options.env = Some(Arc::new(move || {
+        let mut values = previous.as_ref().map(|loader| loader()).unwrap_or_default();
+        // Other environment edits remain live. Changing native authority requires
+        // an explicit server restart, even when it was absent at startup.
+        values.retain(|(name, _)| name != "BRAIN_BACKEND_URL");
+        if let Some(target) = &fixed_backend { values.push(("BRAIN_BACKEND_URL".into(), target.clone())); }
+        values
+    }));
+    let mut dev = brain_serve::start_dev_with_native_proxy(options, compile, watch, on_event, native)
+        .map_err(|error| format!("Cannot start the owned frontend gateway: {error}"))?;
+    if settings.enabled() {
+        if let Err(error) = settings.frontend_enabled(&dev.url()) {
+            let port = dev.addr.port();
+            dev.stop();
+            return Err(format!("{error}; selected port {port} was stopped; fix: use an allowed --host/--port or update the shared exact-origin declaration"));
+        }
+    }
+    Ok(dev)
+}
+
+/// Test servers stay ephemeral unless native sockets require a declared exact origin.
+#[cfg(unix)]
+fn project_test_address(root: &Path) -> Result<(String, u16), String> {
+    let site = env::value(root, "development", "PUBLIC_SITE_URL");
+    let settings = backend::socket_settings(root, site.as_deref(), None)?;
+    if !settings.enabled() { return Ok(("127.0.0.1".into(), 0)); }
+    let fix = "Native socket tests require development PUBLIC_SITE_URL with an exact HTTP loopback address and declared port; configure 127.0.0.1 or [::1] in backend origins and sockets.allowedOrigins";
+    let site = site.ok_or(fix)?;
+    let url = reqwest::Url::parse(&site).map_err(|_| fix)?;
+    if url.scheme() != "http" || !url.username().is_empty() || url.password().is_some() {
+        return Err(fix.into());
+    }
+    let host = match url.host_str().unwrap_or("") {
+        "127.0.0.1" => "127.0.0.1".to_string(),
+        "[::1]" | "::1" => "::1".to_string(),
+        _ => return Err(fix.into()),
+    };
+    let port = url.port_or_known_default().filter(|port| *port != 0).ok_or(fix)?;
+    settings.frontend_enabled(&format!("http://{}:{port}", if host.contains(':') { format!("[{host}]") } else { host.clone() }))?;
+    Ok((host, port))
+}
+
+/// Runs the selected app tests in headless Chrome.
 #[cfg(unix)]
 pub(crate) fn run_tests(target: Option<PathBuf>, timeout: u64) -> Result<Vec<testrun::FileReport>, String> {
     // Absolute: with a relative path, find_root would return "" as the root.
@@ -1520,8 +1585,9 @@ pub(crate) fn run_tests(target: Option<PathBuf>, timeout: u64) -> Result<Vec<tes
     if files.is_empty() {
         return Ok(vec![]);
     }
-    let opts = brain_serve::Options { root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: head_prepend(), runtime: runtime_files(), env: Some(env::loader(&root, "development")), base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None };
-    let dev = brain_serve::start_dev(opts, compile_fn(root.clone(), true), false, None).map_err(|e| format!("could not start the test server: {e}"))?;
+    let (host, port) = project_test_address(&root)?;
+    let opts = brain_serve::Options { root: root.clone(), host, port, head_prepend: head_prepend(), runtime: runtime_files(), env: Some(env::loader(&root, "development")), base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None };
+    let dev = start_project_dev(opts, compile_fn(root.clone(), true), false, None, "development").map_err(|error| format!("could not start the test server: {error}"))?;
     testrun::run(&dev.url(), &root, &files, std::time::Duration::from_secs(timeout))
 }
 
@@ -1866,12 +1932,17 @@ fn cmd_dev(args: &[String]) -> Result<(), String> {
             }
         }) as brain_serve::EventFn);
     brain_serve::set_quiet(view.is_some());
-    let dev = brain_serve::start_dev(opts, compile_fn(root.clone(), true), true, on_event).map_err(|e| e.to_string())?;
+    let environment = env::name(args, "development");
+    let site = env::value(&root, &environment, "PUBLIC_SITE_URL");
+    let native_enabled = backend::socket_settings(&root, site.as_deref(), None)?.enabled();
+    let dev = start_project_dev(opts, compile_fn(root.clone(), true), true, on_event, &environment)?;
     if profile {
         println!("{{\"profile\":\"boot\",\"ms\":{:.1}}}", boot.elapsed().as_secs_f64() * 1000.0);
     }
     let addr = dev.addr;
-    let url = format!("http://{host}:{}{}", addr.port(), dev.url().trim_start_matches(&format!("http://{addr}")));
+    let url = if native_enabled { dev.url() } else {
+        format!("http://{host}:{}{}", addr.port(), dev.url().trim_start_matches(&format!("http://{addr}")))
+    };
     // the debugger (§9.1, #269) on :P+1, same origin for its data: it proxies /@brain/metrics and /@brain/problems here
     let inspector = if args.iter().any(|a| a == "--no-inspect") {
         None
@@ -2096,3 +2167,6 @@ mod scope_collision_tests {
         assert_eq!(app,"ui/button.brain");
     }
 }
+
+#[cfg(test)]
+mod native_startup_tests;
