@@ -31,6 +31,20 @@ jobs:
           node-version: 22
       - name: Verify registry-checker regressions
         run: node --test npm/test/smoke-registry.test.mjs
+      - name: Create an owned registry-check scratch directory
+        run: node -e "require('node:fs').mkdirSync(require('node:path').join(process.env.RUNNER_TEMP,'owned-registry'),{recursive:true})"
       - name: Verify both public initializers and complete real CLI journeys
+        env:
+          TMPDIR: ${{ runner.temp }}/owned-registry
+          TMP: ${{ runner.temp }}/owned-registry
+          TEMP: ${{ runner.temp }}/owned-registry
         shell: bash
-        run: node npm/smoke-registry.mjs --version "$PUBLIC_VERSION" --timeout-ms 900000
+        run: node npm/smoke-registry.mjs --version "$PUBLIC_VERSION" --timeout-ms 900000 --keep-failure-logs
+      - name: Preserve only the safe structured failure summary
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: registry-failure-${{ matrix.os }}
+          path: ${{ runner.temp }}/owned-registry/**/failure-summary.json
+          if-no-files-found: warn
+          retention-days: 3

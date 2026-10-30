@@ -10,6 +10,33 @@ import { request } from 'node:http'
 const REGISTRY = 'https://registry.npmjs.org/'
 const OUTPUT = 2 * 1024 * 1024
 const NPM_CODES=new Set(['E404','E401','E403','E400','E429','E500','E502','E503','EUSAGE','EBADENGINE','EBADPLATFORM','ETARGET','EINTEGRITY','EAI_AGAIN','ETIMEDOUT','ECONNRESET','ECONNREFUSED','ENOTFOUND','ENOENT','EACCES','EPERM'])
+const DOCTOR_REPORTS=new WeakMap()
+const BROWSER_LABELS=new Set(['viewer','headless-cdp','viewer+headless-cdp','Chrome Accessibility.getFullAXTree','DOM-label-heuristic; not AX tree','DOM-label-heuristic; not Chrome AX tree','forced-GC inspector','not-requested','not-measured','MAIN','HeapProfiler.collectGarbage','HeapProfiler.enable','Accessibility.getFullAXTree','FinalizationRegistry','WeakRef'])
+export function doctorSummary(report) {
+ const number=value=>Number.isSafeInteger(value)&&value>=0&&value<=1000000?value:null
+ const length=value=>Array.isArray(value)?value.length:null
+ const label=value=>BROWSER_LABELS.has(value)?value:null
+ const boolean=value=>typeof value==='boolean'?value:null
+ const capability=value=>{
+  if(typeof value==='boolean'||BROWSER_LABELS.has(value))return value
+  if(!value||typeof value!=='object'||Array.isArray(value))return null
+  const out={}
+  for(const key of ['forcedGC','accessibility','heap','pageWorld','scenarioAPI','engine','available','supported'])if(typeof value[key]==='boolean'||BROWSER_LABELS.has(value[key]))out[key]=value[key]
+  return out
+ }
+ const codes=new Set();let visited=0
+ const walk=(value,depth)=>{
+  if(++visited>2048||depth>12||!value||typeof value!=='object')return
+  if(typeof value.code==='string'&&/^B[0-9]{4}$/.test(value.code))codes.add(value.code)
+  for(const entry of (Array.isArray(value)?value.slice(0,128):Object.values(value).slice(0,64)))walk(entry,depth+1)
+ }
+ walk(report,0)
+ const files=Array.isArray(report?.test?.files)?report.test.files:[]
+ const testError=typeof report?.test?.error==='string'?report.test.error:''
+ const errorKind=/Chrome not found/.test(testError)?'browser-unavailable':/Viewer/.test(testError)?'viewer-failure':/CDP|Chrome|browser/i.test(testError)?'browser-runner-failure':testError?'unclassified-test-error':null
+ return {ok:boolean(report?.ok),checkErrors:number(report?.check?.errors),passedTests:number(report?.test?.passed),failedTests:number(report?.test?.failed),accessibilityFindings:number(report?.test?.a11y),runtimeErrors:length(report?.test?.errors),heapLeaks:length(report?.heap?.leaks),testErrorPresent:Boolean(testError),testErrorKind:errorKind,buildOk:boolean(report?.build?.ok),buildErrorPresent:typeof report?.build?.error==='string',seoOk:boolean(report?.seo?.ok),seoErrorPresent:typeof report?.seo?.error==='string',seoMinScore:number(report?.seo?.minScore),seoBelowThresholdPages:Array.isArray(report?.seo?.pages)&&Number.isSafeInteger(report?.seo?.minScore)?report.seo.pages.filter(page=>Number.isFinite(page?.score)&&page.score<report.seo.minScore).length:null,adviceErrors:Array.isArray(report?.advice)?report.advice.filter(item=>item?.level==='error').length:null,diagnosticCodes:[...codes].sort().slice(0,32),capability:capability(report?.test?.capability??report?.test?.capabilities),files:files.slice(0,16).map(file=>({engine:label(file?.engine),scenarios:length(file?.tests),failedScenarios:Array.isArray(file?.tests)?file.tests.filter(test=>test?.ok===false).length:null,loadErrorPresent:typeof file?.error==='string',accessibilityFindings:length(file?.a11y),runtimeErrors:length(file?.errors),leaks:length(file?.leaks),coverage:{accessibility:label(file?.coverage?.accessibility),heap:label(file?.coverage?.heap)},capability:capability(file?.capability??file?.capabilities)})),filesTruncated:files.length>16}
+}
+
 export function logSummary(bytes) {
  const raw=Buffer.from(bytes).subarray(0,OUTPUT).toString('utf8'),codes=new Set()
  for(const match of raw.matchAll(/\b(?:E[A-Z0-9_]+)\b/g))if(NPM_CODES.has(match[0]))codes.add(match[0])
@@ -27,6 +54,7 @@ export function publicFailure(error, fallbackPhase='setup') {
  if(Array.isArray(d.diagnosticCodes))report.diagnosticCodes=d.diagnosticCodes.filter(code=>/^B[0-9]{4}$/.test(code)).slice(0,16)
  for(const key of ['browserUnavailable','browserBridgeFailed','browserProfileRequired','retainedFailureLogs'])if(d[key]===true)report[key]=true
  if(knownReasons.has(d.lastAttemptReason))report.lastAttemptReason=d.lastAttemptReason
+ if(DOCTOR_REPORTS.has(error)){report.doctor=doctorSummary(DOCTOR_REPORTS.get(error));report.diagnosticCodes=[...new Set([...(report.diagnosticCodes||[]),...report.doctor.diagnosticCodes])].slice(0,32)}
  return report
 }
 const USAGE = 'usage: node npm/smoke-registry.mjs --version <exact-version> [--timeout-ms 900000] [--no-dev] [--keep-failure-logs]\nInstalls both published initializers anonymously, then runs version/check/build/doctor and a temporary dev HTTP probe. No publication or local BRAIN_BINARY override.'
@@ -136,6 +164,7 @@ export function childSession(args, { cwd, env, log, timeout, phase, active }) {
         try { Object.assign(error.detail,logSummary(readFileSync(log))) } catch {}
         try {
           const report = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+          if(phase.startsWith('doctor-')&&report&&typeof report==='object'&&!Array.isArray(report))DOCTOR_REPORTS.set(error,report)
           const diagnostics = Array.isArray(report) ? report : report.check?.diags || report.diagnostics || []
           error.detail.diagnosticCodes = diagnostics.map(item => item.code).filter(code => /^B[0-9]{4}$/.test(code)).slice(0, 16)
           if (Number.isInteger(report.check?.errors)) error.detail.checkErrors = report.check.errors

@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
-import { anonymousEnvironment, options, npmCli, childSession, httpProbe, publicFailure, logSummary } from '../smoke-registry.mjs'
+import { anonymousEnvironment, options, npmCli, childSession, httpProbe, publicFailure, logSummary, doctorSummary } from '../smoke-registry.mjs'
 
 test('registry smoke requires an exact version and a bounded deadline without running npm', () => {
   assert.equal(options(['--help']).help, true)
@@ -19,7 +19,8 @@ test('anonymous environment drops every credential, local binary override and in
   const env = anonymousEnvironment('/owned/scratch', { PATH: '/usr/bin', SystemRoot: 'C:\\Windows', HOME: '/private', NPM_TOKEN: 'not-a-real-token', NODE_AUTH_TOKEN: 'not-a-real-token', NPM_CONFIG_USERCONFIG: '/private/npmrc', BRAIN_BINARY: '/local/binary', BRAIN_NO_DELEGATE: '1', OPENAI_API_KEY: 'not-a-real-key', NODE_OPTIONS: '--require /untrusted.js', GITHUB_TOKEN: 'not-a-real-token', HTTPS_PROXY: 'http://proxy.test' })
   assert.equal(env.PATH, '/usr/bin')
   assert.equal(env.NPM_CONFIG_REGISTRY, 'https://registry.npmjs.org/')
-  assert.ok(env.HOME.startsWith('/owned/scratch'))
+  assert.equal(env.HOME,join('/owned/scratch','home'))
+  assert.equal(env.USERPROFILE,env.HOME)
   for (const name of ['NPM_TOKEN', 'NODE_AUTH_TOKEN', 'BRAIN_BINARY', 'BRAIN_NO_DELEGATE', 'OPENAI_API_KEY', 'NODE_OPTIONS', 'GITHUB_TOKEN', 'HTTPS_PROXY']) assert.equal(env[name], undefined, name)
   assert.ok(!Object.values(env).some(value => value.includes('not-a-real-')))
 })
@@ -73,5 +74,28 @@ test('an actual failing npm-like child retains its safe code and releases owned 
    assert.deepEqual(report.npmCodes,['E404']);assert.ok(!JSON.stringify(report).includes(secret));return true
   })
   assert.equal(active.size,0);assert.equal(job.exited,true)
+ }finally{rmSync(root,{recursive:true,force:true})}
+})
+
+test('doctor summaries retain AX, heap and capability failures that assertion counts alone omit',()=>{
+ const secret='PRIVATE_DOCTOR_VALUE_SENTINEL'
+ const report={ok:false,check:{errors:0},test:{passed:2,failed:0,a11y:1,errors:[{msg:secret}],files:[{file:secret,engine:'headless-cdp',tests:[{ok:true,name:secret}],a11y:[{code:'B0406',msg:secret}],leaks:[{code:'B0601',msg:secret}],errors:[],coverage:{accessibility:'Chrome Accessibility.getFullAXTree',heap:'forced-GC inspector'},capability:{forcedGC:false,secret}}]},heap:{leaks:[{code:'B0601',msg:secret}]},build:{ok:true},seo:{ok:false,minScore:80,pages:[{score:75,url:secret}]},advice:[{code:'B0733',level:'error',msg:secret}]}
+ const summary=doctorSummary(report)
+ assert.equal(summary.failedTests,0);assert.equal(summary.passedTests,2);assert.equal(summary.accessibilityFindings,1);assert.equal(summary.heapLeaks,1)
+ assert.equal(summary.testErrorPresent,false);assert.equal(summary.buildOk,true);assert.equal(summary.seoOk,false);assert.equal(summary.seoBelowThresholdPages,1)
+ assert.deepEqual(summary.diagnosticCodes,['B0406','B0601','B0733']);assert.equal(summary.files[0].coverage.heap,'forced-GC inspector');assert.deepEqual(summary.files[0].capability,{forcedGC:false})
+ assert.ok(!JSON.stringify(summary).includes(secret))
+})
+test('actual doctor command failure projects its private report without leaking messages or source locations',async()=>{
+ const root=mkdtempSync(join(tmpdir(),'brain-registry-doctor-summary-')),active=new Set()
+ try{
+  const secret='PRIVATE_DOCTOR_CHILD_SENTINEL',payload={ok:false,check:{errors:0,diags:[]},test:{passed:2,failed:0,a11y:0,files:[{engine:'headless-cdp',tests:[],leaks:[{code:'B0601',msg:secret}],coverage:{heap:'forced-GC inspector'}}]},heap:{leaks:[{code:'B0601',file:secret}]},build:{ok:true},seo:{ok:true}}
+  const child=childSession(['-e',`console.log(${JSON.stringify(JSON.stringify(payload))});process.exit(1)`],{cwd:root,env:anonymousEnvironment(root),log:join(root,'doctor.log'),timeout:5000,phase:'doctor-brainllm',active})
+  await assert.rejects(child.done,error=>{
+   const summary=publicFailure(error)
+   assert.equal(summary.phase,'doctor-brainllm');assert.equal(summary.reason,'nonzero-exit');assert.equal(summary.doctor.heapLeaks,1)
+   assert.deepEqual(summary.diagnosticCodes,['B0601']);assert.ok(!JSON.stringify(summary).includes(secret));return true
+  })
+  assert.equal(active.size,0)
  }finally{rmSync(root,{recursive:true,force:true})}
 })
