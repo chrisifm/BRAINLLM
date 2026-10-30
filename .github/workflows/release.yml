@@ -22,6 +22,12 @@ permissions:
   contents: read
 
 jobs:
+  verify-source:
+    if: always() && !cancelled() && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    permissions:
+      contents: read
+    uses: ./.github/workflows/verify.yml
+
   build:
     if: inputs.artifact_run == ''
     strategy:
@@ -149,8 +155,8 @@ jobs:
             npm/dist/SHA256SUMS
 
   publish:
-    if: always() && !cancelled() && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish)) && (needs.pack.result == 'success' || (inputs.artifact_run != '' && !startsWith(inputs.artifact_run, 'native:')))
-    needs: pack
+    if: always() && !cancelled() && needs['verify-source'].result == 'success' && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish)) && (needs.pack.result == 'success' || (inputs.artifact_run != '' && !startsWith(inputs.artifact_run, 'native:')))
+    needs: [pack, verify-source]
     runs-on: ubuntu-22.04
     outputs:
       version: ${{ steps.published-version.outputs.version }}

@@ -43,7 +43,7 @@ index and unrelated work. Never move the published tag or blindly retry a publis
 - CI helper regressions: 11/11 passed. Publisher guard: ten cases passed, including canceled tag/manual jobs,
   manual publish=false on a tag and failed native recovery. YAML, English and diff checks passed.
 - Review proposal: [PR #10](https://github.com/chrisifm/BRAINLLM/pull/10), targeting the reviewed release branch.
-  No automatic merge into main. Full source verification 41119484085 passed before workflow-only path correction.
+  No automatic merge into main. Full source verification 41120330255 passed on the final helper source; all three hosted install jobs in 41120774001 passed after the workflow-only path correction.
 - Full verification 41118057666 exposed an intermittent atomic-change lock lifecycle failure. A separate
   next-development-version worktree is addressing explicit lock release with meaningful regression coverage.
 - Rust-powered descriptions and relevant frontend/backend/CLI/framework keywords are already public.

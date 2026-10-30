@@ -71,3 +71,12 @@ reports, application sources, user paths, environment values or caches.
 The repaired publisher condition requires an uncanceled run and either an actual tag-push event or explicit manual
 `publish=true`. A manual `publish=false` stays pack-only even when its selected ref is a tag. These corrections apply
 to new reviewed source commits; the already published v0.4.0 tag remains immutable and retains its historical workflow.
+
+
+## Source verification before future publication
+
+Development 0.4.1 makes publication depend on `verify-source` as well as the package result. The source job calls
+`verify.yml` from the same commit and runs the existing workspace/runtime/fixture/privacy/English gates; it inherits
+no publishing credentials. Native builds may run concurrently, but a failed, skipped or canceled source gate cannot
+publish even when a reviewed package archive is reused. Manual pack-only dispatch still does not publish.
+Boolean-policy regressions exercise these failure and cancellation paths without contacting npm or publishing.
