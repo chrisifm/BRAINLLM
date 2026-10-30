@@ -434,12 +434,23 @@ pub(crate) struct Gen<'a> {
     pub(crate) plain_store: bool,
 }
 
+/// Metadata for native handles whose getters read reactive state.
+fn native_node_bindings(c: &Component, top: &HashMap<String, Kind>) -> HashSet<String> {
+    c.script.iter().filter_map(|statement| if let Stmt::Var(var) = statement { Some(var) } else { None })
+        .flat_map(|var| var.decls.iter())
+        .filter_map(|decl| match (&decl.pat, decl.init.as_ref().map(Expr::unparen)) {
+            (Pat::Ident(binding), Some(Expr::Call { callee, .. })) if matches!(callee.unparen(), Expr::Ident(factory) if matches!(factory.name.as_str(), "resource" | "stream") || (factory.name == "liveResource" && !top.contains_key("liveResource"))) => Some(binding.name.clone()),
+            _ => None,
+        }).collect()
+}
+
 /// Signals never written, derived values and effects that read nothing reactive (fixed point, conservative:
 /// shadowing is ignored and any call to a user function counts as reactive).
 fn fold_plan(c: &Component) -> (HashSet<String>, HashSet<u32>) {
     use brain_parse::visit::Uses;
     let all = Uses::component(c);
     let top = scope::top_bindings(c);
+    let native_nodes = native_node_bindings(c, &top);
     let mut user_fns: HashSet<String> = HashSet::new();
     let mut sigs = Vec::new();
     let mut drvs: Vec<(String, &Expr)> = Vec::new();
@@ -471,7 +482,7 @@ fn fold_plan(c: &Component) -> (HashSet<String>, HashSet<u32>) {
     // Names whose reads are reactive once folding is applied.
     let reactive = |folded: &HashSet<String>| -> HashSet<String> {
         top.iter()
-            .filter(|(n, k)| !folded.contains(*n) && (k.is_reactive_cell() || matches!(k, Kind::Prop | Kind::LoadProps | Kind::Form)))
+            .filter(|(n, k)| !folded.contains(*n) && (k.is_reactive_cell() || matches!(k, Kind::Prop | Kind::LoadProps | Kind::Form) || native_nodes.contains(*n)))
             .map(|(n, _)| n.clone())
             .chain(c.script.iter().filter_map(|s| match s {
                 Stmt::Import(i) if i.source.contains("channels/") => Some(import_names(i)),
@@ -1206,16 +1217,7 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
             }
             m
         },
-        node_vars: c
-            .script
-            .iter()
-            .filter_map(|s| if let Stmt::Var(v) = s { Some(v) } else { None })
-            .flat_map(|v| v.decls.iter())
-            .filter_map(|d| match (&d.pat, d.init.as_ref().map(Expr::unparen)) {
-                (Pat::Ident(id), Some(Expr::Call { callee, .. })) if matches!(callee.unparen(), Expr::Ident(k) if matches!(k.name.as_str(), "resource" | "stream")) => Some(id.name.clone()),
-                _ => None,
-            })
-            .collect(),
+        node_vars: native_node_bindings(c, &top),
         scopes: Scopes::new(top),
         indent: 1,
         hash: component_hash_len(&component_scope_key(&c.file,&c.src), opts.hash_len),
@@ -1350,7 +1352,7 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
         body.insert_str(0, &format!("  if (globalThis.__brainSSR || globalThis.__brainRoute) return {t}();\n"));
     }
     // Load preventive allocation hooks for actual client primitives, while retaining zero-JS static output.
-    let native_alloc = ["form","resource","stream","store","bus","use","provide","media","visible","watch","every","debounce","online"]
+    let native_alloc = ["form","resource","stream","liveResource","store","bus","use","provide","media","visible","watch","every","debounce","online"]
         .iter().any(|name|g.scopes.lookup(name).is_none() && calls(&body,name));
     if g.plain_store || g.static_form || g.scalar_form || g.static_form_sync || g.scalar_form_sync || !g.budget_used.is_empty() || ["sig","drv","fx","list","when"].iter().any(|name|g.used.contains(name)) || native_alloc {
         let owner = g.budget("budgetOwner");

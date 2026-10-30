@@ -447,6 +447,12 @@ impl Gen<'_> {
                     let rest: String = args[2..].iter().map(|x| format!(", {}", self.expr(x))).collect();
                     return format!("form({}, ((o) => (o.submit.id = {target}.id, o))({}){rest})", self.expr(&args[0]), self.expr(&args[1]));
                 }
+                // Resource methods and its current Promise live on the node, not the awaited value.
+                "liveResource" if matches!(args.first().map(Expr::unparen), Some(Expr::Ident(r)) if self.node_vars.contains(&r.name) && self.scopes.lookup(&r.name) == Some(Kind::Drv)) => {
+                    let Some(Expr::Ident(r)) = args.first().map(Expr::unparen) else { unreachable!() };
+                    let rest: String = args[1..].iter().map(|x| format!(", {}", self.expr(x))).collect();
+                    return format!("liveResource({}{rest})", r.name);
+                }
                 // `visible(box)` takes the ref itself: the runtime reads it inside an effect, after `bind:ref` fills it.
                 "visible" if matches!(args.first().map(Expr::unparen), Some(Expr::Ident(r)) if self.scopes.lookup(&r.name) == Some(Kind::Ref)) => {
                     let Some(Expr::Ident(r)) = args.first().map(Expr::unparen) else { unreachable!() };

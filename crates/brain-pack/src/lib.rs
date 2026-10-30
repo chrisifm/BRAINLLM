@@ -15,6 +15,8 @@ pub use build_cache::Stats as BuildCacheStats;
 pub mod ledger;
 pub mod impact;
 pub mod cache;
+mod socket_options;
+pub use socket_options::{BuildOptions, NativeSocketOptions};
 pub mod classes;
 pub mod cssdedup;
 mod css_values;
@@ -575,6 +577,28 @@ fn build_inner(
     layouts_of: &dyn Fn(&str) -> Vec<String>,
     seo_of: &dyn Fn(&str) -> Vec<(String, String)>,
     measure: bool,
+) -> Result<Output, String> {
+    build_inner_with_options(input, views, layouts_of, seo_of, measure, &BuildOptions::default())
+}
+
+/// Opt-in features are separate from Input so existing Rust callers and literals stay compatible.
+pub fn build_with_options(
+    input: &Input,
+    views: &[(String, String)],
+    layouts_of: &dyn Fn(&str) -> Vec<String>,
+    seo_of: &dyn Fn(&str) -> Vec<(String, String)>,
+    options: &BuildOptions,
+) -> Result<Output, String> {
+    build_inner_with_options(input, views, layouts_of, seo_of, false, options)
+}
+
+fn build_inner_with_options(
+    input: &Input,
+    views: &[(String, String)],
+    layouts_of: &dyn Fn(&str) -> Vec<String>,
+    seo_of: &dyn Fn(&str) -> Vec<(String, String)>,
+    measure: bool,
+    options: &BuildOptions,
 ) -> Result<Output, String> {
     let cache_before=build_cache::stats();
     let mut warnings = Vec::new();
@@ -1678,6 +1702,14 @@ fn build_inner(
         post_bin.extend(out.binary);
         warnings.extend(out.warnings);
         post_csp = out.csp;
+    }
+    if let Some(socket) = &options.native_sockets {
+        post_csp.extend(cache::native_socket_csp(socket));
+        // Install the opt-in BEFORE cache::apply hashes shipped source/configuration.
+        // A static app receives private metadata without being converted to Node/SSR.
+        let manifest = files.entry("_server/manifest.json".into())
+            .or_insert_with(|| "{\"v\":1,\"routes\":[],\"rpc\":{}}\n".into());
+        *manifest = manifest.replacen("{\"v\":1,", &format!("{{\"v\":1,\"nativeSockets\":true,\"publicOrigin\":{},", prerender_json(socket.public_origin())), 1);
     }
     // A packaged Wasm module is an explicit compile feature; never grant general JavaScript eval.
     if emitted_assets.keys().any(|path|path.ends_with(".wasm")) {post_csp.push(("script-src".into(),"'wasm-unsafe-eval'".into()));}

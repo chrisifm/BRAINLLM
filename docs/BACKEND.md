@@ -151,7 +151,7 @@ before-write callbacks are distinct from service-side preprocessing: clients all
 its CRUD endpoint directly, so service helpers alone are not an enforced cross-entry-point business hook.
 The reference-API throughput/p99 comparison must identify the actual build profile and source. The reproducible
 [benchmark harness](../bench/backend/README.md) runs the real reference API with disposable databases; a debug
-preflight is not release performance evidence. Authenticated realtime sockets are excluded from this checkpoint.
+preflight is not release performance evidence. Authenticated realtime sockets were excluded from the 0.4.0 checkpoint. The development opt-in contract is documented in [Native live resources](NATIVE-LIVE-RESOURCES.md).
 
 ## Structured job failure traces
 

@@ -183,7 +183,7 @@ impl Gen<'_> {
                 self.frames.last().and_then(|f| f.props.get(&id.name)).is_some_and(|(_, d)| *d)
             }
             Expr::Ident(id) => match self.scopes.lookup(&id.name) {
-                Some(k) => k.is_reactive_cell() || matches!(k, Kind::Prop | Kind::LoadProps | Kind::Form) || (k == Kind::Import && self.channel_names.contains(&id.name)),
+                Some(k) => k.is_reactive_cell() || matches!(k, Kind::Prop | Kind::LoadProps | Kind::Form) || (self.node_vars.contains(&id.name) && matches!(k, Kind::Const | Kind::Let)) || (k == Kind::Import && self.channel_names.contains(&id.name)),
                 None => false,
             },
             Expr::Num { .. } | Expr::Str { .. } | Expr::Bool { .. } | Expr::Null(_) | Expr::Regex { .. } | Expr::This(_) | Expr::Func(_) => false,

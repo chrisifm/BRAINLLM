@@ -12,6 +12,10 @@ use std::{
     process::Stdio,
 };
 
+#[path = "socket_settings.rs"]
+mod socket_configuration;
+pub use socket_configuration::{socket_settings, SocketSettings};
+
 fn literal(expr: &Expr) -> Result<Value, String> {
     match expr.unparen() {
         Expr::Str{value,..}=>Ok(json!(value)), Expr::Bool{value,..}=>Ok(json!(value)), Expr::Null(_)=>Ok(Value::Null),
@@ -230,7 +234,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let port=crate::flag(args,"--port").unwrap_or("5182".into()).parse::<u16>().map_err(|_|"port must be 0..65535")?;
         let listener=tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST,port)).await.map_err(|_|"Cannot bind backend loopback port")?;
         let addr=listener.local_addr().map_err(|e|e.to_string())?;
-        let origin=crate::flag(args,"--origin").or_else(||crate::env::value(&root,&environment,"PUBLIC_SITE_URL").and_then(|site|brain_backend::links::origin(&site))).unwrap_or_else(||format!("http://{addr}"));
+        let public_site=crate::env::value(&root,&environment,"PUBLIC_SITE_URL").unwrap_or_else(||format!("http://{addr}"));
+        let sockets=socket_settings(&root,Some(&public_site),crate::flag(args,"--origin").as_deref())?;
+        let origin=sockets.http_origins.first().cloned().ok_or("Set an explicit backend HTTP origin")?;
         // Never migrate on serve: database changes are an explicit, reviewable command.
         let setting=|key:&str|std::env::var(key).ok().filter(|v|!v.is_empty()).or_else(||crate::env::value(&root,&environment,key));
         let jwt=setting("BRAIN_JWT_SECRET").map(|secret|brain_backend::jwt::Config::new(secret,setting("BRAIN_JWT_ISSUER").unwrap_or_else(||origin.clone()),setting("BRAIN_JWT_AUDIENCE").unwrap_or_else(||origin.clone()))).transpose()?;
@@ -242,7 +248,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         };
         let public_base=setting("PUBLIC_SITE_URL").unwrap_or_else(||origin.clone());
         let mail=setting("BRAIN_MAIL_RESEND_KEY").map(|key|brain_backend::auth_flows::MailConfig::resend(key,setting("BRAIN_MAIL_FROM").ok_or("BRAIN_MAIL_FROM must name a verified sender email")?,public_base.clone())).transpose()?;
-        let config=brain_backend::Config{sockets:None,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,resources,jobs,uploads:root.join(".brain/uploads"),origins:vec![origin],production:environment=="production"};
+        let config=brain_backend::Config{sockets:sockets.native_config()?,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,resources,jobs,uploads:root.join(".brain/uploads"),origins:sockets.http_origins,production:environment=="production"};
         eprintln!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
         brain_backend::serve(listener,pool,config).await
     })

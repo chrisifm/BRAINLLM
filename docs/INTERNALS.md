@@ -1813,3 +1813,24 @@ Doctor may audit the fresh pages after that specific failure and includes measur
 failed build section. Check/code-generation/assembly failures have no fresh-output proof, so prior dist pages are
 never presented as this run's SEO evidence. Browser tests already run before the production build. With no test
 files, heap is explicitly unmeasured rather than an empty list presented as evidence of zero leaks.
+
+
+### Native live-resource client and one origin declaration (development 0.4.1)
+
+`brain-live.js` is opt-in through `liveResource(resourceHandle, options)`. Codegen preserves the first resource
+argument as a handle using the same narrow pattern as `visible(ref)`. Shared native-binding metadata marks live
+getters reactive in templates and constant-fold analysis, without a new signal kind. Existing resource/stream
+members and the legacy state-publishing WebSocket protocol retain their behavior.
+
+The broker shares one transport per loaded app runtime/tab, requires consistent public auth scope, waits for
+ordered JOIN acknowledgements before refetch, and coalesces a single in-flight resource Promise plus dirty bit.
+Owner disposal nulls a retained cell and releases resource/callback/owner references even when an external Promise
+never settles. Private `_liveStats` reports only capacity counts; protocol metadata never contains row values.
+
+`backend::socket_settings` reads bounded regular brain.json through the owned JSON parser, rejects duplicate backend
+properties and validates canonical HTTP origins/socket subsets. Explicit --origin replaces the HTTP list. It produces
+native backend configuration and typed pack options; no SQL/database dependency enters brain-pack. `build_with_options`
+keeps legacy Input literals/build callers compatible and adds the validated boolean/public origin to the private
+manifest BEFORE cache hashing. Static applications keep server.mjs absent. Exact public ws/wss CSP sources are additive;
+legacy broad sources are preserved for a separate reviewed hardening change. See NATIVE-LIVE-RESOURCES.md for bounds,
+principal-switch rules and the distinction between scoped unit proofs and full network integration evidence.

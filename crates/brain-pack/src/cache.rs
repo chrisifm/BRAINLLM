@@ -648,6 +648,11 @@ location ~ (^/$|/$|\\.html$) {{\n{doc}    etag on;\n    add_header Cache-Control
     )
 }
 
+/// Preserve existing app/legacy sources; add only the explicitly selected public socket origin.
+pub fn native_socket_csp(options: &crate::NativeSocketOptions) -> Vec<(String, String)> {
+    vec![("connect-src".into(), options.connect_source().into())]
+}
+
 /// The site's Content-Security-Policy (§31): scripts from the site itself and from the listed inline hashes only (no
 /// `unsafe-inline`, no `unsafe-eval`), no plugins, no framing, no `<base>` hijack, forms to the same origin.
 /// Styles allow inline (`style=` attributes and the layer-order `<style>`); `connect-src` allows HTTPS APIs.

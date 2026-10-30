@@ -1221,7 +1221,9 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
             })
             .collect()
     };
-    let out = brain_pack::build(&input, &views, &|v| layouts_of(root, v), &seo_of)?;
+    let socket_settings: backend::SocketSettings = backend::socket_settings(root, site, None)?;
+    let socket_options = socket_settings.build_options(site)?;
+    let out = brain_pack::build_with_options(&input, &views, &|v| layouts_of(root, v), &seo_of, &socket_options)?;
     // write only what changed and drop stale hashed chunks: an unchanged rebuild touches no file
     on_phase("write", 0, out.files.len() + out.binary.len());
     let (mut written, mut unchanged) = (0, 0);

@@ -10,7 +10,7 @@ use brain_parse::ast::*;
 /// Globals and primitives a worker does not have.
 const NOT_IN_WORKER: &[&str] = &[
     "document", "window", "localStorage", "sessionStorage", "alert", "confirm", "prompt", "sig", "drv", "fx", "ref", "emit",
-    "form", "provide", "use", "store", "bus", "navigator.clipboard",
+    "form", "provide", "use", "store", "bus", "liveResource", "navigator.clipboard",
 ];
 
 pub fn is_worker(file: &str) -> bool {
