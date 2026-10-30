@@ -126,10 +126,11 @@ views, zero infrastructure failures and matching frozen spec/token hashes. Binar
 spec SHA prefix: `0f209d72cbed`. This is a separate provider/model cohort from the historical Claude results.
 The frozen 0.4.0 release binary also produced **20/20 first-pass** views, zero infrastructure failures and stable spec/token hashes.
 The release gate and the matched-cohort comparison both passed without changing historical baselines.
-After binary SHA prefix: `f38f973b8e34`; spec SHA prefix: `d1c310181dcb`; served specification: 31939 bytes.
+After binary SHA prefix: `c5a264db5930`; spec SHA prefix: `d1c310181dcb`; served specification: 31939 bytes.
 Both runs used `gpt-6.1-sol`, `medium`, specification-only context, concurrency 1 and zero fix iterations.
 Artifacts: `results/codex-gpt-6.1-sol-medium-before-031-native.json` and
-`results/codex-gpt-6.1-sol-medium-after-040-native.json` (local benchmark outputs, not packaged).
+`results/codex-gpt-6.1-sol-medium-after-040-url-fix.json` (local benchmark outputs, not packaged).
+The final run includes the Windows file-URL correction; the earlier 0.4.0 snapshot also passed 20/20.
 `compare.mjs before.json after.json` checks both complete runs, matching cohort settings, consistent measured
 counts and the existing one-view tolerance without replacing accepted historical baseline entries.
 Compiler crashes, empty/malformed diagnostics and failures in unrelated scaffold files are infrastructure failures;
