@@ -387,10 +387,25 @@ impl Gen<'_> {
         Some(format!("{}{}({})", self.budget_prefix, match (scalar,sync) {(true,true)=>"SyncScalarForm",(true,false)=>"ScalarForm",(false,true)=>"SyncForm",(false,false)=>"Form"}, values.join(", ")))
     }
 
+    /// Only absent options or a closed empty literal prove that no transport is configured.
+    fn plain_store_call(&mut self, args: &[Expr]) -> Option<String> {
+        if !(1..=2).contains(&args.len()) || args.iter().any(|arg|matches!(arg.unparen(),Expr::Spread{..})) { return None; }
+        if let Some(options)=args.get(1) {
+            if !matches!(options.unparen(),Expr::Object{props,..} if props.is_empty()) { return None; }
+        }
+        self.plain_store=true;
+        let init=self.expr(&args[0]);
+        let id=self.store_id.as_deref().map(|id|format!(", {}",js_str(id))).unwrap_or_default();
+        Some(format!("{}PlainStore({init}{id})",self.budget_prefix))
+    }
+
     fn call(&mut self, callee: &Expr, args: &[Expr], optional: bool) -> String {
         if let Expr::Ident(id) = callee.unparen()
             && self.scopes.lookup(&id.name).is_none()
         {
+            if id.name == "store" && !optional {
+                if let Some(call)=self.plain_store_call(args) { return call; }
+            }
             if id.name == "form" {
                 if let Some(call) = self.static_form_call(args) { return call; }
             }

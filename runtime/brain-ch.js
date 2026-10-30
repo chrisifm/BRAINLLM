@@ -60,10 +60,10 @@ const safe = (k, v) => (k === '__proto__' || k === 'constructor' || k === 'proto
 // global instance) and inside `provide(K, store(…))` (one instance per subtree, §41.2). sync: 'tab' (BroadcastChannel) | 'storage'
 // (localStorage + storage event) | 'ws' (WebSocket at `url`, see ws() below). `id` is set by the codegen (channel
 // path); if missing, it is derived from init.
-export function store(init, o = {}, id) {
-  const name = id || o.name || 'store:' + Object.keys(init).join(',')
+// Shared signal/descriptor construction. Compiler-selected plain stores retain the
+// same reset, serialization and inspector contracts without reaching transport code.
+function storeState(init, name, changed) {
   const S = {}, s = {}
-  let last = '' // JSON of the last state sent or received: cuts the echo between tabs
   for (const k of Object.keys(init)) {
     S[k] = sig(init[k], name + '.' + k) // named: dev tools (brain_why, HMR) see `cart.total`
     Object.defineProperty(s, k, {
@@ -80,7 +80,8 @@ export function store(init, o = {}, id) {
   const apply = d => {
     const n = snap()
     for (const k in d) if (k in S) n[k] = d[k]
-    last = JSON.stringify(n) // before the batch: the sync fx runs when it closes and must see the echo
+    const encoded = JSON.stringify(n) // Preserve serialization errors and toJSON effects, even without sync.
+    if (changed) changed(encoded) // Before the batch: a sync effect must see the new echo marker.
     batch(() => {
       for (const k in n) S[k].v = n[k]
     })
@@ -90,6 +91,19 @@ export function store(init, o = {}, id) {
     $snap: { value: snap },
     $reset: { value: () => apply({ ...init }) }, // back to the initial state (persisted and synced like any write)
   })
+  return { S, s, snap, apply }
+}
+// Compiler-only: public store() still accepts all options and retains its full fallback.
+export function plainStore(init, id) {
+  const name = id || 'store:' + Object.keys(init).join(',')
+  const state = storeState(init, name, null)
+  JSON.stringify(state.snap()) // The public plain path performs this validation too.
+  return state.s
+}
+export function store(init, o = {}, id) {
+  const name = id || o.name || 'store:' + Object.keys(init).join(',')
+  let last = '' // JSON of the last state sent or received: cuts the echo between tabs
+  const { S, s, snap, apply } = storeState(init, name, value => { last = value })
   const K = 'brain:' + name
   if (o.persist) {
     // Persistence (INTERNALS §35.4), versioned by the shape of init. Small states live in localStorage and are restored

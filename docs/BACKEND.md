@@ -40,6 +40,33 @@ OpenAPI 3.1 JSON is available at `/_brain/api` (admin session required with `--e
 routes and native account/media/job/link endpoints. CLI/MCP can inspect the same structured source contract;
 source saves report conservative contract diffs in `impact` without claiming a running backend was replaced.
 
+## Opt-in administrative views
+
+```sh
+brain add resource posts --fields "title:str! active:bool! score:num meta:obj" --admin-ui
+```
+
+Creation emits `/admin/posts`, `/admin/posts/new`, `/admin/posts/:id` and `/admin/posts/:id/edit`.
+The private list and detail reads use server loaders; search and pagination use bookmarkable query parameters.
+Editors use project DS controls, required-field feedback, busy/error/success states and explicit deletion confirmation.
+Boolean and number inputs retain their types; JSON object fields are parsed and validated on the server. Form submissions
+support native server-function RPC and the generated no-JavaScript form path. Redirects return to the saved record.
+
+The route guard and generated service require an authoritative administrator session. Native resource policy remains
+an additional authority, including denial of an administrator when its grants exclude that role. No private result cache
+or client-supplied owner/role is introduced. Configure the fixed backend bridge and migrate before using these routes.
+
+The generator validates the combined project snapshot, acquires bounded file leases and commits backend helpers, routes,
+missing DS controls and `client-contract.json` as a recoverable batch with compare-and-swap guards. Individual files
+are atomically replaced; a process crash requires journal recovery rather than a filesystem-wide transaction. Only the committed contract reports
+`adminUi.status: "generated"`. Existing sources, tokens, fonts and controls are preserved; colliding generated paths fail
+before writes. Keep generated views in your application and customize them deliberately. Creating a backend-only resource
+remains the default; this flag currently accompanies creation rather than retrofitting an existing contract.
+
+The 30 KiB default route budget is unchanged. Build and doctor your application after generation: customized layouts,
+controls and field counts can change its route cost. A retained private change journal provides explicit rollback through
+the normal changes protocol; generation never automatically installs dependencies, starts Postgres or grants roles.
+
 ## Postgres and authentication
 
 Set `DATABASE_URL` in `.brain_env` or the host environment. Values never appear in CLI/MCP reports. There is no

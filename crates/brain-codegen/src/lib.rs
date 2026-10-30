@@ -431,6 +431,7 @@ pub(crate) struct Gen<'a> {
     pub(crate) scalar_form: bool,
     pub(crate) static_form_sync: bool,
     pub(crate) scalar_form_sync: bool,
+    pub(crate) plain_store: bool,
 }
 
 /// Signals never written, derived values and effects that read nothing reactive (fixed point, conservative:
@@ -695,7 +696,7 @@ fn runtime_import(g: &Gen, opts: &Options) -> String {
         .map(|n| if g.aliased.contains(n) { format!("{n} as ${n}") } else { n.to_string() })
         .collect();
     let core = if names.is_empty() { String::new() } else { format!("import {{ {} }} from {};\n", names.join(", "), js_str(&opts.runtime)) };
-    format!("{core}{}{}", budget_import(g, opts), static_form_import(g, opts))
+    format!("{core}{}{}{}", budget_import(g, opts), static_form_import(g, opts), plain_store_import(g, opts))
 }
 
 /// Internal helpers use exact tracked imports, never textual detection or author-visible primitives.
@@ -716,6 +717,13 @@ fn static_form_import(g: &Gen, opts: &Options) -> String {
     if imports.is_empty() { return String::new(); }
     let dir = opts.runtime.rsplit_once('/').map(|(d,_)|d).unwrap_or(".");
     format!("import {{ {} }} from {};\n", imports.join(", "), js_str(&format!("{dir}/brain-form.js")))
+}
+
+/// A compiler-only plain-store alias; public store remains imported for any unknown call/value use.
+fn plain_store_import(g: &Gen, opts: &Options) -> String {
+    if !g.plain_store { return String::new(); }
+    let dir=opts.runtime.rsplit_once('/').map(|(dir,_)|dir).unwrap_or(".");
+    format!("import {{ plainStore as {}PlainStore }} from {};\n",g.budget_prefix,js_str(&format!("{dir}/brain-ch.js")))
 }
 
 /// `.jsbrain`: the script at module level, same rewrites, no component wrapper.
@@ -1246,6 +1254,7 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
         scalar_form: false,
         static_form_sync: false,
         scalar_form_sync: false,
+        plain_store: false,
         channel_names: c
             .script
             .iter()
@@ -1274,6 +1283,7 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
     g.scalar_form = false;
     g.static_form_sync = false;
     g.scalar_form_sync = false;
+    g.plain_store = false;
     g.budget_capture_owner = true;
     let name = if c.name.is_empty() { "Component".to_string() } else { c.name.clone() };
 
@@ -1342,7 +1352,7 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
     // Load preventive allocation hooks for actual client primitives, while retaining zero-JS static output.
     let native_alloc = ["form","resource","stream","store","bus","use","provide","media","visible","watch","every","debounce","online"]
         .iter().any(|name|g.scopes.lookup(name).is_none() && calls(&body,name));
-    if g.static_form || g.scalar_form || g.static_form_sync || g.scalar_form_sync || !g.budget_used.is_empty() || ["sig","drv","fx","list","when"].iter().any(|name|g.used.contains(name)) || native_alloc {
+    if g.plain_store || g.static_form || g.scalar_form || g.static_form_sync || g.scalar_form_sync || !g.budget_used.is_empty() || ["sig","drv","fx","list","when"].iter().any(|name|g.used.contains(name)) || native_alloc {
         let owner = g.budget("budgetOwner");
         body.insert_str(0, &format!("  const {}Owner = {owner}();\n", g.budget_prefix));
     }

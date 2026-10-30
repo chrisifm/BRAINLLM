@@ -69,6 +69,16 @@ try{
   assert.equal(rejected.status,403)
   assert.equal(calls.length,before,'Denied roles cannot reach native mutations')
  }
+ for(const title of [undefined,'','   ',27]){
+  const before=calls.length
+  const invalid=await rpc('saveRecord',[{...(title===undefined?{}:{title}),active:false,score:4.5,meta:'{}',[hiddenKey]:''}])
+  assert.equal(invalid.status,422,'Required strings must reject absent, blank and incorrectly typed values')
+  assert.equal(calls.length,before,'Invalid required values cannot reach native mutations')
+ }
+ const beforeRequiredForm=calls.length
+ const requiredForm=await fetch(base+'/admin/posts/new',{method:'POST',redirect:'manual',headers:{cookie,origin:base,'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({_brain:createHash+'/saveRecord',[hiddenKey]:'',score:'4.5',meta:'{}'}),signal:AbortSignal.timeout(5000)})
+ assert.equal(requiredForm.status,422,'The no-JavaScript path must enforce the same required field')
+ assert.equal(calls.length,beforeRequiredForm)
  let response=await rpc('saveRecord',[{title:'First',active:false,score:4.5,meta:'{}',[hiddenKey]:''}])
  assert.equal(response.status,200,await response.clone().text())
  assert.equal((await response.json()).data.title,'First')

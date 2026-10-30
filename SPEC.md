@@ -242,9 +242,12 @@ First read `brain backend schema --json` (resolved resource/job contracts + reso
 or `brain add job notify --fields "message:str!"`; fields: `str num bool email obj`, `!` required. Resources have explicit
 `schema/policy/hooks.jsbrain`; jobs have `schema/handler.jsbrain` under `server/resources/` and `server/jobs/`.
 Resource generation also creates collection/detail clients under `api/`, an executable native repository and
-server service, and `client-contract.json` pointing to the canonical schema revision. Administrative UI is
-an explicit administrative-UI deferral in 0.4: this command does not create routes, guards or controls and does not raise
-the app's 30 KiB route budget. Existing application views remain project-owned.
+server service, and `client-contract.json` pointing to the canonical schema revision. Add `--admin-ui` when creating
+a resource to generate project-owned `/admin/<resource>` list/search, new, detail and edit/delete routes plus an
+administrator guard and missing project DS controls. These files and the generated contract commit together through
+validated file leases and compare-and-swap revisions. Existing files are never overwritten; without this flag no
+routes or controls are created. Native backend policy remains authoritative. Review policy, migrate explicitly,
+then build and doctor the application. The app's default 30 KiB route budget remains unchanged.
 Set `DATABASE_URL`; explicitly `brain backend migrate`, then `brain backend serve` (loopback REST at `/api/<resource>`).
 `brain jobs enqueue|status|work|prune` manages persistent, at-least-once work. Handlers must be idempotent by `ctx.jobId`.
 After-write hooks commit `{resource,operation,record}` with their mutation. `brain add hook validate_order` creates

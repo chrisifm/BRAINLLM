@@ -23,6 +23,7 @@ mod mcp;
 mod mcp_setup;
 mod agent;
 mod backend;
+mod resource_admin;
 mod webhook_config;
 mod hooks_executor;
 mod backend_diff;
@@ -486,8 +487,8 @@ fn cmd_add(args: &[String]) -> Result<(), String> {
     let [kind, name] = <[String; 2]>::try_from(pos).map_err(|_| "usage: brain add view|comp|ui <name> [--props \"...\"]".to_string())?;
     let root = app_root()?;
     if matches!(kind.as_str(), "resource" | "job") {
-        if args.iter().any(|a|a.starts_with("--") && !matches!(a.as_str(),"--fields"|"--json") && !a.starts_with("--fields=")) {return Err("resource/job accepts only --fields and --json".into())}
-        let report = backend::add(&root, &kind, &name, &flag(args,"--fields").unwrap_or_default())?;
+        if args.iter().any(|a|a.starts_with("--") && !matches!(a.as_str(),"--fields"|"--json"|"--admin-ui") && !a.starts_with("--fields=")) {return Err("resource/job accepts only --fields, --admin-ui and --json".into())}
+        let report = backend::add_with_admin(&root, &kind, &name, &flag(args,"--fields").unwrap_or_default(), args.iter().any(|a| a == "--admin-ui"))?;
         println!("{report}"); return Ok(());
     }
     let options = scaffold::AddOptions {

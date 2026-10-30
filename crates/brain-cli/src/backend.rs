@@ -249,7 +249,14 @@ pub fn run(args: &[String]) -> Result<(), String> {
 }
 /// All generated files are reserved with create_new; roll back only files created by this invocation.
 pub fn add(root: &Path, kind: &str, name: &str, shapes: &str) -> Result<Value, String> {
-    let _writer = crate::edit::writer_lock(root)?;
+    add_with_admin(root, kind, name, shapes, false)
+}
+/// Opt-in project-owned administrative views committed with the generated backend contract.
+pub fn add_with_admin(root: &Path, kind: &str, name: &str, shapes: &str, admin_ui: bool) -> Result<Value, String> {
+    if admin_ui && kind != "resource" {
+        return Err("--admin-ui is only supported for resources".into());
+    }
+    let _writer = if admin_ui { None } else { Some(crate::edit::writer_lock(root)?) };
     if !contract::identifier(name) {
         return Err(
             "Use a lowercase resource/job identifier (letters, digits, underscores)".into(),
@@ -304,6 +311,20 @@ pub fn add(root: &Path, kind: &str, name: &str, shapes: &str) -> Result<Value, S
     if kind == "resource" {
         files.extend(resource_support_files(&r, &files[0].1)?);
     }
+    if admin_ui {
+        files.extend(crate::resource_admin::files(root, &r)?);
+        let contract_path = format!("server/resources/{name}/client-contract.json");
+        let (_, source) = files.iter_mut().find(|(path, _)| path == &contract_path)
+            .ok_or("Generated resource contract is missing")?;
+        let mut contract: Value = serde_json::from_str(source).map_err(|_| "Cannot read generated resource contract")?;
+        contract["adminUi"] = json!({"status":"generated","routes":[format!("/admin/{name}"),format!("/admin/{name}/new"),format!("/admin/{name}/:id"),format!("/admin/{name}/:id/edit")],"guard":format!("views/admin/{name}/_guard.jsbrain"),"projectOwned":true});
+        contract["requirements"] = json!(["Review native policy and run explicit backend migration","Configure fixed BRAIN_BACKEND_URL for production and development","Sign in with an existing administrator; signup never grants admin","Run build and doctor after adapting project-owned views and controls"]);
+        *source = serde_json::to_string_pretty(&contract).map_err(|_| "Cannot encode administrative contract")? + "\n";
+        // Publish generated status only after every route/control has been installed.
+        let index = files.iter().position(|(path, _)| path == &contract_path).ok_or("Generated resource contract is missing")?;
+        let contract_file = files.remove(index);
+        files.push(contract_file);
+    }
     for (rel, _) in &files {
         for p in root.join(rel).ancestors().take_while(|p| *p != root) {
             if fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink()) {
@@ -315,6 +336,9 @@ pub fn add(root: &Path, kind: &str, name: &str, shapes: &str) -> Result<Value, S
                 "{rel} already exists; preserve it and edit its contract"
             ));
         }
+    }
+    if admin_ui {
+        return crate::resource_admin::commit(root, &files);
     }
     let mut written = Vec::new();
     let result = (|| {
@@ -335,198 +359,7 @@ pub fn add(root: &Path, kind: &str, name: &str, shapes: &str) -> Result<Value, S
     )
 }
 
-/// Server-rendered admin reads; filters and pagination remain real, bookmarkable links.
-#[cfg(test)]
-fn resource_list(name: &str, service: &str) -> String {
-    r#"<meta seo title="Manage __NAME__" description="Search private __NAME__ records." robots="noindex">
-<script>
-  import service from '../../../__SERVICE__'
-  import Input from '../../../ui/input.brain'
-  import Button from '../../../ui/button.brain'
-  export async function load(ctx) {
-    let offset = Number(ctx.query.offset || 0)
-    if (!Number.isInteger(offset) || offset < 0 || offset > 10000) offset = 0
-    const search = String(ctx.query.search || '').slice(0,200)
-    const page = await service.list(ctx,{search,limit:25,offset})
-    return {page,search,offset}
-  }
-</script>
-<main class="page">
-  <h1>Manage __NAME__</h1>
-  <a href="/admin/__NAME__/new">Create record</a>
-  <form method="get">
-    <Input label="Search records" name="search" value={props.search} />
-    <Button type="submit">Search</Button>
-  </form>
-  {#if props.page.items.length}
-    <ul aria-label="Records">
-      {#each props.page.items as item (item.id)}
-        <li><a href={'/admin/__NAME__/' + item.id}>Record {item.id}</a><p>{JSON.stringify(item.data)}</p></li>
-      {/each}
-    </ul>
-  {:else}<p role="status">No records match this search.</p>{/if}
-  <nav aria-label="Record pages">
-    {#if props.offset > 0}<a href={'/admin/__NAME__?search=' + encodeURIComponent(props.search) + '&offset=' + Math.max(0,props.offset - 25)}>Previous</a>{/if}
-    <span>Page {Math.floor(props.offset / 25) + 1}</span>
-    {#if props.offset + 25 <= 10000 && props.page.items.length === 25}<a href={'/admin/__NAME__?search=' + encodeURIComponent(props.search) + '&offset=' + (props.offset + 25)}>Next</a>{/if}
-  </nav>
-</main>
-<style>
-  .page { max-width:80ch; margin:auto; padding:var(--space-4); display:grid; gap:var(--space-3); overflow-wrap:anywhere; }
-  form, label, li { display:grid; gap:var(--space-2); }
-  ul { list-style:none; padding:0; display:grid; gap:var(--space-3); }
-  nav { display:flex; align-items:center; gap:var(--space-3); }
-</style>
-"#.replace("__NAME__",name).replace("__SERVICE__",service)
-}
-#[cfg(test)]
-fn resource_detail(name: &str, service: &str) -> String {
-    r#"<meta seo title="__NAME__ record" description="Inspect one private __NAME__ record." robots="noindex">
-<script>
-  import service from '../../../__SERVICE__'
-  export async function load(ctx) { return {item:await service.get(ctx,ctx.params.id)} }
-</script>
-<main class="page">
-  <h1>__NAME__ record</h1>
-  <a href="/admin/__NAME__">Back to records</a>
-  <dl><dt>Record ID</dt><dd>{props.item.id}</dd><dt>Values</dt><dd>{JSON.stringify(props.item.data)}</dd></dl>
-  <a href={'/admin/__NAME__/' + props.item.id + '/edit'}>Edit record</a>
-</main>
-<style>.page { max-width:80ch; margin:auto; padding:var(--space-4); display:grid; gap:var(--space-3); overflow-wrap:anywhere; } dd { margin:0; }</style>
-"#.replace("__NAME__",name).replace("__SERVICE__",service)
-}
-#[cfg(test)]
-fn resource_editor(r: &Resource, service: &str, create: bool) -> Result<String, String> {
-    let mut record_key = "__brainRecord".to_string();
-    while r.fields.contains_key(&record_key) {
-        record_key.push('_');
-    }
-    let mut rules = serde_json::Map::new();
-    rules.insert(record_key.clone(), json!("str"));
-    let mut controls = String::new();
-    for (key, field) in &r.fields {
-        let kind = if field.kind == "obj" {
-            "str"
-        } else {
-            &field.kind
-        };
-        let rule = format!(
-            "{kind}{}",
-            if field.required && field.kind != "bool" {
-                "!"
-            } else {
-                ""
-            }
-        );
-        rules.insert(key.clone(), json!(rule));
-        let required = if field.required { "true" } else { "false" };
-        let control = match field.kind.as_str() {
-            "obj" => format!(
-                "<Field label=\"{key} (JSON object)\" error={{f.err.{key}}}><textarea name=\"{key}\" aria-label=\"{key} (JSON object)\" bind:value={{f.v.{key}}} disabled={{f.busy || d.busy}}></textarea></Field>"
-            ),
-            "bool" => format!(
-                "<Checkbox label=\"{key}\" name=\"{key}\" bind:checked={{f.v.{key}}} error={{f.err.{key}}} disabled={{f.busy || d.busy}} />"
-            ),
-            "str" | "email" | "num" => format!(
-                "<Input label=\"{key}\" name=\"{key}\" type=\"{}\" required={{{required}}} bind:value={{f.v.{key}}} error={{f.err.{key}}} disabled={{f.busy || d.busy}} />",
-                if field.kind == "email" {
-                    "email"
-                } else if field.kind == "num" {
-                    "number"
-                } else {
-                    "text"
-                }
-            ),
-            _ => return Err("Unsupported generated resource control".into()),
-        };
-        controls.push_str(&format!("    {control}\n"));
-    }
-    let delete = if create {
-        ""
-    } else {
-        r#"
-  <section aria-label="Delete record">
-    <h2>Delete record</h2>
-    <form on:submit={d.submit}>
-      <input type="hidden" name="__KEY__" bind:value={d.v.__KEY__}>
-      <Checkbox label="Confirm deletion" name="confirmation" bind:checked={d.v.confirmation} error={d.err.confirmation} disabled={f.busy || d.busy} />
-      {#if d.error}<p role="alert">{d.error}</p>{/if}
-      <Button type="submit" busy={d.busy} disabled={f.busy}>Delete record</Button>
-    </form>
-  </section>
-"#
-    };
-    let delete_script = if create {
-        "const d = {busy:false}".to_string()
-    } else {
-        format!(
-            r#"server: async function removeRecord(ctx,values) {{
-    if (values.confirmation !== true) throw {{errors:{{confirmation:'Confirm deletion'}}}}
-    await service.remove(ctx,values.{record_key})
-    return {{redirect:'/admin/{name}'}}
-  }}
-  let d = form({{{record_key}:'str!',confirmation:'bool!'}},{{init:{{{record_key}:props.initial.{record_key},confirmation:false}},submit:removeRecord}})"#,
-            name = r.name
-        )
-    };
-    let source = r#"<meta seo title="__TITLE__ __NAME__ record" description="__TITLE__ a private __NAME__ record." robots="noindex">
-<script>
-  import service from '__PREFIX____SERVICE__'
-  import Input from '__PREFIX__ui/input.brain'
-  import Checkbox from '__PREFIX__ui/checkbox.brain'
-  import Field from '__PREFIX__ui/field.brain'
-  import Button from '__PREFIX__ui/button.brain'
-  export async function load(ctx) {
-    const initial = await service.editor(ctx,__LOAD_ID__)
-    initial.__KEY__ = __LOAD_ID__
-    return {initial}
-  }
-  server: async function saveRecord(ctx,values) {
-    const input={...values}
-    const id=input.__KEY__ || ''
-    delete input.__KEY__
-    const item=await service.saveForm(ctx,id,input)
-    return {...item,redirect:'/admin/__NAME__/' + item.id}
-  }
-  let f = form(__RULES__,{init:props.initial,submit:saveRecord})
-  __DELETE_SCRIPT__
-</script>
-<main class="page">
-  <h1>__TITLE__ __NAME__ record</h1>
-  <a href="/admin/__NAME__">Back to records</a>
-  <form on:submit={f.submit}>
-    <input type="hidden" name="__KEY__" bind:value={f.v.__KEY__}>
-__CONTROLS__    {#if f.error}<p role="alert">{f.error}</p>{/if}
-    {#if f.ok}<p role="status">Record saved.</p>{/if}
-    <Button type="submit" busy={f.busy} disabled={d.busy}>Save record</Button>
-  </form>
-__DELETE__</main>
-<style>
-  .page { max-width:60ch; margin:auto; padding:var(--space-4); display:grid; gap:var(--space-3); }
-  form, label, section { display:grid; gap:var(--space-2); }
-  textarea { font:inherit; min-height:120px; color:var(--fg); background:var(--surface); border:1px solid var(--line); padding:var(--space-2); }
-</style>
-"#;
-    Ok(source
-        .replace("__TITLE__", if create { "Create" } else { "Edit" })
-        .replace("__NAME__", &r.name)
-        .replace(
-            "__PREFIX__",
-            if create { "../../../" } else { "../../../../" },
-        )
-        .replace("__SERVICE__", service)
-        .replace("__LOAD_ID__", if create { "''" } else { "ctx.params.id" })
-        .replace(
-            "__RULES__",
-            &serde_json::to_string(&rules).map_err(|_| "Cannot encode admin form rules")?,
-        )
-        .replace("__DELETE_SCRIPT__", &delete_script)
-        .replace("__CONTROLS__", &controls)
-        .replace("__DELETE__", delete)
-        .replace("__KEY__", &record_key))
-}
-
-/// Native contracts and executable server/client helpers; administrative UI is not released yet.
+/// Native contracts and executable server/client helpers; routes are an explicit opt-in.
 fn resource_support_files(
     r: &Resource,
     schema_source: &str,
@@ -595,6 +428,8 @@ async function saveForm(ctx,id,input) {{
       else if (typeof value === 'number') {{if (!Number.isFinite(value)) invalid=true}}
       else if (typeof value !== 'string' || !/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(value) || !Number.isFinite(Number(value))) invalid=true
       else payload[key]=Number(value)
+    }} else if ((kind === 'str' || kind === 'email') && value != null) {{
+      if (typeof value !== 'string' || (schema[key].endsWith('!') && !value.trim())) invalid=true
     }}
     if (invalid) {{let errors={{}};errors[key]='Use a valid field value';throw {{errors}}}}
   }}
@@ -608,59 +443,10 @@ export default {{list,get,save,saveForm,remove,editor}}
         format!("export default api('/api/{name}/:id',{{get:{{}},put:{{}},delete:{{}}}})\n"),
     ));
     let contract_path = format!("server/resources/{name}/client-contract.json");
-    files.push((contract_path,serde_json::to_string_pretty(&json!({"schemaVersion":1,"resource":name,"schema":format!("server/resources/{name}/schema.jsbrain"),"schemaRevision":crate::manifests::hash(schema_source.as_bytes()),"fields":r.fields,"policy":format!("server/resources/{name}/policy.jsbrain"),"client":[client,record_client],"repository":repository,"service":service,"adminUi":{"status":"planned","reason":"Generated administrative forms do not yet satisfy the unchanged default 30 KiB route budget"},"authorization":"Native backend policy is authoritative; generated services additionally require authoritative admin context","requirements":["Review policy and run explicit backend migration","Configure fixed BRAIN_BACKEND_URL for production and development","Sign in with an existing administrator; signup never grants admin","Build application views deliberately; this command does not create routes, guards or controls"],"generatedSnapshot":true})).map_err(|_|"Cannot encode generated resource contract")?+"\n"));
+    files.push((contract_path,serde_json::to_string_pretty(&json!({"schemaVersion":1,"resource":name,"schema":format!("server/resources/{name}/schema.jsbrain"),"schemaRevision":crate::manifests::hash(schema_source.as_bytes()),"fields":r.fields,"policy":format!("server/resources/{name}/policy.jsbrain"),"client":[client,record_client],"repository":repository,"service":service,"adminUi":{"status":"planned","reason":"Administrative routes require explicit --admin-ui opt-in"},"authorization":"Native backend policy is authoritative; generated services additionally require authoritative admin context","requirements":["Review policy and run explicit backend migration","Configure fixed BRAIN_BACKEND_URL for production and development","Sign in with an existing administrator; signup never grants admin","Build application views deliberately; this command does not create routes, guards or controls"],"generatedSnapshot":true})).map_err(|_|"Cannot encode generated resource contract")?+"\n"));
     Ok(files)
 }
 
-// Recoverable experimental proposal, exercised only in isolated functional tests.
-// It is not exposed through CLI/MCP until the default route budget is satisfied.
-#[cfg(test)]
-fn experimental_admin_files(root: &Path, r: &Resource) -> Result<Vec<(String, String)>, String> {
-    let name = &r.name;
-    let base = format!("views/admin/{name}");
-    let service = format!("server/services/{name}.jsbrain");
-    let guard = format!("{base}/_guard.jsbrain");
-    let index = format!("{base}/index.brain");
-    let detail = format!("{base}/[id].brain");
-    let edit = format!("{base}/[id]/edit.brain");
-    let mut files = vec![];
-    files.push((guard.clone(),"<meta server>\nexport default function guard(ctx) {\n  if (!ctx.backend || !ctx.user || ctx.user.role !== 'admin') return false\n  return true\n}\n".into()));
-    let create = format!("{base}/new.brain");
-    files.push((index.clone(), resource_list(name, &service)));
-    files.push((detail.clone(), resource_detail(name, &service)));
-    files.push((edit.clone(), resource_editor(r, &service, false)?));
-    files.push((create.clone(), resource_editor(r, &service, true)?));
-    if fs::symlink_metadata(root.join("ui")).is_ok_and(|m| m.file_type().is_symlink()) {
-        return Err("Generator refuses a symlink UI directory".into());
-    }
-    for control in ["button", "field", "input", "checkbox", "error-state"] {
-        if fs::symlink_metadata(root.join(format!("ui/{control}.brain")))
-            .is_ok_and(|m| m.file_type().is_symlink())
-        {
-            return Err("Generator refuses symlink project controls".into());
-        }
-    }
-    let basics: BTreeMap<_, _> = crate::design::new_basics().into_iter().collect();
-    for control in ["button", "field", "input", "checkbox"] {
-        let path = format!("ui/{control}.brain");
-        if fs::symlink_metadata(root.join(&path)).is_err() {
-            files.push((
-                path.clone(),
-                basics
-                    .get(path.as_str())
-                    .ok_or("Project basic source is unavailable")?
-                    .clone(),
-            ));
-        }
-    }
-    if fs::symlink_metadata(root.join("ui/error-state.brain")).is_err() {
-        files.push((
-            "ui/error-state.brain".into(),
-            include_str!("../../../runtime/ui/error-state.brain").into(),
-        ));
-    }
-    Ok(files)
-}
 
 pub(crate) struct Scratch(PathBuf);
 impl Drop for Scratch {
@@ -1228,29 +1014,20 @@ mod tests {
         assert!(!root.join("views/admin").exists());
     }
     #[test]
-    fn experimental_admin_ui_proposal_builds_real_routes_and_rpc_without_overwrites() {
+    fn generated_admin_ui_builds_real_routes_and_rpc_without_overwrites() {
         use std::io::Read;
         let root = fixture_root("generated-crud");
         crate::scaffold::new_app(&root.0).unwrap();
         let original_control = fs::read(root.0.join("ui/button.brain")).unwrap();
-        let added = add(
+        let added = add_with_admin(
             &root.0,
             "resource",
             "posts",
             "title:str! active:bool! score:num meta:obj",
+            true,
         )
         .unwrap();
-        assert!(
-            !added["files"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|path| path.as_str().unwrap().starts_with("views/"))
-        );
-        let resource = contracts(&root.0, "resources").unwrap().remove(0);
-        for (path, source) in experimental_admin_files(&root.0, &resource).unwrap() {
-            crate::changes::create_source(&root.0, &path, &source).unwrap();
-        }
+        assert_eq!(added["adminUi"]["status"], "generated");
         assert_eq!(
             fs::read(root.0.join("ui/button.brain")).unwrap(),
             original_control
@@ -1271,8 +1048,8 @@ mod tests {
                 &fs::read(root.0.join("server/resources/posts/schema.jsbrain")).unwrap()
             )
         );
-        assert_eq!(manifest["adminUi"]["status"], "planned");
-        assert!(manifest.get("views").is_none() && manifest.get("guard").is_none());
+        assert_eq!(manifest["adminUi"]["status"], "generated");
+        assert_eq!(manifest["adminUi"]["routes"].as_array().unwrap().len(), 4);
         for path in ["index.brain", "[id].brain", "new.brain", "[id]/edit.brain"] {
             let source = fs::read_to_string(root.0.join("views/admin/posts").join(path)).unwrap();
             assert!(
@@ -1293,17 +1070,10 @@ mod tests {
             fs::read(root.0.join("views/admin/posts/_guard.jsbrain")).unwrap(),
             saved
         );
-        // Functional CRUD coverage has its own explicit fixture envelope. The scaffold's
-        // independent 30 KiB release budget is unchanged and must pass separately.
-        let config_path = root.0.join("brain.json");
-        let mut config: Value = serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
-        config["budget"]["viewKB"] = json!(48);
-        fs::write(config_path, serde_json::to_string_pretty(&config).unwrap()).unwrap();
+        let config: Value = serde_json::from_slice(&fs::read(root.0.join("brain.json")).unwrap()).unwrap();
+        assert_eq!(config["budget"]["viewKB"], 30);
         let report = crate::run_build(&root.0, Some("https://example.test".into())).unwrap();
-        eprintln!(
-            "CRUD functional fixture bytes by route (not the 30 KiB release gate): {:?}",
-            report.report
-        );
+        eprintln!("CRUD default-budget fixture bytes by route: {:?}", report.report);
         for entry in &report.ledger {
             let mut entry: Value = serde_json::from_str(&entry.stringify()).unwrap();
             let route = entry["route"].as_str().unwrap_or("");
