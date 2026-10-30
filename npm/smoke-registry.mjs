@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Anonymous exact-version acceptance of published packages. Never uses a checkout binary or credentials.
 import { spawn, execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, openSync, writeSync, closeSync, readFileSync, readdirSync, lstatSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, openSync, writeSync, closeSync, readFileSync, readdirSync, lstatSync, realpathSync, rmSync, accessSync, constants } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve, delimiter } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -12,6 +12,31 @@ const OUTPUT = 2 * 1024 * 1024
 const NPM_CODES=new Set(['E404','E401','E403','E400','E429','E500','E502','E503','EUSAGE','EBADENGINE','EBADPLATFORM','ETARGET','EINTEGRITY','EAI_AGAIN','ETIMEDOUT','ECONNRESET','ECONNREFUSED','ENOTFOUND','ENOENT','EACCES','EPERM'])
 const DOCTOR_REPORTS=new WeakMap()
 const BROWSER_LABELS=new Set(['viewer','headless-cdp','viewer+headless-cdp','Chrome Accessibility.getFullAXTree','DOM-label-heuristic; not AX tree','DOM-label-heuristic; not Chrome AX tree','forced-GC inspector','not-requested','not-measured','MAIN','HeapProfiler.collectGarbage','HeapProfiler.enable','Accessibility.getFullAXTree','FinalizationRegistry','WeakRef'])
+export function browserExecutable(value) {
+ if(typeof value!=='string'||!value||value.length>4096||/[\x00-\x1f\x7f]/.test(value))throw Error('Browser selection must be an existing executable file')
+ try{const path=realpathSync(resolve(value));if(!lstatSync(path).isFile()||(process.platform==='win32'&&!/\.(?:exe|com)$/i.test(path)))throw Error();accessSync(path,constants.X_OK);return path}catch{throw Error('Browser selection must be an existing executable file')}
+}
+export function browserFailure(value) {
+ const text=typeof value==='string'?value:''
+ let reason=null
+ if(text.startsWith('Chrome not found;'))reason='browser-not-found'
+ else if(/No usable sandbox|Running as root without --no-sandbox|SUID sandbox helper binary/.test(text))reason='browser-sandbox-unavailable'
+ else if(text.includes('Chrome closed the pipe')||text.includes('Chrome pipe closed during write'))reason='cdp-pipe-closed'
+ else if(text.includes('Chrome pipe accepted no bytes'))reason='cdp-write-zero'
+ else if(text.includes('CDP write deadline exceeded'))reason='cdp-write-timeout'
+ else if(text.startsWith('timed out: no answer to '))reason='cdp-response-timeout'
+ else if(text.startsWith('timed out: Chrome did not respond'))reason='browser-session-timeout'
+ else if(text.startsWith('CDP transport write failed:'))reason='cdp-write-failed'
+ else if(/^CDP [A-Za-z]+\.[A-Za-z]+:/.test(text))reason='cdp-protocol-error'
+ else if(text.startsWith('pipe CDP:'))reason='cdp-transport-error'
+ else if(/Connected Viewer capability probe failed|Viewer runner failed|Connected Viewer E2E failed/.test(text))reason='viewer-runner-failure'
+ else if(/No such file or directory \(os error 2\)/.test(text))reason='browser-executable-missing'
+ else if(/Permission denied \(os error 13\)|Operation not permitted \(os error 1\)/.test(text))reason='browser-permission-denied'
+ else if(text)reason='unclassified-test-error'
+ const methods=new Set(['Target.createTarget','Target.attachToTarget','Page.enable','Page.navigate','Runtime.enable','Runtime.evaluate','Runtime.callFunctionOn','Accessibility.enable','Accessibility.getFullAXTree','HeapProfiler.enable','HeapProfiler.collectGarbage'])
+ const method=[...text.matchAll(/\b[A-Za-z]+\.[A-Za-z]+\b/g)].map(match=>match[0]).find(name=>methods.has(name))||null
+ return {reason,method}
+}
 export function doctorSummary(report) {
  const number=value=>Number.isSafeInteger(value)&&value>=0&&value<=1000000?value:null
  const length=value=>Array.isArray(value)?value.length:null
@@ -34,7 +59,7 @@ export function doctorSummary(report) {
  const files=Array.isArray(report?.test?.files)?report.test.files:[]
  const testError=typeof report?.test?.error==='string'?report.test.error:''
  const errorKind=/Chrome not found/.test(testError)?'browser-unavailable':/Viewer/.test(testError)?'viewer-failure':/CDP|Chrome|browser/i.test(testError)?'browser-runner-failure':testError?'unclassified-test-error':null
- return {ok:boolean(report?.ok),checkErrors:number(report?.check?.errors),passedTests:number(report?.test?.passed),failedTests:number(report?.test?.failed),accessibilityFindings:number(report?.test?.a11y),runtimeErrors:length(report?.test?.errors),heapLeaks:length(report?.heap?.leaks),testErrorPresent:Boolean(testError),testErrorKind:errorKind,buildOk:boolean(report?.build?.ok),buildErrorPresent:typeof report?.build?.error==='string',seoOk:boolean(report?.seo?.ok),seoErrorPresent:typeof report?.seo?.error==='string',seoMinScore:number(report?.seo?.minScore),seoBelowThresholdPages:Array.isArray(report?.seo?.pages)&&Number.isSafeInteger(report?.seo?.minScore)?report.seo.pages.filter(page=>Number.isFinite(page?.score)&&page.score<report.seo.minScore).length:null,adviceErrors:Array.isArray(report?.advice)?report.advice.filter(item=>item?.level==='error').length:null,diagnosticCodes:[...codes].sort().slice(0,32),capability:capability(report?.test?.capability??report?.test?.capabilities),files:files.slice(0,16).map(file=>({engine:label(file?.engine),scenarios:length(file?.tests),failedScenarios:Array.isArray(file?.tests)?file.tests.filter(test=>test?.ok===false).length:null,loadErrorPresent:typeof file?.error==='string',accessibilityFindings:length(file?.a11y),runtimeErrors:length(file?.errors),leaks:length(file?.leaks),coverage:{accessibility:label(file?.coverage?.accessibility),heap:label(file?.coverage?.heap)},capability:capability(file?.capability??file?.capabilities)})),filesTruncated:files.length>16}
+ return {ok:boolean(report?.ok),checkErrors:number(report?.check?.errors),passedTests:number(report?.test?.passed),failedTests:number(report?.test?.failed),accessibilityFindings:number(report?.test?.a11y),runtimeErrors:length(report?.test?.errors),heapLeaks:length(report?.heap?.leaks),testErrorPresent:Boolean(testError),testErrorKind:errorKind,testErrorReason:browserFailure(testError).reason,testErrorMethod:browserFailure(testError).method,buildOk:boolean(report?.build?.ok),buildErrorPresent:typeof report?.build?.error==='string',seoOk:boolean(report?.seo?.ok),seoErrorPresent:typeof report?.seo?.error==='string',seoMinScore:number(report?.seo?.minScore),seoBelowThresholdPages:Array.isArray(report?.seo?.pages)&&Number.isSafeInteger(report?.seo?.minScore)?report.seo.pages.filter(page=>Number.isFinite(page?.score)&&page.score<report.seo.minScore).length:null,adviceErrors:Array.isArray(report?.advice)?report.advice.filter(item=>item?.level==='error').length:null,diagnosticCodes:[...codes].sort().slice(0,32),capability:capability(report?.test?.capability??report?.test?.capabilities),files:files.slice(0,16).map(file=>({engine:label(file?.engine),scenarios:length(file?.tests),failedScenarios:Array.isArray(file?.tests)?file.tests.filter(test=>test?.ok===false).length:null,loadErrorPresent:typeof file?.error==='string',accessibilityFindings:length(file?.a11y),runtimeErrors:length(file?.errors),leaks:length(file?.leaks),coverage:{accessibility:label(file?.coverage?.accessibility),heap:label(file?.coverage?.heap)},capability:capability(file?.capability??file?.capabilities)})),filesTruncated:files.length>16}
 }
 
 export function logSummary(bytes) {
@@ -45,7 +70,7 @@ export function logSummary(bytes) {
 export function publicFailure(error, fallbackPhase='setup') {
  const d=error?.detail||{},phase=typeof d.phase==='string'&&/^[a-z0-9-]{1,80}$/.test(d.phase)?d.phase:fallbackPhase
  const reasons=new Map([
-  ['Exact published version is not visible anonymously','exact-version-unavailable'],['Initializer did not install the exact version','installed-version-mismatch'],['Installed launcher escaped its own app','installed-path-escape'],['Published native compiler version mismatch','native-version-mismatch'],['Published compiler did not emit its actual build','invalid-build-output'],['Published doctor did not pass','doctor-failed'],['Invalid owned dev listener metadata','invalid-dev-metadata'],['Published dev HTTP probe did not become ready','dev-http-not-ready'],['Registry smoke deadline','deadline'],['Registry smoke cancelled or capacity exhausted','cancelled-or-capacity'],['Cannot locate the installed npm CLI JavaScript entry','npm-cli-unavailable'],['Invalid bounded smoke metadata','invalid-metadata']])
+  ['Exact published version is not visible anonymously','exact-version-unavailable'],['Initializer did not install the exact version','installed-version-mismatch'],['Installed launcher escaped its own app','installed-path-escape'],['Published native compiler version mismatch','native-version-mismatch'],['Published compiler did not emit its actual build','invalid-build-output'],['Published doctor did not pass','doctor-failed'],['Invalid owned dev listener metadata','invalid-dev-metadata'],['Published dev HTTP probe did not become ready','dev-http-not-ready'],['Registry smoke deadline','deadline'],['Registry smoke cancelled or capacity exhausted','cancelled-or-capacity'],['Cannot locate the installed npm CLI JavaScript entry','npm-cli-unavailable'],['Invalid bounded smoke metadata','invalid-metadata'],['Browser selection must be an existing executable file','invalid-browser-executable']])
  const knownReasons=new Set(['nonzero-exit','spawn','deadline','cancelled','disk-limit','structured-output-limit','exact-version-unavailable','registry-version-response-mismatch','registry-invalid-json'])
  const report={schemaVersion:1,ok:false,code:'REGISTRY_SMOKE_FAILED',phase,reason:knownReasons.has(d.reason)?d.reason:reasons.get(error?.message)||(error instanceof SyntaxError?'invalid-json':'unclassified-failure')}
  for(const key of ['exitCode','checkErrors','failedTests','retryAttempts'])if(Number.isSafeInteger(d[key])&&d[key]>=0&&d[key]<=1000000)report[key]=d[key]
@@ -53,17 +78,19 @@ export function publicFailure(error, fallbackPhase='setup') {
  if(Array.isArray(d.npmCodes))report.npmCodes=d.npmCodes.filter(code=>NPM_CODES.has(code)).slice(0,24)
  if(Array.isArray(d.diagnosticCodes))report.diagnosticCodes=d.diagnosticCodes.filter(code=>/^B[0-9]{4}$/.test(code)).slice(0,16)
  for(const key of ['browserUnavailable','browserBridgeFailed','browserProfileRequired','retainedFailureLogs'])if(d[key]===true)report[key]=true
+ if(typeof d.browserConfigured==='boolean'){report.browserConfigured=d.browserConfigured;report.browserSelection=d.browserConfigured?'explicit':'automatic'}
  if(knownReasons.has(d.lastAttemptReason))report.lastAttemptReason=d.lastAttemptReason
  if(DOCTOR_REPORTS.has(error)){report.doctor=doctorSummary(DOCTOR_REPORTS.get(error));report.diagnosticCodes=[...new Set([...(report.diagnosticCodes||[]),...report.doctor.diagnosticCodes])].slice(0,32)}
  return report
 }
-const USAGE = 'usage: node npm/smoke-registry.mjs --version <exact-version> [--timeout-ms 900000] [--no-dev] [--keep-failure-logs]\nInstalls both published initializers anonymously, then runs version/check/build/doctor and a temporary dev HTTP probe. No publication or local BRAIN_BINARY override.'
+const USAGE = 'usage: node npm/smoke-registry.mjs --version <exact-version> [--timeout-ms 900000] [--no-dev] [--keep-failure-logs] [--browser <executable>]\nInstalls both published initializers anonymously, then runs version/check/build/doctor and a temporary dev HTTP probe. No publication or local BRAIN_BINARY override.'
 export function options(args) {
   const out = { version: null, timeout: 900000, dev: true }
   if (args.length === 1 && ['--help', '-h'].includes(args[0])) return { help: true }
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--version' && out.version === null) out.version = args[++i]
     else if (args[i] === '--timeout-ms' && /^\d+$/.test(args[i + 1] || '')) out.timeout = Number(args[++i])
+    else if (args[i] === '--browser' && out.browser===undefined) out.browser=browserExecutable(args[++i])
     else if (args[i] === '--no-dev' && out.dev) out.dev = false
     else if (args[i] === '--keep-failure-logs' && !out.keepFailureLogs) out.keepFailureLogs = true
     else throw Error('Invalid registry smoke arguments')
@@ -213,9 +240,11 @@ export function httpProbe(url) {
   })
 }
 export async function smoke(config) {
+  const browser=config.browser===undefined?null:browserExecutable(config.browser)
   const root = mkdtempSync(join(tmpdir(), 'brain-registry-smoke-'))
   const active = new Set(), expires = Date.now() + config.timeout
   const env = anonymousEnvironment(root)
+  if(browser)env.BRAIN_CHROME=browser
   let cancelled = false, exhausted = false, phase='setup', preserve=false
   const cancel = () => { cancelled = true; for (const job of active) job.stop('cancelled') }
   process.once('SIGINT', cancel); process.once('SIGTERM', cancel)
@@ -282,9 +311,9 @@ export async function smoke(config) {
       }
       checks.push({ initializer: `@christianirack/${initializer}`, version: config.version, check: true, build: true, doctor: true, browserTests: doctor.test?.skipped ? 'unsupported-on-platform' : 'executed', devHttp })
     }
-    console.log(JSON.stringify({ schemaVersion: 1, ok: true, anonymous: true, registry: REGISTRY, platform: process.platform, arch: process.arch, version: config.version, checks }))
+    console.log(JSON.stringify({ schemaVersion: 1, ok: true, anonymous: true, browserConfigured:Boolean(browser), browserSelection:browser?'explicit':'automatic', registry: REGISTRY, platform: process.platform, arch: process.arch, version: config.version, checks }))
   } catch(error) {
-    error.detail={...publicFailure(error,phase),retainedFailureLogs:config.keepFailureLogs===true}
+    error.detail={...publicFailure(error,phase),browserConfigured:Boolean(browser),retainedFailureLogs:config.keepFailureLogs===true}
     if(config.keepFailureLogs){preserve=true;error.privateRoot=root;writeFileSync(join(root,'failure-summary.json'),JSON.stringify(publicFailure(error,phase),null,2)+'\n',{mode:0o600})}
     throw error
   } finally {

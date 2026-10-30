@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
-import { anonymousEnvironment, options, npmCli, childSession, httpProbe, publicFailure, logSummary, doctorSummary } from '../smoke-registry.mjs'
+import { anonymousEnvironment, options, npmCli, childSession, httpProbe, publicFailure, logSummary, doctorSummary, browserExecutable, browserFailure } from '../smoke-registry.mjs'
 
 test('registry smoke requires an exact version and a bounded deadline without running npm', () => {
   assert.equal(options(['--help']).help, true)
@@ -16,12 +16,12 @@ test('registry smoke requires an exact version and a bounded deadline without ru
   assert.equal(spawnSync(process.execPath, ['npm/smoke-registry.mjs', '--version', 'latest'], { timeout: 10000, stdio: 'pipe' }).status, 2)
 })
 test('anonymous environment drops every credential, local binary override and inherited npm config', () => {
-  const env = anonymousEnvironment('/owned/scratch', { PATH: '/usr/bin', SystemRoot: 'C:\\Windows', HOME: '/private', NPM_TOKEN: 'not-a-real-token', NODE_AUTH_TOKEN: 'not-a-real-token', NPM_CONFIG_USERCONFIG: '/private/npmrc', BRAIN_BINARY: '/local/binary', BRAIN_NO_DELEGATE: '1', OPENAI_API_KEY: 'not-a-real-key', NODE_OPTIONS: '--require /untrusted.js', GITHUB_TOKEN: 'not-a-real-token', HTTPS_PROXY: 'http://proxy.test' })
+  const env = anonymousEnvironment('/owned/scratch', { PATH: '/usr/bin', SystemRoot: 'C:\\Windows', HOME: '/private', NPM_TOKEN: 'not-a-real-token', NODE_AUTH_TOKEN: 'not-a-real-token', NPM_CONFIG_USERCONFIG: '/private/npmrc', BRAIN_BINARY: '/local/binary', BRAIN_NO_DELEGATE: '1', OPENAI_API_KEY: 'not-a-real-key', NODE_OPTIONS: '--require /untrusted.js', GITHUB_TOKEN: 'not-a-real-token', HTTPS_PROXY: 'http://proxy.test', BRAIN_CHROME: '/inherited/browser'  })
   assert.equal(env.PATH, '/usr/bin')
   assert.equal(env.NPM_CONFIG_REGISTRY, 'https://registry.npmjs.org/')
   assert.equal(env.HOME,join('/owned/scratch','home'))
   assert.equal(env.USERPROFILE,env.HOME)
-  for (const name of ['NPM_TOKEN', 'NODE_AUTH_TOKEN', 'BRAIN_BINARY', 'BRAIN_NO_DELEGATE', 'OPENAI_API_KEY', 'NODE_OPTIONS', 'GITHUB_TOKEN', 'HTTPS_PROXY']) assert.equal(env[name], undefined, name)
+  for (const name of ['NPM_TOKEN', 'NODE_AUTH_TOKEN', 'BRAIN_BINARY', 'BRAIN_NO_DELEGATE', 'OPENAI_API_KEY', 'NODE_OPTIONS', 'GITHUB_TOKEN', 'HTTPS_PROXY', 'BRAIN_CHROME']) assert.equal(env[name], undefined, name)
   assert.ok(!Object.values(env).some(value => value.includes('not-a-real-')))
 })
 test('npm discovery uses its installed JavaScript CLI without invoking a platform shell', () => {
@@ -98,4 +98,32 @@ test('actual doctor command failure projects its private report without leaking 
   })
   assert.equal(active.size,0)
  }finally{rmSync(root,{recursive:true,force:true})}
+})
+
+test('browser selection is explicit, executable and never inherited as a compiler override',()=>{
+ assert.equal(browserExecutable(process.execPath),process.execPath)
+ assert.equal(options(['--version','0.4.0','--browser',process.execPath]).browser,process.execPath)
+ assert.throws(()=>browserExecutable(tmpdir()),/existing executable/)
+ assert.throws(()=>browserExecutable('missing-owned-browser-executable'),/existing executable/)
+ assert.throws(()=>options(['--version','0.4.0','--browser']),/existing executable/)
+ const failure=Error('private failure');failure.detail={phase:'doctor-brainllm',reason:'nonzero-exit',browserConfigured:true}
+ const report=publicFailure(failure)
+ assert.equal(report.browserConfigured,true);assert.equal(report.browserSelection,'explicit')
+ assert.ok(!JSON.stringify(report).includes(process.execPath))
+})
+test('browser failures identify known CDP causes and methods without copying raw error text',()=>{
+ const secret='PRIVATE_BROWSER_ERROR_SENTINEL'
+ const cases=[
+  ['pipe CDP: Chrome closed the pipe','cdp-pipe-closed',null],
+  ['CDP transport write failed: CDP write deadline exceeded; the owned browser session was stopped','cdp-write-timeout',null],
+  [`timed out: no answer to Runtime.evaluate in 30 s (${secret})`,'cdp-response-timeout','Runtime.evaluate'],
+  [`CDP Page.navigate: ${secret}`,'cdp-protocol-error','Page.navigate'],
+  ['Running as root without --no-sandbox is not supported','browser-sandbox-unavailable',null],
+  ['Permission denied (os error 13)','browser-permission-denied',null]
+ ]
+ for(const [input,reason,method] of cases){const actual=browserFailure(input);assert.deepEqual(actual,{reason,method});assert.ok(!JSON.stringify(actual).includes(secret))}
+ assert.equal(browserFailure(secret).reason,'unclassified-test-error')
+ assert.equal(browserFailure('').reason,null)
+ const report=doctorSummary({ok:false,test:{error:`pipe CDP: Chrome closed the pipe ${secret}`},seo:{ok:true,site:[{code:'B1808',level:'info',msg:secret}]}})
+ assert.equal(report.testErrorReason,'cdp-pipe-closed');assert.equal(report.testErrorPresent,true);assert.ok(!JSON.stringify(report).includes(secret))
 })

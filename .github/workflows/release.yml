@@ -149,7 +149,7 @@ jobs:
             npm/dist/SHA256SUMS
 
   publish:
-    if: always() && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish)) && (needs.pack.result == 'success' || (inputs.artifact_run != '' && !startsWith(inputs.artifact_run, 'native:')))
+    if: always() && !cancelled() && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish)) && (needs.pack.result == 'success' || (inputs.artifact_run != '' && !startsWith(inputs.artifact_run, 'native:')))
     needs: pack
     runs-on: ubuntu-22.04
     outputs:
@@ -230,5 +230,35 @@ jobs:
         with: { node-version: 22 }
       # No OIDC permission, registry auth setup, token env or local binary override in this job.
       # The script owns its npmrc/cache/home and installs both exact-version public initializers.
+      - name: Select the disposable Linux runner browser
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          test -x "$chrome"
+          wrapper="$RUNNER_TEMP/brain-public-install-chrome"
+          printf '#!/bin/sh\nexec "%s" --no-sandbox "$@"\n' "$chrome" > "$wrapper"
+          chmod 700 "$wrapper"
+          printf 'PUBLIC_INSTALL_BROWSER=%s\n' "$wrapper" >> "$GITHUB_ENV"
+      - name: Create an owned registry-check scratch directory
+        run: node -e "require('node:fs').mkdirSync(require('node:path').join(process.env.RUNNER_TEMP,'owned-registry'),{recursive:true})"
       - name: Verify anonymous published installation and real CLI journeys
-        run: node npm/smoke-registry.mjs --version "${{ needs.publish.outputs.version }}" --timeout-ms 900000
+        env:
+          PUBLIC_VERSION: ${{ needs.publish.outputs.version }}
+          TMPDIR: ${{ runner.temp }}/owned-registry
+          TMP: ${{ runner.temp }}/owned-registry
+          TEMP: ${{ runner.temp }}/owned-registry
+        shell: bash
+        run: |
+          args=(--version "$PUBLIC_VERSION" --timeout-ms 900000 --keep-failure-logs)
+          if [[ -n "${PUBLIC_INSTALL_BROWSER:-}" ]]; then args+=(--browser "$PUBLIC_INSTALL_BROWSER"); fi
+          node npm/smoke-registry.mjs "${args[@]}"
+      - name: Preserve only the safe structured failure summary
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: registry-failure-${{ matrix.os }}
+          path: ${{ runner.temp }}/owned-registry/**/failure-summary.json
+          if-no-files-found: warn
+          retention-days: 3
