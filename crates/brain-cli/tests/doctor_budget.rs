@@ -36,7 +36,7 @@ fn budget_failure_reports_current_seo_but_never_reuses_stale_pages_after_source_
     assert!(ok, "{output}");
     let app = dir.join("app");
     // This regression is about build/SEO stage independence, not a proof of browser or heap execution.
-    fs::remove_file(app.join("counter.test.brain")).unwrap();
+    fs::remove_file(app.join("comp/counter.test.brain")).unwrap();
     fs::remove_file(app.join("views/login.test.brain")).unwrap();
     let mut config: serde_json::Value = serde_json::from_str(&fs::read_to_string(app.join("brain.json")).unwrap()).unwrap();
     config["budget"]["viewKB"] = serde_json::json!(1);
