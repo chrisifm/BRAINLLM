@@ -1630,7 +1630,8 @@ fn build_inner(
                         template_of("!forbidden").map_or(String::new(), |t| format!(",\"forbidden\":{t}"))
                     ),
                 );
-                files.insert("server.mjs".into(), server_mjs.clone());
+                files.insert("server.mjs".into(), server_mjs.replace("from './native-sockets.mjs'", "from './_server/native-sockets.mjs'"));
+                files.insert("_server/native-sockets.mjs".into(), include_str!("../../../runtime/server/native-sockets.mjs").into());
                 if let Some(shim) = &input.shim {
                     files.insert("_server/dom.js".into(), shim.clone());
                 }

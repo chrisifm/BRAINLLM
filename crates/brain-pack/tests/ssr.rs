@@ -93,6 +93,9 @@ fn ssr_and_rpc_through_the_real_server() {
     let views = vec![("/".to_string(), "views/home.brain".to_string()), ("/pick".to_string(), "views/pick.brain".to_string()), ("/users/:id".to_string(), "views/users/[id].brain".to_string()), ("/slow".to_string(), "views/slow.brain".to_string())];
     let out = brain_pack::build(&input, &views, &|_| vec![], &|_| vec![]).unwrap_or_else(|e| panic!("{e}"));
 
+    assert!(out.files["server.mjs"].contains("from './_server/native-sockets.mjs'"));
+    assert_eq!(out.files["_server/native-sockets.mjs"], include_str!("../../../runtime/server/native-sockets.mjs"));
+
     // shape of dist/
     // form posts: server.mjs loads _server/brain-form.js, which imports ./brain.js and ./brain-schema.js (raw names)
     for m in ["_server/brain-form.js", "_server/brain-schema.js", "_server/brain.js"] {

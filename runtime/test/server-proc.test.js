@@ -15,6 +15,7 @@ const { env: ENV } = process
 const dist = mkdtempSync(join(tmpdir(), 'brain-proc-'))
 mkdirSync(join(dist, '_server'), { recursive: true })
 copyFileSync(join(here, '../server/server.mjs'), join(dist, 'server.mjs'))
+copyFileSync(join(here, '../server/native-sockets.mjs'), join(dist, 'native-sockets.mjs'))
 writeFileSync(join(dist, 'index.html'), '<!doctype html><title>x</title><main><h1>Home</h1></main>')
 writeFileSync(join(dist, '_server/slow.mjs'), 'export async function wait(ctx, ms) { await new Promise(r => setTimeout(r, ms)); return { waited: ms, pid: process.pid } }\n')
 writeFileSync(join(dist, '_server/manifest.json'), JSON.stringify({ v: 1, routes: [], rpc: { s: '_server/slow.mjs' } }))

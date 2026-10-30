@@ -1727,6 +1727,22 @@ B2201 is a migration-safe warning enabled only for projects with a bounded regul
 
 ### Native server resource facade (2026-10-30)
 
+Internal Node socket bridge (0.4.1 development, 2026-10-30): `createServer({nativeSockets:true})` requires a fixed
+native loopback backend and installs only `GET <base>/_brain/socket`; the default has no Upgrade listener. Rust
+still requires its own explicit socket configuration and owns authentication, origin allowlists, frame parsing,
+heartbeat and row policy. The bridge preserves one canonical Origin and one `brain.v1` protocol, rejects queries
+and duplicate credential headers, filters native identity cookies and forwards Bearer headers without fallback.
+No request header, credential, frame or exception message enters its bounded diagnostic log.
+
+The bridge admits at most 32 connections, with 16 KiB request headers/credentials, 4 KiB initial client bytes,
+8 KiB upstream headers/initial bytes, 256 KiB queued writes per direction and 64 MiB aggregate transport bytes per
+connection. Native `pipe` backpressure, a two-second stalled-write deadline, five-second handshake deadline,
+70-second idle timeout, 15-minute lifetime
+and one-second half-close flush bound owned work. These are transport budgets, not a claim about total process
+heap. `close`, `closeAllConnections`, explicit stop and the process drain stop upgraded sockets too. Production
+places the helper under private `_server/`; the development sidecar copies its companion before importing the
+server. Public project opt-in configuration, browser subscriptions and the Rust Upgrade proxy are separate work.
+
 `nativeAuthBridge.resource` exposes a request-scoped repository via `ctx.backend.resource(name)` in both production
 SSR/RPC and the development sidecar. It shares the fixed loopback authority, connection budget, cancellation and
 HTTP schema/policy implementation with the native proxy. Only native identity cookies are forwarded; incoming

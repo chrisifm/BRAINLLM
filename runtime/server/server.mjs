@@ -19,6 +19,7 @@
 // `<!--brain:props-->` inside <script type="application/json" id="brain-props">.
 import { createServer as http, STATUS_CODES, request as httpRequest, Agent as HttpAgent } from 'node:http'
 import net from 'node:net'
+import { installNativeSockets } from './native-sockets.mjs'
 import { Readable } from 'node:stream'
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync, realpathSync, statSync, lstatSync } from 'node:fs'
@@ -389,6 +390,7 @@ export function nativeAuthBridge(raw) {
         headers: () => req.$nativeLoginHeaders || {},
       }
     },
+    _socketCookie: req => cookies(req, false),
     close() { stopped = true; for (const request of owned) request.destroy(); agent.destroy() },
   }
 }
@@ -397,6 +399,8 @@ export function createServer(o = {}) {
   const dist = resolve(o.dist || process.cwd())
   const env = Object.freeze({ ...(o.env || ENV) }) // ctx.env: what the supervisor passed, read-only
   const native = nativeAuthBridge(o.backendURL ?? env.BRAIN_BACKEND_URL)
+  if (o.nativeSockets !== undefined && typeof o.nativeSockets !== 'boolean') throw Error('nativeSockets must be an explicit boolean')
+  if (o.nativeSockets && !native) throw Error('Native sockets require a configured native backend')
   const TIMEOUT = +(o.timeout ?? env.BRAIN_TIMEOUT_MS ?? 10000)
   const LIMIT = +(o.rateLimit ?? env.BRAIN_RPC_LIMIT ?? 60) // per IP + function, per minute
   const MAX_BODY = 64 * 1024
@@ -1049,6 +1053,7 @@ export function createServer(o = {}) {
     }
   })
   if (native) server.once('close', () => native.close())
+  if (native && o.nativeSockets) server.$brainSocketStop = installNativeSockets(server,{target:o.backendURL ?? env.BRAIN_BACKEND_URL,base:BASE,cookie:native._socketCookie,log})
   server.headersTimeout = 15000
   server.requestTimeout = 30000
   return server
@@ -1426,6 +1431,7 @@ if (process.argv[1] && real(process.argv[1]) === real(fileURLToPath(import.meta.
   const drain = () => {
     if (s.draining) return
     s.draining = true
+    s.$brainSocketStop?.()
     const ms = +(ENV.BRAIN_DRAIN_MS || 10000)
     const force = setTimeout(() => {
       s.closeAllConnections()

@@ -23,6 +23,13 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   Parenthesize regex-leading expression statements so compiler-added blocks preserve lexical context. Generated
   syntax that cannot be scanned now stops compilation with an explicit generated-location diagnostic.
 
+### Internal
+
+- Add an opt-in Node Upgrade bridge for native invalidation sockets, including private production/helper
+  packaging and development sidecar copies. It delegates protocol authentication and authorization to Rust,
+  preserves trusted Origin and native credentials, and bounds connections, buffering and lifetime. Public
+  project configuration, browser subscriptions and the Rust development proxy remain separate integration work.
+
 ## [0.4.0] - 2026-10-30
 
 ### Added
