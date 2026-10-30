@@ -112,6 +112,13 @@ if (missing.length && requireAll) {
   process.exit(1)
 }
 
+// npm search ranks keywords: who we want to reach (LLM/agent builders, frontend and fullstack devs, React/Vite users)
+const KEYWORDS = [
+  'llm', 'ai', 'ai-agents', 'coding-agent', 'agentic', 'claude-code', 'cursor', 'mcp', 'model-context-protocol',
+  'frontend', 'fullstack', 'web-framework', 'framework', 'compiler', 'rust', 'fast', 'performance',
+  'react-alternative', 'vite-alternative', 'signals', 'reactive', 'components', 'ssr', 'spa', 'web',
+]
+
 // 2. launcher package
 const main = join(stage, 'brainllm')
 cpSync(join(here, 'brainllm'), main, { recursive: true })
@@ -123,7 +130,7 @@ writePkg(main, {
   files: ['bin', 'brain.schema.json', 'README.md'],
   engines: { node: '>=22' },
   optionalDependencies: Object.fromEntries(PLATFORMS.map((p) => [`${SCOPE}/brainllm-${p.key}`, version])),
-  keywords: ['framework', 'llm', 'ai', 'compiler', 'rust', 'fast', 'mcp', 'web'],
+  keywords: KEYWORDS,
 })
 
 writeFileSync(join(main, 'README.md'), npmReadme)
@@ -140,6 +147,7 @@ for (const suffix of ['brainllm', 'brainll']) {
     files: ['bin', 'README.md'],
     engines: { node: '>=22' },
     dependencies: { [`${SCOPE}/brainllm`]: version },
+    keywords: ['create', 'starter', 'template', 'scaffold', ...KEYWORDS],
   })
   writeFileSync(join(create, 'README.md'), `# ${SCOPE}/create-${suffix}\n\nThe BRAINLLM project initializer. Create an app:\n\n\`\`\`sh\nnpm create ${SCOPE}/${suffix}@latest my-app\ncd my-app\nnpm run dev\n\`\`\`\n\nRuns the same pinned BRAINLLM compiler and installs the generated app dependencies. Pass \`-- --no-install\` to skip dependency installation.\n\n` + npmReadme)
   creators.push(create)
@@ -162,6 +170,7 @@ writePkg(rt, {
   type: 'module',
   exports: { '.': './brain.js', './*': './*' },
   sideEffects: false,
+  keywords: ['runtime', 'zero-dependency', 'dom', 'router', ...KEYWORDS],
 })
 
 

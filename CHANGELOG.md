@@ -9,6 +9,12 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+### Changed
+- npm packages carry keywords for LLM, coding-agent, frontend, fullstack and React-alternative searches.
+
+### Documentation
+- The site hero shows the `npm create` command with a copy button (cbb0917).
+
 ## [0.3.1] - 2026-10-29
 
 ### Changed
