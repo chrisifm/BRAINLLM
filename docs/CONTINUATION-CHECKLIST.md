@@ -20,7 +20,7 @@ sessions. Do not merge into main automatically or reset the original checkout/in
   The production correction is verified at `f1608c622586e349fd858cf3fbf3bcf6cddadbbf`; subsequent notes-only
   commits do not replace that code evidence.
 - Corrected-source full verification: [41103502428](https://github.com/chrisifm/BRAINLLM/actions/runs/41103502428), **success**.
-- Next publication: select the newest `v0.4.0` run in the [release workflow](https://github.com/chrisifm/BRAINLLM/actions/workflows/release.yml).
+- Final publication: [41106889626](https://github.com/chrisifm/BRAINLLM/actions/runs/41106889626), source `8283d5270827c6bd9725aba24971691a12098fba`, in progress.
   Earlier run 41097781294 failed its Windows smoke and had inconsistent API state.
 - Earlier run 41096620791 was canceled before publication. The correction only selected the Linux CI browser;
   the production source and validated binary did not change. No 0.4.0 package had been published at correction time.
@@ -31,6 +31,15 @@ sessions. Do not merge into main automatically or reset the original checkout/in
 
 ### Active publication blocker (latest evidence)
 
+- Current blocker is packaging, not native execution: all seven native binaries passed version/new/check/build.
+- The final matrix produced five complete artifacts; both Windows then failed pinned license checks after checkout
+  converted LF to CRLF. The formatter correction keeps exact canonical pinned hashes and records raw lock hashes.
+- Formatter regression tests: 9/9, including real CRLF reproduction, content-tamper/BOM rejection and legacy LF
+  sidecar validation against an actual Linux artifact. No Rust/runtime/lock/source-feature changes are needed.
+- Recovery is being prepared from five verified artifacts at 8283d52 and the two verified Windows diagnostic
+  executables at f1608c6. Their compiled input trees are identical; only two unembedded notes differ.
+  Preserve each actual source SHA and artifact digest; do not claim independently rebuilt binaries are identical.
+- Windows original toolchain is rustc 1.99.1 (58cf8f9c3 2026-10-13); regenerated standard-library notices must match it.
 - Corrected source: `f1608c622586e349fd858cf3fbf3bcf6cddadbbf` on `diagnostic/windows-0.4.0`.
 - Isolated two-Windows run: [41103502488](https://github.com/chrisifm/BRAINLLM/actions/runs/41103502488).
 - Full verification of that correction: [41103502428](https://github.com/chrisifm/BRAINLLM/actions/runs/41103502428).
@@ -71,11 +80,11 @@ sessions. Do not merge into main automatically or reset the original checkout/in
 - [x] Public-source/history privacy checks, secret scan, literal embedded-source inventory and English gate.
 - [x] Corrected macOS native smoke and package-generator tests; earlier real Cargo/license sidecar and tarball audit.
   Final distribution binary/sidecar hashes must be checked again by the publication matrix.
-- [ ] Linux x64 final distribution build, smoke, notices and artifact.
-- [ ] Linux ARM64 final distribution build, smoke, notices and artifact.
-- [ ] macOS ARM64 final distribution build, smoke, notices and artifact.
-- [ ] macOS x64 final distribution build, smoke, notices and artifact.
-- [ ] Linux x64 musl final distribution build, smoke, notices and artifact.
+- [x] Linux x64 final distribution build, smoke, notices and artifact (run 41106889626).
+- [x] Linux ARM64 final distribution build, smoke, notices and artifact (run 41106889626).
+- [x] macOS ARM64 final distribution build, smoke, notices and artifact (run 41106889626).
+- [x] macOS x64 final distribution build, smoke, notices and artifact (run 41106889626).
+- [x] Linux x64 musl final distribution build, smoke, notices and artifact (run 41106889626).
 - [ ] Windows x64 final distribution build, smoke, notices and artifact.
 - [ ] Windows ARM64 final distribution build, smoke, notices and artifact.
 - [ ] Pack all seven platforms and all 11 exact-version npm packages in CI.

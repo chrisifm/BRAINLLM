@@ -1,6 +1,6 @@
 # Builds and packs all seven npm platforms. Every v* tag push publishes to npm with Trusted Publishing (OIDC, no token).
 # Manual dispatch defaults to packing only; publish=true publishes too; the npm-publish environment accepts v* tags and main.
-# artifact_run reuses a reviewed tag-run archive after verifying that only this workflow changed.
+# artifact_run supports reviewed package reuse or native:R:D recovery with exact native-input identity.
 # Reused artifacts avoid recompiling unchanged native code when recovering a publication-workflow failure.
 name: release
 
@@ -14,7 +14,7 @@ on:
         type: boolean
         default: false
       artifact_run:
-        description: Optional prior release run; source must differ only in this workflow
+        description: Prior package run, or approved native:releaseRun:diagnosticRun recovery
         type: string
         default: ''
 
@@ -75,8 +75,64 @@ jobs:
           name: brain-${{ matrix.key }}
           path: bins
 
+  recover-native:
+    if: startsWith(inputs.artifact_run, 'native:')
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - { key: darwin-arm64, os: macos-15, target: aarch64-apple-darwin }
+          - { key: darwin-x64, os: macos-15-intel, target: x86_64-apple-darwin }
+          - { key: linux-x64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
+          - { key: linux-arm64, os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu }
+          - { key: linux-x64-musl, os: ubuntu-22.04, target: x86_64-unknown-linux-musl }
+          - { key: win32-x64, os: windows-2022, target: x86_64-pc-windows-msvc, exe: .exe }
+          - { key: win32-arm64, os: windows-11-arm, target: aarch64-pc-windows-msvc, exe: .exe }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      ARTIFACT_RUN: ${{ inputs.artifact_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Validate reviewed source closure and download a digest-pinned native artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node npm/native-recovery.mjs prepare ${{ matrix.key }}
+      # Every executable is tested on its actual platform again; no Cargo build is invoked.
+      - name: Repeat the complete native smoke on the recovered executable
+        shell: bash
+        run: node npm/smoke-native.mjs bins/${{ matrix.key }}/brain${{ matrix.exe }} --diagnostic bins/${{ matrix.key }}/native-smoke-diagnostic.json > bins/${{ matrix.key }}/native-recovery-smoke.json
+      - name: Provision the exact reviewed Windows compiler copyright without rebuilding
+        if: startsWith(matrix.key, 'win32-')
+        run: rustup toolchain install 1.99.1 --profile minimal --target ${{ matrix.target }} --component rust-docs
+      - name: Regenerate all four Windows notice sidecars from the unchanged lock and exact toolchain
+        if: startsWith(matrix.key, 'win32-')
+        env:
+          RUSTUP_TOOLCHAIN: 1.99.1
+        shell: bash
+        run: |
+          cargo fetch --locked
+          node npm/cargo-notices.mjs --binary bins/${{ matrix.key }}/brain.exe --target ${{ matrix.target }}
+      - name: Require smoke, target, binary, license and source proof before packaging
+        run: node npm/native-recovery.mjs finalize ${{ matrix.key }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brain-${{ matrix.key }}
+          path: bins
+          if-no-files-found: error
+
   pack:
-    needs: build
+    needs: [build, recover-native]
+    if: always() && ((inputs.artifact_run == '' && needs.build.result == 'success') || (startsWith(inputs.artifact_run, 'native:') && needs.recover-native.result == 'success'))
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -93,7 +149,7 @@ jobs:
             npm/dist/SHA256SUMS
 
   publish:
-    if: always() && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)) && (needs.pack.result == 'success' || inputs.artifact_run != '')
+    if: always() && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)) && (needs.pack.result == 'success' || (inputs.artifact_run != '' && !startsWith(inputs.artifact_run, 'native:')))
     needs: pack
     runs-on: ubuntu-22.04
     outputs:
@@ -110,12 +166,12 @@ jobs:
       # Trusted Publishing (OIDC, no token) needs npm 11.5.1 or newer; Node 22 ships npm 10
       - run: npm install -g npm@^11.5.1 && npm --version
       - uses: actions/checkout@v4
-        if: inputs.artifact_run != ''
+        if: inputs.artifact_run != '' && !startsWith(inputs.artifact_run, 'native:')
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Validate reused release source
-        if: inputs.artifact_run != ''
+        if: inputs.artifact_run != '' && !startsWith(inputs.artifact_run, 'native:')
         env:
           GH_TOKEN: ${{ github.token }}
           REUSE_RUN: ${{ inputs.artifact_run }}
@@ -131,7 +187,7 @@ jobs:
         with:
           name: npm-packages
           path: pkgs
-          run-id: ${{ inputs.artifact_run || github.run_id }}
+          run-id: ${{ startsWith(inputs.artifact_run, 'native:') && github.run_id || inputs.artifact_run || github.run_id }}
           github-token: ${{ github.token }}
       - name: Read the exact artifact version
         id: published-version
