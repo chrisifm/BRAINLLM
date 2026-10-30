@@ -2424,6 +2424,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn explicit_native_proxy_preserves_an_absent_environment_loader_scope() {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!("brain-native-env-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir(&root).unwrap();
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+        let _cleanup = Cleanup(root.clone());
+        let opts = || Options {
+            root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: String::new(),
+            runtime: vec![], env: None, base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None,
+        };
+        let compile: CompileFn = Arc::new(|_, _| Ok(Compiled { js: String::new(), css: String::new(), deps: vec![], server_js: String::new() }));
+        let mut legacy = start_dev(opts(), compile.clone(), false, None).unwrap();
+        assert!(legacy.ctx.env_vars().is_empty(), "An absent loader must not expose ambient process variables");
+        legacy.stop();
+        drop(legacy);
+        let proxy = native_proxy::NativeProxy::new("http://127.0.0.1:9").unwrap();
+        let mut explicit = start_dev_with_native_proxy(opts(), compile, false, None, Some(proxy)).unwrap();
+        let values = explicit.ctx.env_vars();
+        // Never format the actual collection on failure: it could contain host credentials if this regresses.
+        assert!(values.len() == 1 && values[0].0 == "BRAIN_BACKEND_URL" && values[0].1 == "http://127.0.0.1:9",
+            "An explicit native authority may add only its own backend setting to an empty environment scope");
+        explicit.stop();
+    }
+
+    #[test]
     fn strip_meta_removes_only_that_tag() {
         assert_eq!(
             strip_meta(
