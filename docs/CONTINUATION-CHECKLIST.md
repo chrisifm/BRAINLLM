@@ -136,17 +136,20 @@ linked to a published release. npm remains 0.4.0. Candidate tests and an integra
   (PostgreSQL 18.6). Source fb48cf8 integrated as 171b94b; CLI defaults remain disabled through e06faf5.
 - [x] Node Upgrade bridge component completed and reviewed: fixed endpoint, filtered credentials, delegated Origin,
   bounded queues/writes/lifetime, coexistence with other Upgrade handlers and reconnect after closeAllConnections.
-  Its 89 Node tests passed. Sources 5906096 + b5d6c5f remain to be integrated; Rust embedding checks remain required.
+  Its 89 Node tests passed. Sources 5906096 + b5d6c5f are integrated as 8c6434a + fd52ab6; Rust embedding checks remain required.
 
 All new Linux results above use **Rust 1.96.1 diagnostic tooling** unless noted otherwise. They are not the final
 Rust 1.99.1 release gate and do not establish cross-platform execution or whole-application memory coverage.
 
 ## Remaining acceptance before freezing the next version
 
-- [ ] Integrate Node bridge sources 5906096 + b5d6c5f and run the actual pack/private-helper/dev-sidecar Rust tests.
+- [x] Integrate Node bridge sources 5906096 + b5d6c5f locally (8c6434a + fd52ab6).
+- [ ] Run the actual pack/private-helper/dev-sidecar Rust embedding tests on the combined tree.
 - [ ] Complete `feat/dev-native-sockets`: opaque bounded Rust dev Upgrade transport, request read-ahead metadata,
   fixed shared HTTP/SSR/socket authority, managed shutdown and preserved HTTP/HMR behavior. Coordinator-owned
-  server integration is already applied in that isolated worktree; focused TCP/Dev.stop checks are pending.
+  server integration is applied. Component 75bb2c0 passed all 64 brain-serve library tests in Linux, including
+  opaque TCP, HTTP/HMR/load and static-production shutdown. Local integration and the additional empty-context
+  environment oracle remain pending; no ambient process environment may be added to ctx.env when its loader is absent.
 - [ ] Complete `feat/native-live-client`: liveResource(resourceHandle, options), owner cleanup, principal scope,
   coalesced refresh, bounded reconnect and explicit capability/auth diagnostics. Twelve candidate Node/GC tests
   passed for lifecycle scaffolding; compiler registry, single-source configuration, CSP and integrated client remain pending.

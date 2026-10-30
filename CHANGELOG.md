@@ -11,6 +11,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Fixed
 
+- Build DOM access-path strings by appending instead of repeatedly copying their growing prefixes. Generated traversal expressions remain byte-identical; this is not a claim that browser sibling traversal is already linearized.
 - Doctor retains fresh build measurements when the payload budget fails, runs SEO against those current pages, and keeps its overall build gate failed. Source failures never reuse stale SEO output; absent test files no longer appear as a measured zero-leak result.
 - Future release publication requires the same-commit source verification job to pass, including when reusing reviewed package artifacts. Canceled runs and manual pack-only dispatch cannot publish.
 - Development 0.4.1: release change-metadata, preview-admission and legacy-writer locks explicitly when their leases end,

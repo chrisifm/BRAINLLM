@@ -950,10 +950,17 @@ fn form_field(x: &Expr) -> Option<(String, String)> {
 /// With `adopt` (#143) the same walk uses `fc(…)`/`nx(…)` from brain-hydrate.js.
 fn access(root: &str, rel: &[usize], known: &BTreeMap<Vec<usize>, String>, adopt: bool) -> String {
     let next = |mut e: String, n: usize| {
-        for _ in 0..n {
-            e = if adopt { format!("nx({e})") } else { format!("{e}.nextSibling") };
+        if adopt && n > 0 {
+            let mut out = String::new();
+            for _ in 0..n { out.push_str("nx("); }
+            out.push_str(&e);
+            for _ in 0..n { out.push(')'); }
+            out
+        } else {
+            // Append once per hop; repeatedly formatting the growing path copies its entire prefix each time.
+            for _ in 0..n { e.push_str(".nextSibling"); }
+            e
         }
-        e
     };
     let (parent, last) = rel.split_at(rel.len() - 1);
     let last = last[0];

@@ -433,6 +433,8 @@ COMPILER:
 - Signal folding: `sig` never written → constant; `drv` of constants → literal value; effects without
   reactive dependencies → a direct call on mount. No reactive node, no subscription.
 - Precomputed DOM paths: codegen emits exact `firstChild`/`nextSibling` per hole (no `querySelector`).
+  Development 0.4.1 constructs each access expression without repeatedly formatting its growing prefix; emitted
+  expressions are unchanged. Sharing additional parent references is a separate optimization, not established here.
 - Text: direct `node.data = v`; attributes with a minimal setter; equality comparison before touching the DOM.
 - (Dropped 2026-10-13) Lazy handlers per event: almost every handler closes over component state, so it cannot leave the component chunk; islands (§6.1) and `lazy` components (§22) already defer code at a useful granularity.
 - Zero runtime checks in prod: types, keys and contracts are validated at build; the prod runtime carries no asserts.
