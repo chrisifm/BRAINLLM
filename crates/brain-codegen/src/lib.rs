@@ -185,10 +185,10 @@ fn compile_once(c: &Component, opts: &Options, ctx: &brain_check::Ctx, deps: Vec
     // §22: built-in `<Img>` becomes `<img>` with decoding/loading/fetchpriority set by the compiler.
     let lowered = img::lowered(c);
     let gc = lowered.as_ref().unwrap_or(c);
-    let (js, css, server_js, server_fns, i18n_keys) = generate(gc, opts, &server_srcs, inline, title_template);
+    let (js, css, server_js, server_fns, i18n_keys) = generate(gc, opts, &server_srcs, inline, title_template).map_err(|diagnostic| vec![diagnostic])?;
     let blocks = blocks::blocks(&c.src, Path::new(&c.file));
-    let (js, map) = srcmap::finish(&js, &c.file, &c.src, opts.dev && !js.is_empty());
-    let (server_js, _) = srcmap::finish(&server_js, &c.file, &c.src, opts.dev && !server_js.is_empty());
+    let (js, map) = srcmap::finish(&js, &c.file, &c.src, opts.dev && !js.is_empty()).map_err(|diagnostic| vec![diagnostic])?;
+    let (server_js, _) = srcmap::finish(&server_js, &c.file, &c.src, opts.dev && !server_js.is_empty()).map_err(|diagnostic| vec![diagnostic])?;
     Ok(Output { js, css, deps, warnings: diags, names: names(c), server_js, server_fns, blocks, map, i18n_keys })
 }
 
@@ -1166,7 +1166,7 @@ fn head_html(g: &mut Gen, nodes: &[Node]) -> String {
     format!("(($esc) => `{}`)((v) => String(v ?? \"\").replace(/[&<>\"]/g, (c) => \"&#\" + c.charCodeAt(0) + \";\"))", s.trim())
 }
 
-fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline: HashMap<String, inline::Inline>, title_template: Option<String>) -> (String, String, String, Vec<String>, Vec<String>) {
+fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline: HashMap<String, inline::Inline>, title_template: Option<String>) -> Result<(String, String, String, Vec<String>, Vec<String>), Diag> {
     let mut top = scope::top_bindings(c);
     let (folded, folded_fx) = if opts.dev || c.kind != FileKind::Component { (HashSet::new(), HashSet::new()) } else { fold_plan(c) };
     for n in &folded {
@@ -1263,9 +1263,9 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
     if g.module {
         let js = generate_module(&mut g, c, opts);
         if c.meta.iter().any(|m| m.name == "server") {
-            return (String::new(), String::new(), js, Vec::new(), g.i18n_keys.into_iter().collect());
+            return Ok((String::new(), String::new(), js, Vec::new(), g.i18n_keys.into_iter().collect()));
         }
-        return (js, String::new(), String::new(), Vec::new(), g.i18n_keys.into_iter().collect());
+        return Ok((js, String::new(), String::new(), Vec::new(), g.i18n_keys.into_iter().collect()));
     }
     let (server_js, server_fns) = generate_server(&mut g, c, opts);
     // Private server checkpoints are imported by server_js itself, never leaked into the browser module.
@@ -1450,6 +1450,8 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
         for (start,end) in hmr_literals.iter().rev(){wiring.replace_range(*start..*end,"\"__brain_static_template__\"");}
         // Exact bounded code equality is the proof: no lossy fingerprint can authorize a DOM patch.
         if wiring.len()<=65536 {
+            // Canonicalize compiler comments before quoting; author literal contents remain untouched.
+            let wiring = srcmap::strip(&wiring, &c.file)?;
             let templates=g.templates.iter().map(|html|js_str(html)).collect::<Vec<_>>().join(",");
             js.insert_str(hmr_export_at,&format!("{name}.$hmr = {{ version: 1, wiring: {}, templates: [{templates}] }};\n",js_str(&wiring)));
         }
@@ -1481,7 +1483,7 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
         }
         js.push_str(&format!("define({}, {name}, {});\n", js_str(&tag), js_str(&plain)));
     }
-    (js, css, server_js, server_fns, g.i18n_keys.into_iter().collect())
+    Ok((js, css, server_js, server_fns, g.i18n_keys.into_iter().collect()))
 }
 
 /// Scoped CSS of a component: its `<style>` with mixins expanded, inside `@layer <level>` and `@scope` by `hash`.

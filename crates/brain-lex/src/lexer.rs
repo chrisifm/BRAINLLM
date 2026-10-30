@@ -165,10 +165,22 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn next_token(&mut self) -> Result<Token, Diag> {
+        self.next_token_located(true)
+    }
+
+    /// The same tokenization with byte ranges only: successful token spans have zero line/column.
+    /// Consumers that only need token boundaries avoid repeatedly counting Unicode columns on long lines.
+    /// Errors still carry the normal exact line and column; lexer state and snapshots are unchanged.
+    pub fn next_token_bytes(&mut self) -> Result<Token, Diag> {
+        self.next_token_located(false)
+    }
+
+    fn next_token_located(&mut self, located: bool) -> Result<Token, Diag> {
         let nl_before = self.skip_trivia()?;
         let start = self.pos;
         let Some(c) = self.peek() else {
-            return Ok(Token { tok: Tok::Eof, span: self.span(start, start), nl_before });
+            let span = if located { self.span(start, start) } else { Span { start: start as u32, end: start as u32, line: 0, col: 0 } };
+            return Ok(Token { tok: Tok::Eof, span, nl_before });
         };
         let tok = if is_ident_start(c) {
             self.ident()
@@ -194,7 +206,8 @@ impl<'a> Lexer<'a> {
             Tok::TplHead(_) | Tok::TplMiddle(_) => true,
             _ => false,
         };
-        Ok(Token { tok, span: self.span(start, self.pos), nl_before })
+        let span = if located { self.span(start, self.pos) } else { Span { start: start as u32, end: self.pos as u32, line: 0, col: 0 } };
+        Ok(Token { tok, span, nl_before })
     }
 
     fn ident(&mut self) -> Tok {
@@ -456,6 +469,42 @@ mod tests {
         let t = lx.next_token().unwrap();
         assert_eq!(t.tok, Tok::Ident("π".into()));
         assert_eq!((t.span.line, t.span.col), (2, 7));
+    }
+
+    #[test]
+    fn byte_only_tokens_preserve_ranges_grammar_and_newlines() {
+        let src = "const π = {label: 'naïve 😀'};\n/* note */const value = `text ${(() => { return /[/*@L71*/]/.source })()} tail`;";
+        let idx = LineIndex::new(src);
+        let mut normal = Lexer::new(src, "t.brain", &idx, 0, src.len());
+        let mut bytes = Lexer::new(src, "t.brain", &idx, 0, src.len());
+        loop {
+            let located = normal.next_token().unwrap();
+            let unlocated = bytes.next_token_bytes().unwrap();
+            assert_eq!(located.tok, unlocated.tok);
+            assert_eq!(located.nl_before, unlocated.nl_before);
+            assert_eq!((located.span.start, located.span.end), (unlocated.span.start, unlocated.span.end));
+            assert_eq!((unlocated.span.line, unlocated.span.col), (0, 0));
+            if located.tok == Tok::Eof { break; }
+        }
+    }
+
+    #[test]
+    fn byte_only_token_errors_keep_exact_unicode_locations() {
+        let src = "const π = 'naïve';\nconst obj = {π: 'bad";
+        let idx = LineIndex::new(src);
+        let mut normal = Lexer::new(src, "t.brain", &idx, 0, src.len());
+        let mut bytes = Lexer::new(src, "t.brain", &idx, 0, src.len());
+        loop {
+            match (normal.next_token(), bytes.next_token_bytes()) {
+                (Ok(a), Ok(b)) => { assert_eq!(a.tok, b.tok); assert_ne!(a.tok, Tok::Eof); }
+                (Err(a), Err(b)) => {
+                    assert_eq!(a, b);
+                    assert_eq!((b.line, b.col), (2, 17));
+                    break;
+                }
+                tokens => panic!("byte-only lexing diverged: {tokens:?}"),
+            }
+        }
     }
 
     #[test]

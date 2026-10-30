@@ -571,8 +571,8 @@ impl Gen<'_> {
             }
             Stmt::Expr { expr, .. } => {
                 let e = self.expr(expr);
-                // An expression statement may not start with `{`, `function` or `class`.
-                let e = if e.starts_with('{') || e.starts_with("function") || e.starts_with("async function") { format!("({e})") } else { e };
+                // Parenthesize ambiguous statement starts, including regex after an emitter-added block.
+                let e = if e.starts_with(['{', '/']) || e.starts_with("function") || e.starts_with("async function") { format!("({e})") } else { e };
                 format!("{p}{e};\n")
             }
             Stmt::If { test, cons, alt, .. } => {

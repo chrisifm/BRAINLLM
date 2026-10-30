@@ -521,6 +521,21 @@ build version and browser. Dedupe by fingerprint + send limit. The failing compo
 --report=/path` sends via `navigator.sendBeacon` to the app's own endpoint; `brain errors serve` is a minimal
 collector (SQLite) with the same UI as the debugger. Inputs and cookies are never included.
 
+**Source-map marker ownership (0.4.1 development):** `finish` consumes framework-emitted JavaScript, never
+arbitrary JavaScript or foreign ESM. The BrainScript parser discards author JavaScript comments; its AST has no
+raw-code or comment escape hatch. The emitter's exact `/*@L<positive canonical u32>*/` comments are therefore
+owned mapping directives. The framework's own lexer identifies comment trivia while keeping strings, regular
+expressions and template text opaque; template substitutions are scanned normally, including nested function
+bodies. Regex-leading expression statements are parenthesized by the emitter so inserted `if`/`for` blocks
+do not change lexical context. Byte-only token scanning omits successful-token columns, while errors retain
+exact generated coordinates. Before HMR wiring becomes quoted metadata, the same scan strips compiler
+comments from that code, preserving author literals; the existing 64 KiB wiring eligibility bound is unchanged.
+This additional scan is limited to eligible development metadata, with no second generation or extra map/base64.
+Marker-shaped quoted HTML/CSS, inlined child text and public environment constants remain data. Author
+comment lookalikes cannot change source lines. Generation remains one pass; maps remain line-level, not precise
+columns. If generated syntax cannot be lexed, compilation fails with the real lexer diagnostic at a virtual
+`generated:<component>` location, explicit compiler-defect feedback and no author-source edits.
+
 ## 19. Native Chrome features leveraged (fixed 2026-10-13)
 Rule: always feature detection; in browsers without the feature the classic path is used and nothing breaks.
 The `.brain` author writes nothing different: the compiler or the runtime applies it.

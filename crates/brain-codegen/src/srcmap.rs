@@ -1,6 +1,75 @@
 //! INTERNALS §18: errors point at `.brain` lines. While generating, the codegen prefixes statements with
 //! `/*@L<line>*/` markers (source line of what follows); [`finish`] strips them and builds a Source Map v3 that
 //! maps every generated line to the `.brain` line of the nearest marker above it.
+//!
+//! Input is the framework emitter's output, never arbitrary or foreign JavaScript: author JavaScript comments
+//! were discarded by the BrainScript parser. Marker-looking data survives in strings, template pieces, regexes
+//! and quoted HTML/CSS, so only exact marker comments in the own lexer's trivia may act as directives.
+
+struct Marker {
+    start: usize,
+    end: usize,
+    line: u32,
+}
+
+fn trivia_markers(js: &str, mut at: usize, end: usize, markers: &mut Vec<Marker>) {
+    while at < end {
+        let rest = &js[at..end];
+        if rest.starts_with("//") {
+            at += rest.find('\n').map_or(rest.len(), |n| n + 1);
+        } else if rest.starts_with("/*") {
+            let Some(close) = rest[2..].find("*/").map(|n| n + 2) else { return };
+            if let Some(number) = rest[2..close].strip_prefix("@L")
+                && !number.starts_with('0')
+                && !number.is_empty()
+                && number.bytes().all(|byte| byte.is_ascii_digit())
+                && let Ok(line) = number.parse::<u32>()
+            {
+                markers.push(Marker { start: at, end: at + close + 2, line });
+            }
+            at += close + 2;
+        } else {
+            at += rest.chars().next().expect("nonempty trivia").len_utf8();
+        }
+    }
+}
+
+/// Literal/template/regex token ranges are opaque. Template substitutions are normal tokens again, including
+/// nested function bodies; their owned statement markers must still be stripped and mapped.
+fn emitted_markers(js: &str, file: &str) -> Result<Vec<Marker>, brain_lex::Diag> {
+    if !js.contains("/*@L") { return Ok(Vec::new()); }
+    let index = brain_lex::LineIndex::new(js);
+    let generated = format!("generated:{file}");
+    let mut lexer = brain_lex::Lexer::new(js, &generated, &index, 0, js.len());
+    let mut previous = 0;
+    let mut markers = Vec::new();
+    loop {
+        let token = lexer.next_token_bytes().map_err(|mut diagnostic| {
+            diagnostic.msg = format!("Framework-generated JavaScript could not be scanned for source maps: {}", diagnostic.msg);
+            diagnostic.fix = format!("Report a compiler defect with component `{file}` and this generated JavaScript location; it is not an author source location. Do not edit generated output.");
+            diagnostic.edits.clear();
+            diagnostic
+        })?;
+        trivia_markers(js, previous, token.span.start as usize, &mut markers);
+        if matches!(token.tok, brain_lex::Tok::Eof) { break; }
+        previous = token.span.end as usize;
+    }
+    Ok(markers)
+}
+
+/// Canonical compiler-owned code before it becomes quoted metadata (for example HMR wiring).
+/// Literal contents remain opaque, just as they do in the final source-map pass.
+pub(crate) fn strip(js: &str, file: &str) -> Result<String, brain_lex::Diag> {
+    let markers = emitted_markers(js, file)?;
+    let mut out = String::with_capacity(js.len());
+    let mut previous = 0;
+    for marker in markers {
+        out.push_str(&js[previous..marker.start]);
+        previous = marker.end;
+    }
+    out.push_str(&js[previous..]);
+    Ok(out)
+}
 
 /// Marker for a source line (stripped by [`finish`]).
 pub(crate) fn mark(line: u32) -> String {
@@ -39,7 +108,10 @@ fn base64(data: &[u8]) -> String {
 
 /// Strips the markers from `js` and returns it with its source map (JSON). With `inline`, the map is also appended
 /// as a `sourceMappingURL` data URL (dev).
-pub(crate) fn finish(js: &str, file: &str, src: &str, inline: bool) -> (String, String) {
+pub(crate) fn finish(js: &str, file: &str, src: &str, inline: bool) -> Result<(String, String), brain_lex::Diag> {
+    let markers = emitted_markers(js, file)?;
+    let mut next_marker = 0;
+    let mut offset = 0;
     let mut out = String::with_capacity(js.len());
     let mut mappings = String::new();
     let mut current: Option<i64> = None;
@@ -49,28 +121,21 @@ pub(crate) fn finish(js: &str, file: &str, src: &str, inline: bool) -> (String, 
             out.push('\n');
             mappings.push(';');
         }
-        let mut rest = line;
         let mut clean = String::with_capacity(line.len());
-        while let Some(at) = rest.find("/*@L") {
-            clean.push_str(&rest[..at]);
-            let after = &rest[at + 4..];
-            match after.find("*/") {
-                Some(end) => {
-                    if let Ok(n) = after[..end].parse::<i64>() {
-                        // The first marker of a line wins: it is where the line's code starts.
-                        if clean.trim().is_empty() || current.is_none() {
-                            current = Some(n);
-                        }
-                    }
-                    rest = &after[end + 2..];
-                }
-                None => {
-                    clean.push_str(&rest[at..]);
-                    rest = "";
-                }
+        let mut previous = 0;
+        let end = offset + line.len();
+        while let Some(marker) = markers.get(next_marker).filter(|marker| marker.start < end) {
+            debug_assert!(marker.start >= offset && marker.end <= end);
+            clean.push_str(&line[previous..marker.start - offset]);
+            // Preserve the existing line-level convention: markers after emitted code do not replace it.
+            if clean.trim().is_empty() || current.is_none() {
+                current = Some(i64::from(marker.line));
             }
+            previous = marker.end - offset;
+            next_marker += 1;
         }
-        clean.push_str(rest);
+        clean.push_str(&line[previous..]);
+        offset = end + 1;
         out.push_str(&clean);
         if let Some(n) = current
             && !clean.trim().is_empty()
@@ -102,5 +167,40 @@ pub(crate) fn finish(js: &str, file: &str, src: &str, inline: bool) -> (String, 
         out.push_str(&base64(map.as_bytes()));
         out.push('\n');
     }
-    (out, map)
+    Ok((out, map))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exact_markers_are_trivia_not_literal_text() {
+        let js = "/*@L2*/const a = 'naïve /*@L71*/';\n/*@L3*/const b = `text /*@L72*/ ${(() => {\n/*@L4*/return /[/*@L73*/]/.source;\n})()}`;\n// /*@L999*/\n/* ordinary /*@L888*/\n/*@L5*/const c = 1;";
+        let (clean, _) = finish(js, "c.brain", "", false).unwrap();
+        for data in ["'naïve /*@L71*/'", "`text /*@L72*/", "/[/*@L73*/]/", "// /*@L999*/", "/* ordinary /*@L888*/"] {
+            assert!(clean.contains(data), "{data}: {clean}");
+        }
+        for line in [2, 3, 4, 5] { assert!(!clean.contains(&format!("/*@L{line}*/")), "{clean}"); }
+    }
+
+    #[test]
+    fn malformed_comments_do_not_become_mapping_directives() {
+        let js = "/*@L0*//*@L01*//*@L-1*//*@L4294967296*//*@Lnope*//*@L1:2*//*@L 2*/const n = 1;";
+        assert_eq!(finish(js, "c.brain", "", false).unwrap().0, js);
+        assert_eq!(finish("/*@L4294967295*/const n = 1;", "c.brain", "", false).unwrap().0, "const n = 1;");
+    }
+
+    #[test]
+    fn unknown_generated_syntax_reports_a_generated_location() {
+        let js = "/*@L3*/const unfinished = 'bad";
+        let diagnostic = finish(js, "comp/c.brain", "author source", false).unwrap_err();
+        assert_eq!(diagnostic.code, "B0001");
+        assert_eq!(diagnostic.file, "generated:comp/c.brain");
+        assert_eq!(diagnostic.line, 1);
+        assert_eq!(diagnostic.col, 27);
+        assert!(diagnostic.msg.starts_with("Framework-generated JavaScript"));
+        assert!(diagnostic.fix.contains("not an author source location"));
+        assert!(diagnostic.edits.is_empty());
+    }
 }

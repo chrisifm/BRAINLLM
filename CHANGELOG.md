@@ -15,6 +15,12 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Development 0.4.1: release change-metadata, preview-admission and legacy-writer locks explicitly when their leases end,
   including when a forked child temporarily retains the same descriptor. Contention still fails immediately;
   interrupted lock syscalls retry at most three times and other errors preserve their safe error category.
+- Preserve author strings, template text, regular-expression literals and generated HTML containing source-marker
+  lookalikes such as `/*@L71*/`. Source-map stripping recognizes only exact compiler marker comments in the
+  framework lexer's trivia; literal tokens remain data, including inlined components and public environment
+  constants. Author JavaScript comments are discarded by the parser before emission and cannot redirect maps.
+  Parenthesize regex-leading expression statements so compiler-added blocks preserve lexical context. Generated
+  syntax that cannot be scanned now stops compilation with an explicit generated-location diagnostic.
 
 ## [0.4.0] - 2026-10-30
 
