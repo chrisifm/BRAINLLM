@@ -9,6 +9,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+### Changed
+
+- Releases: every `v*` tag publishes the 11 npm packages through npm Trusted Publishing (OIDC, no stored token, no
+  approval step); `docs/NPM-RELEASE.md` describes the new flow (57264a4).
+
 ## [0.3.0] - 2026-10-29
 
 ### Added
