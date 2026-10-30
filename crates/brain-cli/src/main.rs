@@ -8,6 +8,7 @@ mod card;
 mod brand;
 mod edit;
 mod budget;
+mod build_assessment;
 #[cfg(unix)]
 mod preview;
 mod impact;
@@ -874,6 +875,12 @@ pub(crate) fn run_build(root: &Path, site: Option<String>) -> Result<BuildReport
 
 /// `run_build` reporting its phases to the terminal view (`brain build`; MCP and tests pass None).
 pub(crate) fn run_build_with(root: &Path, site: Option<String>, env_name: &str, progress: Option<&term::Progress>) -> Result<BuildReport, String> {
+    run_build_assessed_with(root, site, env_name, progress)?.into_report()
+}
+
+// An assessment retains fresh output and measured payloads when only the budget fails. Normal builds still
+// require into_report(); doctor can audit that exact output while keeping its build gate red.
+fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, progress: Option<&term::Progress>) -> Result<build_assessment::Assessment, String> {
     // environment (§36): PUBLIC_* become constants; a key with no value in it stops the build (B0720)
     env::select(root, env_name);
     // any error in the file stops the build too (B0724 malformed line, B0723 secret-shaped PUBLIC_*)
@@ -910,10 +917,12 @@ pub(crate) fn run_build_with(root: &Path, site: Option<String>, env_name: &str, 
     std::fs::create_dir_all(&dist).map_err(|e| e.to_string())?;
     // robots.txt, sitemap.xml, llms.txt, manifest and the head rewrite come from brain-seo's finish (inside bundle)
     bundle(root, &dist, site.as_deref(), env_name, &mut rep, progress)?;
-    budget::enforce(root, &rep.report)?;
-    let feedback:serde_json::Value=serde_json::from_str(&build_json(&rep).stringify()).map_err(|_|"build feedback serialization failed")?;
-    if quality::record_build(root,&feedback).is_err() {rep.warnings.push("Build succeeded but private quality feedback could not be stored; inspect brain quality refresh".into());}
-    Ok(rep)
+    let budget_error = budget::enforce(root, &rep.report).err();
+    if budget_error.is_none() {
+        let feedback:serde_json::Value=serde_json::from_str(&build_json(&rep).stringify()).map_err(|_|"build feedback serialization failed")?;
+        if quality::record_build(root,&feedback).is_err() {rep.warnings.push("Build succeeded but private quality feedback could not be stored; inspect brain quality refresh".into());}
+    }
+    Ok(build_assessment::Assessment { report: rep, budget_error })
 }
 
 /// Production hash length per file: 4 base36 chars, 5 for every file whose 4-char hash collides with another's.
@@ -1631,16 +1640,16 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
     let app = root.as_deref().map(|p| std::path::absolute(p).unwrap_or(p.to_path_buf())).and_then(|p| scaffold::find_root(&p)).or_else(|| app_root().ok());
     // the production build (§25: done = doctor exit 0 = the app ships): what fails `brain build` fails doctor too —
     // empty production keys (B0720), broken links and anchors (B1819/B1820)… — and SEO then audits that dist/
-    let (build_ok, build) = match &app {
-        Some(a) if check.get("errors") == Some(&Json::Num(0.0)) => match run_build(a, None) {
-            Ok(r) => (true, Json::obj([("ok", Json::Bool(true)), ("signature", Json::str(&r.signature)), ("files", Json::Num(r.files.len() as f64))])),
-            Err(e) => (false, Json::obj([("ok", Json::Bool(false)), ("error", Json::str(&e))])),
+    let (build_ok, fresh_output, build) = match &app {
+        Some(a) if check.get("errors") == Some(&Json::Num(0.0)) => match run_build_assessed_with(a, None, "production", None) {
+            Ok(assessment) => (assessment.budget_error.is_none(), true, assessment.doctor_json()),
+            Err(e) => (false, false, Json::obj([("ok", Json::Bool(false)), ("freshOutput", Json::Bool(false)), ("error", Json::str(&e))])),
         },
-        Some(_) => (true, Json::obj([("skipped", Json::str("check has errors; fix them first"))])),
-        None => (true, Json::obj([("skipped", Json::str("no app"))])),
+        Some(_) => (true, false, Json::obj([("freshOutput", Json::Bool(false)), ("skipped", Json::str("check has errors; fix them first"))])),
+        None => (true, false, Json::obj([("freshOutput", Json::Bool(false)), ("skipped", Json::str("no app"))])),
     };
     let (seo_ok, seo) = match &app {
-        Some(a) if build_ok && a.join("dist").is_dir() => {
+        Some(a) if fresh_output && a.join("dist").is_dir() => {
             let (code, out) = brain_seo::cli(a, &["audit".into(), "--json".into()]);
             // no .brain_env value in doctor's output (§36): the audit's absolute URLs carry PUBLIC_SITE_URL, so they
             // become paths (`https://example.com/about` → `/about`)
@@ -1650,7 +1659,7 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
             };
             (code == 0, Json::parse(&out).unwrap_or_else(|_| Json::obj([("error", Json::str(out))])))
         }
-        _ if !build_ok => (true, Json::obj([("skipped", Json::str("the build fails (see build); SEO audits the built pages"))])),
+        _ if !fresh_output => (true, Json::obj([("skipped", Json::str("no fresh build output from this doctor run; fix check/build errors before SEO can audit the current pages"))])),
         _ => (true, Json::obj([("skipped", Json::str("no dist/ yet; run `brain build` to audit SEO"))])),
     };
     let mut advice: Vec<Json> = app.as_deref().map(brain_check::doctor::doctor).unwrap_or_default().iter().filter_map(|d| Json::parse(&d.to_json()).ok()).collect();
@@ -1690,7 +1699,7 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
     let ok = errors.is_empty() && test_ok && build_ok && seo_ok && env_ok && bar_ok;
     // leaks found while the tests ran (each also fails its test file): B0601 / B0602 with their fix
     let heap = match test.get("files") {
-        Some(Json::Arr(fs)) => Json::obj([(
+        Some(Json::Arr(fs)) if !fs.is_empty() => Json::obj([(
             "leaks",
             Json::Arr(fs.iter().flat_map(|f| match f.get("leaks") {
                 Some(Json::Arr(ls)) => ls.iter().map(|l| match l {

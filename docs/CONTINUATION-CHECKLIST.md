@@ -129,6 +129,9 @@ published 0.4.0 packages. Check off integration only after reviewing the diff an
 - [x] Make manual publish=false remain pack-only even on tags, preserving automatic tag-push publication. Corrected on the CI repair branch; the immutable published tag is unchanged.
 - [ ] Stabilize state/preview atomic-change leases with explicit unlock and retained-descriptor regression coverage in the next development version.
 
+- [ ] Investigate linear DOM sibling traversal in generated wiring: the source-map stress fixture emits about 586 KiB for 300 bindings/siblings through repeated nextSibling chains. Preserve fragment/conditional/list/HMR ownership and measure actual emitted bytes plus execution before claiming a speedup.
+- [ ] Complete independent doctor evidence: a failed budget stays failed while fresh SEO still runs; never audit stale dist after a source/build failure, and report heap as unmeasured when no test files run.
+
 - [ ] Fix the source-map marker collision: `brain-codegen/src/srcmap.rs::finish` must not consume an author's
   quoted/template/HTML text containing `/*@L...*/`. Reproduce first; preserve owned marker mapping and budgets.
 - [ ] Resume authenticated backend sockets/rooms only from the isolated proposal, not by restoring an old full tree.

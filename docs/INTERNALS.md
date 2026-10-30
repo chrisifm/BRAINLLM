@@ -1783,3 +1783,13 @@ write. No previous migration or drift guard was edited. Unexpected HTTP errors n
 one unqueued diagnostic job formats at most 32 KiB of stack output without formatting the underlying error value.
 Backend library 22/22 and all 15 distinct integration cases passed across full/focused PostgreSQL 18 runs; the
 compiled hook-executor scenario and the independent blocking-main-thread watchdog scenario passed separately.
+
+
+### Doctor stage evidence (development 0.4.1)
+
+Production building returns an internal assessment containing fresh output and a separate budget result.
+Normal build callers must convert that assessment through its enforcing result; a failed budget remains an error.
+Doctor may audit the fresh pages after that specific failure and includes measured route payloads/ledgers in the
+failed build section. Check/code-generation/assembly failures have no fresh-output proof, so prior dist pages are
+never presented as this run's SEO evidence. Browser tests already run before the production build. With no test
+files, heap is explicitly unmeasured rather than an empty list presented as evidence of zero leaks.
