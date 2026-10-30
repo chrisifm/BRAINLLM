@@ -43,6 +43,11 @@ export function installNativeSockets(server, {target, base='/', cookie, log}) {
     socket.end(`HTTP/1.1 ${status} Socket unavailable\r\nConnection: close\r\nCache-Control: no-store\r\nX-Request-Id: ${rid}\r\nContent-Length: 0\r\n\r\n`,()=>socket.destroy())
   }
   const upgrade = (incoming,browser,head) => {
+    const ownedPath=typeof incoming.url === 'string' && incoming.url.split(/[?#]/,1)[0] === path
+    // Other trusted listeners own their endpoints. If this is the only listener, reject unknown upgrades promptly
+    // instead of retaining a raw socket with no owner. Queries on our exact endpoint always remain ours to reject.
+    if (!ownedPath && server.listenerCount('upgrade')>1) return
+    if (browser.destroyed) return
     const rid = randomUUID()
     // A socket error can precede admission, including while a rejected response is flushing.
     browser.on('error',()=>{})
@@ -139,12 +144,13 @@ export function installNativeSockets(server, {target, base='/', cookie, log}) {
       outgoing.end()
     } catch { finish('NATIVE_SOCKET_UPSTREAM_UNAVAILABLE',502) }
   }
-  const stop = () => { if (stopped) return; stopped=true; for (const finish of [...owned]) finish() }
+  const closeOwned = () => { for (const finish of [...owned]) finish() }
+  const stop = () => { if (stopped) return; stopped=true; closeOwned() }
   installed.add(server)
   server.on('upgrade',upgrade)
   server.once('close',()=>{stop();server.removeListener('upgrade',upgrade)})
   const originalClose=server.close, originalAll=server.closeAllConnections
   server.close=function(...args){stop();return originalClose.apply(this,args)}
-  if (originalAll) server.closeAllConnections=function(...args){stop();return originalAll.apply(this,args)}
+  if (originalAll) server.closeAllConnections=function(...args){closeOwned();return originalAll.apply(this,args)}
   return stop
 }

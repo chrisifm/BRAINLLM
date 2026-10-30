@@ -1739,7 +1739,9 @@ The bridge admits at most 32 connections, with 16 KiB request headers/credential
 connection. Native `pipe` backpressure, a two-second stalled-write deadline, five-second handshake deadline,
 70-second idle timeout, 15-minute lifetime
 and one-second half-close flush bound owned work. These are transport budgets, not a claim about total process
-heap. `close`, `closeAllConnections`, explicit stop and the process drain stop upgraded sockets too. Production
+heap. Other Upgrade listeners retain their endpoints; unknown requests are rejected when this is the only
+listener. `closeAllConnections` closes current upgraded sockets but preserves new admission; `close`, explicit
+stop and the process drain stop admission permanently. Production
 places the helper under private `_server/`; the development sidecar copies its companion before importing the
 server. Public project opt-in configuration, browser subscriptions and the Rust Upgrade proxy are separate work.
 

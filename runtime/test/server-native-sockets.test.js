@@ -230,6 +230,43 @@ test('connection admission is finite and closeAllConnections also owns upgraded 
   assert.equal((await app.open()).status,503);assert.equal(app.seen.length,32)
   app.frontend.closeAllConnections()
   await until(()=>admitted.every(client=>client.closed())&&app.backendSockets.size===0)
+  const replacement=await app.open()
+  assert.equal(replacement.status,101,'closeAllConnections keeps its listener available for new upgrades')
+  assert.equal((await fetch(app.url+'/_health')).status,200)
+})
+
+test('another Upgrade endpoint retains ownership while native path queries are still rejected',{timeout:8000},async t=>{
+  const app=await fixture(t)
+  let custom=0
+  app.frontend.on('upgrade',(request,socket)=>{
+    if(request.url!=='/app/custom-socket')return
+    custom++
+    const digest=createHash('sha1').update(request.headers['sec-websocket-key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64')
+    socket.end(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${digest}\r\nSec-WebSocket-Protocol: custom.v1\r\n\r\n`)
+  })
+  const other=await app.open({path:'/app/custom-socket',protocol:'custom.v1'})
+  assert.equal(other.status,101);assert.equal(custom,1);assert.equal(app.seen.length,0)
+  assert.equal((await app.open({path:'/app/_brain/socket?token=private'})).status,400)
+  assert.equal(app.seen.length,0)
+  assert.equal((await app.open()).status,101)
+  assert.equal(app.seen.length,1)
+})
+
+test('normal upstream EOF flushes the final queued TCP bytes before both sides close',{timeout:10000},async t=>{
+  let source
+  const app=await fixture(t,{accept(request,socket){
+    source=socket
+    const digest=createHash('sha1').update(request.headers['sec-websocket-key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64')
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${digest}\r\nSec-WebSocket-Protocol: brain.v1\r\n\r\n`)
+  }})
+  const client=await app.open({streaming:true});assert.equal(client.status,101)
+  client.socket.pause()
+  const target=4*1024*1024
+  source.end(Buffer.alloc(target,122))
+  const consume=setInterval(()=>client.socket.read(16384),1)
+  try {await until(client.closed,6000)} finally {clearInterval(consume)}
+  assert.equal(client.payloadBytes(),target)
+  await until(()=>app.backendSockets.size===0)
 })
 
 test('native sockets are disabled by default and HTTP health remains available',{timeout:8000},async t=>{
