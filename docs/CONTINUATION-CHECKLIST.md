@@ -6,9 +6,9 @@ index and unrelated work. Never move the published tag or blindly retry a publis
 
 ## Current priority
 
-1. Close anonymous public-install verification on all three operating systems.
-2. Publish the prepared English GitHub release notes and update the local HTML availability report.
-3. Continue excluded work in isolated development branches, with regression evidence for each checked item.
+1. Continue the three active next-development slices below with focused regression evidence.
+2. Integrate reviewed changes in an isolated next-version branch and run the required complete gates.
+3. Preserve the verified 0.4.0 release, public notes and original checkout.
 
 ## Published checkpoint and immutable evidence
 
@@ -32,10 +32,18 @@ index and unrelated work. Never move the published tag or blindly retry a publis
   artifact recovery preserved source/toolchain provenance without rebuilding all binaries.
 - CI-only repairs are on `fix/registry-smoke-0.4.0`, not the immutable published tag. The checker now accepts the
   actual client-rendered development shell, uses portable test paths and reports safe structured failure stages.
-- [Public install verification 41119484124](https://github.com/chrisifm/BRAINLLM/actions/runs/41119484124):
-  Windows and macOS passed both initializers and their actual supported CLI journeys. Ubuntu reached doctor,
-  then its browser runner failed. Earlier Ubuntu public-install run 41118057794 passed. Investigate the runner
-  cause; do not remove doctor, accessibility or browser gates. A clean Linux ARM64 Docker install also passed.
+- Public verification 41119484124 passed Windows and macOS. Ubuntu failed Chrome startup after CI introduced
+  a long temporary directory. A differential Linux reproduction proved the cause: the same Chromium and flags
+  passed with a 14-byte temporary path, but a 70-byte temporary path aborted with "Socket path is too long".
+  The repaired workflows create a short, random, owned Linux temporary parent and remove only that parent.
+- Final verification: [41120774001](https://github.com/chrisifm/BRAINLLM/actions/runs/41120774001),
+  CI repair commit 4ab8258e40ec2f12331753191979e322b10637e7. All three hosted install jobs passed; actual success JSON was independently verified for both initializers on each system.
+  A clean Linux ARM64 Docker install already passed both public creators, check/build/doctor with actual browser
+  tests and development HTTP using the explicit browser selection. No compiler rebuild or republish is required.
+- CI helper regressions: 11/11 passed. Publisher guard: ten cases passed, including canceled tag/manual jobs,
+  manual publish=false on a tag and failed native recovery. YAML, English and diff checks passed.
+- Review proposal: [PR #10](https://github.com/chrisifm/BRAINLLM/pull/10), targeting the reviewed release branch.
+  No automatic merge into main. Full source verification 41119484085 passed before workflow-only path correction.
 - Full verification 41118057666 exposed an intermittent atomic-change lock lifecycle failure. A separate
   next-development-version worktree is addressing explicit lock release with meaningful regression coverage.
 - Rust-powered descriptions and relevant frontend/backend/CLI/framework keywords are already public.
@@ -64,10 +72,11 @@ index and unrelated work. Never move the published tag or blindly retry a publis
 - [x] Windows ARM64 recovered executable, repeated native smoke, exact-toolchain notices and artifact (41113503223).
 - [x] Pack all seven platforms and all 11 exact-version npm packages in CI (41113503223).
 - [x] Verify all 11 public registry versions are 0.4.0; matching integrity and provenance confirmed. Never infer this from a tag, local pack or started job.
-- [ ] Anonymous exact-version installation passes on Linux, macOS and Windows, using both initializers.
-- [ ] Publish the prepared GitHub release draft with the complete English changelog.
-- [ ] Update the local HTML report to published only after registry/install verification.
-- [ ] Record final platform durations, workflow outcome and public links here.
+- [x] Anonymous exact-version installation passes on Linux (clean ARM64 Docker), macOS and Windows (hosted CI), using both initializers. Windows browser testing is explicitly unsupported.
+- [x] Confirm all three repaired hosted install jobs in 41120774001; actual success reports verified independently.
+- [x] Publish the complete English GitHub release: https://github.com/chrisifm/BRAINLLM/releases/tag/v0.4.0 (2026-10-30 20:09:32 UTC).
+- [x] Update the local HTML report to published, including the successful three-system hosted install verification.
+- [x] Record final platform durations, actual publication outcome and public release/review links here.
 
 ## Measured platform durations
 
@@ -101,6 +110,18 @@ The inventory covers:
 - [x] Validated media, renditions, optional storage adapters, native HTTP/API and request-scoped resource access.
 - [x] Form validation, runtime budgets, browser storage, workers and optional SQLite Wasm/OPFS integration.
 - [x] Official SDK adapters/selective ESM integration, PM2/nginx templates and agent-oriented E2E tooling.
+
+## Active next-development slices
+
+All three slices use isolated branches and the next development version, 0.4.1-dev.0. They do not change the
+published 0.4.0 packages. Check off integration only after reviewing the diff and executing its actual regressions.
+
+- [ ] `fix/atomic-lock-lifecycle`: explicit state/preview lease release, bounded interrupted-lock handling and
+  retained-descriptor regressions. Implementation prepared; focused Rust verification in progress.
+- [ ] `fix/srcmap-literal-markers`: preserve author text resembling internal line markers. The published binary
+  reproduced loss of five quoted/template/HTML examples; repair and map-correctness regressions in progress.
+- [ ] `feat/resource-admin-budget`: measure and finish opt-in administrative UI generation within the existing
+  30 KiB route budget, using project-owned design components and existing resource policies.
 
 ## Continue only after publication is verified
 
