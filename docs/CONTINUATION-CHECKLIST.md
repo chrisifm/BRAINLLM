@@ -6,7 +6,7 @@ index and unrelated work. Never move the published tag or blindly retry a publis
 
 ## Current priority
 
-1. Continue the three active next-development slices below with focused regression evidence.
+1. Finish native socket end-to-end integration and the remaining next-development acceptance checks below.
 2. Integrate reviewed changes in an isolated next-version branch and run the required complete gates.
 3. Preserve the verified 0.4.0 release, public notes and original checkout.
 
@@ -44,8 +44,7 @@ index and unrelated work. Never move the published tag or blindly retry a publis
   manual publish=false on a tag and failed native recovery. YAML, English and diff checks passed.
 - Review proposal: [PR #10](https://github.com/chrisifm/BRAINLLM/pull/10), targeting the reviewed release branch.
   No automatic merge into main. Full source verification 41120330255 passed on the final helper source; all three hosted install jobs in 41120774001 passed after the workflow-only path correction.
-- Full verification 41118057666 exposed an intermittent atomic-change lock lifecycle failure. A separate
-  next-development-version worktree is addressing explicit lock release with meaningful regression coverage.
+- Full verification 41118057666 exposed an intermittent atomic-change lock lifecycle failure. The next-development integration now contains explicit lock release with focused regression coverage.
 - Rust-powered descriptions and relevant frontend/backend/CLI/framework keywords are already public.
   Directory category placement still needs the screenshot site's actual URL and classification rules.
 
@@ -111,43 +110,76 @@ The inventory covers:
 - [x] Form validation, runtime budgets, browser storage, workers and optional SQLite Wasm/OPFS integration.
 - [x] Official SDK adapters/selective ESM integration, PM2/nginx templates and agent-oriented E2E tooling.
 
-## Active next-development slices
+## Next-development implementation checkpoints
 
-All three slices use isolated branches and the next development version, 0.4.1-dev.0. They do not change the
-published 0.4.0 packages. Check off integration only after reviewing the diff and executing its actual regressions.
+Version: **0.4.1-dev.0**, branch `development/0.4.1`. Everything below is local development unless explicitly
+linked to a published release. npm remains 0.4.0. Candidate tests and an integrated complete gate are distinct.
 
-- [x] `fix/atomic-lock-lifecycle`: explicit state/preview/writer lease release, bounded interrupted-lock handling
-  and retained-descriptor regressions. Before-fix writer regression failed; after-fix changes/edit tests passed
-  15/15. Reviewed commit 5277d43 is integrated as a72edc1 on development/0.4.1; complete batch gates remain required.
-- [ ] `fix/srcmap-literal-markers`: preserve author text resembling internal line markers. The published binary
-  reproduced loss of five quoted/template/HTML examples; repair and map-correctness regressions in progress.
-- [ ] `feat/resource-admin-budget`: measure and finish opt-in administrative UI generation within the existing
-  30 KiB route budget, using project-owned design components and existing resource policies.
+- [x] Atomic state/preview/writer leases release explicitly: 15 focused tests passed, including retained-descriptor
+  contention and recovery. Source 5277d43 integrated locally as a72edc1.
+- [x] Source-marker literal corruption fixed with the existing framework lexer, one code-generation pass and
+  explicit generated-location diagnostics. Regex and HMR companion cases covered. Candidate 34/34 tests passed;
+  snapshot goldens were not edited. Source ee017de integrated as 9bed977.
+- [x] Opt-in administrative CRUD implemented with project-owned DS, guards, CAS/leases and collision refusal.
+  Plain-store specialization preserves full fallback and serialization semantics. Candidate runtime 421/421,
+  compiler/import checks 16/16 and administrative cases 5/5 passed. Sources 1c513e8 + 4d8e43f + 3fc11f6 integrated
+  as 880f8e1 + bc968ee + fc8aafd. The fixed 45-byte project-name fixture reaches **30,720 B exactly: no headroom**.
+  Do not claim that arbitrary names, fields, themes or layouts fit that reference budget.
+- [x] Doctor preserves independent fresh SEO evidence after a payload-budget failure while keeping build/overall
+  failure. It does not audit stale dist after source errors, raise the configured limit or present absent tests
+  as a measured zero-leak result. Integrated CLI regression passed on the combined tree; sources 38166e3 + 5020d9c.
+- [x] Future publication requires successful same-commit source verification, including approved archive reuse.
+  Cancellation, manual pack-only dispatch and failed native recovery remain fail-closed; three policy tests passed.
+  Sources 553d91e + 8150927. Reusable-call execution still belongs to the final complete CI acceptance.
+- [x] Native backend socket component implemented opt-in, with row/role/session revalidation, bounded admission,
+  fixed metadata, backpressure and graceful shutdown. Seven unit and four actual PostgreSQL/TCP tests passed
+  (PostgreSQL 18.6). Source fb48cf8 integrated as 171b94b; CLI defaults remain disabled through e06faf5.
+- [x] Node Upgrade bridge component completed and reviewed: fixed endpoint, filtered credentials, delegated Origin,
+  bounded queues/writes/lifetime, coexistence with other Upgrade handlers and reconnect after closeAllConnections.
+  Its 89 Node tests passed. Sources 5906096 + b5d6c5f remain to be integrated; Rust embedding checks remain required.
 
-## Continue only after publication is verified
+All new Linux results above use **Rust 1.96.1 diagnostic tooling** unless noted otherwise. They are not the final
+Rust 1.99.1 release gate and do not establish cross-platform execution or whole-application memory coverage.
 
-- [x] Make manual publish=false remain pack-only even on tags, preserving automatic tag-push publication. Corrected on the CI repair branch; the immutable published tag is unchanged.
-- [ ] Stabilize state/preview atomic-change leases with explicit unlock and retained-descriptor regression coverage in the next development version.
+## Remaining acceptance before freezing the next version
 
-- [ ] Investigate linear DOM sibling traversal in generated wiring: the source-map stress fixture emits about 586 KiB for 300 bindings/siblings through repeated nextSibling chains. Preserve fragment/conditional/list/HMR ownership and measure actual emitted bytes plus execution before claiming a speedup.
-- [ ] Complete independent doctor evidence: a failed budget stays failed while fresh SEO still runs; never audit stale dist after a source/build failure, and report heap as unmeasured when no test files run.
+- [ ] Integrate Node bridge sources 5906096 + b5d6c5f and run the actual pack/private-helper/dev-sidecar Rust tests.
+- [ ] Complete `feat/dev-native-sockets`: opaque bounded Rust dev Upgrade transport, request read-ahead metadata,
+  fixed shared HTTP/SSR/socket authority, managed shutdown and preserved HTTP/HMR behavior. Coordinator-owned
+  server integration is already applied in that isolated worktree; focused TCP/Dev.stop checks are pending.
+- [ ] Complete `feat/native-live-client`: liveResource(resourceHandle, options), owner cleanup, principal scope,
+  coalesced refresh, bounded reconnect and explicit capability/auth diagnostics. Twelve candidate Node/GC tests
+  passed for lifecycle scaffolding; compiler registry, single-source configuration, CSP and integrated client remain pending.
+- [ ] Wire one reviewed brain.json backend.origins/sockets configuration into backend startup, Node SSR manifest,
+  Rust development proxy and exact public socket origin. Preserve disabled defaults and explicit operator overrides.
+- [ ] Validate all four PM2/nginx topologies with Upgrade routing, preserving Node cookie transformation where required.
+- [ ] Run actual browser plus native PostgreSQL end-to-end CRUD/live/auth/session-switch/shutdown checks. Prefer an
+  installed connected Viewer as documented; report headless fallback, AX and heap coverage precisely.
+- [ ] Re-run administrative budget/required/no-JS cases on the final combined tree. Keep the 30 KiB reference gate;
+  do not hide the zero-headroom fixture or increase limits to pass.
+- [ ] Investigate source-map performance before any compiler-speed claim: seven paired diagnostic DEBUG runs showed
+  large-prod **72.91 to 148.55 ms (+103.74%)**, despite the functional correction. Release-profile paired measurement
+  is prepared but not executed; classify tooling/profile/inputs accurately and fix material production regressions.
+- [ ] Run final workspace/runtime/fixture/source-input/privacy/English gates on the combined source and current
+  stable Rust 1.99.1, plus a fresh frozen LLM gate for author-facing SPEC/CLI changes. No next-version publication yet.
+- [ ] Keep the original main checkout/index and all unrelated sessions intact; commits/push/review do not imply a main merge.
 
-- [ ] Fix the source-map marker collision: `brain-codegen/src/srcmap.rs::finish` must not consume an author's
-  quoted/template/HTML text containing `/*@L...*/`. Reproduce first; preserve owned marker mapping and budgets.
-- [ ] Resume authenticated backend sockets/rooms only from the isolated proposal, not by restoring an old full tree.
-  Verify authorization, bounded connections/messages, Node/Rust proxying and nginx Upgrade behavior end to end.
-- [ ] Finish optional generated administrative UI without raising the default 30 KiB route budget. Public resource
-  generation currently emits backend/client contracts; its administrative UI status is explicitly planned.
-- [ ] Reconcile remaining debt items against actual source/tests and link closure evidence. Earlier broad native-type,
-  browser-compatibility and backend checklists contain historical snapshots; do not check them wholesale.
-- [ ] Keep conservative type inference limitations explicit; full control-flow/cross-module inference is not proven.
-- [ ] Keep browser API/worklet capability checks and fallbacks explicit; not every API can be polyfilled.
-- [ ] Evaluate advanced mathematical optimization separately. General CSE, strength reduction and loop-invariant
-  hoisting are not established capabilities of this release.
-- [ ] Exact arbitrary minified-byte provenance and `brain explain-output <offset>` remain unimplemented.
-- [ ] Benchmark the release profile against a comparable workload before publishing performance comparisons.
-- [ ] For each new implementation, update this checklist, relevant contracts/docs and changelog, then run the
-  required regression/workspace/runtime/fixture/English gates and the LLM gate when author syntax changes.
+## Additional measured or explicit gaps
+
+- [ ] Linearize repeated DOM sibling paths where ownership permits: a stress fixture with 300 bindings/siblings
+  emits about 586 KiB through repeated nextSibling chains. Preserve fragment/list/HMR semantics and measure bytes,
+  browser execution and compilation before claiming a speedup.
+- [ ] Audit JWT access renewal before socket reconnection. Upgrade must not transmit refresh/Google cookies or
+  depend on Set-Cookie in a 101 response. Any automatic normal-HTTP renewal needs bounded cross-tab coordination;
+  do not silently weaken token replay detection or claim HttpOnly cookie changes are observable from JavaScript.
+- [ ] Attribute the reported application's 42 to 58 KiB payload increase from its actual doctor/ledger output.
+  The application's path/report was requested; no unknown application configuration was edited. A temporary
+  explicit 58 KiB application limit was recommended, not a framework default increase.
+- [ ] Harden legacy broad WebSocket CSP separately from native opt-in, preserving explicit third-party declarations.
+  Existing wss: policy is not evidence that self alone works in every browser.
+- [ ] Reconcile remaining debt against actual source/tests. Do not check historical native-type/browser/backend
+  lists wholesale. Full cross-module flow inference, arbitrary minified-byte provenance/explain-output and general
+  CSE/strength reduction/loop-invariant hoisting are not established by these changes.
 
 ## Resume procedure
 
