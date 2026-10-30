@@ -242,23 +242,37 @@ jobs:
           chmod 700 "$wrapper"
           printf 'PUBLIC_INSTALL_BROWSER=%s\n' "$wrapper" >> "$GITHUB_ENV"
       - name: Create an owned registry-check scratch directory
-        run: node -e "require('node:fs').mkdirSync(require('node:path').join(process.env.RUNNER_TEMP,'owned-registry'),{recursive:true})"
+        id: scratch
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import { mkdtempSync, appendFileSync } from 'node:fs'
+          import { join } from 'node:path'
+          // Linux browser IPC sockets need short paths; the random parent belongs only to this job.
+          const root = mkdtempSync(join(process.platform === 'linux' ? '/tmp' : process.env.RUNNER_TEMP, 'br-'))
+          appendFileSync(process.env.GITHUB_OUTPUT, `path=${root}\n`)
+          JS
       - name: Verify anonymous published installation and real CLI journeys
         env:
           PUBLIC_VERSION: ${{ needs.publish.outputs.version }}
-          TMPDIR: ${{ runner.temp }}/owned-registry
-          TMP: ${{ runner.temp }}/owned-registry
-          TEMP: ${{ runner.temp }}/owned-registry
+          TMPDIR: ${{ steps.scratch.outputs.path }}
+          TMP: ${{ steps.scratch.outputs.path }}
+          TEMP: ${{ steps.scratch.outputs.path }}
         shell: bash
         run: |
           args=(--version "$PUBLIC_VERSION" --timeout-ms 900000 --keep-failure-logs)
           if [[ -n "${PUBLIC_INSTALL_BROWSER:-}" ]]; then args+=(--browser "$PUBLIC_INSTALL_BROWSER"); fi
           node npm/smoke-registry.mjs "${args[@]}"
       - name: Preserve only the safe structured failure summary
-        if: failure()
+        if: failure() && steps.scratch.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: registry-failure-${{ matrix.os }}
-          path: ${{ runner.temp }}/owned-registry/**/failure-summary.json
+          path: ${{ steps.scratch.outputs.path }}/**/failure-summary.json
           if-no-files-found: warn
           retention-days: 3
+      - name: Remove only this job's registry-check scratch directory
+        if: always() && steps.scratch.outcome == 'success'
+        env:
+          OWNED_SCRATCH: ${{ steps.scratch.outputs.path }}
+        run: node -e "require('node:fs').rmSync(process.env.OWNED_SCRATCH,{recursive:true,force:true})"
