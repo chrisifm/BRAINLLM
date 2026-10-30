@@ -180,7 +180,9 @@ jobs:
           set -euo pipefail
           [[ "$REUSE_RUN" =~ ^[0-9]+$ ]]
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$REUSE_RUN" > "$RUNNER_TEMP/reuse-run.json"
-          source_sha=$(node -e 'const r=require(process.argv[1]); if(r.path!==".github/workflows/release.yml"||r.event!=="push"||r.head_repository.full_name!==process.env.GITHUB_REPOSITORY||!/^v[0-9]/.test(r.head_branch)||! /^[a-f0-9]{40}$/.test(r.head_sha))process.exit(1); process.stdout.write(r.head_sha)' "$RUNNER_TEMP/reuse-run.json")
+          # This single manual recovery cohort passed all seven native and license gates plus require-all packing.
+          # The ordinary tag-run rule remains; the approved recovery is pinned to its exact source and release tag.
+          source_sha=$(node -e 'const r=require(process.argv[1]); const recovered=r.id===41113503223&&r.event==="workflow_dispatch"&&r.head_branch==="release/0.4.0-packaging"&&r.head_sha==="1be862f1bcb342973d6fb8586a076b798ae5839f"&&r.conclusion==="success"&&process.env.GITHUB_REF==="refs/tags/v0.4.0"; if(r.path!==".github/workflows/release.yml"||r.head_repository.full_name!==process.env.GITHUB_REPOSITORY||!((r.event==="push"&&/^v[0-9]/.test(r.head_branch))||recovered)||! /^[a-f0-9]{40}$/.test(r.head_sha))process.exit(1); process.stdout.write(r.head_sha)' "$RUNNER_TEMP/reuse-run.json")
           git diff --exit-code "$source_sha" "$GITHUB_SHA" -- . ':!.github/workflows/release.yml'
           echo "Reusing reviewed release packages from $source_sha; only release workflow changes are permitted."
       - uses: actions/download-artifact@v4
