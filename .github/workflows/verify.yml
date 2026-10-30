@@ -31,4 +31,15 @@ jobs:
             sudo apt-get update
             sudo apt-get install --yes ripgrep
           fi
+      - name: Select the runner browser for real CDP checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          test -x "$chrome"
+          # Only this disposable CI runner uses the wrapper; local browser configuration is untouched.
+          wrapper="$RUNNER_TEMP/brain-ci-chrome"
+          printf '#!/bin/sh\nexec "%s" --no-sandbox "$@"\n' "$chrome" > "$wrapper"
+          chmod 700 "$wrapper"
+          printf 'BRAIN_CHROME=%s\n' "$wrapper" >> "$GITHUB_ENV"
       - run: bash scripts/verify.sh
