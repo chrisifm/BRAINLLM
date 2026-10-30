@@ -1,8 +1,10 @@
-//! brain-serve: dev server with HMR. HTTP/1.1 and WebSocket hand-written on top of `std::net`;
-//! `notify` is the only dependency (file watching). The compiler comes in as a closure
-//! so this crate is not coupled to brain-codegen.
+//! brain-serve: dev HTTP/HMR plus an opt-in opaque native socket tunnel.
+//! Native tunnels use one owned Tokio I/O worker; compiler and ordinary HTTP lifecycle remain separate.
 
 pub(crate) mod http;
+mod native_socket_proxy;
+pub use native_socket_proxy::{NativeSocketProxy, SocketProxyDiagnostic, SocketProxyStats};
+pub use server::native_proxy::NativeProxy;
 pub mod load;
 pub mod prod;
 mod route;
@@ -11,7 +13,7 @@ mod sha1;
 mod ws;
 pub mod feedback;
 
-pub use server::{serve, set_quiet, start, start_dev, CompileFn, Compiled, DiagnoseFn, Dev, EnvLoader, EventFn, Options, ProblemsFn};
+pub use server::{start_dev_with_native_proxy, serve, set_quiet, start, start_dev, CompileFn, Compiled, DiagnoseFn, Dev, EnvLoader, EventFn, Options, ProblemsFn};
 
 /// Escapes a string as a JSON literal (quotes included).
 pub fn json_str(s: &str) -> String {

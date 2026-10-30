@@ -16,6 +16,13 @@ pub(crate) struct Target {
     host: String,
 }
 impl Target {
+    pub(crate) fn address(&self) -> SocketAddr {
+        self.address
+    }
+    pub(crate) fn host(&self) -> &str {
+        &self.host
+    }
+
     pub(crate) fn parse(value: &str) -> Result<Self, String> {
         if value.is_empty()
             || value.len() > 2048
@@ -58,6 +65,59 @@ impl Target {
         })
     }
 }
+/// Fixed native authority for an explicit gateway; sockets remain opt-in.
+#[derive(Clone)]
+pub struct NativeProxy {
+    target: Target,
+    sockets: bool,
+    origins: Option<Vec<String>>,
+}
+impl NativeProxy {
+    pub fn new(url: &str) -> Result<Self, String> {
+        Ok(Self {
+            target: Target::parse(url)?,
+            sockets: false,
+            origins: None,
+        })
+    }
+    pub fn sockets(mut self, enabled: bool) -> Self {
+        self.sockets = enabled;
+        self
+    }
+    pub fn socket_origins(mut self, origins: Vec<String>) -> Result<Self, String> {
+        if origins.is_empty()
+            || origins.len() > 8
+            || origins
+                .iter()
+                .any(|origin| !crate::native_socket_proxy::valid_origin(origin))
+            || origins
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != origins.len()
+        {
+            return Err(
+                "Native sockets require 1..8 distinct canonical HTTP(S) frontend origins".into(),
+            );
+        }
+        self.origins = Some(origins);
+        Ok(self)
+    }
+    pub(crate) fn origin(&self) -> String {
+        format!("http://{}", self.target.host())
+    }
+    pub fn start_sockets(&self) -> io::Result<Option<crate::NativeSocketProxy>> {
+        if !self.sockets {
+            return Ok(None);
+        }
+        crate::NativeSocketProxy::start(self.target.clone(), self.origins.clone()).map(Some)
+    }
+}
+
+pub(crate) fn socket_cookie(header: &str) -> Result<String, &'static str> {
+    cookie_for(header, &["__Host-brain", "__Host-brain-access"]).map_err(|_| "invalid-auth-cookie")
+}
+
 pub(crate) fn read_request(
     stream: &TcpStream,
     upload_path: Option<&str>,
@@ -191,6 +251,17 @@ fn line<R: Read>(reader: &mut BufReader<R>, max: usize) -> Result<String, Failur
     String::from_utf8(bytes).map_err(|_| Failure(502, "response-header"))
 }
 fn cookie(header: &str) -> Result<String, Failure> {
+    cookie_for(
+        header,
+        &[
+            "__Host-brain",
+            "__Host-brain-access",
+            "__Host-brain-refresh",
+            "__Host-brain-google",
+        ],
+    )
+}
+fn cookie_for(header: &str, allowed: &[&str]) -> Result<String, Failure> {
     if header.len() > 16384 {
         return Err(Failure(431, "cookie-budget"));
     }
@@ -199,14 +270,7 @@ fn cookie(header: &str) -> Result<String, Failure> {
         let Some((name, value)) = part.trim().split_once('=') else {
             continue;
         };
-        if ![
-            "__Host-brain",
-            "__Host-brain-access",
-            "__Host-brain-refresh",
-            "__Host-brain-google",
-        ]
-        .contains(&name)
-        {
+        if !allowed.contains(&name) {
             continue;
         }
         if value.len() > 8192
@@ -529,6 +593,7 @@ mod tests {
     use super::*;
     fn request(method: &str) -> http::Request {
         http::Request {
+            upgrade: Default::default(),
             method: method.into(),
             path: "/api/items".into(),
             query: "limit=2".into(),

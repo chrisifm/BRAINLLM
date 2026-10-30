@@ -125,7 +125,9 @@ impl Static {
             || rel.starts_with("server.mjs")
             || rel == "_redirects"
             || rel.contains('\\')
-            || rel.split('/').any(|part| part.starts_with('.') && part != ".well-known")
+            || rel
+                .split('/')
+                .any(|part| part.starts_with('.') && part != ".well-known")
         {
             return None;
         }
@@ -151,7 +153,15 @@ impl Static {
         self.handle_with_backend(s, backend.as_deref())
     }
     /// Explicit embedding variant; existing load/handle APIs and Static fields remain unchanged.
-    pub fn handle_with_backend(&self, mut s: TcpStream, backend: Option<&str>) -> io::Result<()> {
+    pub fn handle_with_backend(&self, s: TcpStream, backend: Option<&str>) -> io::Result<()> {
+        self.handle_native(s, backend, None)
+    }
+    fn handle_native(
+        &self,
+        mut s: TcpStream,
+        backend: Option<&str>,
+        sockets: Option<&crate::NativeSocketProxy>,
+    ) -> io::Result<()> {
         let target = backend
             .filter(|s| !s.is_empty())
             .map(native_proxy::Target::parse)
@@ -180,6 +190,19 @@ impl Static {
             path.strip_prefix(&self.pre)
                 .filter(|path| path.starts_with('/'))
         };
+        if native_path == Some("/_brain/socket") {
+            req.path = "/_brain/socket".into();
+            return match sockets {
+                Some(proxy) => proxy.takeover(&mut s, &mut req),
+                None => crate::http::respond(
+                    &mut s,
+                    404,
+                    "application/json",
+                    b"{\"error\":\"Native sockets are disabled\"}",
+                    false,
+                ),
+            };
+        }
         if let (Some(target), Some(native_path)) = (target, native_path) {
             if native_proxy::handles(native_path) {
                 req.path = native_path.to_string();
@@ -471,6 +494,104 @@ fn write_headers<W: Write>(
     Ok(())
 }
 
+/// Managed static gateway. Its authority is fixed for HTTP and sockets at construction.
+/// Clone an `Arc<StaticGateway>` across request workers; dropping the last owner reaps tunnels.
+pub struct StaticGateway {
+    files: Static,
+    backend: Option<String>,
+    sockets: Option<crate::NativeSocketProxy>,
+}
+impl StaticGateway {
+    pub fn load(dist: &Path, base: &str, backend: Option<&str>) -> io::Result<Self> {
+        let backend = backend
+            .filter(|v| !v.is_empty())
+            .map(|value| {
+                native_proxy::Target::parse(value)
+                    .map(|_| value.to_owned())
+                    .map_err(io::Error::other)
+            })
+            .transpose()?;
+        let manifest = dist.join("_server/manifest.json");
+        let enabled = if !manifest.try_exists()? {
+            None
+        } else {
+            if !regular_output(dist, &manifest) {
+                return Err(io::Error::other(
+                    "Static socket manifest must be a regular owned file",
+                ));
+            }
+            let mut options = std::fs::OpenOptions::new();
+            options.read(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+            }
+            let file = options.open(&manifest)?;
+            if !file.metadata()?.is_file() {
+                return Err(io::Error::other(
+                    "Static socket manifest must remain a regular file",
+                ));
+            }
+            let mut bytes = Vec::new();
+            file.take(65537).read_to_end(&mut bytes)?;
+            if bytes.len() > 65536 {
+                return Err(io::Error::other("Static socket manifest exceeds 64 KiB"));
+            }
+            #[derive(serde::Deserialize)]
+            struct Manifest {
+                v: Option<u64>,
+                #[serde(default, rename = "nativeSockets")]
+                native_sockets: bool,
+                #[serde(rename = "publicOrigin")]
+                public_origin: Option<String>,
+            }
+            let manifest: Manifest = serde_json::from_slice(&bytes).map_err(|_| {
+                io::Error::other("Invalid static socket manifest JSON or field type")
+            })?;
+            if manifest.native_sockets {
+                if manifest.v != Some(1) {
+                    return Err(io::Error::other(
+                        "Unsupported static socket manifest version",
+                    ));
+                }
+                Some(
+                    manifest
+                        .public_origin
+                        .ok_or_else(|| io::Error::other("Static sockets require publicOrigin"))?,
+                )
+            } else {
+                None
+            }
+        };
+        let sockets = match enabled {
+            None => None,
+            Some(origin) => crate::NativeProxy::new(
+                backend
+                    .as_deref()
+                    .ok_or_else(|| io::Error::other("Static sockets require BRAIN_BACKEND_URL"))?,
+            )
+            .map_err(io::Error::other)?
+            .sockets(true)
+            .socket_origins(vec![origin])
+            .map_err(io::Error::other)?
+            .start_sockets()?,
+        };
+        Ok(Self {
+            files: Static::load(dist, base),
+            backend,
+            sockets,
+        })
+    }
+    pub fn handle(&self, stream: TcpStream) -> io::Result<()> {
+        self.files
+            .handle_native(stream, self.backend.as_deref(), self.sockets.as_ref())
+    }
+    pub fn stop(&self) -> io::Result<()> {
+        self.sockets.as_ref().map_or(Ok(()), |proxy| proxy.stop())
+    }
+}
+
 /// Serves `dist/` on `listener` until `stop` is set; one thread per connection.
 pub fn serve_static(
     listener: TcpListener,
@@ -478,11 +599,8 @@ pub fn serve_static(
     base: &str,
     stop: Arc<AtomicBool>,
 ) -> io::Result<()> {
-    let st = Arc::new(Static::load(dist, base));
     let backend = std::env::var("BRAIN_BACKEND_URL").ok();
-    if let Some(value) = backend.as_deref().filter(|s| !s.is_empty()) {
-        native_proxy::Target::parse(value).map_err(io::Error::other)?;
-    }
+    let st = Arc::new(StaticGateway::load(dist, base, backend.as_deref())?);
     let active = Arc::new(AtomicUsize::new(0));
     listener.set_nonblocking(true)?;
     while !stop.load(Ordering::Relaxed) {
@@ -514,12 +632,11 @@ pub fn serve_static(
                 }
                 let slot = Slot(active.clone());
                 let st = st.clone();
-                let backend = backend.clone();
                 let _ = std::thread::Builder::new()
                     .name("brain-static-request".into())
                     .spawn(move || {
                         let _slot = slot;
-                        let _ = st.handle_with_backend(s, backend.as_deref());
+                        let _ = st.handle(s);
                     });
             }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -528,6 +645,7 @@ pub fn serve_static(
             Err(e) => return Err(e),
         }
     }
+    st.stop()?;
     Ok(())
 }
 
@@ -537,12 +655,31 @@ mod tests {
 
     #[test]
     fn private_files_and_compressed_server_sources_are_never_public() {
-        let dist = std::env::temp_dir().join(format!("brain-prod-private-{}",std::process::id()));
+        let dist = std::env::temp_dir().join(format!("brain-prod-private-{}", std::process::id()));
         std::fs::create_dir_all(dist.join("_server")).unwrap();
         std::fs::create_dir_all(dist.join(".well-known")).unwrap();
-        for path in ["server.mjs", "server.mjs.gz", ".brain_env", "_headers", "_redirects", "_server/private.mjs", ".well-known/security.txt"] {std::fs::write(dist.join(path), "synthetic private source").unwrap();}
+        for path in [
+            "server.mjs",
+            "server.mjs.gz",
+            ".brain_env",
+            "_headers",
+            "_redirects",
+            "_server/private.mjs",
+            ".well-known/security.txt",
+        ] {
+            std::fs::write(dist.join(path), "synthetic private source").unwrap();
+        }
         let app = Static::load(&dist, "/");
-        for path in ["/server.mjs", "/server.mjs.gz", "/.brain_env", "/_headers", "/_redirects", "/_server/private.mjs"] {assert!(app.resolve(path).is_none(),"{path}");}
+        for path in [
+            "/server.mjs",
+            "/server.mjs.gz",
+            "/.brain_env",
+            "/_headers",
+            "/_redirects",
+            "/_server/private.mjs",
+        ] {
+            assert!(app.resolve(path).is_none(), "{path}");
+        }
         assert!(app.resolve("/.well-known/security.txt").is_some());
         std::fs::remove_dir_all(dist).unwrap();
     }
@@ -715,7 +852,11 @@ mod encoding_tests {
     #[test]
     fn optional_native_proxy_preserves_static_cache_head_and_base_namespace() {
         use super::Static;
-        use std::{io::{Read,Write},net::{TcpListener,TcpStream},time::Duration};
+        use std::{
+            io::{Read, Write},
+            net::{TcpListener, TcpStream},
+            time::Duration,
+        };
         let dist = std::env::temp_dir().join(format!("brain-prod-native-{}", std::process::id()));
         std::fs::create_dir_all(dist.join("_b")).unwrap();
         std::fs::write(dist.join("index.html"), "<h1>Home</h1>").unwrap();

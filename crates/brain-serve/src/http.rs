@@ -59,7 +59,16 @@ pub(crate) fn request_id() -> String {
     )
 }
 
+/// Wire facts needed only when an HTTP connection is transferred to an opaque Upgrade tunnel.
+#[derive(Default)]
+pub(crate) struct UpgradeMetadata {
+    pub version: String,
+    pub query_present: bool,
+    pub head: Vec<u8>,
+}
+
 pub struct Request {
+    pub(crate) upgrade: UpgradeMetadata,
     pub method: String,
     pub path: String,
     pub query: String,
@@ -89,7 +98,7 @@ pub fn read_request_with_uploads<R: Read>(
     upload_path: Option<&str>,
 ) -> io::Result<Request> {
     const HEADERS: usize = 32768;
-    let mut reader = BufReader::new(reader);
+    let mut reader = BufReader::with_capacity(8192, reader);
     let mut used = 0usize;
     fn line<R: Read>(reader: &mut BufReader<R>, used: &mut usize) -> io::Result<String> {
         let left = 32768usize.saturating_sub(*used);
@@ -205,7 +214,17 @@ pub fn read_request_with_uploads<R: Read>(
         .map_err(|_| io::Error::other("HTTP503 request body allocation unavailable"))?;
     body.resize(length, 0);
     reader.read_exact(&mut body)?;
+    let upgrade = UpgradeMetadata {
+        version: parts[2].into(),
+        query_present: parts[1].contains('?'),
+        head: if header("upgrade").is_some() {
+            reader.buffer().to_vec()
+        } else {
+            Vec::new()
+        },
+    };
     Ok(Request {
+        upgrade,
         method: parts[0].into(),
         path,
         query: query.into(),

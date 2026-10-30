@@ -272,6 +272,11 @@ impl Dev {
     /// Stops the accept loop and the watcher. Open connections finish on their own.
     pub fn stop(&mut self) {
         self.ctx.stop.store(true, Ordering::SeqCst);
+        if let Some(proxy) = &self.ctx.native_sockets {
+            if proxy.stop().is_err() {
+                self.ctx.log("error", "{\"schemaVersion\":1,\"code\":\"BNATIVE_SOCKET_STOP_TIMEOUT\",\"phase\":\"stop\",\"valuesCaptured\":false}".into());
+            }
+        }
         let _ = TcpStream::connect(self.addr); // wakes up the accept
         if let Some(t) = self.thread.take() {
             let _ = t.join();
@@ -285,6 +290,9 @@ impl Dev {
     }
     /// Log lines after `since` (seq) at the requested level, as JSON.
     pub fn logs(&self, since: u64, level: Option<&str>) -> String {
+        if let Some(proxy) = &self.ctx.native_sockets {
+            for item in proxy.drain_diagnostics() { self.ctx.log("error", item.to_json()); }
+        }
         let l = self.ctx.logs.lock().unwrap();
         let items: Vec<String> = l
             .iter()
@@ -315,6 +323,7 @@ impl Dev {
         let r = crate::route::resolve(&self.ctx.root, path)
             .ok_or_else(|| format!("no view for `{path}`; fix: create views{path}.brain"))?;
         let req = http::Request {
+            upgrade: Default::default(),
             method: "GET".into(),
             path: path.into(),
             query: query.into(),
@@ -348,6 +357,7 @@ impl Drop for Dev {
 
 struct Ctx {
     root: PathBuf,
+    native_sockets: Option<crate::NativeSocketProxy>,
     env: Option<EnvLoader>,
     /// resolved environment, computed once and dropped when `.brain_env` changes
     env_cache: Mutex<Option<Vec<(String, String)>>>,
@@ -407,6 +417,18 @@ pub fn start_dev(
     watch: bool,
     on_event: Option<EventFn>,
 ) -> io::Result<Dev> {
+    start_dev_with_native_proxy(opts, compile, watch, on_event, None)
+}
+
+/// An explicit native proxy fixes the HTTP, SSR and socket authority until this managed server is recreated.
+/// The legacy entry point keeps its environment-based HTTP forwarding and does not activate sockets.
+pub fn start_dev_with_native_proxy(
+    mut opts: Options,
+    compile: CompileFn,
+    watch: bool,
+    on_event: Option<EventFn>,
+    native: Option<native_proxy::NativeProxy>,
+) -> io::Result<Dev> {
     let root = opts.root.canonicalize()?;
     // If the port is taken, try the next 20 (except 0, which the OS assigns).
     let tries = if opts.port == 0 { 0 } else { 20 };
@@ -420,8 +442,20 @@ pub fn start_dev(
         })?;
     let addr = listener.local_addr()?;
     let feedback = crate::feedback::Spool::new(&root).map_err(io::Error::other)?;
+    let native_sockets = native.as_ref().map(|proxy| proxy.start_sockets()).transpose()?.flatten();
+    if let Some(proxy) = native {
+        let origin = proxy.origin();
+        let previous = opts.env.take();
+        opts.env = Some(Arc::new(move || {
+            let mut values = previous.as_ref().map(|loader| loader()).unwrap_or_default();
+            values.retain(|(name, _)| name != "BRAIN_BACKEND_URL");
+            values.push(("BRAIN_BACKEND_URL".into(), origin.clone()));
+            values
+        }));
+    }
     let ctx = Arc::new(Ctx {
         root,
+        native_sockets,
         env: opts.env,
         env_cache: Mutex::new(None),
         logs: Mutex::default(),
@@ -551,6 +585,12 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
                 );
             }
         }
+    }
+    if req.path == "/_brain/socket" {
+        return match &ctx.native_sockets {
+            Some(proxy) => proxy.takeover(&mut s, &mut req),
+            None => http::respond_with(&mut s, 404, "application/json", b"{\"code\":\"BNATIVE_SOCKET_DISABLED\"}", false, &[("Cache-Control", "no-store")]),
+        };
     }
     if native_proxy::handles(&req.path) {
         match ctx.backend_target(){
@@ -1651,6 +1691,7 @@ fn form_post(s: &mut TcpStream, ctx: &Ctx, req: &http::Request) -> io::Result<()
         Ok((422, _, state, _, _)) => {
             // re-render the page as a GET, then hand form() its state (values + errors)
             let get = http::Request {
+                upgrade: Default::default(),
                 method: "GET".into(),
                 path: req.path.clone(),
                 query: req.query.clone(),

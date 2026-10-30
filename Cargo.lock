@@ -346,6 +346,7 @@ dependencies = [
 name = "brain-serve"
 version = "0.4.1-dev.0"
 dependencies = [
+ "base64 0.23.1",
  "brain-check",
  "brain-lex",
  "brain-min",
@@ -354,6 +355,9 @@ dependencies = [
  "brain-seo",
  "libc",
  "notify",
+ "serde",
+ "serde_json",
+ "tokio",
  "url",
 ]
 

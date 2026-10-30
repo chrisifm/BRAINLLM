@@ -9,6 +9,10 @@ authors.workspace = true
 libc = "0.2.191"
 notify = "8.2.1"
 url = "2.5.8"
+serde_json = "1.0.154"
+serde = { version = "1.0.229", features = ["derive"] }
+base64 = { version = "0.23.1", default-features = false, features = ["std"] }
+tokio = { version = "1.54.1", features = ["rt", "net", "io-util", "sync", "time", "macros"] }
 brain-min = { path = "../brain-min" }
 brain-pack = { path = "../brain-pack" }
 brain-lex = { path = "../brain-lex" }
