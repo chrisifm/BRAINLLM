@@ -27,6 +27,8 @@ test('publisher requires successful source verification even for reviewed packag
     }
   }
   assert.equal(evaluate(context()), true)
+  assert.equal(evaluate(context({ needs: { pack: { result: 'failure' }, 'verify-source': { result: 'success' } } })), false)
+  assert.equal(evaluate(context({ inputs: { publish: true, artifact_run: 'native:123:456' }, needs: { pack: { result: 'skipped' }, 'verify-source': { result: 'success' } } })), false)
   assert.equal(evaluate(context({ github: { event_name: 'workflow_dispatch', ref: 'refs/tags/v0.4.1' }, inputs: { publish: true, artifact_run: '41113503223' }, needs: { pack: { result: 'skipped' }, 'verify-source': { result: 'success' } } })), true)
 })
 

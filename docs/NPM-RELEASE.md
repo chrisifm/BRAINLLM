@@ -80,3 +80,4 @@ Development 0.4.1 makes publication depend on `verify-source` as well as the pac
 no publishing credentials. Native builds may run concurrently, but a failed, skipped or canceled source gate cannot
 publish even when a reviewed package archive is reused. Manual pack-only dispatch still does not publish.
 Boolean-policy regressions exercise these failure and cancellation paths without contacting npm or publishing.
+Fresh author-facing LLM comparisons still belong to the reviewed release preflight; this job does not inherit model-provider credentials or claim to execute that evaluation.
