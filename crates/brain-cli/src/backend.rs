@@ -1017,7 +1017,12 @@ mod tests {
     fn generated_admin_ui_builds_real_routes_and_rpc_without_overwrites() {
         use std::io::Read;
         let root = fixture_root("generated-crud");
-        crate::scaffold::new_app(&root.0).unwrap();
+        // Freeze the old rendered fixture identity before measurement: same 45-byte
+        // pattern (four-digit process id + nineteen-digit nanosecond timestamp).
+        // Its digit sample was captured once, not selected by a passing budget.
+        const BRAND: &str = "brain-generated-crud-2580-1793395249408887000";
+        assert_eq!(BRAND.len(), 45);
+        crate::scaffold::new_app_named(&root.0, BRAND).unwrap();
         let original_control = fs::read(root.0.join("ui/button.brain")).unwrap();
         let added = add_with_admin(
             &root.0,

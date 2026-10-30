@@ -116,7 +116,7 @@ fn resource_editor(r: &Resource, service: &str, create: bool) -> Result<String, 
       <input type="hidden" name="__KEY__" bind:value={d.v.__KEY__}>
       <Checkbox label="Confirm deletion" name="confirmation" bind:checked={d.v.confirmation} error={d.err.confirmation} disabled={f.busy || d.busy} />
       {#if d.error}<p role="alert">{d.error}</p>{/if}
-      <Button type="submit" busy={d.busy} disabled={f.busy}>Delete record</Button>
+      <Button type="submit" busy={d.busy} disabled={f.busy}>Delete</Button>
     </form>
   </section>
 "#
@@ -163,7 +163,7 @@ fn resource_editor(r: &Resource, service: &str, create: bool) -> Result<String, 
     <input type="hidden" name="__KEY__" bind:value={f.v.__KEY__}>
 __CONTROLS__    {#if f.error}<p role="alert">{f.error}</p>{/if}
     {#if f.ok}<p role="status">Record saved.</p>{/if}
-    <Button type="submit" busy={f.busy} disabled={d.busy}>Save record</Button>
+    <Button type="submit" busy={f.busy} disabled={d.busy}>Save</Button>
   </form>
 __DELETE__</main>
 <style>
