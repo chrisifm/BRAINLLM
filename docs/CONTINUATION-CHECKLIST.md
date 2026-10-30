@@ -1,70 +1,53 @@
 # Release and continuation checklist
 
 Updated: 2026-10-30. This is the resumption entry point when a session loses context or tokens.
-Keep checkboxes tied to observed evidence. An implementation, a passing source test and a published package
-are different states. Do not mark the whole roadmap complete because this release is stable.
+Implementation, passing source tests and published packages are separate states. Preserve the original checkout,
+index and unrelated work. Never move the published tag or blindly retry a publisher.
 
 ## Current priority
 
-1. Finish publishing the frozen stable 0.4.0 checkpoint and verify public installation.
-2. Publish the English release notes and update the local HTML report with verified availability.
-3. Continue excluded work separately. Do not add features to the frozen release to delay publication.
+1. Continue the three active next-development slices below with focused regression evidence.
+2. Integrate reviewed changes in an isolated next-version branch and run the required complete gates.
+3. Preserve the verified 0.4.0 release, public notes and original checkout.
 
-Chris explicitly authorized the stable release and continuation afterward. Preserve unrelated work and other
-sessions. Do not merge into main automatically or reset the original checkout/index.
+## Published checkpoint and immutable evidence
 
-## Frozen source and publication
-
-- Release branch: `release/0.4.0-stable`.
-- Release tag: `v0.4.0`; resolve its selected commit with `git rev-parse v0.4.0^{commit}`.
-  The production correction is verified at `f1608c622586e349fd858cf3fbf3bcf6cddadbbf`; subsequent notes-only
-  commits do not replace that code evidence.
-- Corrected-source full verification: [41103502428](https://github.com/chrisifm/BRAINLLM/actions/runs/41103502428), **success**.
-- Final publication: [41106889626](https://github.com/chrisifm/BRAINLLM/actions/runs/41106889626), source `8283d5270827c6bd9725aba24971691a12098fba`, in progress.
-  Earlier run 41097781294 failed its Windows smoke and had inconsistent API state.
-- Earlier run 41096620791 was canceled before publication. The correction only selected the Linux CI browser;
-  the production source and validated binary did not change. No 0.4.0 package had been published at correction time.
-- Validated macOS ARM64 binary SHA-256:
-  `c5a264db5930a7166cfd56c91a597ce61867df74337fbd8e98ae35f6a16add3e`.
-- Original checkout remains on `main` at `5c31575`; release commits descend from `origin/main` at `a4e2cb9`.
-  The original index and working state were preserved using a separate release index.
-
-### Active publication blocker (latest evidence)
-
-- Current blocker is packaging, not native execution: all seven native binaries passed version/new/check/build.
-- The final matrix produced five complete artifacts; both Windows then failed pinned license checks after checkout
-  converted LF to CRLF. The formatter correction keeps exact canonical pinned hashes and records raw lock hashes.
-- Formatter regression tests: 9/9, including real CRLF reproduction, content-tamper/BOM rejection and legacy LF
-  sidecar validation against an actual Linux artifact. No Rust/runtime/lock/source-feature changes are needed.
-- Recovery is being prepared from five verified artifacts at 8283d52 and the two verified Windows diagnostic
-  executables at f1608c6. Their compiled input trees are identical; only two unembedded notes differ.
-  Preserve each actual source SHA and artifact digest; do not claim independently rebuilt binaries are identical.
-- Windows original toolchain is rustc 1.99.1 (58cf8f9c3 2026-10-13); regenerated standard-library notices must match it.
-- Corrected source: `f1608c622586e349fd858cf3fbf3bcf6cddadbbf` on `diagnostic/windows-0.4.0`.
-- Isolated two-Windows run: [41103502488](https://github.com/chrisifm/BRAINLLM/actions/runs/41103502488).
-- Full verification of that correction: [41103502428](https://github.com/chrisifm/BRAINLLM/actions/runs/41103502428).
-- Corrected remapped binary SHA-256: `c5a264db5930a7166cfd56c91a597ce61867df74337fbd8e98ae35f6a16add3e`.
-- Corrected binary passed native macOS new/check/build and actual Viewer/headless replay (three scenarios each);
-  no fallback/errors, full AX replay, heap not requested. Its fresh LLM cohort passed 20/20, with stable hashes and zero infrastructure failures.
-- Three focused file-URL regressions passed locally: Windows serialization oracle, real Node imports/cache busting,
-  and Unix byte/backslash round trips with explicit rejection rather than an incorrect alternate import.
-- Both Windows release builds completed, but the actual native smoke failed with compiler exit 2.
-- Exact failing subcommand is not yet known: the smoke overwrote one command log and removed its scratch in finally.
-- Preserve the gate. Safe phase/error-code feedback and a two-Windows diagnostic workflow are prepared.
-- A Windows file-URL defect is reproduced: canonical verbatim drive paths become malformed Node import URLs.
-  The correction passed both actual Windows journeys and two native file-URL regressions per platform.
-- Corrected-source gates passed: 837 Rust tests, 418 runtime tests, full CI, native Windows x64/ARM64,
-  native macOS smoke, actual Viewer/headless replay and a fresh 20/20 LLM comparison.
-  The final seven-platform distribution matrix and anonymous registry verification remain required.
-- GitHub's job status/steps endpoints are stale or return intermittent HTTP 502. Direct REST job logs established
-  these failures; do not interpret missing API steps as a successful or still-compiling job.
-- Windows x64 compilation: 8m 37s; Windows ARM64 compilation: 7m 50s. These are observed compiler timings.
-- GitHub also contradicts itself: GET says in progress, force-cancel POST says HTTP409 not in progress.
-  Treat the old run as inconsistent; do not blindly rerun a potentially publishing workflow.
-- The latest public npm version remains 0.3.1. Publication of 0.4.0 is not confirmed.
-- Metadata update prepared and package-tested: precise frontend/backend/CLI/full-stack keywords and a leading
-  Rust-powered description. Not public until the next verified package publication. Category visibility on the
-  screenshot directory still needs its actual URL/rules. Do not advertise IoT, robotics or math capabilities.
+- **All 11 npm packages are published at 0.4.0.** Exact public SHA-512 integrity matches every approved tarball;
+  all 11 registry records advertise provenance. The publisher job succeeded in
+  [41115493750](https://github.com/chrisifm/BRAINLLM/actions/runs/41115493750).
+  Its original post-publication checker failed; this does not mean publication failed. Do not republish.
+- Immutable tag `v0.4.0`: `a3c240200c25febcf8dde3cfccb3de37dd0b4987`.
+  Approved package archive: [41113503223](https://github.com/chrisifm/BRAINLLM/actions/runs/41113503223),
+  all seven native recovery gates and all 11 package archives passed. Eleven tarball and 35 native/sidecar
+  hashes were independently checked. Full packaging verification 41113508118 passed.
+- Production source f1608c622586e349fd858cf3fbf3bcf6cddadbbf and 8283d5270827c6bd9725aba24971691a12098fba
+  have identical compiled inputs; only two unembedded notes differ. Preserve actual binary source attribution.
+- Source gates: 837 Rust tests, 418 runtime tests, 53 exact invalid fixtures and four fixture-oracle tests;
+  [full verification 41103502428](https://github.com/chrisifm/BRAINLLM/actions/runs/41103502428) passed.
+- Corrected macOS ARM64 binary SHA-256: `c5a264db5930a7166cfd56c91a597ce61867df74337fbd8e98ae35f6a16add3e`.
+  Native smoke and actual Viewer/headless replay passed three scenarios each with full AX replay;
+  heap collection was not requested. Fresh matched LLM cohorts passed 20/20 before and 20/20 after.
+- Original seven-platform run 41106889626 passed all native smokes, but Windows notices failed because checkout
+  changed pinned license LF bytes to CRLF. Exact-hash canonicalization and nine regressions fixed packaging;
+  artifact recovery preserved source/toolchain provenance without rebuilding all binaries.
+- CI-only repairs are on `fix/registry-smoke-0.4.0`, not the immutable published tag. The checker now accepts the
+  actual client-rendered development shell, uses portable test paths and reports safe structured failure stages.
+- Public verification 41119484124 passed Windows and macOS. Ubuntu failed Chrome startup after CI introduced
+  a long temporary directory. A differential Linux reproduction proved the cause: the same Chromium and flags
+  passed with a 14-byte temporary path, but a 70-byte temporary path aborted with "Socket path is too long".
+  The repaired workflows create a short, random, owned Linux temporary parent and remove only that parent.
+- Final verification: [41120774001](https://github.com/chrisifm/BRAINLLM/actions/runs/41120774001),
+  CI repair commit 4ab8258e40ec2f12331753191979e322b10637e7. All three hosted install jobs passed; actual success JSON was independently verified for both initializers on each system.
+  A clean Linux ARM64 Docker install already passed both public creators, check/build/doctor with actual browser
+  tests and development HTTP using the explicit browser selection. No compiler rebuild or republish is required.
+- CI helper regressions: 11/11 passed. Publisher guard: ten cases passed, including canceled tag/manual jobs,
+  manual publish=false on a tag and failed native recovery. YAML, English and diff checks passed.
+- Review proposal: [PR #10](https://github.com/chrisifm/BRAINLLM/pull/10), targeting the reviewed release branch.
+  No automatic merge into main. Full source verification 41119484085 passed before workflow-only path correction.
+- Full verification 41118057666 exposed an intermittent atomic-change lock lifecycle failure. A separate
+  next-development-version worktree is addressing explicit lock release with meaningful regression coverage.
+- Rust-powered descriptions and relevant frontend/backend/CLI/framework keywords are already public.
+  Directory category placement still needs the screenshot site's actual URL and classification rules.
 
 ### Publication acceptance
 
@@ -85,41 +68,31 @@ sessions. Do not merge into main automatically or reset the original checkout/in
 - [x] macOS ARM64 final distribution build, smoke, notices and artifact (run 41106889626).
 - [x] macOS x64 final distribution build, smoke, notices and artifact (run 41106889626).
 - [x] Linux x64 musl final distribution build, smoke, notices and artifact (run 41106889626).
-- [ ] Windows x64 final distribution build, smoke, notices and artifact.
-- [ ] Windows ARM64 final distribution build, smoke, notices and artifact.
-- [ ] Pack all seven platforms and all 11 exact-version npm packages in CI.
-- [ ] Verify all 11 public registry versions are 0.4.0. Never infer this from a tag, local pack or started job.
-- [ ] Anonymous exact-version installation passes on Linux, macOS and Windows, using both initializers.
-- [ ] Publish the prepared GitHub release draft with the complete English changelog.
-- [ ] Update the local HTML report to published only after registry/install verification.
-- [ ] Record final platform durations, workflow outcome and public links here.
+- [x] Windows x64 recovered executable, repeated native smoke, exact-toolchain notices and artifact (41113503223).
+- [x] Windows ARM64 recovered executable, repeated native smoke, exact-toolchain notices and artifact (41113503223).
+- [x] Pack all seven platforms and all 11 exact-version npm packages in CI (41113503223).
+- [x] Verify all 11 public registry versions are 0.4.0; matching integrity and provenance confirmed. Never infer this from a tag, local pack or started job.
+- [x] Anonymous exact-version installation passes on Linux (clean ARM64 Docker), macOS and Windows (hosted CI), using both initializers. Windows browser testing is explicitly unsupported.
+- [x] Confirm all three repaired hosted install jobs in 41120774001; actual success reports verified independently.
+- [x] Publish the complete English GitHub release: https://github.com/chrisifm/BRAINLLM/releases/tag/v0.4.0 (2026-10-30 20:09:32 UTC).
+- [x] Update the local HTML report to published, including the successful three-system hosted install verification.
+- [x] Record final platform durations, actual publication outcome and public release/review links here.
 
 ## Measured platform durations
 
-Observation: 2026-10-30 17:31:48 UTC, run 41097781294. Job duration excludes queue wait and includes compile,
-native smoke, notices and artifact upload. Running values are elapsed time, not predicted completion time.
-This is one execution, not a historical average.
+Final build run 41106889626, one observation, not historical averages. Whole jobs include compilation, smoke,
+notices and artifact handling; exclude queue wait. All native smokes passed. Windows jobs failed at notices,
+then successful recovery run 41113503223 completed exact-toolchain notices and repeated native smoke.
 
-| Platform | Compile | Job | State at observation |
+| Platform | Compiler-reported release build | Whole original job | Original outcome |
 |---|---:|---:|---|
-| Linux x64 | 5m 08s | 5m 25s | Success |
-| Linux ARM64 | 4m 27s | 4m 44s | Success |
-| macOS ARM64 | 7m 20s | 7m 57s | Success |
-| macOS x64 | 11m 55s | 12m 28s | Running |
-| Linux x64 musl | 3m 41s | 4m 06s | Running |
-| Windows x64 | 1m 55s | 2m 11s | Running |
-| Windows ARM64 | — | — | Queued |
-
-### Corrected Windows diagnostic measurements
-
-Run 41103502488, corrected source f1608c6. Both platforms passed their two native URL tests and complete smoke.
-These jobs additionally include URL regression execution and compilation-cache upload, so they are not the final
-seven-platform release timings. Values are one observation, not averages.
-
-| Platform | Compile step wall time | URL regression step | Native smoke | Whole job |
-|---|---:|---:|---:|---:|
-| Windows x64 | 9m 04s | 1m 47s | 3.398s | 11m 31s |
-| Windows ARM64 | 8m 06s | 1m 40s | 3.528s | 10m 47s |
+| Linux x64 | 5m 05s | 5m 25s | Success |
+| Linux ARM64 | 4m 23s | 4m 40s | Success |
+| Linux x64 musl | 5m 28s | 6m 16s | Success |
+| macOS ARM64 | 6m 45s | 7m 17s | Success |
+| macOS x64 | 14m 29s | 15m 45s | Success |
+| Windows x64 | 8m 27s | 9m 56s | Notices failed after smoke |
+| Windows ARM64 | 7m 36s | 9m 00s | Notices failed after smoke |
 
 ## What the checkpoint includes
 
@@ -138,7 +111,22 @@ The inventory covers:
 - [x] Form validation, runtime budgets, browser storage, workers and optional SQLite Wasm/OPFS integration.
 - [x] Official SDK adapters/selective ESM integration, PM2/nginx templates and agent-oriented E2E tooling.
 
+## Active next-development slices
+
+All three slices use isolated branches and the next development version, 0.4.1-dev.0. They do not change the
+published 0.4.0 packages. Check off integration only after reviewing the diff and executing its actual regressions.
+
+- [ ] `fix/atomic-lock-lifecycle`: explicit state/preview lease release, bounded interrupted-lock handling and
+  retained-descriptor regressions. Implementation prepared; focused Rust verification in progress.
+- [ ] `fix/srcmap-literal-markers`: preserve author text resembling internal line markers. The published binary
+  reproduced loss of five quoted/template/HTML examples; repair and map-correctness regressions in progress.
+- [ ] `feat/resource-admin-budget`: measure and finish opt-in administrative UI generation within the existing
+  30 KiB route budget, using project-owned design components and existing resource policies.
+
 ## Continue only after publication is verified
+
+- [x] Make manual publish=false remain pack-only even on tags, preserving automatic tag-push publication. Corrected on the CI repair branch; the immutable published tag is unchanged.
+- [ ] Stabilize state/preview atomic-change leases with explicit unlock and retained-descriptor regression coverage in the next development version.
 
 - [ ] Fix the source-map marker collision: `brain-codegen/src/srcmap.rs::finish` must not consume an author's
   quoted/template/HTML text containing `/*@L...*/`. Reproduce first; preserve owned marker mapping and budgets.

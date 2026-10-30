@@ -51,3 +51,23 @@ References: [npm initializer resolution](https://docs.npmjs.com/cli/npm-init/),
 [public scoped packages](https://docs.npmjs.com/creating-and-publishing-scoped-public-packages/).
 
 Relative source and asset links in packaged README files are pinned to the package's v<version> tag. Package documentation therefore resolves to the same reviewed source tree even when main changes. Create the matching source tag with the release; publishing the package without that tag would leave these links unresolved.
+
+## Post-publication CI recovery (2026-10-30)
+
+Publication and consumer verification are separate jobs. A red registry-install job does not mean npm rejected the
+packages. First inspect the publisher and all exact-version registry integrity/provenance records. Never rerun a
+successful publisher, reuse a public version or move its source tag to repair a checker.
+
+Use `verify-published.yml` on the reviewed CI repair branch to test an already public version without publishing,
+packing, requesting OIDC or inheriting npm credentials. Both initializers must complete exact-version installation,
+check, production build, doctor and an actual development HTTP response. Windows currently reports browser testing
+as unsupported; do not describe that result as a successful CDP or accessibility execution.
+
+The checker owns its home, npm configuration, cache, browser profile and temporary listeners. Linux CI explicitly
+selects a disposable browser wrapper, matching the source-verification runner setup; this does not alter consumers'
+browser security configuration. Failure artifacts contain only an allowlisted structured summary, never raw doctor
+reports, application sources, user paths, environment values or caches.
+
+The repaired publisher condition requires an uncanceled run and either an actual tag-push event or explicit manual
+`publish=true`. A manual `publish=false` stays pack-only even when its selected ref is a tag. These corrections apply
+to new reviewed source commits; the already published v0.4.0 tag remains immutable and retains its historical workflow.
