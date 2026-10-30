@@ -31,11 +31,46 @@ The optional workers array contains explicit `{ "queue": "thumbnails", "concurre
 Native image ingestion has a thirty-second processing budget. Generated nginx read timeouts allow thirty-five seconds. The Node and Rust frontend proxies use thirty-five-second deadlines specifically for `/_brain/uploads` and its children; ordinary native API/media metadata routes retain ten-second deadlines. This does not introduce automatic retries or an unbounded pending queue.
 
 
-## Checkpoint limits and verification
+## Native sockets and verification
 
-Native authenticated socket rooms and production WebSocket Upgrade tunnels are deferred beyond this checkpoint.
-The generated nginx configuration deliberately clears Connection and contains no Upgrade forwarding rule. Existing
-browser transport helpers do not provision an authenticated native socket server. PM2 supervision does not add one.
+Native sockets are opt-in through the same `brain.json` declaration used by the backend and build:
+
+```json
+{"backend":{"origins":["https://example.test"],"sockets":{"allowedOrigins":["https://example.test"]}}}
+```
+
+There is no deployment-only socket switch. The selected HTTPS domain must appear in the explicit allowed origins;
+no wildcard or implicit CORS expansion is generated. Generated socket locations require a literal ASCII base path
+with no dot segments or nginx metacharacters. Select `rust-node` or `rust-static` to supervise the native
+backend. With sockets disabled, the generated PM2/nginx source retains its previous form and contains no Upgrade
+rule. Build with the same public site before activation; `brain start` reads the compiled `nativeSockets` manifest.
+PM2 does not infer socket support from a port or activate an absent compiled feature. See
+[DEV-NATIVE-SOCKETS.md](DEV-NATIVE-SOCKETS.md) for the managed Rust gateway contract and transport bounds.
+
+The exact `<base>/_brain/socket` location precedes the general frontend/native routes. A `rust-node` deployment
+forwards that Upgrade to the **Node frontend bridge**, preserving the base path and its native credential projection and owned bridge lifecycle.
+Do not point this route directly at the Rust backend. A `rust-static` deployment forwards directly to the fixed
+loopback Rust backend and strips the application base only for this exact endpoint. PM2 without nginx instead uses
+the managed Rust static gateway or Node bridge, with the same fixed backend authority.
+
+The [nginx WebSocket guide](https://nginx.org/en/docs/http/websocket.html) requires explicit hop-by-hop Upgrade
+forwarding. The generated location uses HTTP/1.1, exact `brain.v1`, the original Origin and a fresh request ID. It
+rejects query strings, including an empty `?`, non-GET and non-HTTP/1.1 requests. The backend remains responsible
+for session authentication, revocation, frame limits and authorization on every resource/row event. Connect/send/read
+timeouts are 5/15/70 seconds; backend heartbeats and lifetime bounds still apply. Proxy caching, buffering and
+upstream retry are disabled only for this endpoint. It adds no development HMR route.
+
+For the direct static socket upstream, bounded native session/access cookie values are projected using nginx
+[map directives](https://nginx.org/en/docs/http/ngx_http_map_module.html); duplicate known cookie names are discarded.
+Refresh, OAuth and unrelated cookies are omitted from **that upstream**. Browsers can still send them to the initial
+HTTPS edge; this is not a claim that they never leave the browser. Authorization headers retain standard backend
+validation. Endpoint access logging is disabled so rejected query credentials do not enter a request-URI access log.
+Review the host's separate nginx error logging policy and protect all logs. Application statuses and cache policy
+outside this exact location remain unchanged.
+
+Socket-enabled PM2 backend commands preserve the shared multi-origin declaration instead of replacing it with
+one `--origin`. `PUBLIC_SITE_URL` contains only the selected public HTTPS origin and supplies the fallback when
+`backend.origins` is absent. No private credential value is generated.
 
 Queue leases/retries require idempotent handlers; interrupted work may be delivered again. The preview does not
 promise exactly-once external effects, distributed live-event delivery, whole-tree memory quotas or zero-downtime
@@ -46,3 +81,14 @@ without launching its daemon. Generated nginx configurations for those topologie
 container using temporary test certificates. These checks establish parsing and syntax, not live HTTPS forwarding,
 certificate issuance, host restart behavior or authenticated browser journeys. Repeat them for the final release
 configuration and the actual host before activation.
+
+
+Native socket deployment preflight (0.4.1 development): all eight focused deployment tests passed in the owned
+Linux Rust 1.96.1 cohort. The generated socket-enabled previews matched the exact configuration bytes exercised
+by nginx 1.30.6. All four disabled topologies and both enabled native topologies passed `nginx -t` and owned
+loopback TLS/TCP probes. The probes checked fixed upstream selection, base handling, binary forwarding, private
+path denial, query/method/version/protocol/body rejection and static native-cookie projection, including duplicate
+known names. The Node upstream was a transport fixture; actual Node bridge authorization has its own suite.
+Four actual generated ecosystem files passed the installed PM2 6.0.14 parser without starting its daemon or any
+service. These are isolated preflight results, not a substitute for final release gates or the actual host's
+configuration and authenticated browser verification.
