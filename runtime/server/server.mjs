@@ -400,7 +400,6 @@ export function createServer(o = {}) {
   const env = Object.freeze({ ...(o.env || ENV) }) // ctx.env: what the supervisor passed, read-only
   const native = nativeAuthBridge(o.backendURL ?? env.BRAIN_BACKEND_URL)
   if (o.nativeSockets !== undefined && typeof o.nativeSockets !== 'boolean') throw Error('nativeSockets must be an explicit boolean')
-  if (o.nativeSockets && !native) throw Error('Native sockets require a configured native backend')
   const TIMEOUT = +(o.timeout ?? env.BRAIN_TIMEOUT_MS ?? 10000)
   const LIMIT = +(o.rateLimit ?? env.BRAIN_RPC_LIMIT ?? 60) // per IP + function, per minute
   const MAX_BODY = 64 * 1024
@@ -423,6 +422,10 @@ export function createServer(o = {}) {
     sink(level, msg, safe)
   }
   const mf = readManifest(dist)
+  const hasManifestSockets = Object.hasOwn(mf,'nativeSockets')
+  if (hasManifestSockets && typeof mf.nativeSockets !== 'boolean') throw Error('Manifest nativeSockets must be an explicit boolean')
+  const nativeSockets = o.nativeSockets === undefined ? hasManifestSockets && mf.nativeSockets : o.nativeSockets
+  if (nativeSockets && !native) throw Error('Native sockets require a configured native backend')
   // the build's single route table (#187): already in match order, each with its RegExp source (named groups = params)
   const routes = mf.routes.map(r => ({ ...r, rx: r.rx ? new RegExp(r.rx) : exact(r.path) }))
   // the real path: Node imports file URLs through realpath, and the /_b/ hook must name the same modules (a symlinked
@@ -1053,7 +1056,7 @@ export function createServer(o = {}) {
     }
   })
   if (native) server.once('close', () => native.close())
-  if (native && o.nativeSockets) server.$brainSocketStop = installNativeSockets(server,{target:o.backendURL ?? env.BRAIN_BACKEND_URL,base:BASE,cookie:native._socketCookie,log})
+  if (native && nativeSockets) server.$brainSocketStop = installNativeSockets(server,{target:o.backendURL ?? env.BRAIN_BACKEND_URL,base:BASE,cookie:native._socketCookie,log})
   server.headersTimeout = 15000
   server.requestTimeout = 30000
   return server

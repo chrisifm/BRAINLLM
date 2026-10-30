@@ -23,7 +23,9 @@ async function fixture(t,options={}) {
   const nativeSockets=Object.hasOwn(options,'nativeSockets')?options.nativeSockets:true
   const directory=mkdtempSync(join(tmpdir(),'brain-node-sockets-'))
   mkdirSync(join(directory,'_server'))
-  writeFileSync(join(directory,'_server/manifest.json'),JSON.stringify({routes:[],rpc:{},base}))
+  const manifest={routes:[],rpc:{},base}
+  if(Object.hasOwn(options,'manifestSockets'))manifest.nativeSockets=options.manifestSockets
+  writeFileSync(join(directory,'_server/manifest.json'),JSON.stringify(manifest))
   const backendSockets=new Set(),frontendSockets=new Set(),clients=new Set(),seen=[],logs=[]
   let frontend
   const backend=http((req,res)=>{res.writeHead(200,{'content-type':'application/json'});res.end('{"http":true}')})
@@ -273,8 +275,41 @@ test('native sockets are disabled by default and HTTP health remains available',
   const app=await fixture(t,{nativeSockets:undefined})
   assert.equal(app.frontend.listenerCount('upgrade'),0)
   assert.equal((await fetch(app.url+'/_health')).status,200)
-  assert.throws(()=>createServer({nativeSockets:true,log(){}}),/configured native backend/)
+  assert.throws(()=>createServer({nativeSockets:true,env:{},log(){}}),/configured native backend/)
   assert.throws(()=>installNativeSockets(app.frontend,{target:'https://public.test',cookie:()=>''}),/loopback/)
+})
+
+test('compiled nativeSockets manifest opt-in activates the bridge without a manual runtime flag',{timeout:8000},async t=>{
+  const app=await fixture(t,{manifestSockets:true,nativeSockets:undefined})
+  assert.equal(app.frontend.listenerCount('upgrade'),1)
+  assert.equal((await app.open()).status,101)
+})
+
+test('explicit runtime false overrides the compiled manifest while legacy HTTP remains available',{timeout:8000},async t=>{
+  const app=await fixture(t,{manifestSockets:true,nativeSockets:false})
+  assert.equal(app.frontend.listenerCount('upgrade'),0)
+  assert.equal((await fetch(app.url+'/_health')).status,200)
+  assert.equal(app.seen.length,0)
+})
+
+test('explicit runtime true remains available as a low-level override of a disabled manifest',{timeout:8000},async t=>{
+  const app=await fixture(t,{manifestSockets:false,nativeSockets:true})
+  assert.equal((await app.open()).status,101)
+})
+
+test('manifest and runtime socket flags require actual booleans and enabled manifests require a backend',t=>{
+  const directory=mkdtempSync(join(tmpdir(),'brain-socket-manifest-'))
+  t.after(()=>rmSync(directory,{recursive:true,force:true}))
+  mkdirSync(join(directory,'_server'))
+  const manifest=join(directory,'_server/manifest.json')
+  for(const value of ['true','false',1,0,null,[],{}]) {
+    writeFileSync(manifest,JSON.stringify({routes:[],rpc:{},nativeSockets:value}))
+    // An explicit override must not hide a malformed private build manifest.
+    assert.throws(()=>createServer({dist:directory,nativeSockets:false,env:{},log(){}}),/Manifest nativeSockets.*boolean/)
+  }
+  writeFileSync(manifest,JSON.stringify({routes:[],rpc:{},nativeSockets:true}))
+  assert.throws(()=>createServer({dist:directory,env:{},log(){}}),/configured native backend/)
+  for(const value of ['true',1,null])assert.throws(()=>createServer({dist:directory,nativeSockets:value,env:{},log(){}}),/nativeSockets.*boolean/)
 })
 
 test('both emitted production and development sidecar layouts load their private helper',{timeout:8000},async t=>{
