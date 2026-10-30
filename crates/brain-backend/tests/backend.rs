@@ -164,7 +164,7 @@ async fn postgres_auth_policy_crud_transactional_hooks_and_leased_jobs() {
             roles: Default::default(),
             mail: None,
             auth_public_base_url: None,
-            webhooks: None,before_hooks:None,
+            webhooks: None,before_hooks:None,sockets:None,
             gcs: None,
             jwt: None,
             google: None,

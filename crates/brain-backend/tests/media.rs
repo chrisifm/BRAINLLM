@@ -76,7 +76,7 @@ async fn originals_versions_library_metadata_owner_isolation_and_durable_cleanup
             roles: Default::default(),
             mail: None,
             auth_public_base_url: None,
-            webhooks: None,before_hooks:None,
+            webhooks: None,before_hooks:None,sockets:None,
             resources: vec![],
             jobs: vec![],
             uploads: root.0.clone(),

@@ -22,6 +22,10 @@ use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 use tower_http::{compression::CompressionLayer, cors::CorsLayer};
 use uuid::Uuid;
 
+#[path = "sockets.rs"]
+mod sockets;
+pub use sockets::{SocketConfig, SocketControl};
+
 tokio::task_local! { static REQUEST_ID: String; }
 pub(crate) fn request_reference() -> Option<String> {
     REQUEST_ID.try_with(Clone::clone).ok()
@@ -42,9 +46,12 @@ pub struct Config {
     pub auth_public_base_url: Option<String>,
     pub webhooks: Option<crate::webhooks::Config>,
     pub before_hooks: Option<crate::before_hooks::Executor>,
+    /// None omits the Upgrade route; enabling requires an explicit subset of HTTP origins.
+    pub sockets: Option<SocketConfig>,
 }
 #[derive(Clone)]
 pub struct App {
+    sockets: Arc<sockets::Broker>,
     pool: PgPool,
     auth: Auth,
     jwt: Option<crate::jwt::Jwt>,
@@ -200,6 +207,19 @@ impl App {
 }
 
 pub async fn router(pool: PgPool, config: Config) -> std::result::Result<Router, String> {
+    router_with_socket_control(pool, config).await.map(|(router, _)| router)
+}
+
+/// Library hosts must shut down this control before draining their owned HTTP listener.
+pub async fn router_with_socket_control(
+    pool: PgPool,
+    config: Config,
+) -> std::result::Result<(Router, SocketControl), String> {
+    let socket_origins = config.sockets.as_ref().map(|s| s.allowed().to_vec()).unwrap_or_default();
+    if socket_origins.iter().any(|origin| !config.origins.contains(origin)) {
+        return Err("Socket origins must be an explicit subset of backend HTTP origins".into());
+    }
+    let sockets_enabled = !socket_origins.is_empty();
     let mut origins = Vec::new();
     for origin in &config.origins {
         let uri: axum::http::Uri = origin.parse().map_err(|_| "Invalid backend origin")?;
@@ -321,7 +341,9 @@ pub async fn router(pool: PgPool, config: Config) -> std::result::Result<Router,
             )
         })
         .transpose()?;
+    let sockets = Arc::new(sockets::Broker::new(socket_origins));
     let app = App {
+        sockets: sockets.clone(),
         webhooks,
         before_hooks: config.before_hooks,
         auth,
@@ -361,7 +383,11 @@ pub async fn router(pool: PgPool, config: Config) -> std::result::Result<Router,
         .ok_or("Invalid rate limit")?;
     let limiter = governor.limiter().clone();
     let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let socket_routes = if sockets_enabled {
+        Router::<App>::new().route("/_brain/socket", get(sockets::upgrade))
+    } else { Router::<App>::new() };
     let routes = Router::new()
+        .merge(socket_routes)
         .route("/health", get(health))
         .route("/_brain/api", get(docs))
         .route("/_brain/auth/signup", post(signup))
@@ -437,7 +463,7 @@ pub async fn router(pool: PgPool, config: Config) -> std::result::Result<Router,
         .layer(cors)
         .layer(middleware::from_fn(response_headers))
         .with_state(app);
-    Ok(routes)
+    Ok((routes, SocketControl::new(sockets)))
 }
 
 /// Loopback binding is enforced by the CLI; the reusable library accepts the caller's owned listener.
@@ -456,7 +482,7 @@ pub async fn serve(
         .filter(|cfg| cfg.has_outbound())
         .map(|cfg| crate::webhooks::Webhooks::new(pool.clone(), cfg, &config.jobs))
         .transpose()?;
-    let app = router(pool.clone(), config).await?;
+    let (app, sockets) = router_with_socket_control(pool.clone(), config).await?;
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
     let mut http_stop = stop_rx.clone();
     let worker_failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -476,15 +502,22 @@ pub async fn serve(
         "{}",
         json!({"schemaVersion":1,"event":"backend-ready","address":address,"experimental":true})
     );
+    let socket_stop = sockets.clone();
     let result = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(async move {
         tokio::select! {_=wait_shutdown()=>{},_=http_stop.changed()=>{}}
+        socket_stop.shutdown();
     })
     .await
     .map_err(|_| "Backend HTTP server failed".into());
+    sockets.shutdown();
+    let sockets_closed = sockets.closed().await;
+    if sockets_closed.is_err() {
+        eprintln!("{}", json!({"schemaVersion":1,"event":"socket-shutdown-incomplete","code":"SOCKET_SHUTDOWN_TIMEOUT","valuesCaptured":false}));
+    }
     let _ = stop_tx.send(true);
     if let Some(ref mut worker) = worker {
         if tokio::time::timeout(Duration::from_secs(6), &mut *worker)
@@ -496,6 +529,7 @@ pub async fn serve(
         }
     }
     pool.close().await;
+    if sockets_closed.is_err() { return Err("Native sockets did not close within their shutdown budget".into()); }
     if worker_failed.load(std::sync::atomic::Ordering::Relaxed) {
         return Err("Native webhook worker stopped; inspect private backend diagnostics".into());
     }
@@ -919,10 +953,11 @@ async fn create(
     }
     let input = before(&app, r, "create", input, None, &u).await?;
     let data = r.input(&input).map_err(Error::validation)?;
-    db::create(&app.pool, r, u.id, data)
+    let record = db::create(&app.pool, r, u.id, data)
         .await
-        .map(Json)
-        .map_err(|error| Error::internal(db::safe(error)))
+        .map_err(|error| Error::internal(db::safe(error)))?;
+    app.sockets.changed(&name, "create", &record);
+    Ok(Json(record))
 }
 async fn update(
     State(app): State<App>,
@@ -950,11 +985,12 @@ async fn update(
     }
     let input = before(&app, r, "update", input, Some(existing), &u).await?;
     let data = r.input(&input).map_err(Error::validation)?;
-    db::update_checked(&app.pool, r, id, owner, data, Some(&revision))
+    let record = db::update_checked(&app.pool, r, id, owner, data, Some(&revision))
         .await
         .map_err(|error| Error::internal(db::safe(error)))?
-        .map(Json)
-        .ok_or_else(conflict)
+        .ok_or_else(conflict)?;
+    app.sockets.changed(&name, "update", &record);
+    Ok(Json(record))
 }
 async fn delete(
     State(app): State<App>,
@@ -978,6 +1014,8 @@ async fn delete(
     if owner.is_some_and(|owner| existing["owner"].as_str() != Some(owner.to_string().as_str())) {
         return Err(Error::missing());
     }
+    // Retain only fixed authority metadata before handing the row to application code.
+    let deleted = json!({"id": existing["id"], "owner": existing["owner"]});
     let output = before(
         &app,
         r,
@@ -996,6 +1034,7 @@ async fn delete(
     {
         return Err(conflict());
     }
+    app.sockets.changed(&name, "delete", &deleted);
     Ok(Json(json!({"ok":true})))
 }
 #[derive(Deserialize)]

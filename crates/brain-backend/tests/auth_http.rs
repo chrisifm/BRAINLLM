@@ -181,6 +181,7 @@ async fn real_http_account_handlers_enforce_identity_replay_revocation_custom_ro
         auth_public_base_url: Some("https://app.example.test/project/app".into()),
         webhooks: Some(webhook_config),
         before_hooks: None,
+        sockets: None,
     };
     let router = brain_backend::http::router(pool.clone(), config)
         .await
@@ -788,6 +789,7 @@ async fn all_native_mutations_enforce_before_hooks_policy_validation_deadlines_a
         auth_public_base_url: None,
         webhooks: None,
         before_hooks: executor,
+        sockets: None,
     };
     assert!(
         brain_backend::http::router(pool.clone(), config(None))

@@ -15,3 +15,5 @@ mod links;
 mod media;
 #[path = "native_openapi.rs"]
 mod native_openapi;
+#[path = "native_sockets.rs"]
+mod native_sockets;
