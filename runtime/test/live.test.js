@@ -149,6 +149,17 @@ test('the initial connect deadline and finite reconnect budget leave no retry st
   assert.ok(Socket.instances.length <= 6)
 })
 
+test('a backwards wall clock cannot turn connection throttling into an unbounded wait', async t => {
+  const own = await fixture(t)
+  const first = own({ refetch() {}, v: Promise.resolve([]) }, settings(() => 'user'))
+  await micro(); ready(Socket.instances[0]); ack(Socket.instances[0]); await advance(t)
+  first.stop(); await micro()
+  t.mock.timers.setTime(1)
+  own({ refetch() {}, v: Promise.resolve([]) }, settings(() => 'user'))
+  await micro(); await advance(t, 251)
+  assert.equal(Socket.instances.length, 2)
+})
+
 test('SSR and unsupported browsers create no WebSocket or active owner registration', async t => {
   const own = await fixture(t)
   globalThis.__brainSSR = true

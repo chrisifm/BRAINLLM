@@ -252,7 +252,8 @@ function createBroker() {
     if (terminal || retryTimer) { update(); return }
     if (socket && ready) syncRooms(rooms)
     else if (!socket) {
-      const delay = Math.max(0, 250 - (Date.now() - lastConnect))
+      const elapsed = Date.now() - lastConnect
+      const delay = elapsed < 0 ? 0 : Math.max(0, 250 - elapsed)
       if (delay) retryTimer = setTimeout(() => { retryTimer = null; reconcile() }, delay)
       else connect()
     }
