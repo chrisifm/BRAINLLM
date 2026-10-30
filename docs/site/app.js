@@ -1,7 +1,8 @@
 // Progressive enhancement: prompts and commands remain selectable without JavaScript.
-const copyStatus = document.getElementById('copy-status');
+const pageStatus = document.getElementById('copy-status');
 const copyMessages = {
   agent: 'Agent prompt copied. Paste it into your coding agent.',
+  command: 'Command copied. Paste it into your terminal.',
   commands: 'Installation commands copied. Paste them into your terminal.',
   benchmark: 'Benchmark prompt copied. Paste it into your coding agent.',
 };
@@ -10,6 +11,7 @@ for (const button of document.querySelectorAll('[data-copy]')) {
   const originalLabel = button.textContent;
   button.addEventListener('click', async () => {
     const target = document.getElementById(button.dataset.copy);
+    const copyStatus = button.closest('.hero-cmd')?.querySelector('.hero-cmd-status') || pageStatus;
     if (!target) return;
     button.disabled = true;
     button.textContent = originalLabel;
