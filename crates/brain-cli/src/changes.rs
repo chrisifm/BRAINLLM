@@ -232,7 +232,30 @@ fn bounded_read(path: &Path) -> Result<Option<Vec<u8>>> {
 fn current(root: &Path, path: &str) -> Result<Option<String>> {
     Ok(bounded_read(&safe(root, path, false)?)?.map(|b| revision(&b)))
 }
-fn state_lock(base: &Path) -> Result<File> {
+// A child can retain the same open-file description across fork until exec.
+// Closing this descriptor alone does not release its flock in that interval.
+struct MetadataLease(File);
+impl Drop for MetadataLease {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+fn try_metadata_lock(mut attempt: impl FnMut() -> std::result::Result<(), std::fs::TryLockError>) -> Result<bool> {
+    for index in 0..3 {
+        match attempt() {
+            Ok(()) => return Ok(true),
+            Err(std::fs::TryLockError::WouldBlock) => return Ok(false),
+            Err(std::fs::TryLockError::Error(error))
+                if error.kind() == std::io::ErrorKind::Interrupted && index < 2 => continue,
+            Err(std::fs::TryLockError::Error(error)) => return Err(format!(
+                "change metadata lock unavailable ({:?}); inspect local filesystem locking support",
+                error.kind()
+            )),
+        }
+    }
+    unreachable!("the final lock attempt returns a result")
+}
+fn state_lock(base: &Path) -> Result<MetadataLease> {
     let path = base.join("state.lock");
     if fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
         return Err("state lock symlink refused".into());
@@ -243,12 +266,13 @@ fn state_lock(base: &Path) -> Result<File> {
         .truncate(false)
         .open(path)
         .map_err(|e| e.to_string())?;
-    file.try_lock()
-        .map_err(|_| "change metadata is busy; retry shortly".to_string())?;
-    Ok(file)
+    if !try_metadata_lock(|| file.try_lock())? {
+        return Err("change metadata is busy; retry shortly".into());
+    }
+    Ok(MetadataLease(file))
 }
 // Cross-process admission, released by the kernel even after an interrupted CLI.
-fn preview_slot(base: &Path) -> Result<File> {
+fn preview_slot(base: &Path) -> Result<MetadataLease> {
     for index in 0..4 {
         let path = base.join(format!("preview-{index}.lock"));
         if fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
@@ -260,8 +284,8 @@ fn preview_slot(base: &Path) -> Result<File> {
             .truncate(false)
             .open(path)
             .map_err(|e| e.to_string())?;
-        if file.try_lock().is_ok() {
-            return Ok(file);
+        if try_metadata_lock(|| file.try_lock())? {
+            return Ok(MetadataLease(file));
         }
     }
     Err("four change preparations are already active; retry after one finishes".into())
@@ -1023,6 +1047,69 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn metadata_lease_unlocks_even_when_a_duplicate_description_survives() {
+        let app = App::new();
+        let base = state(&app.0).unwrap();
+        let lease = state_lock(&base).unwrap();
+        let retained = lease.0.try_clone().unwrap();
+        assert!(state_lock(&base).err().unwrap().contains("busy"));
+        drop(lease);
+        let next = state_lock(&base).expect("a completed lease must release despite an inherited descriptor");
+        assert!(state_lock(&base).is_err());
+        drop(next);
+        drop(retained);
+        assert!(state_lock(&base).is_ok());
+    }
+
+    #[test]
+    fn preview_admission_releases_only_its_slot_despite_a_retained_descriptor() {
+        let app = App::new();
+        let base = state(&app.0).unwrap();
+        let first = preview_slot(&base).unwrap();
+        let retained = first.0.try_clone().unwrap();
+        let others = (0..3).map(|_| preview_slot(&base).unwrap()).collect::<Vec<_>>();
+        assert!(preview_slot(&base).is_err());
+        drop(first);
+        let replacement = preview_slot(&base).expect("the released slot must be reusable immediately");
+        assert!(preview_slot(&base).is_err(), "other active slots remain exclusive");
+        drop(retained);
+        assert!(preview_slot(&base).is_err(), "closing a stale descriptor must not unlock its successor");
+        drop(replacement);
+        drop(others);
+        assert!(preview_slot(&base).is_ok());
+    }
+
+    #[test]
+    fn metadata_lock_retries_only_interruption_and_retains_error_category() {
+        let mut calls = 0;
+        assert!(!try_metadata_lock(|| {
+            calls += 1;
+            Err(std::fs::TryLockError::WouldBlock)
+        }).unwrap());
+        assert_eq!(calls, 1, "real contention must never spin or queue");
+        calls = 0;
+        assert!(try_metadata_lock(|| {
+            calls += 1;
+            if calls < 3 {
+                Err(std::fs::TryLockError::Error(std::io::ErrorKind::Interrupted.into()))
+            } else { Ok(()) }
+        }).unwrap());
+        assert_eq!(calls, 3);
+        calls = 0;
+        let error = try_metadata_lock(|| {
+            calls += 1;
+            Err(std::fs::TryLockError::Error(std::io::ErrorKind::Interrupted.into()))
+        }).unwrap_err();
+        assert_eq!(calls, 3);
+        assert!(error.contains("Interrupted"));
+        let error = try_metadata_lock(|| Err(std::fs::TryLockError::Error(
+            std::io::ErrorKind::PermissionDenied.into()
+        ))).unwrap_err();
+        assert!(error.contains("PermissionDenied"));
+        assert!(!error.contains("busy"));
     }
 
     #[test]

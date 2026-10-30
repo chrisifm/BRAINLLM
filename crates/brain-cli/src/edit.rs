@@ -14,7 +14,18 @@ pub enum Operation {
 }
 static NEXT: AtomicU64 = AtomicU64::new(0);
 type Snapshot = BTreeMap<String, Vec<u8>>;
-struct Workspace { path: PathBuf, _lock: std::fs::File }
+/// Explicit unlock releases the lease even while a forked child retains its descriptor.
+#[derive(Debug)]
+pub(crate) struct WriterLease(std::fs::File);
+// Preserve existing borrowed-File callsites while the guard owns lock lifetime.
+impl std::ops::Deref for WriterLease {
+    type Target = std::fs::File;
+    fn deref(&self) -> &Self::Target { &self.0 }
+}
+impl Drop for WriterLease {
+    fn drop(&mut self) { let _ = self.0.unlock(); }
+}
+struct Workspace { path: PathBuf, _lock: WriterLease }
 impl Drop for Workspace {
     fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.path); }
 }
@@ -145,7 +156,7 @@ fn rewrite_imports(rel: &str, source: &str, from: &str, to: &str) -> Result<Stri
 
 /// Shared by AST and MCP text/file edits. The kernel releases this lock on process death.
 /// Cooperating writers serialize; external editors still require conflict detection.
-pub fn writer_lock(root:&Path)->Result<std::fs::File,String>{
+pub fn writer_lock(root:&Path)->Result<WriterLease,String>{
     let file=writer_lock_unchecked(root)?;
     crate::changes::guard_legacy_writer(root)?;
     Ok(file)
@@ -154,13 +165,23 @@ pub fn writer_lock(root:&Path)->Result<std::fs::File,String>{
 /// Internal kernel lock for the leased changes protocol. Callers must authorize
 /// every target lease under changes/state.lock before committing or recovering.
 /// Other source writers must use writer_lock, which also respects active leases.
-pub(crate) fn writer_lock_unchecked(root:&Path)->Result<std::fs::File,String>{
+pub(crate) fn writer_lock_unchecked(root:&Path)->Result<WriterLease,String>{
     let state=safe(root,".brain")?;
     std::fs::create_dir_all(&state).map_err(|e|e.to_string())?;
     let lock=safe(root,".brain/edit.lock")?;
     let file=std::fs::OpenOptions::new().write(true).create(true).truncate(false).open(lock).map_err(|e|e.to_string())?;
-    file.try_lock().map_err(|_|"another edit owns .brain/edit.lock; finish it before retrying")?;
-    Ok(file)
+    for attempt in 0..3 {
+        match file.try_lock() {
+            Ok(()) => return Ok(WriterLease(file)),
+            Err(std::fs::TryLockError::WouldBlock) => return Err("another edit owns .brain/edit.lock; finish it before retrying".into()),
+            Err(std::fs::TryLockError::Error(error))
+                if error.kind() == std::io::ErrorKind::Interrupted && attempt < 2 => continue,
+            Err(std::fs::TryLockError::Error(error)) => return Err(format!(
+                "edit writer lock unavailable ({:?}); inspect local filesystem locking support", error.kind()
+            )),
+        }
+    }
+    unreachable!("the final lock attempt returns a result")
 }
 
 /// Plan and validate inside a private bounded copy; only then commit checked source changes.
@@ -321,6 +342,28 @@ fn commit(root:&Path,before:&Snapshot,after:&Snapshot,changed:&[String],hook:&mu
 #[cfg(test)]
 mod transaction_tests {
     use super::*;
+    #[test]
+    fn writer_lease_releases_before_inherited_descriptor_closes() {
+        let root = std::env::temp_dir().join(format!(
+            "brain-edit-inherited-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&root).unwrap();
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+        let _cleanup = Cleanup(root.clone());
+        let lease = writer_lock_unchecked(&root).unwrap();
+        let retained = lease.try_clone().unwrap();
+        assert!(writer_lock_unchecked(&root).is_err());
+        drop(lease);
+        let next = writer_lock_unchecked(&root)
+            .expect("completed writer must unlock despite a retained descriptor");
+        assert!(writer_lock_unchecked(&root).is_err());
+        drop(retained);
+        assert!(writer_lock_unchecked(&root).is_err(), "stale descriptor close must preserve the successor lock");
+        drop(next);
+        assert!(writer_lock(&root).is_ok());
+    }
+
     #[test]
     fn concurrent_changes_before_commit_and_rollback_are_preserved() {
         let root=std::env::temp_dir().join(format!("brain-edit-conflict-{}-{}",std::process::id(),NEXT.fetch_add(1,Ordering::Relaxed)));

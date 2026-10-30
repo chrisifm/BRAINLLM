@@ -9,6 +9,12 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+### Fixed
+
+- Development 0.4.1: release change-metadata, preview-admission and legacy-writer locks explicitly when their leases end,
+  including when a forked child temporarily retains the same descriptor. Contention still fails immediately;
+  interrupted lock syscalls retry at most three times and other errors preserve their safe error category.
+
 ## [0.4.0] - 2026-10-30
 
 ### Added
