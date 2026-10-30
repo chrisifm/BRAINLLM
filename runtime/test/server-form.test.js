@@ -94,7 +94,7 @@ test('invalid post: the function never runs; 422 page re-rendered with the value
   assert.equal(st.values.age, 16)
 })
 
-test('server-side errors: {errors} → 422 with the field message; a crash → 422 with a generic message (detail only in the log)', async () => {
+test('server-side errors: {errors} → 422 with the field message; a crash → 422 with a generic message (source frames only in the private log)', async () => {
   const taken = await post(good.map(([k, v]) => [k, k === 'email' ? 'taken@x.dev' : v]))
   assert.equal(taken.status, 422)
   assert.match(await taken.text(), /<p class="e">Already taken/)
@@ -103,7 +103,8 @@ test('server-side errors: {errors} → 422 with the field message; a crash → 4
   const t = await crash.text()
   assert.match(t, /Something went wrong/)
   assert.ok(!t.includes('hunter2'))
-  assert.ok(logs.some(l => l.msg === 'form failed' && l.stack.includes('hunter2')))
+  assert.ok(logs.some(l => l.msg === 'form failed' && l.stack.includes('/_server/signup.mjs:') && l.valuesCaptured === false))
+  assert.ok(!JSON.stringify(logs).includes('hunter2'))
 })
 
 test('defenses: cross-origin, no origin signal, wrong encoding, unknown form, POST elsewhere', async () => {
@@ -125,7 +126,8 @@ test('#173 SSR: a failing component renders its fallback inside a 200 page; the 
   const l = logs.find(l => l.msg === 'component failed during SSR')
   assert.equal(l.rid, 'req-42')
   assert.equal(l.comp, 'comp/widget.brain')
-  assert.match(l.stack, /widget exploded/)
+  assert.match(l.stack, /\/_b\/broken\.js:4:/)
+  assert.ok(!l.stack.includes('widget exploded'))
 })
 
 test('BUILD: GET of a form page without load serves the prerendered file with the build ETag; POST still goes to the server', async () => {
@@ -156,5 +158,6 @@ test('#65 prod: guard deny → 403 page with the reason; redirect → 303; allow
   const e = await fetch(base + '/boom')
   assert.equal(e.status, 500)
   assert.match(await e.text(), /<p class="p">Something went wrong\./)
-  assert.ok(logs.some(l => l.msg === 'load failed' && l.stack.includes('load exploded')))
+  assert.ok(logs.some(l => l.msg === 'load failed' && l.stack.includes('/_server/boom.mjs:') && l.private === true))
+  assert.ok(!JSON.stringify(logs).includes('load exploded'))
 })

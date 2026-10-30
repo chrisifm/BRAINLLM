@@ -1,6 +1,63 @@
 //! Minimal HTTP/1.1 for the dev server: one request per connection (`Connection: close`).
 
 use std::io::{self, BufRead, BufReader, Read, Write};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+static REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static BODY_BYTES: AtomicUsize = AtomicUsize::new(0);
+const GLOBAL_BODY_BYTES: usize = 64 * 1024 * 1024;
+pub(crate) struct BodyBudget(usize);
+impl Drop for BodyBudget {
+    fn drop(&mut self) {
+        BODY_BYTES.fetch_sub(self.0, Ordering::AcqRel);
+    }
+}
+fn reserve_body(bytes: usize) -> io::Result<Option<BodyBudget>> {
+    if bytes == 0 {
+        return Ok(None);
+    }
+    let mut used = BODY_BYTES.load(Ordering::Acquire);
+    loop {
+        if used.saturating_add(bytes) > GLOBAL_BODY_BYTES {
+            return Err(io::Error::other("HTTP503 request body capacity exhausted"));
+        }
+        match BODY_BYTES.compare_exchange_weak(
+            used,
+            used + bytes,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => return Ok(Some(BodyBudget(bytes))),
+            Err(now) => used = now,
+        }
+    }
+}
+/// Correlation only, never an authentication token. Locally generated, not a forwarded client identity.
+pub(crate) fn request_id() -> String {
+    let seed = format!(
+        "{}:{}:{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+        REQUEST_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    );
+    let mut bytes = brain_pack::sha::sha256(seed.as_bytes());
+    bytes[6] = (bytes[6] & 15) | 64;
+    bytes[8] = (bytes[8] & 63) | 128;
+    let hex = bytes[..16]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..]
+    )
+}
 
 pub struct Request {
     pub method: String,
@@ -9,45 +66,170 @@ pub struct Request {
     pub headers: Vec<(String, String)>,
     /// Request body (only read when `Content-Length` says there is one; capped at 64 KB like the whole request).
     pub body: Vec<u8>,
+    pub id: String,
+    pub(crate) _body_budget: Option<BodyBudget>,
 }
 
 impl Request {
     pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
+        self.headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
     }
 }
 
-/// Reads the request line and headers (the body is ignored: the dev server only handles GET/HEAD).
-pub fn read_request<R: Read>(r: R) -> io::Result<Request> {
-    let mut br = BufReader::new(r.take(64 * 1024));
-    let mut line = String::new();
-    br.read_line(&mut line)?;
-    let mut parts = line.split_whitespace();
-    let (Some(method), Some(target)) = (parts.next(), parts.next()) else {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "malformed request"));
-    };
-    let (path, query) = target.split_once('?').unwrap_or((target, ""));
-    let (method, path, query) = (method.to_string(), percent_decode(path), query.to_string());
-    let mut headers = Vec::new();
+/// Strict nonstreaming HTTP/1.1; upload capacity is enabled only for an explicitly configured native proxy.
+#[cfg(test)]
+pub fn read_request<R: Read>(reader: R) -> io::Result<Request> {
+    read_request_with_uploads(reader, None)
+}
+pub fn read_request_with_uploads<R: Read>(
+    reader: R,
+    upload_path: Option<&str>,
+) -> io::Result<Request> {
+    const HEADERS: usize = 32768;
+    let mut reader = BufReader::new(reader);
+    let mut used = 0usize;
+    fn line<R: Read>(reader: &mut BufReader<R>, used: &mut usize) -> io::Result<String> {
+        let left = 32768usize.saturating_sub(*used);
+        if left == 0 {
+            return Err(io::Error::other("HTTP431 request headers exceed 32 KiB"));
+        }
+        let mut bytes = Vec::new();
+        let n = reader.take(left as u64 + 1).read_until(b'\n', &mut bytes)?;
+        *used = used.saturating_add(n);
+        if *used > 32768 || n > 8192 {
+            return Err(io::Error::other(
+                "HTTP431 request header line exceeds its budget",
+            ));
+        }
+        if !bytes.ends_with(b"\r\n") {
+            return Err(io::Error::other(
+                "HTTP400 incomplete or invalid request headers",
+            ));
+        }
+        bytes.truncate(bytes.len() - 2);
+        String::from_utf8(bytes).map_err(|_| io::Error::other("HTTP400 headers must be UTF-8"))
+    }
+    let request = line(&mut reader, &mut used)?;
+    let parts = request.split(' ').collect::<Vec<_>>();
+    if parts.len() != 3
+        || parts[0].is_empty()
+        || parts[0].len() > 16
+        || !parts[0].bytes().all(|b| b.is_ascii_uppercase())
+        || !matches!(parts[2], "HTTP/1.0" | "HTTP/1.1")
+        || (!parts[1].starts_with('/') || parts[1].starts_with("//"))
+        || parts[1].len() > 8192
+        || parts[1].bytes().any(|b| b <= 32 || b == 127)
+    {
+        return Err(io::Error::other("HTTP400 malformed request line"));
+    }
+    let (raw_path, query) = parts[1].split_once('?').unwrap_or((parts[1], ""));
+    let path = percent_decode(raw_path);
+    if path
+        .chars()
+        .any(|c| c.is_control() || c.is_whitespace() || matches!(c, '\\' | '?' | '#'))
+    {
+        return Err(io::Error::other("HTTP400 unsafe decoded request path"));
+    }
+    let mut headers: Vec<(String, String)> = Vec::new();
     loop {
-        line.clear();
-        if br.read_line(&mut line)? == 0 {
+        let text = line(&mut reader, &mut used)?;
+        if text.is_empty() {
             break;
         }
-        let l = line.trim_end();
-        if l.is_empty() {
-            break;
+        if text.starts_with([' ', '\t']) {
+            return Err(io::Error::other("HTTP400 folded headers are unsupported"));
         }
-        if let Some((k, v)) = l.split_once(':') {
-            headers.push((k.trim().to_string(), v.trim().to_string()));
+        let (name, value) = text
+            .split_once(':')
+            .ok_or_else(|| io::Error::other("HTTP400 malformed header"))?;
+        if name.is_empty()
+            || !name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
+            || value.chars().any(|c| c.is_control() && c != '\t')
+        {
+            return Err(io::Error::other("HTTP400 unsafe header"));
+        }
+        if headers
+            .iter()
+            .any(|(old, _)| old.eq_ignore_ascii_case(name))
+        {
+            return Err(io::Error::other("HTTP400 duplicate request header"));
+        }
+        headers.push((name.to_ascii_lowercase(), value.trim().to_string()));
+        if headers.len() > 128 || used > HEADERS {
+            return Err(io::Error::other("HTTP431 request header budget exceeded"));
         }
     }
-    let len = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("content-length")).and_then(|(_, v)| v.parse::<usize>().ok()).unwrap_or(0);
-    let mut body = vec![0; len.min(64 * 1024)];
-    if !body.is_empty() {
-        br.read_exact(&mut body)?;
+    let header = |key: &str| {
+        headers
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    };
+    if header("transfer-encoding").is_some() {
+        return Err(io::Error::other(
+            "HTTP400 transfer encoding is unsupported; send an exact Content-Length",
+        ));
     }
-    Ok(Request { method, path, query, headers, body })
+    if header("expect").is_some() {
+        return Err(io::Error::other(
+            "HTTP417 expectations are unsupported; send the bounded body directly",
+        ));
+    }
+    let length = match header("content-length") {
+        None => 0,
+        Some(value) if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) => {
+            return Err(io::Error::other("HTTP400 invalid Content-Length"));
+        }
+        Some(value) => value
+            .parse::<usize>()
+            .map_err(|_| io::Error::other("HTTP413 request body exceeds its budget"))?,
+    };
+    let limit = if upload_path == Some(path.as_str()) && parts[0] == "POST" {
+        5 * 1024 * 1024 + 65536
+    } else {
+        65536
+    };
+    if length > limit {
+        return Err(io::Error::other(
+            "HTTP413 request body exceeds its route budget",
+        ));
+    }
+    let body_budget = reserve_body(length)?;
+    let mut body = Vec::new();
+    body.try_reserve_exact(length)
+        .map_err(|_| io::Error::other("HTTP503 request body allocation unavailable"))?;
+    body.resize(length, 0);
+    reader.read_exact(&mut body)?;
+    Ok(Request {
+        method: parts[0].into(),
+        path,
+        query: query.into(),
+        headers,
+        body,
+        id: request_id(),
+        _body_budget: body_budget,
+    })
+}
+pub fn request_error_status(error: &io::Error) -> u16 {
+    let text = error.to_string();
+    for code in [413u16, 417, 431, 503] {
+        if text.starts_with(&format!("HTTP{code}")) {
+            return code;
+        }
+    }
+    if matches!(
+        error.kind(),
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+    ) {
+        408
+    } else {
+        400
+    }
 }
 
 pub fn percent_decode(s: &str) -> String {
@@ -58,7 +240,9 @@ pub fn percent_decode(s: &str) -> String {
         // Bytes, not `&s[..]`: a `%` followed by a multibyte character must not panic.
         if b[i] == b'%'
             && i + 2 < b.len()
-            && let Some(v) = std::str::from_utf8(&b[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok())
+            && let Some(v) = std::str::from_utf8(&b[i + 1..i + 3])
+                .ok()
+                .and_then(|h| u8::from_str_radix(h, 16).ok())
         {
             out.push(v);
             i += 3;
@@ -70,12 +254,36 @@ pub fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-pub fn respond<W: Write>(w: &mut W, status: u16, ctype: &str, body: &[u8], head_only: bool) -> io::Result<()> {
+pub fn respond<W: Write>(
+    w: &mut W,
+    status: u16,
+    ctype: &str,
+    body: &[u8],
+    head_only: bool,
+) -> io::Result<()> {
     respond_with(w, status, ctype, body, head_only, &[])
 }
 
 /// `respond` plus extra headers (`Location` of a 303, `Retry-After` of a 429).
-pub fn respond_with<W: Write>(w: &mut W, status: u16, ctype: &str, body: &[u8], head_only: bool, extra: &[(&str, &str)]) -> io::Result<()> {
+pub fn respond_with<W: Write>(
+    w: &mut W,
+    status: u16,
+    ctype: &str,
+    body: &[u8],
+    head_only: bool,
+    extra: &[(&str, &str)],
+) -> io::Result<()> {
+    respond_with_length(w, status, ctype, body, head_only, body.len(), extra)
+}
+pub(crate) fn respond_with_length<W: Write>(
+    w: &mut W,
+    status: u16,
+    ctype: &str,
+    body: &[u8],
+    head_only: bool,
+    advertised_length: usize,
+    extra: &[(&str, &str)],
+) -> io::Result<()> {
     let reason = match status {
         200 => "OK",
         303 => "See Other",
@@ -83,19 +291,24 @@ pub fn respond_with<W: Write>(w: &mut W, status: u16, ctype: &str, body: &[u8], 
         403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        408 => "Request Timeout",
         413 => "Content Too Large",
+        417 => "Expectation Failed",
+        431 => "Request Header Fields Too Large",
         415 => "Unsupported Media Type",
         422 => "Unprocessable Content",
         429 => "Too Many Requests",
         500 => "Internal Server Error",
+        502 => "Bad Gateway",
         503 => "Service Unavailable",
+        504 => "Gateway Timeout",
         _ => "",
     };
     let extra: String = extra.iter().map(|(k, v)| format!("{k}: {v}\r\n")).collect();
     write!(
         w,
         "HTTP/1.1 {status} {reason}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n{extra}Connection: close\r\n\r\n",
-        body.len()
+        advertised_length
     )?;
     if !head_only {
         w.write_all(body)?;
@@ -115,7 +328,9 @@ pub fn prefers_markdown(accept: &str) -> bool {
             .map(str::trim)
             .find_map(|p| p.strip_prefix("q=").or_else(|| p.strip_prefix("Q=")))
             .map_or(Some(1.0), |v| v.trim().parse::<f64>().ok());
-        let Some(q) = q.filter(|q| *q >= 0.0) else { continue };
+        let Some(q) = q.filter(|q| *q >= 0.0) else {
+            continue;
+        };
         match ty.as_str() {
             "text/markdown" | "text/x-markdown" => {
                 md = md.max(q);
@@ -138,7 +353,11 @@ pub fn prefers_markdown(accept: &str) -> bool {
 /// `/` -> `index.md`, `/docs/setup/` -> `docs/setup.md` (brain-seo `files::md_path`).
 pub fn md_path(url_path: &str) -> String {
     let r = url_path.trim_matches('/');
-    if r.is_empty() { "index.md".into() } else { format!("{r}.md") }
+    if r.is_empty() {
+        "index.md".into()
+    } else {
+        format!("{r}.md")
+    }
 }
 
 pub fn mime(path: &str) -> &'static str {
@@ -178,25 +397,64 @@ mod tests {
     #[test]
     fn mime_covers_seo_files_and_public_media() {
         assert_eq!(mime("dist/sitemap.xml"), "application/xml; charset=utf-8");
-        assert_eq!(mime("dist/blog/rss.xml"), "application/rss+xml; charset=utf-8");
-        assert_eq!(mime("dist/blog/atom.xml"), "application/atom+xml; charset=utf-8");
-        assert_eq!(mime("dist/manifest.webmanifest"), "application/manifest+json");
+        assert_eq!(
+            mime("dist/blog/rss.xml"),
+            "application/rss+xml; charset=utf-8"
+        );
+        assert_eq!(
+            mime("dist/blog/atom.xml"),
+            "application/atom+xml; charset=utf-8"
+        );
+        assert_eq!(
+            mime("dist/manifest.webmanifest"),
+            "application/manifest+json"
+        );
         assert_eq!(mime("dist/docs/seo.md"), "text/markdown; charset=utf-8");
-        for a in ["text/markdown", "text/markdown, */*", "text/markdown, text/html", "text/html;q=0.5, text/markdown", "text/x-markdown"] {
+        for a in [
+            "text/markdown",
+            "text/markdown, */*",
+            "text/markdown, text/html",
+            "text/html;q=0.5, text/markdown",
+            "text/x-markdown",
+        ] {
             assert!(prefers_markdown(a), "{a}");
         }
-        for a in ["", "*/*", "text/html", "text/html, text/markdown", "text/markdown;q=0", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "text/markdown;q=0.5, */*"] {
+        for a in [
+            "",
+            "*/*",
+            "text/html",
+            "text/html, text/markdown",
+            "text/markdown;q=0",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "text/markdown;q=0.5, */*",
+        ] {
             assert!(!prefers_markdown(a), "{a}");
         }
-        assert_eq!((md_path("/"), md_path("/pricing"), md_path("/docs/setup/")), ("index.md".into(), "pricing.md".into(), "docs/setup.md".into()));
-        for (f, m) in [("a.mp4", "video/mp4"), ("a.webm", "video/webm"), ("a.avif", "image/avif"), ("a.gif", "image/gif"), ("a.woff", "font/woff"), ("a.pdf", "application/pdf"), ("a.mp3", "audio/mpeg")] {
+        assert_eq!(
+            (md_path("/"), md_path("/pricing"), md_path("/docs/setup/")),
+            (
+                "index.md".into(),
+                "pricing.md".into(),
+                "docs/setup.md".into()
+            )
+        );
+        for (f, m) in [
+            ("a.mp4", "video/mp4"),
+            ("a.webm", "video/webm"),
+            ("a.avif", "image/avif"),
+            ("a.gif", "image/gif"),
+            ("a.woff", "font/woff"),
+            ("a.pdf", "application/pdf"),
+            ("a.mp3", "audio/mpeg"),
+        ] {
             assert_eq!(mime(f), m);
         }
     }
 
     #[test]
     fn parses_request_line_and_headers() {
-        let raw = b"GET /views/home.brain?css&t=1 HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\n\r\n";
+        let raw =
+            b"GET /views/home.brain?css&t=1 HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\n\r\n";
         let r = read_request(&raw[..]).unwrap();
         assert_eq!(r.method, "GET");
         assert_eq!(r.path, "/views/home.brain");
@@ -209,5 +467,58 @@ mod tests {
         assert_eq!(percent_decode("/a%20b"), "/a b");
         assert_eq!(percent_decode("/100%"), "/100%");
         assert_eq!(percent_decode("/%€"), "/%€");
+    }
+    #[test]
+    fn oversized_bodies_are_rejected_before_reading_or_allocating_them() {
+        let request =
+            b"POST /api/items HTTP/1.1\r\nHost: localhost\r\nContent-Length: 65537\r\n\r\n";
+        let error = read_request(&request[..]).err().unwrap();
+        assert_eq!(request_error_status(&error), 413);
+        let request =
+            b"POST /_brain/uploads HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5308417\r\n\r\n";
+        let error = read_request_with_uploads(&request[..], Some("/_brain/uploads"))
+            .err()
+            .unwrap();
+        assert_eq!(request_error_status(&error), 413);
+    }
+    #[test]
+    fn enabled_exact_upload_route_accepts_larger_bodies_and_generates_local_request_identity() {
+        let body = vec![b'x'; 100000];
+        let mut request=format!("POST /app/_brain/uploads HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\nX-Request-Id: client-supplied\r\n\r\n",body.len()).into_bytes();
+        request.extend_from_slice(&body);
+        assert_eq!(
+            request_error_status(
+                &read_request_with_uploads(&request[..], Some("/_brain/uploads"))
+                    .err()
+                    .unwrap()
+            ),
+            413
+        );
+        let parsed = read_request_with_uploads(&request[..], Some("/app/_brain/uploads")).unwrap();
+        assert_eq!(parsed.body, body);
+        assert_ne!(parsed.id, "client-supplied");
+        assert_eq!(parsed.id.len(), 36);
+    }
+    #[test]
+    fn duplicate_length_transfer_encoding_and_control_headers_are_rejected() {
+        for headers in [
+            "Content-Length: 0\r\ncontent-length: 0\r\n",
+            "Content-Length: 0\r\nTransfer-Encoding: chunked\r\n",
+            "Host: second\r\n",
+            "X-Test: bad\u{1}value\r\n",
+            "Content-Length: +2\r\n",
+        ] {
+            let request = format!("POST /api/items HTTP/1.1\r\nHost: localhost\r\n{headers}\r\n");
+            let error = read_request(request.as_bytes()).err().unwrap();
+            assert_eq!(request_error_status(&error), 400);
+        }
+        assert_eq!(
+            request_error_status(
+                &read_request(b"GET /api/%0d%0aevil HTTP/1.1\r\nHost: local\r\n\r\n".as_slice())
+                    .err()
+                    .unwrap()
+            ),
+            400
+        );
     }
 }

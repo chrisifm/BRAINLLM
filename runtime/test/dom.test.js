@@ -4,6 +4,9 @@ import { install, stats, MouseEvent } from '../shim/dom.js'
 
 let doc = install()
 const { sig, drv, fx, batch, tpl, insert, attr, cls, on, list, when, mount } = await import('./rt.js')
+const { sibling } = await import('./rt.js')
+await sibling('brain-dev.js') // This file asserts development diagnostic details; production privacy is tested separately.
+
 
 beforeEach(() => {
   doc.body.textContent = ''

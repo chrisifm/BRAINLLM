@@ -6,7 +6,8 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
-notify = "8.2.0"
+libc = "0.2.191"
+notify = "8.2.1"
 brain-min = { path = "../brain-min" }
 brain-pack = { path = "../brain-pack" }
 brain-lex = { path = "../brain-lex" }

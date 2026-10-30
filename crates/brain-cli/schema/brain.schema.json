@@ -197,12 +197,20 @@
       }
     },
     "targets": {
-      "enum": [
-        "baseline-widely",
-        "baseline-newly"
+      "oneOf": [
+        {
+          "enum": [
+            "baseline-widely",
+            "baseline-newly"
+          ]
+        },
+        {
+          "type": "string",
+          "pattern": "^baseline-(201[5-9]|20[2-9][0-9])$"
+        }
       ],
       "default": "baseline-widely",
-      "description": "Browser support target of the B12xx compatibility rules: Baseline widely available (default) or newly available."
+      "description": "Browser support target for B21xx warnings. Explicit years must not be newer than the pinned web-features dataset."
     }
   }
 }

@@ -36,7 +36,10 @@
   .toast {
     display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); min-width: 240px;
     font: 14px/1.4 var(--font); color: var(--fg); background: var(--glass); border: 1px solid var(--glass-edge);
-    border-radius: var(--radius); box-shadow: var(--shadow); backdrop-filter: blur(20px) saturate(1.4);
+    border-radius: var(--radius); box-shadow: var(--shadow);
+  }
+  @supports (backdrop-filter: blur(20px)) {
+    .toast { backdrop-filter: blur(20px) saturate(1.4); }
   }
   .toast.ok { border-color: var(--ok); }
   .toast.bad { border-color: var(--bad); }

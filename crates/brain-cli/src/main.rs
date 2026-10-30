@@ -19,6 +19,29 @@ mod guide;
 mod icons;
 pub(crate) mod map;
 mod mcp;
+mod mcp_setup;
+mod agent;
+mod backend;
+mod webhook_config;
+mod hooks_executor;
+mod backend_diff;
+mod changes;
+mod intelligence;
+mod recipes;
+mod upgrade;
+mod agent_cli;
+mod libraries;
+mod search;
+mod optimization_feedback;
+mod feedback;
+mod design;
+mod manifests;
+mod history;
+mod integrations;
+mod quality;
+mod deployment;
+mod viewer;
+mod dependencies;
 mod names;
 mod scaffold;
 mod term;
@@ -51,7 +74,13 @@ main:
   brain stop | reload | status       control the running `brain start` (zero-downtime reload)
 
 granular:
-  brain add view|comp|ui <name> [--props \"a:num=0 b:str?\"]   (also layout, lib, channel, service, api, type, guard, server, collection, locale)
+  brain changes <operation> <json>   leased revision-checked file plans and commits
+  brain graph | context <task> | why <target> | preflight
+  brain recipe [list|name <json>]    preview generated CRUD/auth flows
+  brain find <query> | symbols <file> | refs <name> [--watch]  native AST index
+  brain lib list | lib new <name>    discover native functions or create a pure project helper
+  brain upgrade <exact-version>      preview package pin changes and remaining decisions
+  brain add view|comp|ui <name> [--props \"a:num=0 b:str?\"]   (also layout, lib, channel, service, api, type, guard, server, hook, resource, job, collection, locale)
   brain check [path]                 errors and warnings with an exact fix
   brain explain <code>               what a diagnostic code means, why, and a minimal correct example
   brain fix [path]                   applies the mechanical fixes and checks again
@@ -66,7 +95,20 @@ granular:
   brain theme <preset> | --list      writes tokens.cssbrain from a preset (glass, dark, paper, contrast)
   brain card <comp>                  a component's contract (props, emits, slots, reads/writes, size, status)
   brain split <comp> <sel> <Name>    extract that subtree into a new component (refused if check fails)
-  brain mcp                          the same commands as MCP tools over stdio
+  brain feedback query|watch         bounded compiler events for agents (watch: NDJSON)
+  brain agent setup [--hooks]        project MCP registration and optional Claude Code edit feedback
+  brain jobs <enqueue|status|work|prune>  persistent Postgres jobs; workers run server/jobs handlers
+  brain design [blueprint|query|check|seed|configure|gallery]  project-owned Design System
+  brain manifest query|refresh        bounded component contracts and revisions
+  brain quality [refresh]             persistent agent improvement JSON/Markdown/panel
+  brain history [operation]           project tasks, evidence and proposed lessons
+  brain integration list|add|update   reviewed official SDK adapters (preview)
+  brain deps analyze|preview|fetch    dependency evidence and explicit pinned CDN acquisition
+  brain deploy config pm2|nginx       guarded front/backend deployment configuration
+  brain media setup-gcs|list|cleanup  private media provisioning/library/owned cleanup
+  brain e2e probe|run                 detected Viewer scenarios plus existing AX/heap gates
+  brain backend <serve|migrate|schema|bootstrap-admin>  experimental Rust/Postgres resource API (loopback)
+  brain mcp [--profile full|minimal|backend]  the same commands as MCP tools over stdio
 ";
 
 fn main() -> ExitCode {
@@ -94,6 +136,67 @@ fn main() -> ExitCode {
         }
         Some("new") => cmd_new(&args[1..]),
         Some("add") => cmd_add(&args[1..]),
+        Some("changes") | Some("graph") | Some("context") | Some("why") | Some("preflight") | Some("recipe") => return agent_cli::entry(&args),
+        Some("find") | Some("symbols") | Some("refs") => search::run(&args),
+        Some("lib") => libraries::run(&args),
+        Some("history") => history_command(&args),
+        Some("integration") => integration_command(&args),
+        Some("deps") => {
+            app_root().and_then(|root| {
+                let op=args.get(1).map(String::as_str).unwrap_or("analyze");
+                let mut request:serde_json::Value=serde_json::from_str(&flag(&args,"--request").unwrap_or_else(||"{}".into())).map_err(|_|"dependency request must be JSON")?;
+                if let Some(file)=flag(&args,"--file") {request["file"]=serde_json::json!(file);}
+                println!("{}",dependencies::query(&root,op,&request)?);Ok(())
+            })
+        },
+        Some("e2e") => {
+            if args.get(1).map(String::as_str)==Some("probe") {viewer::probe().map(|value|println!("{value}"))}
+            else if args.get(1).map(String::as_str)==Some("run") {
+                #[cfg(unix)] {return cmd_test(&args[2..]);}
+                #[cfg(not(unix))] {Err("E2E needs a supported local browser runner".into())}
+            } else {Err("usage: brain e2e probe | brain e2e run [file-or-folder] [--json]".into())}
+        },
+        Some("feedback") => {
+            app_root().and_then(|root| {
+                let request=serde_json::from_str(&flag(&args,"--request").unwrap_or_else(||"{}".into())).map_err(|_|"feedback request must be JSON")?;
+                match args.get(1).map(String::as_str).unwrap_or("query") {
+                    "query" => println!("{}",feedback::query(&root,&request)?),
+                    "watch" => {let result=feedback::watch(&root,&request,&mut std::io::stdout().lock())?;println!("{}",serde_json::json!({"type":"feedback-complete","cursor":result}));},
+                    _ => return Err("usage: brain feedback query|watch [--request '<json>']; watch emits bounded NDJSON".into()),
+                }
+                Ok(())
+            })
+        },
+        Some("quality") => {
+            app_root().and_then(|root| {
+                let value=if args.get(1).map(String::as_str)==Some("refresh") {quality::refresh(&root)?} else {quality::query(&root,&serde_json::json!({}))?};
+                println!("{value}");Ok(())
+            })
+        },
+        Some("deploy") => {
+            app_root().and_then(|root| {
+                if args.get(1).map(String::as_str)!=Some("config") {return Err("usage: brain deploy config pm2|nginx --request '<json>'; preview only".into());}
+                let target=args.get(2).ok_or("deployment target is required")?;
+                let request=serde_json::from_str(&flag(&args,"--request").unwrap_or_else(||"{}".into())).map_err(|_|"deployment request must be JSON")?;
+                println!("{}",deployment::preview(&root,target,&request)?);Ok(())
+            })
+        },
+        Some("design") | Some("manifest") => project_metadata(&args),
+        Some("upgrade") => app_root().and_then(|r| {
+            let target=args.get(1).filter(|s|!s.starts_with('-')).ok_or("usage: brain upgrade <exact-version> [--json]; preview only")?;
+            if args.iter().skip(2).any(|a|a!="--json") {return Err("usage: brain upgrade <exact-version> [--json]; preview only".into());}
+            let result=upgrade::preview(&r,target)?; println!("{}",result); Ok(())
+        }),
+        Some("backend") => backend::run(&args[1..]),
+        Some("jobs") => backend::jobs(&args[1..]),
+        Some("media") => backend::media(&args[1..]),
+        Some("agent") => {
+            if args.get(1).map(String::as_str) != Some("setup") || args.iter().skip(2).any(|s| !matches!(s.as_str(), "--hooks" | "--json")) {
+                Err("usage: brain agent setup [--hooks] [--json]".into())
+            } else {
+                app_root().and_then(|r| agent::setup(&r,args.iter().any(|s|s=="--hooks"))).map(|files| println!("{}", serde_json::json!({"schemaVersion":1,"files":files,"restartClient":true})))
+            }
+        },
         Some("check") => return cmd_check(&args[1..]),
         // JSON Schema of brain.json (editor autocomplete/validation): `brain schema > brain.schema.json`
         // §27: the design tokens of the app from a preset (all text pairs pass AA; `contrast` passes AAA)
@@ -242,7 +345,10 @@ fn main() -> ExitCode {
             // processes started from the MCP server (dev server, tests) print plain text: stdout is the protocol
             // SAFETY: set before any thread is spawned
             unsafe { std::env::set_var("BRAIN_MCP", "1") };
-            mcp::run()
+            let profile = flag(&args[1..],"--profile").unwrap_or("full".into());
+            if args.iter().skip(1).any(|s|s.starts_with("--") && s!="--profile" && !s.starts_with("--profile=")) {
+                Err("usage: brain mcp [--profile full|minimal|backend]".into())
+            } else {mcp::run_profile(&profile)}
         }
         Some("test") => return cmd_test(&args[1..]),
         Some("map") => app_root().and_then(|r| {
@@ -277,6 +383,19 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+pub(crate) fn compatibility(root: Option<&Path>) -> brain_mcp::Json {
+    use brain_mcp::Json;
+    let data=brain_check::browser_compat::dataset_metadata();
+    let target=root.and_then(|r|std::fs::read_to_string(r.join("brain.json")).ok()).and_then(|s|Json::parse(&s).ok()).and_then(|j|j.get("targets").and_then(Json::as_str).map(str::to_string)).unwrap_or_else(||"baseline-widely".into());
+    let target=if target.len()<=32 && (matches!(target.as_str(),"baseline-widely"|"baseline-newly") || target.strip_prefix("baseline-").is_some_and(|s|s.len()==4 && s.bytes().all(|b|b.is_ascii_digit()))) {target}else{"invalid".into()};
+    Json::obj([("target",Json::str(target)),("source",Json::str(data.source)),("published",Json::str(data.published)),("dataSha256",Json::str(data.data_sha256)),("archiveIntegrity",Json::str(data.archive_integrity)),("globalsSha256",Json::str(data.globals_sha256)),("license",Json::str(data.license)),("browsers",Json::Arr(data.browsers.iter().copied().map(Json::str).collect())),("features",Json::Num(data.features as f64)),("exactPaths",Json::Num(data.exact_paths as f64)),("receiverMembers",Json::Num(data.receiver_members as f64)),("rawKeys",Json::Num(data.raw_compat_keys as f64)),("unclassifiedKeys",Json::Num(data.unclassified_keys as f64)),("runtimeProof",Json::Bool(false)),("lowering",Json::Bool(false)),("coverage",Json::str("Known static declarations and guards; counts describe dataset entries, not complete source coverage"))])
+}
+
+pub(crate) fn versioned(mut value: serde_json::Value) -> serde_json::Value {
+    if let Some(object) = value.as_object_mut() { object.insert("schemaVersion".into(),serde_json::json!(1)); }
+    value
 }
 
 /// `"<msg>; fix: <fix>"` → `{"error": msg, "fix": fix}` (same msg/fix pair as Diag).
@@ -365,6 +484,11 @@ fn cmd_add(args: &[String]) -> Result<(), String> {
     let pos = positional(args, &["--props", "--store", "--get", "--post", "--fields"]);
     let [kind, name] = <[String; 2]>::try_from(pos).map_err(|_| "usage: brain add view|comp|ui <name> [--props \"...\"]".to_string())?;
     let root = app_root()?;
+    if matches!(kind.as_str(), "resource" | "job") {
+        if args.iter().any(|a|a.starts_with("--") && !matches!(a.as_str(),"--fields"|"--json") && !a.starts_with("--fields=")) {return Err("resource/job accepts only --fields and --json".into())}
+        let report = backend::add(&root, &kind, &name, &flag(args,"--fields").unwrap_or_default())?;
+        println!("{report}"); return Ok(());
+    }
     let options = scaffold::AddOptions {
         props: flag(args, "--props").unwrap_or_default(), store: flag(args, "--store"),
         bus: args.iter().any(|a| a == "--bus"), key: args.iter().any(|a| a == "--key"),
@@ -430,6 +554,11 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
     if target.is_dir() {
         if let Some(app) = scaffold::find_root(&target) {
             diags.extend(env::check(&app));
+            if let Err(message) = backend::inspect(&app) {
+                let mut diag = compiler::Diag::new("B0735", "server/", brain_parse::Span::default(), message,
+                    "inspect `brain backend schema --json`; fix the named literal schema, explicit policy or hook/job contract, then run brain check again");
+                diag.line=1;diag.col=1;diags.push(diag);
+            }
             // the language files, once per app (B1401 invalid JSON, B1402 untranslated, B1404 placeholders, B1405 locale)
             if let Some(i18n) = brain_check::i18n::load(&app) {
                 diags.extend(brain_check::i18n::check_locales(&i18n));
@@ -550,6 +679,15 @@ pub(crate) fn run_fix_with(target: Option<PathBuf>, before_write: &mut dyn FnMut
 
 /// `run_fix_with` limited to the diagnostics whose code is in `only` (`None` = every code).
 pub(crate) fn run_fix_only(target: Option<PathBuf>, only: Option<&[&str]>, before_write: &mut dyn FnMut(&Path, &str)) -> Result<brain_mcp::Json, String> {
+    let lock_root = scaffold::outer_root(&target.clone().unwrap_or_else(cwd));
+    let _writer = lock_root.as_ref().map(|root|edit::writer_lock(root)).transpose()?;
+    run_fix_only_body(target, only, before_write)
+}
+/// Internal generator continuation. The caller keeps this exact project's writer/lease guard alive.
+pub(crate) fn run_fix_only_with_writer(target: Option<PathBuf>, only: Option<&[&str]>, before_write: &mut dyn FnMut(&Path, &str), _writer: &std::fs::File) -> Result<brain_mcp::Json, String> {
+    run_fix_only_body(target, only, before_write)
+}
+fn run_fix_only_body(target: Option<PathBuf>, only: Option<&[&str]>, before_write: &mut dyn FnMut(&Path, &str)) -> Result<brain_mcp::Json, String> {
     use brain_mcp::Json;
     let mut applied: Vec<Json> = Vec::new();
     for _round in 0..10 {
@@ -715,6 +853,9 @@ fn cmd_check(args: &[String]) -> ExitCode {
 pub(crate) struct BuildReport {
     pub files: Vec<String>,
     pub warnings: Vec<String>,
+    pub ledger: Vec<brain_mcp::Json>,
+    pub build_cache: brain_mcp::Json,
+    pub optimizations: Vec<brain_mcp::Json>,
     /// route → [js raw, js min, js gz, css, css gz, html, html gz]
     pub report: Vec<(String, [usize; 7])>,
     /// dist files written by this build / left untouched because their bytes did not change
@@ -751,7 +892,7 @@ pub(crate) fn run_build_with(root: &Path, site: Option<String>, env_name: &str, 
     {
         return Err(format!("`--site {s}` must be absolute; fix: `--site https://{s}`"));
     }
-    let mut rep = BuildReport { files: vec![], warnings: vec![], report: vec![], written: 0, unchanged: 0, signature: String::new(), seo: None };
+    let mut rep = BuildReport { files: vec![], warnings: vec![], ledger: vec![], build_cache:brain_mcp::Json::Null, optimizations:vec![], report: vec![], written: 0, unchanged: 0, signature: String::new(), seo: None };
     // the native linter (INTERNALS §20): the same diagnostics as `brain check`; errors stop the build with a summary,
     // warnings are listed with their count (info stays in `brain check`)
     if let Some(p) = progress {
@@ -770,19 +911,37 @@ pub(crate) fn run_build_with(root: &Path, site: Option<String>, env_name: &str, 
     // robots.txt, sitemap.xml, llms.txt, manifest and the head rewrite come from brain-seo's finish (inside bundle)
     bundle(root, &dist, site.as_deref(), env_name, &mut rep, progress)?;
     budget::enforce(root, &rep.report)?;
+    let feedback:serde_json::Value=serde_json::from_str(&build_json(&rep).stringify()).map_err(|_|"build feedback serialization failed")?;
+    if quality::record_build(root,&feedback).is_err() {rep.warnings.push("Build succeeded but private quality feedback could not be stored; inspect brain quality refresh".into());}
     Ok(rep)
 }
 
 /// Production hash length per file: 4 base36 chars, 5 for every file whose 4-char hash collides with another's.
-fn hash_lengths(root: &Path) -> HashMap<String, usize> {
+fn scope_width(keys: &[String], hash: impl Fn(&str,usize)->String) -> Result<usize,String> {
+    for width in 4..=12 {
+        let mut seen=std::collections::HashSet::new();
+        if keys.iter().all(|key|seen.insert(hash(key,width))) {return Ok(width);}
+    }
+    Err("component scope collision at the maximum supported hash width; rename one component path before building".into())
+}
+fn hash_lengths(root: &Path) -> Result<HashMap<String, usize>,String> {
     let mut files = Vec::new();
     brain_files(root, &mut files);
-    let rels: Vec<String> = files.iter().map(|f| f.strip_prefix(root).unwrap_or(f).to_string_lossy().replace('\\', "/")).collect();
-    let mut by_hash: HashMap<String, Vec<&String>> = HashMap::new();
-    for r in &rels {
-        by_hash.entry(brain_codegen::component_hash_len(r, 4)).or_default().push(r);
+    let mut identities=std::collections::BTreeSet::new();
+    let mut rels=Vec::new();
+    for file in files {
+        let rel=file.strip_prefix(root).unwrap_or(&file).to_string_lossy().replace('\\',"/");
+        let source=map::read_source(root,&rel)?;
+        identities.insert(brain_codegen::component_scope_key(&rel,&source));
+        rels.push(rel);
     }
-    rels.iter().map(|r| (r.clone(), if by_hash[&brain_codegen::component_hash_len(r, 4)].len() > 1 { 5 } else { 4 })).collect()
+    for (name,source) in RUNTIME.iter().filter(|(name,_)|name.starts_with("ui/") && name.ends_with(".brain")) {
+        identities.insert(brain_codegen::component_scope_key(name,source));
+        rels.push(name.to_string());
+    }
+    // One width also covers inline children: their parent and child scopes cannot diverge.
+    let width=scope_width(&identities.into_iter().collect::<Vec<_>>(),brain_codegen::component_hash_len)?;
+    Ok(rels.into_iter().map(|rel|(rel,width)).collect())
 }
 
 /// `views/a/b.brain` → its `_layout.brain` chain from the outside in (the build's route table).
@@ -866,7 +1025,7 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
             .filter(|(n, _)| (n.ends_with(".js") && !n.contains('/') && n != "brain-dev.js" && n != "brain-inspect.js" && n != "brain-why.js" && n != "brain-mock.js" && n != "brain-overlay.js") || (n.starts_with("ui/") && n.ends_with(".brain")) || n == "shim/probe.js")
             .collect();
     on_phase("check", 0, 0);
-    let lens = hash_lengths(root);
+    let lens = hash_lengths(root)?;
     prewarm(root, &lens);
     let r2 = root.to_path_buf();
     let compile = move |src: &str, rel: &Path| -> Result<brain_pack::Unit, String> {
@@ -1098,6 +1257,22 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
         .iter()
         .map(|r| (r.route.clone(), [r.js_raw, r.js_min, r.js_gz, r.css, r.css_gz, r.html, r.html_gz]))
         .collect();
+    rep.ledger = out.ledger.iter().map(|page|brain_mcp::Json::parse(&page.to_json())).collect::<Result<Vec<_>,_>>()?;
+    rep.build_cache=brain_mcp::Json::parse(&out.build_cache.to_json())?;
+    for item in &out.optimizations {
+        let mut detail:serde_json::Value=serde_json::from_str(&item.detail).map_err(|_|"optimizer returned invalid structured feedback")?;
+        detail["sourceFile"]=serde_json::json!(item.source);
+        detail["stage"]=serde_json::json!(item.stage);
+        detail["originalSourceHash"]=serde_json::json!(item.original_source_hash);
+        if item.stage=="module-minify" && detail["facts"].is_array() {
+            optimization_feedback::annotate(root,&item.source,&mut detail)?;
+        }
+        rep.optimizations.push(brain_mcp::Json::parse(&detail.to_string())?);
+    }
+    if rep.optimizations.iter().any(|v|v.get("removedBindings").is_some_and(|n|n!=&brain_mcp::Json::Num(0.0))) {
+        rep.warnings.push("Production removed unused bindings; inspect optimizations in brain build --json and clean the original source using the reported verified locations".into());
+    }
+    if out.build_cache.corrupt>0 || out.build_cache.unsafe_paths>0 {rep.warnings.push("Build cache entries were recomputed or bypassed; inspect buildCache for corruption, unsafe paths or skipped writes".into());}
     rep.warnings.extend(out.warnings);
     rep.signature = out.signature;
     rep.seo = seo_range.get();
@@ -1108,9 +1283,13 @@ pub(crate) fn build_json(r: &BuildReport) -> brain_mcp::Json {
     use brain_mcp::Json;
     let keys = ["jsRaw", "jsMin", "jsGz", "css", "cssGz", "html", "htmlGz"];
     Json::obj([
+        ("schemaVersion",Json::Num(1.0)),
         ("build", Json::str(&r.signature)),
         ("files", Json::Arr(r.files.iter().map(Json::str).collect())),
         ("warnings", Json::Arr(r.warnings.iter().map(Json::str).collect())),
+        ("ledger", Json::Arr(r.ledger.clone())),
+        ("buildCache",r.build_cache.clone()),
+        ("optimizations",Json::Arr(r.optimizations.clone())),
         (
             "report",
             Json::Arr(
@@ -1475,6 +1654,9 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
         _ => (true, Json::obj([("skipped", Json::str("no dist/ yet; run `brain build` to audit SEO"))])),
     };
     let mut advice: Vec<Json> = app.as_deref().map(brain_check::doctor::doctor).unwrap_or_default().iter().filter_map(|d| Json::parse(&d.to_json()).ok()).collect();
+    if let Some(a) = &app {
+        advice.extend(mcp_setup::advice(a));
+    }
     // .brain_env: tracked by git (error), a stray .env, the example kept in sync, unused keys (B0722)
     let mut env_ok = true;
     for (code, level, msg, fix) in app.as_deref().map(env::doctor).unwrap_or_default() {
@@ -1520,7 +1702,7 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
         )]),
         _ => Json::obj([("skipped", Json::str("the tests did not run"))]),
     };
-    Ok((ok, Json::obj([("ok", Json::Bool(ok)), ("check", check), ("test", test), ("build", build), ("seo", seo), ("advice", Json::Arr(advice)), ("heap", heap)])))
+    Ok((ok, Json::obj([("ok", Json::Bool(ok)), ("check", check), ("test", test), ("build", build), ("seo", seo), ("advice", Json::Arr(advice)), ("heap", heap), ("compatibility", compatibility(app.as_deref()))])))
 }
 
 fn cmd_doctor(args: &[String]) -> ExitCode {
@@ -1792,6 +1974,53 @@ fn lan_url(host: &str, port: u16) -> Option<String> {
     Some(format!("http://{}:{port}", s.local_addr().ok()?.ip()))
 }
 
+fn history_command(args:&[String])->Result<(),String> {
+    let op=args.get(1).map(String::as_str).unwrap_or("status");
+    let raw=flag(&args[1..],"--request").unwrap_or_else(||"{}".into());
+    if raw.len()>65536 {return Err("history request exceeds 64 KiB".into());}
+    let request=serde_json::from_str(&raw).map_err(|_|"history --request must be a JSON object")?;
+    let root=app_root()?;
+    let value=if matches!(op,"task-create"|"task-update"|"evidence"|"lesson"|"incident") {history::edit(&root,op,&request)?} else {history::query(&root,op,&request)?};
+    println!("{value}");Ok(())
+}
+fn integration_command(args:&[String])->Result<(),String> {
+    let op=args.get(1).map(String::as_str).unwrap_or("list");
+    let value=if op=="list" {integrations::catalog()} else if op=="add" || op=="update" {
+        let id=args.get(2).ok_or("usage: brain integration add|update <provider> [--version exact-version] [--json]; preview only")?;
+        let mut request=serde_json::json!({});
+        if let Some(version)=flag(args,"--version") {request["version"]=serde_json::json!(version);}
+        integrations::preview(&app_root()?,id,&request)?
+    } else {return Err("usage: brain integration list|add|update <provider>; preview only".into());};
+    println!("{value}");Ok(())
+}
+
+fn project_metadata(args: &[String]) -> Result<(), String> {
+    let positional_values=positional(&args[1..], &["--request"]);
+    let values:Vec<&str> = positional_values.iter().map(String::as_str).collect();
+    let request=serde_json::from_str(&flag(args,"--request").unwrap_or_else(||"{}".into())).map_err(|_|"design request must be JSON")?;
+    if values.iter().any(|s|s.starts_with('-')) {return Err("usage: brain design [init|check|gallery|component] [--json] | brain manifest [refresh|file] [--json]".into());}
+    let root=app_root()?;
+    let result=match (args[0].as_str(),values.as_slice()) {
+        ("design",[]) | ("design",["query"])=>design::query(&root,None)?,
+        ("design",["query",target])=>design::query(&root,Some(target))?,
+        ("design",["init"])=>design::preview_init(&root,&request)?,
+        ("design",["check"])=>design::check(&root)?,
+        ("design",["gallery"])=>design::gallery(&root)?,
+        ("design",["blueprint"])=>design::blueprint(&root)?,
+        ("design",["seed"])=>design::preview_seed(&root,&request)?,
+        ("design",["configure"])=>design::preview_configure(&root,&request)?,
+        ("design",[target])=>design::query(&root,Some(target))?,
+        ("manifest",[]) | ("manifest",["query"])=>manifests::query(&root,None)?,
+        ("manifest",["query",target])=>manifests::query(&root,Some(target))?,
+        ("manifest",["refresh"])=>manifests::refresh(&root)?,
+        ("manifest",[target])=>manifests::query(&root,Some(target))?,
+        _=>return Err("usage: brain design [init|check|gallery|component] | brain manifest [refresh|file]".into()),
+    };
+    println!("{result}");
+    if result["validation"]["valid"]==false {return Err("design validation failed; inspect the structured issues and preserve the original baseline".into());}
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1834,5 +2063,24 @@ mod tests {
         let (same_js, css_changed, noop_same) = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("compile_fn deadlocked");
         assert!(same_js && css_changed && noop_same);
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod scope_collision_tests {
+    use super::*;
+    #[test]
+    fn scope_width_rechecks_every_extension_and_fails_closed_at_limit() {
+        let keys=vec!["one".into(),"two".into()];
+        assert_eq!(scope_width(&keys,|name,width|if width<7 {"collision".into()} else {name.into()}).unwrap(),7);
+        assert!(scope_width(&keys,|_,_|"collision".into()).is_err());
+    }
+    #[test]
+    fn embedded_kit_and_same_named_app_components_have_separate_identities() {
+        let source=RUNTIME.iter().find(|(name,_)|*name=="ui/button.brain").unwrap().1;
+        let kit=brain_codegen::component_scope_key("ui/button.brain",source);
+        let app=brain_codegen::component_scope_key("ui/button.brain","<meta props=\"text:str\"><span>{text}</span>");
+        assert_ne!(kit,app);
+        assert_eq!(app,"ui/button.brain");
     }
 }

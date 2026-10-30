@@ -13,12 +13,17 @@ pub mod split;
 mod literals;
 mod runaway;
 mod security;
+mod remote_imports;
 pub mod seo;
 pub mod tools;
 pub mod worker;
 mod quality;
 pub mod doctor;
 pub mod types;
+mod infer;
+mod design_system;
+mod baseline_data;
+pub mod browser_compat;
 pub mod env;
 pub mod i18n;
 mod i18n_rules;
@@ -26,8 +31,10 @@ mod planned;
 mod structure;
 pub mod outline;
 pub mod scope;
+pub mod discover;
 
 pub use catalog::{explain, CATALOG};
+pub use infer::{ApiContract, MethodContract};
 
 use brain_parse::ast::*;
 use brain_parse::{Diag, Span};
@@ -47,6 +54,8 @@ pub struct Ctx {
     pub tokens: Option<Vec<(String, String)>>,
     /// Import source → what it resolved to.
     pub imports: HashMap<String, Imported>,
+    /// Exact bounded discovery of unbound PascalCase component tags; normalized through one import edit.
+    pub auto_components: discover::AutoComponents,
     /// Import source → fix text for B0119 built from the files that do exist (closest name first).
     pub missing_hint: HashMap<String, String>,
     /// Import source → the one existing file it most likely meant (B0119 edit).
@@ -67,6 +76,20 @@ pub struct Ctx {
     pub env: Option<env::EnvInfo>,
     /// Names exported by the app's `types.jsbrain` (`None` = no such file), for `api()` schemas (B1103).
     pub types: Option<HashSet<String>>,
+    /// Literal named schema fields shared by native inference; unknown schemas stay unknown.
+    pub type_shapes: HashMap<String, HashMap<String, String>>,
+    /// Literal directly imported API declarations; no module execution or dynamic URL guessing.
+    pub api_contracts: HashMap<String, ApiContract>,
+    /// Local schema aliases proven to import the exact project-root types file.
+    pub schema_aliases: HashMap<String, HashMap<String, String>>,
+    /// Referenced native backend resources, keyed by their validated resource name.
+    pub resource_shapes: HashMap<String, HashMap<String, String>>,
+    /// Browser target; empty means Baseline widely available.
+    pub browser_target: String,
+    /// A project-owned design foundation enables conservative token-reuse feedback.
+    pub design_system: bool,
+    /// Exact CDN URLs whose local immutable artifacts passed bounded SHA-256 verification.
+    pub approved_remote_imports: HashSet<String>,
     /// Static `canonical` of every view in the app → the view files declaring it (B1604). Empty when not scanned.
     pub canonicals: HashMap<String, Vec<String>>,
     /// A `_guard.jsbrain` protects this view's folder (or an ancestor up to the app root): the page sits behind a
@@ -118,6 +141,18 @@ pub fn load_ctx(disk_path: &Path, c: &Component) -> (Ctx, Vec<PathBuf>) {
     let mut ctx = Ctx::default();
     let dir = disk_path.parent().unwrap_or(Path::new("."));
     let project = app_root(dir);
+    let import_root=project.clone().or_else(||infer::component_root(disk_path,&c.file));
+    if let Some(root)=&project {
+        let design=root.join("design.brain.json"); deps.push(design.clone());
+        ctx.design_system=std::fs::symlink_metadata(design).is_ok_and(|m|m.is_file() && !m.file_type().is_symlink() && m.len()<=1048576);
+    }
+    if let Some(root) = &project {
+        let (approved, remote_deps) = remote_imports::load(root, c);
+        ctx.approved_remote_imports = approved;
+        deps.extend(remote_deps);
+    }
+    let (automatic,discovery_deps)=discover::load(disk_path,c,project.as_deref());
+    ctx.auto_components=automatic;deps.extend(discovery_deps);
     'up: for anc in dir.ancestors() {
         for name in TOKEN_FILES {
             let t = anc.join(name);
@@ -177,8 +212,8 @@ pub fn load_ctx(disk_path: &Path, c: &Component) -> (Ctx, Vec<PathBuf>) {
                 }
                 Err(_) => Imported::Missing,
             }
-        } else if i.source.ends_with(".jsbrain") && target.exists() {
-            let module = std::fs::read_to_string(&target).ok().and_then(|src| brain_parse::parse(&src, &target).ok());
+        } else if i.source.ends_with(".jsbrain") {
+            let module = infer::read_module(import_root.as_deref(), &target);
             if let Some(m) = &module {
                 // `export const Theme = key('theme', default?)`
                 for s in &m.script {
@@ -196,17 +231,18 @@ pub fn load_ctx(disk_path: &Path, c: &Component) -> (Ctx, Vec<PathBuf>) {
                     }
                 }
             }
+            let missing=module.is_none();
             let server = module.is_some_and(|m| m.meta.iter().any(|a| a.name == "server"));
-            deps.push(target);
-            if server { Imported::Server } else { Imported::Other }
+            deps.push(infer::watched_module(import_root.as_deref(),&target));
+            if missing {if !infer::module_hint_safe(import_root.as_deref(),&target){ctx.missing_hint.insert(i.source.clone(),"use a regular readable app module inside the project <=256 KiB; symlinks and nonregular files are refused".into());}Imported::Missing} else if server { Imported::Server } else { Imported::Other }
         } else if target.exists() {
-            deps.push(target);
+            deps.push(target.clone());
             Imported::Other
         } else {
             Imported::Missing
         };
-        if matches!(info, Imported::Missing) {
-            let (hint, best) = missing_hint(dir, &i.source);
+        if matches!(info, Imported::Missing) && !ctx.missing_hint.contains_key(&i.source) {
+            let (hint, best) = if let Some(root)=import_root.as_deref().filter(|root|infer::module_hint_safe(Some(root),&target)) {missing_hint(dir, &i.source,root)} else {("use a regular readable app module inside the project; symlinks and nonregular files are refused".into(),None)};
             ctx.missing_hint.insert(i.source.clone(), hint);
             if let Some(b) = best {
                 ctx.missing_best.insert(i.source.clone(), b);
@@ -225,8 +261,10 @@ pub fn load_ctx(disk_path: &Path, c: &Component) -> (Ctx, Vec<PathBuf>) {
         });
     }
     if let Some(root) = app_root(dir) {
-        deps.extend([root.join("types.jsbrain"), root.join(env::FILE), root.join("brain.json")]);
-        ctx.types = types::exported(&root);
+        deps.extend([infer::watched_module(Some(&root),&root.join("types.jsbrain")), root.join(env::FILE), root.join("brain.json")]);
+        let (type_names,type_shapes)=infer::shared_types(&root);ctx.types=type_names;ctx.type_shapes=type_shapes;
+        infer::load_contracts(c, &mut ctx, &root, dir, &mut deps);
+        ctx.browser_target = std::fs::read_to_string(root.join("brain.json")).ok().map(|src|browser_target(&src)).unwrap_or_default();
         ctx.env = env::load(&root);
         ctx.i18n = i18n::load(&root);
         if let Some(i18n) = &ctx.i18n {
@@ -319,27 +357,30 @@ fn provided_names(root: &Path) -> HashSet<String> {
 }
 
 /// B0119 fix: the closest existing file in the target folder, or what exists there, or the folders that exist.
-fn missing_hint(dir: &Path, source: &str) -> (String, Option<String>) {
+fn missing_hint(dir: &Path, source: &str, root: &Path) -> (String, Option<String>) {
+    let Ok(root)=root.canonicalize() else {return ("cannot resolve the project for import hints".into(),None);};
     let (folder, file) = match source.rfind('/') {
         Some(i) => (&source[..i], &source[i + 1..]),
         None => (".", source),
     };
     let ext = file.find('.').map(|i| &file[i..]).unwrap_or("");
-    let list = |d: &Path, dirs: bool| -> Vec<String> {
-        let mut v: Vec<String> = std::fs::read_dir(d)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .filter(|e| e.path().is_dir() == dirs)
-            .map(|e| e.file_name().to_string_lossy().to_string())
+    let list = |d: &Path, dirs: bool| -> Option<Vec<String>> {
+        let canonical=d.canonicalize().ok()?;
+        if !canonical.starts_with(&root) {return None;}
+        let entries=std::fs::read_dir(d).ok()?.take(513).collect::<Vec<_>>();
+        if entries.len()>512 {return None;}
+        let mut v: Vec<String> = entries.into_iter().flatten()
+            .filter(|e|e.file_type().is_ok_and(|t|if dirs {t.is_dir()}else{t.is_file()}))
+            .filter_map(|e|e.file_name().into_string().ok())
             .filter(|n| !n.starts_with('.') && (dirs || n.ends_with(ext)) && !n.ends_with(".test.brain"))
             .collect();
         v.sort();
-        v
+        if d.canonicalize().ok().as_ref()!=Some(&canonical) {return None;}
+        Some(v)
     };
     let target_dir = dir.join(folder);
     if target_dir.is_dir() {
-        let files = list(&target_dir, false);
+        let Some(files) = list(&target_dir, false) else {return ("cannot list safe import candidates within the project and 512-entry hint limit; inspect `brain map --json`".into(),None);};
         let stem = |n: &str| n.split('.').next().unwrap_or("").to_string();
         let want = stem(file);
         let best = files
@@ -356,7 +397,7 @@ fn missing_hint(dir: &Path, source: &str) -> (String, Option<String>) {
     }
     let parent = target_dir.parent().unwrap_or(dir);
     let up = folder.rfind('/').map(|i| &folder[..i]).unwrap_or(".");
-    let dirs = list(parent, true);
+    let Some(dirs) = list(parent, true) else {return ("the import folder is missing; inspect project folders with `brain map --json`".into(),None);};
     let hint = if dirs.is_empty() {
         format!("create `{source}` or remove the import")
     } else {
@@ -410,6 +451,9 @@ pub fn check(c: &Component, ctx: &Ctx) -> Vec<Diag> {
     ck.a11y();
     ck.seo();
     let mut d = ck.diags;
+    d.extend(infer::check(c, ctx));
+    d.extend(design_system::check(c,ctx));
+    d.extend(browser_compat::check(c, ctx));
     // B0721: keys read here but missing from .brain_env; the diagnostic and its edit belong to .brain_env.
     if let Some(env) = &ctx.env {
         let mut seen = HashSet::new();
@@ -1729,6 +1773,23 @@ impl<'a> Checker<'a> {
                 self.kit_spacing(r);
                 return;
             }
+            match self.ctx.auto_components.resolutions.get(&r.name) {
+                Some(discover::Resolution::Unique{..})=>{
+                    if !self.diags.iter().any(|diag| matches!(diag.code, discover::CODE | "B0125")) {
+                        if let Some((start,end,text))=&self.ctx.auto_components.insertion {
+                            self.push_info(discover::CODE,r.span,format!("components {} were discovered automatically (in-memory imports)",self.ctx.auto_components.names.join(", ")),"explicit imports are optional here; run brain fix to persist these exact imports",vec![(*start,*end,text.clone())]);
+                        }
+                    }
+                    return;
+                },
+                Some(discover::Resolution::Ambiguous{paths})=>{
+                    self.push("B0203",r.span,format!("component `<{}>` is ambiguous: {}",r.name,paths.join(", ")),format!("choose one exact path and add an explicit `import {} from '…'`",r.name));return;
+                },
+                Some(discover::Resolution::Incomplete)=>{
+                    self.push("B0203",r.span,format!("component `<{}>` is not imported; bounded discovery was incomplete",r.name),format!("add an explicit import for {}; discovery never guesses after a limit, unreadable path or symlink",r.name));return;
+                },
+                None=>{},
+            }
             self.push("B0203", r.span, format!("component `<{}>` is not imported", r.name), format!("add `import {} from './{}.brain'` to the <script>", r.name, kebab(&r.name)));
             return;
         };
@@ -2691,4 +2752,18 @@ fn provided_names_in(src: &str) -> HashSet<String> {
 /// `export [async] function <name>(…)` at the top of a script.
 fn exports_fn(s: &Stmt, name: &str) -> bool {
     matches!(s, Stmt::Export { decl, .. } if matches!(decl.as_ref(), Stmt::Func(f) if f.name.as_ref().is_some_and(|n| n.name == name)))
+}
+
+/// Read one declared target using the existing AST, without a second JSON parser.
+fn browser_target(source: &str) -> String {
+    if source.len()>1_048_576 {return "invalid-config-size".into()}
+    let Ok(component)=brain_parse::parse(&format!("export default {source}"),Path::new("config.jsbrain")) else {return String::new()};
+    let Some(Stmt::ExportDefault{expr:Expr::Object{props,..},..})=component.script.first() else {return String::new()};
+    for prop in props {
+        if let ObjProp::KeyValue{key,value,..}=prop {
+            let name=match key {PropKey::Str{value,..}=>value.as_str(),PropKey::Ident(i)=>i.name.as_str(),_=>continue};
+            if name=="targets" {return match value {Expr::Str{value,..}=>value.clone(),_=>"invalid-target-type".into()};}
+        }
+    }
+    String::new()
 }

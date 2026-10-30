@@ -1,7 +1,7 @@
 <meta server>
-// Demo authentication. DEMO_PASSWORD exists only in the [development] block of .brain_env, so a deployed app has
-// no demo login: replace check() with your real provider (database lookup, OAuth…).
-const configured = () => Boolean(process.env.DEMO_PASSWORD)
+// Native mode never falls back to this demo, including during a backend failure.
+// The framework marks its development sidecar explicitly; production cannot enable a demo with a password alone.
+const configured = () => process.env.NODE_ENV === 'development' && !process.env.BRAIN_BACKEND_URL && Boolean(process.env.DEMO_PASSWORD)
 
 export default {
   configured,

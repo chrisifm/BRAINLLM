@@ -1,0 +1,2 @@
+<script>import Counter from './counter.brain'</script>
+<Counter count="3" />

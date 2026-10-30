@@ -261,7 +261,17 @@ With a source installation, use the installed `brain` commands directly. That wo
 Cargo installs `brain` into its bin directory; make sure that directory is on your `PATH`. Stop the dev server with
 Ctrl+C. From the app directory, run `brain doctor` to validate it and `brain build` to create production output.
 For an MCP client in an npm-created app, use command `npx` with arguments `["brain", "mcp"]` and the app as its
-working directory. With a source installation, use the installed `brain` executable and argument `mcp`. Follow that client's configuration instructions; merely copying a prompt does not grant tool access.
+working directory. New apps include `.mcp.json` for Claude Code and `.cursor/mcp.json` for Cursor, plus
+`CLAUDE.md` importing `AGENTS.md`. Install the pinned dependency, restart the client and verify `brain_spec` appears.
+Client trust/approval settings still apply; configuration alone does not prove a live connection.
+
+For an existing app, run `brain agent setup` to merge local registrations, or
+`claude mcp add --scope project brain -- npx --no-install brain mcp` for Claude Code alone.
+`brain agent setup --hooks` also installs optional Claude Code edit-time check feedback, preserving existing hooks.
+The hook checks the app after `.brain`, `.jsbrain` and `.cssbrain` edits; it does not run tests or download packages.
+Use `brain mcp --profile minimal` for six core tools, or `--profile backend` for resource/job contracts and generators.
+With a source installation, change the registration to command `brain` and arguments `["mcp"]`.
+Other clients use their own MCP settings. See [the backend/agent contract](docs/BACKEND.md).
 
 </details>
 
@@ -359,7 +369,7 @@ Never include app secrets, private source or customer data in a contribution.
 
 ## Know what you are adopting
 
-BRAINLLM is **0.3.1** (see [CHANGELOG.md](CHANGELOG.md)). Start with a small app or an isolated route and test the behavior you need. Features marked
+BRAINLLM is **0.4.0** (see [CHANGELOG.md](CHANGELOG.md)). Start with a small app or an isolated route and test the behavior you need. Features marked
 as planned in the source specification are not a supported promise; `brain spec` serves the implemented contract.
 Third-party React, Angular and Vue components do not become BRAINLLM components automatically. Benchmark wins in
 build time do not imply that every runtime workload is faster.

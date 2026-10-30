@@ -4,6 +4,25 @@
 Sign-in and sessions, server-only code and secrets, per-environment configuration, error pages, and putting the app
 in production.
 
+## Experimental resource backend
+For typed CRUD resources and durable jobs, read `brain spec --topic server` and the backend part of `brain map`.
+Create contracts with `brain add resource posts --fields "title:str! body:str"` or `brain add job notify --fields "message:str!"`.
+Inspect one contract with `brain card resource:posts` / `brain card job:notify`, and all resolved schemas with
+`brain backend schema --json`. The Rust/Postgres backend has its own sessions and runs separately through
+`brain backend serve`. Configure fixed loopback `BRAIN_BACKEND_URL` to connect development/production SSR and
+server functions to native identity and resources. `ctx.backend.login({email,password})` relays native HttpOnly
+cookies from a same-origin POST; JWT signing keys stay exclusively in the backend. `ctx.backend.resource(name)`
+provides list/get/create/update/remove through native schemas and policies. Resource generation includes typed
+collection/detail clients, a discoverable canonical contract, server service and repository. Administrative UI remains
+planned in 0.4: the command creates no views, guards or controls and preserves the default 30 KiB route budget.
+Build application views deliberately using the project design system. Account recovery/verification recipes need explicit
+mail setup. Review policy and migrations explicitly before serving. Never remove an existing
+production API merely because the experimental contract compiles.
+
+Mandatory before-write validation uses `brain add hook <identifier>` and `before_create|before_update|before_delete`
+in resource hooks. Return `ctx.payload`; native schema revalidation and row-conflict checks remain authoritative.
+After-write jobs commit with their mutation. See `docs/BEFORE-HOOKS.md` and `docs/BACKEND.md` for limits.
+
 ## Sessions
 1. Set `BRAIN_SECRET` in `.brain_env` (MCP: `brain_env_set { key, section, value }`).
 2. In a `server:` function: `ctx.session.set({ id, email })` signs it into the `__Host-session` cookie (HttpOnly,

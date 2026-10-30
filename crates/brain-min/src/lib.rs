@@ -1,6 +1,8 @@
 //! brain-min: in-house minifier (SPEC §11, INTERNALS §6). Hand-written JS lexer, ASI-safe compaction,
 //! local-name mangling and the runtime short map (`RUNTIME_MAP`).
 
+pub mod cleanup;
+pub use cleanup::{Action as CleanupAction, CleanupError, CleanupFact, CleanupReport, Kind as CleanupKind, Minified};
 pub mod lex;
 pub mod mangle;
 pub mod print;
@@ -15,8 +17,21 @@ use std::collections::{HashMap, HashSet};
 /// Short key for each runtime export (single source of truth, INTERNALS §6/§11). Codegen emits readable names;
 /// in build, the core is published with these exports and every chunk imports the short keys.
 pub const RUNTIME_MAP: &[(&str, &str)] = &[
-    ("sig", "s"), ("drv", "d"), ("fx", "f"), ("batch", "b"), ("untrack", "u"), ("tpl", "t"), ("insert", "i"),
-    ("attr", "a"), ("cls", "c"), ("on", "o"), ("list", "l"), ("when", "w"), ("mount", "m"), ("hydrate", "h"), ("rpc", "r"),
+    ("sig", "s"),
+    ("drv", "d"),
+    ("fx", "f"),
+    ("batch", "b"),
+    ("untrack", "u"),
+    ("tpl", "t"),
+    ("insert", "i"),
+    ("attr", "a"),
+    ("cls", "c"),
+    ("on", "o"),
+    ("list", "l"),
+    ("when", "w"),
+    ("mount", "m"),
+    ("hydrate", "h"),
+    ("rpc", "r"),
 ];
 /// Internal exports used by sibling modules (brain-dev, brain-wc): they keep their name.
 pub const RUNTIME_KEEP: &[&str] = &["_dev", "_ev", "_err", "_rt"];
@@ -52,17 +67,50 @@ pub fn minify_runtime_core(src: &str) -> Result<String, String> {
 /// Minifies a module that consumes the runtime (component chunk, brain-dev, brain-wc): mangles locals,
 /// rewrites runtime imports to the short key and, in prod, drops `console.log`.
 pub fn minify_module(src: &str, prod: bool) -> Result<String, String> {
+    minify_module_with_report(src, prod).map(|m| m.code).map_err(|e| e.to_string())
+}
+/// Production cleanup feedback refers to this JavaScript input, never an inferred
+/// original .brain line. Mangling is not counted as a binding removal.
+pub fn minify_module_with_report(src: &str, prod: bool) -> Result<Minified, CleanupError> {
     let (map, keep) = (runtime_map(), runtime_keep());
-    let mut toks = lex::lex(src)?;
+    let mut toks = checked_tokens(src)?;
+    let mut report = CleanupReport::default();
     if prod {
-        toks = mangle::drop_console_log(toks);
-        toks = minify_templates(toks);
-        // dead locals inside functions (QA #101 136); a module the parser cannot follow keeps its code as is
-        toks = mangle::drop_unused_locals(toks.clone()).unwrap_or(toks);
+        let (next, logs) = mangle::drop_logs(toks, Some(src))?;
+        toks = minify_templates(next);
+        report.append(logs)?;
+        let (next, cleanup) = mangle::cleanup_tokens(toks, Some(src), false)?;
+        toks = next;
+        report.append(cleanup)?;
     }
     let none = HashMap::new();
-    let out = mangle::apply(&toks, &mangle::Plan { mangle: true, forced: &none, keep: &keep, import_map: &map, import_from: &is_runtime_spec })?;
-    Ok(print::print(&out))
+    let out =
+        mangle::apply(&toks, &mangle::Plan { mangle: true, forced: &none, keep: &keep, import_map: &map, import_from: &is_runtime_spec }).map_err(|_| {
+            CleanupError::new(
+                "MINIFY_SCOPE_ERROR",
+                "mangle",
+                Some(src),
+                None,
+                "The minifier could not preserve the module scope/import contract",
+                "Run brain check and inspect the generated input; no source snippet was logged",
+            )
+        })?;
+    Ok(Minified { code: print::print(&out), report })
+}
+fn checked_tokens(src: &str) -> Result<Vec<lex::Tok>, CleanupError> {
+    if src.len() > 8 * 1024 * 1024 {
+        return Err(CleanupError::new("CLEANUP_INPUT_LIMIT", "lex", None, None, "Module exceeds 8 MiB", "Split the module before production cleanup"));
+    }
+    lex::lex(src).map_err(|_| {
+        CleanupError::new(
+            "MINIFY_LEX_ERROR",
+            "lex",
+            Some(src),
+            None,
+            "JavaScript tokenization failed",
+            "Run brain check and inspect the generated input; source literals are not logged",
+        )
+    })
 }
 
 /// Shim to run the runtime tests against the minified core: re-exports both short and long keys.
@@ -70,7 +118,6 @@ pub fn runtime_test_shim(min_file: &str) -> String {
     let long: Vec<String> = RUNTIME_MAP.iter().map(|(l, s)| format!("{s} as {l}")).collect();
     format!("export * from './{min_file}'\nexport {{ {} }} from './{min_file}'\n", long.join(", "))
 }
-
 
 #[derive(Default, Clone)]
 pub struct Options {
@@ -97,7 +144,12 @@ pub fn minify(src: &str, o: &Options) -> Result<String, String> {
 
 /// Removes module-level code nothing live uses, keeping the exports in `keep` (see `mangle::tree_shake`).
 pub fn tree_shake(src: &str, keep: &HashSet<String>) -> Result<String, String> {
-    Ok(print::print(&mangle::tree_shake(&lex::lex(src)?, keep)?))
+    tree_shake_with_report(src, keep).map(|m| m.code).map_err(|e| e.to_string())
+}
+pub fn tree_shake_with_report(src: &str, keep: &HashSet<String>) -> Result<Minified, CleanupError> {
+    let toks = checked_tokens(src)?;
+    let (out, report) = mangle::shake_tokens(&toks, Some(src), keep)?;
+    Ok(Minified { code: print::print(&out), report })
 }
 
 /// Names imported (`import { a, b as c }` → `a`, `b`) from specifiers that satisfy `from`.
@@ -272,13 +324,19 @@ mod template_tests {
 
     #[test]
     fn unquotes_safe_attributes_only() {
-        assert_eq!(minify_html("<button data-b=\"rs62\" class=\"a b\" type=\"button\"><!>  x</button>"), "<button data-b=rs62 class=\"a b\" type=button><!> x</button>");
+        assert_eq!(
+            minify_html("<button data-b=\"rs62\" class=\"a b\" type=\"button\"><!>  x</button>"),
+            "<button data-b=rs62 class=\"a b\" type=button><!> x</button>"
+        );
         assert_eq!(minify_html("<a href=\"/x/\">y</a>"), "<a href=\"/x/\">y</a>"); // conservative: a trailing `/` before `>` keeps its quotes
         assert_eq!(minify_html("<a href=\"/x\">y</a>"), "<a href=/x>y</a>");
         assert_eq!(minify_html("<a title=\"\" data-x=\"a=b\">y</a>"), "<a title=\"\" data-x=\"a=b\">y</a>");
         // whitespace is content inside <pre> and <textarea> (COMPILER defect: code blocks came out on one line)
         let code = "<div>\n  <pre class=\"c\"><code>let n = sig(0)\n\n  &lt;b&gt;  x\n</code></pre>\n  <p>a   b</p><textarea>\n two  spaces\n</textarea> <i>c   d</i></div>";
-        assert_eq!(minify_html(code), "<div> <pre class=c><code>let n = sig(0)\n\n  &lt;b&gt;  x\n</code></pre> <p>a b</p><textarea>\n two  spaces\n</textarea> <i>c d</i></div>");
+        assert_eq!(
+            minify_html(code),
+            "<div> <pre class=c><code>let n = sig(0)\n\n  &lt;b&gt;  x\n</code></pre> <p>a b</p><textarea>\n two  spaces\n</textarea> <i>c d</i></div>"
+        );
     }
 
     #[test]

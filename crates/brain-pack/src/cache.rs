@@ -11,7 +11,7 @@
 //!   each page must allow them all) plus the security headers, in `_headers` and the nginx snippet. server.mjs sends
 //!   its own nonce-based CSP for what it serves.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// `brain.json` → `"cache": { "http", "sw", "offline", "precacheKB", "data" }` (`data` belongs to the runtime).
@@ -85,6 +85,57 @@ pub struct Applied {
 pub struct PageRef<'a> {
     pub route: &'a str,
     pub file: &'a str,
+}
+
+/// Explicit document-head opt-in; comments, raw text, attribute values and inert templates cannot enable an SDK.
+pub fn google_signin(html:&str)->bool {
+    let lower=html.to_ascii_lowercase();let bytes=lower.as_bytes();let mut at=0;let mut head=false;let mut templates=0usize;
+    while let Some(offset)=lower[at..].find('<') {
+        let start=at+offset;
+        if lower[start..].starts_with("<!--") {let Some(end)=lower[start+4..].find("-->") else{return false};at=start+4+end+3;continue}
+        let mut end=start+1;let mut quote=0;
+        while end<bytes.len() {let byte=bytes[end];if quote!=0 {if byte==quote {quote=0}} else if matches!(byte,b'\''|b'"') {quote=byte} else if byte==b'>' {break}end+=1;}
+        if end==bytes.len() {return false}at=end+1;
+        let tag=&lower[start+1..end];let closing=tag.starts_with('/');let tag=tag.trim_start_matches('/');let length=tag.find(|ch:char|ch.is_ascii_whitespace() || ch=='/').unwrap_or(tag.len());let name=&tag[..length];
+        if name=="head" && templates==0 {if closing{return false}head=true;continue}
+        if name=="body" && templates==0 {return false}
+        if name=="template" {if closing {templates=templates.saturating_sub(1)} else {templates+=1;}continue}
+        if !closing && matches!(name,"script"|"style"|"title"|"noscript") {
+            let close=format!("</{name}");let mut cursor=at;
+            loop {let Some(offset)=lower[cursor..].find(&close) else{return false};let candidate=cursor+offset;let after=candidate+close.len();if bytes.get(after).is_some_and(|byte|byte.is_ascii_whitespace() || matches!(byte,b'>'|b'/')) {at=candidate;break}cursor=after;}
+            continue
+        }
+        if !head || templates!=0 || closing || name!="meta" {continue}
+        let mut rest=&tag[length..];let mut values=BTreeMap::new();
+        while !rest.trim_start().is_empty() {
+            rest=rest.trim_start();let count=rest.find(|ch:char|ch.is_ascii_whitespace() || matches!(ch,'='|'/')).unwrap_or(rest.len());if count==0 {break}let key=&rest[..count];rest=rest[count..].trim_start();
+            if !rest.starts_with('=') {continue}rest=rest[1..].trim_start();let Some(first)=rest.chars().next() else{break};let value;
+            if matches!(first,'\''|'"') {let Some(end)=rest[1..].find(first) else{break};value=&rest[1..1+end];rest=&rest[end+2..];}else {let end=rest.find(char::is_whitespace).unwrap_or(rest.len());value=&rest[..end];rest=&rest[end..];}
+            values.entry(key).or_insert(value);
+        }
+        if values.get("name")==Some(&"brain-google-signin") && values.get("content")==Some(&"1") {return true}
+    }false
+}
+pub fn google_csp()->Vec<(String,String)> {[("script-src","https://accounts.google.com/gsi/client"),("style-src","https://accounts.google.com/gsi/style"),("frame-src","https://accounts.google.com/gsi/"),("connect-src","https://accounts.google.com/gsi/")].into_iter().map(|(key,value)|(key.into(),value.into())).collect()}
+fn google_paths(pages:&[PageRef],files:&BTreeMap<String,String>)->BTreeMap<String,String> {
+    let mut paths=BTreeMap::new();
+    for page in pages.iter().filter(|page|!crate::routes::is_dynamic(page.route) && page.route!="*" && !page.file.starts_with("_server/")) {
+        if !files.get(page.file).is_some_and(|html|google_signin(html)) {continue}
+        let route=page.route.trim_end_matches('/');let route=if route.is_empty() {"/"}else{route};
+        for path in [route.to_string(),format!("{}/",route.trim_end_matches('/')),format!("/{}",page.file)] {if path.starts_with('/') && path.len()<=4096 && !path.chars().any(|ch|ch.is_whitespace() || matches!(ch,'"'|'\''|'\\'|'$'|';'|'{'|'}')) {paths.insert(path,format!("/{}",page.file));}}
+    }paths
+}
+fn google_static_headers(headers:String,paths:&BTreeMap<String,String>,build:&str,http:bool,csp:&str)->String {
+    let mut current=String::new();let mut present=BTreeSet::new();let mut out=String::new();
+    for line in headers.lines() {
+        if line.starts_with('/') {current=line.to_string();present.insert(current.clone());}
+        if paths.contains_key(&current) && line=="  Cross-Origin-Opener-Policy: same-origin" {out.push_str("  Cross-Origin-Opener-Policy: same-origin-allow-popups\n");}else{out.push_str(line);out.push('\n');}
+    }
+    for path in paths.keys().filter(|path|!present.contains(*path)) {out.push_str(&format!("{path}\n"));if http {out.push_str(&format!("  Cache-Control: {REVALIDATE}\n  X-Brain-Build: {build}\n  Vary: Accept-Encoding\n"));}for (key,value) in SECURITY_DOC {let value=if *key=="Cross-Origin-Opener-Policy" {"same-origin-allow-popups"}else{value};out.push_str(&format!("  {key}: {value}\n"));}out.push_str(&format!("  Content-Security-Policy: {csp}\n"));}
+    out
+}
+fn google_nginx(paths:&BTreeMap<String,String>,pre:&str,build:&str,http:bool,csp:&str)->String {
+    let mut out=String::new();for (path,file) in paths {out.push_str(&format!("location = {pre}{path} {{\n"));for (key,value) in SECURITY.iter().chain(SECURITY_DOC) {let value=if *key=="Cross-Origin-Opener-Policy" {"same-origin-allow-popups"}else{value};out.push_str(&format!("    add_header {key} \"{value}\" always;\n"));}out.push_str(&format!("    add_header Content-Security-Policy \"{csp}\" always;\n"));if http {out.push_str(&format!("    etag on;\n    add_header Cache-Control \"{REVALIDATE}\";\n    add_header X-Brain-Build {build};\n"));}out.push_str(&format!("    try_files $uri $uri/index.html {pre}{file} =404;\n}}\n"));}out
 }
 
 /// Applies §35 to the built files. `files` holds text files, `binary` raw ones (copied `public/` assets).
@@ -196,6 +247,8 @@ pub fn apply(root: &Path, cfg: &CacheCfg, pages: &[PageRef], extra_csp: &[(Strin
                 let reg = register(&cfg.base);
                 for p in pages {
                     if let Some(html) = files.get_mut(p.file) {
+                        // Successful static routes deliberately execute no JavaScript on first entry.
+                        if html.contains("<meta name=\"brain-zero-js\" content=\"1\">") { continue; }
                         *html = match html.rfind("</body>") {
                             Some(i) => format!("{}{reg}{}", &html[..i], &html[i..]),
                             None => format!("{html}{reg}"),
@@ -259,7 +312,9 @@ pub fn apply(root: &Path, cfg: &CacheCfg, pages: &[PageRef], extra_csp: &[(Strin
             }
         }
     }
+    let google=google_paths(pages,files);
     let mut h = headers_with_links(pages, &unhashed, files.contains_key(&offline_file), &build_hash, cfg.http, &policy, &links);
+    if !google.is_empty() {h=google_static_headers(h,&google,&build_hash,cfg.http,&policy);}
     if ext == crate::Ext::Brain {
         h = h.replace("\n/404.html\n", "\n/404.brain\n").replace("\n/_offline.html\n", "\n/_offline.brain\n");
         h = brain_types(&h, pages, files, &offline_file);
@@ -268,10 +323,16 @@ pub fn apply(root: &Path, cfg: &CacheCfg, pages: &[PageRef], extra_csp: &[(Strin
     // redirects.json (SEO, #219): fragments the CLI passes through the post step, placed in the host configs here
     let redir_nginx = files.remove("_brain/redirects.nginx").map(|r| base_redirects(&r, pre)).unwrap_or_default();
     let redir_caddy = files.remove("_brain/redirects.caddy").map(|r| base_redirects(&r, pre)).unwrap_or_default();
-    let n = nginx_at(&build_hash, cfg.http, &policy, pre);
+    let mut n = nginx_at(&build_hash, cfg.http, &policy, pre);
+    if !google.is_empty() {n.push_str(&google_nginx(&google,pre,&build_hash,cfg.http,&policy));}
     let n = if redir_nginx.is_empty() { n } else { insert_after_first_line(&n, &format!("# redirects.json\n{redir_nginx}")) };
     files.insert("_brain/nginx.conf".into(), if ext == crate::Ext::Brain { nginx_brain(&n) } else { n });
-    let c = caddy(&build_hash, cfg.http, &policy, pre, ext);
+    let mut c = caddy(&build_hash, cfg.http, &policy, pre, ext);
+    if !google.is_empty() {
+        c=c.replace("    Cross-Origin-Opener-Policy \"same-origin\"\n", "");
+        let paths=google.keys().map(|path|format!("{pre}{path}")).collect::<Vec<_>>().join(" ");
+        c.push_str(&format!("@google_signin path {paths}\nheader @google_signin Cross-Origin-Opener-Policy same-origin-allow-popups\n@ordinary_opener not path {paths}\nheader @ordinary_opener Cross-Origin-Opener-Policy same-origin\n"));
+    }
     files.insert("_brain/Caddyfile".into(), if redir_caddy.is_empty() { c } else { insert_after_first_line(&c, &format!("# redirects.json\n{redir_caddy}")) });
     Applied { warnings, build_hash }
 }
@@ -502,9 +563,9 @@ pub fn caddy(build_hash: &str, http: bool, csp: &str, pre: &str, ext: crate::Ext
         o.push_str("@jsbrain path *.jsbrain\nheader @jsbrain Content-Type \"text/javascript; charset=utf-8\"\n");
         o.push_str("@cssbrain path *.cssbrain\nheader @cssbrain Content-Type \"text/css; charset=utf-8\"\n");
         o.push_str("@brainpage path *.brain */\nheader @brainpage Content-Type \"text/html; charset=utf-8\"\n");
-        o.push_str("try_files {path} {path}/index.brain {path}.brain\nfile_server {\n    precompressed gzip\n    index index.brain\n}\n");
+        o.push_str("try_files {path} {path}/index.brain {path}.brain\nfile_server {\n    precompressed br gzip\n    index index.brain\n}\n");
     } else {
-        o.push_str("try_files {path} {path}/index.html {path}.html\nfile_server {\n    precompressed gzip\n}\n");
+        o.push_str("try_files {path} {path}/index.html {path}.html\nfile_server {\n    precompressed br gzip\n}\n");
     }
     if !pre.is_empty() {
         o.push_str(&format!("# the app lives under {pre}/: serve it with `handle_path {pre}/* {{ … }}` around this block\n"));
@@ -578,7 +639,7 @@ pub fn nginx(build_hash: &str, http: bool, csp: &str) -> String {
     format!(
         "# BRAINLLM build {build_hash}: include this file inside the app's server {{}} block (root = dist/).\n\
 gzip_static on;\n\
-# brotli_static on;  # with ngx_brotli and the .br files of your deploy step\n\
+# brotli_static on;  # enable when nginx has ngx_brotli; brain build emits .br files\n\
 location /_b/ {{\n{sec}    add_header Cache-Control \"{IMMUTABLE}\";\n    add_header Vary Accept-Encoding;\n    try_files $uri =404;\n}}\n\
 location = /sw.js {{\n{sec}    add_header Cache-Control \"{REVALIDATE}\";\n}}\n\
 location ~ ^/_brain/ {{\n    return 404;\n}}\n\
@@ -602,6 +663,7 @@ pub fn csp(inline_hashes: &[String], extra: &[(String, String)]) -> String {
         ("base-uri", vec!["'self'".into()]),
         ("form-action", vec!["'self'".into()]),
         ("frame-ancestors", vec!["'none'".into()]),
+        ("frame-src", vec!["'self'".into()]),
     ];
     d[1].1.extend(inline_hashes.iter().cloned());
     for (dir, src) in extra {
@@ -619,6 +681,24 @@ pub fn csp(inline_hashes: &[String], extra: &[(String, String)]) -> String {
         }
     }
     d.iter().map(|(k, v)| format!("{k} {}", v.join(" "))).collect::<Vec<_>>().join("; ")
+}
+
+/// True for executable script tags, including external modules; JSON/state metadata does not execute.
+pub fn has_executable_scripts(html: &str) -> bool {
+    // Case-insensitive HTML tags/attributes and uncommon legacy JS MIME types must not create a false proof.
+    let lower = html.to_ascii_lowercase();
+    let mut rest = lower.as_str();
+    while let Some(at) = rest.find("<script") {
+        let tag_rest = &rest[at..];
+        let Some(end) = tag_rest.find('>') else { return true };
+        let tag = &tag_rest[..end];
+        let kind = attr(tag, "type").unwrap_or_default();
+        // Unknown types are conservative: only known inert metadata is accepted as zero-JS.
+        if !matches!(kind.as_str(), "application/json" | "application/ld+json" | "b/state") { return true; }
+        rest = &tag_rest[end+1..];
+        if let Some(close) = rest.find("</script") { rest = &rest[close+8..]; }
+    }
+    false
 }
 
 /// Bodies of the inline scripts the browser executes (classic, module, import map, speculation rules); data blocks

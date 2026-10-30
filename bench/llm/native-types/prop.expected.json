@@ -1,0 +1,1 @@
+[{"code":"B2001","file":"comp/flow.brain","line":2,"col":10,"msg":"prop `count` expects num, received str","fix":"pass a num value for `count`","level":"warning","edits":[{"line":2,"col":10,"endLine":2,"endCol":19,"text":"count={3}"}]}]

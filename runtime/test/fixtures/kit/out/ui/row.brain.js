@@ -1,20 +1,23 @@
 import { tpl, insert, attr, cls } from "__RT__/brain.js";
-import { dev } from "__RT__/brain-dev.js";
-const $t0 = tpl("<div data-b=\"iaock1\" class=\"row\"><!></div>");
+import { budgetEnter as $brainBudgetbudgetEnter, budgetLeave as $brainBudgetbudgetLeave, budgetOwner as $brainBudgetbudgetOwner, budgetStep as $brainBudgetbudgetStep } from "__RT__/brain-budget.js";
+import { dev, fragment as $brainBudgetFragment } from "__RT__/brain-dev.js";
+const $t0 = $brainBudgetFragment(tpl("<div data-b=\"d6ke6b\" class=\"row\"><!></div>"), "d6ke6b", 0);
 function Row($p = {}) {
-  const sp = (n) => (n == null || n === '' ? null : String(n) === '0' ? '0' : 'var(--space-' + n + ')');
-  const jc = (j) => (j === 'between' ? 'space-between' : j === 'start' || j === 'end' ? 'flex-' + j : j);
-  const $r3 = $t0();
-  const $e1 = $r3;
-  const $e2 = $r3.firstChild;
-  cls($e1, "nowrap", () => !($p.wrap ?? true));
-  attr($e1, "style:gap", () => sp(($p.gap ?? '3')));
-  attr($e1, "style:align-items", () => ($p.align ?? 'center'));
-  attr($e1, "style:justify-content", () => jc(($p.justify ?? 'start')));
-  insert(null, $p.children ? $p.children() : null, $e2);
-  return $r3;
+  const $brainBudgetOwner = $brainBudgetbudgetOwner();
+  const sp = (n) => { const $$brainBudgetFrame1 = $brainBudgetbudgetEnter({ file: ".brain/kit/ui/row.brain", component: "Row", line: 5, column: 14 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame1); { return (n == null || n === '' ? null : String(n) === '0' ? '0' : 'var(--space-' + n + ')'); } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame1); } };
+  const jc = (j) => { const $$brainBudgetFrame2 = $brainBudgetbudgetEnter({ file: ".brain/kit/ui/row.brain", component: "Row", line: 6, column: 14 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame2); { return (j === 'between' ? 'space-between' : j === 'start' || j === 'end' ? 'flex-' + j : j); } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame2); } };
+  const $r5 = $t0();
+  const $e3 = $r5;
+  const $e4 = $r5.firstChild;
+  cls($e3, "nowrap", () => !($p.wrap ?? true));
+  attr($e3, "style:gap", () => sp(($p.gap ?? '3')));
+  attr($e3, "style:align-items", () => ($p.align ?? 'center'));
+  attr($e3, "style:justify-content", () => jc(($p.justify ?? 'start')));
+  insert(null, $p.children ? $p.children() : null, $e4);
+  return $r5;
 }
-Row.h = "iaock1";
+Row.h = "d6ke6b";
+Row.$hmr = { version: 1, wiring: "import { tpl, insert, attr, cls } from \"__RT__/brain.js\";\nimport { budgetEnter as $brainBudgetbudgetEnter, budgetLeave as $brainBudgetbudgetLeave, budgetOwner as $brainBudgetbudgetOwner, budgetStep as $brainBudgetbudgetStep } from \"__RT__/brain-budget.js\";\nimport { dev, fragment as $brainBudgetFragment } from \"__RT__/brain-dev.js\";\nconst $t0 = $brainBudgetFragment(tpl(\"__brain_static_template__\"), \"d6ke6b\", 0);\nfunction Row($p = {}) {\n  const $brainBudgetOwner = $brainBudgetbudgetOwner();\n  const sp = (n) => { const $$brainBudgetFrame1 = $brainBudgetbudgetEnter({ file: \".brain/kit/ui/row.brain\", component: \"Row\", line: 5, column: 14 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame1); { return (n == null || n === '' ? null : String(n) === '0' ? '0' : 'var(--space-' + n + ')'); } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame1); } };\n  const jc = (j) => { const $$brainBudgetFrame2 = $brainBudgetbudgetEnter({ file: \".brain/kit/ui/row.brain\", component: \"Row\", line: 6, column: 14 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame2); { return (j === 'between' ? 'space-between' : j === 'start' || j === 'end' ? 'flex-' + j : j); } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame2); } };\n  const $r5 = $t0();\n  const $e3 = $r5;\n  const $e4 = $r5.firstChild;\n  cls($e3, \"nowrap\", () => !($p.wrap ?? true));\n  attr($e3, \"style:gap\", () => sp(($p.gap ?? '3')));\n  attr($e3, \"style:align-items\", () => ($p.align ?? 'center'));\n  attr($e3, \"style:justify-content\", () => jc(($p.justify ?? 'start')));\n  insert(null, $p.children ? $p.children() : null, $e4);\n  return $r5;\n}\nRow.h = \"d6ke6b\";\nexport default dev(Row);\n", templates: ["<div data-b=\"d6ke6b\" class=\"row\"><!></div>"] };
 export default dev(Row);
-//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoicm93LmJyYWluLmpzIiwic291cmNlcyI6WyJyb3cuYnJhaW4iXSwic291cmNlc0NvbnRlbnQiOlsiPG1ldGEgcHJvcHM9XCJnYXA6c3RyPSczJyBhbGlnbjpzdHI9J2NlbnRlcicganVzdGlmeTpzdHI9J3N0YXJ0JyB3cmFwOmJvb2w9dHJ1ZVwiPlxuPHNjcmlwdD5cbiAgLy8gYSBob3Jpem9udGFsIGZsb3cgdGhhdCB3cmFwcyBvbiBuYXJyb3cgc2NyZWVuczsganVzdGlmeTogc3RhcnQgfCBjZW50ZXIgfCBlbmQgfCBiZXR3ZWVuXG4gIC8vIHNwYWNpbmcgcHJvcHMgdGFrZSBhIHRva2VuIHN0ZXAgZnJvbSB0b2tlbnMuY3NzYnJhaW4gKDDigJM2IOKGkiAtLXNwYWNlLU4pLCBuZXZlciByYXcgQ1NTXG4gIGNvbnN0IHNwID0gKG4pID0+IChuID09IG51bGwgfHwgbiA9PT0gJycgPyBudWxsIDogU3RyaW5nKG4pID09PSAnMCcgPyAnMCcgOiAndmFyKC0tc3BhY2UtJyArIG4gKyAnKScpXG4gIGNvbnN0IGpjID0gKGopID0+IChqID09PSAnYmV0d2VlbicgPyAnc3BhY2UtYmV0d2VlbicgOiBqID09PSAnc3RhcnQnIHx8IGogPT09ICdlbmQnID8gJ2ZsZXgtJyArIGogOiBqKVxuPC9zY3JpcHQ+XG48ZGl2IGNsYXNzPVwicm93XCIgY2xhc3M6bm93cmFwPXshd3JhcH0gc3R5bGU6Z2FwPXtzcChnYXApfSBzdHlsZTphbGlnbi1pdGVtcz17YWxpZ259IHN0eWxlOmp1c3RpZnktY29udGVudD17amMoanVzdGlmeSl9PjxzbG90IC8+PC9kaXY+XG48c3R5bGU+XG4gIC5yb3cgeyBkaXNwbGF5OiBmbGV4OyBmbGV4LXdyYXA6IHdyYXA7IG1pbi13aWR0aDogMDsgfVxuICAucm93Lm5vd3JhcCB7IGZsZXgtd3JhcDogbm93cmFwOyB9XG48L3N0eWxlPlxuIl0sIm5hbWVzIjpbXSwibWFwcGluZ3MiOiI7Ozs7QUFJQTtBQUNBO0FBQUE7QUFBQTtBQUFBO0FBRUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBOyJ9
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoicm93LmJyYWluLmpzIiwic291cmNlcyI6WyJyb3cuYnJhaW4iXSwic291cmNlc0NvbnRlbnQiOlsiPG1ldGEgcHJvcHM9XCJnYXA6c3RyPSczJyBhbGlnbjpzdHI9J2NlbnRlcicganVzdGlmeTpzdHI9J3N0YXJ0JyB3cmFwOmJvb2w9dHJ1ZVwiPlxuPHNjcmlwdD5cbiAgLy8gYSBob3Jpem9udGFsIGZsb3cgdGhhdCB3cmFwcyBvbiBuYXJyb3cgc2NyZWVuczsganVzdGlmeTogc3RhcnQgfCBjZW50ZXIgfCBlbmQgfCBiZXR3ZWVuXG4gIC8vIHNwYWNpbmcgcHJvcHMgdGFrZSBhIHRva2VuIHN0ZXAgZnJvbSB0b2tlbnMuY3NzYnJhaW4gKDDigJM2IOKGkiAtLXNwYWNlLU4pLCBuZXZlciByYXcgQ1NTXG4gIGNvbnN0IHNwID0gKG4pID0+IChuID09IG51bGwgfHwgbiA9PT0gJycgPyBudWxsIDogU3RyaW5nKG4pID09PSAnMCcgPyAnMCcgOiAndmFyKC0tc3BhY2UtJyArIG4gKyAnKScpXG4gIGNvbnN0IGpjID0gKGopID0+IChqID09PSAnYmV0d2VlbicgPyAnc3BhY2UtYmV0d2VlbicgOiBqID09PSAnc3RhcnQnIHx8IGogPT09ICdlbmQnID8gJ2ZsZXgtJyArIGogOiBqKVxuPC9zY3JpcHQ+XG48ZGl2IGNsYXNzPVwicm93XCIgY2xhc3M6bm93cmFwPXshd3JhcH0gc3R5bGU6Z2FwPXtzcChnYXApfSBzdHlsZTphbGlnbi1pdGVtcz17YWxpZ259IHN0eWxlOmp1c3RpZnktY29udGVudD17amMoanVzdGlmeSl9PjxzbG90IC8+PC9kaXY+XG48c3R5bGU+XG4gIC5yb3cgeyBkaXNwbGF5OiBmbGV4OyBmbGV4LXdyYXA6IHdyYXA7IG1pbi13aWR0aDogMDsgfVxuICAucm93Lm5vd3JhcCB7IGZsZXgtd3JhcDogbm93cmFwOyB9XG48L3N0eWxlPlxuIl0sIm5hbWVzIjpbXSwibWFwcGluZ3MiOiI7Ozs7OztBQUlBO0FBQ0E7QUFBQTtBQUFBO0FBQUE7QUFFQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTsifQ==
 

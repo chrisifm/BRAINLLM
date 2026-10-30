@@ -1,6 +1,6 @@
 import { tpl, insert, attr } from "/@brain/brain.js";
-import { dev } from "/@brain/brain-dev.js";
-const $t0 = tpl("<span data-b=\"dxj2kp\" class=\"badge\"><!></span>");
+import { dev, fragment as $brainBudgetFragment } from "/@brain/brain-dev.js";
+const $t0 = $brainBudgetFragment(tpl("<span data-b=\"dxj2kp\" class=\"badge\"><!></span>"), "dxj2kp", 0);
 function Badge($p = {}) {
   const $r3 = $t0();
   const $e1 = $r3;
@@ -10,8 +10,9 @@ function Badge($p = {}) {
   return $r3;
 }
 Badge.h = "dxj2kp";
+Badge.$hmr = { version: 1, wiring: "import { tpl, insert, attr } from \"/@brain/brain.js\";\nimport { dev, fragment as $brainBudgetFragment } from \"/@brain/brain-dev.js\";\nconst $t0 = $brainBudgetFragment(tpl(\"__brain_static_template__\"), \"dxj2kp\", 0);\nfunction Badge($p = {}) {\n  const $r3 = $t0();\n  const $e1 = $r3;\n  const $e2 = $r3.firstChild;\n  attr($e1, \"data-tone\", () => ($p.tone ?? 'neutral'));\n  insert(null, () => $p.text, $e2);\n  return $r3;\n}\nBadge.h = \"dxj2kp\";\nexport default dev(Badge);\n", templates: ["<span data-b=\"dxj2kp\" class=\"badge\"><!></span>"] };
 export default dev(Badge);
-//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiYmFkZ2UuYnJhaW4uanMiLCJzb3VyY2VzIjpbImJhZGdlLmJyYWluIl0sInNvdXJjZXNDb250ZW50IjpbIjxtZXRhIHByb3BzPVwidG9uZTpzdHI9J25ldXRyYWwnIHRleHQ6c3RyXCI+XG5cbjxzcGFuIGNsYXNzPVwiYmFkZ2VcIiBkYXRhLXRvbmU9e3RvbmV9Pnt0ZXh0fTwvc3Bhbj5cblxuPHN0eWxlPlxuICAuYmFkZ2UgeyBwYWRkaW5nOiAwIHZhcigtLXNwYWNlLTEpOyBib3JkZXItcmFkaXVzOiB2YXIoLS1yYWRpdXMpOyBjb2xvcjogdmFyKC0tbXV0ZWQpO1xuICAgICZbZGF0YS10b25lPW9rXSB7IGNvbG9yOiB2YXIoLS1vayk7IH1cbiAgICAmW2RhdGEtdG9uZT1iYWRdIHsgY29sb3I6IHZhcigtLWJhZCk7IH0gfVxuPC9zdHlsZT5cbiJdLCJuYW1lcyI6W10sIm1hcHBpbmdzIjoiOzs7Ozs7O0FBRUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBOyJ9
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiYmFkZ2UuYnJhaW4uanMiLCJzb3VyY2VzIjpbImJhZGdlLmJyYWluIl0sInNvdXJjZXNDb250ZW50IjpbIjxtZXRhIHByb3BzPVwidG9uZTpzdHI9J25ldXRyYWwnIHRleHQ6c3RyXCI+XG5cbjxzcGFuIGNsYXNzPVwiYmFkZ2VcIiBkYXRhLXRvbmU9e3RvbmV9Pnt0ZXh0fTwvc3Bhbj5cblxuPHN0eWxlPlxuICAuYmFkZ2UgeyBwYWRkaW5nOiAwIHZhcigtLXNwYWNlLTEpOyBib3JkZXItcmFkaXVzOiB2YXIoLS1yYWRpdXMpOyBjb2xvcjogdmFyKC0tbXV0ZWQpO1xuICAgICZbZGF0YS10b25lPW9rXSB7IGNvbG9yOiB2YXIoLS1vayk7IH1cbiAgICAmW2RhdGEtdG9uZT1iYWRdIHsgY29sb3I6IHZhcigtLWJhZCk7IH0gfVxuPC9zdHlsZT5cbiJdLCJuYW1lcyI6W10sIm1hcHBpbmdzIjoiOzs7Ozs7O0FBRUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7In0=
 
 /* ---- css ---- */
 @layer ui {

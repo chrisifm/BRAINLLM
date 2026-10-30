@@ -1,0 +1,21 @@
+# Persistent agent quality feedback
+
+The primary interface is structured JSON through `quality::query(root, options)`. `quality::refresh(root)` collects bounded native source contracts, local checker evidence, design-baseline status, project-history counts and an optional verified build summary. It never starts a build, launches the app, invokes resources or contacts a service.
+
+Outputs are private local files:
+
+- `.brain/quality/improvements.json`: canonical snapshot, source revisions, evidence, coverage and explicit unknowns.
+- `.brain/quality/IMPROVEMENTS.md`: readable review list.
+- `.brain/quality/panel.html`: fixed local static panel with a restrictive CSP, no scripts, network requests, application data or external assets.
+
+Each finding has a stable ID, code, source location and revision when known, evidence (`proven`, `static`, `unmeasured`), severity, priority, fix, acceptance criteria and status. Parse failures are proven parser observations. Selected local native diagnostics are static findings; full cross-file semantic checking remains a separate gate. Missing structural interaction-state evidence creates a validation task, not a claim that the UI is broken. No complete-audit score or promise to detect all bugs is produced. `score` is null.
+
+Refresh reads native component ASTs and runs only selected locally supported checker families. It does not call the filesystem context loader with an invented complete import/type/configuration context. Coverage explicitly records that cross-file semantics, rendered accessibility, behavioral state coverage, runtime CPU/heap and network performance have not been measured. Source files with detected secrets, excessive delimiter/markup depth, unsafe paths or exhausted budgets are skipped and count as unknown coverage. Bodies, literals, resource payloads, environment values and arbitrary diagnostic messages/fixes are not copied. Static catalog titles and guidance replace raw diagnostic prose.
+
+Limits include 128 locally checked files, 256 KiB per source, 8 MiB per local source phase, a cooperative 30-second refresh deadline, 128 retained findings, 1 MiB per metadata file and query pagination of 1..100 items. Total detected findings and omitted detail counts remain explicit. Reaching a detail limit never means the omitted cases passed. The manifest collector has its own bounded source/metadata coverage. Recorded-source freshness checks are bounded; newly added files require refresh.
+
+`quality::record_build(root, build_json)` is called only after a real compiler build. It selects numeric emitted-byte totals, known optimization stages/actions and verified source coordinates. It does not retain arbitrary build warnings, reports, source excerpts or values. Original source coordinates survive only when the supplied original-source hash matches a guarded current source read. Generated-only or stale locations remain unknown. Per-page byte sums can repeat shared assets: they are not measured network transfer. A source revision change marks earlier build evidence stale; it does not claim that production cleanup executed again.
+
+Refresh uses a cooperating metadata writer lock and per-file revision hashes. It writes a bounded roll-forward journal, atomically replaces each owned file and commits the canonical JSON last. Recovery completes only files still matching their expected revision or already matching the intended content. Unexpected editor changes, symlinks, unknown producers and oversized/corrupt metadata fail closed. An existing Markdown/panel without the owned canonical snapshot is preserved. Three files are a logical publication, not a filesystem-wide atomic transaction; an interrupted publication is visible through pending recovery and per-artifact hashes. Normal filesystems cannot provide compare-and-swap rename against an unrelated editor writing in the final verification/rename window; use the shared writer protocol for coordinated edits.
+
+The static panel is a private artifact, not an HTTP service, deployment or public hosting. Explicit human review remains required for project merges and releases. Build output, full repository gates, runtime measurements and provider integration tests retain their separate responsibilities.

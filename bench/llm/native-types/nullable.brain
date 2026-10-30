@@ -1,0 +1,4 @@
+<script>
+let user=ready?null:{name:'Ada'}
+</script>
+<p>{user.name}</p>

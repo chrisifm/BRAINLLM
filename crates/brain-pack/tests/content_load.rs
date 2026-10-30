@@ -1,6 +1,7 @@
 //! #273: a static route whose `load` only reads `brain:content` (the index `brain add collection` writes) runs its
 //! load at build time and is prerendered: a static file with the entries, no SSR route, and it does not turn on
 //! hydration for every page. A `load` that reads the request stays on the server.
+mod support;
 use std::path::{Path, PathBuf};
 
 fn app() -> PathBuf {
@@ -51,7 +52,7 @@ fn collection_index_is_prerendered() {
         let src = std::fs::read_to_string(r3.join(rel)).map_err(|e| e.to_string())?;
         let u = c2(&src, Path::new(rel))?;
         let content = format!("file://{}", r3.join(".brain/build/server/_rt/content.mjs").display());
-        let code = brain_pack::rewrite_imports(&u.server_js, &mut |s| Ok((s == "brain:content").then(|| content.clone())))?;
+        let code = brain_pack::rewrite_imports(&u.server_js, &mut |s| if s == "brain:content" { Ok(Some(content.clone())) } else { support::runtime_specifier(s) })?;
         let out = r3.join(".brain/build/server").join(format!("{}.mjs", rel.replace('/', "_")));
         std::fs::write(&out, &code).map_err(|e| e.to_string())?;
         Ok((format!("file://{}", out.display()), code))

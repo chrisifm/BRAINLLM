@@ -20,7 +20,7 @@ fn codes(file: &str, src: &str) -> Vec<brain_parse::Diag> {
 fn readers_need_no_import_on_the_server() {
     assert!(codes("views/blog.brain", VIEW).iter().all(|d| d.level != brain_parse::Severity::Error), "{:#?}", codes("views/blog.brain", VIEW));
     let o = brain_codegen::compile(VIEW, Path::new("views/blog.brain")).unwrap_or_else(|d| panic!("{d:#?}"));
-    assert!(o.server_js.starts_with("import { entries, tags } from \"brain:content\";"), "{}", o.server_js);
+    assert!(o.server_js.contains("import { entries, tags } from \"brain:content\";"), "{}", o.server_js);
     assert!(!o.js.contains("brain:content"), "client stays clean: {}", o.js);
 
     // An explicit import (today's scaffold) is not duplicated.
@@ -39,5 +39,5 @@ fn client_reads_are_b0705_and_astro_names_normalize() {
     let d: Vec<_> = codes("views/blog.brain", &astro).into_iter().filter(|d| d.code == "B0706").collect();
     assert!(d.len() == 1 && d[0].edits[0].text == "entries", "{d:#?}");
     let o = brain_codegen::compile(&astro, Path::new("views/blog.brain")).unwrap_or_else(|d| panic!("{d:#?}"));
-    assert!(o.server_js.contains("posts: entries('blog')") && o.server_js.starts_with("import { entries, tags } from \"brain:content\";"), "{}", o.server_js);
+    assert!(o.server_js.contains("posts: entries('blog')") && o.server_js.contains("import { entries, tags } from \"brain:content\";"), "{}", o.server_js);
 }

@@ -83,3 +83,10 @@ impl Checker<'_> {
         }
     }
 }
+
+/// Literal field shapes only; export names without schema objects provide no inferred fields.
+pub fn exported_shapes(root: &Path) -> std::collections::HashMap<String, std::collections::HashMap<String,String>> {
+    let Ok(src)=std::fs::read_to_string(root.join("types.jsbrain")) else {return Default::default()};
+    let Ok(component)=brain_parse::parse(&src,Path::new("types.jsbrain")) else {return Default::default()};
+    crate::infer::shapes(&component)
+}

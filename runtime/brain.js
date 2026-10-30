@@ -5,14 +5,14 @@
 // · r run · q clean · n unlink · d dispose. Short names: brain-min does not rename properties.
 
 // L tracker · O owner · Q pending effects · B batch depth · P flush scheduled · H dev hook · E error hook · V provider (brain-ch)
-let L = null, O = null, Q = [], B = 0, P = 0, H = null, E = null, V, A = null
+let L = null, O = null, Q = [], B = 0, P = 0, H = null, E = null, V, A = null, U
 // Errors (INTERNALS §18): fx, drv and handlers are caught and the app keeps running. E (brain-err.js, _err) records
 // them and applies per-component fallbacks; without it, console.error.
 // Errors go to the rich catcher (brain-err) or the console, then to the nearest component boundary (§42, brain-guard.js):
 // up the owner chain for fx/drv, up the DOM for handlers.
 const oops = (e, x, w) => {
   if (e && e.kind == 'aborted') return // a cancelled request (brain-data): never an error to report or show
-  E ? E(e, x, w) : globalThis.reportError ? reportError(e) : console.error(e) // reportError: window error listeners (the dev client) see it
+  E ? E(e, x, w) : H ? globalThis.reportError ? reportError(e) : console.error(e) : console.error('BRAIN_ERROR: Operation failed. Try again.')
   for (let o = x; o; o = o.nodeType ? o.parentNode : o.p) {
     const g = o.$g
     if (g) return g(e, w)
@@ -155,7 +155,7 @@ function flush() {
   }
 }
 
-export const sig = (v, k) => (k && H ? H(new N(v, null, 0), k) : new N(v, null, 0))
+export const sig = (v, k) => (U && U('signals', O, 1), k && H ? H(new N(v, null, 0), k) : new N(v, null, 0))
 export const drv = f => new N(undefined, f, 0)
 export const fx = f => {
   const n = new N(undefined, f, 1)
@@ -201,7 +201,7 @@ export const rpc = (id, a) => import('./brain-rpc.js').then(m => m.rpc(id, a, oo
 // Internals for sibling modules (brain-err, brain-ch): root, current owner and node helpers; _err installs the hook;
 // brain-ch passes its provider for `mount(C, t, props, { provide })`.
 // Optimistic writes (brain-data) and the circuit breaker (brain-guard) wrap N's prototype instead of a core hook (#288).
-export const _rt = p => ((V = V || p), { root, owner: () => O, nodes, rm, oops, guard: (o, g) => (o.$g = g), adopt: a => (A = a), dev: (a, b) => H && H(a, b) })
+export const _rt = p => ((V = V || p), { root, owner: () => O, nodes, rm, oops, guard: (o, g) => (o.$g = g), adopt: a => (A = a), dev: (a, b) => H && H(a, b), development: () => !!H, budget: f => (U = f) })
 export const _err = h => ((E = h), _rt())
 
 // ---------- DOM ----------
@@ -351,6 +351,7 @@ export function list(p, f, key, render, end, empty) {
   let rows = new Map(), order = [], emp = null
   fx(() => {
     const items = f() || [], me = O
+    if (U) U('rows', me, items.length)
     untrack(() => {
       // Large updates (>500 rows, some already on screen) create new rows in ≤16 ms slices (one frame; QA #302: 5 ms
       // split a 1,000-row update into extra frames): the rest is skipped and this fx re-runs after a yield (INP). A first render (no rows yet) is built at once: slicing it only re-walks the list.

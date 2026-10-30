@@ -55,7 +55,8 @@ test('compiled counter in dev: hmr changes the text and keeps n', async () => {
   await flush()
   assert.equal(host.firstChild.textContent, 'Clicks: 3 double = 6')
   stop()
-  assert.equal(live.get('rs62nv').size, 0)
+  assert.equal(live.has('rs62nv'), false, 'disposed component hashes do not retain empty registry sets')
+  assert.equal(host.childNodes.length, 0, 'disposing the mount removes the current HMR roots, including a remounted version')
 })
 
 test('compiled todo: submit, keyed list, toggle, filters and empty', async () => {

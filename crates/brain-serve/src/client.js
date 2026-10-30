@@ -6,8 +6,8 @@ const url = `ws://${location.host}${base}/@brain/hmr`;
 let box;
 // Timing to measure HMR latency (QA, bench/sites/hmr.mjs): epoch ms, same base as Date.now().
 const now = () => performance.timeOrigin + performance.now();
-const applied = (kind, file, receivedAt) =>
-  dispatchEvent(new CustomEvent('brain:hmr', { detail: { kind, file, receivedAt, appliedAt: now() } }));
+const applied = (kind, file, receivedAt, outcome = {}) =>
+  dispatchEvent(new CustomEvent('brain:hmr', { detail: { kind, file, receivedAt, appliedAt: now(), ...outcome } }));
 function overlay(diags) {
   box ??= Object.assign(document.createElement('pre'), { id: '__brain_overlay' });
   // a panel at the bottom, not a full-page cover: the rest of the app stays clickable while one file is broken
@@ -31,7 +31,7 @@ globalThis.__brainDev = true;
 let ws;
 const pending = [];
 const report = e => {
-  const msg = JSON.stringify({ t: 'brain:error', url: location.pathname + location.search, at: Date.now(), ...e });
+  const msg = JSON.stringify({ t: 'brain:error', url: location.pathname, at: Date.now(), ...e });
   ws?.readyState === 1 ? ws.send(msg) : pending.length < 50 && pending.push(msg);
 };
 // Errors are recorded by the runtime's brain-err (window errors, rejections and what component boundaries catch),
@@ -47,7 +47,7 @@ import(base + '/@brain/brain-err.js').then(({ capture, sub }) => {
     quiet.set(r.fp, setTimeout(() => {
       quiet.delete(r.fp);
       const st = r.brainStack ?? r.stack ?? [];
-      report({ message: r.msg, type: r.type, code: r.code, src: r.src ?? r.line, stack: Array.isArray(st) ? st.join('\n') : String(st), comp: r.comp ? (r.comp.name ?? r.comp.file ?? null) : null, where: r.where, count: r.n, fp: r.fp });
+      report({ message: r.msg, type: r.type, code: r.code, src: r.src ?? r.line, stack: Array.isArray(st) ? st.join('\n') : String(st), comp: r.comp ? (r.comp.name ?? r.comp.file ?? null) : null, where: r.where, location: r.location, generatedLocation: r.generatedLocation, frames: r.frames, causes: r.causes, truncated: r.truncated, mapping: r.mapping, brainStack: r.brainStack ?? null, componentChain: r.comp?.chain ?? [], crumbs: r.crumbs, count: r.n, fp: r.fp });
       ov.then(() => O && O.error(r));
     }, 300));
   });
@@ -60,16 +60,21 @@ addEventListener('brain:net', ev => {
   const msg = JSON.stringify({ t: 'brain:net', ...ev.detail });
   ws?.readyState === 1 ? ws.send(msg) : pending.length < 50 && pending.push(msg);
 });
+let hotModules = 0;
 async function hot(path, receivedAt) {
   try {
+    // Browsers do not evict evaluated ESM versions; bound cache-busting versions in a long dev session.
+    if (++hotModules > 256) return reload(path, receivedAt, 'native-module-cache-budget');
     const mod = await import(`${base}${path}?t=${Date.now()}`);
     const hash = mod.default?.h;
     const dev = await import(base + '/@brain/brain-dev.js');
-    // hmr returns how many instances it remounted; 0 = none alive with that hash → full reload.
-    if (!hash || typeof dev.hmr !== 'function' || !dev.hmr(hash, mod)) return reload(path, receivedAt);
-    applied('js', path, receivedAt);
+    if (!hash || typeof dev.hmr !== 'function') return reload(path, receivedAt, 'module-graph-or-runtime-version-change');
+    const count = dev.hmr(hash, mod);
+    const outcome = dev.lastUpdate || { mode: 'component-remount', reason: 'legacy-runtime', remounted: count, patched: 0 };
+    if (!count && outcome.mode !== 'future-mount-updated') return reload(path, receivedAt, outcome.reason || 'runtime-version-incompatible');
+    applied('js', path, receivedAt, outcome);
   } catch {
-    reload(path, receivedAt);
+    reload(path, receivedAt, 'module-import-or-runtime-version-failed');
   }
 }
 // A file that stopped compiling: its live instances become the error box in place (HMR, same hash as the last good
@@ -90,8 +95,9 @@ async function broken(diags, receivedAt, file, all) {
   if (file) await show(placed ? list.filter(d => d.level !== 'error') : list, file);
   else if (!placed) overlay(diags);
 }
-function reload(file, receivedAt) {
-  applied('reload', file, receivedAt);
+function reload(file, receivedAt, reason = 'document-shell-or-server-contract-change') {
+  applied('reload', file, receivedAt, { mode: 'full-reload', reason });
+  console.info('brain:hmr', { mode: 'full-reload', reason, file });
   location.reload();
 }
 // Swaps the stylesheet without remounting; `appliedAt` is taken once the new sheet has loaded.

@@ -1,0 +1,1 @@
+[{"code":"B2002","file":"comp/flow.brain","line":4,"col":10,"msg":"known object has no field `nmae`","fix":"use `name`","level":"warning","edits":[{"line":4,"col":10,"endLine":4,"endCol":14,"text":"name"}]}]

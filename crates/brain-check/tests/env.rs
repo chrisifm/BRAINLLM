@@ -74,3 +74,14 @@ fn b0721_used_but_not_declared_and_b0722_declared_but_unused() {
     let u = unused_keys(&root);
     assert_eq!(u.iter().map(|d| (d.code, d.msg.contains("UNUSED_KEY"), d.is_info())).collect::<Vec<_>>(), [("B0722", true, true)]);
 }
+
+#[test]
+fn optional_framework_environment_keys_do_not_become_required_application_secrets() {
+    let root=Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("managed-env-{}",std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();std::fs::write(root.join(".brain_env"),"PUBLIC_SITE_NAME=Example\n").unwrap();
+    let info=brain_check::env::load(&root).unwrap();
+    for key in ["NODE_ENV","BRAIN_BACKEND_URL","BRAIN_JWT_SECRET"] {assert!(info.keys.contains(key));}
+    assert!(!info.keys.contains("APPLICATION_SECRET"));
+    assert!(empty_keys(&info.src,brain_check::env::FILE,"production",&|_|None).is_empty());
+    std::fs::remove_dir_all(root).unwrap();
+}

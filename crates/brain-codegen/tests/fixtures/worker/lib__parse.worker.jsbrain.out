@@ -1,3 +1,4 @@
-export const parseCsv = (text) => text.split('\n').map((l) => l.split(','));
+import { budgetEnter as $brainBudgetbudgetEnter, budgetLeave as $brainBudgetbudgetLeave, budgetStep as $brainBudgetbudgetStep } from "/@brain/brain-budget.js";
+export const parseCsv = (text) => { const $$brainBudgetFrame1 = $brainBudgetbudgetEnter({ file: "lib/parse.worker.jsbrain", component: "Parse", line: 1, column: 25 }, null); try { $brainBudgetbudgetStep($$brainBudgetFrame1); { return text.split('\n').map((l) => { const $$brainBudgetFrame2 = $brainBudgetbudgetEnter({ file: "lib/parse.worker.jsbrain", component: "Parse", line: 1, column: 56 }, null); try { $brainBudgetbudgetStep($$brainBudgetFrame2); { return l.split(','); } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame2); } }); } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame1); } };
 import { serve as $serve } from "/@brain/brain-worker.js";
 $serve({ parseCsv });

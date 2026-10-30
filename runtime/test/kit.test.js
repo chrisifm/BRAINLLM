@@ -112,7 +112,8 @@ test('#168 kit ErrorState: message and action per kind; Retry only where it help
   click(off.querySelector('button'))
   assert.equal(n, 1)
   const h403 = show({ kind: 'http', status: 403, message: 'admins only' }, retry)
-  assert.match(h403.textContent, /You do not have permission: admins only/)
+  assert.match(h403.textContent, /You do not have permission to see this\./)
+  assert.ok(!h403.textContent.includes('admins only'), 'arbitrary HTTP exception messages are not public UI')
   assert.equal(h403.querySelector('button'), null) // retrying a 403 does not help
   const h401 = show({ kind: 'http', status: 401 }, retry)
   assert.match(h401.querySelector('a').getAttribute('href'), /^\/login/)

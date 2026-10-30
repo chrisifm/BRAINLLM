@@ -1,5 +1,6 @@
 //! #114 (INTERNALS §32): a static build evaluates `paths()` (one page per param), build-time `load` on those routes,
 //! `seo(props)` and the view's `<head>` block, and a view without `load` is not mistaken for a server view.
+mod support;
 use std::path::{Path, PathBuf};
 
 const HOME: &str = r#"<meta seo title="Home" description="Static home" canonical="/">
@@ -43,7 +44,7 @@ fn paths_seo_and_head_reach_every_page() {
         let o = brain_codegen::compile_with(src, rel, &opts).map_err(|d| format!("{}: {:?}", rel.display(), d.iter().map(|x| &x.msg).collect::<Vec<_>>()))?;
         Ok(brain_pack::Unit { js: o.js, css: o.css, server_js: o.server_js, server_fns: o.server_fns })
     };
-    // the views here import nothing, so the server module is the server_js as is
+    // Resolve generated runtime imports for server evaluation; budget instrumentation is a real dependency.
     let r3 = root.clone();
     let server = move |rel: &str| -> Result<(String, String), String> {
         let src = std::fs::read_to_string(r3.join(rel)).map_err(|e| e.to_string())?;
@@ -51,8 +52,9 @@ fn paths_seo_and_head_reach_every_page() {
         let o = brain_codegen::compile_with(&src, Path::new(rel), &opts).map_err(|_| "compile".to_string())?;
         let f = r3.join(".brain/test-server").join(format!("{}.mjs", rel.replace('/', "_")));
         std::fs::create_dir_all(f.parent().unwrap()).unwrap();
-        std::fs::write(&f, &o.server_js).unwrap();
-        Ok((format!("file://{}", f.to_string_lossy().replace('[', "%5B").replace(']', "%5D")), o.server_js))
+        let code=brain_pack::rewrite_imports(&o.server_js, &mut support::runtime_specifier)?;
+        std::fs::write(&f, &code).unwrap();
+        Ok((format!("file://{}", f.to_string_lossy().replace('[', "%5B").replace(']', "%5D")), code))
     };
     let input = brain_pack::Input {
         root: root.clone(),

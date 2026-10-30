@@ -36,7 +36,7 @@ impl Kind {
 }
 
 /// Framework primitives (SPEC §2) — the only framework globals. None needs an import.
-pub const PRIMITIVES: &[&str] = &["sig", "drv", "fx", "emit", "ref", "log", "form", "resource", "api", "provide", "use", "key", "store", "bus", "sanitize", "t", "locale", "fmt", "alternates", "suggest", "dismiss", "navigate", "route", "mounted", "watch", "tick", "every", "media", "visible", "debounce", "stream", "online", "http", "ApiError", "ai"];
+pub const PRIMITIVES: &[&str] = &["sig", "drv", "fx", "emit", "ref", "log", "form", "resource", "api", "provide", "use", "key", "store", "bus", "sanitize", "t", "locale", "fmt", "alternates", "suggest", "dismiss", "navigate", "route", "mounted", "watch", "tick", "every", "media", "visible", "debounce", "stream", "online", "http", "ApiError", "ai", "interop", "dateParse", "dateAdd", "dateDiff", "dateRange", "dateZone", "hashText", "shortHash", "database", "storageInfo", "persistStorage", "urlState", "storage", "cookie", "sqlite", "urlDialog", "sharedWorker", "threadCapabilities", "loadWorklet", "messageChannel", "offscreen", "sharedMemory", "transfer"];
 
 /// Primitives that live outside the runtime core, and the module (next to `brain.js`) that exports them.
 /// Codegen imports them automatically when used (SPEC: "all primitives need no import").
@@ -51,6 +51,30 @@ pub const EXT_PRIMITIVES: &[(&str, &str)] = &[
     ("expose", "brain-ch.js"),
     // `$val` is imported as `val as $val`: unwraps a provided signal inside the consumer's `drv`.
     ("$val", "brain-ch.js"),
+    ("dateParse", "brain-time.js"),
+    ("dateAdd", "brain-time.js"),
+    ("dateDiff", "brain-time.js"),
+    ("dateRange", "brain-time.js"),
+    ("dateZone", "brain-time.js"),
+    ("hashText", "brain-hash.js"),
+    ("shortHash", "brain-hash.js"),
+    ("transfer", "brain-worker.js"),
+    ("sharedWorker", "brain-worker.js"),
+    ("threadCapabilities", "brain-threads.js"),
+    ("loadWorklet", "brain-threads.js"),
+    ("messageChannel", "brain-threads.js"),
+    ("offscreen", "brain-threads.js"),
+    ("sharedMemory", "brain-threads.js"),
+    ("sqlite", "brain-sqlite.js"),
+    ("storage", "brain-preferences.js"),
+    ("cookie", "brain-preferences.js"),
+    ("urlState", "brain-url.js"),
+    ("urlDialog", "brain-url.js"),
+    ("$urlBind", "brain-url.js"),
+    ("database", "brain-storage.js"),
+    ("storageInfo", "brain-storage.js"),
+    ("persistStorage", "brain-storage.js"),
+    ("interop", "brain-interop.js"),
     ("form", "brain-form.js"),
     ("resource", "brain-data.js"),
     ("api", "brain-data.js"),
@@ -120,6 +144,7 @@ pub const KNOWN_GLOBALS: &[&str] = &[
     "IntersectionObserver", "ResizeObserver", "MutationObserver", "WebSocket", "EventSource", "Worker",
     "BroadcastChannel", "Image", "Audio", "Notification", "matchMedia", "getComputedStyle", "scrollTo",
     "innerWidth", "innerHeight", "devicePixelRatio", "indexedDB", "caches", "reportError", "scheduler",
+    "ServiceWorkerRegistration", "PushManager", "crossOriginIsolated", "isSecureContext", "SharedWorker", "MessageChannel", "MessagePort", "SharedArrayBuffer", "Atomics", "OffscreenCanvas", "WebAssembly", "AudioContext", "AudioWorkletNode", "WorkletAnimation", "ImageBitmap", "createImageBitmap", "CSS", "requestIdleCallback", "cancelIdleCallback", "IDBKeyRange", "self",
 ];
 
 /// Top-level names of a component and their kind.
@@ -142,7 +167,7 @@ pub fn init_kind(init: Option<&Expr>) -> Option<Kind> {
     let Some(Expr::Call { callee, .. }) = init.map(Expr::unparen) else { return None };
     let Expr::Ident(id) = callee.unparen() else { return None };
     match id.name.as_str() {
-        "sig" => Some(Kind::Sig),
+        "sig" | "urlState" => Some(Kind::Sig),
         "drv" => Some(Kind::Drv),
         "ref" => Some(Kind::Ref),
         "form" => Some(Kind::Form),

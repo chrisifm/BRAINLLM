@@ -15,7 +15,7 @@
 // Unsaved changes (§41.5): `f.dirty` is true while values differ from the last saved ones (init, reset() or a successful
 // submit); leaving the page (client navigation or closing the tab) then asks first. No API.
 import { sig, fx, batch, untrack, _rt } from './brain.js'
-import { rule, check, msg } from './brain-schema.js'
+import { rule, check, checkText, checkScalar, msg } from './brain-schema.js'
 
 export { rule, check } // server.mjs validates posted forms with the same rules (§38)
 
@@ -41,9 +41,18 @@ if (globalThis.addEventListener && !globalThis.__brainDirtyHook) {
     for (const f of DIRTY) if (f.dirty && !f.busy) return void (e.preventDefault(), (e.returnValue = ''))
   })
 }
-const empty = v => v == null || v === '' || (Array.isArray(v) && !v.length)
+const empty = v => v == null || typeof v === 'string' && v.trim() === '' || Array.isArray(v) && !v.length
 const init0 = r => (r.list ? [] : r.t === 'bool' ? false : '')
-const out = (r, v) => (r.list ? v || [] : r.t === 'num' ? (empty(v) ? null : Number(v)) : r.t === 'bool' ? !!v : v)
+const out = (r, v) => {
+  if (r.list) {
+    if (!Array.isArray(v)) return []
+    if (r.t !== 'num') return v
+    const numbers = new Array(v.length)
+    for (let i = 0; i < v.length; i++) numbers[i] = Number(v[i])
+    return numbers
+  }
+  return r.t === 'num' ? (empty(v) ? null : Number(v)) : r.t === 'bool' ? !!v : v
+}
 
 // state left by the server: globalThis.__brainForms while it renders, or the page's #brain-forms JSON
 let SEEN
@@ -62,6 +71,46 @@ function posted(id) {
 }
 
 export function form(schema, o = {}) {
+  if (rule(schema).t !== 'obj') throw Error('form: schema must be a nested field object')
+  return createForm(schema, o, rule, check, remoteCheck)
+}
+// Compiler-only flat literal schema bytecode. Dynamic/public form() keeps the full parser.
+export function formStatic(schema, o = {}) {
+  return compiledForm(schema, o, ['str', 'email'], checkText, remoteCheck)
+}
+export function formScalars(schema, o = {}) {
+  return compiledForm(schema, o, ['str', 'email', 'bool', 'num'], checkScalar, remoteCheck)
+}
+// Compiler-only options proven not to configure or dynamically install async checks.
+export function formStaticSync(schema, o = {}) {
+  return compiledForm(schema, o, ['str', 'email'], checkText, null)
+}
+export function formScalarsSync(schema, o = {}) {
+  return compiledForm(schema, o, ['str', 'email', 'bool', 'num'], checkScalar, null)
+}
+function compiledForm(schema, o, types, validate, remote) {
+  if (remote === null && ('check' in o || 'validate' in o)) throw Error('form: invalid compiled synchronous options')
+  if (!schema || Object.getPrototypeOf(schema) !== Object.prototype || Object.keys(schema).length > 4096) throw Error('form: invalid compiled schema')
+  return createForm(schema, o, (value, key) => {
+    if (['__proto__', 'prototype', 'constructor'].includes(key) || !Array.isArray(value) || value.length !== 2 || !types.includes(value[0]) || typeof value[1] !== 'boolean') throw Error('form: invalid compiled schema')
+    return { t: value[0], req: value[1], list: false, min: null, max: null }
+  }, validate, remote)
+}
+// Only public/dynamic or check-configured forms retain this optional capability.
+function remoteCheck(o, x, checking) {
+  const c = o.check && o.check[x.path], v = untrack(() => x.s.v)
+  if (!c || untrack(() => x.e.v)) return Promise.resolve(untrack(() => x.e.v))
+  checking.v++
+  return Promise.resolve()
+    .then(() => c(v))
+    .then(m => m || '', e => (e && e.kind === 'aborted' ? '' : (e && e.message) || msg('form.check_failed', 'Could not check this value.')))
+    .then(m => {
+      if (untrack(() => x.s.v) === v) x.e.v = m
+      return untrack(() => x.e.v)
+    })
+    .finally(() => checking.v--)
+}
+function createForm(schema, o, readRule, validateRule, remote) {
   const id = 'f' + ++seq, owner = I.owner() // aria effects are created later (in handlers) but live with the component
   const busy = sig(false), error = sig(''), shown = sig(0) // shown: bumped when touched set changes
   const checking = sig(0), saved = sig('') // async checks running · JSON of the last saved values
@@ -72,7 +121,7 @@ export function form(schema, o = {}) {
   function build(sch, base, init) {
     const v = {}, err = {}
     for (const k of Object.keys(sch)) {
-      const r = rule(sch[k]), path = base ? base + '.' + k : k
+      const r = readRule(sch[k], k), path = base ? base + '.' + k : k
       if (r.t === 'obj') {
         const sub = build(r.s, path, (init && init[k]) || {})
         Object.defineProperty(v, k, { enumerable: true, value: sub.v })
@@ -115,23 +164,9 @@ export function form(schema, o = {}) {
   const touch = x => {
     validate(x)
     if (!x.touched) (x.touched = true), shown.v++
-    remote(x)
+    if (remote) remote(o, x, checking)
   }
-  // async check of one field (only when its own rule passes); resolves to its message
-  const remote = x => {
-    const c = o.check && o.check[x.path], v = untrack(() => x.s.v)
-    if (!c || untrack(() => x.e.v)) return Promise.resolve(untrack(() => x.e.v))
-    checking.v++
-    return Promise.resolve()
-      .then(() => c(v))
-      .then(m => m || '', e => (e && e.kind === 'aborted' ? '' : (e && e.message) || msg('form.check_failed', 'Could not check this value.')))
-      .then(m => {
-        if (untrack(() => x.s.v) === v) x.e.v = m // a stale answer (the value changed meanwhile) is ignored
-        return untrack(() => x.e.v)
-      })
-      .finally(() => checking.v--)
-  }
-  const validate = x => (x.e.v = untrack(() => check(x.r, x.s.v)))
+  const validate = x => (x.e.v = untrack(() => validateRule(x.r, x.s.v)))
   const fid = p => `${id}-${p.replace(/\./g, '-')}-err`
 
   // A form posted without JS (§38) comes back from the server with its values and messages: start from them, already
@@ -196,7 +231,7 @@ export function form(schema, o = {}) {
       return checking.v > 0
     },
     get ok() {
-      for (const x of F) if (check(x.r, x.s.v)) return false
+      for (const x of F) if (validateRule(x.r, x.s.v)) return false
       return true
     },
     id: path => fid(path),
@@ -244,8 +279,8 @@ export function form(schema, o = {}) {
       busy.v = true
       if (fm) fm.setAttribute('aria-busy', 'true') // assistive tech hears the form is working
       try {
-        if (o.check) {
-          await Promise.all(F.map(remote))
+        if (remote && o.check) {
+          await Promise.all(F.map(x => remote(o, x, checking)))
           first = F.find(x => untrack(() => x.e.v))
           if (first) return void (shown.v++, first.el && first.el.focus && first.el.focus())
         }

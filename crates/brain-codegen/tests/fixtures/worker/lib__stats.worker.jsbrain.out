@@ -1,5 +1,6 @@
-const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
-const sorted = (xs) => [...xs].sort((a, b) => a - b);
+import { budgetEnter as $brainBudgetbudgetEnter, budgetLeave as $brainBudgetbudgetLeave, budgetStep as $brainBudgetbudgetStep } from "/@brain/brain-budget.js";
+const mean = (xs) => { const $$brainBudgetFrame1 = $brainBudgetbudgetEnter({ file: "lib/stats.worker.jsbrain", component: "Stats", line: 1, column: 14 }, null); try { $brainBudgetbudgetStep($$brainBudgetFrame1); { return xs.reduce((a, b) => { const $$brainBudgetFrame2 = $brainBudgetbudgetEnter({ file: "lib/stats.worker.jsbrain", component: "Stats", line: 1, column: 32 }, null); try { $brainBudgetbudgetStep($$brainBudgetFrame2); { return a + b; } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame2); } }, 0) / xs.length; } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame1); } };
+const sorted = (xs) => { const $$brainBudgetFrame3 = $brainBudgetbudgetEnter({ file: "lib/stats.worker.jsbrain", component: "Stats", line: 2, column: 16 }, null); try { $brainBudgetbudgetStep($$brainBudgetFrame3); { return [...xs].sort((a, b) => { const $$brainBudgetFrame4 = $brainBudgetbudgetEnter({ file: "lib/stats.worker.jsbrain", component: "Stats", line: 2, column: 37 }, null); try { $brainBudgetbudgetStep($$brainBudgetFrame4); { return a - b; } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame4); } }); } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame3); } };
 const $default = { mean, sorted };
 export default $default;
 import { serve as $serve } from "/@brain/brain-worker.js";

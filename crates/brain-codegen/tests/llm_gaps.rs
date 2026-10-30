@@ -17,7 +17,7 @@ const t = { form: 1 }
 </form>
 <p>{t.form}</p>"#;
     let o = brain_codegen::compile(src, Path::new("comp/prefs.brain")).unwrap_or_else(|d| panic!("{d:?}"));
-    assert!(o.js.contains("import { form } from \"/@brain/brain-form.js\";"), "{}", o.js);
+    assert!(o.js.contains("import { formStaticSync as $brainBudgetSyncForm } from \"/@brain/brain-form.js\";"), "{}", o.js);
     assert!(o.js.contains("import Button from \"/@brain/ui/button.brain\";"), "{}", o.js);
     assert!(o.js.contains("import Field from \"/@brain/ui/field.brain\";"), "{}", o.js);
     assert!(o.js.contains("prefs.v = { ...prefs.v, email: e.target.checked }"), "{}", o.js);

@@ -40,5 +40,47 @@
     "rule": "credential",
     "sha256": "949a0eca02907f675812d79d696689f6ef9bc0742afcbc06fef6493158669911",
     "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
+    "path": "crates/brain-backend/src/google.rs",
+    "rule": "credential-url",
+    "sha256": "11aa9a43140c3557c04871f9b77987b95c4818e319ac3c1b2c21bfa9e0e413dc",
+    "reason": "Reviewed synthetic signed-token test: scanner spans a public Google issuer literal and adjacent JSON source to a reserved .test email; no usable URL credential."
+  },
+  {
+    "path": "crates/brain-backend/src/jwt.rs",
+    "rule": "credential-url",
+    "sha256": "8f0beccac20b604dac3114440624ed0403497de1c1044427d599d6206a0de4c1",
+    "reason": "Reviewed non-connecting connect_lazy fixture uses only unused:unused at loopback; no usable database credential."
+  },
+  {
+    "path": "crates/brain-backend/src/links.rs",
+    "rule": "credential-url",
+    "sha256": "093866188144b0216fb125431572e8ac2df8980dfeeb6ebeb3d9f3987d1e4c1d",
+    "reason": "Reviewed rejection fixture verifies that URLs containing synthetic user:password credentials are refused."
+  },
+  {
+    "path": "crates/brain-serve/src/native_proxy.rs",
+    "rule": "credential-url",
+    "sha256": "f8c7f2987069485166a19282090fd6bfda8b12c5ccf46c99846068ed92369f32",
+    "reason": "Reviewed rejection fixture verifies that synthetic user:pass loopback target URLs are refused."
+  },
+  {
+    "path": "runtime/test/server-native-auth.test.js",
+    "rule": "credential-url",
+    "sha256": "a28b8176f57374f4f478f28ad1530d57fff8e37cdb58a74e5146350154124e29",
+    "reason": "Reviewed rejection fixture verifies that synthetic user:password loopback backend URLs are refused."
+  },
+  {
+    "path": "crates/brain-backend/tests/auth_flows.rs",
+    "rule": "credential-url",
+    "sha256": "fbddae166ead16d1dd67736b19403ab1ac0095e344f663573848af911a7ce273",
+    "reason": "Reviewed rejection fixture: account mail callback URLs containing synthetic user:pass credentials at a reserved .test host must be refused."
+  },
+  {
+    "path": "crates/brain-backend/src/webhooks.rs",
+    "rule": "credential-url",
+    "sha256": "fbddae166ead16d1dd67736b19403ab1ac0095e344f663573848af911a7ce273",
+    "reason": "Reviewed outbound webhook rejection fixture: synthetic user:pass credentials at a reserved .test host are refused before transport."
   }
 ]

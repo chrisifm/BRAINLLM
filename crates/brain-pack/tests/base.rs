@@ -65,7 +65,12 @@ fn every_url_lives_under_the_base() {
                 }
             }
         }
-        assert!(html.contains("register('/app/sw.js',{scope:'/app/',"), "{html}");
+        if html.contains("<meta name=\"brain-zero-js\" content=\"1\">") {
+            assert!(!brain_pack::cache::has_executable_scripts(html), "static page executes JS: {html}");
+            assert!(!html.contains("serviceWorker.register"), "static page must not register a worker: {html}");
+        } else {
+            assert!(html.contains("register('/app/sw.js',{scope:'/app/',"), "{html}");
+        }
     }
     assert!(out.files["index.html"].contains("href=\"/app/about\"") && out.files["about/index.html"].contains("action=\"/app/save\""));
     assert!(!out.files["index.html"].contains("/app/logo.svg") && out.files["index.html"].contains("rel=\"icon\" href=\"/app/_b/"), "the icon points at the hashed copy");

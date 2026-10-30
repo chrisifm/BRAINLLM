@@ -1,0 +1,5 @@
+<script>
+const User={enabled:'bool'}
+let f=form(User)
+</script>
+<input bind:value={f.v.enabled}>

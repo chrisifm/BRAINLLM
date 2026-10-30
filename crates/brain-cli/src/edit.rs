@@ -146,6 +146,15 @@ fn rewrite_imports(rel: &str, source: &str, from: &str, to: &str) -> Result<Stri
 /// Shared by AST and MCP text/file edits. The kernel releases this lock on process death.
 /// Cooperating writers serialize; external editors still require conflict detection.
 pub fn writer_lock(root:&Path)->Result<std::fs::File,String>{
+    let file=writer_lock_unchecked(root)?;
+    crate::changes::guard_legacy_writer(root)?;
+    Ok(file)
+}
+
+/// Internal kernel lock for the leased changes protocol. Callers must authorize
+/// every target lease under changes/state.lock before committing or recovering.
+/// Other source writers must use writer_lock, which also respects active leases.
+pub(crate) fn writer_lock_unchecked(root:&Path)->Result<std::fs::File,String>{
     let state=safe(root,".brain")?;
     std::fs::create_dir_all(&state).map_err(|e|e.to_string())?;
     let lock=safe(root,".brain/edit.lock")?;

@@ -290,6 +290,10 @@ impl<'a> JsParser<'a> {
             }
             "class" => Err(self.err("B0101", start, "`class` does not exist in BrainScript", "use functions and objects: `const make = (x) => ({ x, area: () => x * x })`")),
             "with" => Err(self.err("B0104", start, "`with` does not exist in BrainScript", "access properties through the explicit object: `obj.prop`")),
+            "server" if {
+                let next=self.peek2()?;
+                next.span.line==start.line && matches!(next.tok,Tok::Ident(ref name) if matches!(name.as_str(),"const"|"let"|"async"|"function"))
+            } => Err(self.err("B0704",start,"a server handler uses the reserved `server:` function declaration, not a variable modifier","write `server: async function save(ctx, data) { ... }`; do not add a semicolon after `server`")),
             "server" if self.peek2()?.is_punct(":") => {
                 // `server: async function f(ctx, …) {}` — the one reserved label (SPEC §11.1).
                 self.bump()?;

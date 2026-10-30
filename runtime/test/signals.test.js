@@ -1,6 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { sig, drv, fx, batch, untrack } from './rt.js'
+const { sibling } = await import('./rt.js')
+await sibling('brain-dev.js') // This file asserts development diagnostic details; production privacy is tested separately.
+
 
 const tick = () => new Promise(r => queueMicrotask(r))
 

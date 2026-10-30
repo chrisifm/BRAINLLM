@@ -139,6 +139,7 @@ COMPILER assigns the next free code there in the same change that emits it, then
 - B072x environment file `.brain_env` (§36): B0720 empty value in the build environment (error) · B0721 key used in
   code but missing (warning, edit adds `KEY=`) · B0722 key never used (info) · B0723 `PUBLIC_*` value shaped like a
   secret (error) · B0724 malformed line or section (error). Values never appear in any diagnostic.
+- B0734 missing local MCP registration (doctor warning; configuration only) · B0735 invalid backend resource/job contract (error; schema, policy or hook reference).
 - B07xx server and secrets (§11.1): B0701 server module used outside load/server: · B0702 env without `PUBLIC_` on the client · B0703 literal shaped like a key · B0704 `server:` function badly declared (not async, nested, in .jsbrain) or reading component state.
 
 ## 6. Runtime (CODEGEN → RUNTIME contract), module `runtime/brain.js`
@@ -344,7 +345,7 @@ so in that mode it is enough for the server to map each one to its type.
   `<slot />` where each view (`views/*.brain`) goes. The compiler assembles the document; nobody writes `index.html`.
 - Clean URLs for SEO: `/users` resolves to `dist/users/index.html` (`index.brain` with `--ext brain`).
 - Precompression at build: each text file in `dist/` carries its `.gz` alongside (optimal deflate). `.br` is planned:#231
-  (own encoder, enabled only if it beats that gzip in measured bytes); until then brotli is the server's job (§26).
+  (own encoder, enabled only if it beats that gzip in measured bytes); build-time Brotli is supplied by the maintained Rust codec (§26, updated 2026-10-29).
 - Brand: `<meta name="generator" content="BRAINLLM <version>">` and header `X-Powered-By: BRAINLLM` (`--no-brand` removes them).
 - `brain build --ext brain` needs a host where MIME can be configured: unconfigured hosts (GitHub Pages, S3 without
   metadata, Netlify/Cloudflare Pages without `_headers`) serve `application/octet-stream` and the app does not start.
@@ -354,7 +355,7 @@ so in that mode it is enough for the server to map each one to its type.
 - `brain run` / `brain-serve`: internal MIME map.
 - `brain build` emits `dist/brain.nginx.conf`, ready to `include` (the `types`/`index` lines only with `--ext brain`):
   `types { text/html brain; text/javascript jsbrain; text/css cssbrain; }` · `index index.brain;` ·
-  `try_files $uri $uri/ =404;` · `gzip_static on;` (`brotli_static on;` commented until #231) · `Cache-Control: public, max-age=31536000, immutable`
+  `try_files $uri $uri/ =404;` · `gzip_static on;` (`brotli_static on;` enabled by the host when ngx_brotli is installed; .br files are emitted by the build) · `Cache-Control: public, max-age=31536000, immutable`
   on `/_b/` · security headers. Also `_headers` (Netlify/Cloudflare Pages) and a Caddy block.
 - **Cloudflare:** its default cache decides by extension and these three are not on its list; the snippet documents the
   Cache Rule for `/_b/*` (or "Respect origin" with the `Cache-Control`). Without that rule they are not cached at the edge.
@@ -533,7 +534,7 @@ The `.brain` author writes nothing different: the compiler or the runtime applie
 | View Transitions (same document) | Baseline 2025: Chrome 111+, Firefox 144+, Safari 18+ | RUNTIME | animated transition between views in the router |
 | `@view-transition` (cross-document) | Chrome 126+, Safari 18.2+; Firefox no | COMPILER | transition between prerendered pages |
 | Speculation Rules | Chrome 109+; Safari 26.2 behind flag (prefetch only); Firefox no | — (removed 2026-10-29) | the router intercepts every click, so a prerender was never used; the router's predictive prefetch replaces it |
-| Predictive prefetch (IntersectionObserver + `requestIdleCallback` + `fetch priority: 'low'`) | Baseline (idle callback: Safari no, `setTimeout` fallback) | RUNTIME router | links in view are fetched while idle (2 at a time, 12 per view), hover/focus/touch first; the next navigation swaps from memory and its chunks get `modulepreload`. Off: `router({ prefetch: false })`, `<meta name="brain-prefetch" content="off">`, `data-prefetch="false"`; skips Save-Data/2G, files, `/api/`, `/auth/`, log-out, unsubscribe and confirm paths and URLs with a token; any write (form submit, `api()` write, server function) forgets every fetched page; `private` pages kept 30 s, others 5 min; requests carry `x-brain-prefetch: 1` (`ctx.prefetch`) (2026-10-29) |
+| Predictive prefetch (IntersectionObserver + `requestIdleCallback` + `fetch priority: 'low'`) | Baseline (idle callback: Safari no, `setTimeout` fallback) | RUNTIME router | links in view are fetched while idle (2 at a time, 12 per view), hover/focus/touch first; the next navigation swaps from memory and its chunks get `modulepreload`. Off: `router({ prefetch: false })`, `<meta name="brain-prefetch" content="off">`, `data-prefetch="false"`; skips Save-Data/2G, files, `/api/`, `/auth/`, log-out, unsubscribe and confirm paths and URLs with a token; any write (form submit, `api()` write, server function) forgets every fetched page; private/no-store and dynamic no-cache HTML is never reused; static HTML (`X-Brain-Static: 1`) and explicitly cacheable public HTML stay at most 5 min (bounded by max-age); requests carry `x-brain-prefetch: 1` (`ctx.prefetch`) (2026-10-29) |
 | Built-in AI: Prompt API, Summarizer, Translator, LanguageDetector, Writer, Rewriter, Proofreader | Chrome 138+ (Summarizer, Translator, LanguageDetector stable; Prompt API origin trial on the web, stable in extensions; the rest trials); other browsers no | RUNTIME `brain-ai.js` (`ai` primitive) | on-device Gemini Nano; `ai.ready()` answers 'unavailable' where absent and calls throw `code: 'unavailable'` (`brain guide ai`, docs checked 2026-10-29) |
 | `103 Early Hints` | Chrome 103+, Firefox 120+, Safari 17+ (HTTP/2+) | TOOLCHAIN | preload before the response |
 | Explicit compile hints `//# allFunctionsCalledOnLoad` | Chrome 136+ | COMPILER | only in the initial chunk of each view; never in deferred chunks |
@@ -715,6 +716,11 @@ Patterns from Vite, Next, Biome, Turborepo, Cargo and Deno applied to `brain`:
   in the background, never in CI.
 
 ## 24. `brain mcp`: full project control over MCP (fixed 2026-10-13)
+Update (2026-10-29): new apps register stdio in `.mcp.json` (Claude Code) and `.cursor/mcp.json` (Cursor), preserving
+existing servers. CLAUDE.md imports AGENTS.md. `brain agent setup --hooks` installs optional bounded PostToolUse feedback;
+B0734 warns about missing local registration without implying connection status. Profiles: full (default), six-tool
+minimal, or focused backend. See [BACKEND.md](BACKEND.md) for supported tools and lifecycle limits.
+
 The MCP server is the AI's main interface: everything the CLI does and more, with typed JSON input and output
 (`inputSchema` and `outputSchema` on every tool). A single process per project; `brain run` shares it.
 
@@ -796,7 +802,9 @@ Metrics: tasks finished with `doctor` = 0, tool calls, tokens, stuck loops, and 
 **Bundler (`brain-pack`):** extract chunks shared by ≥2 views; inline chunks < 1 KB into their importer; inline
 critical CSS per view; exact `modulepreload` graph.
 **Compression:** gzip with optimal parsing (Zopfli-style iterations; slower, ~4–8 % smaller, build-time only),
-zstd dictionary deltas for returning visitors (§19), brotli left to the server deploy step.
+zstd dictionary deltas for returning visitors (§19), and build-time Brotli (2026-10-29): latest stable Rust brotli 9.1.1,
+quality 11/window 22, content cache keyed by codec/settings, two compression workers, emit only when smaller than raw.
+Static Rust and Node servers negotiate br/gzip weights and exclusions; Caddy enables both, nginx documents ngx_brotli.
 `brain build --report` prints, per view, raw → minified → gz → dcz bytes and what each pass saved.
 
 ## 27. AI-driven development: closing the gaps (fixed 2026-10-13)
@@ -1102,7 +1110,7 @@ to appear in LLMs, traditional search and social networks"; implemented in brain
 
 ## 34. Production process manager: `brain start` (fixed 2026-10-13, Chris: our own manager, not PM2)
 
-The `brain` binary runs the app in production. PM2, forever or nodemon are never required, emitted or documented:
+The `brain` binary runs the app in production. Optional PM2/nginx configuration can be prepared with `brain deploy config` (maintainer request, 2026-10-30); it never installs or activates services. The native manager remains the default:
 one way for the model, `brain build` then `brain start`.
 
 - **Static apps** (no `load`, no `server:`): `brain start` serves `dist/` from Rust with brain-serve's static handler
@@ -1630,3 +1638,125 @@ becomes a query, not a guess.
 **5. Record speed, measured** (QA #202): the agent loop (brief → app with `brain doctor` exit 0) is timed before and
 after §43 on the same briefs; a 60+ component app is built by a model using only cards and the map, with 0 reads of
 files over 200 lines. Both numbers go to the REPORT; a regression fails the bench.
+
+
+## 44. Experimental Rust backend and durable work (2026-10-29)
+
+Crate `brain-backend` owns only infrastructure and resolved data contracts; CLI `backend.rs` parses literal BrainScript
+with the existing parser and generates small schema/policy/hook/job files. [BACKEND.md](BACKEND.md) defines the running
+contract, limits, migration semantics, auth, private image storage, transactional hook outbox and leased Postgres workers.
+[BACKEND-DESIGN.md](BACKEND-DESIGN.md) records current Fastify study, latest stable direct crate selections, LLM-oriented
+deviations and the unmeasured HTTP/SSR topology decision. No replacement for existing production APIs is claimed.
+
+Navigation update (2026-10-29): `brain-pack::navigation` emits page-local `brain-next` routes/assets before signature and
+CSP/SRI. The router validates plans against current links and uses a dedicated content-hashed `brain-prefetch.js` worker
+when available, with a main-thread fallback. Two concurrent requests, 512 KB/page, 4 MB tab memory, six-second deadline,
+48 preload links, and at most 150 ms waiting for unfinished speculation on a click. Writes advance an epoch and abort
+requests, preventing late responses from reappearing after logout. Build changes stop speculation; stop removes owned
+workers/listeners/idle jobs. Static assets retain one-year immutable HTTP caching and cache-first service-worker reuse;
+data/private HTML remains separate. Browser/benchmark acceptance is tracked in GAPS.md.
+
+
+## 45. Agent coordination and focused evidence (2026-10-30)
+
+`brain-cli::changes` coordinates per-file expiring leases and SHA-256 revisions. Checked private snapshots precede
+short commits under the existing writer lock. Each file replacement is atomic; batches use durable before/after
+journals and conditional recovery, not filesystem-wide atomic visibility. External editor races remain explicit.
+See [CHANGES.md](CHANGES.md) for request schemas, privacy, bounds and recovery.
+
+`intelligence` builds static evidence across routes, imports, literal API calls, policies, resource hooks and jobs.
+Bounded graph pages, task context, impact, why and preventive checks distinguish compiler observations from runtime
+proof. [INTELLIGENCE.md](INTELLIGENCE.md) specifies unknown edges and context byte estimates.
+
+`recipes` prepares resource-ui and auth-ui operations without writing. Applying them uses the change protocol;
+experimental Rust sessions remain separate from JS SSR. [RECIPES.md](RECIPES.md) records deployment requirements.
+`interop` is an extended primitive mapped to `brain-interop.js`; foreign libraries own only the adapter mount.
+[INTEROP.md](INTEROP.md) defines deferred mount, explicit updates and component disposal.
+
+Internal backend failures capture a private bounded native stack and Rust callsite with the HTTP request ID;
+message payloads, SQL values and credentials are excluded. Public responses contain actionable codes and request IDs.
+
+
+## 46. Native evidence, helpers and emitted byte accounting (2026-10-30)
+
+Native type inference (`brain-check::infer`) consumes literal named schemas through `Ctx.type_shapes`. B2001–B2004
+ship as warnings: proven prop, field, API-body and form/binding inconsistencies. Unknown mutation, alias and dynamic
+flows are not assigned invented types. [NATIVE-TYPES.md](NATIVE-TYPES.md) records scope and remaining flow analysis.
+
+Browser compatibility uses the pinned generated web-features dataset, corrected from the handoff worktree, with
+verified provenance and bundled license. `Ctx.browser_target` defaults to widely available; B2101–B2103 report known
+API/CSS/HTML target violations or invalid targets as warnings. Static receivers and guards matter; unclassified keys
+are not leaf-name heuristics. See [BROWSER-COMPATIBILITY.md](BROWSER-COMPATIBILITY.md). The older B12xx design above
+was a proposal, not evidence that those diagnostics or automatic lowering were implemented.
+
+Pure date and hash primitives map to separate runtime modules. Platform Date/Intl/Web Crypto provide semantics;
+compiler-used named imports go through existing tree shaking. [NATIVE-LIBRARIES.md](NATIVE-LIBRARIES.md) specifies
+UTC/calendar boundaries, secure-context crypto, bounds, helper authoring and contribution review.
+
+Production `Output.ledger` derives raw/gzip/Brotli from final emitted assets. It separates inline scripts, initial
+references, deferred dependencies and conservative graph totals; none is measured network traffic. Static successful
+prerenders can emit zero executable JavaScript in mixed sites; exact full-document destinations remain eligible for
+predictive fetching from interactive pages. See [OUTPUT-BUDGETS.md](OUTPUT-BUDGETS.md).
+
+### Design-token reuse diagnostic
+
+B2201 is a migration-safe warning enabled only for projects with a bounded regular `design.brain.json` foundation. The checker compares component declarations against project token values by role (color, spacing, radius or font). One exact matching token suggests `var(--token)`; ambiguous aliases, existing variables and unrelated property roles remain untouched. There is no automatic replacement because a custom property's dynamic cascade can change behavior. The quality collector reports the same native evidence from bounded root token input; full project `brain check` remains the authority.
+
+### Native server resource facade (2026-10-30)
+
+`nativeAuthBridge.resource` exposes a request-scoped repository via `ctx.backend.resource(name)` in both production
+SSR/RPC and the development sidecar. It shares the fixed loopback authority, connection budget, cancellation and
+HTTP schema/policy implementation with the native proxy. Only native identity cookies are forwarded; incoming
+Bearer credentials are deliberately excluded to match `ctx.user`. Mutations require a same-origin POST and do not
+retry. The response budget is a stricter 2 MiB, independent from media's 20 MiB proxy allowance. Repositories retained
+after their response ends reject further calls. Server-only service/repository modules receive `ctx` explicitly.
+`runtime/test/server-native-resource.test.js` checks actual loopback transport, CRUD, bounds and redacted failures.
+
+The same bridge exposes `ctx.backend.login(credentials)` for same-origin POST server functions. It calls only the
+fixed native password endpoint, validates native cookie attributes, returns a sanitized user and relays cookies
+through both RPC and progressive form responses. Login/logout are exclusive within one request; the original
+request identity is not rewritten. New scaffolds share this path for JavaScript and no-JS submissions.
+
+### Production private-file boundary and runtime identity (2026-10-30)
+
+Node static lookup checks decoded normalized public paths, independently from route dispatch: encoded separators
+and underscores cannot expose `_server/`, `server.mjs`, host configuration or dotfiles. Native static lookup also
+rejects private dotfiles, compressed server-source variants and backslash paths; `.well-known` remains public.
+Private server diagnostics discard arbitrary exception messages but retain bounded source frames. Development
+sidecars enable Node source maps so existing inline maps report the original `.brain` source line.
+The pack fingerprint includes embedded `.mjs`, `.brain`, `.cssbrain` and JSON runtime sources as well as JS/Rust;
+server runtime and UI changes cannot reuse a toolchain identity that omits those files.
+
+### Mandatory native before-hooks and single-row conflict checks (2026-10-30)
+
+`Resource.hooks.before_create/before_update/before_delete` reference private `server/hooks/<name>.jsbrain`
+modules. `brain_backend::before_hooks::BeforeHooks` declares compiled names and receives the canonical
+`{resource,operation,payload,existing,user,rid}` context. HTTP startup rejects references missing from the executor.
+Every native CRUD write checks policy first, runs the callback when declared, and revalidates its returned data.
+Delete supplies existing data; its output approves/rejects deletion rather than updating that data.
+
+`hooks_executor::load` compiles the existing private server-module graph, probes callable default exports,
+and owns two warm `load::Sidecar` instances. `try_acquire_owned` rejects excess requests without queueing.
+`Sidecar::spawn_bounded` has a two-second combined stdin/response deadline, 64 KiB frames, private stderr,
+explicit production mode and a 128 MiB V8 old-space budget. Payloads are objects within 48 KiB/depth 32/4,096
+nodes and the complete context must fit its frame. Those restrictions apply to declared hooks; resources without
+before-hooks preserve their existing input limit. The watchdog's separate Worker clears inherited Node execArgv,
+checks the recorded parent PID and stops its own process when that owner disappears, including a busy main loop.
+Timeout/frame failure kills its owned Unix process group and reaps the sidecar; Drop also closes and joins the bounded I/O threads. Native before-hook provisioning fails on non-Unix platforms in this checkpoint; ordinary frontend/dev sidecars remain available. The V8 old-space setting is not a universal process-memory limit.
+
+Updates/deletes capture `xmin::text` with the server's existing row before callback execution. Checked SQL helpers
+compare that short-lived internal revision and owner in the final mutation. A mismatch returns 409. Existing
+transactional after-hooks enqueue only after a successful mutation in the same transaction. There is no transaction
+covering arbitrary cross-record callback reads or external effects: use constraints or a dedicated transactional
+operation for those invariants. No public durable version is inferred from xmin.
+
+Application failure values are discarded. Rejections expose only known schema field names with static messages;
+private diagnostics name the hook and explicitly identify module-only precision when no source line is proven.
+See [BEFORE-HOOKS.md](BEFORE-HOOKS.md) for the author contract and verification commands.
+
+Additive migration 7 fixes the zero-argument search trigger by coalescing `TG_ARGV` to an empty text array.
+The mandatory-hook HTTP fixture deliberately uses `search: []` and asserts empty search text/vector after a real
+write. No previous migration or drift guard was edited. Unexpected HTTP errors now publish RID/caller immediately;
+one unqueued diagnostic job formats at most 32 KiB of stack output without formatting the underlying error value.
+Backend library 22/22 and all 15 distinct integration cases passed across full/focused PostgreSQL 18 runs; the
+compiled hook-executor scenario and the independent blocking-main-thread watchdog scenario passed separately.

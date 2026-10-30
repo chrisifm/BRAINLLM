@@ -1,0 +1,27 @@
+[
+  {
+    "kind": "create",
+    "prompt": "Create views/index.brain with one accessible main and h1 'Task board'. Include an initially empty keyed task list, a labeled text input and a working add action. Use the provided SPEC. Do not change the benchmark's validators.",
+    "files": {"brain.json":"{}\n"}
+  },
+  {
+    "kind": "edit",
+    "prompt": "Edit views/index.brain: preserve the existing counter and its increment behavior, add a labeled step input and make the button increment by the selected step. Preserve KEEP.txt byte-for-byte.",
+    "files": {"brain.json":"{}\n","KEEP.txt":"preserve this file\n","views/index.brain":"<meta seo title=\"Counter\" description=\"An editable counter.\" robots=\"noindex\">\n<script>let count = sig(0)</script>\n<main><h1>Counter</h1><p>{count}</p><Button on:click={() => count++}>Increment</Button></main>\n"}
+  },
+  {
+    "kind": "repair",
+    "prompt": "Repair views/index.brain so brain check succeeds. Preserve the intended zero-initialized incrementing counter and accessible main heading. Use diagnostics from the supplied binary rather than deleting the behavior.",
+    "files": {"brain.json":"{}\n","views/index.brain":"<meta seo title=\"Counter\" description=\"A counter to repair.\" robots=\"noindex\">\n<script>let count = sig(0)</script>\n<main><h1>Counter</h1><p>{count}</p><Button on:click={() => count = missingValue}>Increment</Button></main>\n"}
+  },
+  {
+    "kind": "atomic-conflict",
+    "prompt": "Use the binary's atomic change commands to prepare a revision-checked edit of views/index.brain. Simulate a concurrent edit after reading/preparing. Demonstrate that applying the stale plan fails and preserves the concurrent edit byte-for-byte. Supply a reproducible conflict-check.mjs that exits nonzero if stale apply succeeds or concurrent bytes change. It must use the supplied BRAIN_BINARY environment value, execute commands without shell, and bound every child process. Preserve KEEP.txt. Do not fake the conflict with an unconditional throw.",
+    "files": {"brain.json":"{}\n","KEEP.txt":"preserve this file\n","views/index.brain":"<meta seo title=\"Original\" description=\"Atomic conflict fixture.\" robots=\"noindex\">\n<main><h1>Original</h1></main>\n"}
+  },
+  {
+    "kind": "CRUD",
+    "prompt": "Prepare a usable CRUD view for the existing notes resource using brain recipe resource-ui and the atomic plan/apply workflow. Include search, keyed rows, offset pagination, create/edit/delete, loading/error/empty/success/busy states. Preserve backend policy. Do not claim a live database test; no database is supplied.",
+    "files": {"brain.json":"{}\n","server/resources/notes/schema.jsbrain":"export default { title: 'str!', done: 'bool' }\n","server/resources/notes/policy.jsbrain":"export default { read: ['owner'], create: ['candidate'], update: ['owner'], delete: ['owner'] }\n"}
+  }
+]

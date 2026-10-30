@@ -443,3 +443,19 @@ test('a call made from an event handler is cancelled when its component unmounts
   assert.equal((await r).kind, 'aborted')
   assert.equal(calls[0].init.signal.aborted, true)
 })
+
+test('native backend errors retain actionable codes and fields without rendering object strings or server traces',async()=>{
+  http({retry:0})
+  reset({
+    'POST /native':[{status:422,body:JSON.stringify({schemaVersion:1,error:{code:'INVALID_INPUT',fix:'Review the declared fields',fields:{email:'Use a valid email'}}}),headers:{'x-request-id':'native-reference'}}],
+    'GET /private':[{status:500,body:JSON.stringify({error:'Error: private driver stack with account values'})}],
+    'GET /private-client':[{status:400,body:JSON.stringify({error:'TypeError: private module path'})}],
+  })
+  const error=await api('/native',{post:{}}).post({}).catch(error=>error)
+  assert.equal(error.message,'Check the highlighted fields.');assert.equal(error.backendCode,'INVALID_INPUT')
+  assert.deepEqual(error.errors,{email:'Use a valid email'});assert.equal(error.id,'native-reference');assert.equal(error.fix,'Review the declared fields')
+  for(const path of ['/private','/private-client']){
+    const failure=await api(path,{get:{}}).get().catch(error=>error)
+    assert.ok(!failure.message.includes('private')&&!failure.message.includes('TypeError'))
+  }
+})

@@ -10,7 +10,7 @@
     if (e.kind === 'timeout') return 'The server took too long to answer.'
     if (e.kind === 'schema') return 'The server sent something unexpected.'
     if (e.status === 401) return 'Sign in to continue.'
-    if (e.status === 403) return e.message && e.message !== 'Forbidden' ? 'You do not have permission: ' + e.message : 'You do not have permission to see this.'
+    if (e.status === 403) return 'You do not have permission to see this.'
     if (e.status === 404) return 'Not found.'
     if (e.status === 422) return 'Check the highlighted fields.'
     if (e.status === 429) return 'Too many requests. Trying again in ' + (e.retryAfter || 30) + ' seconds.'

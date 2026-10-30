@@ -1,42 +1,45 @@
 import { guard } from "/@brain/brain-guard.js";
 import { sig, drv, tpl, insert, attr, on } from "/@brain/brain.js";
-import { dev } from "/@brain/brain-dev.js";
-const $t0 = tpl("<form data-b=\"3ivexe\"><label>Name <input></label> <label>Email <input type=\"email\"></label> <label><input type=\"checkbox\"> Active</label> <button><!></button> <button type=\"button\">Cancel</button></form>");
+import { budgetEnter as $brainBudgetbudgetEnter, budgetLeave as $brainBudgetbudgetLeave, budgetOwner as $brainBudgetbudgetOwner, budgetStep as $brainBudgetbudgetStep } from "/@brain/brain-budget.js";
+import { dev, fragment as $brainBudgetFragment } from "/@brain/brain-dev.js";
+const $t0 = $brainBudgetFragment(tpl("<form data-b=\"3ivexe\"><label>Name <input></label> <label>Email <input type=\"email\"></label> <label><input type=\"checkbox\"> Active</label> <button><!></button> <button type=\"button\">Cancel</button></form>"), "3ivexe", 0);
 function UserForm($p = {}) {
+  const $brainBudgetOwner = $brainBudgetbudgetOwner();
   const name = sig($p.user ? $p.user.name : '', "name");
   const email = sig($p.user ? $p.user.email : '', "email");
   const active = sig($p.user ? $p.user.active : true, "active");
-  const valid = drv(() => name.v.trim() !== '' && email.v.includes('@'));
-  const save = () => {
+  const valid = drv(() => { const $$brainBudgetFrame1 = $brainBudgetbudgetEnter({ file: "comp/user-form.brain", component: "UserForm", line: 8, column: 19 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame1); { return name.v.trim() !== '' && email.v.includes('@'); } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame1); } });
+  const save = () => { const $$brainBudgetFrame2 = $brainBudgetbudgetEnter({ file: "comp/user-form.brain", component: "UserForm", line: 10, column: 16 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame2); {
     if (!valid.v || ($p.busy ?? false)) {
       return;
     }
     $p["on:save"]?.({ id: $p.user ? $p.user.id : null, name: name.v.trim(), email: email.v.trim(), active: active.v });
-  };
-  const $r8 = $t0();
-  const $e1 = $r8;
-  const $e2 = $r8.firstChild.firstChild.nextSibling;
-  const $e3 = $r8.firstChild.nextSibling.nextSibling.firstChild.nextSibling;
-  const $e4 = $r8.firstChild.nextSibling.nextSibling.nextSibling.nextSibling.firstChild;
-  const $e5 = $r8.firstChild.nextSibling.nextSibling.nextSibling.nextSibling.nextSibling.nextSibling;
-  const $e6 = $e5.firstChild;
-  const $e7 = $e5.nextSibling.nextSibling;
-  on($e1, "submit", (e) => { e.preventDefault(); (save)(e); });
-  attr($e2, "value", () => name.v);
-  on($e2, "input", (e) => { name.v = e.target.value; });
-  attr($e3, "value", () => email.v);
-  on($e3, "input", (e) => { email.v = e.target.value; });
-  attr($e4, "checked", () => active.v);
-  on($e4, "change", (e) => { active.v = e.target.checked; });
-  attr($e5, "disabled", () => !valid.v || ($p.busy ?? false));
-  insert(null, () => ($p.busy ?? false) ? 'Saving…' : 'Save', $e6);
-  on($e7, "click", () => { $p["on:cancel"]?.(); });
-  return $r8;
+  } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame2); } };
+  const $r10 = $t0();
+  const $e3 = $r10;
+  const $e4 = $r10.firstChild.firstChild.nextSibling;
+  const $e5 = $r10.firstChild.nextSibling.nextSibling.firstChild.nextSibling;
+  const $e6 = $r10.firstChild.nextSibling.nextSibling.nextSibling.nextSibling.firstChild;
+  const $e7 = $r10.firstChild.nextSibling.nextSibling.nextSibling.nextSibling.nextSibling.nextSibling;
+  const $e8 = $e7.firstChild;
+  const $e9 = $e7.nextSibling.nextSibling;
+  on($e3, "submit", (e) => { e.preventDefault(); (save)(e); });
+  attr($e4, "value", () => name.v);
+  on($e4, "input", (e) => { name.v = e.target.value; });
+  attr($e5, "value", () => email.v);
+  on($e5, "input", (e) => { email.v = e.target.value; });
+  attr($e6, "checked", () => active.v);
+  on($e6, "change", (e) => { active.v = e.target.checked; });
+  attr($e7, "disabled", () => !valid.v || ($p.busy ?? false));
+  insert(null, () => ($p.busy ?? false) ? 'Saving…' : 'Save', $e8);
+  on($e9, "click", () => { $p["on:cancel"]?.(); });
+  return $r10;
 }
 UserForm.h = "3ivexe";
 UserForm.f = "comp/user-form.brain";
+UserForm.$hmr = { version: 1, wiring: "import { guard } from \"/@brain/brain-guard.js\";\nimport { sig, drv, tpl, insert, attr, on } from \"/@brain/brain.js\";\nimport { budgetEnter as $brainBudgetbudgetEnter, budgetLeave as $brainBudgetbudgetLeave, budgetOwner as $brainBudgetbudgetOwner, budgetStep as $brainBudgetbudgetStep } from \"/@brain/brain-budget.js\";\nimport { dev, fragment as $brainBudgetFragment } from \"/@brain/brain-dev.js\";\nconst $t0 = $brainBudgetFragment(tpl(\"__brain_static_template__\"), \"3ivexe\", 0);\nfunction UserForm($p = {}) {\n  const $brainBudgetOwner = $brainBudgetbudgetOwner();\n  const name = sig($p.user ? $p.user.name : '', \"name\");\n  const email = sig($p.user ? $p.user.email : '', \"email\");\n  const active = sig($p.user ? $p.user.active : true, \"active\");\n  const valid = drv(() => { const $$brainBudgetFrame1 = $brainBudgetbudgetEnter({ file: \"comp/user-form.brain\", component: \"UserForm\", line: 8, column: 19 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame1); { return name.v.trim() !== '' && email.v.includes('@'); } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame1); } });\n  const save = () => { const $$brainBudgetFrame2 = $brainBudgetbudgetEnter({ file: \"comp/user-form.brain\", component: \"UserForm\", line: 10, column: 16 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame2); {\n    if (!valid.v || ($p.busy ?? false)) {\n      return;\n    }\n    $p[\"on:save\"]?.({ id: $p.user ? $p.user.id : null, name: name.v.trim(), email: email.v.trim(), active: active.v });\n  } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame2); } };\n  const $r10 = $t0();\n  const $e3 = $r10;\n  const $e4 = $r10.firstChild.firstChild.nextSibling;\n  const $e5 = $r10.firstChild.nextSibling.nextSibling.firstChild.nextSibling;\n  const $e6 = $r10.firstChild.nextSibling.nextSibling.nextSibling.nextSibling.firstChild;\n  const $e7 = $r10.firstChild.nextSibling.nextSibling.nextSibling.nextSibling.nextSibling.nextSibling;\n  const $e8 = $e7.firstChild;\n  const $e9 = $e7.nextSibling.nextSibling;\n  on($e3, \"submit\", (e) => { e.preventDefault(); (save)(e); });\n  attr($e4, \"value\", () => name.v);\n  on($e4, \"input\", (e) => { name.v = e.target.value; });\n  attr($e5, \"value\", () => email.v);\n  on($e5, \"input\", (e) => { email.v = e.target.value; });\n  attr($e6, \"checked\", () => active.v);\n  on($e6, \"change\", (e) => { active.v = e.target.checked; });\n  attr($e7, \"disabled\", () => !valid.v || ($p.busy ?? false));\n  insert(null, () => ($p.busy ?? false) ? 'Saving…' : 'Save', $e8);\n  on($e9, \"click\", () => { $p[\"on:cancel\"]?.(); });\n  return $r10;\n}\nUserForm.h = \"3ivexe\";\nUserForm.f = \"comp/user-form.brain\";\nexport default dev(guard(UserForm));\n", templates: ["<form data-b=\"3ivexe\"><label>Name <input></label> <label>Email <input type=\"email\"></label> <label><input type=\"checkbox\"> Active</label> <button><!></button> <button type=\"button\">Cancel</button></form>"] };
 export default dev(guard(UserForm));
-//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoidXNlci1mb3JtLmJyYWluLmpzIiwic291cmNlcyI6WyJ1c2VyLWZvcm0uYnJhaW4iXSwic291cmNlc0NvbnRlbnQiOlsiPG1ldGEgcHJvcHM9XCJ1c2VyOm9iaj8gYnVzeTpib29sPWZhbHNlXCIgZW1pdHM9XCJzYXZlOm9iaiBjYW5jZWxcIj5cblxuPHNjcmlwdD5cbiAgbGV0IG5hbWUgPSBzaWcodXNlciA/IHVzZXIubmFtZSA6ICcnKVxuICBsZXQgZW1haWwgPSBzaWcodXNlciA/IHVzZXIuZW1haWwgOiAnJylcbiAgbGV0IGFjdGl2ZSA9IHNpZyh1c2VyID8gdXNlci5hY3RpdmUgOiB0cnVlKVxuXG4gIGxldCB2YWxpZCA9IGRydigoKSA9PiBuYW1lLnRyaW0oKSAhPT0gJycgJiYgZW1haWwuaW5jbHVkZXMoJ0AnKSlcblxuICBjb25zdCBzYXZlID0gKCkgPT4ge1xuICAgIGlmICghdmFsaWQgfHwgYnVzeSkgcmV0dXJuXG4gICAgZW1pdCgnc2F2ZScsIHsgaWQ6IHVzZXIgPyB1c2VyLmlkIDogbnVsbCwgbmFtZTogbmFtZS50cmltKCksIGVtYWlsOiBlbWFpbC50cmltKCksIGFjdGl2ZSB9KVxuICB9XG48L3NjcmlwdD5cblxuPGZvcm0gb246c3VibWl0PXtzYXZlfT5cbiAgPGxhYmVsPk5hbWUgPGlucHV0IGJpbmQ6dmFsdWU9e25hbWV9IC8+PC9sYWJlbD5cbiAgPGxhYmVsPkVtYWlsIDxpbnB1dCB0eXBlPVwiZW1haWxcIiBiaW5kOnZhbHVlPXtlbWFpbH0gLz48L2xhYmVsPlxuICA8bGFiZWw+PGlucHV0IHR5cGU9XCJjaGVja2JveFwiIGJpbmQ6Y2hlY2tlZD17YWN0aXZlfSAvPiBBY3RpdmU8L2xhYmVsPlxuICA8YnV0dG9uIGRpc2FibGVkPXshdmFsaWQgfHwgYnVzeX0+e2J1c3kgPyAnU2F2aW5n4oCmJyA6ICdTYXZlJ308L2J1dHRvbj5cbiAgPGJ1dHRvbiB0eXBlPVwiYnV0dG9uXCIgb246Y2xpY2s9e2VtaXQoJ2NhbmNlbCcpfT5DYW5jZWw8L2J1dHRvbj5cbjwvZm9ybT5cblxuPHN0eWxlPlxuICBmb3JtIHsgZGlzcGxheTogZ3JpZDsgZ2FwOiB2YXIoLS1zcGFjZS0yKTsgfVxuPC9zdHlsZT5cbiJdLCJuYW1lcyI6W10sIm1hcHBpbmdzIjoiOzs7OztBQUdBO0FBQ0E7QUFDQTtBQUVBO0FBRUE7QUFDQTtBQUFBO0FBQUE7QUFDQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUlBO0FBQ0E7QUFBQTtBQUNBO0FBQUE7QUFDQTtBQUFBO0FBQ0E7QUFBQTtBQUNBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTsifQ==
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoidXNlci1mb3JtLmJyYWluLmpzIiwic291cmNlcyI6WyJ1c2VyLWZvcm0uYnJhaW4iXSwic291cmNlc0NvbnRlbnQiOlsiPG1ldGEgcHJvcHM9XCJ1c2VyOm9iaj8gYnVzeTpib29sPWZhbHNlXCIgZW1pdHM9XCJzYXZlOm9iaiBjYW5jZWxcIj5cblxuPHNjcmlwdD5cbiAgbGV0IG5hbWUgPSBzaWcodXNlciA/IHVzZXIubmFtZSA6ICcnKVxuICBsZXQgZW1haWwgPSBzaWcodXNlciA/IHVzZXIuZW1haWwgOiAnJylcbiAgbGV0IGFjdGl2ZSA9IHNpZyh1c2VyID8gdXNlci5hY3RpdmUgOiB0cnVlKVxuXG4gIGxldCB2YWxpZCA9IGRydigoKSA9PiBuYW1lLnRyaW0oKSAhPT0gJycgJiYgZW1haWwuaW5jbHVkZXMoJ0AnKSlcblxuICBjb25zdCBzYXZlID0gKCkgPT4ge1xuICAgIGlmICghdmFsaWQgfHwgYnVzeSkgcmV0dXJuXG4gICAgZW1pdCgnc2F2ZScsIHsgaWQ6IHVzZXIgPyB1c2VyLmlkIDogbnVsbCwgbmFtZTogbmFtZS50cmltKCksIGVtYWlsOiBlbWFpbC50cmltKCksIGFjdGl2ZSB9KVxuICB9XG48L3NjcmlwdD5cblxuPGZvcm0gb246c3VibWl0PXtzYXZlfT5cbiAgPGxhYmVsPk5hbWUgPGlucHV0IGJpbmQ6dmFsdWU9e25hbWV9IC8+PC9sYWJlbD5cbiAgPGxhYmVsPkVtYWlsIDxpbnB1dCB0eXBlPVwiZW1haWxcIiBiaW5kOnZhbHVlPXtlbWFpbH0gLz48L2xhYmVsPlxuICA8bGFiZWw+PGlucHV0IHR5cGU9XCJjaGVja2JveFwiIGJpbmQ6Y2hlY2tlZD17YWN0aXZlfSAvPiBBY3RpdmU8L2xhYmVsPlxuICA8YnV0dG9uIGRpc2FibGVkPXshdmFsaWQgfHwgYnVzeX0+e2J1c3kgPyAnU2F2aW5n4oCmJyA6ICdTYXZlJ308L2J1dHRvbj5cbiAgPGJ1dHRvbiB0eXBlPVwiYnV0dG9uXCIgb246Y2xpY2s9e2VtaXQoJ2NhbmNlbCcpfT5DYW5jZWw8L2J1dHRvbj5cbjwvZm9ybT5cblxuPHN0eWxlPlxuICBmb3JtIHsgZGlzcGxheTogZ3JpZDsgZ2FwOiB2YXIoLS1zcGFjZS0yKTsgfVxuPC9zdHlsZT5cbiJdLCJuYW1lcyI6W10sIm1hcHBpbmdzIjoiOzs7Ozs7O0FBR0E7QUFDQTtBQUNBO0FBRUE7QUFFQTtBQUNBO0FBQUE7QUFBQTtBQUNBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBSUE7QUFDQTtBQUFBO0FBQ0E7QUFBQTtBQUNBO0FBQUE7QUFDQTtBQUFBO0FBQ0E7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7In0=
 
 /* ---- css ---- */
 @layer comp {

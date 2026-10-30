@@ -1,0 +1,12 @@
+<meta props="title:str description:str?">
+<section class="hero">
+  <h1>{title}</h1>
+  {#if description}<p>{description}</p>{/if}
+  <div class="actions"><slot /></div>
+</section>
+<style>
+  .hero { display: grid; gap: var(--space-4); padding-block: clamp(2rem, 8vw, 5rem); min-width: 0; }
+  h1 { margin: 0; max-width: 20ch; font: 700 clamp(2rem, 8vw, 4rem)/1.08 var(--font); color: var(--fg); overflow-wrap: anywhere; }
+  p { margin: 0; max-width: 65ch; font: 400 1rem/1.6 var(--font); color: var(--muted); }
+  .actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+</style>

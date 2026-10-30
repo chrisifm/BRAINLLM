@@ -6,6 +6,7 @@ import { install, MouseEvent } from '../shim/dom.js'
 const doc = install()
 const rt = await import('./rt.js')
 const { sig, fx, tpl, insert, on, mount, sibling, list } = rt
+await sibling('brain-dev.js') // These diagnostics assertions exercise development; production privacy has its own suite.
 const { guard } = await sibling('brain-guard.js')
 const tick = (ms = 0) => new Promise(r => setTimeout(r, ms))
 const click = el => el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))

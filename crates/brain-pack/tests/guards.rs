@@ -10,7 +10,7 @@ fn app() -> PathBuf {
     let _ = std::fs::remove_dir_all(&d);
     let files: &[(&str, &str)] = &[
         ("app.brain", "<html lang=\"en\"><head><meta charset=\"utf-8\"><title>App</title></head><body><slot /></body></html>"),
-        ("views/home.brain", "<meta seo title=\"Home\" description=\"Home\">\n<main><h1>Home</h1></main>"),
+        ("views/home.brain", "<meta seo title=\"Home\" description=\"Home\">\n<script>let count = sig(0)</script>\n<main><h1>Home</h1><button on:click={() => count++}>{count}</button></main>"),
         ("views/login.brain", "<meta seo title=\"Login\" description=\"Login\">\n<main><h1>Login</h1></main>"),
         ("views/403.brain", "<meta seo title=\"Forbidden\" description=\"Forbidden\">\n<main><h1>No access: {props.reason}</h1></main>"),
         ("views/account/_guard.jsbrain", "export default (ctx) => (ctx.user ? true : { redirect: '/login?next=' + ctx.url.pathname })\n"),
@@ -91,7 +91,7 @@ fn guarded_routes_run_on_the_server() {
     let mf = &out.files["_server/manifest.json"];
     assert!(mf.contains("\"guards\":[\"_server/") && mf.contains("\"forbidden\":{") && mf.contains("\"error\":{"), "{mf}");
     assert!(!mf.contains("\"path\":\"!"), "templates are not routes: {mf}");
-    // #283: the client router gets each folder guard as a chunk URL
+    // #283: an interactive page's client router gets each folder guard as a chunk URL; static pages use full navigation
     let home = &out.files["index.html"];
     let g = home.split("guards:{").nth(1).unwrap_or_else(|| panic!("no guards in router(): {home}")).split('}').next().unwrap();
     assert!(g.contains("\"/account\":\"/_b/") && g.contains("\"/admin\":\"/_b/"), "{g}");

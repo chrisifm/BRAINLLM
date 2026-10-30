@@ -1,0 +1,1 @@
+[{"code":"B2004","file":"comp/flow.brain","line":5,"col":8,"msg":"bind:value conflicts with form field `enabled` (bool)","fix":"use bind:checked for boolean fields and bind:value for scalar value fields","level":"warning","edits":[]}]

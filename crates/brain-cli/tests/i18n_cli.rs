@@ -14,7 +14,18 @@ fn add_locale_missing_and_dev_routes() {
     let run = |dir: &std::path::Path, args: &[&str]| Command::new(bin).args(args).current_dir(dir).stdin(Stdio::null()).output().unwrap();
     assert!(run(&tmp, &["new", "app"]).status.success());
     let dir = tmp.join("app");
-    assert!(run(&dir, &["add", "locale", "es"]).status.success());
+    let original_config = std::fs::read(dir.join("brain.json")).unwrap();
+    std::fs::create_dir_all(dir.join(".brain")).unwrap();
+    let lock=std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(dir.join(".brain/edit.lock")).unwrap();
+    lock.try_lock().unwrap();
+    let denied=run(&dir, &["add", "locale", "es"]);
+    assert!(!denied.status.success(), "locale generation must respect another writer");
+    assert_eq!(std::fs::read(dir.join("brain.json")).unwrap(), original_config);
+    assert!(!dir.join("i18n/es.json").exists());
+    lock.unlock().unwrap();
+    drop(lock);
+    let added=run(&dir, &["add", "locale", "es"]);
+    assert!(added.status.success(), "{}{}", String::from_utf8_lossy(&added.stdout), String::from_utf8_lossy(&added.stderr));
     // QA #280: the first extra language moves the templates' fixed text to keys, so the new app stays without
     // errors or B1403; es.json starts as the copy to translate (B1402 only)
     let chk = String::from_utf8_lossy(&run(&dir, &["check", "--json"]).stdout).to_string();

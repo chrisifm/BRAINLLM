@@ -107,8 +107,16 @@ fn paged(raw: String, cursor: usize) -> String {
 fn capped_items(key: &str, raw: &str) -> String {
     match Json::parse(raw) {
         Ok(Json::Arr(mut items)) => {
-            let more = items.len() > MAX_LOG_ITEMS;
-            items.truncate(MAX_LOG_ITEMS);
+            let mut retained = 0;
+            let mut bytes = 0;
+            for item in &items {
+                let size = item.stringify().len();
+                if retained >= MAX_LOG_ITEMS || (retained > 0 && bytes + size > 262_144) { break; }
+                bytes += size;
+                retained += 1;
+            }
+            let more = items.len() > retained;
+            items.truncate(retained);
             Json::Obj(vec![(key.to_string(), Json::Arr(items)), ("more".to_string(), Json::Bool(more))]).stringify()
         }
         _ => wrap(key, raw),
@@ -132,6 +140,7 @@ fn journal_record(root: &Path, file: &Path, before: Option<&str>) {
 }
 
 fn journal_undo(root: &Path, steps: usize) -> Result<Vec<String>, String> {
+    let _writer = crate::edit::writer_lock(root)?;
     let text = std::fs::read_to_string(journal_path(root)).unwrap_or_default();
     let mut lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     if lines.is_empty() {
@@ -141,7 +150,7 @@ fn journal_undo(root: &Path, steps: usize) -> Result<Vec<String>, String> {
     for _ in 0..steps.min(lines.len()) {
         let entry = Json::parse(lines.pop().unwrap())?;
         let rel = entry.get("path").and_then(Json::as_str).ok_or("broken journal entry")?;
-        let path = root.join(rel);
+        let path = writable(root, rel)?;
         match entry.get("before") {
             Some(Json::Str(prev)) => std::fs::write(&path, prev).map_err(|e| e.to_string())?,
             _ => {
@@ -162,7 +171,7 @@ fn writable(root: &Path, rel: &str) -> Result<PathBuf, String> {
     if rel.is_empty() || rel.starts_with('/') || rel.split('/').any(|s| s == ".." || s.starts_with('.')) || !ok_ext || rel.contains(".env") {
         return Err(format!("`{rel}` cannot be written; fix: use a path inside the app with one of {}", EXT.join(" ")));
     }
-    Ok(root.join(rel))
+    crate::changes::source_path(root, rel)
 }
 
 /// Diagnostics of one file after a write, bounded so a response stays small (INTERNALS §25).
@@ -280,7 +289,8 @@ fn inspect_summary(m: &Json) -> Json {
     ])
 }
 
-pub fn run() -> Result<(), String> {
+pub fn run_profile(profile: &str) -> Result<(), String> {
+    if !matches!(profile,"full"|"minimal"|"backend") {return Err("unknown MCP profile; use full, minimal or backend".into())}
     let notifier = Notifier::new(Box::new(std::io::stdout()));
     let st: Arc<State> = Arc::default();
     let mut tools: Vec<Tool> = Vec::new();
@@ -385,10 +395,10 @@ pub fn run() -> Result<(), String> {
     // ---------- modules and files ----------
     tools.push(Tool {
         name: "brain_add",
-        description: "Creates a file from a checked template, including channel, service, api, type, guard and server modules. Type additions preserve existing declarations. props: \"name:type[?][=default] ...\" with types str num bool list obj fn any. Fill the template in; do not write files from scratch.",
+        description: "Creates a file from a checked template, including channel, service, api, type, guard, server and mandatory before-hook modules. Hooks fail closed until implemented. Type additions preserve existing declarations. props: \"name:type[?][=default] ...\" with types str num bool list obj fn any. Fill the template in; do not write files from scratch.",
         input_schema: schema(
             [
-                ("kind", "string", "view | comp | ui | test | layout | lib | locale | collection | channel | service | api | type | guard | server"),
+                ("kind", "string", "view | comp | ui | test | layout | lib | locale | collection | channel | service | api | type | guard | server | hook"),
                 ("name", "string", "component name (kebab or PascalCase)"),
                 ("props", "string", "typed props, e.g. \"user:obj active:bool=false note:str?\""),
                 ("store", "string", "channel literal object initializer"),
@@ -424,8 +434,8 @@ pub fn run() -> Result<(), String> {
     });
     tools.push(Tool {
         name: "brain_write",
-        description: "Creates or overwrites a project file with `content` (paths inside the app only; .brain .jsbrain .cssbrain .js .json .md .svg .txt). Returns the file's diagnostics from brain_check in the same response. Reversible with brain_undo.",
-        input_schema: schema([("path", "string", "path relative to the app, e.g. views/about.brain"), ("content", "string", "full file content"), ("app", "string", "app folder")], &["path", "content"]),
+        description: "Creates or overwrites a project file with `content` (paths inside the app only; .brain .jsbrain .cssbrain .js .json .md .svg .txt). Returns the file's diagnostics from brain_check in the same response. Optional expectedRevision rejects stale overwrites. For concurrent agents use brain_changes leases/plan/apply. Reversible with brain_undo.",
+        input_schema: schema([("path", "string", "path relative to the app, e.g. views/about.brain"), ("content", "string", "full file content"), ("app", "string", "app folder"), ("expectedRevision", "string", "optional SHA-256 revision from brain_read; rejects stale overwrites")], &["path", "content"]),
         output_schema: out([("file", "string"), ("created", "boolean"), ("diags", "array")]),
         run: Box::new(|a| {
             let root = app(a)?;
@@ -436,6 +446,10 @@ pub fn run() -> Result<(), String> {
                 return Err("content larger than 200 KB; fix: split the file".into());
             }
             let p = writable(&root, &rel)?;
+            if let Some(expected)=arg(a,"expectedRevision") {
+                let current=crate::changes::read(&root,&rel)?;
+                if current["revision"].as_str()!=Some(expected.as_str()) {return Err("source revision conflict; reread the file and retry with its current revision, or use brain_changes for leased plans".into());}
+            }
             let before = std::fs::read_to_string(&p).ok();
             journal_record(&root, &p, before.as_deref());
             std::fs::create_dir_all(p.parent().unwrap()).map_err(|e| e.to_string())?;
@@ -490,14 +504,15 @@ pub fn run() -> Result<(), String> {
         name: "brain_read",
         description: "Reads a project file and, for .brain/.jsbrain, its summary from the project map (props, emits, imports, exports).",
         input_schema: schema([("path", "string", "path relative to the app, e.g. comp/counter.brain"), ("offset", "number", "byte offset for files over 60 KB (from `nextOffset`)"), ("app", "string", "app folder")], &["path"]),
-        output_schema: out([("path", "string"), ("source", "string"), ("summary", "object"), ("size", "number"), ("nextOffset", "number")]),
+        output_schema: out([("path", "string"), ("source", "string"), ("summary", "object"), ("size", "number"), ("nextOffset", "number"), ("revision", "string")]),
         run: Box::new(|a| {
             let root = app(a)?;
             let rel = need(a, "path")?;
             if rel.contains("..") || rel.contains(".env") || rel.contains(".brain_env") {
                 return Err(format!("`{rel}` is outside the app or a secrets file"));
             }
-            let source = std::fs::read_to_string(root.join(&rel)).map_err(|e| format!("{rel}: {e}"))?;
+            let stored = crate::changes::read(&root,&rel)?;
+            let source=stored["content"].as_str().ok_or_else(||format!("{rel}: no such source file"))?;
             let map = crate::map::build(&root);
             let summary = ["components", "modules", "tests"]
                 .iter()
@@ -520,7 +535,7 @@ pub fn run() -> Result<(), String> {
                     end -= 1;
                 }
             }
-            let mut j = vec![("path".to_string(), Json::str(&rel)), ("source".to_string(), Json::str(&source[start..end])), ("summary".to_string(), summary)];
+            let mut j = vec![("revision".to_string(), Json::str(stored["revision"].as_str().unwrap_or(""))), ("path".to_string(), Json::str(&rel)), ("source".to_string(), Json::str(&source[start..end])), ("summary".to_string(), summary)];
             if start > 0 || end < size {
                 j.push(("size".to_string(), Json::Num(size as f64)));
                 if end < size {
@@ -538,11 +553,12 @@ pub fn run() -> Result<(), String> {
         run: Box::new(|a| {
             confirmed(a)?;
             let root = app(a)?;
+            let _writer = crate::edit::writer_lock(&root)?;
             let rel = need(a, "path")?;
             if rel.contains("..") || rel.starts_with(".brain") {
                 return Err(format!("`{rel}` cannot be removed"));
             }
-            let p = root.join(&rel);
+            let p = writable(&root, &rel)?;
             let prev = std::fs::read_to_string(&p).map_err(|e| format!("{rel}: {e}"))?;
             journal_record(&root, &p, Some(&prev));
             std::fs::remove_file(&p).map_err(|e| e.to_string())?;
@@ -680,7 +696,7 @@ pub fn run() -> Result<(), String> {
     });
     tools.push(Tool {
         name: "brain_test",
-        description: "Runs *.test.brain in real headless Chrome and audits the accessibility tree after each test. Returns {files:[{file, tests:[{name, ok, ms, error?}], a11y:[{code, node, msg, fix}]}]}.",
+        description: "Runs declared *.test.brain scenarios in a detected connected Claude Viewer/Codex Viewer first, with a complementary owned headless Chrome lane for the full accessibility/heap gates. Returns explicit engine/coverage/fallback evidence; a connected Viewer failure cannot become a headless success.",
         input_schema: schema([("path", "string", ".test.brain file or folder; defaults to the current app")], &[]),
         output_schema: out([("files", "array")]),
         run: Box::new(|a| {
@@ -912,7 +928,7 @@ pub fn run() -> Result<(), String> {
     });
     tools.push(Tool {
         name: "brain_errors",
-        description: "JavaScript errors from the browser pages served by the dev server (message, stack, source, line, url) after sequence number `since`, at most 100 entries; `more: true` = call again with the last `seq`.",
+        description: "JavaScript errors with original component/file/line, generated location, bounded frames, causes, mapping precision and truncation flags after sequence number `since`, at most 100 entries and 256 KiB; `more: true` = call again with the last `seq`.",
         input_schema: schema([("since", "number", "last seq already seen (default 0)")], &[]),
         output_schema: out([("errors", "array"), ("more", "boolean")]),
         run: {
@@ -1025,14 +1041,238 @@ pub fn run() -> Result<(), String> {
     // ---------- build ----------
     tools.push(Tool {
         name: "brain_build",
-        description: "Production build into dist/ (today: sitemap.xml and robots.txt from <meta seo>; bundle and prerender are on the way).",
+        description: "Build production assets, prerendered pages and SEO into dist/. Returns conservative route budgets and a final-asset raw/gzip/Brotli ledger separating initial and deferred references; not measured network traffic.",
         input_schema: schema([("site", "string", "absolute origin for the sitemap, e.g. https://example.dev")], &[]),
-        output_schema: out([("files", "array"), ("warnings", "array")]),
+        output_schema: out([("files", "array"), ("warnings", "array"), ("ledger", "array")]),
         run: Box::new(|a| {
             let r = crate::run_build(&crate::app_root()?, arg(a, "site"))?;
             Ok(crate::build_json(&r).stringify())
         }),
     });
+
+    tools.push(Tool {
+        name: "brain_backend_contract",
+        description: "Discover experimental Rust/Postgres backend resources and jobs. Omit name for a small list; give one name for its complete schema, policy, transactional hooks and owned files. One literal schema drives validation and OpenAPI; do not invent routes or database APIs.",
+        input_schema: schema([("name","string","resource or job name; omit to list")], &[]),
+        output_schema: out([("schemaVersion","number")]),
+        run: Box::new(|a| crate::backend::card(&crate::app_root()?,arg(a,"name").as_deref()).map(|v|v.to_string())),
+    });
+    tools.push(Tool {
+        name: "brain_resource_add",
+        description: "Create an experimental backend resource with schema.jsbrain, explicit default-admin policy.jsbrain, hooks.jsbrain and search.jsbrain. Fields: title:str! active:bool. Generates typed collection/detail clients, a canonical client contract, server service and repository. adminUi remains planned: no views, guards, controls or budget changes. Does not migrate Postgres or start services; inspect brain_backend_contract, review policy, then run brain backend migrate explicitly.",
+        input_schema: schema([("name","string","lowercase identifier"),("fields","string","name:type pairs; str, num, bool, email, obj; ! means required")], &["name","fields"]),
+        output_schema: out([("schemaVersion","number"),("files","array")]),
+        run: Box::new(|a| backend_add(a,"resource")),
+    });
+    tools.push(Tool {
+        name: "brain_job_add",
+        description: "Create a typed durable job schema and server-only handler. Implement the handler before starting brain jobs work; delivery is at least once and effects must be idempotent by ctx.jobId. Transactional resource hooks can target this queue.",
+        input_schema: schema([("name","string","lowercase job/queue identifier"),("fields","string","payload name:type pairs; required fields end with !")], &["name","fields"]),
+        output_schema: out([("schemaVersion","number"),("files","array")]),
+        run: Box::new(|a| backend_add(a,"job")),
+    });
+    tools.push(Tool {
+        name: "brain_agent_setup",
+        description: "Merge project-local Claude Code/Cursor MCP registrations, preserving other servers. With hooks:true install optional Claude Code PostToolUse edit feedback for brain/jsbrain/cssbrain files. Checks only, no tests/downloads/auto-fixes. Restart the client; registration is not proof of a live connection.",
+        input_schema: schema([("hooks","boolean","install Claude Code edit feedback")], &[]),
+        output_schema: out([("schemaVersion","number"),("files","array")]),
+        run: Box::new(|a|crate::agent::setup(&crate::app_root()?,a.get("hooks")==Some(&Json::Bool(true))).map(|f|serde_json::json!({"schemaVersion":1,"files":f,"restartClient":true}).to_string())),
+    });
+    tools.push(Tool {
+        name: "brain_changes",
+        description: "Revision-checked multi-file changes with per-file agent leases. Read returns revisions; lease acquires bounded ownership; plan validates an isolated snapshot; apply rechecks revisions and commits atomic individual files with conditional rollback. Use JSON request for operations, owner, token and planId. No merge or publication.",
+        input_schema: schema([("operation","string","read, lease, plan, apply, recover, status or discard"),("request","object","operation arguments; see docs/CHANGES.md")], &["operation","request"]),
+        output_schema: out([("schemaVersion","number")]),
+        run: Box::new(|a| {
+            let input = a.get("request").ok_or("request is required")?;
+            let input = serde_json::from_str(&input.stringify()).map_err(|e|format!("invalid request: {e}"))?;
+            crate::changes::dispatch(&crate::app_root()?,&need(a,"operation")?,&input).map(|v|crate::versioned(v).to_string())
+        }),
+    });
+    tools.push(Tool {
+        name: "brain_intelligence",
+        description: "Bounded static evidence: graph, task context, impact, why or preflight. Preflight reports real checker diagnostics with component/file/line/fix before execution. Declarations are not proof of runtime behavior; dynamic unknowns are explicit.",
+        input_schema: schema([("operation","string","graph, context, impact, why or preflight"),("target","string","component, resource, file or route"),("task","string","task for context selection"),("cursor","number","graph offset"),("limit","number","graph page size"),("budget","number","context byte budget")], &["operation"]),
+        output_schema: out([("schemaVersion","number")]),
+        run: Box::new(|a| {
+            let root = crate::app_root()?;
+            let input: serde_json::Value=serde_json::from_str(&a.stringify()).map_err(|e|e.to_string())?;
+            let target=arg(a,"target");
+            let number=|key:&str,default:usize| input.get(key).and_then(|v|v.as_u64()).and_then(|v|usize::try_from(v).ok()).unwrap_or(default);
+            let result=match need(a,"operation")?.as_str() {
+                "graph"=>crate::intelligence::graph_page(&root,number("cursor",0),number("limit",100)),
+                "context"=>crate::intelligence::context(&root,&arg(a,"task").unwrap_or_default(),number("budget",8192)),
+                "impact"=>crate::intelligence::impact(&root,target.as_deref().ok_or("target is required")?,None),
+                "why"=>crate::intelligence::why(&root,target.as_deref().ok_or("target is required")?),
+                "preflight"=>crate::intelligence::preflight(&root,target.as_deref()),
+                _=>Err("unknown intelligence operation".into()),
+            }; result.map(|v|v.to_string())
+        }),
+    });
+    tools.push(Tool {
+        name: "brain_recipe",
+        description: "List recipes or prepare schema-derived resource-ui/auth-ui/google-signin/password-reset/email-verification file operations. Preview only; acquire leases and pass operations through brain_changes plan/apply to validate and write. Experimental backend must be configured separately.",
+        input_schema: schema([("name","string","omit to list; resource-ui, auth-ui, google-signin, password-reset or email-verification"),("params","object","resource and optional view")], &[]),
+        output_schema: out([("schemaVersion","number")]),
+        run: Box::new(|a| match arg(a,"name") {
+            None=>Ok(crate::recipes::list().to_string()),
+            Some(name)=>{
+                let input=match a.get("params") {Some(v)=>serde_json::from_str(&v.stringify()).map_err(|e|e.to_string())?,None=>serde_json::json!({})};
+                crate::recipes::generate(&crate::app_root()?,&name,&input,true).map(|v|v.to_string())
+            }
+        }),
+    });
+    tools.push(Tool {
+        name: "brain_upgrade",
+        description: "Preview an explicit exact framework package version. Returns revision-checked package.json operations and remaining migration/install decisions without writing, installing or contacting registries. Apply through brain_changes; this is not a completed app upgrade.",
+        input_schema: schema([("version","string","explicit exact SemVer target")], &["version"]),
+        output_schema: out([("schemaVersion","number"),("operations","array")]),
+        run: Box::new(|a|crate::upgrade::preview(&crate::app_root()?,&need(a,"version")?).map(|v|v.to_string())),
+    });
+    tools.push(Tool {
+        name: "brain_lib",
+        description: "Discover built-in HTTP, validation, state, date, hash, format and environment capabilities without installs. operation=new creates one pure named-export project helper; no package or PR is published.",
+        input_schema: schema([("operation","string","list (default) or new"),("name","string","helper name for new")], &[]),
+        output_schema: out([("schemaVersion","number")]),
+        run: Box::new(|a| match arg(a,"operation").as_deref().unwrap_or("list") {
+            "list"=>Ok(crate::libraries::list().to_string()),
+            "new"=>{
+                let root=crate::app_root()?;let value=crate::libraries::new(&root,&need(a,"name")?)?;
+                if let Some(files)=value["files"].as_array() {for file in files.iter().filter_map(serde_json::Value::as_str) {journal_record(&root,&root.join(file),None);}}
+                Ok(value.to_string())
+            },
+            _=>Err("unknown library operation; use list or new".into()),
+        }),
+    });
+    tools.push(Tool {
+        name: "brain_search",
+        description: "Native bounded source index for components, functions, props, imports and lexical references. No browser or whole-app compile. Returns exact token locations, content revisions and explicit resolution limits; page with cursor.",
+        input_schema: schema([("operation","string","find, symbols or refs"),("request","object","query for find; file for symbols; name for refs; optional kind/limit/cursor/metrics")], &["operation","request"]),
+        output_schema: out([("schemaVersion","number")]),
+        run: Box::new(|a| {
+            let input=serde_json::from_str(&a.get("request").ok_or("request is required")?.stringify()).map_err(|e|e.to_string())?;
+            crate::search::query(&crate::app_root()?,&need(a,"operation")?,&input).map(|v|v.to_string())
+        }),
+    });
+    tools.push(Tool {
+        name: "brain_design",
+        description: "Inspect the project-owned design baseline, check drift, preview reversible token adoption or generate a private searchable static component gallery. Existing tokens, fonts and app data are preserved; no app code executes.",
+        input_schema: schema([("operation","string","query (default), check, init, gallery, blueprint, seed or configure"),("target","string","optional token name for query"),("options","object","guarded design adoption/seed/configuration request")], &[]),
+        output_schema: out([("schemaVersion","number")]),
+        run: Box::new(|a| {
+            let root=crate::app_root()?;
+            let options:serde_json::Value=serde_json::from_str(&a.get("options").map(Json::stringify).unwrap_or_else(||"{}".into())).map_err(|_|"design options must be JSON")?;
+            let value=match arg(a,"operation").as_deref().unwrap_or("query") {
+                "query"=>crate::design::query(&root,arg(a,"target").as_deref())?,
+                "check"=>crate::design::check(&root)?,
+                "init"=>crate::design::preview_init(&root,&options)?,
+                "gallery"=>crate::design::gallery(&root)?,
+                "blueprint"=>crate::design::blueprint(&root)?,
+                "seed"=>crate::design::preview_seed(&root,&options)?,
+                "configure"=>crate::design::preview_configure(&root,&options)?,
+                _=>return Err("unknown design operation; use query, check, init or gallery".into()),
+            }; Ok(value.to_string())
+        }),
+    });
+    tools.push(Tool {
+        name: "brain_manifest",
+        description: "Read bounded private per-view/component contracts, revisions, dependency edges and structural UI states without executing source or reading secrets. Refresh updates only owned metadata.",
+        input_schema: schema([("target","string","optional source file"),("refresh","boolean","refresh bounded private manifests")], &[]),
+        output_schema: out([("schemaVersion","number")]),
+        run: Box::new(|a| {
+            let root=crate::app_root()?;
+            if matches!(a.get("refresh"),Some(Json::Bool(true))) {crate::manifests::refresh(&root).map(|v|v.to_string())}
+            else {crate::manifests::query(&root,arg(a,"target").as_deref()).map(|v|v.to_string())}
+        }),
+    });
+    tools.push(Tool {
+        name: "brain_history",
+        description: "Project-local checklist, reported evidence, proposed lessons and safe incident metadata. Read operation defaults to status. Mutations require request.expectedRevision from the last query; no commands execute or reports publish.",
+        input_schema: schema([("operation","string","status/tasks/task/evidence/lessons/incidents/timeline or task-create/task-update/lesson/incident"),("request","object","bounded operation fields and expectedRevision for edits"),("write","boolean","explicitly select mutation for evidence")], &[]),
+        output_schema: out([("schemaVersion","number")]),
+        run: Box::new(|a| {
+            let root=crate::app_root()?;let op=arg(a,"operation").unwrap_or_else(||"status".into());
+            let request=serde_json::from_str(&a.get("request").map(Json::stringify).unwrap_or_else(||"{}".into())).map_err(|_|"history request must be JSON")?;
+            let write=matches!(op.as_str(),"task-create"|"task-update"|"lesson"|"incident") || a.get("write")==Some(&Json::Bool(true));
+            if write {crate::history::edit(&root,&op,&request).map(|v|v.to_string())} else {crate::history::query(&root,&op,&request).map(|v|v.to_string())}
+        }),
+    });
+    tools.push(Tool {
+        name: "brain_integration",
+        description: "Discover versioned official provider SDK adapters or preview selective installation/update as revision-checked source operations. Does not install, contact providers, invoke AI models or expose credentials.",
+        input_schema: schema([("id","string","omit to list integrations"),("options","object","optional exact version, expectedRevision and includeTemplate")], &[]),
+        output_schema: out([("schemaVersion","number")]),
+        run: Box::new(|a| {
+            if let Some(id)=arg(a,"id") {
+                let request=serde_json::from_str(&a.get("options").map(Json::stringify).unwrap_or_else(||"{}".into())).map_err(|_|"integration options must be JSON")?;
+                crate::integrations::preview(&crate::app_root()?,&id,&request).map(|v|v.to_string())
+            } else {Ok(crate::integrations::catalog().to_string())}
+        }),
+    });
+    tools.push(Tool {
+        name: "brain_feedback",
+        description: "Poll bounded project-local compiler events published before the browser error overlay. Resume with epoch/sequence; inspect reset/gap flags and exact source evidence. Does not spawn an agent or edit source. Managed brain_run also delivers live MCP notifications.",
+        input_schema: schema([("options","object","afterEpoch, afterSequence and limit (1..128)")], &[]),
+        output_schema: out([("schemaVersion","number")]),
+        run: Box::new(|a| {
+            let options=serde_json::from_str(&a.get("options").map(Json::stringify).unwrap_or_else(||"{}".into())).map_err(|_|"feedback options must be JSON")?;
+            crate::feedback::query(&crate::app_root()?,&options).map(|v|v.to_string())
+        }),
+    });
+    tools.push(Tool {
+        name: "brain_quality",
+        description: "Agent-first persistent quality feedback: bounded findings with evidence, exact known locations, priorities, fixes and acceptance criteria. Read JSON/Markdown/fixed panel; refresh collects static evidence without compiling or calling providers. Unknown coverage stays explicit.",
+        input_schema: schema([("refresh","boolean","refresh local quality evidence"),("options","object","query filters and pagination")], &[]),
+        output_schema: out([("schemaVersion","number")]),
+        run: Box::new(|a| {
+            let root=crate::app_root()?;
+            if a.get("refresh")==Some(&Json::Bool(true)) {crate::quality::refresh(&root).map(|v|v.to_string())}
+            else {let request=serde_json::from_str(&a.get("options").map(Json::stringify).unwrap_or_else(||"{}".into())).map_err(|_|"quality options must be JSON")?;crate::quality::query(&root,&request).map(|v|v.to_string())}
+        }),
+    });
+    tools.push(Tool {
+        name: "brain_deployment",
+        description: "Prepare optional PM2/nginx deployment configuration as guarded file operations. No services are installed, activated or deployed. Explicit topology and production settings remain reviewable.",
+        input_schema: schema([("target","string","pm2 or nginx"),("options","object","deployment topology and public settings; never secret values")], &["target","options"]),
+        output_schema: out([("schemaVersion","number")]),
+        run: Box::new(|a| {
+            let request=serde_json::from_str(&a.get("options").ok_or("options are required")?.stringify()).map_err(|_|"deployment options must be JSON")?;
+            crate::deployment::preview(&crate::app_root()?,&need(a,"target")?,&request).map(|v|v.to_string())
+        }),
+    });
+    tools.push(Tool {
+        name: "brain_e2e",
+        description: "Probe the local browser extension connection and invocation contract, or run declared app E2E scenarios. Install Claude Viewer/Codex Viewer in the browser and enable its scripting bridge. Only newly owned test tabs are touched; reports preserve actual lane evidence.",
+        input_schema: schema([("operation","string","probe (default) or run"),("path","string","optional declared .test.brain file or folder")], &[]),
+        output_schema: out([("schemaVersion","number")]),
+        run: Box::new(|a| {
+            match arg(a,"operation").as_deref().unwrap_or("probe") {
+                "probe" => return crate::viewer::probe().map(|v|v.to_string()),
+                "run" => {},
+                _ => return Err("E2E operation must be probe or run".into()),
+            }
+            #[cfg(unix)] {
+                let reports=crate::run_tests(arg(a,"path").map(PathBuf::from),60)?;
+                let failed=reports.iter().any(crate::testrun::FileReport::failed);
+                let value=Json::obj([("schemaVersion",Json::Num(1.0)),("files",Json::Arr(reports.iter().map(crate::testrun::FileReport::to_json).collect()))]).stringify();
+                if failed {Err(value)} else {Ok(value)}
+            }
+            #[cfg(not(unix))] {Err("E2E needs a supported browser runner".into())}
+        }),
+    });
+    tools.push(Tool {
+        name: "brain_dependencies",
+        description: "Analyze installed browser ESM offline or preview a revision-checked optimization. Explicit fetch acquires one exact pinned HTTPS CDN ESM artifact with SHA-256 and lock CAS; it writes the reviewed local vendor/lock paths without executing code. Builds never fetch or call an LLM.",
+        input_schema: schema([("operation","string","analyze (default), preview or explicit fetch"),("request","object","file for analyze; file/expectedRevision/content for preview; url/package/version/sha256/expectedRevision for explicit fetch")], &[]),
+        output_schema: out([("schemaVersion","number")]),
+        run: Box::new(|a| {
+            let request=serde_json::from_str(&a.get("request").map(Json::stringify).unwrap_or_else(||"{}".into())).map_err(|_|"dependency request must be JSON")?;
+            crate::dependencies::query(&crate::app_root()?,arg(a,"operation").as_deref().unwrap_or("analyze"),&request).map(|v|v.to_string())
+        }),
+    });
+    if profile != "full" {
+        tools.retain(|t| profile_tool(profile,t.name));
+    }
 
     // ---------- resources ----------
     let resources = vec![
@@ -1096,13 +1336,14 @@ pub fn run() -> Result<(), String> {
         },
     ];
 
+    let instructions = if profile == "full" { "BRAINLLM toolchain. Read brain_spec, brain_map and brain_guide before writing app code. Use brain_add, check/fix, browser verification and brain_doctor. Discover backend resources/jobs with brain_backend_contract; backend is experimental; explicitly start it and configure fixed loopback BRAIN_BACKEND_URL for native development/production identity and resources." } else { "BRAINLLM compact tool profile. Read brain_spec and brain_map; use CLI brain add to create files, check/fix until clean, then brain_test and brain_doctor. Backend profile also exposes resource/job generators and small backend contracts. No backend server is started by this MCP process." };
     let server = Server {
         name: "brain",
         version: env!("CARGO_PKG_VERSION"),
-        instructions: "BRAINLLM toolchain. Read `brain_spec` and `brain_map` before writing a .brain file, and `brain_guide` (topic) before each kind of task; create files with `brain_add`; loop `brain_check` → `brain_fix` until clean; run the app with `brain_run_start` and reproduce bugs with `brain_navigate`/`brain_click`/`brain_eval`; finish with `brain_doctor`.",
+        instructions,
         tools,
         resources,
-        prompts,
+        prompts: if profile == "full" {prompts} else {prompts.into_iter().filter(|p|p.name=="fix-all").collect()},
     };
     let stdin = std::io::stdin();
     let r = server.run(stdin.lock(), &notifier).map_err(|e| e.to_string());
@@ -1110,4 +1351,43 @@ pub fn run() -> Result<(), String> {
         d.stop();
     }
     r
+}
+
+/// Keep a stable six-tool minimal vocabulary; backend adds only its focused contract/generation tools.
+fn profile_tool(profile:&str,name:&str)->bool {
+    matches!(name,"brain_spec"|"brain_check"|"brain_fix"|"brain_map"|"brain_test"|"brain_doctor")
+        || profile=="backend" && matches!(name,"brain_backend_contract"|"brain_resource_add"|"brain_job_add"|"brain_agent_setup")
+}
+
+fn backend_add(args:&Json,kind:&str)->Result<String,String> {
+    let root=crate::app_root()?;
+    let result=crate::backend::add(&root,kind,&need(args,"name")?,&need(args,"fields")?)?;
+    if let Some(files)=result["files"].as_array() {
+        for file in files.iter().filter_map(serde_json::Value::as_str) {journal_record(&root,&root.join(file),None);}
+    }
+    Ok(result.to_string())
+}
+
+#[cfg(test)]
+mod mutation_tests {
+    use super::*;
+    #[test]
+    fn file_mutations_and_tampered_undo_cannot_escape_the_app() {
+        let root=std::env::temp_dir().join(format!("brain-mcp-boundary-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(root.join("app")).unwrap();
+        let app=root.join("app"); let outside=root.join("outside.txt");
+        std::fs::write(&outside,"Retain this file").unwrap();
+        assert!(writable(&app,outside.to_str().unwrap()).is_err());
+        assert!(writable(&app,"../outside.txt").is_err());
+        assert!(writable(&app,"secrets/private.txt").is_err());
+        #[cfg(unix)] {
+            std::os::unix::fs::symlink(&root,app.join("linked")).unwrap();
+            assert!(writable(&app,"linked/outside.txt").is_err());
+        }
+        std::fs::create_dir_all(app.join(".brain")).unwrap();
+        std::fs::write(journal_path(&app),Json::obj([("path",Json::str(outside.to_str().unwrap())),("before",Json::Null)]).stringify()).unwrap();
+        assert!(journal_undo(&app,1).is_err());
+        assert_eq!(std::fs::read_to_string(outside).unwrap(),"Retain this file");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

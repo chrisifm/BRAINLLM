@@ -58,3 +58,54 @@ test('errors: remote throw rethrown with name and message; unknown export; unclo
   await assert.rejects(w.call('fn', []), e => e.name === 'DataCloneError')
   assert.deepEqual(await w.call('parseCsv', ['x']), [['x']]) // still usable afterwards
 })
+
+test('RPC refuses inherited methods, prototype traversal and accessor exports', async () => {
+  let reads = 0
+  modules.set('w:safe', scope => serve(Object.defineProperty({}, 'secret', { get() { reads++; return () => 1 } }), scope))
+  const w = worker('w:safe')
+  await assert.rejects(w.call('constructor', []), /unsafe export/)
+  await assert.rejects(w.call('toString', []), /not an exported function/)
+  await assert.rejects(w.call('secret', []), /not an exported function/)
+  assert.equal(reads, 0)
+  w.terminate()
+})
+
+test('bounded pending calls, deadline termination and restart', async () => {
+  const w = worker('w:csv', { capacity: 1, timeout: 10 })
+  const pending = w.call('slow', [30])
+  await assert.rejects(w.call('parseCsv', ['x']), e => e.code === 'B0911')
+  await assert.rejects(pending, e => e.code === 'B0910')
+  assert.deepEqual(await w.call('parseCsv', ['fresh']), [['fresh']])
+  await new Promise(r => setTimeout(r, 35))
+  w.terminate()
+})
+
+test('abort cancels owned worker pending work and removes abort listeners', async () => {
+  const w = worker('w:csv'), controller = new AbortController()
+  const first = w.call('slow', [20], { signal: controller.signal })
+  const second = w.call('slow', [20])
+  controller.abort()
+  await assert.rejects(first, e => e.kind === 'aborted')
+  await assert.rejects(second, e => e.kind === 'aborted')
+  await assert.rejects(w.call('parseCsv', ['x'], { signal: controller.signal }), e => e.name === 'AbortError')
+  assert.deepEqual(await w.call('parseCsv', ['again']), [['again']])
+  await new Promise(r => setTimeout(r, 25))
+  w.terminate()
+})
+
+test('worker payload and in-flight byte budgets release on completion without invoking accessors', async () => {
+  const w = worker('w:csv', {maxBytes:1024,maxInFlightBytes:1024})
+  await assert.rejects(w.call('parseCsv', ['x'.repeat(600)]), e => e.code === 'B0911')
+  const first = w.call('slow', [20,'x'.repeat(300)])
+  await assert.rejects(w.call('slow', [20,'x'.repeat(300)]), e => e.code === 'B0911')
+  await first
+  assert.deepEqual(await w.call('parseCsv', ['ok']), [['ok']])
+  let reads = 0
+  const value = Object.defineProperty({}, 'secret', {enumerable:true,get(){reads++;return 'no'}})
+  await assert.rejects(w.call('parseCsv', [value]), e => e.name === 'DataCloneError')
+  assert.equal(reads,0)
+  await assert.rejects(w.call('parseCsv', [Array(5000).fill(0)]), e => e.code === 'B0911')
+  const backing = new ArrayBuffer(2048)
+  await assert.rejects(w.call('parseCsv', [new Uint8Array(backing,0,1)]), e => e.code === 'B0911')
+  w.terminate()
+})

@@ -181,13 +181,34 @@ failure shows in `f.error`. Initial values: `form(schema, { init })`; later valu
 `{#await users}…{:then list}…{:catch e}…{/await}` must cover loading, error and empty. Responses are validated.
 `brain run --mock` serves fake data from the schemas.
 
+## Project Design System and agent feedback
+New projects include `design.brain.json`, project-owned tokens and extendible `ui/` basics. Before UI work, inspect
+`brain design blueprint --json`, `brain design query --json` and `brain manifest query --json`. Use this project's
+components/tokens throughout the app: no external CSS frameworks. Build mobile first, then tablet/desktop; preserve
+safe areas, readable input text, touch targets, focus, reduced motion and all interactive states.
+`brain design seed|configure --request <JSON>` prepares guarded source operations; apply them with `brain changes`.
+`brain design check --json` reports drift; `brain design gallery --json` prepares searchable project UI documentation.
+B2201 warns when one exact project token already represents a component style value; review its cascade before editing.
+Existing projects use `brain design init` and `brain upgrade <exact-version>` previews to adopt without deleting old data.
+`brain quality refresh --json` persists actionable JSON, an improvement file and local panel. `brain feedback query|watch`
+reads compiler events published before the browser overlay; watch is finite NDJSON. MCP exposes the corresponding tools.
+`brain history` records project-local tasks, evidence and proposed lessons with revisions; reported evidence is not proof.
+
 ## Caching (automatic)
 `brain build` caches everything for the repeat visit: immutable hashed assets, a service worker (visited pages work
 offline; `views/_offline.brain` is optional) and an in-memory `resource()` cache. Never write a service worker or
 cache headers yourself. Opt out in `brain.json`: `"cache": { "sw": false }` (also `http`, `offline`, `data`).
 Keep data across visits: `api('/posts', { get: { out: '[Post]', cache: '10m' } })` (never for personal data) ·
 `store(init, { persist: true })`. Heavy work off the main thread: name the module `*.worker.jsbrain`; its exports
-become async functions.
+become async functions. Their native bridge bounds pending work, deadlines, bytes and cancellation.
+Public navigable state: `urlState('overview', {key:'tab'})`; selections and native Dialog integrate with query history.
+Preserve unrelated query parameters; never serialize credentials or private form input. Use distinct keys in repeated UI.
+Structured local cache: `database('navigation', {namespace:'my-app',build:'v1'})` supports get/put/batch/scan/prune/close
+with native IndexedDB, quotas, expiry and atomic batches. `storage()` and `cookie()` are small public preferences.
+`storageInfo()` reports capabilities; `persistStorage()` requests persistence from a user action. Storage remains evictable.
+Optional `sqlite(officialInitializer, options)` runs official SQLite Wasm in an owned OPFS worker; it is not a core dependency.
+`threadCapabilities`, `sharedWorker`, `messageChannel`, `transfer`, `offscreen`, `sharedMemory` and `loadWorklet` expose
+bounded native thread operations and explicit unsupported-capability errors. See `docs/BROWSER-DATA.md` for contracts.
 
 ## Errors at runtime
 Errors in `fx`, `drv` and handlers are caught: the app stays alive and the error is reported. An effect that re-runs
@@ -198,7 +219,8 @@ keeps working; a failing click handler keeps the component and shows a toast. Do
 A component that keeps growing (DOM nodes, list rows, effect runs) or loops is stopped and replaced by its fallback;
 `brain build` mounts every view with fake timers and fails (B0907) if anything grows with no user input. Never append
 to a list from a timer, interval, bus or `fx` without a limit; create timers only inside `fx` and return their cleanup.
-Captured errors (message, stack, recent actions) are listed by `brain_errors` (MCP) and `brain doctor`.
+Public production messages contain safe references, never raw traces, arbitrary exception text or internal paths.
+Private captured errors (message, stack, recent actions) are listed by `brain_errors` (MCP) and `brain doctor`.
 
 ## Server and secrets
 `load` runs only on the server. Client code may only read env vars prefixed `PUBLIC_`.
@@ -208,9 +230,44 @@ Read them as `process.env.KEY` (server) or `process.env.PUBLIC_KEY` (anywhere). 
 `.jsbrain` files starting with `<meta server>` run only on the server and may be used only inside `load` or server
 functions. Server function in a `.brain`: `server: async function save(ctx, data) {…}`; the client calls
 `await save(data)` (no `ctx`). Validate `data` inside.
+Server-only modules may signal a deliberate client failure with `throw {status:403}` (standard 4xx only); RPC returns
+the status with a generic public message. Arbitrary exception messages remain private and are excluded from server logs too.
 Sessions: `ctx.session.set(user)` in a server function, `ctx.user` on later requests, `ctx.session.clear()` logs out
 (signed cookie, not encrypted: ids and display data only; setup in `brain guide server`).
 `load` belongs to views: in `_layout.brain` it is not run.
+
+### Experimental Rust/Postgres backend
+First read `brain backend schema --json` (resolved resource/job contracts + resource OpenAPI); inspect one with
+`brain card resource:posts` / `brain card job:notify`. Generate with `brain add resource posts --fields "title:str! body:str"`
+or `brain add job notify --fields "message:str!"`; fields: `str num bool email obj`, `!` required. Resources have explicit
+`schema/policy/hooks.jsbrain`; jobs have `schema/handler.jsbrain` under `server/resources/` and `server/jobs/`.
+Resource generation also creates collection/detail clients under `api/`, an executable native repository and
+server service, and `client-contract.json` pointing to the canonical schema revision. Administrative UI is
+an explicit administrative-UI deferral in 0.4: this command does not create routes, guards or controls and does not raise
+the app's 30 KiB route budget. Existing application views remain project-owned.
+Set `DATABASE_URL`; explicitly `brain backend migrate`, then `brain backend serve` (loopback REST at `/api/<resource>`).
+`brain jobs enqueue|status|work|prune` manages persistent, at-least-once work. Handlers must be idempotent by `ctx.jobId`.
+After-write hooks commit `{resource,operation,record}` with their mutation. `brain add hook validate_order` creates
+`server/hooks/validate_order.jsbrain`; reference it as `before_create`, `before_update` or `before_delete` in a resource's
+hooks contract. Its default function receives `{resource,operation,payload,existing,user,rid}` and must return the
+accepted payload; the backend revalidates it and rejects conflicting writes. See `docs/BEFORE-HOOKS.md` for limits.
+See `brain guide server` for the workflow.
+Set `BRAIN_BACKEND_URL` to the fixed loopback native backend URL to connect native API requests and SSR session verification.
+Native JWT accounts use short-lived access and rotating refresh cookies, persisted revocation, configured roles and Google Sign-In.
+`brain recipe auth-ui|password-reset|email-verification|google-signin` prepares project-owned account UI;
+mail needs private `BRAIN_MAIL_RESEND_KEY`, `BRAIN_MAIL_FROM` and `PUBLIC_SITE_URL` (HTTPS, optional hosting prefix).
+`brain backend bootstrap-admin --user <existing-uuid>` explicitly assigns the first administrator; signup never grants it.
+See `docs/AUTH-FLOWS.md`; mail responses deliberately do not disclose account existence or delivery failures.
+In a same-origin POST server function, `await ctx.backend.login({email,password})` establishes native JWT or opaque
+HttpOnly cookies and returns the sanitized user; the backend chooses the configured mode. Never expose signing keys
+or copy tokens into browser storage. `ctx.session.clear()` revokes native sessions. See `docs/NATIVE-AUTH-SSR.md`.
+With native mode configured, server `load(ctx)` and server functions can use `ctx.backend.resource('posts')`:
+`list({search,limit,offset})`, `get(uuid)`, `create(values)`, `update(uuid,values)`, `remove(uuid)`.
+Reads and writes run through the same native schemas, policies and authenticated cookies, not a second database client.
+Writes require a same-origin POST server function; they are rejected from GET/load. Put domain logic in server-only
+service/repository `.jsbrain` modules and pass `ctx` explicitly. Request JSON is limited to 64 KiB, responses to 2 MiB,
+with a shared eight-request cap and ten-second total deadline; no automatic mutation retries.
+Keep existing production routes until their behavior and policies pass a tested migration slice.
 
 ## Tests (`*.test.brain`)
 `test(name, async () => {…})` · `await mount(Comp, props)` · `await click(sel)` · `await type(sel, text)` ·
@@ -221,7 +278,7 @@ Main: `brain new <app>` · `brain run` (dev server with hot reload, app :5180; v
 SEO and the no-JS HTML on `brain build` + `brain start`) · `brain build` (production) ·
 `brain doctor` (everything at once: check + tests + over-engineering + leaks; exits non-zero on any error).
 Production: `brain start` (serves `dist/`, restarts on crash, logs to `logs/app.log`) · `brain reload` (no downtime) ·
-`brain status` · `brain stop`. Never add PM2 or another process manager.
+`brain status` · `brain stop`. Optional PM2/nginx configurations: `brain deploy config pm2|nginx --request <JSON>`; see `docs/DEPLOYMENT.md`.
 Hosted under a sub-path: `brain.json` `"base": "/app/"`; keep writing app-absolute links and paths (`<a href="/about">`,
 `redirect('/login')`); the build adds the base everywhere.
 Granular: `brain add view|comp|ui <name> --props "…"` · `brain check --json` · `brain test` · `brain spec [--topic x]` ·
@@ -245,13 +302,45 @@ CLI `brain undo` and version-to-version `brain migrate`; runtime budgets `mountM
 `move <file> <destination>` · `extract <file> <selector> <NewName>` (AST edits; prefer over text edits).
 Rename changes a component filename and its resolved imports, preserving local aliases; it does not rename JavaScript
 bindings. Changes pass the checker before writing. Unsupported ambiguous references are rejected.
-Prefer composing over writing: `brain gen --list --json` shows recipes (app shell, navbar, auth, CRUD from an api schema,
-dashboard, settings, pricing, landing sections, wizard, modal); `brain gen <recipe> --params '{…}'` creates files that
-already pass `brain doctor`. Layout without CSS: `<Stack gap="3">` `<Row>` `<Grid cols="3">` `<Center>` `<Sidebar>`
-`<Container>`. Multi-file changes: `brain apply plan.json` (all or nothing). Read cheaply: `brain read <file> --outline`,
-`brain map --focus <file>`, `brain context "<task>" --budget 8000`, `brain shot --text`, `brain diff --semantic`.
+`brain recipe list` lists experimental `resource-ui` (existing resource contract) and `auth-ui` previews; pass recipe
+params as a JSON argument. It returns operations without writing. `brain changes read|lease|plan|apply|recover <json>`
+coordinates per-file leases and revision checks, validates a private snapshot, and supports conditional recovery.
+Each file replacement is atomic; a multi-file change is a recoverable logical transaction. Unrelated editors can race.
+`brain graph` gives bounded static dependency evidence; `brain context "<task>"`, `brain why <target>` and
+`brain preflight` expose focused context and preventive checker diagnostics. Dynamic unknowns remain explicit.
+MCP full profile: `brain_changes`, `brain_intelligence`, `brain_recipe`. See project developer docs for JSON contracts.
+`brain upgrade <exact-version>` previews package pin operations and unresolved migration/install decisions; it does not
+verify the registry, install packages or run source migrations. Apply reviewed operations with the changes protocol.
+`interop(() => element, adapter, props, {onError})` owns an external SDK/DOM mount during component setup; adapters
+return cleanup or `{update, destroy}` synchronously. Updates are explicit; cleanup runs on unmount. SDKs stay app-owned.
+Browser dependencies may use installed ESM packages resolved from exact package metadata/lock evidence. CommonJS,
+TypeScript/JSX source and unknown dynamic graphs are rejected explicitly; use a reviewed ESM distribution.
+`brain deps analyze --json` reports actual graph/bytes, side effects and unknowns. `brain deps preview --request <JSON>`
+validates an agent source proposal against its revision before guarded application. Explicit `brain deps fetch --request <JSON>` acquires one exact pinned HTTPS CDN ESM artifact with SHA-256 and lock CAS. Production builds resolve this
+verified local vendor lock offline; they never fetch mutable URLs or execute an LLM to rewrite dependencies.
+Worker/SDK URL resources, including reached Wasm assets, retain content-addressed paths and required sibling layout.
+Use `brain integration list` and `brain integration add|update <provider> --version <exact>` for official OpenAI, Claude,
+Gemini and Maps SDK adapter previews; backend SDK credentials stay private and frontend callers use server functions.
+See `docs/DEPENDENCIES.md` for the supported ESM/CDN subset and explicit graph limits.
 `brain build` is production: minifies, mangles, obfuscates and removes dead code and `log()`. No flags needed.
 It also adds SRI and a strict CSP with the security headers to every page.
+
+Native helpers need no imports or packages: `dateParse/dateAdd/dateDiff/dateRange/dateZone` use UTC arithmetic and
+explicit timezone projection; `hashText/shortHash` are async Web Crypto. `brain lib list` (MCP `brain_lib`) gives the
+catalog and limits; `brain lib new <name>` atomically creates a pure named-export project helper. Named functions use
+existing tree shaking; inspect emitted bytes in `brain build --json` → `ledger`.
+Native type findings B2001–B2005 and browser-target findings B2101–B2103 are warnings. Unknown flows remain unknown.
+`brain.json` `targets` selects `baseline-widely` (default), `baseline-newly`, or `baseline-YYYY` up to the embedded data.
+Feature guards are required for known newer browser APIs; no polyfill or syntax lowering is promised.
+
+MCP registration: new apps include Claude Code `.mcp.json`, Cursor `.cursor/mcp.json`, and `CLAUDE.md` → `@AGENTS.md`.
+Existing app: `brain agent setup [--hooks]`; restart the client and verify its tools. Optional hooks check after source edits,
+with no tests, downloads or auto-fixes. `brain mcp --profile minimal` exposes spec/check/fix/map/test/doctor; `backend` adds
+focused resource/job contract tools. Default is `full`.
+`brain e2e probe --json` detects Codex Viewer/Claude Viewer; install the extension and enable user scripts. With multiple
+connected profiles, set private BRAIN_VIEWER_PROFILE. `brain test` executes declared scenarios in a fresh owned Viewer tab
+and retains the separate full Chrome AX/optional heap lane. Connected Viewer failures fail the run; unavailable adapters
+have an explicit headless fallback. Follow `docs/VIEWER-E2E.md` to author complete disposable-data E2E scenarios. `doctor` warning B0734 checks local registration, not connectivity.
 
 ## Loop
 1 `brain add` · 2 edit · 3 `brain fix` then `brain check --json` → apply each remaining `fix` literally, repeat until `[]` ·

@@ -1,0 +1,27 @@
+<meta server>
+import Anthropic from '@anthropic-ai/sdk'
+
+let active = 0
+
+// Server-only example. The official SDK remains available directly for additional APIs.
+export async function ask(ctx, input) {
+  if (!ctx.user) throw new Error('integration: authentication required')
+  if (typeof input !== 'string' || !input.trim() || input.length > 16000) throw new Error('integration: input must contain 1..16000 characters')
+  if (active >= 8) throw new Error('integration: capacity exceeded; retry later')
+  const key = ctx.env.ANTHROPIC_API_KEY
+  const model = ctx.env.ANTHROPIC_MODEL
+  if (!key || !model) throw new Error('integration: configure server credentials and model')
+  active++
+  try {
+    const client = new Anthropic({ apiKey: key, timeout: 8000, maxRetries: 0 })
+    const response = await client.messages.create({ model, max_tokens: 1024, messages: [{ role: 'user', content: input }] })
+    const text = response.content.filter(block => block.type === 'text').map(block => block.text).join('')
+    if (typeof text !== 'string' || text.length > 64000) throw new Error('integration: response text exceeds the example contract')
+    return { text, provider: 'claude' }
+  } catch {
+    // Never forward SDK messages, response bodies, prompts or credentials to RPC clients/logs.
+    throw new Error('integration: provider request failed; inspect safe correlated server metadata')
+  } finally {
+    active--
+  }
+}

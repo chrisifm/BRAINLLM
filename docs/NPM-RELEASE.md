@@ -14,7 +14,8 @@ Later source changes require a new build-and-pack run before release.
 
 ## Release requirements
 
-1. Review and merge the intended source commit through the principal-author gate. Run `bash scripts/verify.sh`,
+1. Review the intended source commit through the principal-author gate. An explicitly authorized release may tag
+   the reviewed commit on its review branch; publication never authorizes an automatic merge into `main`. Run `bash scripts/verify.sh`,
    `node --test npm/test/pack.test.mjs`, and the source/history privacy audit. Review the frozen version.
 2. Build and test the native binaries for all seven declared platforms. Refresh obsolete CI runner labels against
    the current GitHub runner catalog before dispatching. The binary must use remapped source/home paths.
@@ -48,3 +49,5 @@ not a private-access requirement. Public access is explicit in every generated p
 
 References: [npm initializer resolution](https://docs.npmjs.com/cli/npm-init/),
 [public scoped packages](https://docs.npmjs.com/creating-and-publishing-scoped-public-packages/).
+
+Relative source and asset links in packaged README files are pinned to the package's v<version> tag. Package documentation therefore resolves to the same reviewed source tree even when main changes. Create the matching source tag with the release; publishing the package without that tag would leave these links unresolved.

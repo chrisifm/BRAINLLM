@@ -47,7 +47,7 @@ pub(crate) fn candidates(c: &Component, disk: &Path, hash_len: usize) -> HashMap
         let file = file.to_string_lossy().replace('\\', "/");
         out.insert(
             local.name.clone(),
-            Inline { hash: crate::component_hash_len(&file, hash_len), source: i.source.clone(), has_style: comp.style.is_some(), comp },
+            Inline { hash: crate::component_hash_len(&crate::component_scope_key(&file,&comp.src), hash_len), source: i.source.clone(), has_style: comp.style.is_some(), comp },
         );
     }
     out

@@ -1,5 +1,7 @@
+import {createHash} from 'node:crypto'
+import {checkedDiagnostics} from './check.mjs'
 // LLM test (#11): 20 views generated with only `brain spec` as context → % that pass `brain check` on the first try.
-// Usage: node bench/llm/run.mjs [--spec-file spec.md] [--briefs briefs-100.json] [--model claude-haiku-5-5|qwen] [--mode spec|mcp] [--fix 3] [--conc 5] [--only 03-login]
+// Usage: node bench/llm/run.mjs [--provider claude|qwen|codex] [--model MODEL] [--effort EFFORT] [--spec-file spec.md] [--briefs briefs-100.json] [--mode spec|mcp] [--fix 3] [--conc 5] [--only 03-login]
 // --mode mcp: besides the spec, the model receives the app map (`brain map --json` if it exists; otherwise a QA
 //   substitute with files, components, props/emits and exports), as it would see it through MCP. --model qwen calls ollama directly.
 // Output: results/<model>/<id>/try<N>.brain + results/<model>.json + table on stdout.
@@ -8,17 +10,27 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
+import { codexGenerate, codexPins } from './codex.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '../..')
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d }
-const MODEL = arg('model', 'claude-haiku-5-5')
+const PROVIDER = arg('provider', arg('model', '') === 'qwen' ? 'qwen' : 'claude')
+if (!['claude', 'qwen', 'codex'].includes(PROVIDER)) throw new Error('Unknown --provider; expected claude, qwen or codex')
+const MODEL = arg('model', PROVIDER === 'codex' ? undefined : PROVIDER === 'qwen' ? 'qwen' : 'claude-haiku-5-5')
+const EFFORT = arg('effort', undefined)
+if (PROVIDER === 'codex') codexPins(MODEL, EFFORT)
 const FIX = Number(arg('fix', 3))
-const CONC = Number(arg('conc', 5))
+const CONC = Number(arg('conc', PROVIDER === 'codex' ? 1 : 5))
+if (!Number.isInteger(FIX) || FIX < 0 || FIX > 10 || !Number.isInteger(CONC) || CONC < 1 || CONC > 8) throw new Error('--fix must be 0..10 and --conc must be 1..8')
 const ONLY = arg('only', null)
 const MODE = arg('mode', 'spec')
 const STAGE = arg('stage', '')
-const TAG = [MODEL, MODE === 'spec' ? '' : MODE, STAGE].filter(Boolean).join('-')
+if (!['spec', 'mcp'].includes(MODE)) throw new Error('--mode must be spec or mcp')
+// Artifact paths must not interpret model names or labels as filesystem paths.
+const label = (s) => s.replace(/[^A-Za-z0-9._-]/g, '_')
+if (STAGE.length > 80 || /[\/\\]|^\.{1,2}$/.test(STAGE)) throw new Error('Invalid --stage label')
+const TAG = [PROVIDER === 'codex' ? 'codex' : '', label(MODEL), PROVIDER === 'codex' ? EFFORT : '', MODE === 'spec' ? '' : MODE, STAGE].filter(Boolean).join('-')
 const BRAIN_LIVE = arg('brain', join(root, 'target/debug/brain'))
 const WORK = process.env.QA_LLM_WORK ?? join(tmpdir(), 'brainllm-llm')
 // Frozen: the binary is copied at start and the whole run (spec, scaffold, check) uses that copy, so a
@@ -58,7 +70,7 @@ async function qwen(prompt) {
     return { text, input: j.prompt_eval_count || 0, output: j.eval_count || 0, cost: 0 }
   } finally { clearTimeout(t) }
 }
-const generate = (prompt) => (MODEL === 'qwen' ? qwen(prompt) : claude(prompt))
+const generate = (prompt) => PROVIDER === 'codex' ? codexGenerate(SYS, prompt, { model: MODEL, effort: EFFORT }) : PROVIDER === 'qwen' ? qwen(prompt) : claude(prompt)
 
 // App map for mcp mode. Prefers the real one; the substitute lists what SPEC promises ("routes, components,
 // props, channels, tests") by reading the scaffold files.
@@ -97,21 +109,17 @@ const strip = (t) => t.replace(/^\s*```[a-z]*\n/, '').replace(/\n```\s*$/, '').t
 const target = (id) => (id === '05-product-detail' ? 'views/products/[id].brain' : `views/${id.replace(/^\d+-/, '')}.brain`)
 
 function check(app, rel) {
-  let raw
-  try { raw = execFileSync(BRAIN, ['check', '--json', app], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) }
-  catch (e) { raw = e.stdout || '' }
-  let all; try { all = JSON.parse(raw || '[]') } catch { all = [{ code: 'CRASH', msg: raw.slice(0, 300) }] }
-  const base = rel.split('/').pop()
-  // Only level "error" counts as a failure (INTERNALS §21): "info" are normalizations the compiler applies itself and
-  // "warning" does not block the build. Diags without level (older binaries) count as errors.
-  return all.filter((d) => (!d.file || d.file.endsWith(base) || d.file.endsWith(rel)) && (d.level ?? 'error') === 'error')
+  let raw, status = 0
+  try { raw = execFileSync(BRAIN, ['check', '--json', app], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120000, maxBuffer: 2*1024*1024 }) }
+  catch (error) { raw = error.stdout; status = error.status }
+  return checkedDiagnostics(raw, status, rel)
 }
 const kind = (d) => (AHEAD.test(d.msg) ? 'ahead' : /^B0[45]/.test(d.code) ? 'a11y' : 'lang')
 
 async function one(b) {
-  const app = join(WORK, 'apps', `${TAG}-${b.id}`)
+  const app = join(WORK, 'apps', 'brain-llm-' + createHash('sha256').update(TAG+'|'+b.id).digest('hex').slice(0,20))
   rmSync(app, { recursive: true, force: true }); mkdirSync(dirname(app), { recursive: true })
-  execFileSync(BRAIN, ['new', app], { stdio: 'ignore' })
+  execFileSync(BRAIN, ['new', app], { stdio: 'ignore', timeout: 120000 })
   const rel = target(b.id); const file = join(app, rel); mkdirSync(dirname(file), { recursive: true })
   const outDir = join(here, 'results', TAG, b.id); mkdirSync(outDir, { recursive: true })
   const ctx = MODE === 'mcp' ? `Project map (brain map --json):\n${appMap(app)}\n\n` : ''
@@ -121,7 +129,7 @@ async function one(b) {
     const t0 = Date.now(); const r = await generate(prompt); const ms = Date.now() - t0
     const src = strip(r.text); writeFileSync(file, src); writeFileSync(join(outDir, `try${t}.brain`), src)
     const diags = check(app, rel)
-    tries.push({ t, ms, input: r.input, output: r.output, cost: r.cost, diags: diags.map((d) => ({ ...d, kind: kind(d) })) })
+    tries.push({ t, ms, input: r.input, output: r.output, ...(r.cachedInput !== undefined ? { cachedInput: r.cachedInput } : {}), cost: r.cost, diags: diags.map((d) => ({ ...d, kind: kind(d) })) })
     if (diags.length === 0) break
     prompt = `${ctx}Write the file ${rel}.\n\n${b.brief}\n\nYour previous version:\n${src}\n\`brain check --json\` returned:\n${JSON.stringify(diags)}\nApply each fix and return the complete corrected file.`
   }
@@ -138,7 +146,7 @@ async function pool(items, n, fn) {
 }
 
 mkdirSync(WORK, { recursive: true })
-const scaffoldSha = () => { const d = join(WORK, 'sha-probe'); rmSync(d, { recursive: true, force: true }); execFileSync(BRAIN, ['new', d], { stdio: 'ignore' }); return execFileSync('shasum', ['-a', '256'], { input: readFileSync(join(d, 'tokens.cssbrain')), encoding: 'utf8' }).slice(0, 12) }
+const scaffoldSha = () => { const d = join(WORK, 'sha-probe'); rmSync(d, { recursive: true, force: true }); execFileSync(BRAIN, ['new', d], { stdio: 'ignore', timeout: 120000 }); return execFileSync('shasum', ['-a', '256'], { input: readFileSync(join(d, 'tokens.cssbrain')), encoding: 'utf8' }).slice(0, 12) }
 const TOK0 = scaffoldSha()
 const rows = await pool(briefs, CONC, one)
 // Guard: if the spec or the scaffold change mid-run (other roles edit live), the run is not comparable.
@@ -148,10 +156,11 @@ if (SPEC_END !== SPEC_SHA || TOK1 !== TOK0) console.error(`WARNING: the spec (${
 const ok = rows.filter((r) => !r.infraFail)
 const pct = (k) => `${ok.filter((r) => r[k]).length}/${ok.length}`
 const codes = {}; for (const r of ok) for (const d of r.tries[0].diags) codes[`${d.code}:${d.kind}`] = (codes[`${d.code}:${d.kind}`] || 0) + 1
-const sum = { model: MODEL, mode: MODE, briefs: BRIEFS, specSha: SPEC_SHA, binSha: BIN_SHA, specShaEnd: SPEC_END, tokensSha: TOK0, tokensShaEnd: TOK1, stable: SPEC_END === SPEC_SHA && TOK1 === TOK0, specBytes: SPEC.length, fix: FIX, at: new Date().toISOString(), n: ok.length, infraFail: rows.length - ok.length,
+const costs = ok.flatMap((r) => r.tries.map((t) => t.cost))
+const sum = { model: MODEL, provider: PROVIDER, ...(PROVIDER === 'codex' ? { effort: EFFORT, context: 'served-spec-and-brief; CLI built-in instructions still apply', tools: 'disabled-shell-and-web; tool events rejected' } : {}), mode: MODE, briefs: BRIEFS, specSha: SPEC_SHA, binSha: BIN_SHA, specShaEnd: SPEC_END, tokensSha: TOK0, tokensShaEnd: TOK1, stable: SPEC_END === SPEC_SHA && TOK1 === TOK0, specBytes: SPEC.length, fix: FIX, at: new Date().toISOString(), n: ok.length, infraFail: rows.length - ok.length,
   firstPass: pct('firstPass'), firstPassLang: pct('firstPassLang'), firstOnlyAhead: pct('firstOnlyAhead'), finalPass: pct('finalPass'),
   meanIterations: +(ok.reduce((a, r) => a + r.iterations, 0) / ok.length).toFixed(2),
-  costUSD: +ok.reduce((a, r) => a + r.tries.reduce((x, t) => x + t.cost, 0), 0).toFixed(4), firstTryCodes: codes }
+  costUSD: costs.length && costs.every((c) => Number.isFinite(c)) ? +costs.reduce((a, c) => a + c, 0).toFixed(4) : null, firstTryCodes: codes }
 mkdirSync(join(here, 'results'), { recursive: true })
 writeFileSync(join(here, 'results', `${TAG}${ONLY ? '-' + ONLY : ''}.json`), JSON.stringify({ summary: sum, rows }, null, 1))
 console.log(JSON.stringify(sum, null, 1))

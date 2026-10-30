@@ -124,19 +124,53 @@ pub fn plan(stylesheets: &[&str], modules: &[&str], public_css: &[&str]) -> BTre
         candidates.extend(css_classes(css));
     }
     let mut unsafe_: BTreeSet<String> = BTreeSet::new();
+    // Escaped selector names cannot be decoded by this intentionally small scanner.
+    // Keeping all names is safer than assigning a short name which an opaque selector already uses.
+    if stylesheets.iter().chain(public_css.iter()).any(|css|css.contains('\\')) {
+        unsafe_.extend(candidates.iter().cloned());
+    }
+    let mut reserved = candidates.clone();
     for css in public_css {
-        unsafe_.extend(css_classes(css));
+        let names=css_classes(css);
+        unsafe_.extend(names.iter().cloned());
+        reserved.extend(names);
     }
     for js in modules {
-        for word in foreign_strings(js) {
-            if candidates.contains(&word) {
-                unsafe_.insert(word);
+        let words=foreign_strings(js);
+        if words.iter().any(|word|word=="*") { unsafe_.extend(candidates.iter().cloned()); }
+        for word in words {
+            if candidates.contains(&word) { unsafe_.insert(word.clone()); }
+            reserved.insert(word);
+        }
+        // Markup can carry a public/external class which has no component stylesheet declaration.
+        // It must not become the destination name of another component-owned class.
+        if let Ok(tokens)=brain_min::lex::lex(js) {
+            for token in tokens.iter().filter(|token|matches!(token.kind,brain_min::lex::Kind::Str|brain_min::lex::Kind::Template|brain_min::lex::Kind::TplHead|brain_min::lex::Kind::TplMiddle|brain_min::lex::Kind::TplTail)) {
+                let names=markup_class_names(&token.text);
+                if names.contains("*") {unsafe_.extend(candidates.iter().cloned());}
+                reserved.extend(names);
             }
         }
     }
     let keep: Vec<String> = candidates.iter().filter(|c| !unsafe_.contains(*c)).cloned().collect();
-    let names = short_names(keep.len(), &candidates);
+    let names = short_names(keep.len(), &reserved);
     keep.into_iter().zip(names).collect()
+}
+
+// Accept the same quoted/escaped/unquoted attribute forms as rename_class_attrs; never rewrite these values.
+fn markup_class_names(html: &str) -> BTreeSet<String> {
+    let mut names=BTreeSet::new();let mut rest=html;
+    while let Some(at)=rest.find("class=") {
+        let before=rest[..at].chars().next_back();rest=&rest[at+6..];
+        if !before.is_some_and(char::is_whitespace) {continue;}
+        let (quote,start)=if rest.starts_with("\\\""){("\\\"",2)}else if rest.starts_with('"'){("\"",1)}else if rest.starts_with('\''){("'",1)}else{("",0)};
+        let body=&rest[start..];
+        let end=if quote.is_empty(){body.find(|ch:char|ch.is_whitespace()||ch=='>').unwrap_or(body.len())}else{body.find(quote).unwrap_or(body.len())};
+        if body[..end].contains('&') || body[..end].contains("\\u") || body[..end].contains("\\x") {names.insert("*".into());}
+        names.extend(body[..end].split_whitespace().map(str::to_string));
+        rest=&body[end..];
+    }
+    names
 }
 
 /// Words of every string in a module except the ones the compiler owns (`tpl("…")` templates and `cls(_, "x", …)`),
@@ -154,6 +188,8 @@ fn foreign_strings(js: &str) -> Vec<String> {
         if owned_tpl || owned_cls {
             continue;
         }
+        // Opaque encoded names may spell a class not visible in the raw token. Fail closed.
+        if t[i].text.contains("\\u") || t[i].text.contains("\\x") { out.push("*".into()); }
         for w in t[i].text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_')) {
             if !w.is_empty() {
                 out.push(w.to_string());

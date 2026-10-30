@@ -16,8 +16,8 @@ const now = () => Date.now()
 const pnow = () => (G.performance ? performance.now() : now())
 const syncHeap = () => (G.performance && performance.memory ? performance.memory.usedJSHeapSize : G.process && process.memoryUsage ? process.memoryUsage().heapUsed : null)
 
-let out = [], seq = 0, opts = {}, started = false
-const push = r => out.push(r)
+let out = [], seq = 0, opts = {}, started = false, dropped = 0
+const push = r => { if (out.length >= 2000) { out.shift(); dropped++ } out.push(r) }
 
 // ---------- instance identity and current owner ----------
 const ids = new WeakMap()
@@ -612,6 +612,8 @@ export function tick() {
 export function drain() {
   if (!out.length) return null
   const m = { t: 'm', v: 2, seq: seq++, at: now(), d: out }
+  if (dropped) m.dropped = dropped
+  dropped = 0
   out = []
   if (opts.send) opts.send(JSON.stringify(m))
   return m
@@ -629,7 +631,7 @@ export function inspect(o) {
       else i = instOf(x)
       if (!i) return null
       const chain = []
-      for (let j = i; j; j = instOf(j.p)) chain.push(nameOf(j))
+      for (let j = i; j && chain.length < 33; j = instOf(j.p)) chain.push(nameOf(j))
       return { id: idOf(i), h: i.h, name: nameOf(i), file: (i.C && (i.C.f || (i.C.C && i.C.C.f))) || null, chain }
     },
     sigName,
@@ -643,7 +645,7 @@ export function inspect(o) {
     if (done) done.add(key)
     push({ k: 'chan', kind, name, role, id: i ? idOf(i) : null, h: i ? i.h : null, comp: i ? nameOf(i) : null })
   })
-  sub.add(r => push({ k: 'err', fp: r.fp, code: r.code, msg: r.msg, where: r.where, comp: r.comp, line: r.line, src: r.src || null, stack: r.brainStack || r.stack, crumbs: r.crumbs, n: r.n, at: r.last }))
+  sub.add(r => push({ k: 'err', fp: r.fp, code: r.code, msg: r.msg, where: r.where, comp: r.comp, line: r.line, src: r.src || null, stack: r.brainStack || r.stack, brainStack: r.brainStack || null, location: r.location, generatedLocation: r.generatedLocation, frames: r.frames, causes: r.causes, truncated: r.truncated, mapping: r.mapping, crumbs: r.crumbs, n: r.n, at: r.last }))
   patchTimers()
   patchGlobalListeners()
   patchHandlers()

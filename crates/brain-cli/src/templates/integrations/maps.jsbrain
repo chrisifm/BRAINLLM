@@ -1,0 +1,19 @@
+// Official loader stays lazy: no map or external request until loadMap() is called.
+import { setOptions, importLibrary } from '@googlemaps/js-api-loader'
+
+let configured = false
+let configuredKey = null
+
+export async function loadMap(element, options) {
+  if (!element || !options || typeof options.key !== 'string' || !options.key) throw new Error('maps: provide a container and restricted public Maps key')
+  // Set a nonce on the page's trusted script when CSP requires one; the official loader propagates it.
+  // Restrict this public key by allowed HTTP referrers and enabled Maps APIs in Google Cloud.
+  if (configured && configuredKey !== options.key) throw new Error('maps: loader configuration is fixed for this page')
+  if (!configured) {
+    setOptions({ key: options.key, v: 'quarterly', authReferrerPolicy: 'origin' })
+    configured = true
+    configuredKey = options.key
+  }
+  const { Map } = await importLibrary('maps')
+  return new Map(element, { center: options.center, zoom: options.zoom ?? 8, mapId: options.mapId })
+}

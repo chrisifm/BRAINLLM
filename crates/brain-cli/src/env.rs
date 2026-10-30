@@ -7,7 +7,7 @@ use std::sync::RwLock;
 pub const FILE: &str = ".brain_env";
 pub const EXAMPLE: &str = ".brain_env.example";
 /// Keys the build reads on its own (so B0722 "nothing reads it" never applies to them).
-pub const TOOLCHAIN_KEYS: &[&str] = &["PUBLIC_SITE_URL", "PUBLIC_SITE_NAME"];
+pub const TOOLCHAIN_KEYS: &[&str] = brain_check::env::TOOLING_KEYS;
 
 /// `PUBLIC_*` values of the environment the running command selected; the compiler turns
 /// `process.env.PUBLIC_X` / `import.meta.env.PUBLIC_X` into these constants.
@@ -46,6 +46,7 @@ pub fn loader(root: &Path, env: &str) -> brain_serve::EnvLoader {
 
 /// The resolved value of one key (e.g. `PUBLIC_SITE_URL` for canonical URLs).
 pub fn value(root: &Path, env: &str, key: &str) -> Option<String> {
+    if let Some(value)=process(key).filter(|v|!v.is_empty()) {return Some(value);}
     let src = std::fs::read_to_string(root.join(FILE)).ok()?;
     brain_check::env::parse(&src).resolve(env, &process).get(key).cloned().filter(|v| !v.is_empty())
 }
@@ -73,7 +74,7 @@ pub fn map(root: &Path) -> Option<brain_mcp::Json> {
     let f = brain_check::env::parse(&src);
     let none = |_: &str| None;
     let mut envs: Vec<(String, Json)> = Vec::new();
-    for e in f.environments() {
+    for e in std::iter::once("shared".to_string()).chain(f.environments()).collect::<std::collections::BTreeSet<_>>() {
         let mut keys: Vec<String> = f.resolve(&e, &none).into_keys().collect();
         keys.sort();
         envs.push((e, Json::Arr(keys.into_iter().map(Json::Str).collect())));
@@ -105,7 +106,8 @@ pub fn doctor(root: &Path) -> Vec<(String, &'static str, String, String)> {
     }
     // keys the toolchain itself reads: PUBLIC_SITE_URL (canonical, sitemap, og:url), PUBLIC_SITE_NAME (site name
     // when brain.json has none) — never "unused"
-    for d in brain_check::env::unused_keys(root).into_iter().filter(|d| !TOOLCHAIN_KEYS.iter().any(|k| d.msg.contains(&format!("`{k}`")))) {
+    let webhook_keys = crate::webhook_config::references(root).unwrap_or_default();
+    for d in brain_check::env::unused_keys(root).into_iter().filter(|d| !TOOLCHAIN_KEYS.iter().any(|k| d.msg.contains(&format!("`{k}`"))) && !webhook_keys.iter().any(|key|d.msg.contains(&format!("`{key}`")))) {
         out.push((d.code.to_string(), "info", d.msg.clone(), d.fix.clone()));
     }
     out

@@ -1,5 +1,6 @@
 // Compares `brain check --json examples/invalid` against each <case>.expected.json (code/file/line/col exact, msg/fix non-empty)
-// and checks that the valid examples produce no diagnostics. Usage: node bench/fixtures-check.mjs [path to brain]
+// and requires the exact documented warning boundary in the valid examples.
+// Usage: node bench/fixtures-check.mjs [path to brain]
 import { execFileSync } from 'node:child_process'
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { join, sep } from 'node:path'
@@ -24,5 +25,11 @@ for (const f of files) {
   console.log(`${ok ? 'OK  ' : 'FAIL'} ${brain.padEnd(44)} want ${want.map(key).join(',')} got ${mine.map(key).join(',') || '-'}`)
 }
 const valid = JSON.parse(run('.').replace(/^\s*$/, '[]')).filter((d) => !d.file.startsWith('invalid/'))
-console.log(`valid examples: ${valid.length} diagnostics${valid.length ? ' → ' + valid.map((d) => `${d.file} ${d.code}@${d.line}:${d.col}`).join(', ') : ''}`)
-process.exit(fail || valid.length ? 1 : 0)
+// Dashboard intentionally imports a plain JavaScript API. That one uninstrumented
+// boundary must remain visible; this is an oracle, not a checker exemption.
+const expectedValid = [{ file: 'views/dashboard.brain', code: 'B0912', line: 6, col: 3, level: 'warning' }]
+const validOk = valid.length === expectedValid.length && expectedValid.every((want, i) =>
+  Object.entries(want).every(([field, value]) => valid[i][field] === value) &&
+  typeof valid[i].msg === 'string' && valid[i].msg.trim() && typeof valid[i].fix === 'string' && valid[i].fix.trim())
+console.log(`valid examples: ${validOk ? 'OK' : 'FAIL'} ${valid.length} diagnostics${valid.length ? ' → ' + valid.map((d) => `${d.file} ${d.code}@${d.line}:${d.col}/${d.level ?? 'error'}`).join(', ') : ''}`)
+process.exit(fail || !validOk ? 1 : 0)

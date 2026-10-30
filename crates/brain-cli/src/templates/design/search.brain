@@ -1,0 +1,17 @@
+<meta props="value:str~ label:str='Search' placeholder:str? disabled:bool=false" emits="search">
+<script>
+  const submit = event => { event.preventDefault(); emit('search', value) }
+</script>
+<form role="search" on:submit={submit}>
+  <label><span>{label}</span><input type="search" bind:value={value} placeholder={placeholder} disabled={disabled}></label>
+  <button type="submit" disabled={disabled}>{label}</button>
+</form>
+<style>
+  form { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: end; }
+  label { display: grid; gap: var(--space-1); flex: 1 1 14rem; min-width: 0; color: var(--fg); }
+  span { font: 600 .875rem/1.4 var(--font); }
+  input { width: 100%; min-height: 44px; padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); font: 400 16px/1.4 var(--font); background: var(--surface); color: var(--fg); }
+  button { min-height: 44px; padding: var(--space-2) var(--space-4); border: 1px solid var(--accent); border-radius: var(--radius-sm); font: 600 1rem/1.4 var(--font); background: var(--accent); color: var(--on-accent); cursor: pointer; }
+  input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button:disabled { cursor: not-allowed; opacity: .6; }
+</style>

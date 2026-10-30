@@ -367,6 +367,19 @@ fn scan(body: &FnBody, sigs: &HashSet<String>, guarded: &mut HashSet<String>, ap
 impl Checker<'_> {
     pub(crate) fn runaway(&mut self) {
         let c = self.c;
+        // Foreign main-thread JavaScript has no compiler checkpoints. Worker modules are already isolated;
+        // server-only files do not run on the browser thread. The import itself is the proven boundary.
+        let browser = !crate::worker::is_worker(&c.file) && !c.meta.iter().any(|m| m.name == "server");
+        if browser {
+            for statement in &c.script {
+                if let Stmt::Import(import) = statement {
+                    let source = import.source.split(['?', '#']).next().unwrap_or("");
+                    if source.ends_with(".js") || source.ends_with(".mjs") || source.ends_with(".cjs") {
+                        self.push("B0912", import.span, "Imported JavaScript runs without compiler execution checkpoints; a synchronous loop or native allocation can block the page.", "Move untrusted or CPU-heavy work into a .worker.jsbrain module with bounded requests, a timeout and transferables; audit code that must run on the main thread.");
+                    }
+                }
+            }
+        }
         if c.kind == FileKind::Module {
             return;
         }

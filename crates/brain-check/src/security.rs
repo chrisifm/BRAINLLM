@@ -235,8 +235,9 @@ impl Checker<'_> {
         for s in &c.script {
             if let Stmt::Import(i) = s
                 && (i.source.starts_with("http://") || i.source.starts_with("https://") || i.source.starts_with("//"))
+                && !self.ctx.approved_remote_imports.contains(&i.source)
             {
-                self.push("B0122", i.span, format!("import by URL `{}`: remote code is not reviewed, pinned or bundled", i.source), "copy the module into `lib/` (or install it) and import it with a relative path");
+                self.push("B0122", i.span, "remote import has no verified immutable local artifact", "explicitly fetch the exact CDN file/version/SHA-256 with brain deps fetch, or import a reviewed local module");
             }
         }
         let allowed: Vec<String> = self.ctx.redirect_hosts.clone();

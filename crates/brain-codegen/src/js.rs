@@ -10,6 +10,20 @@ use brain_parse::ast::*;
 use std::collections::HashMap;
 
 impl Gen<'_> {
+    pub(crate) fn budget(&mut self, name: &'static str) -> String {
+        self.budget_used.insert(name);
+        format!("{}{name}", self.budget_prefix)
+    }
+
+    pub(crate) fn budget_site(&self, span: brain_parse::Span) -> String {
+        format!("{{ file: {}, component: {}, line: {}, column: {} }}", js_str(&self.budget_file), js_str(&self.budget_component), span.line, span.col)
+    }
+
+    pub(crate) fn budget_frame(&mut self) -> String {
+        let prefix = format!("{}Frame", self.budget_prefix);
+        self.fresh(&prefix)
+    }
+
     /// The `server:` function an arrow `submit` hands its values to (only for forms that post to one).
     fn submit_server(&self, f: &Func) -> Option<String> {
         let server: std::collections::HashSet<&str> = self.forms.values().map(String::as_str).collect();
@@ -286,7 +300,14 @@ impl Gen<'_> {
             }
             Expr::Seq { exprs, .. } => self.args(exprs),
             Expr::Spread { arg, .. } => format!("...{}", self.expr(arg)),
-            Expr::Await { arg, .. } => format!("await {}", self.expr(arg)),
+            Expr::Await { arg, .. } => {
+                let value = self.expr(arg);
+                if let Some(frame) = self.budget_frames.last().cloned() {
+                    let suspend = self.budget("budgetSuspend");
+                    let resume = self.budget("budgetResume");
+                    format!("{resume}({frame}, await {suspend}({frame}, {value}))")
+                } else { format!("await {value}") }
+            }
             Expr::Paren { expr, .. } => format!("({})", self.expr(expr)),
         }
     }
@@ -299,10 +320,80 @@ impl Gen<'_> {
         }
     }
 
+    /// Closed, side-effect-free schema subset. All other syntax keeps runtime form/rule.
+    fn static_form_schema(&self, value: &Expr) -> Option<(String, bool)> {
+        let Expr::Object { props, .. } = value.unparen() else { return None; };
+        if props.len()>4096 { return None; }
+        let mut seen = std::collections::HashSet::new();
+        let mut fields = Vec::new();
+        let mut scalar = false;
+        for prop in props {
+            let ObjProp::KeyValue { key, value, .. } = prop else { return None; };
+            let key = match key { PropKey::Ident(id)=>id.name.as_str(), PropKey::Str {value,..}=>value.as_str(), _=>return None };
+            if key.len()>256 || ["__proto__","prototype","constructor"].contains(&key) || !seen.insert(key) { return None; }
+            let Expr::Str { value, .. } = value.unparen() else { return None; };
+            let (kind,required) = match value.as_str() {
+                "str"=>("str",false), "str!"=>("str",true), "email"=>("email",false), "email!"=>("email",true), "bool"=>("bool",false), "bool!"=>("bool",true), "num"=>("num",false), "num!"=>("num",true), _=>return None,
+            };
+            scalar |= matches!(kind, "bool" | "num");
+            fields.push(format!("{}:[{},{}]",js_str(key),js_str(kind),required));
+        }
+        Some((format!("{{{}}}",fields.join(",")), scalar))
+    }
+
+    // The literal options cannot escape through a dynamic callback receiver. Unknown
+    // options, methods, getters, spreads and cross-field/async validation retain the full engine.
+    fn synchronous_form_options(&self, args: &[Expr]) -> bool {
+        if args.len()>2 { return false; }
+        let Some(options)=args.get(1) else { return true; };
+        let Expr::Object {props,..}=options.unparen() else { return false; };
+        let mut seen=std::collections::HashSet::new();
+        props.iter().all(|property| {
+            let ObjProp::KeyValue {key,value,..}=property else { return false; };
+            let name=match key {PropKey::Ident(id)=>id.name.as_str(),PropKey::Str {value,..}=>value.as_str(),_=>return false};
+            if !seen.insert(name) {return false;}
+            match name {
+                "init"=>true,
+                "submit"=>match value.unparen() {
+                    Expr::Func(func)=>func.is_arrow,
+                    Expr::Ident(id)=>self.forms.values().any(|server|server==&id.name) && !self.scopes.frames.iter().skip(1).any(|scope|scope.contains_key(&id.name)),
+                    _=>false,
+                },
+                _=>false,
+            }
+        })
+    }
+    fn static_form_call(&mut self, args: &[Expr]) -> Option<String> {
+        let (schema, scalar) = self.static_form_schema(args.first()?)?;
+        let sync=self.synchronous_form_options(args);
+        match (scalar,sync) {
+            (true,true)=>self.scalar_form_sync=true,
+            (true,false)=>self.scalar_form=true,
+            (false,true)=>self.static_form_sync=true,
+            (false,false)=>self.static_form=true,
+        }
+        let mut values = vec![schema];
+        if let Some(options) = args.get(1) {
+            let target = match options.unparen() {
+                Expr::Object { props, .. } => props.iter().find_map(|p| match p {
+                    ObjProp::KeyValue { key: PropKey::Ident(k), value: Expr::Func(f), .. } if k.name == "submit" => self.submit_server(f),
+                    _ => None,
+                }), _ => None,
+            };
+            let value = self.expr(options);
+            values.push(match target { Some(target) => format!("((o) => (o.submit.id = {target}.id, o))({value})"), None => value });
+        }
+        values.extend(args.iter().skip(2).map(|arg| self.expr(arg)));
+        Some(format!("{}{}({})", self.budget_prefix, match (scalar,sync) {(true,true)=>"SyncScalarForm",(true,false)=>"ScalarForm",(false,true)=>"SyncForm",(false,false)=>"Form"}, values.join(", ")))
+    }
+
     fn call(&mut self, callee: &Expr, args: &[Expr], optional: bool) -> String {
         if let Expr::Ident(id) = callee.unparen()
             && self.scopes.lookup(&id.name).is_none()
         {
+            if id.name == "form" {
+                if let Some(call) = self.static_form_call(args) { return call; }
+            }
             match id.name.as_str() {
                 // `provide(K, theme)` with a signal passes the signal itself so consumers stay reactive.
                 "provide" if args.len() == 2 => {
@@ -406,10 +497,19 @@ impl Gen<'_> {
             self.scopes.declare_pat(p, Kind::Local);
         }
         let params: Vec<String> = f.params.iter().map(|p| self.pat(p)).collect();
+        let frame = self.budget_frame();
+        self.budget_frames.push(frame.clone());
         let body = match &f.body {
-            FnBody::Expr(e) => self.expr(e),
+            FnBody::Expr(e) => format!("{{ return {}; }}", self.expr(e)),
             FnBody::Block(b) => self.block(b),
         };
+        self.budget_frames.pop();
+        let enter = self.budget("budgetEnter");
+        let step = self.budget("budgetStep");
+        let leave = self.budget("budgetLeave");
+        let owner = if self.budget_capture_owner { format!("{}Owner", self.budget_prefix) } else { "null".into() };
+        let site = self.budget_site(f.span);
+        let body = format!("{{ const {frame} = {enter}({site}, {owner}); try {{ {step}({frame}); {body} }} finally {{ {leave}({frame}); }} }}");
         self.scopes.pop();
         (params.join(", "), body)
     }
@@ -486,15 +586,27 @@ impl Gen<'_> {
                 out.push('\n');
                 out
             }
-            Stmt::ForOf { kind, pat, iter, body, .. } => {
+            Stmt::ForOf { kind, pat, iter, body, span } => {
                 let it = self.expr(iter);
+                let own = self.budget_frames.is_empty();
+                let frame = if own { self.budget_frame() } else { self.budget_frames.last().unwrap().clone() };
+                if own { self.budget_frames.push(frame.clone()); }
                 self.scopes.push();
                 self.scopes.declare_pat(pat, Kind::Local);
                 let pt = self.pat(pat);
                 let b = self.inline_stmt(body);
                 self.scopes.pop();
+                if own { self.budget_frames.pop(); }
                 let k = if *kind == VarKind::Const { "const" } else { "let" };
-                format!("{p}for ({k} {pt} of {it}) {b}\n")
+                let step = self.budget("budgetStep");
+                let site = self.budget_site(*span);
+                let loop_js = format!("for ({k} {pt} of {it}) {{ {step}({frame}, {site}); {b} }}");
+                if own {
+                    let enter = self.budget("budgetEnter");
+                    let leave = self.budget("budgetLeave");
+                    let owner = if self.budget_capture_owner { format!("{}Owner", self.budget_prefix) } else { "null".into() };
+                    format!("{p}{{ const {frame} = {enter}({site}, {owner}); try {{ {loop_js} }} finally {{ {leave}({frame}); }} }}\n")
+                } else { format!("{p}{loop_js}\n") }
             }
             Stmt::Return { arg, .. } => match arg {
                 Some(a) => format!("{p}return {};\n", self.expr(a)),
@@ -567,6 +679,9 @@ impl Gen<'_> {
             }
             let pat = self.pat(&d.pat);
             match (&d.init, kind, &d.pat) {
+                (Some(Expr::Call { callee, args, .. }), Some(Kind::Sig), Pat::Ident(_)) if matches!(callee.unparen(), Expr::Ident(k) if k.name == "urlState") => {
+                    parts.push(format!("{pat} = urlState({})", self.args(args)));
+                }
                 (Some(Expr::Call { args, .. }), Some(Kind::Sig | Kind::Ref), Pat::Ident(id)) => {
                     let sig = self.rt("sig");
                     let mut a = if kind == Some(Kind::Ref) { "null".to_string() } else { self.args(args) };

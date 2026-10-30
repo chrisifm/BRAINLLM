@@ -1,0 +1,1 @@
+[{"code":"B2005","file":"comp/flow.brain","line":4,"col":5,"msg":"nullable value is dereferenced without a proven check","fix":"guard this value with `if (value != null)` or use optional chaining","level":"warning","edits":[]}]

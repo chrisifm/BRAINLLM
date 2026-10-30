@@ -9,6 +9,7 @@ mod route;
 mod server;
 mod sha1;
 mod ws;
+pub mod feedback;
 
 pub use server::{serve, set_quiet, start, start_dev, CompileFn, Compiled, DiagnoseFn, Dev, EnvLoader, EventFn, Options, ProblemsFn};
 

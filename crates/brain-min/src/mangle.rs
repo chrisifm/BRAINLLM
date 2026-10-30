@@ -8,11 +8,61 @@ use crate::print::{next_continues, prev_continues};
 use std::collections::{HashMap, HashSet};
 
 const KEYWORDS: &[&str] = &[
-    "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do", "else", "enum", "export",
-    "extends", "false", "finally", "for", "function", "if", "import", "in", "instanceof", "new", "null", "return", "super",
-    "switch", "this", "throw", "true", "try", "typeof", "var", "void", "while", "with", "yield", "let", "static",
-    "implements", "interface", "package", "private", "protected", "public", "await", "arguments", "eval", "undefined",
-    "NaN", "Infinity", "async", "of", "get", "set",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "function",
+    "if",
+    "import",
+    "in",
+    "instanceof",
+    "new",
+    "null",
+    "return",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "with",
+    "yield",
+    "let",
+    "static",
+    "implements",
+    "interface",
+    "package",
+    "private",
+    "protected",
+    "public",
+    "await",
+    "arguments",
+    "eval",
+    "undefined",
+    "NaN",
+    "Infinity",
+    "async",
+    "of",
+    "get",
+    "set",
 ];
 
 fn reserved(s: &str) -> bool {
@@ -22,9 +72,43 @@ fn reserved(s: &str) -> bool {
 /// Words that are never names. Contextual ones (`get`, `set`, `of`, `async`, `static`, `let`,
 /// `await`, `arguments`…) can be variables and are treated as references.
 const HARD: &[&str] = &[
-    "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do", "else", "enum", "export",
-    "extends", "false", "finally", "for", "function", "if", "import", "in", "instanceof", "new", "null", "return", "super",
-    "switch", "this", "throw", "true", "try", "typeof", "var", "void", "while", "with", "yield",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "function",
+    "if",
+    "import",
+    "in",
+    "instanceof",
+    "new",
+    "null",
+    "return",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "with",
+    "yield",
 ];
 
 fn hard(s: &str) -> bool {
@@ -40,8 +124,27 @@ struct Scope {
     decls: Vec<(String, usize)>,
 }
 
+#[derive(Clone)]
+struct Part {
+    start: usize,
+    pattern_end: usize,
+    init: Option<usize>,
+    end: usize,
+    names: Vec<usize>,
+}
+#[derive(Clone)]
+struct Declaration {
+    keyword: usize,
+    end: usize,
+    scope: usize,
+    parts: Vec<Part>,
+}
 #[derive(Default)]
 struct Marks {
+    statements: HashSet<usize>,
+    declarations: Vec<Declaration>,
+    functions: Vec<(usize, usize, usize, usize)>,
+    import_spans: Vec<(usize, usize)>,
     /// Identifiers that are references to resolve.
     refs: Vec<usize>,
     /// Declarations: token index → scope.
@@ -151,6 +254,7 @@ impl<'a> P<'a> {
                 return Ok(());
             }
             let before = self.i;
+            self.m.statements.insert(self.i);
             self.statement()?;
             if self.i == before {
                 return Err(Error(format!("no progress at `{}` (token {})", t.text, self.i)));
@@ -160,7 +264,7 @@ impl<'a> P<'a> {
     }
 
     fn statement(&mut self) -> Result<(), Error> {
-        let t = self.peek().unwrap();
+        let t = self.peek().ok_or_else(|| Error("unexpected end of JavaScript structure".into()))?;
         if t.kind == Kind::Punct {
             match t.text.as_str() {
                 "{" => return self.block(),
@@ -186,10 +290,22 @@ impl<'a> P<'a> {
                     self.eat(";");
                     return Ok(());
                 }
-                "function" => return self.function_decl(),
+                "function" => {
+                    let (start, scope) = (self.i, self.cur);
+                    self.function_decl()?;
+                    if let Some((_, name)) = self.scopes[scope].decls.iter().find(|(_, at)| *at > start && *at < self.i) {
+                        self.m.functions.push((start, self.i, scope, *name));
+                    }
+                    return Ok(());
+                }
                 "async" if next.is_some_and(|n| n.ident("function")) && !next.unwrap().nl_before => {
+                    let (start, scope) = (self.i, self.cur);
                     self.i += 1;
-                    return self.function_decl();
+                    self.function_decl()?;
+                    if let Some((_, name)) = self.scopes[scope].decls.iter().find(|(_, at)| *at > start && *at < self.i) {
+                        self.m.functions.push((start, self.i, scope, *name));
+                    }
+                    return Ok(());
                 }
                 "class" => {
                     self.i += 1;
@@ -312,12 +428,24 @@ impl<'a> P<'a> {
 
     fn decl(&mut self, kind: &str) -> Result<(), Error> {
         let target = if kind == "var" { self.fn_scope() } else { self.cur };
+        let keyword = self.i.saturating_sub(1);
+        let mut parts = vec![];
         loop {
+            let start = self.i;
+            let before = self.scopes[target].decls.len();
             self.pattern(target)?;
-            if self.eat("=") {
+            let pattern_end = self.i;
+            let names = self.scopes[target].decls[before..].iter().map(|(_, at)| *at).collect();
+            let init = if self.eat("=") {
+                let at = self.i;
                 self.expr(true, true)?;
-            }
+                Some(at)
+            } else {
+                None
+            };
+            parts.push(Part { start, pattern_end, init, end: self.i, names });
             if !self.eat(",") {
+                self.m.declarations.push(Declaration { keyword, end: self.i, scope: target, parts });
                 return Ok(());
             }
         }
@@ -399,6 +527,9 @@ impl<'a> P<'a> {
 
     /// Binding pattern: name, `[..]` or `{..}` (with defaults and rest).
     fn pattern(&mut self, s: usize) -> Result<(), Error> {
+        if self.peek().is_none() {
+            return Err(Error("unterminated binding pattern".into()));
+        }
         if self.is_name() {
             let idx = self.i;
             self.declare(idx, s);
@@ -432,6 +563,9 @@ impl<'a> P<'a> {
                     self.pattern(s)?;
                 } else {
                     let key = self.i;
+                    if self.peek().is_none() {
+                        return Err(Error("unterminated binding property".into()));
+                    }
                     self.i += 1;
                     if self.eat(":") {
                         self.pattern(s)?;
@@ -476,13 +610,12 @@ impl<'a> P<'a> {
 
     /// Class or object member: method, getter/setter, field or property.
     fn member(&mut self, class: bool) -> Result<(), Error> {
+        if self.peek().is_none() {
+            return Err(Error("unterminated member".into()));
+        }
         loop {
-            let mod_word = self.peek().is_some_and(|t| {
-                t.kind == Kind::Ident && matches!(t.text.as_str(), "static" | "get" | "set" | "async")
-            });
-            let next_is_key = self
-                .at(1)
-                .is_some_and(|n| matches!(n.kind, Kind::Ident | Kind::Str | Kind::Num) || n.punct("[") || n.punct("*") || n.punct("#"));
+            let mod_word = self.peek().is_some_and(|t| t.kind == Kind::Ident && matches!(t.text.as_str(), "static" | "get" | "set" | "async"));
+            let next_is_key = self.at(1).is_some_and(|n| matches!(n.kind, Kind::Ident | Kind::Str | Kind::Num) || n.punct("[") || n.punct("*") || n.punct("#"));
             if mod_word && next_is_key {
                 self.i += 1;
             } else {
@@ -533,12 +666,22 @@ impl<'a> P<'a> {
         self.expect("}")
     }
 
+    fn import_tail(&mut self) -> Result<(), Error> {
+        if self.eat("with") || self.eat("assert") {
+            if !self.p("{"){return Err(Error("import attributes require a literal object".into()));}
+            let close=self.matching(self.i).ok_or_else(||Error("unterminated import attributes".into()))?;
+            self.i=close+1;
+        }
+        self.eat(";");Ok(())
+    }
     fn import(&mut self) -> Result<(), Error> {
+        let start = self.i;
         self.i += 1;
         let s = 0;
         if self.peek().is_some_and(|t| t.kind == Kind::Str) {
             self.i += 1;
-            self.eat(";");
+            self.import_tail()?;
+            self.m.import_spans.push((start, self.i));
             return Ok(());
         }
         let first_ext = self.m.imports.len();
@@ -550,6 +693,9 @@ impl<'a> P<'a> {
                 self.i += 1;
             } else if self.eat("{") {
                 while !self.p("}") {
+                    if self.peek().is_none() {
+                        return Err(Error("unterminated import list".into()));
+                    }
                     let a = self.i;
                     self.m.imports.push((a, 0));
                     self.i += 1;
@@ -581,7 +727,8 @@ impl<'a> P<'a> {
             e.1 = src;
         }
         self.i += 1; // specifier
-        self.eat(";");
+        self.import_tail()?;
+        self.m.import_spans.push((start, self.i));
         Ok(())
     }
 
@@ -619,6 +766,9 @@ impl<'a> P<'a> {
             let from = self.t.get(close + 1).is_some_and(|t| t.ident("from"));
             self.i += 1;
             while !self.p("}") {
+                if self.peek().is_none() {
+                    return Err(Error("unterminated export list".into()));
+                }
                 let a = self.i;
                 if !from {
                     self.m.refs.push(a);
@@ -683,7 +833,7 @@ impl<'a> P<'a> {
 
     /// One atom or punctuator of an expression.
     fn primary(&mut self) -> Result<(), Error> {
-        let t = self.peek().unwrap();
+        let t = self.peek().ok_or_else(|| Error("unexpected end of JavaScript structure".into()))?;
         match t.kind {
             Kind::Punct => match t.text.as_str() {
                 "(" => {
@@ -862,6 +1012,36 @@ pub struct Plan<'a> {
     pub import_from: &'a dyn Fn(&str) -> bool,
 }
 
+/// Read-only lexical ownership query for a small set of native identifiers. No names are assigned or rewritten.
+/// Returns original byte offsets and names only; properties and declaration keys are not references.
+pub fn free_identifier_sites(toks:&[Tok], names:&HashSet<String>)->Result<Vec<(usize,String)>,String> {
+    if toks.len()>250000 || names.len()>16 || names.iter().any(|name|name.len()>80) {return Err("identifier ownership input budget exceeded".into());}
+    if toks.windows(2).any(|pair|pair[0].ident("with")&&pair[1].punct("(")){return Err("identifier ownership cannot be proven with dynamic with scope".into());}
+    // Bound parser recursion before entering it, including arrow/conditional chains without parentheses.
+    let mut nesting=vec![(0usize,0usize)];
+    for token in toks {
+        if token.kind==Kind::TplHead || ["(","[","{"].iter().any(|p|token.punct(p)) {nesting.push((0,0));}
+        else if token.kind==Kind::TplTail || [")","]","}"].iter().any(|p|token.punct(p)) {if nesting.len()>1 {nesting.pop();}}
+        else if let Some((arrows,questions))=nesting.last_mut() {
+            if token.punct("=>"){*arrows+=1;}else if token.punct("?"){*questions+=1;}else if token.punct(":"){*questions=questions.saturating_sub(1);}else if token.punct(";")||token.punct(",")||token.kind==Kind::TplMiddle{*arrows=0;*questions=0;}
+        }
+        if nesting.len()+nesting.iter().map(|(a,q)|a+q).sum::<usize>()>256 {return Err("identifier ownership nesting budget exceeded".into());}
+    }
+    let mut parser=P {t:toks,i:0,scopes:vec![Scope{parent:None,start:0,end:toks.len(),is_fn:true,decls:vec![]}],cur:0,m:Marks::default()};
+    parser.statements().map_err(|_|"identifier ownership structure could not be proven")?;
+    if parser.i!=toks.len() || parser.scopes.len()>10000 {return Err("identifier ownership scope budget exceeded".into());}
+    let mut ranges:HashMap<String,Vec<(usize,usize)>>=HashMap::new();
+    for scope in &parser.scopes {for(name,_)in &scope.decls {if names.contains(name)||name=="eval" {ranges.entry(name.clone()).or_default().push((scope.start,scope.end.max(scope.start+1)));}}}
+    let bound=|name:&str,at:usize|ranges.get(name).is_some_and(|ranges|ranges.iter().any(|(start,end)|*start<=at&&at<*end));
+    let mut result=Vec::new();
+    for index in parser.m.refs {
+        let token=&toks[index];
+        if token.ident("eval") && toks.get(index+1).is_some_and(|n|n.punct("(")) && !bound("eval",index){return Err("identifier ownership cannot be proven with direct eval".into());}
+        if names.contains(&token.text) && !bound(&token.text,index){result.push((token.start,token.text.clone()));}
+    }
+    result.sort();result.dedup();Ok(result)
+}
+
 pub fn mangle(toks: &[Tok], forced: &HashMap<String, String>, keep: &HashSet<String>) -> Result<Vec<Tok>, String> {
     let none = HashMap::new();
     apply(toks, &Plan { mangle: true, forced, keep, import_map: &none, import_from: &|_| false })
@@ -904,11 +1084,7 @@ pub fn apply(toks: &[Tok], plan: &Plan) -> Result<Vec<Tok>, String> {
     let lookup = |name: &str, at: usize| -> Option<usize> {
         let mut best: Option<usize> = None;
         for (si, s) in scopes.iter().enumerate() {
-            if s.start <= at
-                && at < s.end.max(s.start + 1)
-                && s.decls.iter().any(|(n, _)| n == name)
-                && best.is_none_or(|b| scopes[b].start <= s.start)
-            {
+            if s.start <= at && at < s.end.max(s.start + 1) && s.decls.iter().any(|(n, _)| n == name) && best.is_none_or(|b| scopes[b].start <= s.start) {
                 best = Some(si);
             }
         }
@@ -1008,40 +1184,7 @@ pub fn apply(toks: &[Tok], plan: &Plan) -> Result<Vec<Tok>, String> {
 
 /// Replaces `console.log(...)` with `void 0` (SPEC: `log()` never reaches production).
 pub fn drop_console_log(toks: Vec<Tok>) -> Vec<Tok> {
-    let mut out = Vec::with_capacity(toks.len());
-    let mut i = 0;
-    while i < toks.len() {
-        let is_log = toks[i].ident("console")
-            && toks.get(i + 1).is_some_and(|t| t.punct("."))
-            && toks.get(i + 2).is_some_and(|t| t.ident("log"))
-            && toks.get(i + 3).is_some_and(|t| t.punct("("))
-            && !(i > 0 && (toks[i - 1].punct(".") || toks[i - 1].punct("?.")));
-        if is_log {
-            let mut d = 0i32;
-            let mut j = i + 3;
-            while j < toks.len() {
-                match toks[j].text.as_str() {
-                    "(" | "[" | "{" if toks[j].kind == Kind::Punct => d += 1,
-                    ")" | "]" | "}" if toks[j].kind == Kind::Punct => {
-                        d -= 1;
-                        if d == 0 {
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-                j += 1;
-            }
-            let nl = toks[i].nl_before;
-            out.push(Tok { kind: Kind::Ident, text: "void".into(), nl_before: nl, start: 0 });
-            out.push(Tok { kind: Kind::Num, text: "0".into(), nl_before: false, start: 0 });
-            i = j + 1;
-            continue;
-        }
-        out.push(toks[i].clone());
-        i += 1;
-    }
-    out
+    cleanup_engine::drop_logs(toks.clone(), None).map(|(t, _)| t).unwrap_or(toks)
 }
 
 #[cfg(test)]
@@ -1065,8 +1208,10 @@ mod tests {
     #[test]
     fn shorthand_and_destructuring() {
         assert_eq!(m("const f = (value) => ({ value, k: value })"), "const a=(a)=>({value:a,k:a})");
-        assert_eq!(m("function g({ alpha, beta: gamma = 1 }, [x, , ...rest]) { return alpha + gamma + x + rest }"),
-            "function a({alpha:a,beta:b=1},[c,,...d]){return a+b+c+d}");
+        assert_eq!(
+            m("function g({ alpha, beta: gamma = 1 }, [x, , ...rest]) { return alpha + gamma + x + rest }"),
+            "function a({alpha:a,beta:b=1},[c,,...d]){return a+b+c+d}"
+        );
     }
 
     #[test]
@@ -1107,263 +1252,49 @@ mod tests {
         let map: HashMap<String, String> = [("sig", "s"), ("mount", "m")].iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
         let keep: HashSet<String> = ["_ev".to_string()].into();
         // the runtime: exports renamed to the map
-        let rt = apply(&lex("export const sig = v => v\nexport function mount(C) { return sig(C) }\nexport function _ev() {}").unwrap(),
-            &Plan { mangle: true, forced: &map, keep: &keep, import_map: &map, import_from: &|_| false }).unwrap();
+        let rt = apply(
+            &lex("export const sig = v => v\nexport function mount(C) { return sig(C) }\nexport function _ev() {}").unwrap(),
+            &Plan { mangle: true, forced: &map, keep: &keep, import_map: &map, import_from: &|_| false },
+        )
+        .unwrap();
         assert_eq!(print(&rt), "export const s=a=>a\nexport function m(a){return s(a)}\nexport function _ev(){}");
         // a consumer: imports rewritten even without mangling
         let none = HashMap::new();
         let from = |s: &str| s.ends_with("brain.js");
-        let c = apply(&lex("import { sig, mount as mo, _ev } from '/@brain/brain.js'\nsig(mo)").unwrap(),
-            &Plan { mangle: false, forced: &none, keep: &keep, import_map: &map, import_from: &from }).unwrap();
+        let c = apply(
+            &lex("import { sig, mount as mo, _ev } from '/@brain/brain.js'\nsig(mo)").unwrap(),
+            &Plan { mangle: false, forced: &none, keep: &keep, import_map: &map, import_from: &from },
+        )
+        .unwrap();
         assert_eq!(print(&c), "import{s as sig,m as mo,_ev}from'/@brain/brain.js'\nsig(mo)");
         // unmapped export → error naming it
         assert_eq!(exports_outside(&lex("export const fresh = 1").unwrap(), &map, &keep).unwrap(), vec!["fresh".to_string()]);
-        let bad = apply(&lex("import { fresh } from './brain.js'").unwrap(), &Plan { mangle: false, forced: &none, keep: &keep, import_map: &map, import_from: &from });
+        let bad = apply(
+            &lex("import { fresh } from './brain.js'").unwrap(),
+            &Plan { mangle: false, forced: &none, keep: &keep, import_map: &map, import_from: &from },
+        );
         assert!(bad.unwrap_err().contains("fresh"));
     }
 
     #[test]
     fn drop_log() {
         let t = drop_console_log(lex("fx(() => console.log(n.v, f(x)))").unwrap());
-        assert_eq!(print(&t), "fx(()=>void 0)");
+        assert_eq!(print(&t), "fx(()=>void(n.v,f(x)))");
     }
 }
 
 // ---------- tree shaking ----------
 
-/// Is a module-level statement free of side effects? Declarations whose initializers only build functions,
-/// classes, literals or empty `Map`/`Set`/`WeakMap`/`WeakSet` are pure; any other call, `new`, update or assignment
-/// outside a function body makes it impure (it stays in the output).
-fn pure_statement(t: &[Tok]) -> bool {
-    let first = t.iter().position(|x| !x.ident("export")).unwrap_or(0);
-    let Some(head) = t.get(first) else { return true };
-    if head.ident("function") || head.ident("class") || head.ident("import") || (head.ident("async") && t.get(first + 1).is_some_and(|x| x.ident("function"))) {
-        // a class can still run code in `static {}` blocks or computed keys
-        return !(head.ident("class") && t.windows(2).any(|w| w[0].ident("static") && w[1].punct("{")));
-    }
-    if !(head.ident("const") || head.ident("let") || head.ident("var")) {
-        return false;
-    }
-    let mut i = first + 1;
-    while i < t.len() {
-        let x = &t[i];
-        // skip function bodies: `=> {…}`, `=> expr` (until `,`/`;` at depth 0), `function … {…}`
-        if x.punct("=>") || x.ident("function") {
-            let mut j = i + 1;
-            while j < t.len() && !t[j].punct("{") && x.ident("function") {
-                j += 1;
-            }
-            if j < t.len() && t[j].punct("{") {
-                let mut d = 0i32;
-                while j < t.len() {
-                    if t[j].punct("{") {
-                        d += 1;
-                    } else if t[j].punct("}") {
-                        d -= 1;
-                        if d == 0 {
-                            break;
-                        }
-                    }
-                    j += 1;
-                }
-                i = j + 1;
-            } else {
-                let mut d = 0i32;
-                while j < t.len() {
-                    match t[j].text.as_str() {
-                        "(" | "[" | "{" if t[j].kind == Kind::Punct => d += 1,
-                        ")" | "]" | "}" if t[j].kind == Kind::Punct => d -= 1,
-                        "," | ";" if t[j].kind == Kind::Punct && d == 0 => break,
-                        _ => {}
-                    }
-                    if d < 0 {
-                        break;
-                    }
-                    j += 1;
-                }
-                i = j;
-            }
-            continue;
-        }
-        if x.ident("new") {
-            let ok = t.get(i + 1).is_some_and(|n| matches!(n.text.as_str(), "Map" | "Set" | "WeakMap" | "WeakSet"))
-                && t.get(i + 2).is_some_and(|n| n.punct("("))
-                && t.get(i + 3).is_some_and(|n| n.punct(")"));
-            if !ok {
-                return false;
-            }
-            i += 4;
-            continue;
-        }
-        if x.punct("(") && i > 0 && matches!(t[i - 1].kind, Kind::Ident | Kind::Punct) && !t[i - 1].punct("=") && !t[i - 1].punct(",") && !t[i - 1].punct("(") && !t[i - 1].punct("?") && !t[i - 1].punct(":") {
-            return false; // a call
-        }
-        if matches!(x.text.as_str(), "++" | "--" | "+=" | "-=" | "*=" | "/=" | "||=" | "&&=" | "??=") && x.kind == Kind::Punct {
-            return false;
-        }
-        i += 1;
-    }
-    true
-}
-
-/// Removes module-level declarations that nothing live references. Roots: statements with side effects and
-/// declarations of the exports in `keep_exports`. Exports not in `keep_exports` are dropped when unreferenced.
+/// Removes unreferenced module exports using the same conservative scope/effect
+/// analysis as production cleanup. Imports retain module evaluation by default.
 pub fn tree_shake(toks: &[Tok], keep_exports: &HashSet<String>) -> Result<Vec<Tok>, String> {
-    let mut p = P { t: toks, i: 0, scopes: vec![Scope { parent: None, start: 0, end: toks.len(), is_fn: true, decls: vec![] }], cur: 0, m: Marks::default() };
-    // statement boundaries at module level
-    let mut spans: Vec<(usize, usize)> = Vec::new();
-    while p.i < toks.len() {
-        let s = p.i;
-        p.statement().map_err(|e| e.0)?;
-        if p.i == s {
-            return Err(format!("no progress at token {s}"));
-        }
-        spans.push((s, p.i));
-    }
-    let P { scopes, m, .. } = p;
-    let in_span = |idx: usize, (a, b): (usize, usize)| a <= idx && idx < b;
-    // module-scope names declared by each statement
-    let declared: Vec<Vec<String>> = spans
-        .iter()
-        .map(|sp| scopes[0].decls.iter().filter(|(_, at)| in_span(*at, *sp)).map(|(n, _)| n.clone()).collect())
-        .collect();
-    let module_names: HashSet<&String> = scopes[0].decls.iter().map(|(n, _)| n).collect();
-    // module-scope names each statement references (a ref resolves to module scope when no inner scope declares it)
-    let inner_declares = |name: &str, at: usize| scopes.iter().skip(1).any(|s| s.start <= at && at < s.end && s.decls.iter().any(|(n, _)| n == name));
-    let mut uses: Vec<HashSet<String>> = vec![HashSet::new(); spans.len()];
-    for &r in &m.refs {
-        let name = &toks[r].text;
-        if !module_names.contains(name) || inner_declares(name, r) {
-            continue;
-        }
-        if let Some(si) = spans.iter().position(|sp| in_span(r, *sp)) {
-            uses[si].insert(name.clone());
-        }
-    }
-    let exported_stmt = |si: usize| toks[spans[si].0].ident("export");
-    let mut live = vec![false; spans.len()];
-    let mut queue: Vec<usize> = Vec::new();
-    for si in 0..spans.len() {
-        let (a, b) = spans[si];
-        let root = !pure_statement(&toks[a..b]) || (exported_stmt(si) && declared[si].iter().any(|n| keep_exports.contains(n)))
-            // `export { a, b }` lists: kept (they name what the module offers)
-            || (exported_stmt(si) && declared[si].is_empty());
-        if root {
-            live[si] = true;
-            queue.push(si);
-        }
-    }
-    while let Some(si) = queue.pop() {
-        for name in uses[si].clone() {
-            for (sj, d) in declared.iter().enumerate() {
-                if !live[sj] && d.contains(&name) {
-                    live[sj] = true;
-                    queue.push(sj);
-                }
-            }
-        }
-    }
-    let mut out = Vec::with_capacity(toks.len());
-    for (si, (a, b)) in spans.iter().enumerate() {
-        if live[si] {
-            out.extend_from_slice(&toks[*a..*b]);
-        }
-    }
-    // a removed statement may have carried the newline that separated two kept ones
-    for i in 1..out.len() {
-        if out[i].start != 0 && i > 0 && !out[i].nl_before {
-            let prev_end = out[i - 1].start + out[i - 1].text.len();
-            if out[i].start > prev_end && toks.iter().any(|t| t.start >= prev_end && t.start < out[i].start && t.nl_before) {
-                out[i].nl_before = true;
-            }
-        }
-    }
-    Ok(out)
+    cleanup_engine::shake_tokens(toks, None, keep_exports).map(|(t, _)| t).map_err(|e| e.to_string())
 }
 
-/// Removes `const x = …;` / `let x = …;` declarations inside functions that nothing reads, when their initializer is
-/// pure (the same test as module-level tree shaking: no call, `new`, update or assignment outside a nested function).
-/// Single declarators ended by `;` only; repeated until nothing changes, since dropping one can orphan another
-/// (QA #101, conformance 136: dead code removal inside components).
+/// Legacy local-only entry point; shares the production cleanup engine. Unused
+/// bindings with effectful initializers become initializer expression statements.
 pub fn drop_unused_locals(toks: Vec<Tok>) -> Result<Vec<Tok>, String> {
-    let mut toks = toks;
-    for _ in 0..8 {
-        let mut p = P { t: &toks, i: 0, scopes: vec![Scope { parent: None, start: 0, end: toks.len(), is_fn: true, decls: vec![] }], cur: 0, m: Marks::default() };
-        while p.i < toks.len() {
-            let s = p.i;
-            p.statement().map_err(|e| e.0)?;
-            if p.i == s {
-                return Err(format!("no progress at token {s}"));
-            }
-        }
-        let P { scopes, m, .. } = p;
-        let mut drop: Vec<(usize, usize)> = Vec::new();
-        for (si, sc) in scopes.iter().enumerate().skip(1) {
-            for (name, at) in &sc.decls {
-                let at = *at;
-                // `const|let NAME = …;` (one declarator) inside a function
-                if at == 0 || !(toks[at - 1].ident("const") || toks[at - 1].ident("let")) || !toks.get(at + 1).is_some_and(|t| t.punct("=")) {
-                    continue;
-                }
-                if at >= 2 && (toks[at - 2].ident("export") || toks[at - 2].ident("for") || toks[at - 2].punct("(")) {
-                    continue;
-                }
-                // the `;` that ends it at depth 0 (a `,` means more declarators: left alone)
-                let mut depth = 0i32;
-                let mut end = None;
-                for (j, t) in toks.iter().enumerate().skip(at + 2) {
-                    match t.kind {
-                        Kind::Punct if matches!(t.text.as_str(), "(" | "[" | "{") => depth += 1,
-                        Kind::Punct if matches!(t.text.as_str(), ")" | "]" | "}") => {
-                            depth -= 1;
-                            if depth < 0 {
-                                break;
-                            }
-                        }
-                        Kind::TplHead => depth += 1,
-                        Kind::TplTail => depth -= 1,
-                        Kind::Punct if depth == 0 && t.text == ";" => {
-                            end = Some(j);
-                            break;
-                        }
-                        Kind::Punct if depth == 0 && t.text == "," => break,
-                        _ => {}
-                    }
-                }
-                let Some(end) = end else { continue };
-                if !pure_statement(&toks[at - 1..end]) {
-                    continue;
-                }
-                // read anywhere it is visible (not shadowed by an inner declaration of the same name)?
-                let used = m.refs.iter().any(|&r| {
-                    r != at
-                        && toks[r].text == *name
-                        && sc.start <= r
-                        && r < sc.end
-                        && !scopes.iter().enumerate().any(|(j, inner)| j != si && sc.start <= inner.start && inner.end <= sc.end && inner.start <= r && r < inner.end && inner.decls.iter().any(|(n, _)| n == name))
-                });
-                if !used {
-                    drop.push((at - 1, end));
-                }
-            }
-        }
-        if drop.is_empty() {
-            return Ok(toks);
-        }
-        drop.sort();
-        let mut out = Vec::with_capacity(toks.len());
-        let mut i = 0;
-        for (a, b) in drop {
-            if a < i {
-                continue;
-            }
-            out.extend_from_slice(&toks[i..a]);
-            i = b + 1;
-        }
-        out.extend_from_slice(&toks[i..]);
-        toks = out;
-    }
-    Ok(toks)
+    cleanup_engine::cleanup_tokens(toks, None, true).map(|(t, _)| t).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -1379,8 +1310,8 @@ mod dead_locals_tests {
     #[test]
     fn drops_pure_unused_locals_only() {
         let src = "function C($p) { const unused = 5; const label = 'a' + 'b'; let keep = 1; const side = load(); const chain = [keep]; return label; }";
-        // `chain` reads `keep`; dropping `chain` leaves `keep` unused, so it goes on the next round; `side` calls: kept
-        assert_eq!(run(src), "function C($p){const label='a'+'b';const side=load();return label;}");
+        // Proven initialized reads can disappear; the unused `side` binding is removed while load() still executes.
+        assert_eq!(run(src), "function C($p){const label='a'+'b';(load());return label;}");
     }
 
     #[test]
@@ -1404,14 +1335,38 @@ mod shake_tests {
     #[test]
     fn drops_unused_exports_and_their_helpers() {
         let src = "let state = null, other = 0\nconst helper = (x) => x + 1\nconst lonely = () => 2\nexport const a = (v) => helper(v) + state\nexport function b() { return lonely() }\nexport class C {}\ndocument.title = 'x'\n";
-        assert_eq!(shake(src, &["a"]), "let state=null,other=0\nconst helper=(x)=>x+1\nexport const a=(v)=>helper(v)+state\ndocument.title='x'");
+        assert_eq!(shake(src, &["a"]), "let state=null;const helper=(x)=>x+1;export const a=(v)=>helper(v)+state;document.title='x'");
     }
 
     #[test]
     fn keeps_side_effects_and_transitive_uses() {
         let src = "const registry = new Map()\nconst run = () => registry.size\nconst boot = init()\nexport const x = () => run()\n";
-        // `boot = init()` is a call: kept even if unused; `x` dropped, so `run` goes, `registry` goes too
-        assert_eq!(shake(src, &[]), "const boot=init()");
-        assert_eq!(shake(src, &["x"]), "const registry=new Map()\nconst run=()=>registry.size\nconst boot=init()\nexport const x=()=>run()");
+        // Initializer effects remain even when bindings disappear. `new Map` cannot assume an unmodified global constructor.
+        assert_eq!(shake(src, &[]), "(new Map());(init());");
+        assert_eq!(shake(src, &["x"]), "const registry=new Map()\nconst run=()=>registry.size;(init());export const x=()=>run()");
+    }
+}
+
+#[path = "cleanup_engine.rs"]
+mod cleanup_engine;
+pub(crate) use cleanup_engine::{cleanup_tokens, drop_logs, shake_tokens};
+
+#[cfg(test)]
+mod ownership_query_tests {
+    use super::*;
+    use crate::lex::lex;
+    #[test] fn queries_only_free_native_refs_without_rewriting_local_bindings() {
+        let source="function local(exports,URL){return exports.malloc(new URL('x',import.meta.url))} const wasm={exports:{}};wasm.exports.memory;new URL('x',import.meta.url);process.env.NODE_ENV";
+        let tokens=lex(source).unwrap();let names=["exports","URL","process"].into_iter().map(str::to_owned).collect();
+        let result=free_identifier_sites(&tokens,&names).unwrap();
+        assert_eq!(result.iter().filter(|(_,name)|name=="URL").count(),1);
+        assert_eq!(result.iter().filter(|(_,name)|name=="exports").count(),0);
+        assert_eq!(result.iter().filter(|(_,name)|name=="process").count(),1);
+    }
+    #[test] fn ownership_queries_bound_deep_inputs_and_direct_eval() {
+        let names=["URL".to_owned()].into();
+        assert!(free_identifier_sites(&lex(&format!("{}x{}", "(".repeat(300),")".repeat(300))).unwrap(),&names).is_err());
+        assert!(free_identifier_sites(&lex("eval('let URL');new URL('x',import.meta.url)").unwrap(),&names).is_err());
+        assert!(free_identifier_sites(&lex("const URL=custom;new URL('x',import.meta.url)").unwrap(),&names).unwrap().is_empty());
     }
 }

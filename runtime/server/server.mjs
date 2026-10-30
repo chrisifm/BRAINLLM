@@ -17,12 +17,13 @@
 // `build` is the build signature (§35.7): sent as X-Brain-Build on every HTML response and in /_health.
 // A page template (`page`) is the route's final HTML with `<!--brain:ssr-->` inside #brain-view and
 // `<!--brain:props-->` inside <script type="application/json" id="brain-props">.
-import { createServer as http } from 'node:http'
+import { createServer as http, STATUS_CODES, request as httpRequest, Agent as HttpAgent } from 'node:http'
 import net from 'node:net'
+import { Readable } from 'node:stream'
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync, statSync, lstatSync } from 'node:fs'
 import * as Module from 'node:module'
-import { basename, extname, join, normalize, resolve, sep } from 'node:path'
+import { basename, dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const MIME = {
@@ -72,21 +73,351 @@ export class HttpError extends Error {
     Object.assign(this, extra)
   }
 }
-// `throw redirect('/login')` (or return it) from load/guards; only same-origin paths (open-redirect guard, §31)
+// Plain deliberate 4xx signals are portable from server-only application modules; exception messages stay private.
+function intendedStatus(error) {
+  if (!error || typeof error !== 'object') return null
+  const descriptor = Object.getOwnPropertyDescriptor(error, 'status')
+  const status = descriptor && descriptor.value
+  const plain = Object.getPrototypeOf(error) === Object.prototype || Object.getPrototypeOf(error) === null
+  return Number.isInteger(status) && STATUS_CODES[status] && (error instanceof HttpError && status >= 400 && status <= 599 || plain && status >= 400 && status < 500) ? status : null
+}
+const REDIRECT_CODES = new Set([301, 302, 303, 307, 308])
+function safeLocation(value) {
+  if (typeof value !== 'string' || value.length > 8192 || !value.startsWith('/') || value.startsWith('//') || /[\\\x00-\x20\x7f]/.test(value) || /^\/%2f/i.test(value) || /%(?:0[0-9a-f]|1[0-9a-f]|5c|7f)/i.test(value) || /%20/i.test(value.split(/[?#]/,1)[0])) throw new HttpError(500, 'Invalid same-site redirect location')
+  return value
+}
+// `throw redirect('/login')` (or return it) from load/guards; same-site paths only.
 export const redirect = (url, status = 303) => {
-  const u = String(url)
-  if (!u.startsWith('/') || u.startsWith('//') || u.startsWith('/\\')) throw new HttpError(500, 'redirect to another origin is not allowed: ' + u)
-  return { redirect: u, status }
+  if (!REDIRECT_CODES.has(status)) throw new HttpError(500, 'Invalid redirect status')
+  return { redirect: safeLocation(url), status }
+}
+function mediaQuality(header, kind) {
+  let specificity = -1, quality = 0
+  for (const part of String(header).slice(0, 8192).split(',').slice(0, 64)) {
+    const [raw, ...params] = part.trim().split(';'), name = raw.toLowerCase()
+    const rank = name === kind ? 2 : name === kind.split('/')[0] + '/*' ? 1 : name === '*/*' ? 0 : -1
+    if (rank < 0) continue
+    let q = 1
+    for (const param of params) {
+      const [key, value] = param.trim().split('=')
+      if (key.toLowerCase() === 'q') { q = Number(value); if (!value || !Number.isFinite(q) || q < 0 || q > 1) q = 0 }
+    }
+    if (rank > specificity || rank === specificity && q > quality) { specificity = rank; quality = q }
+  }
+  return quality
+}
+function wantsHtml(req) {
+  const path = req.$brainPath || String(req.url || '/').split('?')[0]
+  if (/^\/(?:api|_brain|_r)(?:\/|$)/.test(path)) return false
+  const accept = req.headers.accept
+  if (!accept) return true
+  const quality = mediaQuality(accept, 'text/html')
+  return quality > 0 && quality >= mediaQuality(accept, 'application/json')
+}
+function defaultError(status, rid, home = '/') {
+  const title = STATUS_CODES[status] || 'Request failed'
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>${status} — ${esc(title)}</title></head><body><main><h1>${status} — ${esc(title)}</h1><p>The request could not be completed. Try again or contact support with this reference.</p><p>Reference: <code>${esc(rid)}</code></p><a href="${esc(home)}">Return home</a></main></body></html>`
+}
+
+// Coding weights are transport preferences, not substring matches (br;q=0 explicitly forbids Brotli).
+export function acceptedEncodings(header = '') {
+  const values = new Map()
+  for (const part of String(header).split(',')) {
+    const [name, ...params] = part.trim().split(';')
+    let q = 1
+    for (const p of params) {
+      const [k,v] = p.trim().split('=')
+      if (k && k.trim().toLowerCase() === 'q') { q = v && v.trim() ? Number(v) : NaN; if (!Number.isFinite(q) || q < 0 || q > 1) q = 0 }
+    }
+    values.set(name.toLowerCase(),q)
+  }
+  return ['br','gzip'].map(name => [name,values.get(name) ?? values.get('*') ?? 0]).filter(([,q]) => q > 0).sort((a,b) => b[1] - a[1]).map(([name]) => name)
+}
+
+function googleSignInPage(page) {
+  let head = false, templates = 0
+  const tags = /<!--[\s\S]*?-->|<(script|style|title|noscript)\b(?:"[^"]*"|'[^']*'|[^'">])*?>[\s\S]*?<\/\1\s*>|<([^'">]|"[^"]*"|'[^']*')*>/gi
+  for (const match of page.matchAll(tags)) {
+    const tag = match[0]
+    if (tag.startsWith('<!--') || match[1]) continue
+    const name = /^<\/?([^\s/>]+)/.exec(tag)?.[1].toLowerCase(), closing = tag.startsWith('</')
+    if (name === 'head' && !templates) { if (closing) return false; head = true; continue }
+    if (name === 'body' && !templates) return false
+    if (name === 'template') { templates = Math.max(0, templates + (closing ? -1 : 1)); continue }
+    if (!closing && ['script', 'style', 'title', 'noscript'].includes(name)) return false
+    if (!head || templates || closing || name !== 'meta') continue
+    const attrs = new Map()
+    for (const item of tag.slice(5, -1).matchAll(/([^\s=/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g)) {
+      const key = item[1].toLowerCase(); if (!attrs.has(key)) attrs.set(key, item[2] ?? item[3] ?? item[4] ?? '')
+    }
+    if (attrs.get('name')?.toLowerCase() === 'brain-google-signin' && attrs.get('content') === '1') return true
+  }
+  return false
+}
+
+// One configured loopback authority. No user-controlled target, proxy, redirect, auth cache or pending queue.
+export function nativeAuthBridge(raw) {
+  if (!raw) return null
+  if (typeof raw !== 'string' || raw.length > 2048) throw Error('BRAIN_BACKEND_URL must be an explicit loopback HTTP origin')
+  let target
+  try { target = new URL(raw) } catch { throw Error('BRAIN_BACKEND_URL must be an explicit loopback HTTP origin') }
+  if (target.protocol !== 'http:' || !['127.0.0.1', '[::1]', 'localhost'].includes(target.hostname) || target.username || target.password || target.pathname !== '/' || target.search || target.hash) throw Error('BRAIN_BACKEND_URL must be an explicit loopback HTTP origin')
+  if (target.hostname === 'localhost') target.hostname = '127.0.0.1'
+  const names = new Set(['__Host-brain', '__Host-brain-access', '__Host-brain-refresh'])
+  const agent = new HttpAgent({ keepAlive: true, maxSockets: 8, maxTotalSockets: 8, maxFreeSockets: 2, timeout: 30000 })
+  const owned = new Set()
+  let active = 0, stopped = false
+  const cookies = (req, includeRefresh) => {
+    const selected = new Map(), header = req.headers.cookie || ''
+    if (header.length > 16384) throw new HttpError(431, 'Authentication cookies exceed the request limit')
+    for (const part of header.split(';')) {
+      const at = part.indexOf('='); if (at < 0) continue
+      const name = part.slice(0, at).trim(), value = part.slice(at + 1).trim()
+      if (!names.has(name) || name === '__Host-brain-refresh' && !includeRefresh) continue
+      if (selected.has(name) || value.length > 8192 || !/^[a-zA-Z0-9._-]*$/.test(value)) throw new HttpError(400, 'Invalid authentication cookies')
+      selected.set(name, value)
+    }
+    return [...selected].map(([name, value]) => name + '=' + value).join('; ')
+  }
+  const safeUser = user => {
+    if (!user || typeof user.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(user.id) || typeof user.email !== 'string' || user.email.length > 254 || typeof user.role !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(user.role) || ['public','owner'].includes(user.role) || typeof user.verified !== 'boolean') throw new HttpError(503,'Native authentication response is unavailable')
+    return Object.freeze({id:user.id,email:user.email,role:user.role,verified:user.verified})
+  }
+  const unavailable = () => new HttpError(503, 'Native authentication is temporarily unavailable')
+  const call = (incoming, response, path, method, rid, origin) => {
+    if (stopped || active >= 8) return Promise.reject(unavailable())
+    const cookie = cookies(incoming, method === 'POST')
+    active++
+    return new Promise((resolve, reject) => {
+      let outgoing, timer, finished = false
+      const finish = (error, value) => {
+        if (finished) return
+        finished = true; active--; clearTimeout(timer)
+        incoming.removeListener('aborted', cancel); response.removeListener('close', disconnected)
+        if (outgoing) owned.delete(outgoing)
+        error ? reject(unavailable()) : resolve(value)
+      }
+      const cancel = () => outgoing?.destroy(unavailable())
+      const disconnected = () => { if (!response.writableEnded) cancel() }
+      try {
+        outgoing = httpRequest(new URL(path, target), { method, agent, headers: { accept: 'application/json', ...(cookie ? { cookie } : {}), 'x-request-id': rid, ...(origin ? { origin } : {}), ...(method === 'POST' ? { 'content-length': '0' } : {}) } }, backend => {
+          let bytes = 0; const chunks = []
+          if (backend.headers['content-encoding'] || Number(backend.headers['content-length']) > 16384) { backend.destroy(); return finish(true) }
+          backend.on('data', chunk => { bytes += chunk.length; if (bytes > 16384) { backend.destroy(); finish(true) } else chunks.push(chunk) })
+          backend.on('error', () => finish(true))
+          backend.on('end', () => {
+            if (backend.statusCode === 401 && method === 'GET') return finish(false, { user: null })
+            if (backend.statusCode !== 200) return finish(true)
+            let payload
+            try { payload = JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { return finish(true) }
+            if (method === 'GET') {
+              try { return finish(false, {user:safeUser(payload?.user)}) } catch { return finish(true) }
+            }
+            if (payload?.ok !== true) return finish(true)
+            const cleared = []
+            for (const value of backend.headers['set-cookie'] || []) {
+              if (value.length > 8192 || /[\r\n]/.test(value)) return finish(true)
+              const name = value.split('=', 1)[0]
+              if (names.has(name) || name === '__Host-brain-google') cleared.push(value)
+            }
+            finish(false, { 'set-cookie': cleared, 'clear-site-data': '"storage"' })
+          })
+        })
+        owned.add(outgoing); incoming.once('aborted', cancel); response.once('close', disconnected)
+        timer = setTimeout(() => outgoing.destroy(unavailable()), 2000)
+        outgoing.once('error', () => finish(true)); outgoing.end()
+      } catch { outgoing?.destroy(); finish(true) }
+    })
+  }
+  let proxyBytes = 0
+  function proxy(req, res, url, rid, reply, responseLimit = 20 * 1024 * 1024) {
+    if (stopped || active >= 8) throw new HttpError(503, 'Backend request capacity is unavailable')
+    if (!['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(req.method)) throw new HttpError(405, 'Method not allowed')
+    const limit = url.pathname === '/_brain/uploads' && req.method === 'POST' ? 5 * 1024 * 1024 + 65536 : 65536
+    if (Number(req.headers['content-length'] || 0) > limit) throw new HttpError(413, 'Request body is too large')
+    active++
+    return new Promise((resolve, reject) => {
+      let outgoing, timer, done = false, bytes = 0, requestBytes = 0, failure
+      const chunks = []
+      const headers = { 'x-request-id':rid }
+      for (const key of ['origin','authorization','content-type','content-length','x-brain-rpc','accept','x-brain-webhook-id','x-brain-webhook-timestamp','x-brain-webhook-signature']) {
+        const value = req.headers[key]
+        if (typeof value === 'string' && value.length <= 8192) headers[key] = value
+      }
+      const selected = []
+      for (const part of String(req.headers.cookie || '').split(';')) {
+        const name = part.trim().split('=')[0]
+        if (['__Host-brain','__Host-brain-access','__Host-brain-refresh','__Host-brain-google'].includes(name)) selected.push(part.trim())
+      }
+      if (selected.length) headers.cookie = selected.join('; ')
+      const finish = (error, backend) => {
+        if (done) return
+        done = true; clearTimeout(timer); active--; proxyBytes -= bytes; owned.delete(outgoing)
+        req.removeListener('aborted',cancel); req.removeListener('data',data); req.removeListener('end',end)
+        res.removeListener('close',cancel)
+        if (error) { if (!res.destroyed) reject(failure || new HttpError(503,'Backend request unavailable')); else resolve(); return }
+        const safe = { 'cache-control':'no-store' }
+        for (const key of ['content-type','content-disposition','allow','retry-after','www-authenticate','location','etag','last-modified','clear-site-data']) {
+          const value = backend.headers[key]
+          if (typeof value === 'string' && value.length <= 8192) safe[key] = value
+        }
+        const cookies = (backend.headers['set-cookie'] || []).filter(value => /^(?:__Host-brain(?:-access|-refresh|-google)?)=/.test(value) && value.length <= 8192)
+        if (cookies.length) safe['set-cookie'] = cookies.slice(0,8)
+        try { reply(res,backend.statusCode || 502,req.method === 'HEAD' ? '' : Buffer.concat(chunks,bytes),safe); resolve() } catch (e) { reject(e) }
+      }
+      const cancel = () => { outgoing?.destroy(); finish(true) }
+      const data = chunk => {
+        requestBytes += chunk.length
+        if (requestBytes > limit) { failure = new HttpError(413,'Request body is too large'); outgoing.destroy(); finish(true); return }
+        if (!outgoing.write(chunk)) { req.pause(); outgoing.once('drain',()=>req.resume()) }
+      }
+      const end = () => outgoing.end()
+      try {
+        outgoing = httpRequest(new URL(url.pathname + url.search,target),{agent,method:req.method,headers},backend => {
+          backend.on('data',chunk => {
+            bytes += chunk.length; proxyBytes += chunk.length
+            if (bytes > responseLimit || proxyBytes > 64 * 1024 * 1024) { failure = new HttpError(502,'Backend response exceeds its byte budget'); outgoing.destroy(); finish(true); return }
+            chunks.push(chunk)
+          })
+          backend.once('end',()=>finish(false,backend)); backend.once('error',()=>finish(true)); backend.once('aborted',()=>finish(true))
+        })
+        owned.add(outgoing)
+        timer = setTimeout(()=>{failure = new HttpError(504,'Backend request timed out');outgoing.destroy();finish(true)},url.pathname === '/_brain/uploads' || url.pathname.startsWith('/_brain/uploads/') ? 35000 : 10000)
+        outgoing.once('error',()=>finish(true)); req.once('aborted',cancel); res.once('close',cancel)
+        req.on('data',data); req.once('end',end)
+        if (req.readableEnded) end()
+      } catch { outgoing?.destroy(); finish(true) }
+    })
+  }
+  const resource = (incoming, response, rid, name) => {
+    if (typeof name !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(name)) throw new HttpError(400, 'Invalid native resource name')
+    const idPath = id => {
+      if (typeof id !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id)) throw new HttpError(400, 'Invalid native record identifier')
+      return '/api/' + name + '/' + id
+    }
+    const request = async (method, path, body) => {
+      if (response.writableEnded || response.destroyed) throw new HttpError(409, 'The server request has ended')
+      if (method !== 'GET' && incoming.method !== 'POST') throw new HttpError(405, 'Native writes require a server function called through POST')
+      let bytes = Buffer.alloc(0)
+      if (body !== undefined) {
+        if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Native resource values must be an object')
+        try { bytes = Buffer.from(JSON.stringify(body)) } catch { throw new HttpError(400, 'Native resource values must be JSON serializable') }
+        if (bytes.length > 65536) throw new HttpError(413, 'Native resource values exceed their byte budget')
+      }
+      const req = Readable.from(bytes.length ? [bytes] : [])
+      req.method = method
+      req.headers = { cookie: cookies(incoming, false), accept: 'application/json', 'content-type':'application/json', 'content-length':String(bytes.length) }
+      if (method !== 'GET') {
+        let origin
+        try { origin = new URL(incoming.headers.origin); if (origin.origin !== incoming.headers.origin || origin.host !== (incoming.headers['x-forwarded-host'] || incoming.headers.host)) throw Error() } catch { throw new HttpError(403, 'Native writes require a same-origin server request') }
+        req.headers.origin = origin.origin
+      }
+      let value
+      try {
+        await proxy(req, response, new URL(path, target), rid, (_res, status, data, headers) => {
+          if (status < 200 || status >= 300) throw new HttpError(status >= 400 && status < 500 ? status : 503, 'Native resource request failed')
+          if (status === 204) { value = null; return }
+          if (!String(headers['content-type'] || '').startsWith('application/json')) throw new HttpError(502, 'Native resource response must be JSON')
+          try { value = JSON.parse(data.toString('utf8')) } catch { throw new HttpError(502, 'Native resource response is invalid') }
+        }, 2 * 1024 * 1024)
+      } finally { req.destroy() }
+      if (response.destroyed || response.writableEnded) throw new HttpError(409, 'The server request has ended')
+      return value
+    }
+    return Object.freeze({
+      list(options = {}) {
+        if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).some(key => !['search','limit','offset'].includes(key))) throw new HttpError(400, 'Invalid native list options')
+        const {search = '', limit = 20, offset = 0} = options
+        if (typeof search !== 'string' || Buffer.byteLength(search) > 256 || !Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0 || offset > 10000) throw new HttpError(400, 'Invalid native list pagination or search')
+        return request('GET', '/api/' + name + '?' + new URLSearchParams({search,limit:String(limit),offset:String(offset)}))
+      },
+      get: id => request('GET', idPath(id)),
+      create: values => request('POST', '/api/' + name, values),
+      update: (id, values) => request('PUT', idPath(id), values),
+      remove: id => request('DELETE', idPath(id)),
+    })
+  }
+  async function login(incoming,response,rid,credentials) {
+    if (incoming.method !== 'POST' || response.headersSent || response.writableEnded || response.destroyed) throw new HttpError(403,'Sign in through a same-origin POST server function')
+    if (incoming.$nativeLoginStarted || incoming.$nativeLogout) throw new HttpError(409,'Use one authentication change per server request')
+    if (!credentials || typeof credentials !== 'object' || Array.isArray(credentials) || Object.keys(credentials).some(key=>!['email','password'].includes(key)) || typeof credentials.email !== 'string' || typeof credentials.password !== 'string' || Buffer.byteLength(credentials.email)>254 || Buffer.byteLength(credentials.password)>1024) throw new HttpError(422,'Enter a valid email and password')
+    let origin
+    try { origin=new URL(incoming.headers.origin);if(origin.origin!==incoming.headers.origin || origin.host!==(incoming.headers['x-forwarded-host']||incoming.headers.host))throw Error() }catch{throw new HttpError(403,'Sign in through a same-origin POST server function')}
+    incoming.$nativeLoginStarted=true
+    const bytes=Buffer.from(JSON.stringify({email:credentials.email,password:credentials.password}))
+    const request=Readable.from([bytes]);request.method='POST';request.headers={origin:origin.origin,accept:'application/json','content-type':'application/json','content-length':String(bytes.length)}
+    let user
+    try {
+      await proxy(request,response,new URL('/_brain/auth/login',target),rid,(_res,status,data,headers)=>{
+        if(status!==200)throw new HttpError(status===400||status===401||status===422?401:status===429?429:503,status===429?'Too many attempts. Wait before trying again.':status<500?'Wrong email or password':'Sign-in is temporarily unavailable')
+        let payload
+        try {payload=JSON.parse(data.toString('utf8'))}catch{throw unavailable()}
+        user=safeUser(payload?.user)
+        const selected=headers['set-cookie']||[]
+        if(new Set(selected.map(value=>value.split('=',1)[0])).size!==selected.length)throw unavailable()
+        if(!selected.length||selected.length>3||selected.some(value=>!/^(?:__Host-brain|__Host-brain-access|__Host-brain-refresh)=/.test(value)||!/(?:^|;)\s*HttpOnly(?:;|$)/i.test(value)||!/(?:^|;)\s*Secure(?:;|$)/i.test(value)||!/(?:^|;)\s*Path=\/(?:;|$)/i.test(value)||!/(?:^|;)\s*SameSite=Lax(?:;|$)/i.test(value)))throw unavailable()
+        if(response.writableEnded||response.destroyed)throw unavailable()
+        incoming.$nativeLoginHeaders={'set-cookie':selected,'cache-control':'no-store'}
+      },16384)
+    } finally {request.destroy();bytes.fill(0)}
+    return {user}
+  }
+  return {
+    proxy,
+    resource,
+    login,
+    async prepare(req, res, rid) {
+      if (!cookies(req, false)) { req.$nativeUser = null; req.$nativeAuth ||= Promise.resolve(); return }
+      if (!req.$nativeAuth) req.$nativeAuth = call(req, res, '/_brain/auth/me', 'GET', rid).then(result => { req.$nativeUser = result.user })
+      await req.$nativeAuth
+    },
+    session(req, res, rid) {
+      return {
+        user: req.$nativeUser,
+        set() { throw new HttpError(409, 'Use the native authentication API to establish a session') },
+        clear() {
+          if (req.$nativeLoginStarted) throw new HttpError(409,'Use a separate server request to sign out after signing in')
+          if (req.method !== 'POST' || res.headersSent) throw new HttpError(403, 'Sign out through a same-origin POST request')
+          let origin
+          try { origin = new URL(req.headers.origin); if (origin.origin !== req.headers.origin || origin.host !== (req.headers['x-forwarded-host'] || req.headers.host)) throw Error() } catch { throw new HttpError(403, 'Sign out through a same-origin POST request') }
+          if (!req.$nativeLogout) {
+            req.$nativeLogout = call(req, res, '/_brain/auth/logout', 'POST', rid, origin.origin).then(headers => { req.$nativeLogoutDone = true; req.$nativeLogoutHeaders = headers }, error => { req.$nativeLogoutDone = true; req.$nativeLogoutError = true; throw error })
+            req.$nativeLogout.catch(() => {})
+          }
+          return req.$nativeLogout
+        },
+        headers: () => req.$nativeLoginHeaders || {},
+      }
+    },
+    close() { stopped = true; for (const request of owned) request.destroy(); agent.destroy() },
+  }
 }
 
 export function createServer(o = {}) {
   const dist = resolve(o.dist || process.cwd())
   const env = Object.freeze({ ...(o.env || ENV) }) // ctx.env: what the supervisor passed, read-only
+  const native = nativeAuthBridge(o.backendURL ?? env.BRAIN_BACKEND_URL)
   const TIMEOUT = +(o.timeout ?? env.BRAIN_TIMEOUT_MS ?? 10000)
   const LIMIT = +(o.rateLimit ?? env.BRAIN_RPC_LIMIT ?? 60) // per IP + function, per minute
   const MAX_BODY = 64 * 1024
   const secret = o.secret ?? env.BRAIN_SECRET ?? ''
-  const log = o.log || ((level, msg, extra) => console[level === 'error' ? 'error' : 'log'](json({ t: new Date().toISOString(), level, msg, ...extra })))
+  const sink = o.log || ((level, msg, extra) => console[level === 'error' ? 'error' : 'log'](json({ t: new Date().toISOString(), level, msg, ...extra })))
+  const log = (level, msg, extra = {}) => {
+    const safe = { ...extra }
+    // Error messages may contain credentials or request data. Retain only bounded V8 source frames.
+    if (typeof safe.stack === 'string') {
+      const kind = /^(TypeError|ReferenceError|RangeError|SyntaxError|AggregateError|Error):/.exec(safe.stack)?.[1] || 'Error'
+      safe.errorType = kind
+      safe.code = kind === 'Error' ? 'NODE_INTERNAL_ERROR' : 'NODE_' + kind.replace(/Error$/, '').toUpperCase() + '_ERROR'
+      const truncated = safe.stack.length > 32768 || safe.stack.split('\n').length > 41
+      safe.traceTruncated = truncated
+      safe.stack = safe.stack.slice(0, 32768).split('\n').filter(line => /^\s+at (?:async )?(?:[A-Za-z0-9_.$<>]+(?: \[as [A-Za-z0-9_$]+\])? \()?(?:file:\/\/\/|\/|node:)[^\s()?#]*:\d+:\d+\)?$/.test(line) && line.length <= 1024).slice(0, 40).join('\n')
+      safe.private = true; safe.valuesCaptured = false
+      safe.fix = kind === 'TypeError' ? 'Check nullable values, argument types and the data contract at these source frames' : kind === 'ReferenceError' ? 'Check the missing binding or import at these source frames' : kind === 'RangeError' ? 'Check recursive calls, array sizes and configured resource budgets at these source frames' : kind === 'SyntaxError' ? 'Check module syntax or JSON input parsing at these source frames without logging input values' : 'Inspect these source frames and the request reference; reproduce with synthetic inputs'
+    }
+    if (typeof safe.path === 'string') safe.path = safe.path.split(/[?#]/, 1)[0].slice(0, 2048)
+    sink(level, msg, safe)
+  }
   const mf = readManifest(dist)
   // the build's single route table (#187): already in match order, each with its RegExp source (named groups = params)
   const routes = mf.routes.map(r => ({ ...r, rx: r.rx ? new RegExp(r.rx) : exact(r.path) }))
@@ -112,9 +443,41 @@ export function createServer(o = {}) {
   hook(distURL, BASE)
 
   // ---------- helpers ----------
-  const send = (res, status, body, headers = {}) => {
+  const send = (res, status, body, headers = {}, configuredExternal = false) => {
+    if (native && res.req.$nativeLogout && !res.req.$nativeLogoutDone) {
+      res.req.$nativeLogout.then(() => send(res, status, body, headers, configuredExternal), () => send(res, 503, '', {}, false))
+      return
+    }
+    if (native && res.req.$nativeLogoutError) { status = 503; body = ''; headers = {}; res.req.$nativeLogoutError = false }
+    if (native && res.req.$nativeLogoutHeaders) {
+      const relay = res.req.$nativeLogoutHeaders, own = headers['set-cookie']
+      headers = { ...headers, ...relay, 'set-cookie': [...(own ? Array.isArray(own) ? own : [own] : []), ...relay['set-cookie']] }
+    }
+    if (!Number.isInteger(status) || status < 200 || status > 599 || !STATUS_CODES[status]) throw new HttpError(500, 'Invalid final response status')
+    if (headers.location != null) {
+      if (configuredExternal && /^https?:\/\//.test(headers.location)) {
+        const target = new URL(headers.location)
+        if (target.username || target.password || /[\\\x00-\x20\x7f]/.test(headers.location)) throw new HttpError(500, 'Invalid configured redirect location')
+      } else safeLocation(headers.location)
+    }
+    if (status >= 400) {
+      headers = { ...headers, 'cache-control': 'private, no-store', vary: [headers.vary, 'Accept'].filter(Boolean).join(', ') }
+      const kind = headers['content-type'] || ''
+      if (!kind || kind.startsWith('text/plain')) {
+        const rid = res.getHeader('x-request-id') || ''
+        if (wantsHtml(res.req)) {
+          body = defaultError(status, rid, BASE)
+          headers['content-type'] = MIME['.html']
+          headers['content-security-policy'] = mf.csp || CSP0
+        } else {
+          body = json({ schemaVersion: 1, status, rid, error: STATUS_CODES[status] || 'Request failed' })
+          headers['content-type'] = MIME['.json']
+        }
+        delete headers['content-length']; delete headers['content-encoding']; delete headers.etag
+      }
+    }
     res.writeHead(status, { ...SECURITY, ...(server.draining ? { connection: 'close' } : {}), ...headers })
-    res.end(body)
+    res.end(res.req.method === 'HEAD' || status === 204 || status === 205 || status === 304 ? undefined : body)
   }
   // HTML: `no-cache` + ETag (strong for files, weak for SSR) → a repeat visit gets 304 with no body (§35); the ETag is
   // taken before the per-response nonce is injected, so it is stable
@@ -126,20 +489,21 @@ export function createServer(o = {}) {
     }
     const nonce = randomBytes(16).toString('base64')
     const body = page.replace(/<script(?![^>]*\bnonce=)/g, `<script nonce="${nonce}"`)
-    send(res, status, body, { 'content-type': MIME['.html'], 'content-security-policy': withNonce(mf.csp || CSP0, nonce), 'cache-control': 'no-cache', ...(mf.build ? { 'x-brain-build': mf.build } : {}), ...headers })
+    send(res, status, body, { 'content-type': MIME['.html'], 'content-security-policy': withNonce(mf.csp || CSP0, nonce), 'cache-control': 'no-cache', ...(googleSignInPage(page) ? { 'cross-origin-opener-policy': 'same-origin-allow-popups' } : {}), ...(mf.build ? { 'x-brain-build': mf.build } : {}), ...headers })
   }
-  const notFound = (req, res) => {
-    const f = mf.notFound && file(mf.notFound)
-    if (f) return html(res, 404, readFileSync(f, 'utf8'))
-    html(res, 404, '<!doctype html><title>Not found</title><main><h1>Not found</h1></main>')
+  const notFound = (req, res) => failPage(res, 404, res.getHeader('x-request-id'))
+  const failPage = (res, status, rid) => {
+    if (!wantsHtml(res.req)) return send(res, status, json({ schemaVersion: 1, status, rid, error: STATUS_CODES[status] || 'Request failed' }), { 'content-type': MIME['.json'] })
+    const custom = (status === 404 && mf.notFound) || (mf.errors && mf.errors[status]) || `${status}.html`
+    const path = typeof custom === 'string' && file(custom)
+    return html(res, status, path ? readFileSync(path, 'utf8') : defaultError(status, rid, BASE))
   }
-  const failPage = (res, status, rid) =>
-    html(res, status, `<!doctype html><title>Error</title><main><h1>${status === 504 ? 'The page took too long' : 'Something went wrong'}</h1><p>Reference: ${esc(rid)}</p></main>`)
   // a file inside dist/ (never outside: no `..`, no absolute paths)
   function file(rel) {
     const p = normalize(join(dist, rel))
     if (p !== dist && !p.startsWith(dist + sep)) return null
     try {
+      for (let cursor = p; cursor !== dist; cursor = dirname(cursor)) if (lstatSync(cursor).isSymbolicLink()) return null
       return statSync(p).isFile() ? p : null
     } catch {
       return null
@@ -154,9 +518,10 @@ export function createServer(o = {}) {
 
   const context = (req, res, url, extra) => {
     const cookies = parseCookies(req.headers.cookie)
-    const { user, session: ses } = sessionFrom(cookies, secret)
+    const { user, session: ses } = native ? { user: req.$nativeUser ?? null, session: native.session(req, res, res.getHeader('x-request-id')) } : sessionFrom(cookies, secret)
     return {
       url, query: Object.fromEntries(url.searchParams), cookies, user, session: ses, env,
+      ...(native ? { backend: Object.freeze({resource: name => native.resource(req, res, res.getHeader('x-request-id'), name),login:credentials=>native.login(req,res,res.getHeader('x-request-id'),credentials)}) } : {}),
       // `prefetch`: the router fetched this page ahead of a click (§19); a `load` with side effects can skip them
       prefetch: req.headers['x-brain-prefetch'] === '1',
       req: { method: req.method, headers: req.headers, ip: ipOf(req) }, ...extra,
@@ -221,10 +586,11 @@ export function createServer(o = {}) {
       } catch {}
     }
     if (!nocache && route.cache > 0 && !forms && !fixed && status === 200 && anonymous(req)) return cached(req, res, route, params, url, rid)
+    if (native) await native.prepare(req, res, rid)
     const ctx = context(req, res, url, { params })
     // a page rendered for a signed-in user is never stored (§35): after logout, Back must not show the previous
     // user's page from the HTTP cache or bfcache. Anonymous pages keep `no-cache` + ETag.
-    const own = ctx.user != null || ctx.cookies[COOKIE] !== undefined
+    const own = ctx.user != null || ctx.cookies[COOKIE] !== undefined || native && /(?:^|;\s*)__Host-brain(?:-access|-refresh)?=/.test(req.headers.cookie || '')
     const keep = h => (own ? { ...h, 'cache-control': 'private, no-store' } : h)
     let props = fixed || {}, extra = {}
     if (!fixed && ((route.guards && route.guards.length) || (route.middleware && route.middleware.length))) {
@@ -238,7 +604,7 @@ export function createServer(o = {}) {
         log('error', 'guard failed', { rid, path: url.pathname, stack: String((e && e.stack) || e) })
         return errorPage(req, res, route, params, url, rid)
       }
-      if (r.redirect) return send(res, r.status, '', { location: withBase(r.redirect), 'cache-control': 'no-store', ...ctx.session.headers() })
+      if (r.redirect) return send(res, r.status, '', { location: withBase(redirect(r.redirect, r.status ?? 303).redirect), 'cache-control': 'no-store', ...ctx.session.headers() })
       if (r.deny !== undefined) return forbidden(req, res, url, rid, r.deny)
       extra = r.headers
     }
@@ -249,13 +615,13 @@ export function createServer(o = {}) {
         if (typeof m.load === 'function') props = (await withTimeout(Promise.resolve(m.load(ctx)), TIMEOUT)) ?? {}
       }
     } catch (e) {
-      if (e && e.redirect) return send(res, e.status || 303, '', { location: withBase(e.redirect), ...ctx.session.headers() })
+      if (e && e.redirect) return send(res, e.status || 303, '', { location: withBase(redirect(e.redirect, e.status ?? 303).redirect), ...ctx.session.headers() })
       if ((e instanceof HttpError && e.status === 404) || (e && e.notFound === true)) return notFound(req, res) // `throw notFound()` (F11)
-      const status = e instanceof HttpError && e.status === 504 ? 504 : 500
+      const status = intendedStatus(e) || 500
       log('error', 'load failed', { rid, path: url.pathname, status, stack: String((e && e.stack) || e) })
       return status === 500 ? errorPage(req, res, route, params, url, rid) : failPage(res, status, rid)
     }
-    if (props && props.redirect) return send(res, props.status || 303, '', { location: withBase(props.redirect), ...ctx.session.headers() })
+    if (props && props.redirect) return send(res, props.status || 303, '', { location: withBase(redirect(props.redirect, props.status ?? 303).redirect), ...ctx.session.headers() })
     if (props && props.notFound === true) return notFound(req, res) // `return notFound()` (F11)
     let body, seo, failed
     try {
@@ -333,7 +699,7 @@ export function createServer(o = {}) {
       props = (await loadP) ?? {}
       if (props.redirect || props.notFound === true) throw props
     } catch (e) {
-      if (e && e.redirect) return end(`<script>location.replace(${jsonInHtml(withBase(e.redirect))})</script>`)
+      if (e && e.redirect) return end(`<script>location.replace(${jsonInHtml(withBase(redirect(e.redirect, e.status ?? 303).redirect))})</script>`)
       // a streamed page already sent its 200 head: the region gets the not-found notice and the page is noindex
       if (e && e.notFound === true) return end(`<meta name="robots" content="noindex"><p role="alert" class="brain-fallback">Page not found.</p>`, {}, bottom.replace(/<script type="module">(?:(?!<\/script>)[\s\S])*?brain-view[\s\S]*?<\/script>/g, ''))
       log('error', 'load failed (streamed)', { rid, path: url.pathname, status: 200, stack: String((e && e.stack) || e) }) // headers already out
@@ -362,14 +728,15 @@ export function createServer(o = {}) {
   }
   // deny → views/403.brain (manifest `forbidden`, props.reason) or the static 403.html, always status 403
   function forbidden(req, res, url, rid, reason) {
+    if (!wantsHtml(req)) return failPage(res, 403, rid)
     if (mf.forbidden) return ssr(req, res, mf.forbidden, {}, url, rid, null, 403, { reason })
     const f = file('403.html')
     if (f) return html(res, 403, readFileSync(f, 'utf8'))
-    send(res, 403, 'Forbidden', { 'content-type': MIME['.txt'] })
+    return failPage(res, 403, rid)
   }
   // a failing load or guard → the folder's _error.brain (route `error`, props { message, rid }), else the generic page
   function errorPage(req, res, route, params, url, rid) {
-    if (route.error) return ssr(req, res, route.error, params, url, rid, null, 500, { message: 'Something went wrong.', rid })
+    if (wantsHtml(req) && route.error) return ssr(req, res, route.error, params, url, rid, null, 500, { message: 'Something went wrong.', rid })
     return failPage(res, 500, rid)
   }
   async function render(route, props, forms, at = null) {
@@ -437,6 +804,7 @@ export function createServer(o = {}) {
     } catch {
       return fail(413, 'Body larger than 64 KB')
     }
+    if (native) await native.prepare(req, res, rid)
     const ctx = context(req, res, url, { params: {} })
     let f
     try {
@@ -478,6 +846,7 @@ export function createServer(o = {}) {
     }
     const id = new URLSearchParams(raw).get('_brain') || '', modPath = mf.rpc[id.split('/')[0]]
     if (!modPath) return plain(400, 'Unknown form')
+    if (native) await native.prepare(req, res, rid)
     const ctx = context(req, res, url, { params })
     let module, rules
     try {
@@ -573,15 +942,27 @@ export function createServer(o = {}) {
   // ---------- static ----------
   // §33 content negotiation: `Accept` preferring text/markdown gets the page's Markdown twin (`/pricing` → pricing.md,
   // `/` → index.md) when the build published one (`seo.markdown`, default true; never for noindex pages).
+  function publicStaticPath(pathname) {
+    let path
+    try { path = decodeURIComponent(pathname) } catch { return null }
+    if (/[\\\x00]/.test(path)) return null
+    const clean = normalize(path).replaceAll('\\', '/')
+    const rel = clean.replace(/^\/+/, '')
+    if (rel.startsWith('_server') || rel.startsWith('_brain') || rel.startsWith('server.mjs') || rel === '_headers' || rel === '_redirects' || clean.split('/').some(part => part.startsWith('.') && part !== '.well-known')) return null
+    return path
+  }
   function serveTwin(req, res, url) {
     if (!prefersMarkdown(req.headers.accept)) return false
-    const md = file(mdPath(decodeURIComponent(url.pathname)))
+    const path = publicStaticPath(url.pathname)
+    if (path === null) return false
+    const md = file(mdPath(path))
     if (!md) return false
     send(res, 200, req.method === 'HEAD' ? '' : readFileSync(md), { 'content-type': MIME['.md'], 'cache-control': 'public, max-age=3600', vary: 'accept' })
     return true
   }
   function serveStatic(req, res, url) {
-    let p = decodeURIComponent(url.pathname)
+    const p = publicStaticPath(url.pathname)
+    if (p === null) return false
     const candidates = p.endsWith('/') ? [p + 'index.html'] : [p, p + '.html', p + '/index.html']
     for (const c of candidates) {
       const f = file(c)
@@ -593,7 +974,7 @@ export function createServer(o = {}) {
         const md = file(mdPath(p))
         const page = readFileSync(f, 'utf8')
         // static HTML changes only with a deploy: its ETag is the build signature (content hash without a manifest)
-        return html(res, 200, page, md ? { vary: 'accept' } : {}, '"' + (mf.build || tag(page)) + '"'), true
+        return html(res, 200, page, md ? { vary: 'accept', 'x-brain-static': '1' } : { 'x-brain-static': '1' }, '"' + (mf.build || tag(page)) + '"'), true
       }
       const headers = {
         'content-type': type,
@@ -601,10 +982,11 @@ export function createServer(o = {}) {
         'cache-control': p.startsWith('/_b/') ? 'public, max-age=31536000, immutable' : p === '/sw.js' ? 'no-cache' : 'public, max-age=3600',
         vary: 'accept-encoding',
       }
-      const ae = String(req.headers['accept-encoding'] || '')
-      for (const [enc, suffix] of [['br', '.br'], ['gzip', '.gz']]) {
-        if (ae.includes(enc) && existsSync(f + suffix)) {
-          send(res, 200, req.method === 'HEAD' ? '' : readFileSync(f + suffix), { ...headers, 'content-encoding': enc })
+      for (const enc of acceptedEncodings(req.headers['accept-encoding'])) {
+        const suffix = enc === 'br' ? '.br' : '.gz'
+        const encoded = file(c + suffix)
+        if (encoded) {
+          send(res, 200, req.method === 'HEAD' ? '' : readFileSync(encoded), { ...headers, 'content-encoding': enc })
           return true
         }
       }
@@ -621,7 +1003,7 @@ export function createServer(o = {}) {
     const t0 = performance.now()
     res.on('finish', () => {
       const ms = performance.now() - t0
-      if (ms > 1000) log('warn', 'slow request', { rid, path: req.url, status: res.statusCode, ms: Math.round(ms) })
+      if (ms > 1000) log('warn', 'slow request', { rid, path: req.$brainPath || String(req.url || '').split('?')[0], status: res.statusCode, ms: Math.round(ms) })
     })
     try {
       const full = new URL(req.url, 'http://' + (req.headers.host || 'localhost'))
@@ -633,12 +1015,14 @@ export function createServer(o = {}) {
         if (!full.pathname.startsWith(BASE)) return notFound(req, res)
         url = new URL('/' + full.pathname.slice(BASE.length) + full.search, full) // the app path
       }
+      req.$brainPath = url.pathname
+      if (native && /^\/(?:api(?:\/|$)|_brain(?:\/|$)|s\/)/.test(url.pathname)) return await native.proxy(req,res,url,rid,send)
       // redirects.json (manifest `redirects`, brain-seo server_json): exact sources first, then patterns, on the app path;
       // same-site targets get the base, the query is kept when the target has none
       const to = redirectOf(url.pathname)
       if (to && (req.method === 'GET' || req.method === 'HEAD')) {
         const loc = /^https?:\/\//.test(to[0]) ? to[0] : withBase(to[0]) + (to[0].includes('?') ? '' : url.search)
-        return send(res, to[1], '', { location: loc, 'cache-control': to[1] === 301 || to[1] === 308 ? 'public, max-age=3600' : 'no-store' })
+        return send(res, to[1], '', { location: loc, 'cache-control': to[1] === 301 || to[1] === 308 ? 'public, max-age=3600' : 'no-store' }, true)
       }
       const r = /^\/_r\/([\w-]+)\/([\w$]+)$/.exec(url.pathname)
       if (r) return await rpc(req, res, r[1], r[2], url, rid)
@@ -660,10 +1044,11 @@ export function createServer(o = {}) {
       notFound(req, res)
     } catch (e) {
       log('error', 'unhandled', { rid, path: req.url, stack: String((e && e.stack) || e) })
-      if (!res.headersSent) failPage(res, 500, rid)
+      if (!res.headersSent) failPage(res, intendedStatus(e) || 500, rid)
       else res.end()
     }
   })
+  if (native) server.once('close', () => native.close())
   server.headersTimeout = 15000
   server.requestTimeout = 30000
   return server
@@ -719,14 +1104,14 @@ export function sessionFrom(cookies, secret) {
 // `_middleware.jsbrain`: async (ctx, next) => …; may set ctx.headers (response headers) or stop with redirect/deny.
 // The same shapes come out of brain-router's redirect()/deny() in the browser.
 export const deny = (reason = 'Forbidden') => ({ deny: String(reason) })
-const samePath = u => typeof u === 'string' && u.startsWith('/') && !u.startsWith('//') && !u.startsWith('/\\')
+const samePath = u => { try { safeLocation(u); return true } catch { return false } }
 function verdict(v) {
   if (v === false) return { deny: 'Forbidden' }
   if (typeof v === 'string') v = { redirect: v }
   if (!v || typeof v !== 'object') return null
   if (v.redirect !== undefined) {
     if (!samePath(v.redirect)) throw new HttpError(500, 'redirect to another origin is not allowed: ' + v.redirect) // §31 open redirect
-    return { redirect: v.redirect, status: v.status || 303 }
+    return redirect(v.redirect, v.status ?? 303)
   }
   return v.deny !== undefined ? { deny: String(v.deny) } : null
 }
@@ -811,7 +1196,9 @@ export async function callRpc({ fn, args, ctx, key, limit = 60, timeout = 10000 
   } catch (e) {
     if (e && e.errors && typeof e.errors === 'object') return { status: 422, body: { error: e.message || 'Invalid input', errors: e.errors } }
     if (e instanceof HttpError && e.status === 504) return { status: 504, body: { error: 'Timeout' }, cause: e }
-    if (e instanceof HttpError && e.status >= 400 && e.status < 500) return { status: e.status, body: { error: e.message } }
+    const deliberate = intendedStatus(e)
+    if (deliberate && deliberate < 500) return { status: deliberate, body: { error: e instanceof HttpError ? e.message : STATUS_CODES[deliberate] } }
+    if (deliberate) return {status:deliberate,body:{error:STATUS_CODES[deliberate]},cause:e}
     return { status: 500, body: { error: 'Internal error' }, cause: e }
   }
 }
@@ -835,10 +1222,13 @@ export async function callForm({ module, raw, ctx, rules, key, limit = 60, timeo
   } catch (e) {
     if (e && e.errors && typeof e.errors === 'object') return again(e.errors, '')
     if (e instanceof HttpError && e.status >= 400 && e.status < 500) return again({}, e.message)
+    const deliberate = intendedStatus(e)
+    if (deliberate && deliberate < 500) return {status:deliberate,body:{error:STATUS_CODES[deliberate]}}
+    if (deliberate) return {status:deliberate,body:{error:STATUS_CODES[deliberate]},cause:e}
     return again({}, 'Something went wrong. Try again.', e)
   }
   if (r && r.errors) return again(r.errors, '')
-  const to = r && typeof r.redirect === 'string' && r.redirect.startsWith('/') && !r.redirect.startsWith('//') ? r.redirect : ctx.url.pathname + ctx.url.search
+  const to = r && r.redirect != null ? safeLocation(r.redirect) : ctx.url.pathname + ctx.url.search
   return { status: 303, location: to }
 }
 
@@ -852,7 +1242,15 @@ function coerce(F, schema, q, base = '', values = {}, errors = {}) {
       coerce(F, r.s, q, path, values[k], errors)
       continue
     }
-    const one = v => (r.t === 'num' ? (v === '' || v == null ? null : Number(v)) : r.t === 'bool' ? v === 'on' || v === 'true' || v === '1' : v == null ? '' : v)
+    const one = v => {
+      if (r.t === 'num') {
+        if (v == null || v.trim() === '') return null
+        // Validate the original decimal token before conversion; Number('0x10') hides invalid form input.
+        return F.check({ ...r, list: false, req: false, min: null, max: null }, v) ? v : Number(v)
+      }
+      if (r.t === 'bool') return v == null || v === '' || v === 'false' || v === '0' ? false : v === 'on' || v === 'true' || v === '1' ? true : v
+      return v == null ? '' : v
+    }
     const v = r.list ? q.getAll(path).map(one) : r.t === 'bool' ? one(q.get(path)) : one(q.get(path) ?? '')
     values[k] = v
     const msg = F.check(r, r.t === 'num' && !r.list && v === null ? '' : r.t === 'num' && !r.list && Number.isNaN(v) ? q.get(path) : v)
@@ -1015,6 +1413,7 @@ function real(p) {
   }
 }
 if (process.argv[1] && real(process.argv[1]) === real(fileURLToPath(import.meta.url))) {
+  process.env.NODE_ENV = 'production'
   const s = createServer({ dist: fileURLToPath(new URL('.', import.meta.url)) })
   const fd = ENV.BRAIN_LISTEN_FD
   const where = fd ? { fd: Number(fd) } : { port: +(ENV.PORT || 3000), host: ENV.HOST || '127.0.0.1' }

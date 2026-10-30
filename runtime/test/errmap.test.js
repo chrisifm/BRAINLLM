@@ -1,8 +1,8 @@
 // brain-err maps (INTERNALS §18, #158): in dev an error in a handler is reported at its file.brain:line, through the
 // inline source map of each module; two views with the same file name in different folders never mix.
-import { test } from 'node:test'
+import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -28,6 +28,7 @@ const vlq = v => {
   return o
 }
 const dir = mkdtempSync(join(tmpdir(), 'brain-errmap-'))
+after(() => rmSync(dir, { recursive: true, force: true }))
 function view(rel, name, hit) {
   const js = [
     `import { tpl, on } from ${JSON.stringify(rt.base + 'brain.js')};`,
@@ -71,6 +72,12 @@ test('an error thrown in a handler is reported at its .brain line; same file nam
   assert.ok(b.src.endsWith('views/users/a.brain.mjs:3'), b.src)
   assert.ok(!b.src.includes('views/a.brain'), 'no cross-mapping between the two a.brain files')
   assert.equal(a.brainStack[0], a.src)
+  assert.equal(a.location.line, 14)
+  assert.equal(a.location.column, null, 'line-only maps never invent an original source column')
+  assert.equal(a.location.precision, 'source-line')
+  assert.equal(a.generatedLocation.line, 6)
+  assert.equal(a.frames[0].source.line, 14)
+  assert.equal(a.mapping.status, 'mapped')
 })
 
 test('a module without a source map (prod) keeps the generated stack and gets no src', async () => {
@@ -86,4 +93,50 @@ test('a module without a source map (prod) keeps the generated stack and gets no
   assert.ok(r, 'recorded')
   assert.equal(r.src, undefined)
   assert.ok(r.stack.some(l => l.includes('plain.mjs')))
+})
+
+
+test('nested causes acquire independent source coordinates before the enriched notification', async () => {
+  const outerUrl = view('views/outer.brain.mjs', 'Outer', 27)
+  const causeUrl = view('comp/cause.brain.mjs', 'Cause', 9)
+  const cause = new Error('cause detail')
+  cause.stack = `Error\n    at cause (${causeUrl}:6:4)`
+  const e = new Error('mapped outer', { cause })
+  e.stack = `Error\n    at outer (${outerUrl}:6:8)`
+  let observed = null
+  const listener = r => { if (r.msg === 'mapped outer' && r.src) observed = r.causes[0].location.line }
+  E.sub.add(listener)
+  const stop = rt.fx(() => { throw e })
+  stop()
+  await until(() => observed !== null)
+  E.sub.delete(listener)
+  const r = errors.find(r => r.msg === 'mapped outer')
+  assert.equal(r.location.line, 27)
+  assert.equal(r.causes[0].location.line, 9)
+  assert.equal(r.causes[0].location.column, null)
+  assert.equal(r.causes[0].generatedLocation.column, 4)
+  assert.equal(observed, 9)
+})
+
+test('source mapping has a total deadline, finite concurrency and aborts owned loads', async () => {
+  let active = 0, peak = 0, aborted = 0
+  E.capture({ maps: true, load: (_url, { signal }) => new Promise((_, reject) => {
+    active++; peak = Math.max(peak, active)
+    signal.addEventListener('abort', () => { active--; aborted++; reject(new Error('aborted map')) }, { once: true })
+  }) })
+  const before = errors.length
+  for (let i = 0; i < 3; i++) {
+    const e = new Error(`deadline ${i}`)
+    e.stack = `Error\n    at action (file:///deadline-${i}.brain:20:3)`
+    const stop = rt.fx(() => { throw e })
+    stop()
+  }
+  await new Promise(resolve => setTimeout(resolve, 2100))
+  const records = errors.slice(before)
+  assert.equal(records.length, 3)
+  assert.ok(records.every(r => r.mapping.status === 'timeout'))
+  assert.ok(records.every(r => r.truncated.mapping && r.generatedLocation.line === 20))
+  assert.equal(peak, 2)
+  assert.equal(active, 0)
+  assert.ok(aborted >= 2 && aborted <= 3, 'only started loads are aborted; a queued request can briefly start before its own deadline')
 })

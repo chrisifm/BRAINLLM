@@ -2,6 +2,8 @@
 //! extraction, global-selector detection and the `@layer` + `@scope` wrapper of SPEC §7-§8.
 //! Native nesting is kept as-is (every target browser supports it); nothing is flattened.
 
+pub mod intern;
+
 use brain_lex::{Diag, LineIndex, Span};
 use std::collections::HashMap;
 
@@ -157,7 +159,12 @@ impl<'a> Parser<'a> {
                             items.push(CssItem::At { name, prelude, block: None, span });
                         } else if let Some(colon) = text.find(':') {
                             let name = text[..colon].trim().to_string();
-                            let value = text[colon + 1..].trim().to_string();
+                            let value = if name.starts_with("--") {
+                                // Custom properties carry raw token streams, including whitespace/comments.
+                                let end = if stop == Some(';') { self.pos - 1 } else { self.pos };
+                                let raw = &self.src[start..end];
+                                raw.find(':').map(|at| raw[at + 1..].to_string()).unwrap_or_default()
+                            } else { text[colon + 1..].trim().to_string() };
                             items.push(CssItem::Decl { name, value, span });
                         } else {
                             return Err(Diag::new(
@@ -451,7 +458,10 @@ pub fn print_items(items: &[CssItem], out: &mut String, indent: usize) {
     let pad = "  ".repeat(indent);
     for it in items {
         match it {
-            CssItem::Decl { name, value, .. } => out.push_str(&format!("{pad}{name}: {value};\n")),
+            CssItem::Decl { name, value, .. } => {
+                if name.starts_with("--") { out.push_str(&format!("{pad}{name}:{value};\n")); }
+                else { out.push_str(&format!("{pad}{name}: {value};\n")); }
+            },
             CssItem::Rule { selector, items, .. } => {
                 out.push_str(&format!("{pad}{selector} {{\n"));
                 print_items(items, out, indent + 1);

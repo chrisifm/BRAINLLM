@@ -1,9 +1,10 @@
-<meta props="title:str closeLabel:str='Close'" emits="close" expose="open close">
+<meta props="title:str closeLabel:str='Close' urlKey:str=''" emits="close" expose="open close">
 <script>
   let dlg = ref()
   // native modal <dialog>: focus moves inside, the rest of the page is inert, Escape closes
   const open = () => { if (!dlg.open) dlg.showModal() }
   const close = () => { if (dlg.open) dlg.close() }
+  fx(() => { if (dlg) return urlDialog(dlg, urlKey) })
 </script>
 <dialog bind:ref={dlg} aria-labelledby="dlg-title" on:close={emit('close')}>
   <header>
@@ -17,13 +18,14 @@
   dialog {
     width: min(520px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--glass-edge);
     border-radius: var(--radius-lg); color: var(--fg); background: var(--glass); box-shadow: var(--shadow);
-    backdrop-filter: blur(24px) saturate(1.4);
+
   }
-  dialog::backdrop { background: var(--scrim); backdrop-filter: blur(4px); }
+  dialog::backdrop { background: var(--scrim); }
   header { display: flex; align-items: center; justify-content: space-between; padding: var(--space-4) var(--space-4) 0; }
   h2 { font: 650 18px/1.3 var(--font); margin: 0; }
   .x { font-size: 22px; line-height: 1; width: 36px; height: 36px; border: 0; border-radius: var(--radius-sm); color: var(--muted); background: var(--surface); cursor: pointer; }
   .body { padding: var(--space-4); }
   footer { display: flex; justify-content: flex-end; gap: var(--space-2); padding: 0 var(--space-4) var(--space-4); }
   footer:empty { display: none; }
+  @supports (backdrop-filter: blur(1px)) { dialog { backdrop-filter: blur(24px) saturate(1.4); } dialog::backdrop { backdrop-filter: blur(4px); } }
 </style>

@@ -82,3 +82,14 @@ test('runChain: guards outer→inner (true/false/redirect/deny, returned or thro
   assert.equal(sessionFrom({ '__Host-session': v }, 'other').user, null)
   assert.equal(sessionFrom({ '__Host-session': v.slice(0, -2) + 'xx' }, 'k1').user, null)
 })
+
+test('plain deliberate client errors preserve HTTP status without exposing their messages',async()=>{
+  for(const status of [400,401,403,404,409,422,429]) {
+    const response=await callRpc({fn:async()=>{throw {status,message:'private values and driver detail'}},args:[],ctx})
+    assert.equal(response.status,status);assert.ok(!JSON.stringify(response.body).includes('private'))
+  }
+  for(const value of [{status:200},{status:599},Object.assign(new Error('private'),{status:403})]) {
+    const response=await callRpc({fn:async()=>{throw value},args:[],ctx})
+    assert.equal(response.status,500)
+  }
+})

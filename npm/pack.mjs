@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto'
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readBundle, writeNotices, FILES as CARGO_NOTICE_FILES } from './cargo-notices.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
@@ -47,7 +48,20 @@ const hostTriple = /host: (\S+)/.exec(execFileSync('rustc', ['-vV'], { encoding:
 if (!binsAt && !argv.includes('--no-build')) {
   const flags = [`--remap-path-prefix=${process.env.HOME}=~`, `--remap-path-prefix=${root}=/brainllm`].join(' ')
   execFileSync('cargo', ['build', '--release', '--locked', '-p', 'brain-cli', '--target-dir', join(root, 'target/npm')], { cwd: root, stdio: ['ignore', 'inherit', 'inherit'], env: { ...process.env, RUSTFLAGS: flags } })
+  execFileSync('cargo',['fetch','--locked'],{cwd:root,stdio:'inherit',timeout:120000})
+  execFileSync(process.execPath, [join(here,'cargo-notices.mjs'),'--binary',join(root,'target/npm/release',process.platform==='win32'?'brain.exe':'brain'),'--target',hostTriple], {cwd:root,stdio:'inherit',timeout:360000})
 }
+
+// Validate attribution bundles before replacing the owned staging directory.
+const nativeInputs = new Map(), requiredMissing = []
+for (const p of PLATFORMS) {
+  const exe='brain'+(p.exe??'')
+  const candidates=binsAt?[join(binsAt,p.key,exe)]:[p.triple===hostTriple&&join(root,'target/npm/release',exe),join(root,'target',p.triple,'release',exe)].filter(Boolean)
+  const src=candidates.find(path=>existsSync(path))
+  if(src)nativeInputs.set(p.key,{src,notices:readBundle(src,p.triple,version,readFileSync(join(root,'Cargo.lock')))})
+  else requiredMissing.push(p.key)
+}
+if(requireAll&&requiredMissing.length)throw Error('Missing native binaries: '+requiredMissing.join(', '))
 
 const out = join(here, 'dist')
 const stage = join(out, 'stage')
@@ -55,19 +69,24 @@ rmSync(out, { recursive: true, force: true })
 mkdirSync(stage, { recursive: true })
 
 // Every scoped package is public, MIT licensed and attributed to the principal author.
-const writePkg = (dir, pkg) => {
+const writePkg = (dir, pkg, cargoNotices = null) => {
   copyFileSync(join(root, 'LICENSE'), join(dir, 'LICENSE'))
+  const licenseFiles = writeNotices(dir,readFileSync(join(root,'docs/licenses/web-features-LICENSE.txt'),'utf8'),cargoNotices)
+  // A package without a files allowlist (the runtime) must keep all staged modules.
+  pkg = { ...pkg, ...(Array.isArray(pkg.files) ? {files:[...pkg.files,...licenseFiles]} : {}) }
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: pkg.name, version, ...pkg, license, author: 'Christian Irack Flores Maldonado <christian@irack.mx> (https://ingenieria.dev)', repository: { type: 'git', url: 'git+https://github.com/chrisifm/BRAINLLM.git' }, homepage: 'https://chrisifm.github.io/BRAINLLM/', publishConfig: { access: 'public', registry: 'https://registry.npmjs.org/' } }, null, 2) + '\n')
 }
 
+// Version-pinned source links keep package documentation reproducible when main evolves.
+const releaseRef = `v${version}`
 // npm renders the same marketing story; repository-relative resources become public URLs.
 const npmReadme = readFileSync(join(root, 'README.md'), 'utf8')
   .replace(/(!?\[[^\]]*\]\()([^\s)]+)(\))/g, (all, start, path, end) => {
     if (/^(?:[a-z]+:|#|\/\/)/i.test(path)) return all
-    return `${start}https://github.com/chrisifm/BRAINLLM/${start.startsWith('!') ? 'raw' : 'blob'}/main/${path}${end}`
+    return `${start}https://github.com/chrisifm/BRAINLLM/${start.startsWith('!') ? 'raw' : 'blob'}/${releaseRef}/${path}${end}`
   })
-  .replace(/src="(?![a-z]+:|\/\/)([^"]+)"/gi, (_, path) => `src="https://raw.githubusercontent.com/chrisifm/BRAINLLM/main/${path}"`)
-  .replace(/href="(?![a-z]+:|\/\/|#)([^"]+)"/gi, (_, path) => `href="https://github.com/chrisifm/BRAINLLM/blob/main/${path}"`)
+  .replace(/src="(?![a-z]+:|\/\/)([^"]+)"/gi, (_, path) => `src="https://raw.githubusercontent.com/chrisifm/BRAINLLM/${releaseRef}/${path}"`)
+  .replace(/href="(?![a-z]+:|\/\/|#)([^"]+)"/gi, (_, path) => `href="https://github.com/chrisifm/BRAINLLM/blob/${releaseRef}/${path}"`)
 
 
 // 1. platform packages
@@ -76,12 +95,13 @@ const built = []
 const missing = []
 for (const p of PLATFORMS) {
   const exe = 'brain' + (p.exe ?? '')
-  const cands = binsAt ? [join(binsAt, p.key, exe)] : [p.triple === hostTriple && join(root, 'target/npm/release', exe), join(root, 'target', p.triple, 'release', exe)].filter(Boolean)
-  const src = cands.find((c) => existsSync(c))
+  const input = nativeInputs.get(p.key)
+  const src = input?.src
   if (!src) {
     missing.push(p.key)
     continue
   }
+  const notices = input.notices
   const name = `${SCOPE}/brainllm-${p.key}`
   const dir = join(stage, `brainllm-${p.key}`)
   mkdirSync(join(dir, 'bin'), { recursive: true })
@@ -95,6 +115,7 @@ for (const p of PLATFORMS) {
     process.exit(1)
   }
   sums.push(`${createHash('sha256').update(bytes).digest('hex')}  ${p.key}/${exe}`)
+  for(const name of CARGO_NOTICE_FILES) sums.push(`${createHash('sha256').update(readFileSync(join(dirname(src),name))).digest('hex')}  ${p.key}/${name}`)
   writePkg(dir, {
     name,
     description: `The native Rust brain binary of BRAINLLM for ${p.key}. Installed automatically by ${SCOPE}/brainllm.`,
@@ -103,7 +124,7 @@ for (const p of PLATFORMS) {
     ...(p.libc ? { libc: [p.libc] } : {}),
     files: ['bin'],
     preferUnplugged: true,
-  })
+  }, notices)
   writeFileSync(join(dir, 'README.md'), `# ${name}\n\nThe native \`brain\` binary for ${p.key}, compiled from Rust. Do not install it directly: install \`${SCOPE}/brainllm\`.\n`)
   built.push({ name, dir, size: bytes.length })
 }

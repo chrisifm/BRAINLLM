@@ -8,6 +8,7 @@ mod inline;
 mod srcmap;
 mod js;
 mod template;
+mod url_state;
 
 pub use js::js_str;
 
@@ -187,7 +188,7 @@ fn compile_once(c: &Component, opts: &Options, ctx: &brain_check::Ctx, deps: Vec
     let (js, css, server_js, server_fns, i18n_keys) = generate(gc, opts, &server_srcs, inline, title_template);
     let blocks = blocks::blocks(&c.src, Path::new(&c.file));
     let (js, map) = srcmap::finish(&js, &c.file, &c.src, opts.dev && !js.is_empty());
-    let (server_js, _) = srcmap::finish(&server_js, &c.file, &c.src, false);
+    let (server_js, _) = srcmap::finish(&server_js, &c.file, &c.src, opts.dev && !server_js.is_empty());
     Ok(Output { js, css, deps, warnings: diags, names: names(c), server_js, server_fns, blocks, map, i18n_keys })
 }
 
@@ -334,6 +335,12 @@ pub fn names(c: &Component) -> Names {
     Names { classes: classes.into_iter().collect(), vars: vars.into_iter().collect(), dynamic: dynamic.into_iter().collect() }
 }
 
+/// Embedded kit components occupy a namespace no filesystem path can impersonate.
+/// The app-path identity stays stable; exact copied kit source has identical semantics.
+pub fn component_scope_key(file: &str, source: &str) -> String {
+    if brain_check::scope::kit_source(source) {format!("\0runtime-kit\0{file}")} else {file.to_string()}
+}
+
 /// Stable 6-char scope hash of a component path (FNV-1a 64 → base36).
 pub fn component_hash(file: &str) -> String {
     component_hash_len(file, 6)
@@ -371,6 +378,9 @@ pub(crate) struct Gen<'a> {
     pub(crate) scopes: Scopes,
     pub(crate) indent: usize,
     pub(crate) hash: String,
+    /// Stable public-navigation namespace, independent of CSS hash shortening and source offsets.
+    pub(crate) url_namespace: String,
+    pub(crate) dialog_index: usize,
     /// Prop name → JS of its default (only props that have one).
     pub(crate) prop_defaults: HashMap<String, String>,
     /// Static `id`s rewritten per instance (SPEC §8).
@@ -410,6 +420,17 @@ pub(crate) struct Gen<'a> {
     pub(crate) i18n_keys: BTreeSet<String>,
     /// A runtime `t()`/`locale()` call was emitted: only then are they imported (a local `t` is common).
     pub(crate) uses_i18n: bool,
+    /// Compiler-only execution checkpoint state; aliases never overlap the author's source.
+    pub(crate) budget_frames: Vec<String>,
+    pub(crate) budget_used: BTreeSet<&'static str>,
+    pub(crate) budget_prefix: String,
+    pub(crate) budget_file: String,
+    pub(crate) budget_component: String,
+    pub(crate) budget_capture_owner: bool,
+    pub(crate) static_form: bool,
+    pub(crate) scalar_form: bool,
+    pub(crate) static_form_sync: bool,
+    pub(crate) scalar_form_sync: bool,
 }
 
 /// Signals never written, derived values and effects that read nothing reactive (fixed point, conservative:
@@ -428,7 +449,7 @@ fn fold_plan(c: &Component) -> (HashSet<String>, HashSet<u32>) {
                 for d in &v.decls {
                     let Pat::Ident(id) = &d.pat else { continue };
                     match (scope::init_kind(d.init.as_ref()), d.init.as_ref().map(Expr::unparen)) {
-                        (Some(Kind::Sig), _) => sigs.push(id.name.clone()),
+                        (Some(Kind::Sig), Some(Expr::Call { callee, .. })) if matches!(callee.unparen(),Expr::Ident(k) if k.name=="sig") => sigs.push(id.name.clone()),
                         (Some(Kind::Drv), Some(Expr::Call { callee, args, .. })) if matches!(callee.unparen(), Expr::Ident(k) if k.name == "drv") => {
                             if let Some(a) = args.first() {
                                 drvs.push((id.name.clone(), a));
@@ -673,7 +694,28 @@ fn runtime_import(g: &Gen, opts: &Options) -> String {
         .filter(|n| g.used.contains(n))
         .map(|n| if g.aliased.contains(n) { format!("{n} as ${n}") } else { n.to_string() })
         .collect();
-    if names.is_empty() { String::new() } else { format!("import {{ {} }} from {};\n", names.join(", "), js_str(&opts.runtime)) }
+    let core = if names.is_empty() { String::new() } else { format!("import {{ {} }} from {};\n", names.join(", "), js_str(&opts.runtime)) };
+    format!("{core}{}{}", budget_import(g, opts), static_form_import(g, opts))
+}
+
+/// Internal helpers use exact tracked imports, never textual detection or author-visible primitives.
+fn budget_import(g: &Gen, opts: &Options) -> String {
+    if g.budget_used.is_empty() { return String::new(); }
+    let dir = opts.runtime.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
+    let names: Vec<String> = g.budget_used.iter().map(|n| format!("{n} as {}{n}", g.budget_prefix)).collect();
+    format!("import {{ {} }} from {};\n", names.join(", "), js_str(&format!("{dir}/brain-budget.js")))
+}
+
+/// An exact tracked alias, never an author-visible auto-import or textual replacement.
+fn static_form_import(g: &Gen, opts: &Options) -> String {
+    let mut imports = Vec::new();
+    if g.static_form { imports.push(format!("formStatic as {}Form", g.budget_prefix)); }
+    if g.scalar_form { imports.push(format!("formScalars as {}ScalarForm", g.budget_prefix)); }
+    if g.static_form_sync { imports.push(format!("formStaticSync as {}SyncForm", g.budget_prefix)); }
+    if g.scalar_form_sync { imports.push(format!("formScalarsSync as {}SyncScalarForm", g.budget_prefix)); }
+    if imports.is_empty() { return String::new(); }
+    let dir = opts.runtime.rsplit_once('/').map(|(d,_)|d).unwrap_or(".");
+    format!("import {{ {} }} from {};\n", imports.join(", "), js_str(&format!("{dir}/brain-form.js")))
 }
 
 /// `.jsbrain`: the script at module level, same rewrites, no component wrapper.
@@ -702,7 +744,7 @@ fn generate_module(g: &mut Gen, c: &Component, opts: &Options) -> String {
         body.push_str(&format!("import {{ serve as $serve }} from {};\n$serve({{ {} }});\n", js_str(&format!("{dir}/brain-worker.js")), fns.join(", ")));
     }
     let declared: HashSet<String> = scope::top_bindings(c).into_keys().collect();
-    let auto = auto_imports(&body, &declared, &BTreeSet::new(), opts, g.uses_i18n, &author_names(c));
+    let auto = auto_imports(&body, &declared, &BTreeSet::new(), opts, g.uses_i18n, &author_names(c), false);
     let types = types_import(g, c, &declared, opts);
     format!("{}{auto}{types}{}{body}", runtime_import(g, opts), user_imports(c, opts, &|_| true))
 }
@@ -843,7 +885,7 @@ fn author_names(c: &Component) -> HashSet<String> {
     names
 }
 
-fn auto_imports(code: &str, declared: &HashSet<String>, ui: &BTreeSet<String>, opts: &Options, i18n: bool, author: &HashSet<String>) -> String {
+fn auto_imports(code: &str, declared: &HashSet<String>, ui: &BTreeSet<String>, opts: &Options, i18n: bool, author: &HashSet<String>, pure_server: bool) -> String {
     let dir = opts.runtime.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
     let used = |name: &str| {
         let w = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
@@ -855,6 +897,7 @@ fn auto_imports(code: &str, declared: &HashSet<String>, ui: &BTreeSet<String>, o
     };
     let mut by_mod: Vec<(&str, Vec<&str>)> = Vec::new();
     for (name, module) in scope::EXT_PRIMITIVES {
+        if pure_server && !matches!(*module,"brain-time.js"|"brain-hash.js") {continue;}
         if declared.contains(*name) || !used(name) || (matches!(*name, "t" | "locale") && !i18n) || (scope::PRIMITIVES.contains(name) && !author.contains(*name))
             // Emitted by the codegen as calls only; the word in template text is not a use.
             || (matches!(*name, "dyn" | "portal" | "transition" | "lazy" | "fc" | "nx") && !code.contains(&format!("{name}("))) {
@@ -1035,7 +1078,8 @@ fn generate_server(g: &mut Gen, c: &Component, opts: &Options) -> (String, Vec<S
     let dir = opts.runtime.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
     let i18n: Vec<&str> = ["t", "locale", "fmt"].into_iter().filter(|n| !declared.contains(*n) && calls(&body, n)).collect();
     let i18n = if i18n.is_empty() { String::new() } else { format!("import {{ {} }} from {};\n", i18n.join(", "), js_str(&format!("{dir}/brain-i18n.js"))) };
-    (format!("{content}{i18n}{imports}{body}"), fns)
+    let pure = auto_imports(&body,&declared,&BTreeSet::new(),opts,false,&author_names(c),true);
+    (format!("{}{}{content}{i18n}{pure}{imports}{body}", budget_import(g, opts), static_form_import(g, opts)), fns)
 }
 
 /// `load`, `paths` and `sitemap` (§32) run on the server only.
@@ -1166,7 +1210,9 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
             .collect(),
         scopes: Scopes::new(top),
         indent: 1,
-        hash: component_hash_len(&c.file, opts.hash_len),
+        hash: component_hash_len(&component_scope_key(&c.file,&c.src), opts.hash_len),
+        url_namespace: component_hash_len(&c.file.replace('\\',"/"), 12),
+        dialog_index: 0,
         prop_defaults: HashMap::new(),
         ids,
         dyn_ids,
@@ -1186,6 +1232,20 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
         type_refs: BTreeSet::new(),
         i18n_keys: BTreeSet::new(),
         uses_i18n: false,
+        budget_frames: Vec::new(),
+        budget_used: BTreeSet::new(),
+        budget_prefix: {
+            let mut prefix = "$brainBudget".to_string();
+            while c.src.contains(&prefix) { prefix.push('_'); }
+            prefix
+        },
+        budget_file: c.file.clone(),
+        budget_component: c.name.clone(),
+        budget_capture_owner: false,
+        static_form: false,
+        scalar_form: false,
+        static_form_sync: false,
+        scalar_form_sync: false,
         channel_names: c
             .script
             .iter()
@@ -1208,6 +1268,13 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
         return (js, String::new(), String::new(), Vec::new(), g.i18n_keys.into_iter().collect());
     }
     let (server_js, server_fns) = generate_server(&mut g, c, opts);
+    // Private server checkpoints are imported by server_js itself, never leaked into the browser module.
+    g.budget_used.clear();
+    g.static_form = false;
+    g.scalar_form = false;
+    g.static_form_sync = false;
+    g.scalar_form_sync = false;
+    g.budget_capture_owner = true;
     let name = if c.name.is_empty() { "Component".to_string() } else { c.name.clone() };
 
     // Per-instance prelude: non-literal prop defaults are created once per instance so that
@@ -1253,6 +1320,7 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
             }
         }
     }
+    body.push_str(&url_state::setup(c));
     // `<meta expose="open close">`: hand the parent its imperative API at the end of setup.
     let exposed = brain_check::meta_names(c, "expose");
     if !exposed.is_empty() {
@@ -1271,12 +1339,19 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
         let t = g.template_decl(&format!("<div data-b=\"{}\" data-client aria-busy=\"true\"></div>", g.hash));
         body.insert_str(0, &format!("  if (globalThis.__brainSSR || globalThis.__brainRoute) return {t}();\n"));
     }
+    // Load preventive allocation hooks for actual client primitives, while retaining zero-JS static output.
+    let native_alloc = ["form","resource","stream","store","bus","use","provide","media","visible","watch","every","debounce","online"]
+        .iter().any(|name|g.scopes.lookup(name).is_none() && calls(&body,name));
+    if g.static_form || g.scalar_form || g.static_form_sync || g.scalar_form_sync || !g.budget_used.is_empty() || ["sig","drv","fx","list","when"].iter().any(|name|g.used.contains(name)) || native_alloc {
+        let owner = g.budget("budgetOwner");
+        body.insert_str(0, &format!("  const {}Owner = {owner}();\n", g.budget_prefix));
+    }
     // ── assemble the module ──
     let mut js = String::new();
     let wc = c.meta.iter().any(|m| m.name == "export" && m.value.as_deref() == Some("wc"));
     js.push_str(&runtime_import(&g, opts));
     if opts.dev {
-        js.push_str(&format!("import {{ dev }} from {};\n", js_str(&opts.runtime_dev)));
+        js.push_str(&format!("import {{ dev, fragment as {}Fragment }} from {};\n", g.budget_prefix, js_str(&opts.runtime_dev)));
     }
     if wc {
         js.push_str(&format!("import {{ define }} from {};\n", js_str(&opts.runtime_wc)));
@@ -1289,7 +1364,7 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
     // `scope()` wraps the export when the component provides context (see below); `expose()` is in the body.
     let author = author_names(c);
     let provides = if mentions(&body, "provide") && author.contains("provide") { "scope()" } else { "" };
-    js.push_str(&auto_imports(&format!("{module_fns}{body}{provides}"), &declared, &ui, opts, g.uses_i18n, &author));
+    js.push_str(&auto_imports(&format!("{module_fns}{body}{provides}"), &declared, &ui, opts, g.uses_i18n, &author, false));
     js.push_str(&types_import(&g, c, &declared, opts));
     // Imports used only by `load`/`server:` stay on the server; side-effect imports always stay.
     let client_code = format!("{module_fns}{body}");
@@ -1297,9 +1372,15 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
         let names = import_names(i);
         !server_srcs.contains(&i.source) && (names.is_empty() || names.iter().any(|n| mentions(&client_code, n)))
     }));
+    // Byte ranges identify only compiler-generated tpl HTML literals; source strings are never globally replaced.
+    let mut hmr_literals = Vec::new();
     for (i, h) in g.templates.iter().enumerate() {
         let tpl = if g.aliased.contains("tpl") { "$tpl" } else { "tpl" };
-        js.push_str(&format!("const $t{i} = {tpl}({});\n", js_str(h)));
+        if opts.dev {
+            js.push_str(&format!("const $t{i} = {}Fragment({tpl}(", g.budget_prefix));
+            let start=js.len();js.push_str(&js_str(h));hmr_literals.push((start,js.len()));
+            js.push_str(&format!("), {}, {i});\n",js_str(&g.hash)));
+        } else {js.push_str(&format!("const $t{i} = {tpl}({});\n", js_str(h)));}
     }
     if !g.ids.is_empty() || g.dyn_ids {
         js.push_str("let $n = 0;\n");
@@ -1341,7 +1422,10 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
     // falls back to its parent's. `<meta fallback="…">` only customizes the text. dev() stays outside so HMR finds `.h`.
     let wrapped = if c.level != Level::Micro && c.kind != FileKind::Module && scope::runtime_has("brain-guard.js", "guard") {
         let dir = opts.runtime.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
-        js.insert_str(0, &format!("import {{ guard }} from {};\n", js_str(&format!("{dir}/brain-guard.js"))));
+        let guard_import=format!("import {{ guard }} from {};\n",js_str(&format!("{dir}/brain-guard.js")));
+        // Literal offsets were recorded before this late prefix. Keep the exact generated ranges aligned.
+        for (start,end) in &mut hmr_literals {*start+=guard_import.len();*end+=guard_import.len();}
+        js.insert_str(0,&guard_import);
         js.push_str(&format!("{name}.f = {};\n", js_str(&c.file)));
         let fb = c.meta.iter().find(|m| m.name == "fallback").and_then(|m| m.value.as_deref()).map(js_str);
         // §30.3: `<meta budget="rows:200000">` raises the runtime fuse (B0908) for this component.
@@ -1355,10 +1439,20 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
     } else {
         wrapped
     };
+    let hmr_export_at=js.len();
     if opts.dev {
         js.push_str(&format!("export default dev({wrapped});\n"));
     } else {
         js.push_str(&format!("export default {wrapped};\n"));
+    }
+    if opts.dev && g.templates.len()<=64 && g.templates.iter().map(String::len).sum::<usize>()<=65536 {
+        let mut wiring=js.clone();
+        for (start,end) in hmr_literals.iter().rev(){wiring.replace_range(*start..*end,"\"__brain_static_template__\"");}
+        // Exact bounded code equality is the proof: no lossy fingerprint can authorize a DOM patch.
+        if wiring.len()<=65536 {
+            let templates=g.templates.iter().map(|html|js_str(html)).collect::<Vec<_>>().join(",");
+            js.insert_str(hmr_export_at,&format!("{name}.$hmr = {{ version: 1, wiring: {}, templates: [{templates}] }};\n",js_str(&wiring)));
+        }
     }
 
     // ── CSS ──

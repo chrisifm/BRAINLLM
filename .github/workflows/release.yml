@@ -40,6 +40,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
       - run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
       - if: matrix.musl
         run: sudo apt-get update && sudo apt-get install -y musl-tools
@@ -50,6 +52,15 @@ jobs:
         run: |
           mkdir -p bins/${{ matrix.key }}
           cp target/${{ matrix.target }}/release/brain${{ matrix.exe }} bins/${{ matrix.key }}/
+      - name: Smoke the actual native release binary
+        run: node npm/smoke-native.mjs bins/${{ matrix.key }}/brain${{ matrix.exe }}
+      - name: Collect public Cargo and standard-library notices for this binary
+        shell: bash
+        run: |
+          # Metadata can need workspace/development manifests not fetched by a single-package build.
+          cargo fetch --locked
+          rustup component add rust-docs
+          node npm/cargo-notices.mjs --binary bins/${{ matrix.key }}/brain${{ matrix.exe }} --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
         with:
           name: brain-${{ matrix.key }}
@@ -76,6 +87,8 @@ jobs:
     if: always() && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish)) && (needs.pack.result == 'success' || inputs.artifact_run != '')
     needs: pack
     runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.published-version.outputs.version }}
     # npm trusts this repo, workflow and environment; the environment deploys only from v* tags and main (settings → Environments)
     environment: npm-publish
     permissions:
@@ -111,6 +124,16 @@ jobs:
           path: pkgs
           run-id: ${{ inputs.artifact_run || github.run_id }}
           github-token: ${{ github.token }}
+      - name: Read the exact artifact version
+        id: published-version
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { readdirSync, appendFileSync } from 'node:fs'
+          const matches = readdirSync('pkgs').map(name => /^christianirack-brainllm-((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?)\.tgz$/.exec(name)).filter(Boolean)
+          if (matches.length !== 1) throw Error('Expected exactly one versioned launcher artifact')
+          appendFileSync(process.env.GITHUB_OUTPUT, `version=${matches[0][1]}\n`)
+          NODE
       # platform packages first, so the launcher's optional dependencies exist when it appears
       - run: |
           for f in pkgs/christianirack-brainllm-*-*.tgz; do case "$f" in *runtime*) ;; *) npm publish "./$f" --provenance --access public ;; esac; done
@@ -118,3 +141,27 @@ jobs:
           npm publish ./pkgs/christianirack-brainllm-[0-9]*.tgz --provenance --access public
           npm publish ./pkgs/christianirack-create-brainllm-*.tgz --provenance --access public
           npm publish ./pkgs/christianirack-create-brainll-[0-9]*.tgz --provenance --access public
+
+
+  registry-smoke:
+    needs: publish
+    if: always() && needs.publish.result == 'success'
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        os: [ubuntu-22.04, macos-15, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      # No OIDC permission, registry auth setup, token env or local binary override in this job.
+      # The script owns its npmrc/cache/home and installs both exact-version public initializers.
+      - name: Verify anonymous published installation and real CLI journeys
+        run: node npm/smoke-registry.mjs --version "${{ needs.publish.outputs.version }}" --timeout-ms 900000

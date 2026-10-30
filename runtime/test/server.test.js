@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { gzipSync } from 'node:zlib'
+import { gzipSync, brotliCompressSync } from 'node:zlib'
 import { fileURLToPath } from 'node:url'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
@@ -77,6 +77,7 @@ w('404.html', '<!doctype html><title>404</title><main><h1>Lost</h1></main>')
 w('_b/app.js', 'console.log("app")')
 w('sw.js', 'self.BRAIN_BUILD={}')
 writeFileSync(join(dist, '_b/app.js.gz'), gzipSync('console.log("app")'))
+writeFileSync(join(dist, '_b/app.js.br'), brotliCompressSync(Buffer.from('console.log("app")')))
 w('_server/manifest.json', JSON.stringify({
   v: 1, build: 'b7c1', core: '/_b/core.js',
   routes: [
@@ -137,7 +138,8 @@ test('SSR: load timeout → 504 page, load error → generic 500 (stack only in 
   assert.equal(boom.status, 500)
   const t = await boom.text()
   assert.ok(!t.includes('hunter2'))
-  assert.ok(logs.some(l => l.msg === 'load failed' && l.stack.includes('hunter2')))
+  assert.ok(logs.some(l => l.msg === 'load failed' && /at .*:\d+:\d+/.test(l.stack) && l.valuesCaptured === false))
+  assert.ok(!JSON.stringify(logs).includes('hunter2'))
   const red = await get('/users/private')
   assert.equal(red.status, 303)
   assert.equal(red.headers.get('location'), '/login')
@@ -197,7 +199,8 @@ test('RPC: 422 with field errors, timeout → 504, unexpected error → generic 
   const j = await boom.json()
   assert.equal(j.error, 'Internal error')
   assert.ok(j.rid && !JSON.stringify(j).includes('secret stack'))
-  assert.ok(logs.some(l => l.rid === j.rid && l.stack.includes('secret stack detail')))
+  assert.ok(logs.some(l => l.rid === j.rid && /at .*:\d+:\d+/.test(l.stack) && l.private === true))
+  assert.ok(!JSON.stringify(logs).includes('secret stack detail'))
   const codes = []
   for (let i = 0; i < 7; i++) codes.push((await call('who', [], { 'x-forwarded-for': '9.9.9.9' })).status)
   assert.deepEqual(codes, [200, 200, 200, 200, 200, 429, 429])
@@ -339,4 +342,19 @@ test('sitemap.xml: past 50 000 URLs in total it becomes an index of the static a
   } finally {
     s2.close()
   }
+})
+
+
+test('static Brotli: q weights, explicit exclusions and identity keep the immutable asset contract', async () => {
+  const br = await fetch(base + '/_b/app.js', {headers:{'accept-encoding':'br, gzip'}})
+  assert.equal(br.headers.get('content-encoding'),'br')
+  assert.match(br.headers.get('cache-control'),/immutable/)
+  assert.match(br.headers.get('vary'),/accept-encoding/i)
+  assert.equal(await br.text(),'console.log("app")')
+  const gzip = await fetch(base + '/_b/app.js', {headers:{'accept-encoding':'br;q=0, gzip;q=1'}})
+  assert.equal(gzip.headers.get('content-encoding'),'gzip')
+  assert.equal(await gzip.text(),'console.log("app")')
+  const identity = await fetch(base + '/_b/app.js', {headers:{'accept-encoding':'br;q=0,gzip;q=0'}})
+  assert.equal(identity.headers.get('content-encoding'),null)
+  assert.equal(await identity.text(),'console.log("app")')
 })

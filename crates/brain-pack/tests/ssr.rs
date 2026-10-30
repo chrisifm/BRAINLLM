@@ -13,7 +13,8 @@ server: async function rename(ctx, name) { if (!name) throw Object.assign(Error(
 let user = sig(props.user)
 const go = async () => { user = { ...user, name: await rename('x') } }
 </script>
-<main><h1>{user.name}</h1><button on:click={go}>Rename</button></main>"#;
+<main><h1>{user.name}</h1><button on:click={go}>Rename</button></main>
+<style>main { padding: 23px; border-radius: 13px; }</style>"#;
 
 fn app() -> PathBuf {
     let d = std::env::temp_dir().join(format!("brain-pack-ssr-{}", std::process::id()));
@@ -116,10 +117,23 @@ fn ssr_and_rpc_through_the_real_server() {
     let pick = out.files.iter().find(|(k, _)| k.starts_with("pick")).map(|(_, v)| v.clone()).unwrap_or_else(|| panic!("no pick page: {:?}", out.files.keys().collect::<Vec<_>>()));
     assert!(pick.contains("<option value=\"a\">A") && pick.contains("<option value=\"b\" selected>B"), "{pick}");
     let home = &out.files["index.html"];
-    assert!(home.contains(",core:\"/_b/") && home.contains("loading:[{rx:\"^/users/"), "the router knows which loading view to show: {home}");
+    assert!(home.contains("brain-zero-js") && !brain_pack::cache::has_executable_scripts(home), "the static home must not load a router: {home}");
     let page = out.files.iter().find(|(k, v)| k.starts_with("_server/pages/") && v.contains("User")).map(|(_, v)| v).unwrap_or_else(|| out.files.iter().find(|(k, _)| k.starts_with("_server/pages/")).unwrap().1);
+    assert!(page.contains(",core:\"/_b/") && page.contains("loading:[{rx:\"^/users/"), "the SSR router knows which loading view to show: {page}");
     assert!(page.contains("<!--brain:ssr-->") && page.contains("<script type=\"application/json\" id=\"brain-props\"><!--brain:props--></script>"), "{page}");
     assert!(page.contains("P=JSON.parse(document.getElementById('brain-props').textContent)"), "props read before the region is cleared: {page}");
+    // Private templates never embed even small view CSS: the immutable stylesheet is compressed
+    // separately from personalized HTML, protected by SRI and fully charged to the route ledger.
+    let css = out.files.iter().find(|(key, value)| key.starts_with("_b/") && key.ends_with(".css") && value.contains("23px")).expect("SSR view stylesheet");
+    assert!(page.contains(&format!("href=\"/{}\"", css.0)));
+    assert!(!page.contains("23px") && !page.contains("13px"));
+    assert!(page.contains("integrity=\"sha384-"));
+    let route_ledger = out.ledger.iter().find(|entry| entry.route == "/users/:id").unwrap();
+    let css_asset = route_ledger.assets.iter().find(|asset| asset.path == *css.0).expect("stylesheet counted by ledger");
+    assert_eq!(css_asset.kind, "css");
+    assert_eq!(css_asset.bytes.raw, css.1.len());
+    assert!(css_asset.initial);
+    assert_eq!(route_ledger.html.raw, page.len());
     assert!(out.files.contains_key("index.html") && !out.files.keys().any(|k| k.starts_with("users/")), "SSR routes have no static page");
     assert!(!out.binary.keys().any(|k| k.starts_with("_server/") || k == "server.mjs.gz"), "server code is never precompressed");
     let srv_mods: Vec<&String> = out.files.keys().filter(|k| k.starts_with("_server/") && k.ends_with(".mjs")).collect();

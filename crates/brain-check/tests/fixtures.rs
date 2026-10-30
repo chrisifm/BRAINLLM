@@ -67,12 +67,19 @@ fn expected(json: &str) -> Vec<(String, String, u32, u32)> {
 }
 
 #[test]
-fn valid_examples_are_clean() {
+fn valid_examples_have_only_explicit_boundary_warnings() {
     let mut files = Vec::new();
     brain_files(&examples(), &mut files);
     let mut bad = Vec::new();
     for f in files.iter().filter(|f| !f.to_string_lossy().contains("/invalid/")) {
         let d = run(f);
+        // This example deliberately demonstrates plain JavaScript interop. Its
+        // uninstrumented import boundary must stay visible, with exact provenance.
+        if f.strip_prefix(examples()).unwrap()==Path::new("views/dashboard.brain") {
+            assert_eq!(d.iter().map(|diag|(diag.code,diag.file.as_str(),diag.line,diag.col,diag.level)).collect::<Vec<_>>(),[("B0912","views/dashboard.brain",6,3,brain_parse::Severity::Warning)],"{d:?}");
+            assert!(!d[0].msg.is_empty() && !d[0].fix.is_empty());
+            continue;
+        }
         if !d.is_empty() {
             bad.push(d.iter().map(|d| d.to_string()).collect::<Vec<_>>().join("\n"));
         }

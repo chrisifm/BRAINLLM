@@ -7,13 +7,25 @@
 pub const HOME: &str = "https://chrisifm.github.io/BRAINLLM/";
 pub const REPO: &str = "https://github.com/chrisifm/BRAINLLM";
 pub mod gzip;
+mod brotli;
+mod build_cache;
+mod feedback;
+pub use feedback::Optimization;
+pub use build_cache::Stats as BuildCacheStats;
+pub mod ledger;
 pub mod impact;
 pub mod cache;
 pub mod classes;
-mod server;
+pub mod cssdedup;
+mod css_values;
+pub mod server;
+mod server_runtime;
+mod runtime_shake;
+mod navigation;
 pub mod prerender;
 pub mod routes;
 pub mod sha;
+pub mod dependencies;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -95,6 +107,10 @@ pub struct Output {
     pub report: Vec<ReportRow>,
     /// Build signature (§35.7): hash of everything in dist/; the same source gives the same signature.
     pub signature: String,
+    /// Final emitted asset accounting, split into initial and deferred JavaScript.
+    pub ledger: Vec<ledger::PageLedger>,
+    pub build_cache: BuildCacheStats,
+    pub optimizations: Vec<Optimization>,
 }
 
 /// Bytes one page downloads: its HTML plus every JS/CSS file it references.
@@ -115,24 +131,7 @@ pub struct ReportRow {
 /// Build-step cache in `<app>/.brain/cache/<kind>/` keyed by the input's content hash (INTERNALS §28: the build
 /// reuses work whose input did not change). Failures to read or write the cache only cost a recomputation.
 fn cached_bytes(root: &Path, kind: &str, input: &[u8], f: impl FnOnce() -> Result<Vec<u8>, String>) -> Result<Vec<u8>, String> {
-    let mut h: u64 = 0xcbf29ce484222325;
-    for b in input.iter().chain(kind.as_bytes()).chain(env!("BRAIN_PACK_FP").as_bytes()) {
-        h ^= *b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    let file = root.join(".brain/cache").join(kind).join(format!("{h:016x}"));
-    if let Ok(b) = std::fs::read(&file) {
-        return Ok(b);
-    }
-    let out = f()?;
-    if let Some(d) = file.parent() {
-        let _ = std::fs::create_dir_all(d);
-    }
-    let tmp = file.with_extension(format!("tmp{}", std::process::id()));
-    if std::fs::write(&tmp, &out).is_ok() {
-        let _ = std::fs::rename(&tmp, &file);
-    }
-    Ok(out)
+    build_cache::get(root,kind,input,env!("BRAIN_PACK_FP"),f)
 }
 
 /// brain.json `"base"` (#148): where the app is hosted, normalized to `/` or `/x/…/`. Read here so the build needs
@@ -468,26 +467,29 @@ pub fn rewrite_specifiers(src: &str, orig_dir: &Path, f: &mut dyn FnMut(&Path) -
     rewrite_imports(src, &mut |spec| if spec.starts_with("./") || spec.starts_with("../") { f(&orig_dir.join(spec)).map(Some) } else { Ok(None) })
 }
 
-/// `new URL("<s>", import.meta.url)` references with byte ranges: how compiled code points at a Web Worker module
-/// (`*.worker.jsbrain` / `*.worker.js`, INTERNALS §35.5).
-pub fn worker_refs(js: &str) -> Result<Vec<(usize, usize, String)>, String> {
+/// Literal URL resources use URL-relative semantics and are distinct from module import specifiers.
+pub fn url_refs(js: &str) -> Result<Vec<(usize, usize, String)>, String> {
     use brain_min::lex::{lex, Kind};
-    let t = lex(js)?;
-    let mut out = Vec::new();
-    for i in 3..t.len().saturating_sub(2) {
-        if t[i].kind == Kind::Str && t[i - 1].punct("(") && t[i - 2].ident("URL") && t[i - 3].ident("new") && t[i + 1].punct(",") && t[i + 2].ident("import") {
-            out.push((t[i].start, t[i].start + t[i].text.len(), t[i].text[1..t[i].text.len() - 1].to_string()));
+    let t=lex(js)?;let mut candidates=Vec::new();
+    for i in 3..t.len().saturating_sub(7) {
+        if t[i].kind==Kind::Str && t[i-1].punct("(") && t[i-2].ident("URL") && t[i-3].ident("new") && t[i+1].punct(",") && t[i+2].ident("import") && t[i+3].punct(".") && t[i+4].ident("meta") && t[i+5].punct(".") && t[i+6].ident("url") && (t[i+7].punct(")") || t[i+7].punct(",")) {candidates.push(i);}
+    }
+    if candidates.is_empty(){return Ok(vec![]);}
+    let native=dependencies::free_identifier_sites(js,&["URL"])?;
+    let mut out=Vec::new();
+    for i in candidates {
+        if native.get("URL").is_some_and(|sites|sites.contains(&t[i-2].start)) {
+            out.push((t[i].start,t[i].start+t[i].text.len(),t[i].text[1..t[i].text.len()-1].to_owned()));
         }
     }
     Ok(out)
 }
-
-/// Import specifiers and worker references of a module, in source order.
+/// JS URL resources (including worker entries). Binary assets never become Brain worker wrappers.
+pub fn worker_refs(js: &str) -> Result<Vec<(usize, usize, String)>, String> {
+    Ok(url_refs(js)?.into_iter().filter(|(_,_,s)|s.ends_with(".js")||s.ends_with(".mjs")||s.ends_with(".jsbrain")).collect())
+}
 fn module_refs(js: &str) -> Result<Vec<(usize, usize, String)>, String> {
-    let mut v = specifiers(js)?;
-    v.extend(worker_refs(js)?);
-    v.sort();
-    Ok(v)
+    let mut v=specifiers(js)?;v.extend(url_refs(js)?);v.sort();Ok(v)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -508,6 +510,8 @@ struct Module {
     deps: Vec<(String, Node)>,
     /// Specifiers among `deps` that start a Web Worker: their modules run off the page (no modulepreload, no CSS).
     workers: Vec<String>,
+    /// Literal non-JS URL resource specifier to contained source file.
+    assets: Vec<(String,String)>,
 }
 
 fn resolve(from: &str, spec: &str) -> Result<Node, String> {
@@ -539,6 +543,7 @@ const INTERACTIVE: &[&str] = &["o", "s", "d", "f", "b", "u", "r"];
 /// `resource()`…): a view that reaches any of them mounts on load; an island would only wake up on the first event
 /// (QA #172 S22, QA #21 F4). `None` = every export of that module. Pure helpers (`debounce`) keep the island.
 const LIVE: &[(&str, Option<&[&str]>)] = &[
+    ("brain-interop.js", Some(&["interop"])),
     ("brain-env.js", Some(&["mounted", "watch", "every", "media", "visible", "dyn", "portal", "route"])),
     ("brain-data.js", Some(&["resource", "stream", "online"])),
     ("brain-ch.js", None),
@@ -571,6 +576,7 @@ fn build_inner(
     seo_of: &dyn Fn(&str) -> Vec<(String, String)>,
     measure: bool,
 ) -> Result<Output, String> {
+    let cache_before=build_cache::stats();
     let mut warnings = Vec::new();
     // brain.json `base` (#148): every URL the build writes starts with `pre` (`/app`, or empty at the root); dist/
     // file paths never do
@@ -583,6 +589,10 @@ fn build_inner(
     let pre = base.trim_end_matches('/').to_string();
     let key_of = |u: &str| -> String { url_key(u, &pre).to_string() };
     let mut modules: HashMap<Node, Module> = HashMap::new();
+    let mut dependency_resolver = dependencies::Resolver::new(&input.root)?;
+    let mut dependency_assets: BTreeMap<String,Vec<u8>> = BTreeMap::new();
+    let mut source_hashes: HashMap<Node, String> = HashMap::new();
+    let mut optimizations = Vec::new();
     let mut needs_server: HashSet<String> = HashSet::new();
     // views whose server module exports something the build evaluates (seo/head/paths), and those with paths()
     let mut has_server: HashSet<String> = HashSet::new();
@@ -596,6 +606,7 @@ fn build_inner(
     let mut content_load: HashSet<String> = HashSet::new();
     // rel → (client js, server js, server fns) of every compiled file with server code
     let mut server_src: BTreeMap<String, (String, String, Vec<String>)> = BTreeMap::new();
+    let mut server_runtime = server_runtime::Uses::default();
 
     let progress = input.progress;
     let report = |phase: &str, done: usize, total: usize| {
@@ -624,6 +635,9 @@ fn build_inner(
     // the client router is a graph module (it imports the core: its import must point at the hashed core, QA #172)
     if input.runtime_siblings.iter().any(|(n, _)| n == "brain-router.js") {
         stack.push(Node::Runtime("brain-router.js".into()));
+        if input.runtime_siblings.iter().any(|(n, _)| n == "brain-prefetch.js") {
+            stack.push(Node::Runtime("brain-prefetch.js".into()));
+        }
     }
     if i18n.is_some() && input.runtime_siblings.iter().any(|(n, _)| n == "brain-i18n.js") {
         stack.push(Node::Runtime("brain-i18n.js".into()));
@@ -665,8 +679,9 @@ fn build_inner(
         report("compile", modules.len() + 1, 0);
         let (js, css) = match &n {
             Node::File(rel) => {
-                let src = std::fs::read_to_string(input.root.join(rel)).map_err(|e| format!("{rel}: {e}"))?;
-                if rel.ends_with(".js") {
+                let src = if dependencies::is_foreign(rel) { dependency_resolver.read(rel)? } else { std::fs::read_to_string(input.root.join(rel)).map_err(|e| format!("{rel}: {e}"))? };
+                source_hashes.insert(n.clone(),sha::sha256(src.as_bytes()).iter().map(|b|format!("{b:02x}")).collect());
+                if rel.ends_with(".js") || rel.ends_with(".mjs") {
                     (src, String::new())
                 } else {
                     let u = (input.compile)(&src, Path::new(rel))?;
@@ -691,6 +706,9 @@ fn build_inner(
                         has_forms.insert(rel.clone());
                     }
                     if !u.server_js.trim().is_empty() {
+                        // Only runtime roots enter this graph; private user modules remain in _server/.
+                        server_runtime.collect(&input.root,rel,&u.server_js,input.compile,0)?;
+                        stack.extend(server_runtime.exports.keys().cloned().map(Node::Runtime));
                         server_src.insert(rel.clone(), (u.js.clone(), u.server_js.clone(), u.server_fns.clone()));
                     }
                     (u.js, u.css)
@@ -718,25 +736,40 @@ fn build_inner(
             Node::Runtime(r) => format!("runtime/{r}"),
         };
         let mut deps = Vec::new();
-        let worker_specs: Vec<String> = worker_refs(&js)?.into_iter().map(|(_, _, s)| s).collect();
-        for (_, _, spec) in module_refs(&js)? {
+        let mut assets=Vec::new();
+        let literal_urls=url_refs(&js)?;
+        let urls:HashSet<String>=literal_urls.iter().map(|(_,_,s)|s.clone()).collect();
+        let worker_specs:Vec<String>=literal_urls.iter().filter(|(_,_,s)|s.ends_with(".js")||s.ends_with(".mjs")||s.ends_with(".jsbrain")).map(|(_,_,s)|s.clone()).collect();
+        let mut references=specifiers(&js)?;references.extend(literal_urls);references.sort();
+        for (_, _, spec) in references {
+            if urls.contains(&spec) {
+                let Some(file)=dependency_resolver.resolve_url(&from,&spec)? else {continue;};
+                if !(file.ends_with(".js") || file.ends_with(".mjs") || file.ends_with(".jsbrain")) {
+                    if !dependency_assets.contains_key(&file) {let bytes=dependency_resolver.read_asset(&file)?;dependency_assets.insert(file.clone(),bytes);}
+                    assets.push((spec,file));continue;
+                }
+                let dependency=if !dependencies::is_foreign(&file) && file.ends_with(".worker.js") {Node::Worker(file)}else{Node::File(file)};
+                stack.push(dependency.clone());deps.push((spec,dependency));continue;
+            }
             let d = match &n {
                 // runtime siblings import ./brain.js; kit components import their neighbours (`ui/x` → `ui/y`)
                 Node::Runtime(r) if spec.starts_with("./") => {
                     let dir = r.rsplit_once('/').map_or(String::new(), |(d, _)| format!("{d}/"));
                     Node::Runtime(format!("{dir}{}", spec.trim_start_matches("./")))
                 }
-                _ => match resolve(&from, &spec)? {
+                _ => match if let Some(file) = dependency_resolver.resolve(&from,&spec)? { Node::File(file) } else { resolve(&from, &spec)? } {
                     // a plain JS worker gets the generated entry that serves its exports
-                    Node::File(r) if worker_specs.contains(&spec) && r.ends_with(".js") => Node::Worker(r),
+                    Node::File(r) if worker_specs.contains(&spec) && !dependencies::is_foreign(&r) && r.ends_with(".worker.js") => Node::Worker(r),
                     d => d,
                 },
             };
             stack.push(d.clone());
             deps.push((spec, d));
         }
-        modules.insert(n, Module { js, css, deps, workers: worker_specs });
+        modules.insert(n, Module { js, css, deps, workers: worker_specs, assets });
     }
+
+    dependency_resolver.verify()?;
 
     // 1b. Production: class names renamed everywhere the compiler wrote them (#260, INTERNALS §11.6)
     let shell_src = std::fs::read_to_string(input.root.join("app.brain")).unwrap_or_default();
@@ -764,7 +797,8 @@ fn build_inner(
         BTreeMap::new()
     };
     if !class_map.is_empty() {
-        for m in modules.values_mut() {
+        for (node,m) in modules.iter_mut() {
+            if matches!(node,Node::File(file) if dependencies::is_foreign(file)) { continue; }
             m.js = classes::rename_js(&m.js, &class_map);
             m.css = classes::rename_css(&m.css, &class_map);
         }
@@ -793,56 +827,40 @@ fn build_inner(
     let mut min_src: HashMap<Node, String> = HashMap::new();
     for (i, (n, m)) in modules.iter().enumerate() {
         report("minify", i + 1, modules.len());
-        let src = if input.minify && *n != core_node {
-            let b = cached_bytes(&input.root, "min", m.js.as_bytes(), || brain_min::minify_module(&m.js, true).map(String::into_bytes))?;
-            String::from_utf8(b).map_err(|e| e.to_string())?
+        let src = if input.minify && matches!(n,Node::File(file) if dependencies::is_foreign(file)) {
+            let mut keep = HashSet::new();
+            let mut proven = true;
+            for consumer in modules.values() {
+                for (specifier,dependency) in &consumer.deps {
+                    if dependency != n { continue; }
+                    if consumer.workers.contains(specifier) { proven=false; break; }
+                    match dependencies::used_exports(&consumer.js,specifier)? {
+                        Some(names)=>keep.extend(names),
+                        None=>{proven=false;break;}
+                    }
+                }
+                if !proven { break; }
+            }
+            let source = if proven {
+                match feedback::shake(&m.js,&keep) {
+                    Ok((code,detail))=>{
+                        optimizations.push(Optimization{source:match n{Node::File(f)=>f.clone(),_=>unreachable!()},original_source_hash:source_hashes.get(n).cloned(),stage:"foreign-esm-tree-shake",detail});code
+                    },
+                    Err(_)=>{warnings.push("A foreign ESM module retained all exports because safe tree shaking could not be proven.".into());m.js.clone()}
+                }
+            } else { m.js.clone() };
+            format!("{}{}",dependencies::notices(&m.js)?,dependencies::compact(&source)?)
+        } else if input.minify && *n != core_node {
+            let (code, detail) = feedback::minify(&input.root, &m.js).map_err(|e|format!("{}: production module optimization failed: {e}", match n {Node::File(f)|Node::Worker(f)=>f.as_str(),Node::Runtime(f)=>f.as_str()}))?;
+            optimizations.push(Optimization {source:match n {Node::File(f)|Node::Worker(f)=>f.clone(),Node::Runtime(f)=>format!("runtime/{f}")},original_source_hash:source_hashes.get(n).cloned(),stage:"module-minify",detail});
+            code
         } else {
             m.js.clone()
         };
         min_src.insert(n.clone(), src);
     }
     if input.minify && modules.contains_key(&core_node) {
-        // pages always mount (`m`) or hydrate (`h`); internal exports used by sibling modules stay
-        let mut keep: HashSet<String> = ["m", "h"].iter().map(|s| s.to_string()).collect();
-        for (n, src) in &min_src {
-            if *n == core_node {
-                continue;
-            }
-            let from_core = |sp: &str| brain_min::is_runtime_spec(sp);
-            keep.extend(brain_min::imported_names(src, &from_core)?);
-        }
-        let shaken = brain_min::tree_shake(&min_src[&core_node], &keep)?;
-        min_src.insert(core_node.clone(), shaken);
-        // sibling runtime modules (brain-ch.js, brain-form.js…): keep only the exports some module imports
-        let siblings: Vec<String> = modules.keys().filter_map(|n| match n {
-            // kit components are imported by default export: never shaken
-            // kit components (default export) and the router (imported by the page script) keep all their exports
-            Node::Runtime(r) if r != "brain.js" && !r.ends_with(".brain") => Some(r.clone()),
-            _ => None,
-        }).collect();
-        for sib in siblings {
-            let node = Node::Runtime(sib.clone());
-            // the page script imports `router` from the router module (it is not a graph edge)
-            // and the dictionary chunks (written later) import `add` from the i18n module
-            let mut keep: HashSet<String> = match sib.as_str() {
-                "brain-router.js" => ["router".to_string()].into(),
-                "brain-i18n.js" => ["add".to_string()].into(),
-                _ => HashSet::new(),
-            };
-            let is_it = |sp: &str| sp.ends_with(&format!("/{sib}")) || sp == format!("./{sib}");
-            // a module loaded with import() is used through property access (`m.hydrate`): keep all its exports
-            if min_src.iter().any(|(n, src)| *n != node && dynamic_import_of(src, &is_it)) {
-                continue;
-            }
-            for (n, src) in &min_src {
-                if *n == node {
-                    continue;
-                }
-                keep.extend(brain_min::imported_names(src, &is_it)?);
-            }
-            let shaken = brain_min::tree_shake(&min_src[&node], &keep)?;
-            min_src.insert(node, shaken);
-        }
+        runtime_shake::apply(&mut min_src, &server_runtime.exports, &mut optimizations)?;
     }
     // public/ assets named in JS (`"/og.png"`) point at their immutable copy, before the chunk is hashed, so the
     // chunk's name changes with the asset (QA #124). Same URLs as cache.rs (`hashed_url`).
@@ -850,7 +868,7 @@ fn build_inner(
         let public: BTreeMap<String, String> = cache::public_urls(&input.root).into_iter().map(|(k, v)| (k, format!("{pre}{v}"))).collect();
         if !public.is_empty() {
             for (n, src) in min_src.iter_mut() {
-                if matches!(n, Node::File(_)) {
+                if matches!(n, Node::File(file) if !dependencies::is_foreign(file)) {
                     *src = cache::rewrite(src, &public);
                 }
             }
@@ -859,10 +877,24 @@ fn build_inner(
     // links inside the app's templates (`<a href=/about>`) go under the base too
     if !pre.is_empty() {
         for (n, src) in min_src.iter_mut() {
-            if matches!(n, Node::File(_)) {
+            if matches!(n, Node::File(file) if !dependencies::is_foreign(file)) {
                 *src = prefix_links(src, &pre);
             }
         }
+    }
+    // Preserve reachable SDK layout for import.meta.url and dynamic filename defaults, inside a versioned namespace.
+    let mut foreign_snapshot=dependency_resolver.summary().stringify();
+    let mut foreign_code:BTreeMap<&String,&String>=BTreeMap::new();
+    for(node,source)in &min_src {if let Node::File(file)=node {if dependencies::is_foreign(file){foreign_code.insert(file,source);}}}
+    for(file,source)in &foreign_code {foreign_snapshot.push_str(&format!("{}:{file}{}",file.len(),sha::sha256(source.as_bytes()).iter().map(|b|format!("{b:02x}")).collect::<String>()));}
+    for(file,bytes)in &dependency_assets {foreign_snapshot.push_str(file);foreign_snapshot.push_str(&sha::sha256(bytes).iter().map(|b|format!("{b:02x}")).collect::<String>());}
+    foreign_snapshot.push_str(env!("CARGO_PKG_VERSION"));
+    let foreign_namespace=format!("_b/npm/{}",sha::sha256(foreign_snapshot.as_bytes()).iter().take(16).map(|b|format!("{b:02x}")).collect::<String>());
+    let mut asset_urls=BTreeMap::new();
+    let mut emitted_assets=BTreeMap::new();
+    for(file,bytes)in dependency_assets {
+        let key=if dependencies::is_foreign(&file){format!("{foreign_namespace}/{file}")}else{format!("_b/{}.{}",sha::sha256(&bytes).iter().map(|b|format!("{b:02x}")).collect::<String>(),Path::new(&file).extension().and_then(|e|e.to_str()).unwrap_or("bin"))};
+        asset_urls.insert(file,format!("{pre}/{key}"));emitted_assets.insert(key,bytes);
     }
     let mut url_of: HashMap<Node, String> = HashMap::new();
     let mut files = BTreeMap::new();
@@ -875,6 +907,8 @@ fn build_inner(
         files: &mut BTreeMap<String, String>,
         pre: &str,
         jsx: &str,
+        foreign_namespace: &str,
+        asset_urls: &BTreeMap<String,String>,
     ) -> Result<String, String> {
         if let Some(u) = url_of.get(n) {
             return Ok(u.clone());
@@ -887,14 +921,13 @@ fn build_inner(
         let mut js = String::with_capacity(src.len());
         let mut last = 0;
         for (a, b, spec) in module_refs(src)? {
-            let Some((_, d)) = m.deps.iter().find(|(s, _)| *s == spec) else { continue };
-            let u = emit(d, modules, min_src, url_of, visiting, files, pre, jsx)?;
+            let u=if let Some((_,d))=m.deps.iter().find(|(s,_)|*s==spec) {emit(d,modules,min_src,url_of,visiting,files,pre,jsx,foreign_namespace,asset_urls)?}else if let Some((_,file))=m.assets.iter().find(|(s,_)|*s==spec){asset_urls.get(file).cloned().ok_or("URL asset was not emitted")?}else{continue};
             js.push_str(&src[last..a]);
             js.push_str(&format!("\"{u}\""));
             last = b;
         }
         js.push_str(&src[last..]);
-        let key = format!("_b/{}.{jsx}", content_hash(&js));
+        let key=match n {Node::File(file) if dependencies::is_foreign(file)=>format!("{foreign_namespace}/{file}"),_=>format!("_b/{}.{jsx}",content_hash(&js))};
         let url = format!("{pre}/{key}");
         files.insert(key, js);
         visiting.remove(n);
@@ -905,7 +938,7 @@ fn build_inner(
     let mut nodes: Vec<Node> = modules.keys().cloned().collect();
     nodes.sort();
     for n in &nodes {
-        emit(n, &modules, &min_src, &mut url_of, &mut visiting, &mut files, &pre, ext.js())?;
+        emit(n, &modules, &min_src, &mut url_of, &mut visiting, &mut files, &pre, ext.js(),&foreign_namespace,&asset_urls)?;
     }
 
     // 3. Shared tokens CSS + one CSS file per view (styles of every module it reaches statically).
@@ -1161,14 +1194,16 @@ fn build_inner(
         }
         let css: String = reach.iter().map(|n| modules[n].css.as_str()).collect::<Vec<_>>().join("\n");
         // a ui/ child inlined into two parents brings its scoped CSS twice (COMPILER §13): keep one copy
-        let css = dedupe_scopes(&css);
+        let (css, css_report) = cssdedup::dedupe(&css);
+        optimizations.push(Optimization {source:view.clone(),original_source_hash:None,stage:"generated-css",detail:css_report.to_json()});
         let css = format!("{}{css}", if shell_style.trim().is_empty() { String::new() } else { format!("@layer view{{{shell_style}}}") });
         // the view's CSS travels inside the region (#35): the router swaps it with the view, so a client navigation
-        // brings the next view's styles and drops the old ones; small sheets go inline (critical CSS, no request)
+        // brings the next view's styles and drops the old ones. Static small sheets stay inline; SSR sheets
+        // are immutable assets: their compression/cache does not include personalized HTML or props.
         let mut view_css = String::new();
         if !css.trim().is_empty() {
             let css = minify_css(&css);
-            if css.len() <= INLINE_CSS {
+            if !*ssr && css.len() <= INLINE_CSS {
                 view_css = format!("<style>{css}</style>");
             } else {
                 let key = format!("_b/{}.{}", content_hash(&css), ext.css());
@@ -1265,8 +1300,8 @@ fn build_inner(
                 let loading = if with_loading.is_empty() {
                     String::new()
                 } else {
-                    let items: Vec<String> = with_loading.iter().map(|(r, u)| format!("{{rx:{},view:{}}}", prerender_json(&routes::regex_source(r)), prerender_json(u))).collect();
-                    format!(",core:{},loading:[{}]", prerender_json(&core), items.join(","))
+                    let entries: Vec<_> = with_loading.iter().map(|(route,url)|((*route).clone(),url.clone())).collect();
+                    format!(",core:{},loading:[{}]", prerender_json(&core), navigation::loading(&entries))
                 };
                 // #283: `guards` = folder route → chunk of its `_guard.jsbrain` (RUNTIME runs them outermost first)
                 let mut guard_dirs: BTreeMap<String, String> = BTreeMap::new();
@@ -1285,7 +1320,8 @@ fn build_inner(
                     let items: Vec<String> = guard_dirs.iter().map(|(d, u)| format!("{}:{}", prerender_json(d), prerender_json(u))).collect();
                     format!(",guards:{{{}}}", items.join(","))
                 };
-                format!("<script type=\"module\">import{{router}}from\"{u}\";router({{region:\"#brain-view\"{loading}{guards}}})</script>")
+                let worker = url_of.get(&Node::Runtime("brain-prefetch.js".into())).map(|u| format!(",prefetchWorker:{}",prerender_json(u))).unwrap_or_default();
+                format!("<script type=\"module\">import{{router}}from\"{u}\";router({{region:\"#brain-view\"{loading}{guards}{worker},fullLoad:__BRAIN_ZERO_PATHS__}})</script>")
             }
             None => {
                 warnings.push("brain-router.js is not embedded: pages navigate with full reloads".into());
@@ -1355,7 +1391,21 @@ fn build_inner(
         return Err(runaway.join("\n"));
     }
     let app_seo = seo_of("app.brain");
-    // With client navigation, a static page can become the host of an interactive one: every page then registers
+    // Successful static routes need neither hydration nor a router. Guarded routes keep the current
+    // client/server integration until their authorization lifecycle can be proven independent of it.
+    let zero_routes: HashSet<String> = plans.iter().filter(|p| {
+        !p.interactive && !p.ssr && p.prerender && !cache::has_executable_scripts(&shell) && !cache::has_executable_scripts(&p.head)
+        && folder_chain(&p.view, "_guard.jsbrain").is_empty()
+        && folder_chain(&p.view, "_middleware.jsbrain").is_empty()
+        && rendered.get(&p.route).is_some_and(|result| result.as_ref().is_ok_and(|r| r.failed.is_empty() && !r.fetched && !cache::has_executable_scripts(&r.head) && !cache::has_executable_scripts(&r.html)))
+    }).map(|p| p.route.clone()).collect();
+    let mut zero_paths: Vec<String> = zero_routes.iter().filter(|route|route.as_str()!="*")
+        .map(|route|format!("{}{}",pre,if route=="/" {"/"} else {route.trim_end_matches('/')}))
+        .map(|path|if path=="/" {path} else {path.trim_end_matches('/').to_string()}).collect();
+    zero_paths.sort();
+    let zero_json = format!("[{}]",zero_paths.iter().map(|path|prerender_json(path)).collect::<Vec<_>>().join(","));
+    let router_tag = router_tag.replace("__BRAIN_ZERO_PATHS__",&zero_json);
+    // Nonstatic pages retain hydration across client navigation; static targets use full navigation.
     // hydrate() so islands arriving through the router resume (the core is one cached chunk).
     let hydrate_everywhere = !router_tag.is_empty() && plans.iter().any(|p| p.interactive);
     // Islands resume through the core's hydrate(), which loads brain-island.js and hands it the core functions
@@ -1435,17 +1485,20 @@ fn build_inner(
                 warnings.push(format!("{}: no island root found; the page mounts on load instead", p.view));
             }
         }
-        if script.is_empty() && hydrate_everywhere {
+        let zero_js = zero_routes.contains(&p.route);
+        if script.is_empty() && hydrate_everywhere && !zero_js {
             script = hydrate_tag.clone();
         }
-        let head = if script == hydrate_tag { format!("{head}{island_preload}") } else { head };
+        let mut head = if script == hydrate_tag { format!("{head}{island_preload}") } else { head };
+        if zero_js { head.push_str("<meta name=\"brain-zero-js\" content=\"1\">"); }
         // the dictionary loads before the page mounts or resumes (t() is synchronous)
         // (a static page renders its text at build: its dictionary only served the prerender)
         if let (Some(d), true) = (&p.dict, p.interactive && script.starts_with("<script type=\"module\">")) {
             script = script.replacen("<script type=\"module\">", &format!("<script type=\"module\">import\"{d}\";"), 1);
         }
         // page scripts go INSIDE the region (the router recreates them after a swap); the router itself stays outside
-        let slot = format!("<div id=\"brain-view\">{}{body_html}{script}</div>{router_tag}", p.css);
+        let page_router = if zero_js { "" } else { router_tag.as_str() };
+        let slot = format!("<div id=\"brain-view\">{}{body_html}{script}</div>{page_router}", p.css);
         let mut doc = shell.replace("<slot />", &slot).replace("<slot/>", &slot);
         if let (Some(loc), Some((def, _))) = (&p.locale, &i18n) {
             doc = html_lang(&doc, loc, def);
@@ -1625,6 +1678,10 @@ fn build_inner(
         warnings.extend(out.warnings);
         post_csp = out.csp;
     }
+    // A packaged Wasm module is an explicit compile feature; never grant general JavaScript eval.
+    if emitted_assets.keys().any(|path|path.ends_with(".wasm")) {post_csp.push(("script-src".into(),"'wasm-unsafe-eval'".into()));}
+    // Explicit compiled-page feature opt-in: exact Google SDK sources, never a token-controlled URL.
+    if pages.iter().any(|page|cache::google_signin(&page.html)) {post_csp.extend(cache::google_csp());}
     // #148: root-relative links of every page (the author's and SEO's) go under the base, after SEO checked them
     if !pre.is_empty() {
         for p in pages.iter_mut() {
@@ -1632,6 +1689,7 @@ fn build_inner(
             files.insert(p.file.clone(), p.html.clone());
         }
     }
+    navigation::apply(&mut pages, &mut files, &pre);
     // an empty chunk nobody references (its only importers lost the import to tree-shaking) is not written (QA #292)
     let empty: Vec<String> = files.iter().filter(|(k, v)| k.starts_with("_b/") && k.ends_with(&format!(".{}", ext.js())) && v.trim().is_empty()).map(|(k, _)| k.clone()).collect();
     for k in empty {
@@ -1644,6 +1702,7 @@ fn build_inner(
     // 4b. Caching (§35): public/ hashing, headers, service worker and its registration
     let refs: Vec<cache::PageRef> = pages.iter().map(|p| cache::PageRef { route: &p.route, file: &p.file }).collect();
     let mut public_bin: BTreeMap<String, Vec<u8>> = post_bin;
+    public_bin.extend(emitted_assets);
     // measuring skips it: the signature changes on every edit and would show as noise in every page's bytes
     let applied = if measure { cache::Applied { warnings: vec![], build_hash: String::new() } } else { cache::apply(&input.root, &cache::CacheCfg { base: base.clone(), ext: (if ext == Ext::Brain { "brain" } else { "web" }).into(), ..input.cache.clone() }, &refs, &post_csp, &mut files, &mut public_bin) };
     warnings.extend(applied.warnings);
@@ -1675,11 +1734,11 @@ fn build_inner(
             p.html = h.clone();
         }
     }
-    // 5. Report and precompression (.gz next to every text file; brotli is left to the deploy step, §26).
+    // 5. Report and precompression (.gz and .br next to static text files, §26).
     // gzip with optimal parsing is the slowest pass: cached by content and spread over threads
     // host config files are read by the host, never downloaded: no .gz for them
     // text files, plus the binary copies whose format compresses (SVG, JSON, XML, icons…: QA #21 F7)
-    let compressible = |p: &str| p.rsplit_once('.').is_some_and(|(_, e)| matches!(e, "svg" | "json" | "txt" | "xml" | "webmanifest" | "ico" | "map" | "wasm" | "csv" | "md"));
+    let compressible = |p: &str| p.rsplit_once('.').is_some_and(|(_, e)| matches!(e, "svg" | "json" | "txt" | "xml" | "webmanifest" | "ico" | "map" | "wasm" | "csv" | "md" | "css"));
     let entries: Vec<(&String, &[u8])> = files
         .iter()
         .filter(|(p, _)| *p != "_headers" && *p != "server.mjs" && !p.starts_with("_brain/") && !p.starts_with("_server/"))
@@ -1688,8 +1747,9 @@ fn build_inner(
         .collect();
     let results: std::sync::Mutex<BTreeMap<String, Vec<u8>>> = Default::default();
     let next = std::sync::atomic::AtomicUsize::new(0);
+    let compressed = std::sync::atomic::AtomicUsize::new(0);
     report("compress", 0, entries.len());
-    let workers = std::thread::available_parallelism().map_or(4, |n| n.get()).min(entries.len().max(1));
+    let workers = std::thread::available_parallelism().map_or(2, |n| n.get()).min(2).min(entries.len().max(1));
     let root = input.root.clone(); // `input` holds the (non-Sync) compile closure: share only the root
     std::thread::scope(|sc| {
         for _ in 0..workers {
@@ -1697,13 +1757,15 @@ fn build_inner(
                 let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let Some((p, c)) = entries.get(i) else { break };
                 let z = cached_bytes(&root, "gz", c, || Ok(gzip::gzip(c, 15))).unwrap_or_else(|_| gzip::gzip(c, 15));
+                let br = cached_bytes(&root, "br-9.1.1-q11-w22", c, || brotli::compress(c));
                 let mut r = results.lock().unwrap();
+                if let Ok(br) = br { if br.len() < c.len() { r.insert(format!("{p}.br"), br); } }
                 // a .gz that is not smaller is never served (`gzip_static` would pick it anyway)
                 if z.len() < c.len() {
                     r.insert(format!("{p}.gz"), z);
                 }
                 if let Some(f) = progress {
-                    f("compress", r.len(), entries.len());
+                    f("compress", compressed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1, entries.len());
                 }
             });
         }
@@ -1711,13 +1773,15 @@ fn build_inner(
     let mut binary = results.into_inner().unwrap();
     binary.extend(public_bin);
     let raw_of: HashMap<String, usize> = url_of.iter().map(|(n, u)| (key_of(u), modules[n].js.len())).collect();
+    let sources: HashMap<String, String> = url_of.iter().map(|(node,url)| (key_of(url), match node {Node::File(path)=>path.clone(),Node::Runtime(path)=>format!("runtime/{path}"),Node::Worker(path)=>path.clone()})).collect();
+    let mut ledger = Vec::new();
     let mut report = Vec::new();
     for p in pages.iter().filter(|p| !p.route.starts_with('!')) {
         let (mut js_raw, mut js_min, mut js_gz, mut css, mut css_gz) = (0, 0, 0, 0, 0);
         let mut seen = HashSet::new();
         // Conservative route graph: count each emitted JS/CSS asset once, including lazy chunks.
         // Images/fonts are separate payloads, not view code. Incompressible files transfer raw bytes.
-        let mut queue: Vec<String> = p.html.match_indices("/_b/").map(|(i, _)| p.html[i + 1..].chars().take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/')).collect()).collect();
+        let mut queue = ledger::html_asset_refs(&p.html, &base);
         while let Some(f) = queue.pop() {
             if !seen.insert(f.clone()) { continue; }
             let Some(c) = files.get(&f) else { continue };
@@ -1725,7 +1789,7 @@ fn build_inner(
             if f.ends_with(".css") || f.ends_with(".cssbrain") {
                 css += c.len();
                 css_gz += z;
-            } else if f.ends_with(".js") || f.ends_with(".jsbrain") {
+            } else if ledger::javascript(&f) {
                 js_min += c.len();
                 js_gz += z;
                 js_raw += raw_of.get(&f).copied().unwrap_or(c.len());
@@ -1734,6 +1798,7 @@ fn build_inner(
                 }
             }
         }
+        ledger.push(ledger::page(&p.route,&p.file,&p.html,&base,&files,&binary,&sources)?);
         report.push(ReportRow {
             route: p.route.clone(),
             js_raw,
@@ -1745,7 +1810,8 @@ fn build_inner(
             html_gz: transfer_size(p.html.as_bytes(), binary.get(&format!("{}.gz", p.file)).map(Vec::as_slice)),
         });
     }
-    Ok(Output { files, binary, pages, warnings, report, signature })
+    optimizations.sort_by(|a,b|(&a.source,a.stage).cmp(&(&b.source,b.stage)));
+    Ok(Output { files, binary, pages, warnings, report, signature, ledger, optimizations, build_cache:build_cache::stats().since(cache_before) })
 }
 
 /// Match production serving: precompressed bytes exist only when smaller than raw output.
@@ -1848,13 +1914,14 @@ pub fn strip_meta_seo(src: &str) -> String {
 /// Placeholder for a route's preload list in the server manifest until the SRI pass has run.
 const LINKS: &str = "\u{1}links:";
 
-/// The server code imports only `brain:content` and its `load` reads nothing of the request (#273).
+/// Collection readers may carry compiler execution checkpoints; other imports and request reads stay server-only (#273).
 fn content_only_load(server_js: &str) -> bool {
     if !(server_js.contains("function load(") || server_js.contains("const load =")) {
         return false;
     }
     let Ok(specs) = specifiers(server_js) else { return false };
-    if specs.is_empty() || specs.iter().any(|(_, _, s)| s != "brain:content") {
+    if !specs.iter().any(|(_, _, s)| s == "brain:content")
+        || specs.iter().any(|(_, _, s)| s != "brain:content" && s != "/@brain/brain-budget.js") {
         return false;
     }
     !["ctx.request", "ctx.req", "ctx.cookies", "ctx.session", "ctx.user", "ctx.query", "ctx.url", "ctx.headers", "ctx.ip", "ctx.env", "ctx.params"]
@@ -1943,60 +2010,10 @@ fn decode_rendered(b: &[u8]) -> Option<prerender::Rendered> {
     Some(prerender::Rendered { html: f[0].into(), seo, head: f[2].into(), props: f[3].into(), fetched: f[4] == "1", failed: f[5].split('\u{1e}').filter(|x| !x.is_empty()).map(String::from).collect(), probe: f[6].split('\u{1e}').filter(|x| !x.is_empty()).map(String::from).collect() })
 }
 
-/// Drops every `@scope (…) { … }` block identical to one seen earlier in the same stylesheet (at any depth, e.g.
-/// inside `@layer view{…}`): the same component's styles reached twice. Strings and comments are skipped.
+/// Interns only adjacent rules/groups in an identical generated CSS context.
+/// Nonadjacent or differently scoped rules are preserved because cascade equivalence is unproven.
 pub fn dedupe_scopes(css: &str) -> String {
-    let b = css.as_bytes();
-    let mut seen: HashSet<&str> = HashSet::new();
-    let mut out = String::with_capacity(css.len());
-    let (mut i, mut last) = (0usize, 0usize);
-    while i < b.len() {
-        match b[i] {
-            q @ (b'"' | b'\'') => {
-                i += 1;
-                while i < b.len() && b[i] != q {
-                    i += if b[i] == b'\\' { 2 } else { 1 };
-                }
-                i += 1;
-            }
-            b'/' if b.get(i + 1) == Some(&b'*') => {
-                i = css[i + 2..].find("*/").map_or(b.len(), |e| i + 2 + e + 2);
-            }
-            b'@' if b[i..].starts_with(b"@scope") => {
-                // the block: up to the `}` that closes its `{`
-                let Some(open) = css[i..].find('{').map(|o| i + o) else { break };
-                let (mut depth, mut j) = (0usize, open);
-                while j < b.len() {
-                    match b[j] {
-                        b'{' => depth += 1,
-                        b'}' => {
-                            depth -= 1;
-                            if depth == 0 {
-                                break;
-                            }
-                        }
-                        q @ (b'"' | b'\'') => {
-                            j += 1;
-                            while j < b.len() && b[j] != q {
-                                j += if b[j] == b'\\' { 2 } else { 1 };
-                            }
-                        }
-                        _ => {}
-                    }
-                    j += 1;
-                }
-                let end = (j + 1).min(b.len());
-                if !seen.insert(&css[i..end]) {
-                    out.push_str(&css[last..i]);
-                    last = end;
-                }
-                i = end;
-            }
-            _ => i += 1,
-        }
-    }
-    out.push_str(&css[last..]);
-    out
+    cssdedup::dedupe(css).0
 }
 
 /// Index just after the `>` that closes the start tag at `start`, skipping `>` inside quoted values and inside
@@ -2046,75 +2063,13 @@ fn take_block(src: &str, tag: &str) -> (String, String) {
 /// Conservative CSS minifier: drops comments and collapses whitespace outside strings; keeps one space where a
 /// token boundary needs it (`a b`, `1px solid`, `and (`), removes it around `{}:;,>` and before `!important`.
 pub fn minify_css(css: &str) -> String {
-    shorten_css(&minify_css_ws(css))
+    css_values::preserve(css, |masked| shorten_css(&minify_css_ws(masked)))
 }
 
 /// Shortest forms after whitespace minification: `#aabbcc` → `#abc`, `0.5` → `.5`, and `0px`/`0em`… → `0` outside
 /// parentheses (inside `calc()` a unitless 0 is invalid). Strings are left untouched.
 fn shorten_css(css: &str) -> String {
-    let b: Vec<char> = css.chars().collect();
-    let mut out = String::with_capacity(css.len());
-    let mut i = 0;
-    let mut depth = 0u32;
-    let is_num_start = |prev: Option<char>| prev.is_none_or(|p| matches!(p, ':' | ' ' | ',' | '(' | '-' | '+' | '/' | '*'));
-    while i < b.len() {
-        let c = b[i];
-        if c == '"' || c == '\'' {
-            let start = i;
-            i += 1;
-            while i < b.len() && b[i] != c {
-                if b[i] == '\\' {
-                    i += 1;
-                }
-                i += 1;
-            }
-            i = (i + 1).min(b.len());
-            out.extend(&b[start..i]);
-            continue;
-        }
-        if c == '(' {
-            depth += 1;
-        } else if c == ')' {
-            depth = depth.saturating_sub(1);
-        }
-        // #aabbcc → #abc (only in values: the previous char is `:`, space, `,` or `(`)
-        if c == '#' && i + 7 <= b.len() && matches!(out.chars().last(), Some(':' | ' ' | ',' | '(')) {
-            let h: Vec<char> = b[i + 1..i + 7].to_vec();
-            let ends = b.get(i + 7).is_none_or(|n| !n.is_ascii_hexdigit());
-            if ends && h.iter().all(|x| x.is_ascii_hexdigit()) && h[0] == h[1] && h[2] == h[3] && h[4] == h[5] {
-                out.push('#');
-                out.push(h[0].to_ascii_lowercase());
-                out.push(h[2].to_ascii_lowercase());
-                out.push(h[4].to_ascii_lowercase());
-                i += 7;
-                continue;
-            }
-        }
-        if c == '0' && is_num_start(out.chars().last()) {
-            // 0.5 → .5
-            if b.get(i + 1) == Some(&'.') && b.get(i + 2).is_some_and(|d| d.is_ascii_digit()) {
-                i += 1;
-                continue;
-            }
-            // 0px → 0 (not inside parentheses, not 0.x, not part of a longer number)
-            if depth == 0 {
-                let mut j = i + 1;
-                while j < b.len() && b[j].is_ascii_alphabetic() {
-                    j += 1;
-                }
-                let unit: String = b[i + 1..j].iter().collect();
-                let ends = b.get(j).is_none_or(|n| matches!(n, ';' | '}' | ' ' | ',' | '!' | ')'));
-                if ends && matches!(unit.as_str(), "px" | "em" | "rem" | "vh" | "vw" | "pt" | "cm" | "mm" | "in" | "ex" | "ch") {
-                    out.push('0');
-                    i = j;
-                    continue;
-                }
-            }
-        }
-        out.push(c);
-        i += 1;
-    }
-    out
+    css_values::shorten(css)
 }
 
 fn minify_css_ws(css: &str) -> String {
@@ -2267,12 +2222,15 @@ mod tests {
     }
 
     #[test]
-    fn identical_scoped_blocks_ship_once() {
-        let child = "@scope ([data-b=\"k1\"]) to ([data-b]){:where(:scope){color:red}.a{content:\"}\"}}";
-        let css = format!("@layer view{{{child}.p1{{x:1}}}}\n@layer view{{.p2{{x:2}}{child}}}\n@layer view{{@scope ([data-b=\"k2\"]) to ([data-b]){{b{{y:1}}}}}}");
+    fn identical_scoped_blocks_require_adjacent_compatible_context() {
+        let child = "@scope ([data-b=\"k1\"]) to ([data-b]){.a{color:red}}";
+        let css = format!("@layer view{{{child}}}@layer view{{{child}}}");
         let out = dedupe_scopes(&css);
         assert_eq!(out.matches("data-b=\"k1\"").count(), 1, "{out}");
-        assert!(out.contains(".p1{x:1}") && out.contains(".p2{x:2}") && out.contains("data-b=\"k2\""), "{out}");
+        let css = format!("@layer view{{{child}.a{{color:blue}}{child}}}");
+        assert_eq!(dedupe_scopes(&css),css,"source order across intervening rules is observable");
+        let css=format!("@media (width>1px){{{child}}}@media (width>2px){{{child}}}");
+        assert_eq!(dedupe_scopes(&css),css,"identical scopes under different conditions are not duplicates");
         assert_eq!(dedupe_scopes("a{b:c}"), "a{b:c}");
     }
 
@@ -2282,6 +2240,11 @@ mod tests {
         assert!(!content_only_load("import { page } from \"brain:content\";\nexport async function load(ctx) { return { posts: page(ctx.query.p) } }"), "reads the request");
         assert!(!content_only_load("import db from \"../lib/db.js\";\nexport async function load() { return db.all() }"), "another import");
         assert!(!content_only_load("export async function load() { return { n: Date.now() } }"), "no collection: stays on the server");
+        let instrumented="import { budgetEnter } from \"/@brain/brain-budget.js\"; import { page } from \"brain:content\"; export async function load() { budgetEnter({},null); return page('notes',1) }";
+        assert!(content_only_load(instrumented), "owned execution checkpoints do not add a request dependency");
+        assert!(!content_only_load(&instrumented.replace("page('notes',1)","page('notes',ctx.query.p)")), "instrumentation cannot authorize request reads");
+        assert!(!content_only_load(&instrumented.replace("brain:content","brain:other")), "a collection reader is still required");
+        assert!(!content_only_load(&instrumented.replace("/@brain/brain-budget.js","../brain-budget.js")), "foreign lookalikes remain server-only");
     }
 
     #[test]

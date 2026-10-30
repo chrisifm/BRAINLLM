@@ -24,8 +24,19 @@ export function forLLM(d) {
     })
   if (d.fix) out.push(`fix: ${d.fix}`)
   if (d.brainStack) out.push('stack:', ...[].concat(d.brainStack))
+  if (d.location || d.frames || d.causes || d.rid) out.push('structured trace (development only):', JSON.stringify(traceOf(d)))
+  if (d.mapping?.status && d.mapping.status !== 'mapped') out.push('Location mapping is incomplete; do not treat generated coordinates as original source coordinates.')
+  out.push('Agent next steps: inspect the exact source revision, apply a focused change, run brain check --json, then reproduce the failing action. Record evidence with brain history and refresh brain quality.')
   if (d.file) out.push('brain check --json:', JSON.stringify((byFile.get(d.file) || [d]).map(({ snippet, ...x }) => x)))
   return out.join('\n')
+}
+
+function traceOf(d) {
+  return { schemaVersion: 1, requestId: d.rid || d.requestId || null, component: d.comp || null,
+    location: d.location || null, generatedLocation: d.generatedLocation || null,
+    mapping: d.mapping || null, truncated: d.truncated || null,
+    frames: Array.isArray(d.frames) ? d.frames.slice(0, 24) : [],
+    causes: Array.isArray(d.causes) ? d.causes.slice(0, 6) : [] }
 }
 
 function item(d, i) {
@@ -35,6 +46,7 @@ function item(d, i) {
     : ''
   return `<li class="${d.level === 'warning' || d.level === 'info' ? d.level : 'error'}"><p class="t"><b>${esc(d.code || 'Error')}</b> <span>${esc(loc)}</span></p>` +
     `<p>${esc(d.msg)}</p>${snip}${d.fix ? `<p class="fix">fix: ${esc(d.fix)}</p>` : ''}` +
+    `${d.location || d.frames || d.causes ? `<details><summary>Development trace and mapping</summary><pre>${esc(JSON.stringify(traceOf(d), null, 2))}</pre></details>` : ''}` +
     `<button type="button" data-copy="${i}">Copy for the LLM</button></li>`
 }
 

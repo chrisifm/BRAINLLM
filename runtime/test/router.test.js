@@ -710,3 +710,174 @@ test('predictive prefetch: action, file, api and token links are skipped; a writ
   globalThis.fetch = real
   delete globalThis.addEventListener, delete globalThis.removeEventListener, delete globalThis.dispatchEvent
 })
+
+test('prefetch graph works without IntersectionObserver and never bypasses link opt-outs', async () => {
+  globalThis.location = new URL('http://x.test/a')
+  const { predict } = await rt.sibling('brain-router.js')
+  const real = globalThis.fetch, asked = []
+  globalThis.fetch = async (u, o) => (asked.push(new URL(u).pathname), real(u, o))
+  globalThis.requestIdleCallback = f => setTimeout(f, 0)
+  doc.body.innerHTML = '<a href="/b">B</a><div data-prefetch="false"><a href="/c">C</a></div><script type="application/json" id="brain-next">{"v":1,"next":[{"url":"/b"},{"url":"/c"},{"url":"/logout"}]}</script>'
+  const p = predict({}, () => true)
+  p.scan()
+  await new Promise(r => setTimeout(r, 10))
+  assert.deepEqual(asked, ['/b'])
+  assert.equal(await (await p.take('http://x.test/b')).text(), pages['/b'])
+  p.stop()
+  globalThis.fetch = real
+  delete globalThis.requestIdleCallback
+})
+
+test('prefetch write epoch rejects an in-flight response already awaited by navigation', async () => {
+  globalThis.location = new URL('http://x.test/a')
+  const { predict } = await rt.sibling('brain-router.js')
+  const on = {}
+  Object.assign(globalThis, {
+    addEventListener: (t, f) => (on[t] ||= new Set()).add(f),
+    removeEventListener: (t, f) => on[t]?.delete(f),
+    dispatchEvent: e => (on[e.type] || []).forEach(f => f(e)),
+  })
+  const real = globalThis.fetch
+  let finish, aborted = false
+  globalThis.fetch = async (_, o) => {
+    o.signal.addEventListener('abort', () => { aborted = true })
+    await new Promise(resolve => { finish = resolve })
+    return { ok: true, status: 200, headers: new Headers({ 'content-type': 'text/html', 'cache-control': 'private' }), text: async () => '<main>Previous user</main>' }
+  }
+  doc.body.innerHTML = '<a href="/b">B</a>'
+  const p = predict({}, () => true)
+  doc.body.querySelector('a').dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
+  const taking = p.take('http://x.test/b')
+  globalThis.dispatchEvent(new Event('brain:write'))
+  finish()
+  assert.equal(await taking, null)
+  assert.equal(aborted, true)
+  p.stop()
+  globalThis.fetch = real
+  delete globalThis.addEventListener; delete globalThis.removeEventListener; delete globalThis.dispatchEvent
+})
+
+test('prefetch uses the dedicated worker bridge and terminates it with the router', async () => {
+  globalThis.location = new URL('http://x.test/a')
+  const { predict } = await rt.sibling('brain-router.js')
+  const sent = [], instances = []
+  globalThis.Worker = class {
+    constructor(url) { this.url = url; instances.push(this) }
+    postMessage(m) {
+      sent.push(m)
+      if (!m.cancel) queueMicrotask(() => this.onmessage({ data: { id: m.id, ok: true, status: 200, url: m.url, headers: [['content-type','text/html']], text: '<main>Worker page</main>', bytes: 24, assets: [] } }))
+    }
+    terminate() { this.terminated = true }
+  }
+  doc.body.innerHTML = '<a href="/b">B</a>'
+  const p = predict({ prefetchWorker: '/_b/worker.js' }, () => true)
+  doc.body.querySelector('a').dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 5))
+  assert.equal(instances[0].url, 'http://x.test/_b/worker.js')
+  assert.equal(sent[0].url, 'http://x.test/b')
+  assert.equal(await (await p.take('http://x.test/b')).text(), '<main>Worker page</main>')
+  p.stop()
+  assert.equal(instances[0].terminated, true)
+  delete globalThis.Worker
+})
+
+test('prefetch keeps static build HTML but revalidates private/dynamic pages and honors public max-age', async () => {
+  globalThis.location = new URL('http://x.test/a')
+  const { predict } = await rt.sibling('brain-router.js')
+  const real = globalThis.fetch
+  try {
+    for (const control of ['private, no-store', 'no-cache', 'no-store']) {
+      globalThis.fetch = async () => ({ ok:true, status:200, headers:new Headers({'content-type':'text/html','cache-control':control}), text:async()=>'<main>Dynamic</main>' })
+      doc.body.innerHTML = '<a href="/b">B</a>'
+      const p=predict({},()=>true)
+      doc.body.querySelector('a').dispatchEvent(new MouseEvent('pointerover',{bubbles:true}))
+      await new Promise(r=>setTimeout(r,5))
+      assert.equal(await p.take('http://x.test/b'),null,control)
+      p.stop()
+    }
+    globalThis.fetch = async () => ({ok:true,status:200,headers:new Headers({'content-type':'text/html','cache-control':'no-cache','x-brain-static':'1'}),text:async()=>'<main>Static build</main>'})
+    const staticPage=predict({},()=>true)
+    doc.body.querySelector('a').dispatchEvent(new MouseEvent('pointerover',{bubbles:true}))
+    await new Promise(r=>setTimeout(r,5))
+    assert.equal(await (await staticPage.take('http://x.test/b')).text(),'<main>Static build</main>')
+    staticPage.stop()
+    globalThis.fetch = async () => ({ok:true,status:200,headers:new Headers({'content-type':'text/html','cache-control':'public, max-age=1'}),text:async()=>'<main>Public data</main>'})
+    const publicPage=predict({},()=>true)
+    doc.body.querySelector('a').dispatchEvent(new MouseEvent('pointerover',{bubbles:true}))
+    await new Promise(r=>setTimeout(r,5))
+    const now=Date.now
+    try {Date.now=()=>now()+2000;assert.equal(await publicPage.take('http://x.test/b'),null)} finally {Date.now=now;publicPage.stop()}
+  } finally {globalThis.fetch=real}
+})
+
+test('zero-JS destinations keep intent prefetch but use full document navigation', async () => {
+  delete globalThis.navigation
+  hist()
+  page()
+  const hard = [], asked = [], oldFetch = globalThis.fetch
+  globalThis.fetch = async (u, options) => { asked.push([new URL(u, location.href).pathname, options?.headers?.['x-brain-prefetch']]); return oldFetch(u, options) }
+  const r = router({ parse, hard: u => hard.push(u), fullLoad: ['/b'] })
+  try {
+    const a = doc.createElement('a'); a.setAttribute('href', '/b'); doc.querySelector('main').appendChild(a)
+    a.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
+    await new Promise(resolve => setTimeout(resolve, 10))
+    assert.ok(asked.some(([path, prefetch]) => path === '/b' && prefetch === '1'))
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true }); a.dispatchEvent(click)
+    assert.equal(click.defaultPrevented, false)
+    await r.go('/b/')
+    assert.deepEqual(hard, ['/b/'])
+    assert.equal(doc.querySelector('main h1').textContent, 'Page A')
+  } finally { r.stop(); globalThis.fetch = oldFetch }
+})
+
+test('loading groups preserve ordered array matches, individual regex and fallback priority', async () => {
+  const { writeFileSync, mkdtempSync, rmSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const { pathToFileURL } = await import('node:url')
+  const directory = mkdtempSync(join(tmpdir(), 'brain-loading-groups-'))
+  const core = pathToFileURL(join(directory, 'core.mjs')).href
+  const first = pathToFileURL(join(directory, 'first.mjs')).href
+  const fallback = pathToFileURL(join(directory, 'fallback.mjs')).href
+  writeFileSync(join(directory, 'core.mjs'), 'export const m=(C,el)=>(el.appendChild(C()),()=>{})')
+  writeFileSync(join(directory, 'first.mjs'), 'export default()=>Object.assign(document.createElement("p"),{textContent:"First loader"})')
+  writeFileSync(join(directory, 'fallback.mjs'), 'export default()=>Object.assign(document.createElement("p"),{textContent:"Fallback loader"})')
+  const originalFetch = globalThis.fetch
+  try {
+    for (const [loading, expected] of [
+      [[{ rx: ['^/unused$', '^/b$'], view: first }, { rx: '^/b$', view: fallback }], 'First loader'],
+      [[{ rx: '^/b$', view: fallback }], 'Fallback loader'],
+      [[{ rx: ['^/unused$', '^/other$'], view: first }, { rx: '^/b$', view: fallback }], 'Fallback loader']
+    ]) {
+      hist()
+      const { m } = page()
+      globalThis.fetch = async (url, options) => { await new Promise(resolve => setTimeout(resolve, 400)); return originalFetch(url, options) }
+      const instance = router({ parse, hard: () => assert.fail('unexpected full navigation'), core, loading })
+      try {
+        const navigation = instance.go('/b')
+        await new Promise(resolve => setTimeout(resolve, 300))
+        assert.equal(m.textContent, expected)
+        await navigation
+        assert.equal(m.textContent, 'Page Bb')
+      } finally { instance.stop() }
+    }
+  } finally {
+    globalThis.fetch = originalFetch
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+
+test('navigate rejects raw controls, whitespace and backslashes before URL normalization', async () => {
+  const { navigate } = await rt.sibling('brain-router.js')
+  const old = globalThis.location, calls = []
+  globalThis.location = { assign: v => calls.push(v), replace: v => calls.push(v) }
+  try {
+    for (const target of ['/\n/evil.test', '/\r/evil.test', '/\t/evil.test', '/ path', '/\\evil.test', '/x\u0000y', '/x\u007fy']) {
+      assert.throws(() => navigate(target), { message: 'Invalid navigation target' })
+    }
+    assert.equal(calls.length, 0)
+    navigate('/safe'); navigate('https://example.test/path?q=ok')
+    assert.deepEqual(calls, ['/safe', 'https://example.test/path?q=ok'])
+  } finally { globalThis.location = old }
+})

@@ -3,7 +3,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <title>{{name}}</title>
 </head>
@@ -22,9 +22,11 @@
 </html>
 
 <style>
-  .top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-3) var(--space-5); }
+  .top { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-2); padding: max(var(--space-3), env(safe-area-inset-top)) max(var(--space-4), env(safe-area-inset-right)) var(--space-3) max(var(--space-4), env(safe-area-inset-left)); min-width: 0; }
   .brand { font-weight: 650; text-decoration: none; color: var(--fg); }
-  nav { display: flex; gap: var(--space-4); }
-  nav a { text-decoration: none; color: var(--muted); }
+  nav { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); min-width: 0; }
+  nav a { display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; color: var(--muted); }
   nav a:hover, nav a[aria-current="page"] { color: var(--fg); }
+  @media (min-width: 42rem) { .top { flex-direction: row; align-items: center; justify-content: space-between; } }
+  @media (min-width: 64rem) { .top { padding-inline: max(var(--space-6), env(safe-area-inset-left)); } }
 </style>

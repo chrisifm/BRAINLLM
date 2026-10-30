@@ -3,26 +3,29 @@
 <script>
   import auth from '../server/auth.jsbrain'
   import session from '../channels/session.jsbrain'
+  import Button from '../ui/button.brain'
 
-  export async function load() {
-    return { configured: auth.configured() }
+  export async function load(ctx) {
+    const native = Boolean(ctx.backend)
+    return { configured: native || auth.configured(), native }
   }
-  server: async function login(ctx, v) {
-    const user = auth.check(v.email, v.password)
+  server: async function login(ctx, v, requestedNext) {
+    const result = ctx.backend ? await ctx.backend.login(v) : null
+    if (!ctx.backend && process.env.BRAIN_BACKEND_URL) throw { status: 503 }
+    const user = result ? result.user : auth.check(v.email, v.password)
     if (!user) throw { errors: { password: 'Wrong email or password' } }
-    ctx.session.set(user)
-    // back to the page that asked for the login; only a path of this app (no open redirect)
-    const next = /^\/(?![\/\\])/.test(ctx.query.next ?? '') ? ctx.query.next : '/account'
-    // without JS the form post answers 303 to `redirect`; with JS the submit below navigates there
+    if (!ctx.backend) ctx.session.set(user)
+    // One server-side redirect decision covers JavaScript and progressive form posts.
+    const candidate = requestedNext ?? ctx.query.next ?? ''
+    const next = typeof candidate === 'string' && candidate.length <= 8192 && /^\/(?![\/\\])[^\\\x00-\x20\x7f]*$/.test(candidate) && !/^\/%2f/i.test(candidate) && !/%(?:0[0-9a-f]|1[0-9a-f]|5c|7f)/i.test(candidate) && !/%20/i.test(candidate.split(/[?#]/)[0]) ? candidate : '/account'
     return { redirect: next, user }
   }
   let f = form({ email: 'email!', password: 'str!' }, {
     submit: async (v) => {
-      const r = await login(v)
+      const r = await login(v, new URLSearchParams(location.search).get('next'))
       session.user = r.user
-      // the RPC call does not carry this page's ?next=, so read it here (same rule: a path of this app)
-      const next = new URLSearchParams(location.search).get('next') ?? ''
-      navigate(/^\/(?![\/\\])/.test(next) ? next : r.redirect)
+      f.reset()
+      navigate(r.redirect)
     },
   })
 </script>
@@ -31,15 +34,15 @@
   <h1>Sign in</h1>
   {#if props.configured}
     <form on:submit={f.submit}>
-      <label>Email <input type="email" autocomplete="email" bind:value={f.v.email}></label>
+      <label>Email <input type="email" autocomplete="email" bind:value={f.v.email} disabled={f.busy}></label>
       {#if f.err.email}<p class="err">{f.err.email}</p>{/if}
-      <label>Password <input type="password" autocomplete="current-password" bind:value={f.v.password}></label>
+      <label>Password <input type="password" autocomplete="current-password" bind:value={f.v.password} disabled={f.busy}></label>
       {#if f.err.password}<p class="err">{f.err.password}</p>{/if}
       {#if f.error}<p role="alert">{f.error}</p>{/if}
       <Button type="submit" busy={f.busy}>Sign in</Button>
     </form>
   {:else}
-    <p role="status">Authentication is not configured. Set up a real provider in server/auth.jsbrain (the demo login exists only in development).</p>
+    <p role="status">Authentication is not configured. Connect the native backend with BRAIN_BACKEND_URL, or configure a real provider in server/auth.jsbrain. The demo exists only in development.</p>
   {/if}
 </main>
 

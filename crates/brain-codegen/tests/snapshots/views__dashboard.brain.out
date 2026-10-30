@@ -1,5 +1,6 @@
 import { guard } from "/@brain/brain-guard.js";
 import { sig, drv, tpl, insert, attr, on, list, when } from "/@brain/brain.js";
+import { budgetEnter as $brainBudgetbudgetEnter, budgetLeave as $brainBudgetbudgetLeave, budgetOwner as $brainBudgetbudgetOwner, budgetResume as $brainBudgetbudgetResume, budgetStep as $brainBudgetbudgetStep, budgetSuspend as $brainBudgetbudgetSuspend } from "/@brain/brain-budget.js";
 import UserForm from "../comp/user-form.brain";
 import api from "../lib/api.js";
 import fmt from "../lib/format.jsbrain";
@@ -10,92 +11,93 @@ const $t3 = tpl("<tr><td><!></td> <td><!></td> <td><!></td> <td><button>Edit</bu
 const $t4 = tpl("<tr><td colspan=\"4\"><!></td></tr>");
 const $t5 = tpl("<main data-b=\"0m3tc1\" class=\"dash\"><header><h1>Users</h1> <span><!> active of <!></span> <input placeholder=\"Search by name or email\" aria-label=\"Search users\"> <button>New</button></header> <!> <!> <table><thead><tr><th>Name</th><th>Email</th><th>Status</th><th></th></tr></thead> <tbody><!></tbody></table></main>");
 function Dashboard($p = {}) {
+  const $brainBudgetOwner = $brainBudgetbudgetOwner();
   const users = sig($p.users);
   const query = sig('');
   const editing = sig(null);
   const busy = sig(false);
   const error = sig('');
-  const shown = drv(() => {
+  const shown = drv(() => { const $$brainBudgetFrame2 = $brainBudgetbudgetEnter({ file: "views/dashboard.brain", component: "Dashboard", line: 19, column: 19 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame2); {
     const q = query.v.trim().toLowerCase();
     if (q === '') {
       return users.v;
     }
-    return users.v.filter((u) => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
-  });
-  const activeCount = drv(() => users.v.filter((u) => u.active).length);
-  const save = async (data) => {
+    return users.v.filter((u) => { const $$brainBudgetFrame3 = $brainBudgetbudgetEnter({ file: "views/dashboard.brain", component: "Dashboard", line: 22, column: 25 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame3); { return u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q); } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame3); } });
+  } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame2); } });
+  const activeCount = drv(() => { const $$brainBudgetFrame4 = $brainBudgetbudgetEnter({ file: "views/dashboard.brain", component: "Dashboard", line: 24, column: 25 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame4); { return users.v.filter((u) => { const $$brainBudgetFrame5 = $brainBudgetbudgetEnter({ file: "views/dashboard.brain", component: "Dashboard", line: 24, column: 44 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame5); { return u.active; } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame5); } }).length; } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame4); } });
+  const save = async (data) => { const $$brainBudgetFrame6 = $brainBudgetbudgetEnter({ file: "views/dashboard.brain", component: "Dashboard", line: 26, column: 16 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame6); {
     busy.v = true;
     error.v = '';
     try {
-      const saved = data.id === null ? await api.create(data) : await api.update(data);
-      users.v = data.id === null ? [...users.v, saved] : users.v.map((u) => u.id === saved.id ? saved : u);
+      const saved = data.id === null ? $brainBudgetbudgetResume($$brainBudgetFrame6, await $brainBudgetbudgetSuspend($$brainBudgetFrame6, api.create(data))) : $brainBudgetbudgetResume($$brainBudgetFrame6, await $brainBudgetbudgetSuspend($$brainBudgetFrame6, api.update(data)));
+      users.v = data.id === null ? [...users.v, saved] : users.v.map((u) => { const $$brainBudgetFrame7 = $brainBudgetbudgetEnter({ file: "views/dashboard.brain", component: "Dashboard", line: 33, column: 21 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame7); { return u.id === saved.id ? saved : u; } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame7); } });
       editing.v = null;
     } catch (e) {
       error.v = e.message;
     }
     busy.v = false;
-  };
-  const remove = async (id) => {
+  } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame6); } };
+  const remove = async (id) => { const $$brainBudgetFrame8 = $brainBudgetbudgetEnter({ file: "views/dashboard.brain", component: "Dashboard", line: 41, column: 18 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame8); {
     error.v = '';
     try {
-      await api.remove(id);
-      users.v = users.v.filter((u) => u.id !== id);
+      $brainBudgetbudgetResume($$brainBudgetFrame8, await $brainBudgetbudgetSuspend($$brainBudgetFrame8, api.remove(id)));
+      users.v = users.v.filter((u) => { const $$brainBudgetFrame9 = $brainBudgetbudgetEnter({ file: "views/dashboard.brain", component: "Dashboard", line: 45, column: 28 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame9); { return u.id !== id; } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame9); } });
     } catch (e) {
       error.v = e.message;
     }
-  };
-  const $r23 = $t5();
-  const $e1 = $r23.firstChild.firstChild.nextSibling.nextSibling.firstChild;
-  const $e2 = $e1.nextSibling.nextSibling;
-  const $e3 = $r23.firstChild.firstChild.nextSibling.nextSibling.nextSibling.nextSibling;
-  const $e4 = $e3.nextSibling.nextSibling;
-  const $e5 = $r23.firstChild.nextSibling.nextSibling;
-  const $e8 = $e5.nextSibling.nextSibling;
-  const $e11 = $e8.nextSibling.nextSibling.firstChild.nextSibling.nextSibling.firstChild;
-  insert(null, () => activeCount.v, $e1);
-  insert(null, () => fmt.plural(users.v.length, 'user', 'users'), $e2);
-  attr($e3, "value", () => query.v);
-  on($e3, "input", (e) => { query.v = e.target.value; });
-  on($e4, "click", () => { editing.v = {}; });
+  } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame8); } };
+  const $r32 = $t5();
+  const $e10 = $r32.firstChild.firstChild.nextSibling.nextSibling.firstChild;
+  const $e11 = $e10.nextSibling.nextSibling;
+  const $e12 = $r32.firstChild.firstChild.nextSibling.nextSibling.nextSibling.nextSibling;
+  const $e13 = $e12.nextSibling.nextSibling;
+  const $e14 = $r32.firstChild.nextSibling.nextSibling;
+  const $e17 = $e14.nextSibling.nextSibling;
+  const $e20 = $e17.nextSibling.nextSibling.firstChild.nextSibling.nextSibling.firstChild;
+  insert(null, () => activeCount.v, $e10);
+  insert(null, () => fmt.plural(users.v.length, 'user', 'users'), $e11);
+  attr($e12, "value", () => query.v);
+  on($e12, "input", (e) => { query.v = e.target.value; });
+  on($e13, "click", () => { editing.v = {}; });
   when(null, () => error.v !== '', () => {
-    const $r7 = $t0();
-    const $e6 = $r7.firstChild;
-    insert(null, () => error.v, $e6);
-    return $r7;
-  }, null, $e5);
+    const $r16 = $t0();
+    const $e15 = $r16.firstChild;
+    insert(null, () => error.v, $e15);
+    return $r16;
+  }, null, $e14);
   when(null, () => editing.v !== null, () => {
-    const $r10 = $t1();
-    const $e9 = $r10.firstChild;
-    insert(null, UserForm({ get "user"() { return editing.v.id ? editing.v : null; }, get "busy"() { return busy.v; }, "on:save": save, "on:cancel": () => { editing.v = null; } }), $e9);
-    return $r10;
-  }, null, $e8);
+    const $r19 = $t1();
+    const $e18 = $r19.firstChild;
+    insert(null, UserForm({ get "user"() { return editing.v.id ? editing.v : null; }, get "busy"() { return busy.v; }, "on:save": save, "on:cancel": () => { editing.v = null; } }), $e18);
+    return $r19;
+  }, null, $e17);
   list(null, () => shown.v, (u) => u.id, (u) => {
-    const $r20 = $t3();
-    const $e12 = $r20.firstChild.firstChild;
-    const $e13 = $r20.firstChild.nextSibling.nextSibling.firstChild;
-    const $e14 = $r20.firstChild.nextSibling.nextSibling.nextSibling.nextSibling.firstChild;
-    const $e18 = $r20.firstChild.nextSibling.nextSibling.nextSibling.nextSibling.nextSibling.nextSibling.firstChild;
-    const $e19 = $e18.nextSibling.nextSibling;
-    insert(null, () => u.v.name, $e12);
-    insert(null, () => u.v.email, $e13);
+    const $r29 = $t3();
+    const $e21 = $r29.firstChild.firstChild;
+    const $e22 = $r29.firstChild.nextSibling.nextSibling.firstChild;
+    const $e23 = $r29.firstChild.nextSibling.nextSibling.nextSibling.nextSibling.firstChild;
+    const $e27 = $r29.firstChild.nextSibling.nextSibling.nextSibling.nextSibling.nextSibling.nextSibling.firstChild;
+    const $e28 = $e27.nextSibling.nextSibling;
+    insert(null, () => u.v.name, $e21);
+    insert(null, () => u.v.email, $e22);
     {
-      const $r17 = $t2();
-      const $e15 = $r17;
-      const $e16 = $r17.firstChild;
-      attr($e15, "data-tone", () => (u.v.active ? 'ok' : 'bad'));
-      insert(null, () => (u.v.active ? 'Active' : 'Inactive'), $e16);
-      insert(null, $r17, $e14);
+      const $r26 = $t2();
+      const $e24 = $r26;
+      const $e25 = $r26.firstChild;
+      attr($e24, "data-tone", () => (u.v.active ? 'ok' : 'bad'));
+      insert(null, () => (u.v.active ? 'Active' : 'Inactive'), $e25);
+      insert(null, $r26, $e23);
     }
-    on($e18, "click", () => { editing.v = u.v; });
-    on($e19, "click", () => { remove(u.v.id); });
-    return $r20;
-  }, $e11, () => {
-    const $r22 = $t4();
-    const $e21 = $r22.firstChild.firstChild;
-    insert(null, () => query.v === '' ? 'No users yet.' : 'No results for this search.', $e21);
-    return $r22;
+    on($e27, "click", () => { editing.v = u.v; });
+    on($e28, "click", () => { remove(u.v.id); });
+    return $r29;
+  }, $e20, () => {
+    const $r31 = $t4();
+    const $e30 = $r31.firstChild.firstChild;
+    insert(null, () => query.v === '' ? 'No users yet.' : 'No results for this search.', $e30);
+    return $r31;
   });
-  return $r23;
+  return $r32;
 }
 Dashboard.h = "0m3tc1";
 Dashboard.seo = ($p) => ({ "title": "User admin", "description": "User admin for the example app: create, edit, activate and delete users, with search and an inline edit form.", "canonical": "/dashboard" });
@@ -147,8 +149,9 @@ export default guard(Dashboard);
 }
 
 /* ---- server ---- */
+import { budgetEnter as $brainBudgetbudgetEnter, budgetLeave as $brainBudgetbudgetLeave, budgetResume as $brainBudgetbudgetResume, budgetStep as $brainBudgetbudgetStep, budgetSuspend as $brainBudgetbudgetSuspend } from "/@brain/brain-budget.js";
 import api from "../lib/api.js";
-export async function load(ctx) {
-  return { users: await api.list(ctx) };
-}
+export async function load(ctx) { const $$brainBudgetFrame1 = $brainBudgetbudgetEnter({ file: "views/dashboard.brain", component: "Dashboard", line: 9, column: 10 }, null); try { $brainBudgetbudgetStep($$brainBudgetFrame1); {
+  return { users: $brainBudgetbudgetResume($$brainBudgetFrame1, await $brainBudgetbudgetSuspend($$brainBudgetFrame1, api.list(ctx))) };
+} } finally { $brainBudgetbudgetLeave($$brainBudgetFrame1); } }
 export const seo = (props) => ({ "title": "User admin", "description": "User admin for the example app: create, edit, activate and delete users, with search and an inline edit form.", "canonical": "/dashboard" });

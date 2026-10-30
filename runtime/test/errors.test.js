@@ -160,3 +160,90 @@ test("a cancelled request (kind 'aborted') never becomes a brain_errors entry", 
   assert.equal(errors.length, n)
   stop()
 })
+
+test('structured traces distinguish generated coordinates and keep bounded cyclic causes without values', () => {
+  E.capture({ maps: false, who: () => ({ name: 'Checkout', h: 'checkout', file: 'views/checkout.brain', chain: ['Checkout'], variables: { password: 'never-export-this' } }) })
+  const root = new TypeError('nested'), outer = new Error('outer https://app.test/pay?token=hidden#secret', { cause: root })
+  outer.stack = 'Error\n    at submit (https://app.test/views/checkout.brain?token=hidden:40:7)'
+  root.stack = 'TypeError\n    at save (https://app.test/api/orders.jsbrain?cookie=hidden:12:3)'
+  root.cause = outer
+  root.locals = { card: 'never-export-this-either' }
+  const stop = fx(() => { throw outer })
+  stop()
+  const r = last()
+  assert.deepEqual(r.generatedLocation, { file: '/views/checkout.brain', line: 40, column: 7 })
+  assert.equal(r.location.component, 'Checkout')
+  assert.equal(r.location.precision, 'generated')
+  assert.equal(r.causes.length, 1)
+  assert.equal(r.causes[0].generatedLocation.file, '/api/orders.jsbrain')
+  assert.equal(r.truncated.causes, true, 'a causal cycle is explicit, not recursively serialized')
+  assert.equal(r.frames[0].source, null)
+  assert.equal(r.mapping.status, 'disabled')
+  const text = JSON.stringify(r)
+  for (const sensitive of ['token=', 'cookie=', '#secret', 'never-export-this', 'rawFrames']) assert.ok(!text.includes(sensitive), sensitive)
+})
+
+test('deep causes, stack overflow and component ancestry report truncation', () => {
+  E.capture({ maps: false, who: () => ({ name: 'Deep', chain: Array.from({ length: 80 }, (_, i) => `C${i}`) }) })
+  let error = new Error('leaf')
+  for (let i = 0; i < 20; i++) error = new Error('wrapped', { cause: error })
+  error.stack = 'Error\n' + Array.from({ length: 60 }, (_, i) => `    at f (https://app.test/deep.brain:${i + 100}:9)`).join('\n')
+  const stop = fx(() => { throw error })
+  stop()
+  const r = last()
+  assert.equal(r.frames.length, 24)
+  assert.equal(r.causes.length, 6)
+  assert.equal(r.comp.chain.length, 32)
+  assert.equal(r.truncated.frames, true)
+  assert.equal(r.truncated.causes, true)
+  assert.equal(r.truncated.componentChain, true)
+  assert.ok(JSON.stringify(r).length <= 65536)
+})
+
+test('inspector forwards structural traces without changing its event envelope', async () => {
+  const inspector = await sibling('brain-inspect.js')
+  const api = inspector.inspect({ noPanel: true, sample: 1e9, batch: 1e9 })
+  E.capture({ maps: false })
+  const e = new Error('forwarded')
+  e.stack = 'Error\n    at click (https://app.test/comp/form.brain:88:5)'
+  const stop = fx(() => { throw e })
+  stop()
+  const message = api.drain(), event = message.d.find(r => r.k === 'err' && r.msg === 'forwarded')
+  assert.equal(message.v, 2)
+  assert.equal(event.location.line, 88)
+  assert.equal(event.generatedLocation.column, 5)
+  assert.equal(event.frames[0].generated.file, '/comp/form.brain')
+  assert.deepEqual(event.causes, [])
+  assert.equal(event.mapping.status, 'disabled')
+  assert.equal(event.truncated.output, false)
+})
+
+
+test('inspector queue overflow is bounded and reported explicitly', async () => {
+  const inspector = await sibling('brain-inspect.js')
+  const api = inspector.inspect()
+  const e = new Error('queue overflow')
+  e.stack = 'Error\n    at action (https://app.test/queue.brain:300:4)'
+  for (let i = 0; i < 2005; i++) { const stop = fx(() => { throw e }); stop() }
+  const message = api.drain()
+  assert.equal(message.d.length, 2000)
+  assert.ok(message.dropped >= 5)
+  assert.equal(api.drain(), null)
+})
+
+test('serialized traces enforce the UTF-8 output cap across nested frames', () => {
+  E.capture({ maps: false, who: () => ({ name: 'Large', chain: ['Large'] }) })
+  const stack = 'Error\n' + Array.from({ length: 24 }, (_, i) => `    at action (https://app.test/${'a'.repeat(950)}/large.brain:${900 + i}:8)`).join('\n')
+  let e = new Error('large leaf')
+  e.stack = stack
+  for (let i = 0; i < 6; i++) {
+    e = new Error('bounded wrapper', { cause: e })
+    e.stack = stack
+  }
+  const stop = fx(() => { throw e })
+  stop()
+  const r = last()
+  assert.equal(r.truncated.output, true)
+  assert.ok(Buffer.byteLength(JSON.stringify(r), 'utf8') <= 65536)
+  assert.equal(r.location.line, 900, 'the primary generated failure location remains actionable')
+})

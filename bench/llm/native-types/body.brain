@@ -1,0 +1,6 @@
+<script>
+const User={name:'str!'}
+let users=api('/users',{post:{in:'User'}})
+users.post({name:42})
+</script>
+<p>Users</p>

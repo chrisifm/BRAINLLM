@@ -327,9 +327,16 @@ function slot(origin, pri, sg) {
 // paths in api() are the app's own (`/users`): `<meta http base>` then the app's base path (<meta name="brain-base">)
 const appBase = () => {
   const m = G.document && document.querySelector('meta[name=brain-base]')
-  return m ? m.getAttribute('content').replace(/\/$/, '') : ''
+  const base = m && m.getAttribute('content') || ''
+  if (base && (!base.startsWith('/') || base.startsWith('//') || /[\\?#\x00-\x20]/.test(base))) throw Error('Invalid application base')
+  return base.replace(/\/$/, '')
 }
-const full = u => (u.startsWith('/') && !u.startsWith('//') ? appBase() + P.base + u : u)
+const full = u => {
+  if (!u.startsWith('/') || u.startsWith('//')) return u
+  // Native account/media endpoints never inherit a foreign API base or send account credentials off origin.
+  if (u === '/_brain' || u.startsWith('/_brain/')) return appBase() + u
+  return (/^(?:https?:)?\/\//i.test(P.base) ? '' : appBase()) + P.base + u
+}
 
 async function once(u, M, body, sg, pri, up) {
   const url = full(u), origin = new URL(url, G.location ? location.href : 'http://localhost').origin
@@ -368,7 +375,10 @@ async function once(u, M, body, sg, pri, up) {
   if (st >= 200 && st < 300) return { value: j, cacheable: !/no-store|private/i.test(h('cache-control') || '') }
   const ra = h('retry-after'), retryAfter = ra == null ? undefined : isNaN(ra) ? Math.max(0, (Date.parse(ra) - Date.now()) / 1e3) : +ra
   if (st === 401 && P.login && G.location && !location.pathname.endsWith(P.login)) location.assign(appBase() + P.login + '?next=' + encodeURIComponent(location.pathname + location.search))
-  throw new ApiError('http', (j && j.error) || `${M} ${u}: ${st}`, { status: st, errors: j && j.errors, retryAfter, id: h('x-request-id') || undefined })
+  const native = j && j.schemaVersion === 1 && j.error && typeof j.error === 'object' && typeof j.error.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(j.error.code)
+  const generic = st === 401 ? 'Authentication failed. Sign in again.' : st === 403 ? 'You do not have permission to continue.' : st === 422 ? 'Check the highlighted fields.' : st === 429 ? 'Too many requests. Wait before trying again.' : `Request failed (${st}).`
+  const message = !native && st < 500 && typeof j?.error === 'string' && j.error.length <= 512 && !/[\r\n]|(?:TypeError|ReferenceError|SyntaxError|Error):/.test(j.error) ? j.error : generic
+  throw new ApiError('http', message, { status: st, errors: native && st === 422 ? j.error.fields : j && j.errors, retryAfter, id: h('x-request-id') || undefined, ...(native ? { backendCode: j.error.code, fix: typeof j.error.fix === 'string' ? j.error.fix.slice(0,1024) : undefined } : {}) })
 }
 
 // multipart upload with progress (fetch has no upload progress)

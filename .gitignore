@@ -15,3 +15,5 @@ dist/
 .netrc
 .claude/tmp-tasks/
 RESUME*.md
+# Public embedded provider source must survive user-level claude.* ignore patterns.
+!/crates/brain-cli/src/templates/integrations/claude.jsbrain

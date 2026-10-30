@@ -47,7 +47,9 @@ target/debug/brain doctor              # inside any app
 
 ## Invariants (a change that breaks one is rejected)
 1. **No third-party parsers, bundlers, minifiers or compressors.** Rust deps only for low-level I/O (`notify`).
-   Runtime: zero dependencies, no polyfills.
+   Runtime: zero dependencies, no polyfills. Maintained Rust infrastructure crates are allowed for the experimental
+   backend and build-time Brotli (2026-10-29, maintainer authorization); use the latest stable direct versions and
+   record choices in docs/BACKEND-DESIGN.md. BrainScript/JS/CSS parsing, bundling and minification remain owned here.
 2. **Runtime core ≤ 4 096 B gzip** after `brain-min`. New features go to a separate `brain-*.js` module if the core
    has no room.
 3. **Hot path uses vanilla primitives:** indexed `for`, direct DOM (`node.data`, `cloneNode`, `insertBefore`), fixed
@@ -64,6 +66,15 @@ target/debug/brain doctor              # inside any app
 10. **English everywhere in the repo:** code comments, identifiers, every string literal and UI text (sample and test
     data included), diagnostics (`msg`, `fix`), CLI/MCP output, test names, templates and docs.
     `scripts/check-english.sh` must pass.
+
+## Compatibility review
+
+New non-security author diagnostics in a minor release start as warnings with a deterministic mechanical fix where
+one exists. Preserve renamed syntax as a deprecated alias for at least one minor release. Security invariants remain
+fail-closed and cannot be weakened for compatibility. Record changes in each release's Upgrading section.
+`scripts/compatibility-check.mjs` compares explicit reviewed release manifests; its source inventory is partial
+coverage and is not a historical baseline. See docs/COMPATIBILITY.md. Provider-neutral benchmark plumbing is tested
+by `node --test bench/agents/runner.test.mjs`; actual model evaluation still requires the fresh LLM gate.
 
 ## Recipes
 **Add a checker rule**

@@ -5,7 +5,13 @@ import { mount as rtMount } from '/@brain/brain.js';
 const tests = [];
 let root;
 let dispose;
-const flush = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+// Background Viewer tabs may suspend animation frames. Flush state without requiring foreground focus.
+const flush = () => new Promise(resolve => {
+  let frame, timer, done=false;
+  const finish=()=>{if(done)return;done=true;clearTimeout(timer);if(frame!=null)cancelAnimationFrame(frame);resolve()};
+  timer=setTimeout(finish,document.visibilityState==='hidden'?0:50);
+  if(document.visibilityState!=='hidden')frame=requestAnimationFrame(()=>setTimeout(finish,0));
+});
 const fmt = v => (typeof v === 'string' ? JSON.stringify(v) : (() => { try { return JSON.stringify(v) ?? String(v) } catch { return String(v) } })());
 const q = sel => {
   const el = root.querySelector(sel);

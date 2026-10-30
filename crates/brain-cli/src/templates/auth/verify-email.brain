@@ -1,0 +1,54 @@
+<meta seo title="Verify email" description="Verify the email address of your signed-in account." robots="noindex">
+<script>
+  import Button from '../ui/button.brain'
+  import ErrorState from '../ui/error-state.brain'
+  const me = api('/_brain/auth/me', { get: {} })
+  const request = api('/_brain/auth/email/request', { post: {} })
+  const verify = api('/_brain/auth/email/verify', { post: {} })
+  let token = ''
+  let hasToken = sig(false)
+  let sent = sig(false)
+  let account = resource(async () => {
+    try { return await me.get() }
+    catch (error) { if (error.status === 401) return { user: null }; throw error }
+  })
+  mounted(() => {
+    const candidate = new URLSearchParams(location.hash.slice(1)).get('token') ?? ''
+    if (/^[a-f0-9]{64}$/.test(candidate)) { token = candidate; hasToken = true }
+    history.replaceState(null, '', location.pathname + location.search)
+  })
+  let action = form({}, { submit: async () => {
+    if (hasToken) { await verify.post({ token }); token = ''; hasToken = false; account.refetch() }
+    else { await request.post({}); sent = true }
+  } })
+</script>
+<main class="page">
+  <h1>Verify email</h1>
+  {#await account}
+    <p role="status">Checking your session...</p>
+  {:then session}
+    {#if session.user}
+      {#if session.user.verified}
+        <p role="status">Your email address is verified.</p>
+        <a href="/account">Open your account</a>
+      {:else}
+        <p>This action applies only to your signed-in account.</p>
+        {#if sent}<p role="status">Request accepted. If your account needs verification and email delivery is available, check your inbox and spam folder for a link.</p>{/if}
+        <form on:submit={action.submit}>
+          {#if action.error}<p role="alert">{action.error}</p>{/if}
+          <Button type="submit" busy={action.busy}>{hasToken ? 'Verify this email' : 'Request verification link'}</Button>
+        </form>
+      {/if}
+    {:else}
+      <p>Sign in in another tab, then check your session here. Your link stays in this tab until you use it.</p>
+      <a href="/login" target="_blank" rel="noopener noreferrer">Open sign in</a>
+      <Button on:click={account.refetch}>Check session</Button>
+    {/if}
+  {:catch error}
+    <ErrorState error={error} retry={account.refetch} />
+  {/await}
+</main>
+<style>
+  .page { max-width: 48ch; margin: auto; padding: var(--space-4); display: grid; gap: var(--space-3); }
+  form { display: grid; gap: var(--space-3); }
+</style>

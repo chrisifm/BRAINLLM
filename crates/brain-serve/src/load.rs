@@ -5,22 +5,72 @@
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, Command, Stdio};
 
 const RUNNER: &str = r#"
 import { createInterface } from 'node:readline'
+import { EventEmitter } from 'node:events'
+import { Worker } from 'node:worker_threads'
+// A separate watchdog thread still runs if application code blocks Node's main event loop.
+const owner = Number(process.env.BRAIN_SIDECAR_PARENT)
+if (Number.isInteger(owner) && owner > 1) {
+  const watcher = new Worker(`const {workerData}=require('node:worker_threads');setInterval(()=>{try{process.kill(workerData.owner,0)}catch(error){if(error.code==='ESRCH'){try{process.kill(workerData.group?-process.pid:process.pid,'SIGKILL')}catch{process.kill(process.pid,'SIGKILL')}}}},500)`, {eval:true,execArgv:[],resourceLimits:{maxOldGenerationSizeMb:8,maxYoungGenerationSizeMb:2,stackSizeMb:1},workerData:{owner,group:process.env.BRAIN_SIDECAR_GROUP==='1'}})
+  watcher.unref()
+}
 // stdout is the protocol channel: the user's console.log calls go to stderr (brain run terminal).
 const out = process.stdout.write.bind(process.stdout)
 console.log = console.info = (...a) => console.error(...a)
 // response headers as "name\u0001value\u0002…" (a header may repeat: set-cookie)
 const flat = h => Object.entries(h || {}).flatMap(([k, v]) => (Array.isArray(v) ? v : [v]).map(x => k + '\u0001' + x)).join('\u0002')
 // the request's session from its signed cookie (server.mjs sessionFrom), so login/logout set cookies in dev too
-const withSession = (S, ctx, secret) => {
+const nativeContexts = new WeakMap()
+let nativeBridge = null, nativeModule = null, nativeURL = null
+const withSession = async (S, ctx, secret, preauthenticated = false, nativeRequired = false) => {
+  const c = { ...ctx, url: new URL(ctx.url, 'http://localhost'), env: process.env }
+  const configured = process.env.BRAIN_BACKEND_URL
+  if (nativeRequired && !configured) throw Object.assign(Error('Native authentication is temporarily unavailable'), { status: 503 })
+  if (configured) {
+    if (typeof S.nativeAuthBridge !== 'function') throw Object.assign(Error('Native authentication bridge is unavailable in this runtime version'), { status: 503 })
+    if (!nativeBridge || nativeModule !== S || nativeURL !== configured) { nativeBridge?.close(); try { nativeBridge = S.nativeAuthBridge(configured) } catch { throw Object.assign(Error('Native authentication is temporarily unavailable'), { status: 503 }) }; nativeModule = S; nativeURL = configured }
+    const req = new EventEmitter(), res = new EventEmitter(), headers = Object.create(null)
+    for (const name of ['host', 'cookie', 'origin', 'accept', 'content-type']) { const value = ctx.req?.headers?.[name]; if (typeof value === 'string') headers[name] = value }
+    req.headers = headers; req.method = ctx.req?.method || 'GET'; req.url = ctx.url
+    res.headersSent = false; res.writableEnded = false
+    const responseHeaders = new Map()
+    res.getHeader = name => responseHeaders.get(String(name).toLowerCase())
+    res.setHeader = (name, value) => responseHeaders.set(String(name).toLowerCase(), value)
+    const rid = typeof ctx.rid === 'string' && /^[a-f0-9-]{36}$/i.test(ctx.rid) ? ctx.rid : '00000000-0000-4000-8000-000000000000'
+    try {
+      if (preauthenticated) {
+        const user = ctx.user ?? null
+        if (user !== null && (typeof user.id !== 'string' || !/^[a-f0-9-]{36}$/i.test(user.id) || typeof user.email !== 'string' || user.email.length > 254 || typeof user.role !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(user.role) || ['public','owner'].includes(user.role) || typeof user.verified !== 'boolean')) throw Object.assign(Error('Native authentication context is invalid'), {status:503})
+        req.$nativeUser = user === null ? null : Object.freeze({ id:user.id, email:user.email, role:user.role, verified:user.verified })
+        req.$nativeAuth = Promise.resolve()
+      }
+      else await nativeBridge.prepare(req, res, rid)
+      const session = nativeBridge.session(req, res, rid)
+      c.user = session.user; c.session = session
+      c.backend = Object.freeze({resource: name => nativeBridge.resource(req, res, rid, name),login:credentials=>nativeBridge.login(req,res,rid,credentials)})
+      nativeContexts.set(c, { req, res })
+      return c
+    } catch (error) { res.writableEnded = true; res.emit('finish'); res.emit('close'); throw error }
+  }
   const ses = S.sessionFrom(ctx.cookies || {}, secret || '')
-  return { ...ctx, url: new URL(ctx.url, 'http://localhost'), env: process.env, user: ses.user, session: ses.session }
+  c.user = ses.user; c.session = ses.session
+  return c
 }
+const contextHeaders = async ctx => {
+  const native = nativeContexts.get(ctx)
+  if (!native) return ctx.session.headers()
+  const { req } = native
+  if (req.$nativeLogout) await req.$nativeLogout
+  if (req.$nativeLogoutError) throw Object.assign(Error('Native authentication is temporarily unavailable'), { status: 503 })
+  return req.$nativeLogoutHeaders || req.$nativeLoginHeaders || {}
+}
+const finishContext = ctx => { const native = nativeContexts.get(ctx); if (native) { native.res.writableEnded = true; native.res.emit('finish'); native.res.emit('close'); nativeContexts.delete(ctx) } }
+process.once('exit', () => nativeBridge?.close())
 for await (const line of createInterface({ input: process.stdin })) {
-  const { id, file, fn, ctx, args, rpc, raw, key, form, rules, chain, guards, middleware, secret } = JSON.parse(line)
+  const { id, file, fn, ctx, args, probe, rpc, raw, key, form, rules, chain, guards, middleware, secret, contextServer, preauthenticated, nativeRequired } = JSON.parse(line)
   if (chain) {
     // _guard/_middleware of the route through server.mjs's runChain, with ctx.user from the signed session cookie
     try {
@@ -28,16 +78,16 @@ for await (const line of createInterface({ input: process.stdin })) {
       const G = [], M = []
       for (const u of guards || []) G.push(await import(u))
       for (const u of middleware || []) M.push(await import(u))
-      const c = { ...ctx, url: new URL(ctx.url, 'http://localhost'), env: process.env }
-      const ses = S.sessionFrom(c.cookies || {}, secret || '')
-      c.user = ses.user
-      c.session = ses.session
-      const r = await S.runChain({ guards: G, middleware: M, ctx: c })
-      const kind = r.redirect ? 'redirect' : r.deny !== undefined ? 'deny' : 'ok'
-      out(`CHN ${id} ${JSON.stringify({ kind, location: r.redirect || '', status: String(r.status || 303), reason: String(r.deny ?? ''), user: JSON.stringify(c.user ?? null) })}\n`)
+      const c = await withSession(S, ctx, secret, false, nativeRequired)
+      try {
+        const r = await S.runChain({ guards: G, middleware: M, ctx: c })
+        await contextHeaders(c)
+        const kind = r.redirect ? 'redirect' : r.deny !== undefined ? 'deny' : 'ok'
+        out(`CHN ${id} ${JSON.stringify({ kind, location: r.redirect || '', status: String(r.status || 303), reason: String(r.deny ?? ''), user: JSON.stringify(c.user ?? null) })}\n`)
+      } finally { finishContext(c) }
     } catch (e) {
       console.error(String(e?.stack ?? e))
-      out(`CHN ${id} ${JSON.stringify({ kind: 'error', reason: String(e?.message ?? e) })}\n`)
+      out(`CHN ${id} ${JSON.stringify({ kind: 'error', status: String(e?.status || 500), reason: String(e?.message ?? e) })}\n`)
     }
     continue
   }
@@ -45,13 +95,15 @@ for await (const line of createInterface({ input: process.stdin })) {
     // a form posted without JS (§38) through server.mjs's callForm, with the same rules as form() in the browser
     try {
       const S = await import(form), R = await import(rules), m = await import(file)
-      const c = withSession(S, ctx, secret)
-      const r = await S.callForm({ module: m, raw, ctx: c, rules: R, key })
-      if (r.cause) console.error(String(r.cause?.stack ?? r.cause))
-      out(`FRM ${id} ${JSON.stringify({ status: r.status, location: r.location || '', state: JSON.stringify(r.state || null), body: JSON.stringify(r.body || null), headers: flat({ ...(r.headers || {}), ...c.session.headers() }) })}\n`)
+      const c = await withSession(S, ctx, secret, false, nativeRequired)
+      try {
+        const r = await S.callForm({ module: m, raw, ctx: c, rules: R, key })
+        if (r.cause) console.error(String(r.cause?.stack ?? r.cause))
+        out(`FRM ${id} ${JSON.stringify({ status: r.status, location: r.location || '', state: JSON.stringify(r.state || null), body: JSON.stringify(r.body || null), headers: flat({ ...(r.headers || {}), ...await contextHeaders(c) }) })}\n`)
+      } finally { finishContext(c) }
     } catch (e) {
       console.error(String(e?.stack ?? e))
-      out(`FRM ${id} ${JSON.stringify({ status: 500, location: '', state: 'null', body: '{"error":"Internal error"}' })}\n`)
+      out(`FRM ${id} ${JSON.stringify({ status: Number.isInteger(e?.status) ? e.status : 500, location: '', state: 'null', body: '{"error":"Request could not complete"}' })}\n`)
     }
     continue
   }
@@ -60,24 +112,33 @@ for await (const line of createInterface({ input: process.stdin })) {
     try {
       const S = await import(rpc)
       const m = await import(file)
-      const c = withSession(S, ctx, secret)
-      const r = await S.callRpc({ fn: m[fn], args: raw, ctx: c, key })
-      if (r.cause) console.error(String(r.cause?.stack ?? r.cause))
-      out(`RES ${id} ${JSON.stringify({ status: r.status, body: JSON.stringify(r.body ?? null), headers: flat({ ...(r.headers || {}), ...c.session.headers() }) })}\n`)
+      const c = await withSession(S, ctx, secret, false, nativeRequired)
+      try {
+        const r = await S.callRpc({ fn: m[fn], args: raw, ctx: c, key })
+        if (r.cause) console.error(String(r.cause?.stack ?? r.cause))
+        out(`RES ${id} ${JSON.stringify({ status: r.status, body: JSON.stringify(r.body ?? null), headers: flat({ ...(r.headers || {}), ...await contextHeaders(c) }) })}\n`)
+      } finally { finishContext(c) }
     } catch (e) {
       console.error(String(e?.stack ?? e))
-      out(`RES ${id} ${JSON.stringify({ status: 500, body: '{"error":"Internal error"}' })}\n`)
+      out(`RES ${id} ${JSON.stringify({ status: Number.isInteger(e?.status) ? e.status : 500, body: '{"error":"Request could not complete"}' })}\n`)
     }
     continue
   }
   try {
     const m = await import(file)
     if (typeof m[fn] !== 'function') throw new Error(`${fn} is not exported by the view's server code`)
-    const v = await m[fn]({ ...ctx, env: process.env }, ...(args || []))
-    out(`OK ${id} ${JSON.stringify(v ?? null)}\n`)
+    if (probe) { out(`OK ${id} true\n`); continue }
+    const S = contextServer ? await import(contextServer) : null
+    const c = S ? await withSession(S, ctx, secret, preauthenticated === true, nativeRequired === true) : { ...ctx, env: process.env }
+    try {
+      const v = await m[fn](c, ...(args || []))
+      if (S) await contextHeaders(c)
+      out(`OK ${id} ${JSON.stringify(v ?? null)}\n`)
+    } finally { if (S) finishContext(c) }
   } catch (e) {
     if (e && e.notFound === true) out(`OK ${id} {"notFound":true,"status":404}\n`) // `throw notFound()`: answered as a 404 page
     else if (e && e.errors && typeof e.errors === 'object') out(`BAD ${id} ${JSON.stringify({ error: e.message || 'Invalid input', errors: e.errors })}\n`)
+    else if (contextServer && e?.status === 503) out(`STATUS ${id} ${JSON.stringify({status:503,message:'Native authentication is temporarily unavailable'})}\n`)
     else out(`ERR ${id} ${JSON.stringify(String(e?.stack ?? e))}\n`)
   }
 }
@@ -85,11 +146,18 @@ for await (const line of createInterface({ input: process.stdin })) {
 
 pub struct Sidecar {
     child: Child,
-    stdin: ChildStdin,
+    terminated: bool,
+    input:
+        Option<std::sync::mpsc::SyncSender<(String, std::sync::mpsc::SyncSender<io::Result<()>>)>>,
+    write_thread: Option<std::thread::JoinHandle<()>>,
+    read_thread: Option<std::thread::JoinHandle<()>>,
+    frame_limit: usize,
+    stop_reader: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Lines from Node's stdout, read on a thread so a hung `load()` can time out instead of blocking forever.
     lines: std::sync::mpsc::Receiver<String>,
     next: u64,
     timeout: std::time::Duration,
+    native_required: bool,
 }
 
 /// A `load()` that does not answer in this time is killed (INTERNALS §25: every command terminates).
@@ -100,44 +168,185 @@ const LOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 impl Sidecar {
     /// `vars`: the resolved environment (`.brain_env` development section over the process), seen as `ctx.env`.
     pub fn spawn(root: &Path, vars: &[(String, String)]) -> io::Result<Sidecar> {
-        let mut child = Command::new(std::env::var("BRAIN_NODE").unwrap_or_else(|_| "node".into()))
-            .args(["--input-type=module", "-e", RUNNER])
+        Self::spawn_with(
+            root,
+            vars,
+            LOAD_TIMEOUT,
+            MAX_RESPONSE as usize,
+            false,
+            false,
+        )
+    }
+    /// Private hooks: strict end-to-end I/O deadline, production mode and silent untrusted stderr.
+    pub fn spawn_bounded(
+        root: &Path,
+        vars: &[(String, String)],
+        timeout: std::time::Duration,
+        frame_limit: usize,
+        production: bool,
+    ) -> io::Result<Sidecar> {
+        if !cfg!(unix) {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "Native before-hooks require Unix process-group supervision in this release; ordinary frontend/dev sidecars remain available",
+            ));
+        }
+        if timeout < std::time::Duration::from_millis(50)
+            || timeout > std::time::Duration::from_secs(2)
+            || !(1024..=65536).contains(&frame_limit)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Invalid bounded sidecar limits",
+            ));
+        }
+        Self::spawn_with(root, vars, timeout, frame_limit, production, true)
+    }
+    fn spawn_with(
+        root: &Path,
+        vars: &[(String, String)],
+        timeout: std::time::Duration,
+        frame_limit: usize,
+        production: bool,
+        private: bool,
+    ) -> io::Result<Sidecar> {
+        let mut command =
+            Command::new(std::env::var("BRAIN_NODE").unwrap_or_else(|_| "node".into()));
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        let mut child=command.args(if private {&["--max-old-space-size=128"][..]}else{&[]})
+            .args(["--enable-source-maps", "--input-type=module", "-e", RUNNER])
             .envs(vars.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+            .env("NODE_ENV", if production {"production"}else{"development"})
+            .env("BRAIN_SIDECAR_PARENT",std::process::id().to_string())
+            .env("BRAIN_SIDECAR_GROUP",if cfg!(unix){"1"}else{"0"})
             .current_dir(root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(if private {Stdio::null()}else{Stdio::inherit()})
             .spawn()
             .map_err(|e| io::Error::new(e.kind(), format!("could not launch node for load(): {e}; fix: install Node ≥ 22 or set BRAIN_NODE")))?;
-        let stdin = child.stdin.take().unwrap();
-        let mut stdout = BufReader::new(child.stdout.take().unwrap());
-        let (tx, lines) = std::sync::mpsc::sync_channel(2);
-        std::thread::spawn(move || {
-            let mut line = String::new();
-            // Cap a frame before allocating an arbitrary line from user code. A full queue backpressures Node.
-            while (&mut stdout).take(MAX_RESPONSE + 1).read_line(&mut line).is_ok_and(|n| n > 0) {
-                if line.len() as u64 > MAX_RESPONSE { break; }
-                if tx.send(std::mem::take(&mut line)).is_err() {
+        let mut stdin = child.stdin.take().unwrap();
+        let (input, requests) = std::sync::mpsc::sync_channel::<(
+            String,
+            std::sync::mpsc::SyncSender<io::Result<()>>,
+        )>(1);
+        let write_thread = std::thread::spawn(move || {
+            while let Ok((request, ack)) = requests.recv() {
+                let result = stdin
+                    .write_all(request.as_bytes())
+                    .and_then(|_| stdin.flush());
+                let failed = result.is_err();
+                let _ = ack.send(result);
+                if failed {
                     break;
                 }
             }
         });
-        Ok(Sidecar { child, stdin, lines, next: 0, timeout: LOAD_TIMEOUT })
+        let mut stdout = BufReader::new(child.stdout.take().unwrap());
+        let (tx, lines) = std::sync::mpsc::sync_channel(2);
+        let stop_reader = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopped = stop_reader.clone();
+        let read_thread = std::thread::spawn(move || {
+            let mut line = String::new();
+            // Cap a frame before allocating an arbitrary line from user code. A full queue backpressures Node.
+            while (&mut stdout)
+                .take(frame_limit as u64 + 1)
+                .read_line(&mut line)
+                .is_ok_and(|n| n > 0)
+            {
+                if line.len() > frame_limit {
+                    break;
+                }
+                let mut pending = std::mem::take(&mut line);
+                loop {
+                    match tx.try_send(pending) {
+                        Ok(()) => break,
+                        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => return,
+                        Err(std::sync::mpsc::TrySendError::Full(value)) => {
+                            if stopped.load(std::sync::atomic::Ordering::Relaxed) {
+                                return;
+                            }
+                            pending = value;
+                            std::thread::sleep(std::time::Duration::from_millis(1));
+                        }
+                    }
+                }
+            }
+        });
+        Ok(Sidecar {
+            child,
+            terminated: false,
+            input: Some(input),
+            write_thread: Some(write_thread),
+            read_thread: Some(read_thread),
+            frame_limit,
+            stop_reader,
+            lines,
+            next: 0,
+            timeout,
+            native_required: vars
+                .iter()
+                .find(|(key, _)| key == "BRAIN_BACKEND_URL")
+                .map(|(_, value)| !value.is_empty())
+                .unwrap_or_else(|| {
+                    std::env::var("BRAIN_BACKEND_URL").is_ok_and(|value| !value.is_empty())
+                }),
+        })
     }
 
+    fn terminate(&mut self) {
+        if !self.terminated {
+            self.terminated = true;
+            // The unreaped child pins this process-group identifier: never target a reused PID.
+            #[cfg(unix)]
+            unsafe {
+                libc::kill(-(self.child.id() as i32), libc::SIGKILL);
+            }
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+    fn send(&mut self, request: String, deadline: std::time::Instant) -> Result<(), (u16, String)> {
+        let (ack, done) = std::sync::mpsc::sync_channel(1);
+        let outcome = if request.len() > self.frame_limit {
+            false
+        } else {
+            self.input
+                .as_ref()
+                .is_some_and(|input| input.try_send((request, ack)).is_ok())
+                && done
+                    .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                    .is_ok_and(|result| result.is_ok())
+        };
+        if !outcome {
+            self.terminate();
+            return Err((
+                503,
+                "Node sidecar input exceeded its bounded deadline or frame budget".into(),
+            ));
+        }
+        Ok(())
+    }
     fn response(&mut self, deadline: std::time::Instant) -> Result<String, (u16, String)> {
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
         match self.lines.recv_timeout(remaining) {
             Ok(line) if !remaining.is_zero() => Ok(line),
             outcome => {
-                let timed_out = remaining.is_zero() || matches!(outcome, Err(std::sync::mpsc::RecvTimeoutError::Timeout));
-                let _ = self.child.kill();
-                let _ = self.child.wait();
-                Err((if timed_out { 504 } else { 500 }, if timed_out {
-                    "the load() node process exited: request timed out; fix: use bounded awaits and no infinite loops".into()
-                } else {
-                    "the load() node process exited or exceeded the 16 MiB response limit; check the brain run terminal".into()
-                }))
+                let timed_out = remaining.is_zero()
+                    || matches!(outcome, Err(std::sync::mpsc::RecvTimeoutError::Timeout));
+                self.terminate();
+                Err((
+                    if timed_out { 504 } else { 500 },
+                    if timed_out {
+                        "the load() node process exited: request timed out; fix: use bounded awaits and no infinite loops".into()
+                    } else {
+                        "the load() node process exited or exceeded its configured response limit; inspect private sidecar diagnostics".into()
+                    },
+                ))
             }
         }
     }
@@ -149,54 +358,98 @@ impl Sidecar {
     }
 
     /// `POST /_r/<hash>/<fn>` through server.mjs's `callRpc` (`server` = its file URL): returns (status, JSON body).
-    pub fn rpc(&mut self, file: &str, func: &str, ctx_json: &str, raw: &str, server: &str, key: &str, secret: &str) -> Result<(u16, String, Vec<(String, String)>), String> {
+    pub fn rpc(
+        &mut self,
+        file: &str,
+        func: &str,
+        ctx_json: &str,
+        raw: &str,
+        server: &str,
+        key: &str,
+        secret: &str,
+    ) -> Result<(u16, String, Vec<(String, String)>), String> {
         self.next += 1;
         let id = self.next;
         let req = format!(
-            "{{\"id\":{id},\"file\":{},\"fn\":{},\"ctx\":{ctx_json},\"rpc\":{},\"raw\":{},\"key\":{},\"secret\":{}}}\n",
+            "{{\"id\":{id},\"file\":{},\"fn\":{},\"ctx\":{ctx_json},\"rpc\":{},\"raw\":{},\"key\":{},\"secret\":{},\"nativeRequired\":{}}}\n",
             crate::json_str(file),
             crate::json_str(func),
             crate::json_str(server),
             crate::json_str(raw),
             crate::json_str(key),
-            crate::json_str(secret)
+            crate::json_str(secret),
+            self.native_required
         );
-        self.stdin.write_all(req.as_bytes()).and_then(|_| self.stdin.flush()).map_err(|e| format!("node sidecar: {e}"))?;
         let deadline = std::time::Instant::now() + self.timeout;
+        self.send(req, deadline).map_err(|(_, message)| message)?;
         loop {
             let line = self.response(deadline).map_err(|(_, message)| message)?;
             let rest = line.trim_end();
-            let Some(rest) = rest.strip_prefix("RES ") else { continue };
+            let Some(rest) = rest.strip_prefix("RES ") else {
+                continue;
+            };
             let (rid, payload) = rest.split_once(' ').unwrap_or((rest, "{}"));
             if rid != id.to_string() {
                 continue;
             }
             let fields = crate::json_flat(payload).unwrap_or_default();
-            let status = fields.iter().find(|(k, _)| k == "status").and_then(|(_, v)| v.parse().ok()).unwrap_or(500);
-            let headers = unflat(fields.iter().find(|(k, _)| k == "headers").map(|(_, v)| v.as_str()).unwrap_or(""));
-            let body = fields.into_iter().find(|(k, _)| k == "body").map(|(_, v)| v).unwrap_or_else(|| "null".into());
+            let status = fields
+                .iter()
+                .find(|(k, _)| k == "status")
+                .and_then(|(_, v)| v.parse().ok())
+                .unwrap_or(500);
+            let headers = unflat(
+                fields
+                    .iter()
+                    .find(|(k, _)| k == "headers")
+                    .map(|(_, v)| v.as_str())
+                    .unwrap_or(""),
+            );
+            let body = fields
+                .into_iter()
+                .find(|(k, _)| k == "body")
+                .map(|(_, v)| v)
+                .unwrap_or_else(|| "null".into());
             return Ok((status, body, headers));
         }
     }
 
     /// Runs a route's guards and middleware (server.mjs `runChain`): fields kind (ok|redirect|deny|error), location,
     /// status, reason, user (JSON).
-    pub fn chain(&mut self, server: &str, guards: &[String], middleware: &[String], ctx_json: &str, secret: &str) -> Result<Vec<(String, String)>, String> {
+    pub fn chain(
+        &mut self,
+        server: &str,
+        guards: &[String],
+        middleware: &[String],
+        ctx_json: &str,
+        secret: &str,
+    ) -> Result<Vec<(String, String)>, String> {
         self.next += 1;
         let id = self.next;
-        let list = |v: &[String]| format!("[{}]", v.iter().map(|u| crate::json_str(u)).collect::<Vec<_>>().join(","));
+        let list = |v: &[String]| {
+            format!(
+                "[{}]",
+                v.iter()
+                    .map(|u| crate::json_str(u))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        };
         let req = format!(
-            "{{\"id\":{id},\"ctx\":{ctx_json},\"chain\":{},\"guards\":{},\"middleware\":{},\"secret\":{}}}\n",
+            "{{\"id\":{id},\"ctx\":{ctx_json},\"chain\":{},\"guards\":{},\"middleware\":{},\"secret\":{},\"nativeRequired\":{}}}\n",
             crate::json_str(server),
             list(guards),
             list(middleware),
-            crate::json_str(secret)
+            crate::json_str(secret),
+            self.native_required
         );
-        self.stdin.write_all(req.as_bytes()).and_then(|_| self.stdin.flush()).map_err(|e| format!("node sidecar: {e}"))?;
         let deadline = std::time::Instant::now() + self.timeout;
+        self.send(req, deadline).map_err(|(_, message)| message)?;
         loop {
             let line = self.response(deadline).map_err(|(_, message)| message)?;
-            let Some(rest) = line.trim_end().strip_prefix("CHN ") else { continue };
+            let Some(rest) = line.trim_end().strip_prefix("CHN ") else {
+                continue;
+            };
             let (rid, payload) = rest.split_once(' ').unwrap_or((rest, "{}"));
             if rid != id.to_string() {
                 continue;
@@ -206,42 +459,118 @@ impl Sidecar {
     }
 
     /// A form-encoded POST through server.mjs's `callForm`: (status, location, state JSON, body JSON).
-    pub fn form(&mut self, file: &str, ctx_json: &str, raw: &str, server: &str, rules: &str, key: &str, secret: &str) -> Result<(u16, String, String, String, Vec<(String, String)>), String> {
+    pub fn form(
+        &mut self,
+        file: &str,
+        ctx_json: &str,
+        raw: &str,
+        server: &str,
+        rules: &str,
+        key: &str,
+        secret: &str,
+    ) -> Result<(u16, String, String, String, Vec<(String, String)>), String> {
         self.next += 1;
         let id = self.next;
         let req = format!(
-            "{{\"id\":{id},\"file\":{},\"ctx\":{ctx_json},\"form\":{},\"rules\":{},\"raw\":{},\"key\":{},\"secret\":{}}}\n",
+            "{{\"id\":{id},\"file\":{},\"ctx\":{ctx_json},\"form\":{},\"rules\":{},\"raw\":{},\"key\":{},\"secret\":{},\"nativeRequired\":{}}}\n",
             crate::json_str(file),
             crate::json_str(server),
             crate::json_str(rules),
             crate::json_str(raw),
             crate::json_str(key),
-            crate::json_str(secret)
+            crate::json_str(secret),
+            self.native_required
         );
-        self.stdin.write_all(req.as_bytes()).and_then(|_| self.stdin.flush()).map_err(|e| format!("node sidecar: {e}"))?;
         let deadline = std::time::Instant::now() + self.timeout;
+        self.send(req, deadline).map_err(|(_, message)| message)?;
         loop {
             let line = self.response(deadline).map_err(|(_, message)| message)?;
-            let Some(rest) = line.trim_end().strip_prefix("FRM ") else { continue };
+            let Some(rest) = line.trim_end().strip_prefix("FRM ") else {
+                continue;
+            };
             let (rid, payload) = rest.split_once(' ').unwrap_or((rest, "{}"));
             if rid != id.to_string() {
                 continue;
             }
             let f = crate::json_flat(payload).unwrap_or_default();
-            let get = |k: &str| f.iter().find(|(a, _)| a == k).map(|(_, v)| v.clone()).unwrap_or_default();
-            return Ok((get("status").parse().unwrap_or(500), get("location"), get("state"), get("body"), unflat(&get("headers"))));
+            let get = |k: &str| {
+                f.iter()
+                    .find(|(a, _)| a == k)
+                    .map(|(_, v)| v.clone())
+                    .unwrap_or_default()
+            };
+            return Ok((
+                get("status").parse().unwrap_or(500),
+                get("location"),
+                get("state"),
+                get("body"),
+                unflat(&get("headers")),
+            ));
         }
     }
 
     /// Calls `fn(ctx, ...args)`; the error carries 422 + `{error, errors}` JSON when the function threw `{errors}`,
     /// 504 on timeout, 500 + the stack otherwise.
-    pub fn invoke(&mut self, file: &str, func: &str, ctx_json: &str, args_json: Option<&str>) -> Result<String, (u16, String)> {
+    pub fn call_context(
+        &mut self,
+        file: &str,
+        func: &str,
+        ctx_json: &str,
+        server: &str,
+        secret: &str,
+        preauthenticated: bool,
+    ) -> Result<String, String> {
+        self.invoke_context(
+            file,
+            func,
+            ctx_json,
+            None,
+            Some((server, secret, preauthenticated)),
+            false,
+        )
+        .map_err(|(status, message)| {
+            if status == 503 {
+                format!("BNATIVE_AUTH_UNAVAILABLE: {message}")
+            } else {
+                message
+            }
+        })
+    }
+    pub fn invoke(
+        &mut self,
+        file: &str,
+        func: &str,
+        ctx_json: &str,
+        args_json: Option<&str>,
+    ) -> Result<String, (u16, String)> {
+        self.invoke_context(file, func, ctx_json, args_json, None, false)
+    }
+    /// Imports a private module and verifies its callable export without running the hook body.
+    pub fn probe(&mut self, file: &str, func: &str) -> Result<(), (u16, String)> {
+        self.invoke_context(file, func, "{}", None, None, true)
+            .map(|_| ())
+    }
+    fn invoke_context(
+        &mut self,
+        file: &str,
+        func: &str,
+        ctx_json: &str,
+        args_json: Option<&str>,
+        context: Option<(&str, &str, bool)>,
+        probe: bool,
+    ) -> Result<String, (u16, String)> {
         self.next += 1;
         let id = self.next;
-        let args = args_json.map_or(String::new(), |a| format!(",\"args\":{a}"));
-        let req = format!("{{\"id\":{id},\"file\":{},\"fn\":{},\"ctx\":{ctx_json}{args}}}\n", crate::json_str(file), crate::json_str(func));
-        self.stdin.write_all(req.as_bytes()).and_then(|_| self.stdin.flush()).map_err(|e| (500, format!("node sidecar: {e}")))?;
+        let args = args_json.map_or(String::new(), |a| format!(",\"args\":{a}"))
+            + if probe { ",\"probe\":true" } else { "" };
+        let context=context.map(|(server,secret,verified)|format!(",\"contextServer\":{},\"secret\":{},\"preauthenticated\":{verified},\"nativeRequired\":{}",crate::json_str(server),crate::json_str(secret),self.native_required)).unwrap_or_default();
+        let req = format!(
+            "{{\"id\":{id},\"file\":{},\"fn\":{},\"ctx\":{ctx_json}{args}{context}}}\n",
+            crate::json_str(file),
+            crate::json_str(func)
+        );
         let deadline = std::time::Instant::now() + self.timeout;
+        self.send(req, deadline)?;
         loop {
             let line = self.response(deadline)?;
             let rest = line.trim_end();
@@ -253,6 +582,21 @@ impl Sidecar {
             return match tag {
                 "OK" => Ok(payload.to_string()),
                 "BAD" => Err((422, payload.to_string())),
+                "STATUS" => {
+                    let fields = crate::json_flat(payload).unwrap_or_default();
+                    let status = fields
+                        .iter()
+                        .find(|(key, _)| key == "status")
+                        .and_then(|(_, value)| value.parse::<u16>().ok())
+                        .filter(|status| (400..=599).contains(status))
+                        .unwrap_or(500);
+                    let message = fields
+                        .into_iter()
+                        .find(|(key, _)| key == "message")
+                        .map(|(_, value)| value)
+                        .unwrap_or_else(|| "Native request failed".into());
+                    Err((status, message))
+                }
                 _ => Err((500, unquote(payload))),
             };
         }
@@ -261,19 +605,43 @@ impl Sidecar {
 
 /// `name\u{1}value\u{2}…` (the sidecar's response headers) → pairs.
 fn unflat(s: &str) -> Vec<(String, String)> {
-    s.split('\u{2}').filter_map(|h| h.split_once('\u{1}')).map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    s.split('\u{2}')
+        .filter_map(|h| h.split_once('\u{1}'))
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
 }
 
 impl Drop for Sidecar {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        self.stop_reader
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.terminate();
+        self.input.take();
+        #[cfg(unix)]
+        {
+            if let Some(thread) = self.write_thread.take() {
+                let _ = thread.join();
+            }
+            if let Some(thread) = self.read_thread.take() {
+                let _ = thread.join();
+            }
+        }
+        // Windows retains the ordinary dev helper's detached reader behavior. Native bounded hooks
+        // fail during provisioning there until safe process-tree supervision is available.
+        #[cfg(not(unix))]
+        {
+            self.write_thread.take();
+            self.read_thread.take();
+        }
     }
 }
 
 /// JSON string → text (only the escapes JSON.stringify produces).
 pub(crate) fn unquote(s: &str) -> String {
-    let inner = s.strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(s);
+    let inner = s
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(s);
     let mut o = String::new();
     let mut it = inner.chars();
     while let Some(c) = it.next() {
@@ -300,10 +668,23 @@ pub(crate) fn unquote(s: &str) -> String {
 
 /// `file:///abs/path?v=<mtime>`: Node caches by URL, so a change forces the module to reload.
 pub fn file_url(p: &Path) -> String {
-    let v = std::fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
+    let v = std::fs::metadata(p)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_nanos());
     let s = p.to_string_lossy().replace('\\', "/");
-    let s = if s.starts_with('/') { s } else { format!("/{s}") };
-    format!("file://{}?v={v}", s.replace(' ', "%20").replace('[', "%5B").replace(']', "%5D"))
+    let s = if s.starts_with('/') {
+        s
+    } else {
+        format!("/{s}")
+    };
+    format!(
+        "file://{}?v={v}",
+        s.replace(' ', "%20")
+            .replace('[', "%5B")
+            .replace(']', "%5D")
+    )
 }
 
 /// Path where the server code of `rel` is written (e.g. `views/users/[id].brain` → `.brain/server/views/users/[id].brain.mjs`).
@@ -340,12 +721,30 @@ mod tests {
         let f = d.join("v.mjs");
         std::fs::write(&f, "export async function load(ctx) { console.log('noise'); return { id: ctx.params.id, hasEnv: !!ctx.env.PATH } }\nexport async function boom() { throw new Error('bad') }").unwrap();
         let mut sc = Sidecar::spawn(&d, &[]).unwrap();
-        let ok = sc.call(&file_url(&f), "load", "{\"params\":{\"id\":\"42\"}}").unwrap();
+        let ok = sc
+            .call(&file_url(&f), "load", "{\"params\":{\"id\":\"42\"}}")
+            .unwrap();
         assert_eq!(ok, "{\"id\":\"42\",\"hasEnv\":true}");
         let err = sc.call(&file_url(&f), "boom", "{}").unwrap_err();
         assert!(err.contains("Error: bad"), "{err}");
         std::fs::remove_dir_all(&d).unwrap();
     }
+    #[test]
+    fn sidecar_reports_original_source_lines_from_inline_maps() {
+        if Command::new("node").arg("--version").output().is_err() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("brain-mapped-load-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let module = dir.join("mapped.mjs");
+        std::fs::write(&module, "export function boom(){throw Error('mapped')}\n//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJzb3VyY2VzIjpbIm9yaWdpbmFsLmJyYWluIl0sIm5hbWVzIjpbXSwibWFwcGluZ3MiOiJBQVNBIn0=\n").unwrap();
+        let mut sidecar = Sidecar::spawn(&dir, &[]).unwrap();
+        let error = sidecar.call(&file_url(&module), "boom", "{}").unwrap_err();
+        assert!(error.contains("original.brain:10:"), "{error}");
+        drop(sidecar);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn sidecar_answers_not_found_from_load() {
         if Command::new("node").arg("--version").output().is_err() {
@@ -358,10 +757,20 @@ mod tests {
         std::fs::write(&f, "export async function load(ctx) { if (ctx.params.id === 'gone') throw ({ notFound: true, status: 404 }); if (ctx.params.id === 'ret') return ({ notFound: true, status: 404 }); return { id: ctx.params.id } }").unwrap();
         let mut sc = Sidecar::spawn(&d, &[]).unwrap();
         for id in ["gone", "ret"] {
-            let v = sc.call(&file_url(&f), "load", &format!("{{\"params\":{{\"id\":\"{id}\"}}}}")).unwrap();
+            let v = sc
+                .call(
+                    &file_url(&f),
+                    "load",
+                    &format!("{{\"params\":{{\"id\":\"{id}\"}}}}"),
+                )
+                .unwrap();
             assert!(v.starts_with("{\"notFound\":true"), "{id}: {v}");
         }
-        assert_eq!(sc.call(&file_url(&f), "load", "{\"params\":{\"id\":\"7\"}}").unwrap(), "{\"id\":\"7\"}");
+        assert_eq!(
+            sc.call(&file_url(&f), "load", "{\"params\":{\"id\":\"7\"}}")
+                .unwrap(),
+            "{\"id\":\"7\"}"
+        );
         drop(sc);
         std::fs::remove_dir_all(d).unwrap();
     }
@@ -378,7 +787,10 @@ mod tests {
         let (status, _) = sc.invoke(&file_url(&f), "load", "{}", None).unwrap_err();
         assert_eq!(status, 504);
         assert!(start.elapsed() < std::time::Duration::from_secs(3));
-        assert!(sc.child.try_wait().unwrap().is_some(), "timeout must reap Node");
+        assert!(
+            sc.child.try_wait().unwrap().is_some(),
+            "timeout must reap Node"
+        );
         drop(sc);
         std::fs::remove_dir_all(d).unwrap();
     }
@@ -392,10 +804,102 @@ mod tests {
         let mut sc = Sidecar::spawn(&d, &[]).unwrap();
         sc.timeout = std::time::Duration::from_millis(250);
         let start = std::time::Instant::now();
-        assert_eq!(sc.invoke(&file_url(&f), "load", "{}", None).unwrap_err().0, 504);
+        assert_eq!(
+            sc.invoke(&file_url(&f), "load", "{}", None).unwrap_err().0,
+            504
+        );
         assert!(start.elapsed() < std::time::Duration::from_secs(3));
         drop(sc);
         std::fs::remove_dir_all(d).unwrap();
     }
-
+    #[test]
+    #[cfg(not(unix))]
+    fn native_hooks_reject_platforms_without_owned_process_group_supervision() {
+        let error = Sidecar::spawn_bounded(
+            &std::env::temp_dir(),
+            &[],
+            std::time::Duration::from_secs(2),
+            65536,
+            true,
+        )
+        .err()
+        .expect("Unsupported native hooks must fail during provisioning");
+        assert_eq!(error.kind(), std::io::ErrorKind::Unsupported);
+    }
+    #[test]
+    #[cfg(unix)]
+    fn bounded_hooks_enforce_production_frames_deadlines_and_reap_owned_node() {
+        let root = std::env::temp_dir().join(format!("brain-bounded-hooks-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("hook.mjs");
+        std::fs::write(&file,"export default function(ctx){if(ctx.large)return 'x'.repeat(70000);if(ctx.loop)while(true){};return {mode:process.env.NODE_ENV,ownedGroup:process.env.BRAIN_SIDECAR_GROUP==='1',payload:ctx.payload}}
+").unwrap();
+        let timeout = std::time::Duration::from_millis(500);
+        let mut hook = Sidecar::spawn_bounded(
+            &root,
+            &[("NODE_ENV".into(), "development".into())],
+            timeout,
+            65536,
+            true,
+        )
+        .unwrap();
+        let result = hook
+            .invoke(
+                &file_url(&file),
+                "default",
+                r#"{"payload":{"ok":true}}"#,
+                None,
+            )
+            .unwrap();
+        assert!(result.contains("production"));
+        assert!(
+            result.contains("\"ownedGroup\":true"),
+            "The Rust spawn path must enable owned-group supervision in the actual Node process"
+        );
+        assert!(!result.contains("development"));
+        assert!(
+            hook.invoke(&file_url(&file), "default", r#"{"large":true}"#, None)
+                .is_err()
+        );
+        assert!(hook.child.try_wait().unwrap().is_some());
+        drop(hook);
+        let mut hook = Sidecar::spawn_bounded(&root, &[], timeout, 65536, true).unwrap();
+        let started = std::time::Instant::now();
+        assert_eq!(
+            hook.invoke(&file_url(&file), "default", r#"{"loop":true}"#, None)
+                .unwrap_err()
+                .0,
+            504
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(3));
+        assert!(hook.child.try_wait().unwrap().is_some());
+        drop(hook);
+        let mut hook = Sidecar::spawn_bounded(&root, &[], timeout, 1024, true).unwrap();
+        let started = std::time::Instant::now();
+        assert!(
+            hook.invoke(
+                &file_url(&file),
+                "default",
+                &format!(r#"{{"v":"{}"}}"#, "x".repeat(2048)),
+                None
+            )
+            .is_err()
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        drop(hook);
+        #[cfg(unix)]
+        {
+            std::fs::write(&file,"export default async function(){const {spawn}=await import('node:child_process');spawn(process.execPath,['-e','setTimeout(()=>{},3000)'],{stdio:['ignore','inherit','inherit']});return {ok:true}}\n").unwrap();
+            let mut hook = Sidecar::spawn_bounded(&root, &[], timeout, 65536, true).unwrap();
+            hook.invoke(&file_url(&file), "default", "{}", None)
+                .unwrap();
+            let started = std::time::Instant::now();
+            drop(hook);
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(1),
+                "Disposal must kill owned descendants before joining inherited stdout"
+            );
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

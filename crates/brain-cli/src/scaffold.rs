@@ -21,6 +21,8 @@ pub fn new_app_named(dir: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
     if dir.exists() && fs::read_dir(dir).map_err(|e| e.to_string())?.flatten().any(|e| !e.file_name().to_string_lossy().starts_with('.')) {
         return Err(format!("`{}` already exists and is not empty; fix: pick another folder or delete its contents", dir.display()));
     }
+    // Validate and merge registrations before writing app files; preserve other MCP servers.
+    let registrations = crate::mcp_setup::registrations(dir)?;
     // a random dev-only session key (BRAIN_SECRET in [development]; production gets its own from the host)
     let secret: String = {
         let mut b = [0u8; 24];
@@ -34,6 +36,7 @@ pub fn new_app_named(dir: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
     let text: Vec<(&str, String)> = vec![
         ("app.brain", fill(include_str!("templates/new/app.brain"))),
         (TOKENS_FILE, TOKENS_CSS.into()),
+        (crate::design::FILE, format!("{}\n", serde_json::to_string_pretty(&crate::design::baseline(TOKENS_CSS, TOKENS_FILE, None)).map_err(|_| "could not create design baseline")?)),
         ("brain.json", fill(include_str!("templates/new/brain.json"))),
         (".brain_env", fill(include_str!("templates/new/brain_env"))),
         (".brain_env.example", include_str!("templates/new/brain_env.example").into()),
@@ -42,6 +45,7 @@ pub fn new_app_named(dir: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
         ("package.json", PACKAGE_JSON.replace("{{name}}", &name.to_ascii_lowercase()).replace("{{version}}", env!("CARGO_PKG_VERSION"))),
         ("APP.md", APP_MD.replace("{{name}}", &name)),
         ("AGENTS.md", AGENTS_MD.into()),
+        ("CLAUDE.md", "@AGENTS.md\n".into()),
         ("views/home.brain", HOME.into()),
         ("views/about.brain", fill(include_str!("templates/new/about.brain"))),
         ("views/404.brain", include_str!("templates/new/404.brain").into()),
@@ -67,7 +71,7 @@ pub fn new_app_named(dir: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
     // folders without code yet hold only a README: what goes there and the command that creates it (§29)
     let readmes = FOLDERS.iter().map(|(d, body)| (format!("{d}/README.md"), body.to_string()));
     let mut written = Vec::new();
-    for (rel, body) in text.into_iter().map(|(a, b)| (a.to_string(), b)).chain(readmes) {
+    for (rel, body) in text.into_iter().map(|(a, b)| (a.to_string(), b)).chain(readmes).chain(registrations).chain(crate::design::new_basics().into_iter().map(|(path,source)|(path.to_string(),source))) {
         let p = dir.join(&rel);
         fs::create_dir_all(p.parent().unwrap()).map_err(|e| e.to_string())?;
         fs::write(&p, body).map_err(|e| e.to_string())?;
@@ -130,9 +134,19 @@ pub fn add_with_options(root: &Path, kind: &str, name: &str, o: &AddOptions) -> 
         || o.fields.is_some() && kind != "type"
         || !o.props.is_empty() && !matches!(kind, "view" | "comp" | "ui" | "micro")
     { return Err("options do not match the file kind; fix: use channel store/bus/key, api get/post, type fields or component props".into()); }
+    if kind == "hook" {
+        let _writer = crate::edit::writer_lock(root)?;
+        let files = crate::hooks_executor::scaffold(name)?;
+        let (relative, body) = files.into_iter().next().ok_or("Missing hook template")?;
+        let path = root.join(&relative);
+        validate_generated(root, &path, &body)?;
+        crate::changes::create_source(root, &relative, &body)?;
+        return Ok(path);
+    }
     if !matches!(kind, "channel" | "service" | "api" | "type" | "guard" | "server") {
         return add(root, kind, name, &o.props);
     }
+    let _writer = crate::edit::writer_lock(root)?;
     if !valid_ident(name) { return Err("invalid name; fix: letters, digits, underscores or hyphens, starting with a letter".into()); }
     let stem = kebab(name);
     let (rel, body) = match kind {
@@ -255,12 +269,13 @@ fn append_type(root: &Path, path: &Path, name: &str, body: &str) -> Result<PathB
 }
 
 pub fn add(root: &Path, kind: &str, name: &str, props: &str) -> Result<PathBuf, String> {
+    let _writer = crate::edit::writer_lock(root)?;
     match kind {
         "test" => return add_test(root, name),
         "layout" => return add_layout(root, name),
         "lib" => return add_lib(root, name),
         "collection" => return add_collection(root, name),
-        "locale" => return add_locale(root, name),
+        "locale" => return add_locale(root, name, &_writer),
         _ => {}
     }
     let dir = match kind {
@@ -372,7 +387,7 @@ fn add_layout(root: &Path, dir: &str) -> Result<PathBuf, String> {
 /// `brain add locale <code>` (§37): declares the language in brain.json (creating the `i18n` block with `en` as the
 /// default when there is none) and writes `i18n/<code>.json` with the default locale's keys and texts, so the site
 /// works at once and B1402 lists every text still to translate.
-fn add_locale(root: &Path, code: &str) -> Result<PathBuf, String> {
+fn add_locale(root: &Path, code: &str, writer: &std::fs::File) -> Result<PathBuf, String> {
     if !brain_check::i18n::valid_locale(code) {
         return Err(format!("`{code}` is not a language tag; fix: e.g. es, pt-BR, ar"));
     }
@@ -426,7 +441,7 @@ fn add_locale(root: &Path, code: &str) -> Result<PathBuf, String> {
     // the first extra language: the fixed text of the templates moves to keys (B1403's edits: `{t('key')}` in the
     // markup, the text in the default file), so the app stays clean; the new file then starts as a copy to translate
     if locales.len() == 1 {
-        crate::run_fix_only(Some(root.to_path_buf()), Some(&["B1403"]), &mut |_, _| {})?;
+        crate::run_fix_only_with_writer(Some(root.to_path_buf()), Some(&["B1403"]), &mut |_, _| {}, writer)?;
     }
     if fresh || fs::read_to_string(&path).is_ok_and(|t| t.trim() == "{}" || t.trim() == "{\n}") {
         fs::write(&path, fs::read_to_string(&def_file).unwrap_or_else(|_| "{\n}\n".into())).map_err(|e| e.to_string())?;
@@ -734,12 +749,16 @@ Before each kind of task run `brain guide <topic>` (the playbook: steps, verify 
 `start` first, then `views` `data` `forms` `server` `seo` `a11y` `webmcp` `tests` `i18n` `performance`.
 1. Before writing code read `brain spec` (or `brain spec --topic <topic>`); what is not there does not exist.
 2. Read `brain map --json` to see existing routes, components, props and modules; import only what it lists. To use a component read `brain card <name>` (its contract), never its body; `brain map --reads cart.total` lists who reads a store field. A component over 150 lines gets B1010: run the `brain split` it suggests.
-3. Create files with `brain add view|comp|ui <name> --props "…"` and complete them; do not write them from scratch.
-4. Loop: edit → `brain check --json` → apply `brain fix`, then each remaining error's `fix` → repeat until `[]`.
-5. A diag with `"stuck": true` failed the same way 3 checks in a row: stop patching, read its `explain` (why + correct example) or `brain explain <code>`, and rewrite that part.
-6. SEO: every indexable view names its search query in `<meta seo keyword="…">`. Pick the query first; put it in the title, H1, first sentence and description.
-7. Done means `brain doctor` exits 0 (check + tests + accessibility + leaks). Not before; never claim a task done with doctor failing.
-8. `brain run` serves the app and prints one `impact {…}` line per save: new/fixed diagnostics and Δ bytes per view. Per-environment values (API URLs, tokens) go in `.brain_env` through MCP `brain_env_set {key, section, value}`; `brain_env_keys` lists the keys, never the values. Use the CLI or discover the available tools through `brain mcp`. Prefer structured output where supported. Inspect the exit status and result; unified exit codes are still planned.
+3. Every UI change MUST follow `design.brain.json` and the native token stylesheet. First run `brain design --json`, `brain design check --json` and `brain manifest --json`; reuse project components through their contracts and explicit imports. Extend the foundation through revision-checked design plans; never install a CSS framework, fetch fonts automatically, duplicate existing primitives or bypass the baseline with arbitrary colors/spacing. Build mobile first, then verify tablet/desktop, safe areas, 16px inputs, 44px touch targets, keyboard/focus, reduced motion and permission/loading/error/empty/success/disabled states. Regenerate `brain design gallery --json` after adding UI contracts.
+4. Create files with `brain add view|comp|ui <name> --props "…"` and complete them; do not write them from scratch.
+5. Loop: edit → `brain check --json` → apply `brain fix`, then each remaining error's `fix` → repeat until `[]`.
+6. A diag with `"stuck": true` failed the same way 3 checks in a row: stop patching, read its `explain` (why + correct example) or `brain explain <code>`, and rewrite that part.
+7. SEO: every indexable view names its search query in `<meta seo keyword="…">`. Pick the query first; put it in the title, H1, first sentence and description.
+8. Done means `brain doctor` exits 0 (check + tests + accessibility + leaks). Not before; never claim a task done with doctor failing.
+9. `brain run` serves the app and prints one `impact {…}` line per save: new/fixed diagnostics and Δ bytes per view. Per-environment values (API URLs, tokens) go in `.brain_env` through MCP `brain_env_set {key, section, value}`; `brain_env_keys` lists the keys, never the values. MCP is preconfigured in `.mcp.json` (Claude Code) and `.cursor/mcp.json` (Cursor), using the local npm binary. Install dependencies first (`npm install`); restart the client, approve the project server if prompted, and verify `brain_spec` and `brain_map` appear in its tool list. With a source-only installation, change the registration command to `brain` and args to `["mcp"]`. Other clients need their own MCP registration; the CLI remains available. Prefer structured output where supported. Inspect the exit status and result; unified exit codes are still planned.
+10. For concurrent edits use `brain changes read|lease|plan|apply` (or MCP `brain_changes`), not independent overwrites. `brain context` and `brain preflight` provide focused static evidence and preventive diagnostics. `brain lib list` discovers built-in helpers without dependency setup.
+11. With multiple connected Viewer profiles, set private BRAIN_VIEWER_PROFILE. E2E MUST probe `brain e2e probe --json` and try `brain e2e run --json`. Install Claude Viewer/Codex Viewer in the browser and enable its scripting bridge. Connected Viewer runs declared scenarios by default; a complementary owned Chrome lane preserves full accessibility/heap checks. Inspect each report engine/coverage, reproduce the entire flow (permission, load, error, empty, success, disabled; URL/back-forward; responsive; network; console), and record actual evidence. Never substitute a mock or headless run for a failed connected Viewer result.
+12. Optional Claude Code edit feedback: `brain agent setup --hooks` (checks after source edits; no tests, downloads or auto-fixes). For experimental backend resources/jobs, inspect `brain backend schema --json` and `brain card resource:<name>` / `brain card job:<name>` before editing; `brain run` does not start that backend.
 "#;
 
 const PACKAGE_JSON: &str = r#"{
@@ -795,7 +814,10 @@ mod tests {
     fn new_then_add() {
         let app = tmp("demo");
         let files = new_app(&app).unwrap();
-        assert_eq!(files.len(), 39);
+        assert_eq!(files.len(), 54);
+        assert!(app.join("design.brain.json").is_file());
+        assert!(app.join("ui/card.brain").is_file());
+        assert!(app.join("ui/header.brain").is_file());
         assert!(app.join("AGENTS.md").is_file());
         assert!(fs::read_to_string(app.join("AGENTS.md")).unwrap().contains("brain guide <topic>"));
         assert!(app.join("app.brain").is_file() && !app.join("index.html").exists());
@@ -823,7 +845,7 @@ mod tests {
         let mut files = Vec::new();
         crate::brain_files(&app, &mut files);
         files.retain(|f| !f.to_string_lossy().ends_with(".test.brain")); // tests are not components (brain check skips them too)
-        assert_eq!(files.len(), 18, "app.brain + the scaffold's views/components + 3 added");
+        assert_eq!(files.len(), 29, "app.brain + the scaffold's views/components + 3 added");
         for f in &files {
             let src = fs::read_to_string(f).unwrap();
             let rel = f.strip_prefix(&app).unwrap();

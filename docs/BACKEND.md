@@ -1,0 +1,161 @@
+# Resource backend (experimental)
+
+Implemented across 2026-10-29/30. Native resource/auth/media/queue contracts share one project and a fixed loopback
+bridge with development and production frontends. `brain run` does not implicitly start or migrate PostgreSQL.
+Use the reviewed [PM2/nginx topologies](DEPLOYMENT.md), and migrate existing APIs in behavior-tested slices.
+
+## One contract per edit
+
+```sh
+brain add resource posts --fields "title:str! body:str active:bool"
+brain add job post_created --fields "resource:str! operation:str! record:obj!"
+brain backend schema --json
+brain backend migrate --env development
+brain backend serve --port 5182 --origin http://127.0.0.1:5182
+```
+
+The resource generator writes only implemented files:
+
+```
+server/resources/posts/schema.jsbrain  field shapes
+server/resources/posts/policy.jsbrain  read/create/update/delete grants
+server/resources/posts/hooks.jsbrain   optional durable after-write events
+server/jobs/post_created/schema.jsbrain payload shape
+server/jobs/post_created/handler.jsbrain server-only async handler
+```
+
+Schemas export one literal object (`{ title: 'str!', body: 'str' }`). Types: `str`, `num`, `bool`, `email`, `obj`;
+`!` means required. Unknown fields are rejected. Resource and field identifiers are lowercase letters, digits and
+underscores, begin with a letter, and are at most 48 bytes; storage-reserved names are rejected. There are 1–64 fields.
+Strings are at most 16 KB, emails 254 bytes and objects 32 KB. HTTP JSON bodies are at most 64 KB.
+
+Policy exports all four operation lists. Default grants are admin-only. Available grants: `admin`, `company`,
+`candidate`, `user`, configured role names, `owner` (existing rows only), and `public` (read only). Empty lists deny everyone. There is no implicit
+admin bypass. List queries enforce owner filtering in SQL; clients cannot select an owner or supply system columns.
+Public reads expose each record's owner UUID; do not grant public read when that identifier is sensitive.
+
+`GET /api/posts?search=words&limit=25&offset=0`, `POST /api/posts`, and `GET|PUT|DELETE /api/posts/<uuid>` use that
+contract. PUT replaces the record's data; PATCH is not supported. List limit: 1–100, offset: 0–10000, search: 256 bytes.
+OpenAPI 3.1 JSON is available at `/_brain/api` (admin session required with `--env production`). It documents resource
+routes and native account/media/job/link endpoints. CLI/MCP can inspect the same structured source contract;
+source saves report conservative contract diffs in `impact` without claiming a running backend was replaced.
+
+## Postgres and authentication
+
+Set `DATABASE_URL` in `.brain_env` or the host environment. Values never appear in CLI/MCP reports. There is no
+SQLite fallback. `migrate` explicitly creates the system tables and one JSONB table per resource, with owner and GIN
+full-text indexes. It serializes migrations with a transaction advisory lock. All request values use bind parameters;
+only validated identifiers enter SQL text. A changed field contract is refused until a reviewed data migration
+updates its recorded schema. No destructive or implicit schema sync runs during serve.
+
+- `POST /_brain/auth/signup` accepts `{ email, password }`, creates a candidate, and never accepts a role.
+- `POST /_brain/auth/login` accepts the same input and sets an opaque `__Host-brain` cookie: HttpOnly, Secure,
+  SameSite=Lax, seven days. The token is hashed in Postgres; roles are loaded from the users table on every request.
+- `GET /_brain/auth/me` returns the authenticated user. `POST /_brain/auth/logout` revokes that session.
+- Passwords use Argon2id with random salts. Two blocking hash slots prevent unbounded memory use; account lockout
+  after ten attempts lasts fifteen minutes. Signup/login/logout events are recorded in Postgres.
+
+Browser writes require an exact configured Origin. Forwarded headers are not trusted. The CLI binds only loopback;
+use an HTTPS reverse proxy for a deployed experiment (the session cookie is always Secure). `GET /health` checks
+Postgres. Request ids, no-store responses, nosniff, frame denial, CSP and a ten-second request timeout are enabled.
+The server uses peer-IP rate limiting (120 burst, one replenished request/second); a proxy currently shares that quota.
+
+Native sessions populate the verified `ctx.user` in Node SSR and the development sidecar through the fixed loopback
+bridge; legacy signed sessions never act as a fallback in native mode. JWT uses five-minute access tokens and
+rotating persisted refresh families; reuse detection and account mutations revoke active sessions.
+Roles and their signup default are declared in `server/auth/roles.jsbrain`; public signup cannot choose a role.
+`brain backend bootstrap-admin --user <existing-uuid>` explicitly provisions the first administrator.
+Single-use password recovery/email verification and optional Resend delivery are described in [AUTH-FLOWS.md](AUTH-FLOWS.md).
+No automatic administrator or production demo login is created. New app display hints are ephemeral, never localStorage authority.
+
+## Transactional hooks and queues
+
+```js
+// server/resources/posts/hooks.jsbrain
+<meta server>
+export default { after_create: 'post_created', after_update: 'post_updated' }
+```
+
+Every referenced job must exist. Hook payloads are `{ resource, operation, record }`; a hook job's schema must accept
+those fields. The record mutation and queue insertion share a Postgres transaction: enqueue failure rolls back the
+mutation. These after-write hooks are asynchronous events. Mandatory `before_create`, `before_update` and
+`before_delete` callbacks instead execute before the mutation on every native CRUD entry point; their returned
+payload is revalidated. Generate them with `brain add hook` and read [BEFORE-HOOKS.md](BEFORE-HOOKS.md) for the
+execution limits, safe rejection contract and same-record CAS conflict protection.
+
+Implement the generated handler before starting a worker; its initial body throws deliberately, so unfinished work
+cannot be reported as successful. It receives `{ payload, jobId, attempt, env }`. The worker compiles its BrainScript
+module graph with the existing compiler and runs it in an owned Node child; it never evaluates job payloads as code.
+
+```sh
+brain jobs enqueue post_created --payload '{"resource":"posts","operation":"create","record":{}}' --key example-event
+brain jobs work post_created --concurrency 2
+brain jobs status <uuid>
+brain jobs prune
+```
+
+The queue uses `FOR UPDATE SKIP LOCKED`, leases and unique lease tokens, with at-least-once delivery. Make side effects
+idempotent by `ctx.jobId`; an expired lease may be delivered again. A stale worker cannot acknowledge a newer lease.
+Limits: 10000 active jobs globally, 1–8 workers per process, no prefetched backlog, 60 seconds per execution, a 256 MB Node old-space heap setting, 90-second
+lease, 64 KB payload, default three attempts (library/HTTP allow 1–10), exponential retry delay capped at five minutes.
+The final failure or expired final lease becomes `dead`. Errors persisted in job status are generic, never raw handler
+exceptions. CLI status and HTTP status omit payloads. Prune explicitly removes at most 1000 finished jobs older than
+30 days; idempotency keys expire with those records. There is no automatic retry of dead jobs or scheduler yet.
+
+Ctrl+C stops claiming work and cancels owned execution. This trusted-project worker is not a sandbox for untrusted
+handler code. Node execution costs and delivery semantics must be measured before production adoption.
+
+## Private images
+
+`POST /_brain/uploads` accepts one authenticated multipart image field, checked by content and bounded decode.
+PNG/JPEG/WebP originals remain private and unchanged, with separately versioned responsive renditions/crops and
+ownership metadata. Image work, input/output bytes, dimensions and decoding memory have explicit budgets.
+The media library supports metadata pagination, guarded edits, private downloads and leased deletion cleanup.
+See [MEDIA.md](MEDIA.md) for the exact current routes, limits and optional private Google Cloud Storage adapter.
+General active-content/file formats are not implicitly treated as safe images.
+
+## Remaining acceptance work
+
+Final acceptance uses the combined repository gates and real browser/database evidence, not this feature list.
+A source contract change does not automatically migrate deployed data or restart a backend. Registered synchronous
+before-write callbacks are distinct from service-side preprocessing: clients allowed by a resource policy can call
+its CRUD endpoint directly, so service helpers alone are not an enforced cross-entry-point business hook.
+The reference-API throughput/p99 comparison must identify the actual build profile and source. The reproducible
+[benchmark harness](../bench/backend/README.md) runs the real reference API with disposable databases; a debug
+preflight is not release performance evidence. Authenticated realtime sockets are excluded from this checkpoint.
+
+## Structured job failure traces
+
+Workers compile private server modules with inline source maps and write a bounded
+`_server/trace-index.json` beside the entry module. The index maps generated module
+names to application-relative source files; it is not a public build asset.
+
+A failing Node handler reports one `JOB_TRACE` JSON record on its stderr pipe.
+It contains the job ID, source locations, generated coordinates, at most 24 frames
+across the complete error/cause chain, six causes and explicit truncation flags.
+Cause cycles stop traversal. Error messages, names, arbitrary error properties,
+variables, payloads, environment values, stdout and raw stack text are excluded.
+A formatted or unavailable stack is marked unknown rather than reconstructed from
+untrusted text.
+
+The implementation uses [V8 CallSites](https://v8.dev/docs/stack-trace-api) and
+[Node source-map lookup](https://nodejs.org/download/release/v22.21.1/docs/api/module.html#sourcemapfindentrylineoffset-columnoffset).
+`findEntry` receives zero-based generated coordinates. Only an exact mapped
+line whose original source matches the private index supplies an application line.
+Original columns remain null with `precision: source-line`; unmapped locations use
+`precision: module-only`, a null application line and separate generated
+coordinates. Source-map URLs or arbitrary map paths never replace the index path.
+
+The parent worker retains at most 64 KiB of child stderr and continues draining
+additional bytes into a fixed-size discard buffer. It accepts only correlated
+`JOB_TRACE` records and reconstructs allowlisted paths, coordinates and boolean
+flags. A failed attempt emits structured `job-failed` JSON with `jobId`, `queue`,
+the sanitized trace, `stderrBytes` and `stderrTruncated`. It never forwards raw
+stderr or exception text. Persisted queue errors remain generic.
+
+Waiting and stderr draining run in one joined future. The existing 60-second queue
+deadline, kill-on-drop child and owned process-group guard also cover a handler
+that floods stderr or leaves a child holding the pipe open. There is no detached
+reader task. The index has at most 2048 entries and 256 KiB; the Node trace itself
+is limited to 32 KiB. If stderr or tracing is truncated, absence of a location is
+not proof that the handler had no relevant frame.

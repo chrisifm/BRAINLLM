@@ -138,6 +138,7 @@ fn source_map_covers_statements_inside_nested_functions() {
         by_gen.push(Some(src_line));
     }
     let line_of = |needle: &str| lines.iter().position(|l| l.contains(needle)).and_then(|i| by_gen[i]).map(|l| l + 1);
-    assert_eq!(line_of("await fetch"), Some(4), "{}", o.js);
+    assert!(o.js.contains("await $brainBudgetbudgetSuspend"), "{}", o.js);
+    assert_eq!(line_of("fetch('/x')"), Some(4), "{}", o.js);
     assert_eq!(line_of("saved.v = 'ok'"), Some(5), "{}", o.js);
 }

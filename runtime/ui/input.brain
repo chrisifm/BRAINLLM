@@ -1,7 +1,8 @@
-<meta props="label:str value:str~ type:str='text' name:str? placeholder:str? autocomplete:str? required:bool=false disabled:bool=false error:str? help:str?">
+<meta props="label:str value:str~ type:str='text' step:str='any' name:str? placeholder:str? autocomplete:str? required:bool=false disabled:bool=false error:str? help:str?">
 <Field label={label} error={error} help={help}>
   <input
     type={type}
+    step={type === 'number' ? step : null}
     name={name}
     placeholder={placeholder}
     autocomplete={autocomplete}
@@ -13,8 +14,8 @@
 </Field>
 <style>
   input {
-    width: 100%; min-height: 40px; padding: var(--space-2) var(--space-3);
-    font: 15px/1.4 var(--font); color: var(--fg); background: var(--surface);
+    width: 100%; min-height: 44px; padding: var(--space-2) var(--space-3);
+    font: 16px/1.4 var(--font); color: var(--fg); background: var(--surface);
     border: 1px solid var(--line); border-radius: var(--radius-sm);
   }
   input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

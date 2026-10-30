@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "verifiedAt": "2026-10-30T09:17:12.296239+00:00",
+  "verification": "npm latest manifests read only; packages not installed or executed",
+  "entries": [
+    {
+      "id": "openai",
+      "package": "openai",
+      "version": "7.45.1",
+      "execution": "server",
+      "officialDocs": "https://developers.openai.com/api/reference/typescript/resources/responses/methods/create",
+      "repository": {
+        "url": "git+https://github.com/openai/openai-node.git",
+        "type": "git"
+      },
+      "license": "Apache-2.0",
+      "engines": {
+        "node": ">=22.0.0"
+      },
+      "registry": "https://registry.npmjs.org/openai/latest",
+      "integrity": "sha512-mutrJXwhJIMZ24Lab2COFtNp44OcpZSnV4O2O7q38wAHUa2m2fQqUO5pj1XS3PqLfOTeODBUS9YoadqDnnGk5A==",
+      "envKeys": [
+        "OPENAI_API_KEY",
+        "OPENAI_MODEL"
+      ],
+      "adapterContractVersion": 1,
+      "updatePolicy": "selective exact pin; review official API and rerun offline adapter tests",
+      "optimizationBoundary": "preserve official exports, side effects and external property contracts; no blanket mangling"
+    },
+    {
+      "id": "claude",
+      "package": "@anthropic-ai/sdk",
+      "version": "1.3.0",
+      "execution": "server",
+      "officialDocs": "https://platform.claude.com/docs/en/api/messages/create",
+      "repository": {
+        "url": "git+https://github.com/anthropics/anthropic-sdk-typescript.git",
+        "type": "git"
+      },
+      "license": "Apache-2.0",
+      "engines": null,
+      "registry": "https://registry.npmjs.org/%40anthropic-ai%2Fsdk/latest",
+      "integrity": "sha512-k7z9BlLLPxfZH+ov7dS6EnaN/wiZeV8YNT1LZfrpAHIy7oY7pHr4UzirF9f2OlHtFEnRBOX+AZQ91Y5fK+TPTw==",
+      "envKeys": [
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_MODEL"
+      ],
+      "adapterContractVersion": 1,
+      "updatePolicy": "selective exact pin; review official API and rerun offline adapter tests",
+      "optimizationBoundary": "preserve official exports, side effects and external property contracts; no blanket mangling"
+    },
+    {
+      "id": "gemini",
+      "package": "@google/genai",
+      "version": "2.32.0",
+      "execution": "server",
+      "officialDocs": "https://ai.google.dev/gemini-api/docs/libraries",
+      "repository": {
+        "url": "git+https://github.com/googleapis/js-genai.git",
+        "type": "git"
+      },
+      "license": "Apache-2.0",
+      "engines": {
+        "node": ">=20.0.0"
+      },
+      "registry": "https://registry.npmjs.org/%40google%2Fgenai/latest",
+      "integrity": "sha512-60c79uXpR0a47bmGqDxbXEBuQUalNmwo5mx5kqb91jIW4FoqpsLSt86DeVhRhtH5+s/16Wqxt3sXzFQn2U1OHQ==",
+      "envKeys": [
+        "GEMINI_API_KEY",
+        "GEMINI_MODEL"
+      ],
+      "adapterContractVersion": 1,
+      "updatePolicy": "selective exact pin; review official API and rerun offline adapter tests",
+      "optimizationBoundary": "preserve official exports, side effects and external property contracts; no blanket mangling"
+    },
+    {
+      "id": "maps",
+      "package": "@googlemaps/js-api-loader",
+      "version": "2.1.3",
+      "execution": "browser",
+      "officialDocs": "https://developers.google.com/maps/documentation/javascript/load-maps-js-api",
+      "repository": {
+        "url": "git+https://github.com/googlemaps/js-api-loader.git",
+        "type": "git"
+      },
+      "license": "Apache-2.0",
+      "engines": null,
+      "registry": "https://registry.npmjs.org/%40googlemaps%2Fjs-api-loader/latest",
+      "integrity": "sha512-1t6umwRufEGzIPjHPjPeuuY1dCal0zU2bZeomkf4OA0MprFdlKCnXY3zeFkzDaCvKjwbFubeapm61P5+EbrAoA==",
+      "envKeys": [
+        "PUBLIC_GOOGLE_MAPS_API_KEY"
+      ],
+      "adapterContractVersion": 1,
+      "updatePolicy": "selective exact pin; review official API and rerun offline adapter tests",
+      "optimizationBoundary": "preserve official exports, side effects and external property contracts; no blanket mangling"
+    },
+    {
+      "id": "storage",
+      "package": "@google-cloud/storage",
+      "version": "8.4.0",
+      "execution": "server",
+      "officialDocs": "https://docs.cloud.google.com/nodejs/docs/reference/storage/latest",
+      "repository": {
+        "url": "git+https://github.com/googleapis/google-cloud-node.git",
+        "type": "git",
+        "directory": "handwritten/storage"
+      },
+      "license": "Apache-2.0",
+      "engines": {
+        "node": ">=22"
+      },
+      "registry": "https://registry.npmjs.org/%40google-cloud%2Fstorage/latest",
+      "integrity": "sha512-M3kA6UA2Tjp5aznCrgKcm9CzOjiQyRMnquqalqXAeS5wvkqqZxN8wpNjjHafOSYs6lQ82U7f2i8we4eTfIrpkA==",
+      "envKeys": [],
+      "adapterContractVersion": 1,
+      "updatePolicy": "selective exact pin; review official API and rerun offline adapter tests",
+      "optimizationBoundary": "preserve official exports, side effects and external property contracts; no blanket mangling"
+    }
+  ]
+}

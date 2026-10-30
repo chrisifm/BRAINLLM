@@ -46,14 +46,16 @@ Task: <describe the app you want>`)
   .eyebrow { margin: 0; font-size: .8rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
   h1 { font-size: clamp(2.2rem, 6vw, 3.6rem); font-weight: 650; }
   .lead { margin: 0; max-width: 56ch; color: var(--muted); font-size: 1.1rem; }
-  .card { width: 100%; text-align: left; background: var(--glass); border: 1px solid var(--glass-edge); border-radius: var(--radius-lg); box-shadow: var(--shadow); padding: var(--space-4); -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%); }
+  .card { width: 100%; text-align: left; background: var(--glass); border: 1px solid var(--glass-edge); border-radius: var(--radius-lg); box-shadow: var(--shadow); padding: var(--space-4); }
   .card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); }
   h2 { font-size: 1rem; font-weight: 600; }
-  textarea { width: 100%; resize: vertical; font-family: ui-monospace, "SF Mono", monospace; font-size: .85rem; line-height: 1.55; background: var(--surface); }
+  textarea { width: 100%; font-family: ui-monospace, "SF Mono", monospace; font-size: .85rem; line-height: 1.55; background: var(--surface); }
   .primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
   .steps { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-3); color: var(--muted); }
   .steps li { background: var(--glass); border: 1px solid var(--glass-edge); border-radius: 999px; padding: var(--space-1) var(--space-3); box-shadow: var(--shadow); }
   code { color: var(--fg); font-weight: 600; }
-  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; white-space: nowrap; }
   @supports not (backdrop-filter: blur(1px)) { .card { background: var(--surface); } }
+  @supports (backdrop-filter: blur(1px)) { .card { backdrop-filter: blur(20px) saturate(180%); } }
+  @supports (resize: vertical) { textarea { resize: vertical; } }
 </style>

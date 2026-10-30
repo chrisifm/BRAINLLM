@@ -13,6 +13,7 @@
 // `false` and redirects with `redirect('/login')` (thrown or returned) or a string. The server runs the same guard,
 // so a redirect it answers (fetch ends on another URL) is reflected in the address bar. A guard that throws anything
 // else → full page load: the server decides.
+import { prefetchPage } from './brain-prefetch-shared.js'
 const G = globalThis
 // Base path (<meta name="brain-base" content="/app/">, §23 #148): links in the HTML already carry it; guards and
 // routes work with app paths (strip), and app paths given to go()/navigate()/redirect() get it (app). '/' when absent.
@@ -33,7 +34,9 @@ const app = u => {
 // guards run); without a router it is a normal page load.
 let active = null
 export function navigate(to, o = {}) {
-  const u = app(String(to))
+  const raw = String(to)
+  if (/[\\\x00-\x20\x7f]/.test(raw)) throw Error('Invalid navigation target')
+  const u = app(raw)
   if (active) return active.go(u, o.replace ? 'replace' : true)
   o.replace ? location.replace(u) : location.assign(u)
 }
@@ -89,8 +92,9 @@ const outcome = v =>
 export function router(o = {}) {
   const region = o.region || 'main'
   const parse = o.parse || (h => new DOMParser().parseFromString(h, 'text/html'))
+  const fullLoad = new Set(Array.isArray(o.fullLoad) ? o.fullLoad.map(p => { try { return new URL(p, location.href).pathname.replace(/\/+$/, '') || '/' } catch { return null } }).filter(Boolean) : [])
   let seq = 0, through = null, stale = false
-  const ahead = predict(o, u => same(u))
+  const ahead = predict(o, u => same(u, true))
   // Build signature (§35.7): the page's <meta name="brain-build">. A navigation response from another build, or the
   // service worker announcing one, turns client navigation into full loads so old and new code never mix.
   const build = () => {
@@ -98,7 +102,7 @@ export function router(o = {}) {
     return m ? m.getAttribute('content') : null
   }
   const sw = G.navigator && navigator.serviceWorker
-  const onMsg = e => typeof e.data === 'string' && e.data.startsWith('brain:build ') && build() && e.data.slice(12) !== build() && (stale = true)
+  const onMsg = e => typeof e.data === 'string' && e.data.startsWith('brain:build ') && build() && e.data.slice(12) !== build() && (stale = true, ahead.stop())
   if (sw && sw.addEventListener) sw.addEventListener('message', onMsg)
   // a guard is a function, or the URL of its `_guard.jsbrain` chunk (BUILD #220): loaded the first time a navigation
   // reaches that folder, then cached by the module map; its default export runs with the same ctx
@@ -130,11 +134,11 @@ export function router(o = {}) {
   }
 
   // _loading.brain (#235): when the next page takes longer than 150 ms, the nearest loading view of the target route
-  // (`loading: [{ rx, view }]`, most specific first, emitted by the build with the `core` URL) is mounted in the
+  // (`loading: [{ rx: string | string[], view }]`, most specific first, emitted by the build with the `core` URL) is mounted in the
   // region until the page arrives; fast navigations never show it, so nothing flickers.
   const loads = o.loading || []
   function waiting(url, my) {
-    const path = strip(new URL(url, location.href).pathname), l = loads.find(x => new RegExp(x.rx).test(path))
+    const path = strip(new URL(url, location.href).pathname), l = loads.find(x => (Array.isArray(x.rx) ? x.rx : [x.rx]).some(rx => new RegExp(rx).test(path)))
     const w = { done: false, t: 0 }
     if (!l || !o.core) return w
     w.t = setTimeout(() => {
@@ -223,6 +227,9 @@ export function router(o = {}) {
       if (pb && document.head) document.head.appendChild(document.adoptNode ? document.adoptNode(pb) : pb)
       routed()
       current()
+      const oldPlan = document.getElementById('brain-next'), newPlan = doc.querySelector('#brain-next')
+      if (oldPlan) oldPlan.remove()
+      if (newPlan) document.body.appendChild(document.adoptNode ? document.adoptNode(newPlan) : newPlan)
       ahead.scan()
     }
     if (document.startViewTransition) {
@@ -233,11 +240,11 @@ export function router(o = {}) {
   }
   // a full load must not be intercepted again (Navigation API): `through` lets that one navigation pass
   const hard = url => ((through = new URL(url, location.href).href), (o.hard || (u => location.assign(u)))(url))
-  const same = u => {
+  const same = (u, prefetch = false) => {
     try {
       const x = new URL(u, location.href), b = base()
       // same origin and inside the app's base path (§23 #148); anything else is a full load
-      return x.origin === location.origin && (x.pathname + '/').startsWith(b) && !(o.skip && o.skip(x))
+      return x.origin === location.origin && (x.pathname + '/').startsWith(b) && !(o.skip && o.skip(x)) && (prefetch || !fullLoad.has(x.pathname.replace(/\/+$/, '') || '/'))
     } catch {
       return false
     }
@@ -251,6 +258,7 @@ export function router(o = {}) {
       if (!e.canIntercept || e.hashChange || e.downloadRequest || e.formData || !same(e.destination.url)) return
       if (e.cancelable && !leave()) return e.preventDefault()
       const to = e.destination.url, from = nav.currentEntry && nav.currentEntry.url
+      if (G.__brainURLOnly?.(from || location.href, to)) return e.intercept({ handler: () => G.__brainURLRestore?.() })
       if (!gs.length) return e.intercept({ handler: () => load(to) }) // scroll + focus reset handled by the browser
       let g
       e.intercept({
@@ -282,6 +290,7 @@ export function router(o = {}) {
   let here = location.href
   const go = async (u, push = true, hops = 0) => {
     if (!hops && !leave()) return push || history.pushState(history.state, '', here) // stay (back/forward: restore the URL)
+    if (!same(u)) return hard(u)
     const g = gs.length ? await check(u) : true
     if (g === null || hops > 5) return hard(u)
     if (g === false) return push || history.pushState(history.state, '', here) // back/forward blocked: stay
@@ -304,7 +313,10 @@ export function router(o = {}) {
     e.preventDefault()
     go(u.href)
   }
-  const pop = () => go(location.href, false)
+  const pop = () => {
+    if (G.__brainURLOnly?.(here, location.href)) { here = location.href; G.__brainURLRestore?.(); return }
+    return go(location.href, false)
+  }
   const focusMain = () => {
     const m = document.querySelector(region), h = m && (m.querySelector('h1') || m)
     if (h && h.focus) {
@@ -330,12 +342,13 @@ export function router(o = {}) {
 // intent prefetches there, and never with Save-Data), `data-prefetch="false"` on the link or an ancestor, download or
 // target links, files (`.pdf`, `.zip`…), `/api/` and `/auth/`, action-style paths (log out, unsubscribe, confirm,
 // verify), URLs carrying a token in the query, and everything with `router({ prefetch: false })` or
-// `<meta name="brain-prefetch" content="off">`. A page served `private`/`no-store` is reused for 30 s, others for 5 min,
+// `<meta name="brain-prefetch" content="off">`. Private/no-store and dynamic no-cache HTML is never reused; static
+// pages and explicitly cacheable public HTML stay in bounded tab memory for at most 5 min,
 // and any write empties the memory first: a form submit, a `brain:write` (brain-data writes, every server function
 // call, log-out included), so the next view never shows data from before the write or another session. Each fetch says
 // `x-brain-prefetch: 1` (`ctx.prefetch` in the server's `load`), so a server can tell it apart from a click.
-const FRESH = 300000, FRESH_PRIVATE = 30000, MAX_PAGE = 12, MAX_KEPT = 24, PARALLEL = 2
-const NOPE = /(^|\/)(log-?out|sign-?out|logoff|unsubscribe|confirm|verify|api|auth)(\.html?)?(\/|$)/i
+const FRESH = 300000, MAX_PAGE = 12, MAX_KEPT = 24, PARALLEL = 2
+const NOPE = /(^|\/)(log-?out|sign-?out|logoff|unsubscribe|confirm|verify|api|auth|_brain|_r)(\.html?)?(\/|$)/i
 const FILE = /\.(?!html?$)[a-z0-9]{2,5}$/i
 const SECRET = /(^|[?&])(token|code|key|sig|signature|auth|otp|state)=/i
 export function predict(o = {}, same = () => false) {
@@ -344,79 +357,114 @@ export function predict(o = {}, same = () => false) {
   if (o.prefetch === false || (meta && /^(off|false|0)$/i.test(meta.getAttribute('content') || '')) || !G.document || !G.fetch) return off
   const net = G.navigator && navigator.connection
   const thin = () => !!net && (net.saveData || /(^|-)2g$/.test(net.effectiveType || ''))
-  const cache = new Map(), queue = [], seen = new WeakSet(), pre = new Set()
-  let busy = 0, count = 0, io = null, idle = 0
+  const cache = new Map(), queue = [], pre = new Map(), running = new Map(), pending = new Map(), planned = new Map()
+  let seen = new WeakSet(), busy = 0, count = 0, io = null, idle = 0, epoch = 0, dead = false, bytes = 0, worker = null, serial = 0
   const key = h => {
-    try {
-      const u = new URL(h, location.href)
-      u.hash = ''
-      return u.href
-    } catch {
-      return null
-    }
+    try { const u = new URL(h, location.href); u.hash = ''; return u.href } catch { return null }
+  }
+  const safe = k => {
+    if (!k || !same(k) || k === key(location.href)) return false
+    const u = new URL(k)
+    return !NOPE.test(u.pathname) && !FILE.test(u.pathname) && !SECRET.test(u.search)
   }
   const ok = a => {
     if (!a || !a.getAttribute || !a.getAttribute('href') || a.getAttribute('target') || a.hasAttribute('download')) return null
     for (let n = a; n && n.getAttribute; n = n.parentNode) if (n.getAttribute('data-prefetch') === 'false') return null
     const k = key(a.href || a.getAttribute('href'))
-    if (!k || !same(k) || k === key(location.href)) return null
-    const u = new URL(k)
-    if (NOPE.test(u.pathname) || FILE.test(u.pathname) || SECRET.test(u.search)) return null
-    return k
+    return safe(k) ? k : null
   }
-  // the next page's chunks: module scripts and static imports in its HTML
-  const chunks = html => {
-    if (!document.head) return
-    const re = /<script[^>]+type="module"[^>]+src="([^"]+)"|\bfrom\s*"([^"]+\.js)"|\bimport\(\s*"([^"]+\.js)"\s*\)/g
-    let m, n = 0
-    while ((m = re.exec(html)) && n < 8) {
-      const u = key(m[1] || m[2] || m[3])
-      if (!u || pre.has(u) || !same(u)) continue
-      pre.add(u), n++
+  const warm = list => {
+    if (!document.head || dead) return
+    let n = 0
+    for (const href of list) {
+      const u = key(href)
+      if (!u || pre.has(u) || !same(u) || !new URL(u).pathname.includes('/_b/') || ++n > 8) continue
       const l = document.createElement('link')
-      l.setAttribute('rel', 'modulepreload')
+      l.setAttribute('rel', /\.(js|jsbrain)(\?|$)/.test(u) ? 'modulepreload' : 'prefetch')
       l.setAttribute('href', u)
+      l.setAttribute('fetchpriority', 'low')
       document.head.appendChild(l)
+      pre.set(u, l)
+      while (pre.size > 48) { const [k, node] = pre.entries().next().value; node.remove(); pre.delete(k) }
     }
   }
-  // drop what expired, then the oldest past MAX_KEPT (a Map keeps insertion order)
+  const remove = k => { const c = cache.get(k); if (c) bytes -= c.bytes || 0; cache.delete(k) }
   const prune = () => {
-    const now = Date.now()
-    for (const [k, c] of cache) if (now - c.at > FRESH) cache.delete(k)
-    for (const k of cache.keys()) if (cache.size >= MAX_KEPT) cache.delete(k)
+    for (const [k, c] of cache) if (Date.now() - c.at > FRESH) remove(k)
+    while (cache.size > MAX_KEPT || bytes > 4 * 1024 * 1024) remove(cache.keys().next().value)
   }
+  const crashed = () => {
+    worker && worker.terminate(); worker = null
+    for (const p of pending.values()) { clearTimeout(p.timer); p.resolve(null) }
+    pending.clear()
+  }
+  if (G.Worker && typeof o.prefetchWorker === 'string') {
+    try {
+      const url = new URL(o.prefetchWorker, location.href)
+      if (url.origin === location.origin) {
+        worker = new Worker(url.href, { type: 'module' })
+        worker.onmessage = e => {
+          const m = e.data, p = m && pending.get(m.id)
+          if (!p) return
+          clearTimeout(p.timer); pending.delete(m.id); p.resolve(m.ok ? m : null)
+        }
+        worker.onerror = crashed
+        worker.onmessageerror = crashed
+      }
+    } catch { crashed() }
+  }
+  const background = (k, controller) => {
+    if (worker) return new Promise(resolve => {
+      const id = ++serial
+      const done = () => { const p = pending.get(id); if (p) { clearTimeout(p.timer); pending.delete(id); resolve(null); worker && worker.postMessage({ id, cancel: true }) } }
+      const timer = setTimeout(done, 6500)
+      pending.set(id, { resolve, timer })
+      controller.signal.addEventListener('abort', done, { once: true })
+      try { worker.postMessage({ id, url: k }) } catch { done(); crashed() }
+    })
+    return prefetchPage(k, controller.signal)
+  }
+
   const get = k => {
-    prune()
-    const at = Date.now()
-    const p = fetch(k, { headers: { 'x-brain-nav': '1', 'x-brain-prefetch': '1' }, priority: 'low', credentials: 'same-origin' })
-      .then(async r => {
-        const ct = (r.headers && r.headers.get && r.headers.get('content-type')) || 'text/html'
-        if (!r.ok || !/html/.test(ct)) return null
-        const text = await r.text()
-        chunks(text)
-        const cc = (r.headers.get && r.headers.get('cache-control')) || ''
-        // a stand-in for the Response that load() reads: headers, status, redirect and the body once per use
-        return { ok: r.ok, status: r.status, redirected: r.redirected, url: r.url, headers: r.headers, text: async () => text, ttl: /private|no-store/i.test(cc) ? FRESH_PRIVATE : FRESH }
-      })
-      .catch(() => null)
-    cache.set(k, { at, p })
-    return p
+    const own = epoch, controller = new AbortController(), at = Date.now()
+    running.set(k, controller)
+    const timer = setTimeout(() => controller.abort(), 6000)
+    const c = { at, epoch: own, bytes: 0, p: null }
+    c.p = background(k, controller).then(m => {
+      if (!m || dead || own !== epoch || controller.signal.aborted) { if (cache.get(k) === c) remove(k); return null }
+      const headers = Array.isArray(m.headers) ? new Headers(m.headers) : m.headers
+      const cc = headers.get('cache-control') || '', freshness = /(?:^|,)\s*(?:s-maxage|max-age)=(\d+)/i.exec(cc)
+      if (m.assets) warm(m.assets)
+      if (planned.has(k)) warm(planned.get(k))
+      // Personalized and dynamically revalidated HTML always goes back through the server on navigation.
+      // Speculation still warms its immutable code/assets; it never reuses another tab's prior session data.
+      if (/private|no-store/i.test(cc) || /no-cache/i.test(cc) && headers.get('x-brain-static') !== '1') { if (cache.get(k) === c) remove(k); return null }
+      // Transient page memory belongs to this tab and write epoch, never to CacheStorage or the worker.
+      c.bytes = m.text.length * 2
+      if (cache.get(k) === c) bytes += c.bytes
+      prune()
+      return { ok: m.ok, status: m.status, redirected: false, url: m.url, headers, text: async () => m.text, ttl: Math.min(FRESH, freshness ? +freshness[1] * 1000 : FRESH) }
+    }).catch(() => null).finally(() => { clearTimeout(timer); if (running.get(k) === controller) running.delete(k) })
+    cache.set(k, c); prune()
+    return c.p
   }
   const pump = () => {
+    if (dead || document.hidden || net && net.saveData) return
     while (busy < PARALLEL && queue.length) {
       const k = queue.shift()
       if (cache.has(k)) continue
       busy++
-      get(k).finally(() => (busy--, pump()))
+      get(k).finally(() => { busy--; pump() })
     }
   }
-  const later = f => (G.requestIdleCallback ? G.requestIdleCallback(f, { timeout: 2000 }) : setTimeout(f, 200))
+  const later = f => G.requestIdleCallback ? G.requestIdleCallback(f, { timeout: 2000 }) : setTimeout(f, 200)
+  const cancelIdle = () => { if (idle) { G.cancelIdleCallback ? G.cancelIdleCallback(idle) : clearTimeout(idle); idle = 0 } }
   const want = (k, now) => {
-    if (!k || cache.has(k)) return
+    if (!k || dead || cache.has(k) || count >= (now ? MAX_KEPT : MAX_PAGE)) return
     const i = queue.indexOf(k)
-    if (i >= 0) queue.splice(i, 1)
-    if (now) queue.unshift(k), pump()
-    else if (count < MAX_PAGE) count++, queue.push(k), idle || (idle = 1) && later(() => ((idle = 0), pump()))
+    if (i >= 0) queue.splice(i, 1); else count++
+    if (now) { queue.unshift(k); pump() }
+    else { queue.push(k); if (!idle) idle = later(() => { idle = 0; pump() }) }
   }
   const intent = e => {
     if (net && net.saveData) return
@@ -426,38 +474,56 @@ export function predict(o = {}, same = () => false) {
   }
   const evs = ['pointerover', 'focusin', 'touchstart']
   for (const t of evs) document.addEventListener(t, intent, { passive: true, capture: true })
-  // a write makes every fetched page possibly stale (or another session's after log-out): forget them all
-  const forget = () => ((queue.length = 0), cache.clear())
+  const forget = () => {
+    epoch++; cancelIdle(); queue.length = 0; cache.clear(); bytes = 0; count = 0
+    for (const c of running.values()) c.abort()
+    running.clear()
+  }
   document.addEventListener('submit', forget, { capture: true })
   if (G.addEventListener) G.addEventListener('brain:write', forget)
-  if (G.IntersectionObserver)
-    io = new IntersectionObserver(
-      es => {
-        for (const e of es) if (e.isIntersecting) io.unobserve(e.target), thin() || want(ok(e.target), false)
-      },
-      { rootMargin: '200px' }
-    )
+  const visible = () => { if (!document.hidden) pump() }
+  document.addEventListener('visibilitychange', visible)
+  if (G.IntersectionObserver) io = new IntersectionObserver(es => {
+    for (const e of es) if (e.isIntersecting) { io.unobserve(e.target); if (!thin()) want(ok(e.target), false) }
+  }, { rootMargin: '200px' })
   return {
     scan() {
-      count = 0
-      queue.length = 0 // the previous view's links are no longer the likely next step
-      if (!io) return
-      for (const a of document.querySelectorAll('a[href]')) if (!seen.has(a)) seen.add(a), io.observe(a)
+      if (dead) return
+      count = 0; cancelIdle(); queue.length = 0; planned.clear(); seen = new WeakSet(); io && io.disconnect()
+      const anchors = document.querySelectorAll('a[href]'), allowed = new Set()
+      for (const a of anchors) { const k = ok(a); if (k) allowed.add(k); if (io && !seen.has(a)) { seen.add(a); io.observe(a) } }
+      // Compiler-generated graph, validated against the current DOM: hidden/opted-out links cannot sneak in.
+      const plan = document.getElementById && document.getElementById('brain-next')
+      if (plan && !thin()) {
+        try {
+          const map = JSON.parse(plan.textContent)
+          if (map.v === 1 && Array.isArray(map.next)) for (const item of map.next.slice(0, MAX_PAGE)) {
+            const k = key(item.url)
+            if (allowed.has(k) && safe(k)) { if (Array.isArray(item.assets)) planned.set(k, item.assets.slice(0, 16)); want(k, false) }
+          }
+        } catch {}
+      }
     },
     stop() {
-      io && io.disconnect()
+      if (dead) return
+      forget(); dead = true; crashed(); io && io.disconnect()
       for (const t of evs) document.removeEventListener(t, intent, { capture: true })
       document.removeEventListener('submit', forget, { capture: true })
+      document.removeEventListener('visibilitychange', visible)
       G.removeEventListener && G.removeEventListener('brain:write', forget)
-      cache.clear()
+      for (const l of pre.values()) l.remove()
+      pre.clear()
     },
-    // the prefetched page for this URL when it is still fresh (used once: a later visit fetches again)
     async take(u) {
       const k = key(u), c = k && cache.get(k)
       if (!c) return null
-      cache.delete(k)
-      const r = await c.p
-      return r && Date.now() - c.at < r.ttl ? r : null
+      remove(k)
+      // A click must not inherit a slow speculative request's six-second deadline.
+      let timer
+      const r = await Promise.race([c.p, new Promise(resolve => { timer = setTimeout(() => resolve(null), 150) })])
+      clearTimeout(timer)
+      if (!r) { const controller = running.get(k); controller && controller.abort() }
+      return r && !dead && c.epoch === epoch && Date.now() - c.at < r.ttl ? r : null
     },
   }
 }

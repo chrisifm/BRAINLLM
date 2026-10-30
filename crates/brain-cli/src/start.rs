@@ -144,6 +144,7 @@ fn spawn_child(root: &Path, fd: i32, vars: &[(String, String)], log: &Arc<Mutex<
     cmd.arg(root.join("dist/server.mjs"))
         .current_dir(root.join("dist"))
         .envs(vars.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+        .env("NODE_ENV", "production")
         .env("BRAIN_LISTEN_FD", "3")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

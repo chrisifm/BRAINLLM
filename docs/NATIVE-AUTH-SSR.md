@@ -1,0 +1,23 @@
+# Native backend authority in production SSR
+
+Set `BRAIN_BACKEND_URL=http://127.0.0.1:<backend-port>` in the Node production server's private environment to make the Rust backend authoritative for `ctx.user`. Literal loopback IPv4/IPv6 and localhost HTTP origins are accepted; localhost is normalized to loopback IPv4. Credentials, paths, query strings, fragments, public hosts and oversized URLs are rejected. The target never comes from a request or token.
+
+Before a production SSR route, form post or RPC creates its context, Node calls `/_brain/auth/me` on that fixed origin. The result is resolved once per request, with no cross-request authorization cache. Static assets do not make this call. Only native opaque/access authentication cookies are forwarded; legacy Node cookies, unrelated cookies and inbound Authorization headers are excluded. Request IDs propagate, and Rust preserves incoming valid UUID references. The native bridge is a browser-cookie integration; Bearer clients can call the Rust API directly.
+
+A successful user is reduced to `id`, `email`, `role` and `verified`; extra backend fields never enter the context. Unauthorized means anonymous. Unavailable, redirected, malformed or oversized backend responses fail closed with a safe 503; the server does not fall back to a legacy signed cookie. All authenticated HTML keeps private/no-store behavior.
+
+## Session mutations
+
+In native mode, `ctx.session.set()` refuses to establish a legacy session. Establish password sessions with `await ctx.backend.login({email,password})` inside a same-origin POST server function, or use the native Google authentication endpoint. The facade returns only the canonical sanitized user and relays HttpOnly cookies; tokens never enter the rendered context. Login and logout cannot both mutate the same request. The old signed-cookie demo remains available only when the native backend bridge is not configured.
+
+`ctx.session.clear()` relays a logout to the fixed native backend. It requires a same-origin POST and cannot mutate a streamed response whose headers are already sent. Refresh cookies are forwarded only for this logout relay. The response waits for revocation even when application code did not await `clear()`. Only native auth Set-Cookie headers and the storage cleanup header are relayed; unrelated backend cookies are discarded. A failed relay returns a safe 503 instead of pretending logout succeeded. The backend must allow the public site Origin explicitly.
+
+The bridge does not rotate refresh tokens during GET navigation. The Google sign-in recipe checks its native session, performs one explicit same-origin refresh POST after a 401, and reloads the authentication boundary on success. Applications can coordinate additional refresh POSTs around their own navigation/API lifecycle; concurrent refresh reuse intentionally revokes a family.
+
+## Resource lifecycle and deployment
+
+One bridge owns a keep-alive HTTP agent with eight active operations, two idle sockets and no pending work queue. Identity checks and logout have an absolute two-second deadline and a 16 KiB body limit, including responses that keep sending small chunks. Password login has an absolute ten-second deadline, bounded credentials and a 16 KiB response limit; Argon2 work remains bounded by the native backend. Resource operations share the eight-operation cap with a ten-second deadline and a 2 MiB response limit. Authentication is never cached. Incoming cancellation aborts owned operations, and server close destroys its owned sockets. Redirects, compression and proxy environment variables cannot change the fixed loopback destination.
+
+With `BRAIN_BACKEND_URL` configured, the production Node server also proxies `/api`, `/_brain` and `/s/` paths to that fixed backend origin. This provides same-origin browser cookies for native APIs and SSR when Node is the public application server. A deployment can instead route those namespaces directly to Rust through its reviewed reverse proxy. A separate backend port alone does not establish a shared browser origin. Configuration does not start or deploy either server.
+
+The production Node server is covered by real local HTTP tests for authoritative users, legacy backdoor rejection, cookie minimization, role sanitization, single-request resolution, logout revocation/headers, overload, malformed responses and absolute deadlines. Google tests use a synthetic SDK; external sign-in still needs operator configuration. Development and Rust static-server proxy integration is described separately in [DEV-NATIVE-BACKEND.md](DEV-NATIVE-BACKEND.md).

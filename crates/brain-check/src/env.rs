@@ -18,7 +18,7 @@ use std::path::Path;
 pub const FILE: &str = ".brain_env";
 
 /// Keys the toolchain reads (brain build, brain-seo, brain start): never reported as unused (B0722).
-pub const TOOLING_KEYS: &[&str] = &["PUBLIC_SITE_URL", "PUBLIC_SITE_NAME", "INDEXNOW_KEY", "BRAIN_SECRET", "PORT", "HOST"];
+pub const TOOLING_KEYS: &[&str] = &["PUBLIC_SITE_URL", "PUBLIC_SITE_NAME", "INDEXNOW_KEY", "BRAIN_SECRET", "PORT", "HOST", "NODE_ENV", "DATABASE_URL", "BRAIN_BACKEND_URL", "BRAIN_JWT_SECRET", "BRAIN_JWT_ISSUER", "BRAIN_JWT_AUDIENCE", "GOOGLE_CLIENT_ID", "BRAIN_GCS_BUCKET", "BRAIN_GCS_PREFIX", "BRAIN_GCS_ADAPTER", "BRAIN_MAIL_RESEND_KEY", "BRAIN_MAIL_FROM", "BRAIN_VIEWER_PROFILE"];
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
@@ -312,7 +312,7 @@ pub fn unused_keys(root: &Path) -> Vec<Diag> {
         .collect()
 }
 
-/// What the checker needs from the app's `.brain_env` (keys only, never values).
+/// Declared and framework-managed environment keys, plus source used only for diagnostic locations.
 #[derive(Clone, Debug, Default)]
 pub struct EnvInfo {
     pub keys: HashSet<String>,
@@ -327,5 +327,7 @@ pub struct EnvInfo {
 pub fn load(root: &Path) -> Option<EnvInfo> {
     let src = std::fs::read_to_string(root.join(FILE)).ok()?;
     let f = parse(&src);
-    Some(EnvInfo { keys: f.keys(), insert_at: f.shared_end, src_len: src.len(), src })
+    let mut keys = f.keys();
+    keys.extend(TOOLING_KEYS.iter().map(|key|(*key).to_owned()));
+    Some(EnvInfo { keys, insert_at: f.shared_end, src_len: src.len(), src })
 }

@@ -120,7 +120,7 @@ pub fn compile_style(src: &str, path: &Path, opts: &Options) -> Result<String, V
     if !errors.is_empty() {
         return Err(errors);
     }
-    Ok(crate::component_css(&c, &component_hash_len(&c.file, opts.hash_len)))
+    Ok(crate::component_css(&c, &component_hash_len(&crate::component_scope_key(&c.file,&c.src), opts.hash_len)))
 }
 
 /// `src` with the content of `raw` elements blanked (same length), so block tags inside code samples are ignored.

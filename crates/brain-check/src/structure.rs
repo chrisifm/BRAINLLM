@@ -26,12 +26,46 @@ impl Block {
     }
 }
 
+// Parsed markup expressions and attribute values are content, never file-level blocks.
+fn expression_spans(nodes: &[Node], out: &mut Vec<Span>) {
+    fn attrs(items: &[Attr], out: &mut Vec<Span>) { out.extend(items.iter().map(|attr| attr.span)); }
+    for node in nodes {
+        match node {
+            Node::Interp(node) => out.push(node.span),
+            Node::Element(node) => { attrs(&node.attrs, out); expression_spans(&node.children, out); }
+            Node::ComponentRef(node) => { attrs(&node.attrs, out); expression_spans(&node.children, out); }
+            Node::Slot(node) => attrs(&node.attrs, out),
+            Node::If(node) => {
+                for branch in &node.branches { out.push(branch.test.span()); expression_spans(&branch.body, out); }
+                if let Some(body) = &node.otherwise { expression_spans(body, out); }
+            }
+            Node::Each(node) => {
+                out.push(node.list.span());
+                if let Some(key) = &node.key { out.push(key.span()); }
+                expression_spans(&node.body, out);
+                if let Some(body) = &node.empty { expression_spans(body, out); }
+            }
+            Node::Await(node) => {
+                out.push(node.promise.span()); expression_spans(&node.pending, out);
+                for branch in [&node.then, &node.catch].into_iter().flatten() { expression_spans(&branch.body, out); }
+            }
+            Node::SlotScope(node) => expression_spans(&node.body, out),
+            Node::Text(_) => {}
+        }
+    }
+}
+
 /// Top-level blocks of a `.brain` source in order of appearance, with their byte offset.
-fn blocks(src: &str) -> Vec<(Block, usize, usize)> {
+fn blocks(src: &str, protected: &[Span]) -> Vec<(Block, usize, usize)> {
     let mut out = Vec::new();
     let mut i = 0;
     let b = src.as_bytes();
     while i < b.len() {
+        if let Some(span) = protected.get(protected.partition_point(|span| span.start as usize <= i).wrapping_sub(1)).filter(|span| i < span.end as usize) {
+            if out.last().is_none_or(|(kind, _, _)| *kind != Block::Markup) { out.push((Block::Markup, i, i)); }
+            i = span.end as usize;
+            continue;
+        }
         let rest = &src[i..];
         if rest.starts_with("<!--") {
             i += rest.find("-->").map(|e| e + 3).unwrap_or(rest.len());
@@ -48,7 +82,7 @@ fn blocks(src: &str) -> Vec<(Block, usize, usize)> {
             i += head_end;
         } else if brain_script || tag("<style") {
             let (kind, close) = if brain_script { (Block::Script, "</script>") } else { (Block::Style, "</style>") };
-            let end = i + rest.find(close).map(|e| e + close.len()).unwrap_or(rest.len());
+            let end = i + if head.trim_end().ends_with("/>") {head_end} else {rest.find(close).map(|e| e + close.len()).unwrap_or(rest.len())};
             out.push((kind, i, end));
             i = end;
         } else if (b[i] as char).is_whitespace() {
@@ -98,7 +132,11 @@ impl Checker<'_> {
             return;
         }
         let src = c.src.as_str();
-        let found = blocks(src);
+        let mut protected = Vec::new();
+        expression_spans(&c.template, &mut protected);
+        expression_spans(&c.head, &mut protected);
+        protected.sort_by_key(|span| (span.start, span.end));
+        let found = blocks(src, &protected);
         let mut max = Block::Meta;
         for (k, at, _) in &found {
             if *k < max {

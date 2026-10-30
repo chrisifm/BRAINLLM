@@ -817,6 +817,17 @@ impl Gen<'_> {
 
     fn component_call(&mut self, r: &ComponentRef) -> String {
         let mut props = Vec::new();
+        if r.name == "Dialog" {
+            let ordinal=self.dialog_index;self.dialog_index+=1;
+            if !r.attrs.iter().any(|a|a.name=="urlKey") {
+                let identity=r.attrs.iter().find_map(|a|match (&a.kind,a.name.as_str(),&a.value) {
+                    (AttrKind::Bind,"ref",AttrValue::Expr(Expr::Ident(id)))=>Some(format!("ref.{}",id.name)),
+                    (AttrKind::Plain,"id",AttrValue::Text(id))=>Some(format!("id.{id}")),
+                    _=>None,
+                }).unwrap_or_else(||ordinal.to_string());
+                props.push(format!("urlKey: {}",js_str(&format!("ui.dialog.{}.{}",self.url_namespace,identity))));
+            }
+        }
         for a in &r.attrs {
             match (a.kind, &a.value) {
                 (AttrKind::Plain, AttrValue::Text(t)) => props.push(format!("{}: {}", js_str(&a.name), js_str(t))),
