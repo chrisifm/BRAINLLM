@@ -51,6 +51,7 @@ The tokens used by the `<style>` blocks live in `invalid/tokens.cssbrain`; `--fa
 | B1701 | `comp/b1701-tool-no-function.brain` | WebMCP tool without a function of the same name |
 | B1702 | `comp/b1702-tool-bad-name.brain` | tool name not in snake_case |
 | B1703 | `comp/b1703-tool-untyped-param.brain` | tool parameter without a type |
+| B1704 | `comp/b1704-tool-param-mismatch.brain` | tool function destructures a parameter the tool does not declare |
 | B0701 | `comp/b0701-server-import-client.brain` (+ `lib/db.jsbrain` with `<meta server>`) | server module used in client code (§11.1) |
 | B0702 | `comp/b0702-private-env.brain` | `import.meta.env.X` without `PUBLIC_` in the client |
 | B0703 | `comp/b0703-secret-literal.brain` | literal shaped like a key (`sk-…`) in the client |

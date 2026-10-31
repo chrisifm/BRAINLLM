@@ -6,7 +6,23 @@ import { install } from '../shim/dom.js'
 const doc = install()
 const rt = await import('./rt.js')
 const { tpl, mount } = rt
-const { tool, schema, context, definition } = await rt.sibling('brain-mcp.js')
+const { tool, schema, context, definition, registerTools } = await rt.sibling('brain-mcp.js')
+
+// A model context like Chrome's: registerTool() refuses a name already registered and returns the handle.
+function fakeContext() {
+  const reg = new Map(), calls = { register: 0, unregister: 0 }
+  const mc = {
+    registerTool(t) {
+      if (reg.has(t.name)) throw Error(`InvalidStateError: ${t.name} is already registered`)
+      calls.register++
+      reg.set(t.name, t)
+      return { unregister: () => (calls.unregister++, reg.delete(t.name)) }
+    },
+  }
+  return { mc, reg, calls }
+}
+// What the codegen emits for `<meta tools="add_task: Add a task (text:str!, due:date, tags:list)">` (INTERNALS §32).
+const addTaskDef = (fn, extra) => ({ name: 'add_task', description: 'Add a task', inputSchema: { type: 'object', properties: { text: { type: 'string' }, due: { type: 'string', format: 'date' }, tags: { type: 'array' } }, required: ['text'] }, execute: fn, ...extra })
 
 test('schema(): form() mini-language → JSON Schema', () => {
   assert.deepEqual(schema({ q: 'str!<=80', max: 'num<=50', tags: '[str]', email: 'email' }), {
@@ -67,6 +83,120 @@ test('tool(): title and annotations (WebMCP draft 2026-10-27) reach the registra
     else delete globalThis.navigator
   }
   assert.deepEqual(definition('x', 'd', {}, { title: '', readOnly: 0 }), { name: 'x', description: 'd', inputSchema: { type: 'object', properties: {}, required: [] }, annotations: { readOnlyHint: false } })
+})
+
+test('registerTools(): a no-op without a model context (nothing registered, nothing thrown, the component renders)', () => {
+  assert.equal(context(), null)
+  let ran = 0
+  const Tasks = () => (registerTools([addTaskDef(() => ran++)]), tpl('<p>tasks</p>')())
+  const host = doc.body.appendChild(doc.createElement('div'))
+  const stop = mount(Tasks, host)
+  assert.equal(host.textContent, 'tasks')
+  stop()
+  assert.equal(ran, 0)
+})
+
+test('registerTools(): `<meta tools>` registered on mount with the compiled schema, validated, unregistered on unmount', async () => {
+  const { mc, reg } = fakeContext()
+  doc.modelContext = mc
+  try {
+    const seen = []
+    const add_task = async ({ text, due }) => (seen.push([text, due]), { id: 1, text })
+    const clear_done = () => 'cleared'
+    const Tasks = () => {
+      registerTools([addTaskDef(add_task), { name: 'clear_done', description: 'Remove completed tasks', inputSchema: { type: 'object', properties: {}, required: [] }, execute: clear_done }])
+      return tpl('<p>tasks</p>')()
+    }
+    const stop = mount(Tasks, doc.body.appendChild(doc.createElement('div')))
+    assert.deepEqual([...reg.keys()], ['add_task', 'clear_done'])
+    const { execute, ...def } = reg.get('add_task')
+    assert.equal(typeof execute, 'function')
+    assert.deepEqual(def, { name: 'add_task', description: 'Add a task', inputSchema: addTaskDef().inputSchema })
+    assert.deepEqual(await execute({ text: 'Buy milk', due: '2026-11-02' }), { content: [{ type: 'text', text: '{"id":1,"text":"Buy milk"}' }] })
+    assert.deepEqual(seen, [['Buy milk', '2026-11-02']])
+    // Arguments are checked against the schema before the author's function runs.
+    assert.deepEqual(await execute({ due: '2026-11-02' }), { content: [{ type: 'text', text: 'text: Required' }] })
+    assert.match((await execute({ text: 'x', due: 'tomorrow' })).content[0].text, /^due: /)
+    assert.match((await execute({ text: 'x', tags: 'urgent' })).content[0].text, /^tags: /)
+    assert.match((await execute({ text: 42 })).content[0].text, /^text: /)
+    assert.equal(seen.length, 1)
+    assert.deepEqual(await reg.get('clear_done').execute(), { content: [{ type: 'text', text: 'cleared' }] })
+    // A throwing function answers with its message instead of breaking the page.
+    const Broken = () => (registerTools([{ name: 'fail_now', description: 'Fails', inputSchema: { type: 'object', properties: {}, required: [] }, execute: () => { throw Error('offline') } }]), tpl('<p></p>')())
+    const stopBroken = mount(Broken, doc.body.appendChild(doc.createElement('div')))
+    assert.deepEqual(await reg.get('fail_now').execute({}), { content: [{ type: 'text', text: 'Error: offline' }] })
+    stopBroken()
+    stop()
+    assert.equal(reg.size, 0)
+  } finally {
+    delete doc.modelContext
+  }
+})
+
+test('registerTools(): optional title and annotations reach the registration exactly as tool() passes them', () => {
+  const { mc, reg } = fakeContext()
+  doc.modelContext = mc
+  try {
+    const List = () => {
+      registerTools([
+        addTaskDef(() => 1, { title: 'Add task', consequential: true }),
+        { name: 'list_tasks', description: 'List the tasks', inputSchema: { type: 'object', properties: {}, required: [] }, execute: () => [], title: 'List tasks', readOnly: true, untrusted: false },
+        { name: 'plain', description: 'No options', inputSchema: { type: 'object', properties: {}, required: [] }, execute: () => 1, title: '' },
+      ])
+      return tpl('<p></p>')()
+    }
+    const stop = mount(List, doc.body.appendChild(doc.createElement('div')))
+    const pick = n => { const { execute, ...rest } = reg.get(n); return rest }
+    assert.deepEqual(pick('add_task'), { ...definition('add_task', 'Add a task', {}, { title: 'Add task', consequential: true }), inputSchema: addTaskDef().inputSchema })
+    assert.deepEqual(pick('list_tasks'), { name: 'list_tasks', description: 'List the tasks', inputSchema: { type: 'object', properties: {}, required: [] }, title: 'List tasks', annotations: { readOnlyHint: true, untrustedContentHint: false } })
+    assert.deepEqual(Object.keys(pick('plain')), ['name', 'description', 'inputSchema'])
+    stop()
+  } finally {
+    delete doc.modelContext
+  }
+})
+
+test('registerTools(): no leak across mounts; a second instance whose name is taken leaves the first registered and the page working', () => {
+  const { mc, reg, calls } = fakeContext()
+  doc.modelContext = mc
+  try {
+    const Tasks = () => (registerTools([addTaskDef(() => 1)]), tpl('<p>tasks</p>')())
+    for (let i = 0; i < 3; i++) {
+      const stop = mount(Tasks, doc.body.appendChild(doc.createElement('div')))
+      assert.equal(reg.size, 1)
+      stop()
+      assert.equal(reg.size, 0)
+    }
+    assert.deepEqual(calls, { register: 3, unregister: 3 })
+    // Two instances at once: the browser refuses the duplicate name; the second still renders and its unmount does
+    // not remove the first one's tool.
+    const first = mount(Tasks, doc.body.appendChild(doc.createElement('div')))
+    const host = doc.body.appendChild(doc.createElement('div'))
+    const second = mount(Tasks, host)
+    assert.equal(host.textContent, 'tasks')
+    second()
+    assert.equal(reg.size, 1)
+    first()
+    assert.equal(reg.size, 0)
+    assert.deepEqual(calls, { register: 4, unregister: 4 })
+  } finally {
+    delete doc.modelContext
+  }
+})
+
+test('registerTools(): skipped while rendering on the server', () => {
+  const { mc, reg } = fakeContext()
+  doc.modelContext = mc
+  globalThis.__brainSSR = true
+  try {
+    const Tasks = () => (registerTools([addTaskDef(() => 1)]), tpl('<p></p>')())
+    const stop = mount(Tasks, doc.body.appendChild(doc.createElement('div')))
+    assert.equal(reg.size, 0)
+    stop()
+  } finally {
+    delete globalThis.__brainSSR
+    delete doc.modelContext
+  }
 })
 
 test('consent(): gtag consent update per kind, remembered and applied again on the next load', async () => {

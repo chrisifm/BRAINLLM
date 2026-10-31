@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1704",
+    "level": "error",
+    "file": "invalid/comp/b1704-tool-param-mismatch.brain",
+    "line": 3,
+    "col": 29,
+    "msg": "function `add_task` reads `due`, which tool `add_task` does not declare (agents never send it)",
+    "fix": "declare it in <meta tools> (`due:str`; types: str num bool list obj email url date any) or remove it from the function's parameters"
+  }
+]

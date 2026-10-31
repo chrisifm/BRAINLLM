@@ -11,6 +11,12 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Added
 
+- WebMCP imperative tools ship (#106): `<meta tools="add_task: Add a task (text:str!, due:date)">` plus a same-named
+  function registers the tool with the browser's model context while the component is mounted and unregisters it on
+  unmount. Nothing is registered without WebMCP, during SSR or prerender; arguments are validated against the
+  declared types before the function runs; a name another mounted instance holds is skipped instead of breaking the
+  page. `brain check` no longer reports B0128 for `<meta tools>`, and the new B1704 reports a function that
+  destructures other parameters than its tool declares. Only components with tools load `brain-mcp.js`.
 - Backend contracts accept exact `int`, `decimal(p,s)`, `date`, `datetime`, `enum(a|b)` and `list<str[,N]>` fields,
   object field options `{type, default, unique}` and declarative checks in `constraints.jsbrain`. Decimals travel and
   are stored as canonical strings with a lossless database CHECK; unique and check violations answer 409/422. Records
