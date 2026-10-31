@@ -11,7 +11,21 @@ BRAIN_JWT_SECRET=<at least 32 cryptographically random bytes; private>
 BRAIN_JWT_ISSUER=https://your-site.example
 BRAIN_JWT_AUDIENCE=https://your-site.example
 GOOGLE_CLIENT_ID=<configured web OAuth client id>.apps.googleusercontent.com
+BRAIN_JWT_SECRET_PREVIOUS=<optional, retired keys separated by commas, 32..4096 bytes each, at most 8>
+BRAIN_AUTH_SESSION_SECONDS=<optional session and refresh length, 300..31536000; default 7 days>
 ```
+
+`GOOGLE_CLIENT_ID` without `BRAIN_JWT_SECRET` stops `brain backend serve` with B0751, and `brain check` and `brain doctor`
+report it first: Google sign-in opens JWT sessions, so it does not run on opaque sessions. To rotate the signing key, move
+the old key to `BRAIN_JWT_SECRET_PREVIOUS`, set the new one, and remove the old key when its tokens have expired.
+
+Refresh is safe under concurrency: a retired token that comes back within 10 seconds, up to 8 times, and whose successor
+was never used, answers with a new access token and no new refresh token. That covers tabs and prefetches; a later reuse
+still revokes the family.
+
+From a server function, `await ctx.backend.google.challenge()` returns `{client_id, nonce, expires_in}` and binds the
+nonce to this browser with the HttpOnly `__Host-brain-google` cookie; `await ctx.backend.google.login({credential})` sends
+that cookie with the credential and relays the session cookies. Both need a same-origin POST, like `ctx.backend.login`.
 
 The signing secret is server-only. The Google web client ID is public and is returned by the nonce endpoint; no Google client secret is used for this ID-token flow. Configure the exact browser origin in Google Cloud's authorized JavaScript origins and the backend origin allowlist. Google sign-in refuses to start without JWT configuration. Existing unconfigured applications keep their opaque session behavior.
 
@@ -36,6 +50,8 @@ Refresh tokens have 244 random bits from two UUIDv4 values. Only SHA-256 digests
 
 ## Google verification and identity policy
 
+Google tokens must use RS256, one configured audience, an accepted Google issuer, an unexpired lifetime, an acceptable issued-at, the exact browser nonce and a verified email. Multi-audience tokens require the configured authorized party. The stable identity key is Google's `sub`, never email. An existing local email account cannot be linked by this flow; sign in using its existing method. New identities receive only the candidate role. The local verified flag is enabled automatically only when Google is authoritative for the address: Gmail or a verified Google Workspace hosted-domain claim. A third-party address can authenticate its stable Google subject without being marked locally verified.
+
 ## Linking an existing account
 
 Google's `sub` is the identity. The first Google sign-in for an address that already has an account links it only when Google is authoritative for the address (`gmail.com`, or a token with a Workspace `hd`):
@@ -48,8 +64,6 @@ Google's `sub` is the identity. The first Google sign-in for an address that alr
 | Disabled | Denied. |
 
 A Google account on another provider's address has `email_verified` true, but Google does not host that address, so it does not link and sign-in answers `AUTH_DENIED`. Its owner recovers through password reset by email. Every denial is the same `AUTH_DENIED`, so the response never reveals whether the address has an account, and each one writes a `google-link` row with outcome `denied` to `_brain_auth_events`.
-
-Google tokens must use RS256, one configured audience, an accepted Google issuer, an unexpired lifetime, an acceptable issued-at, the exact browser nonce and a verified email. Multi-audience tokens require the configured authorized party. The stable identity key is Google's `sub`, never email. An existing local email account cannot be linked by this flow; sign in using its existing method. New identities receive only the candidate role. The local verified flag is enabled automatically only when Google is authoritative for the address: Gmail or a verified Google Workspace hosted-domain claim. A third-party address can authenticate its stable Google subject without being marked locally verified.
 
 Only `https://www.googleapis.com/oauth2/v3/certs` supplies verification keys. Token-provided key URLs are rejected. TLS remains verified; redirects and environment proxies are disabled. Public JWKS caching respects bounded max-age; one set contains at most sixteen keys and 64 KiB. Unknown kids cannot cause more than one refresh per thirty seconds. Verification has two concurrent slots, a three-second HTTP deadline, two-second connect timeout and bounded cache-lock waiting. Stale keys are not accepted after their cache lifetime.
 

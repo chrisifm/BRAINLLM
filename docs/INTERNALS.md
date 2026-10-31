@@ -1249,6 +1249,15 @@ one way for the model, `brain build` then `brain start`.
 
 `sessionSecrets` (server.mjs) adds `setSecret`/`secret`/`clearSecret` to any session handle, signed or native: AES-256-GCM in `__Host-session-secret`, key from HKDF over `BRAIN_SECRET`, the cookie name as AAD, expiry inside the ciphertext, 3.5 KB limit. It never fills `ctx.user`. `BRAIN_SECRET_PREVIOUS` still verifies and decrypts; new cookies use the current key. `BRAIN_SESSION_VERSION` travels in the signed cookie, and a mismatch reads as anonymous. Logout remembers the MAC until expiry in one process only, because no shared store exists here; several processes revoke through the version.
 
+### Refresh grace, client lockout, operator actions and internal routes (2026-10-31)
+
+- Refresh grace (`jwt.rs`, migration 0016 `grace_uses`): a retired token within 10 s, up to 8 uses, with a successor never used, answers an access token and an empty `refresh_token`; `jwt_response` then sets no refresh cookie. The bridge `renew()` in `prepare` renews during SSR and rewrites `req.headers.cookie`; 401/403 is anonymous, anything else 503.
+- Lockout (`auth.rs` `login_from`, `login_attempt`): pair key 10, email key 100; success clears only the pair. Reset (`request_reset_from`, `flow_budget`): pair 3, email 10. `None` client keeps the previous per-email budget. The client is `ClientIp`, so without `trustProxy` plus forwarded headers all proxied visitors share one pair.
+- Operator actions (`auth_flows.rs` `set_user_disabled`, `revoke_user_sessions`, `set_identity_disabled`) are static functions, shared by routes and `brain backend users`; `set_user_disabled` takes the role-change advisory lock for the last-admin guard. `_brain_identities.disabled_at` is read in the `existing` query of `google_login`, so a disabled identity returns before link or create.
+- `Access::Internal` (`routes.rs`): `InternalAuth` keeps HMAC tags under a per-process key; `Debug` shows only the count. `signed()` in `routes_http.rs` exempts it from the Origin check. The site proxy has a header allowlist that omits the secret header on purpose.
+- B0751 (`backend.rs` `config_problems`): single source for startup, `brain check` and `brain doctor`, runs before the database connection and reports names, never values. Check and doctor read the development section only, and only when the app has `server/resources`, `server/jobs`, `server/routes` or `BRAIN_BACKEND_URL`. Not covered, because each validates files or needs the listener: `socket_settings`, `api_key_config`, `hooks_executor`, `platform_config`, route contracts (B0735 covers those at check), the database URL and the connection budget.
+- `ctx.backend.google` (server.mjs `googleStep`): the bridge reads the nonce cookie and sends it alone; the dev sidecar gets it through `nativeBridge.backend`.
+
 ## 35. Caching and the repeat visit: on by default (fixed 2026-10-13, Chris: "the second visit must be faster")
 Cache audit (2026-10-28): anonymous SSR caching bypasses every cookie-bearing request and Authorization. Captured
 session headers are preserved; Set-Cookie, Vary and private/no-store/no-cache responses never enter the shared map.

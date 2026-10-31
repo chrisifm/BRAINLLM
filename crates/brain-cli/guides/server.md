@@ -10,7 +10,7 @@ Create contracts with `brain add resource posts --fields "title:str! body:str"` 
 Inspect one contract with `brain card resource:posts` / `brain card job:notify`, and all resolved schemas with
 `brain backend schema --json`. The Rust/Postgres backend has its own sessions and runs separately through
 `brain backend serve`. Configure fixed loopback `BRAIN_BACKEND_URL` to connect development/production SSR and
-server functions to native identity and resources. `ctx.backend.login({email,password})` relays native HttpOnly
+server functions to native identity and resources. `ctx.backend.google.challenge()` and `.login({credential})` bind Google's nonce to the browser. `ctx.backend.login({email,password})` relays native HttpOnly
 cookies from a same-origin POST; JWT signing keys stay exclusively in the backend. `ctx.backend.resource(name)`
 provides list (filters, sort, cursor, include, aggregates)/get/create/update/patch/remove and `ctx.backend.slugRedirect(name,slug)`
 through native schemas and policies (docs/backend/server-queries.md). Resource generation includes typed

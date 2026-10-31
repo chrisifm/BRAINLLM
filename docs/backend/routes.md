@@ -20,7 +20,7 @@ with the file path in the message.
 export default {
   method: 'POST',                         // GET, POST, PUT, PATCH, DELETE (default GET)
   path: '/orders/{id}/quote',             // {name} segments are path parameters
-  auth: 'user',                           // 'public', 'user' (default) or ['admin', 'support']
+  auth: 'user',                           // 'public', 'user' (default), 'internal' or ['admin', 'support']
   params: { id: 'uuid' },                 // str (default), int, bool, uuid; a bad value answers 404
   query: { currency: 'str!', rush: 'bool' }, // '!' = required; unknown keys answer 422
   headers: ['x-shop-channel'],            // forwarded to the handler; everything else is dropped
@@ -80,3 +80,26 @@ operation `route_<name>` with its path, query and header parameters, request bod
 `x-brain-route` extension (limits, rate, signature header). File buckets appear as
 `files_<bucket>_upload`, `_download`, `_delete` and `_meta` with an `x-brain-bucket` extension. Signing
 secrets never appear in the document.
+
+## Internal routes
+
+For machines and operators, not browsers:
+
+```js
+export default {
+  method: 'POST',
+  path: '/ops/reindex',
+  auth: 'internal',
+  internal: { secret: ['INTERNAL_SECRET', 'INTERNAL_SECRET_OLD'], header: 'x-internal-secret', loopback: true },
+}
+```
+
+`secret` names one environment variable, or up to 4 for rotation, each at least 32 bytes: a missing or short value stops
+startup. `header` defaults to `x-internal-secret` and cannot be `cookie` or `authorization`. The comparison is HMAC
+verification under a per-process random key, so its time does not depend on where the bytes differ. A wrong secret
+answers 403, and a session is never accepted in its place. No browser Origin is required, and `rate ... per user` is
+rejected because there is no user.
+
+`loopback: true` also requires the connection itself and the resolved client to be local, with no `X-Forwarded-For` or
+`Forwarded` header, so a proxy on the same machine cannot speak for a remote caller. The site server does not forward the
+secret header, so these routes are reached directly on the backend port, not through the public site.

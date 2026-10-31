@@ -9,10 +9,21 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+### Security
+- Google sign-in links an existing account when Google hosts the address (`gmail.com` or a Workspace `hd`); a never-verified account also loses its password, sessions and recovery links, and any other address is denied with the same `AUTH_DENIED`.
+- Concurrent JWT refresh inside a 10-second grace no longer revokes the family, so tabs and prefetches keep their session, and the SSR bridge renews an expired access cookie during render.
+- Failed sign-ins and reset mail are counted per email and client with a cap per email, so a third party can no longer lock out the owner from another client.
+- `ctx.session.setSecret` stores server-only values encrypted; `BRAIN_SECRET_PREVIOUS` rotates the key, `BRAIN_SESSION_VERSION` ends every signed session and `BRAIN_SESSION_SECONDS` sets their length. B0737 warns about a credential passed to `ctx.session.set`.
+
 ### Signature
 - HTML documents now carry `X-Generated-By` with the official site and repository in `brain start`, `_headers`, nginx and Caddy. It replaces `X-Powered-By` and adds nothing visible to the page.
 
 ### Added
+- `brain backend users disable|enable|revoke-sessions|disable-identity|enable-identity` and matching administrator routes disable users and identities and end sessions without SQL.
+- Declared routes accept `auth: 'internal'` with a rotatable secret compared in constant time, limitable to loopback from the manifest.
+- `ctx.backend.google.challenge()` and `.login({credential})` bind Google's nonce to the browser over a server function.
+- `BRAIN_JWT_SECRET_PREVIOUS` rotates the JWT signing key and `BRAIN_AUTH_SESSION_SECONDS` sets the native session length.
+- B0751: `brain check`, `brain doctor` and `brain backend serve` name the exact backend setting that is missing or out of range, such as `GOOGLE_CLIENT_ID` without `BRAIN_JWT_SECRET`.
 - `brain upgrade [--from V] [--to V] [--dry-run|--apply] [--json] [--no-doctor]` (MCP `brain_upgrade`) migrates an
   app between versions: from the recorded `brainVersion` in `brain.json` (now written by `brain new`) to the installed
   compiler, it reports codemods, manual steps with `file:line`, capabilities to adopt with their snippet and the gates;

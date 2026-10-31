@@ -142,6 +142,27 @@ The corresponding operator command is `brain backend bootstrap-admin --user <exi
 environment selection. Use an account you control and selected deliberately, then sign in again after its old
 sessions were revoked. No first public signup is promoted automatically.
 
+## Operator actions without SQL
+
+| Action | Route (administrator, `POST`) | CLI |
+|---|---|---|
+| Disable a user: ends sessions and refresh families, revokes API keys | `/_brain/auth/users/{id}/disable` | `brain backend users disable --email <address>` |
+| Enable a user; old sessions stay ended | `/_brain/auth/users/{id}/enable` | `brain backend users enable --user <uuid>` |
+| End all sessions of a user | `/_brain/auth/users/{id}/sessions/revoke` | `brain backend users revoke-sessions --user <uuid>` |
+| Stop one sign-in identity and end current sessions | `/_brain/auth/users/{id}/identities/{provider}/disable` | `brain backend users disable-identity --user <uuid> --provider google` |
+| Let the identity sign in again | `/_brain/auth/users/{id}/identities/{provider}/enable` | `brain backend users enable-identity --user <uuid> --provider google` |
+
+Each action writes an audit event. A refused action answers 409: unknown target, no such identity, or the last enabled
+administrator. A disabled identity is denied before linking, so it cannot come back through the same email.
+
+## Sign-in and reset limits
+
+Failed sign-ins are counted per email and client, 10 in 15 minutes, with a cap of 100 per email: one attacker cannot lock
+out the owner from another client, and a distributed attack still hits the cap, which does lock that email out until the
+window ends. A success clears only the count of its own pair. Reset mail uses the same shape, 3 per pair and 10 per email.
+The client comes from the connection, or from `X-Forwarded-For` only when `trustProxy` lists the proxy; without that, every
+visitor behind the proxy counts as one client.
+
 ## Verification
 
 `tests/auth_flows.rs` uses a fresh database inside the explicitly owned disposable Postgres harness and an in-memory
