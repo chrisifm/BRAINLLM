@@ -9,6 +9,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- Fix: B0721 and B0722 see keys read by destructuring `process.env` or `ctx.env`
 - `ctx.signal` in `load()`, guards and server functions aborts when the client disconnects or the deadline passes
 - Fix: a newer client navigation aborts the page request it replaced
 - Fix: `t()`, `fmt` and `locale()` inside `load()`, guards and form handlers read the page's language, in production and in `brain run`

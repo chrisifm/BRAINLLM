@@ -193,3 +193,25 @@ fn a_guard_in_another_statement_counts() {
         assert!(!guarded(src), "{src}");
     }
 }
+
+fn read_keys(src: &str) -> Vec<(String, bool)> {
+    brain_check::env::reads(src).into_iter().map(|r| (r.key, r.guarded)).collect()
+}
+
+#[test]
+fn destructured_env_is_read_with_each_key() {
+    let keys = |v: &[(&str, bool)]| v.iter().map(|(k, g)| (k.to_string(), *g)).collect::<Vec<_>>();
+    assert_eq!(read_keys("const { API_KEY, API_URL: url } = process.env"), keys(&[("API_KEY", false), ("API_URL", false)]));
+    assert_eq!(read_keys("const { API_KEY = 'x' } = ctx.env"), keys(&[("API_KEY", true)]));
+    assert_eq!(read_keys("const { API_KEY } = process.env\nif (!API_KEY) return null"), keys(&[("API_KEY", true)]));
+    assert_eq!(read_keys("let { 'API_KEY': k } = import.meta.env"), keys(&[("API_KEY", false)]));
+    // the object under another name
+    assert_eq!(read_keys("const e = process.env\nuse(e.API_KEY, e['API_URL'])"), keys(&[("API_KEY", false), ("API_URL", false)]));
+    assert_eq!(read_keys("const { env } = process\nuse(env.API_KEY)"), keys(&[("API_KEY", false)]));
+    assert_eq!(read_keys("const { env: e } = ctx\nconst { API_URL } = e"), keys(&[("API_URL", false)]));
+    assert_eq!(read_keys("export async function sitemap({ env }) { return get(env.API_URL) }"), keys(&[("API_URL", false)]));
+    assert_eq!(read_keys("export async function load({ params, env: { API_URL } }) { return get(API_URL, params) }"), keys(&[("API_URL", false)]));
+    // not env reads
+    assert_eq!(read_keys("const { API_KEY } = config\nconst env = load()\nconst { lower } = process.env"), keys(&[]));
+    assert_eq!(read_keys("function f({ env }) { return 1 }\nother.env.API_KEY\nthing.API_URL"), keys(&[]));
+}
