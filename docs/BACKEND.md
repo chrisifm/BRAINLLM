@@ -211,6 +211,7 @@ Signed webhook routes for payment and shipping providers (HMAC, timestamp tolera
 Calling external APIs from server logic (timeouts, safe retries, idempotency keys, redacted errors): [backend/outbound.md](backend/outbound.md).
 
 Lists, relations and readers: [relations](backend/relations.md) · [filters](backend/filters.md) · [sorting](backend/sorting.md) · [aggregates](backend/aggregates.md) · [pagination](backend/pagination.md) · [search](backend/search.md) · [ownership](backend/ownership.md) · [visibility](backend/visibility.md) · [slug history](backend/slugs.md).
+Server code (`load`, server functions) queries with the same contract through `ctx.backend`: [backend/server-queries.md](backend/server-queries.md).
 
 ## Remaining acceptance work
 

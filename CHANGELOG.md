@@ -11,6 +11,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Added
 
+- `ctx.backend` speaks the full HTTP list contract from server code: `list({filter, sort, cursor|after, include,
+  aggregate, count, search, limit, offset})`, `get(id, {include})`, `patch(id, partial)` and
+  `slugRedirect(resource, slug)`. Field errors from the backend reject with `status 422` and `errors`, so a server
+  function can hand them back to its form. `list()` without options now uses the backend defaults (25 rows). See
+  `docs/backend/server-queries.md`.
 - WebMCP imperative tools ship (#106): `<meta tools="add_task: Add a task (text:str!, due:date)">` plus a same-named
   function registers the tool with the browser's model context while the component is mounted and unregisters it on
   unmount. Nothing is registered without WebMCP, during SSR or prerender; arguments are validated against the

@@ -12,7 +12,8 @@ Inspect one contract with `brain card resource:posts` / `brain card job:notify`,
 `brain backend serve`. Configure fixed loopback `BRAIN_BACKEND_URL` to connect development/production SSR and
 server functions to native identity and resources. `ctx.backend.login({email,password})` relays native HttpOnly
 cookies from a same-origin POST; JWT signing keys stay exclusively in the backend. `ctx.backend.resource(name)`
-provides list/get/create/update/remove through native schemas and policies. Resource generation includes typed
+provides list (filters, sort, cursor, include, aggregates)/get/create/update/patch/remove and `ctx.backend.slugRedirect(name,slug)`
+through native schemas and policies (docs/backend/server-queries.md). Resource generation includes typed
 collection/detail clients, a discoverable canonical contract, server service and repository. Administrative UI remains
 planned in 0.4: the command creates no views, guards or controls and preserves the default 30 KiB route budget.
 Build application views deliberately using the project design system. Account recovery/verification recipes need explicit

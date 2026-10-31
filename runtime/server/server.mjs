@@ -67,6 +67,8 @@ const b64u = b => Buffer.from(b).toString('base64url')
 const tag = s => createHash('sha1').update(s).digest('base64url').slice(0, 22)
 
 // Errors a server function may throw on purpose: { errors: { field: msg } } → 422; { status, message } with 4xx → that
+const LIST_OPTIONS = ['search','limit','offset','filter','sort','cursor','after','include','aggregate','count']
+const FILTER_OPS = ['eq','ne','gt','gte','lt','lte','between','in','exists','prefix','iprefix','has']
 export class HttpError extends Error {
   constructor(status, message, extra) {
     super(message)
@@ -309,7 +311,7 @@ export function nativeAuthBridge(raw) {
       if (typeof id !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id)) throw new HttpError(400, 'Invalid native record identifier')
       return '/api/' + name + '/' + id
     }
-    const request = async (method, path, body) => {
+    const request = async (method, path, body, notFound) => {
       if (response.writableEnded || response.destroyed) throw new HttpError(409, 'The server request has ended')
       if (method !== 'GET' && incoming.method !== 'POST') throw new HttpError(405, 'Native writes require a server function called through POST')
       let bytes = Buffer.alloc(0)
@@ -329,6 +331,14 @@ export function nativeAuthBridge(raw) {
       let value
       try {
         await proxy(req, response, new URL(path, target), rid, (_res, status, data, headers) => {
+          if (status === 422) {
+            // the backend's own field messages (never driver text): a server function that rethrows answers 422 {errors}
+            let fields
+            try { fields = JSON.parse(data.toString('utf8'))?.error?.fields } catch {}
+            const errors = fields && typeof fields === 'object' && !Array.isArray(fields) ? Object.fromEntries(Object.entries(fields).filter(([k, v]) => typeof v === 'string' && k.length <= 128).slice(0, 64).map(([k, v]) => [k, v.slice(0, 512)])) : {}
+            throw new HttpError(422, 'Invalid input', { errors })
+          }
+          if (status === 404 && notFound) { value = notFound(); return }
           if (status < 200 || status >= 300) throw new HttpError(status >= 400 && status < 500 ? status : 503, 'Native resource request failed')
           if (status === 204) { value = null; return }
           if (!String(headers['content-type'] || '').startsWith('application/json')) throw new HttpError(502, 'Native resource response must be JSON')
@@ -338,17 +348,80 @@ export function nativeAuthBridge(raw) {
       if (response.destroyed || response.writableEnded) throw new HttpError(409, 'The server request has ended')
       return value
     }
+    const names = (value, label) => {
+      const list = typeof value === 'string' ? value.split(',') : value
+      if (!Array.isArray(list) || list.length > 16 || list.some(item => typeof item !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(item))) throw new HttpError(400, `Invalid native ${label} names`)
+      return list.join(',')
+    }
     return Object.freeze({
+      // the HTTP list contract (docs/backend/filters.md, sorting.md, pagination.md): the backend validates declared
+      // filters and sorts and answers 422 {errors}; this only rejects shapes the query string cannot express
       list(options = {}) {
-        if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).some(key => !['search','limit','offset'].includes(key))) throw new HttpError(400, 'Invalid native list options')
-        const {search = '', limit = 20, offset = 0} = options
-        if (typeof search !== 'string' || Buffer.byteLength(search) > 256 || !Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0 || offset > 10000) throw new HttpError(400, 'Invalid native list pagination or search')
-        return request('GET', '/api/' + name + '?' + new URLSearchParams({search,limit:String(limit),offset:String(offset)}))
+        if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).some(key => !LIST_OPTIONS.includes(key))) throw new HttpError(400, 'Invalid native list options')
+        const {search, limit, offset, filter, sort, cursor, after, include, aggregate, count} = options
+        if ((search !== undefined && (typeof search !== 'string' || Buffer.byteLength(search) > 256)) || (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 100)) || (offset !== undefined && (!Number.isInteger(offset) || offset < 0 || offset > 10000))) throw new HttpError(400, 'Invalid native list pagination or search')
+        const q = new URLSearchParams()
+        if (filter !== undefined) {
+          if (!filter || typeof filter !== 'object' || Array.isArray(filter) || Object.keys(filter).length > 32) throw new HttpError(400, 'Invalid native list filter')
+          const scalar = value => {
+            if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+            if (typeof value === 'boolean') return String(value)
+            if (typeof value === 'string' && Buffer.byteLength(value) <= 256) return value
+            throw new HttpError(400, 'Invalid native filter value')
+          }
+          for (const [field, condition] of Object.entries(filter)) {
+            if (!/^[a-z][a-z0-9_]{0,47}(?:\.[a-z][a-z0-9_]{0,47})?$/.test(field)) throw new HttpError(400, 'Invalid native list filter field')
+            const ops = condition && typeof condition === 'object' && !Array.isArray(condition) ? Object.entries(condition) : [['eq', condition]]
+            if (!ops.length) throw new HttpError(400, 'Invalid native filter value')
+            for (const [op, value] of ops) {
+              if (!FILTER_OPS.includes(op)) throw new HttpError(400, 'Invalid native filter operator')
+              let raw
+              if (op === 'in' || op === 'between' || op === 'has') {
+                const items = Array.isArray(value) ? value : [value]
+                if (!items.length || items.length > 50 || (op === 'between' && items.length !== 2)) throw new HttpError(400, 'Invalid native filter value')
+                raw = items.map(scalar)
+                if (raw.some(item => item.includes(','))) throw new HttpError(400, 'Invalid native filter value')
+                raw = raw.join(',')
+              } else raw = scalar(value)
+              q.append(op === 'eq' ? field : `${field}[${op}]`, raw)
+            }
+          }
+        }
+        if (search !== undefined) q.set('search', search)
+        if (limit !== undefined) q.set('limit', String(limit))
+        if (offset !== undefined) q.set('offset', String(offset))
+        if (sort !== undefined) {
+          const keys = typeof sort === 'string' ? sort.split(',') : sort
+          if (!Array.isArray(keys) || !keys.length || keys.length > 4 || keys.some(key => typeof key !== 'string' || !/^-?[a-z][a-z0-9_]{0,47}$/.test(key))) throw new HttpError(400, 'Invalid native list sort')
+          q.set('sort', keys.join(','))
+        }
+        if (cursor !== undefined && after !== undefined) throw new HttpError(400, 'Use either cursor or after')
+        for (const [key, value] of [['cursor', cursor], ['after', after]]) if (value !== undefined) {
+          if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,2048}$/.test(value)) throw new HttpError(400, 'Invalid native list cursor')
+          q.set(key, value)
+        }
+        for (const [key, value] of [['include', include], ['aggregate', aggregate], ['count', count]]) if (value !== undefined) q.set(key, names(value, key))
+        const query = q.toString()
+        return request('GET', '/api/' + name + (query ? '?' + query : ''))
       },
-      get: id => request('GET', idPath(id)),
+      get(id, options = {}) {
+        if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).some(key => key !== 'include')) throw new HttpError(400, 'Invalid native get options')
+        const path = idPath(id)
+        return request('GET', options.include === undefined ? path : path + '?' + new URLSearchParams({include: names(options.include, 'include')}))
+      },
       create: values => request('POST', '/api/' + name, values),
       update: (id, values) => request('PUT', idPath(id), values),
+      // only the sent fields change (docs/backend/patch.md); null clears an optional field
+      async patch(id, values) {
+        if (values && typeof values === 'object' && !Array.isArray(values) && !Object.keys(values).length) throw new HttpError(422, 'Send at least one field', { errors: { body: 'Send at least one field to change' } })
+        return request('PATCH', idPath(id), values)
+      },
       remove: id => request('DELETE', idPath(id)),
+      // an earlier slug of a readable record → its current slug; live, unknown or unreadable slugs → null
+      slugRedirect(slug) {
+        if (typeof slug !== 'string' || !/^[A-Za-z0-9._~-]{1,512}$/.test(slug)) throw new HttpError(400, 'Invalid native slug')
+        return request('GET', '/api/' + name + '/redirects/' + slug, undefined, () => null).then(value => typeof value?.slug === 'string' ? value.slug : null)
+      },
     })
   }
   async function login(incoming,response,rid,credentials) {
@@ -376,9 +449,16 @@ export function nativeAuthBridge(raw) {
     } finally {request.destroy();bytes.fill(0)}
     return {user}
   }
+  // ctx.backend for one server request (load, actions, RPC, dev sidecar): the same object everywhere
+  const backend = (incoming, response, rid) => Object.freeze({
+    resource: name => resource(incoming, response, rid, name),
+    slugRedirect: (name, slug) => resource(incoming, response, rid, name).slugRedirect(slug),
+    login: credentials => login(incoming, response, rid, credentials),
+  })
   return {
     proxy,
     resource,
+    backend,
     login,
     async prepare(req, res, rid) {
       if (!cookies(req, false)) { req.$nativeUser = null; req.$nativeAuth ||= Promise.resolve(); return }
@@ -592,7 +672,7 @@ export function createServer(o = {}) {
     const { user, session: ses } = native ? { user: req.$nativeUser ?? null, session: native.session(req, res, res.getHeader('x-request-id')) } : sessionFrom(cookies, secret)
     return {
       url, query: Object.fromEntries(url.searchParams), cookies, user, session: ses, env,
-      ...(native ? { backend: Object.freeze({resource: name => native.resource(req, res, res.getHeader('x-request-id'), name),login:credentials=>native.login(req,res,res.getHeader('x-request-id'),credentials)}) } : {}),
+      ...(native ? { backend: native.backend(req, res, res.getHeader('x-request-id')) } : {}),
       // `prefetch`: the router fetched this page ahead of a click (§19); a `load` with side effects can skip them
       prefetch: req.headers['x-brain-prefetch'] === '1',
       req: { method: req.method, headers: req.headers, ip: ipOf(req) }, ...extra,

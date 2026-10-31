@@ -1837,6 +1837,11 @@ Bearer credentials are deliberately excluded to match `ctx.user`. Mutations requ
 retry. The response budget is a stricter 2 MiB, independent from media's 20 MiB proxy allowance. Repositories retained
 after their response ends reject further calls. Server-only service/repository modules receive `ctx` explicitly.
 `runtime/test/server-native-resource.test.js` checks actual loopback transport, CRUD, bounds and redacted failures.
+`nativeAuthBridge.backend(req,res,rid)` builds the frozen `ctx.backend` object for SSR, RPC and the sidecar alike. List
+options map 1:1 to the HTTP query string (`field[op]=value`, `sort`, `cursor`/`after`, `include`, `aggregate`,
+`count`); only unrepresentable shapes fail locally, so the backend stays the single validator. A 422 keeps the
+backend's string field messages as `error.errors` (bounded to 64 entries); other failures stay generic.
+`runtime/test/server-native-queries.test.js` covers the mapping, PATCH and slug redirects.
 
 The same bridge exposes `ctx.backend.login(credentials)` for same-origin POST server functions. It calls only the
 fixed native password endpoint, validates native cookie attributes, returns a sanitized user and relays cookies
