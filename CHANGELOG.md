@@ -22,6 +22,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - A route handler can return `{ file: { base64, name, type } }`: always an attachment, with `nosniff` and a sandboxing policy.
 - Backend docs corrected: route `ctx.user` is `{id, role, verified}`, `ctx.env` is documented, OpenAPI lives at `/_brain/api`, migration does not add constraints to a registered resource, and API keys cover batch and upsert.
 ### Security
+- `brain backend` commands stop with B0785 when no `--env` was given and the database is remote or `NODE_ENV=production`, `users` actions honor production TLS, and a proxied `/_brain/api` request needs an administrator in every environment.
 - The refresh grace window is configurable with `BRAIN_AUTH_REFRESH_GRACE_SECONDS` (0..60, default 10; 0 turns it off), and reuse detection stays on.
 - `brain doctor` and `brain check` warn on a public `trustProxy` range or none behind a proxy (B0784), a production `brain backend serve` refuses a public range, and `trustPublicProxy` declares a CDN.
 - In production, a refused list query no longer lists the declared filters and sorts in its 422; outside production it still does.

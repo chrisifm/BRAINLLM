@@ -974,7 +974,8 @@ async fn health(State(app): State<App>) -> Result<Json<Value>> {
     Ok(Json(json!({"ok":true,"schemaVersion":1})))
 }
 async fn docs(State(app): State<App>, h: HeaderMap) -> Result<Json<Value>> {
-    if app.production {
+    // Outside production the description is a local tool: a request through a proxy already left this machine.
+    if app.production || ["x-forwarded-for", "x-forwarded-host", "forwarded"].iter().any(|name| h.contains_key(*name)) {
         app.admin(&h).await?;
     }
     let resources = app.resources.values().cloned().collect::<Vec<_>>();

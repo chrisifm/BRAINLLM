@@ -519,7 +519,7 @@ pub fn config_diagnostics(root: &Path) -> Vec<(String, String)> {
     }
     config_problems(&|key| crate::env::value(root, "development", key).filter(|v| !v.is_empty()))
 }
-fn operator(args: &[String], url: &str) -> Result<(), String> {
+fn operator(args: &[String], url: &str, production: bool) -> Result<(), String> {
     let usage = "usage: brain backend users disable|enable|revoke-sessions|disable-identity|enable-identity --user <uuid>|--email <address> [--provider google] [--env development]";
     let action = args.get(1).map(String::as_str).ok_or(usage)?;
     if !matches!(action, "disable" | "enable" | "revoke-sessions" | "disable-identity" | "enable-identity") {
@@ -532,7 +532,7 @@ fn operator(args: &[String], url: &str) -> Result<(), String> {
     };
     runtime()?.block_on(async {
         use brain_backend::auth_flows as flows;
-        let pool = brain_backend::boot::connect(url, &brain_backend::boot::Boot::command(false)).await?;
+        let pool = brain_backend::boot::connect(url, &brain_backend::boot::Boot::command(production)).await?;
         let user = match (crate::flag(args, "--user"), crate::flag(args, "--email")) {
             (Some(user), None) => user.parse().map_err(|_| "--user must be a UUID".to_string())?,
             (None, Some(address)) => flows::user_id_by_email(&pool, &address).await.map_err(|e| e.to_string())?.ok_or("No user has that email")?,
@@ -554,6 +554,28 @@ fn operator(args: &[String], url: &str) -> Result<(), String> {
         Ok(())
     })
 }
+/// B0785: without `--env`, `serve` runs as development: no TLS check on the database, open API description, no HSTS.
+/// That default is only right on a developer's machine, so anything that looks deployed has to say what it is.
+fn unstated_environment(args: &[String], database: Option<&str>, node_env: Option<&str>) -> Option<String> {
+    if args.iter().any(|a| a == "--env") {
+        return None;
+    }
+    let why = if node_env == Some("production") {
+        "NODE_ENV is production"
+    } else if database.is_some_and(|url| !brain_backend::boot::database_is_local(url)) {
+        "DATABASE_URL points at another machine"
+    } else {
+        return None;
+    };
+    Some(format!("B0785: {why} and no --env was given, so this would run with development defaults; fix: pass --env production (or --env development if this really is a development machine)"))
+}
+fn stated_database(args: &[String], root: &Path, environment: &str) -> Result<String, String> {
+    let url = database(root, environment)?;
+    match unstated_environment(args, Some(&url), std::env::var("NODE_ENV").ok().as_deref()) {
+        Some(refusal) => Err(refusal),
+        None => Ok(url),
+    }
+}
 pub fn run(args: &[String]) -> Result<(), String> {
     let root = crate::app_root()?;
     let environment = crate::env::name(args, "development");
@@ -564,7 +586,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         return Ok(());
     }
     if operation == "keys" {
-        return crate::api_key_config::run(&root, &args[1..], database(&root, &environment)?);
+        return crate::api_key_config::run(&root, &args[1..], stated_database(args, &root, &environment)?);
     }
     if !matches!(
         operation,
@@ -585,9 +607,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
             return Err(format!("B0751 backend settings: {}", lines.join(" | ")));
         }
     }
-    let url = database(&root, &environment)?;
+    let url = stated_database(args, &root, &environment)?;
     if operation == "users" {
-        return operator(args, &url);
+        return operator(args, &url, environment == "production");
     }
     // Everything the environment alone can reveal stops before the first connection, with its code and fix.
     if operation == "serve" {
@@ -1236,7 +1258,7 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
         return Err("usage: brain jobs enqueue <queue> --payload '<json>' [--key K] [--priority N] [--delay S] | status <id> | work <queue> [--concurrency 2] | dead <queue> | retry <queue> [--id <uuid>] | stats [queue] | cron [--once] | prune".into());
     }
     let snapshot = inspect(&root)?;
-    let url = database(&root, &environment)?;
+    let url = stated_database(args, &root, &environment)?;
     let name = args.get(1).filter(|a| !a.starts_with("--")).cloned().unwrap_or_default();
     let declared: Vec<String> = contracts(&root, "jobs")?.into_iter().map(|job| job.name).collect();
     if name.is_empty() && matches!(op, "enqueue" | "work" | "dead" | "retry") {
@@ -1644,6 +1666,23 @@ impl Drop for HandlerGroup {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unstated_environment_stops_what_looks_deployed() {
+        let args = |list: &[&str]| list.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let remote = "postgres://u@db.internal/app";
+        for (given, database, node_env, refused) in [
+            (&["serve"][..], Some("postgres://u@127.0.0.1/app"), None, false),
+            (&["serve"][..], Some("postgres://u@%2Ftmp/app"), Some("development"), false),
+            (&["serve"][..], Some(remote), None, true),
+            (&["serve"][..], Some("postgres://u@127.0.0.1/app"), Some("production"), true),
+            (&["serve", "--env", "development"][..], Some(remote), None, false),
+            (&["migrate", "--env", "production"][..], Some(remote), Some("production"), false),
+        ] {
+            let found = unstated_environment(&args(given), database, node_env);
+            assert_eq!(found.is_some(), refused, "{given:?} {database:?} {node_env:?}");
+            assert!(found.is_none_or(|text| text.starts_with("B0785") && text.contains("--env production") && !text.contains("db.internal")));
+        }
+    }
     fn roles_app(files: &[(&str, &str)]) -> (std::path::PathBuf, Vec<&'static str>) {
         static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let root = std::env::temp_dir().join(format!("brain-roles-{}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
@@ -2172,7 +2211,7 @@ pub fn media(args: &[String]) -> Result<(), String> {
         return Err("usage: brain media setup-gcs | list --owner <uuid> [--limit 50] [--offset 0] | cleanup [--limit 8]; cleanup processes only recorded owned deletion work".into());
     }
     let environment = crate::env::name(args, "development");
-    let url = database(&root, &environment)?;
+    let url = stated_database(args, &root, &environment)?;
     let limit = crate::flag(args, "--limit")
         .unwrap_or_else(|| {
             if operation == "list" {
