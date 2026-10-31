@@ -2,9 +2,10 @@
 //! rate limit, deadline) applies unchanged; every request runs in one Postgres transaction.
 use super::{App, Error, Result, write_error};
 use crate::domain::{BatchRequest, Change, Domain, Engine, Failure, UpsertRequest};
+use super::Path;
 use axum::{
     Json, Router,
-    extract::{DefaultBodyLimit, Path, State},
+    extract::{DefaultBodyLimit, State},
     http::{HeaderMap, StatusCode},
     routing::post,
 };

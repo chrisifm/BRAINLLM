@@ -8,7 +8,7 @@ use crate::{
 use axum::{
     Json, Router,
     body::{Body, Bytes},
-    extract::{DefaultBodyLimit, Multipart, Path, Query, Request, State},
+    extract::{DefaultBodyLimit, FromRequestParts, Multipart, Query, Request, State},
     http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -112,6 +112,10 @@ impl Error {
     fn database_in(error: &sqlx::Error, at: &'static std::panic::Location<'static>, context: Value) -> Self {
         crate::platform::note_database_error(error);
         db::log_failure(error, at, context);
+        // Text Postgres cannot store (a NUL or invalid bytes) came from the request.
+        if db::sqlstate(error).is_some_and(|state| matches!(state.as_str(), "22P05" | "22021")) {
+            return Self::new(StatusCode::UNPROCESSABLE_ENTITY, "INVALID_INPUT", "Remove NUL characters and invalid bytes from the text values");
+        }
         if db::sqlstate(error).is_some_and(|state| db::retryable(&state)) {
             return Self::new(StatusCode::SERVICE_UNAVAILABLE, "DATABASE_BUSY", "The database could not finish in time and nothing was changed; retry after the Retry-After delay");
         }
@@ -216,6 +220,17 @@ fn stack_is_symbolized(stack: &str) -> bool {
     stack.contains("brain_backend")
 }
 type Result<T> = std::result::Result<T, Error>;
+/// URL parameters; a value of the wrong shape (a record id that is not a UUID) answers with what to send instead.
+pub(crate) struct Path<T>(pub T);
+impl<S: Send + Sync, T: serde::de::DeserializeOwned + Send> FromRequestParts<S> for Path<T> {
+    type Rejection = Error;
+    async fn from_request_parts(parts: &mut axum::http::request::Parts, state: &S) -> std::result::Result<Self, Error> {
+        match axum::extract::Path::<T>::from_request_parts(parts, state).await {
+            Ok(axum::extract::Path(value)) => Ok(Path(value)),
+            Err(_) => Err(Error::new(StatusCode::BAD_REQUEST, "INVALID_ID", "The id in the URL is not a valid id; record ids are UUIDs, send the id the API returned")),
+        }
+    }
+}
 impl App {
     async fn user(&self, h: &HeaderMap) -> Result<Option<User>> {
         if let Some(user) = http_api_keys::key_user() {
@@ -1149,7 +1164,7 @@ async fn include(
         .map_err(|error| match error {
             crate::relations::IncludeError::Unknown(name) => Error::validation(json!({"include": format!("`{name}` is not includable")})),
             crate::relations::IncludeError::Denied(_) => Error::forbidden(),
-            crate::relations::IncludeError::Database => Error::internal("include"),
+            crate::relations::IncludeError::Database(error) => Error::internal(error),
         })
 }
 /// Whether the viewer owns `id` through a declared `owner.<ref>` grant of `operation`.

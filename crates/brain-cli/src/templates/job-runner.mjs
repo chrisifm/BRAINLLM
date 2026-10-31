@@ -140,7 +140,7 @@ function jobBackend(env) {
   const resource = name => {
     if (problem) throw fail(503, problem)
     if (typeof name !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(name)) throw fail(400, 'Invalid native resource name')
-    const idPath = id => { if (typeof id !== 'string' || !UUID.test(id)) throw fail(400, 'Invalid native record identifier'); return '/api/' + name + '/' + id }
+    const idPath = id => { if (typeof id !== 'string' || !UUID.test(id)) throw fail(404, 'No record has this id; record ids are UUIDs'); return '/api/' + name + '/' + id }
     return Object.freeze({
       list(options = {}) {
         if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).some(k => !LIST_OPTIONS.includes(k))) throw fail(400, 'Invalid native list options')

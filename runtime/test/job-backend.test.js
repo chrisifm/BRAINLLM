@@ -68,10 +68,11 @@ test('backend failures reach the handler as status and field errors, never as re
     try{await ctx.backend.resource('orders').list({filter:{status:'bad'}})}catch(e){out.invalid=[e.status,e.errors]}
     try{await ctx.backend.resource('secret').list()}catch(e){out.denied=[e.status,e.code,e.message.includes('SCOPE')]}
     try{ctx.backend.resource('../auth')}catch(e){out.name=e.status}
+    try{ctx.backend.resource('orders').get('nope')}catch(e){out.malformed=e.status}
     return out
   `,{BRAIN_BACKEND_URL:url,BRAIN_JOBS_API_KEY:key})
   assert.equal(r.code,0,r.stderr)
-  assert.deepEqual(r.value,{invalid:[422,{status:'Expected one of: pending, paid'}],denied:[403,'API_KEY_SCOPE_DENIED',false],name:400})
+  assert.deepEqual(r.value,{invalid:[422,{status:'Expected one of: pending, paid'}],denied:[403,'API_KEY_SCOPE_DENIED',false],name:400,malformed:404})
 })
 test('without a backend URL and key, ctx.backend explains what to configure',async()=>{
   const before=seen.length

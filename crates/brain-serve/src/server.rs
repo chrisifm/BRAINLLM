@@ -1439,6 +1439,10 @@ fn app_page(ctx: &Ctx, req: &http::Request) -> (u16, String, Option<String>) {
             {
                 // the folder's _error.brain (props message + rid) when the app has one; the dev notice with the stack else
                 Err(error) if error.starts_with("BNATIVE_AUTH_UNAVAILABLE:")=>(503,fixed_view(ctx,&error_view(&ctx.root,&r.view),&format!("{{\"message\":\"Native authentication is temporarily unavailable\",\"rid\":{}}}",json_str(&req.id)),"Native authentication unavailable","Native authentication is temporarily unavailable")),
+                Err(error) if error.starts_with("BNATIVE_STATUS:") => {
+                    let status = error.split(':').nth(1).and_then(|n| n.parse().ok()).unwrap_or(500);
+                    (status, fixed_view(ctx, &error_view(&ctx.root, &r.view), &format!("{{\"message\":\"The request could not complete\",\"rid\":{}}}", json_str(&req.id)), "The request could not complete", "The request could not complete"))
+                }
                 Err(e) if ctx.root.join(error_view(&ctx.root, &r.view)).is_file() => (
                     500,
                     fixed_view(

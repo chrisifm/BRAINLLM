@@ -141,7 +141,9 @@ for await (const line of createInterface({ input: process.stdin })) {
     if (e && e.notFound === true) out(`OK ${id} ${e.gone === true ? '{"notFound":true,"gone":true,"status":410}' : '{"notFound":true,"status":404}'}\n`) // `throw notFound()` / `throw gone()`: a 404 / 410 page
     else if (e && typeof e.redirect === 'string') out(`OK ${id} ${JSON.stringify({ redirect: e.redirect, status: Number(e.status) || 303 })}\n`) // `throw redirect(url, s)`: as server.mjs
     else if (e && e.errors && typeof e.errors === 'object') out(`BAD ${id} ${JSON.stringify({ error: e.message || 'Invalid input', errors: e.errors })}\n`)
+    else if (contextServer && e?.status === 404 && e?.constructor?.name === 'HttpError') out(`OK ${id} {"notFound":true,"status":404}\n`) // as server.mjs: the 404 page
     else if (contextServer && e?.status === 503) out(`STATUS ${id} ${JSON.stringify({status:503,message:'Native authentication is temporarily unavailable'})}\n`)
+    else if (contextServer && e?.constructor?.name === 'HttpError' && Number.isInteger(e.status) && e.status >= 400 && e.status < 600) out(`STATUS ${id} ${JSON.stringify({status:e.status,message:'The request could not complete'})}\n`) // as server.mjs: a deliberate status never shows its message
     else out(`ERR ${id} ${JSON.stringify(String(e?.stack ?? (e && typeof e === 'object' ? JSON.stringify(e) : e)))}\n`)
   }
 }
@@ -578,6 +580,8 @@ impl Sidecar {
         .map_err(|(status, message)| {
             if status == 503 {
                 format!("BNATIVE_AUTH_UNAVAILABLE: {message}")
+            } else if (400..600).contains(&status) {
+                format!("BNATIVE_STATUS:{status}: {message}")
             } else {
                 message
             }
@@ -1008,6 +1012,27 @@ mod tests {
             let v = sc.call(&file_url(&f), "load", &format!("{{\"params\":{{\"id\":\"{id}\"}}}}")).unwrap();
             assert_eq!(v, "{\"notFound\":true,\"gone\":true,\"status\":410}", "{id}");
         }
+        drop(sc);
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn sidecar_gives_deliberate_http_errors_their_status_in_development() {
+        if Command::new("node").arg("--version").output().is_err() {
+            return;
+        }
+        // A malformed id through ctx.backend is a 404, as in production, and never a raw 500 with the stack.
+        let d = std::env::temp_dir().join(format!("brain-status-load-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("status.mjs");
+        std::fs::write(&f, "class HttpError extends Error { constructor(status, message) { super(message); this.status = status } }\nexport async function load(ctx) { throw new HttpError(ctx.params.status, 'private detail') }\n").unwrap();
+        let server = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime/server/server.mjs");
+        let mut sc = Sidecar::spawn(&d, &[]).unwrap();
+        let mut call = |status: u16| sc.call_context(&file_url(&f), "load", &format!("{{\"params\":{{\"status\":{status}}}}}"), &file_url(&server), "synthetic-secret-synthetic-secret", true);
+        assert_eq!(call(404).unwrap(), "{\"notFound\":true,\"status\":404}");
+        let conflict = call(409).unwrap_err();
+        assert!(conflict.starts_with("BNATIVE_STATUS:409:"), "{conflict}");
+        assert!(!conflict.contains("private detail"), "{conflict}");
         drop(sc);
         std::fs::remove_dir_all(d).unwrap();
     }
