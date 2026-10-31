@@ -312,6 +312,8 @@ impl HeldBackend {
             while !done.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok((mut s, _)) => {
+                        // BSD sockets inherit O_NONBLOCK from the listener; blocking reads below would see WouldBlock.
+                        s.set_nonblocking(false).unwrap();
                         if workers.len() >= 64 {
                             drop(s);
                             continue;
