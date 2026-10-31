@@ -11,6 +11,12 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Added
 
+- Service worker data routes: brain.json `"cache": { "routes": [...] }` declares `cache-first`, `network-first`,
+  `stale-while-revalidate` or `network-only` per same-origin data path, with `maxEntries`, `maxAge` and a
+  network-first `timeout`. Personal responses (Authorization, `Vary: Cookie`, `Set-Cookie`, `private`/`no-store`,
+  non-200) are never stored; removed routes drop their caches. See `docs/BROWSER-DATA.md`.
+- User-controlled app updates: `"cache": { "update": "prompt" }` keeps a new service worker waiting; `updateReady()`
+  and `applyUpdate()` let the page show a reload prompt (0 bytes for views that do not use them).
 - WebMCP imperative tools ship (#106): `<meta tools="add_task: Add a task (text:str!, due:date)">` plus a same-named
   function registers the tool with the browser's model context while the component is mounted and unregisters it on
   unmount. Nothing is registered without WebMCP, during SSR or prerender; arguments are validated against the

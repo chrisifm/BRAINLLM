@@ -1048,6 +1048,37 @@ pub(crate) fn cache_cfg(root: &Path) -> Result<brain_pack::cache::CacheCfg, Stri
         Some(Json::Num(n)) if *n >= 0.0 => c.precache_kb = *n as usize,
         Some(_) => return Err("brain.json: cache.precacheKB must be a number of KB (default 2048)".into()),
     }
+    c.update_prompt = match cache.get("update") {
+        None => false,
+        Some(Json::Str(s)) if s == "auto" => false,
+        Some(Json::Str(s)) if s == "prompt" => true,
+        Some(_) => return Err("brain.json: cache.update must be \"auto\" (default) or \"prompt\" (wait for applyUpdate())".into()),
+    };
+    match cache.get("routes") {
+        None => {}
+        Some(Json::Arr(list)) if list.len() <= 32 => {
+            for r in list {
+                let text = |k: &str| -> Result<Option<String>, String> {
+                    match r.get(k) {
+                        None => Ok(None),
+                        Some(Json::Str(s)) => Ok(Some(s.clone())),
+                        Some(Json::Num(n)) if *n >= 0.0 && n.fract() == 0.0 => Ok(Some(format!("{n}"))),
+                        Some(_) => Err(format!("brain.json: cache.routes {k} must be a string such as \"10m\"")),
+                    }
+                };
+                let (Some(Json::Str(m)), Some(Json::Str(st))) = (r.get("match"), r.get("strategy")) else {
+                    return Err("brain.json: every cache.routes entry needs \"match\" and \"strategy\" strings".into());
+                };
+                let entries = match r.get("maxEntries") {
+                    None => None,
+                    Some(Json::Num(n)) => Some(*n),
+                    Some(_) => return Err("brain.json: cache.routes maxEntries must be a number".into()),
+                };
+                c.routes.push(brain_pack::cache::sw_route(m, st, entries, text("maxAge")?.as_deref(), text("timeout")?.as_deref())?);
+            }
+        }
+        Some(_) => return Err("brain.json: cache.routes must be an array of at most 32 { match, strategy } entries".into()),
+    }
     Ok(c)
 }
 

@@ -50,6 +50,48 @@ Install the reviewed exact version of official `@sqlite.org/sqlite-wasm` in the 
 
 The adapter requires SQLite 3.54+, OPFS and Web Locks in an owned worker. It acquires an exclusive same-origin database lease before non-destructive SAHPool initialization; failures preserve existing files. No in-memory downgrade or implicit delete runs. Capacity is 64 MiB, pending work 32, rows 200 and output 2 MiB, with native SQLite expression/column/parameter/statement limits. `info()` reports limits and handle state; `close()` releases the owned database and lease. Unsupported browsers should use `database()` or a server-backed data source through an explicit app decision. Official Worker1/Promiser APIs deprecated upstream are not used.
 
+## Offline data routes and updates
+
+The generated service worker caches pages and build files by itself. Declare data paths it should also answer
+offline in `brain.json`; the first matching route wins and every other request stays untouched:
+
+```json
+{
+  "cache": {
+    "update": "prompt",
+    "routes": [
+      { "match": "/api/products/*", "strategy": "stale-while-revalidate", "maxEntries": 50, "maxAge": "1h" },
+      { "match": "/api/catalog", "strategy": "cache-first", "maxAge": "7d" },
+      { "match": "/api/cart", "strategy": "network-first", "timeout": "3s", "maxAge": "1d" },
+      { "match": "/api/session", "strategy": "network-only" }
+    ]
+  }
+}
+```
+
+| Strategy | Use for |
+|---|---|
+| `stale-while-revalidate` | public lists and pages of data: instant answer, refreshed in the background |
+| `cache-first` | data that rarely changes (catalogs, reference tables) |
+| `network-first` | data that should be fresh but readable offline; falls back to the cache after `timeout` |
+| `network-only` | sign-in, session and every personal endpoint |
+
+Each route keeps at most `maxEntries` responses (default 64, oldest evicted first) younger than `maxAge`. Responses
+that are `private`/`no-store`, set a cookie, vary by `Cookie` or `Authorization`, answer a request with an
+`Authorization` header, or are not `200` are never stored. The worker cannot see cookies, so an endpoint that returns
+personal data must be `network-only` or answer `Cache-Control: private`.
+
+With `"update": "prompt"` a new build waits until the user accepts it instead of taking over at once:
+
+```html
+{#if updateReady()}
+  <p role="status">A new version is ready. <button onclick={() => applyUpdate()}>Reload</button></p>
+{/if}
+```
+
+`updateReady()` is a signal; `applyUpdate()` activates the waiting worker and reloads the page once. Without a service
+worker both are inert. Only components that use them load `brain-update.js`.
+
 ## Threads and capabilities
 
 Import a project worker through the native worker compiler path. Its RPC bridge owns cancellation, bounded pending work, deadlines, payload/in-flight bytes and disposal. Abort terminates an owned dedicated worker and rejects pending calls. `sharedWorker(url, {name})` owns its MessagePort; closing one client does not terminate other tabs. Remote modules and prototype/accessor RPC paths are rejected.

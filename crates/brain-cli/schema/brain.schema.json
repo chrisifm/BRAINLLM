@@ -102,6 +102,28 @@
           "type": "number",
           "minimum": 0,
           "default": 2048
+        },
+        "update": {
+          "enum": ["auto", "prompt"],
+          "default": "auto",
+          "description": "prompt: a new service worker waits until the page calls applyUpdate()"
+        },
+        "routes": {
+          "type": "array",
+          "maxItems": 32,
+          "description": "Service worker strategies for same-origin data paths; first match wins",
+          "items": {
+            "type": "object",
+            "required": ["match", "strategy"],
+            "additionalProperties": false,
+            "properties": {
+              "match": { "type": "string", "pattern": "^/[^*?#\\s]*\\*?$" },
+              "strategy": { "enum": ["cache-first", "network-first", "stale-while-revalidate", "network-only"] },
+              "maxEntries": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 64 },
+              "maxAge": { "type": ["string", "integer"], "description": "30s, 10m, 1h, 7d or seconds; omitted = no age limit" },
+              "timeout": { "type": ["string", "integer"], "description": "network-first deadline, 1s to 60s (default 3s)" }
+            }
+          }
         }
       }
     },

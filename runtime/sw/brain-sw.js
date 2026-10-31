@@ -7,12 +7,21 @@
 // open tab still asks for: navigations are answered from the current build alone, so nothing old is shown by mistake.
 // After taking over it tells every tab `brain:build <sig>` (the router then does full loads). Caches that are not per
 // build are named `brain:*`. (`sw: false` is a separate kill worker emitted by the build.)
+// `cache.routes` (brain.json) adds declarative data routes: { match, prefix, strategy: cache-first | network-first |
+// stale-while-revalidate | network-only, maxEntries, maxAge (s), timeout (ms) }, each in its own `brain:route:<match>`
+// cache that survives builds, bounded by entries and age; personal responses are never stored. `cache.update:
+// "prompt"` keeps a new worker waiting (while an older one controls tabs) until a page posts `brain:skip-waiting`.
 const B = self.BRAIN_BUILD || { hash: 'dev', precache: [], offline: null }
 const BASE = B.base || '/' // app served under a base path (§23 #148); precache/offline URLs already carry it
 const BUILD = 'brain-' + B.hash, META = 'brain:meta'
 const NAV_TIMEOUT = 3000
 // responses marked personal or uncacheable are never stored
 const storable = r => r.ok && !/no-store|private/i.test(r.headers.get('cache-control') || '')
+const ROUTES = (B.routes || []).map(r => ({ ...r, cache: 'brain:route:' + r.match + (r.prefix ? '*' : '') }))
+const route = p => ROUTES.find(r => (r.prefix ? p.startsWith(r.match) : p === r.match))
+// identity-bound: an Authorization header, a response that varies by cookie/authorization/*, or one that sets a cookie
+const personal = (req, r) =>
+  !!req.headers?.has?.('authorization') || /(^|,)\s*(\*|cookie|authorization)\s*(,|$)/i.test(r.headers.get('vary') || '') || r.headers.has('set-cookie')
 const OFFLINE =
   '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
   '<title>Offline</title><main style="font:16px/1.5 system-ui;max-width:32rem;margin:15vh auto;padding:0 16px">' +
@@ -25,7 +34,8 @@ self.addEventListener('install', e => {
       // one failing URL must not abort the install: cache what answers, the rest is cached on first use
       // default cache mode: the page just filled the HTTP cache with these immutable files, so this costs no bytes
       await Promise.allSettled(B.precache.map(u => fetch(u).then(r => r.ok && c.put(u, r))))
-      await self.skipWaiting()
+      // update: 'prompt' → an update waits for the page (appUpdate); the first install has nothing to replace
+      if (B.update !== 'prompt' || !self.registration.active) await self.skipWaiting()
     })()
   )
 })
@@ -40,11 +50,16 @@ self.addEventListener('activate', e => {
       const gens = r ? await r.json() : []
       const keep = [...gens.filter(g => g !== BUILD).slice(-1), BUILD]
       await meta.put('/__brain_generations', new Response(JSON.stringify(keep)))
-      for (const k of await caches.keys()) if (k.startsWith('brain-') && !keep.includes(k)) await caches.delete(k)
+      for (const k of await caches.keys())
+        if ((k.startsWith('brain-') && !keep.includes(k)) || (k.startsWith('brain:route:') && !ROUTES.some(r => r.cache === k))) await caches.delete(k)
       await self.clients.claim()
       for (const c of await self.clients.matchAll({ type: 'window', includeUncontrolled: true })) c.postMessage('brain:build ' + B.hash)
     })()
   )
+})
+
+self.addEventListener('message', e => {
+  if (e.data === 'brain:skip-waiting') self.skipWaiting()
 })
 
 self.addEventListener('fetch', e => {
@@ -55,6 +70,8 @@ self.addEventListener('fetch', e => {
   // offline: false (B.offline null) → navigations go straight to the network: no page cache, no offline page
   if (req.mode === 'navigate') return B.offline ? e.respondWith(navigate(e)) : undefined
   if (url.pathname.startsWith(BASE + '_b/')) return e.respondWith(hashed(req))
+  const rt = route(url.pathname)
+  if (rt) return e.respondWith(rt.strategy === 'network-only' ? fetch(req) : data(e, rt))
   // only files the page itself loads (img, style, script, font, manifest…); fetch()/XHR data is never touched (§35:
   // data is not cached by default)
   if (req.destination) e.respondWith(revalidate(e))
@@ -100,4 +117,36 @@ async function revalidate(e) {
   const net = fetch(e.request).then(r => (storable(r) && c.put(e.request, r.clone()), r))
   e.waitUntil(net.catch(() => {}))
   return hit || net
+}
+
+// declared data route: entries carry their storage time (x-brain-at); older than maxAge are never served
+async function data(e, rt) {
+  const req = e.request, c = await caches.open(rt.cache)
+  const fresh = async () => {
+    const h = await c.match(req)
+    return h && (!rt.maxAge || Date.now() - Number(h.headers.get('x-brain-at') || 0) <= rt.maxAge * 1000) ? h : null
+  }
+  const save = async r => {
+    if (!storable(r) || r.status !== 200 || personal(req, r)) return
+    const h = new Headers(r.headers)
+    h.set('x-brain-at', String(Date.now()))
+    await c.put(req, new Response(await r.blob(), { status: 200, statusText: r.statusText, headers: h }))
+    const keys = await c.keys() // insertion order: the oldest first
+    for (const k of keys.slice(0, Math.max(0, keys.length - rt.maxEntries))) await c.delete(k)
+  }
+  const net = () => {
+    const p = fetch(req).then(r => (e.waitUntil(save(r.clone()).catch(() => {})), r))
+    e.waitUntil(p.catch(() => {}))
+    return p
+  }
+  if (rt.strategy === 'cache-first') return (await fresh()) || net()
+  if (rt.strategy === 'network-first') {
+    const n = net()
+    const timeout = new Promise(ok => setTimeout(() => ok(null), rt.timeout || NAV_TIMEOUT))
+    const first = await Promise.race([n, timeout]).catch(() => null)
+    return first || (await fresh()) || n
+  }
+  const hit = await fresh() // stale-while-revalidate
+  const n = net()
+  return hit || n
 }
