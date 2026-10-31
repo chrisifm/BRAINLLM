@@ -288,6 +288,18 @@ async fn postgres_operations_commit_every_step_or_roll_all_of_them_back() {
     assert_eq!(stock(&s, &p).await, 98);
 }
 
+/// A malformed id is the caller's mistake on every record route, including the action and transition routes.
+#[tokio::test]
+#[ignore = "requires scripts/backend-check.mjs disposable Postgres"]
+async fn postgres_action_and_transition_routes_answer_invalid_id_for_a_malformed_id() {
+    let s = shop().await;
+    for uri in ["/api/shop_products/not-a-uuid/actions/restock", "/api/shop_orders/not-a-uuid/transitions/pay"] {
+        let (status, body) = call(&s.app, "POST", uri, &s.admin, Some(json!({"amount":1}))).await;
+        assert_eq!((status, body["error"]["code"].as_str()), (400, Some("INVALID_ID")), "{uri} {body}");
+        assert!(body["error"]["fix"].as_str().unwrap().contains("UUID"), "{uri} {body}");
+    }
+}
+
 #[tokio::test]
 #[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
 async fn postgres_atomic_actions_and_upserts_are_race_safe_under_concurrent_requests() {

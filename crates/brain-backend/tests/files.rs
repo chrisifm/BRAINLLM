@@ -218,6 +218,13 @@ async fn declared_buckets_stream_any_type_enforce_policy_and_serve_ranges() {
     assert_eq!(response.headers()["cache-control"], "public, max-age=31536000, immutable");
     assert_eq!(response.headers()["content-type"], "image/png");
 
+    // A malformed id is the caller's mistake on every file route.
+    for (method, path) in [("GET", "/_brain/files/invoices/not-a-uuid"), ("GET", "/_brain/files/invoices/not-a-uuid/meta"), ("DELETE", "/_brain/files/invoices/not-a-uuid")] {
+        let response = client.send(method, path, Some(owner_session), &[], vec![]).await;
+        assert_eq!(response.status(), 400, "{method} {path}");
+        assert_eq!(json_body(response).await["error"]["code"], "INVALID_ID", "{method} {path}");
+    }
+
     // Deletion follows the delete grants and removes the stored bytes.
     assert_eq!(client.send("DELETE", &location, Some(stranger_session), &[], vec![]).await.status(), 403);
     assert_eq!(client.send("DELETE", &location, Some(owner_session), &[], vec![]).await.status(), 204);
