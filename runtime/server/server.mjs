@@ -406,6 +406,7 @@ export function createServer(o = {}) {
   const TIMEOUT = +(o.timeout ?? env.BRAIN_TIMEOUT_MS ?? 10000)
   const LIMIT = +(o.rateLimit ?? env.BRAIN_RPC_LIMIT ?? 60) // per IP + function, per minute
   const MAX_BODY = 64 * 1024
+  const SITEMAP_BYTES = +(o.sitemapBytes ?? 50 * 1024 * 1024) // protocol: 50 MB uncompressed per sitemap file
   const secret = o.secret ?? env.BRAIN_SECRET ?? ''
   const sink = o.log || ((level, msg, extra) => console[level === 'error' ? 'error' : 'log'](json({ t: new Date().toISOString(), level, msg, ...extra })))
   const log = (level, msg, extra = {}) => {
@@ -940,7 +941,9 @@ export function createServer(o = {}) {
         for (const p of Array.isArray(list) ? list : []) {
           const path = fill(r.path, p)
           if (!path) continue
-          if (urls.length < MAX_URLS) urls.push({ loc: origin + withBase(path), lastmod: day(p.lastmod) })
+          const loc = origin + withBase(path)
+          if (loc.length > 2048) log('warn', 'sitemap(): URL longer than 2048 characters left out; fix: shorten the slug', { view: r.view, loc: loc.slice(0, 120) })
+          else if (urls.length < MAX_URLS) urls.push({ loc, lastmod: day(p.lastmod) })
           else dropped++
         }
       } catch (e) {
@@ -957,6 +960,23 @@ export function createServer(o = {}) {
     if (!dynRun) dynRun = collect(origin).finally(() => (dynRun = null))
     return dynRun
   }
+  // §33 S01: every sitemap file holds at most 50 000 URLs and SITEMAP_BYTES bytes of UTF-8 XML; the dynamic URLs fill
+  // /sitemap-dynamic.xml, /sitemap-dynamic-2.xml, … in sitemap() order, so the split is deterministic
+  const SET_HEAD = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+  const SET_FOOT = '</urlset>\n'
+  const bytes = t => Buffer.byteLength(t)
+  function pages(urls) {
+    const out = [[]]
+    let size = bytes(SET_HEAD + SET_FOOT)
+    for (const u of urls) {
+      const line = `  <url><loc>${esc(u.loc)}</loc>${u.lastmod ? `<lastmod>${esc(u.lastmod)}</lastmod>` : ''}</url>\n`
+      const n = bytes(line)
+      if (out.at(-1).length && (out.at(-1).length >= MAX_URLS || size + n > SITEMAP_BYTES)) out.push([]), (size = bytes(SET_HEAD + SET_FOOT))
+      out.at(-1).push(line)
+      size += n
+    }
+    return out.map(p => p.join(''))
+  }
   async function serveSitemap(req, res, url) {
     const f = file('/sitemap.xml')
     if (!f) return false
@@ -964,22 +984,24 @@ export function createServer(o = {}) {
     const origin = [...text.matchAll(/<loc>(https?:\/\/[^<]+)<\/loc>/g)].map(m => URL.canParse(m[1]) && new URL(m[1]).origin).find(Boolean)
     if (!origin) return false
     const index = text.includes('<sitemapindex')
-    const urls = await dynamicUrls(origin)
-    // a urlset that would pass 50 000 URLs with the dynamic ones is split: index → static file + dynamic file
-    const split = !index && (text.match(/<url>/g) || []).length + urls.length > MAX_URLS
+    const sets = pages(await dynamicUrls(origin))
+    // a urlset that would pass either limit with the dynamic URLs is split: index → static file + dynamic file(s)
+    const split = !index && (sets.length > 1 || (text.match(/<url>/g) || []).length + (sets[0].match(/<url>/g) || []).length > MAX_URLS || bytes(text) + bytes(sets[0]) > SITEMAP_BYTES)
     const xml = body => send(res, 200, req.method === 'HEAD' ? '' : body, { 'content-type': MIME['.xml'], 'cache-control': 'public, max-age=300' })
     if (url.pathname === '/sitemap-static.xml') return split ? (xml(text), true) : false
-    if (url.pathname === '/sitemap-dynamic.xml' && !index && !split) return false
+    const name = i => (i ? `/sitemap-dynamic-${i + 1}.xml` : '/sitemap-dynamic.xml')
     const child = p => `  <sitemap><loc>${esc(origin + withBase(p))}</loc></sitemap>\n`
-    const set = urls.map(u => `  <url><loc>${esc(u.loc)}</loc>${u.lastmod ? `<lastmod>${esc(u.lastmod)}</lastmod>` : ''}</url>\n`).join('')
+    const kids = sets.map((_, i) => child(name(i))).join('')
+    if (url.pathname !== '/sitemap.xml') {
+      const i = sets.findIndex((_, i) => name(i) === url.pathname)
+      return i >= 0 && (index || split) ? (xml(SET_HEAD + sets[i] + SET_FOOT), true) : false
+    }
     xml(
-      url.pathname === '/sitemap-dynamic.xml'
-        ? `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${set}</urlset>\n`
-        : index
-          ? text.replace('</sitemapindex>', `${child('/sitemap-dynamic.xml')}</sitemapindex>`)
-          : split
-            ? `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${child('/sitemap-static.xml')}${child('/sitemap-dynamic.xml')}</sitemapindex>\n`
-            : text.replace('</urlset>', set + '</urlset>'),
+      index
+        ? text.replace('</sitemapindex>', `${kids}</sitemapindex>`)
+        : split
+          ? `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${child('/sitemap-static.xml')}${kids}</sitemapindex>\n`
+          : text.replace('</urlset>', sets[0] + '</urlset>'),
     )
     return true
   }
@@ -1081,7 +1103,7 @@ export function createServer(o = {}) {
         return await (post ? formPost : ssr)(req, res, route, m.groups ? { ...m.groups } : {}, url, rid)
       }
       if (post) return send(res, 405, 'Method not allowed', { allow: 'GET, HEAD' })
-      if (DYN.length && (url.pathname === '/sitemap.xml' || url.pathname === '/sitemap-dynamic.xml' || url.pathname === '/sitemap-static.xml') && (await serveSitemap(req, res, url))) return
+      if (DYN.length && /^\/sitemap(-static|-dynamic(-\d+)?)?\.xml$/.test(url.pathname) && (await serveSitemap(req, res, url))) return
       if (serveStatic(req, res, url)) return
       notFound(req, res)
     } catch (e) {

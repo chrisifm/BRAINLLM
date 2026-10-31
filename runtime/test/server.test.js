@@ -347,6 +347,37 @@ test('sitemap.xml: past 50 000 URLs in total it becomes an index of the static a
 })
 
 
+test('sitemap.xml: dynamic URLs are split by serialized bytes too, and a URL over 2 048 characters is left out', async () => {
+  const d3 = mkdtempSync(join(tmpdir(), 'brain-dist-smb-'))
+  const w3 = (rel, s) => (mkdirSync(join(d3, rel, '..'), { recursive: true }), writeFileSync(join(d3, rel), s))
+  w3('sitemap.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>https://bytes.test/</loc></url>\n</urlset>\n')
+  w3('_server/b.mjs', `export async function sitemap() { return [...Array.from({ length: 6 }, (_, i) => ({ id: i + '-' + '€'.repeat(60) })), { id: 'x'.repeat(2100) }] }\n`)
+  w3('_server/manifest.json', JSON.stringify({ v: 1, build: 'b1', routes: [{ path: '/items/:id', rx: '^/items/(?<id>[^/]+)/?$', view: '/_b/view.js', layouts: [], server: '_server/b.mjs', page: '_server/pages/user.html', sitemap: true }] }))
+  const logs3 = []
+  const s3 = createServer({ dist: d3, timeout: 2000, sitemapBytes: 1200, log: (level, msg, x) => logs3.push({ level, msg, ...x }) })
+  await new Promise(r => s3.listen(0, '127.0.0.1', r))
+  try {
+    const b3 = `http://127.0.0.1:${s3.address().port}`
+    const idx = await (await fetch(b3 + '/sitemap.xml')).text()
+    assert.ok(idx.includes('<sitemapindex'), idx)
+    const kids = [...idx.matchAll(/<loc>https:\/\/bytes\.test(\/[^<]+)<\/loc>/g)].map(m => m[1])
+    assert.ok(kids.includes('/sitemap-static.xml') && kids.includes('/sitemap-dynamic.xml') && kids.includes('/sitemap-dynamic-2.xml'), idx)
+    let n = 0
+    for (const k of kids.filter(k => k.startsWith('/sitemap-dynamic'))) {
+      const r = await fetch(b3 + k)
+      assert.equal(r.status, 200, k)
+      const body = Buffer.from(await r.arrayBuffer())
+      assert.ok(body.length <= 1200, `${k} is ${body.length} bytes`)
+      n += (body.toString().match(/<url>/g) || []).length
+    }
+    assert.equal(n, 6)
+    assert.equal((await fetch(b3 + '/sitemap-dynamic-9.xml')).status, 404)
+    assert.ok(logs3.some(l => l.level === 'warn' && /2048/.test(l.msg)), JSON.stringify(logs3))
+  } finally {
+    s3.close()
+  }
+})
+
 test('static Brotli: q weights, explicit exclusions and identity keep the immutable asset contract', async () => {
   const br = await fetch(base + '/_b/app.js', {headers:{'accept-encoding':'br, gzip'}})
   assert.equal(br.headers.get('content-encoding'),'br')

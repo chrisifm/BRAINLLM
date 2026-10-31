@@ -11,6 +11,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Added
 
+- Sitemaps respect the 50 MB limit as well as 50 000 URLs (§32, S01): the build and the server's dynamic
+  `sitemap()` URLs split into more child files by escaped UTF-8 bytes, and a URL over 2 048 characters is left out
+  with a warning.
 - Client navigation replaces every route-owned head tag (§32): description, canonical, hreflang and Markdown
   alternates, and `prev`/`next` now follow the page; a page without them no longer keeps the previous page's tags.
   Icons, stylesheets and the RSS feed stay.

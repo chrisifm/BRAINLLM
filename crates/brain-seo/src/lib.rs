@@ -676,7 +676,13 @@ pub fn finish_with_og(
             cfg.abs("/sitemap.xml")
         ));
     }
-    let sm = files::sitemaps(cfg, &entries);
+    let (sm, rejected) = files::sitemaps_with(cfg, &entries, files::SITEMAP_MAX, files::SITEMAP_MAX_BYTES);
+    for u in rejected {
+        warnings.push(format!(
+            "sitemap: {u} is left out, its URL is longer than {} characters or its entry is larger than a sitemap file; fix: shorten the route or the slug",
+            files::LOC_MAX
+        ));
+    }
     if sm.is_empty() && cfg.sitemap && !cfg.staging {
         warnings.push("no sitemap.xml: it needs absolute URLs; fix: `brain build --site https://your-domain` or \"site\" in brain.json".into());
     }

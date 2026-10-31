@@ -1031,14 +1031,19 @@ specified elsewhere; ➕ = new in this section.
   `<meta seo>` holds site defaults (`titleTemplate`, `og:image`, `twitter`, `locale`); views override per page.
 - A view may contain a `<head>` block for anything else (alternate hreflang, preload, custom meta). Merged into the
   document head at SSR/prerender; deduplicated by `name`/`property`/`rel+hreflang`; on client navigation the router
-  swaps title, description, canonical, og:* and JSON-LD (RUNTIME extends the existing swap).
+  swaps every route-owned tag: title, description, canonical, hreflang and Markdown alternates, `prev`/`next`, og:*,
+  twitter:*, robots and JSON-LD. The page's own tags replace the previous page's, and none stay when it has none (S04);
+  icons, stylesheets and the RSS feed are site tags and stay.
 - Dynamic routes export `paths()` → prerendered per param and listed in the sitemap; without `paths()` they are SSR.
 - A dynamic route without `paths()` (live content: SSR) may export `sitemap()` instead: it returns the params of its pages
   (`[{ slug: 'a', lastmod: '2026-10-01' }]`) and gets `{ env }`. The manifest marks the route `sitemap: true`, and
   server.mjs serves /sitemap.xml as the build's file plus those URLs (a sitemap index gets one more child,
-  `/sitemap-dynamic.xml`), with the origin of the build's own sitemap. One file holds at most 50 000 URLs: when the
-  build's URLs plus the dynamic ones pass that, /sitemap.xml becomes an index of `/sitemap-static.xml` (the build's
-  file) and `/sitemap-dynamic.xml`, and dynamic URLs past 50 000 are dropped with a warning. The list is kept 5 min
+  `/sitemap-dynamic.xml`), with the origin of the build's own sitemap. One file holds at most 50 000 URLs and 50 MB of
+  UTF-8 XML (escaping included; S01): when the build's URLs plus the dynamic ones pass either limit, /sitemap.xml
+  becomes an index of `/sitemap-static.xml` (the build's file) and `/sitemap-dynamic.xml`, `/sitemap-dynamic-2.xml`, …
+  filled in `sitemap()` order. Dynamic URLs past 50 000 are dropped with a warning, and a URL over 2 048 characters is
+  left out with a warning. The build splits its own sitemap the same way (`sitemap-N.xml`, by count and bytes) and
+  warns about each URL it leaves out. The list is kept 5 min
   (`max-age=300`; requests after expiry share one run); a throwing `sitemap()` is logged and skipped. B0117 outside a
   dynamic view, like `paths()`, and in a view that also exports `paths()` (those pages are prerendered and already
   in the build's sitemap). Static hosting has no

@@ -207,24 +207,20 @@ export function router(o = {}) {
       for (const a of next.attributes || []) cur.setAttribute(a.name, a.value)
       if (doc.title) document.title = doc.title
       // SEO (§32, S04): the route owns description, og:*, twitter:*, robots, JSON-LD, canonical, hreflang and Markdown
-      // alternates and prev/next: the current page's go, the next page's come (none when it has none). Site links
-      // (icons, stylesheets, the RSS feed) and the region's own tags stay where they are.
+      // alternates, prev/next and its route params (brain-params, read by route()): the current page's go, the next
+      // page's come (none when it has none). Site links (icons, stylesheets, the RSS feed) and the region's own tags stay.
       const tags = (r, skip) =>
         [...((r && r.querySelectorAll && r.querySelectorAll('meta,script,link')) || [])].filter(e => {
           for (let p = e.parentNode; p; p = p.parentNode) if (p === skip) return false
-          const k = e.getAttribute('property') || e.getAttribute('name') || '', rel = e.getAttribute('rel') || ''
-          return e.tagName === 'SCRIPT' ? e.getAttribute('type') === 'application/ld+json'
-            : e.tagName === 'LINK' ? /^(canonical|prev|next)$/.test(rel) || (rel === 'alternate' && (e.hasAttribute('hreflang') || e.getAttribute('type') === 'text/markdown'))
-            : /^(og:|twitter:|robots$|description$)/.test(k)
+          const a = n => e.getAttribute(n) || '', t = e.tagName
+          return t == 'SCRIPT' ? a('type') == 'application/ld+json'
+            : t == 'LINK' ? /^(canonical|prev|next)$/.test(a('rel')) || (a('rel') == 'alternate' && (a('hreflang') || a('type') == 'text/markdown'))
+            : /^(og:|twitter:|robots$|description$|brain-params$)/.test(a('property') || a('name'))
         })
       if (document.head) {
         for (const e of tags(document.head)) e.remove()
         for (const e of tags(doc.head || doc, next)) document.head.appendChild(document.adoptNode ? document.adoptNode(e) : e)
       }
-      // the next page's route params (or none): route() reads them
-      const pa = document.head && document.head.querySelector('meta[name=brain-params]'), pb = doc.querySelector('meta[name=brain-params]')
-      if (pa) pa.remove()
-      if (pb && document.head) document.head.appendChild(document.adoptNode ? document.adoptNode(pb) : pb)
       routed()
       current()
       const oldPlan = document.getElementById('brain-next'), newPlan = doc.querySelector('#brain-next')

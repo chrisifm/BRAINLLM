@@ -23,6 +23,10 @@ pub struct Entry<'a> {
 
 /// URLs per sitemap file (protocol limit: 50 000 URLs and 50 MB).
 pub const SITEMAP_MAX: usize = 50_000;
+/// Uncompressed bytes per sitemap file (protocol limit: 50 MB).
+pub const SITEMAP_MAX_BYTES: usize = 50 * 1024 * 1024;
+/// Characters per `<loc>` (sitemaps.org protocol: under 2 048).
+pub const LOC_MAX: usize = 2_048;
 
 /// Percent-encodes what a URL path cannot carry raw (spaces, quotes, non-ASCII); existing `%XX` escapes are kept.
 pub fn encode_path(p: &str) -> String {
@@ -153,68 +157,105 @@ pub fn abs_path(route: &str, href: &str) -> String {
     format!("/{}", segs.join("/"))
 }
 
-/// `sitemap.xml` files: one urlset, or a sitemap index plus `sitemap-N.xml` above [`SITEMAP_MAX`] URLs.
-/// Empty when there is no `site` (sitemaps need absolute URLs) or the build is staging.
+/// `sitemap.xml` files: one urlset, or a sitemap index plus `sitemap-N.xml` above [`SITEMAP_MAX`] URLs or
+/// [`SITEMAP_MAX_BYTES`] serialized bytes. Empty when there is no `site` (sitemaps need absolute URLs) or the build is
+/// staging.
 pub fn sitemaps(cfg: &Config, entries: &[Entry]) -> Vec<(String, String)> {
-    if cfg.site.is_none() {
-        return vec![];
-    }
-    if cfg.staging || !cfg.sitemap {
-        return vec![];
+    sitemaps_with(cfg, entries, SITEMAP_MAX, SITEMAP_MAX_BYTES).0
+}
+
+/// [`sitemaps`] with explicit limits, plus the URLs left out because they are invalid on their own (a `<loc>` over
+/// [`LOC_MAX`] characters, or one entry larger than a whole file). Children are filled in URL order, so the split is
+/// deterministic; every child respects both limits, counted on the escaped UTF-8 XML.
+pub fn sitemaps_with(
+    cfg: &Config,
+    entries: &[Entry],
+    max_urls: usize,
+    max_bytes: usize,
+) -> (Vec<(String, String)>, Vec<String>) {
+    if cfg.site.is_none() || cfg.staging || !cfg.sitemap {
+        return (vec![], vec![]);
     }
     let mut list: Vec<&Entry> = entries.iter().filter(|e| e.indexable).collect();
     list.sort_by(|a, b| a.url.cmp(&b.url));
-    let urlset = |chunk: &[&Entry]| {
-        let with_images = chunk.iter().any(|e| !images(cfg, e).is_empty());
+    let line = |e: &Entry| {
+        let mut o = format!("  <url><loc>{}</loc>", xml(&e.url));
+        if let Some(d) = e.lastmod {
+            o.push_str(&format!("<lastmod>{}</lastmod>", xml(d)));
+        }
+        for img in images(cfg, e) {
+            o.push_str(&format!(
+                "<image:image><image:loc>{}</image:loc></image:image>",
+                xml(&img)
+            ));
+        }
+        for v in &e.videos {
+            o.push_str(&crate::video::sitemap_entry(v));
+        }
+        for (lang, href) in &e.alternates {
+            o.push_str(&format!(
+                "<xhtml:link rel=\"alternate\" hreflang=\"{}\" href=\"{}\"/>",
+                xml(lang),
+                xml(href)
+            ));
+        }
+        o.push_str("</url>\n");
+        o
+    };
+    let head = |chunk: &[(&Entry, String)]| {
         let mut o = String::from(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\"",
         );
-        if with_images {
+        if chunk.iter().any(|(e, _)| !images(cfg, e).is_empty()) {
             o.push_str(" xmlns:image=\"http://www.google.com/schemas/sitemap-image/1.1\"");
         }
-        if chunk.iter().any(|e| !e.alternates.is_empty()) {
+        if chunk.iter().any(|(e, _)| !e.alternates.is_empty()) {
             o.push_str(" xmlns:xhtml=\"http://www.w3.org/1999/xhtml\"");
         }
-        if chunk.iter().any(|e| !e.videos.is_empty()) {
+        if chunk.iter().any(|(e, _)| !e.videos.is_empty()) {
             o.push_str(" xmlns:video=\"http://www.google.com/schemas/sitemap-video/1.1\"");
         }
         o.push_str(">\n");
-        for e in chunk {
-            o.push_str(&format!("  <url><loc>{}</loc>", xml(&e.url)));
-            if let Some(d) = e.lastmod {
-                o.push_str(&format!("<lastmod>{}</lastmod>", xml(d)));
-            }
-            for img in images(cfg, e) {
-                o.push_str(&format!(
-                    "<image:image><image:loc>{}</image:loc></image:image>",
-                    xml(&img)
-                ));
-            }
-            for v in &e.videos {
-                o.push_str(&crate::video::sitemap_entry(v));
-            }
-            for (lang, href) in &e.alternates {
-                o.push_str(&format!(
-                    "<xhtml:link rel=\"alternate\" hreflang=\"{}\" href=\"{}\"/>",
-                    xml(lang),
-                    xml(href)
-                ));
-            }
-            o.push_str("</url>\n");
-        }
-        o.push_str("</urlset>\n");
         o
     };
-    if list.len() <= SITEMAP_MAX {
-        return vec![("sitemap.xml".into(), urlset(&list))];
+    const FOOT: &str = "</urlset>\n";
+    // the widest header (every namespace) is reserved, so a chunk never grows past the limit once its header is known
+    const HEAD_MAX: usize = 360;
+    let mut rejected = Vec::new();
+    let mut chunks: Vec<Vec<(&Entry, String)>> = vec![vec![]];
+    let mut size = 0;
+    for e in list {
+        let l = line(e);
+        if e.url.chars().count() > LOC_MAX || l.len() + HEAD_MAX + FOOT.len() > max_bytes {
+            rejected.push(e.url.clone());
+            continue;
+        }
+        let cur = chunks.last().unwrap();
+        if !cur.is_empty() && (cur.len() >= max_urls || size + l.len() + HEAD_MAX + FOOT.len() > max_bytes) {
+            chunks.push(vec![]);
+            size = 0;
+        }
+        size += l.len();
+        chunks.last_mut().unwrap().push((e, l));
+    }
+    let urlset = |chunk: &[(&Entry, String)]| {
+        let mut o = head(chunk);
+        for (_, l) in chunk {
+            o.push_str(l);
+        }
+        o.push_str(FOOT);
+        o
+    };
+    if chunks.len() == 1 {
+        return (vec![("sitemap.xml".into(), urlset(&chunks[0]))], rejected);
     }
     let mut out = Vec::new();
     let mut index = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<sitemapindex xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n",
     );
-    for (i, chunk) in list.chunks(SITEMAP_MAX).enumerate() {
+    for (i, chunk) in chunks.iter().enumerate() {
         let name = format!("sitemap-{}.xml", i + 1);
-        let last = chunk.iter().filter_map(|e| e.lastmod).max();
+        let last = chunk.iter().filter_map(|(e, _)| e.lastmod).max();
         index.push_str(&format!(
             "  <sitemap><loc>{}</loc>",
             xml(&cfg.abs(&format!("/{name}")))
@@ -227,7 +268,7 @@ pub fn sitemaps(cfg: &Config, entries: &[Entry]) -> Vec<(String, String)> {
     }
     index.push_str("</sitemapindex>\n");
     out.insert(0, ("sitemap.xml".into(), index));
-    out
+    (out, rejected)
 }
 
 /// Markdown copy of a page for LLMs (llmstxt.org convention, extension-replaced form: `/about` → `about.md`, `/` →
@@ -648,6 +689,52 @@ mod tests {
         assert_eq!(robots(&staging), "User-agent: *\nDisallow: /\n");
         assert!(sitemaps(&staging, &e).is_empty());
         assert!(sitemaps(&Config::default(), &e).is_empty());
+    }
+
+    #[test]
+    fn sitemaps_split_by_serialized_bytes_and_reject_oversized_urls() {
+        // S01: the protocol limit is 50 000 URLs *and* 50 MB; a child must respect both, counting escaped UTF-8 bytes
+        let cfg = Config {
+            site: Some("https://acme.dev".into()),
+            ..Config::default()
+        };
+        let d = parse("<html><head><title>T</title></head><body><main><h1>T</h1></main></body></html>");
+        let long = "€&".repeat(60); // 3 UTF-8 bytes + 5 escaped bytes per pair
+        let mut routes: Vec<String> = (0..7).map(|i| format!("/p{i}-{long}")).collect();
+        routes.push(format!("/huge-{}", "x".repeat(2100))); // over the 2 048-character <loc> limit
+        let entries: Vec<Entry> = routes
+            .iter()
+            .map(|r| Entry {
+                route: r,
+                url: cfg.abs(r),
+                doc: &d,
+                lastmod: None,
+                indexable: true,
+                alternates: vec![],
+                videos: vec![],
+            })
+            .collect();
+        let (sm, rejected) = sitemaps_with(&cfg, &entries, 3, 1_100);
+        assert_eq!(rejected.len(), 1, "{rejected:?}");
+        assert!(rejected[0].starts_with("https://acme.dev/huge-"));
+        assert_eq!(sm[0].0, "sitemap.xml");
+        assert!(sm[0].1.contains("<sitemapindex"));
+        let children = &sm[1..];
+        assert!(children.len() > 3, "the byte limit must split before the URL limit: {}", children.len());
+        let mut seen = 0;
+        for (name, body) in children {
+            assert!(body.len() <= 1_100, "{name} is {} bytes", body.len());
+            let n = body.matches("<url>").count();
+            assert!((1..=3).contains(&n), "{name} has {n} URLs");
+            assert!(sm[0].1.contains(&format!("https://acme.dev/{name}")));
+            seen += n;
+        }
+        assert_eq!(seen, 7);
+        assert!(children.iter().all(|(_, b)| !b.contains("/huge-")));
+        assert_eq!(sitemaps_with(&cfg, &entries, 3, 1_100), (sm.clone(), rejected.clone()), "deterministic");
+        // the defaults keep an ordinary site in one file
+        let (one, none) = sitemaps_with(&cfg, &entries[..2], SITEMAP_MAX, SITEMAP_MAX_BYTES);
+        assert_eq!((one.len(), none.len()), (1, 0));
     }
 
     #[test]
