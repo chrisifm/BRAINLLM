@@ -193,9 +193,15 @@ Rust 1.99.1 release gate and do not establish cross-platform execution or whole-
   when global data caching is off; invalid values and write-method cache options remain rejected.
 - [ ] Execute that checker regression, fresh CLI and complete native/browser fixture after integration. The old
   3987d0b binary still contains the reproduced rejection and must not be reused as the corrected binary.
-- [ ] Correct and prove development value-module errors: an invalid `.jsbrain` currently exports a component-style
-  error fallback, obscuring the compile diagnostic behind missing API methods. Preserve component HMR fallback,
-  source diagnostics and persistent agent feedback while making module import failures actionable.
+- [x] Correct and prove development default-value-module errors (41c7fae from b6b80b8). A real ESM regression
+  failed before the fix; 92/92 focused Rust 1.99.1 cases passed afterward, including 20 checker library, six worker
+  and 66 serve cases. Original diagnostics, pre-HTTP persistent feedback, component fallback and reload/recovery
+  remain intact. Static named-import linking can still precede module evaluation and relies on the feedback spool.
+- [x] Execute the f2287f6 no-cache checker regression in that stable-toolchain focused batch.
+- [x] Integrate span-only marker scanning as 8ea262a from 32eaae9; 44 focused stable-toolchain tests passed.
+  Token-payload allocations dropped from 48,800 to one and full scanning from 48,813 to 14 for the measured
+  571 KiB fixture. Allocation counts are not retained heap or a global timing result; final paired speed measurement
+  and the fresh combined native binary remain pending.
 - [ ] Complete the actual compiled-app/PG/browser acceptance. Three owned browser contexts loaded the synthetic
   app, and its disposable schema/auth/HTTP setup passed; CRUD/live cases stopped at the compile mismatch above.
   This is not a successful end-to-end run or a migration of the requesting application.

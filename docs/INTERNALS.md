@@ -1843,3 +1843,14 @@ keeps legacy Input literals/build callers compatible and adds the validated bool
 manifest BEFORE cache hashing. Static applications keep server.mjs absent. Exact public ws/wss CSP sources are additive;
 legacy broad sources are preserved for a separate reviewed hardening change. See NATIVE-LIVE-RESOURCES.md for bounds,
 principal-switch rules and the distinction between scoped unit proofs and full network integration evidence.
+
+
+### Development value-module failures (2026-10-30)
+
+The development server keeps component `.brain` compilation failures as renderable diagnostic fallbacks so
+unrelated UI and HMR remain usable. An invalid `.jsbrain` is a value module, not a fallback component: it declares
+a linkable default and rejects evaluation with `BrainCompileError`, preserving the original structured diagnostics,
+code, file, line, column and fix. Durable compiler feedback is recorded before the HTTP response in either case.
+A static named import can still fail at ESM linking before that error executes; persistent compiler feedback is
+then authoritative. No named exports, substitute API methods or production traces are fabricated. A corrected
+module is recompiled and its ordinary development reload event remains available.

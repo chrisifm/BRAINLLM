@@ -29,6 +29,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Fixed
 
+- Development imports of invalid value modules now reject with their original compiler diagnostics instead of returning a component-shaped fallback. Component fallbacks, durable agent feedback and recovery remain intact; static named-import linking retains its explicit limitation.
 - Accept the existing GET `cache: 'no'` runtime contract in the checker, including when app-wide data caching is disabled. Keep that explicit endpoint privacy intent instead of suggesting its removal.
 - Source-map scanning requests validated token boundaries without copying discarded identifier and literal values.
   The parser keeps its normal token payloads; marker ownership, source maps and generated-code diagnostics remain intact.
