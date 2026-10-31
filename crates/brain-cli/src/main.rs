@@ -24,6 +24,7 @@ mod mcp_setup;
 mod agent;
 mod backend;
 mod resource_admin;
+mod analytics;
 mod webhook_config;
 mod hooks_executor;
 mod backend_diff;
@@ -191,6 +192,7 @@ fn main() -> ExitCode {
         }),
         Some("backend") => backend::run(&args[1..]),
         Some("jobs") => backend::jobs(&args[1..]),
+        Some("analytics") => analytics::run(&args[1..]),
         Some("media") => backend::media(&args[1..]),
         Some("agent") => {
             if args.get(1).map(String::as_str) != Some("setup") || args.iter().skip(2).any(|s| !matches!(s.as_str(), "--hooks" | "--json")) {
@@ -1036,6 +1038,7 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
             .collect();
     on_phase("check", 0, 0);
     let lens = hash_lengths(root)?;
+    let _ = analytics::write_map(root); // .brain/analytics/elements.json: element ids → file:line, never deployed
     prewarm(root, &lens);
     let r2 = root.to_path_buf();
     let compile = move |src: &str, rel: &Path| -> Result<brain_pack::Unit, String> {

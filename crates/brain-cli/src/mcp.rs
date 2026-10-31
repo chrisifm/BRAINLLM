@@ -1058,6 +1058,16 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
         run: Box::new(|a| crate::backend::card(&crate::app_root()?,arg(a,"name").as_deref()).map(|v|v.to_string())),
     });
     tools.push(Tool {
+        name: "brain_analytics_report",
+        description: "Usage report from the app's own behavior analytics (native backend Postgres): per route views, visitors, dwell, scroll depth, time to first interaction, rage and dead clicks; per element interactions with the .brain source file:line; per component totals; neverUsed interactive elements (dead UI); transitions, exits, sources and custom track events. Read-only. Use it to decide what to simplify, fix or remove.",
+        input_schema: schema([("since","string","window in days, e.g. 30 (default 7)"),("env","string","environment, default development")], &[]),
+        output_schema: out([("schemaVersion","number")]),
+        run: Box::new(|a| {
+            let since = arg(a,"since").map_or(Ok(7), |v| v.trim_end_matches('d').parse::<u32>().map_err(|_| "since must be a number of days".to_string()))?;
+            crate::analytics::report_value(&crate::app_root()?, arg(a,"env").as_deref().unwrap_or("development"), since).map(|v| v.to_string())
+        }),
+    });
+    tools.push(Tool {
         name: "brain_resource_add",
         description: "Create an experimental backend resource with schema.jsbrain, explicit default-admin policy.jsbrain, hooks.jsbrain and search.jsbrain. Fields: title:str! active:bool. Generates typed collection/detail clients, a canonical client contract, server service and repository. adminUi remains planned: no views, guards, controls or budget changes. Does not migrate Postgres or start services; inspect brain_backend_contract, review policy, then run brain backend migrate explicitly.",
         input_schema: schema([("name","string","lowercase identifier"),("fields","string","name:type pairs; str, num, bool, email, obj; ! means required")], &["name","fields"]),

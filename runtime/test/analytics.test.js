@@ -217,7 +217,7 @@ test('SPA navigation: leave with dwell and scroll depth, then a new page view on
   env.history.pushState({}, '', '/checkout')
   const evs = flush()
   assert.deepEqual(kinds(evs), ['page', 'leave', 'page'])
-  assert.deepEqual([evs[1].r, evs[1].v, evs[1].p.s], ['/', 4000, 50])
+  assert.deepEqual([evs[1].r, evs[1].v, evs[1].p.scroll], ['/', 4000, 50])
   assert.deepEqual([evs[2].r, evs[2].pv], ['/checkout', 2])
 })
 

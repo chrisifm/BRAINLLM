@@ -242,7 +242,7 @@ export function start(config = {}, env = globalThis) {
   }
   const leave = () => {
     flushInputs()
-    if (pv) record('leave', null, dwell(), { s: Math.round(maxScroll) })
+    if (pv) record('leave', null, dwell(), { scroll: Math.round(maxScroll) })
   }
   const navigated = () => {
     const p = loc().pathname
