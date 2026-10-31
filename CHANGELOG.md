@@ -25,6 +25,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Fixed
 
+- Tests can pass slot content: `mount(Comp, props, { slot: 'Text', slots: { hint: 'Text' } })` renders the default
+  and named slots as text, so a component whose accessible text comes only from its slot no longer fails the B0406
+  audit in its own test. The test `mount` now also forwards `provide`, which it previously ignored.
 - An `{#if}` block no longer throws when its guarded value turns `null`: the scheduler brings an effect's owners up to
   date first, so `{#if data.file}{data.file.name}{/if}` disposes the block before `data.file.name` would re-run, even
   when another dependency of the condition re-ordered the subscriptions.

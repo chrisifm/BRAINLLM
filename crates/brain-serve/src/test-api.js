@@ -25,10 +25,22 @@ globalThis.__brainDispose = () => { if (typeof dispose === 'function') dispose()
 
 Object.assign(globalThis, {
   test: (name, fn) => tests.push({ name, fn }),
-  mount: async (Comp, props = {}) => {
+  // `mount(Comp, props, { slot, slots, provide })`: `slot` is the default slot's text and `slots` maps a named slot
+  // (`<slot name="hint" />`) to its text, so a component whose accessible text comes from its slot is tested (and
+  // audited) with it. `provide` swaps services as in the runtime's mount.
+  mount: async (Comp, props = {}, options = {}) => {
+    const known = ['slot', 'slots', 'provide'], unknown = Object.keys(options).filter(k => !known.includes(k));
+    if (unknown.length) fail(`mount: unknown option \`${unknown[0]}\`; use ${known.join(', ')}`);
+    const slotText = (v, name) => {
+      if (typeof v !== 'string' && typeof v !== 'number') fail(`mount: ${name} must be text (a string), got ${fmt(v)}`);
+      return () => String(v);
+    };
+    const p = { ...props };
+    if (options.slot != null) p.children = slotText(options.slot, '`slot`');
+    for (const [name, v] of Object.entries(options.slots || {})) p['slot:' + name] = slotText(v, `\`slots.${name}\``);
     if (typeof dispose === 'function') dispose();
     root.replaceChildren();
-    dispose = rtMount(Comp, root, props);
+    dispose = rtMount(Comp, root, p, options.provide ? { provide: options.provide } : undefined);
     await flush();
   },
   click: async sel => { q(sel).click(); await flush() },

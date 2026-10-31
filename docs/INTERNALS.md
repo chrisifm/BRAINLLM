@@ -246,9 +246,11 @@ the check cache).
 runs them in real headless Chrome via CDP, with its own Rust client. The same command audits the
 accessibility tree with `Accessibility.getFullAXTree`. No jsdom or Playwright.
 
-Test API in `*.test.brain`: `test(name, async () => {…})` · `await mount(Comp, props)` · `await click(sel)` ·
+Test API in `*.test.brain`: `test(name, async () => {…})` · `await mount(Comp, props, options?)` · `await click(sel)` ·
 `await type(sel, text)` · synchronous readers `text(sel)`, `attr(sel, name)`, `hasClass(sel, cls)`, `count(sel)` ·
-`expect(x).toBe(y)`, `.toEqual(y)`, `.toBeTruthy()`. Selectors are CSS within the mounted component.
+`expect(x).toBe(y)`, `.toEqual(y)`, `.toBeTruthy()`. Selectors are CSS within the mounted component. `options`:
+`slot` (text of the default `<slot />`), `slots` (`{ name: text }` for `<slot name="…" />`) and `provide` (service
+swaps); slot text is real DOM, so the accessibility audit sees it. Unknown options and non-text slot values fail the test.
 
 **Encapsulated IDs:** every static `id` of a component and its references (`for`, `aria-labelledby`,
 `aria-describedby`, `aria-controls`, `popovertarget`) are rewritten with a per-instance suffix: the first instance keeps
