@@ -86,14 +86,14 @@ const outcome = v =>
 export function router(o = {}) {
   const region = o.region || 'main'
   const parse = o.parse || (h => new DOMParser().parseFromString(h, 'text/html'))
-  const fullLoad = new Set(Array.isArray(o.fullLoad) ? o.fullLoad.map(p => { try { return new URL(p, location.href).pathname.replace(/\/+$/, '') || '/' } catch { return null } }).filter(Boolean) : [])
+  const fullLoad = new Set((o.fullLoad || []).map(p => { try { return new URL(p, location.href).pathname.replace(/\/+$/, '') || '/' } catch { return null } }).filter(Boolean))
   let seq = 0, through = null, stale = false
   const ahead = predict(o, u => same(u, true))
   // Build signature (§35.7): the page's <meta name="brain-build">. A navigation response from another build, or the
   // service worker announcing one, turns client navigation into full loads so old and new code never mix.
   const build = () => document.querySelector('meta[name=brain-build]')?.getAttribute('content')
   const sw = G.navigator?.serviceWorker
-  const onMsg = e => typeof e.data === 'string' && e.data.startsWith('brain:build ') && build() && e.data.slice(12) !== build() && (stale = true, ahead.stop())
+  const onMsg = e => /^brain:build /.test(e.data) && build() && e.data.slice(12) !== build() && (stale = true, ahead.stop())
   sw?.addEventListener?.('message', onMsg)
   // both routers stop through here, so neither keeps the service worker listener alive (B05)
   const quit = () => ((active = null), ahead.stop(), sw?.removeEventListener?.('message', onMsg))
@@ -118,7 +118,7 @@ export function router(o = {}) {
         v = await g(ctx)
       } catch (e) {
         if (asked) return null
-        return e && typeof e === 'object' && 'redirect' in e ? outcome(e) : null
+        return typeof e?.redirect === 'string' ? e.redirect : null
       }
       v = outcome(v)
       if (v !== true) return asked ? null : v
@@ -128,15 +128,15 @@ export function router(o = {}) {
 
   // Feedback (§19): a navigation marks the region aria-busy and route().navigating at once; past 150 ms it shows
   // #brain-nav: the app's own element with that id (a spinner in app.brain, `<div id="brain-nav" hidden>`) or a native
-  // indeterminate <progress> bar at the top (label "Loading"; styled only by --nav-color and --nav-height, no extra
+  // indeterminate <progress> bar at the top (label "Loading"; styled by accent-color on #brain-nav and --nav-height, no extra
   // DOM), so fast ones show nothing. _loading.brain (#235): past 400 ms the nearest loading view of the target route
   // (`loading: [{ rx, view }]`, most specific first, emitted by the build with the `core` URL) replaces the region until
   // the page arrives. Until then the current page stays as it is.
   const loads = o.loading || [], adopt = n => document.adoptNode?.(n) || n
-  const dispose = r => { for (const e of [r, ...walkAll(r)]) if (e.$d) e.$d(), (e.$d = null) }
+  const dispose = r => { for (const e of [r, ...r.querySelectorAll('*')]) if (e.$d) e.$d(), (e.$d = null) }
   const ui = on => {
     let b = document.getElementById('brain-nav')
-    if (!b && on) ((b = document.body.appendChild(document.createElement('progress'))).id = 'brain-nav'), (b.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:var(--nav-height,3px);accent-color:var(--nav-color)'), (b.ariaLabel = 'Loading')
+    if (!b && on) ((b = document.body.appendChild(document.createElement('progress'))).id = 'brain-nav'), (b.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:var(--nav-height,3px)'), (b.ariaLabel = 'Loading')
     if (b) b.hidden = !on
   }
   const busy = (my, on) => {
@@ -147,7 +147,7 @@ export function router(o = {}) {
   }
   function waiting(url, my) {
     const path = strip(new URL(url, location.href).pathname), l = loads.find(x => [x.rx].flat().some(rx => new RegExp(rx).test(path)))
-    const w = { t: [] }, at = (ms, f) => w.t.push(setTimeout(() => my === seq && !w.done && f(), ms))
+    const w = {}, at = (ms, f) => setTimeout(() => my === seq && !w.done && f(), ms)
     at(150, () => ui(1))
     if (l && o.core)
       at(400, () =>
@@ -171,9 +171,7 @@ export function router(o = {}) {
     const slow = waiting(url, my)
     busy(my, 1)
     // the previous route's background requests (prefetch) are dropped by brain-data's queue (§41.4)
-    try {
-      G.dispatchEvent?.(new Event('brain:navigate'))
-    } catch {}
+    G.dispatchEvent?.(new Event('brain:navigate'))
     try {
       const r = (await ahead.take(url)) || (await fetch(url, { headers: { 'x-brain-nav': '1' } }))
       if (my !== seq) return
@@ -185,7 +183,7 @@ export function router(o = {}) {
       // another language (§37): a full load brings its own dictionaries, `lang` and `dir`; locales never mix in memory
       const lang = d => d?.documentElement?.getAttribute('lang')
       if (lang(doc) && lang(document) && lang(doc) !== lang(document)) return hard(url)
-      if (r.redirected && r.url && G.history && r.url !== new URL(url, location.href).href) history.replaceState(history.state, '', r.url)
+      if (r.redirected && r.url && r.url !== new URL(url, location.href).href) history.replaceState(history.state, '', r.url)
       const cur = document.querySelector(region), next = doc.querySelector(region)
       if (!cur || !next) return hard(url)
       // DOM, head and active links change in one callback (one frame); a newer navigation that started meanwhile skips it
@@ -203,7 +201,7 @@ export function router(o = {}) {
           if (sc.type && !/^(module|text\/javascript)$/.test(sc.type)) continue
           const n = document.createElement('script')
           for (const a of sc.attributes) if (a.name !== 'nonce') n.setAttribute(a.name, a.value)
-          if (nonce) (n.nonce = nonce), n.setAttribute('nonce', nonce)
+          if (nonce) n.setAttribute('nonce', nonce)
           n.textContent = sc.textContent
           sc.replaceWith(n)
         }
@@ -211,28 +209,26 @@ export function router(o = {}) {
         // run later; until then the region shows the server's HTML with no handlers. Clicks and submits there are held and
         // replayed on the mounted view, by position, so the first click after a navigation is never lost.
         if (!cur.$d && [...cur.querySelectorAll('script[type=module]')].some(sc => /\$d\s*=/.test(sc.textContent))) hold(cur)
-        for (const a of next.attributes || []) cur.setAttribute(a.name, a.value)
+        for (const a of next.attributes) cur.setAttribute(a.name, a.value)
         if (doc.title) document.title = doc.title
         // SEO (§32, S04): the route owns description, og:*, twitter:*, robots, JSON-LD, canonical, hreflang and Markdown
         // alternates, prev/next and its route params (brain-params, read by route()): the current page's go, the next
         // page's come (none when it has none). Site links (icons, stylesheets, the RSS feed) and the region's own tags stay.
         const tags = (r, skip) =>
-          [...(r?.querySelectorAll?.('meta,script,link') || [])].filter(e => {
+          [...(r.querySelectorAll?.('meta,script,link') || [])].filter(e => {
             for (let p = e.parentNode; p; p = p.parentNode) if (p === skip) return false
             const a = n => e.getAttribute(n) || '', t = e.tagName
             return t == 'SCRIPT' ? a('type') == 'application/ld+json'
               : t == 'LINK' ? /^(canonical|prev|next)$/.test(a('rel')) || (a('rel') == 'alternate' && (a('hreflang') || a('type') == 'text/markdown'))
               : /^(og:|twitter:|robots$|description$|brain-params$)/.test(a('property') || a('name'))
           })
-        if (document.head) {
-          for (const e of tags(document.head)) e.remove()
-          for (const e of tags(doc.head || doc, next)) document.head.appendChild(adopt(e))
-        }
+        for (const e of tags(document.head)) e.remove()
+        for (const e of tags(doc.head || doc, next)) document.head.appendChild(adopt(e))
         routed()
         current()
-        const oldPlan = document.getElementById('brain-next'), newPlan = doc.querySelector('#brain-next')
-        oldPlan?.remove()
-        if (newPlan) document.body.appendChild(adopt(newPlan))
+        document.getElementById('brain-next')?.remove()
+        const plan = doc.querySelector('#brain-next')
+        if (plan) document.body.appendChild(adopt(plan))
         ahead.scan()
       }
       // View Transition when the browser has it (an app turns it off under prefers-reduced-motion with CSS, §19)
@@ -247,7 +243,6 @@ export function router(o = {}) {
       my === seq && hard(url)
     } finally {
       slow.done = 1
-      slow.t.forEach(clearTimeout)
       busy(my, 0)
     }
   }
@@ -333,7 +328,7 @@ export function router(o = {}) {
   const focusMain = () => {
     const m = document.querySelector(region), h = m && (m.querySelector('h1') || m)
     if (h?.focus) {
-      if (!h.hasAttribute('tabindex')) h.setAttribute('tabindex', '-1')
+      h.hasAttribute('tabindex') || h.setAttribute('tabindex', '-1')
       h.focus({ preventScroll: true }) // screen readers announce the new view
     }
   }
@@ -387,7 +382,7 @@ export function predict(o = {}, same = () => false) {
     return safe(k) ? k : null
   }
   const warm = list => {
-    if (!document.head || dead) return
+    if (dead) return
     let n = 0
     for (const href of list) {
       const u = key(href)
@@ -439,12 +434,12 @@ export function predict(o = {}, same = () => false) {
   }
 
   const get = k => {
-    const own = epoch, controller = new AbortController(), at = Date.now()
+    const controller = new AbortController()
     running.set(k, controller)
     const timer = setTimeout(() => controller.abort(), 6000)
-    const c = { at, epoch: own, bytes: 0, p: null }
+    const c = { at: Date.now(), epoch, bytes: 0, t: timer }
     c.p = background(k, controller).then(m => {
-      if (!m || dead || own !== epoch || controller.signal.aborted) { if (cache.get(k) === c) remove(k); return null }
+      if (!m || dead || c.epoch !== epoch || controller.signal.aborted) { if (cache.get(k) === c) remove(k); return null }
       const headers = Array.isArray(m.headers) ? new Headers(m.headers) : m.headers
       const cc = headers.get('cache-control') || '', freshness = /(?:^|,)\s*(?:s-maxage|max-age)=(\d+)/i.exec(cc)
       if (m.assets) warm(m.assets)
@@ -459,7 +454,6 @@ export function predict(o = {}, same = () => false) {
       prune()
       return { ok: m.ok, status: m.status, redirected: false, url: m.url, headers, text: async () => m.text, ttl: Math.min(FRESH, freshness ? +freshness[1] * 1000 : FRESH) }
     }).catch(() => null).finally(() => { clearTimeout(timer); if (running.get(k) === controller) running.delete(k) })
-    c.t = timer
     cache.set(k, c); prune()
     return c.p
   }
@@ -508,7 +502,7 @@ export function predict(o = {}, same = () => false) {
       const anchors = document.querySelectorAll('a[href]'), allowed = new Set()
       for (const a of anchors) { const k = ok(a); if (k) allowed.add(k); if (io && !seen.has(a)) { seen.add(a); io.observe(a) } }
       // Compiler-generated graph, validated against the current DOM: hidden/opted-out links cannot sneak in.
-      const plan = document.getElementById?.('brain-next')
+      const plan = document.getElementById('brain-next')
       if (plan && !thin()) {
         try {
           const map = JSON.parse(plan.textContent)
@@ -571,13 +565,9 @@ function hold(el) {
       el.$d = v
       for (const [e, path] of q) {
         let n = el
-        for (const i of path) n = n && n.childNodes[i]
-        if (n) n.dispatchEvent(new e.constructor(e.type, e))
+        for (const i of path) n = n?.childNodes[i]
+        n?.dispatchEvent(new e.constructor(e.type, e))
       }
     },
   })
-}
-function walkAll(n, out = []) {
-  for (const c of n.childNodes) if (c.nodeType === 1) out.push(c), walkAll(c, out)
-  return out
 }
