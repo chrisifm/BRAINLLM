@@ -42,6 +42,8 @@ fn number(raw: &str, negative: bool) -> Result<Value, String> {
         _ => Err(format!("Contract number `{text}` must be a plain decimal literal within the 64-bit integer range; write exact decimals as strings")),
     }
 }
+#[path = "backend_domain.rs"]
+pub(crate) mod domain;
 pub(crate) fn read_contract(root: &Path, path: &Path) -> Result<Value, String> {
     let relative = path
         .strip_prefix(root)
@@ -212,8 +214,11 @@ pub fn inspect(root: &Path) -> Result<Value, String> {
     contract::validate_graph(&resources, &jobs)?;
     let roles = auth_roles(root)?;
     validate_roles(&roles, &resources)?;
+    let domain = domain::checked(root, &resources, &roles)?;
+    let mut openapi = contract::openapi_with_roles(&resources, &roles);
+    brain_backend::domain::openapi(&domain, &resources, &mut openapi);
     Ok(
-        json!({"schemaVersion":1,"experimental":true,"resources":resources,"jobs":jobs,"roles":roles,"webhooks":crate::webhook_config::metadata(root)?,"openapi":contract::openapi_with_roles(&resources,&roles),"limits":{"activeJobs":10000,"workers":8,"jobSeconds":60,"leaseSeconds":90},"delivery":"at-least-once; handlers must be idempotent"}),
+        json!({"schemaVersion":1,"experimental":true,"resources":resources,"jobs":jobs,"roles":roles,"domain":domain,"webhooks":crate::webhook_config::metadata(root)?,"openapi":openapi,"limits":{"activeJobs":10000,"workers":8,"jobSeconds":60,"leaseSeconds":90},"delivery":"at-least-once; handlers must be idempotent"}),
     )
 }
 fn database(root: &Path, environment: &str) -> Result<String, String> {
@@ -252,6 +257,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let roles = auth_roles(&root)?;
     let resources = contracts(&root, "resources")?;
     let jobs = contracts(&root, "jobs")?;
+    let domain = domain::checked(&root, &resources, &roles)?;
     runtime()?.block_on(async{
         let pool=brain_backend::db::connect(&url).await?;
         if operation=="migrate"{
@@ -287,7 +293,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let mail=setting("BRAIN_MAIL_RESEND_KEY").map(|key|brain_backend::auth_flows::MailConfig::resend(key,setting("BRAIN_MAIL_FROM").ok_or("BRAIN_MAIL_FROM must name a verified sender email")?,public_base.clone())).transpose()?;
         let config=brain_backend::Config{sockets:sockets.native_config()?,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,resources,jobs,uploads:root.join(".brain/uploads"),origins:sockets.http_origins,production:environment=="production"};
         eprintln!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
-        brain_backend::serve(listener,pool,config).await
+        brain_backend::http::serve_with_domain(listener,pool,config,domain).await
     })
 }
 /// All generated files are reserved with create_new; roll back only files created by this invocation.

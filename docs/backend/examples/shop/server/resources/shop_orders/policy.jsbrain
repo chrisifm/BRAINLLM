@@ -1,0 +1,2 @@
+<meta server>
+export default { read: ['owner', 'admin'], create: ['candidate', 'admin'], update: ['owner', 'admin'], delete: ['admin'] }

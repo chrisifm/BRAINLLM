@@ -17,6 +17,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   expose `created_at`/`updated_at`. Existing contracts record byte-identically and gain no database objects.
 - `PATCH /api/<resource>/<uuid>` updates only the sent fields; `null` clears an optional field. The merged record is
   revalidated against the full contract and written with the same conflict check as `PUT` (`docs/backend/patch.md`).
+- Declarative operations (`server/operations/<name>.jsbrain`, `POST /_brain/operations/<name>`) run read, create,
+  update, upsert, delete, action and transition steps in one Postgres transaction and roll all of them back on any
+  failure, with step-prefixed errors (`docs/backend/transactions.md`).
 
 ### Changed
 

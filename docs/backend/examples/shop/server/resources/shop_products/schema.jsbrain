@@ -1,0 +1,9 @@
+<meta server>
+export default {
+  name: 'str!',
+  sku: { type: 'str!', unique: true },
+  stock: { type: 'int', default: 0 },
+  price: { type: 'decimal(10,2)', default: '0.00' },
+  status: { type: 'enum(draft|active|archived)', default: 'draft' },
+  note: 'str'
+}

@@ -1,0 +1,2 @@
+<meta server>
+export default { check: [{ field: 'quantity', min: 1, max: 50 }] }

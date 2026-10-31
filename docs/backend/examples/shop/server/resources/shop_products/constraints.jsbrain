@@ -1,0 +1,2 @@
+<meta server>
+export default { check: [{ field: 'stock', min: 0 }] }

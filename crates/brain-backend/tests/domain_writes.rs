@@ -3,120 +3,30 @@
 use axum::body::{Body, to_bytes};
 use brain_backend::{
     auth::{Auth, Credentials},
-    contract::{Check, Constraints, Field, Hooks, Policy, Resource},
+    contract::Resource,
     db,
     domain::{self, Domain},
 };
 use axum::http::Request;
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tower::ServiceExt;
 
-fn field(kind: &str, required: bool) -> Field {
-    Field { kind: kind.into(), required, ..Default::default() }
-}
-fn grants(read: &[&str], create: &[&str], update: &[&str], delete: &[&str]) -> Policy {
-    let v = |x: &[&str]| x.iter().map(|s| s.to_string()).collect();
-    Policy { read: v(read), create: v(create), update: v(update), delete: v(delete) }
-}
-fn products() -> Resource {
-    let mut fields = BTreeMap::from([
-        ("name".into(), field("str", true)),
-        ("sku".into(), field("str", true)),
-        ("stock".into(), field("int", false)),
-        ("price".into(), field("decimal(10,2)", false)),
-        ("status".into(), field("enum(draft|active|archived)", false)),
-        ("note".into(), field("str", false)),
-    ]);
-    fields.get_mut("sku").unwrap().unique = true;
-    fields.get_mut("stock").unwrap().default = Some(json!(0));
-    fields.get_mut("price").unwrap().default = Some(json!("0.00"));
-    fields.get_mut("status").unwrap().default = Some(json!("draft"));
-    Resource {
-        name: "shop_products".into(),
-        search: vec!["name".into()],
-        fields,
-        policy: grants(&["candidate", "admin"], &["admin"], &["admin"], &["admin"]),
-        hooks: Hooks::default(),
-        constraints: Constraints {
-            check: vec![Check { field: Some("stock".into()), min: Some(json!(0)), ..Default::default() }],
-            ..Default::default()
-        },
-    }
-}
-fn orders() -> Resource {
-    let mut fields = BTreeMap::from([
-        ("product".into(), field("str", true)),
-        ("quantity".into(), field("int", true)),
-        ("status".into(), field("enum(pending|paid|shipped|cancelled)", false)),
-        ("pay_by".into(), field("date", false)),
-        ("paid_at".into(), field("datetime", false)),
-        ("reason".into(), field("str", false)),
-    ]);
-    fields.get_mut("status").unwrap().default = Some(json!("pending"));
-    Resource {
-        name: "shop_orders".into(),
-        search: Vec::new(),
-        fields,
-        policy: grants(&["owner", "admin"], &["candidate", "admin"], &["owner", "admin"], &["admin"]),
-        hooks: Hooks::default(),
-        constraints: Constraints {
-            check: vec![Check { field: Some("quantity".into()), min: Some(json!(1)), max: Some(json!(50)), ..Default::default() }],
-            ..Default::default()
-        },
-    }
-}
-fn tasks() -> Resource {
-    let mut fields = BTreeMap::from([
-        ("title".into(), field("str", true)),
-        ("code".into(), field("str", true)),
-        ("done".into(), field("bool", false)),
-        ("points".into(), field("int", false)),
-    ]);
-    fields.get_mut("code").unwrap().unique = true;
-    fields.get_mut("points").unwrap().default = Some(json!(0));
-    Resource {
-        name: "task_items".into(),
-        search: Vec::new(),
-        fields,
-        policy: grants(&["owner"], &["candidate"], &["owner"], &["owner"]),
-        hooks: Hooks::default(),
-        constraints: Constraints::default(),
-    }
-}
-/// The domain exactly as the CLI loads it from `server/**.jsbrain` files.
-fn shop_domain() -> Domain {
-    serde_json::from_value(json!({
-        "resources": {
-            "shop_products": {"actions": {
-                "restock": {"roles": ["admin"], "input": {"amount": "int!"}, "when": {"status": {"ne": "archived"}}, "increment": {"stock": "$input.amount"}},
-                "reserve": {"roles": ["admin"], "input": {"quantity": "int!"}, "when": {"status": "active", "stock": {"gte": "$input.quantity"}}, "decrement": {"stock": "$input.quantity"}},
-                "reprice": {"roles": ["admin"], "input": {"expected": "decimal(10,2)!", "price": "decimal(10,2)!"}, "when": {"price": "$input.expected"}, "set": {"price": "$input.price"}}
-            }},
-            "shop_orders": {"transitions": {"field": "status", "initial": ["pending"], "transitions": {
-                "pay": {"from": ["pending"], "to": "paid", "roles": ["owner", "admin"], "set": {"paid_at": "$now"}},
-                "ship": {"from": ["paid"], "to": "shipped", "roles": ["admin"]},
-                "cancel": {"from": ["pending", "paid"], "to": "cancelled", "roles": ["owner", "admin"], "input": {"reason": "str!"}, "set": {"reason": "$input.reason"}}
-            }}},
-            "task_items": {"batch": {"max": 5}}
-        },
-        "operations": {
-            "place_order": {
-                "roles": ["candidate", "admin"],
-                "input": {"product_id": "str!", "quantity": "int!"},
-                "steps": [
-                    {"as": "product", "action": "shop_products.reserve", "id": "$input.product_id", "input": {"quantity": "$input.quantity"}},
-                    {"as": "order", "create": "shop_orders", "data": {"product": "$steps.product.id", "quantity": "$input.quantity", "pay_by": "$now+3d"}}
-                ],
-                "result": ["order", "product"]
-            }
-        }
-    }))
-    .unwrap()
+/// Contracts loaded by the CLI from `docs/backend/examples/shop` (kept equal by a brain-cli test).
+fn fixture() -> Value {
+    serde_json::from_str(include_str!("shop_contracts.json")).unwrap()
 }
 fn resources() -> Vec<Resource> {
-    vec![products(), orders(), tasks()]
+    serde_json::from_value(fixture()["resources"].clone()).unwrap()
+}
+fn resource(name: &str) -> Resource {
+    resources().into_iter().find(|r| r.name == name).unwrap()
+}
+fn products() -> Resource {
+    resource("shop_products")
+}
+fn shop_domain() -> Domain {
+    serde_json::from_value(fixture()["domain"].clone()).unwrap()
 }
 
 #[test]
@@ -321,4 +231,57 @@ async fn postgres_patch_updates_only_sent_fields_with_policy_and_conflict_checks
     for (status, body) in [&a, &b] {
         assert!(*status == 200 || *status == 409 && body["error"]["code"] == "RESOURCE_CHANGED", "{status} {body}");
     }
+}
+
+fn id(row: &Value) -> String {
+    row["id"].as_str().unwrap().to_string()
+}
+async fn stock(s: &Shop, product: &str) -> i64 {
+    sqlx::query_scalar("SELECT (data->>'stock')::bigint FROM _brain_res_shop_products WHERE id=$1::uuid")
+        .bind(product).fetch_one(&s.pool).await.unwrap()
+}
+async fn place(s: &Shop, token: &str, product: &str, quantity: i64) -> (u16, Value) {
+    call(&s.app, "POST", "/_brain/operations/place_order", token, Some(json!({"product_id":product,"quantity":quantity}))).await
+}
+async fn orders_for(s: &Shop, product: &str) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM _brain_res_shop_orders WHERE data->>'product'=$1")
+        .bind(product).fetch_one(&s.pool).await.unwrap()
+}
+
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn postgres_operations_commit_every_step_or_roll_all_of_them_back() {
+    let s = shop().await;
+    let p = id(&product(&s, "ops", json!({"stock":100,"status":"active"})).await);
+    let (status, body) = place(&s, &s.alice, &p, 2).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["operation"], "place_order");
+    assert_eq!(body["result"]["product"]["data"]["stock"], 98);
+    let order = &body["result"]["order"];
+    assert_eq!(order["data"]["product"], p.as_str());
+    assert_eq!(order["data"]["status"], "pending", "declared initial state");
+    let pay_by = order["data"]["pay_by"].as_str().unwrap();
+    assert!(pay_by.len() == 10 && pay_by > &order["created_at"].as_str().unwrap()[..10], "$now+3d as a date: {pay_by}");
+    assert_eq!(order["owner"], body["result"]["order"]["owner"]);
+    // Step 1 (reserve 60) succeeds, step 2 violates the order's quantity check: nothing is kept.
+    let (status, body) = place(&s, &s.alice, &p, 60).await;
+    assert_eq!(status, 422, "{body}");
+    assert_eq!(body["error"]["fields"]["order.quantity"], "Must be <= 50");
+    assert_eq!(stock(&s, &p).await, 98, "the reservation rolled back with the failed order");
+    assert_eq!(orders_for(&s, &p).await, 1);
+    // A failed guard is a 409 naming the step and field; nothing changes.
+    let (status, body) = place(&s, &s.alice, &p, 99).await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(body["error"]["code"], "GUARD_FAILED");
+    assert_eq!(body["error"]["fields"]["product.stock"], "Must be >= 99");
+    // Typed input, unknown record, missing role, missing operation.
+    let (status, body) = call(&s.app, "POST", "/_brain/operations/place_order", &s.alice, Some(json!({"product_id":p,"quantity":"2"}))).await;
+    assert_eq!((status, body["error"]["fields"]["input.quantity"].is_string()), (422, true), "{body}");
+    let (status, body) = call(&s.app, "POST", "/_brain/operations/place_order", &s.alice, Some(json!({"product_id":uuid::Uuid::new_v4().to_string(),"quantity":1}))).await;
+    assert_eq!((status, &body["error"]["fields"]["product"]), (404, &json!("Not found")), "{body}");
+    let (status, _) = call(&s.app, "POST", "/_brain/operations/unknown", &s.alice, Some(json!({}))).await;
+    assert_eq!(status, 404);
+    let (status, _) = call(&s.app, "POST", "/_brain/operations/place_order", "not-a-session", Some(json!({"product_id":p,"quantity":1}))).await;
+    assert_eq!(status, 401);
+    assert_eq!(stock(&s, &p).await, 98);
 }

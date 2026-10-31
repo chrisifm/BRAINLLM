@@ -1,0 +1,327 @@
+{
+  "domain": {
+    "operations": {
+      "place_order": {
+        "input": {
+          "product_id": "str!",
+          "quantity": "int!"
+        },
+        "result": [
+          "order",
+          "product"
+        ],
+        "roles": [
+          "candidate",
+          "admin"
+        ],
+        "steps": [
+          {
+            "action": "shop_products.reserve",
+            "as": "product",
+            "id": "$input.product_id",
+            "input": {
+              "quantity": "$input.quantity"
+            }
+          },
+          {
+            "as": "order",
+            "create": "shop_orders",
+            "data": {
+              "pay_by": "$now+3d",
+              "product": "$steps.product.id",
+              "quantity": "$input.quantity"
+            }
+          }
+        ]
+      }
+    },
+    "resources": {
+      "shop_orders": {
+        "transitions": {
+          "field": "status",
+          "initial": [
+            "pending"
+          ],
+          "transitions": {
+            "cancel": {
+              "from": [
+                "pending",
+                "paid"
+              ],
+              "input": {
+                "reason": "str!"
+              },
+              "roles": [
+                "owner",
+                "admin"
+              ],
+              "set": {
+                "reason": "$input.reason"
+              },
+              "to": "cancelled"
+            },
+            "pay": {
+              "from": [
+                "pending"
+              ],
+              "roles": [
+                "owner",
+                "admin"
+              ],
+              "set": {
+                "paid_at": "$now"
+              },
+              "to": "paid"
+            },
+            "ship": {
+              "from": [
+                "paid"
+              ],
+              "roles": [
+                "admin"
+              ],
+              "to": "shipped"
+            }
+          }
+        }
+      },
+      "shop_products": {
+        "actions": {
+          "reprice": {
+            "input": {
+              "expected": "decimal(10,2)!",
+              "price": "decimal(10,2)!"
+            },
+            "roles": [
+              "admin"
+            ],
+            "set": {
+              "price": "$input.price"
+            },
+            "when": {
+              "price": "$input.expected"
+            }
+          },
+          "reserve": {
+            "decrement": {
+              "stock": "$input.quantity"
+            },
+            "input": {
+              "quantity": "int!"
+            },
+            "roles": [
+              "admin"
+            ],
+            "when": {
+              "status": "active",
+              "stock": {
+                "gte": "$input.quantity"
+              }
+            }
+          },
+          "restock": {
+            "increment": {
+              "stock": "$input.amount"
+            },
+            "input": {
+              "amount": "int!"
+            },
+            "roles": [
+              "admin"
+            ],
+            "when": {
+              "status": {
+                "ne": "archived"
+              }
+            }
+          }
+        }
+      },
+      "task_items": {
+        "batch": {
+          "max": 5
+        }
+      }
+    }
+  },
+  "resources": [
+    {
+      "constraints": {
+        "check": [
+          {
+            "field": "quantity",
+            "max": 50,
+            "min": 1
+          }
+        ]
+      },
+      "fields": {
+        "paid_at": {
+          "kind": "datetime",
+          "required": false
+        },
+        "pay_by": {
+          "kind": "date",
+          "required": false
+        },
+        "product": {
+          "kind": "str",
+          "required": true
+        },
+        "quantity": {
+          "kind": "int",
+          "required": true
+        },
+        "reason": {
+          "kind": "str",
+          "required": false
+        },
+        "status": {
+          "default": "pending",
+          "kind": "enum(pending|paid|shipped|cancelled)",
+          "required": false
+        }
+      },
+      "hooks": {
+        "after_create": null,
+        "after_delete": null,
+        "after_update": null,
+        "before_create": null,
+        "before_delete": null,
+        "before_update": null
+      },
+      "name": "shop_orders",
+      "policy": {
+        "create": [
+          "candidate",
+          "admin"
+        ],
+        "delete": [
+          "admin"
+        ],
+        "read": [
+          "owner",
+          "admin"
+        ],
+        "update": [
+          "owner",
+          "admin"
+        ]
+      },
+      "search": []
+    },
+    {
+      "constraints": {
+        "check": [
+          {
+            "field": "stock",
+            "min": 0
+          }
+        ]
+      },
+      "fields": {
+        "name": {
+          "kind": "str",
+          "required": true
+        },
+        "note": {
+          "kind": "str",
+          "required": false
+        },
+        "price": {
+          "default": "0.00",
+          "kind": "decimal(10,2)",
+          "required": false
+        },
+        "sku": {
+          "kind": "str",
+          "required": true,
+          "unique": true
+        },
+        "status": {
+          "default": "draft",
+          "kind": "enum(draft|active|archived)",
+          "required": false
+        },
+        "stock": {
+          "default": 0,
+          "kind": "int",
+          "required": false
+        }
+      },
+      "hooks": {
+        "after_create": null,
+        "after_delete": null,
+        "after_update": null,
+        "before_create": null,
+        "before_delete": null,
+        "before_update": null
+      },
+      "name": "shop_products",
+      "policy": {
+        "create": [
+          "admin"
+        ],
+        "delete": [
+          "admin"
+        ],
+        "read": [
+          "candidate",
+          "admin"
+        ],
+        "update": [
+          "admin"
+        ]
+      },
+      "search": [
+        "name"
+      ]
+    },
+    {
+      "fields": {
+        "code": {
+          "kind": "str",
+          "required": true,
+          "unique": true
+        },
+        "done": {
+          "kind": "bool",
+          "required": false
+        },
+        "points": {
+          "default": 0,
+          "kind": "int",
+          "required": false
+        },
+        "title": {
+          "kind": "str",
+          "required": true
+        }
+      },
+      "hooks": {
+        "after_create": null,
+        "after_delete": null,
+        "after_update": null,
+        "before_create": null,
+        "before_delete": null,
+        "before_update": null
+      },
+      "name": "task_items",
+      "policy": {
+        "create": [
+          "candidate"
+        ],
+        "delete": [
+          "owner"
+        ],
+        "read": [
+          "owner"
+        ],
+        "update": [
+          "owner"
+        ]
+      },
+      "search": []
+    }
+  ]
+}

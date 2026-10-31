@@ -1,0 +1,9 @@
+<meta server>
+export default {
+  product: 'str!',
+  quantity: 'int!',
+  status: { type: 'enum(pending|paid|shipped|cancelled)', default: 'pending' },
+  pay_by: 'date',
+  paid_at: 'datetime',
+  reason: 'str'
+}
