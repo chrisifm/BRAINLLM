@@ -28,6 +28,7 @@ pub(super) fn apply(
             let mut keep: HashSet<String> = match name.as_str() {
                 "brain-router.js" => ["router".to_string()].into(),
                 "brain-i18n.js" => ["add".to_string()].into(),
+                "brain-links.js" => ["default".to_string()].into(),
                 _ => HashSet::new(),
             };
             if let Some(names) = server_roots.get(name) {

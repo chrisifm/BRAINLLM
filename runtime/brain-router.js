@@ -24,6 +24,7 @@ const strip = p => {
 }
 const app = u => {
   const b = base()
+  u = G.__brainHref?.(u) ?? u // the page's language (brain-links.js)
   return typeof u === 'string' && b !== '/' && u.startsWith('/') && !u.startsWith('//') && !(u + '/').startsWith(b) ? b + u.slice(1) : u
 }
 

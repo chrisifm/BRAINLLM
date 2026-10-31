@@ -1453,6 +1453,15 @@ fn app_page(ctx: &Ctx, req: &http::Request) -> (u16, String, Option<String>) {
         head_extra.push_str(&format!(
             "<script type=\"module\">import{{add}}from'/@brain/brain-i18n.js';{js}</script>"
         ));
+        if loc != def {
+            let t = brain_pack::LocaleLinks::of(root, loc, false);
+            head_extra.push_str(&format!(
+                "<script type=\"module\">import l from'/@brain/brain-links.js';l({},\"\",{},{},{{}});</script>",
+                json_str(loc),
+                json_str(&t.prefix),
+                json_str(&t.pattern()),
+            ));
+        }
     }
     let (status, slot) = match crate::route::resolve(root, &route_path) {
         None => (

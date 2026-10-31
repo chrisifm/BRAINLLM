@@ -1489,6 +1489,7 @@ language is one command.
   it. Text written straight into markup is allowed in single-language sites; with 2+ locales it is B1403 (warning,
   with an edit that moves the text to a new key in every locale file).
 - **One language** (2026-10-31): `i18n` with one locale has no prefixes; `brain run` loads its dictionary, sets `lang` and passes it to `load()` and form posts, as `brain build` already did, so `form.*` keys apply in both.
+- **Internal links keep the language** (2026-10-31): a page outside the default language has its `<a href>` and `<form action>` that name a page of the app rewritten to that language (`/about` → `/es/about`, or its `<meta route>`): `LocaleLinks` in brain-pack on the written HTML, `route.hrefs` in server.mjs on rendered bodies and on `redirect()`, and `brain-links.js` (loaded only by interactive pages of those languages, ~610 B gz) on what views mount, and on `go()`/`navigate()` through `__brainHref`. `hreflang` opts a link out, which is how `<LangSwitch>` works. Files, other origins and paths with no page stay. The default language and single-language apps ship nothing. `brain run` covers mounted links and navigation but not translated routes, nor the HTML before scripts run.
 - **What B1403 moves** (2026-10-31): text nodes; a sentence with interpolations as one message with placeholders
   (`Signed in as {email}` becomes `t('account.signed_in_as_with', { email })`, never two fragments); visible
   attributes (`placeholder`, `title`, `alt`, `aria-label` and the other `aria-*` texts, `label`, `description`,

@@ -9,6 +9,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- Fix: internal links, forms, `navigate()` and `redirect()` on a page outside the default language stay in that language
+- Fix: a link to a server-rendered page under a language prefix no longer fails the build with B1819
 - B1850 warns when a page shows framework messages and the app's non-English default language lacks their `form.*` or `error_state.*` keys
 - Fix: `brain run` loads the dictionary of a single-language app, so `form.*` messages and `t()` match the production build
 - `brain new` puts the menu in `views/_layout.brain`, so it can be translated; `brain add view` links there, or in `app.brain` for apps that keep it there
