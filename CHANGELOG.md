@@ -22,6 +22,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `*.test.brain` under `views/` no longer gets B0501 when it is checked on its own: a test file has no route.
 - A `DATABASE_URL` without a user connects as the system account, as `psql` does; it used to try the role `anonymous`. B0762 connection failures now say the host, database and user tried and why it failed, never the password.
 B0721 and B0722 read `process.env`, `ctx.env` and `import.meta.env` from tokens: a comment, a string, prose or a CSS rule that mentions a key no longer counts as a read, and a guard in a later statement (`const k = ctx.env.K; if (!k) ...`) makes the key optional.
+A session write without `BRAIN_SECRET` fails with B0782 and how to set it.
+`brain dev` refuses the redirects production refuses (an invalid status, an off-site or malformed location), thrown or returned from `load`; it used to answer them and production then failed with a 500.
 ### Security
 - Google sign-in links an existing account when Google hosts the address (`gmail.com` or a Workspace `hd`); a never-verified account also loses its password, sessions and recovery links, and any other address is denied with the same `AUTH_DENIED`.
 - Concurrent JWT refresh inside a 10-second grace no longer revokes the family, so tabs and prefetches keep their session, and the SSR bridge renews an expired access cookie during render.
