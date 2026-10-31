@@ -52,6 +52,9 @@ fn run(args: &[String]) -> Result<bool, String> {
             crate::intelligence::context(&root, positional[0], number("--budget", 8192)?)?
         }
         "why" if positional.len() == 1 => crate::intelligence::why(&root, positional[0])?,
+        "risk" if positional.len() == 1 => {
+            crate::risk::assess(&root, positional[0], flags.contains_key("--measure"))?
+        }
         "preflight" if positional.len() <= 1 => {
             crate::intelligence::preflight(&root, positional.first().copied())?
         }
@@ -77,7 +80,10 @@ fn parse(
     let mut i = 1;
     while i < args.len() {
         let value = args[i].as_str();
-        if value == "--json" {
+        if value == "--json" || (command == "risk" && value == "--measure") {
+            if value == "--measure" {
+                flags.insert(value, "");
+            }
             i += 1;
             continue;
         }
@@ -123,5 +129,10 @@ mod tests {
         assert!(parse(&args(&["graph", "--budget", "1"])).is_err());
         assert!(parse(&args(&["graph", "--limit", "1", "--limit", "2"])).is_err());
         assert!(parse(&args(&["context", "--budget"])).is_err());
+        let a = args(&["risk", "Cart", "--measure", "--json"]);
+        let (_, p, f) = parse(&a).unwrap();
+        assert_eq!(p, ["Cart"]);
+        assert!(f.contains_key("--measure"));
+        assert!(parse(&args(&["graph", "--measure"])).is_err());
     }
 }

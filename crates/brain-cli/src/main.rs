@@ -35,6 +35,7 @@ mod hooks_executor;
 mod backend_diff;
 mod changes;
 mod intelligence;
+mod risk;
 mod recipes;
 mod releases;
 mod upgrade;
@@ -146,7 +147,7 @@ fn main() -> ExitCode {
         }
         Some("new") => cmd_new(&args[1..]),
         Some("add") => cmd_add(&args[1..]),
-        Some("changes") | Some("graph") | Some("context") | Some("why") | Some("preflight") | Some("recipe") => return agent_cli::entry(&args),
+        Some("changes") | Some("graph") | Some("context") | Some("why") | Some("preflight") | Some("recipe") | Some("risk") => return agent_cli::entry(&args),
         Some("find") | Some("symbols") | Some("refs") => search::run(&args),
         Some("lib") => libraries::run(&args),
         Some("history") => history_command(&args),

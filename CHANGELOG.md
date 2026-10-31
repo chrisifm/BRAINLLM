@@ -41,6 +41,12 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   Changing either reindexes rows in place on `brain backend migrate`; resources without it are untouched. See
   `docs/backend/search.md`.
 - Guide for keeping numeric ids from another backend as a unique, filterable field (`docs/backend/ids.md`).
+- `brain risk <target> [--measure] --json` and MCP `brain_risk` measure the risk of an edit before it is made: a
+  deterministic 0..100 score with named factors (dependents, routes, public contract, backend schema, covering tests,
+  checker errors, SEO/i18n/a11y surfaces, styles and, with `--measure`, budget headroom per affected view) and the
+  exact `requiredChecks` that prove the edit safe. `brain preflight <target>` now fills `risks` with the static score,
+  and the scaffold AGENTS.md tells agents to run it before editing shared code.
+
 - WebMCP imperative tools ship (#106): `<meta tools="add_task: Add a task (text:str!, due:date)">` plus a same-named
   function registers the tool with the browser's model context while the component is mounted and unregisters it on
   unmount. Nothing is registered without WebMCP, during SSR or prerender; arguments are validated against the

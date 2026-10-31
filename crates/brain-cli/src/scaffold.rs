@@ -766,6 +766,9 @@ Before each kind of task run `brain guide <topic>` (the playbook: steps, verify 
 10. For concurrent edits use `brain changes read|lease|plan|apply` (or MCP `brain_changes`), not independent overwrites. `brain context` and `brain preflight` provide focused static evidence and preventive diagnostics. `brain lib list` discovers built-in helpers without dependency setup.
 11. Tests run in owned headless Chrome (`brain test`, `brain doctor`); no browser extension is required. Only when the user asks for it, run them in a connected Claude Viewer/Codex Viewer: `brain e2e probe --json`, then `brain test --viewer` (or `brain e2e run --json`); with several connected profiles set private BRAIN_VIEWER_PROFILE. An opted-in Viewer run that fails is a failure, never replaced by a headless result. Either way, reproduce the entire flow (permission, load, error, empty, success, disabled; URL/back-forward; responsive; network; console) and record actual evidence.
 12. Optional Claude Code edit feedback: `brain agent setup --hooks` (checks after source edits; no tests, downloads or auto-fixes). For experimental backend resources/jobs, inspect `brain backend schema --json` and `brain card resource:<name>` / `brain card job:<name>` before editing; `brain run` does not start that backend.
+
+## Edit risk (locate → risk → change → verify)
+Before editing a shared component, route, resource or `tokens.cssbrain`, run `brain risk <target> --json` (MCP `brain_risk`). Read `score`, `level` and `factors`; run every command in `requiredChecks` after the edit. Above `medium`, add the missing test it names before changing behaviour. `brain preflight <target>` returns the same static risk in `risks`.
 "#;
 
 const PACKAGE_JSON: &str = r#"{

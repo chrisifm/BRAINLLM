@@ -73,3 +73,36 @@ Inline unit tests cover reverse import propagation, separation of hooks from
 reverse dependencies, literal redaction, path containment and concrete graph
 contracts. Run them through the normal workspace gates after integration. Runtime
 execution and cache residency require separate trace or browser evidence.
+
+## Measured edit risk
+
+`risk::assess(root, target, measure)` (CLI `brain risk <target> [--measure] --json`, MCP `brain_risk`) turns the
+static evidence above into a review priority before an edit. The target is a component name, an app-relative file,
+`route:/path`, `resource:name`, `field:resource.field`, `api:name`, `job:name` or any node ID that `brain graph`
+lists. Each factor reports its points, measured value and reason; the score is their sum capped at 100.
+
+| Factor | Points | Source |
+|---|---|---|
+| `dependents` | 0, 5 (1+), 10 (3+), 18 (6+), 25 (16+) | reverse static closure, excluding the target and tests |
+| `routes` | 0, 5 (1), 10 (2+), 15 (5+) | `route:` nodes in the closure |
+| `publicContract` | 15 with consumers, 5 without | `<meta props>`, `emit(`, exports, API or backend contract |
+| `backendSchema` | 20 schema/field/resource, 10 other server code | backend contracts; migrations may be required |
+| `tests` | 15 when no test covers the target | `*.test.brain` in the closure or `<file>.test.brain` beside it |
+| `checkerErrors` | 10 when errors exist in scope | `preflight` diagnostics (CLI/MCP only) |
+| `seo` · `i18n` · `a11y` · `styles` | 4 · 3 · 3 · 5 | affected views with `<meta seo>`, 2+ locales, markup, `.cssbrain` |
+| `budgetHeadroom` | 10 below 5 %, 5 below 15 % | only with `--measure`: gz bytes per affected view against `budget.viewKB` |
+
+Levels: `low` 0–24, `medium` 25–49, `high` 50–74, `critical` 75–100. `requiredChecks` always lists `brain check`,
+then `brain test <file>` per covering test (or the test file to add), `brain build` when routes have a budget,
+`brain backend schema --json` for server targets and `brain seo audit --json` for SEO views. The report is
+deterministic for the same sources; `--measure` runs one production build and stays opt-in.
+
+```bash
+npx brain new shop && cd shop
+npx brain risk Counter --json          # covered by comp/counter.test.brain: the tests factor is 0
+npx brain risk views/posts/index.brain --measure --json
+npx brain preflight Counter --json     # same static score in "risks"
+```
+
+A score is not proof: dynamic imports, runtime data, authorization and handler side effects stay in `unknown` and
+are not scored. Use the listed checks as the evidence that the edit was safe.

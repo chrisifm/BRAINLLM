@@ -379,7 +379,10 @@ coordinates per-file leases and revision checks, validates a private snapshot, a
 Each file replacement is atomic; a multi-file change is a recoverable logical transaction. Unrelated editors can race.
 `brain graph` gives bounded static dependency evidence; `brain context "<task>"`, `brain why <target>` and
 `brain preflight` expose focused context and preventive checker diagnostics. Dynamic unknowns remain explicit.
-MCP full profile: `brain_changes`, `brain_intelligence`, `brain_recipe`. See project developer docs for JSON contracts.
+`brain risk <target> [--measure] --json` (MCP `brain_risk`) scores an edit before it is made: a deterministic 0..100
+`score`, `level` (low/medium/high/critical), `factors` (dependents, routes, public contract, backend schema, covering
+tests, checker errors, SEO/i18n/a11y, styles, budget headroom with `--measure`) and `requiredChecks` to run afterwards.
+MCP full profile: `brain_changes`, `brain_intelligence`, `brain_risk`, `brain_recipe`. See project developer docs for JSON contracts.
 `brain upgrade <exact-version>` previews package pin operations and unresolved migration/install decisions; it does not
 verify the registry, install packages or run source migrations. Apply reviewed operations with the changes protocol.
 `interop(() => element, adapter, props, {onError})` owns an external SDK/DOM mount during component setup; adapters

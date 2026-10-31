@@ -1,0 +1,29 @@
+{
+  "id": "edit-risk",
+  "kind": "capability",
+  "title": "Measured edit risk before a change",
+  "why": "An agent can ask how risky an edit is before making it: a deterministic score with its factors and the exact checks that prove the edit safe.",
+  "changelog": [
+    "`brain risk <target> [--measure] --json` and MCP `brain_risk` measure the risk of an edit"
+  ],
+  "guide": "docs/INTELLIGENCE.md",
+  "apis": [
+    "brain risk <target> [--measure] --json",
+    "brain_risk",
+    "brain preflight <target> (risks)"
+  ],
+  "affects": [
+    "AGENTS.md"
+  ],
+  "adopt": {
+    "file": "AGENTS.md",
+    "command": "brain risk <component> --json",
+    "snippet": "## Edit risk (locate → risk → change → verify)\nBefore editing a shared component, route, resource or `tokens.cssbrain`, run `brain risk <target> --json`."
+  },
+  "uses": [
+    {
+      "glob": "AGENTS.md",
+      "contains": "brain risk"
+    }
+  ]
+}
