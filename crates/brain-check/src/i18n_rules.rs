@@ -632,6 +632,32 @@ impl Checker<'_> {
                 }
             }
         }
+        // B1850: the framework's own texts stay English when the default language lacks them.
+        if let Some(def) = i18n.default_file()
+            && i18n.default.split('-').next() != Some("en")
+            && c.kind == FileKind::Component
+            && !c.file.ends_with(".test.brain")
+        {
+            let mut validates = false;
+            let mut see = |e: &Expr, _: bool, _: &[String]| {
+                if let Expr::Call { callee, args, .. } = e
+                    && matches!(callee.unparen(), Expr::Ident(i) if i.name == "form" || (i.name == "api" && args.len() > 1))
+                {
+                    validates = true;
+                }
+            };
+            walk(&c.script, false, &mut see);
+            markup_exprs(&c.template, &mut see);
+            let shows_errors = c.src.contains("<ErrorState");
+            let missing: Vec<&str> = crate::i18n::FRAMEWORK_EN
+                .iter()
+                .map(|(k, _)| *k)
+                .filter(|k| !def.entries.contains_key(*k) && ((validates && k.starts_with("form.")) || (shows_errors && k.starts_with("error_state."))))
+                .collect();
+            if !missing.is_empty() {
+                self.push("B1850", Span { start: 0, end: 0, line: 1, col: 1 }, format!("this page shows framework messages, and {} has no {}, so they stay in English", def.file, missing.join(", ")), format!("add those keys to {} with their text in `{}`", def.file, i18n.default));
+            }
+        }
         // B1403: fixed text in a multilingual site.
         // Not in app.brain: the shell is static HTML (B0132); its text belongs in views/_layout.brain.
         if i18n.multi() && c.kind == FileKind::Component && !c.file.ends_with(".test.brain") {

@@ -96,6 +96,22 @@ fn b1403_reads_script_literals_that_reach_a_person() {
 }
 
 #[test]
+fn b1850_lists_framework_keys_the_default_language_lacks() {
+    let view = "<meta seo title={t('hi')} description={t('hi')}>\n<script>\nlet f = form({ a: 'email!' }, { submit: async (v) => v })\n</script>\n<form on:submit={f.submit}><h1>{t('hi')}</h1><label>{t('hi')} <input bind:value={f.v.a}></label></form>";
+    let es = "{\n  \"hi\": \"Hi\",\n  \"form.required\": \"Stand-in\"\n}";
+    let root = app("b1850", &["es"], &[("i18n/es.json", es)]);
+    let d = check(&root, "views/home.brain", view);
+    let b: Vec<&brain_parse::Diag> = d.iter().filter(|d| d.code == "B1850").collect();
+    assert_eq!(b.len(), 1, "{d:#?}");
+    assert!(b[0].msg.contains("form.email") && !b[0].msg.contains("form.required") && !b[0].msg.contains("error_state"), "{}", b[0].msg);
+    // A page with no validation, and an English default, have nothing to warn about.
+    let plain = "<meta seo title={t('hi')} description={t('hi')}>\n<h1>{t('hi')}</h1>";
+    assert!(!check(&root, "views/home.brain", plain).iter().any(|d| d.code == "B1850"));
+    let en = app("b1850en", &["en"], &[("i18n/en.json", es)]);
+    assert!(!check(&en, "views/home.brain", view).iter().any(|d| d.code == "B1850"));
+}
+
+#[test]
 fn b0306_physical_properties_with_rtl_and_route_slugs() {
     let css = "<meta seo title=\"T\" description=\"D\">\n<main class=\"m\"><h1>{t('nav.home')}</h1></main>\n<style>.m { margin-left: var(--space-2); text-align: right; }</style>";
     let ltr = app("ltr", &["en", "es"], &[("i18n/en.json", EN), ("i18n/es.json", ES)]);

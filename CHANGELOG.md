@@ -9,6 +9,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- B1850 warns when a page shows framework messages and the app's non-English default language lacks their `form.*` or `error_state.*` keys
+- Fix: `brain run` loads the dictionary of a single-language app, so `form.*` messages and `t()` match the production build
 - `brain new` puts the menu in `views/_layout.brain`, so it can be translated; `brain add view` links there, or in `app.brain` for apps that keep it there
 - B1403 also reads `<script>` literals a person sees: variables markup only displays, `alert`, `confirm`, `prompt`, `toast.send` and `.textContent`
 - The sitemap warning without a site URL points at `PUBLIC_SITE_URL` and lists the `sitemap()` routes it skips

@@ -771,7 +771,7 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
         "/@brain/test.html" => {
             // tests read the default language's texts, like the page at `/` (t() would otherwise return the key)
             let mut pre = ctx.head_prepend.clone();
-            if let Some((def, _)) = brain_pack::read_i18n(&ctx.root).filter(|(_, ls)| ls.len() > 1)
+            if let Some((def, _)) = brain_pack::read_i18n(&ctx.root)
             {
                 let dict = brain_pack::read_dict(&ctx.root, &def)
                     .iter()
@@ -1368,7 +1368,7 @@ fn run_load(
     }
     let lctx = load_ctx_json(req, params);
     // t() and locale() inside load() read the page's language and dictionaries, as in production (§37)
-    let i18n = brain_pack::read_i18n(&ctx.root).filter(|(_, ls)| ls.len() > 1);
+    let i18n = brain_pack::read_i18n(&ctx.root);
     let language = match (split_locale(&i18n, &req.path).0, &i18n) {
         (Some(loc), Some((def, _))) => format!(",\"$locale\":{},\"$dict\":{{{}:{},{}:{}}}", json_str(&loc), json_str(def), dict_json(&ctx.root, def), json_str(&loc), dict_json(&ctx.root, &loc)),
         _ => String::new(),
@@ -1442,7 +1442,7 @@ fn app_page(ctx: &Ctx, req: &http::Request) -> (u16, String, Option<String>) {
     // the view's seo(props)/head(props) (INTERNALS §32), filled when its load ran
     let mut view_seo: Option<(Vec<(String, String)>, String)> = None;
     // languages (§37): `/es/about` is `/about` in `es`; the default locale has no prefix
-    let i18n = brain_pack::read_i18n(root).filter(|(_, ls)| ls.len() > 1);
+    let i18n = brain_pack::read_i18n(root);
     let (locale, route_path) = split_locale(&i18n, &req.path);
     if let (Some(loc), Some((def, _))) = (&locale, &i18n) {
         // this locale's texts and the default's (the fallback of t()), before any view mounts
@@ -2019,7 +2019,7 @@ fn form_post(s: &mut TcpStream, ctx: &Ctx, req: &http::Request) -> io::Result<()
         return json(s, 413, &format!("Body larger than {} KB; raise brain.json server.maxBodyKB", limits.max_body_kb));
     }
     // `/es/contact` is the contact page in `es`: its schema messages come from es.json (§37), like the browser
-    let i18n = brain_pack::read_i18n(&ctx.root).filter(|(_, ls)| ls.len() > 1);
+    let i18n = brain_pack::read_i18n(&ctx.root);
     let (locale, route_path) = split_locale(&i18n, &req.path);
     let Some(r) = crate::route::resolve(&ctx.root, &route_path) else {
         return json(s, 404, "No page here");

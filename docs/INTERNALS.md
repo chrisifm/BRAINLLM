@@ -137,6 +137,7 @@ COMPILER assigns the next free code there in the same change that emits it, then
   build, through `brain_seo::cli_with`) · B1837 public dynamic route (no guard, not `noindex`) without `paths()` or
   `sitemap()`: rendered per request but listed nowhere (warning from `brain build`, named with the fix). Collections (`content/<name>/*.md`, §33): server-only `entries` `entry` `tags` `tagged` `pages`
   `page` from `brain:content`, `content.perPage` (default 10), drafts only with `--env staging`.
+- B1850 framework messages left in English (warning, 2026-10-31): a component calling `form()` or `api()` with a schema, or using `<ErrorState>`, in an app whose default language is not English, while that language's file lacks `form.*` or `error_state.*` keys. It names the keys; no edit, because the text must be written in that language. Only the keys the file has reach the page dictionary, so nothing is added to bundles.
 - B072x environment file `.brain_env` (§36): B0720 empty value in the build environment (error) · B0721 key used in
   code but missing (warning, edit adds `KEY=`, or `KEY?=` when the file reads it with a default or a condition) · B0722 key never used (info); both see `const { KEY = d, B: alias } = process.env`, aliases of the object (`const e = process.env`, `const { env } = process`) and destructured `ctx.env` (2026-10-31) · B0723 `PUBLIC_*` value shaped like a
   secret (error) · B0724 malformed line or section (error). Values never appear in any diagnostic. `KEY?=` (2026-10-31) declares an optional key: the winning line of an environment decides, an empty one is omitted from the program's environment and a `PUBLIC_*` one compiles to `undefined`. B0727 `.brain_env.example` differs from the union of `.brain_env` and the keys the code reads, compared by key, block and optional flag: doctor only reports it; `brain fix` and `brain doctor --fix` write it.
@@ -1487,6 +1488,7 @@ language is one command.
   `fmt.number(n)`, `fmt.money(n, 'USD')` and `fmt.relative(d)` over `Intl` for the current locale; `locale()` returns
   it. Text written straight into markup is allowed in single-language sites; with 2+ locales it is B1403 (warning,
   with an edit that moves the text to a new key in every locale file).
+- **One language** (2026-10-31): `i18n` with one locale has no prefixes; `brain run` loads its dictionary, sets `lang` and passes it to `load()` and form posts, as `brain build` already did, so `form.*` keys apply in both.
 - **What B1403 moves** (2026-10-31): text nodes; a sentence with interpolations as one message with placeholders
   (`Signed in as {email}` becomes `t('account.signed_in_as_with', { email })`, never two fragments); visible
   attributes (`placeholder`, `title`, `alt`, `aria-label` and the other `aria-*` texts, `label`, `description`,
