@@ -29,17 +29,17 @@ fn conditioned_read() -> Value {
 fn resources() -> Vec<Resource> {
     let value = json!([
         {"name":"shops","fields":{"name":{"kind":"str","required":true},"status":{"kind":"enum(open|closed)","required":true}},
-         "policy":{"read":["owner","admin"],"create":["candidate","admin"],"update":["owner","admin"],"delete":["admin"]},
+         "policy":{"read":["owner","admin"],"create":["member","admin"],"update":["owner","admin"],"delete":["admin"]},
          "query":{"filter":{"status":["eq"]}}},
         {"name":"jobs","search":["title"],
          "fields":{"shop":{"kind":"ref:shops","required":true},"title":{"kind":"str","required":true,"unique":true},
                    "status":{"kind":"enum(pending|published)","required":true},"pay":{"kind":"int","required":true},"section":{"kind":"ref:sections"}},
-         "policy":{"read":conditioned_read(),"create":["candidate","admin"],"update":["company","admin"],"delete":["admin"]},
+         "policy":{"read":conditioned_read(),"create":["member","admin"],"update":["seller","admin"],"delete":["admin"]},
          "query":{"expose_owner":false,"filter":{"status":["eq"],"pay":["gte"]},"sort":["pay"],"include":["shop"],
                   "aggregate":{"stats":{"sum":["pay"]},"by_status":{"group":"status"}},
                   "count":{"reviews":{"resource":"reviews","field":"job"}}}},
         {"name":"reviews","fields":{"job":{"kind":"ref:jobs","required":true},"body":{"kind":"str","required":true}},
-         "policy":{"read":["public"],"create":["candidate"],"update":["admin"],"delete":["admin"]},
+         "policy":{"read":["public"],"create":["member"],"update":["admin"],"delete":["admin"]},
          "query":{"include":["job"],"filter":{"job.status":["eq"],"shop.status":["eq"]},"count":{}}},
         {"name":"sections","fields":{"name":{"kind":"str","required":true}},
          "policy":{"read":["public"],"create":["admin"],"update":["admin"],"delete":["admin"]},
@@ -48,9 +48,9 @@ fn resources() -> Vec<Resource> {
          "policy":{"read":[{"public":{"where":{"status":"live"}}},"admin"],"create":["admin"],"update":["admin"],"delete":["admin"]}},
         {"name":"ledgers","fields":{"note":{"kind":"str","required":true}},"policy":{"api":false}},
         {"name":"notices","fields":{"body":{"kind":"str","required":true}},
-         "policy":{"read":["public"],"create":["candidate"],"update":["owner"],"delete":["owner"]}},
+         "policy":{"read":["public"],"create":["member"],"update":["owner"],"delete":["owner"]}},
         {"name":"diaries","fields":{"body":{"kind":"str","required":true}},
-         "policy":{"read":["owner"],"create":["candidate"],"update":["owner"],"delete":["owner"]}}
+         "policy":{"read":["owner"],"create":["member"],"update":["owner"],"delete":["owner"]}}
     ]);
     let mut list: Vec<Value> = value.as_array().unwrap().clone();
     // reviews.shop lets a public resource filter through a target its reader may not read at all.
@@ -82,9 +82,12 @@ async fn actor(pool: &sqlx::PgPool, role: &str) -> Actor {
         .bind(auth::digest(&token)).bind(id).execute(pool).await.unwrap();
     Actor { id, token }
 }
+fn roles() -> brain_backend::auth_flows::RolesConfig {
+    brain_backend::auth_flows::RolesConfig { roles: ["admin", "member", "seller"].map(String::from).to_vec(), signup_role: "member".into() }
+}
 fn config(resources: Vec<Resource>, uploads: &str) -> brain_backend::Config {
     brain_backend::Config {
-        api_keys: Some(Default::default()), roles: Default::default(), mail: None, auth_public_base_url: None, webhooks: None, before_hooks: None,
+        api_keys: Some(Default::default()), roles: roles(), mail: None, auth_public_base_url: None, webhooks: None, before_hooks: None,
         sockets: None, gcs: None, jwt: None, google: None, resources, jobs: Vec::new(),
         uploads: std::env::temp_dir().join(format!("brain-row-policy-{uploads}-{}", Uuid::new_v4().simple())),
         origins: vec![ORIGIN.into()], production: false,
@@ -105,8 +108,8 @@ async fn fixture(platform: Platform) -> Fix {
     let pool = database().await;
     let all = resources();
     db::migrate(&pool, &all).await.unwrap();
-    brain_backend::auth_flows::RolesConfig::default().register(&pool).await.unwrap();
-    let (shop_owner, stranger, admin, editor) = (actor(&pool, "candidate").await, actor(&pool, "candidate").await, actor(&pool, "admin").await, actor(&pool, "company").await);
+    roles().register(&pool).await.unwrap();
+    let (shop_owner, stranger, admin, editor) = (actor(&pool, "member").await, actor(&pool, "member").await, actor(&pool, "admin").await, actor(&pool, "seller").await);
     let cfg = config(all.clone(), "http");
     let (http, _) = brain_backend::http::router_with_platform(pool.clone(), cfg, platform).await.unwrap();
     let shops = all[0].clone();
@@ -298,8 +301,8 @@ async fn upload(http: &Router, path: &str, who: &Actor) -> Value {
 #[tokio::test]
 #[ignore = "requires scripts/backend-check.mjs disposable Postgres"]
 async fn related_files_follow_the_get_rule_for_relational_owners_and_hidden_rows() {
-    let bucket = Bucket::from_contract("job_files", json!({"resource":"jobs","field":"title","create":["candidate","admin"],"read":["related"]})).unwrap();
-    let banners = Bucket::from_contract("banners", json!({"visibility":"public","create":["candidate"]})).unwrap();
+    let bucket = Bucket::from_contract("job_files", json!({"resource":"jobs","field":"title","create":["member","admin"],"read":["related"]})).unwrap();
+    let banners = Bucket::from_contract("banners", json!({"visibility":"public","create":["member"]})).unwrap();
     let f = fixture(Platform { buckets: vec![bucket, banners], ..Default::default() }).await;
     let uploaded = upload(&f.http, &format!("/_brain/files/job_files?record={}", f.draft), &f.admin).await;
     let meta = format!("/_brain/files/job_files/{}/meta", uploaded["id"].as_str().unwrap());
@@ -385,7 +388,7 @@ async fn server_only_resources_have_no_public_surface_but_a_named_key_reaches_th
 #[ignore = "requires scripts/backend-check.mjs disposable Postgres"]
 async fn domain_actions_keep_hidden_rows_hidden_from_callers_and_responses() {
     let f = fixture(Platform::default()).await;
-    let domain: brain_backend::domain::Domain = serde_json::from_value(json!({"resources":{"jobs":{"actions":{"bump":{"roles":["company","admin"],"increment":{"pay":1}}}}}})).unwrap();
+    let domain: brain_backend::domain::Domain = serde_json::from_value(json!({"resources":{"jobs":{"actions":{"bump":{"roles":["seller","admin"],"increment":{"pay":1}}}}}})).unwrap();
     let (http, _) = brain_backend::http::router_with_domain(f.pool.clone(), config(resources(), "domain"), domain).await.unwrap();
     let action = |id: &str| format!("/api/jobs/{id}/actions/bump");
     // The action runs, and the row its caller may not read stays out of the response.

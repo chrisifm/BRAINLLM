@@ -34,6 +34,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("search_text_bound", include_str!("../migrations/0016_search_text_bound.sql")),
     ("auth_hardening", include_str!("../migrations/0017_auth_hardening.sql")),
     ("queue_workers", include_str!("../migrations/0018_queue_workers.sql")),
+    ("system_keys", include_str!("../migrations/0019_system_keys.sql")),
 ];
 fn checksum(sql: &str) -> String {
     Sha256::digest(sql.as_bytes())
@@ -1337,5 +1338,67 @@ mod failure_log_tests {
         assert_eq!((lines[1]["sqlstate"].as_str(), lines[1].get("message")), (Some("22P02"), None));
         assert!(!lines[1].to_string().contains("private-value"));
         std::fs::remove_file(file).unwrap();
+    }
+}
+
+/// Database time of one request, read by the request log. Only the sites wrapped with [`timed`] count.
+#[derive(Default)]
+pub(crate) struct DbTime {
+    micros: std::sync::atomic::AtomicU64,
+    wait_micros: std::sync::atomic::AtomicU64,
+    measured: std::sync::atomic::AtomicBool,
+}
+tokio::task_local! { static DB_TIME: std::sync::Arc<DbTime>; }
+impl DbTime {
+    /// Request-log fields in milliseconds with microsecond precision, or nothing when no database work was measured.
+    pub(crate) fn fields(&self) -> Option<(f64, f64)> {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.measured.load(Relaxed).then(|| (self.micros.load(Relaxed) as f64 / 1000.0, self.wait_micros.load(Relaxed) as f64 / 1000.0))
+    }
+}
+pub(crate) async fn with_db_time<F: std::future::Future>(time: std::sync::Arc<DbTime>, future: F) -> F::Output {
+    DB_TIME.scope(time, future).await
+}
+/// Adds the wall time of `future` to the request's database time. Do not nest: the outer wrap already counts the inner.
+pub(crate) async fn timed<F: std::future::Future>(future: F) -> F::Output {
+    use std::sync::atomic::Ordering::Relaxed;
+    let started = std::time::Instant::now();
+    let out = future.await;
+    let _ = DB_TIME.try_with(|time| {
+        time.micros.fetch_add(started.elapsed().as_micros() as u64, Relaxed);
+        time.measured.store(true, Relaxed);
+    });
+    out
+}
+/// Records the time spent waiting for a connection and opening the transaction; it is part of the time [`timed`] counts.
+pub(crate) async fn acquiring<F: std::future::Future>(future: F) -> F::Output {
+    use std::sync::atomic::Ordering::Relaxed;
+    let started = std::time::Instant::now();
+    let out = future.await;
+    let _ = DB_TIME.try_with(|time| {
+        time.wait_micros.fetch_add(started.elapsed().as_micros() as u64, Relaxed);
+    });
+    out
+}
+
+#[cfg(test)]
+mod timing_tests {
+    use super::*;
+    #[tokio::test]
+    async fn database_time_adds_up_and_is_absent_when_nothing_was_measured() {
+        let time = std::sync::Arc::new(DbTime::default());
+        assert!(time.fields().is_none());
+        with_db_time(time.clone(), async {
+            timed(async { tokio::time::sleep(std::time::Duration::from_millis(5)).await }).await;
+            timed(acquiring(async { tokio::time::sleep(std::time::Duration::from_millis(5)).await })).await;
+        })
+        .await;
+        let (db, wait) = time.fields().unwrap();
+        assert!(db >= 10.0, "{db}");
+        assert!((5.0..db).contains(&wait), "{wait} of {db}");
+    }
+    #[tokio::test]
+    async fn code_outside_a_request_is_not_measured() {
+        assert_eq!(timed(async { 7 }).await, 7);
     }
 }

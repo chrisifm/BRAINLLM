@@ -240,6 +240,8 @@ pub struct Route {
     pub params: BTreeMap<String, Kind>,
     pub query: BTreeMap<String, Param>,
     pub headers: Vec<String>,
+    /// Identity of `ctx.backend` in the handler: `key` (BRAIN_ROUTES_API_KEY) or `system` (BRAIN_ROUTES_SYSTEM_KEY). Absent: no ctx.backend.
+    pub run_as: Option<String>,
 }
 
 fn object<'a>(value: &'a Value, at: &str, keys: &[&str]) -> Result<&'a Map<String, Value>, String> {
@@ -291,7 +293,7 @@ impl Route {
             return Err(format!("route `{name}`: the folder name must be a lowercase identifier"));
         }
         let at = format!("route `{name}`");
-        let map = object(value, &at, &["method", "path", "auth", "body", "bodyLimit", "timeout", "rate", "verify", "internal", "params", "query", "headers"])?;
+        let map = object(value, &at, &["method", "path", "auth", "body", "bodyLimit", "timeout", "rate", "verify", "internal", "params", "query", "headers", "runAs"])?;
         let method = match map.get("method").and_then(Value::as_str).unwrap_or("GET").to_ascii_uppercase().as_str() {
             "GET" => axum::http::Method::GET,
             "POST" => axum::http::Method::POST,
@@ -391,7 +393,12 @@ impl Route {
         if verify.is_some() && method == axum::http::Method::GET {
             return Err(format!("{at}: signed routes receive a body; use POST, PUT or PATCH"));
         }
-        Ok(Route { name: name.into(), method, path: path.into(), access, raw_body, body_limit, timeout, rate, verify, params, query, headers })
+        let run_as = match map.get("runAs") {
+            None => None,
+            Some(Value::String(who)) if matches!(who.as_str(), "key" | "system") => Some(who.clone()),
+            Some(_) => return Err(format!("{at}: runAs must be 'key' or 'system'; fix: it picks the API key of ctx.backend, and without it the handler has no ctx.backend")),
+        };
+        Ok(Route { name: name.into(), method, path: path.into(), access, raw_body, body_limit, timeout, rate, verify, params, query, headers, run_as })
     }
     pub fn schema(&self) -> Value {
         json!({
@@ -403,6 +410,7 @@ impl Route {
             "params": self.params.iter().map(|(k, v)| (k.clone(), json!(format!("{v:?}").to_lowercase()))).collect::<Map<_, _>>(),
             "query": self.query.iter().map(|(k, p)| (k.clone(), json!({"kind": format!("{:?}", p.kind).to_lowercase(), "required": p.required}))).collect::<Map<_, _>>(),
             "headers": self.headers,
+            "runAs": self.run_as,
         })
     }
 }

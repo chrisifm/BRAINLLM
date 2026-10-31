@@ -254,6 +254,10 @@ async fn serve(app: App, state: Arc<State>, route: Arc<Route>, req: Request) -> 
         "verified": verified,
     });
     let handlers = state.handlers.as_ref().ok_or_else(|| Error::internal("route handlers missing"))?;
+    let mut context = context;
+    if let Some(who) = &route.run_as {
+        context["$runAs"] = json!(who);
+    }
     let outcome = match tokio::time::timeout(route.timeout, handlers.run(&route.name, context, route.timeout)).await {
         Ok(outcome) => outcome,
         Err(_) => Err(RouteFailure::Timeout),

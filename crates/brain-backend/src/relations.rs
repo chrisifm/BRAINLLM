@@ -237,17 +237,40 @@ pub fn referenced(error: &sqlx::Error) -> bool {
         .is_some_and(|code| code == "23001" || code == "23503")
 }
 
+/// Levels of one include path: `product.shop.region` is three.
+pub const MAX_INCLUDE_DEPTH: usize = 3;
+/// Distinct related records one request may attach across every level.
+pub const MAX_INCLUDED_RECORDS: usize = 500;
+/// Include paths of one request.
+pub const MAX_INCLUDE_PATHS: usize = 16;
+
 /// Why related records could not be attached.
 #[derive(Debug)]
 pub enum IncludeError {
     Unknown(String),
     Denied(String),
+    /// The request would attach more than [`MAX_INCLUDED_RECORDS`].
+    TooMany,
     Database(sqlx::Error),
 }
 
-/// Attaches `included.<field>` (the referenced record or null) to each row. One query per included field,
-/// bounded by the page size; the target's read policy applies (owner-only readers see only their own rows,
-/// other rows render as null) and so does the target's field visibility.
+/// Whether every level of an include path is a `ref:` field its own resource declares in `include`.
+pub fn include_path_declared(r: &Resource, resources: &BTreeMap<String, Resource>, path: &str) -> bool {
+    let mut current = r;
+    let mut depth = 0;
+    for name in path.split('.') {
+        depth += 1;
+        let next = target(current, name).filter(|_| current.query.include.iter().any(|x| x == name)).and_then(|t| resources.get(&t));
+        let Some(next) = next else { return false };
+        current = next;
+    }
+    depth <= MAX_INCLUDE_DEPTH
+}
+
+/// Attaches `included.<field>` (the referenced record or null) to each row, following dotted paths into the attached
+/// records. One query per included field at each level, bounded by the page size and [`MAX_INCLUDED_RECORDS`]. Every
+/// level applies its own read policy and field visibility: a row the reader may not see renders as null, exactly like a
+/// missing one, and nothing below it is read. A reference the reader cannot see is not followed.
 pub async fn include(
     pool: &sqlx::PgPool,
     resources: &BTreeMap<String, Resource>,
@@ -256,40 +279,91 @@ pub async fn include(
     rows: &mut [Value],
     viewer: crate::visibility::Viewer<'_>,
 ) -> Result<(), IncludeError> {
-    for name in names {
-        let Some(target_name) = target(r, name).filter(|_| r.query.include.contains(name)) else {
-            return Err(IncludeError::Unknown(name.clone()));
-        };
-        let target = resources.get(&target_name).ok_or_else(|| IncludeError::Unknown(name.clone()))?;
-        let scope = crate::ownership::read_scope(target, resources, viewer).ok_or_else(|| IncludeError::Denied(name.clone()))?;
-        let ids: Vec<Uuid> = rows
-            .iter()
-            .filter_map(|row| row["data"][name.as_str()].as_str().and_then(|s| Uuid::parse_str(s).ok()))
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        let mut found: BTreeMap<String, Value> = BTreeMap::new();
-        if !ids.is_empty() {
-            let mut q = sqlx::QueryBuilder::<sqlx::Postgres>::new(concat!("SELECT ", crate::record_columns!(), " FROM "));
-            q.push(table(&target.name)).push(" WHERE id=ANY(").push_bind(ids).push(") AND ");
-            scope.push(&mut q, target, resources);
-            let fetched = q.build().fetch_all(pool).await.map_err(IncludeError::Database)?;
-            for row in fetched {
-                let mut record = crate::db::record(row);
-                crate::visibility::project(target, &mut record, viewer, false);
-                found.insert(record["id"].as_str().unwrap_or_default().to_string(), record);
-            }
-        }
-        for row in rows.iter_mut() {
-            let related = row["data"][name.as_str()]
-                .as_str()
-                .and_then(|id| found.get(id).cloned())
-                .unwrap_or(Value::Null);
-            if !row["included"].is_object() {
-                row["included"] = serde_json::json!({});
-            }
-            row["included"][name.as_str()] = related;
-        }
+    include_within(pool, resources, r, names, rows, viewer, MAX_INCLUDED_RECORDS).await
+}
+
+/// [`include`] with an explicit record budget.
+pub async fn include_within(
+    pool: &sqlx::PgPool,
+    resources: &BTreeMap<String, Resource>,
+    r: &Resource,
+    names: &[String],
+    rows: &mut [Value],
+    viewer: crate::visibility::Viewer<'_>,
+    budget: usize,
+) -> Result<(), IncludeError> {
+    if let Some(name) = names.get(MAX_INCLUDE_PATHS) {
+        return Err(IncludeError::Unknown(name.clone()));
     }
-    Ok(())
+    if let Some(name) = names.iter().find(|name| !include_path_declared(r, resources, name)) {
+        return Err(IncludeError::Unknown(name.clone()));
+    }
+    let mut budget = budget;
+    level(pool, resources, r, names, rows, viewer, &mut budget).await
+}
+
+type LevelFuture<'a> = std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), IncludeError>> + Send + 'a>>;
+
+/// One level of includes; each distinct head field runs one query, then its dotted tails run over the fetched records.
+fn level<'a>(
+    pool: &'a sqlx::PgPool,
+    resources: &'a BTreeMap<String, Resource>,
+    r: &'a Resource,
+    names: &'a [String],
+    rows: &'a mut [Value],
+    viewer: crate::visibility::Viewer<'a>,
+    budget: &'a mut usize,
+) -> LevelFuture<'a> {
+    Box::pin(async move {
+        let mut heads: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+        for path in names {
+            match path.split_once('.') {
+                Some((head, tail)) => heads.entry(head).or_default().push(tail.to_string()),
+                None => {
+                    heads.entry(path.as_str()).or_default();
+                }
+            }
+        }
+        for (name, tails) in heads {
+            let Some(target_name) = target(r, name).filter(|_| r.query.include.iter().any(|x| x == name)) else {
+                return Err(IncludeError::Unknown(name.to_string()));
+            };
+            let target = resources.get(&target_name).ok_or_else(|| IncludeError::Unknown(name.to_string()))?;
+            let scope = crate::ownership::read_scope(target, resources, viewer).ok_or_else(|| IncludeError::Denied(name.to_string()))?;
+            let ids: Vec<Uuid> = rows
+                .iter()
+                .filter_map(|row| row["data"][name].as_str().and_then(|s| Uuid::parse_str(s).ok()))
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            if ids.len() > *budget {
+                return Err(IncludeError::TooMany);
+            }
+            *budget -= ids.len();
+            let mut records = Vec::new();
+            if !ids.is_empty() {
+                let mut q = sqlx::QueryBuilder::<sqlx::Postgres>::new(concat!("SELECT ", crate::record_columns!(), " FROM "));
+                q.push(table(&target.name)).push(" WHERE id=ANY(").push_bind(ids).push(") AND ");
+                scope.push(&mut q, target, resources);
+                let fetched = q.build().fetch_all(pool).await.map_err(IncludeError::Database)?;
+                for row in fetched {
+                    let mut record = crate::db::record(row);
+                    crate::visibility::project(target, &mut record, viewer, false);
+                    records.push(record);
+                }
+            }
+            if !tails.is_empty() {
+                level(pool, resources, target, &tails, &mut records, viewer, &mut *budget).await?;
+            }
+            let found: BTreeMap<String, Value> = records.into_iter().map(|record| (record["id"].as_str().unwrap_or_default().to_string(), record)).collect();
+            for row in rows.iter_mut() {
+                let related = row["data"][name].as_str().and_then(|id| found.get(id).cloned()).unwrap_or(Value::Null);
+                if !row["included"].is_object() {
+                    row["included"] = serde_json::json!({});
+                }
+                row["included"][name] = related;
+            }
+        }
+        Ok(())
+    })
 }

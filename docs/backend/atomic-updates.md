@@ -30,6 +30,8 @@ export default {
 | `set` | assignments; `null` removes an optional field |
 | `increment` / `decrement` | exact deltas on `int`, `num` or `decimal(p,s)` fields (decimals use exact string arithmetic) |
 
+A guard can require that the write really changes a field: `when: { price: { ne: '$input.price' } }` answers 409 `GUARD_FAILED` for the same value.
+
 Values may use `$input.<field>`, `$user.id|role|email`, `$now` and `$now±N{s,m,h,d}`. A field appears in only one of
 `set`, `increment` and `decrement`. The result is checked against types and `constraints.jsbrain`, so a decrement
 below a `min` answers 422 and never reaches the database.

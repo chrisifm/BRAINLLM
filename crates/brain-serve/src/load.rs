@@ -7,6 +7,8 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
+/// The API-key client of job and route handlers; route sidecars append it to their runner, job runs to theirs.
+pub const KEY_BACKEND: &str = include_str!("key-backend.js");
 const RUNNER: &str = r#"
 import { createInterface } from 'node:readline'
 import { EventEmitter } from 'node:events'
@@ -27,6 +29,9 @@ const flat = h => Object.entries(h || {}).flatMap(([k, v]) => (Array.isArray(v) 
 const REDIRECT_CODES = new Set([301, 302, 303, 307, 308])
 const redirectProblem = ({ redirect: to, status = 303 }) => !REDIRECT_CODES.has(status) ? 'Invalid redirect status'
   : to.length > 8192 || !to.startsWith('/') || to.startsWith('//') || /[\\\x00-\x20\x7f]/.test(to) || /^\/%2f/i.test(to) || /%(?:0[0-9a-f]|1[0-9a-f]|5c|7f)/i.test(to) || /%20/i.test(to.split(/[?#]/, 1)[0]) ? 'Invalid same-site redirect location' : ''
+// Handler keys stay out of every process.env and ctx.env a handler can read: only ctx.backend carries them.
+const handlerEnv = { ...process.env }
+for (const name of ['BRAIN_JOBS_API_KEY', 'BRAIN_JOBS_SYSTEM_KEY', 'BRAIN_ROUTES_API_KEY', 'BRAIN_ROUTES_SYSTEM_KEY']) delete process.env[name]
 const nativeContexts = new WeakMap()
 let nativeBridge = null, nativeModule = null, nativeURL = null
 const withSession = async (S, ctx, secret, preauthenticated = false, nativeRequired = false) => {
@@ -139,7 +144,10 @@ for await (const line of createInterface({ input: process.stdin })) {
     if (typeof m[fn] !== 'function') throw new Error(`${fn} is not exported by the view's server code`)
     if (probe) { out(`OK ${id} true\n`); continue }
     const S = contextServer ? await import(contextServer) : null
-    const c = S ? await withSession(S, ctx, secret, preauthenticated === true, nativeRequired === true) : { ...ctx, env: process.env }
+    // `$runAs` comes from the route contract, set by the backend after the client's request was parsed into fields.
+    const { $runAs, ...plain } = S ? {} : ctx
+    const c = S ? await withSession(S, ctx, secret, preauthenticated === true, nativeRequired === true) : { ...plain, env: process.env }
+    if ($runAs && typeof keyBackend === 'function') c.backend = keyBackend(handlerEnv, $runAs === 'system' ? 'BRAIN_ROUTES_SYSTEM_KEY' : 'BRAIN_ROUTES_API_KEY', 'route')
     try {
       const v = await m[fn](c, ...(args || []))
       if (fn === 'load' && v && typeof v.redirect === 'string' && redirectProblem(v)) throw new Error(redirectProblem(v))
@@ -239,7 +247,7 @@ impl Sidecar {
         {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid bounded sidecar limits"));
         }
-        Self::spawn_with(root, vars, timeout, frame_limit, production, true)
+        Self::spawn_script(root, vars, timeout, frame_limit, production, true, &format!("{RUNNER}\n{KEY_BACKEND}"))
     }
     fn spawn_with(
         root: &Path,
@@ -249,6 +257,17 @@ impl Sidecar {
         production: bool,
         private: bool,
     ) -> io::Result<Sidecar> {
+        Self::spawn_script(root, vars, timeout, frame_limit, production, private, RUNNER)
+    }
+    fn spawn_script(
+        root: &Path,
+        vars: &[(String, String)],
+        timeout: std::time::Duration,
+        frame_limit: usize,
+        production: bool,
+        private: bool,
+        script: &str,
+    ) -> io::Result<Sidecar> {
         let mut command =
             Command::new(std::env::var("BRAIN_NODE").unwrap_or_else(|_| "node".into()));
         #[cfg(unix)]
@@ -257,7 +276,7 @@ impl Sidecar {
             command.process_group(0);
         }
         let mut child=command.args(if private {&["--max-old-space-size=128"][..]}else{&[]})
-            .args(["--enable-source-maps", "--input-type=module", "-e", RUNNER])
+            .args(["--enable-source-maps", "--input-type=module", "-e", script])
             .envs(vars.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .env("NODE_ENV", if production {"production"}else{"development"})
             .env("BRAIN_SIDECAR_PARENT",std::process::id().to_string())

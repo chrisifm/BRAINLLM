@@ -9,6 +9,22 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- Lists name aggregates that hit the 100-group cap in `aggregates_truncated`
+- Request log lines carry `dbMs` and `dbWaitMs` for resource reads, so database time and pool wait are visible apart from `ms`
+- Fix: plain lists and `created_at`/`updated_at` sorts use their index instead of sorting the whole table on every request
+- Declared sorts get an index for their other direction on the next `brain backend migrate`
+- `?search=` with one or two punctuation characters finds nothing without scanning, like longer punctuation
+- `brain backend serve` warns B0771 when `/_brain/api` is open to anonymous callers, unless you chose `--env development`
+- `brain check` reports a handler with no default export (B0772) or a secret-shaped literal (B0773) that used to fail only at boot
+- `brain jobs work` refuses those two handlers at start, as `brain backend serve` already did for routes
+- Declared `or` groups in `query.jsbrain` (`?group.field[op]=value`), indexed and bounded, validated by `brain check`
+- `?owner=me` lists the reader's own rows; the id comes from the session, never from the client
+- `?fields=a,b` narrows the `data` of each list item, after policy and visibility; hidden fields answer like undeclared ones
+- `?include=a.b.c` follows references up to three levels; each level declares it and applies its own read policy, at most 500 records per request
+- Fix: a project API key needs a read scope for every resource reached by `include`, related filters and `count` (they answered with only the list's scope)
+- System identity for jobs and routes: `keys create --system` (CLI only), `runAs: 'system'` in `queue.jsbrain` and route contracts; each request is marked `system` in the key's events
+- `ctx.backend` in route handlers with `runAs: 'key'|'system'` in the contract
+- `ctx.backend.files(bucket)` in jobs, routes and server code; `/_brain/files` accepts keys with a `files.<bucket>` scope
 - Roles are general: only `admin` is required, a new app has `admin` and `user`, and people who sign up get `user`, so `create: ['user']` admits them. Apps with no roles file whose grants still name `company` or `candidate` keep the old implicit roles and signup role, with warning B0739.
 - `brain add roles` declares the roles an app already has; `brain backend rename-role --from <role> --to <role> [--apply]` moves accounts explicitly, and `brain backend migrate` reports accounts whose role is not declared.
 - B0735 names the real file and a concrete fix for role errors. B0738 warns when a grant names an undeclared role in field visibility or a route, or when no grant names the signup role.

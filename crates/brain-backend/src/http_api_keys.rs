@@ -31,9 +31,16 @@ fn resource_of(path: &str) -> Option<&str> {
     let shape = parts.len() <= 2 || (parts.len() == 3 && parts[1] == "redirects") || (parts.len() == 4 && matches!(parts[2], "actions" | "transitions"));
     (crate::contract::identifier(name) && shape).then_some(name)
 }
-/// True when origin enforcement may be skipped: a non-ambient credential on a resource route.
+/// `/_brain/files/{bucket}[/{id}[/meta]]` → the scope subject `files.<bucket>`. Only a scope naming the bucket opens it.
+fn bucket_of(path: &str) -> Option<String> {
+    let parts: Vec<&str> = path.strip_prefix("/_brain/files/")?.split('/').collect();
+    let shape = parts.len() <= 2 || (parts.len() == 3 && parts[2] == "meta");
+    (crate::contract::identifier(parts[0]) && shape).then(|| format!("files.{}", parts[0]))
+}
+/// True when origin enforcement may be skipped: a non-ambient credential on a resource or bucket route.
 pub(super) fn keyed_resource_request(req: &Request) -> bool {
-    resource_of(req.uri().path()).is_some() && api_keys::presented(req.headers()).is_some()
+    let path = req.uri().path();
+    (resource_of(path).is_some() || bucket_of(path).is_some()) && api_keys::presented(req.headers()).is_some()
 }
 fn denied(status: StatusCode, code: &'static str, fix: &'static str) -> Response {
     let mut response = Error::new(status, code, fix).into_response();
@@ -71,11 +78,12 @@ pub(super) async fn gate(State(app): State<App>, req: Request, next: Next) -> Re
         );
     };
     let path = req.uri().path().to_owned();
-    let Some(resource) = resource_of(&path).map(str::to_owned) else {
+    let bucket = bucket_of(&path);
+    let Some(resource) = resource_of(&path).map(str::to_owned).or_else(|| bucket.clone()) else {
         return denied(
             StatusCode::UNAUTHORIZED,
             "API_KEY_NOT_ACCEPTED",
-            "API keys work only on /api resource routes; auth and key management require a signed-in session",
+            "API keys work only on /api resource routes and declared file buckets; auth and key management require a signed-in session",
         );
     };
     let action = api_keys::action(req.method());
@@ -127,6 +135,7 @@ pub(super) async fn gate(State(app): State<App>, req: Request, next: Next) -> Re
         user_agent: user_agent.clone(),
         bytes_out: bytes,
         query_keys: query_keys.clone(),
+        system: false,
     };
     let principal: Principal = match keys.authenticate(&raw).await {
         Err(error) => return Error::internal(error).into_response(),
@@ -155,7 +164,10 @@ pub(super) async fn gate(State(app): State<App>, req: Request, next: Next) -> Re
         }
         Ok(Ok(principal)) => principal,
     };
-    if !api_keys::allows(&principal.scopes, &resource, action) {
+    let trace = |key_id: Uuid, status: StatusCode, bytes: Option<i64>| api_keys::Event { system: principal.system, ..trace(key_id, status, bytes) };
+    // A wildcard never opens a bucket: keys issued before buckets accepted keys keep exactly what they had.
+    let scoped = if bucket.is_some() { api_keys::names(&principal.scopes, &resource, action) } else { api_keys::allows(&principal.scopes, &resource, action) };
+    if !scoped {
         keys.record(trace(principal.key_id, StatusCode::FORBIDDEN, None));
         return denied(
             StatusCode::FORBIDDEN,
@@ -198,7 +210,9 @@ pub(super) async fn gate(State(app): State<App>, req: Request, next: Next) -> Re
         Ok(Admission::Allowed(quota)) => quota,
     };
     let key_id = principal.key_id;
-    let mut response = KEY_USER.scope(principal.user, next.run(req)).await;
+    let system = principal.system;
+    let run = api_keys::with_scopes(principal.scopes.clone(), KEY_USER.scope(principal.user.clone(), next.run(req)));
+    let mut response = if system { api_keys::as_system(run).await } else { run.await };
     if let Some(quota) = &quota {
         quota_headers(&mut response, quota);
     }
@@ -207,7 +221,12 @@ pub(super) async fn gate(State(app): State<App>, req: Request, next: Next) -> Re
         .get(header::CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse().ok());
-    keys.record(trace(key_id, response.status(), bytes));
+    let event = trace(key_id, response.status(), bytes);
+    if system {
+        keys.audit(event).await;
+    } else {
+        keys.record(event);
+    }
     response
 }
 

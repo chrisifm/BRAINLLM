@@ -161,7 +161,7 @@ pub fn load(root: &Path, environment: &str, routes: &[Route]) -> Result<Option<H
         let relative = format!("{ROUTES}/{}/handler.jsbrain", route.name);
         crate::changes::source_path(root, &relative)?;
         crate::map::read_source_limit(root, &relative, 256 * 1024)
-            .map_err(|_| format!("{relative}: handler source must be a regular file within 256 KiB"))?;
+            .map_err(|reason| format!("{relative}: handler source refused: {reason}; run brain check"))?;
         let (scratch, module) = crate::backend::server_module(root, &relative)
             .map_err(|_| format!("{relative}: private handler compilation failed; run brain check for structured source diagnostics"))?;
         modules.insert(route.name.clone(), Arc::new(Compiled { _scratch: scratch, module }));
@@ -266,10 +266,25 @@ mod tests {
         fs::create_dir_all(&rates).unwrap();
         fs::write(rates.join("route.jsbrain"), "<meta server>\nexport default { path: '/rates', auth: 'public' }\n").unwrap();
         fs::write(rates.join("handler.jsbrain"), "<meta server>\nexport default async function handle() {\n  const refused = await httpCall('http://127.0.0.1:9/rates').catch((e) => e.code)\n  return { refused }\n}\n").unwrap();
+        // ctx.backend exists only for a route that declares runAs, and its key never reaches the handler's environment.
+        let keyed = root.join(ROUTES).join("reports");
+        fs::create_dir_all(&keyed).unwrap();
+        fs::write(keyed.join("route.jsbrain"), "<meta server>\nexport default { path: '/reports', auth: 'public', runAs: 'system' }\n").unwrap();
+        fs::write(keyed.join("handler.jsbrain"), "<meta server>\nexport default async function handle(ctx) {\n  if (!ctx.backend) return { backend: false, runAs: ctx.$runAs ?? null, leaked: ctx.env.BRAIN_ROUTES_SYSTEM_KEY ?? null }\n  const uses = await Promise.resolve().then(() => ctx.backend.resource('notes').list()).catch((e) => e.message)\n  const stored = await Promise.resolve().then(() => ctx.backend.files('reports')).catch((e) => e.message)\n  return { backend: true, uses, stored, runAs: ctx.$runAs ?? null, leaked: ctx.env.BRAIN_ROUTES_SYSTEM_KEY ?? null }\n}\n").unwrap();
+        fs::write(root.join(".env"), "BRAIN_BACKEND_URL=http://127.0.0.1:9\nBRAIN_ROUTES_SYSTEM_KEY=not-a-key\n").unwrap();
         let routes = contracts(&root, "development").unwrap();
+        assert_eq!(routes.iter().find(|r| r.name == "reports").unwrap().run_as.as_deref(), Some("system"));
         assert_eq!(routes[0].path, "/orders/quote");
         let handlers = load(&root, "development", &routes).unwrap().unwrap();
-        assert_eq!(handlers.names(), vec!["order_quote".to_string(), "rates".to_string()]);
+        assert_eq!(handlers.names(), vec!["order_quote".to_string(), "rates".to_string(), "reports".to_string()]);
+        let plain = handlers.run("reports", json!({}), Duration::from_secs(5)).await.unwrap();
+        assert_eq!(plain["backend"], false, "no runAs in the context, no ctx.backend: {plain}");
+        let system = handlers.run("reports", json!({"$runAs": "system"}), Duration::from_secs(5)).await.unwrap();
+        assert_eq!(system["backend"], true, "{system}");
+        assert!(system["uses"].as_str().unwrap().contains("BRAIN_ROUTES_SYSTEM_KEY"), "only the declared key, shape-checked: {system}");
+        assert!(system["stored"].as_str().unwrap().contains("BRAIN_ROUTES_SYSTEM_KEY"), "{system}");
+        assert_eq!(system["runAs"], Value::Null, "the marker stays out of the handler");
+        assert_eq!(system["leaked"], Value::Null, "the key stays out of ctx.env");
         let rates = handlers.run("rates", json!({}), Duration::from_secs(5)).await.unwrap();
         assert_eq!(rates, json!({"refused": "UNSAFE_URL"}), "httpCall is auto-imported into route handlers");
         let out = handlers.run("order_quote", json!({"body": {"items": 3}}), Duration::from_secs(5)).await.unwrap();

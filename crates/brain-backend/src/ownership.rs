@@ -49,6 +49,9 @@ fn grants<'a>(r: &'a Resource, operation: &str) -> &'a [String] {
 
 /// The scope a viewer has for an operation, or None when the policy denies it entirely.
 pub fn scope(r: &Resource, operation: &str, viewer: Viewer<'_>) -> Option<Scope> {
+    if crate::api_keys::system_active() {
+        return Some(Scope::All);
+    }
     if operation == "read" && r.policy.conditioned() {
         return conditioned_scope(r, viewer);
     }
@@ -111,6 +114,9 @@ pub fn relational_read(r: &Resource, viewer: Viewer<'_>) -> Option<Scope> {
     (!paths.is_empty()).then_some(Scope::Owned { user, direct: false, paths })
 }
 pub fn read_scope(r: &Resource, _resources: &BTreeMap<String, Resource>, viewer: Viewer<'_>) -> Option<Scope> {
+    if !crate::api_keys::scopes_read(&r.name, r.policy.api) {
+        return None;
+    }
     scope(r, "read", viewer)
 }
 

@@ -21,6 +21,28 @@ pub const KEY_PREFIX: &str = "bk_live_";
 pub const HEADER: &str = "x-api-key";
 pub const MAX_KEYS_PER_USER: i64 = 50;
 
+tokio::task_local! { static SYSTEM: (); }
+/// True only while the request of a verified system key runs. Policy, field access and action roles read this one
+/// mark, so ordinary requests cannot reach the bypass; the setter is private to the crate and tasks spawned from the
+/// request (socket fan-out, webhooks) do not inherit it.
+pub fn system_active() -> bool {
+    SYSTEM.try_with(|_| ()).is_ok()
+}
+pub(crate) async fn as_system<F: std::future::Future>(future: F) -> F::Output {
+    SYSTEM.scope((), future).await
+}
+tokio::task_local! { static KEY_SCOPES: Vec<String>; }
+pub(crate) async fn with_scopes<F: std::future::Future>(scopes: Vec<String>, future: F) -> F::Output {
+    KEY_SCOPES.scope(scopes, future).await
+}
+/// Whether the request's key, if any, may read `resource`. Includes, related filters and counts read other resources
+/// than the one the gate checked, and a key's scopes narrow all of them. A server-only resource needs a scope naming it.
+pub(crate) fn scopes_read(resource: &str, api: bool) -> bool {
+    KEY_SCOPES
+        .try_with(|scopes| if api { allows(scopes, resource, "read") } else { names(scopes, resource, "read") })
+        .unwrap_or(true)
+}
+
 /// Opt-in settings (`apiKeys` in the backend contract). `None` on the server config disables keys entirely.
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -88,10 +110,10 @@ fn generate() -> (String, String) {
     let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
     (prefix, secret)
 }
-/// `resource:action` where resource is a resource name or `*` and action is `read`, `write` or `*`.
+/// `resource:action` where resource is a resource name, `files.<bucket>` or `*` and action is `read`, `write` or `*`.
 pub fn valid_scope(scope: &str) -> bool {
     scope.split_once(':').is_some_and(|(resource, action)| {
-        (resource == "*" || crate::contract::identifier(resource))
+        (resource == "*" || crate::contract::identifier(resource) || resource.strip_prefix("files.").is_some_and(crate::contract::identifier))
             && matches!(action, "read" | "write" | "*")
     })
 }
@@ -127,6 +149,7 @@ pub struct Principal {
     pub prefix: String,
     pub user: User,
     pub scopes: Vec<String>,
+    pub system: bool,
     daily: Option<i64>,
     monthly: Option<i64>,
 }
@@ -158,6 +181,7 @@ pub struct Event {
     pub user_agent: Option<String>,
     pub bytes_out: Option<i64>,
     pub query_keys: Vec<String>,
+    pub system: bool,
 }
 
 #[derive(Clone)]
@@ -173,7 +197,7 @@ pub struct Keys {
 /// Public key fields as JSON; never includes the secret hash.
 macro_rules! key_json {
     () => {
-        "json_build_object('id',k.id,'userId',k.user_id,'name',k.name,'prefix',k.prefix,'scopes',k.scopes,'dailyQuota',k.daily_quota,'monthlyQuota',k.monthly_quota,'createdAt',k.created_at,'updatedAt',k.updated_at,'lastUsedAt',k.last_used_at,'expiresAt',k.expires_at,'revokedAt',k.revoked_at,'rotatedFrom',k.rotated_from,'usedToday',coalesce((SELECT u.count FROM public._brain_api_key_usage u WHERE u.key_id=k.id AND u.period='day' AND u.starts_on=(now() AT TIME ZONE 'UTC')::date),0),'usedThisMonth',coalesce((SELECT u.count FROM public._brain_api_key_usage u WHERE u.key_id=k.id AND u.period='month' AND u.starts_on=date_trunc('month',now() AT TIME ZONE 'UTC')::date),0))"
+        "json_build_object('id',k.id,'userId',k.user_id,'name',k.name,'prefix',k.prefix,'scopes',k.scopes,'dailyQuota',k.daily_quota,'monthlyQuota',k.monthly_quota,'createdAt',k.created_at,'updatedAt',k.updated_at,'lastUsedAt',k.last_used_at,'expiresAt',k.expires_at,'revokedAt',k.revoked_at,'rotatedFrom',k.rotated_from,'system',k.system,'usedToday',coalesce((SELECT u.count FROM public._brain_api_key_usage u WHERE u.key_id=k.id AND u.period='day' AND u.starts_on=(now() AT TIME ZONE 'UTC')::date),0),'usedThisMonth',coalesce((SELECT u.count FROM public._brain_api_key_usage u WHERE u.key_id=k.id AND u.period='month' AND u.starts_on=date_trunc('month',now() AT TIME ZONE 'UTC')::date),0))"
     };
 }
 
@@ -191,7 +215,7 @@ impl NewKey {
             return Err("name must be 1..80 printable characters");
         }
         if self.scopes.is_empty() || self.scopes.len() > 32 || !self.scopes.iter().all(|s| valid_scope(s)) {
-            return Err("scopes must be 1..32 entries shaped resource:read|write|* (resource may be *)");
+            return Err("scopes must be 1..32 entries shaped resource:read|write|* (resource may be * or files.<bucket>)");
         }
         if self.expires_in_days.is_some_and(|d| !(1..=3650).contains(&d)) {
             return Err("expiresInDays must be 1..3650");
@@ -236,6 +260,12 @@ impl Keys {
     pub fn dropped_events(&self) -> u64 {
         self.dropped.load(Ordering::Relaxed)
     }
+    /// The trace of a system key is its audit: it waits for room in the channel instead of being dropped.
+    pub async fn audit(&self, event: Event) {
+        if self.events.send(event).await.is_err() {
+            self.dropped.fetch_add(1, Ordering::Relaxed);
+        }
+    }
     /// Never blocks the request: a full channel counts a drop instead.
     pub fn record(&self, event: Event) {
         if self.events.try_send(event).is_err() {
@@ -259,7 +289,26 @@ impl Keys {
         if live >= MAX_KEYS_PER_USER {
             return Ok(Err("Active key limit reached; revoke an unused key first"));
         }
-        let issued = self.insert(&mut tx, owner, &key, None).await?;
+        let issued = self.insert(&mut tx, owner, &key, None, false).await?;
+        tx.commit().await.map_err(crate::db::safe)?;
+        Ok(Ok(issued))
+    }
+    /// Operator only (`brain backend keys create --system`): no HTTP route reaches this. Every scope names its resource.
+    pub async fn create_system(&self, owner: Uuid, key: NewKey) -> Result<Result<(Value, String), &'static str>, String> {
+        if let Err(error) = key.validate() {
+            return Ok(Err(error));
+        }
+        if key.scopes.iter().any(|scope| scope.starts_with("*:")) {
+            return Ok(Err("system keys name each resource they reach; a wildcard resource scope is refused"));
+        }
+        let mut tx = self.pool.begin().await.map_err(crate::db::safe)?;
+        sqlx::query("SELECT id FROM public._brain_users WHERE id=$1 AND disabled_at IS NULL FOR UPDATE")
+            .bind(owner)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(crate::db::safe)?
+            .ok_or("Unknown or disabled key owner")?;
+        let issued = self.insert(&mut tx, owner, &key, None, true).await?;
         tx.commit().await.map_err(crate::db::safe)?;
         Ok(Ok(issued))
     }
@@ -269,13 +318,14 @@ impl Keys {
         owner: Uuid,
         key: &NewKey,
         rotated_from: Option<Uuid>,
+        system: bool,
     ) -> Result<(Value, String), String> {
         let (prefix, secret) = generate();
         let id = Uuid::new_v4();
         let mut scopes = key.scopes.clone();
         scopes.sort();
         scopes.dedup();
-        let sql = concat!("WITH k AS (INSERT INTO public._brain_api_keys(id,user_id,name,prefix,secret_hash,scopes,daily_quota,monthly_quota,expires_at,rotated_from) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,CASE WHEN $9::bigint IS NULL THEN NULL ELSE now()+make_interval(days=>$9::int) END,$10) RETURNING *) SELECT ", key_json!(), " FROM k");
+        let sql = concat!("WITH k AS (INSERT INTO public._brain_api_keys(id,user_id,name,prefix,secret_hash,scopes,daily_quota,monthly_quota,expires_at,rotated_from,system) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,CASE WHEN $9::bigint IS NULL THEN NULL ELSE now()+make_interval(days=>$9::int) END,$10,$11) RETURNING *) SELECT ", key_json!(), " FROM k");
         let info: Value = sqlx::query_scalar(sql)
             .bind(id)
             .bind(owner)
@@ -287,6 +337,7 @@ impl Keys {
             .bind(key.monthly_quota)
             .bind(key.expires_in_days)
             .bind(rotated_from)
+            .bind(system)
             .fetch_one(&mut **tx)
             .await
             .map_err(crate::db::safe)?;
@@ -318,10 +369,18 @@ impl Keys {
             .bind(id).bind(owner).execute(&self.pool).await.map_err(crate::db::safe)?.rows_affected() == 1)
     }
     /// Issues a new secret with the same name, scopes, quotas and remaining lifetime; the old key is revoked atomically.
+    /// A session never rotates a system key: the new secret would hand a session route the system identity.
     pub async fn rotate(&self, id: Uuid, owner: Option<Uuid>) -> Result<Option<(Value, String)>, String> {
+        self.rotate_key(id, owner, false).await
+    }
+    /// Operator only: the replacement of a system key stays a system key.
+    pub async fn rotate_operator(&self, id: Uuid) -> Result<Option<(Value, String)>, String> {
+        self.rotate_key(id, None, true).await
+    }
+    async fn rotate_key(&self, id: Uuid, owner: Option<Uuid>, operator: bool) -> Result<Option<(Value, String)>, String> {
         let mut tx = self.pool.begin().await.map_err(crate::db::safe)?;
-        let Some(row) = sqlx::query("UPDATE public._brain_api_keys SET revoked_at=now(),updated_at=now() WHERE id=$1 AND ($2::uuid IS NULL OR user_id=$2) AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>now()) RETURNING user_id,name,scopes,daily_quota,monthly_quota,ceil(extract(epoch FROM expires_at-now())/86400)::bigint AS days")
-            .bind(id).bind(owner).fetch_optional(&mut *tx).await.map_err(crate::db::safe)? else {
+        let Some(row) = sqlx::query("UPDATE public._brain_api_keys SET revoked_at=now(),updated_at=now() WHERE id=$1 AND ($2::uuid IS NULL OR user_id=$2) AND ($3 OR NOT system) AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>now()) RETURNING user_id,name,scopes,system,daily_quota,monthly_quota,ceil(extract(epoch FROM expires_at-now())/86400)::bigint AS days")
+            .bind(id).bind(owner).bind(operator).fetch_optional(&mut *tx).await.map_err(crate::db::safe)? else {
             return Ok(None);
         };
         let key = NewKey {
@@ -331,7 +390,7 @@ impl Keys {
             daily_quota: row.get("daily_quota"),
             monthly_quota: row.get("monthly_quota"),
         };
-        let issued = self.insert(&mut tx, row.get("user_id"), &key, Some(id)).await?;
+        let issued = self.insert(&mut tx, row.get("user_id"), &key, Some(id), row.get("system")).await?;
         tx.commit().await.map_err(crate::db::safe)?;
         Ok(Some(issued))
     }
@@ -341,7 +400,7 @@ impl Keys {
         let Some((prefix, secret)) = parse(raw) else {
             return Ok(Err(Denied::Invalid));
         };
-        let row = sqlx::query("SELECT k.id,k.secret_hash,k.scopes,k.daily_quota,k.monthly_quota,k.revoked_at IS NOT NULL AS revoked,coalesce(k.expires_at<=now(),false) AS expired,u.id AS user_id,u.email,u.role,u.verified FROM public._brain_api_keys k JOIN public._brain_users u ON u.id=k.user_id WHERE k.prefix=$1 AND u.disabled_at IS NULL")
+        let row = sqlx::query("SELECT k.id,k.secret_hash,k.scopes,k.system,k.daily_quota,k.monthly_quota,k.revoked_at IS NOT NULL AS revoked,coalesce(k.expires_at<=now(),false) AS expired,u.id AS user_id,u.email,u.role,u.verified FROM public._brain_api_keys k JOIN public._brain_users u ON u.id=k.user_id WHERE k.prefix=$1 AND u.disabled_at IS NULL")
             .bind(prefix).fetch_optional(&self.pool).await.map_err(crate::db::safe)?;
         let presented = digest(secret);
         let stored: String = row
@@ -363,6 +422,7 @@ impl Keys {
             key_id: id,
             prefix: prefix.to_string(),
             scopes: row.get("scopes"),
+            system: row.get("system"),
             daily: row.get::<Option<i64>, _>("daily_quota").or(self.config.default_daily_quota),
             monthly: row
                 .get::<Option<i64>, _>("monthly_quota")
@@ -429,7 +489,7 @@ impl Keys {
     /// Keyset-paginated trace for one key, newest first.
     pub async fn events(&self, key: Uuid, filter: &EventFilter) -> Result<Value, String> {
         let limit = filter.limit.unwrap_or(50).clamp(1, 200);
-        let rows: Vec<Value> = sqlx::query_scalar("SELECT json_build_object('id',e.id,'at',e.at,'rid',e.rid,'method',e.method,'route',e.route,'path',e.path,'resource',e.resource,'action',e.action,'status',e.status,'latencyMs',e.latency_ms,'clientIp',e.client_ip,'userAgent',e.user_agent,'bytesOut',e.bytes_out,'queryKeys',e.query_keys) FROM public._brain_api_key_events e WHERE e.key_id=$1 AND ($2::timestamptz IS NULL OR e.at>=$2::timestamptz) AND ($3::timestamptz IS NULL OR e.at<$3::timestamptz) AND ($4::int IS NULL OR e.status=$4) AND ($5::text IS NULL OR e.resource=$5) AND ($6::bigint IS NULL OR e.id<$6) ORDER BY e.id DESC LIMIT $7")
+        let rows: Vec<Value> = sqlx::query_scalar("SELECT json_build_object('id',e.id,'at',e.at,'rid',e.rid,'method',e.method,'route',e.route,'path',e.path,'resource',e.resource,'action',e.action,'status',e.status,'latencyMs',e.latency_ms,'clientIp',e.client_ip,'userAgent',e.user_agent,'bytesOut',e.bytes_out,'queryKeys',e.query_keys,'system',e.system) FROM public._brain_api_key_events e WHERE e.key_id=$1 AND ($2::timestamptz IS NULL OR e.at>=$2::timestamptz) AND ($3::timestamptz IS NULL OR e.at<$3::timestamptz) AND ($4::int IS NULL OR e.status=$4) AND ($5::text IS NULL OR e.resource=$5) AND ($6::bigint IS NULL OR e.id<$6) ORDER BY e.id DESC LIMIT $7")
             .bind(key).bind(filter.from.as_deref()).bind(filter.to.as_deref()).bind(filter.status).bind(filter.resource.as_deref()).bind(filter.before).bind(limit)
             .fetch_all(&self.pool).await.map_err(crate::db::safe)?;
         let next = if rows.len() as i64 == limit {
@@ -491,7 +551,7 @@ async fn write_events(pool: PgPool, mut receiver: mpsc::Receiver<Event>) {
             }
         }
         let column = |f: fn(&Event) -> Option<String>| batch.iter().map(f).collect::<Vec<_>>();
-        let result = sqlx::query("INSERT INTO public._brain_api_key_events(key_id,rid,method,route,path,resource,action,status,latency_ms,client_ip,user_agent,bytes_out,query_keys) SELECT k,r,m,ro,p,re,a,s,l,ip,ua,b,CASE WHEN q='' THEN '{}'::text[] ELSE string_to_array(q,',') END FROM UNNEST($1::uuid[],$2::text[],$3::text[],$4::text[],$5::text[],$6::text[],$7::text[],$8::int[],$9::int[],$10::text[],$11::text[],$12::bigint[],$13::text[]) AS t(k,r,m,ro,p,re,a,s,l,ip,ua,b,q) WHERE EXISTS (SELECT 1 FROM public._brain_api_keys x WHERE x.id=t.k)")
+        let result = sqlx::query("INSERT INTO public._brain_api_key_events(key_id,rid,method,route,path,resource,action,status,latency_ms,client_ip,user_agent,bytes_out,query_keys,system) SELECT k,r,m,ro,p,re,a,s,l,ip,ua,b,CASE WHEN q='' THEN '{}'::text[] ELSE string_to_array(q,',') END,sy FROM UNNEST($1::uuid[],$2::text[],$3::text[],$4::text[],$5::text[],$6::text[],$7::text[],$8::int[],$9::int[],$10::text[],$11::text[],$12::bigint[],$13::text[],$14::bool[]) AS t(k,r,m,ro,p,re,a,s,l,ip,ua,b,q,sy) WHERE EXISTS (SELECT 1 FROM public._brain_api_keys x WHERE x.id=t.k)")
             .bind(batch.iter().map(|e| e.key_id).collect::<Vec<_>>())
             .bind(column(|e| e.rid.clone()))
             .bind(batch.iter().map(|e| e.method.clone()).collect::<Vec<_>>())
@@ -505,6 +565,7 @@ async fn write_events(pool: PgPool, mut receiver: mpsc::Receiver<Event>) {
             .bind(column(|e| e.user_agent.clone()))
             .bind(batch.iter().map(|e| e.bytes_out).collect::<Vec<_>>())
             .bind(batch.iter().map(|e| e.query_keys.join(",")).collect::<Vec<_>>())
+            .bind(batch.iter().map(|e| e.system).collect::<Vec<_>>())
             .execute(&pool)
             .await;
         if result.is_err() {

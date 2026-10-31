@@ -310,7 +310,7 @@ See `docs/backend/analytics.md`.
 
 `ref:<resource>` fields keep a foreign key (`on_delete: restrict|cascade|set_null`; missing id → 422 `REFERENCE_NOT_FOUND`,
 referenced on restrict delete → 409 `REFERENCE_IN_USE`). Optional `query.jsbrain` declares list filters (`?f=v`, `?f[op]=v`,
-`now-7d`), `sort` (`?sort=-price,title`, ties by id), `include` (one level), named `aggregate`s and related `count`s;
+`now-7d`), `sort` (`?sort=-price,title`, ties by id), `include` (dotted paths up to three levels), `or` groups (`?group.field=v`), `?fields=a,b`, `?owner=me`, named `aggregate`s and related `count`s;
 undeclared or repeated parameters → 422. Lists return `total` and `next_cursor` (pass back as `cursor` or `after`).
 Read grants take row conditions (`{ public: { where: { status: 'published' } } }`, OR-ed; hidden rows answer 404 on every read channel; B0749 warns on an unconditioned public read with a state field, `expose_all_rows: true` declares it); `api: false` makes a resource server-only (`ctx.backend.service(name)`).
 Policy grants `owner.<ref>[.<ref>]` scope rows through relations; field option `visible: ['owner','admin']` hides
@@ -339,6 +339,7 @@ weights A-D on searchable fields; `docs/backend/search.md`). Record ids are UUID
 (`docs/backend/ids.md`).
 Job handlers get the same `ctx.backend` when the worker has `BRAIN_BACKEND_URL` and `BRAIN_JOBS_API_KEY` (a scoped
 project API key; it acts as its owner under each policy). See `docs/backend/job-backend.md`.
+Queues and routes may declare `runAs: 'system'` to use an operator-created system key (`keys create --system`), which bypasses policy, owner scope and `private`/`readonly` fields within its scopes. Routes get `ctx.backend` only with `runAs`. `ctx.backend.files(bucket)` works from jobs, routes and server code with a `files.<bucket>` scope.
 Reads and writes run through the same native schemas, policies and authenticated cookies, not a second database client.
 Writes require a same-origin POST server function; they are rejected from GET/load. Put domain logic in server-only
 service/repository `.jsbrain` modules and pass `ctx` explicitly. Request JSON is limited to 64 KiB, responses to 2 MiB,
