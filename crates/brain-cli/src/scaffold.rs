@@ -444,7 +444,14 @@ fn add_locale(root: &Path, code: &str, writer: &std::fs::File) -> Result<PathBuf
         crate::run_fix_only_with_writer(Some(root.to_path_buf()), Some(&["B1403"]), &mut |_, _| {}, writer)?;
     }
     if fresh || fs::read_to_string(&path).is_ok_and(|t| t.trim() == "{}" || t.trim() == "{\n}") {
-        fs::write(&path, fs::read_to_string(&def_file).unwrap_or_else(|_| "{\n}\n".into())).map_err(|e| e.to_string())?;
+        let mut copy = fs::read_to_string(&def_file).unwrap_or_else(|_| "{\n}\n".into());
+        // English added to a site in another language: the framework's own texts (form.*, error_state.*) are known
+        // in English, so they arrive translated instead of as a copy of the default language.
+        let english = |l: &str| l == "en" || l.starts_with("en-");
+        if english(code) && !english(&default) {
+            copy = brain_check::i18n::with_framework_english(&copy);
+        }
+        fs::write(&path, copy).map_err(|e| e.to_string())?;
     }
     Ok(path)
 }

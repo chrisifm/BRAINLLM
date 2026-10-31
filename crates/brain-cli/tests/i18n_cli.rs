@@ -113,3 +113,34 @@ fn add_locale_moves_every_text_once() {
     assert_eq!(std::fs::read_to_string(dir.join("i18n/es.json")).unwrap(), en);
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// Adding English to a site whose default is another language: the framework's own keys (`form.*`, `error_state.*`)
+/// get their built-in English texts instead of a copy of the default language; the app's keys are copied to translate.
+#[test]
+fn add_locale_en_fills_framework_texts_in_english() {
+    let dir = std::env::temp_dir().join(format!("bi18n-en-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("views")).unwrap();
+    std::fs::create_dir_all(dir.join("i18n")).unwrap();
+    std::fs::write(dir.join("brain.json"), "{\n  \"i18n\": { \"default\": \"es\", \"locales\": [\"es\"] }\n}\n").unwrap();
+    std::fs::write(dir.join("app.brain"), "<html lang=\"es\"><head><meta charset=\"utf-8\"></head><body><slot /></body></html>\n").unwrap();
+    std::fs::write(dir.join("views/index.brain"), "<meta seo title={t('home.title')} description={t('home.title')}>\n<main><h1>{t('home.title')}</h1></main>\n").unwrap();
+    // Tagged English stand-ins for the default language (the repository is English only).
+    let es = "{\n  \"home.title\": \"Hello [es]\",\n  \"form.required\": \"Required [es]\",\n  \"form.min_chars\": \"At least {n} chars [es]\",\n  \"error_state.retry\": \"Retry [es]\",\n  \"form.custom\": \"Custom [es]\"\n}\n";
+    std::fs::write(dir.join("i18n/es.json"), es).unwrap();
+    let bin = env!("CARGO_BIN_EXE_brain");
+    let o = Command::new(bin).args(["add", "locale", "en"]).current_dir(&dir).stdin(Stdio::null()).output().unwrap();
+    assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+    let en = std::fs::read_to_string(dir.join("i18n/en.json")).unwrap();
+    for want in [
+        "\"home.title\": \"Hello [es]\"",
+        "\"form.required\": \"Required\"",
+        "\"form.min_chars\": { \"one\": \"At least {n} character\", \"other\": \"At least {n} characters\" }",
+        "\"error_state.retry\": \"Retry\"",
+        "\"form.custom\": \"Custom [es]\"",
+    ] {
+        assert!(en.contains(want), "missing {want} in:\n{en}");
+    }
+    assert_eq!(std::fs::read_to_string(dir.join("i18n/es.json")).unwrap(), es, "the default file is untouched");
+    let _ = std::fs::remove_dir_all(&dir);
+}

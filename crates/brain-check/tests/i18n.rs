@@ -204,3 +204,21 @@ fn b1403_covers_attributes_meta_seo_and_literals_in_expressions() {
     let d = check(&root, "views/posts.brain", &view);
     assert!(!d.iter().any(|d| d.code == "B1403"), "{d:#?}");
 }
+
+#[test]
+fn framework_english_covers_every_runtime_message_key() {
+    // Every `msg('form.x', …)` of the runtime and every `say('x', …)` of <ErrorState> has its English text in
+    // FRAMEWORK_EN, so `brain add locale en` on a site in another language translates them all.
+    let rt = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime");
+    let mut keys = std::collections::BTreeSet::new();
+    for (file, call, prefix) in [("brain-schema.js", "msg('", ""), ("brain-form.js", "msg('", ""), ("ui/error-state.brain", "say('", "error_state.")] {
+        let src = std::fs::read_to_string(rt.join(file)).unwrap();
+        for part in src.split(call).skip(1) {
+            keys.insert(format!("{prefix}{}", part.split('\'').next().unwrap()));
+        }
+    }
+    keys.retain(|k| k != "error_state.' + key + '" && !k.contains(' '));
+    let have: Vec<&str> = brain_check::i18n::FRAMEWORK_EN.iter().map(|(k, _)| *k).collect();
+    let missing: Vec<&String> = keys.iter().filter(|k| !have.contains(&k.as_str())).collect();
+    assert!(keys.len() >= 25 && missing.is_empty(), "missing English for {missing:?}");
+}

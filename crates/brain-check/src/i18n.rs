@@ -428,6 +428,79 @@ pub fn check_locales(i18n: &I18n) -> Vec<Diag> {
     out
 }
 
+/// The framework's own keys with their built-in English texts (the runtime's defaults), as JSON values: form
+/// validation (`brain-schema.js`, `brain-form.js`) and the kit's `<ErrorState>`.
+pub const FRAMEWORK_EN: &[(&str, &str)] = &[
+    ("form.required", "\"Required\""),
+    ("form.list", "\"Must be a list\""),
+    ("form.min_items", "\"Choose at least {n}\""),
+    ("form.max_items", "{ \"one\": \"At most {n} item\", \"other\": \"At most {n} items\" }"),
+    ("form.item", "\"Item {n}: {error}\""),
+    ("form.number", "\"Enter a number\""),
+    ("form.min", "\"Must be at least {n}\""),
+    ("form.max", "\"Must be at most {n}\""),
+    ("form.email", "\"Enter a valid email\""),
+    ("form.url", "\"Enter a valid URL\""),
+    ("form.date", "\"Enter a valid date\""),
+    ("form.text", "\"Enter text\""),
+    ("form.boolean", "\"Choose true or false\""),
+    ("form.min_chars", "{ \"one\": \"At least {n} character\", \"other\": \"At least {n} characters\" }"),
+    ("form.max_chars", "{ \"one\": \"At most {n} character\", \"other\": \"At most {n} characters\" }"),
+    ("form.error", "\"Something went wrong. Try again.\""),
+    ("form.check_failed", "\"Could not check this value.\""),
+    ("error_state.offline", "\"You are offline.\""),
+    ("error_state.network", "\"The connection was lost.\""),
+    ("error_state.timeout", "\"The server took too long to answer.\""),
+    ("error_state.schema", "\"The server sent something unexpected.\""),
+    ("error_state.unauthorized", "\"Sign in to continue.\""),
+    ("error_state.forbidden", "\"You do not have permission to see this.\""),
+    ("error_state.not_found", "\"Not found.\""),
+    ("error_state.invalid", "\"Check the highlighted fields.\""),
+    ("error_state.rate_limited", "\"Too many requests. Trying again in {n} seconds.\""),
+    ("error_state.server", "\"Something went wrong on our side.\""),
+    ("error_state.sign_in", "\"Sign in\""),
+    ("error_state.retry", "\"Retry\""),
+    ("error_state.reference", "\"Reference: {id}\""),
+];
+
+/// A locale file copied from a non-English default, with the framework keys it has rewritten to their English text
+/// (`brain add locale en`): only these keys have a known English value; the app's keys stay as the copy to translate.
+/// A key whose placeholders differ from the English text is left alone (B1404 would flag it).
+pub fn with_framework_english(src: &str) -> String {
+    let f = parse_locale(src, "en", "i18n/en.json");
+    if f.error.is_some() {
+        return src.to_string();
+    }
+    let mut edits: Vec<(usize, usize, &str)> = Vec::new();
+    for (key, value) in FRAMEWORK_EN {
+        let Some((text, _, at)) = f.entries.get(*key) else { continue };
+        let english = parse_locale(&format!("{{\"k\": {value}}}"), "en", "x");
+        if english.entries.get("k").is_none_or(|(t, _, _)| t.vars() != text.vars()) {
+            continue;
+        }
+        let mut j = J { s: src, b: src.as_bytes(), i: *at };
+        if j.string().is_err() {
+            continue;
+        }
+        j.ws();
+        if j.b.get(j.i) != Some(&b':') {
+            continue;
+        }
+        j.i += 1;
+        j.ws();
+        let start = j.i;
+        if j.skip_value().is_ok() {
+            edits.push((start, j.i, value));
+        }
+    }
+    edits.sort_by_key(|e| std::cmp::Reverse(e.0));
+    let mut out = src.to_string();
+    for (a, b, v) in edits {
+        out.replace_range(a..b, v);
+    }
+    out
+}
+
 /// Text with letters (not just numbers, punctuation or whitespace): what B1403 considers translatable.
 pub fn translatable(s: &str) -> bool {
     s.chars().filter(|c| c.is_alphabetic()).count() >= 2
