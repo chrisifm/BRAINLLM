@@ -21,7 +21,20 @@ if (Number.isInteger(owner) && owner > 1) {
 }
 // stdout is the protocol channel: the user's console.log calls go to stderr (brain run terminal).
 const out = process.stdout.write.bind(process.stdout)
-console.log = console.info = (...a) => console.error(...a)
+const raw = { warn: console.warn.bind(console), error: console.error.bind(console) }
+// `brain trace` under `brain run`: `TRC <json>` lines on the protocol channel, one request at a time like this loop.
+const tracing = process.env.BRAIN_TRACE === '1'
+let traceRid = null
+const trace = (kind, level, fields) => { if (tracing) { try { out(`TRC ${JSON.stringify({ ts: Date.now(), module: 'server', kind, level, request_id: traceRid, ...fields })}\n`) } catch {} } }
+const failure = (e, where) => {
+  raw.error(String(e?.stack ?? e))
+  trace('exception', 'error', { title: `${e?.name || 'Error'}: ${e?.message ?? e}`, data: { stack: String(e?.stack ?? e), where } })
+}
+if (tracing) for (const [method, level] of [['warn', 'warn'], ['error', 'error']]) console[method] = (...a) => {
+  raw[method](...a)
+  trace('console', level, { title: a.map(x => (typeof x === 'string' ? x : x?.stack || (() => { try { return JSON.stringify(x) } catch { return String(x) } })())).join(' ').slice(0, 1024) })
+}
+console.log = console.info = (...a) => raw.error(...a)
 // response headers as "name\u0001value\u0002…" (a header may repeat: set-cookie)
 const flat = h => Object.entries(h || {}).flatMap(([k, v]) => (Array.isArray(v) ? v : [v]).map(x => k + '\u0001' + x)).join('\u0002')
 // the request's session from its signed cookie (server.mjs sessionFrom), so login/logout set cookies in dev too
@@ -91,6 +104,7 @@ const finishContext = ctx => { const native = nativeContexts.get(ctx); if (nativ
 process.once('exit', () => nativeBridge?.close())
 for await (const line of createInterface({ input: process.stdin })) {
   const { id, file, fn, ctx, args, probe, rpc, raw, key, form, rules, chain, guards, middleware, secret, contextServer, preauthenticated, nativeRequired, locale, dict, timeout, limit } = JSON.parse(line)
+  traceRid = typeof ctx?.rid === 'string' ? ctx.rid : null
   if (chain) {
     // _guard/_middleware of the route through server.mjs's runChain, with ctx.user from the signed session cookie
     try {
@@ -106,7 +120,7 @@ for await (const line of createInterface({ input: process.stdin })) {
         out(`CHN ${id} ${JSON.stringify({ kind, location: r.redirect || '', status: String(r.status || 303), reason: String(r.deny ?? ''), user: JSON.stringify(c.user ?? null) })}\n`)
       } finally { finishContext(c) }
     } catch (e) {
-      console.error(String(e?.stack ?? e))
+      failure(e, 'guard')
       out(`CHN ${id} ${JSON.stringify({ kind: 'error', status: String(e?.status || 500), reason: String(e?.message ?? e) })}\n`)
     }
     continue
@@ -120,11 +134,11 @@ for await (const line of createInterface({ input: process.stdin })) {
         // the page's language (§37): its dictionary is what form() in the browser validates with
         if (dict) { const G = globalThis, D = (G.__brainDict ||= {}); for (const l in dict) D[l] = dict[l] }
         const r = await S.callForm({ module: m, raw, ctx: c, rules: R, key, locale: locale || undefined, timeout, limit })
-        if (r.cause) console.error(String(r.cause?.stack ?? r.cause))
+        if (r.cause) failure(r.cause, 'form')
         out(`FRM ${id} ${JSON.stringify({ status: r.status, location: r.location || '', state: JSON.stringify(r.state || null), body: JSON.stringify(r.body || null), headers: flat({ ...(r.headers || {}), ...await contextHeaders(c) }) })}\n`)
       } finally { finishContext(c) }
     } catch (e) {
-      console.error(String(e?.stack ?? e))
+      failure(e, 'form')
       out(`FRM ${id} ${JSON.stringify({ status: Number.isInteger(e?.status) ? e.status : 500, location: '', state: 'null', body: '{"error":"Request could not complete"}' })}\n`)
     }
     continue
@@ -137,11 +151,11 @@ for await (const line of createInterface({ input: process.stdin })) {
       const c = await withSession(S, ctx, secret, false, nativeRequired)
       try {
         const r = await S.callRpc({ fn: m[fn], args: raw, ctx: c, key, timeout, limit })
-        if (r.cause) console.error(String(r.cause?.stack ?? r.cause))
+        if (r.cause) failure(r.cause, 'rpc')
         out(`RES ${id} ${JSON.stringify({ status: r.status, body: JSON.stringify(r.body ?? null), headers: flat({ ...(r.headers || {}), ...await contextHeaders(c) }) })}\n`)
       } finally { finishContext(c) }
     } catch (e) {
-      console.error(String(e?.stack ?? e))
+      failure(e, 'rpc')
       out(`RES ${id} ${JSON.stringify({ status: Number.isInteger(e?.status) ? e.status : 500, body: '{"error":"Request could not complete"}' })}\n`)
     }
     continue
@@ -168,7 +182,8 @@ for await (const line of createInterface({ input: process.stdin })) {
     else if (contextServer && e?.status === 404 && e?.constructor?.name === 'HttpError') out(`OK ${id} {"notFound":true,"status":404}\n`) // as server.mjs: the 404 page
     else if (contextServer && e?.status === 503) out(`STATUS ${id} ${JSON.stringify({status:503,message:'Native authentication is temporarily unavailable'})}\n`)
     else if (contextServer && e?.constructor?.name === 'HttpError' && Number.isInteger(e.status) && e.status >= 400 && e.status < 600) out(`STATUS ${id} ${JSON.stringify({status:e.status,message:'The request could not complete'})}\n`) // as server.mjs: a deliberate status never shows its message
-    else out(`ERR ${id} ${JSON.stringify(String(e?.stack ?? (e && typeof e === 'object' ? JSON.stringify(e) : e)))}\n`)
+    else { trace('exception', 'error', { title: `${e?.name || 'Error'}: ${e?.message ?? e}`, data: { stack: String(e?.stack ?? e), where: fn } })
+    out(`ERR ${id} ${JSON.stringify(String(e?.stack ?? (e && typeof e === 'object' ? JSON.stringify(e) : e)))}\n`) }
   }
 }
 "#;
@@ -275,6 +290,7 @@ impl Sidecar {
         private: bool,
         script: &str,
     ) -> io::Result<Sidecar> {
+        let sink = (!production && !private).then(|| crate::trace::for_root(root)).flatten();
         let mut command =
             Command::new(std::env::var("BRAIN_NODE").unwrap_or_else(|_| "node".into()));
         #[cfg(unix)]
@@ -288,6 +304,7 @@ impl Sidecar {
             .env("NODE_ENV", if production {"production"}else{"development"})
             .env("BRAIN_SIDECAR_PARENT",std::process::id().to_string())
             .env("BRAIN_SIDECAR_GROUP",if cfg!(unix){"1"}else{"0"})
+            .envs(sink.as_ref().map(|_| ("BRAIN_TRACE", "1")))
             .current_dir(root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -325,6 +342,11 @@ impl Sidecar {
             {
                 if line.len() > frame_limit {
                     break;
+                }
+                if let (Some(sink), Some(event)) = (&sink, line.strip_prefix("TRC ")) {
+                    sink.record(event.trim_end().to_string());
+                    line.clear();
+                    continue;
                 }
                 let mut pending = std::mem::take(&mut line);
                 loop {

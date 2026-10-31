@@ -119,7 +119,7 @@ try {
     run(exe('createdb'),['-h','127.0.0.1','-p',String(port),'-U','brain_test','backend_roles'])
     {
       const rolesEnv={...cliEnv,DATABASE_URL:`postgres://brain_test@127.0.0.1:${port}/backend_roles`}
-      const cli=(args,cwd)=>{const r=spawnSync(binary,args,{cwd,env:rolesEnv,encoding:'utf8',timeout:20000,maxBuffer:256*1024});if(r.status!==0)throw Error('Roles upgrade smoke failed at '+args.join(' ')+': '+(r.stderr||r.stdout).slice(0,1000));return JSON.parse(r.stdout)}
+      const cli=(args,cwd)=>{const r=spawnSync(binary,args,{cwd,env:rolesEnv,encoding:'utf8',timeout:20000,maxBuffer:8*1024*1024});if(r.status!==0)throw Error('Roles upgrade smoke failed at '+args.join(' ')+': '+(r.stderr||r.stdout).slice(0,1000));return JSON.parse(r.stdout)}
       const sql=(text)=>{const r=spawnSync(exe('psql'),['-h','127.0.0.1','-p',String(port),'-U','brain_test','-d','backend_roles','-At','-v','ON_ERROR_STOP=1','-c',text],{encoding:'utf8'});if(r.status!==0)throw Error('Roles upgrade smoke SQL failed: '+r.stderr.slice(0,500));return r.stdout.trim()}
       spawnSync(binary,['new','roles-app','--json'],{cwd:dir,env:rolesEnv,encoding:'utf8',timeout:20000})
       const legacyApp=join(dir,'roles-app'),write=(path,text)=>{mkdirSync(join(legacyApp,path,'..'),{recursive:true});writeFileSync(join(legacyApp,path),text)}

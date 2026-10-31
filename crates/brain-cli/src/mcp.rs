@@ -810,6 +810,7 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
                     return Ok(Json::obj([("url", Json::str(d.url())), ("port", Json::Num(d.addr.port() as f64))]).stringify());
                 }
                 let root = app(a)?;
+                brain_serve::trace::enable(&root);
                 let opts = brain_serve::Options {
                     root: root.clone(),
                     host: "127.0.0.1".into(),
@@ -944,6 +945,36 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
                 Ok(capped_items("logs", &d.logs(num(a, "since").unwrap_or(0.0) as u64, arg(a, "level").as_deref())))
             })
         },
+    });
+    tools.push(Tool {
+        name: "brain_trace",
+        description: "What `brain run` or brain_run_start captured in development: navigation, RPC and fetch with payload and response, status and timing, browser and server errors with mapped .brain locations, console warnings, CSP and CORS failures, sockets, backend queries and leaks, redacted and stored locally. One id follows a request through every layer. Pass `requestId` for one request, `issues` for failures grouped with their B-code and fix.",
+        input_schema: schema(
+            [
+                ("since", "string", "window such as 30s, 5m, 2h, 1d"),
+                ("failed", "boolean", "only errors and failed requests"),
+                ("module", "string", "source: browser, server, backend, memory or a registered module"),
+                ("requestId", "string", "a whole request across layers (at least the first 8 characters)"),
+                ("issues", "boolean", "grouped failures instead of events"),
+                ("limit", "number", "newest N (default 100, at most 1000)"),
+                ("app", "string", "app folder"),
+            ],
+            &[],
+        ),
+        output_schema: out([("schemaVersion", "number"), ("more", "boolean")]),
+        run: Box::new(move |a| {
+            let root = app(a)?;
+            let text = |key: &str| a.get(key).and_then(|value| value.as_str()).map(str::to_string);
+            let flag = |key: &str| matches!(a.get(key), Some(Json::Bool(true)));
+            let mut query = serde_json::json!({ "json": true });
+            if let Some(since) = text("since") { query["since"] = since.into(); }
+            if flag("failed") { query["failed"] = true.into(); }
+            if let Some(module) = text("module") { query["module"] = module.into(); }
+            if let Some(id) = text("requestId") { query["requestId"] = id.into(); }
+            if flag("issues") { query["mode"] = "issues".into(); }
+            query["limit"] = num(a, "limit").unwrap_or(100.0).into();
+            brain_serve::trace::query(&root, &query.to_string()).map(|answer| answer.trim_end().to_string())
+        }),
     });
     tools.push(Tool {
         name: "brain_errors",

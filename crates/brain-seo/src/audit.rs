@@ -273,6 +273,36 @@ pub const CATALOG: &[(&str, &str, &str, &str)] = &[
         "A URL published by the previous build is gone; visitors and search engines that kept it get a 404.",
         "[{ \"from\": \"/old\", \"to\": \"/new\" }]",
     ),
+    (
+        "B1840",
+        "Failed request (brain trace)",
+        "`brain trace` saw a request answer 4xx or 5xx, or never get an answer. The same id links the browser payload, the server handling and the backend queries.",
+        "brain trace --failed\nbrain trace <requestId>",
+    ),
+    (
+        "B1841",
+        "Server exception (brain trace)",
+        "A server function, load or guard threw during development. The trace holds the stack mapped to .brain and the request that caused it.",
+        "brain trace issues\nbrain trace <requestId>",
+    ),
+    (
+        "B1842",
+        "Content Security Policy violation (brain trace)",
+        "The dev server sends the production policy in report-only mode: the browser allowed this load now, and production would block it. Load the resource from this origin or from https, or move the inline code to a module.",
+        "<script src=\"/lib/chart.js\"></script>",
+    ),
+    (
+        "B1843",
+        "Cross-origin request failed (brain trace)",
+        "The browser refused or could not complete a cross-origin request, usually because the service does not allow this origin. Call it from a server function, or allow the origin on that service.",
+        "server: async function rates() { return (await fetch(RATES_URL)).json() }",
+    ),
+    (
+        "B1844",
+        "Socket closed abnormally (brain trace)",
+        "A WebSocket closed without a clean close frame. Check that its endpoint is running and allows this origin; the trace shows the close code and the message counts.",
+        "brain trace --module browser --since 5m",
+    ),
 ];
 
 /// Arial advance widths in 1/1000 em for ASCII 32..=126 (what search results use to cut titles and snippets).
