@@ -112,7 +112,7 @@ The inventory covers:
 
 ## Next-development implementation checkpoints
 
-Version: **0.4.1-dev.0**, branch `development/0.4.1`, integration checkpoint `0a411f9`. Everything below is local development unless explicitly
+Version: **0.4.1-dev.0**, branch `development/0.4.1`, integration checkpoint `3987d0b`. Everything below is local development unless explicitly
 linked to a published release. npm remains 0.4.0. Candidate tests and an integrated complete gate are distinct.
 
 - [x] Atomic state/preview/writer leases release explicitly: 15 focused tests passed, including retained-descriptor
@@ -143,7 +143,14 @@ linked to a published release. npm remains 0.4.0. Candidate tests and an integra
 - [x] Scoped liveResource client, compiler registration, strict shared socket settings, CSP and optional private
   manifest generation integrated as 0a411f9 from 4aa7b74. Candidate runtime 433/433 and focused Rust 87/87
   passed (20 compiler, 63 packaging, four configuration). Unused applications retain identical asset bytes.
-  These are component results; CLI startup and Node manifest consumers remain separate acceptance items.
+  These are component results; combined acceptance remains required. Clock rollback throttle regression fixed
+  as a67c32a from e699338; candidate live/GC tests 13/13 passed.
+- [x] Strict Node manifest activation integrated as 72df6f3 from 48b2168. Candidate 19/19 tests passed, covering
+  true/false overrides, absent defaults, malformed flags and the required backend.
+- [x] Shared CLI development/test/static startup integrated as b440f9a from 86699c0. Candidate five CLI and 65 serve
+  tests passed. MCP now uses the same project startup helper (3987d0b); combined compilation remains required.
+- [x] Deployment integration afc4ded from 7661924: eight focused Rust tests, six real nginx TLS/TCP checks and
+  four actual PM2 configuration parser checks passed; compiler-rendered nginx hashes match tested templates.
 
 All new Linux results above use **Rust 1.96.1 diagnostic tooling** unless noted otherwise. They are not the final
 Rust 1.99.1 release gate and do not establish cross-platform execution or whole-application memory coverage.
@@ -156,21 +163,23 @@ Rust 1.99.1 release gate and do not establish cross-platform execution or whole-
 - [ ] Execute the added empty-context environment oracle and all serve tests on the combined tree. No ambient
   process environment may be added to ctx.env when its loader is absent.
 - [x] Integrate the scoped liveResource client/compiler/configuration/packaging component (0a411f9).
-- [ ] Complete and verify CLI development/test/static startup and Node private-manifest consumers against the
-  actual combined gateway/configuration source, including selected-port Origin preflight and disabled defaults.
-- [ ] Wire one reviewed brain.json backend.origins/sockets configuration into backend startup, Node SSR manifest,
-  Rust development proxy and exact public socket origin. Preserve disabled defaults and explicit operator overrides.
+- [x] Integrate CLI development/test/static startup, Node manifest consumers and MCP project-startup callsite.
+- [ ] Verify those consumers together on the combined tree, including selected-port Origin preflight and disabled defaults.
+- [x] Wire one reviewed brain.json backend.origins/sockets declaration into backend startup, private build manifest,
+  Node SSR and Rust development/static gateways. Disabled defaults and explicit overrides have focused coverage.
+- [ ] Validate that shared declaration end to end in an actual native/browser application.
 - [x] Candidate nginx deployment templates passed six actual parser/TLS/TCP checks: four disabled topologies and
   two socket-enabled Rust topologies; query/method/protocol/body rejection and credential projection included.
-- [ ] Integrate deployment sources and verify compiler-rendered PM2/nginx configurations against those tested
-  templates. Node routing preserves its credential projection and bridge lifecycle; it does not rename cookies.
+- [x] Integrate deployment sources and verify compiler-rendered PM2/nginx configurations against tested templates.
+  Node routing preserves its credential projection and bridge lifecycle; it does not rename cookies.
 - [ ] Run actual browser plus native PostgreSQL end-to-end CRUD/live/auth/session-switch/shutdown checks. Prefer an
   installed connected Viewer as documented; report headless fallback, AX and heap coverage precisely.
 - [ ] Re-run administrative budget/required/no-JS cases on the final combined tree. Keep the 30 KiB reference gate;
   do not hide the zero-headroom fixture or increase limits to pass.
 - [ ] Investigate source-map performance before any compiler-speed claim: seven paired diagnostic DEBUG runs showed
   large-prod **72.91 to 148.55 ms (+103.74%)**, despite the functional correction. Release-profile paired measurement
-  is prepared but not executed; classify tooling/profile/inputs accurately and fix material production regressions.
+  completed with the same diagnostic toolchain: seven paired release runs measured large-prod **12.59 to 20.57 ms
+  (+63.34%)** and simple-dev +24.99%. The material regression remains open; do not claim a global compiler speedup.
 - [ ] Run final workspace/runtime/fixture/source-input/privacy/English gates on the combined source and current
   stable Rust 1.99.1, plus a fresh frozen LLM gate for author-facing SPEC/CLI changes. No next-version publication yet.
 - [ ] Keep the original main checkout/index and all unrelated sessions intact; commits/push/review do not imply a main merge.
@@ -191,6 +200,14 @@ Rust 1.99.1 release gate and do not establish cross-platform execution or whole-
 - [ ] Reconcile remaining debt against actual source/tests. Do not check historical native-type/browser/backend
   lists wholesale. Full cross-module flow inference, arbitrary minified-byte provenance/explain-output and general
   CSE/strength reduction/loop-invariant hoisting are not established by these changes.
+
+## Current combined verification
+
+- [x] English and diff checks passed on checkpoint 3987d0b.
+- [x] Source-input inventory: 108 literal embeddings, zero findings; computed macro inputs require clean compilation.
+- [x] Future publisher policy regressions: three passed.
+- [ ] Combined immutable snapshot 3987d0b: runtime and Rust/compiler/pack/serve/CLI tests running; results must be
+  recorded after completion, not inferred from component totals.
 
 ## Resume procedure
 
