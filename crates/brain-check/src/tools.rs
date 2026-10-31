@@ -4,6 +4,8 @@
 //! - B1701 a tool without a same-named function in the script.
 //! - B1702 a tool name that is not snake_case, or repeated in the file.
 //! - B1703 a parameter without a type.
+//! - B1704 the function destructures other parameters than the tool declares (#106): an undeclared one never
+//!   arrives (agents send only what the schema lists) and a declared one the function ignores misleads the agent.
 
 use crate::Checker;
 use brain_parse::ast::*;
@@ -111,6 +113,14 @@ impl Checker<'_> {
                 if t.description.is_empty() {
                     self.push("B1703", m.span, format!("tool `{}` has no description", t.name), format!("write `{}: what it does (params)` — agents choose tools by their description", t.name));
                 }
+                if let Some((read, span)) = fns.contains(&t.name).then(|| read_params(c, &t.name)).flatten() {
+                    for (p, at) in read.iter().filter(|(p, _)| !t.params.iter().any(|d| d.name == *p)) {
+                        self.push("B1704", *at, format!("function `{}` reads `{p}`, which tool `{0}` does not declare (agents never send it)", t.name), format!("declare it in <meta tools> (`{p}:str`; types: {}) or remove it from the function's parameters", PARAM_TYPES.join(" ")));
+                    }
+                    for d in t.params.iter().filter(|d| !read.iter().any(|(p, _)| *p == d.name)) {
+                        self.push("B1704", span, format!("tool `{}` declares `{}`, which function `{0}` never reads", t.name, d.name), format!("destructure it (`({{ {} }})`) or remove `{}` from <meta tools>", t.params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "), d.name));
+                    }
+                }
             }
         }
         let mut forms = Vec::new();
@@ -123,6 +133,37 @@ impl Checker<'_> {
             }
         }
     }
+}
+
+/// The keys a tool function destructures from its argument object, with the span of each, plus the span of the
+/// parameter list (the function's when it takes none). `None` when the checker cannot tell and trusts the author: a
+/// whole-object parameter (`(args) =>`), a rest element, a computed key, or no plain function of that name.
+fn read_params(c: &Component, name: &str) -> Option<(Vec<(String, brain_parse::Span)>, brain_parse::Span)> {
+    let f = c.script.iter().find_map(|s| match s {
+        Stmt::Func(f) if f.name.as_ref().is_some_and(|n| n.name == name) => Some(f),
+        Stmt::Var(v) => v.decls.iter().find_map(|d| match (&d.pat, d.init.as_ref().map(Expr::unparen)) {
+            (Pat::Ident(i), Some(Expr::Func(f))) if i.name == name => Some(&**f),
+            _ => None,
+        }),
+        _ => None,
+    })?;
+    let Some(first) = f.params.first() else { return Some((Vec::new(), f.span)) };
+    let span = first.span();
+    let Pat::Object { props, rest: None, .. } = (match first {
+        Pat::Default { pat, .. } => pat,
+        p => p,
+    }) else {
+        return None;
+    };
+    let keys = props
+        .iter()
+        .map(|p| match &p.key {
+            PropKey::Ident(i) => Some((i.name.clone(), i.span)),
+            PropKey::Str { value, span, .. } => Some((value.clone(), *span)),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some((keys, span))
 }
 
 fn snake(n: &str) -> String {

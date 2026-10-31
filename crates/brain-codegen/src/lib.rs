@@ -1338,7 +1338,8 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
     if !exposed.is_empty() {
         body.push_str(&format!("  expose($p, {{ {} }});\n", exposed.join(", ")));
     }
-    // `<meta tools>` (WebMCP, §32): registered while the component is mounted (brain-mcp.js unregisters on dispose).
+    // `<meta tools>` (WebMCP, §32, #106): registered while the component is mounted (brain-mcp.js `registerTools`
+    // feature-detects the browser's model context, validates arguments and unregisters on dispose).
     let tools: Vec<brain_check::tools::Tool> = c.meta.iter().filter(|m| m.name == "tools").flat_map(|m| brain_check::tools::parse_tools(m.value.as_deref().unwrap_or(""))).collect();
     if !tools.is_empty() {
         let list: Vec<String> = tools.iter().map(tool_js).collect();
@@ -1531,11 +1532,11 @@ fn tool_js(t: &brain_check::tools::Tool) -> String {
         })
         .collect();
     let required: Vec<String> = t.params.iter().filter(|p| p.required).map(|p| js_str(&p.name)).collect();
+    let props = if props.is_empty() { "{}".to_string() } else { format!("{{ {} }}", props.join(", ")) };
     format!(
-        "{{ name: {}, description: {}, inputSchema: {{ type: \"object\", properties: {{ {} }}, required: [{}] }}, execute: {} }}",
+        "{{ name: {}, description: {}, inputSchema: {{ type: \"object\", properties: {props}, required: [{}] }}, execute: {} }}",
         js_str(&t.name),
         js_str(&t.description),
-        props.join(", "),
         required.join(", "),
         t.name
     )

@@ -10,7 +10,7 @@ book, subscribe, create a record. Do not expose:
 Support is feature-detected (`document.modelContext`, or Chrome's origin-trial `navigator.modelContext`); where the
 browser has none, nothing is registered and nothing breaks. WebMCP is not a standard yet.
 
-## Steps (declarative: ships today)
+## Steps (declarative: a form people already use)
 1. Start from a real `<form>` that already works for people (`brain guide forms`).
 2. Add `tool="snake_case_name"` and `tool-description="…"` to the `<form>`. The compiler emits the attribute names the
    current WebMCP draft uses.
@@ -21,6 +21,19 @@ browser has none, nothing is registered and nothing breaks. WebMCP is not a stan
    "Search the catalog by text and return up to 20 matching products with price and stock."
    Say when NOT to use it if a near tool exists ("Use add_to_cart to buy; this only searches").
 6. Keep the form usable without JS and without an agent: the agent fills the same fields a person does.
+
+## Steps (imperative: an action that is not a form)
+Use `<meta tools>` when the action has no form a person fills (clear completed tasks, add the current item to the
+cart) or needs typed values a form does not hold.
+1. Declare the tools in the component: `<meta tools="add_task: Add a task (text:str!, due:date); clear_done: Remove
+   completed tasks">`. Same naming and description rules as above; `!` marks a required parameter.
+2. Write a function with the same name that destructures exactly those parameters and returns what the agent should
+   read: `const add_task = async ({ text, due }) => { … return items.length }`.
+3. The tools are registered while the component is mounted and removed when it unmounts. Arguments are checked
+   against the declared types first: a missing required one or a wrong type answers `text: Required` (or the type's
+   message) and the function does not run. A thrown error answers `Error: <message>`.
+4. Mount a component with tools once per page: the browser refuses a second registration of the same name, so a
+   second instance exposes nothing (it still renders).
 
 ## Naming and description checklist
 - Verb first, lower snake_case, no app prefix, no version numbers.
@@ -43,15 +56,22 @@ brain shot /shop --text           # every field has a name in the accessibility 
 | CamelCase or duplicated tool name | — | snake_case, unique per page (SPEC rule; not machine-checked on `<form tool>`) |
 | description that repeats the name ("Search tool") | — | say what it does, needs and returns |
 | exposing delete/pay without a confirmation | — | keep the confirmation step in the UI |
-| `<meta tools>` in a component today | B0128 | planned (#106): use a `<form tool>` |
+| `<meta tools>` entry without a function of that name | B1701 | write `const add_task = async ({ text }) => …` |
+| tool parameter without a type | B1703 | `text:str` (types `str num bool list obj email url date any`) |
+| function destructures other parameters than the tool declares | B1704 | make `(text:str!, due:date)` and `({ text, due })` list the same names |
 
-## Planned (#106, not available yet)
-Imperative tools in a component: `<meta tools="add_task: Add a task (text:str!)">` plus a function of the same name,
-registered while the component is mounted (checks B1701 no function, B1702 bad or duplicate name, B1703 parameter
-without a type; B0128 until it ships). The runtime registration already passes WebMCP's optional `title` and the
-`annotations` hints (`readOnlyHint`, `consequentialHint`, `untrustedContentHint`) when given.
+## Imperative example
+```html
+<meta tools="add_task: Add a task to the list and return how many there are (text:str!, due:date); clear_done: Remove completed tasks">
+<script>
+  let items = sig([])
+  const add_task = async ({ text, due }) => { items = [...items, { id: items.length + 1, text, due, done: false }]; return items.length }
+  const clear_done = () => { items = items.filter(i => !i.done); return 'Removed completed tasks' }
+</script>
+<p>{items.length} tasks</p>
+```
 
-## Minimal correct example
+## Minimal correct example (declarative)
 ```html
 <script>
   let f = form({ q: 'str!<=80', max: 'num<=50' }, { submit: async (v) => navigate('/shop?q=' + encodeURIComponent(v.q)) })

@@ -10,7 +10,6 @@ use brain_parse::ast::*;
 fn instead(name: &str) -> &'static str {
     match name {
         "t" | "locale" => "write the text directly for now (single-language site); `t()` arrives with the runtime's brain-i18n.js",
-        "registerTools" => "remove `<meta tools>` for now; declarative `<form tool=\"name\" tool-description=\"…\">` already works, and imperative tools arrive with the runtime's brain-mcp.js `registerTools`",
         _ => "use a supported primitive; this one is not shipped by the runtime yet",
     }
 }

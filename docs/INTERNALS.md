@@ -1021,7 +1021,7 @@ specified elsewhere; ➕ = new in this section.
   if that token breaks the AA pair, B0408 reports it on the next pass. B0125 (markup required) counts `<meta>` and
   `<script src|type>` in `app.brain`'s head as markup. B0126 exempts `*.test.brain`.
 
-## 32. Dynamic metadata, generated SEO files and WebMCP (fixed 2026-10-13, dynamic sitemap 2026-10-29)
+## 32. Dynamic metadata, generated SEO files and WebMCP (fixed 2026-10-13, dynamic sitemap 2026-10-29, imperative tools 2026-10-30)
 **Metadata (COMPILER + TOOLCHAIN + RUNTIME)**
 - `<meta seo>` attributes accept expressions over `props` (the `load` result); `jsonld={obj}` serializes to
   `<script type="application/ld+json">` (escaped `</`), and `schema="Article"` stays a shortcut: one node of that
@@ -1063,18 +1063,32 @@ All configurable in `brain.json`.
 Mode v2 defaulting to denied until the app calls `consent('analytics')`; site verification becomes the meta tag.
 **WebMCP (agent tools)** — support verified 2026-10-13: Chrome origin trial (149+), API name moving from
 `navigator.modelContext` to `document.modelContext`; not a standard yet. Therefore:
-- Status (2026-10-29): the declarative `<form tool>` path ships. The imperative path is pending #106 (SPEC.md's
-  `<!--planned:#106-->` block): codegen emits `registerTools([...])` for `<meta tools>`, the runtime does not export
-  it yet, so `brain check` reports B0128 on `<meta tools>`.
-- RUNTIME `brain-mcp.js` (separate module): feature-detects either object; `registerTool({ name, description,
-  inputSchema, execute })` on mount, unregister on dispose; no-op when unsupported. (Pending #106.)
+- Status (2026-10-30): both paths ship. Declarative `<form tool>` is browser-native HTML; imperative `<meta tools>`
+  (#106) compiles to `registerTools([...])` from `brain-mcp.js`, imported only by components that declare tools (no
+  byte on other routes; B0128 no longer fires for it).
+- RUNTIME `brain-mcp.js` (separate module): feature-detects either object; registration and lifetime are one helper
+  (`own`) shared by `tool()` and `registerTools()`: `registerTool(def)` inside one effect of the calling component,
+  `unregister()` (or `unregisterTool(name)`) on dispose; no-op when unsupported, during SSR (`__brainSSR`) and route
+  prerender (`__brainRoute`). A registration the browser refuses (a name another mounted instance holds) is skipped,
+  so the page keeps rendering and that instance's unmount leaves the other's tool in place. `execute` validates the
+  arguments first (a bad one answers `field: message` and never runs the function) and answers with the result as
+  text, or `Error: message` when it throws.
   `tool(name, description, params, run, { title, readOnly, consequential, untrusted })` adds `title` and
   `annotations: { readOnlyHint, consequentialHint, untrustedContentHint }` (WebMCP draft 2026-10-27), only the keys
-  given (2026-10-29).
-- COMPILER: `<meta tools="name: description (param:type!, …)">` + a same-named function → schema from the same
-  mini-language as `form()` (pending #106); declarative `<form tool=… tool-description=…>` is emitted with the
-  attribute names the current spec uses (one table in the codegen, updated when the spec settles). B1701 tool without
-  a matching function, B1702 name not snake_case or duplicated on the page, B1703 parameter without a type.
+  given (2026-10-29). `registerTools([{ name, description, inputSchema, execute, title?, readOnly?, consequential?,
+  untrusted? }])` applies the same keys the same way; the `<meta tools>` mini-language has no syntax for them yet, so
+  compiled entries carry none. Its arguments are checked against the compiled schema: required = present (`false` and
+  `0` count), `string` with `format` email/uri/date and `number`/`boolean` through `brain-schema.js` `check`, `array`
+  and `object` by shape, `{}` (`any`) unchecked.
+- COMPILER: `<meta tools="name: description (param:type!, …)">` (tools separated by `;`, types `str num bool list obj
+  email url date any`) + a same-named function → `{ name, description, inputSchema, execute: <function> }` per tool,
+  the JSON Schema built at compile time (`tool_js` in brain-codegen); declarative `<form tool=… tool-description=…>`
+  is emitted with the attribute names the current spec uses (one table in the codegen, updated when the spec
+  settles). B1701 tool without a matching function, B1702 name not snake_case or duplicated on the page, B1703
+  parameter without a type, B1704 (2026-10-30) the function destructures a key the tool does not declare (agents
+  never send it; reported at the key) or the tool declares one the function never destructures (reported at the
+  parameter list; a function without parameters counts). A whole-object parameter, a rest element, a computed key or
+  a `server:` function are trusted (the checker cannot tell). No edits: either side may be the one to change.
 - Tools run with the page's permissions only; anything destructive should ask for confirmation in the UI.
 
 ## 33. `brain-seo`: the SEO module (fixed 2026-10-13, Chris: "much more powerful than WordPress")

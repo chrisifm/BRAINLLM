@@ -160,10 +160,10 @@ policy. Never hand-write `og:*` defaults, robots.txt or llms.txt.
 ## Agent tools (WebMCP)
 Expose what a page can do to browser AI agents. Declarative: `<form tool="search_products" tool-description="Search the
 catalog">` (each field's `<label>` becomes its description). Tool names are snake_case and unique per page.
-<!--planned:#106-->
-Imperative, in a component: `<meta tools="add_task: Add a task (text:str!)">` + a function of the same name; it is
-registered while the component is mounted.
-<!--/planned-->
+Imperative, in a component: `<meta tools="add_task: Add a task (text:str!, due:date)">` + a function of the same name
+that destructures exactly those parameters (`const add_task = async ({ text, due }) => …`; types `str num bool list obj
+email url date any`, `!` required; tools separated by `;`). It is registered while the component is mounted; its return
+value (or thrown message) is the agent's answer, and invalid arguments never reach it.
 
 ## Built-in ui/ kit (use before writing your own; no import needed)
 `<Button>` `<Input>` `<Select>` `<Checkbox>` `<Dialog>` `<Table>` `<Tabs>` `<Toast>` `<Menu>` `<Field>` — accessible,

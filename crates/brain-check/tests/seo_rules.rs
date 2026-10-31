@@ -1,4 +1,4 @@
-//! #104 (INTERNALS §32): B1601–B1604 metadata rules, B1701–B1703 WebMCP tools, `paths()` and `ViewSeo`.
+//! #104 (INTERNALS §32): B1601–B1604 metadata rules, B1701–B1704 WebMCP tools, `paths()` and `ViewSeo`.
 
 use brain_check::seo::{view_info, SeoValue};
 use brain_check::Ctx;
@@ -97,10 +97,32 @@ fn b17xx_tools() {
     let comp = |tools: &str, script: &str| format!("<meta tools=\"{tools}\">\n<script>{script}</script>\n<p>x</p>");
     assert!(codes_in("comp/t.brain", &comp("add_task: Add a task (text:str!)", "const add_task = ({ text }) => text"), &ctx).is_empty());
     assert_eq!(codes_in("comp/t.brain", &comp("add_task: Add a task (text:str!)", "const other = 1"), &ctx), ["B1701"]);
-    assert_eq!(codes_in("comp/t.brain", &comp("addTask: Add a task (text:str!)", "const addTask = () => 1"), &ctx), ["B1702"]);
-    assert_eq!(codes_in("comp/t.brain", &comp("add_task: Add (text)", "const add_task = () => 1"), &ctx), ["B1703"]);
+    assert_eq!(codes_in("comp/t.brain", &comp("addTask: Add a task (text:str!)", "const addTask = ({ text }) => 1"), &ctx), ["B1702"]);
+    assert_eq!(codes_in("comp/t.brain", &comp("add_task: Add (text)", "const add_task = ({ text }) => 1"), &ctx), ["B1703"]);
     assert_eq!(codes_in("comp/t.brain", &comp("a: A; a: B", "const a = () => 1"), &ctx), ["B1702"]);
     assert_eq!(codes_in("comp/t.brain", "<form tool=\"Search\"><input aria-label=\"q\" /></form>", &ctx), ["B1702"]);
+}
+
+#[test]
+fn b1704_tool_params_match_the_function() {
+    // #106: the agent sends exactly the declared parameters; the function destructures exactly those.
+    let ctx = Ctx::default();
+    let comp = |tools: &str, script: &str| format!("<meta tools=\"{tools}\">\n<script>{script}</script>\n<p>x</p>");
+    let ok = |tools: &str, script: &str| assert!(codes_in("comp/t.brain", &comp(tools, script), &ctx).is_empty(), "{tools} / {script}");
+    ok("add_task: Add a task (text:str!, due:date)", "const add_task = async ({ text, due }) => text");
+    ok("add_task: Add a task (text:str!, due:date)", "async function add_task({ due, text = '' }) { return text }");
+    ok("add_task: Add a task (text:str!, due:date)", "const add_task = ({ text, due: when } = {}) => when");
+    // Not destructured (a whole-object parameter or a rest element): the checker cannot tell, so it trusts the author.
+    ok("add_task: Add a task (text:str!)", "const add_task = (args) => args.text");
+    ok("add_task: Add a task (text:str!, due:date)", "const add_task = ({ text, ...rest }) => rest");
+    ok("clear_done: Remove completed tasks", "const clear_done = () => 1");
+    let bad = |tools: &str, script: &str| codes_in("comp/t.brain", &comp(tools, script), &ctx);
+    assert_eq!(bad("add_task: Add a task (text:str!)", "const add_task = ({ text, due }) => due"), ["B1704"]);
+    assert_eq!(bad("add_task: Add a task (text:str!, due:date)", "const add_task = ({ text }) => text"), ["B1704"]);
+    assert_eq!(bad("add_task: Add a task (text:str!)", "function add_task() { return 1 }"), ["B1704"]);
+    assert_eq!(bad("clear_done: Remove completed tasks", "const clear_done = ({ all }) => all"), ["B1704"]);
+    // No function at all is B1701 only.
+    assert_eq!(bad("add_task: Add a task (text:str!)", "const other = ({ x }) => x"), ["B1701"]);
 }
 
 #[test]
