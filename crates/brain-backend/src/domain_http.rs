@@ -73,7 +73,7 @@ fn failure(app: &App, error: Failure) -> Error {
                 }
                 e
             }
-            None => Error::internal(crate::db::safe(error)),
+            None => Error::database(error),
         },
     }
 }
@@ -97,12 +97,12 @@ fn hooked(r: &crate::Resource, ops: &[&str]) -> Result<()> {
 /// Run `body` against one transaction; commit only when it succeeds, then notify live subscribers.
 macro_rules! transactional {
     ($app:expr, $user:expr, |$engine:ident, $tx:ident| $body:expr) => {{
-        let mut $tx = $app.pool.begin().await.map_err(|e| Error::internal(crate::db::safe(e)))?;
+        let mut $tx = $app.pool.begin().await.map_err(|e| Error::database(e))?;
         let mut $engine = Engine::new(&$app.domain, &$app.resources, &$user);
         let outcome = $body;
         match outcome {
             Ok(value) => {
-                $tx.commit().await.map_err(|e| Error::internal(crate::db::safe(e)))?;
+                $tx.commit().await.map_err(|e| Error::database(e))?;
                 let changes = std::mem::take(&mut $engine.changes);
                 notify(&$app, changes);
                 Ok(value)

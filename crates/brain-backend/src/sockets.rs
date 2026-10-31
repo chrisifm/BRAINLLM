@@ -437,7 +437,7 @@ async fn authorize(
             .fetch_optional(&app.pool)
             .await
             .map_err(|error| {
-                let _ = Error::internal(crate::db::safe(error));
+                let _ = Error::database(error);
                 CheckFailure::Unavailable
             })?;
         let Some(owner) = owner else {

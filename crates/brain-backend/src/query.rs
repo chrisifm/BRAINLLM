@@ -19,6 +19,12 @@ const TEXT_KEY: usize = 256;
 const OPS: &[&str] = &["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "prefix", "iprefix", "exists", "has"];
 const RESERVED: &[&str] = &["search", "limit", "offset", "sort", "include", "cursor", "after", "aggregate", "count"];
 const TIMESTAMPS: &[&str] = &["created_at", "updated_at"];
+/// Candidates per search branch, before ranking.
+const SEARCH_CANDIDATES: i64 = 500;
+/// Budget of the typo branch: past it the full-text results answer alone and the response says `degraded`.
+const FUZZY_BUDGET: &str = "400ms";
+/// Deadline of every other statement of a search request.
+const SEARCH_DEADLINE: &str = "1s";
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -616,11 +622,20 @@ fn decode_cursor(raw: &str) -> Option<(Vec<Option<String>>, Uuid)> {
 pub enum ListError {
     Invalid(Problems),
     Denied(String),
-    Database(sqlx::Error),
+    Database { error: sqlx::Error, at: &'static std::panic::Location<'static>, branch: &'static str },
 }
 impl From<sqlx::Error> for ListError {
-    fn from(e: sqlx::Error) -> Self {
-        ListError::Database(e)
+    #[track_caller]
+    fn from(error: sqlx::Error) -> Self {
+        ListError::Database { error, at: std::panic::Location::caller(), branch: "page" }
+    }
+}
+impl ListError {
+    fn in_branch(self, name: &'static str) -> Self {
+        match self {
+            ListError::Database { error, at, .. } => ListError::Database { error, at, branch: name },
+            other => other,
+        }
     }
 }
 
@@ -763,10 +778,11 @@ struct Ctx<'a> {
     scope: &'a Scope,
     related: BTreeMap<String, Scope>,
     req: &'a ListRequest,
+    candidates: Option<Vec<Uuid>>,
 }
 impl Ctx<'_> {
-    /// WHERE body over the alias-free columns of the main table: scope, filters, related filters and search.
-    fn push_where(&self, q: &mut QueryBuilder<Postgres>) {
+    /// Authorization scope and declared filters over the alias-free columns of the current table.
+    fn push_scope(&self, q: &mut QueryBuilder<Postgres>) {
         self.scope.push(q, self.r, self.resources);
         for f in &self.req.filters {
             q.push(" AND ");
@@ -782,30 +798,75 @@ impl Ctx<'_> {
                 }
             }
         }
+    }
+    /// WHERE body: scope, filters and search. Three-character searches were resolved to `candidates` beforehand.
+    fn push_where(&self, q: &mut QueryBuilder<Postgres>) {
+        self.push_scope(q);
         let text = self.req.search.trim();
         if text.is_empty() {
             return;
         }
-        let table = format!("_brain_res_{}", self.r.name);
         if self.r.search.is_empty() {
             q.push(" AND false");
-        } else if text.chars().count() < 3 {
+        } else if let Some(ids) = &self.candidates {
+            q.push(" AND id=ANY(").push_bind(ids.clone()).push(")");
+        } else {
             q.push(" AND search_text LIKE public.unaccent('public.unaccent'::regdictionary,lower(")
                 .push_bind(escape_like(&text.to_lowercase()))
                 .push(")) ESCAPE '\\'");
-        } else {
-            // Bounded candidate branches, each carrying the same authorization scope (mirrors search.rs).
-            q.push(format!(" AND id IN (SELECT id FROM (SELECT id FROM {table} WHERE "));
-            self.scope.push(q, self.r, self.resources);
-            q.push(format!(" AND search_vector @@ websearch_to_tsquery('{cfg}',public.unaccent('public.unaccent'::regdictionary,", cfg = crate::search_config::regconfig(self.r)))
-                .push_bind(text.to_string())
-                .push(format!(")) ORDER BY ts_rank_cd(search_vector,websearch_to_tsquery('{cfg}',public.unaccent('public.unaccent'::regdictionary,", cfg = crate::search_config::regconfig(self.r)))
-                .push_bind(text.to_string())
-                .push(format!("))) DESC,id LIMIT 500) f UNION SELECT id FROM (SELECT id FROM {table} WHERE "));
-            self.scope.push(q, self.r, self.resources);
-            q.push(" AND public.unaccent('public.unaccent'::regdictionary,")
-                .push_bind(text.to_lowercase())
-                .push(") OPERATOR(public.<%) search_text ORDER BY id LIMIT 500) s)");
+        }
+    }
+    /// Full-text ids in rank order, each carrying the same authorization scope and filters as the page.
+    async fn full_text(&self, tx: &mut sqlx::Transaction<'_, Postgres>, text: &str) -> Result<Vec<Uuid>, sqlx::Error> {
+        let cfg = crate::search_config::regconfig(self.r);
+        let tsquery = format!("websearch_to_tsquery('{cfg}',public.unaccent('public.unaccent'::regdictionary,");
+        let mut q = QueryBuilder::<Postgres>::new(format!("SELECT id FROM _brain_res_{} WHERE ", self.r.name));
+        self.push_scope(&mut q);
+        q.push(format!(" AND search_vector @@ {tsquery}")).push_bind(text.to_string()).push(format!(")) ORDER BY ts_rank_cd(search_vector,{tsquery}")).push_bind(text.to_string()).push(format!("))) DESC,id LIMIT {SEARCH_CANDIDATES}"));
+        q.build_query_scalar().fetch_all(&mut **tx).await
+    }
+    /// Typo candidates within [`FUZZY_BUDGET`]; `None` when the budget ran out, which leaves the transaction usable.
+    async fn fuzzy(&self, tx: &mut sqlx::Transaction<'_, Postgres>, text: &str) -> Result<Option<Vec<Uuid>>, sqlx::Error> {
+        use sqlx::Acquire;
+        let mut savepoint = tx.begin().await?;
+        sqlx::raw_sql(sqlx::AssertSqlSafe(format!("SET LOCAL statement_timeout='{FUZZY_BUDGET}'"))).execute(&mut *savepoint).await?;
+        let mut q = QueryBuilder::<Postgres>::new(format!("SELECT id FROM _brain_res_{} WHERE ", self.r.name));
+        self.push_scope(&mut q);
+        q.push(" AND public.unaccent('public.unaccent'::regdictionary,").push_bind(text.to_lowercase()).push(format!(") OPERATOR(public.<%) search_text ORDER BY id LIMIT {SEARCH_CANDIDATES}"));
+        match q.build_query_scalar().fetch_all(&mut *savepoint).await {
+            Ok(ids) => {
+                savepoint.commit().await?;
+                sqlx::raw_sql(sqlx::AssertSqlSafe(format!("SET LOCAL statement_timeout='{SEARCH_DEADLINE}'"))).execute(&mut **tx).await?;
+                Ok(Some(ids))
+            }
+            Err(error) if crate::db::sqlstate(&error).as_deref() == Some("57014") => {
+                savepoint.rollback().await?;
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+/// Resolves a three-character search into candidate ids: full text first, then typo matches when they can still change
+/// the answer. A typo branch that runs out of budget degrades the response instead of failing it.
+async fn search_candidates(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, text: &str, ranked: bool) -> Result<(Vec<Uuid>, bool), ListError> {
+    let mut ids = ctx.full_text(tx, text).await.map_err(|e| ListError::from(e).in_branch("search.full_text"))?;
+    // Ranked pages list full-text matches first, so a filled page cannot change. Sorted pages and aggregates can.
+    let filled = ranked && ctx.req.aggregate.is_empty() && ids.len() as i64 >= ctx.req.limit + ctx.req.offset;
+    // pg_trgm extracts nothing from punctuation: the scan could only find no rows.
+    if filled || !text.chars().any(char::is_alphanumeric) {
+        return Ok((ids, false));
+    }
+    match ctx.fuzzy(tx, text).await.map_err(|e| ListError::from(e).in_branch("search.fuzzy"))? {
+        Some(more) => {
+            let known: BTreeSet<Uuid> = ids.iter().copied().collect();
+            ids.extend(more.into_iter().filter(|id| !known.contains(id)));
+            Ok((ids, false))
+        }
+        None => {
+            eprintln!("{}", json!({"schemaVersion":1,"event":"search-degraded","rid":crate::http::request_reference(),"resource":ctx.r.name,"operation":"list.search","branch":"search.fuzzy","budget":FUZZY_BUDGET,"private":true,"valuesCaptured":false}));
+            Ok((ids, true))
         }
     }
 }
@@ -827,7 +888,7 @@ pub async fn list(
             related.insert(target.clone(), s);
         }
     }
-    let ctx = Ctx { r, resources, scope: &scope, related, req };
+    let mut ctx = Ctx { r, resources, scope: &scope, related, req, candidates: None };
     let keys = keys(r, req);
     let sig = signature(&keys);
     let ranked = req.sort.is_none() && search_ranked(r, req);
@@ -835,6 +896,12 @@ pub async fn list(
     let mut tx = pool.begin().await?;
     let timeout = if text.is_empty() { "SET LOCAL statement_timeout='5s';" } else { "SET LOCAL statement_timeout='1s';" };
     sqlx::raw_sql(sqlx::AssertSqlSafe(format!("{timeout} SET LOCAL lock_timeout='500ms'; SET LOCAL pg_trgm.word_similarity_threshold='0.45';"))).execute(&mut *tx).await?;
+    let mut degraded = false;
+    if search_ranked(r, req) {
+        let (ids, cut) = search_candidates(&mut tx, &ctx, &text, ranked).await?;
+        ctx.candidates = Some(ids);
+        degraded = cut;
+    }
 
     // Page.
     let mut q = QueryBuilder::<Postgres>::new(concat!("SELECT ", crate::record_columns!()));
@@ -926,6 +993,9 @@ pub async fn list(
     }
     if !aggregates.is_empty() {
         out["aggregates"] = Value::Object(aggregates);
+    }
+    if degraded {
+        out["degraded"] = json!(true);
     }
     Ok(out)
 }

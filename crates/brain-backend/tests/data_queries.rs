@@ -670,3 +670,136 @@ async fn search_language_weights_and_legacy_numeric_ids() {
     assert!(vector(fresh["id"].as_str().unwrap().to_string()).await.contains("'walk'"));
     pool.close().await;
 }
+
+/// Hostile and ordinary search text never reaches a 500, in any declared language and with any query option.
+#[tokio::test]
+#[ignore = "requires scripts/backend-check.mjs disposable Postgres"]
+async fn search_text_never_raises_an_internal_error() {
+    let pool = database("brain_search_hostile").await;
+    let mut listings = resource(
+        "listings",
+        vec![
+            ("title", field("str", true)),
+            ("company_name", field("str", false)),
+            ("search_terms", field("str", false)),
+            ("description", field("str", false)),
+            ("status", field("enum(open|closed)", false)),
+            ("views", field("int", false)),
+        ],
+        policy(&["public"], &["candidate"], &["owner"], &["owner"]),
+        json!({
+            "filter": {"status": ["eq", "in"], "views": ["gte"]},
+            "sort": ["title", "views"],
+            "default_sort": ["-created_at"],
+            "search": {"language": "spanish", "weights": {"title": "A", "company_name": "B", "search_terms": "B", "description": "C"}}
+        }),
+    );
+    listings.search = vec!["title".into(), "company_name".into(), "search_terms".into(), "description".into()];
+    let api = api(&pool, vec![listings]).await;
+    let (_, author) = api.user("author@shop.test").await;
+    let (s, row) = api.post("/api/listings", &author, json!({"title": "React developer", "company_name": "Corner Shop", "search_terms": "frontend web", "description": "Build the shop front", "status": "open", "views": 3})).await;
+    assert_eq!(s, 200, "{row}");
+    for text in ["react", "%C3%B1and%C3%BA", "a%27b", "%27%3B--", "%5C", "a%3Ab", "%3C-%3E", "%25", "%3Cscript%3E", "%27", "%22", "--", "(", ")", "%26", "%7C", "!", "%3A*", "%20"] {
+        for extra in ["", "&status=open", "&sort=title", "&sort=-views"] {
+            let (s, body) = api.get(&format!("/api/listings?search={text}{extra}"), None).await;
+            assert_eq!(s, 200, "search={text}{extra} {body}");
+        }
+    }
+    pool.close().await;
+}
+
+/// Seeds `rows` records whose long description is about 4 KB of varied words, so trigram scans are really expensive.
+async fn seed_long_listings(pool: &sqlx::PgPool, owner: Uuid, rows: i32) {
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query("SET LOCAL statement_timeout=0").execute(&mut *tx).await.unwrap();
+    sqlx::query(
+        "INSERT INTO _brain_res_listings(id,owner,data) SELECT gen_random_uuid(),$1,jsonb_build_object(\
+         'title','Shop worker '||n,'company_name','Corner Shop '||(n%50),'search_terms','retail store','status','open','views',n,\
+         'description',(SELECT string_agg(md5((n*k)::text),' ') FROM generate_series(1,125) k)) FROM generate_series(1,$2) n",
+    )
+    .bind(owner)
+    .bind(rows)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    sqlx::query("ANALYZE _brain_res_listings").execute(pool).await.unwrap();
+}
+
+/// Long text must not turn a search into an error: full-text results survive whatever the typo branch costs.
+#[tokio::test]
+#[ignore = "requires scripts/backend-check.mjs disposable Postgres"]
+async fn search_over_long_text_keeps_full_text_results() {
+    let pool = database("brain_search_long").await;
+    let mut listings = resource(
+        "listings",
+        vec![
+            ("title", field("str", true)),
+            ("company_name", field("str", false)),
+            ("search_terms", field("str", false)),
+            ("description", field("str", false)),
+            ("status", field("enum(open|closed)", false)),
+            ("views", field("int", false)),
+        ],
+        policy(&["public"], &["candidate"], &["owner"], &["owner"]),
+        json!({
+            "filter": {"status": ["eq"]},
+            "sort": ["views"],
+            "search": {"language": "spanish", "weights": {"title": "A", "company_name": "B", "search_terms": "B", "description": "C"}}
+        }),
+    );
+    listings.search = vec!["title".into(), "company_name".into(), "search_terms".into(), "description".into()];
+    let definition = listings.clone();
+    let api = api(&pool, vec![listings]).await;
+    let (owner, author) = api.user("author@shop.test").await;
+    seed_long_listings(&pool, owner, 5000).await;
+    let (s, row) = api.post("/api/listings", &author, json!({"title": "React developer", "status": "open"})).await;
+    assert_eq!(s, 200, "{row}");
+    let row = row["id"].as_str().unwrap().to_string();
+    let longest = |pool: sqlx::PgPool| async move {
+        sqlx::query_scalar::<_, i32>("SELECT max(length(search_text)) FROM _brain_res_listings").fetch_one(&pool).await.unwrap()
+    };
+    let bound = 257 * 4;
+    assert!(longest(pool.clone()).await <= bound, "new rows store bounded typo text");
+    let indexed: i64 = sqlx::query_scalar("SELECT count(*) FROM _brain_res_listings WHERE search_vector @@ websearch_to_tsquery('spanish',md5((7*125)::text))").fetch_one(&pool).await.unwrap();
+    assert!(indexed >= 1, "full-text search still indexes the end of the long field");
+
+    // A full page of full-text matches never starts the typo branch: no degradation, whatever it would cost.
+    let (s, page) = api.get("/api/listings?search=worker", None).await;
+    assert_eq!((s, page.get("degraded"), page["items"].as_array().unwrap().len()), (200, None, 25), "{page}");
+
+    // Rows from before the bound (the shape an upgrade finds): the typo branch cannot finish within its budget, and
+    // the full-text answer survives. The plan cost is the reproduction of the reported cancellation.
+    let legacy = "ALTER TABLE _brain_res_listings DISABLE TRIGGER _brain_search; SET statement_timeout=0; UPDATE _brain_res_listings SET search_text=search_text||' '||coalesce(data->>'description',''); ALTER TABLE _brain_res_listings ENABLE TRIGGER _brain_search; RESET statement_timeout; ANALYZE _brain_res_listings;";
+    sqlx::raw_sql(legacy).execute(&pool).await.unwrap();
+    assert!(longest(pool.clone()).await > bound);
+    for query in ["search=react", "search=react&sort=-views", "search=react&status=open", "search=react&limit=100&offset=0"] {
+        let (s, found) = api.get(&format!("/api/listings?{query}"), None).await;
+        assert_eq!((s, ids(&found), found["total"].clone(), found["degraded"].clone()), (200, vec![row.clone()], json!(1), json!(true)), "{query} {found}");
+    }
+
+    // A retryable database condition is a 503 with Retry-After, never BACKEND_INTERNAL.
+    let mut lock = pool.begin().await.unwrap();
+    sqlx::query("LOCK TABLE _brain_res_listings IN ACCESS EXCLUSIVE MODE").execute(&mut *lock).await.unwrap();
+    let response = api.http.clone().oneshot(Request::builder()
+        .extension(axum::extract::ConnectInfo("127.0.0.1:3456".parse::<std::net::SocketAddr>().unwrap()))
+        .uri("/api/listings?search=react").header("origin", ORIGIN).body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), 503);
+    assert_eq!(response.headers()["retry-after"], "1");
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
+    assert_eq!(body["error"]["code"], "DATABASE_BUSY", "{body}");
+    lock.rollback().await.unwrap();
+
+    // The next migrate rebuilds those rows once and leaves their timestamps alone.
+    let before: String = sqlx::query_scalar("SELECT max(updated_at)::text FROM _brain_res_listings").fetch_one(&pool).await.unwrap();
+    db::migrate(&pool, &[definition]).await.unwrap();
+    assert!(longest(pool.clone()).await <= bound, "migrate rebuilds rows stored before the bound");
+    let after: String = sqlx::query_scalar("SELECT max(updated_at)::text FROM _brain_res_listings").fetch_one(&pool).await.unwrap();
+    assert_eq!(before, after);
+    let (s, typo) = api.get("/api/listings?search=reactt&limit=5", None).await;
+    assert_eq!(s, 200, "{typo}");
+    if typo.get("degraded").is_none() {
+        assert_eq!(ids(&typo), vec![row.clone()], "the typo branch still finds short fields");
+    }
+    pool.close().await;
+}

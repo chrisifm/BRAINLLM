@@ -197,7 +197,7 @@ async fn upload(
         Ok(created) => created,
         Err(error) => {
             app.platform.storage.remove(&stored.key).await;
-            return Err(Error::internal(crate::db::safe(error)));
+            return Err(Error::database(error));
         }
     };
     let body = created.json();
