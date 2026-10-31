@@ -17,7 +17,7 @@ pub const GROUP_LIMIT: i64 = 100;
 /// Text comparisons and text indexes use the first 256 characters; equality is rechecked on the full value.
 const TEXT_KEY: usize = 256;
 const OPS: &[&str] = &["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "prefix", "iprefix", "exists", "has"];
-const RESERVED: &[&str] = &["search", "limit", "offset", "sort", "include", "cursor", "aggregate", "count"];
+const RESERVED: &[&str] = &["search", "limit", "offset", "sort", "include", "cursor", "after", "aggregate", "count"];
 const TIMESTAMPS: &[&str] = &["created_at", "updated_at"];
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -471,7 +471,9 @@ pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(Str
                 }
                 req.sort = Some(keys);
             }
-            "cursor" => match decode_cursor(raw) {
+            // `after` is an alias of `cursor` (keyset pagination by the previous page's next_cursor).
+            "cursor" | "after" if req.cursor.is_some() => bad("Use either cursor or after, not both"),
+            "cursor" | "after" => match decode_cursor(raw) {
                 Some(c) => req.cursor = Some(c),
                 None => bad("Invalid cursor; use next_cursor from the previous page unchanged"),
             },
@@ -1069,6 +1071,7 @@ pub fn openapi_parameters(r: &Resource) -> Vec<Value> {
         json!({"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":100,"default":25}}),
         json!({"name":"offset","in":"query","schema":{"type":"integer","minimum":0,"maximum":10000,"default":0}}),
         json!({"name":"cursor","in":"query","description":"next_cursor of the previous page (keyset pagination)","schema":{"type":"string"}}),
+        json!({"name":"after","in":"query","description":"Alias of cursor","schema":{"type":"string"}}),
         json!({"name":"sort","in":"query","description":format!("Comma-separated, '-' for descending: {}", sort_names(r)),"schema":{"type":"string"}}),
     ];
     for (field, ops) in &r.query.filter {
