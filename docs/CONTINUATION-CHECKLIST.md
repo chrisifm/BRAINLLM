@@ -201,13 +201,34 @@ Rust 1.99.1 release gate and do not establish cross-platform execution or whole-
   lists wholesale. Full cross-module flow inference, arbitrary minified-byte provenance/explain-output and general
   CSE/strength reduction/loop-invariant hoisting are not established by these changes.
 
+## Existing-backend migration requirements
+
+- [x] Capture all nine capability rows from the requesting project's assessment; distinguish actual limitations
+  from existing capabilities in [BACKEND-MIGRATION-READINESS.md](BACKEND-MIGRATION-READINESS.md).
+- [ ] Read the complete requesting project `docs/MIGRACION-BACKEND-BRAINLLM.md`. The supplied app folder exists,
+  but that file/docs directory was absent during inspection; exact remaining input requested from the user.
+- [ ] Complete exact money/date/enum types, relational company/vacancy/application scope and lossless legacy bigint
+  compatibility with explicit migration plans; existing role/owner permissions are not organization membership.
+- [ ] Implement private PDF/general-document capability with matching limits across every gateway. Existing image
+  multipart accepts 5 MiB, not the generic 64 KiB limit, but does not accept PDF.
+- [ ] Add genuine Stripe/PayPal signature adapters and provider-specific raw-body/header ingress, durable receipt
+  and replay/idempotency coverage; native BRAIN HMAC compatibility is not provider compatibility.
+- [ ] Finish declarative search/index control and resumable rebuild/drift/query-plan acceptance. pg_trgm/unaccent/
+  FTS indexes already exist; do not replace proven search from scratch.
+- [ ] Validate whole-application migration parity before removing any existing backend. Admin generation is in
+  current development; the source assessment's "postponed in 0.4" refers to the published baseline.
+
 ## Current combined verification
 
 - [x] English and diff checks passed on checkpoint 3987d0b.
 - [x] Source-input inventory: 108 literal embeddings, zero findings; computed macro inputs require clean compilation.
 - [x] Future publisher policy regressions: three passed.
-- [ ] Combined immutable snapshot 3987d0b: runtime and Rust/compiler/pack/serve/CLI tests running; results must be
-  recorded after completion, not inferred from component totals.
+- [x] Combined immutable snapshot 3987d0b: 221/221 Rust and 453/453 runtime on Node 22.23.4 passed, no skips.
+  Includes 192 compiler/lexer/pack/serve cases and 29 CLI/admin/deployment/startup/configuration/doctor cases.
+  Fixed admin edit remains 30,720 B with zero headroom; no budget increase.
+- [ ] Complete auxiliary tool gates in an appropriate clean writable environment. The first Linux batch returned
+  88 passes, six environment failures and six skips: missing Python, read-only pack output, unspecified Chrome and
+  noexec temporary fake hooks. These failures are not a complete green gate or a demonstrated product defect.
 
 ## Resume procedure
 
