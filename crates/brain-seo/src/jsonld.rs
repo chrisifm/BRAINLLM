@@ -485,15 +485,14 @@ pub fn script(j: &Json) -> String {
     )
 }
 
-/// Properties a type needs (`a|b` = either). Rich-result requirements; missing ones are warnings.
+/// Properties a type needs (`a|b` = either). Rich-result requirements; missing ones are warnings. Article types are
+/// absent on purpose: Google requires no Article property, so `headline` is only recommended.
 const REQUIRED: &[(&str, &[&str])] = &[
     (
         "AggregateRating",
         &["ratingValue", "ratingCount|reviewCount"],
     ),
     ("Answer", &["text"]),
-    ("Article", &["headline"]),
-    ("BlogPosting", &["headline"]),
     ("BreadcrumbList", &["itemListElement"]),
     ("Course", &["name", "description"]),
     ("Dataset", &["name", "description"]),
@@ -511,7 +510,6 @@ const REQUIRED: &[(&str, &[&str])] = &[
     ),
     ("ListItem", &["position", "name"]),
     ("LocalBusiness", &["name", "address"]),
-    ("NewsArticle", &["headline"]),
     ("Organization", &["name"]),
     ("Person", &["name"]),
     ("Product", &["name", "offers|review|aggregateRating"]),
@@ -524,9 +522,9 @@ const REQUIRED: &[(&str, &[&str])] = &[
 
 /// Recommended (info only, no score penalty).
 const RECOMMENDED: &[(&str, &[&str])] = &[
-    ("Article", &["image", "datePublished", "author"]),
-    ("BlogPosting", &["image", "datePublished", "author"]),
-    ("NewsArticle", &["image", "datePublished", "author"]),
+    ("Article", &["headline", "image", "datePublished", "author"]),
+    ("BlogPosting", &["headline", "image", "datePublished", "author"]),
+    ("NewsArticle", &["headline", "image", "datePublished", "author"]),
     ("Organization", &["url", "logo"]),
     ("WebApplication", &["offers", "aggregateRating|review"]),
 ];
@@ -692,6 +690,17 @@ pub fn validate(block: &str) -> Vec<Issue> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn article_types_require_nothing_and_recommend_headline() {
+        // Google's Article structured data has no required properties: headline is recommended (info, no penalty)
+        for t in ["Article", "BlogPosting", "NewsArticle"] {
+            let j = format!(r#"{{"@context":"https://schema.org","@type":"{t}","datePublished":"2026-10-01","author":{{"@type":"Person","name":"Ada"}},"image":"https://shop.acme.dev/c.png"}}"#);
+            let issues = validate(&j);
+            assert!(issues.iter().all(|i| i.level == Level::Info), "{t}: {issues:?}");
+            assert!(issues.iter().any(|i| i.msg.contains("headline")), "{t}: {issues:?}");
+        }
+    }
     use crate::config::Organization;
     use crate::html::parse;
 
