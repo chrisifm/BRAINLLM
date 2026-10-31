@@ -23,6 +23,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   only to locate a failure. Emitted JS, server JS, CSS, maps and diagnostics are byte-identical; no compiler-speed
   claim is made until paired measurement.
 
+### Fixed
+
+- The development compile cache keys each source by modification time, size and (on Unix) inode. A file replaced
+  atomically while keeping its timestamp is recompiled instead of serving the previous output until a watch event.
+
 ### Tests
 
 - Pin that a native socket rejected at the handshake stops retrying within its bounded budget.

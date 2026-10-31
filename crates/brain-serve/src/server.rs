@@ -64,7 +64,28 @@ pub type ProblemsFn = Arc<dyn Fn() -> String + Send + Sync>;
 /// `() -> resolved variables` (the caller also refreshes its `PUBLIC_*` constants for the compiler).
 pub type EnvLoader = Arc<dyn Fn() -> Vec<(String, String)> + Send + Sync>;
 
-type Cache = Arc<Mutex<HashMap<PathBuf, (SystemTime, Arc<Compiled>)>>>;
+/// Cheap source identity for the compile cache: a timestamp alone misses an atomic replacement that keeps it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Stamp {
+    modified: SystemTime,
+    len: u64,
+    #[cfg(unix)]
+    inode: u64,
+}
+
+impl Stamp {
+    fn of(file: &Path) -> Option<Stamp> {
+        let meta = std::fs::metadata(file).ok()?;
+        Some(Stamp {
+            modified: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+            len: meta.len(),
+            #[cfg(unix)]
+            inode: std::os::unix::fs::MetadataExt::ino(&meta),
+        })
+    }
+}
+
+type Cache = Arc<Mutex<HashMap<PathBuf, (Option<Stamp>, Arc<Compiled>)>>>;
 type Clients = Arc<Mutex<Vec<TcpStream>>>;
 /// Receives every dev server event as JSON: `{"type":"update"|"error"|"reload"|"client-error"|"log", …}`.
 pub type EventFn = Arc<dyn Fn(&str) + Send + Sync>;
@@ -2043,13 +2064,12 @@ impl Ctx {
 }
 
 fn compile_cached(ctx: &Ctx, file: &Path) -> Result<Arc<Compiled>, Vec<String>> {
-    let mtime = std::fs::metadata(file)
-        .and_then(|m| m.modified())
-        .unwrap_or(SystemTime::UNIX_EPOCH);
+    let stamp = Stamp::of(file);
     // Single-flight: concurrent requests cannot compile and publish the same stale entry twice.
     let mut cache = ctx.cache.lock().unwrap();
     if let Some((t, c)) = cache.get(file)
-        && *t == mtime
+        && stamp.is_some()
+        && *t == stamp
     {
         return Ok(c.clone());
     }
@@ -2084,7 +2104,7 @@ fn compile_cached(ctx: &Ctx, file: &Path) -> Result<Arc<Compiled>, Vec<String>> 
         cache.clear();
     }
     if size <= 16 * 1024 * 1024 {
-        cache.insert(file.to_path_buf(), (mtime, out.clone()));
+        cache.insert(file.to_path_buf(), (stamp, out.clone()));
     }
     Ok(out)
 }
@@ -2582,6 +2602,35 @@ mod admission_tests {
         assert!(start.elapsed() < Duration::from_secs(1));
         drop(stream);
         sender.join().unwrap();
+    }
+
+    #[test]
+    fn replaced_source_with_preserved_mtime_is_recompiled_without_a_watch_event() {
+        let root = std::env::temp_dir().join(format!("brain-dev-mtime-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let source = root.join("view.brain");
+        std::fs::write(&source, "first").unwrap();
+        let stamp = std::fs::metadata(&source).unwrap().modified().unwrap();
+        let compiler: CompileFn = Arc::new(|src, _| {
+            Ok(Compiled { js: String::new(), css: String::new(), deps: vec![], server_js: src.into() })
+        });
+        let opts = Options {
+            root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: String::new(),
+            runtime: vec![], env: None, base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None,
+        };
+        let dev = start_dev(opts, compiler, false, None).unwrap();
+        assert_eq!(compile_cached(&dev.ctx, &source).unwrap().server_js, "first");
+        // An editor or checkout may replace the file atomically while keeping its timestamp; no watch event arrives here.
+        let staged = root.join("view.brain.tmp");
+        std::fs::write(&staged, "second edit").unwrap();
+        std::fs::File::options().write(true).open(&staged).unwrap().set_modified(stamp).unwrap();
+        std::fs::rename(&staged, &source).unwrap();
+        assert_eq!(std::fs::metadata(&source).unwrap().modified().unwrap(), stamp);
+        assert_eq!(compile_cached(&dev.ctx, &source).unwrap().server_js, "second edit");
+        drop(dev);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
