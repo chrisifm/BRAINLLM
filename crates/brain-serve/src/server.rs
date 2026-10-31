@@ -1161,39 +1161,12 @@ fn app_page(ctx: &Ctx, req: &http::Request) -> (u16, String, Option<String>) {
     let mut view_seo: Option<(Vec<(String, String)>, String)> = None;
     // languages (§37): `/es/about` is `/about` in `es`; the default locale has no prefix
     let i18n = brain_pack::read_i18n(root).filter(|(_, ls)| ls.len() > 1);
-    let (locale, route_path) = match &i18n {
-        Some((def, ls)) => {
-            let first = req
-                .path
-                .trim_start_matches('/')
-                .split('/')
-                .next()
-                .unwrap_or("");
-            match ls.iter().find(|l| *l == first && *l != def) {
-                Some(l) => (
-                    Some(l.clone()),
-                    format!(
-                        "/{}",
-                        req.path.trim_start_matches('/')[first.len()..].trim_start_matches('/')
-                    ),
-                ),
-                None => (Some(def.clone()), req.path.clone()),
-            }
-        }
-        None => (None, req.path.clone()),
-    };
+    let (locale, route_path) = split_locale(&i18n, &req.path);
     if let (Some(loc), Some((def, _))) = (&locale, &i18n) {
         // this locale's texts and the default's (the fallback of t()), before any view mounts
-        let dict = |l: &str| {
-            brain_pack::read_dict(root, l)
-                .iter()
-                .map(|(k, v)| format!("{}:{v}", json_str(k)))
-                .collect::<Vec<_>>()
-                .join(",")
-        };
-        let mut js = format!("add({},{{{}}});", json_str(def), dict(def));
+        let mut js = format!("add({},{});", json_str(def), dict_json(root, def));
         if loc != def {
-            js.push_str(&format!("add({},{{{}}});", json_str(loc), dict(loc)));
+            js.push_str(&format!("add({},{});", json_str(loc), dict_json(root, loc)));
         }
         head_extra.push_str(&format!(
             "<script type=\"module\">import{{add}}from'/@brain/brain-i18n.js';{js}</script>"
@@ -1648,6 +1621,31 @@ fn rpc(ctx: &Ctx, req: &http::Request, id: &str) -> (u16, String, Vec<(String, S
     }
 }
 
+/// Languages (§37): `/es/about` is `/about` in `es`; the default locale has no prefix. (locale, path to route).
+fn split_locale(i18n: &Option<(String, Vec<String>)>, path: &str) -> (Option<String>, String) {
+    let Some((def, ls)) = i18n else {
+        return (None, path.to_string());
+    };
+    let first = path.trim_start_matches('/').split('/').next().unwrap_or("");
+    match ls.iter().find(|l| *l == first && *l != def) {
+        Some(l) => (
+            Some(l.clone()),
+            format!("/{}", path.trim_start_matches('/')[first.len()..].trim_start_matches('/')),
+        ),
+        None => (Some(def.clone()), path.to_string()),
+    }
+}
+
+/// A locale's dictionary as a JSON object (i18n/<locale>.json, values kept as written).
+fn dict_json(root: &Path, locale: &str) -> String {
+    let body = brain_pack::read_dict(root, locale)
+        .iter()
+        .map(|(k, v)| format!("{}:{v}", json_str(k)))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{{{body}}}")
+}
+
 /// `POST <page>` with `application/x-www-form-urlencoded`: the view's `server:` function named by `_brain` runs
 /// through server.mjs's callForm (schema coercion and rules shared with form()). 303 after success (PRG), 422
 /// re-renders the page with the values and errors in `#brain-forms`, 400/429 answer JSON.
@@ -1684,8 +1682,22 @@ fn form_post(s: &mut TcpStream, ctx: &Ctx, req: &http::Request) -> io::Result<()
     {
         return json(s, 413, "Body larger than 64 KB");
     }
-    let Some(r) = crate::route::resolve(&ctx.root, &req.path) else {
+    // `/es/contact` is the contact page in `es`: its schema messages come from es.json (§37), like the browser
+    let i18n = brain_pack::read_i18n(&ctx.root).filter(|(_, ls)| ls.len() > 1);
+    let (locale, route_path) = split_locale(&i18n, &req.path);
+    let Some(r) = crate::route::resolve(&ctx.root, &route_path) else {
         return json(s, 404, "No page here");
+    };
+    let dict = match (&locale, &i18n) {
+        (Some(loc), Some((def, _))) if loc != def => format!(
+            "{{{}:{},{}:{}}}",
+            json_str(def),
+            dict_json(&ctx.root, def),
+            json_str(loc),
+            dict_json(&ctx.root, loc)
+        ),
+        (Some(loc), _) => format!("{{{}:{}}}", json_str(loc), dict_json(&ctx.root, loc)),
+        _ => "null".to_string(),
     };
     let rules = runtime_file(ctx, "brain-schema.js");
     let (module, server, rules) = match (server_module(ctx, &r.view, 0), runtime_server(ctx), rules)
@@ -1721,6 +1733,8 @@ fn form_post(s: &mut TcpStream, ctx: &Ctx, req: &http::Request) -> io::Result<()
             &rules,
             &format!("{ip} form {}", req.path),
             &ctx.secret(),
+            locale.as_deref().unwrap_or(""),
+            &dict,
         );
         if out.is_err() {
             *sc = None;

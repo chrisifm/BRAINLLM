@@ -9,14 +9,16 @@ fn app() -> PathBuf {
     std::fs::create_dir_all(d.join("views")).unwrap();
     std::fs::create_dir_all(d.join("i18n")).unwrap();
     std::fs::write(d.join("brain.json"), "{\"name\":\"x\",\"i18n\":{\"default\":\"en\",\"locales\":[\"en\",\"es\",\"ar\"]}}").unwrap();
-    std::fs::write(d.join("i18n/en.json"), "{\n  \"home.title\": \"Welcome\",\n  \"home.count\": { \"one\": \"{n} click\", \"other\": \"{n} clicks\" },\n  \"about.title\": \"About us\",\n  \"unused\": \"Never shipped\",\n  \"form.required\": \"Required [en]\"\n}\n").unwrap();
-    std::fs::write(d.join("i18n/es.json"), "{\n  \"home.title\": \"Welcome [es]\",\n  \"home.count\": { \"one\": \"{n} click [es]\", \"other\": \"{n} clicks [es]\" },\n  \"about.title\": \"About us [es]\",\n  \"unused\": \"Never [es]\",\n  \"form.required\": \"Required [es]\"\n}\n").unwrap();
+    std::fs::write(d.join("i18n/en.json"), "{\n  \"home.title\": \"Welcome\",\n  \"home.count\": { \"one\": \"{n} click\", \"other\": \"{n} clicks\" },\n  \"about.title\": \"About us\",\n  \"unused\": \"Never shipped\",\n  \"form.required\": \"Required [en]\",\n  \"error_state.offline\": \"Offline [en]\"\n}\n").unwrap();
+    std::fs::write(d.join("i18n/es.json"), "{\n  \"home.title\": \"Welcome [es]\",\n  \"home.count\": { \"one\": \"{n} click [es]\", \"other\": \"{n} clicks [es]\" },\n  \"about.title\": \"About us [es]\",\n  \"unused\": \"Never [es]\",\n  \"form.required\": \"Required [es]\",\n  \"error_state.offline\": \"Offline [es]\"\n}\n").unwrap();
     std::fs::write(d.join("i18n/ar.json"), "{\n  \"home.title\": \"Welcome [ar]\",\n  \"home.count\": { \"one\": \"{n} click [ar]\", \"other\": \"{n} clicks [ar]\" },\n  \"about.title\": \"About us [ar]\",\n  \"unused\": \"x\"\n}\n").unwrap();
     std::fs::write(d.join("app.brain"), "<html lang=\"en\"><head><meta charset=\"utf-8\"><title>App</title></head><body><slot /></body></html>").unwrap();
     std::fs::write(d.join("views/home.brain"), "<meta seo title=\"Home\" description=\"Home\">\n<script>let n = sig(1)</script>\n<main><h1>{t('home.title')}</h1><button on:click={() => n++}>{t('home.count', { n })}</button></main>").unwrap();
     std::fs::write(d.join("views/about.brain"), "<meta seo title=\"About\" description=\"About\">\n<meta route es=\"/es/about-us\">\n<main><h1>{t('about.title')}</h1></main>").unwrap();
     // a form with no t() call: its validation messages still need the form.* keys (F12)
     std::fs::write(d.join("views/join.brain"), "<meta seo title=\"Join\" description=\"Join\">\n<script>let f = form({ email: 'email!' }, { submit: async (v) => v })</script>\n<main><h1>Join</h1><form on:submit={f.submit}><input aria-label=\"Email\" bind:value={f.v.email}><p>{f.err.email}</p><button>Join</button></form></main>").unwrap();
+    // the kit's <ErrorState> reads error_state.* from the dictionary without calling t()
+    std::fs::write(d.join("views/oops.brain"), "<meta seo title=\"Oops\" description=\"Oops\">\n<script>let e = sig({ kind: 'offline' })</script>\n<main><h1>{t('home.title')}</h1><ErrorState error={e} /></main>").unwrap();
     d.canonicalize().unwrap()
 }
 
@@ -25,13 +27,17 @@ fn one_page_per_locale_with_its_dictionary() {
     let root = app();
     let rt = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime");
     let core = brain_min::minify_runtime_core(&std::fs::read_to_string(rt.join("brain.js")).unwrap()).unwrap();
-    let siblings: Vec<(String, String)> = std::fs::read_dir(&rt)
+    let mut siblings: Vec<(String, String)> = std::fs::read_dir(&rt)
         .unwrap()
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|x| x == "js") && !p.ends_with("brain-dev.js") && !p.ends_with("brain-inspect.js"))
         .map(|p| (p.file_name().unwrap().to_string_lossy().into_owned(), std::fs::read_to_string(&p).unwrap()))
         .collect();
+    // the kit, embedded like the CLI does (`ui/<name>.brain`)
+    for e in std::fs::read_dir(rt.join("ui")).unwrap().flatten() {
+        siblings.push((format!("ui/{}", e.file_name().to_string_lossy()), std::fs::read_to_string(e.path()).unwrap()));
+    }
     let r2 = root.clone();
     let compile = move |src: &str, rel: &Path| -> Result<brain_pack::Unit, String> {
         let opts = brain_codegen::Options { dev: false, root: Some(r2.clone()), ..Default::default() };
@@ -54,7 +60,7 @@ fn one_page_per_locale_with_its_dictionary() {
         progress: None,
         post: None,
     };
-    let views = vec![("/".to_string(), "views/home.brain".to_string()), ("/about".to_string(), "views/about.brain".to_string()), ("/join".to_string(), "views/join.brain".to_string())];
+    let views = vec![("/".to_string(), "views/home.brain".to_string()), ("/about".to_string(), "views/about.brain".to_string()), ("/join".to_string(), "views/join.brain".to_string()), ("/oops".to_string(), "views/oops.brain".to_string())];
     let out = brain_pack::build(&input, &views, &|_| vec![], &|_| vec![]).unwrap_or_else(|e| panic!("{e}"));
     let routes: Vec<&str> = out.pages.iter().map(|p| p.route.as_str()).collect();
     for r in ["/", "/about", "/es", "/es/about-us", "/ar", "/ar/about"] {
@@ -78,6 +84,10 @@ fn one_page_per_locale_with_its_dictionary() {
     assert!(out.files["es/join/index.html"].contains("/_b/i18n-join-es."), "the page loads it");
     let ard = out.files.iter().find(|(k, _)| k.starts_with("_b/i18n-home-ar.")).unwrap().1;
     assert!(ard.contains("Welcome [ar]") && ard.contains("add(\"ar\""), "{ard}");
+    let oops = out.files.iter().find(|(k, _)| k.starts_with("_b/i18n-oops-es.")).expect("oops dictionary").1;
+    assert!(oops.contains("\"error_state.offline\":\"Offline [es]\""), "{oops}");
+    assert!(out.files["es/oops/index.html"].contains("Offline [es]"), "{}", out.files["es/oops/index.html"]);
+    assert!(!d.contains("error_state."), "only pages with <ErrorState> get its texts: {d}");
     // the static about page ships no dictionary
     assert!(!out.files["es/about-us/index.html"].contains("i18n-"), "static page");
     assert!(!out.files.get("sw.js").is_some_and(|s| s.contains("/_b/i18n-")), "dictionaries are never precached");

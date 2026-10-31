@@ -713,7 +713,13 @@ fn run_fix_only_body(target: Option<PathBuf>, only: Option<&[&str]>, before_writ
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
                 Err(e) => return Err(format!("{}: {e}", path.display())),
             };
-            let all: Vec<_> = ds.iter().flat_map(|d| d.edits.iter().cloned()).collect();
+            // Identical edits from different diagnostics (two views adding the same key to a locale file) apply once.
+            let mut all: Vec<brain_parse::Edit> = Vec::new();
+            for e in ds.iter().flat_map(|d| d.edits.iter()) {
+                if !all.iter().any(|x| x.start == e.start && x.end == e.end && x.text == e.text) {
+                    all.push(e.clone());
+                }
+            }
             let (out, used): (Option<String>, Vec<&&compiler::Diag>) = match compiler::Diag::apply(&src, &all) {
                 Some(o) => (Some(o), ds.iter().collect()),
                 None => (compiler::Diag::apply(&src, &ds[0].edits), vec![&ds[0]]),

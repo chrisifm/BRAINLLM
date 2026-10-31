@@ -27,6 +27,14 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `brain test`, `brain doctor` and MCP `brain_test` run in owned headless Chrome by default and never probe or open a
   connected Claude Viewer/Codex Viewer unless the user opts in with `--viewer`, `BRAIN_VIEWER=1`, `brain e2e run` or
   MCP `viewer: true`; the scaffold's agent guide no longer requires an extension.
+- Adding the first extra language moves every fixed text to keys: text, sentences with values as one message with
+  placeholders, visible attributes, `<meta seo>` title and description, and string literals in markup expressions.
+  Keys are scoped by view path (`account.your_account`, not `index.your_account`), folded to ASCII, unique per text
+  and never duplicated in the locale files. `brain add locale en` on a site in another language writes the framework
+  texts in English.
+- The kit's `<ErrorState>` reads its texts from the app's dictionary (`error_state.*` keys, documented in the i18n
+  guide and INTERNALS §37) like the `form.*` messages, with the English text as the default when a key is missing.
+
 - The shared lexer decodes ASCII directly, scans ASCII identifier runs as bytes and indexes punctuation by first byte
   in the same longest-first order. Source-map scanning skips slash-free trivia gaps and builds its generated line index
   only to locate a failure. Emitted JS, server JS, CSS, maps and diagnostics are byte-identical; no compiler-speed
@@ -34,6 +42,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Fixed
 
+- A form posted without JS is validated in the page's language (`form.*` and `form.error` of its dictionary), in
+  `dist/server.mjs` and in `brain run`; in development a POST to `/<locale>/page` reached the wrong view (400).
+- Pages that show `<ErrorState>` ship its `error_state.*` texts in their dictionary chunk.
 - The development compile cache keys each source by modification time, size and (on Unix) inode. A file replaced
   atomically while keeping its timestamp is recompiled instead of serving the previous output until a watch event.
 - Deeply nested BrainScript, markup or CSS reports B0002/B0003 instead of overflowing the compiler stack; one small

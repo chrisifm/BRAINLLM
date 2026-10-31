@@ -859,11 +859,12 @@ export function createServer(o = {}) {
     try {
       module = await load(modPath)
       rules = await load('_server/brain-form.js')
+      if (route.i18n) await load(route.i18n) // the page's dictionary: validation messages in its language (§37)
     } catch (e) {
       log('error', 'form module failed to load', { rid, fn: id, stack: String((e && e.stack) || e) })
       return failPage(res, 500, rid)
     }
-    const r = await callForm({ module, raw, ctx, rules, key: ipOf(req) + ' ' + id, limit: LIMIT, timeout: TIMEOUT })
+    const r = await callForm({ module, raw, ctx, rules, key: ipOf(req) + ' ' + id, limit: LIMIT, timeout: TIMEOUT, locale: route.locale })
     if (r.cause) log('error', 'form failed', { rid, fn: id, stack: String((r.cause && r.cause.stack) || r.cause) })
     if (r.status === 303) return send(res, 303, '', { location: withBase(r.location), 'cache-control': 'no-store', ...ctx.session.headers() })
     if (r.status === 422) return ssr(req, res, route, params, url, rid, r.state, 422)
@@ -1213,7 +1214,10 @@ export async function callRpc({ fn, args, ctx, key, limit = 60, timeout = 10000 
 // A form posted without JS (§38) → { status: 303, location } | { status: 422, state } | { status, body } (400/429).
 // `module` exports the function and `$forms`; `rules` = { rule, check } (brain-schema / brain-form). `state` is what the
 // page re-renders with: { '<hash>/<fn>': { values, errors, error } }.
-export async function callForm({ module, raw, ctx, rules, key, limit = 60, timeout = 10000 }) {
+// `locale` (§37): the page's language, so the schema messages (`form.*`) and the generic error come from its dictionary
+// (globalThis.__brainDict, filled by the page's chunk) like form() in the browser. It is set only around the synchronous
+// validation, so concurrent requests in other languages never see it.
+export async function callForm({ module, raw, ctx, rules, key, limit = 60, timeout = 10000, locale }) {
   const q = new URLSearchParams(raw || ''), id = q.get('_brain') || '', fn = id.split('/')[1] || ''
   if (key) {
     const ra = overLimit(key, limit)
@@ -1221,7 +1225,16 @@ export async function callForm({ module, raw, ctx, rules, key, limit = 60, timeo
   }
   if (!/^[A-Za-z_$][\w$]*$/.test(fn) || typeof (module && module[fn]) !== 'function') return { status: 400, body: { error: 'Unknown form' } }
   const schema = module.$forms && module.$forms[fn]
-  const { values, errors } = schema ? coerce(rules, schema, q) : { values: Object.fromEntries([...q].filter(([k]) => k !== '_brain')), errors: {} }
+  const G = globalThis, had = '__brainLocale' in G, prev = G.__brainLocale
+  let values, errors, generic
+  if (locale) G.__brainLocale = locale
+  try {
+    ;({ values, errors } = schema ? coerce(rules, schema, q) : { values: Object.fromEntries([...q].filter(([k]) => k !== '_brain')), errors: {} })
+    const D = G.__brainDict, m = locale && D && D[locale] && D[locale]['form.error']
+    generic = typeof m === 'string' ? m : 'Something went wrong. Try again.'
+  } finally {
+    if (locale) had ? (G.__brainLocale = prev) : delete G.__brainLocale
+  }
   const again = (errs, error, cause) => ({ status: 422, state: { [id]: { values, errors: errs, error } }, cause })
   if (Object.keys(errors).length) return again(errors, '')
   let r
@@ -1233,7 +1246,7 @@ export async function callForm({ module, raw, ctx, rules, key, limit = 60, timeo
     const deliberate = intendedStatus(e)
     if (deliberate && deliberate < 500) return {status:deliberate,body:{error:STATUS_CODES[deliberate]}}
     if (deliberate) return {status:deliberate,body:{error:STATUS_CODES[deliberate]},cause:e}
-    return again({}, 'Something went wrong. Try again.', e)
+    return again({}, generic, e)
   }
   if (r && r.errors) return again(r.errors, '')
   const to = r && r.redirect != null ? safeLocation(r.redirect) : ctx.url.pathname + ctx.url.search

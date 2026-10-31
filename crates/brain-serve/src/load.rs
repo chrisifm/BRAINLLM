@@ -70,7 +70,7 @@ const contextHeaders = async ctx => {
 const finishContext = ctx => { const native = nativeContexts.get(ctx); if (native) { native.res.writableEnded = true; native.res.emit('finish'); native.res.emit('close'); nativeContexts.delete(ctx) } }
 process.once('exit', () => nativeBridge?.close())
 for await (const line of createInterface({ input: process.stdin })) {
-  const { id, file, fn, ctx, args, probe, rpc, raw, key, form, rules, chain, guards, middleware, secret, contextServer, preauthenticated, nativeRequired } = JSON.parse(line)
+  const { id, file, fn, ctx, args, probe, rpc, raw, key, form, rules, chain, guards, middleware, secret, contextServer, preauthenticated, nativeRequired, locale, dict } = JSON.parse(line)
   if (chain) {
     // _guard/_middleware of the route through server.mjs's runChain, with ctx.user from the signed session cookie
     try {
@@ -97,7 +97,9 @@ for await (const line of createInterface({ input: process.stdin })) {
       const S = await import(form), R = await import(rules), m = await import(file)
       const c = await withSession(S, ctx, secret, false, nativeRequired)
       try {
-        const r = await S.callForm({ module: m, raw, ctx: c, rules: R, key })
+        // the page's language (§37): its dictionary is what form() in the browser validates with
+        if (dict) { const G = globalThis, D = (G.__brainDict ||= {}); for (const l in dict) D[l] = dict[l] }
+        const r = await S.callForm({ module: m, raw, ctx: c, rules: R, key, locale: locale || undefined })
         if (r.cause) console.error(String(r.cause?.stack ?? r.cause))
         out(`FRM ${id} ${JSON.stringify({ status: r.status, location: r.location || '', state: JSON.stringify(r.state || null), body: JSON.stringify(r.body || null), headers: flat({ ...(r.headers || {}), ...await contextHeaders(c) }) })}\n`)
       } finally { finishContext(c) }
@@ -468,18 +470,21 @@ impl Sidecar {
         rules: &str,
         key: &str,
         secret: &str,
+        locale: &str,
+        dict_json: &str,
     ) -> Result<(u16, String, String, String, Vec<(String, String)>), String> {
         self.next += 1;
         let id = self.next;
         let req = format!(
-            "{{\"id\":{id},\"file\":{},\"ctx\":{ctx_json},\"form\":{},\"rules\":{},\"raw\":{},\"key\":{},\"secret\":{},\"nativeRequired\":{}}}\n",
+            "{{\"id\":{id},\"file\":{},\"ctx\":{ctx_json},\"form\":{},\"rules\":{},\"raw\":{},\"key\":{},\"secret\":{},\"nativeRequired\":{},\"locale\":{},\"dict\":{dict_json}}}\n",
             crate::json_str(file),
             crate::json_str(server),
             crate::json_str(rules),
             crate::json_str(raw),
             crate::json_str(key),
             crate::json_str(secret),
-            self.native_required
+            self.native_required,
+            crate::json_str(locale)
         );
         let deadline = std::time::Instant::now() + self.timeout;
         self.send(req, deadline).map_err(|(_, message)| message)?;

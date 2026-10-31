@@ -428,22 +428,155 @@ pub fn check_locales(i18n: &I18n) -> Vec<Diag> {
     out
 }
 
+/// The framework's own keys with their built-in English texts (the runtime's defaults), as JSON values: form
+/// validation (`brain-schema.js`, `brain-form.js`) and the kit's `<ErrorState>`.
+pub const FRAMEWORK_EN: &[(&str, &str)] = &[
+    ("form.required", "\"Required\""),
+    ("form.list", "\"Must be a list\""),
+    ("form.min_items", "\"Choose at least {n}\""),
+    ("form.max_items", "{ \"one\": \"At most {n} item\", \"other\": \"At most {n} items\" }"),
+    ("form.item", "\"Item {n}: {error}\""),
+    ("form.number", "\"Enter a number\""),
+    ("form.min", "\"Must be at least {n}\""),
+    ("form.max", "\"Must be at most {n}\""),
+    ("form.email", "\"Enter a valid email\""),
+    ("form.url", "\"Enter a valid URL\""),
+    ("form.date", "\"Enter a valid date\""),
+    ("form.text", "\"Enter text\""),
+    ("form.boolean", "\"Choose true or false\""),
+    ("form.min_chars", "{ \"one\": \"At least {n} character\", \"other\": \"At least {n} characters\" }"),
+    ("form.max_chars", "{ \"one\": \"At most {n} character\", \"other\": \"At most {n} characters\" }"),
+    ("form.error", "\"Something went wrong. Try again.\""),
+    ("form.check_failed", "\"Could not check this value.\""),
+    ("error_state.offline", "\"You are offline.\""),
+    ("error_state.network", "\"The connection was lost.\""),
+    ("error_state.timeout", "\"The server took too long to answer.\""),
+    ("error_state.schema", "\"The server sent something unexpected.\""),
+    ("error_state.unauthorized", "\"Sign in to continue.\""),
+    ("error_state.forbidden", "\"You do not have permission to see this.\""),
+    ("error_state.not_found", "\"Not found.\""),
+    ("error_state.invalid", "\"Check the highlighted fields.\""),
+    ("error_state.rate_limited", "\"Too many requests. Trying again in {n} seconds.\""),
+    ("error_state.server", "\"Something went wrong on our side.\""),
+    ("error_state.sign_in", "\"Sign in\""),
+    ("error_state.retry", "\"Retry\""),
+    ("error_state.reference", "\"Reference: {id}\""),
+];
+
+/// A locale file copied from a non-English default, with the framework keys it has rewritten to their English text
+/// (`brain add locale en`): only these keys have a known English value; the app's keys stay as the copy to translate.
+/// A key whose placeholders differ from the English text is left alone (B1404 would flag it).
+pub fn with_framework_english(src: &str) -> String {
+    let f = parse_locale(src, "en", "i18n/en.json");
+    if f.error.is_some() {
+        return src.to_string();
+    }
+    let mut edits: Vec<(usize, usize, &str)> = Vec::new();
+    for (key, value) in FRAMEWORK_EN {
+        let Some((text, _, at)) = f.entries.get(*key) else { continue };
+        let english = parse_locale(&format!("{{\"k\": {value}}}"), "en", "x");
+        if english.entries.get("k").is_none_or(|(t, _, _)| t.vars() != text.vars()) {
+            continue;
+        }
+        let mut j = J { s: src, b: src.as_bytes(), i: *at };
+        if j.string().is_err() {
+            continue;
+        }
+        j.ws();
+        if j.b.get(j.i) != Some(&b':') {
+            continue;
+        }
+        j.i += 1;
+        j.ws();
+        let start = j.i;
+        if j.skip_value().is_ok() {
+            edits.push((start, j.i, value));
+        }
+    }
+    edits.sort_by_key(|e| std::cmp::Reverse(e.0));
+    let mut out = src.to_string();
+    for (a, b, v) in edits {
+        out.replace_range(a..b, v);
+    }
+    out
+}
+
 /// Text with letters (not just numbers, punctuation or whitespace): what B1403 considers translatable.
 pub fn translatable(s: &str) -> bool {
     s.chars().filter(|c| c.is_alphabetic()).count() >= 2
 }
 
-/// `<file stem>.<first words>` key for a fixed text (B1403).
+/// Key scope of a source file (B1403): the view's route path for views (`views/posts/index.brain` → `posts`,
+/// `views/blog/[slug].brain` → `blog-slug`, `views/index.brain` → `home`, `views/_layout.brain` → `layout`), the file
+/// stem for anything else (`comp/card.brain` → `card`). Two views never share a scope, so their keys never collide.
+pub fn key_scope(file: &str) -> String {
+    let rel = file.replace('\\', "/");
+    let rel = rel.strip_suffix(".brain").unwrap_or(&rel);
+    let segs: Vec<String> = match rel.strip_prefix("views/") {
+        Some(v) => v.split('/').filter(|s| *s != "index").map(clean_segment).filter(|s| !s.is_empty()).collect(),
+        None => Path::new(rel).file_name().map(|s| vec![clean_segment(&s.to_string_lossy())]).unwrap_or_default(),
+    };
+    let scope = segs.join("-");
+    if scope.is_empty() { "home".into() } else { scope }
+}
+
+fn clean_segment(s: &str) -> String {
+    let s = s.trim_start_matches('_').replace(['[', ']', '.'], "").replace("...", "");
+    ascii_fold(&s).chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c.to_ascii_lowercase() } else { '-' }).collect::<String>().trim_matches('-').to_string()
+}
+
+/// Latin letters with diacritics to their base letter (`\u{e7}` → `c`); other non-ASCII characters are dropped.
+pub fn ascii_fold(s: &str) -> String {
+    // U+00C0..=U+00FF, one ASCII replacement per code point (`_` = drop).
+    const LATIN1: &[u8; 64] = b"AAAAAAACEEEEIIIIDNOOOOO_OUUUUYTsaaaaaaaceeeeiiiidnooooo_ouuuuyty";
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c as u32 {
+            0..=0x7f => out.push(c),
+            n @ 0xc0..=0xff => {
+                let r = LATIN1[(n - 0xc0) as usize];
+                if r == b's' && n == 0xdf {
+                    out.push_str("ss");
+                } else if r != b'_' {
+                    out.push(r as char);
+                }
+            }
+            // Latin Extended-A pairs upper/lower case of the same base letter.
+            n @ 0x100..=0x17f => {
+                const EXT_A: &[u8; 128] = b"AaAaAaCcCcCcCcDdDdEeEeEeEeEeGgGgGgGgHhHhIiIiIiIiIiJjJjKkkLlLlLlLlLlNnNnNnnNnOoOoOoOoRrRrRrSsSsSsSsTtTtTtUuUuUuUuUuUuWwYyYZzZzZzs";
+                out.push(EXT_A[(n - 0x100) as usize] as char);
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The first `n` words of a text as an ASCII key part (`Your posts` → `your_posts`); placeholders `{x}` are skipped.
+pub fn key_words(text: &str, n: usize) -> String {
+    let mut plain = String::new();
+    let mut depth = 0;
+    for c in text.chars() {
+        match c {
+            '{' => depth += 1,
+            '}' if depth > 0 => depth -= 1,
+            _ if depth == 0 => plain.push(c),
+            _ => {}
+        }
+    }
+    let words: Vec<String> = ascii_fold(&plain).split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| !w.is_empty()).take(n).map(|w| w.to_ascii_lowercase()).collect();
+    if words.is_empty() {
+        // A text in a non-Latin script: a stable short hash of it.
+        let h = text.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
+        format!("text_{:06x}", h & 0xff_ffff)
+    } else {
+        words.join("_")
+    }
+}
+
+/// `<scope>.<first words>` key for a fixed text (B1403).
 pub fn key_for(file: &str, text: &str) -> String {
-    let stem = Path::new(file).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-    let stem = stem.trim_start_matches('[').trim_end_matches(']').trim_start_matches('_').replace(['[', ']'], "");
-    let words: Vec<String> = text
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .take(4)
-        .map(|w| w.to_lowercase())
-        .collect();
-    format!("{}.{}", stem.replace('.', "-"), words.join("_"))
+    format!("{}.{}", key_scope(file), key_words(text, 4))
 }
 
 /// Physical → logical CSS property (B0306).

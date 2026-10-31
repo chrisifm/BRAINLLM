@@ -132,6 +132,41 @@ test('#168 kit ErrorState: message and action per kind; Retry only where it help
   assert.equal(n, 1)
 })
 
+test('kit ErrorState: every text comes from the app dictionary (error_state.* keys) with English defaults', async () => {
+  const { default: ErrorState } = await import(pathToFileURL(join(dir, 'ui', 'error-state.brain.js')).href)
+  const show = (error, retry) => {
+    const host = doc.createElement('div')
+    doc.body.appendChild(host)
+    mount(ErrorState, host, { error, retry })
+    return host
+  }
+  // Tagged English stand-ins for a second locale (the repository is English only).
+  const es = {
+    'error_state.offline': 'Offline [es]', 'error_state.server': 'Server failed [es]', 'error_state.retry': 'Retry [es]',
+    'error_state.reference': 'Ref [es] {id}', 'error_state.unauthorized': 'Sign in first [es]', 'error_state.sign_in': 'Sign in [es]',
+    'error_state.rate_limited': 'Wait {n} s [es]',
+  }
+  const before = globalThis.__brainDict
+  globalThis.__brainDict = { es }
+  globalThis.__brainLocale = 'es'
+  try {
+    const off = show({ kind: 'offline' }, () => {})
+    assert.match(off.textContent, /Offline \[es\]/)
+    assert.match(off.querySelector('button').textContent, /Retry \[es\]/)
+    const h500 = show({ kind: 'http', status: 500, id: 'rid-7' }, () => {})
+    assert.match(h500.textContent, /Server failed \[es\][\s\S]*Ref \[es\] rid-7/)
+    const h401 = show({ kind: 'http', status: 401 })
+    assert.match(h401.textContent, /Sign in first \[es\]/)
+    assert.match(h401.querySelector('a').textContent, /Sign in \[es\]/)
+    assert.match(show({ kind: 'http', status: 429, retryAfter: 9 }).textContent, /Wait 9 s \[es\]/)
+    // a key the dictionary lacks keeps its English default
+    assert.match(show({ kind: 'timeout' }).textContent, /The server took too long to answer\./)
+  } finally {
+    globalThis.__brainDict = before
+    delete globalThis.__brainLocale
+  }
+})
+
 test('#82 layout primitives: token-only spacing (gap="3" → var(--space-3)), flow and widths without writing CSS', async () => {
   const load = async n => (await import(pathToFileURL(join(dir, 'ui', n + '.brain.js')).href)).default
   const [Stack, Row, Grid, Center, Container, Sidebar, Spacer] = await Promise.all(['stack', 'row', 'grid', 'center', 'container', 'sidebar', 'spacer'].map(load))
