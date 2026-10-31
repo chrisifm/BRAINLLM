@@ -10,9 +10,18 @@ pub struct JsParser<'a> {
     lx: Lexer<'a>,
     tok: Token,
     prev_end: usize,
+    /// Nesting budget in use (see [`MAX_NESTING`]).
+    depth: u32,
 }
 
 type R<T> = Result<T, Diag>;
+
+/// Bound on how deep the parser recurses and how deep the AST it builds gets, so pathological input
+/// (thousands of `(`, `{`, `!` or `a + a + …`) is a diagnostic instead of a stack overflow here or in
+/// every later pass. Each nested statement, expression or pattern costs [`NEST_COST`]; each link of a
+/// left-associative chain (`a.b`, `f()`, `a + b`) costs 1, as it adds one AST level without recursing.
+const MAX_NESTING: u32 = 2048;
+const NEST_COST: u32 = 8;
 
 const ASSIGN_OPS: &[&str] = &["=", "+=", "-=", "*=", "/=", "%=", "**=", "<<=", ">>=", ">>>=", "&=", "|=", "^=", "&&=", "||=", "??="];
 
@@ -45,7 +54,7 @@ impl<'a> JsParser<'a> {
     pub fn new(mut lx: Lexer<'a>) -> R<Self> {
         let start = lx.pos();
         let tok = lx.next_token()?;
-        Ok(JsParser { lx, tok, prev_end: start })
+        Ok(JsParser { lx, tok, prev_end: start, depth: 0 })
     }
 
     /// Byte offset just after the current token (used by the markup parser after `}`).
@@ -68,6 +77,28 @@ impl<'a> JsParser<'a> {
         let mut s = start;
         s.end = self.prev_end as u32;
         s
+    }
+
+    /// Spends `cost` of the nesting budget; the enclosing [`Self::nested`] call gives it back.
+    fn charge(&mut self, cost: u32) -> R<()> {
+        self.depth += cost;
+        if self.depth > MAX_NESTING {
+            return Err(self.err(
+                "B0002",
+                self.tok.span,
+                "the code is nested too deeply to compile",
+                "split it into named intermediate values (`const part = …`) or smaller functions",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Runs `f` one nesting level deeper, restoring the budget afterwards (also on error, for backtracking).
+    fn nested<T>(&mut self, f: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
+        let saved = self.depth;
+        let r = self.charge(NEST_COST).and_then(|()| f(self));
+        self.depth = saved;
+        r
     }
 
     fn peek2(&mut self) -> R<Token> {
@@ -185,6 +216,10 @@ impl<'a> JsParser<'a> {
     }
 
     pub fn statement(&mut self) -> R<Stmt> {
+        self.nested(Self::statement_at)
+    }
+
+    fn statement_at(&mut self) -> R<Stmt> {
         let start = self.tok.span;
         let Tok::Ident(w) = self.tok.tok.clone() else {
             if self.is("{") {
@@ -464,6 +499,10 @@ impl<'a> JsParser<'a> {
 
     /// Identifier, `{...}` or `[...]` (no default).
     pub fn binding_target(&mut self) -> R<Pat> {
+        self.nested(Self::binding_target_at)
+    }
+
+    fn binding_target_at(&mut self) -> R<Pat> {
         let start = self.tok.span;
         if self.eat("{")? {
             let mut props = Vec::new();
@@ -585,6 +624,10 @@ impl<'a> JsParser<'a> {
     }
 
     pub fn assignment(&mut self) -> R<Expr> {
+        self.nested(Self::assignment_at)
+    }
+
+    fn assignment_at(&mut self) -> R<Expr> {
         if (self.is("(") || matches!(self.tok.tok, Tok::Ident(_)))
             && let Some(arrow) = self.try_arrow()?
         {
@@ -629,6 +672,7 @@ impl<'a> JsParser<'a> {
             if prec <= min {
                 break;
             }
+            self.charge(1)?;
             self.bump()?;
             // `**` is right-associative.
             let right = if op == "**" { self.binary(prec - 1)? } else { self.binary(prec)? };
@@ -638,6 +682,10 @@ impl<'a> JsParser<'a> {
     }
 
     fn unary(&mut self) -> R<Expr> {
+        self.nested(Self::unary_at)
+    }
+
+    fn unary_at(&mut self) -> R<Expr> {
         let start = self.tok.span;
         let op: Option<&'static str> = match &self.tok.tok {
             Tok::Punct(p) if matches!(*p, "!" | "-" | "+" | "~") => Some(p),
@@ -709,6 +757,7 @@ impl<'a> JsParser<'a> {
             self.primary()?
         };
         loop {
+            self.charge(1)?;
             if self.eat(".")? {
                 let name = self.any_word()?;
                 e = Expr::Member { obj: Box::new(e), prop: MemberProp::Name(name), optional: false, span: self.span_from(start) };
@@ -746,6 +795,7 @@ impl<'a> JsParser<'a> {
         let start = self.tok.span;
         let mut e = self.primary()?;
         loop {
+            self.charge(1)?;
             if self.eat(".")? {
                 let name = self.any_word()?;
                 e = Expr::Member { obj: Box::new(e), prop: MemberProp::Name(name), optional: false, span: self.span_from(start) };

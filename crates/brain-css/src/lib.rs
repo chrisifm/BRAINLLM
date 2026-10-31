@@ -35,11 +35,16 @@ struct Parser<'a> {
     idx: &'a LineIndex,
     pos: usize,
     end: usize,
+    /// Open blocks around `pos` (bounded by [`MAX_CSS_DEPTH`]).
+    depth: u32,
 }
+
+/// Blocks nested deeper than this are a diagnostic, not a stack overflow in the parser or later passes.
+const MAX_CSS_DEPTH: u32 = 256;
 
 /// Parses `src[start..end]` (the inside of a `<style>`), with spans absolute in the file.
 pub fn parse(src: &str, file: &str, idx: &LineIndex, start: usize, end: usize) -> Result<CssSheet, Diag> {
-    let mut p = Parser { src, file, idx, pos: start, end };
+    let mut p = Parser { src, file, idx, pos: start, end, depth: 0 };
     let items = p.block_items(false)?;
     Ok(CssSheet { items, span: idx.span(src, start, end) })
 }
@@ -138,8 +143,14 @@ impl<'a> Parser<'a> {
             let text = collapse_ws(&text);
             match stop {
                 Some('{') => {
+                    if self.depth >= MAX_CSS_DEPTH {
+                        return Err(self.err(self.pos, "the CSS is nested too deeply to compile", "flatten the nested rules"));
+                    }
                     self.pos += 1;
-                    let inner = self.block_items(true)?;
+                    self.depth += 1;
+                    let inner = self.block_items(true);
+                    self.depth -= 1;
+                    let inner = inner?;
                     let span = self.span(start, self.pos);
                     if let Some(at) = text.strip_prefix('@') {
                         let (name, prelude) = split_at_rule(at);

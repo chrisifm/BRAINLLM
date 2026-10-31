@@ -69,7 +69,12 @@ pub struct Markup<'a> {
     out: Parsed,
     diags: Vec<Diag>,
     seen_script: bool,
+    /// Open tags and blocks around `pos` (bounded by [`MAX_MARKUP_DEPTH`]).
+    depth: u32,
 }
+
+/// Tags and `{#…}` blocks nested deeper than this are a diagnostic, not a stack overflow in the parser or later passes.
+const MAX_MARKUP_DEPTH: u32 = 256;
 
 impl<'a> Markup<'a> {
     pub fn new(src: &'a str, file: &'a str, idx: &'a LineIndex) -> Self {
@@ -81,6 +86,7 @@ impl<'a> Markup<'a> {
             out: Parsed { props: Vec::new(), meta: Vec::new(), script: Vec::new(), template: Vec::new(), style: None },
             diags: Vec::new(),
             seen_script: false,
+            depth: 0,
         }
     }
 
@@ -149,6 +155,16 @@ impl<'a> Markup<'a> {
     }
 
     fn children(&mut self, top: bool) -> R<(Vec<Node>, End)> {
+        if self.depth >= MAX_MARKUP_DEPTH {
+            return Err(self.err(self.span(self.pos, self.pos), "the markup is nested too deeply to compile", "flatten it or move inner parts into components"));
+        }
+        self.depth += 1;
+        let r = self.children_at(top);
+        self.depth -= 1;
+        r
+    }
+
+    fn children_at(&mut self, top: bool) -> R<(Vec<Node>, End)> {
         let mut nodes = Vec::new();
         loop {
             let r = self.rest();
