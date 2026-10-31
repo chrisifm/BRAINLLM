@@ -272,6 +272,7 @@ name = "brain-check"
 version = "0.6.1"
 dependencies = [
  "brain-css",
+ "brain-lex",
  "brain-parse",
  "libc",
  "sha2 0.11.1",

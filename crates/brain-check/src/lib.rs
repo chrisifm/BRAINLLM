@@ -464,7 +464,7 @@ pub fn check(c: &Component, ctx: &Ctx) -> Vec<Diag> {
     if let Some(env) = &ctx.env {
         let mut seen = HashSet::new();
         let idx = brain_parse::LineIndex::new(&c.src);
-        let reads = env::reads(&c.src);
+        let reads = env::reads_of_file(&c.src, &c.file);
         for env::Read { key: k, at, .. } in &reads {
             let (k, at) = (k.clone(), *at);
             if env.keys.contains(&k) || !seen.insert(k.clone()) {

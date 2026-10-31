@@ -14,6 +14,7 @@
 //! - B0723 a `PUBLIC_*` value shaped like a secret (it would ship to every visitor).
 //! - B0724 a malformed line or section header.
 
+use brain_lex::{LineIndex, Lexer, Tok, Token};
 use brain_parse::{Diag, Span};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
@@ -300,7 +301,7 @@ pub struct Read {
 
 /// `X || d`, `X ?? d`, `X && y`, `X ? a : b`, `X?.y`, `X === y`, `Number(X) || d`, `parseInt(X, 10) || d`,
 /// `!X` and `if (X)`: the read at `src[at..end]` tolerates an absent key. A whitespace and parenthesis scan, because it
-/// only chooses the wording of a fix; a guard in another statement is not seen, and the fix still names `KEY?=`.
+/// only chooses the wording of a fix.
 fn guarded(src: &str, at: usize, end: usize) -> bool {
     let mut after = src[end..].trim_start();
     if let Some(rest) = after.strip_prefix(',') {
@@ -324,29 +325,175 @@ fn guarded(src: &str, at: usize, end: usize) -> bool {
     closed && open.strip_suffix("if").is_some_and(|w| !w.ends_with(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == '$'))
 }
 
-/// Every env read of a source file, with whether it tolerates an absent key.
-pub fn reads(src: &str) -> Vec<Read> {
+/// Tokens of `src[start..end]`. A byte the lexer rejects skips to the next line, so one odd line hides no later read.
+fn tokens(src: &str, idx: &LineIndex, start: usize, end: usize) -> Vec<Token> {
     let mut out = Vec::new();
-    for prefix in ["import.meta.env", "process.env", "ctx.env"] {
-        let mut from = 0;
-        while let Some(i) = src[from..].find(prefix) {
-            let at = from + i;
-            let rest = &src[at + prefix.len()..];
-            let (key, tail) = if let Some(r) = rest.strip_prefix('.') {
-                (r.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).next().unwrap_or(""), 1)
-            } else if let Some(r) = rest.strip_prefix("['").or_else(|| rest.strip_prefix("[\"")) {
-                (r.split(['\'', '"']).next().unwrap_or(""), 4)
-            } else {
-                ("", 0)
-            };
-            if is_key(key) {
-                let end = at + prefix.len() + tail + key.len();
-                out.push(Read { key: key.to_string(), at, guarded: guarded(src, at, end) });
+    let mut from = start;
+    while from < end {
+        let mut lexer = Lexer::new(src, "", idx, from, end);
+        loop {
+            match lexer.next_token_bytes() {
+                Ok(t) if t.tok == Tok::Eof => return out,
+                Ok(t) => out.push(t),
+                Err(_) => {
+                    let at = lexer.pos().max(from);
+                    from = src[at..end].find('\n').map_or(end, |n| at + n + 1);
+                    break;
+                }
             }
-            from = at + prefix.len();
         }
     }
     out
+}
+
+/// The tokens of the `{…}` expression opening at `open`, with the offset after its `}`; `None` if it never closes.
+fn expression(src: &str, idx: &LineIndex, open: usize) -> Option<(Vec<Token>, usize)> {
+    let mut lexer = Lexer::new(src, "", idx, open + 1, src.len());
+    let mut out = Vec::new();
+    let mut depth = 0usize;
+    loop {
+        let t = lexer.next_token_bytes().ok()?;
+        match &t.tok {
+            Tok::Eof => return None,
+            Tok::Punct("{") => depth += 1,
+            Tok::Punct("}") if depth == 0 => return Some((out, t.span.end as usize)),
+            Tok::Punct("}") => depth -= 1,
+            _ => {}
+        }
+        out.push(t);
+    }
+}
+
+/// Tokens of the code in a markup file: `<script>` bodies and `{…}` values. Prose, HTML comments, `<style>` and literal
+/// attribute values are not code.
+fn markup_tokens(src: &str) -> Vec<Vec<Token>> {
+    let closes = |from: usize, end: &str| src[from..].find(end).map_or(src.len(), |n| from + n);
+    let opens = |at: usize, tag: &str| src[at..].starts_with(tag) && src[at + tag.len()..].starts_with(|c: char| c == '>' || c.is_ascii_whitespace());
+    let idx = LineIndex::new(src);
+    let mut out = Vec::new();
+    let mut at = 0;
+    while let Some(n) = src[at..].find(['<', '{']) {
+        at += n;
+        if src[at..].starts_with("<!--") {
+            at = (closes(at, "-->") + 3).min(src.len());
+        } else if opens(at, "<style") {
+            at = closes(at, "</style");
+        } else if opens(at, "<script") {
+            let body = (closes(at, ">") + 1).min(src.len());
+            let end = closes(body, "</script");
+            out.push(tokens(src, &idx, body, end));
+            at = end;
+        } else if src[at..].starts_with('{') {
+            match expression(src, &idx, at) {
+                Some((t, next)) => {
+                    out.push(t);
+                    at = next;
+                }
+                None => at += 1,
+            }
+        } else {
+            at += 1;
+        }
+    }
+    out
+}
+
+/// The name `const NAME = <read>` binds, also through `Number(…)`, `parseInt(…, 10)` and the like: only a value that
+/// reaches the name unchanged carries the absent key with it.
+fn bound_name(t: &[Token], first: usize, last: usize) -> Option<usize> {
+    let mut before = first;
+    let mut after = last + 1;
+    if before >= 2 && t[before - 1].is_punct("(") && matches!(&t[before - 2].tok, Tok::Ident(w) if matches!(w.as_str(), "Number" | "String" | "Boolean" | "parseInt" | "parseFloat")) {
+        before -= 2;
+        if t.get(after).is_some_and(|x| x.is_punct(",")) && matches!(t.get(after + 1).map(|x| &x.tok), Some(Tok::Num(_))) {
+            after += 2;
+        }
+        if !t.get(after).is_some_and(|x| x.is_punct(")")) {
+            return None;
+        }
+        after += 1;
+    }
+    let ends = t.get(after).is_none_or(|x| x.nl_before || x.is_punct(";"));
+    (ends && before >= 3 && t[before - 1].is_punct("=") && matches!(&t[before - 2].tok, Tok::Ident(_)) && (t[before - 3].is_word("const") || t[before - 3].is_word("let") || t[before - 3].is_word("var"))).then(|| before - 2)
+}
+
+/// A later use of the name in the same block handles the key being absent: `const k = ctx.env.K; if (!k) return null`.
+fn guarded_later(src: &str, t: &[Token], name: usize, from: usize) -> bool {
+    let Tok::Ident(word) = &t[name].tok else { return false };
+    let mut depth = 0usize;
+    for (i, x) in t.iter().enumerate().skip(from) {
+        match &x.tok {
+            Tok::Punct("{") => depth += 1,
+            Tok::Punct("}") if depth == 0 => return false,
+            Tok::Punct("}") => depth -= 1,
+            Tok::Ident(w) if w == word && !(t[i - 1].is_punct(".") || t[i - 1].is_punct("?.")) && guarded(src, x.span.start as usize, x.span.end as usize) => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
+fn reads_of_tokens(src: &str, t: &[Token], out: &mut Vec<Read>) {
+    let member = |i: usize| t.get(i).is_some_and(|x| x.is_punct(".") || x.is_punct("?."));
+    let word = |i: usize, w: &str| t.get(i).is_some_and(|x| x.is_word(w));
+    for i in 0..t.len() {
+        let after_dot = i > 0 && member(i - 1);
+        // `env` sits after these; `x.ctx.env` is still a context, and `process` is only the global one.
+        let env = if word(i, "ctx") {
+            i + 2
+        } else if word(i, "process") && (!after_dot || (i >= 2 && word(i - 2, "globalThis"))) {
+            i + 2
+        } else if word(i, "import") && !after_dot && member(i + 1) && word(i + 2, "meta") && member(i + 3) {
+            i + 4
+        } else {
+            continue;
+        };
+        if !member(env - 1) || !word(env, "env") {
+            continue;
+        }
+        let (key, last) = match (t.get(env + 1), t.get(env + 2), t.get(env + 3)) {
+            (Some(_), Some(Token { tok: Tok::Ident(k), .. }), _) if member(env + 1) => (k.clone(), env + 2),
+            (Some(_), Some(open), Some(k)) if member(env + 1) && open.is_punct("[") && t.get(env + 4).is_some_and(|c| c.is_punct("]")) => {
+                let Tok::Str { value, .. } = &k.tok else { continue };
+                (value.clone(), env + 4)
+            }
+            (Some(open), Some(k), Some(close)) if open.is_punct("[") && close.is_punct("]") => {
+                let Tok::Str { value, .. } = &k.tok else { continue };
+                (value.clone(), env + 3)
+            }
+            _ => continue,
+        };
+        if !is_key(&key) {
+            continue;
+        }
+        let at = t[i].span.start as usize;
+        let tolerant = guarded(src, at, t[last].span.end as usize) || bound_name(t, i, last).is_some_and(|name| guarded_later(src, t, name, last + 1));
+        out.push(Read { key, at, guarded: tolerant });
+    }
+}
+
+/// Every env read of a script (`.jsbrain`, `.js`), with whether it tolerates an absent key. Read from tokens: a comment,
+/// a string or a regex that mentions `process.env.X` reads nothing.
+pub fn reads(src: &str) -> Vec<Read> {
+    reads_in(src, false)
+}
+
+/// `reads` for a script or, with `markup`, for a `.brain` file.
+pub fn reads_in(src: &str, markup: bool) -> Vec<Read> {
+    let mut out = Vec::new();
+    if markup {
+        for t in markup_tokens(src) {
+            reads_of_tokens(src, &t, &mut out);
+        }
+    } else {
+        reads_of_tokens(src, &tokens(src, &LineIndex::new(src), 0, src.len()), &mut out);
+    }
+    out
+}
+
+/// `reads` by file name: a `.brain` file is markup, except a `.test.brain`, which is a script.
+pub fn reads_of_file(src: &str, file: &str) -> Vec<Read> {
+    reads_in(src, file.ends_with(".brain") && !file.ends_with(".test.brain"))
 }
 
 /// Keys the app's `.brain`/`.jsbrain` files read, the ones B0721 covers, with whether any read tolerates absence.
@@ -367,7 +514,7 @@ pub fn code_reads(root: &Path) -> BTreeMap<String, bool> {
             } else if (name.ends_with(".brain") || name.ends_with(".jsbrain"))
                 && let Ok(text) = std::fs::read_to_string(&p)
             {
-                for r in reads(&text) {
+                for r in reads_of_file(&text, &name) {
                     if !TOOLING_KEYS.contains(&r.key.as_str()) {
                         *out.entry(r.key).or_insert(false) |= r.guarded;
                     }
@@ -397,7 +544,7 @@ pub fn unused_keys(root: &Path) -> Vec<Diag> {
             } else if (name.ends_with(".brain") || name.ends_with(".jsbrain") || name.ends_with(".js") || name.ends_with(".mjs"))
                 && let Ok(text) = std::fs::read_to_string(&p)
             {
-                used.extend(keys_used(&text).into_iter().map(|(k, _)| k));
+                used.extend(reads_of_file(&text, &name).into_iter().map(|r| r.key));
             }
         }
     }
