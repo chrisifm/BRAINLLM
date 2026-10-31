@@ -860,6 +860,7 @@ async fn response_headers(req: Request, next: Next) -> Response {
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
     let response = REQUEST_ID.scope(rid.clone(), next.run(req)).await;
+    crate::dev_trace::request(&rid, method.as_str(), &route, response.status().as_u16(), started.elapsed().as_secs_f64() * 1000.0);
     let log_policy = response.extensions().get::<edge_http::LogPolicy>().copied();
     let mut response = crate::response::finalize(&method, &path, accept.as_deref(), &rid, response);
     let cacheable = response.status().is_success() || response.status() == StatusCode::NOT_MODIFIED;

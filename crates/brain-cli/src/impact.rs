@@ -368,6 +368,7 @@ pub fn measure(root: &Path) -> Result<brain_pack::impact::Measure, String> {
                 && !n.contains('/')
                 && n != "brain-dev.js"
                 && n != "brain-inspect.js"
+                && n != "brain-trace.js"
                 && n != "brain-why.js"
                 && n != "brain-mock.js"
                 && n != "brain-overlay.js")

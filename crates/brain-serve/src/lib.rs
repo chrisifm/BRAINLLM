@@ -13,6 +13,7 @@ mod server;
 mod sha1;
 mod ws;
 pub mod feedback;
+pub mod trace;
 
 pub use server::{start_dev_with_native_proxy, serve, set_quiet, start, start_dev, CompileFn, Compiled, DiagnoseFn, Dev, EnvLoader, EventFn, Options, ProblemsFn};
 

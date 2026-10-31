@@ -1,5 +1,7 @@
 // brain dev HMR client (SPEC §8). CSS: swaps the stylesheet without remounting. JS: `hmr(hash, mod)` from
 // /@brain/brain-dev.js remounts keeping the sigs; if it is missing or fails, the page reloads.
+// First import on purpose: `brain trace` wraps fetch before anything on this page can call it.
+import { attach as traceAttach, ids as traceIds, inspected as traceInspected, lastFailed as traceFailed } from './brain-trace.js';
 // brain.json `base` (#148): every dev URL lives under it (`<meta name="brain-base" content="/app/">`)
 const base = (document.querySelector('meta[name="brain-base"]')?.content ?? '/').replace(/\/$/, '');
 const url = `ws://${location.host}${base}/@brain/hmr`;
@@ -31,7 +33,7 @@ globalThis.__brainDev = true;
 let ws;
 const pending = [];
 const report = e => {
-  const msg = JSON.stringify({ t: 'brain:error', url: location.pathname, at: Date.now(), ...e });
+  const msg = JSON.stringify({ t: 'brain:error', url: location.pathname, at: Date.now(), ...traceIds, rid: e.type === 'rpc' ? traceFailed() : undefined, ...e });
   ws?.readyState === 1 ? ws.send(msg) : pending.length < 50 && pending.push(msg);
 };
 // Errors are recorded by the runtime's brain-err (window errors, rejections and what component boundaries catch),
@@ -116,6 +118,7 @@ function swapCss(path, receivedAt) {
 function connect() {
   ws = new WebSocket(url);
   ws.onopen = () => { while (pending.length) ws.send(pending.shift()); };
+  traceAttach(batch => ws?.readyState === 1 && (ws.send(batch), true));
   ws.onmessage = e => {
     const receivedAt = now();
     const m = JSON.parse(e.data);
@@ -157,7 +160,7 @@ export async function route(data) {
   await (why ??= import(base + '/@brain/brain-why.js').catch(() => null));
   // the memory/latency inspector (§9): its batches go to the dev server over this socket (GET /@brain/metrics,
   // MCP brain_inspect); dropped while the socket is reconnecting
-  await (insp ??= import(base + '/@brain/brain-inspect.js').then(m => m.inspect({ send: s => ws?.readyState === 1 && ws.send(s) }), () => null));
+  await (insp ??= import(base + '/@brain/brain-inspect.js').then(m => m.inspect({ send: s => { traceInspected(s); return ws?.readyState === 1 && ws.send(s); } }), () => null));
   const at = u => (u.startsWith('/') && !u.startsWith(base + '/') ? base + u : u);
   const V = (await import(at(data.v))).default;
   const L = [];

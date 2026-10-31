@@ -2,6 +2,7 @@
 
 #[cfg(unix)]
 mod browser;
+mod trace;
 mod startup_config;
 #[cfg(unix)]
 mod shot;
@@ -80,7 +81,7 @@ main:
   brain --version                    prints the version (also -V, --json)
   brain seo <audit|links|preview R>  SEO audit of the built site (score per page, B18xx findings)
   brain new <app>                    creates the app (app.brain, tokens.cssbrain, views/, comp/, ui/, AGENTS.md)
-  brain run [--port 5180] [--base /app/] [--mock[=seed]] [--profile] [--inspect-port N | --no-inspect]  dev server with hot reload; the debugger on port+1
+  brain run [--port 5180] [--base /app/] [--mock[=seed]] [--profile] [--no-trace] [--inspect-port N | --no-inspect]  dev server with hot reload; the debugger on port+1
   brain build [--site https://…] [--report] [--ext web|brain]   production (--report: bytes per page before/after each pass)
   brain preview [--port 4173]         temporary local preview of dist/; Ctrl+C to stop
   brain doctor [--fix]                everything at once: check + tests + overengineering + leaks; exit ≠ 0 on any error
@@ -102,6 +103,7 @@ granular:
   brain edit <operation> <file> ...  checked AST edits: add-prop, remove-prop, rename, move, extract
   brain shot [route] [--text] [--baseline name] [--update-baseline]  Chrome screenshot and accessibility outline
   brain test [path] [--timeout 60] [--heap] [--viewer]   *.test.brain in headless Chrome + accessibility audit (+ leaks); --viewer opts in to Claude/Codex Viewer
+  brain trace [<requestId>|issues] [--since 5m] [--failed] [--module m] [--limit n] [--json]  what `brain run` captured: requests, errors, CSP, sockets, queries
   brain map                          project graph: routes, components and props, modules, tests, tokens
   brain spec [--topic X] [--all]     the spec for the LLM (topics: files script markup channels css a11y tests cli)
   brain guide [topic] [--json]       playbooks per task: start views data forms server seo a11y webmcp tests i18n performance
@@ -367,6 +369,7 @@ fn main() -> ExitCode {
             } else {mcp::run_profile(&profile)}
         }
         Some("test") => return cmd_test(&args[1..]),
+        Some("trace") => app_root().and_then(|root| trace::run(&root, &args[1..])),
         Some("map") => app_root().and_then(|r| {
             // filters and pages (§43): --view <route|file>, --comp <name>, --reads <key>, --limit N, --cursor N
             let num = |k: &str| flag(&args[1..], k).map(|v| v.parse::<usize>().map_err(|_| format!("{k} must be a number")));
@@ -1200,7 +1203,7 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
         rt.into_iter()
             // runtime modules, plus the built-in ui/ kit (compiled by brain-pack like an app component) and RUNTIME's
             // runaway probe for the build (shim/probe.js, B0907; never served)
-            .filter(|(n, _)| (n.ends_with(".js") && !n.contains('/') && n != "brain-dev.js" && n != "brain-inspect.js" && n != "brain-why.js" && n != "brain-mock.js" && n != "brain-overlay.js") || (n.starts_with("ui/") && n.ends_with(".brain")) || n == "shim/probe.js")
+            .filter(|(n, _)| (n.ends_with(".js") && !n.contains('/') && n != "brain-dev.js" && n != "brain-inspect.js" && n != "brain-trace.js" && n != "brain-why.js" && n != "brain-mock.js" && n != "brain-overlay.js") || (n.starts_with("ui/") && n.ends_with(".brain")) || n == "shim/probe.js")
             .collect();
     on_phase("check", 0, 0);
     let lens = hash_lengths(root)?;
@@ -2191,6 +2194,9 @@ fn cmd_dev(args: &[String]) -> Result<(), String> {
             }
         }) as brain_serve::EventFn);
     brain_serve::set_quiet(view.is_some());
+    if !args.iter().any(|arg| arg == "--no-trace") {
+        brain_serve::trace::enable(&root);
+    }
     let environment = env::name(args, "development");
     let site = env::value(&root, &environment, "PUBLIC_SITE_URL");
     let native_enabled = backend::socket_settings(&root, site.as_deref(), None)?.enabled();

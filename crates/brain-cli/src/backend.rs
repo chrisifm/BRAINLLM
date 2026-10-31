@@ -631,6 +631,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
             println!("{}",json!({"schemaVersion":1,"ok":true,"user":user,"role":"admin","sessionsRevoked":true}));return Ok(());
         }
         brain_backend::db::keep_diagnostics(failure_log(&root));
+        if !production && brain_serve::trace::settings(&root).enabled {brain_backend::dev_trace::install(&root);}
         let port=crate::flag(args,"--port").unwrap_or("5182".into()).parse::<u16>().map_err(|_|"B0763: --port is not a port number; fix: pass 0 to 65535")?;
         let listener=brain_serve::listen::bind_waiting("127.0.0.1",port,brain_serve::listen::RESTART_WAIT).and_then(|l|{l.set_nonblocking(true)?;tokio::net::TcpListener::from_std(l)}).map_err(|e|format!("B0763: cannot listen on 127.0.0.1:{port} ({e}); fix: stop what uses that port or pass another with --port"))?;
         let addr=listener.local_addr().map_err(|e|e.to_string())?;
