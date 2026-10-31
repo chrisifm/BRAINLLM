@@ -203,6 +203,7 @@ impl Static {
                 ),
             };
         }
+        let analytics = target.is_some() && std::env::var("BRAIN_ANALYTICS").as_deref() != Ok("off");
         if let (Some(target), Some(native_path)) = (target, native_path) {
             if native_proxy::handles(native_path) {
                 req.path = native_path.to_string();
@@ -316,6 +317,12 @@ impl Static {
                 return write(&mut s, 304, &hs, b"", true);
             }
         }
+        if html && analytics {
+            // behavior analytics: the page gains the backend-served collector at response time (never in the build)
+            if let Ok(page) = std::fs::read_to_string(&file) {
+                return write(&mut s, status, &hs, with_analytics(&page, &self.pre).as_bytes(), head);
+            }
+        }
         let variants = [
             ("br", PathBuf::from(format!("{name}.br"))),
             ("gzip", PathBuf::from(format!("{name}.gz"))),
@@ -348,6 +355,18 @@ impl Static {
             }
         }
         write_file(&mut s, status, &hs, selected_file, head)
+    }
+}
+
+/// Adds the async collector module (`<pre>/_brain/analytics.js`, served by the native backend) before `</head>`, once.
+pub(crate) fn with_analytics(html: &str, pre: &str) -> String {
+    let tag = format!("<script type=\"module\" async src=\"{pre}/_brain/analytics.js\"></script>");
+    if html.contains(&tag) {
+        html.to_string()
+    } else if html.contains("</head>") {
+        html.replacen("</head>", &format!("{tag}</head>"), 1)
+    } else {
+        format!("{html}{tag}")
     }
 }
 
@@ -929,7 +948,17 @@ mod encoding_tests {
         assert!(cached.ends_with("export const cached=1"));
         let head = request("HEAD", "/app/");
         assert!(head.starts_with("HTTP/1.1 200"));
-        assert!(head.contains("Content-Length: 13"));
+        // with a native backend the page gains the collector tag at response time; the built file is unchanged
+        let served = super::with_analytics("<h1>Home</h1>", "/app");
+        assert!(head.contains(&format!("Content-Length: {}", served.len())));
+        let page = request("GET", "/app/");
+        assert!(page.ends_with("<h1>Home</h1><script type=\"module\" async src=\"/app/_brain/analytics.js\"></script>"));
+        assert_eq!(std::fs::read_to_string(dist.join("index.html")).unwrap(), "<h1>Home</h1>");
+        assert_eq!(super::with_analytics(&served, "/app"), served);
+        assert_eq!(
+            super::with_analytics("<html><head><title>T</title></head><body></body></html>", ""),
+            "<html><head><title>T</title><script type=\"module\" async src=\"/_brain/analytics.js\"></script></head><body></body></html>"
+        );
         assert!(head.ends_with("\r\n\r\n"));
         assert!(request("GET", "/s/short").starts_with("HTTP/1.1 404"));
         std::fs::remove_dir_all(dist).unwrap();

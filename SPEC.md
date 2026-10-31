@@ -274,6 +274,10 @@ After-write hooks commit `{resource,operation,record}` with their mutation. `bra
 hooks contract. Its default function receives `{resource,operation,payload,existing,user,rid}` and must return the
 accepted payload; the backend revalidates it and rejects conflicting writes. See `docs/BEFORE-HOOKS.md` for limits.
 See `brain guide server` for the workflow.
+Behavior analytics is on by default with a native backend: the served page loads `/_brain/analytics.js` (no build
+bytes), events go to the project's Postgres, and `brain analytics report [--since 7d] [--json]` resolves elements to
+`file:line`. Mark custom events with `data-track="name"`; turn it off with `"analytics": false` or `BRAIN_ANALYTICS=off`.
+See `docs/backend/analytics.md`.
 Set `BRAIN_BACKEND_URL` to the fixed loopback native backend URL to connect native API requests and SSR session verification.
 Native JWT accounts use short-lived access and rotating refresh cookies, persisted revocation, configured roles and Google Sign-In.
 `brain recipe auth-ui|password-reset|email-verification|google-signin` prepares project-owned account UI;

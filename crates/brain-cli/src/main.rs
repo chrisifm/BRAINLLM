@@ -24,6 +24,7 @@ mod mcp_setup;
 mod agent;
 mod backend;
 mod resource_admin;
+mod analytics;
 mod webhook_config;
 mod hooks_executor;
 mod backend_diff;
@@ -193,6 +194,7 @@ fn main() -> ExitCode {
         }),
         Some("backend") => backend::run(&args[1..]),
         Some("jobs") => backend::jobs(&args[1..]),
+        Some("analytics") => analytics::run(&args[1..]),
         Some("media") => backend::media(&args[1..]),
         Some("agent") => {
             if args.get(1).map(String::as_str) != Some("setup") || args.iter().skip(2).any(|s| !matches!(s.as_str(), "--hooks" | "--json")) {
@@ -1050,6 +1052,7 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
             .collect();
     on_phase("check", 0, 0);
     let lens = hash_lengths(root)?;
+    let _ = analytics::write_map(root); // .brain/analytics/elements.json: element ids → file:line, never deployed
     prewarm(root, &lens);
     let r2 = root.to_path_buf();
     let compile = move |src: &str, rel: &Path| -> Result<brain_pack::Unit, String> {
@@ -1764,6 +1767,14 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
         let legacy = std::fs::read_to_string(a.join("brain.json")).ok().and_then(|s| Json::parse(&s).ok()).and_then(|j| j.get("site").and_then(Json::as_str).map(str::to_string));
         if legacy.is_some() {
             advice.push(Json::obj([("code", Json::str("B0728")), ("level", Json::str("info")), ("file", Json::str("brain.json")), ("msg", Json::str("brain.json \"site\" is a legacy fallback: the site URL comes from PUBLIC_SITE_URL of each environment")), ("fix", Json::str("set PUBLIC_SITE_URL in each section of .brain_env and delete \"site\" from brain.json"))]));
+        }
+    }
+    // behavior analytics (docs/backend/analytics.md): on by default, but it needs the native backend and Postgres
+    if let Some(a) = &app {
+        let set = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty()).or_else(|| env::value(a, "development", k)).or_else(|| env::value(a, "production", k)).is_some();
+        let off = matches!(backend::analytics_settings(a), Ok(None));
+        if !off && !(set("DATABASE_URL") && set("BRAIN_BACKEND_URL")) {
+            advice.push(Json::obj([("code", Json::str("B0729")), ("level", Json::str("info")), ("file", Json::str(env::FILE)), ("msg", Json::str("behavior analytics records nothing: it needs the native backend (DATABASE_URL and BRAIN_BACKEND_URL)")), ("fix", Json::str("set DATABASE_URL and BRAIN_BACKEND_URL in .brain_env, run `brain backend migrate` and `brain backend serve`; or set \"analytics\": false in brain.json"))]));
         }
     }
     // a quality bar lowered below its default does not count as passing: an agent must fix the pages, not the bar

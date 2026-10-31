@@ -1,4 +1,6 @@
 //! One integration executable preserves each isolated fixture and avoids repeated platform loader startup.
+#[path = "analytics.rs"]
+mod analytics;
 #[path = "auth_flows.rs"]
 mod auth_flows;
 #[path = "auth_http.rs"]

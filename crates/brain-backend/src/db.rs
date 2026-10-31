@@ -23,6 +23,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "search_empty_fields",
         include_str!("../migrations/0007_search_empty_fields.sql"),
     ),
+    ("analytics", include_str!("../migrations/0008_analytics.sql")),
 ];
 fn checksum(sql: &str) -> String {
     Sha256::digest(sql.as_bytes())
@@ -30,13 +31,32 @@ fn checksum(sql: &str) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect()
 }
+/// `brain:<app>:<role>` (role `http`, `worker:<queue>`, `migrate`, `cli`) so `pg_stat_activity` and audits attribute load.
+/// Kept to Postgres' 63-byte NAMEDATALEN with only `[A-Za-z0-9_.:-]`; anything else becomes `-`.
+pub fn application_name(app: &str, role: &str) -> String {
+    let clean = |s: &str| -> String {
+        s.chars()
+            .map(|c| if c.is_ascii_alphanumeric() || "_.:-".contains(c) { c } else { '-' })
+            .collect()
+    };
+    let app = if app.trim().is_empty() { "app".to_string() } else { clean(app.trim()) };
+    let mut name = format!("brain:{app}:{}", clean(role));
+    name.truncate(63);
+    name
+}
 pub async fn connect(url: &str) -> Result<PgPool, String> {
+    connect_as(url, &application_name("app", "http")).await
+}
+pub async fn connect_as(url: &str, application: &str) -> Result<PgPool, String> {
+    let options = <sqlx::postgres::PgConnectOptions as std::str::FromStr>::from_str(url)
+        .map_err(|_| "Cannot parse DATABASE_URL (credentials are not logged)".to_string())?
+        .application_name(application);
     PgPoolOptions::new().max_connections(8).acquire_timeout(Duration::from_secs(5))
         .after_connect(|conn, _| Box::pin(async move {
             // Keep pg_catalog implicit: it resolves first, while unqualified CREATE targets public.
             sqlx::raw_sql("SET search_path=public; SET statement_timeout='5s'; SET lock_timeout='2s'; SET idle_in_transaction_session_timeout='10s';").execute(conn).await?;
             Ok(())
-        })).connect(url).await.map_err(|_| "Cannot connect to Postgres; check DATABASE_URL (credentials are not logged)".into())
+        })).connect_with(options).await.map_err(|_| "Cannot connect to Postgres; check DATABASE_URL (credentials are not logged)".into())
 }
 fn drift(object: &str) -> String {
     format!(
