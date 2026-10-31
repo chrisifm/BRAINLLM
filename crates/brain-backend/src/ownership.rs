@@ -131,6 +131,17 @@ pub fn validate_graph(r: &Resource, resources: &[Resource]) -> Result<(), String
     Ok(())
 }
 
+/// Checks one `owner.<ref>[.<ref>]` grant of an action or transition against the resource graph.
+pub fn check_path(r: &Resource, grant: &str, resources: &[Resource]) -> Result<(), String> {
+    let hops = path(grant).ok_or_else(|| format!("invalid grant `{grant}`; fix: use owner.<ref field> or owner.<ref field>.<ref field>"))?;
+    let mut current = r;
+    for hop in &hops {
+        let target = relations::target(current, hop).ok_or_else(|| format!("grant `{grant}`: `{hop}` is not a ref:<resource> field of {}", current.name))?;
+        current = resources.iter().find(|x| x.name == target).ok_or_else(|| format!("grant `{grant}` reaches unknown resource `{target}`"))?;
+    }
+    Ok(())
+}
+
 impl Scope {
     /// Pushes a boolean SQL expression over the current table's unqualified columns.
     pub fn push(&self, q: &mut sqlx::QueryBuilder<sqlx::Postgres>, r: &Resource, resources: &BTreeMap<String, Resource>) {

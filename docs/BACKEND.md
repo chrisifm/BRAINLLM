@@ -38,6 +38,10 @@ Strings are at most 16 KB, emails 254 bytes and objects 32 KB. HTTP JSON bodies 
 
 ### Exact types, constraints and defaults (2026-10-30)
 
+A `str` field can declare a format: `{ type: 'str', pattern: '[A-Z]{3}[0-9]{6}' }`. The value must match as a whole on
+every write, or the write answers 422 `Invalid format`. A pattern is not part of the registered contract, so adding one
+needs no migration and stored rows are checked only when they are next written.
+
 | Type | Accepted JSON | Stored and returned | Database CHECK |
 |---|---|---|---|
 | `int` | integer within ±9007199254740991 (JavaScript-safe) | the same number | integral JSON number within the range |

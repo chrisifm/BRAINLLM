@@ -78,6 +78,7 @@ fn fields(value: Value) -> Result<BTreeMap<String, Field>, String> {
             let mut on_delete = None;
             let mut visible = None;
             let mut access = None;
+            let mut pattern = None;
             let mut slug = false;
             let (kind, default, unique) = match v {
                 // `'str! private'`: an optional access modifier after the type.
@@ -89,8 +90,8 @@ fn fields(value: Value) -> Result<BTreeMap<String, Field>, String> {
                     None => (kind.as_str(), None, false),
                 },
                 Value::Object(spec) => {
-                    if let Some(key) = spec.keys().find(|k| !matches!(k.as_str(), "type" | "default" | "unique" | "on_delete" | "visible" | "access" | "slug")) {
-                        return Err(format!("field `{name}`: unknown option `{key}`; fix: use type, default, unique, on_delete, visible, access and slug"));
+                    if let Some(key) = spec.keys().find(|k| !matches!(k.as_str(), "type" | "default" | "unique" | "on_delete" | "visible" | "access" | "slug" | "pattern")) {
+                        return Err(format!("field `{name}`: unknown option `{key}`; fix: use type, default, unique, on_delete, visible, access, slug and pattern"));
                     }
                     let kind = spec.get("type").and_then(Value::as_str).ok_or_else(|| format!("field `{name}` needs type: 'str' (or another kind)"))?;
                     let unique = match spec.get("unique") {
@@ -106,6 +107,9 @@ fn fields(value: Value) -> Result<BTreeMap<String, Field>, String> {
                         Some(Value::Bool(b)) => slug = *b,
                         Some(_) => return Err(format!("field `{name}`: slug must be true or false")),
                     }
+                    if let Some(text) = spec.get("pattern") {
+                        pattern = Some(text.as_str().ok_or_else(|| format!("field `{name}`: pattern must be a regular expression string"))?.to_string());
+                    }
                     if let Some(mode) = spec.get("access") {
                         access = Some(mode.as_str().ok_or_else(|| format!("field `{name}`: access must be 'private', 'readonly' or 'writeonly'"))?.to_string());
                     }
@@ -114,7 +118,7 @@ fn fields(value: Value) -> Result<BTreeMap<String, Field>, String> {
                     }
                     (kind, spec.get("default").cloned(), unique)
                 }
-                _ => return Err("Field shape must be a string or { type, default, unique, on_delete, visible, access, slug }".into()),
+                _ => return Err("Field shape must be a string or { type, default, unique, on_delete, visible, access, slug, pattern }".into()),
             };
             Ok((
                 name.clone(),
@@ -127,6 +131,7 @@ fn fields(value: Value) -> Result<BTreeMap<String, Field>, String> {
                     visible,
                     access,
                     slug,
+                    pattern,
                 },
             ))
         })

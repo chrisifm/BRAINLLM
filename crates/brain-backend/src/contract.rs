@@ -32,6 +32,10 @@ pub struct Field {
     /// The resource's slug: previous values keep resolving for permanent redirects (see `slugs.rs`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub slug: bool,
+    /// Regular expression a `str` value must match as a whole, on every write path. Application-level, like
+    /// list byte limits: not recorded, so adding one needs no migration and never rejects stored rows until rewritten.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
 }
 impl Field {
     pub fn ty(&self) -> Option<Ty> {
@@ -274,6 +278,11 @@ pub fn identifier(s: &str) -> bool {
                 | "search"
         )
 }
+/// A field pattern matches the whole value: `[0-9]+` must not accept `abc1`.
+fn whole_value(pattern: &str) -> Option<regex_lite::Regex> {
+    regex_lite::Regex::new(&format!("^(?:{pattern})$")).ok()
+}
+
 impl Resource {
     pub fn validate(&self) -> Result<(), String> {
         if !identifier(&self.name) {
@@ -333,6 +342,16 @@ impl Resource {
         {
             if !identifier(queue) {
                 return Err("hook names and queues must be valid identifiers".into());
+            }
+        }
+        for (name, field) in &self.fields {
+            if let Some(pattern) = &field.pattern {
+                if !matches!(field.ty(), Some(crate::types::Ty::Str)) {
+                    return Err(format!("{}.{name}: pattern applies only to a str field", self.name));
+                }
+                if pattern.len() > 256 || whole_value(pattern).is_none() {
+                    return Err(format!("{}.{name}: pattern must be a valid regular expression of at most 256 bytes", self.name));
+                }
             }
         }
         for (op, grants) in [
@@ -395,6 +414,12 @@ impl Resource {
             match field.ty() {
                 Some(ty) => match ty.normalize(v, field.required) {
                     Some(value) => {
+                        if let (Some(pattern), Some(text)) = (&field.pattern, value.as_str())
+                            && !whole_value(pattern).is_some_and(|re| re.is_match(text))
+                        {
+                            errors.insert(name.clone(), "Invalid format".into());
+                            continue;
+                        }
                         clean.insert(name.clone(), value);
                     }
                     None => {
@@ -457,6 +482,7 @@ impl Resource {
                     field.remove("visible");
                     field.remove("access");
                     field.remove("slug");
+                    field.remove("pattern");
                 }
             }
         }

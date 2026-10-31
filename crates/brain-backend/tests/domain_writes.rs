@@ -469,3 +469,97 @@ async fn postgres_state_transitions_are_the_only_way_to_change_state() {
     let (status, _) = call(&s.app, "POST", "/api/shop_orders/batch", &s.admin, Some(json!({"op":"update","items":[{"id":id(&order),"data":{"status":"pending"}}]}))).await;
     assert_eq!(status, 422);
 }
+
+fn notice_contracts() -> (Vec<Resource>, Domain) {
+    let resources: Vec<Resource> = serde_json::from_value(json!([
+        {"name": "note_boards", "fields": {"title": {"kind": "str", "required": true}},
+         "policy": {"read": ["user"], "create": ["user"], "update": ["owner"], "delete": ["owner"]}},
+        {"name": "note_items", "fields": {
+            "board": {"kind": "ref:note_boards", "required": true},
+            "code": {"kind": "str", "required": false, "pattern": "[A-Z]{2}-[0-9]+"},
+            "body": {"kind": "str", "required": false},
+            "rank": {"kind": "int", "required": false},
+            "pinned": {"kind": "bool", "required": false},
+            "status": {"kind": "enum(draft|live)", "required": false, "default": "draft"}},
+         "policy": {"read": ["user"], "create": ["user"], "update": ["owner"], "delete": ["owner"]}}
+    ]))
+    .unwrap();
+    let domain: Domain = serde_json::from_value(json!({"resources": {"note_items": {
+        "actions": {"pin": {"roles": ["owner.board"], "when_any": [{"status": "live"}, {"rank": {"gte": 5}}], "set": {"pinned": true}}},
+        "transitions": {"field": "status", "initial": ["draft"], "editable": {"body": ["draft"]},
+            "transitions": {"publish": {"from": ["draft"], "to": "live", "roles": ["owner"]}}}
+    }}}))
+    .unwrap();
+    (resources, domain)
+}
+
+#[test]
+fn field_patterns_state_locks_and_relational_action_grants_validate() {
+    let (resources, domain) = notice_contracts();
+    domain.validate(&resources).unwrap();
+    let items = &resources[1];
+    assert_eq!(items.input(&json!({"board": uuid::Uuid::nil().to_string(), "code": "abc AB-1"})).unwrap_err()["code"], "Invalid format", "the whole value must match");
+    assert!(items.input(&json!({"board": uuid::Uuid::nil().to_string(), "code": "AB-1"})).is_ok());
+    assert!(items.recorded_fields()["code"].get("pattern").is_none(), "a pattern needs no migration");
+    let mut bad = items.clone();
+    bad.fields.get_mut("rank").unwrap().pattern = Some("[0-9]+".into());
+    assert!(bad.validate().unwrap_err().contains("only to a str"));
+    let mut bad = items.clone();
+    bad.fields.get_mut("code").unwrap().pattern = Some("(".into());
+    assert!(bad.validate().unwrap_err().contains("valid regular expression"));
+    let broken = |patch: Value| {
+        let mut value = serde_json::to_value(&domain).unwrap();
+        json_patch(&mut value, &json!({"resources": {"note_items": patch}}));
+        let domain: Domain = serde_json::from_value(value).unwrap();
+        domain.validate(&resources).unwrap_err()
+    };
+    assert!(broken(json!({"actions": {"pin": {"roles": ["owner.body"]}}})).contains("not a ref:<resource>"));
+    assert!(broken(json!({"actions": {"pin": {"when_any": [{"ghost": 1}]}}})).contains("undeclared field"));
+    assert!(broken(json!({"actions": {"pin": {"when_any": [{}]}}})).contains("non-empty"));
+    assert!(broken(json!({"transitions": {"editable": {"status": ["draft"]}}})).contains("other than the state field"));
+    assert!(broken(json!({"transitions": {"editable": {"body": ["gone"]}}})).contains("must list values"));
+}
+
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn postgres_patterns_state_locks_and_relational_actions_hold_on_every_write() {
+    let s = shop().await;
+    let (resources, domain) = notice_contracts();
+    db::migrate(&s.pool, &resources).await.unwrap();
+    let config = brain_backend::Config {
+        api_keys: None, roles: Default::default(), mail: None, auth_public_base_url: None, webhooks: None, before_hooks: None, sockets: None,
+        gcs: None, jwt: None, google: None, resources, jobs: Vec::new(),
+        uploads: std::env::temp_dir().join(format!("brain-notice-test-{}", std::process::id())),
+        origins: vec!["http://localhost:5182".into()], production: true,
+    };
+    let (app, _) = brain_backend::http::router_with_domain(s.pool.clone(), config, domain).await.unwrap();
+    let (_, board) = call(&app, "POST", "/api/note_boards", &s.alice, Some(json!({"title": "Alice"}))).await;
+    let board = board["id"].as_str().unwrap().to_string();
+
+    let (status, refused) = call(&app, "POST", "/api/note_items", &s.bob, Some(json!({"board": board, "code": "nope"}))).await;
+    assert_eq!((status, &refused["error"]["fields"]["code"]), (422, &json!("Invalid format")), "{refused}");
+    let (status, item) = call(&app, "POST", "/api/note_items", &s.bob, Some(json!({"board": board, "code": "AB-1", "body": "first", "rank": 1}))).await;
+    assert_eq!(status, 200, "{item}");
+    let uri = format!("/api/note_items/{}", item["id"].as_str().unwrap());
+    let (status, refused) = call(&app, "PATCH", &uri, &s.bob, Some(json!({"code": "nope"}))).await;
+    assert_eq!(status, 422, "PATCH validates the format too: {refused}");
+
+    // The action's grant is the board's owner: the row's own owner does not hold it, and the guard group still applies.
+    let pin = format!("{uri}/actions/pin");
+    assert_eq!(call(&app, "POST", &pin, &s.bob, Some(json!({}))).await.0, 403);
+    let (status, guarded) = call(&app, "POST", &pin, &s.alice, Some(json!({}))).await;
+    assert_ne!(status, 200, "neither group holds: {guarded}");
+    assert_eq!(call(&app, "PATCH", &uri, &s.bob, Some(json!({"rank": 7}))).await.0, 200);
+    let (status, pinned) = call(&app, "POST", &pin, &s.alice, Some(json!({}))).await;
+    assert_eq!((status, &pinned["data"]["pinned"]), (200, &json!(true)), "the second group holds: {pinned}");
+
+    assert_eq!(call(&app, "PATCH", &uri, &s.bob, Some(json!({"body": "second"}))).await.0, 200, "editable while draft");
+    assert_eq!(call(&app, "POST", &format!("{uri}/transitions/publish"), &s.bob, Some(json!({}))).await.0, 200);
+    let (status, locked) = call(&app, "PATCH", &uri, &s.bob, Some(json!({"body": "third"}))).await;
+    assert_eq!((status, locked["error"]["fields"]["body"].as_str()), (422, Some("Editable only while status is draft")), "{locked}");
+    let (_, current) = call(&app, "GET", &uri, &s.bob, None).await;
+    let mut replacement = current["data"].clone();
+    replacement["body"] = json!("fourth");
+    assert_eq!(call(&app, "PUT", &uri, &s.bob, Some(replacement)).await.0, 422, "PUT is locked as well");
+    assert_eq!(call(&app, "PATCH", &uri, &s.bob, Some(json!({"body": "second", "rank": 9}))).await.0, 200, "an unchanged locked field and a free field pass");
+}

@@ -25,6 +25,10 @@ Each transition accepts the same keys as an [action](atomic-updates.md): `roles`
 guards and side effects in `set` / `increment` / `decrement`. Side effects are written in the same transaction as the
 state change; for example, `due_on: '$now+14d'` on a `date` field stores today plus 14 days.
 
+`editable` keeps other fields fixed outside given states: `editable: { title: ['draft'] }` answers 422 when any write
+(PUT, PATCH, batch, upsert, an operation step or an action) changes `title` while the state is anything else. Sending the
+stored value is not a change. A transition's own `set` still applies, since declaring it is the decision to write there.
+
 ```http
 POST /api/shop_orders/5f2a…/transitions/pay
 content-type: application/json
