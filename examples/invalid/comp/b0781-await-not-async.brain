@@ -1,0 +1,5 @@
+<script>
+  const g = async (u) => u
+  const f = () => { await g(1) }
+</script>
+<button on:click={f}>Go</button>

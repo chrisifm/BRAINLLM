@@ -5,6 +5,7 @@
 //! - B0122 import by URL (`http(s)://`, `//host`).
 //! - B0123 third-party `<script src>` in `app.brain` without `integrity`.
 //! - B0737 (warning) a credential-shaped value in `ctx.session.set`: signed, not encrypted (use `ctx.session.setSecret`).
+//! - B0783 (warning) a credential in a log or browser storage, or a password returned from server code to the browser.
 //! - B0710 `redirect(url)` to another origin (not a same-origin path and not a host listed in `brain.json`
 //!   `"redirects"`).
 //! - B0711 (warning) server `fetch` whose URL is built from `ctx.params`/`ctx.query`/RPC arguments.
@@ -251,8 +252,20 @@ fn secret_key(name: &str) -> bool {
         || (last == "key" && matches!(before, Some("api" | "private" | "secret")))
 }
 
-/// Credential-shaped keys in a literal object (nested too) and credential-shaped identifiers: `{ token: t }`, `{ user: { password } }`, `accessToken`.
+/// A stored password in any form: `password`, `passwordHash`, `password_digest`. A token may legitimately reach its
+/// owner's browser, so a return value only warns on these; `password_changed_at` and `passwordless` are not secrets.
+fn password_key(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    ["password", "passwd", "pwd"].iter().any(|word| lower.ends_with(word) || ["hash", "_hash", "digest", "_digest"].iter().any(|tail| lower.ends_with(&format!("{word}{tail}"))))
+}
+
+/// Credential-shaped keys in a literal object (nested too), identifiers and member names: `{ token: t }`,
+/// `{ user: { password } }`, `accessToken`, `d.password`, `` `got ${token}` ``, `'got ' + token`.
 fn secret_shaped(e: &Expr, out: &mut Vec<String>) {
+    named_like(e, &secret_key, out);
+}
+
+fn named_like(e: &Expr, is_secret: &dyn Fn(&str) -> bool, out: &mut Vec<String>) {
     match e.unparen() {
         Expr::Object { props, .. } => {
             for p in props {
@@ -263,19 +276,71 @@ fn secret_shaped(e: &Expr, out: &mut Vec<String>) {
                             PropKey::Str { value, .. } => Some(value.as_str()),
                             _ => None,
                         };
-                        if let Some(name) = name.filter(|n| secret_key(n)) {
+                        if let Some(name) = name.filter(|n| is_secret(n)) {
                             out.push(name.to_string());
                         }
-                        secret_shaped(value, out);
+                        named_like(value, is_secret, out);
                     }
-                    ObjProp::Shorthand(i) if secret_key(&i.name) => out.push(i.name.clone()),
+                    ObjProp::Shorthand(i) if is_secret(&i.name) => out.push(i.name.clone()),
                     _ => {}
                 }
             }
         }
-        Expr::Ident(i) if secret_key(&i.name) => out.push(i.name.clone()),
+        Expr::Ident(i) if is_secret(&i.name) => out.push(i.name.clone()),
+        Expr::Member { prop: MemberProp::Name(n), .. } if is_secret(&n.name) => out.push(n.name.clone()),
+        Expr::Template { exprs, .. } => exprs.iter().for_each(|x| named_like(x, is_secret, out)),
+        Expr::Binary { left, right, .. } => {
+            named_like(left, is_secret, out);
+            named_like(right, is_secret, out);
+        }
         _ => {}
     }
+}
+
+/// `return` statements of a function body, without entering nested functions.
+fn returns<'a>(stmts: &'a [Stmt], out: &mut Vec<&'a Expr>) {
+    for s in stmts {
+        match s {
+            Stmt::Return { arg: Some(e), .. } => out.push(e),
+            Stmt::If { cons, alt, .. } => {
+                returns(std::slice::from_ref(cons), out);
+                alt.iter().for_each(|a| returns(std::slice::from_ref(a), out));
+            }
+            Stmt::Block { body, .. } => returns(body, out),
+            Stmt::ForOf { body, .. } => returns(std::slice::from_ref(body), out),
+            Stmt::Try { block, handler, finalizer, .. } => {
+                returns(block, out);
+                handler.iter().for_each(|h| returns(h, out));
+                finalizer.iter().for_each(|f| returns(f, out));
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Functions whose return value is sent to the browser: `server:` functions, `load` and route handlers.
+fn answering_functions(c: &Component) -> Vec<&Func> {
+    let handler = c.file.starts_with("server/routes/") && c.file.ends_with("/handler.jsbrain");
+    let mut out = Vec::new();
+    for s in &c.script {
+        match s {
+            Stmt::Server { func, .. } => out.push(func),
+            Stmt::Export { decl, .. } => {
+                if let Stmt::Func(f) = decl.as_ref()
+                    && f.name.as_ref().is_some_and(|n| n.name == "load")
+                {
+                    out.push(f)
+                }
+            }
+            Stmt::ExportDefault { expr, .. } if handler => {
+                if let Expr::Func(f) = expr.unparen() {
+                    out.push(f)
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 impl Checker<'_> {
@@ -289,6 +354,20 @@ impl Checker<'_> {
                 && !self.ctx.approved_remote_imports.contains(&i.source)
             {
                 self.push("B0122", i.span, "remote import has no verified immutable local artifact", "explicitly fetch the exact CDN file/version/SHA-256 with brain deps fetch, or import a reviewed local module");
+            }
+        }
+        for func in answering_functions(c) {
+            let mut answers = Vec::new();
+            match &func.body {
+                FnBody::Block(body) => returns(body, &mut answers),
+                FnBody::Expr(e) => answers.push(e),
+            }
+            for answer in answers {
+                let mut found = Vec::new();
+                named_like(answer, &password_key, &mut found);
+                if let Some(key) = found.first() {
+                    self.push("B0783", answer.span(), format!("`{key}` is returned to the browser"), "return only what the page shows and leave the stored password on the server");
+                }
             }
         }
         let allowed: Vec<String> = self.ctx.redirect_hosts.clone();
@@ -325,8 +404,29 @@ impl Checker<'_> {
                 if (name == "ctx.session.set" || name.ends_with(".session.set")) && let Some(a) = args.first() {
                     let mut found = Vec::new();
                     secret_shaped(a, &mut found);
+                    if !found.is_empty() {
+                        found.dedup();
+                        let keys = found.iter().map(|k| format!("`{k}`")).collect::<Vec<_>>().join(", ");
+                        out.push(("B0737", *span, format!("{keys} goes into `ctx.session.set`: that cookie is signed, not encrypted, so anyone holding it can read the value"), "keep only the user's identity in `ctx.session.set`, and move the value to the encrypted `ctx.session.setSecret(value)` (read it with `ctx.session.secret()`)".into()));
+                    }
+                }
+                if name.strip_prefix("console.").is_some() {
+                    let mut found = Vec::new();
+                    args.iter().for_each(|a| secret_shaped(a, &mut found));
                     if let Some(key) = found.first() {
-                        out.push(("B0737", *span, format!("`{key}` goes into `ctx.session.set`: that cookie is signed, not encrypted, so anyone holding it can read the value"), "keep only the user's identity in `ctx.session.set`, and move the value to the encrypted `ctx.session.setSecret(value)` (read it with `ctx.session.secret()`)".into()));
+                        out.push(("B0783", *span, format!("`{key}` goes into a log, which keeps it where others can read it"), "log the identity or an outcome instead (`user.id`, `'signed in'`), never the credential".into()));
+                    }
+                }
+                if matches!(name.as_str(), "localStorage.setItem" | "sessionStorage.setItem") {
+                    let mut found = Vec::new();
+                    if let Some(Expr::Str { value, .. }) = args.first().map(Expr::unparen)
+                        && secret_key(value)
+                    {
+                        found.push(value.clone());
+                    }
+                    args.get(1).iter().for_each(|a| secret_shaped(a, &mut found));
+                    if let Some(key) = found.first() {
+                        out.push(("B0783", *span, format!("`{key}` goes into browser storage, which any script on the page can read"), "keep credentials on the server: sign in with `ctx.backend.login(…)` or `ctx.session.setSecret(value)`, which stay out of reach of scripts".into()));
                     }
                 }
                 if name == "RegExp"

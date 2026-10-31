@@ -122,6 +122,25 @@ impl<'a> Markup<'a> {
 
     /// Parses `expr}` starting at `self.pos` and moves past the `}`.
     fn expr_until_brace(&mut self) -> R<Expr> {
+        let open = self.pos;
+        self.braced_expr().map_err(|d| self.unclosed_brace(open, d))
+    }
+
+    /// A failed `{expr` with a closing tag before any `}`: the tag is not the mistake, the missing `}` is.
+    fn unclosed_brace(&self, open: usize, diag: Diag) -> Diag {
+        let rest = &self.src[open..];
+        let Some(tag) = rest.find("</").filter(|at| !rest[..*at].contains('}')) else { return diag };
+        let close = rest[tag..].find('>').map_or(rest.len(), |end| tag + end + 1);
+        Diag::new(
+            "B0002",
+            self.file,
+            self.span(open.saturating_sub(1), open),
+            format!("this `{{` is not closed before `{}`", &rest[tag..close]),
+            "close the expression with `}`; a literal brace is written `{'{'}`",
+        )
+    }
+
+    fn braced_expr(&mut self) -> R<Expr> {
         let mut p = self.js_at(self.pos, self.src.len())?;
         if p.current().is_punct("}") {
             return Err(self.err(p.current().span, "the braces `{}` are empty", "write an expression inside: `{name}`"));

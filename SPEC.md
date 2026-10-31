@@ -264,7 +264,7 @@ subclass with a 4xx `status` reaches the calling form's `f.error` as is; other e
 Server-only modules may signal a deliberate client failure with `throw {status:403}` (standard 4xx only); RPC returns
 the status with a generic public message. Arbitrary exception messages remain private and are excluded from server logs too.
 Sessions: `ctx.session.set(user)` in a server function, `ctx.user` on later requests, `ctx.session.clear()` logs out
-(signed cookie, not encrypted: ids and display data only; a credential passed to it warns B0737). A server-only value
+(signed cookie, not encrypted: ids and display data only; a credential passed to it warns B0737; one in `console.*`, browser storage or a password in a returned value warns B0783). A server-only value
 such as a provider token goes in `ctx.session.setSecret(value, {maxAge})`, read with `ctx.session.secret()`, removed with
 `ctx.session.clearSecret()` or `clear()`: its own encrypted cookie, never `ctx.user`, also available with `BRAIN_BACKEND_URL`
 (setup in `brain guide server`).

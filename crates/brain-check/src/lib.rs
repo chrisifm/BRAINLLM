@@ -437,7 +437,7 @@ pub fn check(c: &Component, ctx: &Ctx) -> Vec<Diag> {
     let server_ctx = c.kind == FileKind::Module && c.meta.iter().any(|m| m.name == "server");
     let mut api_vars = HashMap::new();
     collect_api_vars(c, ctx, &c.template, &mut api_vars);
-    let mut ck = Checker { c, ctx, diags: Vec::new(), scopes: Scopes::new(scope::top_bindings(c)), fn_depth: 0, server_names, server_ctx, server_fns, api_vars, scoped_stores: HashSet::new(), shared: servershare::shared(c) };
+    let mut ck = Checker { c, ctx, diags: Vec::new(), scopes: Scopes::new(scope::top_bindings(c)), fn_depth: 0, server_names, server_ctx, server_fns, api_vars, scoped_stores: HashSet::new(), shared: servershare::shared(c), can_await: c.kind == FileKind::Module || c.file.ends_with(".test.brain"), enclosing_fn: None, literal_text: 0 };
     ck.structure();
     ck.runaway();
     ck.security();
@@ -512,6 +512,12 @@ struct Checker<'a> {
     scoped_stores: HashSet<u32>,
     /// #276: pure constants and server-only helpers the server module also gets.
     shared: servershare::Shared,
+    /// `await` is valid here (B0781): inside an `async` function, or at the top level of an ES module.
+    can_await: bool,
+    /// The name of the function that encloses this code, for the B0781 fix.
+    enclosing_fn: Option<String>,
+    /// Inside `<pre>`, `<code>` and the like, where a lone `}` is usually what the author means to show (B0780).
+    literal_text: u32,
 }
 
 /// Import source of a component used as `<Name>`.
@@ -925,6 +931,8 @@ impl<'a> Checker<'a> {
     }
 
     fn func(&mut self, f: &Func) {
+        let saved_await = std::mem::replace(&mut self.can_await, f.is_async);
+        let saved_name = std::mem::replace(&mut self.enclosing_fn, f.name.as_ref().map(|n| n.name.clone()));
         self.fn_depth += 1;
         self.scopes.push();
         for p in &f.params {
@@ -939,6 +947,21 @@ impl<'a> Checker<'a> {
         }
         self.scopes.pop();
         self.fn_depth -= 1;
+        self.can_await = saved_await;
+        self.enclosing_fn = saved_name;
+    }
+
+    /// B0781: the emitted JavaScript would not parse, so the module would never load.
+    fn await_scope(&mut self, span: Span) {
+        if self.can_await {
+            return;
+        }
+        let fix = match (&self.enclosing_fn, self.fn_depth) {
+            (Some(name), _) => format!("declare it `async function {name}(…)` and await its callers"),
+            (None, 0) => "code that runs while the component is created cannot wait: move it into an `async` function, or render the promise with `{#await}`".to_string(),
+            (None, _) => "add `async` to the function that directly contains this `await`: `async () => { … }`; a function nested in an async one needs its own".to_string(),
+        };
+        self.push("B0781", span, "`await` is not inside an `async` function", fix);
     }
 
     fn ident_ref(&mut self, id: &Ident) {
@@ -1236,7 +1259,11 @@ impl<'a> Checker<'a> {
                 }
             }
             Expr::Seq { exprs, .. } => exprs.iter().for_each(|x| self.expr(x)),
-            Expr::Spread { arg, .. } | Expr::Await { arg, .. } | Expr::Paren { expr: arg, .. } => self.expr(arg),
+            Expr::Await { arg, span } => {
+                self.await_scope(*span);
+                self.expr(arg)
+            }
+            Expr::Spread { arg, .. } | Expr::Paren { expr: arg, .. } => self.expr(arg),
         }
     }
 
@@ -1479,9 +1506,34 @@ impl<'a> Checker<'a> {
     }
 
     fn nodes(&mut self, nodes: &[Node]) {
-        for n in nodes {
+        for (i, n) in nodes.iter().enumerate() {
+            if let Node::Text(t) = n {
+                self.stray_brace(t, i > 0 && matches!(nodes[i - 1], Node::Interp(_)));
+            }
+            let literal = matches!(n, Node::Element(e) if matches!(e.tag.as_str(), "pre" | "code" | "samp" | "kbd" | "textarea"));
+            self.literal_text += u32::from(literal);
             self.node(n);
+            self.literal_text -= u32::from(literal);
         }
+    }
+
+    /// B0780: a `}` in text closes nothing. Other delimiters are ordinary text, and `<` and `{` already fail to parse.
+    fn stray_brace(&mut self, t: &Text, after_value: bool) {
+        let at = if after_value && t.value.starts_with('}') {
+            0
+        } else if self.literal_text > 0 {
+            return;
+        } else if let Some(at) = t.value.find('}') {
+            at
+        } else {
+            return;
+        };
+        let before = &t.value[..at];
+        let lines = before.matches('\n').count() as u32;
+        let col = if lines == 0 { t.span.col + at as u32 } else { (before.len() - before.rfind('\n').unwrap_or(0)) as u32 };
+        let start = t.span.start + at as u32;
+        let span = Span { start, end: start + 1, line: t.span.line + lines, col };
+        self.push("B0780", span, "this `}` closes nothing and renders as text", "delete it; to show a brace on purpose write `{'}'}`");
     }
 
     fn node(&mut self, n: &Node) {
@@ -1500,6 +1552,14 @@ impl<'a> Checker<'a> {
             Node::Interp(i) => {
                 if i.html && !matches!(i.expr.unparen(), Expr::Call { callee, .. } if matches!(callee.as_ref(), Expr::Ident(id) if id.name == "sanitize")) {
                     self.push("B0210", i.span, "raw HTML without `sanitize`", "wrap the value: `{@html sanitize(value)}`");
+                }
+                // `{{x}}` parses as the object `{x}` and renders `[object Object]`
+                if let Expr::Object { props, .. } = i.expr.unparen() {
+                    let edits = match props.as_slice() {
+                        [ObjProp::Shorthand(id)] => vec![(i.span.start, i.span.end, format!("{{{}}}", id.name))],
+                        _ => Vec::new(),
+                    };
+                    self.push_edits("B0780", i.span, "doubled braces render an object as `[object Object]`", "one pair of braces shows a value: `{x}`", edits);
                 }
                 self.expr(&i.expr)
             }
@@ -1644,6 +1704,12 @@ impl<'a> Checker<'a> {
     fn attrs(&mut self, attrs: &[Attr], tag: Option<&str>) {
         for a in attrs {
             self.class_ternary(a, attrs);
+            // `title="{x}}"`: the part right after a value starts with the brace that closes nothing
+            if let AttrValue::Mixed(parts) = &a.value
+                && parts.windows(2).any(|w| matches!((&w[0], &w[1]), (AttrPart::Expr(_), AttrPart::Text(t)) if t.starts_with('}')))
+            {
+                self.push("B0780", a.span, format!("a `}}` in `{}` closes nothing and renders as text", a.name), "delete it; to show a brace on purpose write `{'}'}`");
+            }
         }
         let mut seen = HashSet::new();
         for a in attrs {
@@ -2247,7 +2313,8 @@ impl<'a> Checker<'a> {
 
     fn seo(&mut self) {
         // `_layout.brain` (and any `_x.brain`) wraps a folder of views; it is not a route.
-        let partial = self.c.file.rsplit('/').next().is_some_and(|f| f.starts_with('_'));
+        // a test file lives beside its view but has no route (`route_of` gives none), so no page to describe
+        let partial = self.c.file.rsplit('/').next().is_some_and(|f| f.starts_with('_') || f.ends_with(".test.brain"));
         if self.c.kind == FileKind::Component && self.c.level == Level::View && !partial && !self.c.meta.iter().any(|m| m.name == "seo") {
             let s = Span { start: 0, end: 0, line: 1, col: 1 };
             self.push("B0501", s, "the view does not declare `<meta seo …>`", "add `<meta seo title=\"…\" description=\"…\" canonical=\"/route\">` at the top of the file");

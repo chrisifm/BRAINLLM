@@ -16,6 +16,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `brain <command> | head -1` ends quietly: a closed pipe no longer reports an internal error, on any command.
 - `--help` on any command, at any position, prints its usage and acts on nothing; `brain build --help` used to build and `brain new x --help` used to create the app.
 - `brain add` without arguments lists every kind it can create.
+- B0780 warns on a `}` in markup that closes nothing (`<p>{x}}</p>`) and on `{{x}}`, with the exact edit; an unclosed `{` now names the tag it ran into.
+- B0781 reports `await` with no enclosing `async` function, including nested functions and the top of a component script: that code emitted JavaScript that does not parse.
+- B0737 names every credential in `ctx.session.set` and reads `d.password`; B0783 warns on a credential in `console.*` or browser storage, and on a stored password returned by a server function, `load` or a route handler.
+- `*.test.brain` under `views/` no longer gets B0501 when it is checked on its own: a test file has no route.
 ### Security
 - Google sign-in links an existing account when Google hosts the address (`gmail.com` or a Workspace `hd`); a never-verified account also loses its password, sessions and recovery links, and any other address is denied with the same `AUTH_DENIED`.
 - Concurrent JWT refresh inside a 10-second grace no longer revokes the family, so tabs and prefetches keep their session, and the SSR bridge renews an expired access cookie during render.
