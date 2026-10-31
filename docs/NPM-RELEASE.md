@@ -75,7 +75,7 @@ to new reviewed source commits; the already published v0.4.0 tag remains immutab
 
 ## Source verification before future publication
 
-Development 0.4.1 makes publication depend on `verify-source` as well as the package result. The source job calls
+Release 0.5.0 makes publication depend on `verify-source` as well as the package result. The source job calls
 `verify.yml` from the same commit and runs the existing workspace/runtime/fixture/privacy/English gates; it inherits
 no publishing credentials. Native builds may run concurrently, but a failed, skipped or canceled source gate cannot
 publish even when a reviewed package archive is reused. Manual pack-only dispatch still does not publish.

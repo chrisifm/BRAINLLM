@@ -433,7 +433,7 @@ COMPILER:
 - Signal folding: `sig` never written → constant; `drv` of constants → literal value; effects without
   reactive dependencies → a direct call on mount. No reactive node, no subscription.
 - Precomputed DOM paths: codegen emits exact `firstChild`/`nextSibling` per hole (no `querySelector`).
-  Development 0.4.1 constructs each access expression without repeatedly formatting its growing prefix; emitted
+  Release 0.5.0 constructs each access expression without repeatedly formatting its growing prefix; emitted
   expressions are unchanged. Sharing additional parent references is a separate optimization, not established here.
 - Text: direct `node.data = v`; attributes with a minimal setter; equality comparison before touching the DOM.
 - (Dropped 2026-10-13) Lazy handlers per event: almost every handler closes over component state, so it cannot leave the component chunk; islands (§6.1) and `lazy` components (§22) already defer code at a useful granularity.
@@ -1689,7 +1689,7 @@ short commits under the existing writer lock. Each file replacement is atomic; b
 journals and conditional recovery, not filesystem-wide atomic visibility. External editor races remain explicit.
 See [CHANGES.md](CHANGES.md) for request schemas, privacy, bounds and recovery.
 
-Development 0.4.1: state, preview-admission and writer leases explicitly unlock before descriptor close. A forked
+Release 0.5.0: state, preview-admission and writer leases explicitly unlock before descriptor close. A forked
 child or cloned descriptor must not extend a completed operation's lease. Real contention returns immediately;
 only interrupted lock syscalls receive up to three attempts. Filesystem errors retain their category. Retained-
 descriptor regressions verify both immediate reuse and continued exclusion while a successor holds the lock.
