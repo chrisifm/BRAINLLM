@@ -33,6 +33,16 @@ every visitor in the same bucket. With `trustProxy` the backend resolves the rea
    rate-limit key by sending `X-Forwarded-For: 1.2.3.4`.
 4. An unreadable hop stops the walk at the last trusted address. If every hop is trusted, the left-most one is used.
 
+The same-origin gateways (`brain start`, `brain run` and the generated `server.mjs`) are proxies too: they append the
+peer they observed to `X-Forwarded-For`, so the backend needs `trustProxy: ['127.0.0.1', '::1']` to tell visitors
+apart. Without it the backend keeps one bucket per gateway and logs `trust-proxy-not-configured` once. The generated
+`server.mjs` resolves `ctx.req.ip` and its own limits the same way, from `trustProxy` in this file or the
+`BRAIN_TRUST_PROXY` variable (comma separated; the generated PM2 file sets the loopback pair). With neither, it ignores
+`X-Forwarded-For` and uses the TCP peer.
+
+A range wider than `/8` on IPv4 or `/16` on IPv6 is refused, except `fc00::/7`: `0.0.0.0/1` plus `128.0.0.0/1` would
+trust every client.
+
 IPv4-mapped IPv6 addresses (`::ffff:127.0.0.1`) are compared as IPv4. A hop list has no hop-count setting on purpose:
 counting hops trusts whatever sits at that position, while a range list trusts only machines you control.
 

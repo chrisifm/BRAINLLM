@@ -43,7 +43,9 @@ applies, so a scope can only narrow what the owner may do: a `*:*` key of a `can
 Keys are accepted only on resource routes (`/api/<resource>`, `/api/<resource>/<id>` and the read-only
 `/api/<resource>/redirects/<slug>`). Job handlers use a key for `ctx.backend` ([job-backend.md](job-backend.md)). They are a non-ambient
 credential, so these requests need no `Origin` header and cookies are ignored. Every other route (sign-in, sessions,
-key management, uploads, jobs) rejects a presented key with `401 API_KEY_NOT_ACCEPTED`.
+key management, uploads, jobs) rejects a presented key with `401 API_KEY_NOT_ACCEPTED`. The same-origin gateways
+(`brain start`, `brain run` and the generated `server.mjs`) forward both headers unchanged, so a key behaves the same
+through them as against the backend directly.
 
 ```bash
 curl -s https://api.example.com/api/posts?limit=2 \

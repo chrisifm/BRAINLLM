@@ -23,6 +23,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   block lists `precompressed zstd br gzip`.
 
 ### Fixed
+- The same-origin gateways now forward the client address: each appends the peer it observed to `X-Forwarded-For`, so with `trustProxy: ['127.0.0.1', '::1']` every visitor gets its own rate-limit bucket and a browser-supplied header cannot choose one. The generated `server.mjs` resolves `ctx.req.ip` the same way from `trustProxy` or `BRAIN_TRUST_PROXY` and ignores `X-Forwarded-For` without them; generated PM2 files set the variable. Trust ranges wider than `/8` (IPv4) or `/16` (IPv6) are refused.
+- `/_brain/files` now streams through the gateways up to the bucket limit, with `Range`, `If-Range`, conditional requests, `206`, `304` and a client disconnect closing the backend connection, instead of failing above 20 MiB and refusing uploads above 64 KiB.
+- Routes declared in `server/routes` are now reachable through the gateways, with the raw body byte for byte; only declared routes are proxied. New error B0737 reports a route that hides a view, a `public/` file or a framework prefix.
+- The gateways now relay `ETag`, `Last-Modified` and `Cache-Control`, forward `If-Match` and `If-None-Match`, and accept the 1 MiB batch body.
+- API keys now cross the gateways and the dev proxy: `X-API-Key` was dropped, so a valid key got `403 ORIGIN_DENIED` on writes and an invalid key read public rows as anonymous.
 - `brain start` answers 404 for a request path starting with `//`. It answered 500 for `//`.
 - Service worker caches are scoped to the app: under a base path they are named `brain/app-<sig>` and `brain/app:*`, so
   activating or opting out one app no longer deletes another app's caches on the same origin, and `sw: false` deletes

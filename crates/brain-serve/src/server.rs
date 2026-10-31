@@ -3205,6 +3205,22 @@ mod admission_tests {
     }
 
     #[test]
+    fn dev_proxy_forwards_an_api_key_so_the_backend_can_identify_the_caller(){
+        let root=std::env::temp_dir().join(format!("brain-native-dev-key-{}-{}",std::process::id(),now_ms()));std::fs::create_dir_all(&root).unwrap();
+        let backend=TcpListener::bind("127.0.0.1:0").unwrap();let backend_url=format!("http://{}",backend.local_addr().unwrap());
+        let authority=std::thread::spawn(move||{let (mut socket,_)=backend.accept().unwrap();socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();let request=http::read_request(socket.try_clone().unwrap()).unwrap();assert_eq!(request.path,"/api/notes");assert_eq!(request.header("x-api-key"),Some("bk_live_sample"));assert_eq!(request.header("origin"),None);http::respond(&mut socket,200,"application/json",b"{\"items\":[]}",false).unwrap();});
+        let env:EnvLoader=Arc::new(move||vec![("BRAIN_BACKEND_URL".into(),backend_url.clone())]);
+        let compiler:CompileFn=Arc::new(|_,_|panic!("native API routing must not compile application source"));
+        let opts=Options{root:root.clone(),host:"127.0.0.1".into(),port:0,head_prepend:String::new(),runtime:vec![],env:Some(env),base:"/".into(),diagnose:None,problems:None,upstream:None,mock:None};
+        let mut dev=start_dev(opts,compiler,false,None).unwrap();
+        let mut socket=TcpStream::connect(dev.addr).unwrap();socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        socket.write_all(b"GET /api/notes HTTP/1.1\r\nHost: localhost\r\nX-API-Key: bk_live_sample\r\nConnection: close\r\n\r\n").unwrap();
+        let mut bytes=Vec::new();socket.read_to_end(&mut bytes).unwrap();
+        assert!(String::from_utf8(bytes).unwrap().starts_with("HTTP/1.1 200"));authority.join().unwrap();
+        dev.stop();drop(dev);std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn closed_hmr_sockets_leave_the_client_registry_without_a_broadcast() {
         let root=std::env::temp_dir().join(format!("brain-hmr-registry-{}-{}",std::process::id(),now_ms()));std::fs::create_dir_all(&root).unwrap();
         let compiler:CompileFn=Arc::new(|_,_|panic!("HMR sockets never compile application source"));

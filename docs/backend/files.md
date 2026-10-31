@@ -63,6 +63,10 @@ PDF-only bucket with 415 `FILE_TYPE_DENIED`. Unrestricted buckets accept it and 
 
 ## HTTP
 
+The same-origin gateways stream `/_brain/files` in both directions, without buffering, up to the bucket limit. They
+forward `Range`, `If-Range` and the conditional headers, relay `206` and `304` with their validators, and close the
+backend connection when the client disconnects. Access checks stay in the backend.
+
 All mutations need the configured browser `Origin` (same rule as every native mutation).
 
 | Method and path | Behavior |
