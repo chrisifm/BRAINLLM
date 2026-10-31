@@ -214,6 +214,8 @@ reads compiler events published before the browser overlay; watch is finite NDJS
 `brain build` caches everything for the repeat visit: immutable hashed assets, a service worker (visited pages work
 offline; `views/_offline.brain` is optional) and an in-memory `resource()` cache. Never write a service worker or
 cache headers yourself. Opt out in `brain.json`: `"cache": { "sw": false }` (also `http`, `offline`, `data`).
+Every response is compressed for you (zstd, Brotli or gzip by `Accept-Encoding`; precompressed assets, per-response
+HTML and JSON); never compress bodies or set `Content-Encoding` in app code (docs/PERFORMANCE.md).
 Keep data across visits: `api('/posts', { get: { out: '[Post]', cache: '10m' } })` (never for personal data) ·
 `store(init, { persist: true })`. Heavy work off the main thread: name the module `*.worker.jsbrain`; its exports
 become async functions. Their native bridge bounds pending work, deadlines, bytes and cancellation.

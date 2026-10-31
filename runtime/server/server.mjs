@@ -8,7 +8,7 @@
 //   GET  /_health                → 200 {"ok":true,"build":"<sig>"}
 //   POST /_r/<hash>/<fn>         → RPC to a `server:` function (same origin + X-Brain-RPC; body, rate and time limits from brain.json `server`)
 //   GET  routes in the manifest  → SSR: load(ctx) → render the view on the DOM shim → page with props and SEO head
-//   GET  files in dist/          → static (precompressed .br/.gz when accepted; /_b/* immutable), clean URLs
+//   GET  files in dist/          → static (the smallest accepted .zst/.br/.gz sibling; /_b/* immutable), clean URLs
 //   anything else                → 404 page
 // Every response carries the security headers; every HTML response gets a fresh CSP nonce on each <script>.
 //
@@ -21,6 +21,7 @@ import { createServer as http, STATUS_CODES, request as httpRequest, Agent as Ht
 import net from 'node:net'
 import { installNativeSockets } from './native-sockets.mjs'
 import { Readable } from 'node:stream'
+import zlib from 'node:zlib'
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync, realpathSync, statSync, lstatSync } from 'node:fs'
 import * as Module from 'node:module'
@@ -133,8 +134,11 @@ function defaultError(status, rid, home = '/') {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>${status} — ${esc(title)}</title></head><body><main><h1>${status} — ${esc(title)}</h1><p>The request could not be completed. Try again or contact support with this reference.</p><p>Reference: <code>${esc(rid)}</code></p><a href="${esc(home)}">Return home</a></main></body></html>`
 }
 
-// Coding weights are transport preferences, not substring matches (br;q=0 explicitly forbids Brotli).
-export function acceptedEncodings(header = '') {
+// Coding weights are transport preferences, not substring matches (br;q=0 explicitly forbids Brotli). Ties keep the
+// server order: static files prefer their max-level .br, dynamic bodies prefer zstd (fastest at a Brotli-like ratio).
+// zstd is offered only where node:zlib has it (Node 22.15+).
+const ZSTD = typeof zlib.zstdCompressSync === 'function'
+export function acceptedEncodings(header = '', order = ['br', 'zstd', 'gzip']) {
   const values = new Map()
   for (const part of String(header).split(',')) {
     const [name, ...params] = part.trim().split(';')
@@ -145,8 +149,19 @@ export function acceptedEncodings(header = '') {
     }
     values.set(name.toLowerCase(),q)
   }
-  return ['br','gzip'].map(name => [name,values.get(name) ?? values.get('*') ?? 0]).filter(([,q]) => q > 0).sort((a,b) => b[1] - a[1]).map(([name]) => name)
+  return order.filter(name => name !== 'zstd' || ZSTD).map(name => [name,values.get(name) ?? values.get('*') ?? 0]).filter(([,q]) => q > 0).sort((a,b) => b[1] - a[1]).map(([name]) => name)
 }
+// Response compression (docs/PERFORMANCE.md): text bodies of at least 1 KiB, negotiated per request; a body that
+// already has an encoding, a `no-transform` cache policy or a status without content is sent as is.
+const COMPRESSIBLE = /^(?:text\/|image\/svg\+xml|application\/(?:json|javascript|xml|[\w.-]+\+(?:json|xml)))/i
+const DYNAMIC = ['zstd', 'br', 'gzip']
+const varyEncoding = v => (/accept-encoding/i.test(v || '') ? v : [v, 'Accept-Encoding'].filter(Boolean).join(', '))
+function bodyEncoding(req, status, headers) {
+  if (status < 200 || status === 204 || status === 206 || status === 304 || headers['content-encoding'] || !COMPRESSIBLE.test(headers['content-type'] || '') || /no-transform/i.test(headers['cache-control'] || '')) return null
+  return acceptedEncodings(req.headers['accept-encoding'], DYNAMIC)[0] || ''
+}
+const encodeBody = (enc, buf) => enc === 'zstd' ? zlib.zstdCompressSync(buf) : enc === 'br' ? zlib.brotliCompressSync(buf, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: buf.length } }) : zlib.gzipSync(buf)
+const encodeStream = enc => enc === 'zstd' ? zlib.createZstdCompress() : enc === 'br' ? zlib.createBrotliCompress({ params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5 } }) : zlib.createGzip()
 
 function googleSignInPage(page) {
   let head = false, templates = 0
@@ -415,6 +430,7 @@ export function createServer(o = {}) {
   if (o.nativeSockets !== undefined && typeof o.nativeSockets !== 'boolean') throw Error('nativeSockets must be an explicit boolean')
   const SITEMAP_BYTES = +(o.sitemapBytes ?? 50 * 1024 * 1024) // protocol: 50 MB uncompressed per sitemap file
   const secret = o.secret ?? env.BRAIN_SECRET ?? ''
+  const COMPRESS = o.compress !== false && env.BRAIN_COMPRESS !== 'off' // a proxy that already compresses can opt out
   const sink = o.log || ((level, msg, extra) => console[level === 'error' ? 'error' : 'log'](json({ t: new Date().toISOString(), level, msg, ...extra })))
   const log = (level, msg, extra = {}) => {
     const safe = { ...extra }
@@ -540,6 +556,16 @@ export function createServer(o = {}) {
           headers['content-type'] = MIME['.json']
         }
         delete headers['content-length']; delete headers['content-encoding']; delete headers.etag
+      }
+    }
+    const enc = COMPRESS ? bodyEncoding(res.req, status, headers) : null
+    if (enc != null) {
+      headers = { ...headers, vary: varyEncoding(headers.vary) }
+      const size = body ? Buffer.byteLength(body) : 0
+      if (enc && size >= 1024 && res.req.method !== 'HEAD') {
+        body = encodeBody(enc, Buffer.isBuffer(body) ? body : Buffer.from(body))
+        headers['content-encoding'] = enc
+        delete headers['content-length']
       }
     }
     res.writeHead(status, { ...SECURITY, ...(server.draining ? { connection: 'close' } : {}), ...headers })
@@ -736,10 +762,16 @@ export function createServer(o = {}) {
     const seoF = sm.seo || (await load(route.view)).default.seo
     if (route.i18n) await load(route.i18n)
     const nonce = randomBytes(16).toString('base64'), n = h => h.replace(/<script(?![^>]*\bnonce=)/g, `<script nonce="${nonce}"`)
+    const enc = COMPRESS && req.method !== 'HEAD' ? acceptedEncodings(req.headers['accept-encoding'], DYNAMIC)[0] : null
     res.writeHead(200, {
       ...SECURITY, 'content-type': MIME['.html'], 'content-security-policy': withNonce(mf.csp || CSP0, nonce), 'cache-control': 'no-cache',
       ...(mf.build ? { 'x-brain-build': mf.build } : {}), ...extra, ...ctx.session.headers(),
+      ...(COMPRESS ? { vary: varyEncoding(extra.vary) } : {}), ...(enc ? { 'content-encoding': enc } : {}),
     })
+    // each chunk is flushed through the encoder, so the head still reaches the browser before load() ends
+    const zs = enc ? encodeStream(enc) : null
+    if (zs) zs.pipe(res)
+    const write = s => (zs ? (zs.write(s), zs.flush()) : res.write(s))
     globalThis.__brainLocale = route.locale || null
     let seo0 = null
     try {
@@ -748,7 +780,7 @@ export function createServer(o = {}) {
       globalThis.__brainLocale = null
     }
     const at = { path: url.pathname, params: params || {}, query: Object.fromEntries(url.searchParams) }
-    res.write(n(head(top, seo0, url.pathname)))
+    write(n(head(top, seo0, url.pathname)))
     // QA #253: the folder's _loading.brain goes in the region with the first chunk (SPEC: shows while load runs),
     // between two marker comments; the last chunk starts with a script that removes them and what is between
     let clear = ''
@@ -756,13 +788,13 @@ export function createServer(o = {}) {
       try {
         const lr = { ...route, view: route.loading, layouts: [], server: null }
         const { body } = await (queue = queue.then(() => render(lr, {}, null, at), () => render(lr, {}, null, at)))
-        res.write(n(`<!--brain:loading-->${body}<!--/brain:loading-->`))
+        write(n(`<!--brain:loading-->${body}<!--/brain:loading-->`))
         clear = `<script>{const s=document.currentScript;let x=0;for(const c of[...s.parentNode.childNodes]){if(c.data=='brain:loading')x=1;if(x)c.remove();if(c.data=='/brain:loading')x=0}s.remove()}</script>`
       } catch (e) {
         log('error', 'loading view failed (streamed)', { rid, path: url.pathname, ...trace(e) })
       }
     }
-    const end = (body, props = {}, b = bottom) => res.end(n(clear + body + b.replace('<!--brain:props-->', () => jsonInHtml(props))))
+    const end = (body, props = {}, b = bottom) => (zs || res).end(n(clear + body + b.replace('<!--brain:props-->', () => jsonInHtml(props))))
     // QA #289: the page closes with the _error.brain template (its client mounts the error view with { message, rid }),
     // never with the route's own mount script, which would replace the error with the view rendered from {}. Without an
     // _error.brain the notice stays: the view's mount script is left out.
@@ -1086,13 +1118,16 @@ export function createServer(o = {}) {
         'cache-control': p.startsWith('/_b/') ? 'public, max-age=31536000, immutable' : p === '/sw.js' ? 'no-cache' : 'public, max-age=3600',
         vary: 'accept-encoding',
       }
+      // the smallest precompressed sibling the client accepts (the build keeps only those smaller than the file)
+      let best = null
       for (const enc of acceptedEncodings(req.headers['accept-encoding'])) {
-        const suffix = enc === 'br' ? '.br' : '.gz'
-        const encoded = file(c + suffix)
-        if (encoded) {
-          send(res, 200, req.method === 'HEAD' ? '' : readFileSync(encoded), { ...headers, 'content-encoding': enc })
-          return true
-        }
+        const encoded = file(c + (enc === 'br' ? '.br' : enc === 'zstd' ? '.zst' : '.gz'))
+        const size = encoded ? statSync(encoded).size : Infinity
+        if (encoded && (!best || size < best.size)) best = { enc, encoded, size }
+      }
+      if (best) {
+        send(res, 200, req.method === 'HEAD' ? '' : readFileSync(best.encoded), { ...headers, 'content-encoding': best.enc })
+        return true
       }
       send(res, 200, req.method === 'HEAD' ? '' : readFileSync(f), headers)
       return true
