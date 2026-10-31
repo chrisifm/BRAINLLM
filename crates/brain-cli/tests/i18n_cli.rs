@@ -200,3 +200,50 @@ fn dev_form_without_js_is_validated_in_the_page_locale() {
     let _ = c.wait();
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// Internal links keep the page's language: in the HTML of every page outside the default language, with a chunk for
+/// what its views mount; the default language gets neither, and a language switch link stays as written.
+#[test]
+fn internal_links_keep_the_page_language() {
+    let root = std::env::temp_dir().join(format!("brain-i18n-links-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let run = |args: &[&str], dir: &std::path::Path| std::process::Command::new(env!("CARGO_BIN_EXE_brain")).args(args).current_dir(dir).stdin(std::process::Stdio::null()).output().unwrap();
+    std::fs::create_dir_all(&root).unwrap();
+    assert!(run(&["new", "app"], &root).status.success());
+    let app = root.join("app");
+    assert!(run(&["add", "locale", "es"], &app).status.success());
+    run(&["fix"], &app);
+    let out = run(&["build"], &app);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let read = |p: &str| std::fs::read_to_string(app.join("dist").join(p)).unwrap();
+    let es = read("es/about/index.html");
+    assert!(es.contains("href=\"/es/posts\"") && !es.contains("href=\"/posts\""), "{es}");
+    assert!(es.contains("hreflang=\"en\" href=\"/about\""), "alternates still name the other language: {es}");
+    let en = read("about/index.html");
+    assert!(en.contains("href=\"/posts\"") && !en.contains("links-es"), "{en}");
+    // a page rendered per request: its body is localized, and so is the redirect of a guard or load()
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let mut server = std::process::Command::new("node").arg("dist/server.mjs").env("PORT", port.to_string()).env("HOST", "127.0.0.1").current_dir(&app).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
+    let get = |path: &str| {
+        use std::io::{Read, Write};
+        for _ in 0..100 {
+            if let Ok(mut c) = std::net::TcpStream::connect(("127.0.0.1", port)) {
+                write!(c, "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n").unwrap();
+                let mut raw = Vec::new();
+                c.read_to_end(&mut raw).unwrap();
+                return String::from_utf8_lossy(&raw).into_owned();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        panic!("the server did not start");
+    };
+    let login = get("/es/login");
+    let account = get("/es/account");
+    let _ = server.kill();
+    let _ = server.wait();
+    assert!(login.contains("href=\"/es/about\"") && !login.contains("href=\"/login\""), "{login}");
+    assert!(account.to_lowercase().contains("location: /es/login"), "{account}");
+    let _ = std::fs::remove_dir_all(&root);
+}

@@ -18,6 +18,7 @@
 // A page template (`page`) is the route's final HTML with `<!--brain:ssr-->` inside #brain-view and
 // `<!--brain:props-->` inside <script type="application/json" id="brain-props">.
 import { createServer as http, STATUS_CODES, request as httpRequest, Agent as HttpAgent } from 'node:http'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import net from 'node:net'
 import { installNativeSockets } from './native-sockets.mjs'
 import { BlockList, isIP } from 'node:net'
@@ -104,6 +105,24 @@ function safeLocation(value) {
   if (typeof value !== 'string' || value.length > 8192 || !value.startsWith('/') || value.startsWith('//') || /[\\\x00-\x20\x7f]/.test(value) || /^\/%2f/i.test(value) || /%(?:0[0-9a-f]|1[0-9a-f]|5c|7f)/i.test(value) || /%20/i.test(value.split(/[?#]/,1)[0])) throw new HttpError(500, 'Invalid same-site redirect location')
   return value
 }
+// Internal links keep the page's language (§37): `route.hrefs` is the table of a page outside the default language, the
+// one brain-links.js applies in the browser; `b` is the base path, added later here.
+function linkTo(route, path) {
+  const t = route && route.hrefs
+  if (!t || typeof path !== 'string' || path[0] !== '/' || path[1] === '/') return path
+  const m = /^[^?#]*/.exec(path)[0]
+  const n = t.s[m] || (new RegExp(t.re).test(m) && (m === '/' ? t.p : t.p + m))
+  return n ? n + path.slice(m.length) : path
+}
+function localizeLinks(route, html) {
+  if (!route.hrefs) return html
+  const b = (globalThis.__brainBase || '/').slice(0, -1) // render() set it for this page
+  return html.replace(/<(?:a|form)\s[^>]*>/g, tag => /\shreflang=/.test(tag) ? tag : tag.replace(/(\s(?:href|action)=")(\/[^"]*)"/, (all, at, h) => {
+    const a = b && (h + '/').startsWith(b + '/') ? h.slice(b.length) || '/' : h
+    return at + (a === h ? linkTo(route, a) : b + linkTo(route, a)) + '"'
+  }))
+}
+
 // `throw redirect('/login')` (or return it) from load/guards; same-site paths only.
 export const redirect = (url, status = 303) => {
   if (!REDIRECT_CODES.has(status)) throw new HttpError(500, 'Invalid redirect status')
@@ -1005,7 +1024,7 @@ export function createServer(o = {}) {
       ...(native ? { backend: native.backend(req, res, res.getHeader('x-request-id')) } : {}),
       // `prefetch`: the router fetched this page ahead of a click (§19); a `load` with side effects can skip them
       prefetch: req.headers['x-brain-prefetch'] === '1',
-      req: { method: req.method, headers: req.headers, ip: ipOf(req) }, ...extra,
+      req: { method: req.method, headers: req.headers, ip: ipOf(req) }, signal: lifetime(res), ...extra,
     }
   }
 
@@ -1080,19 +1099,19 @@ export function createServer(o = {}) {
         const guards = [], middleware = []
         for (const g of route.guards || []) guards.push(await load(g))
         for (const m of route.middleware || []) middleware.push(await load(m))
-        r = await runChain({ guards, middleware, ctx })
+        r = await pageLocale.run(route.locale, () => runChain({ guards, middleware, ctx }))
       } catch (e) {
         log('error', 'guard failed', { rid, path: url.pathname, ...trace(e) })
         return errorPage(req, res, route, params, url, rid)
       }
       // a guarded page must not reach the index through its login redirect (§33): the redirect itself says noindex
-      if (r.redirect) return send(res, r.status, '', { location: withBase(redirect(r.redirect, r.status ?? 303).redirect), 'cache-control': 'no-store', 'x-robots-tag': NOINDEX, ...ctx.session.headers() })
+      if (r.redirect) return send(res, r.status, '', { location: withBase(linkTo(route, redirect(r.redirect, r.status ?? 303).redirect)), 'cache-control': 'no-store', 'x-robots-tag': NOINDEX, ...ctx.session.headers() })
       if (r.deny !== undefined) return forbidden(req, res, url, rid, r.deny)
       extra = r.headers
     }
     // what load() thrown or returned instead of props answers: redirect, notFound() (F11), deliberate status, failure
     const loadOutcome = e => {
-      if (e && e.redirect) return send(res, e.status || 303, '', { location: withBase(redirect(e.redirect, e.status ?? 303).redirect), ...ctx.session.headers() })
+      if (e && e.redirect) return send(res, e.status || 303, '', { location: withBase(linkTo(route, redirect(e.redirect, e.status ?? 303).redirect)), ...ctx.session.headers() })
       if ((e instanceof HttpError && e.status === 404) || (e && e.notFound === true)) return missing(req, res, e) // `notFound()` 404 / `gone()` 410
       const status = intendedStatus(e) || 500
       log('error', 'load failed', { rid, path: url.pathname, status, ...trace(e) })
@@ -1102,7 +1121,8 @@ export function createServer(o = {}) {
     try {
       if (!fixed && route.server) {
         const m = await load(route.server)
-        if (typeof m.load === 'function') props = (await withTimeout(Promise.resolve(m.load(ctx)), TIMEOUT)) ?? {}
+        if (route.i18n) await load(route.i18n) // t() inside load(): the dictionary is there before it runs
+        if (typeof m.load === 'function') props = (await withTimeout(pageLocale.run(route.locale, () => Promise.resolve(m.load(ctx))), TIMEOUT, ctx)) ?? {}
       }
     } catch (e) {
       return loadOutcome(e)
@@ -1137,7 +1157,8 @@ export function createServer(o = {}) {
   async function streamed(req, res, route, params, url, rid, ctx, extra, outcome) {
     const [top, bottom = ''] = readFileSync(file(route.page), 'utf8').split('<!--brain:ssr-->')
     const sm = await load(route.server)
-    const loadP = typeof sm.load === 'function' ? withTimeout(Promise.resolve().then(() => sm.load(ctx)), TIMEOUT) : Promise.resolve(null)
+    if (route.i18n) await load(route.i18n)
+    const loadP = typeof sm.load === 'function' ? withTimeout(pageLocale.run(route.locale, () => Promise.resolve().then(() => sm.load(ctx))), TIMEOUT, ctx) : Promise.resolve(null)
     loadP.catch(() => {}) // handled below; never an unhandled rejection while the loading view renders
     let timer
     const early = await Promise.race([loadP.then(v => ({ v }), e => ({ e })), new Promise(r => (timer = setTimeout(r, STREAM_HOLD)))])
@@ -1196,7 +1217,7 @@ export function createServer(o = {}) {
       if (props.redirect || props.notFound === true) throw props
     } catch (e) {
       // too late for a real redirect: the page says noindex so the stub never enters the index
-      if (e && e.redirect) return end(`<meta name="robots" content="noindex"><script>location.replace(${jsonInHtml(withBase(redirect(e.redirect, e.status ?? 303).redirect))})</script>`)
+      if (e && e.redirect) return end(`<meta name="robots" content="noindex"><script>location.replace(${jsonInHtml(withBase(linkTo(route, redirect(e.redirect, e.status ?? 303).redirect)))})</script>`)
       // a streamed page already sent its 200 head: the region gets the not-found notice and the page is noindex
       if (e && e.notFound === true) return end(`<meta name="robots" content="noindex"><p role="alert" class="brain-fallback">Page not found.</p>`, {}, bottom.replace(/<script type="module">(?:(?!<\/script>)[\s\S])*?brain-view[\s\S]*?<\/script>/g, ''))
       log('error', 'load failed (streamed)', { rid, path: url.pathname, status: 200, ...trace(e) }) // headers already out
@@ -1270,7 +1291,7 @@ export function createServer(o = {}) {
     await new Promise(r => setTimeout(r, 0))
     globalThis.__brainSSR = null
     fillValues(root)
-    const body = root.innerHTML
+    const body = localizeLinks(route, root.innerHTML)
     stop()
     // SEO head: the codegen emits `export const seo` / `head` in the view's server module; the client chunk's V.seo
     // (older builds) is the fallback. Still inside the page's locale: `<meta seo title={t('…')}>` is translated.
@@ -1790,9 +1811,30 @@ export function overLimit(key, max = 60) {
   if (!h || now - h[0] > 60000) HITS.set(key, (h = [now, 0]))
   return ++h[1] > max ? Math.ceil((h[0] + 60000 - now) / 1000) : 0
 }
-const withTimeout = (p, ms) => {
+// t(), fmt and locale() read globalThis.__brainLocale. A render sets it while nothing else runs (renders are serialized);
+// load(), guards and form handlers overlap across awaits, so each carries its page's language in the async context.
+const pageLocale = new AsyncLocalStorage()
+let renderLocale = globalThis.__brainLocale
+Object.defineProperty(globalThis, '__brainLocale', { configurable: true, get: () => pageLocale.getStore() ?? renderLocale, set: v => (renderLocale = v) })
+// ctx.signal: aborted when the client disconnects before the answer ends or the function passes its deadline, so the
+// work it started (fetch, a query) stops with it.
+const aborts = new WeakMap()
+const newSignal = () => {
+  const c = new AbortController()
+  aborts.set(c.signal, c)
+  return c.signal
+}
+const lifetime = res => {
+  const signal = newSignal()
+  res.once?.('close', () => res.writableFinished || aborts.get(signal).abort()) // a captured render has no socket
+  return signal
+}
+const withTimeout = (p, ms, ctx) => {
   let t
-  return Promise.race([p, new Promise((_, rej) => (t = setTimeout(() => rej(new HttpError(504, 'timeout')), ms)))]).finally(() => clearTimeout(t))
+  return Promise.race([p, new Promise((_, rej) => (t = setTimeout(() => {
+    aborts.get(ctx?.signal)?.abort()
+    rej(new HttpError(504, 'timeout'))
+  }, ms)))]).finally(() => clearTimeout(t))
 }
 // RPC body → arguments: a JSON array, with __proto__/constructor/prototype keys dropped. Throws HttpError(400).
 export function parseArgs(raw) {
@@ -1820,7 +1862,8 @@ export async function callRpc({ fn, args, ctx, key, limit = 60, timeout = 10000 
     return { status: e.status || 400, body: { error: e.message } }
   }
   try {
-    const v = await withTimeout(Promise.resolve(fn(ctx, ...a)), timeout)
+    ctx.signal ||= newSignal() // the dev sidecar builds its own ctx
+    const v = await withTimeout(Promise.resolve(fn(ctx, ...a)), timeout, ctx)
     return { status: 200, body: v ?? null }
   } catch (e) {
     if (e && e.errors && typeof e.errors === 'object') return { status: 422, body: { error: e.message || 'Invalid input', errors: e.errors } }
@@ -1861,7 +1904,8 @@ export async function callForm({ module, raw, ctx, rules, key, limit = 60, timeo
   if (Object.keys(errors).length) return again(errors, '')
   let r
   try {
-    r = await withTimeout(Promise.resolve(module[fn](ctx, values)), timeout)
+    ctx.signal ||= newSignal()
+    r = await withTimeout(pageLocale.run(locale, () => Promise.resolve(module[fn](ctx, values))), timeout, ctx)
   } catch (e) {
     if (e && e.errors && typeof e.errors === 'object') return again(e.errors, '')
     if (e instanceof HttpError && e.status >= 400 && e.status < 500) return again({}, e.message)

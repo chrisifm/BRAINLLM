@@ -940,6 +940,26 @@ test('a superseded navigation never swaps, scrolls or moves focus after the newe
   r.stop()
 })
 
+test('a newer navigation aborts the fetch of the one it replaced, and a finished one is left alone', async () => {
+  hist()
+  page()
+  const real = globalThis.fetch, seen = []
+  globalThis.fetch = (u, o) => (seen.push({ u, signal: o.signal }), u === '/b'
+    ? new Promise((_, rej) => o.signal.addEventListener('abort', () => rej(new DOMException('Aborted', 'AbortError'))))
+    : real(u, o))
+  const r = router({ parse, hard: u => assert.fail('hard ' + u) })
+  const slow = r.go('/b')
+  while (!seen.length) await null
+  assert.equal(seen[0].signal.aborted, false)
+  const fast = r.go('/c')
+  assert.equal(seen[0].signal.aborted, true)
+  await slow
+  await fast
+  assert.equal(seen[1].signal.aborted, false)
+  globalThis.fetch = real
+  r.stop()
+})
+
 test('a swap that throws becomes a full page load: no half-swapped page, no unhandled rejection', async () => {
   hist()
   page()

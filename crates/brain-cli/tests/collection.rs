@@ -19,7 +19,7 @@ fn a_new_collection_checks_and_builds() {
     for f in ["content/blog/hello-world.md", "views/blog/index.brain", "views/blog/page/[n].brain", "views/blog/[slug].brain", "views/blog/tag/[tag].brain"] {
         assert!(dir.join(f).is_file(), "{f}");
     }
-    assert!(std::fs::read_to_string(dir.join("app.brain")).unwrap().contains("<a href=\"/blog\">Blog</a>"), "linked from the nav");
+    assert!(std::fs::read_to_string(dir.join("views/_layout.brain")).unwrap().contains("<a href=\"/blog\">Blog</a>"), "linked from the nav");
     let (ok, chk) = brain(&dir, &["check"]);
     assert!(ok && chk.contains("0 error(s), 0 warning(s)"), "{chk}");
     // RSS needs absolute URLs: the scaffold's placeholder production origin is "no site" (B0736)

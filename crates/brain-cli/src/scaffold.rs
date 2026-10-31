@@ -51,7 +51,7 @@ pub fn new_app_named(dir: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
         ("views/about.brain", fill(include_str!("templates/new/about.brain"))),
         ("views/404.brain", include_str!("templates/new/404.brain").into()),
         ("views/_offline.brain", include_str!("templates/new/_offline.brain").into()),
-        ("views/_layout.brain", include_str!("templates/new/views/_layout.brain").into()),
+        ("views/_layout.brain", fill(include_str!("templates/new/views/_layout.brain"))),
         ("views/_loading.brain", include_str!("templates/new/views/_loading.brain").into()),
         ("views/_error.brain", include_str!("templates/new/views/_error.brain").into()),
         ("views/403.brain", include_str!("templates/new/views/403.brain").into()),
@@ -700,9 +700,12 @@ fn add_lib(root: &Path, name: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// A new view is linked from app.brain's main nav (before `</nav>`), so it is never born orphaned (SEO B1813).
+/// A new view is linked from the main nav (before `</nav>`) of `views/_layout.brain`, or of `app.brain` in an app that
+/// keeps it there, so it is never born orphaned (SEO B1813).
 fn link_in_nav(root: &Path, href: &str, label: &str) {
-    let app = root.join("app.brain");
+    let has_nav = |p: &Path| fs::read_to_string(p).is_ok_and(|s| s.contains("<nav") && s.contains("</nav>"));
+    let layout = root.join("views/_layout.brain");
+    let app = if has_nav(&layout) { layout } else { root.join("app.brain") };
     let Ok(src) = fs::read_to_string(&app) else { return };
     if src.contains(&format!("href=\"{href}\"")) {
         return;
@@ -835,7 +838,8 @@ BRAINLLM app. Rules: `brain spec` · check: `brain check --json` · development:
 
 | Path | What goes there |
 |---|---|
-| `app.brain` | root layout: `<head>`, site `<meta seo>`, nav (every view is linked from it) |
+| `app.brain` | static document shell: `<head>`, site `<meta seo>`, skip link |
+| `views/_layout.brain` | wraps every view: nav (every view is linked from it), session line |
 | `views/` | routes (`about.brain` → `/about`, `404.brain`, `_offline.brain`); may export `load` |
 | `comp/` · `ui/` | stateful components (with a colocated `.test.brain`) · stateless micro components |
 | `channels/` `services/` `api/` `lib/` `server/` `content/` | see each README and its `brain add` command |
@@ -889,8 +893,8 @@ mod tests {
         let app = tmp("clean");
         new_app(&app).unwrap();
         add(&app, "view", "settings", "id:num?").unwrap();
-        let shell = fs::read_to_string(app.join("app.brain")).unwrap();
-        assert!(shell.contains("<a href=\"/settings\">Settings</a>\n    </nav>"), "the new view is in the nav: {shell}");
+        let shell = fs::read_to_string(app.join("views/_layout.brain")).unwrap();
+        assert!(shell.contains("<a href=\"/settings\">Settings</a>\n  </nav>"), "the new view is in the nav: {shell}");
         add(&app, "comp", "UserCard", "user:obj active:bool=false").unwrap();
         assert!(app.join("comp/user-card.test.brain").is_file(), "brain add comp creates its colocated test");
         add(&app, "micro", "chip", "label:str").unwrap();

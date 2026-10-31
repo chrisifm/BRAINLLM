@@ -1376,6 +1376,8 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
     #[cfg(unix)]
     let shooter = og::Shooter::new(root);
     let post = |pages: &mut [brain_pack::Page], assets: &[(String, u64)]| -> Result<brain_pack::PostOut, String> {
+        // a page rendered per request exists too, also under its language prefix
+        let routes: Vec<String> = routes.iter().cloned().chain(pages.iter().filter(|p| p.file.starts_with("_server/") && !p.route.starts_with('!')).map(|p| p.route.clone())).collect();
         let mut sp: Vec<brain_seo::Page> = pages
             .iter()
             .filter(|p| !p.file.starts_with("_server/"))

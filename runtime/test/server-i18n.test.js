@@ -14,13 +14,19 @@ for (const f of ['brain.js', 'brain-i18n.js']) mkdirSync(join(dist, '_b'), { rec
 mkdirSync(join(dist, '_server/_rt'), { recursive: true })
 copyFileSync(join(here, '../brain-i18n.js'), join(dist, '_server/_rt/brain-i18n.js')) // the server module's own copy
 copyFileSync(join(here, '../shim/dom.js'), join(dist, '_server/dom.js'))
+for (const f of ['brain.js', 'brain-form.js', 'brain-schema.js']) copyFileSync(join(here, '..', f), join(dist, '_server', f))
 w('_b/dict-nl.js', `import { add } from '/_b/brain-i18n.js'\nadd('nl', { 'home.title': 'Startpagina', 'home.hi': 'Hallo' })\n`)
 w('_b/home.js', `import { tpl } from '/_b/brain.js'\nimport { t } from '/_b/brain-i18n.js'\nexport default function Home() { return tpl('<h1>' + t('home.hi') + '</h1>')() }\n`)
 w('_server/home.server.mjs', `import { t } from './_rt/brain-i18n.js'\nexport const seo = () => ({ title: t('home.title') })\nexport function load() { return {} }\n`)
+w('_b/dict-en.js', `import { add } from '/_b/brain-i18n.js'\nadd('en', { 'home.hi': 'Hello' })\n`)
+w('_b/late.js', `import { tpl } from '/_b/brain.js'\nexport default function Late(p) { return tpl('<h1>' + p.msg + '</h1>')() }\n`)
+w('_server/late.server.mjs', `import { t, locale } from './_rt/brain-i18n.js'\nexport async function load() { await new Promise(r => setTimeout(r, 5)); return { msg: t('home.hi') + ' ' + locale() } }\nconst redirect = to => ({ redirect: to, status: 303 })\nexport async function send() { await new Promise(r => setTimeout(r, 1)); return redirect('/late/nl?m=' + t('home.hi')) }\nexport const $forms = {}\n`)
 w('_server/pages/p.html', '<!doctype html><html lang="nl"><head><title>t</title></head><body><div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
 w('_server/manifest.json', JSON.stringify({
-  v: 1, build: 'b1', core: '/_b/brain.js', rpc: {},
-  routes: [{ path: '/nl', rx: '^/nl/?$', view: '/_b/home.js', layouts: [], server: '_server/home.server.mjs', page: '_server/pages/p.html', locale: 'nl', i18n: '/_b/dict-nl.js' }],
+  v: 1, build: 'b1', core: '/_b/brain.js', rpc: { hf: '_server/late.server.mjs' },
+  routes: [{ path: '/nl', rx: '^/nl/?$', view: '/_b/home.js', layouts: [], server: '_server/home.server.mjs', page: '_server/pages/p.html', locale: 'nl', i18n: '/_b/dict-nl.js' },
+    { path: '/late/nl', rx: '^/late/nl/?$', view: '/_b/late.js', layouts: [], server: '_server/late.server.mjs', page: '_server/pages/p.html', locale: 'nl', i18n: '/_b/dict-nl.js' },
+    { path: '/late', rx: '^/late/?$', view: '/_b/late.js', layouts: [], server: '_server/late.server.mjs', page: '_server/pages/p.html', locale: 'en', i18n: '/_b/dict-en.js' }],
 }))
 
 const { createServer } = await import('../server/server.mjs')
@@ -33,4 +39,18 @@ test('SSR in the route locale: the body and the <title> from <meta seo> are tran
   assert.match(html, /<h1>Hallo<\/h1>/)
   assert.match(html, /<title>Startpagina<\/title>/)
   assert.equal(globalThis.__brainLocale ?? null, null) // nothing left behind
+})
+
+test('t() and locale() inside load() read the page language, also across an await and with requests overlapping', async () => {
+  const base = `http://127.0.0.1:${server.address().port}`
+  const [a, b] = await Promise.all([fetch(`${base}/late/nl`), fetch(`${base}/late`)])
+  const [nl, en] = [await a.text(), await b.text()]
+  assert.match(nl, /<h1>Hallo nl<\/h1>/)
+  assert.match(en, /<h1>Hello en<\/h1>/)
+})
+
+test('a form handler reads the page language after the validation, inside its own await', async () => {
+  const r = await fetch(`http://127.0.0.1:${server.address().port}/late/nl`, { method: 'POST', redirect: 'manual', headers: { origin: `http://127.0.0.1:${server.address().port}`, 'content-type': 'application/x-www-form-urlencoded' }, body: '_brain=hf/send' })
+  assert.equal(r.status, 303)
+  assert.equal(r.headers.get('location'), '/late/nl?m=Hallo')
 })

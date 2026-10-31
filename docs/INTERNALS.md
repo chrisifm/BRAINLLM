@@ -137,8 +137,9 @@ COMPILER assigns the next free code there in the same change that emits it, then
   build, through `brain_seo::cli_with`) · B1837 public dynamic route (no guard, not `noindex`) without `paths()` or
   `sitemap()`: rendered per request but listed nowhere (warning from `brain build`, named with the fix). Collections (`content/<name>/*.md`, §33): server-only `entries` `entry` `tags` `tagged` `pages`
   `page` from `brain:content`, `content.perPage` (default 10), drafts only with `--env staging`.
+- B1850 framework messages left in English (warning, 2026-10-31): a component calling `form()` or `api()` with a schema, or using `<ErrorState>`, in an app whose default language is not English, while that language's file lacks `form.*` or `error_state.*` keys. It names the keys; no edit, because the text must be written in that language. Only the keys the file has reach the page dictionary, so nothing is added to bundles.
 - B072x environment file `.brain_env` (§36): B0720 empty value in the build environment (error) · B0721 key used in
-  code but missing (warning, edit adds `KEY=`, or `KEY?=` when the file reads it with a default or a condition) · B0722 key never used (info) · B0723 `PUBLIC_*` value shaped like a
+  code but missing (warning, edit adds `KEY=`, or `KEY?=` when the file reads it with a default or a condition) · B0722 key never used (info); both see `const { KEY = d, B: alias } = process.env`, aliases of the object (`const e = process.env`, `const { env } = process`) and destructured `ctx.env` (2026-10-31) · B0723 `PUBLIC_*` value shaped like a
   secret (error) · B0724 malformed line or section (error). Values never appear in any diagnostic. `KEY?=` (2026-10-31) declares an optional key: the winning line of an environment decides, an empty one is omitted from the program's environment and a `PUBLIC_*` one compiles to `undefined`. B0727 `.brain_env.example` differs from the union of `.brain_env` and the keys the code reads, compared by key, block and optional flag: doctor only reports it; `brain fix` and `brain doctor --fix` write it.
 - B076x backend settings (2026-10-31, `crates/brain-cli/src/startup_config.rs`): the validators of `brain backend serve`, also run per environment by `brain check`/`brain doctor` as warnings on values present in `.brain_env` and the process environment. B0760 mail keys and sender (`sender@domain` or `Name <sender@domain>`) · B0761 object storage · B0762 `DATABASE_URL` (missing, malformed, unreachable, unverified TLS in production; the `BDB_*` tokens stay in the message) · B0763 pool sizes, process count, port · B0764 `PUBLIC_SITE_URL` unusable in mail links. Serve stops on the fatal ones before its first database connection; messages name the variable, never its value.
 - B0771 anonymous API catalog (warning, `backend.rs` `anonymous_catalog_warning`, printed at `backend serve`, silent for an explicit `--env development`) · B0772 handler without a default export (warning in `check`, `structure.rs`; refused at boot) · B0773 secret-shaped literal in a route, job or hook handler (error; `read_source_limit` is the boot refusal)
@@ -966,7 +967,7 @@ component edit, ≤ 20 ms to the browser (excluding the OS file-event latency), 
 - **Initial structure (`brain new`, Chris 2026-10-13: "the organization the framework expects, adopted by default"):**
   every project starts with the full layout, so the model never invents folders and every generator has its place:
   ```
-  app.brain            root layout: <head>, site <meta seo>, nav
+  app.brain            static document shell: <head>, site <meta seo>, skip link
   tokens.cssbrain      design tokens (white glass theme)
   brain.json           name, site URL, cache, seo.minScore, budgets
   .brain_env           variables per environment (§36), gitignored · .brain_env.example committed
@@ -982,7 +983,7 @@ component edit, ≤ 20 ms to the browser (excluding the OS file-event latency), 
   feature once, the way the framework expects it, so the model copies a correct example instead of inventing one:
   | Feature | Files | What it shows |
   |---|---|---|
-  | Routing | `home`, `about`, nav in `app.brain` | static routes, active link, View Transitions |
+  | Routing | `home`, `about`, nav in `views/_layout.brain` | static routes, active link, View Transitions |
   | Dynamic route | `posts/[id].brain` + `lib/posts.jsbrain` | `paths()` + `load(ctx)` with `ctx.params`, SEO per page |
   | Not found | `404.brain` | returned for unknown URLs (status 404), link back home |
   | Permission denied | `403.brain` | a guard's `deny('reason')` renders it with status 403 and names the missing permission; never a blank page |
@@ -1447,6 +1448,10 @@ DATABASE_URL=            # empty: must come from the host's real environment
 - **Client vs server:** only `PUBLIC_*` keys reach the browser; `brain build` substitutes them as constants (dead
   branches removed, §13). Every other key exists only on the server (`load`, `server:` functions, `ctx.env.X`). The
   supervisor (`brain start`, §34) passes the resolved environment to `server.mjs`; Node never reads the file itself.
+  A `PUBLIC_*` key no environment declares compiles to `undefined` outside server code (every read form: dotted,
+  computed, optional, `globalThis.process.env`, `import.meta.env`), so a browser never meets a missing `process`. Server
+  code (`load`, `server:`, `<meta server>`) keeps reading the real environment; `import.meta.env.X` there becomes
+  `process.env["X"]` (2026-10-31).
 - **The compiler understands it** (COMPILER): `brain check` reads the keys (never the values into diagnostics) and
   - B0702 (existing) private key in client code;
   - B0721 key used in code but missing from `.brain_env` (warning, with an edit that adds `KEY=` to the shared block);
@@ -1484,14 +1489,19 @@ language is one command.
   `fmt.number(n)`, `fmt.money(n, 'USD')` and `fmt.relative(d)` over `Intl` for the current locale; `locale()` returns
   it. Text written straight into markup is allowed in single-language sites; with 2+ locales it is B1403 (warning,
   with an edit that moves the text to a new key in every locale file).
+- **One language** (2026-10-31): `i18n` with one locale has no prefixes; `brain run` loads its dictionary, sets `lang` and passes it to `load()` and form posts, as `brain build` already did, so `form.*` keys apply in both.
+- **Internal links keep the language** (2026-10-31): a page outside the default language has its `<a href>` and `<form action>` that name a page of the app rewritten to that language (`/about` → `/es/about`, or its `<meta route>`): `LocaleLinks` in brain-pack on the written HTML, `route.hrefs` in server.mjs on rendered bodies and on `redirect()`, and `brain-links.js` (loaded only by interactive pages of those languages, ~610 B gz) on what views mount, and on `go()`/`navigate()` through `__brainHref`. `hreflang` opts a link out, which is how `<LangSwitch>` works. Files, other origins and paths with no page stay. The default language and single-language apps ship nothing. `brain run` covers mounted links and navigation but not translated routes, nor the HTML before scripts run.
 - **What B1403 moves** (2026-10-31): text nodes; a sentence with interpolations as one message with placeholders
   (`Signed in as {email}` becomes `t('account.signed_in_as_with', { email })`, never two fragments); visible
   attributes (`placeholder`, `title`, `alt`, `aria-label` and the other `aria-*` texts, `label`, `description`,
   `help`, `hint`, `caption`, `heading`, `message`, `empty`, and `value` on submit/button/reset inputs);
   `<meta seo title/description>` (`<scope>.meta_title`, `<scope>.meta_description`); string literals in markup
   expressions (both branches of `a ? 'x' : 'y'`, the right side of `||`/`??`, `+` concatenations, untagged
-  templates). Not moved: `app.brain` (static shell, B0132: put translatable chrome in `views/_layout.brain`) and
-  literals inside `<script>`.
+  templates); on the client, `<script>` literals a person reads: the value of a variable markup only displays when it
+  reads as prose (a space or a capital), messages of `alert`, `confirm`, `prompt`, `toast.send` and what is assigned to
+  `.textContent`, `.innerText`, `.title`, `.placeholder`, `.alt`. A variable the code also reads stays: `t()` would change what
+  it compares or sends. Not moved: `app.brain` (static shell, B0132: put translatable chrome in `views/_layout.brain`),
+  server code, data returned by `load()` and props defaults.
 - **Key names** (2026-10-31): `<scope>.<first four ASCII words>`. The scope is the view path without `views/` and
   `index` (`views/account/index.brain` is `account`, `views/posts/[id]/edit.brain` is `posts-id-edit`, `home` for the
   root) or the component file name. Words are folded to ASCII (accented Latin letters lose the accent); a text with no word
@@ -1513,6 +1523,7 @@ language is one command.
   `<meta route es="/es/acerca">`. hreflang pairs pages by view plus page identity (S03): page 2 of a listing pairs
   with page 2 in each language, translated slug or not, and never with page 1. `/` with no prefix never auto-redirects by `Accept-Language` (crawlers and shared
   links must see the same page); instead the language switcher suggests the browser's language once.
+- **`t()` in server code** (2026-10-31): `load()`, guards and form handlers overlap across awaits, so each runs with its page's language in an `AsyncLocalStorage` behind the `__brainLocale` accessor, after the route's dictionary loads. An RPC has no page: it keeps the default language. Dev runs requests one at a time and passes the language and dictionaries to the sidecar.
 - **Framework texts:** messages the runtime and the kit write themselves read the app's dictionary by key and fall back
   to English when the key is missing, without loading `brain-i18n.js`: form validation (`form.*`, §14) and
   `<ErrorState>` (`error_state.offline`, `network`, `timeout`, `schema`, `unauthorized`, `forbidden`, `not_found`,

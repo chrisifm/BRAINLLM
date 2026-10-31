@@ -32,76 +32,78 @@ fn t_calls(c: &Component) -> Vec<(String, Option<BTreeSet<String>>, Span)> {
         }
     };
     walk(&c.script, false, &mut take);
-    fn nodes(ns: &[Node], f: &mut dyn FnMut(&Expr, bool, &[String])) {
-        for n in ns {
-            match n {
-                Node::Interp(i) => visit(&i.expr, false, &[], f),
-                Node::Element(Element { attrs, children, .. }) | Node::ComponentRef(ComponentRef { attrs, children, .. }) => {
-                    for a in attrs {
-                        match &a.value {
-                            AttrValue::Expr(x) => visit(x, false, &[], f),
-                            AttrValue::Mixed(parts) => {
-                                for p in parts {
-                                    if let AttrPart::Expr(x) = p {
-                                        visit(x, false, &[], f);
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    nodes(children, f);
-                }
-                Node::If(b) => {
-                    for br in &b.branches {
-                        visit(&br.test, false, &[], f);
-                        nodes(&br.body, f);
-                    }
-                    if let Some(o) = &b.otherwise {
-                        nodes(o, f);
-                    }
-                }
-                Node::Each(b) => {
-                    visit(&b.list, false, &[], f);
-                    nodes(&b.body, f);
-                    if let Some(e) = &b.empty {
-                        nodes(e, f);
-                    }
-                }
-                Node::SlotScope(b) => nodes(&b.body, f),
-                Node::Slot(s) => {
-                    for a in &s.attrs {
-                        match &a.value {
-                            AttrValue::Expr(x) => visit(x, false, &[], f),
-                            AttrValue::Mixed(parts) => {
-                                for p in parts {
-                                    if let AttrPart::Expr(x) = p {
-                                        visit(x, false, &[], f);
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                Node::Await(a) => {
-                    nodes(&a.pending, f);
-                    for br in [&a.then, &a.catch].into_iter().flatten() {
-                        nodes(&br.body, f);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    nodes(&c.template, &mut take);
-    nodes(&c.head, &mut take);
+    markup_exprs(&c.template, &mut take);
+    markup_exprs(&c.head, &mut take);
     for m in &c.meta {
         if let Some(x) = &m.expr {
             visit(x, false, &[], &mut take);
         }
     }
     out
+}
+
+/// Every expression written in markup.
+fn markup_exprs(ns: &[Node], f: &mut dyn FnMut(&Expr, bool, &[String])) {
+    for n in ns {
+        match n {
+            Node::Interp(i) => visit(&i.expr, false, &[], f),
+            Node::Element(Element { attrs, children, .. }) | Node::ComponentRef(ComponentRef { attrs, children, .. }) => {
+                for a in attrs {
+                    match &a.value {
+                        AttrValue::Expr(x) => visit(x, false, &[], f),
+                        AttrValue::Mixed(parts) => {
+                            for p in parts {
+                                if let AttrPart::Expr(x) = p {
+                                    visit(x, false, &[], f);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                markup_exprs(children, f);
+            }
+            Node::If(b) => {
+                for br in &b.branches {
+                    visit(&br.test, false, &[], f);
+                    markup_exprs(&br.body, f);
+                }
+                if let Some(o) = &b.otherwise {
+                    markup_exprs(o, f);
+                }
+            }
+            Node::Each(b) => {
+                visit(&b.list, false, &[], f);
+                markup_exprs(&b.body, f);
+                if let Some(e) = &b.empty {
+                    markup_exprs(e, f);
+                }
+            }
+            Node::SlotScope(b) => markup_exprs(&b.body, f),
+            Node::Slot(s) => {
+                for a in &s.attrs {
+                    match &a.value {
+                        AttrValue::Expr(x) => visit(x, false, &[], f),
+                        AttrValue::Mixed(parts) => {
+                            for p in parts {
+                                if let AttrPart::Expr(x) = p {
+                                    visit(x, false, &[], f);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Node::Await(a) => {
+                markup_exprs(&a.pending, f);
+                for br in [&a.then, &a.catch].into_iter().flatten() {
+                    markup_exprs(&br.body, f);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// One fixed text that B1403 moves to a key: the source range it replaces, the message with `{name}` placeholders and
@@ -155,7 +157,149 @@ fn fixed_texts(c: &Component) -> Vec<Found> {
         }
     }
     nodes(&c.template, &c.src, &mut out);
+    script_texts(c, &mut out);
     out
+}
+
+/// Variables markup only displays: named as the whole text of an interpolation or of a readable attribute, directly
+/// or in a value position (`a ? x : y`, `a || x`), and read nowhere else.
+fn displayed_vars(c: &Component) -> BTreeSet<String> {
+    fn value_idents<'a>(e: &'a Expr, out: &mut Vec<&'a str>) {
+        match e.unparen() {
+            Expr::Ident(i) => out.push(&i.name),
+            Expr::Cond { cons, alt, .. } => {
+                value_idents(cons, out);
+                value_idents(alt, out);
+            }
+            Expr::Binary { op: "||" | "??", right, .. } => value_idents(right, out),
+            _ => {}
+        }
+    }
+    fn shown<'a>(ns: &'a [Node], out: &mut Vec<&'a str>) {
+        for n in ns {
+            match n {
+                Node::Interp(Interp { html: false, expr, .. }) => value_idents(expr, out),
+                Node::Element(Element { attrs, children, .. }) | Node::ComponentRef(ComponentRef { attrs, children, .. }) => {
+                    for a in attrs.iter().filter(|a| a.kind == AttrKind::Plain && TEXT_ATTRS.contains(&a.name.as_str())) {
+                        match &a.value {
+                            AttrValue::Expr(x) => value_idents(x, out),
+                            AttrValue::Mixed(parts) => parts.iter().for_each(|p| {
+                                if let AttrPart::Expr(x) = p {
+                                    value_idents(x, out)
+                                }
+                            }),
+                            _ => {}
+                        }
+                    }
+                    shown(children, out);
+                }
+                Node::If(b) => {
+                    b.branches.iter().for_each(|br| shown(&br.body, out));
+                    b.otherwise.iter().for_each(|o| shown(o, out));
+                }
+                Node::Each(b) => {
+                    shown(&b.body, out);
+                    b.empty.iter().for_each(|e| shown(e, out));
+                }
+                Node::SlotScope(b) => shown(&b.body, out),
+                Node::Await(a) => {
+                    shown(&a.pending, out);
+                    [&a.then, &a.catch].into_iter().flatten().for_each(|br| shown(&br.body, out));
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut names = Vec::new();
+    shown(&c.template, &mut names);
+    let mut display: BTreeMap<&str, i32> = BTreeMap::new();
+    names.iter().for_each(|n| *display.entry(n).or_default() += 1);
+    // Every mention must be accounted for: one displayed in markup or the target of an assignment.
+    let mut mentions: BTreeMap<String, i32> = BTreeMap::new();
+    let mut take = |e: &Expr, _: bool, _: &[String]| match e {
+        Expr::Ident(i) => *mentions.entry(i.name.clone()).or_default() += 1,
+        Expr::Object { props, .. } => props.iter().for_each(|p| {
+            if let ObjProp::Shorthand(i) = p {
+                *mentions.entry(i.name.clone()).or_default() += 1
+            }
+        }),
+        Expr::Assign { op: "=", target, .. } => {
+            if let Expr::Ident(i) = target.unparen() {
+                *mentions.entry(i.name.clone()).or_default() -= 1
+            }
+        }
+        _ => {}
+    };
+    walk(&c.script, false, &mut take);
+    markup_exprs(&c.template, &mut take);
+    markup_exprs(&c.head, &mut take);
+    display.into_iter().filter(|(n, shown)| mentions.get(*n) == Some(shown)).map(|(n, _)| n.to_string()).collect()
+}
+
+/// Reads as a sentence or a title, not as a state value (`'first'`, `'idle'`).
+fn prose(found: &Found) -> bool {
+    found.msg.contains(' ') || found.msg.starts_with(char::is_uppercase)
+}
+
+/// Literals in `<script>` a person reads, on the client only: the value of a variable markup only displays, a message
+/// passed to `alert`, `confirm`, `prompt` or `toast.send`, and what is assigned to `.textContent` and its kin. A literal
+/// the code also reads is left alone: `t()` would change what it compares or sends.
+fn script_texts(c: &Component, out: &mut Vec<Found>) {
+    let shown = displayed_vars(c);
+    let mut held = |e: &Expr, out: &mut Vec<Found>| {
+        let mut f = Vec::new();
+        lits(e, &c.src, &mut f);
+        out.extend(f.into_iter().filter(prose));
+    };
+    fn top(stmts: &[Stmt], shown: &BTreeSet<String>, held: &mut dyn FnMut(&Expr, &mut Vec<Found>), out: &mut Vec<Found>) {
+        for s in stmts {
+            if let Stmt::Var(v) = s {
+                for d in &v.decls {
+                    if let (Pat::Ident(i), Some(init)) = (&d.pat, &d.init)
+                        && shown.contains(&i.name)
+                    {
+                        held(init, out);
+                    }
+                }
+            }
+        }
+    }
+    top(&c.script, &shown, &mut held, out);
+    let mut take = |e: &Expr, server: bool, _: &[String]| {
+        if server {
+            return;
+        }
+        match e {
+            Expr::Assign { op: "=", target, value, .. } => match target.unparen() {
+                Expr::Ident(i) if shown.contains(&i.name) => held(value, out),
+                Expr::Member { prop: MemberProp::Name(p), .. } if matches!(p.name.as_str(), "textContent" | "innerText" | "title" | "placeholder" | "alt") => lits(value, &c.src, out),
+                _ => {}
+            },
+            Expr::Call { callee, args, .. } => {
+                let message = match callee.unparen() {
+                    Expr::Ident(i) => matches!(i.name.as_str(), "alert" | "confirm" | "prompt"),
+                    Expr::Member { obj, prop: MemberProp::Name(p), .. } => {
+                        p.name == "send" && matches!(obj.unparen(), Expr::Ident(i) if i.name == "toast")
+                            || matches!(p.name.as_str(), "alert" | "confirm" | "prompt") && matches!(obj.unparen(), Expr::Ident(i) if i.name == "window")
+                    }
+                    _ => false,
+                };
+                match args.first().map(Expr::unparen) {
+                    Some(Expr::Object { props, .. }) if message => props.iter().for_each(|p| {
+                        if let ObjProp::KeyValue { key: PropKey::Ident(k), value, .. } = p
+                            && matches!(k.name.as_str(), "text" | "title" | "message")
+                        {
+                            lits(value, &c.src, out)
+                        }
+                    }),
+                    Some(x) if message => lits(x, &c.src, out),
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    };
+    walk(&c.script, false, &mut take);
 }
 
 fn collapse(s: &str) -> String {
@@ -486,6 +630,32 @@ impl Checker<'_> {
                         self.push("B1404", span, format!("`t('{key}')` needs {}", list.iter().map(|v| format!("`{{{v}}}`")).collect::<Vec<_>>().join(", ")), format!("pass them: `t('{key}', {{ {} }})`", need.iter().cloned().collect::<Vec<_>>().join(", ")));
                     }
                 }
+            }
+        }
+        // B1850: the framework's own texts stay English when the default language lacks them.
+        if let Some(def) = i18n.default_file()
+            && i18n.default.split('-').next() != Some("en")
+            && c.kind == FileKind::Component
+            && !c.file.ends_with(".test.brain")
+        {
+            let mut validates = false;
+            let mut see = |e: &Expr, _: bool, _: &[String]| {
+                if let Expr::Call { callee, args, .. } = e
+                    && matches!(callee.unparen(), Expr::Ident(i) if i.name == "form" || (i.name == "api" && args.len() > 1))
+                {
+                    validates = true;
+                }
+            };
+            walk(&c.script, false, &mut see);
+            markup_exprs(&c.template, &mut see);
+            let shows_errors = c.src.contains("<ErrorState");
+            let missing: Vec<&str> = crate::i18n::FRAMEWORK_EN
+                .iter()
+                .map(|(k, _)| *k)
+                .filter(|k| !def.entries.contains_key(*k) && ((validates && k.starts_with("form.")) || (shows_errors && k.starts_with("error_state."))))
+                .collect();
+            if !missing.is_empty() {
+                self.push("B1850", Span { start: 0, end: 0, line: 1, col: 1 }, format!("this page shows framework messages, and {} has no {}, so they stay in English", def.file, missing.join(", ")), format!("add those keys to {} with their text in `{}`", def.file, i18n.default));
             }
         }
         // B1403: fixed text in a multilingual site.

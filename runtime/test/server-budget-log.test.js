@@ -18,13 +18,18 @@ const budget = `Object.assign(new Error('B0910: ms budget exceeded'), { code: 'B
 w('_b/v.js', `import { tpl } from '/_b/brain.js'\nexport default function V(p) { return tpl('<h1>' + p.msg + '</h1>')() }\n`)
 w('_server/v.server.mjs', `export async function load() { throw ${budget} }\n`)
 w('_server/items.mjs', `export async function heavy() { throw ${budget} }\nexport async function plain() { throw new Error('secret value 42') }\n`)
+w('_b/hang.js', `export default function V() { return document.createTextNode('x') }\n`)
+w('_server/hang.server.mjs', `export function load(ctx) { globalThis.__hang(ctx.signal); return new Promise(() => {}) }\n`)
+w('_server/fine.server.mjs', `export function load(ctx) { globalThis.__fine = ctx.signal; return {} }\n`)
 w('_server/pages/p.html', '<!doctype html><html><head><title>t</title></head><body><div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
 w('_server/manifest.json', JSON.stringify({
   v: 1, build: 'b1', core: '/_b/brain.js', rpc: { hb: '_server/items.mjs' },
-  routes: [{ path: '/posts', rx: '^/posts/?$', view: '/_b/v.js', layouts: [], server: '_server/v.server.mjs', page: '_server/pages/p.html' }],
+  routes: [{ path: '/posts', rx: '^/posts/?$', view: '/_b/v.js', layouts: [], server: '_server/v.server.mjs', page: '_server/pages/p.html' },
+    { path: '/hang', rx: '^/hang/?$', view: '/_b/hang.js', layouts: [], server: '_server/hang.server.mjs', page: '_server/pages/p.html' },
+    { path: '/fine', rx: '^/fine/?$', view: '/_b/hang.js', layouts: [], server: '_server/fine.server.mjs', page: '_server/pages/p.html' }],
 }))
 
-const { createServer } = await import('../server/server.mjs')
+const { createServer, callRpc } = await import('../server/server.mjs')
 const logs = []
 const server = createServer({ dist, secret: 'test-secret-0123456789', log: (level, msg, x) => logs.push({ level, msg, ...x }) }) // gitleaks:allow -- local test-only session secret
 await new Promise(r => server.listen(0, '127.0.0.1', r))
@@ -59,4 +64,43 @@ test('a budget failure in an RPC is logged the same way; other errors keep the g
   assert.equal(plain.code, 'NODE_INTERNAL_ERROR')
   assert.equal(plain.budget, undefined)
   assert.doesNotMatch(JSON.stringify(plain), /secret value/)
+})
+
+test('an unhandled request failure logs the path without its query string', async () => {
+  // A request that reaches the outer catch: the manifest route module is replaced by one whose getter throws.
+  const before = logs.length
+  const original = server.listeners('request')[0]
+  const secret = 'query-token-value'
+  const req = { url: '/posts?token=' + secret, method: 'GET', headers: { get host() { throw new Error('boom') } }, socket: {}, on() {}, once() {}, removeListener() {} }
+  const res = { req, setHeader() {}, getHeader() {}, on() {}, once() {}, removeListener() {}, end() {}, writeHead() {}, write() {}, headersSent: false }
+  await original(req, res)
+  const entry = logs.slice(before).find(l => l.msg === 'unhandled')
+  assert.ok(entry, 'logged')
+  assert.equal(entry.path, '/posts')
+  assert.doesNotMatch(JSON.stringify(logs.slice(before)), new RegExp(secret))
+})
+
+test('ctx.signal aborts when the client disconnects, and not after a finished answer', async () => {
+  const { request } = await import('node:http')
+  const seen = new Promise(resolve => (globalThis.__hang = resolve))
+  const client = request(base + '/hang')
+  client.on('error', () => {})
+  client.end()
+  const signal = await seen
+  assert.equal(signal.aborted, false)
+  const aborted = new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }))
+  client.destroy()
+  await aborted
+  assert.equal(signal.aborted, true)
+  const closed = fetch(base + '/fine', { headers: { connection: 'close' } })
+  await (await closed).text()
+  await new Promise(setImmediate)
+  assert.equal(globalThis.__fine.aborted, false)
+})
+
+test('ctx.signal aborts at the deadline of a server function', async () => {
+  let signal
+  const r = await callRpc({ fn: ctx => { signal = ctx.signal; return new Promise(() => {}) }, args: [], ctx: {}, timeout: 1 })
+  assert.equal(r.status, 504)
+  assert.equal(signal.aborted, true)
 })

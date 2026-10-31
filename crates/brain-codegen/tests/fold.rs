@@ -103,8 +103,8 @@ fn public_env_values_compile_to_constants() {
     let opts = brain_codegen::Options { public_env: vec![("PUBLIC_SITE_NAME".into(), "Nimbus".into())], ..Default::default() };
     let o = brain_codegen::compile_with(src, std::path::Path::new("comp/s.brain"), &opts).unwrap();
     assert!(o.js.contains("const site = \"Nimbus\";"), "{}", o.js);
-    // Unknown keys stay as written (the host may provide them at runtime).
-    assert!(o.js.contains("process.env.PUBLIC_MISSING"), "{}", o.js);
+    // The browser has no `process`: a key with no value is absent, never a ReferenceError.
+    assert!(o.js.contains("const other = undefined;"), "{}", o.js);
 }
 
 #[test]
@@ -141,4 +141,22 @@ fn source_map_covers_statements_inside_nested_functions() {
     assert!(o.js.contains("await $brainBudgetbudgetSuspend"), "{}", o.js);
     assert_eq!(line_of("fetch('/x')"), Some(4), "{}", o.js);
     assert_eq!(line_of("saved.v = 'ok'"), Some(5), "{}", o.js);
+}
+
+#[test]
+fn undeclared_public_env_is_undefined_in_the_browser_and_read_at_runtime_on_the_server() {
+    let src = "<meta seo title=\"T\" description=\"D\">\n<script>\nexport async function load() { return { a: process.env.PUBLIC_LATE, b: import.meta.env.PUBLIC_LATE2, c: import.meta.env.PRIVATE_KEY } }\nconst x = import.meta.env.PUBLIC_MISSING\nconst y = process.env.PUBLIC_MISSING2\nconst z = process.env['PUBLIC_MISSING3']\nconst w = process.env?.PUBLIC_MISSING4\nconst k = globalThis.process.env.PUBLIC_MISSING5\nconst v = process.env['PUBLIC_SITE_NAME']\n</script>\n<p>{x}{y}{z}{w}{k}{v}</p>";
+    let opts = brain_codegen::Options { public_env: vec![("PUBLIC_SITE_NAME".into(), "Nimbus".into())], ..Default::default() };
+    let out = brain_codegen::compile_with(src, std::path::Path::new("views/x.brain"), &opts).unwrap();
+    assert!(!out.js.contains("PUBLIC_MISSING") && !out.js.contains("process.env") && !out.js.contains("import.meta.env"), "{}", out.js);
+    assert!(out.js.contains("\"Nimbus\""), "{}", out.js);
+    assert!(out.server_js.contains("process.env.PUBLIC_LATE"), "{}", out.server_js);
+    assert!(out.server_js.contains("process.env[\"PUBLIC_LATE2\"]") && out.server_js.contains("process.env[\"PRIVATE_KEY\"]") && !out.server_js.contains("import.meta.env"), "{}", out.server_js);
+}
+
+#[test]
+fn a_server_module_keeps_reading_undeclared_public_env_at_runtime() {
+    let src = "<meta server>\nexport default { a: process.env.PUBLIC_LATE, b: import.meta.env.PRIVATE_KEY }\n";
+    let out = brain_codegen::compile_with(src, std::path::Path::new("server/x.jsbrain"), &Default::default()).unwrap();
+    assert!(out.server_js.contains("process.env.PUBLIC_LATE") && out.server_js.contains("process.env[\"PRIVATE_KEY\"]"), "{}", out.server_js);
 }

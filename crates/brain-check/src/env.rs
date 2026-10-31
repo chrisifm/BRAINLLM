@@ -433,22 +433,150 @@ fn guarded_later(src: &str, t: &[Token], name: usize, from: usize) -> bool {
     false
 }
 
-fn reads_of_tokens(src: &str, t: &[Token], out: &mut Vec<Read>) {
+/// One `key`, `key: target` or `key = default` of a destructuring pattern, as token indexes.
+struct PatternEntry {
+    key: usize,
+    target: usize,
+    default: bool,
+}
+
+/// The entries of the `{…}` pattern opening at token `open`, with the index of its `}`. Not a pattern → `None`.
+fn pattern(t: &[Token], open: usize) -> Option<(usize, Vec<PatternEntry>)> {
+    let mut entries = Vec::new();
+    let mut depth = 0usize;
+    let mut start = open + 1;
+    let mut default = false;
+    let mut close = None;
+    for i in open + 1..t.len() {
+        let x = &t[i];
+        if x.is_punct("{") || x.is_punct("[") || x.is_punct("(") {
+            depth += 1;
+        } else if x.is_punct("]") || x.is_punct(")") {
+            depth = depth.checked_sub(1)?;
+        } else if depth == 0 && x.is_punct("=") {
+            default = true;
+        } else if depth > 0 && x.is_punct("}") {
+            depth -= 1;
+        } else if depth == 0 && (x.is_punct(",") || x.is_punct("}")) {
+            if i > start && matches!(t[start].tok, Tok::Ident(_) | Tok::Str { .. }) {
+                let target = if t[start + 1].is_punct(":") { start + 2 } else { start };
+                entries.push(PatternEntry { key: start, target, default });
+            }
+            (start, default) = (i + 1, false);
+            if x.is_punct("}") {
+                close = Some(i);
+                break;
+            }
+        }
+    }
+    Some((close?, entries))
+}
+
+/// The `{` that the `}` at token `close` ends.
+fn pattern_open(t: &[Token], close: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for i in (0..=close).rev() {
+        if t[i].is_punct("}") {
+            depth += 1;
+        } else if t[i].is_punct("{") {
+            depth -= 1;
+            if depth == 0 {
+                return Some(i);
+            }
+        }
+    }
+    None
+}
+
+fn key_of(x: &Token) -> Option<&str> {
+    match &x.tok {
+        Tok::Ident(k) => Some(k),
+        Tok::Str { value, .. } => Some(value),
+        _ => None,
+    }
+}
+
+/// The token after which the env object starting at `i` ends (`process.env`, `ctx.env`, `import.meta.env`, or a name
+/// bound to one of them), when `t[i]` starts one.
+fn env_object(t: &[Token], i: usize, names: &[String]) -> Option<usize> {
+    // `const x =` at the end of unfinished source has nothing to read.
+    t.get(i)?;
     let member = |i: usize| t.get(i).is_some_and(|x| x.is_punct(".") || x.is_punct("?."));
     let word = |i: usize, w: &str| t.get(i).is_some_and(|x| x.is_word(w));
+    let after_dot = i > 0 && member(i - 1);
+    // `env` sits after these; `x.ctx.env` is still a context, and `process` is only the global one.
+    let env = if word(i, "ctx") {
+        i + 2
+    } else if word(i, "process") && (!after_dot || (i >= 2 && word(i - 2, "globalThis"))) {
+        i + 2
+    } else if word(i, "import") && !after_dot && member(i + 1) && word(i + 2, "meta") && member(i + 3) {
+        i + 4
+    } else if !after_dot && matches!(&t[i].tok, Tok::Ident(n) if names.contains(n)) {
+        return Some(i);
+    } else {
+        return None;
+    };
+    (member(env - 1) && word(env, "env")).then_some(env)
+}
+
+/// The keys of a pattern over the env object, each tolerant when it has a default or a later use handles it absent.
+fn pattern_reads(src: &str, t: &[Token], entries: &[PatternEntry], after: usize, out: &mut Vec<Read>) {
+    for e in entries {
+        let Some(key) = key_of(&t[e.key]).filter(|k| is_key(k)) else { continue };
+        let later = matches!(t[e.target].tok, Tok::Ident(_)) && guarded_later(src, t, e.target, after);
+        out.push(Read { key: key.to_string(), at: t[e.key].span.start as usize, guarded: e.default || later });
+    }
+}
+
+/// Names bound to the env object, and the keys read in a parameter pattern (`load({ env: { KEY } })`).
+fn env_names(src: &str, t: &[Token], out: &mut Vec<Read>) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
     for i in 0..t.len() {
-        let after_dot = i > 0 && member(i - 1);
-        // `env` sits after these; `x.ctx.env` is still a context, and `process` is only the global one.
-        let env = if word(i, "ctx") {
-            i + 2
-        } else if word(i, "process") && (!after_dot || (i >= 2 && word(i - 2, "globalThis"))) {
-            i + 2
-        } else if word(i, "import") && !after_dot && member(i + 1) && word(i + 2, "meta") && member(i + 3) {
-            i + 4
-        } else {
+        // `const e = process.env`
+        if matches!(t[i].tok, Tok::Ident(_))
+            && i > 0
+            && (t[i - 1].is_word("const") || t[i - 1].is_word("let") || t[i - 1].is_word("var"))
+            && t.get(i + 1).is_some_and(|x| x.is_punct("="))
+            && let Some(end) = env_object(t, i + 2, &names)
+            && !t.get(end + 1).is_some_and(|x| x.is_punct(".") || x.is_punct("?.") || x.is_punct("[") || x.is_punct("("))
+            && let Tok::Ident(name) = &t[i].tok
+        {
+            names.push(name.clone());
+        }
+        if !t[i].is_punct("{") {
             continue;
-        };
-        if !member(env - 1) || !word(env, "env") {
+        }
+        let Some((close, entries)) = pattern(t, i) else { continue };
+        let holder = t.get(close + 1).is_some_and(|x| x.is_punct("=")) && (t.get(close + 2).is_some_and(|x| x.is_word("process") || x.is_word("ctx"))) && !t.get(close + 3).is_some_and(|x| x.is_punct(".") || x.is_punct("?."));
+        let param = i > 0 && t[i - 1].is_punct("(") && t.get(close + 1).is_some_and(|x| x.is_punct(")")) && t.get(close + 2).is_some_and(|x| x.is_punct("{") || x.is_punct("=>"));
+        if !holder && !param {
+            continue;
+        }
+        for e in entries.iter().filter(|e| t[e.key].is_word("env")) {
+            match &t[e.target].tok {
+                Tok::Ident(name) => names.push(name.clone()),
+                Tok::Punct("{") => {
+                    if let Some((end, inner)) = pattern(t, e.target) {
+                        pattern_reads(src, t, &inner, end + 1, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    names
+}
+
+fn reads_of_tokens(src: &str, t: &[Token], out: &mut Vec<Read>) {
+    let member = |i: usize| t.get(i).is_some_and(|x| x.is_punct(".") || x.is_punct("?."));
+    let names = env_names(src, t, out);
+    for i in 0..t.len() {
+        let Some(env) = env_object(t, i, &names) else { continue };
+        // `const { KEY, KEY2: name } = process.env`
+        if i >= 2 && t[i - 1].is_punct("=") && t[i - 2].is_punct("}") && !member(env + 1) {
+            if let Some((close, entries)) = pattern_open(t, i - 2).and_then(|open| pattern(t, open)) {
+                pattern_reads(src, t, &entries, close + 1, out);
+            }
             continue;
         }
         let (key, last) = match (t.get(env + 1), t.get(env + 2), t.get(env + 3)) {

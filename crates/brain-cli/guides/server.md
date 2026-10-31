@@ -29,7 +29,7 @@ RPC and form bodies, call deadlines and the call rate come from brain.json, the 
 gets 413 naming the setting; a file sent as base64 grows by a third, so a 5 MB file needs about `"maxBodyKB": 7000`
 (at most 65536). `timeoutMs` bounds each server function and `load()` (504), `rpcPerMinute` the calls per client IP
 and function (429). `BRAIN_MAX_BODY_KB`, `BRAIN_TIMEOUT_MS` and `BRAIN_RPC_LIMIT` in `.brain_env` override them per
-environment. `brain check` reports an invalid value as B0707.
+environment. `brain check` reports an invalid value as B0707. Pass `ctx.signal` to `fetch`: it aborts on disconnect or deadline.
 
 ## Sessions
 1. Set `BRAIN_SECRET` in `.brain_env` (MCP: `brain_env_set { key, section, value }`).

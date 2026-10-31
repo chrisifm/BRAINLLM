@@ -79,6 +79,39 @@ fn b1403_fixed_text_only_with_two_locales() {
 }
 
 #[test]
+fn b1403_reads_script_literals_that_reach_a_person() {
+    let two = app("script", &["en", "es"], &[("i18n/en.json", EN), ("i18n/es.json", ES)]);
+    let view = "<meta seo title={t('nav.home')} description={t('nav.home')}>\n<script>\nlet status = 'Ready to go'\nconst mode = 'Edit mode'\nconst url = 'Some Path'\nlet tab = 'first'\nfunction save() { status = 'Saved it'; toast.send({ text: 'All done' }); if (confirm('Really remove?')) fetch(url) }\nexport async function load() { return { a: 'Server text' } }\n</script>\n<main><h1>{status}</h1><p title={mode}>{tab}</p><button on:click={save}>{t('nav.home')}</button>{#if mode === 'Edit mode'}<b>{t('nav.home')}</b>{/if}</main>";
+    let d = check(&two, "views/home.brain", view);
+    let found: Vec<&str> = d.iter().filter(|d| d.code == "B1403" && d.file == "views/home.brain").map(|d| d.msg.as_str()).collect();
+    for text in ["Ready to go", "Saved it", "All done", "Really remove?"] {
+        assert!(found.iter().any(|m| m.contains(text)), "{text} missing: {found:#?}");
+    }
+    // Read by code (a comparison, a call), a bare word that may be a state value, and server code: never moved.
+    for text in ["Edit mode", "Some Path", "first", "Server text"] {
+        assert!(!found.iter().any(|m| m.contains(text)), "{text} flagged: {found:#?}");
+    }
+    let b = d.iter().find(|d| d.code == "B1403" && d.msg.contains("Ready to go")).unwrap();
+    assert_eq!(b.edits[0].text, "t('home.ready_to_go')", "a literal in script becomes a t() expression");
+}
+
+#[test]
+fn b1850_lists_framework_keys_the_default_language_lacks() {
+    let view = "<meta seo title={t('hi')} description={t('hi')}>\n<script>\nlet f = form({ a: 'email!' }, { submit: async (v) => v })\n</script>\n<form on:submit={f.submit}><h1>{t('hi')}</h1><label>{t('hi')} <input bind:value={f.v.a}></label></form>";
+    let es = "{\n  \"hi\": \"Hi\",\n  \"form.required\": \"Stand-in\"\n}";
+    let root = app("b1850", &["es"], &[("i18n/es.json", es)]);
+    let d = check(&root, "views/home.brain", view);
+    let b: Vec<&brain_parse::Diag> = d.iter().filter(|d| d.code == "B1850").collect();
+    assert_eq!(b.len(), 1, "{d:#?}");
+    assert!(b[0].msg.contains("form.email") && !b[0].msg.contains("form.required") && !b[0].msg.contains("error_state"), "{}", b[0].msg);
+    // A page with no validation, and an English default, have nothing to warn about.
+    let plain = "<meta seo title={t('hi')} description={t('hi')}>\n<h1>{t('hi')}</h1>";
+    assert!(!check(&root, "views/home.brain", plain).iter().any(|d| d.code == "B1850"));
+    let en = app("b1850en", &["en"], &[("i18n/en.json", es)]);
+    assert!(!check(&en, "views/home.brain", view).iter().any(|d| d.code == "B1850"));
+}
+
+#[test]
 fn b0306_physical_properties_with_rtl_and_route_slugs() {
     let css = "<meta seo title=\"T\" description=\"D\">\n<main class=\"m\"><h1>{t('nav.home')}</h1></main>\n<style>.m { margin-left: var(--space-2); text-align: right; }</style>";
     let ltr = app("ltr", &["en", "es"], &[("i18n/en.json", EN), ("i18n/es.json", ES)]);

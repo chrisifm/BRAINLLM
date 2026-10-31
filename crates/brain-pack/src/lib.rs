@@ -423,6 +423,138 @@ pub fn url_key<'a>(u: &'a str, pre: &str) -> &'a str {
     u.strip_prefix(pre).filter(|r| r.starts_with('/')).unwrap_or(u).trim_start_matches('/')
 }
 
+/// Where the pages of one language live (INTERNALS §37): the routes of the default language, the language's prefix and
+/// its translated routes. Internal links of a page in that language go through it, in the HTML and in the browser.
+#[derive(Clone, Debug, Default)]
+pub struct LocaleLinks {
+    pub prefix: String,
+    pub routes: Vec<String>,
+    pub slugs: BTreeMap<String, String>,
+}
+
+impl LocaleLinks {
+    /// The app's pages for `locale`, from the views on disk; `translated` = also read `<meta route>`.
+    pub fn of(root: &Path, locale: &str, translated: bool) -> Self {
+        let mut t = LocaleLinks { prefix: format!("/{locale}"), ..Default::default() };
+        for r in routes::discover(root) {
+            if r.path == "*" || r.path.starts_with('!') {
+                continue;
+            }
+            if translated && !routes::is_dynamic(&r.path) {
+                let src = std::fs::read_to_string(root.join(&r.view)).unwrap_or_default();
+                if let Some(slug) = route_meta(&src, locale).filter(|s| s.starts_with('/')) {
+                    t.slugs.insert(r.path.clone(), slug);
+                }
+            }
+            t.routes.push(r.path);
+        }
+        t
+    }
+
+    fn matches(route: &str, path: &str) -> bool {
+        let want: Vec<&str> = route.split('/').filter(|s| !s.is_empty()).collect();
+        let got: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        for (i, w) in want.iter().enumerate() {
+            if w.starts_with('*') {
+                return true;
+            }
+            match got.get(i) {
+                Some(g) if w.starts_with(':') || w == g => {}
+                _ => return false,
+            }
+        }
+        want.len() == got.len()
+    }
+
+    /// `href` in this language, or `None` when it is not a page of the app or already names a language.
+    pub fn to(&self, href: &str) -> Option<String> {
+        if !href.starts_with('/') || href.starts_with("//") {
+            return None;
+        }
+        let end = href.find(['?', '#']).unwrap_or(href.len());
+        let (path, rest) = href.split_at(end);
+        let new = match self.slugs.get(path) {
+            Some(slug) => slug.clone(),
+            None if !self.routes.iter().any(|r| Self::matches(r, path)) => return None,
+            None if path == "/" => self.prefix.clone(),
+            None => format!("{}{path}", self.prefix),
+        };
+        Some(new + rest)
+    }
+
+    /// The paths with a page as one regular expression source, for the browser and the server.
+    pub fn pattern(&self) -> String {
+        let alts: Vec<String> = self
+            .routes
+            .iter()
+            .map(|r| {
+                let segs: Vec<String> = r
+                    .split('/')
+                    .filter(|s| !s.is_empty())
+                    .map(|s| match s.chars().next() {
+                        Some('*') => "/.*".to_string(),
+                        Some(':') => "/[^/]+".to_string(),
+                        _ => {
+                            let mut lit = String::from("/");
+                            for c in s.chars() {
+                                if !c.is_alphanumeric() && c != '-' && c != '_' {
+                                    lit.push('\\');
+                                }
+                                lit.push(c);
+                            }
+                            lit
+                        }
+                    })
+                    .collect();
+                segs.concat()
+            })
+            .collect();
+        format!("^(?:{})/?$", alts.join("|"))
+    }
+
+    pub fn slugs_json(&self) -> String {
+        let items: Vec<String> = self.slugs.iter().map(|(k, v)| format!("{}:{}", prerender_json(k), prerender_json(v))).collect();
+        format!("{{{}}}", items.join(","))
+    }
+
+    /// `<a href>` and `<form action>` of a whole document, outside `<script>`; `hreflang` names a language on purpose.
+    pub fn html(&self, doc: &str) -> String {
+        let mut out = String::with_capacity(doc.len() + 64);
+        let mut rest = doc;
+        while let Some(at) = rest.find('<') {
+            let (head, tail) = rest.split_at(at);
+            out.push_str(head);
+            if let Some(end) = tail.starts_with("<script").then(|| tail.find("</script>")).flatten() {
+                out.push_str(&tail[..end]);
+                rest = &tail[end..];
+                continue;
+            }
+            let attr = if tail.starts_with("<a ") || tail.starts_with("<a\n") {
+                "href="
+            } else if tail.starts_with("<form ") || tail.starts_with("<form\n") {
+                "action="
+            } else {
+                out.push('<');
+                rest = &tail[1..];
+                continue;
+            };
+            let close = tail.find('>').unwrap_or(tail.len() - 1) + 1;
+            let tag = &tail[..close];
+            let new = tag.find(&format!(" {attr}")).filter(|_| !tag.contains(" hreflang=")).and_then(|i| {
+                let v = i + 1 + attr.len();
+                let q = tag[v..].chars().next().filter(|c| *c == '"' || *c == '\'')?;
+                let end = tag[v + 1..].find(q)? + v + 1;
+                let to = self.to(&tag[v + 1..end])?;
+                Some(format!("{}{to}{}", &tag[..v + 1], &tag[end..]))
+            });
+            out.push_str(new.as_deref().unwrap_or(tag));
+            rest = &tail[close..];
+        }
+        out.push_str(rest);
+        out
+    }
+}
+
 /// Prefixes root-relative URLs of `href`/`src`/`action`/`formaction`/`poster` attributes with `pre` (`/app`): in
 /// HTML and in the template strings of compiled modules (quoted, unquoted or with escaped quotes). Protocol-relative
 /// URLs (`//cdn`) and values already under the base are left alone.
@@ -719,6 +851,9 @@ fn build_inner_with_options(
     }
     if i18n.is_some() && input.runtime_siblings.iter().any(|(n, _)| n == "brain-i18n.js") {
         stack.push(Node::Runtime("brain-i18n.js".into()));
+    }
+    if i18n.as_ref().is_some_and(|(_, l)| l.len() > 1) && input.runtime_siblings.iter().any(|(n, _)| n == "brain-links.js") {
+        stack.push(Node::Runtime("brain-links.js".into()));
     }
     let http_setup = input.root.join(HTTP_SETUP).is_file();
     if http_setup {
@@ -1590,6 +1725,18 @@ fn build_inner_with_options(
         if let (Some(d), true) = (&p.dict, p.interactive && script.starts_with("<script type=\"module\">")) {
             script = script.replacen("<script type=\"module\">", &format!("<script type=\"module\">import\"{d}\";"), 1);
         }
+        // a page outside the default language keeps it in the links its views mount (§37)
+        let links = p.locale.as_ref().filter(|l| i18n.as_ref().is_some_and(|(def, _)| def != *l)).map(|l| LocaleLinks::of(&input.root, l, true));
+        if let (Some(t), Some(l), Some(rt), true) = (&links, &p.locale, url_of.get(&Node::Runtime("brain-links.js".into())), p.interactive && script.starts_with("<script type=\"module\">")) {
+            let js = format!("import l from\"{rt}\";l({},{},{},{},{});\n", prerender_json(l), prerender_json(&pre), prerender_json(&t.prefix), prerender_json(&t.pattern()), t.slugs_json());
+            let key = format!("_b/links-{l}.{}.{}", content_hash(&js), ext.js());
+            // after the dictionary: the page's first import stays the one its first render needs
+            script = match &p.dict {
+                Some(d) => script.replacen(&format!("import\"{d}\";"), &format!("import\"{d}\";import\"{pre}/{key}\";"), 1),
+                None => script.replacen("<script type=\"module\">", &format!("<script type=\"module\">import\"{pre}/{key}\";"), 1),
+            };
+            files.insert(key, js);
+        }
         // page scripts go INSIDE the region (the router recreates them after a swap); the router itself stays outside
         let page_router = if zero_js { "" } else { router_tag.as_str() };
         let slot = format!("<div id=\"brain-view\">{}{body_html}{script}</div>{page_router}", p.css);
@@ -1609,6 +1756,10 @@ fn build_inner_with_options(
             None => format!("<!doctype html>{}{doc}", head),
         };
         let html = prerender::dedupe_head(&html);
+        let html = match &links {
+            Some(t) => t.html(&html),
+            None => html,
+        };
         let file = if p.ssr {
             format!("_server/pages/{}.html", content_hash(&p.route))
         } else if p.route == "/" {
@@ -1684,6 +1835,10 @@ fn build_inner_with_options(
                     chain.push_str(&format!(",\"links\":\"{LINKS}{}\"", p.file));
                     if let Some(loc) = locale_of.get(&p.route) {
                         chain.push_str(&format!(",\"locale\":{},\"alternates\":{}", prerender_json(loc), alternates_of(&p.route)));
+                        if i18n.as_ref().is_some_and(|(def, _)| def != loc) {
+                            let t = LocaleLinks::of(&input.root, loc, true);
+                            chain.push_str(&format!(",\"hrefs\":{{\"p\":{},\"re\":{},\"s\":{}}}", prerender_json(&t.prefix), prerender_json(&t.pattern()), t.slugs_json()));
+                        }
                         // the page's dictionary: server.mjs imports it before render() and seo() (QA #153)
                         if let Some(d) = dicts.get(&p.route) {
                             chain.push_str(&format!(",\"i18n\":{}", prerender_json(d)));
@@ -1771,6 +1926,13 @@ fn build_inner_with_options(
         files.extend(out.files);
         post_bin.extend(out.binary);
         warnings.extend(out.warnings);
+        // without a sitemap file server.mjs serves none, so these routes' sitemap() never runs
+        let mut skipped: Vec<String> = pages.iter().filter(|p| routes::is_dynamic(&p.route) && has_sitemap.contains(&p.view)).map(|p| p.route.clone()).collect();
+        skipped.sort();
+        skipped.dedup();
+        if let (false, Some(w)) = (skipped.is_empty(), warnings.iter_mut().find(|w| w.starts_with("no sitemap.xml"))) {
+            w.push_str(&format!("; sitemap() of {} is skipped until then", skipped.join(", ")));
+        }
         post_csp = out.csp;
     }
     if let Some(socket) = &options.native_sockets {
@@ -2295,6 +2457,21 @@ fn needs_space(prev: Option<char>, next: char) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn locale_links_rewrite_pages_and_leave_the_rest() {
+        let t = LocaleLinks { prefix: "/es".into(), routes: vec!["/".into(), "/about".into(), "/posts/:id".into()], slugs: BTreeMap::from([("/contact".to_string(), "/es/contacto".to_string())]) };
+        assert_eq!(t.to("/").as_deref(), Some("/es"));
+        assert_eq!(t.to("/about?a=1#x").as_deref(), Some("/es/about?a=1#x"));
+        assert_eq!(t.to("/posts/7").as_deref(), Some("/es/posts/7"));
+        assert_eq!(t.to("/contact").as_deref(), Some("/es/contacto"));
+        for other in ["/favicon.svg", "/_b/a.js", "//cdn/x", "#top", "https://a.test/about", "/es/about"] {
+            assert_eq!(t.to(other), None, "{other}");
+        }
+        let doc = "<a href=\"/about\">A</a><a hreflang=\"en\" href=\"/about\">B</a><link rel=\"alternate\" href=\"/about\"><script>x=\"<a href='/about'>\"</script><form action=\"/about\"></form><a class=\"c\" href='/'>H</a>";
+        assert_eq!(t.html(doc), "<a href=\"/es/about\">A</a><a hreflang=\"en\" href=\"/about\">B</a><link rel=\"alternate\" href=\"/about\"><script>x=\"<a href='/about'>\"</script><form action=\"/es/about\"></form><a class=\"c\" href='/es'>H</a>");
+        assert_eq!(t.pattern(), "^(?:|/about|/posts/[^/]+)/?$");
+    }
+
     #[test]
     fn the_shell_loses_indentation_only_where_it_is_safe() {
         assert_eq!(super::unindent_shell("<head>\n  <title>x</title>\n</head>\n  text\n"), "<head>\n<title>x</title>\n</head>\n  text");

@@ -14,6 +14,18 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Fix: `brain check` and `brain backend schema` report an invalid route contract as B0735 (it was dropped silently)
 - `brain check` reports invalid `brain.json` analytics settings and a route handler or before-hook file that does not exist as B0735, instead of `brain backend serve` failing later
 - Fix: a non-numeric `analytics.retentionDays` or `eventsPerMinute` is refused instead of silently keeping the default
+- Fix: internal links, forms, `navigate()` and `redirect()` on a page outside the default language stay in that language
+- Fix: a link to a server-rendered page under a language prefix no longer fails the build with B1819
+- B1850 warns when a page shows framework messages and the app's non-English default language lacks their `form.*` or `error_state.*` keys
+- Fix: `brain run` loads the dictionary of a single-language app, so `form.*` messages and `t()` match the production build
+- `brain new` puts the menu in `views/_layout.brain`, so it can be translated; `brain add view` links there, or in `app.brain` for apps that keep it there
+- B1403 also reads `<script>` literals a person sees: variables markup only displays, `alert`, `confirm`, `prompt`, `toast.send` and `.textContent`
+- The sitemap warning without a site URL points at `PUBLIC_SITE_URL` and lists the `sitemap()` routes it skips
+- Fix: reading an undeclared `PUBLIC_*` variable in the browser gives `undefined` instead of throwing
+- Fix: B0721 and B0722 see keys read by destructuring `process.env` or `ctx.env`
+- `ctx.signal` in `load()`, guards and server functions aborts when the client disconnects or the deadline passes
+- Fix: a newer client navigation aborts the page request it replaced
+- Fix: `t()`, `fmt` and `locale()` inside `load()`, guards and form handlers read the page's language, in production and in `brain run`
 - Lists name aggregates that hit the 100-group cap in `aggregates_truncated`
 - Request log lines carry `dbMs` and `dbWaitMs` for resource reads, so database time and pool wait are visible apart from `ms`
 - Fix: plain lists and `created_at`/`updated_at` sorts use their index instead of sorting the whole table on every request
