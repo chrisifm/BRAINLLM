@@ -205,8 +205,10 @@ Rust 1.99.1 release gate and do not establish cross-platform execution or whole-
 
 - [x] Capture all nine capability rows from the requesting project's assessment; distinguish actual limitations
   from existing capabilities in [BACKEND-MIGRATION-READINESS.md](BACKEND-MIGRATION-READINESS.md).
-- [ ] Read the complete requesting project `docs/MIGRACION-BACKEND-BRAINLLM.md`. The supplied app folder exists,
-  but that file/docs directory was absent during inspection; exact remaining input requested from the user.
+- [x] Read the complete 147-line requesting project `docs/MIGRACION-BACKEND-BRAINLLM.md`, found in the project
+  root above its frontend after it became available. Capture all 43 original IDs/priorities B-01 through B-43 in
+  the readiness ledger. Exact private requirements are recorded outside this public repository; reading is not
+  implementation or migration approval. Source SHA is recorded in the ledger.
 - [ ] Complete exact money/date/enum types, relational company/vacancy/application scope and lossless legacy bigint
   compatibility with explicit migration plans; existing role/owner permissions are not organization membership.
 - [ ] Preserve typed arrays, partial-update behavior, authorized state transitions and atomic multi-resource
