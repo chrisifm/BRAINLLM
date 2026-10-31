@@ -82,6 +82,18 @@ function intendedStatus(error) {
   const plain = Object.getPrototypeOf(error) === Object.prototype || Object.getPrototypeOf(error) === null
   return Number.isInteger(status) && STATUS_CODES[status] && (error instanceof HttpError && status >= 400 && status <= 599 || plain && status >= 400 && status < 500) ? status : null
 }
+// A deliberate public failure → { status, message } for f.error: a plain `{ message }` without a status (400) or an
+// author's Error subclass with a 4xx `status`. Plain `{ status, message }` keeps its message private (driver detail);
+// built-in errors and bare `Error` messages stay private too.
+const BUILTIN_ERRORS = new Set([Error, TypeError, RangeError, SyntaxError, ReferenceError, EvalError, URIError, AggregateError].map(c => c.prototype))
+function publicError(error) {
+  if (!error || typeof error !== 'object' || error instanceof HttpError) return null
+  const proto = Object.getPrototypeOf(error), plain = proto === Object.prototype || proto === null
+  const typed = error instanceof Error && !BUILTIN_ERRORS.has(proto)
+  const status = plain ? (error.status === undefined ? 400 : 0) : error.status, message = error.message
+  if (!(plain || typed) || typeof message !== 'string' || !message || message.length > 500) return null
+  return Number.isInteger(status) && status >= 400 && status < 500 && STATUS_CODES[status] ? { status, message } : null
+}
 const REDIRECT_CODES = new Set([301, 302, 303, 307, 308])
 function safeLocation(value) {
   if (typeof value !== 'string' || value.length > 8192 || !value.startsWith('/') || value.startsWith('//') || /[\\\x00-\x20\x7f]/.test(value) || /^\/%2f/i.test(value) || /%(?:0[0-9a-f]|1[0-9a-f]|5c|7f)/i.test(value) || /%20/i.test(value.split(/[?#]/,1)[0])) throw new HttpError(500, 'Invalid same-site redirect location')
@@ -1204,6 +1216,8 @@ export async function callRpc({ fn, args, ctx, key, limit = 60, timeout = 10000 
   } catch (e) {
     if (e && e.errors && typeof e.errors === 'object') return { status: 422, body: { error: e.message || 'Invalid input', errors: e.errors } }
     if (e instanceof HttpError && e.status === 504) return { status: 504, body: { error: 'Timeout' }, cause: e }
+    const pub = publicError(e)
+    if (pub) return { status: pub.status, body: { error: pub.message } }
     const deliberate = intendedStatus(e)
     if (deliberate && deliberate < 500) return { status: deliberate, body: { error: e instanceof HttpError ? e.message : STATUS_CODES[deliberate] } }
     if (deliberate) return {status:deliberate,body:{error:STATUS_CODES[deliberate]},cause:e}
@@ -1230,6 +1244,8 @@ export async function callForm({ module, raw, ctx, rules, key, limit = 60, timeo
   } catch (e) {
     if (e && e.errors && typeof e.errors === 'object') return again(e.errors, '')
     if (e instanceof HttpError && e.status >= 400 && e.status < 500) return again({}, e.message)
+    const pub = publicError(e)
+    if (pub) return again({}, pub.message)
     const deliberate = intendedStatus(e)
     if (deliberate && deliberate < 500) return {status:deliberate,body:{error:STATUS_CODES[deliberate]}}
     if (deliberate) return {status:deliberate,body:{error:STATUS_CODES[deliberate]},cause:e}

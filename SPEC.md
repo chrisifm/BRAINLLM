@@ -240,7 +240,8 @@ Variables live in `.brain_env` (already created): shared `KEY=value` lines, then
 Read them as `process.env.KEY` (server) or `process.env.PUBLIC_KEY` (anywhere). Never create a `.env`.
 `.jsbrain` files starting with `<meta server>` run only on the server and may be used only inside `load` or server
 functions. Server function in a `.brain`: `server: async function save(ctx, data) {…}`; the client calls
-`await save(data)` (no `ctx`). Validate `data` inside.
+`await save(data)` (no `ctx`). Validate `data` inside. `throw { message: 'Title already used' }` (400) or an Error
+subclass with a 4xx `status` reaches the calling form's `f.error` as is; other exceptions stay private.
 Server-only modules may signal a deliberate client failure with `throw {status:403}` (standard 4xx only); RPC returns
 the status with a generic public message. Arbitrary exception messages remain private and are excluded from server logs too.
 Sessions: `ctx.session.set(user)` in a server function, `ctx.user` on later requests, `ctx.session.clear()` logs out

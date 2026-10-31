@@ -57,7 +57,8 @@ In production set `BRAIN_SECRET` (32+ random bytes) in the `[production]` sectio
 - `throw notFound()` in `load` → 404 with `views/404.brain`; `throw redirect('/x')` → 303; `deny('reason')` in a
   guard → `views/403.brain`. `_error.brain` is the folder's error boundary (retry button, request id, no stack in production).
 - A server function that throws a plain `Error` answers 500 with a generic message; the real one goes to the server log.
-  To show a reason, throw `{ errors: { field: 'msg' } }` (422).
+  To show a reason, throw `{ errors: { field: 'msg' } }` (422, field errors) or `{ message: 'msg' }` (400, the calling
+  form's `f.error`); an Error subclass with a 4xx `status` (`class Conflict extends Error { status = 409 }`) is public too.
 - Components are isolated: a failing component shows its fallback (`<meta fallback="Could not load">`) with Retry and
   the page keeps working. Do not wrap everything in try/catch.
 - Browser errors captured in development: `brain doctor` and MCP `brain_errors`.

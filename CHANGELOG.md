@@ -16,6 +16,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   are stored as canonical strings with a lossless database CHECK; unique and check violations answer 409/422. Records
   expose `created_at`/`updated_at`. Existing contracts record byte-identically and gain no database objects.
 
+- A `server:` function that throws `{ message }` (400) or an Error subclass with a 4xx `status` reaches the calling
+  form's `f.error` through RPC and through a form posted without JS; other exceptions stay private.
+
 ### Changed
 
 - `brain test`, `brain doctor` and MCP `brain_test` run in owned headless Chrome by default and never probe or open a
