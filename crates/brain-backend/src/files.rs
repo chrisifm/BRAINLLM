@@ -1,7 +1,7 @@
 //! Declared file buckets: any content type, streamed to private disk, recorded in Postgres, served by policy.
 //!
 //! A bucket is a literal contract (`server/files/<name>.jsbrain`). Client filenames and declared types never choose
-//! a path; magic bytes are sniffed and recorded. Types are only enforced when the bucket lists them.
+//! a path; magic bytes are sniffed and recorded. A bucket lists its types, or says `types: '*'` to accept any.
 use crate::Resource;
 use axum::body::Bytes;
 use serde::{Deserialize, Deserializer};
@@ -74,6 +74,16 @@ fn size<'de, D: Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
     parse_size(&Value::deserialize(d)?).map_err(serde::de::Error::custom)
 }
 
+fn type_list<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::String(s) if s == "*" => Ok(vec!["*/*".into()]),
+        Value::Array(items) => items
+            .into_iter()
+            .map(|v| v.as_str().map(str::to_string).ok_or_else(|| serde::de::Error::custom("types are MIME patterns such as application/pdf, or '*' for any type")))
+            .collect(),
+        _ => Err(serde::de::Error::custom("types are a list of MIME patterns such as application/pdf, or '*' for any type")),
+    }
+}
 /// One declared bucket. Grants: configured role names, `owner` (uploader) and `related` (may read the linked record).
 #[derive(Clone, Debug, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -84,8 +94,9 @@ pub struct Bucket {
     pub visibility: Visibility,
     #[serde(default = "default_max", deserialize_with = "size")]
     pub max_bytes: u64,
-    /// MIME patterns (`application/pdf`, `image/*`). Empty means any type is accepted.
-    #[serde(default)]
+    /// MIME patterns (`application/pdf`, `image/*`), or `'*'` to accept any type. Omitted or empty still accepts any
+    /// type, as it did before 0.6.2, and `brain check` warns B0770.
+    #[serde(default, deserialize_with = "type_list")]
     pub types: Vec<String>,
     /// Optional resource whose records own these files; uploads then need `?record=<uuid>` and update rights on it.
     #[serde(default)]
@@ -157,11 +168,18 @@ impl Bucket {
         }
         Ok(())
     }
+    /// A bucket that never said which types it takes: it accepts every file only by omission (B0770).
+    pub fn open_by_omission(&self) -> bool {
+        self.types.is_empty()
+    }
     pub fn accepts(&self, content_type: &str) -> bool {
+        let detected = same_type(content_type);
         self.types.is_empty()
             || self.types.iter().any(|pattern| {
+                let pattern = same_type(pattern);
                 pattern == "*/*"
-                    || pattern == content_type
+                    || pattern == detected
+                    || contains_format(content_type) == Some(pattern)
                     || pattern
                         .strip_suffix("/*")
                         .is_some_and(|family| content_type.split('/').next() == Some(family))
@@ -193,6 +211,119 @@ fn mime_pattern(s: &str) -> bool {
         || s.split_once('/').is_some_and(|(a, b)| {
             token(a) && (b == "*" || token(b)) && s == s.to_ascii_lowercase()
         })
+}
+/// One name per format: the registered MIME type stands for the names detection and browsers also use.
+fn same_type(mime: &str) -> &str {
+    match mime {
+        "image/jpg" | "image/pjpeg" => "image/jpeg",
+        "image/heic" | "image/heic-sequence" | "image/heif-sequence" => "image/heif",
+        "audio/mp3" => "audio/mpeg",
+        "audio/wav" | "audio/wave" | "audio/vnd.wave" => "audio/x-wav",
+        "audio/mp4" | "audio/x-m4a" => "audio/m4a",
+        "application/x-zip-compressed" | "application/x-zip" => "application/zip",
+        "application/x-pdf" => "application/pdf",
+        other => other,
+    }
+}
+/// The container an Office format is stored in: a bucket that lists the container keeps accepting the format.
+fn contains_format(mime: &str) -> Option<&'static str> {
+    match mime {
+        DOCX | XLSX | PPTX => Some("application/zip"),
+        DOC | XLS | PPT => Some(OLE),
+        _ => None,
+    }
+}
+const ZIP: &str = "application/zip";
+const OLE: &str = "application/x-ole-storage";
+const DOCX: &str = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const XLSX: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const PPTX: &str = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+const DOC: &str = "application/msword";
+const XLS: &str = "application/vnd.ms-excel";
+const PPT: &str = "application/vnd.ms-powerpoint";
+/// Central directory bytes read to tell an Office document from a plain zip, and directory bytes for the older format.
+const CONTAINER_TAIL: u64 = 1024 * 1024 + 66 * 1024;
+const OLE_DIRECTORY: usize = 64 * 1024;
+fn le16(b: &[u8], at: usize) -> Option<usize> {
+    Some(u16::from_le_bytes(b.get(at..at + 2)?.try_into().ok()?) as usize)
+}
+fn le32(b: &[u8], at: usize) -> Option<usize> {
+    Some(u32::from_le_bytes(b.get(at..at + 4)?.try_into().ok()?) as usize)
+}
+/// The Office format of a zip, from the names in its central directory: the signature every zip shares says nothing,
+/// and a real document's main part can sit anywhere in the archive. `tail` is the end of the file.
+pub fn zip_format(tail: &[u8]) -> Option<&'static str> {
+    let end = tail.windows(4).rposition(|w| w == [0x50, 0x4b, 0x05, 0x06])?;
+    let size = le32(tail, end + 12)?;
+    let mut at = end.checked_sub(size)?;
+    let (mut manifest, mut format) = (false, None);
+    for _ in 0..le16(tail, end + 10)? {
+        if tail.get(at..at + 4)? != [0x50, 0x4b, 0x01, 0x02] {
+            return None;
+        }
+        let (name, extra, comment) = (le16(tail, at + 28)?, le16(tail, at + 30)?, le16(tail, at + 32)?);
+        let entry = tail.get(at + 46..at + 46 + name)?;
+        manifest |= entry == b"[Content_Types].xml";
+        format = format.or(if entry == b"word/document.xml" {
+            Some(DOCX)
+        } else if entry == b"xl/workbook.xml" {
+            Some(XLSX)
+        } else if entry == b"ppt/presentation.xml" {
+            Some(PPTX)
+        } else {
+            None
+        });
+        at += 46 + name + extra + comment;
+    }
+    format.filter(|_| manifest)
+}
+/// The Office format of an OLE compound file, from the stream names in its directory; other compound files (installers
+/// among them) stay `application/x-ole-storage`. `directory` starts at its first sector.
+fn ole_format(directory: &[u8]) -> Option<&'static str> {
+    let mut entries = directory.chunks_exact(128);
+    entries.find_map(|entry| {
+        let len = le16(entry, 64)?.checked_sub(2)?;
+        let name: Vec<u16> = entry.get(..len)?.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        match String::from_utf16(&name).ok()?.as_str() {
+            "WordDocument" => Some(DOC),
+            "Workbook" | "Book" => Some(XLS),
+            "PowerPoint Document" => Some(PPT),
+            _ => None,
+        }
+    })
+}
+/// Sharpen a container type with what only the whole stored file shows. Any read failure keeps the container type.
+pub async fn refine(path: &Path, head: &[u8], sniffed: Option<String>) -> Option<String> {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    let sharper = async {
+        let mut file = tokio::fs::File::open(path).await.ok()?;
+        match sniffed.as_deref()? {
+            ZIP => {
+                let size = file.metadata().await.ok()?.len();
+                file.seek(std::io::SeekFrom::Start(size.saturating_sub(CONTAINER_TAIL))).await.ok()?;
+                let mut tail = Vec::new();
+                file.read_to_end(&mut tail).await.ok()?;
+                zip_format(&tail)
+            }
+            OLE => {
+                let (shift, first) = (le16(head, 30)?, le32(head, 48)?);
+                let offset = (first as u64 + 1).checked_mul(1u64.checked_shl(shift as u32)?)?;
+                file.seek(std::io::SeekFrom::Start(offset)).await.ok()?;
+                let mut directory = vec![0; OLE_DIRECTORY];
+                let mut filled = 0;
+                while filled < directory.len() {
+                    match file.read(&mut directory[filled..]).await.ok()? {
+                        0 => break,
+                        n => filled += n,
+                    }
+                }
+                directory.truncate(filled);
+                ole_format(&directory)
+            }
+            _ => None,
+        }
+    };
+    sharper.await.map(str::to_string).or(sniffed)
 }
 /// Normalize a client-declared type to `type/subtype` (parameters dropped); unusable values become octet-stream.
 pub fn declared_type(value: Option<&str>) -> String {
@@ -519,6 +650,93 @@ mod tests {
         assert!(bucket(json!({"types":["Application/PDF"]})).unwrap().validate(&[], &[]).is_err());
         assert!(bucket(json!({"maxBytes":"3gb"})).unwrap().validate(&[], &[]).is_err());
         assert!(bucket(json!({"color":"red"})).is_err());
+    }
+    #[test]
+    fn any_type_is_said_with_a_star_and_omission_stays_open_with_a_warning() {
+        let star = bucket(json!({"types":"*"})).unwrap();
+        assert!(star.accepts("application/x-msdownload") && !star.open_by_omission());
+        assert!(star.validate(&[], &["admin".to_string()]).is_ok());
+        assert!(bucket(json!({})).unwrap().open_by_omission());
+        assert!(bucket(json!({"types":[]})).unwrap().open_by_omission());
+        assert!(bucket(json!({"types":"pdf"})).is_err());
+        assert!(bucket(json!({"types":[1]})).is_err());
+        assert!(!bucket(json!({"types":["application/pdf"]})).unwrap().open_by_omission());
+    }
+    #[test]
+    fn official_names_match_what_detection_reports() {
+        let b = bucket(json!({"types":["image/heic","image/jpg","audio/mp3","audio/wav","application/x-zip-compressed"]})).unwrap();
+        for detected in ["image/heif", "image/jpeg", "audio/mpeg", "audio/x-wav", "application/zip"] {
+            assert!(b.accepts(detected), "{detected}");
+        }
+        assert!(!b.accepts("image/png") && !b.accepts(DOC));
+        let word = bucket(json!({"types":[DOCX, DOC]})).unwrap();
+        assert!(word.accepts(DOCX) && word.accepts(DOC));
+        assert!(!word.accepts(ZIP), "a plain zip is not a Word document");
+        assert!(!word.accepts(OLE), "an unknown compound file is not a Word document");
+        // Apps that listed the container before the format was told apart keep accepting their documents.
+        let containers = bucket(json!({"types":["application/zip", OLE]})).unwrap();
+        assert!(containers.accepts(DOCX) && containers.accepts(XLSX) && containers.accepts(DOC) && containers.accepts(ZIP));
+    }
+    /// A zip with the given entry names and nothing stored in them; the central directory is what is read.
+    fn zip_of(names: &[&str]) -> Vec<u8> {
+        let mut central = Vec::new();
+        for name in names {
+            central.extend_from_slice(&[0x50, 0x4b, 0x01, 0x02]);
+            central.extend_from_slice(&[0; 24]);
+            central.extend_from_slice(&(name.len() as u16).to_le_bytes());
+            central.extend_from_slice(&[0; 16]);
+            central.extend_from_slice(name.as_bytes());
+        }
+        let mut out = vec![0x50, 0x4b, 0x03, 0x04];
+        let offset = out.len() as u32;
+        out.extend_from_slice(&central);
+        out.extend_from_slice(&[0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0]);
+        out.extend_from_slice(&(names.len() as u16).to_le_bytes());
+        out.extend_from_slice(&(names.len() as u16).to_le_bytes());
+        out.extend_from_slice(&(central.len() as u32).to_le_bytes());
+        out.extend_from_slice(&offset.to_le_bytes());
+        out.extend_from_slice(&[0, 0]);
+        out
+    }
+    #[test]
+    fn a_word_document_is_told_apart_from_any_other_zip() {
+        assert_eq!(zip_format(&zip_of(&["[Content_Types].xml", "_rels/.rels", "docProps/app.xml", "word/document.xml"])), Some(DOCX));
+        assert_eq!(zip_format(&zip_of(&["[Content_Types].xml", "xl/workbook.xml"])), Some(XLSX));
+        assert_eq!(zip_format(&zip_of(&["[Content_Types].xml", "ppt/presentation.xml"])), Some(PPTX));
+        assert_eq!(zip_format(&zip_of(&["setup.exe", "readme.txt"])), None);
+        assert_eq!(zip_format(&zip_of(&["word/document.xml"])), None, "no package manifest");
+        assert_eq!(zip_format(b"PK\x03\x04 not a directory"), None);
+        let mut lying = zip_of(&["[Content_Types].xml", "word/document.xml"]);
+        let n = lying.len();
+        lying[n - 10..n - 6].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(zip_format(&lying), None, "a directory size past the file is refused, not trusted");
+    }
+    #[test]
+    fn compound_files_name_their_format_by_stream() {
+        let entry = |name: &str| {
+            let mut e = [0u8; 128];
+            let wide: Vec<u8> = name.encode_utf16().flat_map(u16::to_le_bytes).collect();
+            e[..wide.len()].copy_from_slice(&wide);
+            e[64..66].copy_from_slice(&((wide.len() + 2) as u16).to_le_bytes());
+            e.to_vec()
+        };
+        let dir = |names: &[&str]| names.iter().flat_map(|n| entry(n)).collect::<Vec<u8>>();
+        assert_eq!(ole_format(&dir(&["Root Entry", "1Table", "WordDocument"])), Some(DOC));
+        assert_eq!(ole_format(&dir(&["Root Entry", "Workbook"])), Some(XLS));
+        assert_eq!(ole_format(&dir(&["Root Entry", "PowerPoint Document"])), Some(PPT));
+        assert_eq!(ole_format(&dir(&["Root Entry", "SummaryInformation"])), None);
+    }
+    #[tokio::test]
+    async fn refine_reads_the_stored_file_and_keeps_the_container_on_failure() {
+        let path = std::env::temp_dir().join(format!("brain-refine-{}", Uuid::new_v4()));
+        std::fs::write(&path, zip_of(&["[Content_Types].xml", "word/document.xml"])).unwrap();
+        assert_eq!(refine(&path, b"PK", Some(ZIP.into())).await.as_deref(), Some(DOCX));
+        std::fs::write(&path, zip_of(&["a.txt"])).unwrap();
+        assert_eq!(refine(&path, b"PK", Some(ZIP.into())).await.as_deref(), Some(ZIP));
+        assert_eq!(refine(&path, b"", Some("application/pdf".into())).await.as_deref(), Some("application/pdf"));
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(refine(&path, b"", Some(ZIP.into())).await.as_deref(), Some(ZIP));
+        assert_eq!(refine(&path, b"", None).await, None);
     }
     #[test]
     fn grants_are_checked_against_roles_and_resources() {

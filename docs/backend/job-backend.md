@@ -59,8 +59,10 @@ export default async function handle(ctx) {
 }
 ```
 
-The `fulfilled` flag makes a repeated delivery a no-op. For counters that must never double-count, prefer an
-[atomic update](atomic-updates.md) route over read-then-write.
+The `fulfilled` flag makes a repeated delivery a no-op. For counters that must never double-count, call a declared
+[atomic action](atomic-updates.md) instead of read-then-write:
+`await ctx.backend.resource('products').action(product.id, 'reserve', { quantity: 1 })`. `.transition(id, name, input)`
+does the same for a state transition. The key needs `<resource>:write`, and the action's `roles` still apply to its owner.
 
 ## Errors
 

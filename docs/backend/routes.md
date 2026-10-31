@@ -57,14 +57,22 @@ export default async function handle(ctx) {
 }
 ```
 
-`ctx` carries `rid`, `route`, `method`, `path`, `params`, `query`, `headers`, `user` (`{id, roles}` or
-`null`), `client` (the resolved client IP), `body`, and for raw or signed routes `rawBody` with
+`ctx` carries `rid`, `route`, `method`, `path`, `params`, `query`, `headers`, `user` (`{id, role, verified}` or
+`null`), `client` (the resolved client IP), `env` (the resolved environment), `body`, and for raw or signed routes `rawBody` with
 `rawBodyEncoding` (`utf8` or `base64`) plus `verified` (see [webhooks.md](webhooks.md)).
 
 Return either a plain value (answered as `200` JSON) or `{status, body, headers}`. A returned `status` from 200 to 599
 is answered as written, 5xx included. A number outside that range is a handler bug: it answers
 `500 ROUTE_INVALID_STATUS` and logs a `route-invalid-status` event, never a silent `200`. An object whose only key is a
 non-numeric `status` is plain data. Response headers are limited to `location`, `cache-control`, `etag`, `retry-after`, `link`, `content-language` and `x-*`.
+
+To answer a file built by the handler, return `{ file: { base64, name, type } }` (optionally with `status` and `headers`):
+`return { file: { base64: pdf.toString('base64'), name: 'report.pdf', type: 'application/pdf' } }`. It is always an
+attachment with `nosniff` and a `default-src 'none'` policy, as a stored file is; `Content-Disposition` cannot be set
+any other way. Invalid base64, a missing `name` or a non-2xx status answers `500 ROUTE_INVALID_STATUS`.
+
+Handlers follow the same source rules as the rest of `server/` (one default export; no `for`, `do` or `class`).
+`brain check`, `brain build` and `brain doctor` report them; run one before starting the backend or a worker.
 
 Throwing `{errors: {field: 'message'}}` answers `422 INVALID_INPUT` with those fields. Throwing an error
 with a 4xx `status` answers that status with a generic `ROUTE_REJECTED` code. Any other throw answers
@@ -86,7 +94,7 @@ they can use `fetch` and any server module of the app.
 
 ## OpenAPI
 
-`GET /_brain/docs` (admin-only in production) and `brain backend inspect` include every route as an
+`GET /_brain/api` (admin-only with `--env production`) includes every route as an
 operation `route_<name>` with its path, query and header parameters, request body, error responses and an
 `x-brain-route` extension (limits, rate, signature header). File buckets appear as
 `files_<bucket>_upload`, `_download`, `_delete` and `_meta` with an `x-brain-bucket` extension. Signing

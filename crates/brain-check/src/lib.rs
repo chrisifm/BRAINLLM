@@ -1249,10 +1249,12 @@ impl<'a> Checker<'a> {
         {
             self.scoped_stores.insert(ss.start);
         }
-        // `console.x(…)` → `log(…)` (B1308, normalized): `log` is removed from production builds.
+        // `console.x(…)` → `log(…)` (B1308, normalized): `log` is removed from production builds, so only debug output
+        // is rewritten; `console.error` and `console.warn` report failures and stay.
         if let Expr::Member { obj, prop: MemberProp::Name(m), .. } = callee.unparen()
             && let Expr::Ident(o) = obj.unparen()
             && o.name == "console"
+            && !matches!(m.name.as_str(), "error" | "warn")
             && self.scopes.lookup("console").is_none()
             && self.scopes.lookup("log").is_none()
         {

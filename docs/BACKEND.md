@@ -38,6 +38,10 @@ Strings are at most 16 KB, emails 254 bytes and objects 32 KB. HTTP JSON bodies 
 
 ### Exact types, constraints and defaults (2026-10-30)
 
+A `str` field can declare a format: `{ type: 'str', pattern: '[A-Z]{3}[0-9]{6}' }`. The value must match as a whole on
+every write, or the write answers 422 `Invalid format`. A pattern is not part of the registered contract, so adding one
+needs no migration and stored rows are checked only when they are next written.
+
 | Type | Accepted JSON | Stored and returned | Database CHECK |
 |---|---|---|---|
 | `int` | integer within ±9007199254740991 (JavaScript-safe) | the same number | integral JSON number within the range |
@@ -74,8 +78,9 @@ Composite unique sets have 2–4 fields; single-field uniqueness uses `unique: t
 `decimal`, `date` and `datetime`; `compare` (`< <= > >= == !=`) needs two ordered fields of the same type; `together`
 (2–8 fields) means all present or all absent. At most 16 unique indexes and 16 checks per resource. Each rule is
 enforced in the request validator and in Postgres (deterministic `_brain_ck_*` constraints and `_brain_ux_*`
-expression indexes). Migration adds missing objects; if existing rows violate one, the migration rolls back with
-an actionable message. `verify` reports a missing object as `BDB_SCHEMA_DRIFT`. A duplicate returns HTTP 409
+expression indexes). On a new resource, migration creates them; if existing rows violate one, the migration rolls back
+with an actionable message. Fields, search fields and constraints are part of the registered contract, so adding one to a
+resource that is already registered answers `BDB_SCHEMA_DRIFT` and changes nothing. `verify` reports a missing object the same way. A duplicate returns HTTP 409
 `UNIQUE_CONFLICT` with the field names; a database check violation returns 422 `CONSTRAINT_VIOLATION`.
 Legacy contracts serialize and record exactly as before and receive no new database objects. Byte limits of list
 items are enforced by the application layer only. `--admin-ui` generates controls only for the legacy types.

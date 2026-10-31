@@ -28,7 +28,7 @@ fn resource_of(path: &str) -> Option<&str> {
     let rest = path.strip_prefix("/api/")?;
     let parts: Vec<&str> = rest.split('/').collect();
     let name = parts[0];
-    let shape = parts.len() <= 2 || (parts.len() == 3 && parts[1] == "redirects");
+    let shape = parts.len() <= 2 || (parts.len() == 3 && parts[1] == "redirects") || (parts.len() == 4 && matches!(parts[2], "actions" | "transitions"));
     (crate::contract::identifier(name) && shape).then_some(name)
 }
 /// True when origin enforcement may be skipped: a non-ambient credential on a resource route.

@@ -111,6 +111,9 @@ pub struct Action {
     pub input: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub when: BTreeMap<String, Value>,
+    /// At least one of these guard groups must hold, on top of `when`. Each group is an AND of field guards.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub when_any: Vec<BTreeMap<String, Value>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub set: BTreeMap<String, Value>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -126,6 +129,9 @@ pub struct Transitions {
     pub field: String,
     pub initial: Vec<String>,
     pub transitions: BTreeMap<String, Transition>,
+    /// Fields that change only while the state is one of the listed values. A transition's own side effects still apply.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub editable: BTreeMap<String, Vec<String>>,
 }
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -137,6 +143,9 @@ pub struct Transition {
     pub input: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub when: BTreeMap<String, Value>,
+    /// At least one of these guard groups must hold, on top of `when`. Each group is an AND of field guards.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub when_any: Vec<BTreeMap<String, Value>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub set: BTreeMap<String, Value>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -151,6 +160,7 @@ impl Transition {
             roles: self.roles.clone(),
             input: self.input.clone(),
             when: self.when.clone(),
+            when_any: self.when_any.clone(),
             set: self.set.clone(),
             increment: self.increment.clone(),
             decrement: self.decrement.clone(),
@@ -343,7 +353,9 @@ fn grants_valid(roles: &[String], allow_owner: bool) -> bool {
     !roles.is_empty()
         && roles.len() <= 16
         && roles.iter().all(|role| {
-            role == "owner" && allow_owner || role != "owner" && role != "public" && crate::auth_flows::role_name(role)
+            role == "owner" && allow_owner
+                || allow_owner && crate::ownership::path(role).is_some()
+                || role != "owner" && role != "public" && crate::auth_flows::role_name(role)
         })
 }
 
@@ -351,14 +363,17 @@ impl Action {
     fn validate(&self, r: &Resource, label: &str, known_steps: Option<&[String]>) -> Result<(), String> {
         let fail = |m: String| Err(format!("{label}: {m}"));
         if !grants_valid(&self.roles, true) {
-            return fail("roles must list 1..16 configured role names or owner; public cannot write".into());
+            return fail("roles must list 1..16 configured role names, owner or owner.<ref field>; public cannot write".into());
         }
         let inputs = input_validator("input", &self.input).map_err(|m| format!("{label}: {m}"))?;
         let input_names: Vec<String> = inputs.map(|i| i.fields.keys().cloned().collect()).unwrap_or_default();
         if self.set.is_empty() && self.increment.is_empty() && self.decrement.is_empty() {
             return fail("declare set, increment and/or decrement".into());
         }
-        for (field, guard) in &self.when {
+        if self.when_any.len() > 8 || self.when_any.iter().any(|group| group.is_empty()) {
+            return fail("when_any takes 1..8 non-empty guard groups".into());
+        }
+        for (field, guard) in self.when.iter().chain(self.when_any.iter().flatten()) {
             let Some(ty) = r.fields.get(field).and_then(Field::ty) else {
                 return fail(format!("when references undeclared field `{field}`"));
             };
@@ -392,7 +407,7 @@ impl Action {
             }
         }
         let mut refs = Vec::new();
-        for value in self.when.values().chain(self.set.values()).chain(self.increment.values()).chain(self.decrement.values()) {
+        for value in self.when.values().chain(self.when_any.iter().flat_map(BTreeMap::values)).chain(self.set.values()).chain(self.increment.values()).chain(self.decrement.values()) {
             references(value, &mut refs);
         }
         for text in refs {
@@ -437,7 +452,11 @@ impl Domain {
                 if !crate::contract::identifier(action_name) {
                     return Err(format!("server/resources/{name}/actions.jsbrain: invalid action name `{action_name}`"));
                 }
-                action.validate(r, &format!("server/resources/{name}/actions.jsbrain {action_name}"), None)?;
+                let label = format!("server/resources/{name}/actions.jsbrain {action_name}");
+                action.validate(r, &label, None)?;
+                for grant in action.roles.iter().filter(|g| g.starts_with("owner.")) {
+                    crate::ownership::check_path(r, grant, resources).map_err(|m| format!("{label}: {m}"))?;
+                }
                 if let Some(t) = &domain.transitions
                     && (action.set.contains_key(&t.field) || action.increment.contains_key(&t.field) || action.decrement.contains_key(&t.field))
                 {
@@ -453,6 +472,14 @@ impl Domain {
                 if t.initial.is_empty() || !t.initial.iter().all(known) {
                     return Err(format!("{label}: initial must list enum values of `{}`", t.field));
                 }
+                for (field, states) in &t.editable {
+                    if !r.fields.contains_key(field) || field == &t.field {
+                        return Err(format!("{label}: editable `{field}` must name a declared field other than the state field"));
+                    }
+                    if states.is_empty() || !states.iter().all(known) {
+                        return Err(format!("{label}: editable `{field}` must list values of `{}`", t.field));
+                    }
+                }
                 if t.transitions.is_empty() || t.transitions.len() > 64 {
                     return Err(format!("{label}: declare 1..64 transitions"));
                 }
@@ -467,6 +494,9 @@ impl Domain {
                         return Err(format!("{label} {tname}: `to` already assigns `{}`", t.field));
                     }
                     transition.action(&t.field).validate(r, &format!("{label} {tname}"), None)?;
+                    for grant in transition.roles.iter().filter(|g| g.starts_with("owner.")) {
+                        crate::ownership::check_path(r, grant, resources).map_err(|m| format!("{label} {tname}: {m}"))?;
+                    }
                 }
             }
             if let Some(batch) = &domain.batch
@@ -598,7 +628,15 @@ impl Domain {
             Some(before) => before.get(&t.field) == value,
         };
         if ok {
-            Ok(())
+            let Some(before) = before else { return Ok(()) };
+            let state = before.get(&t.field).and_then(Value::as_str).unwrap_or_default();
+            let locked: BTreeMap<String, String> = t
+                .editable
+                .iter()
+                .filter(|(field, states)| before.get(*field) != after.get(*field) && !states.iter().any(|s| s == state))
+                .map(|(field, states)| (field.clone(), format!("Editable only while {} is {}", t.field, states.join(", "))))
+                .collect();
+            if locked.is_empty() { Ok(()) } else { Err(locked) }
         } else {
             let names: Vec<&str> = t.transitions.keys().map(String::as_str).collect();
             Err(BTreeMap::from([(
@@ -959,6 +997,20 @@ impl<'a> Engine<'a> {
         }
     }
 
+    /// True when the caller owns the record this row references through an `owner.<ref>` grant.
+    async fn owns_through(&self, tx: &mut Tx, r: &Resource, id: Uuid, roles: &[String]) -> Result<bool, sqlx::Error> {
+        let paths: Vec<Vec<String>> = roles.iter().filter_map(|role| crate::ownership::path(role)).collect();
+        if paths.is_empty() {
+            return Ok(false);
+        }
+        let scope = crate::ownership::Scope::Owned { user: self.user.id, direct: false, paths };
+        let mut q = sqlx::QueryBuilder::new(format!("SELECT EXISTS(SELECT 1 FROM {} WHERE id=", table(r)));
+        q.push_bind(id).push(" AND ");
+        scope.push(&mut q, r, self.resources);
+        q.push(")");
+        q.build_query_scalar::<bool>().fetch_one(&mut **tx).await
+    }
+
     /// Run one declared action (or transition when `state` is set) on a locked row.
     async fn act(
         &mut self,
@@ -982,7 +1034,10 @@ impl<'a> Engine<'a> {
             .ok_or_else(|| Failure::Missing(label.unwrap_or("id").into()))?;
         match authority {
             Authority::Roles => {
-                let allowed = action.roles.iter().any(|role| role == &self.user.role || role == "owner" && owns(&existing, self.user));
+                let mut allowed = action.roles.iter().any(|role| role == &self.user.role || role == "owner" && owns(&existing, self.user));
+                if !allowed {
+                    allowed = self.owns_through(tx, r, id, &action.roles).await.map_err(located(&r.name, label))?;
+                }
                 if !allowed {
                     return Err(Failure::Denied { resource: r.name.clone(), id, label: label.unwrap_or("id").into() });
                 }
@@ -1007,6 +1062,19 @@ impl<'a> Engine<'a> {
                         _ => describe(op, &operand),
                     };
                     failed.entry(field.clone()).or_insert(message);
+                }
+            }
+        }
+        if failed.is_empty() && !action.when_any.is_empty() {
+            let holds = action.when_any.iter().any(|group| {
+                group.iter().all(|(field, guard)| {
+                    let ty = r.fields[field].ty().expect("validated field");
+                    guard_ops(guard).into_iter().all(|(op, operand)| guard_holds(&ty, data.get(field), op, &scope.resolve(operand, Some(&ty))))
+                })
+            });
+            if !holds {
+                for field in action.when_any.iter().flat_map(BTreeMap::keys) {
+                    failed.insert(field.clone(), "Must meet one of the declared conditions".into());
                 }
             }
         }

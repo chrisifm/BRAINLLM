@@ -305,3 +305,29 @@ async fn auth_errors_separate_bad_input_from_a_busy_database() {
     }
     drop(held);
 }
+
+#[tokio::test]
+#[ignore = "Use scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn a_production_list_refusal_names_the_parameter_without_the_declared_catalog() {
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Disposable Postgres only; no developer database is selected");
+    let pool = brain_backend::db::connect(&url).await.unwrap();
+    let resource: Resource = serde_json::from_value(json!({
+        "name": "probes",
+        "fields": {"title": {"kind": "str", "required": true}, "secret_rank": {"kind": "int", "required": true}},
+        "policy": {"read": ["public"], "create": ["admin"], "update": ["admin"], "delete": ["admin"]},
+        "query": {"filter": {"secret_rank": ["eq"]}, "sort": ["secret_rank"]}
+    })).unwrap();
+    brain_backend::db::migrate(&pool, std::slice::from_ref(&resource)).await.unwrap();
+    let (production, _) = brain_backend::http::router_with_platform(pool.clone(), config(vec![resource.clone()]), Platform::default()).await.map_err(|e| e.to_string()).unwrap();
+    for path in ["/api/probes?nope=1", "/api/probes?sort=title", "/api/probes?secret_rank.gt=1"] {
+        let response = send(&production, "GET", path, &[]).await;
+        assert_eq!(response.status(), 422, "{path}");
+        let body = json_body(response).await.to_string();
+        assert!(!body.contains("declared:") && !body.contains("filterable:"), "{path}: {body}");
+    }
+    let mut development = config(vec![resource]);
+    development.production = false;
+    let (development, _) = brain_backend::http::router_with_platform(pool, development, Platform::default()).await.map_err(|e| e.to_string()).unwrap();
+    let body = json_body(send(&development, "GET", "/api/probes?nope=1", &[]).await).await.to_string();
+    assert!(body.contains("filterable: secret_rank"), "development keeps the fix: {body}");
+}

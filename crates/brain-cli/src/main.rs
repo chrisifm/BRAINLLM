@@ -639,6 +639,11 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
                 let mut diag = compiler::Diag::new("B0749", &file, brain_parse::Span::default(), message, fix);
                 diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
             }
+            // B0770: a bucket accepts every file only because it never listed its types
+            for (file, message, fix) in backend::bucket_warnings(&app) {
+                let mut diag = compiler::Diag::new("B0770", &file, brain_parse::Span::default(), message, fix);
+                diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
+            }
             // backend settings the server would refuse at startup (B0751): names only, never values
             for (message, fix) in backend::config_diagnostics(&app) {
                 let mut diag = compiler::Diag::new("B0751", env::FILE, brain_parse::Span::default(), message, fix);

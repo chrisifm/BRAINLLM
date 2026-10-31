@@ -41,7 +41,7 @@ pub(super) fn validate(
         })
         .chain(domain.operations.values().flat_map(|o| o.roles.iter()));
     for role in grants {
-        if role != "owner" && !roles.roles.contains(role) {
+        if role != "owner" && crate::ownership::path(role).is_none() && !roles.roles.contains(role) {
             return Err(format!("Domain contract names role `{role}` that is not declared in server/auth/roles.jsbrain"));
         }
     }

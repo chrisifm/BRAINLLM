@@ -23,7 +23,7 @@ pub const FILE: &str = ".brain_env";
 pub const UNSET: &str = "\0";
 
 /// Keys the toolchain reads (brain build, brain-seo, brain start): never reported as unused (B0722).
-pub const TOOLING_KEYS: &[&str] = &["PUBLIC_SITE_URL", "PUBLIC_SITE_NAME", "INDEXNOW_KEY", "BRAIN_SECRET", "BRAIN_SECRET_PREVIOUS", "BRAIN_SESSION_VERSION", "BRAIN_SESSION_SECONDS", "BRAIN_JWT_SECRET_PREVIOUS", "BRAIN_AUTH_SESSION_SECONDS", "PORT", "HOST", "NODE_ENV", "DATABASE_URL", "BRAIN_BACKEND_URL", "BRAIN_JWT_SECRET", "BRAIN_JWT_ISSUER", "BRAIN_JWT_AUDIENCE", "GOOGLE_CLIENT_ID", "BRAIN_GCS_BUCKET", "BRAIN_GCS_PREFIX", "BRAIN_GCS_ADAPTER", "BRAIN_MAIL_RESEND_KEY", "BRAIN_MAIL_FROM", "BRAIN_VIEWER_PROFILE"];
+pub const TOOLING_KEYS: &[&str] = &["PUBLIC_SITE_URL", "PUBLIC_SITE_NAME", "INDEXNOW_KEY", "BRAIN_SECRET", "BRAIN_SECRET_PREVIOUS", "BRAIN_SESSION_VERSION", "BRAIN_SESSION_SECONDS", "BRAIN_JWT_SECRET_PREVIOUS", "BRAIN_AUTH_SESSION_SECONDS", "PORT", "HOST", "NODE_ENV", "DATABASE_URL", "BRAIN_BACKEND_URL", "BRAIN_JWT_SECRET", "BRAIN_JWT_ISSUER", "BRAIN_JWT_AUDIENCE", "GOOGLE_CLIENT_ID", "BRAIN_GCS_BUCKET", "BRAIN_GCS_PREFIX", "BRAIN_GCS_ADAPTER", "BRAIN_MAIL_RESEND_KEY", "BRAIN_MAIL_FROM", "BRAIN_VIEWER_PROFILE", "BRAIN_JOBS_API_KEY", "BRAIN_SERVICE_API_KEY"];
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
@@ -398,6 +398,13 @@ pub fn unused_keys(root: &Path) -> Vec<Diag> {
                 && let Ok(text) = std::fs::read_to_string(&p)
             {
                 used.extend(keys_used(&text).into_iter().map(|(k, _)| k));
+                // A contract under server/ names a variable as a string (`verify: { secret: 'X' }`), and a literal
+                // that equals a declared key is read somewhere; keeping one is harmless, dropping one breaks startup.
+                if p.strip_prefix(root).is_ok_and(|rel| rel.starts_with("server")) {
+                    for quote in ['\'', '"'] {
+                        used.extend(text.split(quote).skip(1).step_by(2).filter(|t| is_key(t)).map(str::to_string));
+                    }
+                }
             }
         }
     }

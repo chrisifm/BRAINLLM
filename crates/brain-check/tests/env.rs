@@ -114,3 +114,16 @@ fn reads_with_a_default_or_a_condition_are_guarded_and_plain_reads_are_not() {
         assert_eq!(got.get(k), Some(&false), "{k}: {got:?}");
     }
 }
+
+/// A route contract names its secret by variable name; the toolchain reads the variables of its own service keys.
+#[test]
+fn keys_named_by_contracts_and_service_keys_are_used() {
+    let dir = std::env::temp_dir().join(format!("brain-env-named-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("server/routes/hook")).unwrap();
+    std::fs::write(dir.join(".brain_env"), "PAYMENTS_WEBHOOK_SECRET=x\nBRAIN_JOBS_API_KEY=y\nBRAIN_SERVICE_API_KEY=z\nUNUSED_THING=w\n").unwrap();
+    std::fs::write(dir.join("server/routes/hook/route.jsbrain"), "<meta server>\nexport default { method: 'POST', path: '/hooks/x', auth: 'public', verify: { scheme: 'timestamped', header: 'x-sig', secret: 'PAYMENTS_WEBHOOK_SECRET' } }\n").unwrap();
+    let unused = brain_check::env::unused_keys(&dir);
+    assert_eq!(unused.iter().map(|d| d.msg.contains("UNUSED_THING")).collect::<Vec<_>>(), [true], "{unused:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

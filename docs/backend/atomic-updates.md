@@ -23,9 +23,10 @@ export default {
 
 | Key | Meaning |
 |---|---|
-| `roles` | configured roles or `owner` (caller owns the row) allowed to run the action |
+| `roles` | configured roles, `owner` (caller owns the row) or `owner.<ref>[.<ref>]` (caller owns the record this row references) allowed to run the action |
 | `input` | typed request fields (`int!`, `decimal(10,2)!`, `str`, ...); unknown keys answer 422 |
 | `when` | guards on the locked row: a literal (equals) or `{eq, ne, in, not_in, gt, gte, lt, lte, exists}` |
+| `when_any` | 1..8 guard groups on top of `when`: at least one group must hold, for example `[{ ends_on: { exists: false } }, { ends_on: { gte: '$now' } }]` |
 | `set` | assignments; `null` removes an optional field |
 | `increment` / `decrement` | exact deltas on `int`, `num` or `decimal(p,s)` fields (decimals use exact string arithmetic) |
 

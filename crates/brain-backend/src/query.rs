@@ -445,6 +445,18 @@ fn split(raw: &str) -> Vec<&str> {
     raw.split(',').collect()
 }
 
+/// Production answers name the bad parameter without listing what the contract declares: the catalog
+/// of filters and sorts is admin-only there (`/_brain/api`), so a probe must not recover it from a 422.
+pub fn without_declared_names(problems: Problems) -> Problems {
+    problems
+        .into_iter()
+        .map(|(key, message)| {
+            let kept = ["; declared:", "; filterable:"].iter().find_map(|cut| message.find(cut)).map_or(message.as_str(), |at| &message[..at]);
+            (key, kept.to_string())
+        })
+        .collect()
+}
+
 /// Parses raw query pairs against the contract. Every undeclared key, operator or malformed value is a problem.
 pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(String, String)]) -> Result<ListRequest, Problems> {
     let mut problems = Problems::new();
