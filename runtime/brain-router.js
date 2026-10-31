@@ -17,10 +17,7 @@ import { prefetchPage } from './brain-prefetch-shared.js'
 const G = globalThis
 // Base path (<meta name="brain-base" content="/app/">, §23 #148): links in the HTML already carry it; guards and
 // routes work with app paths (strip), and app paths given to go()/navigate()/redirect() get it (app). '/' when absent.
-const base = () => {
-  const m = G.document && document.querySelector('meta[name=brain-base]')
-  return (m && m.getAttribute('content')) || '/'
-}
+const base = () => G.document?.querySelector('meta[name=brain-base]')?.getAttribute('content') || '/'
 const strip = p => {
   const b = base()
   return b !== '/' && (p + '/').startsWith(b) ? '/' + p.slice(b.length) : p
@@ -44,7 +41,7 @@ G.__brainNavigate = navigate // brain-form follows a server function's { redirec
 
 // route() lives in brain-env.js (it needs the core's signals; a page without islands downloads only this router):
 // after every client navigation the router calls the hook it installs.
-const routed = () => G.__brainRouted && G.__brainRouted()
+const routed = () => G.__brainRouted?.()
 
 // Active links (§41.5): every internal <a href> to the current page gets aria-current="page" (the CSS hook is
 // [aria-current=page]); the others lose it. On start and after every client navigation.
@@ -94,13 +91,12 @@ export function router(o = {}) {
   const ahead = predict(o, u => same(u, true))
   // Build signature (§35.7): the page's <meta name="brain-build">. A navigation response from another build, or the
   // service worker announcing one, turns client navigation into full loads so old and new code never mix.
-  const build = () => {
-    const m = document.querySelector('meta[name=brain-build]')
-    return m ? m.getAttribute('content') : null
-  }
-  const sw = G.navigator && navigator.serviceWorker
+  const build = () => document.querySelector('meta[name=brain-build]')?.getAttribute('content')
+  const sw = G.navigator?.serviceWorker
   const onMsg = e => typeof e.data === 'string' && e.data.startsWith('brain:build ') && build() && e.data.slice(12) !== build() && (stale = true, ahead.stop())
-  if (sw && sw.addEventListener) sw.addEventListener('message', onMsg)
+  sw?.addEventListener?.('message', onMsg)
+  // both routers stop through here, so neither keeps the service worker listener alive (B05)
+  const quit = () => ((active = null), ahead.stop(), sw?.removeEventListener?.('message', onMsg))
   // a guard is a function, or the URL of its `_guard.jsbrain` chunk (BUILD #220): loaded the first time a navigation
   // reaches that folder, then cached by the module map; its default export runs with the same ctx
   const gs = Object.entries(o.guards || {})
@@ -132,12 +128,15 @@ export function router(o = {}) {
 
   // Feedback (§19): a navigation marks the region aria-busy and route().navigating at once; past 150 ms it shows
   // #brain-nav: the app's own element with that id (a spinner in app.brain, `<div id="brain-nav" hidden>`) or a native
-  // <progress> bar at the top (role progressbar, label "Loading"; --nav-color, --nav-height), so fast ones show nothing. _loading.brain (#235): past 400 ms the nearest loading view of the target route (`loading: [{ rx, view }]`,
-  // most specific first, emitted by the build with the `core` URL) replaces the region until the page arrives. Until then the current page stays as it is.
-  const loads = o.loading || [], adopt = n => (document.adoptNode ? document.adoptNode(n) : n)
+  // indeterminate <progress> bar at the top (label "Loading"; styled only by --nav-color and --nav-height, no extra
+  // DOM), so fast ones show nothing. _loading.brain (#235): past 400 ms the nearest loading view of the target route
+  // (`loading: [{ rx, view }]`, most specific first, emitted by the build with the `core` URL) replaces the region until
+  // the page arrives. Until then the current page stays as it is.
+  const loads = o.loading || [], adopt = n => document.adoptNode?.(n) || n
+  const dispose = r => { for (const e of [r, ...walkAll(r)]) if (e.$d) e.$d(), (e.$d = null) }
   const ui = on => {
     let b = document.getElementById('brain-nav')
-    if (!b && on) ((b = document.body.appendChild(document.createElement('progress'))).id = 'brain-nav'), (b.style.cssText = 'position:fixed;inset:0;width:100%')
+    if (!b && on) ((b = document.body.appendChild(document.createElement('progress'))).id = 'brain-nav'), (b.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:var(--nav-height,3px);accent-color:var(--nav-color)'), (b.ariaLabel = 'Loading')
     if (b) b.hidden = !on
   }
   const busy = (my, on) => {
@@ -156,7 +155,7 @@ export function router(o = {}) {
           .then(([c, v]) => {
             const el = document.querySelector(region), mount = c.m || c.mount
             if (w.done || my !== seq || !el || !mount) return // the page arrived first
-            for (const e of [el, ...walkAll(el)]) if (e.$d) e.$d(), (e.$d = null)
+            dispose(el)
             for (const n of [...el.childNodes]) if (!/^(STYLE|LINK)$/.test(n.nodeName)) n.remove() // the view's CSS stays (BUILD #35)
             el.$d = mount(v.default, el, {})
           })
@@ -180,12 +179,11 @@ export function router(o = {}) {
       if (my !== seq) return
       const hd = k => r.headers?.get?.(k), b = hd('x-brain-build')
       if (b && build() && b !== build()) return hard(url) // a new deploy: load it whole
-      const ct = hd('content-type') || 'text/html'
-      if (!r.ok || !/html/.test(ct)) throw Error(r.status)
+      if (!r.ok || !/html/.test(hd('content-type') || 'html')) throw Error(r.status)
       const doc = parse(await r.text())
       if (my !== seq) return // a newer navigation won
       // another language (§37): a full load brings its own dictionaries, `lang` and `dir`; locales never mix in memory
-      const lang = d => d && d.documentElement && d.documentElement.getAttribute('lang')
+      const lang = d => d?.documentElement?.getAttribute('lang')
       if (lang(doc) && lang(document) && lang(doc) !== lang(document)) return hard(url)
       if (r.redirected && r.url && G.history && r.url !== new URL(url, location.href).href) history.replaceState(history.state, '', r.url)
       const cur = document.querySelector(region), next = doc.querySelector(region)
@@ -194,8 +192,8 @@ export function router(o = {}) {
       const swap = () => {
         if (my !== seq) return
         // read before the swap: afterwards the fetched page's scripts are in the document too
-        const own = document.querySelector('script[nonce]'), nonce = own && (own.nonce || own.getAttribute('nonce'))
-        for (const el of [cur, ...walkAll(cur)]) if (el.$d) el.$d(), (el.$d = null)
+        const own = document.querySelector('script[nonce]'), nonce = own?.nonce || own?.getAttribute('nonce')
+        dispose(cur)
         cur.replaceChildren(...[...next.childNodes].map(adopt))
         // Scripts parsed by DOMParser never run: the region's own scripts (the view's mount, `e.$d = mount(...)`) are
         // recreated so they execute. Already-imported modules come from the module map: their state survives.
@@ -219,7 +217,7 @@ export function router(o = {}) {
         // alternates, prev/next and its route params (brain-params, read by route()): the current page's go, the next
         // page's come (none when it has none). Site links (icons, stylesheets, the RSS feed) and the region's own tags stay.
         const tags = (r, skip) =>
-          [...((r && r.querySelectorAll && r.querySelectorAll('meta,script,link')) || [])].filter(e => {
+          [...(r?.querySelectorAll?.('meta,script,link') || [])].filter(e => {
             for (let p = e.parentNode; p; p = p.parentNode) if (p === skip) return false
             const a = n => e.getAttribute(n) || '', t = e.tagName
             return t == 'SCRIPT' ? a('type') == 'application/ld+json'
@@ -233,7 +231,7 @@ export function router(o = {}) {
         routed()
         current()
         const oldPlan = document.getElementById('brain-next'), newPlan = doc.querySelector('#brain-next')
-        if (oldPlan) oldPlan.remove()
+        oldPlan?.remove()
         if (newPlan) document.body.appendChild(adopt(newPlan))
         ahead.scan()
       }
@@ -259,7 +257,7 @@ export function router(o = {}) {
     try {
       const x = new URL(u, location.href), b = base()
       // same origin and inside the app's base path (§23 #148); anything else is a full load
-      return x.origin === location.origin && (x.pathname + '/').startsWith(b) && !(o.skip && o.skip(x)) && (prefetch || !fullLoad.has(x.pathname.replace(/\/+$/, '') || '/'))
+      return x.origin === location.origin && (x.pathname + '/').startsWith(b) && !o.skip?.(x) && (prefetch || !fullLoad.has(x.pathname.replace(/\/+$/, '') || '/'))
     } catch {
       return false
     }
@@ -272,7 +270,7 @@ export function router(o = {}) {
       if (e.navigationType === 'reload') return // a reload is always a real full load (e.g. after a deploy deleted a chunk)
       if (!e.canIntercept || e.hashChange || e.downloadRequest || e.formData || !same(e.destination.url)) return
       if (e.cancelable && !leave()) return e.preventDefault()
-      const to = e.destination.url, from = nav.currentEntry && nav.currentEntry.url
+      const to = e.destination.url, from = nav.currentEntry?.url
       if (G.__brainURLOnly?.(from || location.href, to)) return e.intercept({ handler: () => G.__brainURLRestore?.() })
       if (!gs.length) return e.intercept({ handler: () => load(to) }) // scroll + focus reset handled by the browser
       let g
@@ -296,7 +294,7 @@ export function router(o = {}) {
     return (active = {
       go: (u, how) => nav.navigate(app(u), how === 'replace' ? { history: 'replace' } : undefined),
       check,
-      stop: () => ((active = null), ahead.stop(), nav.removeEventListener('navigate', h), sw && sw.removeEventListener && sw.removeEventListener('message', onMsg)),
+      stop: () => (quit(), nav.removeEventListener('navigate', h)),
     })
   }
 
@@ -315,7 +313,7 @@ export function router(o = {}) {
     here = location.href
     const hash = new URL(u, location.href).hash, t = hash && document.getElementById(hash.slice(1))
     if (t) t.scrollIntoView()
-    else G.scrollTo && G.scrollTo(0, push ? 0 : (history.state && history.state.y) || 0)
+    else G.scrollTo?.(0, push ? 0 : history.state?.y || 0)
     focusMain()
   }
   const click = e => {
@@ -334,18 +332,18 @@ export function router(o = {}) {
   }
   const focusMain = () => {
     const m = document.querySelector(region), h = m && (m.querySelector('h1') || m)
-    if (h && h.focus) {
+    if (h?.focus) {
       if (!h.hasAttribute('tabindex')) h.setAttribute('tabindex', '-1')
       h.focus({ preventScroll: true }) // screen readers announce the new view
     }
   }
   document.addEventListener('click', click)
-  G.addEventListener && G.addEventListener('popstate', pop)
+  G.addEventListener?.('popstate', pop)
   ahead.scan()
   return (active = {
     go: (u, push = true) => go(app(u), push),
     check,
-    stop: () => ((active = null), ahead.stop(), document.removeEventListener('click', click), G.removeEventListener && G.removeEventListener('popstate', pop)),
+    stop: () => (quit(), document.removeEventListener('click', click), G.removeEventListener?.('popstate', pop)),
   })
 }
 
@@ -368,9 +366,9 @@ const FILE = /\.(?!html?$)[a-z0-9]{2,5}$/i
 const SECRET = /(^|[?&])(token|code|key|sig|signature|auth|otp|state)=/i
 export function predict(o = {}, same = () => false) {
   const off = { scan() {}, stop() {}, take: async () => null }
-  const meta = G.document && document.querySelector && document.querySelector('meta[name=brain-prefetch]')
+  const meta = G.document?.querySelector?.('meta[name=brain-prefetch]')
   if (o.prefetch === false || (meta && /^(off|false|0)$/i.test(meta.getAttribute('content') || '')) || !G.document || !G.fetch) return off
-  const net = G.navigator && navigator.connection
+  const net = G.navigator?.connection
   const thin = () => !!net && (net.saveData || /(^|-)2g$/.test(net.effectiveType || ''))
   const cache = new Map(), queue = [], pre = new Map(), running = new Map(), pending = new Map(), planned = new Map()
   let seen = new WeakSet(), busy = 0, count = 0, io = null, idle = 0, epoch = 0, dead = false, bytes = 0, worker = null, serial = 0
@@ -409,7 +407,7 @@ export function predict(o = {}, same = () => false) {
     while (cache.size > MAX_KEPT || bytes > 4 * 1024 * 1024) remove(cache.keys().next().value)
   }
   const crashed = () => {
-    worker && worker.terminate(); worker = null
+    worker?.terminate(); worker = null
     for (const p of pending.values()) { clearTimeout(p.timer); p.resolve(null) }
     pending.clear()
   }
@@ -431,7 +429,7 @@ export function predict(o = {}, same = () => false) {
   const background = (k, controller) => {
     if (worker) return new Promise(resolve => {
       const id = ++serial
-      const done = () => { const p = pending.get(id); if (p) { clearTimeout(p.timer); pending.delete(id); resolve(null); worker && worker.postMessage({ id, cancel: true }) } }
+      const done = () => { const p = pending.get(id); if (p) { clearTimeout(p.timer); pending.delete(id); resolve(null); worker?.postMessage({ id, cancel: true }) } }
       const timer = setTimeout(done, 6500)
       pending.set(id, { resolve, timer })
       controller.signal.addEventListener('abort', done, { once: true })
@@ -466,7 +464,7 @@ export function predict(o = {}, same = () => false) {
     return c.p
   }
   const pump = () => {
-    if (dead || document.hidden || net && net.saveData) return
+    if (dead || document.hidden || net?.saveData) return
     while (busy < PARALLEL && queue.length) {
       const k = queue.shift()
       if (cache.has(k)) continue
@@ -484,7 +482,7 @@ export function predict(o = {}, same = () => false) {
     else { queue.push(k); if (!idle) idle = later(() => { idle = 0; pump() }) }
   }
   const intent = e => {
-    if (net && net.saveData) return
+    if (net?.saveData) return
     let a = e.target
     while (a && a.tagName !== 'A') a = a.parentNode
     want(ok(a), true)
@@ -497,7 +495,7 @@ export function predict(o = {}, same = () => false) {
     running.clear()
   }
   document.addEventListener('submit', forget, { capture: true })
-  if (G.addEventListener) G.addEventListener('brain:write', forget)
+  G.addEventListener?.('brain:write', forget)
   const visible = () => { if (!document.hidden) pump() }
   document.addEventListener('visibilitychange', visible)
   if (G.IntersectionObserver) io = new IntersectionObserver(es => {
@@ -506,11 +504,11 @@ export function predict(o = {}, same = () => false) {
   return {
     scan() {
       if (dead) return
-      count = 0; cancelIdle(); queue.length = 0; planned.clear(); seen = new WeakSet(); io && io.disconnect()
+      count = 0; cancelIdle(); queue.length = 0; planned.clear(); seen = new WeakSet(); io?.disconnect()
       const anchors = document.querySelectorAll('a[href]'), allowed = new Set()
       for (const a of anchors) { const k = ok(a); if (k) allowed.add(k); if (io && !seen.has(a)) { seen.add(a); io.observe(a) } }
       // Compiler-generated graph, validated against the current DOM: hidden/opted-out links cannot sneak in.
-      const plan = document.getElementById && document.getElementById('brain-next')
+      const plan = document.getElementById?.('brain-next')
       if (plan && !thin()) {
         try {
           const map = JSON.parse(plan.textContent)
@@ -523,11 +521,11 @@ export function predict(o = {}, same = () => false) {
     },
     stop() {
       if (dead) return
-      forget(); dead = true; crashed(); io && io.disconnect()
+      forget(); dead = true; crashed(); io?.disconnect()
       for (const t of evs) document.removeEventListener(t, intent, { capture: true })
       document.removeEventListener('submit', forget, { capture: true })
       document.removeEventListener('visibilitychange', visible)
-      G.removeEventListener && G.removeEventListener('brain:write', forget)
+      G.removeEventListener?.('brain:write', forget)
       for (const l of pre.values()) l.remove()
       pre.clear()
     },
@@ -546,7 +544,7 @@ export function predict(o = {}, same = () => false) {
 
 const HOLD = ['click', 'submit']
 function hold(el) {
-  if (el.$hold) el.$hold() // a newer navigation drops what the previous page held
+  el.$hold?.() // a newer navigation drops what the previous page held
   const q = []
   const keep = e => {
     const path = []

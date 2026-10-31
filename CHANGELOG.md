@@ -23,6 +23,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   superseded navigation never swaps, never runs its View Transition callback, never scrolls or moves focus and never
   mounts its loading view; a fetch, parse or swap that throws becomes a full page load; a click reuses a prefetch
   still in flight (even a no-cache page) instead of fetching the page twice.
+- Stopping the History router now removes its service worker `message` listener, as the Navigation API branch
+  already did, so repeated start/stop keeps no listener.
 - Scoped CSS keeps pseudo-elements (`::backdrop`, `::before`, `:after`, `::-webkit-*`) outside the root anchor's
   `:is()`, so Chrome no longer drops the whole rule list for components that style them at their root.
 - Conditional content passed to a named slot (`{#if}<a slot="footer">…{:else}<span slot="footer">…{/if}`) now

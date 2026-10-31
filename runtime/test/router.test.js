@@ -999,6 +999,8 @@ test('feedback: the region is aria-busy and route().navigating is true while a n
   assert.equal(m.getAttribute('aria-busy'), 'true')
   assert.equal(rr.navigating, true)
   assert.equal(own.hidden, true) // not before the delay
+  await new Promise(r => setTimeout(r, 100))
+  assert.equal(own.hidden, true) // still hidden at 100 ms: a fast navigation shows nothing
   for (let i = 0; i < 1000 && own.hidden; i++) await settle()
   assert.equal(own.hidden, false) // the app's own #brain-nav replaces the built-in bar
   assert.equal(doc.querySelectorAll('progress').length, 0)
@@ -1068,5 +1070,54 @@ test('prefetch: a dynamic (no-cache) page taken while its request is in flight i
   assert.equal(await (await taking).text(), '<main>Dynamic</main>')
   assert.deepEqual(asked, ['/b'])
   p.stop()
+  globalThis.fetch = real
+})
+
+test('B05: repeated start/stop leaves no service worker listener behind (History and Navigation API)', async () => {
+  const nav0 = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  const live = new Set()
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { serviceWorker: { addEventListener: (t, f) => live.add(f), removeEventListener: (t, f) => live.delete(f) } } })
+  try {
+    for (const api of [false, true]) {
+      if (api) globalThis.navigation = { addEventListener() {}, removeEventListener() {}, navigate() {} }
+      else hist()
+      page()
+      for (let i = 0; i < 5; i++) {
+        const r = router({ parse, hard: u => assert.fail('hard ' + u) })
+        assert.equal(live.size, 1)
+        r.stop()
+        assert.equal(live.size, 0, (api ? 'Navigation API' : 'History') + ' stop() keeps the listener')
+      }
+      delete globalThis.navigation
+    }
+  } finally {
+    if (nav0) Object.defineProperty(globalThis, 'navigator', nav0)
+    else delete globalThis.navigator
+  }
+})
+
+test('prefetch reuse through the router: a click on a link whose prefetch is in flight fetches the page once', async () => {
+  hist()
+  const { m } = page()
+  const real = globalThis.fetch, asked = []
+  let finish
+  globalThis.fetch = async (u, o) => {
+    asked.push(new URL(u, 'http://x.test').pathname)
+    await new Promise(r => (finish = r))
+    return real(u, o)
+  }
+  const a = doc.createElement('a')
+  a.setAttribute('href', '/b')
+  doc.body.appendChild(a)
+  const r = router({ parse, hard: u => assert.fail('hard ' + u) })
+  a.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
+  for (let i = 0; i < 500 && !asked.length; i++) await settle()
+  const nav = r.go('/b')
+  await new Promise(r => setTimeout(r, 200))
+  finish()
+  await nav
+  assert.equal(m.textContent, 'Page Bb')
+  assert.deepEqual(asked, ['/b'])
+  r.stop()
   globalThis.fetch = real
 })
