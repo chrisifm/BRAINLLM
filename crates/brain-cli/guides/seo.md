@@ -70,8 +70,10 @@ page text, not after.
 `hreflang` for every locale, and Google tags from `brain.json` `"google"`. AI crawler policy:
 `brain.json` `"seo": { "ai": "allow" | "search-only" | "block" }` (`search-only` = AI search and answers yes, training no).
 Non-production builds force `noindex` (B1822).
-`brain run` answers /robots.txt and /sitemap.xml with no build step, from the request's host: every static route plus
-what `paths()` and `sitemap({ env })` return (a file in `public/` still wins). Try it: `curl localhost:5180/sitemap.xml`.
+`brain run` answers /robots.txt, /sitemap.xml and /llms.txt (plus /es/llms.txt per extra locale) with no build step,
+from the request's host: every static route plus what `paths()` and `sitemap({ env })` return, in every locale, with
+hreflang alternates and image entries for literal `<img src>` like the build (a file in `public/` still wins). Try it:
+`curl localhost:5180/sitemap.xml` and `curl localhost:5180/llms.txt`.
 
 ## Common mistakes — do NOT
 - Stuff the keyword or repeat it beyond a natural density (B1816 reports over 3 %); use synonyms.

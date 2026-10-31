@@ -654,10 +654,10 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
     // zero-config SEO in dev: /robots.txt and /sitemap.xml answer like a production build (static routes, paths() and
     // sitemap({ env }) of live views) with no build step; a file in public/ still wins
     if (req.method == "GET" || req.method == "HEAD")
-        && (req.path == "/robots.txt" || req.path == "/sitemap.xml")
+        && dev_seo_file(&req.path)
         && !ctx.root.join("public").join(&req.path[1..]).is_file()
+        && let Some((ctype, body)) = dev_seo(ctx, &req)
     {
-        let (ctype, body) = dev_seo(ctx, &req);
         return http::respond_with(&mut s, 200, ctype, body.as_bytes(), req.method == "HEAD", &[("Cache-Control", "no-store")]);
     }
     if native_proxy::handles(&req.path) {
@@ -1046,28 +1046,45 @@ fn server_module(ctx: &Ctx, rel: &str, depth: u32) -> Result<String, String> {
     Ok(crate::load::file_url(&out))
 }
 
-/// Dev `/robots.txt` and `/sitemap.xml` (zero config): the origin is the request's Host, so the files always point at
-/// the server that answers them. Pages: every static route, plus the params a dynamic view's `paths()` or
-/// `sitemap({ env })` returns; views marked `noindex` and the error views are left out.
-fn dev_seo(ctx: &Ctx, req: &http::Request) -> (&'static str, String) {
+/// Paths the dev server generates like a build: robots.txt, sitemap.xml (+ sitemap-N.xml), llms.txt (+ /<locale>/llms.txt).
+fn dev_seo_file(path: &str) -> bool {
+    let name = path.trim_start_matches('/');
+    let name = name.split_once('/').filter(|(l, _)| !l.is_empty() && l.len() <= 8 && !l.contains('.')).map_or(name, |(_, n)| n);
+    path == "/robots.txt"
+        || path == "/sitemap.xml"
+        || name == "llms.txt"
+        || (path.starts_with("/sitemap-") && path.ends_with(".xml") && path[9..path.len() - 4].bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Pages a dev sitemap renders to read their head and static images (beyond it, URLs are listed without them).
+const DEV_SEO_RENDER_MAX: usize = 300;
+
+/// Dev `/robots.txt`, `/sitemap.xml` and `/llms.txt` (zero config): the origin is the request's Host, so the files always
+/// point at the server that answers them. Pages: every static route, plus the params a dynamic view's `paths()` or
+/// `sitemap({ env })` returns, in every locale; views marked `noindex` and the error views are left out. Each page is
+/// rendered once so the files carry what the build writes: the page title and description (llms.txt), hreflang
+/// alternates with x-default, and image entries for the view's static `<img src>` (dev renders on the client, so images
+/// bound to props only appear in the build).
+fn dev_seo(ctx: &Ctx, req: &http::Request) -> Option<(&'static str, String)> {
     let mut cfg = brain_seo::Config::load(&ctx.root).unwrap_or_default();
     cfg.site = Some(format!("http://{}", req.header("host").unwrap_or("localhost")));
     cfg.staging = false;
     if req.path == "/robots.txt" {
-        return ("text/plain; charset=utf-8", brain_seo::files::robots(&cfg));
+        return Some(("text/plain; charset=utf-8", brain_seo::files::robots(&cfg)));
     }
     let env = format!(
         "{{\"env\":{{{}}}}}",
         ctx.env_vars().iter().map(|(k, v)| format!("{}:{}", json_str(k), json_str(v))).collect::<Vec<_>>().join(",")
     );
-    let mut urls: Vec<(String, Option<String>)> = Vec::new();
+    cfg.markdown = false; // dev serves no .md copies: llms.txt links the pages themselves
+    let mut urls: Vec<(String, Option<String>, String)> = Vec::new();
     for r in brain_pack::routes::discover(&ctx.root) {
         let src = std::fs::read_to_string(ctx.root.join(&r.view)).unwrap_or_default();
         if r.path == "*" || src.contains("noindex") || ["404", "410", "500"].iter().any(|n| r.view.ends_with(&format!("/{n}.brain"))) {
             continue;
         }
         if !r.path.contains([':', '*']) {
-            urls.push((r.path.clone(), None));
+            urls.push((r.path.clone(), None, r.view.clone()));
             continue;
         }
         let Ok(c) = compile_cached(ctx, &ctx.root.join(&r.view)) else { continue };
@@ -1109,22 +1126,117 @@ fn dev_seo(ctx: &Ctx, req: &http::Request) -> (&'static str, String) {
                 .join("/");
             let lastmod = item.get("lastmod").and_then(brain_lex::Json::as_str).filter(|d| d.len() >= 10).map(|d| d[..10].to_string());
             if ok {
-                urls.push((path, lastmod));
+                urls.push((path, lastmod, r.view.clone()));
             }
         }
     }
     urls.sort();
     urls.dedup();
-    let mut o = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
-    for (p, d) in urls {
-        o.push_str(&format!("  <url><loc>{}</loc>", brain_seo::files::xml(&cfg.abs(&p))));
-        if let Some(d) = d {
-            o.push_str(&format!("<lastmod>{}</lastmod>", brain_seo::files::xml(&d)));
-        }
-        o.push_str("</url>\n");
+    let i18n = brain_pack::read_i18n(&ctx.root)
+        .filter(|(_, ls)| ls.len() > 1)
+        .map(|(default, locales)| brain_seo::hreflang::I18n { default, locales });
+    let pages: Vec<(String, Option<String>, String)> = match &i18n {
+        Some(i) => urls.iter().flat_map(|(p, d, v)| i.locales.iter().map(move |l| (i.prefixed(l, p), d.clone(), v.clone()))).collect(),
+        None => urls,
+    };
+    let alternates = match &i18n {
+        Some(i) => brain_seo::hreflang::alternates(i, &pages.iter().map(|(p, _, v)| (p.as_str(), Some(v.as_str()))).collect::<Vec<_>>()),
+        None => Default::default(),
+    };
+    let mut docs = Vec::with_capacity(pages.len());
+    for (n, (path, _, view)) in pages.iter().enumerate() {
+        let html = if n < DEV_SEO_RENDER_MAX {
+            let page = http::Request {
+                upgrade: Default::default(),
+                method: "GET".into(),
+                path: path.clone(),
+                query: String::new(),
+                headers: req.headers.clone(),
+                body: vec![],
+                id: req.id.clone(),
+                _body_budget: None,
+            };
+            match app_page(ctx, &page) {
+                (200, html, None) => html,
+                _ => {
+                    docs.push(None);
+                    continue;
+                }
+            }
+        } else {
+            String::new()
+        };
+        let src = std::fs::read_to_string(ctx.root.join(view)).unwrap_or_default();
+        let html = match html.rfind("</body>") {
+            Some(i) => format!("{}{}{}", &html[..i], static_images(&src), &html[i..]),
+            None => format!("{html}{}", static_images(&src)),
+        };
+        docs.push(Some(brain_seo::html::parse(&html)));
     }
-    o.push_str("</urlset>\n");
-    ("application/xml; charset=utf-8", o)
+    let entries: Vec<brain_seo::files::Entry> = pages
+        .iter()
+        .zip(&docs)
+        .filter_map(|((path, lastmod, _), doc)| {
+            let doc = doc.as_ref()?;
+            let mut alt: Vec<(String, String)> = alternates
+                .get(path)
+                .map_or(vec![], |v| v.iter().map(|(l, r)| (l.clone(), cfg.abs(&brain_seo::files::encode_path(r)))).collect());
+            if let Some(i) = &i18n
+                && let Some(d) = alt.iter().find(|(l, _)| *l == i.default).map(|(_, u)| u.clone())
+            {
+                alt.push(("x-default".into(), d));
+            }
+            Some(brain_seo::files::Entry {
+                route: path,
+                url: cfg.abs(&brain_seo::files::encode_path(path)),
+                doc,
+                lastmod: lastmod.as_deref(),
+                indexable: brain_seo::audit::indexable(&cfg, path, doc),
+                alternates: alt,
+                videos: vec![],
+            })
+        })
+        .collect();
+    let name = req.path.trim_start_matches('/');
+    if let Some(dir) = name.strip_suffix("llms.txt") {
+        if !cfg.llms {
+            return None;
+        }
+        let locale = dir.trim_end_matches('/');
+        let list: Vec<brain_seo::files::Entry> = match &i18n {
+            Some(i) if locale.is_empty() || i.locales.iter().any(|l| l == locale && *l != i.default) => {
+                let want = if locale.is_empty() { i.default.as_str() } else { locale };
+                entries.iter().filter(|e| i.locale_of(e.route) == want).cloned().collect()
+            }
+            _ if locale.is_empty() => entries,
+            _ => return None,
+        };
+        return Some(("text/plain; charset=utf-8", brain_seo::files::llms_txt(&cfg, &list)));
+    }
+    let files = brain_seo::files::sitemaps(&cfg, &entries);
+    let empty = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n</urlset>\n";
+    match files.into_iter().find(|(n, _)| n == name) {
+        Some((_, body)) => Some(("application/xml; charset=utf-8", body)),
+        None if name == "sitemap.xml" => Some(("application/xml; charset=utf-8", empty.into())),
+        None => None,
+    }
+}
+
+/// The view's `<img>` tags whose `src` is a literal (no `{expr}`), as `<img src alt>` for the dev sitemap's image entries.
+fn static_images(src: &str) -> String {
+    let (markup, _) = take_block(src, "script");
+    let mut out = String::new();
+    let mut rest = markup.as_str();
+    while let Some(i) = rest.find("<img") {
+        let tag = &rest[i..];
+        let end = tag.find('>').unwrap_or(tag.len());
+        let attrs = brain_seo::html::parse_attrs(&tag[4..end]);
+        if let Some(src) = brain_seo::html::attr(&attrs, "src").filter(|v| !v.is_empty() && !v.contains('{')) {
+            out.push_str(&format!("<img src=\"{}\" alt=\"\">", html_escape(src)));
+        }
+        rest = &tag[end..];
+    }
+    out
 }
 
 fn query_json(q: &str) -> String {
@@ -2750,6 +2862,53 @@ mod admission_tests {
         assert!(start.elapsed() < Duration::from_secs(1));
         drop(stream);
         sender.join().unwrap();
+    }
+
+    #[test]
+    fn dev_sitemap_and_llms_txt_match_the_build_shape() {
+        // parity with `brain build`: image entries, hreflang alternates with x-default, llms.txt per locale
+        let root = std::env::temp_dir().join(format!("brain-dev-seo-parity-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for (f, src) in [
+            ("brain.json", "{\"i18n\":{\"default\":\"en\",\"locales\":[\"en\",\"es\"]}}"),
+            ("i18n/en.json", "{\"hi\":\"Hi\"}"),
+            ("i18n/es.json", "{\"hi\":\"Hola\"}"),
+            ("views/home.brain", "<main><img src=\"/hero.png\" alt=\"Hero\"><img src={props.photo} alt=\"\"></main>"),
+            ("views/about.brain", "<main><p></p></main>"),
+        ] {
+            let p = root.join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, src).unwrap();
+        }
+        let root = root.canonicalize().unwrap();
+        let compiler: CompileFn = Arc::new(|src, _| Ok(Compiled { js: String::new(), css: String::new(), deps: vec![], server_js: src.into() }));
+        let opts = Options {
+            root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: String::new(),
+            runtime: vec![], env: None, base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None,
+        };
+        let dev = start_dev(opts, compiler, false, None).unwrap();
+        let get = |path: &str| {
+            use std::io::{Read, Write};
+            let addr = dev.url().trim_start_matches("http://").trim_end_matches('/').to_string();
+            let mut c = TcpStream::connect(&addr).unwrap();
+            write!(c, "GET {path} HTTP/1.1\r\nHost: shop.local:5180\r\nConnection: close\r\n\r\n").unwrap();
+            let mut out = String::new();
+            c.read_to_string(&mut out).unwrap();
+            out
+        };
+        let sm = get("/sitemap.xml");
+        assert!(sm.starts_with("HTTP/1.1 200"), "{sm}");
+        assert!(sm.contains("<image:image><image:loc>http://shop.local:5180/hero.png</image:loc></image:image>"), "{sm}");
+        assert!(!sm.contains("props.photo"), "{sm}");
+        assert!(sm.contains("<loc>http://shop.local:5180/es/about</loc>"), "{sm}");
+        assert!(sm.contains("hreflang=\"es\" href=\"http://shop.local:5180/es/about\"") && sm.contains("hreflang=\"x-default\" href=\"http://shop.local:5180/about\""), "{sm}");
+        let llms = get("/llms.txt");
+        assert!(llms.starts_with("HTTP/1.1 200") && llms.contains("text/plain"), "{llms}");
+        assert!(llms.contains("(http://shop.local:5180/about)") && !llms.contains("/es/about"), "{llms}");
+        let es = get("/es/llms.txt");
+        assert!(es.contains("(http://shop.local:5180/es/about)"), "{es}");
+        drop(dev);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
