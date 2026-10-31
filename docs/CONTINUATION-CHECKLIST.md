@@ -283,12 +283,14 @@ Three disjoint audits (runtime JS, Rust serve/backend/CLI, compiler). Every conf
 
 - [x] Live sockets accepted then closed with "try again later" no longer reconnect forever; budget resets after 30 s healthy.
 - [x] Settled handler requests leave the component registry; synchronized stores release channels, listeners and
-  sockets on close and unmount; the History router removes its service worker listener; Prompt API sessions are
-  bounded to eight.
+  sockets on close and unmount; Prompt API sessions are bounded to eight.
 - [x] Closed HMR sockets leave the dev-server client set; `brain start` escalates SIGTERM to SIGKILL after 12 s.
 - [x] Deep nesting reports B0002/B0003 instead of overflowing the stack; span columns are computed in O(log n).
 - [x] macOS-only flake in the native socket proxy test: accepted sockets inherit O_NONBLOCK on BSD; the test backend
   resets it (product accept loops already did).
+- [ ] The History router keeps its service worker message listener after stop(). The fix measured +5 to +10 gzip
+  bytes on the generated admin edit route, which already sits 2 B under the fixed 30,720 B budget; it was reverted
+  until bytes are recovered elsewhere. Impact is limited to stopping a router and creating another on one page.
 - [ ] RPC rate limiting keys on `X-Forwarded-For` without a trusted-proxy setting; needs an explicit policy.
 - [ ] A request body read promise is not settled on client abort (no retained memory measured).
 - [ ] `brain-mcp` reads stdin lines without a per-line size cap.
