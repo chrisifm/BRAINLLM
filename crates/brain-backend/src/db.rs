@@ -662,6 +662,7 @@ fn failure_metadata(error: &sqlx::Error) -> Value {
     json!({"schemaVersion":1,"event":"database-operation-failed","rid":crate::http::request_reference(),"sqlstate":code,"category":category,"private":true,"valuesCaptured":false})
 }
 pub fn safe(error: sqlx::Error) -> String {
+    crate::platform::note_database_error(&error);
     let metadata = failure_metadata(&error);
     eprintln!("{metadata}");
     format!(

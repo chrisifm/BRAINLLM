@@ -190,6 +190,8 @@ The media library supports metadata pagination, guarded edits, private downloads
 See [MEDIA.md](MEDIA.md) for the exact current routes, limits and optional private Google Cloud Storage adapter.
 General active-content/file formats are not implicitly treated as safe images.
 Files of any type (documents, archives, audio, video) use declared buckets: [backend/files.md](backend/files.md).
+Running behind a proxy, extra CORS origins and preflight caching: [backend/proxy-cors.md](backend/proxy-cors.md).
+Database TLS and boot retry, health probes, backpressure and graceful shutdown: [backend/lifecycle.md](backend/lifecycle.md).
 
 ## Remaining acceptance work
 

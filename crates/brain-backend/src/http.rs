@@ -26,6 +26,9 @@ use uuid::Uuid;
 mod sockets;
 #[path = "files_http.rs"]
 mod files_http;
+#[path = "edge_http.rs"]
+mod edge_http;
+pub use edge_http::{ClientIp, EdgeControl, resolve_client};
 pub use sockets::{SocketConfig, SocketControl};
 
 tokio::task_local! { static REQUEST_ID: String; }
@@ -87,7 +90,10 @@ impl Error {
         }
     }
     #[track_caller]
-    fn internal(_: impl std::fmt::Display) -> Self {
+    fn internal(error: impl std::fmt::Display + 'static) -> Self {
+        if let Some(error) = (&error as &dyn std::any::Any).downcast_ref::<sqlx::Error>() {
+            crate::platform::note_database_error(error);
+        }
         let at = std::panic::Location::caller();
         static DIAGNOSTIC_BUSY: std::sync::atomic::AtomicBool =
             std::sync::atomic::AtomicBool::new(false);
@@ -226,6 +232,21 @@ pub async fn router_with_platform(
     config: Config,
     platform: crate::platform::Platform,
 ) -> std::result::Result<(Router, SocketControl), String> {
+    router_with_control(pool, config, platform).await.map(|(router, sockets, _)| (router, sockets))
+}
+/// [`router_with_platform`] plus the [`EdgeControl`] that marks the instance as draining.
+pub async fn router_with_control(
+    pool: PgPool,
+    mut config: Config,
+    platform: crate::platform::Platform,
+) -> std::result::Result<(Router, SocketControl, EdgeControl), String> {
+    for origin in &platform.edge.cors_origins {
+        if !config.origins.contains(origin) {
+            config.origins.push(origin.clone());
+        }
+    }
+    let (edge_state, edge_control) = edge_http::EdgeState::new(&platform.edge);
+    let cors_max_age = platform.edge.cors_max_age;
     let socket_origins = config.sockets.as_ref().map(|s| s.allowed().to_vec()).unwrap_or_default();
     if socket_origins.iter().any(|origin| !config.origins.contains(origin)) {
         return Err("Socket origins must be an explicit subset of backend HTTP origins".into());
@@ -394,7 +415,12 @@ pub async fn router_with_platform(
             header::HeaderName::from_static("x-brain-rpc"),
         ]);
     let cors = cors.expose_headers([header::HeaderName::from_static("x-request-id")]);
+    let cors = match cors_max_age {
+        Some(age) => cors.max_age(age),
+        None => cors,
+    };
     let governor = GovernorConfigBuilder::default()
+        .key_extractor(edge_http::ClientKey)
         .per_second(1)
         .burst_size(120)
         .finish()
@@ -407,6 +433,8 @@ pub async fn router_with_platform(
     let routes = Router::new()
         .merge(socket_routes)
         .route("/health", get(health))
+        .route("/health/live", get(edge_http::live))
+        .route("/health/ready", get(edge_http::ready))
         .route("/_brain/api", get(docs))
         .route("/_brain/auth/signup", post(signup))
         .route("/_brain/auth/login", post(login))
@@ -467,6 +495,7 @@ pub async fn router_with_platform(
         .layer(DefaultBodyLimit::max(65536))
         .layer(middleware::from_fn_with_state(app.clone(), protect))
         .layer(GovernorLayer::new(governor))
+        .layer(middleware::from_fn_with_state(edge_state, edge_http::edge))
         .layer(middleware::from_fn(move |req: Request, next: Next| {
             let limiter = limiter.clone();
             let requests = requests.clone();
@@ -482,7 +511,7 @@ pub async fn router_with_platform(
         .layer(cors)
         .layer(middleware::from_fn(response_headers))
         .with_state(app);
-    Ok((routes, SocketControl::new(sockets)))
+    Ok((routes, SocketControl::new(sockets), edge_control))
 }
 
 /// Loopback binding is enforced by the CLI; the reusable library accepts the caller's owned listener.
@@ -510,7 +539,9 @@ pub async fn serve_with_platform(
         .filter(|cfg| cfg.has_outbound())
         .map(|cfg| crate::webhooks::Webhooks::new(pool.clone(), cfg, &config.jobs))
         .transpose()?;
-    let (app, sockets) = router_with_platform(pool.clone(), config, platform).await?;
+    let ready_delay = platform.edge.ready_delay;
+    let drain_budget = platform.edge.drain;
+    let (app, sockets, edge) = router_with_control(pool.clone(), config, platform).await?;
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
     let mut http_stop = stop_rx.clone();
     let worker_failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -531,16 +562,36 @@ pub async fn serve_with_platform(
         json!({"schemaVersion":1,"event":"backend-ready","address":address,"experimental":true})
     );
     let socket_stop = sockets.clone();
-    let result = axum::serve(
+    let (signalled_tx, signalled_rx) = tokio::sync::oneshot::channel::<()>();
+    let draining = edge.clone();
+    let server = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(async move {
         tokio::select! {_=wait_shutdown()=>{},_=http_stop.changed()=>{}}
+        // Readiness fails first so load balancers stop routing here, then the listener closes.
+        draining.drain();
+        eprintln!("{}", json!({"schemaVersion":1,"event":"backend-draining","readyDelayMs":ready_delay.as_millis() as u64,"drainMs":drain_budget.as_millis() as u64}));
+        let _ = signalled_tx.send(());
+        tokio::time::sleep(ready_delay).await;
         socket_stop.shutdown();
-    })
-    .await
-    .map_err(|_| "Backend HTTP server failed".into());
+    });
+    let server = std::future::IntoFuture::into_future(server);
+    tokio::pin!(server);
+    let result = tokio::select! {
+        result = &mut server => result.map_err(|_| "Backend HTTP server failed".into()),
+        _ = async {
+            if signalled_rx.await.is_ok() {
+                tokio::time::sleep(ready_delay + drain_budget).await;
+            } else {
+                std::future::pending::<()>().await;
+            }
+        } => {
+            eprintln!("{}", json!({"schemaVersion":1,"event":"drain-timeout","code":"DRAIN_TIMEOUT","inFlight":edge.in_flight(),"fix":"Raise platform.shutdown.drain or shorten slow requests"}));
+            Ok(())
+        }
+    };
     sockets.shutdown();
     let sockets_closed = sockets.closed().await;
     if sockets_closed.is_err() {

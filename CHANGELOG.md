@@ -18,6 +18,14 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Native file buckets (`server/files/<name>.jsbrain`) accept uploads of any type by default, streamed to private
   disk with a per-bucket size limit (default 25 MiB), magic-byte type detection, optional type allowlists,
   private/public visibility, owner/role/related-record download policy and `Range`/`ETag` downloads.
+- Native backend `trustProxy` takes a list of trusted proxy IPs/CIDR ranges and resolves the real client from
+  `X-Forwarded-For`, so rate limiting works per visitor behind nginx; `cors.origins` adds origins and `cors.maxAge`
+  caches preflights.
+- Native backend health is split into `GET /health/live` and `GET /health/ready`; overload (in-flight cap or a 2 s
+  database pool wait) answers `503 OVERLOADED` with `Retry-After`, and shutdown fails readiness first, then drains
+  open requests within a bound.
+- Production refuses a remote `DATABASE_URL` without `sslmode=verify-full` (`BDB_TLS_UNVERIFIED`); `serve` and
+  `jobs work` retry the boot connection with full-jitter backoff for up to 60 s.
 
 ### Changed
 

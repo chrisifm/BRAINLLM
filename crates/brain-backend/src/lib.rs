@@ -1,6 +1,7 @@
 //! Experimental backend. The compiler owns source syntax; this crate consumes only validated resource contracts.
 pub mod auth;
 pub mod auth_flows;
+pub mod boot;
 pub mod contract;
 pub mod db;
 pub mod google;

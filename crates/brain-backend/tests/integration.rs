@@ -5,6 +5,8 @@ mod auth_flows;
 mod auth_http;
 #[path = "backend.rs"]
 mod backend;
+#[path = "edge.rs"]
+mod edge;
 #[path = "exact_types.rs"]
 mod exact_types;
 #[path = "files.rs"]

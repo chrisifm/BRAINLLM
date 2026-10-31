@@ -253,7 +253,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let resources = contracts(&root, "resources")?;
     let jobs = contracts(&root, "jobs")?;
     runtime()?.block_on(async{
-        let pool=brain_backend::db::connect(&url).await?;
+        let production=environment=="production";
+        let boot=if operation=="serve" {brain_backend::boot::Boot::server(production)} else {brain_backend::boot::Boot::command(production)};
+        let pool=brain_backend::boot::connect(&url,&boot).await?;
         if operation=="migrate"{
             brain_backend::db::migrate(&pool,&resources).await?;
             roles.register(&pool).await?;
@@ -628,7 +630,9 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
     let env: Vec<_> = crate::env::select(&root, &environment);
     let _ = snapshot;
     runtime()?.block_on(async {
-        let pool = brain_backend::db::connect(&url).await?;
+        let production = environment == "production";
+        let boot = if op == "work" { brain_backend::boot::Boot::server(production) } else { brain_backend::boot::Boot::command(production) };
+        let pool = brain_backend::boot::connect(&url, &boot).await?;
         brain_backend::db::verify(&pool, &contracts(&root, "resources")?).await?;
         let queue = brain_backend::jobs::Queue::new(pool.clone());
         let webhooks = if op == "work" {
@@ -1372,7 +1376,7 @@ pub fn media(args: &[String]) -> Result<(), String> {
         return Err(format!("media limit must be 1..{max}"));
     }
     runtime()?.block_on(async {
-        let pool = brain_backend::db::connect(&url).await?;
+        let pool = brain_backend::boot::connect(&url, &brain_backend::boot::Boot::command(environment == "production")).await?;
         let result = if operation == "list" {
             let owner = crate::flag(args, "--owner")
                 .ok_or("media list requires an explicit owner UUID")?

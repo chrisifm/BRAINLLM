@@ -27,6 +27,7 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 infer = "0.22.0"
 tokio-util = { version = "0.7.20", features = ["io"] }
 http-range-header = "0.4.2"
+ipnet = "2.12.2"
 
 [dev-dependencies]
 tokio-tungstenite = "0.30.0"
