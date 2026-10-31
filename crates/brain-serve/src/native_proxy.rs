@@ -812,6 +812,7 @@ fn transfer(stream: &mut TcpStream, target: &Target, req: &http::Request) -> Res
         }
     }
     reply.push_str("Connection: close\r\n\r\n");
+    http::trace_status(status);
     stream.write_all(reply.as_bytes()).map_err(|_| Interrupted::AfterReply)?;
     if req.method != "HEAD" && status != 204 && status != 304 {
         let mut left = framed_length;

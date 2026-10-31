@@ -388,6 +388,40 @@ pub(crate) fn reason(status: u16) -> &'static str {
         _ => "",
     }
 }
+/// `brain trace`: the request this thread is answering. Set only while capture is on (the dev server under `brain run`);
+/// production and every other caller of `respond` never have one.
+struct TraceScope {
+    rid: String,
+    status: Option<u16>,
+    policy: String,
+}
+thread_local! { static TRACE_SCOPE: std::cell::RefCell<Option<TraceScope>> = const { std::cell::RefCell::new(None) }; }
+pub(crate) fn trace_begin(rid: &str, policy: String) {
+    TRACE_SCOPE.with_borrow_mut(|scope| *scope = Some(TraceScope { rid: rid.to_string(), status: None, policy }));
+}
+pub(crate) fn trace_status(status: u16) {
+    TRACE_SCOPE.with_borrow_mut(|scope| if let Some(scope) = scope { scope.status = Some(status) });
+}
+pub(crate) fn trace_end() -> Option<u16> {
+    TRACE_SCOPE.with_borrow_mut(|scope| scope.take()).and_then(|scope| scope.status)
+}
+/// What a traced response adds: the id the browser correlates with (`Server-Timing` is the only header a page can read
+/// about its own load) and, on a page, the production policy in report-only mode.
+fn trace_headers(status: u16, ctype: &str, extra: &str) -> String {
+    TRACE_SCOPE.with_borrow_mut(|scope| {
+        let Some(scope) = scope else { return String::new() };
+        scope.status = Some(status);
+        let mut headers = String::new();
+        if !extra.to_ascii_lowercase().contains("x-request-id:") {
+            headers.push_str(&format!("X-Request-Id: {}\r\n", scope.rid));
+        }
+        headers.push_str(&format!("Server-Timing: rid;desc=\"{}\"\r\n", scope.rid));
+        if ctype.starts_with("text/html") && !scope.policy.is_empty() {
+            headers.push_str(&format!("Content-Security-Policy-Report-Only: {}\r\n", scope.policy));
+        }
+        headers
+    })
+}
 pub(crate) fn respond_with_length<W: Write>(
     w: &mut W,
     status: u16,
@@ -397,7 +431,8 @@ pub(crate) fn respond_with_length<W: Write>(
     advertised_length: usize,
     extra: &[(&str, &str)],
 ) -> io::Result<()> {
-    let extra: String = extra.iter().map(|(k, v)| format!("{k}: {v}\r\n")).collect();
+    let mut extra: String = extra.iter().map(|(k, v)| format!("{k}: {v}\r\n")).collect();
+    extra.push_str(&trace_headers(status, ctype, &extra));
     let reason = reason(status);
     // no-store unless the caller carries the backend's own lifetime (a public read, a file)
     let cache = if extra.to_ascii_lowercase().contains("cache-control:") { "" } else { "Cache-Control: no-store\r\n" };

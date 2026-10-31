@@ -5,6 +5,18 @@
   "description": "BRAINLLM app configuration. Precedence: flag > BRAIN_* variable > brain.json > defaults.",
   "type": "object",
   "properties": {
+    "trace": {
+      "type": "object",
+      "description": "`brain trace`, the development capture of `brain run`. It never reaches a production build.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "redact": { "type": "array", "items": { "type": "string" }, "description": "Extra field names to hide, on top of passwords, tokens, cookies and secrets" },
+        "maxBodyKB": { "type": "integer", "minimum": 1, "default": 16 },
+        "maxMB": { "type": "integer", "minimum": 1, "default": 64 },
+        "maxAgeHours": { "type": "integer", "minimum": 1, "default": 72 }
+      }
+    },
     "$schema": {
       "type": "string"
     },

@@ -227,6 +227,12 @@ impl Ctx {
         }
     }
     fn client_message(&self, text: String) {
+        if text.starts_with("{\"t\":\"brain:trace\"") {
+            if let Some(trace) = &self.trace {
+                trace.record(text);
+            }
+            return;
+        }
         if text.starts_with("{\"t\":\"m\"") {
             let now = now_ms();
             let mut m = self.metrics.lock().unwrap();
@@ -246,6 +252,9 @@ impl Ctx {
             return;
         }
         if text.contains("\"brain:error\"") {
+            if let Some(trace) = &self.trace {
+                trace.record(text.clone());
+            }
             let n = self.seq.fetch_add(1, Ordering::SeqCst) + 1;
             let mut e = self.errors.lock().unwrap();
             if e.len() >= RING {
@@ -435,6 +444,8 @@ struct Ctx {
     hashes: Mutex<HashMap<String, String>>,
     /// Inspector batches (`{t:"m", seq, at, d:[…]}` from brain-inspect over the HMR socket): (received ms, raw JSON).
     metrics: Mutex<VecDeque<(u64, String)>>,
+    /// `brain trace`: present only under `brain run` (INTERNALS §48).
+    trace: Option<Arc<crate::trace::Trace>>,
 }
 
 /// Blocking dev server with watch and HMR.
@@ -516,9 +527,11 @@ fn start_with_threads(
             values
         }));
     }
+    let trace = crate::trace::attach(&root);
     let ctx = Arc::new(Ctx {
         native_routes,
         native_routes_cache: Mutex::new(None),
+        trace,
         root,
         native_sockets,
         env: opts.env,
@@ -672,6 +685,8 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
             }
         }
     }
+    let native = ctx.backend_configured() && (native_proxy::handles(&req.path) || routes.find(&req.path).is_some());
+    let _traced = ctx.trace.as_ref().map(|trace| crate::trace::begin(trace, &mut req, native));
     if req.path == "/_brain/socket" {
         return match &ctx.native_sockets {
             Some(proxy) => proxy.takeover(&mut s, &mut req),
@@ -748,6 +763,10 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
         }
         "/@brain/client.js" => {
             return http::respond(&mut s, 200, http::mime("x.js"), CLIENT_JS.as_bytes(), head);
+        }
+        // the client imports it unconditionally: without capture it is an empty module, so nothing wraps `fetch`
+        "/@brain/brain-trace.js" if ctx.trace.is_none() || !ctx.runtime.iter().any(|(name, _)| name == "brain-trace.js") => {
+            return http::respond(&mut s, 200, http::mime("x.js"), crate::trace::CLIENT_OFF.as_bytes(), head);
         }
         "/@brain/test.html" => {
             // tests read the default language's texts, like the page at `/` (t() would otherwise return the key)

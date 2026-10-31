@@ -7,6 +7,7 @@ pub mod boot;
 pub mod cluster;
 pub mod contract;
 pub mod db;
+pub mod dev_trace;
 pub mod domain;
 pub mod schedules;
 pub mod google;

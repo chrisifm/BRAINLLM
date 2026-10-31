@@ -24,6 +24,21 @@ already creates the test file; fill it before calling the task done.
 4. Events to the parent: render a tiny parent in the test only if the event's effect is visible; otherwise test the
    visible result.
 
+## When something fails while you develop
+`brain run` records what the app does, so read one query before adding logs:
+```
+brain trace issues                 # failures grouped, with B-code, fix and the last request id
+brain trace <requestId>            # one request: browser payload and response, server exception, backend queries
+brain trace --failed --since 5m    # recent failures; --module browser|server|backend|memory narrows it
+```
+MCP: `brain_trace`. The store is `.brain/trace.db`, local and gitignored. Passwords, tokens, cookies and secrets are hidden
+before writing; add field names with `"trace": { "redact": ["cardCode"] }`. Server-function arguments keep only the length
+of their strings. CSP violations listed here are what production blocks. Nothing of this reaches a production build.
+
+A module of your own records with no schema change:
+`globalThis.__brainTrace('payments', 'declined', { level: 'error', title: 'Card declined', fix: 'Ask for another card' })`
+in the browser, or the same object with `module` and `kind` as one line in `.brain/trace-spool/payments.ndjson` elsewhere.
+
 ## Verify
 ```bash
 brain test                  # all files; non-zero exit on any failure
