@@ -654,7 +654,13 @@ pub fn run(args: &[String]) -> Result<(), String> {
         }
         if operation=="bootstrap-admin" {
             brain_backend::db::verify(&pool,&resources).await?;
-            let user=crate::flag(args,"--user").ok_or("bootstrap-admin requires the explicit UUID of an existing enabled user; no account is created")?.parse().map_err(|_|"user must be a UUID")?;
+            let user=match (crate::flag(args,"--user"),crate::flag(args,"--email")) {
+                (Some(_),Some(_))=>return Err("bootstrap-admin takes --user or --email, not both".into()),
+                (None,Some(address))=>brain_backend::auth_flows::user_id_by_email(&pool,&address).await.map_err(|error|error.to_string())?.ok_or("bootstrap-admin: no account has this email; no account is created. Sign up first")?.to_string(),
+                (Some(user),None)=>user,
+                (None,None)=>return Err("bootstrap-admin requires --email or the explicit --user UUID of an existing enabled user; no account is created".into()),
+            };
+            let user=user.parse().map_err(|_|"user must be a UUID")?;
             let promoted=brain_backend::auth_flows::bootstrap_first_admin(&pool,user).await.map_err(|error|error.to_string())?;
             pool.close().await;
             if !promoted {return Err("Admin bootstrap requires an enabled existing user and no active administrator".into());}

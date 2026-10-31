@@ -14,7 +14,7 @@ origin checks, request/body limits and rate limiting.
 | `/_brain/auth/users/{id}/role` | `{role}` | Administrator-only assignment from the server's configured roles |
 
 Request bodies reject unknown fields. Signup and Google sign-in use only the server's configured default role;
-signup credentials never accept a client-supplied role. Passwords retain Argon2id and the existing bounded hashing
+Signup creates the account and starts no session: call login next, so a sign-up form signs in with a second request. Signup credentials never accept a client-supplied role. Passwords retain Argon2id and the existing bounded hashing
 workers and 12..1024-byte password limits. Recovery links do not appear in HTTP responses, private diagnostics,
 database plaintext columns or generic job payloads.
 
@@ -151,7 +151,7 @@ The private operator API `bootstrap_first_admin(pool, existing_user_id)` promote
 account only while no enabled administrator exists, then revokes its old sessions and records the bootstrap event.
 It is never a public HTTP route or an automatic first-signup rule. Operator tooling must obtain the selected account
 through private input; passwords and tokens do not belong in command arguments, shell history or public examples.
-The corresponding operator command is `brain backend bootstrap-admin --user <existing-user-uuid>` with the explicit
+The corresponding operator command is `brain backend bootstrap-admin --user <existing-user-uuid>` (or `--email <address>`) with the explicit
 environment selection. Use an account you control and selected deliberately, then sign in again after its old
 sessions were revoked. No first public signup is promoted automatically.
 

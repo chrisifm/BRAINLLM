@@ -166,7 +166,7 @@ Native sessions populate the verified `ctx.user` in Node SSR and the development
 bridge; legacy signed sessions never act as a fallback in native mode. JWT uses five-minute access tokens and
 rotating persisted refresh families; reuse detection and account mutations revoke active sessions.
 Roles and their signup default are declared in `server/auth/roles.jsbrain`; public signup cannot choose a role.
-`brain backend bootstrap-admin --user <existing-uuid>` explicitly provisions the first administrator.
+`brain backend bootstrap-admin --user <existing-uuid>` (or `--email <address>`) explicitly provisions the first administrator.
 Single-use password recovery/email verification and optional Resend delivery are described in [AUTH-FLOWS.md](AUTH-FLOWS.md).
 No automatic administrator or production demo login is created. New app display hints are ephemeral, never localStorage authority.
 
