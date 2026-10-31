@@ -343,6 +343,11 @@ fn fetch(
         "x-brain-webhook-id",
         "x-brain-webhook-timestamp",
         "x-brain-webhook-signature",
+        // Behavior analytics filters (bots, Do Not Track, Global Privacy Control); never stored as such.
+        "user-agent",
+        "dnt",
+        "sec-gpc",
+        "cf-ipcountry",
     ] {
         if let Some(value) = req.header(name) {
             if value.len() > 8192 || value.chars().any(char::is_control) {
@@ -682,6 +687,24 @@ mod tests {
             assert_eq!(received.header(name), req.header(name));
         }
         assert!(received.header("x-brain-webhook-extra").is_none());
+    }
+    #[test]
+    fn analytics_beacons_forward_only_the_privacy_and_bot_filter_headers() {
+        let (target,server)=authority(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec());
+        let mut req = request("POST");
+        req.path = "/_brain/analytics".into();
+        req.query.clear();
+        req.body = br#"{"v":1}"#.to_vec();
+        for (name, value) in [("user-agent", "Mozilla/5.0 Synthetic"), ("dnt", "1"), ("sec-gpc", "1"), ("cf-ipcountry", "MX"), ("x-forwarded-for", "203.0.113.9")] {
+            req.headers.push((name.into(), value.into()));
+        }
+        assert!(handles(&req.path));
+        assert_eq!(fetch(&target, &req).unwrap().0, 204);
+        let received = server.join().unwrap();
+        for name in ["user-agent", "dnt", "sec-gpc", "cf-ipcountry"] {
+            assert_eq!(received.header(name), req.header(name));
+        }
+        assert!(received.header("x-forwarded-for").is_none(), "client addresses never reach analytics");
     }
     #[test]
     fn actual_transport_forwards_only_native_credentials_and_owned_request_identity() {

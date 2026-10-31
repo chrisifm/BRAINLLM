@@ -241,7 +241,7 @@ export function nativeAuthBridge(raw) {
       let outgoing, timer, done = false, bytes = 0, requestBytes = 0, failure
       const chunks = []
       const headers = { 'x-request-id':rid }
-      for (const key of ['origin','authorization','content-type','content-length','x-brain-rpc','accept','x-brain-webhook-id','x-brain-webhook-timestamp','x-brain-webhook-signature']) {
+      for (const key of ['origin','authorization','content-type','content-length','x-brain-rpc','accept','x-brain-webhook-id','x-brain-webhook-timestamp','x-brain-webhook-signature','user-agent','dnt','sec-gpc','cf-ipcountry']) {
         const value = req.headers[key]
         if (typeof value === 'string' && value.length <= 8192) headers[key] = value
       }

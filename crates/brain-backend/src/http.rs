@@ -428,6 +428,10 @@ pub async fn router_with_socket_control(
         )
         .route("/_brain/slugs", post(create_slug))
         .route("/s/{code}", get(resolve_short_link))
+        .route(
+            "/_brain/analytics",
+            post(analytics_ingest).layer(DefaultBodyLimit::max(crate::analytics::MAX_BODY)),
+        )
         .route("/_brain/jobs/{queue}", post(enqueue))
         .route("/_brain/jobs/status/{id}", get(job_status))
         .route("/api/{name}", get(list).post(create))
@@ -502,6 +506,8 @@ pub async fn serve(
         "{}",
         json!({"schemaVersion":1,"event":"backend-ready","address":address,"experimental":true})
     );
+    let retention = crate::analytics::settings()
+        .map(|cfg| tokio::spawn(crate::analytics::retention_loop(pool.clone(), cfg.retention_days)));
     let socket_stop = sockets.clone();
     let result = axum::serve(
         listener,
@@ -513,6 +519,9 @@ pub async fn serve(
     })
     .await
     .map_err(|_| "Backend HTTP server failed".into());
+    if let Some(retention) = retention {
+        retention.abort();
+    }
     sockets.shutdown();
     let sockets_closed = sockets.closed().await;
     if sockets_closed.is_err() {
@@ -1420,6 +1429,39 @@ pub async fn wait_shutdown() {
     #[cfg(not(unix))]
     {
         let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+// First-party behavior analytics (docs/backend/analytics.md). Accepts `text/plain` beacons; answers 204 even when a
+// privacy signal or bot heuristic drops the batch, so the browser learns nothing about filtering.
+async fn analytics_ingest(State(app): State<App>, headers: HeaderMap, body: Bytes) -> Result<Response> {
+    use crate::analytics::{self, IngestError, Outcome};
+    let Some(cfg) = analytics::settings() else { return Err(Error::missing()) };
+    if body.len() > analytics::MAX_BODY {
+        return Err(Error::new(StatusCode::PAYLOAD_TOO_LARGE, "ANALYTICS_TOO_LARGE", "Send at most 32 KiB per analytics batch"));
+    }
+    let text = |name: &str| headers.get(name).and_then(|v| v.to_str().ok()).map(str::to_owned);
+    let mut signals = analytics::Signals {
+        user_agent: text("user-agent"),
+        do_not_track: text("dnt").as_deref() == Some("1"),
+        global_privacy_control: text("sec-gpc").as_deref() == Some("1"),
+        country: cfg.country_header.as_deref().and_then(text).map(|c| c.trim().to_ascii_uppercase()),
+        user: None,
+        origins: app.origins.to_vec(),
+    };
+    if signals.do_not_track || signals.global_privacy_control || analytics::is_bot(signals.user_agent.as_deref()) {
+        return Ok(StatusCode::NO_CONTENT.into_response());
+    }
+    let batch: analytics::Batch = serde_json::from_slice(&body).map_err(|_| {
+        Error::new(StatusCode::BAD_REQUEST, "ANALYTICS_INVALID", "Send the collector batch shape {v,vid,sid,ctx?,ev[]}")
+    })?;
+    signals.user = app.user(&headers).await.ok().flatten().map(|u| u.id);
+    match analytics::ingest(&app.pool, analytics::limiter(), batch, &signals).await {
+        Ok(Outcome::Stored(_) | Outcome::Ignored(_)) => Ok(StatusCode::NO_CONTENT.into_response()),
+        Err(IngestError::Invalid(fix)) => Err(Error::new(StatusCode::BAD_REQUEST, "ANALYTICS_INVALID", fix)),
+        Err(IngestError::RateLimited) => Err(Error::new(StatusCode::TOO_MANY_REQUESTS, "ANALYTICS_RATE_LIMITED", "Batch and throttle events; the per-visitor minute budget is exhausted")),
+        Err(IngestError::SessionConflict) => Err(Error::new(StatusCode::CONFLICT, "ANALYTICS_SESSION_CONFLICT", "Start a new random session identifier for this visitor")),
+        Err(IngestError::Database(e)) => Err(Error::internal(e)),
     }
 }
 

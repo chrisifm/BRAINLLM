@@ -716,6 +716,16 @@ fn native_paths(roles: &crate::auth_flows::RolesConfig) -> Map<String, Value> {
         &[400, 401, 403, 413, 415, 422, 429, 500, 503, 504],
     );
     add(
+        "/_brain/analytics",
+        "post",
+        "Store one first-party behavior batch (docs/backend/analytics.md); privacy signals and bots are acknowledged and dropped",
+        open.clone(),
+        204,
+        None,
+        Some(json!({"required":true,"content":{"text/plain":{"schema":{"type":"string","maxLength":32768,"description":"JSON {v:1,vid:uuid,sid:uuid,ctx?:{ref,utm,lang,w},ev:[{k,r,pv,t,at,el?,v?,p?}] (1-64)}"}}}})),
+        &[400, 403, 404, 409, 413, 429, 500, 504],
+    );
+    add(
         "/_brain/slugs",
         "post",
         "Normalize a bounded public title into a slug",
