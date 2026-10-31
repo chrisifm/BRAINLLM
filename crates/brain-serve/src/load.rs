@@ -23,6 +23,10 @@ console.log = console.info = (...a) => console.error(...a)
 // response headers as "name\u0001value\u0002…" (a header may repeat: set-cookie)
 const flat = h => Object.entries(h || {}).flatMap(([k, v]) => (Array.isArray(v) ? v : [v]).map(x => k + '\u0001' + x)).join('\u0002')
 // the request's session from its signed cookie (server.mjs sessionFrom), so login/logout set cookies in dev too
+// What `redirect()` in server.mjs refuses, so a redirect that fails in production fails here too.
+const REDIRECT_CODES = new Set([301, 302, 303, 307, 308])
+const redirectProblem = ({ redirect: to, status = 303 }) => !REDIRECT_CODES.has(status) ? 'Invalid redirect status'
+  : to.length > 8192 || !to.startsWith('/') || to.startsWith('//') || /[\\\x00-\x20\x7f]/.test(to) || /^\/%2f/i.test(to) || /%(?:0[0-9a-f]|1[0-9a-f]|5c|7f)/i.test(to) || /%20/i.test(to.split(/[?#]/, 1)[0]) ? 'Invalid same-site redirect location' : ''
 const nativeContexts = new WeakMap()
 let nativeBridge = null, nativeModule = null, nativeURL = null
 const withSession = async (S, ctx, secret, preauthenticated = false, nativeRequired = false) => {
@@ -138,12 +142,13 @@ for await (const line of createInterface({ input: process.stdin })) {
     const c = S ? await withSession(S, ctx, secret, preauthenticated === true, nativeRequired === true) : { ...ctx, env: process.env }
     try {
       const v = await m[fn](c, ...(args || []))
+      if (fn === 'load' && v && typeof v.redirect === 'string' && redirectProblem(v)) throw new Error(redirectProblem(v))
       if (S) await contextHeaders(c)
       out(`OK ${id} ${JSON.stringify(v ?? null)}\n`)
     } finally { if (S) finishContext(c) }
   } catch (e) {
     if (e && e.notFound === true) out(`OK ${id} ${e.gone === true ? '{"notFound":true,"gone":true,"status":410}' : '{"notFound":true,"status":404}'}\n`) // `throw notFound()` / `throw gone()`: a 404 / 410 page
-    else if (e && typeof e.redirect === 'string') out(`OK ${id} ${JSON.stringify({ redirect: e.redirect, status: Number(e.status) || 303 })}\n`) // `throw redirect(url, s)`: as server.mjs
+    else if (e && typeof e.redirect === 'string') { const bad = redirectProblem(e); out(bad ? `ERR ${id} ${JSON.stringify(bad)}\n` : `OK ${id} ${JSON.stringify({ redirect: e.redirect, status: e.status ?? 303 })}\n`) } // `throw redirect(url, s)`: as server.mjs
     else if (e && e.errors && typeof e.errors === 'object') out(`BAD ${id} ${JSON.stringify({ error: e.message || 'Invalid input', errors: e.errors })}\n`)
     else if (contextServer && e?.status === 404 && e?.constructor?.name === 'HttpError') out(`OK ${id} {"notFound":true,"status":404}\n`) // as server.mjs: the 404 page
     else if (contextServer && e?.status === 503) out(`STATUS ${id} ${JSON.stringify({status:503,message:'Native authentication is temporarily unavailable'})}\n`)
@@ -995,8 +1000,41 @@ mod tests {
         let f = d.join("rd.mjs");
         std::fs::write(&f, "export async function load(ctx) { throw ({ redirect: '/posts/' + ctx.params.id, status: 301 }) }").unwrap();
         let mut sc = Sidecar::spawn(&d, &[]).unwrap();
-        let v = sc.call(&file_url(&f), "load", "{\"params\":{\"id\":\"a b\"}}").unwrap();
-        assert_eq!(v, "{\"redirect\":\"/posts/a b\",\"status\":301}");
+        let v = sc.call(&file_url(&f), "load", "{\"params\":{\"id\":\"a-b\"}}").unwrap();
+        assert_eq!(v, "{\"redirect\":\"/posts/a-b\",\"status\":301}");
+        drop(sc);
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn sidecar_rejects_the_redirects_production_rejects() {
+        if Command::new("node").arg("--version").output().is_err() {
+            return;
+        }
+        let d = std::env::temp_dir().join(format!("brain-rd-bad-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("rd.mjs");
+        let source = "const r = c => ({ redirect: c.query.to, status: c.query.status === undefined ? undefined : c.query.status })\n\
+            export async function load(c) { if (c.query.how === 'return') return r(c); throw r(c) }";
+        std::fs::write(&f, source).unwrap();
+        let mut sc = Sidecar::spawn(&d, &[]).unwrap();
+        for how in ["throw", "return"] {
+            for (to, status, problem) in [
+                ("/x", "200", Some("Invalid redirect status")),
+                ("/x", "304", Some("Invalid redirect status")),
+                ("/x", "\"301\"", Some("Invalid redirect status")),
+                ("https://elsewhere.example/", "303", Some("Invalid same-site redirect location")),
+                ("//elsewhere.example/", "303", Some("Invalid same-site redirect location")),
+                ("/a b", "303", Some("Invalid same-site redirect location")),
+                ("/x", "308", None),
+            ] {
+                let got = sc.call(&file_url(&f), "load", &format!("{{\"query\":{{\"how\":\"{how}\",\"to\":\"{to}\",\"status\":{status}}}}}"));
+                match problem {
+                    Some(p) => assert!(got.as_ref().is_err_and(|e| e.to_string().contains(p)), "{how} {to} {status}: {got:?}"),
+                    None => assert!(got.as_ref().is_ok_and(|v| v.contains("\"status\":308")), "{how} {to} {status}: {got:?}"),
+                }
+            }
+        }
         drop(sc);
         std::fs::remove_dir_all(d).unwrap();
     }

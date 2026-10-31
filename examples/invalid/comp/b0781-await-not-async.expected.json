@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0781",
+    "level": "error",
+    "file": "invalid/comp/b0781-await-not-async.brain",
+    "line": 3,
+    "col": 21,
+    "msg": "`await` is not inside an `async` function",
+    "fix": "add `async` to the function that directly contains this `await`: `async () => { … }`; a function nested in an async one needs its own"
+  }
+]

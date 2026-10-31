@@ -9,7 +9,7 @@ Any task in a BRAINLLM app: a new view, a bug, a refactor, a deploy. Run `brain 
    What is not in the spec does not exist; do not invent syntax from other frameworks.
 2. **Learn the project.** `brain map --json` lists routes, components with props, modules, tests and tokens. Import only
    what it lists. To use a component read `brain card <name>` (its contract), never its body.
-3. **Generate, do not hand-create.** `brain add view|comp|ui|layout|lib|channel|service|api|type|guard|server|collection|locale <name>`.
+3. **Generate, do not hand-create.** `brain add <kind> <name>` (`brain add` lists every kind).
    The file arrives with the right `<meta>`, a11y-correct markup and, for components, a colocated test.
 4. **Edit** the generated file. Prefer AST edits for structural changes:
    `brain edit add-prop|remove-prop|rename|move|extract …` and `brain split <comp> "<selector>" <NewName>`.

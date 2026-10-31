@@ -127,3 +127,69 @@ fn keys_named_by_contracts_and_service_keys_are_used() {
     assert_eq!(unused.iter().map(|d| d.msg.contains("UNUSED_THING")).collect::<Vec<_>>(), [true], "{unused:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn env_reads_come_from_tokens_not_from_text() {
+    let keys = |src: &str| brain_check::env::reads(src).into_iter().map(|r| r.key).collect::<Vec<_>>();
+    let none: Vec<String> = Vec::new();
+    for src in [
+        "// process.env.IN_LINE_COMMENT\nconst a = 1\n",
+        "/* ctx.env.IN_BLOCK_COMMENT */\n",
+        "const a = 'import.meta.env.IN_STRING'\n",
+        "const a = \"process.env.IN_STRING\"\n",
+        "const a = `set process.env.IN_TEMPLATE first`\n",
+        "const a = /process.env.IN_REGEX/\n",
+        "const a = myctx.env.NOT_CTX\n",
+        "const a = my.process.env.NOT_PROCESS\n",
+        "const a = process.environment.NOT_ENV\n",
+    ] {
+        assert_eq!(keys(src), none, "{src}");
+    }
+    assert_eq!(keys("const a = `v ${process.env.IN_EXPRESSION} w`\n"), ["IN_EXPRESSION"]);
+    assert_eq!(keys("const a = process\n  .env\n  .SPLIT_LINES\n"), ["SPLIT_LINES"]);
+    assert_eq!(keys("const a = ctx.env['BRACKET_KEY']\nconst b = ctx.env?.OPTIONAL_KEY\n"), ["BRACKET_KEY", "OPTIONAL_KEY"]);
+    assert_eq!(keys("<meta server>\nexport default () => import.meta.env.AFTER_META\n"), ["AFTER_META"]);
+    // a file the lexer cannot read to the end still reports what it reads
+    assert_eq!(keys("#!/usr/bin/env node\nconst a = process.env.AFTER_SHEBANG\n"), ["AFTER_SHEBANG"]);
+    // the byte offset is that of the read
+    let src = "// process.env.NO\nconst a = process.env.YES\n";
+    let read = brain_check::env::reads(src).remove(0);
+    assert_eq!(&src[read.at..read.at + 7], "process");
+}
+
+#[test]
+fn env_reads_in_markup_only_see_scripts_and_expressions() {
+    let keys = |src: &str| brain_check::env::reads_in(src, true).into_iter().map(|r| r.key).collect::<Vec<_>>();
+    let none: Vec<String> = Vec::new();
+    for src in [
+        "<p>set process.env.IN_PROSE in the host</p>\n",
+        "<!-- ctx.env.IN_HTML_COMMENT -->\n<p>x</p>\n",
+        "<a title=\"process.env.IN_ATTR\">x</a>\n",
+        "<style>.a::after { content: 'process.env.IN_CSS' }</style>\n<p>x</p>\n",
+        "<script>\n  // ctx.env.IN_SCRIPT_COMMENT\n</script>\n<p>{'ctx.env.IN_VALUE_STRING'}</p>\n",
+    ] {
+        assert_eq!(keys(src), none, "{src}");
+    }
+    assert_eq!(keys("<script>\n  const a = process.env.IN_SCRIPT\n</script>\n<p>{ctx.env.IN_VALUE}</p>\n<a title=\"x {ctx.env.IN_MIXED}\">y</a>\n{#if ctx.env.IN_BLOCK}z{/if}\n"), ["IN_SCRIPT", "IN_VALUE", "IN_MIXED", "IN_BLOCK"]);
+}
+
+#[test]
+fn a_guard_in_another_statement_counts() {
+    let guarded = |src: &str| brain_check::env::reads(src).remove(0).guarded;
+    for src in [
+        "const key = ctx.env.API_KEY\nif (!key) return null\n",
+        "const key = ctx.env.API_KEY\nif (key) use(key)\n",
+        "const key = process.env.API_KEY;\nreturn key || 'none'\n",
+        "let key = process.env.API_KEY\nconst a = key ?? 'none'\n",
+        "const key = Number(process.env.LIMIT)\nreturn key || 10\n",
+    ] {
+        assert!(guarded(src), "{src}");
+    }
+    for src in [
+        "const key = ctx.env.API_KEY\nreturn send(key)\n",
+        "const key = ctx.env.API_KEY\nconst other = 1\nif (other) use(key)\n",
+        "const key = ctx.env.API_KEY + 'x'\nif (key) use(key)\n",
+    ] {
+        assert!(!guarded(src), "{src}");
+    }
+}

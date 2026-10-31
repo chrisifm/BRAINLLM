@@ -203,3 +203,10 @@ test('session rotation, version, revocation and configured length', async () => 
     for (const [k, n] of [['p', 'BRAIN_SECRET_PREVIOUS'], ['v', 'BRAIN_SESSION_VERSION'], ['s', 'BRAIN_SESSION_SECONDS']]) saved[k] === undefined ? delete process.env[n] : process.env[n] = saved[k]
   }
 })
+
+test('a session without BRAIN_SECRET names B0782 and how to fix it, in every session write', async () => {
+  const { sessionFrom } = await import('../server/server.mjs')
+  const { session } = sessionFrom({}, '')
+  for (const write of [() => session.set({ name: 'Ada' }), () => session.setSecret({ token: 't' })])
+    assert.throws(write, /B0782: BRAIN_SECRET is not set.*\.brain_env/)
+})
