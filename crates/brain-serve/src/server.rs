@@ -1266,6 +1266,11 @@ fn app_page(ctx: &Ctx, req: &http::Request) -> (u16, String, Option<String>) {
                     ),
                 ),
                 // `throw notFound()` / `return notFound()` from load (F11): views/404.brain with status 404, as in production
+                // `gone()` (§33): 410 with views/410.brain when the app has one, else the 404 view
+                Ok(props) if props.starts_with("{\"notFound\":true,\"gone\":true") => (
+                    410,
+                    fixed_view(ctx, if ctx.root.join("views/410.brain").is_file() { "views/410.brain" } else { "views/404.brain" }, "{}", "Gone", &req.path),
+                ),
                 Ok(props) if props.starts_with("{\"notFound\":true") => (
                     404,
                     fixed_view(ctx, "views/404.brain", "{}", "Not found", &req.path),

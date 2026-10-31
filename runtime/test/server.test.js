@@ -153,7 +153,8 @@ test('SSR: load timeout → 504 page, load error → generic 500 (stack only in 
 
 test('static: clean URLs, index, gzip when accepted, immutable /_b/, 404 page, server code never served', async () => {
   assert.match(await (await get('/about')).text(), /About/)
-  assert.match(await (await get('/docs/')).text(), /Docs/)
+  assert.match(await (await get('/docs')).text(), /Docs/)
+  assert.equal((await get('/docs/')).headers.get('location'), '/docs') // §33 trailingSlash "never": one 301
   const home = await get('/')
   assert.match(home.headers.get('content-security-policy'), /nonce-/)
   assert.match(await home.text(), /<script nonce="[^"]+" type="module" src="\/_b\/app.js">/)
@@ -276,7 +277,8 @@ test("BUILD #177: the manifest's CSP is used as is, with this response's nonce a
 })
 
 test('#193 routes come from the manifest (rx, order): :param one segment, *rest catch-all, _segments never match', async () => {
-  assert.match(await (await get('/users/7/')).text(), /<p>id 7/)
+  assert.match(await (await get('/users/7')).text(), /<p>id 7/)
+  assert.equal((await get('/users/7/')).headers.get('location'), '/users/7')
   assert.equal((await get('/users/_x')).status, 404)
   assert.equal((await get('/users/a/b')).status, 404)
   const doc = await (await get('/docs/a/b/c')).text()

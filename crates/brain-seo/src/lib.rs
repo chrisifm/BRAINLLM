@@ -119,6 +119,8 @@ pub struct Built {
     /// `redirects.json` rules, validated: feed them to [`redirects::nginx`], [`redirects::caddy`] and
     /// [`redirects::server_json`] for the server configs (`_redirects` is already in `files`).
     pub redirects: Vec<redirects::Rule>,
+    /// `seo.trailingSlash` / `seo.canonicalHost`: feed with the rules to [`redirects::server_json_with`].
+    pub policy: redirects::Policy,
     /// `(dist path, bytes)` of generated binary files (social images).
     pub binary: Vec<(String, Vec<u8>)>,
     pub report: Report,
@@ -797,8 +799,8 @@ pub fn finish_with_og(
                 .join("\n")
         ));
     }
-    if !rules.is_empty() {
-        files.push(("_redirects".into(), redirects::netlify(&rules)));
+    if !rules.is_empty() || !cfg.redirect_policy.is_default() {
+        files.push(("_redirects".into(), redirects::netlify_with(&rules, &cfg.redirect_policy)));
     }
     if let (Some(site), Ok(prev)) = (
         &cfg.site,
@@ -838,6 +840,7 @@ pub fn finish_with_og(
         warnings,
         csp: google.csp,
         redirects: rules,
+        policy: cfg.redirect_policy.clone(),
         binary,
         report,
     })

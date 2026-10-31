@@ -76,7 +76,7 @@ Signals are plain variables: `n++`, `items = [...items, x]`. Never mutate in pla
 | `sig(v)` | reactive state |
 | `drv(() => e)` | derived, read-only |
 | `fx(() => { …; return cleanup })` | side effect; return cleanup for listeners/timers |
-| `export async function load(ctx)` | views only, runs on server; result arrives as `props`. `throw notFound()` → 404 with `views/404.brain`; `throw redirect('/x')` → 303 |
+| `export async function load(ctx)` | views only, runs on server; result arrives as `props`. `throw notFound()` → 404 with `views/404.brain`; `throw gone()` → 410 (removed for good; `views/410.brain`, else the 404 view); `throw redirect('/x')` → 303, `redirect('/new-slug', 301)` for a moved record |
 | `emit('ev', data?)` | event to parent (`on:ev` on the parent) |
 | `ref()` + `bind:ref={r}` | DOM node access (never `document`/`window`) |
 | `log(...)` | dev log, removed in build |

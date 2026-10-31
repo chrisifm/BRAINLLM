@@ -11,6 +11,12 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Added
 
+- Crawler-safe answers (§33): `throw gone()` in `load` answers 410; a redirect rule, the trailing-slash policy
+  (`brain.json` `seo.trailingSlash`: `never` by default, `always`, `ignore`) and the canonical host
+  (`seo.canonicalHost`) are one 301 hop with the query kept, in `brain start` for SSR and static apps. Guard
+  redirects and 403 pages carry `X-Robots-Tag: noindex, nofollow`; a streamed route waits 50 ms for `load()` so a
+  quick 404/410/30x keeps its real status instead of a soft 200.
+
 - Backend contracts accept exact `int`, `decimal(p,s)`, `date`, `datetime`, `enum(a|b)` and `list<str[,N]>` fields,
   object field options `{type, default, unique}` and declarative checks in `constraints.jsbrain`. Decimals travel and
   are stored as canonical strings with a lossless database CHECK; unique and check violations answer 409/422. Records

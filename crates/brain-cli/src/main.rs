@@ -1173,7 +1173,10 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
         if !built.redirects.is_empty() {
             files.push(("_brain/redirects.nginx".into(), brain_seo::redirects::nginx(&built.redirects)));
             files.push(("_brain/redirects.caddy".into(), brain_seo::redirects::caddy(&built.redirects)));
-            files.push(("_server/redirects.json".into(), brain_seo::redirects::server_json(&built.redirects).stringify()));
+        }
+        // §33: rules + trailing-slash/canonical-host policy, one hop in server.mjs
+        if !built.redirects.is_empty() || !built.policy.is_default() {
+            files.push(("_server/redirects.json".into(), brain_seo::redirects::server_json_with(&built.redirects, &built.policy).stringify()));
         }
         Ok(brain_pack::PostOut { files, binary: built.binary, warnings: built.warnings, csp: built.csp.iter().map(|(d, o)| (d.to_string(), o.to_string())).collect() })
     };

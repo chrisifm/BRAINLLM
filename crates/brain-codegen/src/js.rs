@@ -475,6 +475,9 @@ impl Gen<'_> {
                 // `throw notFound()` (or return it) from `load`: the server answers 404 with views/404.brain (F11).
                 // It takes no arguments: any given (`notFound('why')`) are ignored, never left as an undefined call.
                 "notFound" => return "({ notFound: true, status: 404 })".into(),
+                // `throw gone()` (§33): the record was removed for good → 410. `notFound: true` keeps older readers on
+                // the not-found path; server.mjs and the dev server read `gone`. A local `gone` is the author's own.
+                "gone" if self.scopes.lookup("gone").is_none() => return "({ notFound: true, gone: true, status: 410 })".into(),
                 "deny" => {
                     let why = args.first().map(|r| self.expr(r)).unwrap_or_else(|| "\"forbidden\"".into());
                     return format!("({{ deny: {why} }})");

@@ -95,6 +95,8 @@ pub struct Static {
     pub build: String,
     /// brain.json `base` without its trailing slash (`/app`), empty at the root (#148).
     pub pre: String,
+    /// `_redirects` (redirects.json + `seo.trailingSlash`/`seo.canonicalHost`, §33): one hop per request.
+    pub redirects: (Vec<brain_seo::redirects::Rule>, brain_seo::redirects::Policy),
 }
 
 impl Static {
@@ -110,6 +112,13 @@ impl Static {
                 Vec::new()
             },
             build: signature(dist).unwrap_or_default(),
+            redirects: if regular_output(dist, &dist.join("_redirects")) {
+                std::fs::read_to_string(dist.join("_redirects"))
+                    .map(|s| brain_seo::redirects::parse_netlify(&s))
+                    .unwrap_or_default()
+            } else {
+                Default::default()
+            },
         }
     }
 
@@ -248,6 +257,15 @@ impl Static {
                 .filter(|r| r.starts_with('/'))
                 .map(str::to_string)
         };
+        // §33: the redirect rule, the trailing-slash policy and the canonical host as ONE hop, query kept
+        if let Some((loc, code)) = inner.as_deref().and_then(|p| {
+            let q = if req.query.is_empty() { String::new() } else { format!("?{}", req.query) };
+            brain_seo::redirects::resolve(&self.redirects.0, &self.redirects.1, p, &q, req.header("host"))
+        }) {
+            let loc = if loc.starts_with('/') { format!("{}{loc}", self.pre) } else { loc };
+            let cache = if code == 301 || code == 308 { "public, max-age=3600" } else { "no-store" };
+            return write(&mut s, code, &[("Location".into(), loc), ("Cache-Control".into(), cache.into())], b"", head);
+        }
         let (status, file) = match inner.as_deref().and_then(|p| self.resolve(p)) {
             Some(f) => (200, f),
             None => match ["404.html", "404.brain"]
@@ -477,6 +495,9 @@ fn write_headers<W: Write>(
     let reason = match status {
         200 => "OK",
         301 => "Moved Permanently",
+        302 => "Found",
+        307 => "Temporary Redirect",
+        308 => "Permanent Redirect",
         304 => "Not Modified",
         404 => "Not Found",
         405 => "Method Not Allowed",
@@ -692,6 +713,37 @@ mod tests {
         }
         assert!(app.resolve("/.well-known/security.txt").is_some());
         std::fs::remove_dir_all(dist).unwrap();
+    }
+
+    #[test]
+    fn redirects_file_and_slash_policy_are_one_hop() {
+        use std::io::{Read, Write};
+        use std::net::{TcpListener, TcpStream};
+        let dist = std::env::temp_dir().join(format!("brain-prod-redir-{}", std::process::id()));
+        std::fs::create_dir_all(dist.join("about")).unwrap();
+        std::fs::write(dist.join("about/index.html"), "about-page").unwrap();
+        let get = |files: &str, path: &str, host: &str| {
+            std::fs::write(dist.join("_redirects"), files).unwrap();
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let handler = Static::load(&dist, "/");
+            let task = std::thread::spawn(move || handler.handle(listener.accept().unwrap().0).unwrap());
+            let mut c = TcpStream::connect(addr).unwrap();
+            write!(c, "GET {path} HTTP/1.1\r\nHost: {host}\r\n\r\n").unwrap();
+            let mut r = String::new();
+            c.read_to_string(&mut r).unwrap();
+            task.join().unwrap();
+            r
+        };
+        let r = get("/old /about 301\n", "/old/?a=1", "localhost");
+        assert!(r.starts_with("HTTP/1.1 301") && r.contains("Location: /about?a=1\r\n"), "{r}");
+        let r = get("", "/about/", "localhost");
+        assert!(r.contains("Location: /about\r\n"), "default trailingSlash never: {r}");
+        assert!(get("", "/about", "localhost").ends_with("about-page"));
+        let r = get("# brain trailingSlash=always host=https://shop.example\n", "/about", "www.shop.example");
+        assert!(r.contains("Location: https://shop.example/about/\r\n"), "{r}");
+        assert!(get("# brain trailingSlash=always host=https://shop.example\n", "/about/", "127.0.0.1:8080").ends_with("about-page"));
+        std::fs::remove_dir_all(&dist).unwrap();
     }
 
     #[test]

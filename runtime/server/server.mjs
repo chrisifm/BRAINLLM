@@ -83,6 +83,9 @@ function intendedStatus(error) {
   return Number.isInteger(status) && STATUS_CODES[status] && (error instanceof HttpError && status >= 400 && status <= 599 || plain && status >= 400 && status < 500) ? status : null
 }
 const REDIRECT_CODES = new Set([301, 302, 303, 307, 308])
+const NOINDEX = 'noindex, nofollow'
+// §33: how long a streamed route waits for load() before sending its 200 head (a quick 404/410/30x keeps its status)
+const STREAM_WAIT = 50
 function safeLocation(value) {
   if (typeof value !== 'string' || value.length > 8192 || !value.startsWith('/') || value.startsWith('//') || /[\\\x00-\x20\x7f]/.test(value) || /^\/%2f/i.test(value) || /%(?:0[0-9a-f]|1[0-9a-f]|5c|7f)/i.test(value) || /%20/i.test(value.split(/[?#]/,1)[0])) throw new HttpError(500, 'Invalid same-site redirect location')
   return value
@@ -447,6 +450,28 @@ export function createServer(o = {}) {
     return null
   }
   const withBase = u => (typeof u === 'string' && BASE !== '/' && u.startsWith('/') && !u.startsWith('//') && !(u + '/').startsWith(BASE) ? BASE + u.slice(1) : u)
+  // §33 crawler-safe URLs: the redirect rule, the trailing-slash policy (brain.json seo.trailingSlash, default "never")
+  // and the canonical host (seo.canonicalHost → site) are folded into ONE hop; loopback hosts are never redirected
+  // (a proxy that does not forward Host, local runs). The query is kept unless a rule's target has its own.
+  const SLASH = RD.slash || 'never', HOST = typeof RD.host === 'string' && /^https?:\/\//.test(RD.host) ? new URL(RD.host) : null
+  const loopback = h => !h || /^(?:localhost|127(?:\.\d+){3}|\[::1\])(?::\d+)?$/i.test(h)
+  const canonicalOf = (req, url) => {
+    let path = url.pathname, query = url.search, status = 301, moved = false
+    const to = redirectOf(path)
+    if (to) {
+      if (/^https?:\/\//.test(to[0])) return [to[0], to[1], true]
+      const q = to[0].indexOf('?')
+      path = q < 0 ? to[0] : to[0].slice(0, q)
+      if (q >= 0) query = to[0].slice(q)
+      status = to[1]
+      moved = true
+    }
+    if (path !== '/' && SLASH === 'never' && path.endsWith('/')) path = path.replace(/\/+$/, '') || '/'
+    else if (path !== '/' && SLASH === 'always' && !path.endsWith('/') && !/\.[^/]*$/.test(path)) path += '/'
+    const host = HOST && !loopback(req.headers.host) && req.headers.host.toLowerCase() !== HOST.host
+    if (!moved && !host && path === url.pathname) return null
+    return [(host ? HOST.origin : '') + withBase(path) + query, status, host]
+  }
   hook(distURL, BASE)
 
   // ---------- helpers ----------
@@ -499,9 +524,11 @@ export function createServer(o = {}) {
     send(res, status, body, { 'content-type': MIME['.html'], 'content-security-policy': withNonce(mf.csp || CSP0, nonce), 'cache-control': 'no-cache', ...(googleSignInPage(page) ? { 'cross-origin-opener-policy': 'same-origin-allow-popups' } : {}), ...(mf.build ? { 'x-brain-build': mf.build } : {}), ...headers })
   }
   const notFound = (req, res) => failPage(res, 404, res.getHeader('x-request-id'))
+  // `gone()` from load (§33): 410 tells crawlers the URL was removed for good; views/410.brain, else the 404 page
+  const missing = (req, res, x) => (x && x.gone === true ? failPage(res, 410, res.getHeader('x-request-id')) : notFound(req, res))
   const failPage = (res, status, rid) => {
     if (!wantsHtml(res.req)) return send(res, status, json({ schemaVersion: 1, status, rid, error: STATUS_CODES[status] || 'Request failed' }), { 'content-type': MIME['.json'] })
-    const custom = (status === 404 && mf.notFound) || (mf.errors && mf.errors[status]) || `${status}.html`
+    const custom = (status === 404 && mf.notFound) || (mf.errors && mf.errors[status]) || (status === 410 && !file('410.html') ? mf.notFound : `${status}.html`)
     const path = typeof custom === 'string' && file(custom)
     return html(res, status, path ? readFileSync(path, 'utf8') : defaultError(status, rid, BASE))
   }
@@ -611,7 +638,8 @@ export function createServer(o = {}) {
         log('error', 'guard failed', { rid, path: url.pathname, stack: String((e && e.stack) || e) })
         return errorPage(req, res, route, params, url, rid)
       }
-      if (r.redirect) return send(res, r.status, '', { location: withBase(redirect(r.redirect, r.status ?? 303).redirect), 'cache-control': 'no-store', ...ctx.session.headers() })
+      // a guarded page must not reach the index through its login redirect (§33): the redirect itself says noindex
+      if (r.redirect) return send(res, r.status, '', { location: withBase(redirect(r.redirect, r.status ?? 303).redirect), 'cache-control': 'no-store', 'x-robots-tag': NOINDEX, ...ctx.session.headers() })
       if (r.deny !== undefined) return forbidden(req, res, url, rid, r.deny)
       extra = r.headers
     }
@@ -623,13 +651,13 @@ export function createServer(o = {}) {
       }
     } catch (e) {
       if (e && e.redirect) return send(res, e.status || 303, '', { location: withBase(redirect(e.redirect, e.status ?? 303).redirect), ...ctx.session.headers() })
-      if ((e instanceof HttpError && e.status === 404) || (e && e.notFound === true)) return notFound(req, res) // `throw notFound()` (F11)
+      if ((e instanceof HttpError && e.status === 404) || (e && e.notFound === true)) return missing(req, res, e) // `throw notFound()` (F11) / `throw gone()` (410)
       const status = intendedStatus(e) || 500
       log('error', 'load failed', { rid, path: url.pathname, status, stack: String((e && e.stack) || e) })
       return status === 500 ? errorPage(req, res, route, params, url, rid) : failPage(res, status, rid)
     }
     if (props && props.redirect) return send(res, props.status || 303, '', { location: withBase(redirect(props.redirect, props.status ?? 303).redirect), ...ctx.session.headers() })
-    if (props && props.notFound === true) return notFound(req, res) // `return notFound()` (F11)
+    if (props && props.notFound === true) return missing(req, res, props) // `return notFound()` (F11) / `return gone()`
     let body, seo, failed
     try {
       const at = { path: url.pathname, params: params || {}, query: Object.fromEntries(url.searchParams) } // route() (§41.5)
@@ -659,6 +687,17 @@ export function createServer(o = {}) {
     const sm = await load(route.server)
     const seoF = sm.seo || (await load(route.view)).default.seo
     if (route.i18n) await load(route.i18n)
+    // load() starts now: the loading view (#253) renders while it runs
+    const loadP = typeof sm.load === 'function' ? withTimeout(Promise.resolve().then(() => sm.load(ctx)), TIMEOUT) : Promise.resolve(null)
+    loadP.catch(() => {}) // handled below; never an unhandled rejection while the loading view renders
+    // §33: before the 200 head goes out, give load() a short window; a quick notFound/gone/redirect keeps its real
+    // status (404/410/30x) instead of a soft 200 with a notice. Slower loads stream as before.
+    let timer
+    const early = await Promise.race([loadP.then(v => ({ v }), e => ({ e })), new Promise(r => (timer = setTimeout(r, STREAM_WAIT, null)))])
+    clearTimeout(timer)
+    const x = early && (early.e ?? early.v)
+    if (x && x.redirect) return send(res, x.status || 303, '', { location: withBase(redirect(x.redirect, x.status ?? 303).redirect), ...ctx.session.headers() })
+    if (x && x.notFound === true) return missing(req, res, x)
     const nonce = randomBytes(16).toString('base64'), n = h => h.replace(/<script(?![^>]*\bnonce=)/g, `<script nonce="${nonce}"`)
     res.writeHead(200, {
       ...SECURITY, 'content-type': MIME['.html'], 'content-security-policy': withNonce(mf.csp || CSP0, nonce), 'cache-control': 'no-cache',
@@ -671,9 +710,6 @@ export function createServer(o = {}) {
     } finally {
       globalThis.__brainLocale = null
     }
-    // load() starts now: the loading view (#253) renders while it runs
-    const loadP = typeof sm.load === 'function' ? withTimeout(Promise.resolve().then(() => sm.load(ctx)), TIMEOUT) : Promise.resolve(null)
-    loadP.catch(() => {}) // handled below; never an unhandled rejection while the loading view renders
     const at = { path: url.pathname, params: params || {}, query: Object.fromEntries(url.searchParams) }
     res.write(n(head(top, seo0, url.pathname)))
     // QA #253: the folder's _loading.brain goes in the region with the first chunk (SPEC: shows while load runs),
@@ -706,7 +742,8 @@ export function createServer(o = {}) {
       props = (await loadP) ?? {}
       if (props.redirect || props.notFound === true) throw props
     } catch (e) {
-      if (e && e.redirect) return end(`<script>location.replace(${jsonInHtml(withBase(redirect(e.redirect, e.status ?? 303).redirect))})</script>`)
+      // too late for a real redirect: the page says noindex so the stub never enters the index
+      if (e && e.redirect) return end(`<meta name="robots" content="noindex"><script>location.replace(${jsonInHtml(withBase(redirect(e.redirect, e.status ?? 303).redirect))})</script>`)
       // a streamed page already sent its 200 head: the region gets the not-found notice and the page is noindex
       if (e && e.notFound === true) return end(`<meta name="robots" content="noindex"><p role="alert" class="brain-fallback">Page not found.</p>`, {}, bottom.replace(/<script type="module">(?:(?!<\/script>)[\s\S])*?brain-view[\s\S]*?<\/script>/g, ''))
       log('error', 'load failed (streamed)', { rid, path: url.pathname, status: 200, stack: String((e && e.stack) || e) }) // headers already out
@@ -735,6 +772,7 @@ export function createServer(o = {}) {
   }
   // deny → views/403.brain (manifest `forbidden`, props.reason) or the static 403.html, always status 403
   function forbidden(req, res, url, rid, reason) {
+    res.setHeader('x-robots-tag', NOINDEX) // a members-only page never enters the index (§33)
     if (!wantsHtml(req)) return failPage(res, 403, rid)
     if (mf.forbidden) return ssr(req, res, mf.forbidden, {}, url, rid, null, 403, { reason })
     const f = file('403.html')
@@ -970,7 +1008,7 @@ export function createServer(o = {}) {
   function serveStatic(req, res, url) {
     const p = publicStaticPath(url.pathname)
     if (p === null) return false
-    const candidates = p.endsWith('/') ? [p + 'index.html'] : [p, p + '.html', p + '/index.html']
+    const candidates = p.endsWith('/') ? [p + 'index.html', ...(p.length > 1 ? [p.slice(0, -1) + '.html'] : [])] : [p, p + '.html', p + '/index.html']
     for (const c of candidates) {
       const f = file(c)
       if (!f) continue
@@ -1025,12 +1063,9 @@ export function createServer(o = {}) {
       req.$brainPath = url.pathname
       if (native && /^\/(?:api(?:\/|$)|_brain(?:\/|$)|s\/)/.test(url.pathname)) return await native.proxy(req,res,url,rid,send)
       // redirects.json (manifest `redirects`, brain-seo server_json): exact sources first, then patterns, on the app path;
-      // same-site targets get the base, the query is kept when the target has none
-      const to = redirectOf(url.pathname)
-      if (to && (req.method === 'GET' || req.method === 'HEAD')) {
-        const loc = /^https?:\/\//.test(to[0]) ? to[0] : withBase(to[0]) + (to[0].includes('?') ? '' : url.search)
-        return send(res, to[1], '', { location: loc, 'cache-control': to[1] === 301 || to[1] === 308 ? 'public, max-age=3600' : 'no-store' }, true)
-      }
+      // same-site targets get the base, the query is kept when the target has none; slash policy and host in the same hop
+      const to = (req.method === 'GET' || req.method === 'HEAD') && canonicalOf(req, url)
+      if (to) return send(res, to[1], '', { location: to[0], 'cache-control': to[1] === 301 || to[1] === 308 ? 'public, max-age=3600' : 'no-store' }, to[2])
       const r = /^\/_r\/([\w-]+)\/([\w$]+)$/.exec(url.pathname)
       if (r) return await rpc(req, res, r[1], r[2], url, rid)
       if (url.pathname.startsWith('/_r/')) return send(res, 404, json({ error: 'Unknown function' }), { 'content-type': MIME['.json'] })

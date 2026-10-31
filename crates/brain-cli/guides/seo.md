@@ -39,6 +39,11 @@ page text, not after.
   `jsonld={{ '@type': 'Article', headline: props.post.title, datePublished: props.post.date }}` (B1603/B1818 without `@type`).
 - Keep each attribute value on one line (newlines are kept in the output). Values may be expressions from `load` props: `title={props.user.name}`.
 - Site defaults once in `app.brain`: `<meta seo titleTemplate="%s · Acme" og:image="/og.png" twitter="@acme">`.
+- Status codes from `load`: `throw notFound()` → 404, `throw gone()` → 410 (deleted for good), a renamed record
+  `throw redirect('/jobs/' + job.slug, 301)`. Never render an empty page with 200 (a soft 404).
+- URLs: `/about/` answers one 301 to `/about` (`brain.json` `"seo": { "trailingSlash": "never" | "always" |
+  "ignore" }`); `"canonicalHost": true` sends `www.` or old domains to `site` in the same hop. Moved pages go in
+  `redirects.json` (`[{ "from": "/old", "to": "/new", "status": 301 }]`), never a meta refresh or a script.
 - `robots="noindex"` for pages that must not be indexed (403, thank-you pages). Other head tags: a `<head>` block in the view.
 - `[id]` views: `export async function paths()` (prerendered, in the sitemap) or, for live pages,
   `export async function sitemap({ env })` returning `[{ id, lastmod }]` (needs `brain.json` `site`). Never both (B0117).

@@ -22,6 +22,39 @@ impl Rule {
     }
 }
 
+/// Trailing-slash policy (`brain.json` `seo.trailingSlash`): `/about/` and `/about` are one URL for crawlers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Slash {
+    /// `/about/` → 301 `/about` (default).
+    #[default]
+    Never,
+    /// `/about` → 301 `/about/` (paths whose last segment has a dot, such as `/feed.xml`, keep their form).
+    Always,
+    /// Both forms are served (the canonical link still names one).
+    Ignore,
+}
+
+/// What the servers fold into the same single hop as a redirect rule (§33): the slash policy and, with
+/// `seo.canonicalHost`, the canonical origin (`site`) every other host is sent to.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Policy {
+    pub slash: Slash,
+    pub host: Option<String>,
+}
+
+impl Policy {
+    pub fn is_default(&self) -> bool {
+        self.slash == Slash::Never && self.host.is_none()
+    }
+    fn slash_name(&self) -> &'static str {
+        match self.slash {
+            Slash::Never => "never",
+            Slash::Always => "always",
+            Slash::Ignore => "ignore",
+        }
+    }
+}
+
 /// `(message, fix)` of one invalid rule.
 pub type Problem = (String, String);
 
@@ -195,10 +228,97 @@ pub fn validate(rules: &[Rule], pages: &[String], exists: &dyn Fn(&str) -> bool)
 
 /// `_redirects` for Cloudflare Pages and Netlify (`*` → `:splat`).
 pub fn netlify(rules: &[Rule]) -> String {
-    rules
-        .iter()
-        .map(|r| format!("{} {} {}\n", r.from, r.to, r.status))
-        .collect()
+    netlify_with(rules, &Policy::default())
+}
+
+/// [`netlify`] plus the policy as a leading comment line (hosts ignore `#` lines; `brain start` reads it).
+pub fn netlify_with(rules: &[Rule], policy: &Policy) -> String {
+    let mut o = String::new();
+    if !policy.is_default() {
+        o.push_str(&format!("# brain trailingSlash={}", policy.slash_name()));
+        if let Some(h) = &policy.host {
+            o.push_str(&format!(" host={h}"));
+        }
+        o.push('\n');
+    }
+    for r in rules {
+        o.push_str(&format!("{} {} {}\n", r.from, r.to, r.status));
+    }
+    o
+}
+
+/// Reads a `_redirects` file written by [`netlify_with`] (the static server of `brain start`).
+pub fn parse_netlify(src: &str) -> (Vec<Rule>, Policy) {
+    let mut policy = Policy::default();
+    let mut rules = Vec::new();
+    for line in src.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        if let Some(c) = line.strip_prefix("# brain ") {
+            for kv in c.split_whitespace() {
+                match kv.split_once('=') {
+                    Some(("trailingSlash", "always")) => policy.slash = Slash::Always,
+                    Some(("trailingSlash", "ignore")) => policy.slash = Slash::Ignore,
+                    Some(("host", h)) if h.starts_with("http") => policy.host = Some(h.to_string()),
+                    _ => {}
+                }
+            }
+            continue;
+        }
+        if line.starts_with('#') {
+            continue;
+        }
+        let mut it = line.split_whitespace();
+        if let (Some(from), Some(to)) = (it.next(), it.next()) {
+            let status = it.next().and_then(|s| s.parse().ok()).filter(|s| [301, 302, 307, 308].contains(s)).unwrap_or(301);
+            rules.push(Rule { from: from.into(), to: to.into(), status });
+        }
+    }
+    (rules, policy)
+}
+
+/// The single redirect a server answers for `path` + `query` (§33): the matching rule, then the slash policy on
+/// its target, then the canonical host when `host` (the request's `Host`) is another non-loopback host.
+/// `None` when the URL is already canonical. `(location, status)`; the query is kept unless the rule's target
+/// has its own.
+pub fn resolve(rules: &[Rule], policy: &Policy, path: &str, query: &str, host: Option<&str>) -> Option<(String, u16)> {
+    let (mut p, mut q, mut status, mut moved) = (path.to_string(), query.to_string(), 301, false);
+    // exact sources first, then patterns (as server.mjs does)
+    let hit = |pattern: bool| rules.iter().filter(|r| r.is_pattern() == pattern).find_map(|r| apply(r, path).map(|t| (r, t)));
+    if let Some((rule, to)) = hit(false).or_else(|| hit(true)) {
+        if rule.external() {
+            return Some((to, rule.status));
+        }
+        match to.split_once('?') {
+            Some((a, b)) => {
+                p = a.to_string();
+                q = format!("?{b}");
+            }
+            None => p = to,
+        }
+        status = rule.status;
+        moved = true;
+    }
+    if p != "/" {
+        match policy.slash {
+            Slash::Never if p.ends_with('/') => p = p.trim_end_matches('/').to_string(),
+            Slash::Always if !p.ends_with('/') && !segs(&p).last().is_some_and(|l| l.contains('.')) => p.push('/'),
+            _ => {}
+        }
+        if p.is_empty() {
+            p = "/".into();
+        }
+    }
+    let loopback = |h: &str| {
+        let name = h.rsplit_once(':').filter(|(a, _)| !a.ends_with(']') || h.starts_with('[')).map_or(h, |(a, _)| a);
+        name.is_empty() || name.eq_ignore_ascii_case("localhost") || name.starts_with("127.") || name == "[::1]"
+    };
+    let other = policy.host.as_deref().and_then(|origin| {
+        let want = origin.split("://").nth(1)?.trim_end_matches('/');
+        host.filter(|h| !loopback(h) && !h.eq_ignore_ascii_case(want)).map(|_| origin.trim_end_matches('/'))
+    });
+    if !moved && other.is_none() && p == path {
+        return None;
+    }
+    Some((format!("{}{p}{q}", other.unwrap_or("")), status))
 }
 
 fn regex_of(from: &str) -> (String, Vec<String>) {
@@ -276,6 +396,20 @@ pub fn caddy(rules: &[Rule]) -> String {
         }
     }
     o
+}
+
+/// [`server_json`] plus the policy (`slash`, `host`) when it is not the default.
+pub fn server_json_with(rules: &[Rule], policy: &Policy) -> Json {
+    let mut j = server_json(rules);
+    if let Json::Obj(kv) = &mut j {
+        if policy.slash != Slash::Never {
+            kv.push(("slash".into(), Json::str(policy.slash_name())));
+        }
+        if let Some(h) = &policy.host {
+            kv.push(("host".into(), Json::str(h)));
+        }
+    }
+    j
 }
 
 /// Table for `server.mjs`: exact sources in a map, patterns as regex + target with `$1`.
@@ -438,6 +572,36 @@ mod tests {
             server_json(&r).get("exact").unwrap().stringify(),
             r#"{"/old-pricing":["/pricing",301]}"#
         );
+    }
+
+    #[test]
+    fn one_hop_rule_slash_and_host() {
+        let r = parse(r#"[{"from":"/old","to":"/new/"},{"from":"/blog/:slug","to":"/posts/:slug?from=blog","status":308},{"from":"/ext","to":"https://other.dev/x","status":302}]"#).unwrap();
+        let never = Policy::default();
+        assert_eq!(resolve(&r, &never, "/old/", "?a=1", None), Some(("/new?a=1".into(), 301)));
+        assert_eq!(resolve(&r, &never, "/blog/hi", "?a=1", None), Some(("/posts/hi?from=blog".into(), 308)));
+        assert_eq!(resolve(&r, &never, "/ext", "", None), Some(("https://other.dev/x".into(), 302)));
+        assert_eq!(resolve(&r, &never, "/about/", "", None), Some(("/about".into(), 301)));
+        assert_eq!(resolve(&r, &never, "/about", "", None), None);
+        assert_eq!(resolve(&r, &never, "/", "", None), None);
+        let always = Policy { slash: Slash::Always, host: Some("https://shop.example".into()) };
+        assert_eq!(resolve(&r, &always, "/about", "?x=1", Some("www.shop.example")), Some(("https://shop.example/about/?x=1".into(), 301)));
+        assert_eq!(resolve(&r, &always, "/about/", "", Some("shop.example")), None);
+        assert_eq!(resolve(&r, &always, "/about/", "", Some("127.0.0.1:3000")), None, "loopback is never redirected");
+        assert_eq!(resolve(&r, &always, "/feed.xml", "", None), None, "files keep their form");
+        let ignore = Policy { slash: Slash::Ignore, host: None };
+        assert_eq!(resolve(&r, &ignore, "/about/", "", None), None);
+    }
+
+    #[test]
+    fn policy_round_trips_through_redirects_file() {
+        let r = rules();
+        let p = Policy { slash: Slash::Always, host: Some("https://shop.example".into()) };
+        let text = netlify_with(&r, &p);
+        assert!(text.starts_with("# brain trailingSlash=always host=https://shop.example\n"), "{text}");
+        assert_eq!(parse_netlify(&text), (r.clone(), p.clone()));
+        assert_eq!(netlify_with(&r, &Policy::default()), netlify(&r), "the default adds nothing");
+        assert_eq!(server_json_with(&[], &p).stringify(), r#"{"exact":{},"patterns":[],"slash":"always","host":"https://shop.example"}"#);
     }
 
     #[test]
