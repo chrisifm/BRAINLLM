@@ -332,3 +332,47 @@ test('#94 store sync: prototype keys from untrusted JSON are dropped; a full loc
   assert.match(warns.at(-1), /store prefs94: not saved to localStorage \(QuotaExceededError\)/)
   console.warn = w0
 })
+
+test("store sync 'ws': closing a connection removes its page listeners, so open/close cycles do not accumulate", async () => {
+  globalThis.location = new URL('https://app.test/x')
+  globalThis.WebSocket = class {
+    constructor() { this.readyState = 0 }
+    send() {}
+    close() { this.readyState = 3 }
+  }
+  const count = () => (doc._l.bub.visibilitychange || []).length
+  const before = count()
+  for (let i = 0; i < 10; i++) store({ n: 0 }, { sync: 'ws', url: '/cycle' }, 'cycle' + i).$close()
+  assert.equal(count(), before)
+  delete globalThis.WebSocket
+})
+
+test('store sync inside a subtree releases its BroadcastChannel, storage listener and socket on unmount', async () => {
+  const chans = new Set(), listeners = new Set()
+  globalThis.BroadcastChannel = class {
+    constructor() { chans.add(this) }
+    postMessage() {}
+    close() { chans.delete(this) }
+  }
+  globalThis.localStorage = { getItem: () => null, setItem() {} }
+  globalThis.addEventListener = (t, f) => t === 'storage' && listeners.add(f)
+  globalThis.removeEventListener = (t, f) => listeners.delete(f)
+  const socks = []
+  globalThis.WebSocket = class {
+    constructor() { this.readyState = 0; socks.push(this) }
+    send() {}
+    close() { this.readyState = 3 }
+  }
+  const Tab = key('tab'), Disk = key('disk'), Wire = key('wire')
+  const Root = scope(() => {
+    provide(Tab, store({ n: 0 }, { sync: 'tab' }, 'sub-tab'))
+    provide(Disk, store({ n: 0 }, { sync: 'storage' }, 'sub-disk'))
+    provide(Wire, store({ n: 0 }, { sync: 'ws', url: '/sub' }, 'sub-wire'))
+    return doc.createElement('i')
+  })
+  for (let i = 0; i < 5; i++) mount(() => Root({}), doc.body.appendChild(doc.createElement('div')))()
+  assert.equal(chans.size, 0, 'BroadcastChannels closed with their subtree')
+  assert.equal(listeners.size, 0, 'storage listeners removed with their subtree')
+  assert.ok(socks.every(s => s.readyState === 3), 'sockets closed with their subtree')
+  delete globalThis.BroadcastChannel; delete globalThis.addEventListener; delete globalThis.removeEventListener; delete globalThis.WebSocket
+})

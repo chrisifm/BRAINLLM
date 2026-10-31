@@ -119,12 +119,14 @@ export function store(init, o = {}, id) {
     const base = JSON.stringify(snap()) // the state as created: changes made before the module loads are still saved
     READY.push(import('./brain-persist.js').then(m => m.persist({ key: P, v, big, apply, snap, S, base })))
   }
+  let onStorage = null
   if (o.sync === 'storage' && G.localStorage) {
     try {
       const v = localStorage.getItem(K)
       if (v) apply(JSON.parse(v, safe))
     } catch {}
-    G.addEventListener && G.addEventListener('storage', e => e.key === K && e.newValue && apply(JSON.parse(e.newValue, safe)))
+    onStorage = e => e.key === K && e.newValue && apply(JSON.parse(e.newValue, safe))
+    G.addEventListener && G.addEventListener('storage', onStorage)
   }
   const bc = o.sync === 'tab' && G.BroadcastChannel ? new BroadcastChannel(K) : null
   const w = o.sync === 'ws' && G.WebSocket ? ws(o.url || '/_ws', K, apply) : null
@@ -155,6 +157,14 @@ export function store(init, o = {}, id) {
           }
       }),
     I.owner())
+  // a store owned by a subtree (provide inside a component) releases its channel, listener and socket with it;
+  // a global store (channels/, no owner) lives as long as the page
+  if (o.sync && I.owner())
+    I.root(() => fx(() => () => {
+      if (bc && bc.close) bc.close()
+      if (onStorage && G.removeEventListener) G.removeEventListener('storage', onStorage)
+      if (w) w.close()
+    }), I.owner())
   return s
 }
 
@@ -199,8 +209,9 @@ function ws(url, s, apply) {
       }
     }
     const now = () => ((n = 0), open())
+    const shown = () => document.visibilityState === 'visible' && open()
     G.addEventListener && G.addEventListener('online', now)
-    G.document && document.addEventListener && document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && open())
+    G.document && document.addEventListener && document.addEventListener('visibilitychange', shown)
     c = {
       subs,
       sub(k, f) {
@@ -212,14 +223,16 @@ function ws(url, s, apply) {
         off = true
         clearTimeout(t)
         sock && sock.close()
-        WS.delete(url)
+        if (WS.get(url) === c) WS.delete(url)
         G.removeEventListener && G.removeEventListener('online', now)
+        G.document && document.removeEventListener && document.removeEventListener('visibilitychange', shown)
       },
     }
     WS.set(url, c)
   }
   c.sub(s, apply)
-  return { send: d => c.send(s, d), close: () => (c.subs.delete(s), c.subs.size || c.close()) }
+  let gone = false // $close() and the owner's cleanup may both run: release once
+  return { send: d => c.send(s, d), close: () => gone || ((gone = true), c.subs.delete(s), c.subs.size || c.close()) }
 }
 
 // Shape of a store: field names + kind of each initial value. A persisted state with another shape is discarded.
