@@ -26,10 +26,16 @@ pub fn check(src: &str, rel: &Path, disk: &Path) -> (Vec<Diag>, Vec<PathBuf>) {
     // A .cssbrain (tokens or a shared stylesheet) is plain CSS, not a component: only its syntax is checked here.
     if rel.extension().is_some_and(|e| e == "cssbrain") {
         let file = rel.to_string_lossy().replace('\\', "/");
-        return (
-            brain_css::parse_str(src, &file).err().into_iter().collect(),
-            Vec::new(),
-        );
+        let diags = match brain_css::parse_str(src, &file) {
+            Err(d) => vec![d],
+            // the token file is unlayered on purpose (custom properties); a style rule there outranks every layer
+            Ok(sheet) if rel.file_name().is_some_and(|n| n == "tokens.cssbrain") => brain_css::unlayered_rules(&sheet)
+                .into_iter()
+                .map(|(sel, span)| Diag::new("B0309", &file, span, format!("`{sel}` sets styles outside any @layer in the token file, so it beats every view and component rule"), "wrap it in `@layer reset { … }` (or move it to the view or component that owns it); keep only custom properties unlayered"))
+                .collect(),
+            Ok(_) => Vec::new(),
+        };
+        return (diags, Vec::new());
     }
     match brain_parse::parse(src, rel) {
         Err(ds) => (ds, Vec::new()),
@@ -321,6 +327,17 @@ fn prune_cache(dir: &Path, max_bytes: u64, max_entries: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unlayered_style_rule_in_tokens_is_b0309() {
+        let src = ":root { color-scheme: light; --accent: #06c; }\n@media (prefers-color-scheme: dark) { :root { --accent: #4af; } }\n@layer reset { body { margin: 0; } }\nbody .card { color: var(--accent); }\n";
+        let (d, _) = check(src, Path::new("tokens.cssbrain"), Path::new("/nonexistent/tokens.cssbrain"));
+        let codes: Vec<(&str, u32)> = d.iter().map(|d| (d.code, d.line)).collect();
+        assert_eq!(codes, [("B0309", 4)], "{d:?}");
+        assert!(d[0].fix.contains("@layer"), "{}", d[0].fix);
+        // only the token file: a shared stylesheet keeps its own layering
+        assert!(check(src, Path::new("styles/shared.cssbrain"), Path::new("/nonexistent/styles/shared.cssbrain")).0.is_empty());
+    }
 
     #[test]
     fn codegen_dev_output() {

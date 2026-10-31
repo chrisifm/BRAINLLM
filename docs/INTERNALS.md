@@ -113,7 +113,7 @@ COMPILER assigns the next free code there in the same change that emits it, then
   B0208 on: without handler · B0209 repeated attribute · B0210 raw HTML without `sanitize` · B0211 `unload` listener ·
   B0212 (info) ternary in `class=` → `class:x`. · B0216 unknown `transition:` kind (edit) · B0217 `<component>`
   without `is` · B0218 slot props mixed with other content.
-- B03xx CSS: B0301 global selector · B0302 nonexistent token (`--space-0` and its synonyms normalize to `0`, info) · B0303 nonexistent mixin. · B0307 dead CSS that `@scope` cancels (html/body/:root not first, `:scope ~`/`+`, a tag the component never writes; warning)
+- B03xx CSS: B0301 global selector · B0302 nonexistent token (`--space-0` and its synonyms normalize to `0`, info) · B0303 nonexistent mixin. · B0307 dead CSS that `@scope` cancels (html/body/:root not first, `:scope ~`/`+`, a tag the component never writes; warning) · B0309 style rule outside `@layer` in tokens.cssbrain (beats every layered rule; warning)
 - B04xx accessibility and B05xx SEO: §8.
 - B1010 component over 150 lines or 20 KB (warning; the fix is the exact `brain split` command or the repeated block, §43).
 - B16xx source SEO and B17xx WebMCP: §32. B18xx built output, `brain seo audit` (§33; `brain_seo::CATALOG` holds

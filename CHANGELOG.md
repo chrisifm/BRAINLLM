@@ -11,6 +11,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Added
 
+- B0309 (warning): a style rule outside any `@layer` in `tokens.cssbrain` beats every view and component rule whatever
+  its specificity; `brain check` now reports it with the fix (wrap it in `@layer reset`). Custom properties and
+  `color-scheme` stay unlayered.
 - brain.json `"server": { "maxBodyKB", "timeoutMs", "rpcPerMinute" }` sets the RPC/form body limit, the call and
   `load` deadline and the per-IP, per-function call rate, with the same values in `brain run` and the production
   server (the build writes them into the server manifest). `BRAIN_MAX_BODY_KB`, `BRAIN_TIMEOUT_MS` and

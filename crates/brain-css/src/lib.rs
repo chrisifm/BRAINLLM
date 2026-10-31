@@ -341,6 +341,29 @@ pub fn global_selectors(sheet: &CssSheet) -> Vec<(String, Span)> {
     out
 }
 
+/// B0309: style rules outside every `@layer` that set real properties (custom properties and `color-scheme` are fine). In the token file
+/// such a rule beats every layered rule (`@layer view`, components) whatever its specificity. Returns (selector, span).
+pub fn unlayered_rules(sheet: &CssSheet) -> Vec<(String, Span)> {
+    fn walk(items: &[CssItem], out: &mut Vec<(String, Span)>) {
+        for it in items {
+            match it {
+                CssItem::At { name, .. } if name == "layer" => {}
+                CssItem::At { block: Some(b), .. } => walk(b, out),
+                CssItem::Rule { selector, items, span } => {
+                    if items.iter().any(|d| matches!(d, CssItem::Decl { name, .. } if !name.starts_with("--") && name != "color-scheme")) {
+                        out.push((selector.trim().to_string(), *span));
+                    }
+                    walk(items, out);
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&sheet.items, &mut out);
+    out
+}
+
 /// B0307: selectors that `@scope ([data-b]) to ([data-b])` can never match. `tags` = the element names written by
 /// this component (`None` = unknown, e.g. it renders `{@html}`; the absent-tag check is skipped). Leading
 /// `html`/`body`/`:root` at the top level is B0301 and is not repeated here. Returns (selector, reason, span).
