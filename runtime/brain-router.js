@@ -330,7 +330,7 @@ export function router(o = {}) {
   return (active = {
     go: (u, push = true) => go(app(u), push),
     check,
-    stop: () => ((active = null), ahead.stop(), document.removeEventListener('click', click), G.removeEventListener && G.removeEventListener('popstate', pop)),
+    stop: () => ((active = null), ahead.stop(), document.removeEventListener('click', click), G.removeEventListener && G.removeEventListener('popstate', pop), sw && sw.removeEventListener && sw.removeEventListener('message', onMsg)),
   })
 }
 

@@ -236,6 +236,18 @@ test('#131 a navigation response from another build â†’ full load; same build â†
   r.stop()
 })
 
+test('the History fallback stop() removes its service worker listener', async () => {
+  hist()
+  page()
+  const listeners = new Set()
+  const nav0 = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { serviceWorker: { addEventListener: (t, f) => listeners.add(f), removeEventListener: (t, f) => listeners.delete(f) } } })
+  for (let i = 0; i < 5; i++) router({ parse }).stop()
+  assert.equal(listeners.size, 0, 'A stopped router must not keep its prefetch state reachable from the service worker')
+  if (nav0) Object.defineProperty(globalThis, 'navigator', nav0)
+  else delete globalThis.navigator
+})
+
 test('#131 the service worker announcing another build makes the next navigation a full load', async () => {
   hist()
   page()
