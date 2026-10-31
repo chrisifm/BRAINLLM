@@ -154,6 +154,7 @@ Exports: `sig(v, name?)`, `drv(fn)`, `fx(fn)`, `batch(fn)`, `untrack(fn)`, `tpl(
 
 - `sig` and `drv` expose `.v`; codegen rewrites `n` → `n.v` and `n = x` → `n.v = x`. Writing to `drv.v` throws.
 - Writes are batched per microtask; `batch` applies synchronously when it finishes; every `on` handler runs inside `batch`.
+- Owners run first: before a queued effect runs, its owner chain is brought up to date from the top. A `when`/`{#if}` re-evaluates its condition and disposes its block before an effect inside the block runs, so `{#if data.file}{data.file.name}{/if}` never reads `name` of a `file` that became `null`, whatever the subscription order (guard-first scheduling, as in Solid and Svelte).
 - `anchor` = template comment (`<!>` in `tpl`); everything is inserted BEFORE the anchor. Without an anchor, the runtime creates one at the end of `parent`.
 - `fn` of insert/a/b/empty/render may return Node, DocumentFragment, string, number, array or `null`/`false` (empty).
 - `render(item, i)` receives SIGNALS (`item.v`, `i.v`): same key with a new object updates the row in place. `keyFn(item, i)` receives the raw value. Duplicate key = error.

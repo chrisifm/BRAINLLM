@@ -25,6 +25,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Fixed
 
+- An `{#if}` block no longer throws when its guarded value turns `null`: the scheduler brings an effect's owners up to
+  date first, so `{#if data.file}{data.file.name}{/if}` disposes the block before `data.file.name` would re-run, even
+  when another dependency of the condition re-ordered the subscriptions.
 - B0910 no longer takes a page down because of native work or a loaded machine. The elapsed-time clock stops before
   an awaited expression is evaluated, so the synchronous start of a process's first `fetch` (or four parallel reads in
   `load()`) is not charged; author functions called inside the expression still are. Because that clock is wall-clock

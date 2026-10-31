@@ -231,6 +231,27 @@ test('when: switches branches, disposes effects of the old branch and does not r
   assert.equal(renders, 2)
 })
 
+test('when: the guard re-evaluates and disposes its block before the block reads a value that turned null', () => {
+  // `{#if data.file && open}{data.file.name}{/if}`: when only `open` changes, the guard re-runs and re-subscribes to
+  // `file` after the inner read, so the inner effect is queued first when `file` later becomes null.
+  const r = doc.createElement('div')
+  const file = sig({ name: 'a.txt' }), open = sig(1), errors = []
+  const warn = console.error
+  console.error = e => errors.push(e)
+  try {
+    when(r, () => file.v && open.v, () => {
+      const f = doc.createDocumentFragment(), t = f.appendChild(doc.createComment(''))
+      insert(null, () => file.v.name, t)
+      return f
+    })
+    batch(() => (open.v = 2))
+    assert.equal(r.textContent, 'a.txt')
+    batch(() => (file.v = null))
+  } finally { console.error = warn }
+  assert.deepEqual(errors, [])
+  assert.equal(html(r), '<!---->')
+})
+
 test('mount + dispose: hand-written counter against the API', () => {
   const T = tpl('<button><!>: <!> × 2 = <!></button>')
   function Counter($p) {

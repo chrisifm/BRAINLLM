@@ -131,6 +131,9 @@ class N {
   }
 }
 
+// Owners first (guard-first, as Solid and Svelte): an {#if} re-evaluates its condition, and disposes its block, before
+// an effect inside the block runs, even when the inner effect was queued first.
+const up = n => (n.p && up(n.p), n.u())
 function flush() {
   P = 0
   B++
@@ -147,7 +150,7 @@ function flush() {
           continue
         }
       }
-      n.u()
+      up(n)
     }
   } finally {
     Q = []
@@ -209,7 +212,7 @@ export const _err = h => ((E = h), _rt())
 const mk = p => p.appendChild(document.createComment(''))
 // Yield to the browser: scheduler.yield (Chrome 129+), else a MessageChannel task (no 4 ms setTimeout clamp)
 const later = f => {
-  if (globalThis.scheduler && scheduler.yield) return scheduler.yield().then(f)
+  if (globalThis.scheduler?.yield) return scheduler.yield().then(f)
   const c = new MessageChannel()
   c.port1.onmessage = () => (c.port1.close(), f())
   c.port2.postMessage(0)
@@ -219,7 +222,7 @@ const rm = a => {
   for (const n of a) n.$out ? n.$out().then(() => n.remove()) : n.remove()
 }
 function nodes(v, a = []) {
-  if (v == null || v === true || v === false) return a
+  if (v == null || v === !!v) return a // null, undefined, true, false
   if (Array.isArray(v)) for (const x of v) nodes(x, a)
   else if (typeof v == 'function') nodes(v(), a)
   else if (v.nodeType == 11) a.push(...v.childNodes)
