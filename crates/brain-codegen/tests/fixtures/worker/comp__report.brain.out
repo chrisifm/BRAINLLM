@@ -11,8 +11,8 @@ function Report($p = {}) {
   const $brainBudgetOwner = $brainBudgetbudgetOwner();
   const avg = sig(0);
   const run = async (text) => { const $$brainBudgetFrame1 = $brainBudgetbudgetEnter({ file: "comp/report.brain", component: "Report", line: 5, column: 13 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame1); {
-    const rows = $brainBudgetbudgetResume($$brainBudgetFrame1, await $brainBudgetbudgetSuspend($$brainBudgetFrame1, parseCsv(text)));
-    avg.v = $brainBudgetbudgetResume($$brainBudgetFrame1, await $brainBudgetbudgetSuspend($$brainBudgetFrame1, stats.mean(rows.map((r) => { const $$brainBudgetFrame2 = $brainBudgetbudgetEnter({ file: "comp/report.brain", component: "Report", line: 7, column: 35 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame2); { return Number(r[0]); } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame2); } }))));
+    const rows = $brainBudgetbudgetResume($$brainBudgetFrame1, await $brainBudgetbudgetSuspend($$brainBudgetFrame1)(parseCsv(text)));
+    avg.v = $brainBudgetbudgetResume($$brainBudgetFrame1, await $brainBudgetbudgetSuspend($$brainBudgetFrame1)(stats.mean(rows.map((r) => { const $$brainBudgetFrame2 = $brainBudgetbudgetEnter({ file: "comp/report.brain", component: "Report", line: 7, column: 35 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame2); { return Number(r[0]); } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame2); } }))));
   } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame1); } };
   const $r5 = $t0();
   const $e3 = $r5;
