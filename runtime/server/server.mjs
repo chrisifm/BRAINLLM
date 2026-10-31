@@ -6,7 +6,7 @@
 //
 // It serves, in this order:
 //   GET  /_health                → 200 {"ok":true,"build":"<sig>"}
-//   POST /_r/<hash>/<fn>         → RPC to a `server:` function (same origin + X-Brain-RPC, 64 KB, rate limit, 10 s)
+//   POST /_r/<hash>/<fn>         → RPC to a `server:` function (same origin + X-Brain-RPC; body, rate and time limits from brain.json `server`)
 //   GET  routes in the manifest  → SSR: load(ctx) → render the view on the DOM shim → page with props and SEO head
 //   GET  files in dist/          → static (precompressed .br/.gz when accepted; /_b/* immutable), clean URLs
 //   anything else                → 404 page
@@ -400,9 +400,6 @@ export function createServer(o = {}) {
   const env = Object.freeze({ ...(o.env || ENV) }) // ctx.env: what the supervisor passed, read-only
   const native = nativeAuthBridge(o.backendURL ?? env.BRAIN_BACKEND_URL)
   if (o.nativeSockets !== undefined && typeof o.nativeSockets !== 'boolean') throw Error('nativeSockets must be an explicit boolean')
-  const TIMEOUT = +(o.timeout ?? env.BRAIN_TIMEOUT_MS ?? 10000)
-  const LIMIT = +(o.rateLimit ?? env.BRAIN_RPC_LIMIT ?? 60) // per IP + function, per minute
-  const MAX_BODY = 64 * 1024
   const secret = o.secret ?? env.BRAIN_SECRET ?? ''
   const sink = o.log || ((level, msg, extra) => console[level === 'error' ? 'error' : 'log'](json({ t: new Date().toISOString(), level, msg, ...extra })))
   const log = (level, msg, extra = {}) => {
@@ -422,6 +419,15 @@ export function createServer(o = {}) {
     sink(level, msg, safe)
   }
   const mf = readManifest(dist)
+  // brain.json `server` (§11.1), written into the manifest by the build; createServer options and env still win
+  const SL = mf.server || {}
+  const TIMEOUT = +(o.timeout ?? env.BRAIN_TIMEOUT_MS ?? SL.timeoutMs ?? 10000)
+  const LIMIT = +(o.rateLimit ?? env.BRAIN_RPC_LIMIT ?? SL.rpcPerMinute ?? 60) // per IP + function, per minute
+  const BODY_KB = +(o.maxBodyKB ?? env.BRAIN_MAX_BODY_KB ?? SL.maxBodyKB ?? 1024)
+  if (!Number.isInteger(BODY_KB) || BODY_KB < 1 || BODY_KB > 65536) throw Error('brain.json server.maxBodyKB must be an integer from 1 to 65536 (KB)')
+  const MAX_BODY = BODY_KB * 1024 // RPC and form bodies; bounded reads never buffer more
+  const TOO_BIG = `Body larger than ${BODY_KB} KB; raise brain.json server.maxBodyKB`
+  const tooBig = (rid, path) => (log('warn', 'body too large', { rid, path, limitKB: BODY_KB, fix: 'Raise brain.json server.maxBodyKB (or BRAIN_MAX_BODY_KB), up to 65536' }), TOO_BIG)
   const hasManifestSockets = Object.hasOwn(mf,'nativeSockets')
   if (hasManifestSockets && typeof mf.nativeSockets !== 'boolean') throw Error('Manifest nativeSockets must be an explicit boolean')
   const nativeSockets = o.nativeSockets === undefined ? hasManifestSockets && mf.nativeSockets : o.nativeSockets
@@ -809,7 +815,7 @@ export function createServer(o = {}) {
     try {
       raw = await body(req, MAX_BODY)
     } catch {
-      return fail(413, 'Body larger than 64 KB')
+      return fail(413, tooBig(rid, url.pathname))
     }
     if (native) await native.prepare(req, res, rid)
     const ctx = context(req, res, url, { params: {} })
@@ -849,7 +855,7 @@ export function createServer(o = {}) {
     try {
       raw = await body(req, MAX_BODY)
     } catch {
-      return plain(413, 'Form larger than 64 KB')
+      return plain(413, tooBig(rid, url.pathname))
     }
     const id = new URLSearchParams(raw).get('_brain') || '', modPath = mf.rpc[id.split('/')[0]]
     if (!modPath) return plain(400, 'Unknown form')
@@ -1292,7 +1298,7 @@ function body(req, max) {
     // past the limit the rest is drained without keeping it (so the 413 reaches the client); far past it, cut
     req.on('data', c => {
       n += c.length
-      if (n > 16 * max) req.destroy()
+      if (n > max + Math.min(15 * max, 16 << 20)) req.destroy() // at most 16 MB of drain for a large limit
       else if (n <= max) parts.push(c)
     })
     req.on('end', () => (n > max ? fail(new Error('too large')) : ok(Buffer.concat(parts).toString('utf8'))))

@@ -140,7 +140,7 @@ COMPILER assigns the next free code there in the same change that emits it, then
   code but missing (warning, edit adds `KEY=`) · B0722 key never used (info) · B0723 `PUBLIC_*` value shaped like a
   secret (error) · B0724 malformed line or section (error). Values never appear in any diagnostic.
 - B0734 missing local MCP registration (doctor warning; configuration only) · B0735 invalid backend resource/job contract (error; schema, policy or hook reference).
-- B07xx server and secrets (§11.1): B0701 server module used outside load/server: · B0702 env without `PUBLIC_` on the client · B0703 literal shaped like a key · B0704 `server:` function badly declared (not async, nested, in .jsbrain) or reading component state.
+- B07xx server and secrets (§11.1): B0701 server module used outside load/server: · B0702 env without `PUBLIC_` on the client · B0703 literal shaped like a key · B0704 `server:` function badly declared (not async, nested, in .jsbrain) or reading component state · B0707 invalid brain.json `server` setting (error; unknown key or a value outside its range).
 
 ## 6. Runtime (CODEGEN → RUNTIME contract), module `runtime/brain.js`
 
@@ -617,9 +617,19 @@ be turned off.
   in brain-pack.
 - `Output` gains `server_js: String` (ESM with `load` + server functions + their imports) and `server_fns: Vec<String>`.
 - **RPC contract:** `POST /_r/<hash>/<name>`, JSON body = array of arguments, JSON response. Default defenses:
-  same origin only (`Origin` + header `X-Brain-RPC: 1`, rejects CSRF), 64 KB body limit, rate limit per IP
-  (60/min per function, configurable in `brain.json`), unexpected error → generic 500 to the client and full log on the
-  server. The runtime exports `rpc(id, args)` (RUNTIME); brain-serve mounts the endpoint in dev (TOOLCHAIN).
+  same origin only (`Origin` + header `X-Brain-RPC: 1`, rejects CSRF), body limit, rate limit per IP and function,
+  call deadline, unexpected error → generic 500 to the client and full log on the server. The runtime exports
+  `rpc(id, args)` (RUNTIME); brain-serve mounts the endpoint in dev (TOOLCHAIN).
+- **Server limits (2026-10-30):** brain.json `"server": { "maxBodyKB", "timeoutMs", "rpcPerMinute" }` (defaults 1024,
+  10000, 60; read by `brain_pack::read_server_limits`). The build writes the resolved object into
+  `_server/manifest.json` as `server`; server.mjs applies it after `createServer` options and `BRAIN_MAX_BODY_KB` /
+  `BRAIN_TIMEOUT_MS` / `BRAIN_RPC_LIMIT`. `brain run` reads brain.json per request with the same overrides, sizes the
+  request reader, the sidecar request frame (6× the body for JSON escaping) and the sidecar deadline from it, and
+  passes the deadline and rate to `callRpc`/`callForm`. `maxBodyKB` is capped at 65536, the dev server's global
+  in-flight body reservation. Both servers read bodies bounded (never buffering past the limit); a 413 names
+  `brain.json server.maxBodyKB`, and server.mjs logs `body too large` with the limit and the fix. The dev server
+  answers `Expect: 100-continue` with `100 Continue` once the declared length fits and with 413 otherwise; other
+  expectations get 417. An invalid value is B0707 in `brain check`; the build warns and keeps the defaults.
 - **Production server:** if the app has `load` or `server:` functions, `brain build` emits `dist/server.mjs`
   (Node, zero dependencies, `node:http`): SSR of the views with `load`, RPC at `/_r/`, and leaves the rest static. The
   nginx snippet does `proxy_pass` only for those routes and `/_r/`. Without `load` or `server:`, the output is 100 %
@@ -992,7 +1002,7 @@ specified elsewhere; ➕ = new in this section.
 | Prototype pollution | `api()` validators and `store` `sync` drop `__proto__`, `constructor`, `prototype` keys from untrusted JSON | RUNTIME | ➕ |
 | Open redirect | `redirect(url)` in guards/RPC only to same origin unless the host is listed in `brain.json` `"redirects"` (B0710) | COMPILER + TOOLCHAIN | ➕ |
 | SSRF | server `fetch` whose URL is built from `ctx.params`/`ctx.query`/RPC args without an allowlist: warning B0711 | COMPILER | ➕ |
-| CSRF / abuse | RPC same-origin + header, 64 KB body, rate limit | §11.1 | ✓ |
+| CSRF / abuse | RPC same-origin + header, body limit (brain.json `server.maxBodyKB`, 1 MB default), rate limit | §11.1 | ✓ |
 | Secrets | env and key-shaped literals never reach the client | §11 | ✓ |
 | Cookies | session cookie forced `HttpOnly; Secure; SameSite=Lax`; `document.cookie` writes of names starting with `__Host-`/`session` are a build error | TOOLCHAIN + COMPILER | ➕ |
 | Headers | CSP with nonce, SRI, plus `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `frame-ancestors 'none'` (clickjacking), `Permissions-Policy` minimal | TOOLCHAIN (server config + server.mjs) | ➕ (CSP/SRI ✓) |

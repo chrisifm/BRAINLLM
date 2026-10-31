@@ -165,6 +165,18 @@ impl Ctx {
     fn backend_target(&self)->Result<Option<native_proxy::Target>,String>{
         self.env_vars().into_iter().find(|(name,value)|name=="BRAIN_BACKEND_URL"&&!value.is_empty()).map(|(_,value)|native_proxy::Target::parse(&value)).transpose()
     }
+    /// brain.json `server` (§11.1), read per request so an edit applies without a restart; BRAIN_MAX_BODY_KB,
+    /// BRAIN_TIMEOUT_MS and BRAIN_RPC_LIMIT (dev environment, then process) win as in production. An invalid
+    /// brain.json value keeps the defaults: `brain check` reports it (B0707).
+    fn server_limits(&self) -> brain_pack::ServerLimits {
+        let mut l = brain_pack::read_server_limits(&self.root).unwrap_or_default();
+        let vars = self.env_vars();
+        let var = |name: &str| vars.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone()).or_else(|| std::env::var(name).ok()).and_then(|v| v.trim().parse::<u64>().ok());
+        if let Some(kb) = var("BRAIN_MAX_BODY_KB").filter(|kb| (1..=brain_pack::MAX_BODY_KB_CAP).contains(kb)) { l.max_body_kb = kb; }
+        if let Some(ms) = var("BRAIN_TIMEOUT_MS").filter(|ms| *ms > 0) { l.timeout_ms = ms; }
+        if let Some(n) = var("BRAIN_RPC_LIMIT").filter(|n| *n > 0) { l.rpc_per_minute = n; }
+        l
+    }
     /// BRAIN_SECRET of the dev environment (signs the session cookie).
     fn secret(&self) -> String {
         self.env_vars()
@@ -583,12 +595,20 @@ impl Read for RequestReader<'_> {
 fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
     s.set_write_timeout(Some(Duration::from_secs(5)))?;
     let upload_path=ctx.backend_configured().then(||format!("{}/_brain/uploads",ctx.pre));
-    let mut req = match http::read_request_with_uploads(RequestReader {
+    let limits = ctx.server_limits();
+    // Expect: 100-continue (§11.1): the interim response once the declared length fits brain.json server.maxBodyKB
+    let mut send_continue = || -> io::Result<()> { (&s).write_all(b"HTTP/1.1 100 Continue\r\n\r\n") };
+    let read = http::read_request_with(RequestReader {
         stream: &s,
-        deadline: Instant::now() + Duration::from_secs(5),
-    },upload_path.as_deref()){
+        // a large body limit gets a longer total read budget (1 s per 2 MB on top of the 5 s for headers)
+        deadline: Instant::now() + Duration::from_secs(5 + limits.max_body_kb / 2048),
+    },upload_path.as_deref(),limits.max_body_bytes(),Some(&mut send_continue));
+    let mut req = match read {
         Ok(request)=>request,
-        Err(error)=>{let status=http::request_error_status(&error);let rid=http::request_id();let body=format!("{{\"error\":\"Invalid or over-budget request\",\"code\":\"BHTTP_REQUEST\",\"rid\":{}}}",json_str(&rid));return http::respond_with(&mut s,status,"application/json",body.as_bytes(),false,&[("X-Request-Id",&rid)]);}
+        Err(error)=>{let status=http::request_error_status(&error);let rid=http::request_id();
+            // a 413 names the setting to raise; every other read failure stays generic
+            let text=error.to_string();let message=match text.strip_prefix("HTTP413 ") {Some(m) if status==413 => m.to_string(), _ => "Invalid or over-budget request".into()};
+            let body=format!("{{\"error\":{},\"code\":\"BHTTP_REQUEST\",\"rid\":{}}}",json_str(&message),json_str(&rid));return http::respond_with(&mut s,status,"application/json",body.as_bytes(),false,&[("X-Request-Id",&rid)]);}
     };
     // base (#148): `/app` → `/app/`; `/app/x` is routed as `/x`; anything outside the base is a 404, as in production
     if !ctx.pre.is_empty() {
@@ -1588,9 +1608,10 @@ fn rpc(ctx: &Ctx, req: &http::Request, id: &str) -> (u16, String, Vec<(String, S
     if hash.is_empty() || !hash.chars().all(|c| c.is_ascii_alphanumeric()) || !ident(func) {
         return fail(404, "Unknown function");
     }
+    let limits = ctx.server_limits();
     let raw = String::from_utf8_lossy(&req.body).to_string();
-    if raw.len() > 64 * 1024 {
-        return fail(413, "Body larger than 64 KB");
+    if raw.len() > limits.max_body_bytes() {
+        return fail(413, &format!("Body larger than {} KB; raise brain.json server.maxBodyKB", limits.max_body_kb));
     }
     // the module whose client stub calls "<hash>/<fn>"
     let stub = format!("\"{hash}/{func}\"");
@@ -1630,6 +1651,7 @@ fn rpc(ctx: &Ctx, req: &http::Request, id: &str) -> (u16, String, Vec<(String, S
         }
     }
     let ip = "127.0.0.1"; // Dev loopback peer; forwarded client identity is never trusted.
+    sc.as_mut().unwrap().limits(limits.timeout_ms, limits.rpc_per_minute, limits.max_body_bytes());
     match sc.as_mut().unwrap().rpc(
         &url,
         func,
@@ -1677,12 +1699,9 @@ fn form_post(s: &mut TcpStream, ctx: &Ctx, req: &http::Request) -> io::Result<()
     if !same {
         return json(s, 403, "Cross-origin form");
     }
-    if req
-        .header("content-length")
-        .and_then(|v| v.parse::<usize>().ok())
-        .is_some_and(|n| n > 64 * 1024)
-    {
-        return json(s, 413, "Body larger than 64 KB");
+    let limits = ctx.server_limits();
+    if req.body.len() > limits.max_body_bytes() {
+        return json(s, 413, &format!("Body larger than {} KB; raise brain.json server.maxBodyKB", limits.max_body_kb));
     }
     let Some(r) = crate::route::resolve(&ctx.root, &req.path) else {
         return json(s, 404, "No page here");
@@ -1713,6 +1732,7 @@ fn form_post(s: &mut TcpStream, ctx: &Ctx, req: &http::Request) -> io::Result<()
             }
         }
         let params: Vec<(String, String)> = r.params.clone();
+        sc.as_mut().unwrap().limits(limits.timeout_ms, limits.rpc_per_minute, limits.max_body_bytes());
         let out = sc.as_mut().unwrap().form(
             &module,
             &load_ctx_json(req, &params),
@@ -2782,6 +2802,37 @@ mod admission_tests {
     }
 
     #[test]
+    fn brain_json_server_body_limit_and_expect_100_continue() {
+        let root = std::env::temp_dir().join(format!("brain-dev-body-limit-{}-{}", std::process::id(), now_ms()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("brain.json"), r#"{"name":"x","server":{"maxBodyKB":2}}"#).unwrap();
+        let compiler: CompileFn = Arc::new(|_, _| Ok(Compiled { js: String::new(), css: String::new(), deps: vec![], server_js: String::new() }));
+        let opts = Options { root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: String::new(), runtime: vec![], env: None, base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None };
+        let mut dev = start_dev(opts, compiler, false, None).unwrap();
+        let connect = || { let s = TcpStream::connect(dev.addr).unwrap(); s.set_read_timeout(Some(Duration::from_secs(3))).unwrap(); s };
+        // within the limit: the interim 100 Continue arrives before the client sends the body, then the final response
+        let mut s = connect();
+        s.write_all(b"POST /_r/h1/save HTTP/1.1\r\nHost: localhost\r\nExpect: 100-continue\r\nContent-Length: 1024\r\nConnection: close\r\n\r\n").unwrap();
+        let mut interim = [0u8; 25];
+        s.read_exact(&mut interim).unwrap();
+        assert_eq!(&interim, b"HTTP/1.1 100 Continue\r\n\r\n");
+        s.write_all(&[b'x'; 1024]).unwrap();
+        let mut rest = String::new();
+        s.read_to_string(&mut rest).unwrap();
+        assert!(rest.starts_with("HTTP/1.1 403"), "{rest}"); // the RPC handler answered: no X-Brain-RPC header
+        // past the limit: 413 at once (no 100 Continue), and the body names the setting to raise
+        let mut s = connect();
+        s.write_all(b"POST /_r/h1/save HTTP/1.1\r\nHost: localhost\r\nExpect: 100-continue\r\nContent-Length: 4096\r\nConnection: close\r\n\r\n").unwrap();
+        let mut out = String::new();
+        s.read_to_string(&mut out).unwrap();
+        assert!(out.starts_with("HTTP/1.1 413"), "{out}");
+        assert!(out.contains("Body larger than 2 KB; raise brain.json server.maxBodyKB"), "{out}");
+        dev.stop();
+        drop(dev);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn configured_native_backend_is_proxied_same_origin_and_runtime_routes_stay_local(){
         let root=std::env::temp_dir().join(format!("brain-native-dev-proxy-{}-{}",std::process::id(),now_ms()));std::fs::create_dir_all(&root).unwrap();
         let backend=TcpListener::bind("127.0.0.1:0").unwrap();let backend_url=format!("http://{}",backend.local_addr().unwrap());
@@ -2793,7 +2844,7 @@ mod admission_tests {
         let request=|path:&str,extra:&str|{let mut socket=TcpStream::connect(dev.addr).unwrap();socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();socket.write_all(format!("GET {path} HTTP/1.1\r\nHost: localhost\r\n{extra}Connection: close\r\n\r\n").as_bytes()).unwrap();let mut bytes=Vec::new();socket.read_to_end(&mut bytes).unwrap();String::from_utf8(bytes).unwrap()};
         let response=request("/_brain/auth/me","X-Forwarded-For: untrusted\r\n");assert!(response.starts_with("HTTP/1.1 200"));assert!(response.ends_with("{\"user\":null}"));assert!(response.to_ascii_lowercase().contains("x-request-id:"));authority.join().unwrap();
         let runtime=request("/@brain/brain.js","");assert!(runtime.starts_with("HTTP/1.1 200"));assert!(runtime.contains("localRuntime"));
-        let rejected=request("/api/items","Content-Length: 65537\r\n");assert!(rejected.starts_with("HTTP/1.1 413"));
+        let rejected=request("/api/items","Content-Length: 1048577\r\n");assert!(rejected.starts_with("HTTP/1.1 413"));
         dev.stop();drop(dev);std::fs::remove_dir_all(root).unwrap();
     }
 

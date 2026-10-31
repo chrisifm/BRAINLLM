@@ -561,6 +561,12 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
                     "inspect `brain backend schema --json`; fix the named literal schema, explicit policy or hook/job contract, then run brain check again");
                 diag.line=1;diag.col=1;diags.push(diag);
             }
+            // brain.json `server` (B0707): body, time and rate limits shared by brain run and the production server
+            if let Err(message) = brain_pack::read_server_limits(&app) {
+                let (msg, fix) = message.split_once("; fix: ").unwrap_or((message.as_str(), "set whole numbers in range"));
+                let mut diag = compiler::Diag::new("B0707", "brain.json", brain_parse::Span::default(), msg.to_string(), fix.to_string());
+                diag.line=1;diag.col=1;diags.push(diag);
+            }
             // the language files, once per app (B1401 invalid JSON, B1402 untranslated, B1404 placeholders, B1405 locale)
             if let Some(i18n) = brain_check::i18n::load(&app) {
                 diags.extend(brain_check::i18n::check_locales(&i18n));

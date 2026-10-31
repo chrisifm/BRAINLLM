@@ -19,6 +19,16 @@
       "type": "string",
       "description": "Default document language, e.g. \"en\"."
     },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Limits shared by brain run and the production server (dist/server.mjs). BRAIN_MAX_BODY_KB, BRAIN_TIMEOUT_MS and BRAIN_RPC_LIMIT override them at run time. brain check reports an invalid value as B0707.",
+      "properties": {
+        "maxBodyKB": { "type": "integer", "minimum": 1, "maximum": 65536, "default": 1024, "description": "Largest RPC or form body in KiB (1024 bytes); a larger body is answered with 413. Raise it for files sent as base64 in RPC arguments." },
+        "timeoutMs": { "type": "integer", "minimum": 100, "maximum": 600000, "default": 10000, "description": "Deadline for a server function call and for load(); past it the server answers 504." },
+        "rpcPerMinute": { "type": "integer", "minimum": 1, "maximum": 100000, "default": 60, "description": "Calls per client IP and function per minute; past it the server answers 429 with Retry-After." }
+      }
+    },
     "site": {
       "type": "string",
       "format": "uri",
