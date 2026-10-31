@@ -20,6 +20,8 @@ pub struct Platform {
     /// Application-declared routes and the executor that runs their handlers.
     pub routes: Vec<crate::routes::Route>,
     pub handlers: Option<crate::routes::Handlers>,
+    /// Shared rate windows and cross-process socket fan-out (`cluster` in `server/platform.jsbrain`).
+    pub cluster: crate::cluster::Cluster,
 }
 
 /// Which finished requests the backend logs as structured JSON lines.
@@ -123,7 +125,7 @@ impl Edge {
     /// Reads the `server/platform.jsbrain` literal. Unknown keys are rejected so typos never
     /// silently fall back to defaults.
     pub fn from_contract(value: &Value) -> Result<Self, String> {
-        let map = object(value, "platform", &["trustProxy", "cors", "limits", "shutdown", "logging"])?;
+        let map = object(value, "platform", &["trustProxy", "cors", "limits", "shutdown", "logging", "cluster"])?;
         let mut edge = Edge::default();
         if let Some(list) = map.get("trustProxy") {
             let list = list.as_array().ok_or("platform.trustProxy must be an array of IPs or CIDR ranges")?;

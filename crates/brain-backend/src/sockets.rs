@@ -1,4 +1,4 @@
-//! Ephemeral, single-process invalidation metadata. Authorization is never delegated to room names.
+//! Ephemeral invalidation metadata, relayed between processes when `cluster.shared` is on. Authorization is never delegated to room names.
 use super::{App, Error, Result};
 use axum::{
     extract::{
@@ -76,8 +76,38 @@ pub(super) struct Broker {
     active: watch::Sender<usize>,
     checks: Semaphore,
     origins: Vec<String>,
+    /// Cross-process relay: this process id and the pool that publishes `pg_notify`.
+    fanout: Option<(sqlx::PgPool, Uuid)>,
 }
 impl Broker {
+    /// Relays committed changes to sockets on every process of the deployment through Postgres `LISTEN/NOTIFY`.
+    pub(super) fn with_fanout(mut self, pool: sqlx::PgPool) -> Self {
+        self.fanout = Some((pool, Uuid::new_v4()));
+        self
+    }
+    /// Starts the listener that delivers other processes' changes to local sockets.
+    pub(super) fn listen(self: &Arc<Self>) {
+        if let Some((pool, origin)) = &self.fanout {
+            let broker = self.clone();
+            crate::cluster::spawn_listener(pool.clone(), *origin, move |change| {
+                let operation = match change.operation.as_str() {
+                    "create" => "create",
+                    "update" => "update",
+                    "delete" => "delete",
+                    _ => return,
+                };
+                if name(&change.resource) {
+                    broker.emit(change.resource, change.id, change.owner, operation);
+                }
+            });
+        }
+    }
+    fn emit(&self, resource: String, id: Uuid, owner: Uuid, operation: &'static str) {
+        if self.events.receiver_count() == 0 {
+            return;
+        }
+        let _ = self.events.send(Event { resource, id, owner, operation, event_id: Uuid::new_v4() });
+    }
     pub(super) fn new(origins: Vec<String>) -> Self {
         let (events, _) = broadcast::channel(EVENTS);
         Self {
@@ -87,11 +117,12 @@ impl Broker {
             active: watch::channel(0).0,
             checks: Semaphore::new(CHECKS),
             origins,
+            fanout: None,
         }
     }
     /// Call only AFTER the repository transaction commits. Row values are never retained or emitted.
     pub(super) fn changed(&self, resource: &str, operation: &str, record: &Value) {
-        if self.events.receiver_count() == 0 {
+        if self.events.receiver_count() == 0 && self.fanout.is_none() {
             return;
         }
         let operation = match operation {
@@ -109,13 +140,10 @@ impl Broker {
         let Some(owner) = record["owner"].as_str().and_then(|s| s.parse().ok()) else {
             return;
         };
-        let _ = self.events.send(Event {
-            resource: resource.into(),
-            id,
-            owner,
-            operation,
-            event_id: Uuid::new_v4(),
-        });
+        if let Some((pool, origin)) = &self.fanout {
+            crate::cluster::publish(pool, crate::cluster::Change { origin: *origin, resource: resource.into(), id, owner, operation: operation.into() });
+        }
+        self.emit(resource.into(), id, owner, operation);
     }
     fn acquire(self: &Arc<Self>, user: Uuid) -> Option<Permit> {
         let mut users = self.users.lock().ok()?;

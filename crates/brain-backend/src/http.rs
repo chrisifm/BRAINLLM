@@ -83,6 +83,7 @@ pub struct App {
     api_keys: Option<crate::api_keys::Keys>,
     platform: Arc<files_http::State>,
     routes: Arc<routes_http::State>,
+    cluster: crate::cluster::Cluster,
 }
 #[derive(Debug)]
 pub struct Error {
@@ -281,6 +282,7 @@ pub async fn router_full(
         }
     }
     let (edge_state, edge_control) = edge_http::EdgeState::new(&platform.edge);
+    let shared = platform.cluster.shared;
     let cors_max_age = platform.edge.cors_max_age;
     let (custom_routes, custom_handlers) = (platform.routes.clone(), platform.handlers.clone());
     let socket_origins = config.sockets.as_ref().map(|s| s.allowed().to_vec()).unwrap_or_default();
@@ -419,12 +421,18 @@ pub async fn router_full(
             )
         })
         .transpose()?;
-    let sockets = Arc::new(sockets::Broker::new(socket_origins));
+    let sockets = sockets::Broker::new(socket_origins);
+    let sockets = Arc::new(if shared && sockets_enabled { sockets.with_fanout(pool.clone()) } else { sockets });
+    sockets.listen();
+    if shared {
+        crate::cluster::spawn_sweeper(pool.clone());
+    }
     let api_keys = config
         .api_keys
-        .map(|cfg| crate::api_keys::Keys::new(pool.clone(), cfg))
+        .map(|cfg| crate::api_keys::Keys::new(pool.clone(), cfg).map(|keys| keys.shared(shared)))
         .transpose()?;
     let app = App {
+        cluster: crate::cluster::Cluster { shared },
         platform: platform.clone(),
         routes: custom.clone(),
         sockets: sockets.clone(),

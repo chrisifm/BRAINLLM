@@ -20,6 +20,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   `slugRedirect(resource, slug)`. Field errors from the backend reject with `status 422` and `errors`, so a server
   function can hand them back to its form. `list()` without options now uses the backend defaults (25 rows). See
   `docs/backend/server-queries.md`.
+- Native backend multi-process mode: `cluster: { shared: true }` in `server/platform.jsbrain` (on by itself when
+  `BRAIN_BACKEND_PROCESSES` is above 1) counts route `rate` windows and the API-key per-minute limit in Postgres
+  (`_brain_rate_windows`, subjects stored as digests) and relays socket invalidation events between processes with
+  `LISTEN/NOTIFY`. See `docs/backend/cluster.md`.
 - WebMCP imperative tools ship (#106): `<meta tools="add_task: Add a task (text:str!, due:date)">` plus a same-named
   function registers the tool with the browser's model context while the component is mounted and unregisters it on
   unmount. Nothing is registered without WebMCP, during SSR or prerender; arguments are validated against the

@@ -1,22 +1,24 @@
 //! Literal platform contracts for the native backend: file buckets (`server/files/<name>.jsbrain`)
 //! and HTTP edge settings (`server/platform.jsbrain`).
-use brain_backend::{Resource, auth_flows::RolesConfig, files::Bucket, platform::{Edge, Platform}};
+use brain_backend::{Resource, auth_flows::RolesConfig, cluster::Cluster, files::Bucket, platform::{Edge, Platform}};
 use serde_json::{Value, json};
 use std::{fs, path::Path};
 
 const FILES: &str = "server/files";
 const EDGE: &str = "server/platform.jsbrain";
 
-fn edge(root: &Path) -> Result<Edge, String> {
+fn edge(root: &Path) -> Result<(Edge, Cluster), String> {
     let path = root.join(EDGE);
     if !path.exists() {
-        return Ok(Edge::default());
+        return Ok((Edge::default(), Cluster::default()));
     }
     if !path.is_file() {
         return Err(format!("{EDGE}: must be a regular file"));
     }
     let value = crate::backend::read_contract(root, &path).map_err(|e| format!("{EDGE}: {e}"))?;
-    Edge::from_contract(&value).map_err(|e| format!("{EDGE}: {e}"))
+    let edge = Edge::from_contract(&value).map_err(|e| format!("{EDGE}: {e}"))?;
+    let cluster = Cluster::from_contract(value.get("cluster")).map_err(|e| format!("{EDGE}: {e}"))?;
+    Ok((edge, cluster))
 }
 
 fn buckets(root: &Path, resources: &[Resource], roles: &RolesConfig) -> Result<Vec<Bucket>, String> {
@@ -49,7 +51,8 @@ fn buckets(root: &Path, resources: &[Resource], roles: &RolesConfig) -> Result<V
 }
 
 pub fn load(root: &Path, resources: &[Resource], roles: &RolesConfig) -> Result<Platform, String> {
-    Ok(Platform { buckets: buckets(root, resources, roles)?, edge: edge(root)?, ..Default::default() })
+    let (edge, cluster) = edge(root)?;
+    Ok(Platform { buckets: buckets(root, resources, roles)?, edge, cluster, ..Default::default() })
 }
 
 /// Projection for `brain backend schema --json`; contains no environment values.
@@ -68,6 +71,7 @@ pub fn metadata(root: &Path, resources: &[Resource], roles: &RolesConfig) -> Res
             "requestLog": format!("{:?}", edge.request_log).to_lowercase(),
             "slowMs": edge.slow.map(|d| d.as_millis() as u64),
         },
+        "cluster": platform.cluster.schema(),
     }))
 }
 
