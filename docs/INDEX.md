@@ -41,6 +41,7 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [performance](../crates/brain-cli/guides/performance.md) | fast first load, smooth updates, small pages |
 | [seo](../crates/brain-cli/guides/seo.md) | classic search and AI answers (GEO) |
 | [server](../crates/brain-cli/guides/server.md) | sessions, errors, environment, deploy with brain start |
+| [sockets](../crates/brain-cli/guides/sockets.md) | live updates with liveResource |
 | [start](../crates/brain-cli/guides/start.md) | the working loop for any BRAINLLM task |
 | [tests](../crates/brain-cli/guides/tests.md) | colocated *.test.brain in real Chrome |
 | [views](../crates/brain-cli/guides/views.md) | routes, layouts, guards, navigation |
@@ -125,7 +126,7 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [HTTP caching and conditional requests](backend/caching.md) | Every successful `GET /api/...` response carries an `ETag`. |
 | [Running several backend processes](backend/cluster.md) | One `brain backend serve` process keeps two kinds of state in its own memory: rate-limit windows and the socket event fan-out. |
 | [Cron schedules (single run per slot)](backend/cron.md) | `server/cron/<name>.jsbrain` enqueues a declared job on a cron schedule. |
-| [File uploads of any type (native backend)](backend/files.md) | Declared file buckets accept any content type by default (PDF, Word, spreadsheets, zip, audio, video, images, plain text), stream the body to private disk with… |
+| [File uploads of any type (native backend)](backend/files.md) | Declared file buckets hold the content types they list (PDF, Word, spreadsheets, zip, audio, video, images, plain text), stream the body to private disk withou… |
 | [Filters (B-11)](backend/filters.md) | List endpoints accept only the filters a resource declares in `query.jsbrain`. |
 | [Record ids and keeping existing numeric ids (B-08)](backend/ids.md) | Every native record gets a server-generated UUID (`id`). |
 | [Reading and writing resources from job handlers](backend/job-backend.md) | A job handler (`server/jobs/<name>/handler.jsbrain`) gets `ctx.backend` with the same calls as server `load()` and server functions (server-queries.md): `resou… |
