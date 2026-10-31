@@ -373,6 +373,34 @@ pub fn row_exposure(root: &Path) -> Vec<(String, String, String)> {
         })
         .collect()
 }
+/// B0790: secrets a declared route or webhook needs and the development environment does not hold: `(file, message, fix)`.
+/// `brain backend serve` refuses to start without them; names only, never values.
+pub fn secret_warnings(root: &Path) -> Vec<(String, String, String)> {
+    let fix = "set it to a generated value in .brain_env or the host environment; a secret held only on the deployed host may keep this warning on other machines";
+    crate::route_executor::secret_problems(root, "development")
+        .into_iter()
+        .chain(crate::webhook_config::secret_problem(root, "development"))
+        .map(|(file, message)| {
+            let message = message.strip_prefix(&format!("{file}: ")).unwrap_or(&message).to_string();
+            (file, format!("`brain backend serve` refuses to start: {message}"), fix.to_string())
+        })
+        .collect()
+}
+/// Why a source a contract names cannot start, with its own `; fix:`. `None` when it can be read and fits its limit.
+pub(crate) fn source_problem(root: &Path, relative: &str, limit: usize, fix: &str) -> Option<String> {
+    if !root.join(relative).exists() {
+        return Some(format!("{relative}: a contract names this file and it does not exist, so `brain backend serve` refuses to start; fix: {fix}"));
+    }
+    crate::map::read_source_limit(root, relative, limit).err().map(|reason| format!("{relative}: `brain backend serve` refuses this source: {reason}; fix: {fix}"))
+}
+/// B0735 for what only `brain backend serve` reads, kept apart from `inspect` so that schema, docs and migrate still work
+/// while a handler is being written. Each message starts with its file and may end with its own `; fix:`.
+pub fn startup_contract_errors(root: &Path) -> Vec<String> {
+    let mut out: Vec<String> = analytics_settings(root).err().into_iter().collect();
+    out.extend(crate::route_executor::declared(root).map(|routes| crate::route_executor::handler_problems(root, &routes)).unwrap_or_default());
+    out.extend(contracts(root, "resources").map(|resources| crate::hooks_executor::source_problems(root, &resources)).unwrap_or_default());
+    out
+}
 /// B0770: buckets that accept every file only because they never listed their types.
 pub fn bucket_warnings(root: &Path) -> Vec<(String, String, String)> {
     let (Ok(resources), Ok(roles)) = (contracts(root, "resources"), auth_roles(root)) else { return Vec::new() };
@@ -392,8 +420,8 @@ pub fn inspect(root: &Path) -> Result<Value, String> {
     let domain = domain::checked(root, &resources, &roles)?;
     let mut openapi = contract::openapi_with_roles(&resources, &roles);
     brain_backend::domain::openapi(&domain, &resources, &mut openapi);
-    // Routes need their signing secrets to load; inspection without them documents buckets only.
-    let routes = crate::route_executor::contracts(root, "development").unwrap_or_default();
+    // The contract documents a route whether or not this machine holds its secret (B0790 reports that); an invalid one is B0735.
+    let routes = crate::route_executor::declared(root)?;
     let buckets = crate::platform_config::load(root, &resources, &roles).map(|p| p.buckets).unwrap_or_default();
     brain_backend::openapi::extend(&mut openapi, &routes, &buckets);
     let queues: serde_json::Map<String, Value> = jobs
@@ -440,27 +468,34 @@ pub(crate) fn analytics_settings(root: &Path) -> Result<Option<brain_backend::an
         return Ok(None);
     }
     if !(a.is_null() || a.is_object() || a == &Value::Bool(true)) {
-        return Err("brain.json analytics must be true, false or an object".into());
+        return Err("brain.json: analytics must be true, false or an object".into());
     }
     let mut cfg = brain_backend::analytics::Config::default();
     if let Some(obj) = a.as_object() {
         for key in obj.keys() {
             if !matches!(key.as_str(), "enabled" | "consent" | "retentionDays" | "countryHeader" | "eventsPerMinute") {
-                return Err(format!("brain.json analytics.{key} is unknown; use enabled, consent, retentionDays, countryHeader or eventsPerMinute"));
+                return Err(format!("brain.json: analytics.{key} is unknown; fix: use enabled, consent, retentionDays, countryHeader or eventsPerMinute"));
             }
         }
         match &a["consent"] {
             Value::Null => {}
             Value::String(s) if s == "required" => cfg.consent_required = true,
             Value::String(s) if s == "none" => {}
-            _ => return Err("brain.json analytics.consent must be \"required\" or \"none\"".into()),
+            _ => return Err("brain.json: analytics.consent must be \"required\" or \"none\"".into()),
         }
-        let num = |k: &str| a[k].as_u64().map(|n| u32::try_from(n).unwrap_or(u32::MAX));
-        if let Some(n) = num("retentionDays") { cfg.retention_days = n; }
-        if let Some(n) = num("eventsPerMinute") { cfg.events_per_minute = n; }
-        if let Some(h) = a["countryHeader"].as_str() { cfg.country_header = Some(h.to_string()); }
+        let num = |k: &str| match &a[k] {
+            Value::Null => Ok(None),
+            value => value.as_u64().map(|n| Some(u32::try_from(n).unwrap_or(u32::MAX))).ok_or_else(|| format!("brain.json: analytics.{k} must be a whole number")),
+        };
+        if let Some(n) = num("retentionDays")? { cfg.retention_days = n; }
+        if let Some(n) = num("eventsPerMinute")? { cfg.events_per_minute = n; }
+        match &a["countryHeader"] {
+            Value::Null => {}
+            Value::String(h) => cfg.country_header = Some(h.clone()),
+            _ => return Err("brain.json: analytics.countryHeader must be a lowercase HTTP header name".into()),
+        }
     }
-    cfg.validate()?;
+    cfg.validate().map_err(|error| format!("brain.json: {error}"))?;
     Ok(Some(cfg))
 }
 fn runtime() -> Result<tokio::runtime::Runtime, String> {

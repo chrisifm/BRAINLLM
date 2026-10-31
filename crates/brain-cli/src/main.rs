@@ -681,10 +681,14 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
     if target.is_dir() {
         if let Some(app) = scaffold::find_root(&target) {
             diags.extend(env::check(&app));
-            if let Err(message) = backend::inspect(&app) {
+            let contract_errors = match backend::inspect(&app) {
+                Ok(_) => backend::startup_contract_errors(&app),
+                Err(message) => vec![message],
+            };
+            for message in contract_errors {
                 // Contract errors start with the file that names the problem and may end with their own fix.
                 let (text, fix) = message.split_once("; fix: ").unwrap_or((message.as_str(), "inspect `brain backend schema --json`; fix the named literal schema, explicit policy or hook/job contract, then run brain check again"));
-                let file = text.split_once(": ").map(|(at, _)| at).filter(|at| at.starts_with("server/") && !at.contains(' ')).unwrap_or("server/");
+                let file = text.split_once(": ").map(|(at, _)| at).filter(|at| (at.starts_with("server/") || *at == "brain.json") && !at.contains(' ')).unwrap_or("server/");
                 let mut diag = compiler::Diag::new("B0735", file, brain_parse::Span::default(), text.to_string(), fix.to_string());
                 diag.line=1;diag.col=1;diags.push(diag);
             }
@@ -704,6 +708,11 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
             // B0749: every row of a resource with a state-like field is public; advisory, never a contract error
             for (file, message, fix) in backend::row_exposure(&app) {
                 let mut diag = compiler::Diag::new("B0749", &file, brain_parse::Span::default(), message, fix);
+                diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
+            }
+            // B0790: a route or webhook secret serve would refuse to start without; names only, never values
+            for (file, message, fix) in backend::secret_warnings(&app) {
+                let mut diag = compiler::Diag::new("B0790", &file, brain_parse::Span::default(), message, fix);
                 diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
             }
             // B0770: a bucket accepts every file only because it never listed its types
