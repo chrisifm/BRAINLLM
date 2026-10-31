@@ -615,6 +615,11 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
                     "inspect `brain backend schema --json`; fix the named literal schema, explicit policy or hook/job contract, then run brain check again");
                 diag.line=1;diag.col=1;diags.push(diag);
             }
+            // backend settings the server would refuse at startup (B0751): names only, never values
+            for (message, fix) in backend::config_diagnostics(&app) {
+                let mut diag = compiler::Diag::new("B0751", env::FILE, brain_parse::Span::default(), message, fix);
+                diag.line=1;diag.col=1;diags.push(diag);
+            }
             // brain.json `server` (B0707): body, time and rate limits shared by brain run and the production server
             if let Err(message) = brain_pack::read_server_limits(&app) {
                 let (msg, fix) = message.split_once("; fix: ").unwrap_or((message.as_str(), "set whole numbers in range"));
@@ -1874,6 +1879,9 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
     for (code, level, msg, fix) in app.as_deref().map(env::doctor).unwrap_or_default() {
         env_ok &= level != "error";
         advice.push(Json::obj([("code", Json::str(code)), ("level", Json::str(level)), ("file", Json::str(env::FILE)), ("msg", Json::str(msg)), ("fix", Json::str(fix))]));
+    }
+    for (msg, fix) in app.as_deref().map(backend::config_diagnostics).unwrap_or_default() {
+        advice.push(Json::obj([("code", Json::str("B0751")), ("level", Json::str("warning")), ("file", Json::str(env::FILE)), ("msg", Json::str(msg)), ("fix", Json::str(fix))]));
     }
     if let Some(a) = &app
         && let Some(p) = env::value(a, "production", "PUBLIC_SITE_URL").or_else(|| std::fs::read_to_string(a.join("brain.json")).ok().and_then(|s| Json::parse(&s).ok()).and_then(|j| j.get("site").and_then(Json::as_str).map(str::to_string))).filter(|s| env::placeholder_origin(s))

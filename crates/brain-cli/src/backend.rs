@@ -336,6 +336,113 @@ fn runtime() -> Result<tokio::runtime::Runtime, String> {
         .build()
         .map_err(|e| e.to_string())
 }
+/// Every setting the backend refuses at startup, as (problem, fix). Values never reach a message: only variable names.
+pub fn config_problems(setting: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
+    let mut problems = Vec::new();
+    let mut report = |problem: String, fix: &str| problems.push((problem, fix.to_string()));
+    let placeholder = || "http://127.0.0.1".to_string();
+    let secret_fix = "set BRAIN_JWT_SECRET to 32..4096 random bytes; BRAIN_JWT_ISSUER and BRAIN_JWT_AUDIENCE are optional and default to the backend origin";
+    match setting("BRAIN_JWT_SECRET") {
+        Some(secret) => {
+            let issuer = setting("BRAIN_JWT_ISSUER").unwrap_or_else(placeholder);
+            let audience = setting("BRAIN_JWT_AUDIENCE").unwrap_or_else(placeholder);
+            match brain_backend::jwt::Config::new(secret, issuer, audience) {
+                Err(_) => report("BRAIN_JWT_SECRET, BRAIN_JWT_ISSUER or BRAIN_JWT_AUDIENCE is out of range".into(), secret_fix),
+                Ok(config) => {
+                    if let Some(previous) = setting("BRAIN_JWT_SECRET_PREVIOUS")
+                        && config.with_previous(previous.split(',').map(str::to_string).collect()).is_err()
+                    {
+                        report("BRAIN_JWT_SECRET_PREVIOUS has a key out of range".into(), "list retired keys separated by commas, each 32..4096 bytes, and remove them once their tokens expired");
+                    }
+                }
+            }
+        }
+        None => {
+            if setting("GOOGLE_CLIENT_ID").is_some() {
+                report("GOOGLE_CLIENT_ID needs native JWT sessions, and BRAIN_JWT_SECRET is not set".into(), secret_fix);
+            }
+        }
+    }
+    if let Some(id) = setting("GOOGLE_CLIENT_ID")
+        && brain_backend::google::Config::new(id).is_err()
+    {
+        report("GOOGLE_CLIENT_ID is not a web OAuth client id".into(), "use the web client id that ends in .apps.googleusercontent.com");
+    }
+    if let Some(bucket) = setting("BRAIN_GCS_BUCKET") {
+        match setting("BRAIN_GCS_ADAPTER") {
+            None => report("BRAIN_GCS_BUCKET needs BRAIN_GCS_ADAPTER, which is not set".into(), "set BRAIN_GCS_ADAPTER to the absolute path of the private storage adapter"),
+            Some(adapter) => {
+                let prefix = setting("BRAIN_GCS_PREFIX").unwrap_or_else(|| "brain-media".into());
+                if brain_backend::media::GcsConfig::new(bucket, prefix, std::path::PathBuf::from(adapter)).is_err() {
+                    report("BRAIN_GCS_BUCKET, BRAIN_GCS_PREFIX or BRAIN_GCS_ADAPTER is invalid".into(), "use a lowercase bucket name of 3..63 characters, a prefix of letters, digits, - or _, and an absolute adapter path");
+                }
+            }
+        }
+    }
+    if let Some(key) = setting("BRAIN_MAIL_RESEND_KEY") {
+        match setting("BRAIN_MAIL_FROM") {
+            None => report("BRAIN_MAIL_RESEND_KEY needs BRAIN_MAIL_FROM, which is not set".into(), "set BRAIN_MAIL_FROM to a verified plain sender address"),
+            Some(from) => {
+                if brain_backend::auth_flows::MailConfig::resend(key, from, placeholder()).is_err() {
+                    report("BRAIN_MAIL_RESEND_KEY or BRAIN_MAIL_FROM is invalid".into(), "use the provider key (16..4096 printable bytes) and a plain sender address without a display name");
+                }
+            }
+        }
+    }
+    for key in ["BRAIN_DB_HTTP_POOL", "BRAIN_DB_WORKER_POOL", "BRAIN_BACKEND_PROCESSES"] {
+        if setting(key).is_some_and(|v| !v.parse::<u32>().is_ok_and(|n| (1..=64).contains(&n))) {
+            report(format!("{key} must be 1..64"), "set a whole number from 1 to 64, or remove it to use the default");
+        }
+    }
+    if setting("BRAIN_AUTH_SESSION_SECONDS").is_some_and(|v| !v.parse::<u32>().is_ok_and(|n| (300..=31_536_000).contains(&n))) {
+        report("BRAIN_AUTH_SESSION_SECONDS must be 300..31536000".into(), "set the session length in whole seconds, or remove it to use the default");
+    }
+    problems
+}
+/// The same findings for `brain check` and `brain doctor`, from the development section of .brain_env. Only for apps
+/// that run the native backend: a key like GOOGLE_CLIENT_ID means nothing to the backend in any other app.
+pub fn config_diagnostics(root: &Path) -> Vec<(String, String)> {
+    let native = root.join("server/resources").is_dir() || root.join("server/jobs").is_dir() || root.join("server/routes").is_dir() || crate::env::value(root, "development", "BRAIN_BACKEND_URL").is_some();
+    if !native {
+        return Vec::new();
+    }
+    config_problems(&|key| crate::env::value(root, "development", key).filter(|v| !v.is_empty()))
+}
+fn operator(args: &[String], url: &str) -> Result<(), String> {
+    let usage = "usage: brain backend users disable|enable|revoke-sessions|disable-identity|enable-identity --user <uuid>|--email <address> [--provider google] [--env development]";
+    let action = args.get(1).map(String::as_str).ok_or(usage)?;
+    if !matches!(action, "disable" | "enable" | "revoke-sessions" | "disable-identity" | "enable-identity") {
+        return Err(usage.into());
+    }
+    let provider = crate::flag(args, "--provider");
+    let provider = match action {
+        "disable-identity" | "enable-identity" => Some(provider.ok_or("this action requires --provider, for example --provider google")?),
+        _ => None,
+    };
+    runtime()?.block_on(async {
+        use brain_backend::auth_flows as flows;
+        let pool = brain_backend::boot::connect(url, &brain_backend::boot::Boot::command(false)).await?;
+        let user = match (crate::flag(args, "--user"), crate::flag(args, "--email")) {
+            (Some(user), None) => user.parse().map_err(|_| "--user must be a UUID".to_string())?,
+            (None, Some(address)) => flows::user_id_by_email(&pool, &address).await.map_err(|e| e.to_string())?.ok_or("No user has that email")?,
+            _ => return Err(usage.to_string()),
+        };
+        let done = match action {
+            "disable" => flows::set_user_disabled(&pool, user, true).await,
+            "enable" => flows::set_user_disabled(&pool, user, false).await,
+            "revoke-sessions" => flows::revoke_user_sessions(&pool, user).await,
+            "disable-identity" => flows::set_identity_disabled(&pool, user, provider.as_deref().unwrap_or_default(), true).await,
+            _ => flows::set_identity_disabled(&pool, user, provider.as_deref().unwrap_or_default(), false).await,
+        }
+        .map_err(|e| e.to_string())?;
+        pool.close().await;
+        if !done {
+            return Err("Refused: the target does not exist, it has no such identity, or it is the last enabled administrator".into());
+        }
+        println!("{}", json!({"schemaVersion":1,"ok":true,"action":action,"user":user}));
+        Ok(())
+    })
+}
 pub fn run(args: &[String]) -> Result<(), String> {
     let root = crate::app_root()?;
     let environment = crate::env::name(args, "development");
@@ -345,16 +452,27 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }
     if !matches!(
         operation,
-        "schema" | "migrate" | "serve" | "bootstrap-admin"
+        "schema" | "migrate" | "serve" | "bootstrap-admin" | "users"
     ) {
-        return Err("usage: brain backend schema|migrate|serve|bootstrap-admin|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182]".into());
+        return Err("usage: brain backend schema|migrate|serve|bootstrap-admin|users|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182]".into());
     }
     let snapshot = inspect(&root)?;
     if operation == "schema" {
         println!("{snapshot}");
         return Ok(());
     }
+    if operation == "serve" {
+        // Before any connection, so a wrong setting is never reported as a database or port problem.
+        let problems = config_problems(&|key| std::env::var(key).ok().filter(|v| !v.is_empty()).or_else(|| crate::env::value(&root, &environment, key)));
+        if !problems.is_empty() {
+            let lines: Vec<String> = problems.iter().map(|(problem, fix)| format!("{problem}; fix: {fix}")).collect();
+            return Err(format!("B0751 backend settings: {}", lines.join(" | ")));
+        }
+    }
     let url = database(&root, &environment)?;
+    if operation == "users" {
+        return operator(args, &url);
+    }
     let roles = auth_roles(&root)?;
     let resources = contracts(&root, "resources")?;
     let jobs = contracts(&root, "jobs")?;
@@ -386,6 +504,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
         // Never migrate on serve: database changes are an explicit, reviewable command.
         let setting=|key:&str|std::env::var(key).ok().filter(|v|!v.is_empty()).or_else(||crate::env::value(&root,&environment,key));
         let jwt=setting("BRAIN_JWT_SECRET").map(|secret|brain_backend::jwt::Config::new(secret,setting("BRAIN_JWT_ISSUER").unwrap_or_else(||origin.clone()),setting("BRAIN_JWT_AUDIENCE").unwrap_or_else(||origin.clone()))).transpose()?;
+        let jwt=match (jwt,setting("BRAIN_JWT_SECRET_PREVIOUS")) {(Some(config),Some(previous))=>Some(config.with_previous(previous.split(',').map(str::to_string).collect())?),(config,_)=>config};
+        if let Some(seconds)=setting("BRAIN_AUTH_SESSION_SECONDS") {brain_backend::auth::configure_session_seconds(seconds.parse().map_err(|_|"BRAIN_AUTH_SESSION_SECONDS must be 300..31536000")?)?;}
         let google=setting("GOOGLE_CLIENT_ID").map(brain_backend::google::Config::new).transpose()?;
         if google.is_some() && jwt.is_none() {return Err("Google Sign-In requires configured native JWT sessions; set BRAIN_JWT_SECRET, issuer and audience".into());}
         let gcs=match setting("BRAIN_GCS_BUCKET") {
