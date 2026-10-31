@@ -114,6 +114,37 @@ try {
       if(r.status!==0) throw Error('Backend CLI smoke failed at '+args[0]+' '+(args[1]||'')+' (exit '+r.status+', signal '+r.signal+'): '+(r.stderr||r.stdout||r.error?.message||'No output').slice(0,2000))
       return r.stdout.trim()?JSON.parse(r.stdout):null
     }
+    // Accounts stored under the implicit roles of 0.6.1 and earlier survive every roles change; nothing moves them unasked.
+    // check-general: begin 0.6.1 upgrade fixture
+    run(exe('createdb'),['-h','127.0.0.1','-p',String(port),'-U','brain_test','backend_roles'])
+    {
+      const rolesEnv={...cliEnv,DATABASE_URL:`postgres://brain_test@127.0.0.1:${port}/backend_roles`}
+      const cli=(args,cwd)=>{const r=spawnSync(binary,args,{cwd,env:rolesEnv,encoding:'utf8',timeout:20000,maxBuffer:256*1024});if(r.status!==0)throw Error('Roles upgrade smoke failed at '+args.join(' ')+': '+(r.stderr||r.stdout).slice(0,1000));return JSON.parse(r.stdout)}
+      const sql=(text)=>{const r=spawnSync(exe('psql'),['-h','127.0.0.1','-p',String(port),'-U','brain_test','-d','backend_roles','-At','-v','ON_ERROR_STOP=1','-c',text],{encoding:'utf8'});if(r.status!==0)throw Error('Roles upgrade smoke SQL failed: '+r.stderr.slice(0,500));return r.stdout.trim()}
+      spawnSync(binary,['new','roles-app','--json'],{cwd:dir,env:rolesEnv,encoding:'utf8',timeout:20000})
+      const legacyApp=join(dir,'roles-app'),write=(path,text)=>{mkdirSync(join(legacyApp,path,'..'),{recursive:true});writeFileSync(join(legacyApp,path),text)}
+      write('server/resources/items/schema.jsbrain',"<meta server>\nexport default { title: 'str!' }\n")
+      write('server/resources/items/policy.jsbrain',"<meta server>\nexport default { read: ['owner', 'company'], create: ['candidate'], update: ['owner'], delete: ['owner'] }\n")
+      cli(['backend','migrate','--json'],legacyApp)
+      sql("INSERT INTO _brain_users(id,email,password_hash,role) SELECT gen_random_uuid(),'old-'||n||'@example.test','preserve-exact','candidate' FROM generate_series(1,3) n")
+      if(cli(['backend','migrate','--json'],legacyApp).undeclaredRoles) throw Error('Implicit roles must stay declared for an app that names them')
+      const schema=cli(['backend','schema'],legacyApp)
+      if(schema.roles.signup_role!=='candidate') throw Error('An app naming the implicit roles must keep its signup role')
+      write('server/auth/roles.jsbrain',"<meta server>\nexport default { roles: ['admin', 'company', 'candidate', 'user'], signup_role: 'user' }\n")
+      if(cli(['backend','migrate','--json'],legacyApp).undeclaredRoles) throw Error('Names declared only to compile must keep compiling')
+      write('server/resources/items/policy.jsbrain',"<meta server>\nexport default { read: ['owner'], create: ['member'], update: ['owner'], delete: ['owner'] }\n")
+      write('server/auth/roles.jsbrain',"<meta server>\nexport default { roles: ['admin', 'member'], signup_role: 'member' }\n")
+      const report=cli(['backend','migrate','--json'],legacyApp)
+      if(report.undeclaredRoles?.[0]?.role!=='candidate'||report.undeclaredRoles[0].accounts!==3||!report.next) throw Error('Migrate must report accounts whose role is no longer declared')
+      if(sql("SELECT count(*) FROM _brain_users WHERE role='candidate' AND password_hash='preserve-exact'")!=='3') throw Error('Migrate must not rewrite accounts')
+      const preview=cli(['backend','rename-role','--from','candidate','--to','member'],legacyApp)
+      if(preview.accounts!==3||preview.applied||sql("SELECT count(*) FROM _brain_users WHERE role='candidate'")!=='3') throw Error('rename-role must only count without --apply')
+      if(cli(['backend','rename-role','--from','candidate','--to','member','--apply'],legacyApp).accounts!==3) throw Error('rename-role must move the accounts')
+      if(sql("SELECT count(*) FROM _brain_users WHERE role='member' AND password_hash='preserve-exact' AND auth_version>0")!=='3') throw Error('rename-role must keep accounts and bump their auth version')
+      if(cli(['backend','migrate','--json'],legacyApp).undeclaredRoles) throw Error('No undeclared accounts may remain after the move')
+      console.log('Backend CLI roles upgrade smoke: PASS (implicit roles kept, omitted names compile, accounts preserved, explicit move)')
+    }
+    // check-general: end 0.6.1 upgrade fixture
     brain(['new','app','--json'],dir)
     const app=join(dir,'app')
     brain(['add','job','deliver','--fields','message:str!','--json'],app)
@@ -140,7 +171,7 @@ try {
       await terminateOwned(test,'SIGINT')
     }
     mkdirSync(join(app,'server/auth'),{recursive:true})
-    writeFileSync(join(app,'server/auth/roles.jsbrain'),"export default { roles: ['admin','company','candidate','user','editor'], signup_role: 'user' }\n")
+    writeFileSync(join(app,'server/auth/roles.jsbrain'),"export default { roles: ['admin','user','editor'], signup_role: 'user' }\n")
     mkdirSync(join(app,'server/webhooks'),{recursive:true})
     writeFileSync(join(app,'server/api-keys.jsbrain'),"export default { enabled: true, dailyQuota: 100 }\n")
     writeFileSync(join(app,'server/webhooks/config.jsbrain'),"export default { encryptionKeys: ['BRAIN_WEBHOOK_ENCRYPTION_KEY'], inbound: { smoke: { queue: 'deliver', signingKeys: ['BRAIN_WEBHOOK_SMOKE_KEY'] } } }\n")

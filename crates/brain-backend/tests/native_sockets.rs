@@ -59,8 +59,8 @@ impl Server {
             .database(&name);
         let pool = db::connect(options.to_url_lossy().as_str()).await.unwrap();
         base.close().await;
-        let owner = json!({"name":"posts","fields":{"title":{"kind":"str","required":true}},"policy":{"read":["owner","admin"],"create":["candidate","admin"],"update":["owner","admin"],"delete":["owner","admin"]}});
-        let staff = json!({"name":"staff_posts","fields":{"title":{"kind":"str","required":true}},"policy":{"read":["candidate","admin"],"create":["admin"],"update":["admin"],"delete":["admin"]}});
+        let owner = json!({"name":"posts","fields":{"title":{"kind":"str","required":true}},"policy":{"read":["owner","admin"],"create":["user","admin"],"update":["owner","admin"],"delete":["owner","admin"]}});
+        let staff = json!({"name":"staff_posts","fields":{"title":{"kind":"str","required":true}},"policy":{"read":["user","admin"],"create":["admin"],"update":["admin"],"delete":["admin"]}});
         let resources = vec![
             serde_json::from_value(owner).unwrap(),
             serde_json::from_value(staff).unwrap(),
@@ -268,8 +268,8 @@ async fn denied(request: tokio_tungstenite::tungstenite::http::Request<()>, code
 #[ignore = "Use the owned disposable Postgres harness; opens loopback TCP only"]
 async fn authenticated_metadata_rechecks_row_policy_revocation_origins_and_committed_mutations() {
     let server = Server::new().await;
-    let alice = server.actor("candidate").await;
-    let bob = server.actor("candidate").await;
+    let alice = server.actor("user").await;
+    let bob = server.actor("user").await;
     let admin = server.actor("admin").await;
     denied(server.request(Some(&alice.cookie), None, ""), 403).await;
     denied(
@@ -368,7 +368,11 @@ async fn authenticated_metadata_rechecks_row_policy_revocation_origins_and_commi
     assert!(Uuid::parse_str(event["eventId"].as_str().unwrap()).is_ok());
 
     // A database role change applies to an already joined room on its very next delivery.
-    sqlx::query("UPDATE _brain_users SET role='company' WHERE id=$1")
+    sqlx::query("INSERT INTO _brain_auth_roles(role) VALUES('staff')")
+        .execute(&server.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE _brain_users SET role='staff' WHERE id=$1")
         .bind(alice.id)
         .execute(&server.pool)
         .await
@@ -485,7 +489,7 @@ async fn authenticated_metadata_rechecks_row_policy_revocation_origins_and_commi
 #[ignore = "Use the owned disposable Postgres harness; opens loopback TCP only"]
 async fn native_protocol_caps_connections_frames_and_client_publication() {
     let server = Server::new().await;
-    let actor = server.actor("candidate").await;
+    let actor = server.actor("user").await;
     let mut sockets = Vec::new();
     for _ in 0..4 {
         sockets.push(server.connect(&actor).await);
@@ -535,7 +539,7 @@ async fn native_protocol_caps_connections_frames_and_client_publication() {
 #[ignore = "Use the owned disposable Postgres harness; opens loopback TCP only"]
 async fn native_socket_opt_in_is_absent_by_default_and_origin_subset_is_required() {
     let server = Server::configured(false).await;
-    let actor = server.actor("candidate").await;
+    let actor = server.actor("user").await;
     denied(server.request(Some(&actor.cookie), Some(ORIGIN), ""), 404).await;
     assert_eq!(
         server
@@ -590,7 +594,7 @@ async fn sixteen_admitted_users_share_one_committed_event_without_a_reconnect_st
     let admin = server.actor("admin").await;
     let mut sockets = Vec::new();
     for _ in 0..16 {
-        let actor = server.actor("candidate").await;
+        let actor = server.actor("user").await;
         let mut socket = server.connect(&actor).await;
         assert_eq!(
             command(&mut socket, json!({"type":"join","resource":"staff_posts"})).await["type"],

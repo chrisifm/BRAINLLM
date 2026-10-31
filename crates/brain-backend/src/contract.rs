@@ -671,7 +671,7 @@ fn native_paths(roles: &crate::auth_flows::RolesConfig) -> Map<String, Value> {
     add(
         "/_brain/auth/signup",
         "post",
-        "Create an unverified candidate account",
+        "Create an unverified account with the configured signup role",
         open.clone(),
         200,
         Some(account.clone()),

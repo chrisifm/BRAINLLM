@@ -1,8 +1,8 @@
 //! Row scopes for reads and relational ownership (B-09/B-21).
 //!
 //! A policy grant `owner.<ref>` (or `owner.<ref>.<ref>`, at most two hops) means: the reader owns the record that
-//! this row references. Example: `applications.job -> jobs.company -> companies.owner`, so the grant
-//! `owner.job.company` lets a company owner read the applications to its jobs. Scopes compile to one bound SQL
+//! this row references. Example: `comments.post -> posts.board -> boards.owner`, so the grant
+//! `owner.post.board` lets a board owner read the comments on its posts. Scopes compile to one bound SQL
 //! predicate (nested `IN (SELECT id ...)` over indexed foreign-key columns), applied to lists, counts, aggregates,
 //! includes and single-record checks alike.
 use crate::{Resource, relations, visibility::Viewer};

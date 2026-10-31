@@ -83,20 +83,20 @@ pub fn catalog() -> Vec<Resource> {
         resource(
             "shops",
             vec![("name", field("str", true)), ("country", field("str", true))],
-            policy(&["public"], &["candidate"], &["owner"], &["owner"]),
+            policy(&["public"], &["user"], &["owner"], &["owner"]),
             json!({"filter": {"country": ["eq"]}}),
         ),
         products,
         resource(
             "reviews",
             vec![("product", field("ref:products", true)), ("rating", field("int", true)), ("body", field("str", false))],
-            policy(&["owner", "owner.product.shop"], &["candidate"], &["owner"], &["owner"]),
+            policy(&["owner", "owner.product.shop"], &["user"], &["owner"], &["owner"]),
             json!({"filter": {"rating": ["eq"]}}),
         ),
         resource(
             "orders",
             vec![("product", product_ref), ("quantity", field("int", true))],
-            policy(&["owner"], &["candidate"], &["owner"], &["owner"]),
+            policy(&["owner"], &["user"], &["owner"], &["owner"]),
             json!({}),
         ),
     ]
@@ -487,10 +487,10 @@ async fn access_modifiers_and_owner_exposure() {
     let posts = resource(
         "posts",
         vec![("title", field("str", true)), ("status", status), ("api_key", with("str", "writeonly")), ("score", with("int", "private"))],
-        policy(&["public"], &["candidate"], &["owner"], &["owner"]),
+        policy(&["public"], &["user"], &["owner"], &["owner"]),
         json!({}),
     );
-    let mut notes = resource("notes", vec![("body", field("str", true))], policy(&["public"], &["candidate"], &["owner"], &["owner"]), json!({"expose_owner": true}));
+    let mut notes = resource("notes", vec![("body", field("str", true))], policy(&["public"], &["user"], &["owner"], &["owner"]), json!({"expose_owner": true}));
     notes.search = Vec::new();
     let api = api(&pool, vec![posts, notes]).await;
     let (author_id, author) = api.user("author@blog.test").await;
@@ -530,10 +530,10 @@ async fn access_modifiers_and_owner_exposure() {
     assert_eq!(notes["items"][0]["owner"], author_id.to_string(), "expose_owner opts in");
 
     // Hidden fields stay off the query surface.
-    let mut bad = resource("bad", vec![("secret", with("str", "writeonly"))], policy(&["public"], &["candidate"], &["owner"], &["owner"]), json!({"filter": {"secret": ["eq"]}}));
+    let mut bad = resource("bad", vec![("secret", with("str", "writeonly"))], policy(&["public"], &["user"], &["owner"], &["owner"]), json!({"filter": {"secret": ["eq"]}}));
     bad.search = Vec::new();
     assert!(brain_backend::query::validate(&bad).is_err());
-    let odd = resource("odd", vec![("x", with("str", "hidden"))], policy(&["public"], &["candidate"], &["owner"], &["owner"]), json!({}));
+    let odd = resource("odd", vec![("x", with("str", "hidden"))], policy(&["public"], &["user"], &["owner"], &["owner"]), json!({}));
     assert!(brain_backend::db::migrate(&pool, &[odd]).await.is_err(), "unknown access modes are rejected");
     pool.close().await;
 }
@@ -544,11 +544,11 @@ async fn access_modifiers_and_owner_exposure() {
 async fn slug_history_resolves_old_slugs_to_the_current_one() {
     let pool = database("brain_slugs").await;
     let slug = Field { kind: "str".into(), required: true, unique: true, slug: true, ..Default::default() };
-    let mut articles = resource("articles", vec![("title", field("str", true)), ("slug", slug)], policy(&["public"], &["candidate"], &["owner"], &["owner"]), json!({}));
+    let mut articles = resource("articles", vec![("title", field("str", true)), ("slug", slug)], policy(&["public"], &["user"], &["owner"], &["owner"]), json!({}));
     articles.search = Vec::new();
     let mut drafts = articles.clone();
     drafts.name = "drafts".into();
-    drafts.policy = policy(&["owner"], &["candidate"], &["owner"], &["owner"]);
+    drafts.policy = policy(&["owner"], &["user"], &["owner"], &["owner"]);
     let api = api(&pool, vec![articles, drafts]).await;
     let (_, author) = api.user("author@news.test").await;
     let (_, other) = api.user("other@news.test").await;
@@ -584,7 +584,7 @@ async fn slug_history_resolves_old_slugs_to_the_current_one() {
     let (s, _) = api.get("/api/drafts/redirects/plan", Some(&other)).await;
     assert_eq!(s, 404);
     // Contract: a slug must be a unique str.
-    let mut bad = resource("bad", vec![("slug", Field { kind: "str".into(), slug: true, ..Default::default() })], policy(&["public"], &["candidate"], &["owner"], &["owner"]), json!({}));
+    let mut bad = resource("bad", vec![("slug", Field { kind: "str".into(), slug: true, ..Default::default() })], policy(&["public"], &["user"], &["owner"], &["owner"]), json!({}));
     bad.search = Vec::new();
     assert!(bad.validate().is_err());
     pool.close().await;
@@ -602,7 +602,7 @@ async fn search_language_weights_and_legacy_numeric_ids() {
         let mut r = resource(
             "posts",
             vec![("title", field("str", true)), ("body", field("str", false)), ("legacy_id", legacy.clone())],
-            policy(&["public"], &["candidate"], &["owner"], &["owner"]),
+            policy(&["public"], &["user"], &["owner"], &["owner"]),
             query,
         );
         r.search = vec!["title".into(), "body".into()];

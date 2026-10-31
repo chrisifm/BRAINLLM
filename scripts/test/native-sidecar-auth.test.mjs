@@ -16,7 +16,7 @@ const once = (emitter, event) => new Promise(resolve => emitter.once(event, reso
 test('real sidecar uses native authority once across guard/load, awaits logout and refuses legacy fallback', { timeout: 15000 }, async () => {
   const dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), 'brain-sidecar-native-'))
   let anonymous = false, me = 0, logout = 0, child, lines
-  const user = { id: '00000000-0000-4000-8000-000000000001', email: 'synthetic@example.test', role: 'candidate', verified: true }
+  const user = { id: '00000000-0000-4000-8000-000000000001', email: 'synthetic@example.test', role: 'user', verified: true }
   const backend = createServer((req, res) => {
     assert.equal(req.headers['x-forwarded-host'], undefined)
     assert.equal(req.headers['x-forwarded-for'], undefined)

@@ -314,6 +314,8 @@ async fn baseline(
                     Some("r"),
                 )
                 .await?;
+                // Rows seeded by the immutable migration 0005 in every database, whatever roles the app declares; this is
+                // drift detection only and grants nothing. An app's roles come from RolesConfig.
                 let builtins:i64=sqlx::query_scalar("SELECT count(*) FROM public._brain_auth_roles WHERE role IN('admin','company','candidate','user')").fetch_one(&mut *conn).await.map_err(safe)?;
                 if builtins != 4 {
                     return Err(drift("registered built-in roles"));

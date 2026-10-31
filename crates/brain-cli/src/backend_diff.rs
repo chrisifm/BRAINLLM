@@ -88,7 +88,7 @@ pub fn diff(before: Option<&Value>, after: &Value) -> Value {
 mod tests {
     use super::*;
     fn resource() -> Value {
-        json!({"resources":[{"name":"notes","fields":{"title":{"kind":"str","required":true}},"policy":{"read":["owner"]},"search":[],"hooks":{}}],"jobs":[],"roles":{"roles":["admin","candidate"],"signup_role":"candidate"}})
+        json!({"resources":[{"name":"notes","fields":{"title":{"kind":"str","required":true}},"policy":{"read":["owner"]},"search":[],"hooks":{}}],"jobs":[],"roles":{"roles":["admin","user"],"signup_role":"user"}})
     }
     #[test]
     fn reports_real_breaking_fields_and_policy_changes_without_claiming_a_deployment() {

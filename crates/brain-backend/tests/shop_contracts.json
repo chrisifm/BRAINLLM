@@ -11,7 +11,7 @@
           "product"
         ],
         "roles": [
-          "candidate",
+          "user",
           "admin"
         ],
         "steps": [
@@ -193,7 +193,7 @@
       "name": "shop_orders",
       "policy": {
         "create": [
-          "candidate",
+          "user",
           "admin"
         ],
         "delete": [
@@ -266,7 +266,7 @@
           "admin"
         ],
         "read": [
-          "candidate",
+          "user",
           "admin"
         ],
         "update": [
@@ -309,7 +309,7 @@
       "name": "task_items",
       "policy": {
         "create": [
-          "candidate"
+          "user"
         ],
         "delete": [
           "owner"

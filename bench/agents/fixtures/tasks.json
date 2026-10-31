@@ -22,6 +22,6 @@
   {
     "kind": "CRUD",
     "prompt": "Prepare a usable CRUD view for the existing notes resource using brain recipe resource-ui and the atomic plan/apply workflow. Include search, keyed rows, offset pagination, create/edit/delete, loading/error/empty/success/busy states. Preserve backend policy. Do not claim a live database test; no database is supplied.",
-    "files": {"brain.json":"{}\n","server/resources/notes/schema.jsbrain":"export default { title: 'str!', done: 'bool' }\n","server/resources/notes/policy.jsbrain":"export default { read: ['owner'], create: ['candidate'], update: ['owner'], delete: ['owner'] }\n"}
+    "files": {"brain.json":"{}\n","server/resources/notes/schema.jsbrain":"export default { title: 'str!', done: 'bool' }\n","server/resources/notes/policy.jsbrain":"export default { read: ['owner'], create: ['user'], update: ['owner'], delete: ['owner'] }\n"}
   }
 ]

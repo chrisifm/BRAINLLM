@@ -213,48 +213,147 @@ pub fn contracts(root: &Path, kind: &str) -> Result<Vec<Resource>, String> {
     Ok(out)
 }
 pub fn auth_roles(root: &Path) -> Result<brain_backend::auth_flows::RolesConfig, String> {
+    use brain_backend::auth_flows::RolesConfig;
     let path = root.join("server/auth/roles.jsbrain");
     let roles = if path.symlink_metadata().is_ok() {
         serde_json::from_value(read_contract(root, &path)?)
-            .map_err(|_| "server/auth/roles.jsbrain must declare roles and signup_role")?
+            .map_err(|_| "server/auth/roles.jsbrain must declare roles and signup_role; fix: export default { roles: ['admin', 'user'], signup_role: 'user' }")?
+    } else if legacy_implicit_roles(root) {
+        RolesConfig::legacy_implicit()
     } else {
-        brain_backend::auth_flows::RolesConfig::default()
+        RolesConfig::default()
     };
     roles.validate()?;
     Ok(roles)
 }
-fn validate_roles(
-    roles: &brain_backend::auth_flows::RolesConfig,
-    resources: &[Resource],
-) -> Result<(), String> {
-    for resource in resources {
-        for grants in [
-            &resource.policy.read,
-            &resource.policy.create,
-            &resource.policy.update,
-            &resource.policy.delete,
-        ] {
+/// No roles file, and a grant names a role only the pre-0.6.2 implicit defaults declared. Such an app keeps those
+/// defaults (B0739 asks it to declare them); without this it would stop compiling and its signups would change role.
+fn legacy_implicit_roles(root: &Path) -> bool {
+    !root.join("server/auth/roles.jsbrain").exists()
+        && named_grants(root).iter().any(|(role, _)| {
+            role != "admin" && role != "user" && brain_backend::auth_flows::LEGACY_IMPLICIT_ROLES.contains(&role.as_str())
+        })
+}
+/// Every role name a contract grants, with the file that names it: resource policies and field visibility, domain
+/// actions, transitions and operations, file buckets and routes. Keywords and `owner.<ref>` paths are not roles.
+/// Unreadable contracts are skipped here; their own validation reports them.
+fn named_grants(root: &Path) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut push = |role: &str, at: String| {
+        if !matches!(role, "public" | "owner" | "related") && brain_backend::ownership::path(role).is_none() {
+            out.push((role.to_string(), at));
+        }
+    };
+    let resources = contracts(root, "resources").unwrap_or_default();
+    for r in &resources {
+        for grants in [&r.policy.read, &r.policy.create, &r.policy.update, &r.policy.delete] {
             for role in grants {
-                if !matches!(role.as_str(), "public" | "owner")
-                    && brain_backend::ownership::path(role).is_none()
-                    && !roles.roles.contains(role)
-                {
-                    return Err(format!(
-                        "server/resources/{}/policy.jsbrain: role {role} is not declared in server/auth/roles.jsbrain",
-                        resource.name
-                    ));
-                }
+                push(role, format!("server/resources/{}/policy.jsbrain", r.name));
+            }
+        }
+        for field in r.fields.values() {
+            for role in field.visible.iter().flatten() {
+                push(role, format!("server/resources/{}/schema.jsbrain", r.name));
             }
         }
     }
+    if let Ok(d) = domain::load(root, &resources) {
+        for (name, resource) in &d.resources {
+            let grants = resource.actions.values().flat_map(|a| a.roles.iter())
+                .chain(resource.transitions.iter().flat_map(|t| t.transitions.values().flat_map(|x| x.roles.iter())));
+            for role in grants {
+                push(role, format!("server/resources/{name}"));
+            }
+        }
+        for (name, op) in &d.operations {
+            for role in &op.roles {
+                push(role, format!("server/operations/{name}.jsbrain"));
+            }
+        }
+    }
+    let mut scan = |at: String, path: PathBuf, keys: &[&str]| {
+        if path.is_file()
+            && let Ok(contract) = read_contract(root, &path)
+        {
+            for key in keys {
+                for role in contract[*key].as_array().into_iter().flatten().filter_map(Value::as_str) {
+                    push(role, at.clone());
+                }
+            }
+        }
+    };
+    for entry in std::fs::read_dir(root.join("server/routes")).into_iter().flatten().flatten() {
+        let at = format!("server/routes/{}/route.jsbrain", entry.file_name().to_string_lossy());
+        scan(at, entry.path().join("route.jsbrain"), &["auth"]);
+    }
+    for entry in std::fs::read_dir(root.join("server/files")).into_iter().flatten().flatten() {
+        scan(format!("server/files/{}", entry.file_name().to_string_lossy()), entry.path(), &["create", "read", "delete"]);
+    }
+    out
+}
+fn undeclared(role: &str, at: &str, roles: &brain_backend::auth_flows::RolesConfig) -> String {
+    format!(
+        "{at}: role `{role}` is not declared, so this grant would admit nobody; fix: add '{role}' to roles in server/auth/roles.jsbrain (`brain add roles` creates the file) and run `brain backend migrate`, or grant a declared role: {}",
+        roles.roles.join(", ")
+    )
+}
+fn validate_roles(root: &Path, roles: &brain_backend::auth_flows::RolesConfig) -> Result<(), String> {
+    // Policies have always failed on an undeclared role; field visibility and routes warn (role_warnings) so that an
+    // app that compiled before keeps compiling.
+    if let Some((role, at)) = named_grants(root).into_iter().find(|(role, at)| at.ends_with("/policy.jsbrain") && !roles.roles.contains(role)) {
+        return Err(undeclared(&role, &at, roles));
+    }
     Ok(())
+}
+/// Warnings about the roles of a valid contract: `(code, file, message, fix)`. Nothing here can fail a green app.
+pub fn role_warnings(root: &Path) -> Vec<(&'static str, String, String, String)> {
+    let Ok(roles) = auth_roles(root) else { return Vec::new() };
+    if validate_roles(root, &roles).is_err() {
+        return Vec::new(); // B0735 owns it
+    }
+    let mut out = Vec::new();
+    if legacy_implicit_roles(root) {
+        let list = roles.roles.iter().map(|r| format!("'{r}'")).collect::<Vec<_>>().join(", ");
+        out.push(("B0739", "server/auth/roles.jsbrain".to_string(),
+            format!("no roles file: this app names a role from the implicit defaults of 0.6.1 and earlier, so it keeps them and signs people up as `{}`", roles.signup_role),
+            format!("run `brain add roles` to declare them: export default {{ roles: [{list}], signup_role: '{}' }}; then remove the names you do not use", roles.signup_role)));
+    }
+    let grants = named_grants(root);
+    for (role, at) in &grants {
+        if !roles.roles.contains(role) && !at.ends_with("/policy.jsbrain") {
+            let text = undeclared(role, at, &roles);
+            let (message, fix) = text.split_once("; fix: ").unwrap_or((&text, ""));
+            out.push(("B0738", at.clone(), message.to_string(), fix.to_string()));
+        }
+    }
+    let routes_admit = crate::route_executor::contracts(root, "development").is_ok_and(|r| r.iter().any(|route| matches!(route.access, brain_backend::routes::Access::SignedIn)));
+    let others: std::collections::BTreeSet<&str> = grants.iter().map(|(r, _)| r.as_str()).filter(|r| *r != "admin").collect();
+    if !others.is_empty() && !others.contains(roles.signup_role.as_str()) && !routes_admit {
+        out.push(("B0738", "server/auth/roles.jsbrain".to_string(),
+            format!("accounts that sign up get the role `{}`, which no grant names; the grants name: {}", roles.signup_role, others.iter().copied().collect::<Vec<_>>().join(", ")),
+            format!("if people who sign up should act here, set signup_role to one of those roles or add '{}' to the grants; existing accounts keep their role (`brain backend rename-role --from <old> --to <new>` moves them)", roles.signup_role)));
+    }
+    out
+}
+/// `brain add roles`: writes the roles this app already has, so declaring them changes nothing.
+pub fn add_roles(root: &Path) -> Result<String, String> {
+    let path = root.join("server/auth/roles.jsbrain");
+    if path.symlink_metadata().is_ok() {
+        return Err("server/auth/roles.jsbrain already exists; fix: edit it directly".into());
+    }
+    let roles = auth_roles(root)?;
+    std::fs::create_dir_all(root.join("server/auth")).map_err(|_| "could not create server/auth")?;
+    let list = roles.roles.iter().map(|r| format!("'{r}'")).collect::<Vec<_>>().join(", ");
+    std::fs::write(&path, format!("<meta server>\nexport default {{ roles: [{list}], signup_role: '{}' }}\n", roles.signup_role))
+        .map_err(|_| "could not write server/auth/roles.jsbrain")?;
+    Ok("server/auth/roles.jsbrain".into())
 }
 pub fn inspect(root: &Path) -> Result<Value, String> {
     let resources = contracts(root, "resources")?;
     let jobs = contracts(root, "jobs")?;
     contract::validate_graph(&resources, &jobs)?;
     let roles = auth_roles(root)?;
-    validate_roles(&roles, &resources)?;
+    validate_roles(root, &roles)?;
     let domain = domain::checked(root, &resources, &roles)?;
     let mut openapi = contract::openapi_with_roles(&resources, &roles);
     brain_backend::domain::openapi(&domain, &resources, &mut openapi);
@@ -345,9 +444,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }
     if !matches!(
         operation,
-        "schema" | "migrate" | "serve" | "bootstrap-admin"
+        "schema" | "migrate" | "serve" | "bootstrap-admin" | "rename-role"
     ) {
-        return Err("usage: brain backend schema|migrate|serve|bootstrap-admin|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182]".into());
+        return Err("usage: brain backend schema|migrate|serve|bootstrap-admin|rename-role --from <role> --to <role> [--apply]|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182]".into());
     }
     let snapshot = inspect(&root)?;
     if operation == "schema" {
@@ -366,8 +465,23 @@ pub fn run(args: &[String]) -> Result<(), String> {
         if operation=="migrate"{
             brain_backend::db::migrate(&pool,&resources).await?;
             roles.register(&pool).await?;
+            let undeclared=brain_backend::auth_flows::undeclared_accounts(&pool,&roles).await?;
             pool.close().await;
-            println!("{}",json!({"schemaVersion":1,"ok":true,"resources":resources.len()}));return Ok(())
+            let mut report=json!({"schemaVersion":1,"ok":true,"resources":resources.len()});
+            if !undeclared.is_empty() {
+                // Nothing is rewritten: those accounts keep their role and owner grants, but no role grant reaches them.
+                report["undeclaredRoles"]=json!(undeclared.iter().map(|(role,accounts)|json!({"role":role,"accounts":accounts})).collect::<Vec<_>>());
+                report["next"]=json!("Declare those roles in server/auth/roles.jsbrain, or preview moving their accounts with `brain backend rename-role --from <role> --to <role>` (add --apply; sessions are revoked)");
+            }
+            println!("{report}");return Ok(())
+        }
+        if operation=="rename-role" {
+            let from=crate::flag(args,"--from").ok_or("rename-role requires --from <role> --to <role>")?;
+            let to=crate::flag(args,"--to").ok_or("rename-role requires --from <role> --to <role>")?;
+            let apply=args.iter().any(|a|a=="--apply");
+            let accounts=brain_backend::auth_flows::rename_role(&pool,&roles,&from,&to,apply).await?;
+            pool.close().await;
+            println!("{}",json!({"schemaVersion":1,"ok":true,"from":from,"to":to,"accounts":accounts,"applied":apply,"sessionsRevoked":apply}));return Ok(());
         }
         if operation=="bootstrap-admin" {
             brain_backend::db::verify(&pool,&resources).await?;
@@ -1123,6 +1237,79 @@ impl Drop for HandlerGroup {
 
 #[cfg(test)]
 mod tests {
+    fn roles_app(files: &[(&str, &str)]) -> (std::path::PathBuf, Vec<&'static str>) {
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let root = std::env::temp_dir().join(format!("brain-roles-{}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("brain.json"), "{}").unwrap();
+        for (path, source) in files {
+            fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
+            fs::write(root.join(path), source).unwrap();
+        }
+        let codes = role_warnings(&root).iter().map(|w| w.0).collect();
+        (root, codes)
+    }
+    const SCHEMA: &str = "<meta server>\nexport default { title: 'str!' }\n";
+    fn policy(create: &str) -> String {
+        format!("<meta server>\nexport default {{ read: ['owner'], create: {create}, update: ['owner'], delete: ['owner'] }}\n")
+    }
+    #[test]
+    fn a_new_app_has_general_roles_and_signup_is_granted_by_user() {
+        let p = policy("['user']");
+        let (root, warnings) = roles_app(&[("server/resources/posts/schema.jsbrain", SCHEMA), ("server/resources/posts/policy.jsbrain", &p)]);
+        let roles = auth_roles(&root).unwrap();
+        assert_eq!((roles.roles.join(","), roles.signup_role.as_str()), ("admin,user".to_string(), "user"));
+        assert!(inspect(&root).is_ok());
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+    #[test]
+    fn a_published_app_without_a_roles_file_keeps_its_implicit_roles() {
+        for (role, _) in [("candidate", ()), ("company", ())] {
+            let p = policy(&format!("['{role}']"));
+            let (root, warnings) = roles_app(&[("server/resources/posts/schema.jsbrain", SCHEMA), ("server/resources/posts/policy.jsbrain", &p)]);
+            assert!(inspect(&root).is_ok(), "{role} must keep compiling");
+            assert_eq!(auth_roles(&root).unwrap().signup_role, brain_backend::auth_flows::LEGACY_IMPLICIT_SIGNUP_ROLE);
+            assert!(warnings.contains(&"B0739"), "{warnings:?}");
+            assert_eq!(add_roles(&root).unwrap(), "server/auth/roles.jsbrain");
+            let declared = auth_roles(&root).unwrap();
+            assert_eq!(declared.signup_role, brain_backend::auth_flows::LEGACY_IMPLICIT_SIGNUP_ROLE, "declaring changes nothing");
+            assert!(!role_warnings(&root).iter().any(|w| w.0 == "B0739"));
+            assert!(add_roles(&root).is_err(), "never overwrites");
+        }
+    }
+    #[test]
+    fn roles_files_may_omit_or_keep_any_name() {
+        let p = policy("['member']");
+        // omits the old names
+        let (root, _) = roles_app(&[("server/auth/roles.jsbrain", "<meta server>\nexport default { roles: ['admin', 'member'], signup_role: 'member' }\n"), ("server/resources/posts/schema.jsbrain", SCHEMA), ("server/resources/posts/policy.jsbrain", &p)]);
+        assert!(inspect(&root).is_ok());
+        // declares them only to compile, signup elsewhere
+        let (root, _) = roles_app(&[("server/auth/roles.jsbrain", "<meta server>\nexport default { roles: ['admin', 'company', 'candidate', 'user'], signup_role: 'user' }\n")]);
+        assert!(inspect(&root).is_ok());
+        for bad in ["roles: ['member'], signup_role: 'member'", "roles: ['admin', 'user'], signup_role: 'admin'", "roles: ['admin', 'user'], signup_role: 'guest'"] {
+            let source = format!("<meta server>\nexport default {{ {bad} }}\n");
+            let (root, _) = roles_app(&[("server/auth/roles.jsbrain", &source)]);
+            let error = auth_roles(&root).err().unwrap();
+            assert!(error.starts_with("server/auth/roles.jsbrain: ") && error.contains("; fix: "), "{error}");
+        }
+    }
+    #[test]
+    fn undeclared_grants_are_actionable_and_a_silent_signup_role_warns() {
+        let p = policy("['editor']");
+        let (root, warnings) = roles_app(&[("server/resources/posts/schema.jsbrain", SCHEMA), ("server/resources/posts/policy.jsbrain", &p)]);
+        let error = inspect(&root).unwrap_err();
+        assert!(error.starts_with("server/resources/posts/policy.jsbrain: role `editor`") && error.contains("brain add roles"), "{error}");
+        assert!(warnings.is_empty(), "the error owns it: {warnings:?}");
+        // The signup role reaches nothing while grants name another role.
+        let (root, warnings) = roles_app(&[("server/auth/roles.jsbrain", "<meta server>\nexport default { roles: ['admin', 'editor', 'user'], signup_role: 'user' }\n"), ("server/resources/posts/schema.jsbrain", SCHEMA), ("server/resources/posts/policy.jsbrain", &p)]);
+        assert!(inspect(&root).is_ok());
+        assert_eq!(warnings, vec!["B0738"]);
+        // Field visibility compiled before: it warns instead of failing.
+        let open = policy("['user']");
+        let (root, warnings) = roles_app(&[("server/resources/posts/schema.jsbrain", "<meta server>\nexport default { title: { type: 'str', visible: ['ghost', 'owner'] } }\n"), ("server/resources/posts/policy.jsbrain", &open)]);
+        assert!(inspect(&root).is_ok());
+        assert_eq!(warnings, vec!["B0738"]);
+    }
     use super::*;
     #[test]
     fn brain_json_analytics_switch_defaults_on_and_validates() {
@@ -1485,21 +1672,21 @@ mod tests {
     #[test]
     fn exact_type_contracts_read_object_fields_numbers_and_constraints() {
         let root = fixture_root("exact-types");
-        let dir = root.0.join("server/resources/vacancies");
+        let dir = root.0.join("server/resources/listings");
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("schema.jsbrain"), "<meta server>\nexport default {\n  title: 'str!',\n  status: { type: 'enum(draft|published)!', default: 'draft' },\n  slug: { type: 'str!', unique: true },\n  openings: { type: 'int', default: 1 },\n  salary_min: 'decimal(10,2)',\n  salary_max: 'decimal(10,2)',\n  currency: 'enum(MXN|USD)',\n  closes_on: 'date',\n  tags: 'list<str,10>'\n}\n").unwrap();
+        fs::write(dir.join("schema.jsbrain"), "<meta server>\nexport default {\n  title: 'str!',\n  status: { type: 'enum(draft|published)!', default: 'draft' },\n  slug: { type: 'str!', unique: true },\n  seats: { type: 'int', default: 1 },\n  price_min: 'decimal(10,2)',\n  price_max: 'decimal(10,2)',\n  currency: 'enum(MXN|USD)',\n  ends_on: 'date',\n  tags: 'list<str,10>'\n}\n").unwrap();
         fs::write(dir.join("policy.jsbrain"), "<meta server>\nexport default { read: ['admin'], create: ['admin'], update: ['admin'], delete: ['admin'] }\n").unwrap();
-        fs::write(dir.join("constraints.jsbrain"), "<meta server>\nexport default {\n  unique: [['title', 'closes_on']],\n  check: [\n    { field: 'openings', min: 1, max: 500 },\n    { compare: ['salary_min', '<=', 'salary_max'] },\n    { together: ['salary_min', 'salary_max', 'currency'] }\n  ]\n}\n").unwrap();
+        fs::write(dir.join("constraints.jsbrain"), "<meta server>\nexport default {\n  unique: [['title', 'ends_on']],\n  check: [\n    { field: 'seats', min: 1, max: 500 },\n    { compare: ['price_min', '<=', 'price_max'] },\n    { together: ['price_min', 'price_max', 'currency'] }\n  ]\n}\n").unwrap();
         let resources = contracts(&root.0, "resources").unwrap();
         let r = &resources[0];
         assert_eq!(r.fields["status"].default, Some(json!("draft")));
         assert!(r.fields["slug"].unique && r.fields["slug"].required);
-        assert_eq!(r.fields["openings"].default, Some(json!(1)));
+        assert_eq!(r.fields["seats"].default, Some(json!(1)));
         assert_eq!(r.constraints.check.len(), 3);
         assert_eq!(r.unique_sets().len(), 2);
-        let saved = r.input(&json!({"title":"Engineer","slug":"engineer"})).unwrap();
-        assert_eq!(saved, json!({"title":"Engineer","slug":"engineer","status":"draft","openings":1}));
-        assert!(r.input(&json!({"title":"A","slug":"a","salary_min":"10"})).unwrap_err().contains_key("salary_max"));
+        let saved = r.input(&json!({"title":"Widget","slug":"widget"})).unwrap();
+        assert_eq!(saved, json!({"title":"Widget","slug":"widget","status":"draft","seats":1}));
+        assert!(r.input(&json!({"title":"A","slug":"a","price_min":"10"})).unwrap_err().contains_key("price_max"));
         fs::write(dir.join("schema.jsbrain"), "export default { price: { type: 'int', default: 99999999999999999999 } }\n").unwrap();
         assert!(contracts(&root.0, "resources").unwrap_err().contains("64-bit integer range"));
         fs::write(dir.join("schema.jsbrain"), "export default { price: { type: 'int', unknown: true } }\n").unwrap();

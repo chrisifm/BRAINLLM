@@ -384,7 +384,7 @@ mod tests {
     }
     #[test]
     fn resource_controls_follow_contract_not_handwritten_shapes() {
-        let r: brain_backend::Resource = serde_json::from_value(json!({"name":"notes","fields":{"title":{"kind":"str","required":true},"done":{"kind":"bool","required":false},"details":{"kind":"obj","required":false}},"policy":{"read":["owner"],"create":["candidate"],"update":["owner"],"delete":["owner"]}})).unwrap();
+        let r: brain_backend::Resource = serde_json::from_value(json!({"name":"notes","fields":{"title":{"kind":"str","required":true},"done":{"kind":"bool","required":false},"details":{"kind":"obj","required":false}},"policy":{"read":["owner"],"create":["user"],"update":["owner"],"delete":["owner"]}})).unwrap();
         let view = resource_view(&r).unwrap();
         assert!(view.contains("\"title\":\"str!\""));
         assert!(view.contains("bind:checked={f.v.done}"));

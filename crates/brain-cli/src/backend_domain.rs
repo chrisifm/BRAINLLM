@@ -101,13 +101,13 @@ pub fn checked(root: &Path, resources: &[Resource], roles: &brain_backend::auth_
             .chain(d.transitions.iter().flat_map(|t| t.transitions.values().flat_map(|x| x.roles.iter())));
         for role in grants {
             if !declared(role) {
-                return Err(format!("server/resources/{name}: role {role} is not declared in server/auth/roles.jsbrain"));
+                return Err(format!("server/resources/{name}: role `{role}` is not declared; fix: add '{role}' to roles in server/auth/roles.jsbrain (`brain add roles` creates the file) and run `brain backend migrate`"));
             }
         }
     }
     for (name, op) in &domain.operations {
         if let Some(role) = op.roles.iter().find(|r| !declared(r)) {
-            return Err(format!("server/operations/{name}.jsbrain: role {role} is not declared in server/auth/roles.jsbrain"));
+            return Err(format!("server/operations/{name}.jsbrain: role `{role}` is not declared; fix: add '{role}' to roles in server/auth/roles.jsbrain (`brain add roles` creates the file) and run `brain backend migrate`"));
         }
     }
     Ok(domain)
@@ -182,7 +182,7 @@ mod tests {
         let error = super::super::inspect(&root).unwrap_err();
         assert!(error.contains("server/resources/notes/actions.jsbrain") && error.contains("extra"), "{error}");
         std::fs::write(r.join("actions.jsbrain"), "export default { vote: { roles: ['editor'], increment: { votes: 1 } } }\n").unwrap();
-        assert!(super::super::inspect(&root).unwrap_err().contains("role editor"));
+        assert!(super::super::inspect(&root).unwrap_err().contains("role `editor`"));
         std::fs::write(r.join("actions.jsbrain"), "export default { vote: { roles: ['admin'], increment: { votes: 1 } } }\n").unwrap();
         assert!(super::super::inspect(&root).unwrap()["domain"]["resources"]["notes"]["actions"]["vote"].is_object());
         let _ = std::fs::remove_dir_all(&dir);
