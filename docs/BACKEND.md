@@ -118,6 +118,8 @@ other names, layouts, fonts or field counts. Build and doctor your application a
 controls and field counts can change its route cost. A retained private change journal provides explicit rollback through
 the normal changes protocol; generation never automatically installs dependencies, starts Postgres or grants roles.
 
+- Project API keys (scoped, quota-limited, traced): [docs/backend/api-keys.md](backend/api-keys.md)
+
 ## Postgres and authentication
 
 Set `DATABASE_URL` in `.brain_env` or the host environment. Values never appear in CLI/MCP reports. There is no

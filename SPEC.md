@@ -290,6 +290,7 @@ Native JWT accounts use short-lived access and rotating refresh cookies, persist
 `brain recipe auth-ui|password-reset|email-verification|google-signin` prepares project-owned account UI;
 mail needs private `BRAIN_MAIL_RESEND_KEY`, `BRAIN_MAIL_FROM` and `PUBLIC_SITE_URL` (HTTPS, optional hosting prefix).
 `brain backend bootstrap-admin --user <existing-uuid>` explicitly assigns the first administrator; signup never grants it.
+API keys: add `server/api-keys.jsbrain` `{enabled:true}`; signed-in users manage keys at `/_brain/keys` (secret shown once), callers send `X-API-Key: bk_live_...` to `/api/<resource>` only; scopes `posts:read|write|*` never exceed the owner. See `docs/backend/api-keys.md`.
 See `docs/AUTH-FLOWS.md`; mail responses deliberately do not disclose account existence or delivery failures.
 In a same-origin POST server function, `await ctx.backend.login({email,password})` establishes native JWT or opaque
 HttpOnly cookies and returns the sanitized user; the backend chooses the configured mode. Never expose signing keys

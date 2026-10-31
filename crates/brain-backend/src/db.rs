@@ -25,6 +25,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ),
     ("analytics", include_str!("../migrations/0008_analytics.sql")),
     ("domain_queues", include_str!("../migrations/0009_domain_queues.sql")),
+    ("api_keys", include_str!("../migrations/0010_api_keys.sql")),
 ];
 fn checksum(sql: &str) -> String {
     Sha256::digest(sql.as_bytes())

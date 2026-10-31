@@ -159,6 +159,7 @@ async fn shop() -> Shop {
         tokens.push(token);
     }
     let config = brain_backend::Config {
+        api_keys: None,
         roles: Default::default(),
         mail: None,
         auth_public_base_url: None,

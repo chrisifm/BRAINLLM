@@ -74,7 +74,7 @@ impl Server {
             "socket-test".into(),
         )
         .unwrap();
-        let config = brain_backend::Config {
+        let config = brain_backend::Config { api_keys: None,
             resources,
             jobs: vec![],
             uploads: files.clone(),
@@ -559,7 +559,7 @@ async fn native_socket_opt_in_is_absent_by_default_and_origin_subset_is_required
             .0,
         200
     );
-    let invalid = brain_backend::Config {
+    let invalid = brain_backend::Config { api_keys: None,
         resources: vec![],
         jobs: vec![],
         uploads: server.files.clone(),

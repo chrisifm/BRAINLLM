@@ -94,7 +94,8 @@ async fn postgres_migrations_search_scope_session_serialization_and_storage_outb
             (6, "webhooks".into()),
             (7, "search_empty_fields".into()),
             (8, "analytics".into()),
-            (9, "domain_queues".into())
+            (9, "domain_queues".into()),
+            (10, "api_keys".into())
         ]
     );
     assert_eq!(
