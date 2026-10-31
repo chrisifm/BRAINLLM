@@ -84,8 +84,8 @@ pub async fn connect_for(url: &str, workload: Workload, size: u32) -> Result<PgP
 }
 /// `connect_for` with an explicit `application_name`.
 pub async fn connect_named(url: &str, workload: Workload, size: u32, application: &str) -> Result<PgPool, String> {
-    let failed = |_| "Cannot connect to Postgres (B0762); fix: check DATABASE_URL (credentials are not logged)".to_string();
-    let base = PgConnectOptions::from_str(url).map_err(failed)?.application_name(application);
+    let base = crate::boot::connect_options(url).map_err(|_| "B0762: DATABASE_URL is not a valid Postgres URL (its value is not logged); fix: use postgres://user:password@host:5432/database".to_string())?.application_name(application);
+    let failed = |error: sqlx::Error| crate::boot::connect_failure(&base, &error);
     // transaction_timeout exists from Postgres 17; an unknown startup option would refuse the connection.
     let version = if workload == Workload::Default {
         0
@@ -112,7 +112,7 @@ pub async fn connect_named(url: &str, workload: Workload, size: u32, application
     PgPoolOptions::new()
         .max_connections(size.clamp(1, 64))
         .acquire_timeout(Duration::from_secs(5))
-        .connect_with(base.options(options))
+        .connect_with(base.clone().options(options))
         .await
         .map_err(failed)
 }
