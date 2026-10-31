@@ -72,10 +72,10 @@ pub async fn list(
         ));
         q.push(candidates);
         owner_predicate(&mut q);
-        q.push(" AND search_vector @@ websearch_to_tsquery('simple',public.unaccent('public.unaccent'::regdictionary,").push_bind(text.to_string()).push(")) ORDER BY ts_rank_cd(search_vector,websearch_to_tsquery('simple',public.unaccent('public.unaccent'::regdictionary,").push_bind(text.to_string()).push("))) DESC,id LIMIT 500) f UNION SELECT id FROM (SELECT id FROM ").push(&table).push(" WHERE ");
+        q.push(format!(" AND search_vector @@ websearch_to_tsquery('{cfg}',public.unaccent('public.unaccent'::regdictionary,", cfg = crate::search_config::regconfig(r))).push_bind(text.to_string()).push(format!(")) ORDER BY ts_rank_cd(search_vector,websearch_to_tsquery('{cfg}',public.unaccent('public.unaccent'::regdictionary,", cfg = crate::search_config::regconfig(r))).push_bind(text.to_string()).push("))) DESC,id LIMIT 500) f UNION SELECT id FROM (SELECT id FROM ").push(&table).push(" WHERE ");
         owner_predicate(&mut q);
         // text <% indexed_column (word similarity), not long-document whole-string similarity.
-        q.push(" AND public.unaccent('public.unaccent'::regdictionary,").push_bind(text.to_lowercase()).push(") OPERATOR(public.<%) search_text ORDER BY id LIMIT 500) t) ORDER BY ts_rank_cd(search_vector,websearch_to_tsquery('simple',public.unaccent('public.unaccent'::regdictionary,").push_bind(text.to_string()).push("))) DESC, public.word_similarity(public.unaccent('public.unaccent'::regdictionary,").push_bind(text.to_lowercase()).push("),search_text) DESC,id");
+        q.push(" AND public.unaccent('public.unaccent'::regdictionary,").push_bind(text.to_lowercase()).push(format!(") OPERATOR(public.<%) search_text ORDER BY id LIMIT 500) t) ORDER BY ts_rank_cd(search_vector,websearch_to_tsquery('{cfg}',public.unaccent('public.unaccent'::regdictionary,", cfg = crate::search_config::regconfig(r))).push_bind(text.to_string()).push("))) DESC, public.word_similarity(public.unaccent('public.unaccent'::regdictionary,").push_bind(text.to_lowercase()).push("),search_text) DESC,id");
     }
     q.push(" LIMIT ")
         .push_bind(limit)

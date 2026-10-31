@@ -1,0 +1,26 @@
+{
+  "id": "legacy-ids",
+  "kind": "capability",
+  "title": "Keeping existing numeric ids",
+  "why": "Apps moving from another backend keep their public numbers as a unique, filterable field next to the UUID key.",
+  "changelog": [
+    "Guide for keeping numeric ids from another backend"
+  ],
+  "guide": "docs/backend/ids.md",
+  "apis": [
+    "GET /api/<resource>?legacy_id=<n>"
+  ],
+  "affects": [
+    "server/resources/**/schema.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/products/schema.jsbrain",
+    "snippet": "<meta server>\nexport default { title: 'str!', legacy_id: { type: 'int', unique: true } }"
+  },
+  "uses": [
+    {
+      "glob": "server/resources/**/schema.jsbrain",
+      "contains": "legacy_id"
+    }
+  ]
+}

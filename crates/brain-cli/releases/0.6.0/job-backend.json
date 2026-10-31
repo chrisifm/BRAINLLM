@@ -1,0 +1,28 @@
+{
+  "id": "job-backend",
+  "kind": "capability",
+  "title": "ctx.backend in job handlers",
+  "why": "Durable jobs read and write resources through the HTTP contract with a scoped project API key, so policies, hooks, quotas and tracing still apply.",
+  "changelog": [
+    "Job handlers get `ctx.backend` with the same calls"
+  ],
+  "guide": "docs/backend/job-backend.md",
+  "apis": [
+    "ctx.backend (job handlers)",
+    "BRAIN_JOBS_API_KEY",
+    "GET /api/<resource>/redirects/<slug> (API keys)"
+  ],
+  "affects": [
+    "server/jobs/**/*.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/jobs/order_paid/handler.jsbrain",
+    "snippet": "await ctx.backend.resource('orders').patch(ctx.payload.record.id, { fulfilled: true })"
+  },
+  "uses": [
+    {
+      "glob": "server/jobs/**/*.jsbrain",
+      "contains": "ctx.backend"
+    }
+  ]
+}

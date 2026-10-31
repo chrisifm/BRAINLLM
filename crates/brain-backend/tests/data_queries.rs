@@ -589,3 +589,84 @@ async fn slug_history_resolves_old_slugs_to_the_current_one() {
     assert!(bad.validate().is_err());
     pool.close().await;
 }
+
+/// B-14: a resource's text-search language (stemming) and field weights, rebuilt in place when they change; and
+/// B-08: an existing numeric id kept as a unique, filterable field.
+#[tokio::test]
+#[ignore = "requires scripts/backend-check.mjs disposable Postgres"]
+async fn search_language_weights_and_legacy_numeric_ids() {
+    let pool = database("brain_search_language").await;
+    let mut legacy = field("int", false);
+    legacy.unique = true;
+    let posts = |query: Value| {
+        let mut r = resource(
+            "posts",
+            vec![("title", field("str", true)), ("body", field("str", false)), ("legacy_id", legacy.clone())],
+            policy(&["public"], &["candidate"], &["owner"], &["owner"]),
+            query,
+        );
+        r.search = vec!["title".into(), "body".into()];
+        r
+    };
+    // Contract validation: built-in configurations only, weights only on searchable fields.
+    let bad = posts(json!({"search": {"language": "klingon"}}));
+    assert!(bad.validate().unwrap_err().contains("built-in text-search configuration"));
+    let bad = posts(json!({"search": {"weights": {"legacy_id": "A"}}}));
+    assert!(bad.validate().unwrap_err().contains("not a searchable field"));
+    let bad = posts(json!({"search": {"weights": {"title": "E"}}}));
+    assert!(bad.validate().unwrap_err().contains("A, B, C or D"));
+
+    // Start with the default (simple) configuration and default weights.
+    let api = api(&pool, vec![posts(json!({"filter": {"legacy_id": ["eq", "in"]}}))]).await;
+    let (_, author) = api.user("author@blog.test").await;
+    let (s, runners) = api.post("/api/posts", &author, json!({"title": "Weekend notes", "body": "The runners were running through the park", "legacy_id": 1042})).await;
+    assert_eq!(s, 200, "{runners}");
+    let (s, garden) = api.post("/api/posts", &author, json!({"title": "Park benches", "body": "Notes about a garden", "legacy_id": 1043})).await;
+    assert_eq!(s, 200, "{garden}");
+    let vector = |id: String| {
+        let pool = pool.clone();
+        async move { sqlx::query_scalar::<_, String>("SELECT search_vector::text FROM _brain_res_posts WHERE id=$1::uuid").bind(id).fetch_one(&pool).await.unwrap() }
+    };
+    let runners_id = runners["id"].as_str().unwrap().to_string();
+    assert!(vector(runners_id.clone()).await.contains("'running'"), "simple keeps whole words");
+    let (_, ranked) = api.get("/api/posts?search=park", None).await;
+    assert_eq!(titles(&ranked)[0], "Park benches", "default weights rank title (A) above body (D)");
+
+    // B-08: the old number finds the record through an indexed filter, and stays unique.
+    let (s, found) = api.get("/api/posts?legacy_id=1042&limit=1", None).await;
+    assert_eq!((s, ids(&found)), (200, vec![runners_id.clone()]));
+    let (s, found) = api.get("/api/posts?legacy_id[in]=1042,1043", None).await;
+    assert_eq!((s, found["total"].as_i64()), (200, Some(2)));
+    let (s, conflict) = api.post("/api/posts", &author, json!({"title": "Copy", "legacy_id": 1042})).await;
+    assert_eq!(s, 409, "{conflict}");
+    assert_eq!(conflict["error"]["code"], "UNIQUE_CONFLICT");
+    assert!(conflict["error"]["fields"]["legacy_id"].is_string());
+
+    // Switching to English with body above title rebuilds stored documents without touching updated_at.
+    let before: String = sqlx::query_scalar("SELECT updated_at::text FROM _brain_res_posts WHERE id=$1::uuid").bind(&runners_id).fetch_one(&pool).await.unwrap();
+    let english = posts(json!({"filter": {"legacy_id": ["eq", "in"]}, "search": {"language": "english", "weights": {"body": "A", "title": "C"}}}));
+    db::migrate(&pool, &[english.clone()]).await.unwrap();
+    db::migrate(&pool, &[english.clone()]).await.unwrap();
+    let stemmed = vector(runners_id.clone()).await;
+    assert!(stemmed.contains("'run'") && !stemmed.contains("'running'") && !stemmed.contains("'the'"), "{stemmed}");
+    let after: String = sqlx::query_scalar("SELECT updated_at::text FROM _brain_res_posts WHERE id=$1::uuid").bind(&runners_id).fetch_one(&pool).await.unwrap();
+    assert_eq!(before, after);
+    let api = Api { http: brain_backend::http::router(
+        pool.clone(),
+        brain_backend::Config {
+            api_keys: None, roles: Default::default(), mail: None, auth_public_base_url: None, webhooks: None,
+            before_hooks: None, sockets: None, gcs: None, jwt: None, google: None, resources: vec![english],
+            jobs: Vec::new(), uploads: std::env::temp_dir().join(format!("brain-data-queries-{}", Uuid::new_v4().simple())),
+            origins: vec![ORIGIN.into()], production: false,
+        },
+    ).await.unwrap(), auth: Auth::new(pool.clone()).await.unwrap() };
+    // A different inflection matches through the English stem; the weighted body now outranks the title.
+    let (s, stem) = api.get("/api/posts?search=runs&sort=-created_at", None).await;
+    assert_eq!((s, ids(&stem)), (200, vec![runners_id.clone()]), "{stem}");
+    let (_, ranked) = api.get("/api/posts?search=park", None).await;
+    assert_eq!(titles(&ranked)[0], "Weekend notes", "{ranked}");
+    // New writes use the declared configuration too.
+    let (_, fresh) = api.post("/api/posts", &author, json!({"title": "Hikes", "body": "Walking together"})).await;
+    assert!(vector(fresh["id"].as_str().unwrap().to_string()).await.contains("'walk'"));
+    pool.close().await;
+}

@@ -192,7 +192,7 @@ pub fn contracts(root: &Path, kind: &str) -> Result<Vec<Resource>, String> {
         let query_path = e.path().join("query.jsbrain");
         let query = if kind == "resources" && query_path.is_file() {
             serde_json::from_value(read_contract(root, &query_path)?).map_err(|_| {
-                format!("server/{kind}/{name}/query.jsbrain must export {{ filter: {{ field: ['eq', ...] }}, sort: [field | {{ field, nulls }}], default_sort: ['-field'], include: [ref], aggregate: {{ name: {{ group, sum, avg, min, max }} }}, count: {{ name: {{ resource, field, where }} }} }}")
+                format!("server/{kind}/{name}/query.jsbrain must export {{ filter: {{ field: ['eq', ...] }}, sort: [field | {{ field, nulls }}], default_sort: ['-field'], include: [ref], aggregate: {{ name: {{ group, sum, avg, min, max }} }}, count: {{ name: {{ resource, field, where }} }}, search: {{ language, weights: {{ field: 'A' }} }} }}")
             })?
         } else {
             Default::default()
@@ -474,7 +474,7 @@ pub fn add_with_admin(root: &Path, kind: &str, name: &str, shapes: &str, admin_u
         ));
         files.push((format!("{prefix}/hooks.jsbrain"),"<meta server>\n// Set before_create/before_update/before_delete to a server/hooks module name; return ctx.payload.\n// Set after_create/after_update/after_delete to a job name; events commit with the mutation.\nexport default {}\n".into()));
     } else {
-        files.push((format!("{prefix}/handler.jsbrain"),"<meta server>\n// ctx: payload, jobId, attempt, env. Delivery is at least once; make effects idempotent by jobId.\nexport default async function handle(ctx) {\n  throw new Error('Implement this job handler before starting a worker')\n}\n".into()));
+        files.push((format!("{prefix}/handler.jsbrain"),"<meta server>\n// ctx: payload, jobId, attempt, env, backend (docs/backend/job-backend.md). Delivery is at least once; make effects idempotent by jobId.\nexport default async function handle(ctx) {\n  throw new Error('Implement this job handler before starting a worker')\n}\n".into()));
     }
     if kind == "resource" {
         files.extend(resource_support_files(&r, &files[0].1)?);

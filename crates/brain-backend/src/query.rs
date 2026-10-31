@@ -45,6 +45,9 @@ pub struct QueryContract {
     /// Named per-record counts of related records (`?count=<name>`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub count: BTreeMap<String, Count>,
+    /// Text-search language and field weights (`docs/backend/search.md`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<crate::search_config::TextSearch>,
 }
 impl QueryContract {
     pub fn is_empty(&self) -> bool {
@@ -179,6 +182,7 @@ fn restricted(r: &Resource, field: &str) -> bool {
 
 /// Static validation of one resource's query contract.
 pub fn validate(r: &Resource) -> Result<(), String> {
+    crate::search_config::validate(r)?;
     let q = &r.query;
     let at = |what: String| format!("{}: query {what}", r.name);
     if q.filter.len() > 32 || q.sort.len() > 16 || q.default_sort.len() > 4 || q.include.len() > 8 || q.aggregate.len() > 8 || q.count.len() > 8 {
@@ -793,9 +797,9 @@ impl Ctx<'_> {
             // Bounded candidate branches, each carrying the same authorization scope (mirrors search.rs).
             q.push(format!(" AND id IN (SELECT id FROM (SELECT id FROM {table} WHERE "));
             self.scope.push(q, self.r, self.resources);
-            q.push(" AND search_vector @@ websearch_to_tsquery('simple',public.unaccent('public.unaccent'::regdictionary,")
+            q.push(format!(" AND search_vector @@ websearch_to_tsquery('{cfg}',public.unaccent('public.unaccent'::regdictionary,", cfg = crate::search_config::regconfig(self.r)))
                 .push_bind(text.to_string())
-                .push(")) ORDER BY ts_rank_cd(search_vector,websearch_to_tsquery('simple',public.unaccent('public.unaccent'::regdictionary,")
+                .push(format!(")) ORDER BY ts_rank_cd(search_vector,websearch_to_tsquery('{cfg}',public.unaccent('public.unaccent'::regdictionary,", cfg = crate::search_config::regconfig(self.r)))
                 .push_bind(text.to_string())
                 .push(format!("))) DESC,id LIMIT 500) f UNION SELECT id FROM (SELECT id FROM {table} WHERE "));
             self.scope.push(q, self.r, self.resources);
@@ -870,7 +874,7 @@ pub async fn list(
     }
     q.push(" ORDER BY ");
     if ranked {
-        q.push("ts_rank_cd(search_vector,websearch_to_tsquery('simple',public.unaccent('public.unaccent'::regdictionary,")
+        q.push(format!("ts_rank_cd(search_vector,websearch_to_tsquery('{cfg}',public.unaccent('public.unaccent'::regdictionary,", cfg = crate::search_config::regconfig(r)))
             .push_bind(text.clone())
             .push("))) DESC, public.word_similarity(public.unaccent('public.unaccent'::regdictionary,")
             .push_bind(text.to_lowercase())

@@ -315,6 +315,11 @@ With native mode configured, server `load(ctx)` and server functions can use `ct
 as `GET /api/<name>`; undeclared filters reject with `error.status 422` and `error.errors`), `get(uuid,{include})`,
 `create(values)`, `update(uuid,values)`, `patch(uuid,partial)`, `remove(uuid)`; `ctx.backend.slugRedirect(name,slug)` → current
 slug or `null`. Records carry `created_at`/`updated_at`. See `docs/backend/server-queries.md`.
+`query.jsbrain` may set `search: { language: 'english', weights: { body: 'A' } }` (built-in Postgres configurations,
+weights A-D on searchable fields; `docs/backend/search.md`). Record ids are UUIDs; keep old numbers as a unique field
+(`docs/backend/ids.md`).
+Job handlers get the same `ctx.backend` when the worker has `BRAIN_BACKEND_URL` and `BRAIN_JOBS_API_KEY` (a scoped
+project API key; it acts as its owner under each policy). See `docs/backend/job-backend.md`.
 Reads and writes run through the same native schemas, policies and authenticated cookies, not a second database client.
 Writes require a same-origin POST server function; they are rejected from GET/load. Put domain logic in server-only
 service/repository `.jsbrain` modules and pass `ctx` explicitly. Request JSON is limited to 64 KiB, responses to 2 MiB,
