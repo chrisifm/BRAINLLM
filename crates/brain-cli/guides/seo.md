@@ -46,7 +46,20 @@ page text, not after.
   `redirects.json` (`[{ "from": "/old", "to": "/new", "status": 301 }]`), never a meta refresh or a script.
 - `robots="noindex"` for pages that must not be indexed (403, thank-you pages). Other head tags: a `<head>` block in the view.
 - `[id]` views: `export async function paths()` (prerendered, in the sitemap) or, for live pages,
-  `export async function sitemap({ env })` returning `[{ id, lastmod }]` (needs `brain.json` `site`). Never both (B0117).
+  `export async function sitemap({ env })`. Never both (B0117). It returns one object per page keyed by the bracket name;
+  `lastmod` is optional (`YYYY-MM-DD` or a Date); an item without the key is skipped. `views/blog/[slug].brain`:
+  ```html
+  <meta seo title="Blog post" keyword="blog post" description="One article of the blog with its title and a short summary.">
+  <script>
+    export async function load(ctx) { return { slug: ctx.params.slug } }
+    export async function sitemap({ env }) { return [{ slug: 'hello-world', lastmod: '2026-10-01' }, { slug: 'second-post' }] }
+  </script>
+  <main><h1>Blog post</h1><p>{props.slug}</p></main>
+  ```
+  The server lists `/blog/hello-world` and `/blog/second-post` in /sitemap.xml (kept 5 min).
+- Sitemaps and robots `Sitemap:` need the deployed origin: `PUBLIC_SITE_URL` in the `[production]` section of
+  `.brain_env`. With none, or a placeholder (example.com, `*.test`, localhost: B0736, also in `brain doctor`), the build
+  publishes neither and warns; `brain build --site https://your-domain` overrides it.
 - Collections: `brain add collection blog` turns `content/blog/*.md` (frontmatter `title description date updated?
   tags? cover? author? draft?`) into pages, tag pages, RSS and Atom, with Article JSON-LD.
 

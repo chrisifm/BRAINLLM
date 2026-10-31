@@ -11,6 +11,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Added
 
+- B0736: a placeholder site URL (the scaffold's `https://example.com`, `*.test`, localhost) is no site in a production
+  build. The build warns, names the skipped `sitemap()` routes and publishes no sitemap or robots `Sitemap:` line
+  pointing at it; `brain doctor` flags it before deploy. SPEC and `brain guide seo` show a runnable `[slug]`
+  `sitemap({ env })` example.
 - Sitemaps respect the 50 MB limit as well as 50 000 URLs (§32, S01): the build and the server's dynamic
   `sitemap()` URLs split into more child files by escaped UTF-8 bytes, and a URL over 2 048 characters is left out
   with a warning.

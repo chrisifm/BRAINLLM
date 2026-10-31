@@ -139,7 +139,7 @@ COMPILER assigns the next free code there in the same change that emits it, then
 - B072x environment file `.brain_env` (§36): B0720 empty value in the build environment (error) · B0721 key used in
   code but missing (warning, edit adds `KEY=`) · B0722 key never used (info) · B0723 `PUBLIC_*` value shaped like a
   secret (error) · B0724 malformed line or section (error). Values never appear in any diagnostic.
-- B0734 missing local MCP registration (doctor warning; configuration only) · B0735 invalid backend resource/job contract (error; schema, policy or hook reference).
+- B0734 missing local MCP registration (doctor warning; configuration only) · B0735 invalid backend resource/job contract (error; schema, policy or hook reference) · B0736 placeholder site URL (build and doctor warning): a reserved origin (example.com/org/net, `*.example`, `*.test`, `*.invalid`, localhost, loopback) from `.brain_env` or brain.json is no site outside development, so no sitemap, robots `Sitemap:` line or absolute URL is published; the build names the `sitemap()` routes it skips. An explicit `--site` is used as given.
 - B07xx server and secrets (§11.1): B0701 server module used outside load/server: · B0702 env without `PUBLIC_` on the client · B0703 literal shaped like a key · B0704 `server:` function badly declared (not async, nested, in .jsbrain) or reading component state.
 
 ## 6. Runtime (CODEGEN → RUNTIME contract), module `runtime/brain.js`

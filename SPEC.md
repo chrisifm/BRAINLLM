@@ -143,7 +143,10 @@ jsonld={{ '@type': 'Person', name: props.user.name }}>`. Site defaults live in `
 `<meta seo titleTemplate="%s · Nimbus" og:image="/og.png" twitter="@nimbus">`. Any other tag goes in a `<head>` block of
 the view (merged, deduplicated by name/property). `[id]` views list their pages with
 `export async function paths() { return [{ id: '1' }] }` so they are prerendered and appear in the sitemap.
-Live `[id]` views (SSR, no `paths()`) export `sitemap({ env })` instead (`brain guide seo`; never both, B0117).
+Live `[slug]` views (SSR, no `paths()`) export `sitemap({ env })` instead, returning `[{ slug, lastmod? }]` (key = the
+bracket name; `lastmod` a `YYYY-MM-DD` string or Date; an item without the key is skipped). `brain guide seo`; never both, B0117.
+Sitemaps need the deployed origin (`PUBLIC_SITE_URL` in `.brain_env`): with none, or a placeholder (example.com, `*.test`,
+localhost), the build publishes no sitemap and warns B0736.
 Sitemap date: `<meta seo lastmod="2026-10-13">` or the collection's frontmatter `date`; without one it is omitted.
 Collections: `brain add collection blog` turns `content/blog/*.md` (frontmatter `title description date updated? tags? cover?
 author? draft?`) into pages, tag pages, `/blog/rss.xml` and `/blog/atom.xml`. In `load()`/`paths()`, with no import:
