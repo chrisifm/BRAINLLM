@@ -149,6 +149,24 @@ test('the initial connect deadline and finite reconnect budget leave no retry st
   assert.ok(Socket.instances.length <= 6)
 })
 
+test('an Upgrade rejected before READY (for example expired access) stays within the finite retry budget', async t => {
+  // Browsers hide the HTTP status of a rejected WebSocket handshake: a 401 from an expired access cookie arrives as
+  // close 1006. The runtime never refreshes credentials itself, so it must stop instead of looping on the handshake.
+  const own = await fixture(t)
+  const { updates } = own({ refetch() {}, v: Promise.resolve([]) }, settings(() => 'user'))
+  await micro()
+  for (let n = 0; n < 70; n++) {
+    const socket = Socket.instances.at(-1)
+    if (socket && socket.readyState === 0) socket.remoteClose(1006)
+    await advance(t, 1000)
+  }
+  assert.equal(updates.state, 'exhausted')
+  assert.ok(Socket.instances.length <= 6, 'At most the initial attempt plus five retries')
+  for (const socket of Socket.instances) assert.equal(socket.url, 'wss://app.example.test/_brain/socket')
+  updates.reconnect(); await micro(); await advance(t, 250)
+  assert.equal(Socket.instances.at(-1).readyState, 0, 'An explicit reconnect after HTTP renewal starts one fresh attempt')
+})
+
 test('a backwards wall clock cannot turn connection throttling into an unbounded wait', async t => {
   const own = await fixture(t)
   const first = own({ refetch() {}, v: Promise.resolve([]) }, settings(() => 'user'))
