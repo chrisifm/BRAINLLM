@@ -99,6 +99,7 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [Native type evidence without TypeScript](NATIVE-TYPES.md) | BRAINLLM checks proven data shapes in its own AST. |
 | [Publishing npm releases](NPM-RELEASE.md) | A release requires public registry publication and anonymous installation verification. |
 | [Output accounting and static-route budgets](OUTPUT-BUDGETS.md) | Output metrics come from the final compiled assets and their generated `.gz` and `.br` siblings. |
+| [Loading performance defaults](PERFORMANCE.md) | What `brain build`, the production server (`dist/server.mjs`) and `brain start` do for load speed without any app code, how to opt out, and the measured effect… |
 | [PostgreSQL foundation review](POSTGRES-FOUNDATION.md) | DBA review of the experimental Rust backend, 2026-10-30. |
 | [Production cleanup and machine-readable feedback](PRODUCTION-CLEANUP.md) | Production `brain_min::minify_module(source, true)` removes proven unused imports, local/module declarations and unreferenced function declarations by default. |
 | [Private project history and explicit learning](PROJECT-HISTORY.md) | Project history is a bounded local checklist, changelog and evidence ledger for agents. |
