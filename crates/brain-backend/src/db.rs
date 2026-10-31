@@ -777,7 +777,7 @@ fn failure_metadata(error: &sqlx::Error) -> Value {
 pub fn safe(error: sqlx::Error) -> String {
     crate::platform::note_database_error(&error);
     let metadata = failure_metadata(&error);
-    eprintln!("{metadata}");
+    diagnostic(&metadata);
     format!(
         "Postgres {} failed; inspect sanitized server diagnostics",
         metadata["category"]
@@ -790,6 +790,29 @@ pub fn safe(error: sqlx::Error) -> String {
 /// exhausted connections and a server going away. The transaction rolled back, so a retry is safe.
 pub(crate) fn retryable(state: &str) -> bool {
     matches!(state, "57014" | "55P03" | "40001" | "40P01" | "53300" | "57P01" | "57P02" | "57P03") || state.starts_with("08")
+}
+static DIAGNOSTICS: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+const DIAGNOSTICS_MAX_BYTES: u64 = 5 * 1024 * 1024;
+/// Also keeps failure events in `file`, one JSON object per line, so a request id can be looked up later
+/// (`brain backend logs <rid>`). The older half moves to `<file>.1` at 5 MB.
+pub fn keep_diagnostics(file: std::path::PathBuf) {
+    if let Some(parent) = file.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    *DIAGNOSTICS.lock().unwrap_or_else(|e| e.into_inner()) = Some(file);
+}
+/// Writes one failure event to stderr and to the kept file. A logging failure never affects the request.
+pub(crate) fn diagnostic(event: &Value) {
+    eprintln!("{event}");
+    let kept = DIAGNOSTICS.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(file) = kept.as_ref() else { return };
+    if std::fs::metadata(file).is_ok_and(|m| m.len() > DIAGNOSTICS_MAX_BYTES) {
+        let _ = std::fs::rename(file, file.with_extension("jsonl.1"));
+    }
+    if let Ok(mut out) = std::fs::OpenOptions::new().create(true).append(true).open(file) {
+        use std::io::Write;
+        let _ = out.write_all(format!("{event}\n").as_bytes());
+    }
 }
 static DEVELOPMENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Development logs add the database message, which can quote values; production never does.
@@ -824,7 +847,7 @@ pub(crate) fn log_failure(error: &sqlx::Error, at: &std::panic::Location<'_>, co
             _ => "driver",
         });
     }
-    eprintln!("{event}");
+    diagnostic(&event);
 }
 
 /// Public record columns. Timestamps are rendered by Postgres in UTC as `YYYY-MM-DDTHH:MM:SS.sssZ`
@@ -1282,4 +1305,31 @@ pub async fn get_version(
             (record(row), revision)
         })
     })
+}
+
+#[cfg(test)]
+mod failure_log_tests {
+    use super::*;
+    #[tokio::test]
+    #[ignore = "Run with the explicitly owned disposable Postgres harness"]
+    async fn production_failure_events_never_quote_request_values() {
+        let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("owned disposable harness URL required");
+        let pool = sqlx::postgres::PgPoolOptions::new().connect(&url).await.unwrap();
+        let error = sqlx::query("SELECT 'private-value'::int").execute(&pool).await.unwrap_err();
+        let file = std::env::temp_dir().join(format!("brain-failure-values-{}.jsonl", std::process::id()));
+        let _ = std::fs::remove_file(&file);
+        keep_diagnostics(file.clone());
+        let at = std::panic::Location::caller();
+        log_values(false);
+        log_failure(&error, at, json!({"resource": "shop"}));
+        log_values(true);
+        log_failure(&error, at, json!({"resource": "shop"}));
+        let kept = std::fs::read_to_string(&file).unwrap();
+        let lines: Vec<Value> = kept.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        assert_eq!((lines[0]["sqlstate"].as_str(), lines[0]["resource"].as_str()), (Some("22P02"), Some("shop")));
+        assert!(lines[0]["message"].as_str().unwrap().contains("private-value"), "development keeps the full cause");
+        assert_eq!((lines[1]["sqlstate"].as_str(), lines[1].get("message")), (Some("22P02"), None));
+        assert!(!lines[1].to_string().contains("private-value"));
+        std::fs::remove_file(file).unwrap();
+    }
 }

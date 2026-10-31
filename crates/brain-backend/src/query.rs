@@ -912,7 +912,7 @@ async fn resolve_search(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &mut Ctx<
             Ok((false, capped))
         }
         None => {
-            eprintln!("{}", json!({"schemaVersion":1,"event":"search-degraded","rid":crate::http::request_reference(),"resource":ctx.r.name,"operation":"list.search","branch":"search.fuzzy","budget":FUZZY_BUDGET,"private":true,"valuesCaptured":false}));
+            crate::db::diagnostic(&json!({"schemaVersion":1,"event":"search-degraded","rid":crate::http::request_reference(),"resource":ctx.r.name,"operation":"list.search","branch":"search.fuzzy","budget":FUZZY_BUDGET,"private":true,"valuesCaptured":false}));
             ctx.matches = Matches::Nothing;
             Ok((true, true))
         }
@@ -990,9 +990,14 @@ pub async fn list(
     if ranked {
         q.push(format!("ts_rank_cd(search_vector,websearch_to_tsquery('{cfg}',public.unaccent('public.unaccent'::regdictionary,", cfg = crate::search_config::regconfig(r)))
             .push_bind(text.clone())
-            .push("))) DESC, public.word_similarity(public.unaccent('public.unaccent'::regdictionary,")
-            .push_bind(text.to_lowercase())
-            .push("),search_text) DESC,id");
+            .push("))) DESC,");
+        // Similarity only orders typo matches: over full-text matches it would rescan every long text for a tie-break.
+        if !matches!(ctx.matches, Matches::FullText) {
+            q.push("public.word_similarity(public.unaccent('public.unaccent'::regdictionary,")
+                .push_bind(text.to_lowercase())
+                .push("),search_text) DESC,");
+        }
+        q.push("id");
     } else {
         for k in &keys {
             q.push(format!("{} {} NULLS {},", expr(k.kind, &k.field), if k.desc { "DESC" } else { "ASC" }, if k.nulls_first { "FIRST" } else { "LAST" }));

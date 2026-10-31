@@ -826,6 +826,9 @@ async fn search_over_long_text_keeps_full_text_results() {
     assert_eq!((s, found["total"].clone(), found.get("degraded")), (200, json!(1001), None), "{found}");
 
     // A retryable database condition is a 503 with Retry-After, never BACKEND_INTERNAL.
+    let kept = std::env::temp_dir().join(format!("brain-search-failures-{}.jsonl", std::process::id()));
+    let _ = std::fs::remove_file(&kept);
+    db::keep_diagnostics(kept.clone());
     let mut lock = pool.begin().await.unwrap();
     sqlx::query("LOCK TABLE _brain_res_listings IN ACCESS EXCLUSIVE MODE").execute(&mut *lock).await.unwrap();
     let response = api.http.clone().oneshot(Request::builder()
@@ -836,6 +839,12 @@ async fn search_over_long_text_keeps_full_text_results() {
     let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
     assert_eq!(body["error"]["code"], "DATABASE_BUSY", "{body}");
     lock.rollback().await.unwrap();
+    // The request id in the response leads to the cause: where it ran, what it was doing and which branch failed.
+    let events = std::fs::read_to_string(&kept).unwrap();
+    let event: Value = events.lines().map(|l| serde_json::from_str::<Value>(l).unwrap()).find(|e| e["rid"] == body["rid"]).unwrap_or_else(|| panic!("{body} {events}"));
+    assert_eq!((event["sqlstate"].as_str(), event["resource"].as_str(), event["operation"].as_str()), (Some("55P03"), Some("listings"), Some("list.search")), "{event}");
+    assert!(event["branch"].is_string() && event["location"]["file"].as_str().unwrap().ends_with("query.rs"), "{event}");
+    std::fs::remove_file(kept).unwrap();
 
     // The next migrate rebuilds those rows once and leaves their timestamps alone.
     let before: String = sqlx::query_scalar("SELECT max(updated_at)::text FROM _brain_res_listings").fetch_one(&pool).await.unwrap();

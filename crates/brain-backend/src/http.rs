@@ -141,10 +141,7 @@ impl Error {
                 std::sync::atomic::Ordering::Relaxed,
             )
             .is_ok();
-        eprintln!(
-            "{}",
-            json!({"schemaVersion":1,"event":"backend-internal-error","rid":rid,"code":"BACKEND_INTERNAL","location":{"file":at.file(),"line":at.line(),"column":at.column()},"stackDeferred":reserved,"stackOmitted":!reserved,"queueDepth":0,"private":true,"valuesCaptured":false})
-        );
+        db::diagnostic(&json!({"schemaVersion":1,"event":"backend-internal-error","rid":rid,"code":"BACKEND_INTERNAL","location":{"file":at.file(),"line":at.line(),"column":at.column()},"stackDeferred":reserved,"stackOmitted":!reserved,"queueDepth":0,"private":true,"valuesCaptured":false}));
         if reserved {
             let trace = std::backtrace::Backtrace::force_capture();
             let diagnostic=std::thread::Builder::new().name("brain-diagnostic".into()).spawn(move || {

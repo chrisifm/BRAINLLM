@@ -1077,6 +1077,13 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
         run: Box::new(|a| crate::backend::card(&crate::app_root()?,arg(a,"name").as_deref()).map(|v|v.to_string())),
     });
     tools.push(Tool {
+        name: "brain_backend_logs",
+        description: "Failure events kept by `brain backend serve`. Give the rid from an error response to get its cause: SQLSTATE, resource, operation, branch and code location; omit it for the latest 50.",
+        input_schema: schema([("rid","string","request id from the error response; omit for the latest")], &[]),
+        output_schema: out([("schemaVersion","number"),("events","array")]),
+        run: Box::new(|a| Ok(crate::backend::failure_logs(&crate::app_root()?,arg(a,"rid").as_deref()).to_string())),
+    });
+    tools.push(Tool {
         name: "brain_analytics_report",
         description: "Usage report from the app's own behavior analytics (native backend Postgres): per route views, visitors, dwell, scroll depth, time to first interaction, rage and dead clicks; per element interactions with the .brain source file:line; per component totals; neverUsed interactive elements (dead UI); transitions, exits, sources and custom track events. Read-only. Use it to decide what to simplify, fix or remove.",
         input_schema: schema([("since","string","window in days, e.g. 30 (default 7)"),("env","string","environment, default development")], &[]),
@@ -1403,7 +1410,7 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
 /// Keep a stable six-tool minimal vocabulary; backend adds only its focused contract/generation tools.
 fn profile_tool(profile:&str,name:&str)->bool {
     matches!(name,"brain_spec"|"brain_check"|"brain_fix"|"brain_map"|"brain_test"|"brain_doctor")
-        || profile=="backend" && matches!(name,"brain_backend_contract"|"brain_resource_add"|"brain_job_add"|"brain_agent_setup")
+        || profile=="backend" && matches!(name,"brain_backend_contract"|"brain_backend_logs"|"brain_resource_add"|"brain_job_add"|"brain_agent_setup")
 }
 
 fn backend_add(args:&Json,kind:&str)->Result<String,String> {

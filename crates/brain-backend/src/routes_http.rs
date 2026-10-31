@@ -255,11 +255,11 @@ async fn serve(app: App, state: Arc<State>, route: Arc<Route>, req: Request) -> 
         }
         Err(RouteFailure::Capacity) => Ok(with_retry(error(StatusCode::SERVICE_UNAVAILABLE, "OVERLOADED", "All route workers are busy; retry after the Retry-After delay").into_response(), 1)),
         Err(RouteFailure::Timeout) => {
-            eprintln!("{}", json!({"schemaVersion":1,"event":"route-timeout","route":route.name,"timeoutMs":route.timeout.as_millis() as u64,"rid":rid}));
+            crate::db::diagnostic(&json!({"schemaVersion":1,"event":"route-timeout","route":route.name,"timeoutMs":route.timeout.as_millis() as u64,"rid":rid}));
             Err(error(StatusCode::GATEWAY_TIMEOUT, "ROUTE_TIMEOUT", "The route handler did not finish within its timeout"))
         }
         Err(RouteFailure::Unavailable) => {
-            eprintln!("{}", json!({"schemaVersion":1,"event":"route-failed","code":"ROUTE_FAILED","route":route.name,"location":{"file":format!("server/routes/{}/handler.jsbrain", route.name)},"rid":rid,"valuesCaptured":false}));
+            crate::db::diagnostic(&json!({"schemaVersion":1,"event":"route-failed","code":"ROUTE_FAILED","route":route.name,"location":{"file":format!("server/routes/{}/handler.jsbrain", route.name)},"rid":rid,"valuesCaptured":false}));
             Err(error(StatusCode::INTERNAL_SERVER_ERROR, "ROUTE_FAILED", "The route handler failed; inspect server diagnostics with the request reference"))
         }
     }
@@ -271,7 +271,7 @@ fn failure_status(status: u16) -> Option<StatusCode> {
     StatusCode::from_u16(status).ok().filter(|s| s.is_client_error() || s.is_server_error())
 }
 fn invalid_status(route: &str, rid: &impl serde::Serialize) -> Error {
-    eprintln!("{}", json!({"schemaVersion":1,"event":"route-invalid-status","code":"ROUTE_INVALID_STATUS","route":route,"rid":rid,"valuesCaptured":false}));
+    crate::db::diagnostic(&json!({"schemaVersion":1,"event":"route-invalid-status","code":"ROUTE_INVALID_STATUS","route":route,"rid":rid,"valuesCaptured":false}));
     error(StatusCode::INTERNAL_SERVER_ERROR, "ROUTE_INVALID_STATUS", "The route handler returned an invalid status; return an integer from 200 to 599, excluding 1xx")
 }
 
