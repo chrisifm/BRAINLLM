@@ -3,7 +3,11 @@
 
 <main class="page">
   <h1>Access denied</h1>
-  <p>Missing permission: <strong>{reason || 'not specified'}</strong></p>
+  {#if reason}
+    <p>Missing permission: <strong>{reason}</strong></p>
+  {:else}
+    <p>You do not have permission to open this page.</p>
+  {/if}
   <p><a href="/">Back to the home page</a></p>
 </main>
 

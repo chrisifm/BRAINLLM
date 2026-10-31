@@ -884,6 +884,13 @@ export function createServer(o = {}) {
     const path = typeof custom === 'string' && file(custom)
     return html(res, status, path ? readFileSync(path, 'utf8') : defaultError(status, rid, BASE))
   }
+  // `/403`, `/404.html`, `/503`…: the status when the app has that page, else 0 and the path is an ordinary one
+  const reservedStatus = pathname => {
+    const m = /^\/(403|404|410|5\d\d)(?:\.html)?$/.exec(pathname)
+    if (!m) return 0
+    const n = +m[1]
+    return file(`${n}.html`) || (mf.errors && mf.errors[n]) || (n === 403 && mf.forbidden) || (n === 404 && mf.notFound) ? n : 0
+  }
   // a file inside dist/ (never outside: no `..`, no absolute paths)
   function file(rel) {
     const p = normalize(join(dist, rel))
@@ -1470,6 +1477,10 @@ export function createServer(o = {}) {
       if (url.pathname.startsWith('/_server/')) return notFound(req, res) // server code is never served
       const post = req.method === 'POST'
       if (!post && req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'Method not allowed', { allow: 'GET, HEAD, POST' })
+      // a status page opened directly answers its own status: `/403` is never a 200 that a crawler or a probe can trust
+      const reserved = post ? 0 : reservedStatus(url.pathname)
+      if (reserved === 403) return forbidden(req, res, url, rid, '')
+      if (reserved) return failPage(res, reserved, rid)
       for (const route of routes) {
         const m = route.rx.exec(url.pathname)
         if (!m) continue

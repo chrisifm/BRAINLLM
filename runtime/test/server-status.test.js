@@ -105,3 +105,36 @@ test('same-site redirects preserve encoded public query spaces while path/contro
   assert.equal(redirect('/results?filter=last%2030%20days').redirect,'/results?filter=last%2030%20days')
   for(const path of ['/bad%20path','/results?filter=%0aheader','/results?filter=%5cevil','/'+String.fromCharCode(10)+'/evil.example'])assert.throws(()=>redirect(path))
 })
+test('a status page opened directly answers its status; a code without a page stays an ordinary path', async () => {
+  const accept = { accept: 'text/html' }
+  for (const [path, status, text] of [['/404', 404, 'Custom missing'], ['/404.html', 404, 'Custom missing'], ['/410', 410, 'Custom gone'], ['/410.html', 410, 'Custom gone']]) {
+    const r = await request(path, { headers: accept })
+    assert.equal(r.status, status, path)
+    assert.match(await r.text(), new RegExp(text), path)
+  }
+  // no 403.html and no 500.html in this app: both are one more missing path, and `/4040` or `/403x` never match
+  for (const path of ['/403', '/500', '/4040', '/403x']) {
+    const r = await request(path, { headers: accept })
+    assert.equal(r.status, 404, path)
+    assert.match(await r.text(), /Custom missing/, path)
+  }
+  const own = mkdtempSync(join(tmpdir(), 'brain-http-denied-'))
+  mkdirSync(join(own, '_server'))
+  writeFileSync(join(own, '_server/manifest.json'), JSON.stringify({ routes: [] }))
+  writeFileSync(join(own, '403.html'), '<!doctype html><title>Custom denied</title><main><h1>Custom denied</h1></main>')
+  const denied = createServer({ dist: own, log() {} })
+  await new Promise(resolve => denied.listen(0, '127.0.0.1', resolve))
+  const at = `http://127.0.0.1:${denied.address().port}`
+  try {
+    for (const path of ['/403', '/403.html']) {
+      const r = await fetch(at + path, { headers: accept })
+      assert.equal(r.status, 403, path)
+      assert.match(r.headers.get('x-robots-tag'), /noindex/)
+      assert.match(await r.text(), /Custom denied/)
+    }
+    assert.equal((await fetch(at + '/403', { method: 'HEAD', headers: accept })).status, 403)
+  } finally {
+    await new Promise(resolve => { denied.close(resolve); denied.closeAllConnections() })
+    rmSync(own, { recursive: true, force: true })
+  }
+})

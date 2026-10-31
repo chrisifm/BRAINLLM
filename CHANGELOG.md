@@ -31,6 +31,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - New apps start with a skip link to `#brain-view` in `app.brain`.
 - A rejected form no longer says "Check the highlighted fields." when nothing is highlighted: a 422 without fields shows the backend's fix or a plain sentence, errors naming no field of the form become `f.error` (`form.rejected` when empty), also without JS, and `<ErrorState>` has `error_state.rejected`.
 
+- Error pages always say what happened: `_error.brain` and `views/403|404|410|5xx.brain` without a `<meta seo title>` get a default title and `noindex`, in the build, in production and in dev; a view's own values win.
+- A status page opened directly answers its status: `/403`, `/404`, `/410`, `/5xx` and their `.html` return that code instead of 200 when the app has the page, and the new app's `views/403.brain` no longer says "Missing permission: not specified" when no permission was named. Static hosts keep their own rules.
+
 ### Signature
 - HTML documents now carry `X-Generated-By` with the official site and repository in `brain start`, `_headers`, nginx and Caddy. It replaces `X-Powered-By` and adds nothing visible to the page.
 

@@ -15,6 +15,8 @@ Adding a page, a dynamic route, a section with shared chrome, or protecting page
 | `views/<dir>/_guard.jsbrain` | runs before every view of its folder, on the server and before client navigation |
 | `views/<dir>/_loading.brain` · `_error.brain` | shown while `load` runs · when it fails |
 
+Error views answer with their status, also when opened directly (`/403` is a 403). Without a `<meta seo title>` they get a default title and `noindex`; the server cannot change a static host, so set the same rule there. A streamed page has already sent its head when `load` fails late: its region shows the error, its title stays.
+
 ## Steps
 1. `brain add view users` → `views/users.brain` with `<meta seo>`, `<main><h1>` and an optional `load`.
    Dynamic: `brain add view users/[id]`. Folder chrome: `brain add layout users`. Protection: `brain add guard admin`.

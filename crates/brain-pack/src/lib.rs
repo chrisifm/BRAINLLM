@@ -1511,6 +1511,16 @@ fn build_inner_with_options(
         };
         let static_seo = seo_of(&p.view);
         over(&mut seo, &static_seo);
+        // an error view that names no title still says what happened, and an error page never enters the index
+        if let Some((_, title)) = reserved_view(&p.view) {
+            let has = |k: &str| static_seo.iter().any(|(a, _)| a == k) || r.is_some_and(|r| r.seo.iter().any(|(a, _)| a == k));
+            if !has("title") {
+                over(&mut seo, &[("title".to_string(), title.to_string())]);
+            }
+            if !has("robots") {
+                over(&mut seo, &[("robots".to_string(), "noindex".to_string())]);
+            }
+        }
         if let Some(r) = r {
             // the compiler already applied app.brain's titleTemplate inside seo(props): never twice
             if r.seo.iter().any(|(k, _)| k == "title") {
@@ -2005,6 +2015,22 @@ fn rpc_hash(js: &str, f: &str) -> Option<String> {
     })
 }
 
+/// The views the framework answers with an error status: `_error.brain` in any folder and `views/403|404|410|5xx.brain`.
+/// Gives the status and the title the page shows when the view names none.
+pub fn reserved_view(view: &str) -> Option<(u16, &'static str)> {
+    if view.ends_with("/_error.brain") {
+        return Some((500, "Something went wrong"));
+    }
+    let code: u16 = view.strip_prefix("views/")?.strip_suffix(".brain")?.parse().ok()?;
+    match code {
+        403 => Some((403, "Access denied")),
+        404 => Some((404, "Page not found")),
+        410 => Some((410, "Page removed")),
+        500..=599 => Some((code, "Something went wrong")),
+        _ => None,
+    }
+}
+
 /// app.brain's `<meta seo …>` holds site defaults (read through `seo_of`); it is not markup of the page.
 pub fn strip_meta_seo(src: &str) -> String {
     let mut out = src.to_string();
@@ -2259,6 +2285,19 @@ fn needs_space(prev: Option<char>, next: char) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reserved_views_are_the_error_views_only() {
+        use super::reserved_view as r;
+        assert_eq!(r("views/_error.brain"), Some((500, "Something went wrong")));
+        assert_eq!(r("views/admin/_error.brain"), Some((500, "Something went wrong")));
+        assert_eq!(r("views/403.brain"), Some((403, "Access denied")));
+        assert_eq!(r("views/410.brain"), Some((410, "Page removed")));
+        assert_eq!(r("views/503.brain"), Some((503, "Something went wrong")));
+        for ordinary in ["views/home.brain", "views/200.brain", "views/600.brain", "views/a/403.brain", "views/_loading.brain"] {
+            assert_eq!(r(ordinary), None, "{ordinary}");
+        }
+    }
+
     use super::*;
 
     #[test]
