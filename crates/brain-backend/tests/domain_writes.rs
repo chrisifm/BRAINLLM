@@ -371,3 +371,100 @@ async fn postgres_atomic_actions_and_upserts_are_race_safe_under_concurrent_requ
     let (status, body) = call(&s.app, "POST", "/api/task_items/upsert", &s.alice, Some(json!({"key":["title"],"data":{"title":"x","code":"y"}}))).await;
     assert_eq!((status, body["error"]["fields"]["key"].is_string()), (422, true));
 }
+
+async fn batch(s: &Shop, body: Value) -> (u16, Value) {
+    call(&s.app, "POST", "/api/task_items/batch", &s.alice, Some(body)).await
+}
+async fn tasks_with_prefix(s: &Shop, prefix: &str) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM _brain_res_task_items WHERE data->>'code' LIKE $1")
+        .bind(format!("{prefix}%")).fetch_one(&s.pool).await.unwrap()
+}
+
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn postgres_batches_are_all_or_nothing_with_per_item_errors() {
+    let s = shop().await;
+    let pre = format!("B-{}-", s.run);
+    let item = |n: usize| json!({"title":format!("Task {n}"),"code":format!("{pre}{n}")});
+    let (status, body) = batch(&s, json!({"op":"create","items":[item(1),item(2),item(3)]})).await;
+    assert_eq!((status, &body["count"]), (200, &json!(3)), "{body}");
+    let ids: Vec<String> = body["items"].as_array().unwrap().iter().map(id).collect();
+    // One invalid item: per-index errors, nothing written.
+    let (status, body) = batch(&s, json!({"op":"create","items":[item(4),{"code":format!("{pre}5")},{"title":"x","code":format!("{pre}6"),"points":"9"}]})).await;
+    assert_eq!(status, 422, "{body}");
+    assert!(body["error"]["fields"]["items.1.title"].is_string() && body["error"]["fields"]["items.2.points"].is_string(), "{body}");
+    assert_eq!(tasks_with_prefix(&s, &pre).await, 3);
+    // A database conflict on the third item rolls back the first two and names the item.
+    let (status, body) = batch(&s, json!({"op":"create","items":[item(7),item(8),item(1)]})).await;
+    assert_eq!(status, 409, "{body}");
+    assert!(body["error"]["fields"]["items.2.code"].is_string(), "{body}");
+    assert_eq!(tasks_with_prefix(&s, &pre).await, 3);
+    // Declared max (5) and the shape of each operation.
+    let (status, body) = batch(&s, json!({"op":"create","items":(10..16).map(item).collect::<Vec<_>>()})).await;
+    assert_eq!((status, body["error"]["fields"]["items"].as_str()), (422, Some("Send 1..5 items")));
+    let (status, _) = batch(&s, json!({"op":"merge","items":[item(1)]})).await;
+    assert_eq!(status, 422);
+    // Update: PATCH semantics per item; an unknown id makes the whole batch a 404.
+    let (status, body) = batch(&s, json!({"op":"update","items":[{"id":ids[0],"data":{"done":true}},{"id":ids[1],"data":{"points":5}}]})).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!((&body["items"][0]["data"]["done"], &body["items"][0]["data"]["title"]), (&json!(true), &json!("Task 1")));
+    let (status, body) = batch(&s, json!({"op":"update","items":[{"id":ids[2],"data":{"done":true}},{"id":uuid::Uuid::new_v4().to_string(),"data":{"done":true}}]})).await;
+    assert_eq!((status, &body["error"]["fields"]["items.1"]), (404, &json!("Not found")), "{body}");
+    let done: Option<bool> = sqlx::query_scalar("SELECT (data->>'done')::boolean FROM _brain_res_task_items WHERE id=$1::uuid").bind(&ids[2]).fetch_one(&s.pool).await.unwrap();
+    assert_eq!(done, None, "the first item rolled back with the missing second one");
+    let (status, body) = batch(&s, json!({"op":"update","items":[{"id":ids[0],"data":{"done":false}},{"id":ids[0],"data":{"done":true}}]})).await;
+    assert_eq!((status, body["error"]["fields"]["items.1.id"].as_str()), (422, Some("Duplicate id in this batch")));
+    // Other owners' rows are invisible (owner-only policy).
+    let (status, _) = call(&s.app, "POST", "/api/task_items/batch", &s.bob, Some(json!({"op":"delete","items":[{"id":ids[0]}]}))).await;
+    assert_eq!(status, 404);
+    // Upsert batch reports which items were created.
+    let (status, body) = batch(&s, json!({"op":"upsert","key":["code"],"items":[item(1),item(9)]})).await;
+    assert_eq!((status, &body["created"]), (200, &json!([false, true])), "{body}");
+    // Delete returns ids only.
+    let (status, body) = batch(&s, json!({"op":"delete","items":ids.iter().map(|i| json!({"id":i})).collect::<Vec<_>>()})).await;
+    assert_eq!((status, &body["count"], body["items"][0].get("data").is_none()), (200, &json!(3), true), "{body}");
+    assert_eq!(tasks_with_prefix(&s, &pre).await, 1);
+}
+
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn postgres_state_transitions_are_the_only_way_to_change_state() {
+    let s = shop().await;
+    let (status, order) = call(&s.app, "POST", "/api/shop_orders", &s.alice, Some(json!({"product":"p","quantity":1}))).await;
+    assert_eq!((status, &order["data"]["status"]), (200, &json!("pending")));
+    let t = |name: &str| format!("/api/shop_orders/{}/transitions/{name}", id(&order));
+    let (status, _) = call(&s.app, "POST", &t("pay"), &s.bob, Some(json!({}))).await;
+    assert_eq!(status, 403, "owner role means the caller owns the row");
+    let (status, _) = call(&s.app, "POST", &t("ship"), &s.alice, Some(json!({}))).await;
+    assert_eq!(status, 403, "only admin ships");
+    let (status, paid) = call(&s.app, "POST", &t("pay"), &s.alice, Some(json!({}))).await;
+    assert_eq!((status, &paid["data"]["status"]), (200, &json!("paid")), "{paid}");
+    let paid_at = paid["data"]["paid_at"].as_str().unwrap();
+    assert!(paid_at.ends_with('Z') && paid_at.len() == 24, "side effect in the same write: {paid_at}");
+    let (status, body) = call(&s.app, "POST", &t("pay"), &s.alice, Some(json!({}))).await;
+    assert_eq!((status, &body["error"]["fields"]["status"]), (409, &json!("Transition pay is allowed from pending")), "{body}");
+    // Concurrent ship and cancel: exactly one wins.
+    let (ship, cancel) = (t("ship"), t("cancel"));
+    let (a, b) = tokio::join!(
+        call(&s.app, "POST", &ship, &s.admin, Some(json!({}))),
+        call(&s.app, "POST", &cancel, &s.alice, Some(json!({"reason":"Changed my mind"})))
+    );
+    let mut statuses = [a.0, b.0];
+    statuses.sort();
+    assert_eq!(statuses, [200, 409], "{a:?} {b:?}");
+    let (status, body) = call(&s.app, "POST", &t("cancel"), &s.alice, Some(json!({}))).await;
+    assert!(status == 409 || status == 422, "{body}");
+    let (status, body) = call(&s.app, "POST", &t("cancel"), &s.admin, Some(json!({"reason":1}))).await;
+    assert_eq!(status, 422, "typed input: {body}");
+    let (status, _) = call(&s.app, "POST", &t("teleport"), &s.admin, Some(json!({}))).await;
+    assert_eq!(status, 404);
+    // PUT and batch cannot change the state field either.
+    let (status, current) = call(&s.app, "GET", &format!("/api/shop_orders/{}", id(&order)), &s.admin, None).await;
+    assert_eq!(status, 200);
+    let mut data = current["data"].clone();
+    data["status"] = json!("pending");
+    let (status, _) = call(&s.app, "PUT", &format!("/api/shop_orders/{}", id(&order)), &s.admin, Some(data)).await;
+    assert_eq!(status, 422);
+    let (status, _) = call(&s.app, "POST", "/api/shop_orders/batch", &s.admin, Some(json!({"op":"update","items":[{"id":id(&order),"data":{"status":"pending"}}]}))).await;
+    assert_eq!(status, 422);
+}

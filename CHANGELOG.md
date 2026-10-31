@@ -23,6 +23,12 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Atomic actions (`server/resources/<r>/actions.jsbrain`, `POST /api/<r>/<uuid>/actions/<name>`) lock the row and
   apply guarded `set`, `increment` and `decrement` (compare-and-set via `when`), and `POST /api/<r>/upsert` inserts
   if absent on a declared unique key; both are race-safe under concurrent requests (`docs/backend/atomic-updates.md`).
+- `POST /api/<r>/batch` creates, updates (PATCH semantics), upserts or deletes up to `batch.jsbrain { max }` items
+  (default 100) in one transaction; every item is validated first and errors are keyed `items.<i>.<field>`
+  (`docs/backend/batch.md`).
+- `transitions.jsbrain` turns one `enum` field into a state machine: records start in a declared initial value and
+  change only through `POST /api/<r>/<uuid>/transitions/<name>` with `from` guards, roles, input and side effects
+  (`docs/backend/state-machines.md`).
 
 ### Changed
 
