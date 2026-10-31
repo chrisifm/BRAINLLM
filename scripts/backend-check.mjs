@@ -142,6 +142,7 @@ try {
     mkdirSync(join(app,'server/auth'),{recursive:true})
     writeFileSync(join(app,'server/auth/roles.jsbrain'),"export default { roles: ['admin','company','candidate','user','editor'], signup_role: 'user' }\n")
     mkdirSync(join(app,'server/webhooks'),{recursive:true})
+    writeFileSync(join(app,'server/api-keys.jsbrain'),"export default { enabled: true, dailyQuota: 100 }\n")
     writeFileSync(join(app,'server/webhooks/config.jsbrain'),"export default { encryptionKeys: ['BRAIN_WEBHOOK_ENCRYPTION_KEY'], inbound: { smoke: { queue: 'deliver', signingKeys: ['BRAIN_WEBHOOK_SMOKE_KEY'] } } }\n")
     brain(['backend','migrate','--json'],app)
     let backendURL='',line='',captured=0
@@ -202,6 +203,19 @@ try {
       const updated=requireStatus(await http('/_brain/auth/login',{email:'another@example.test',password}),200)
       if(updated.json.user.role!=='editor')throw Error('Administrator role assignment did not reach the actual account')
       console.log('Backend CLI auth smoke: PASS (configured signup, private first-admin bootstrap, revocation, custom-role HTTP and live OpenAPI)')
+      const issued=brain(['backend','keys','create','--user',second.json.user.id,'--name','Smoke key','--scopes','*:read'],app)
+      if(!/^bk_live_[0-9a-f]{12}_[0-9a-f]{64}$/.test(issued.secret)||issued.key.prefix!==issued.secret.slice(8,20))throw Error('CLI did not issue a well-formed API key')
+      const keyed=async(path)=>{const response=await fetch(backendURL+path,{headers:{'X-API-Key':issued.secret,Accept:'application/json'},signal:AbortSignal.timeout(3000),redirect:'manual'});const json=await response.json().catch(()=>null);return {status:response.status,code:json?.error?.code,headers:response.headers}}
+      const refused=await keyed('/_brain/auth/me');if(refused.status!==401||refused.code!=='API_KEY_NOT_ACCEPTED')throw Error('Live server accepted an API key on a session-only route')
+      const used=await keyed('/api/absent');if(used.status!==404||used.headers.get('x-quota-limit')!=='100')throw Error('Live server did not authenticate the CLI-issued key with quota headers')
+      const listed=brain(['backend','keys','list','--user',second.json.user.id],app)
+      if(listed.items.length!==1||JSON.stringify(listed).includes(issued.secret.slice(21)))throw Error('CLI key list was wrong or exposed the secret')
+      brain(['backend','keys','revoke',issued.key.prefix],app)
+      const revokedKey=await keyed('/api/absent');if(revokedKey.status!==401||revokedKey.code!=='API_KEY_REVOKED')throw Error('Revoked CLI key was still accepted')
+      let traced=false
+      for(let i=0;i<50&&!traced;i++){traced=brain(['backend','keys','events',issued.key.prefix],app).items.length>=2;if(!traced)await sleep(100)}
+      if(!traced)throw Error('CLI key events did not return the live request trace')
+      console.log('Backend CLI API-key smoke: PASS (opt-in file, CLI create/list/revoke/events, live X-API-Key auth, quota headers)')
       const webhookID=randomUUID(),stamp=String(Math.floor(Date.now()/1000)),raw=Buffer.from(JSON.stringify({message:'Synthetic private CLI webhook'}))
       const signature='v1='+createHmac('sha256',Buffer.from(authEnv.BRAIN_WEBHOOK_SMOKE_KEY,'hex')).update(`brain-webhook-v1\n${webhookID}\n${stamp}\n`).update(raw).digest('hex')
       const received=await fetch(backendURL+'/_brain/webhooks/in/smoke',{method:'POST',headers:{'Content-Type':'application/json','X-Brain-Webhook-ID':webhookID,'X-Brain-Webhook-Timestamp':stamp,'X-Brain-Webhook-Signature':signature},body:raw,signal:AbortSignal.timeout(3000),redirect:'manual'})
