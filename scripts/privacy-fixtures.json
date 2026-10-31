@@ -94,5 +94,11 @@
     "rule": "credential-url",
     "sha256": "ec25b8fa54a9d7a878a86e6f38233af24d5d27d184b396136d6d7f0251d33c19",
     "reason": "Reviewed rejection-only fixture uses synthetic credentials at the reserved app.example.test host. Configuration must reject the URL without transport or echoing its credentials."
+  },
+  {
+    "path": "bench/native-live/run.mjs",
+    "rule": "credential-url",
+    "sha256": "efdb02117ac4b051b600f59766916395055a0fabc53c0117309b3df599b4eab6",
+    "reason": "Reviewed historical template literal: the password is interpolated from a per-run random value for the owned throwaway Postgres container; no usable credential."
   }
 ]
