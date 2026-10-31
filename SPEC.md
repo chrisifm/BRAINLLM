@@ -263,7 +263,10 @@ subclass with a 4xx `status` reaches the calling form's `f.error` as is; other e
 Server-only modules may signal a deliberate client failure with `throw {status:403}` (standard 4xx only); RPC returns
 the status with a generic public message. Arbitrary exception messages remain private and are excluded from server logs too.
 Sessions: `ctx.session.set(user)` in a server function, `ctx.user` on later requests, `ctx.session.clear()` logs out
-(signed cookie, not encrypted: ids and display data only; setup in `brain guide server`).
+(signed cookie, not encrypted: ids and display data only; a credential passed to it warns B0737). A server-only value
+such as a provider token goes in `ctx.session.setSecret(value, {maxAge})`, read with `ctx.session.secret()`, removed with
+`ctx.session.clearSecret()` or `clear()`: its own encrypted cookie, never `ctx.user`, also available with `BRAIN_BACKEND_URL`
+(setup in `brain guide server`).
 `load` belongs to views: in `_layout.brain` it is not run.
 Server limits (dev and production alike): brain.json `"server": { "maxBodyKB": 1024, "timeoutMs": 10000,
 "rpcPerMinute": 60 }` bounds RPC/form bodies (413 past it, at most 65536), function calls and `load` (504) and calls

@@ -141,6 +141,7 @@ COMPILER assigns the next free code there in the same change that emits it, then
   code but missing (warning, edit adds `KEY=`) · B0722 key never used (info) · B0723 `PUBLIC_*` value shaped like a
   secret (error) · B0724 malformed line or section (error). Values never appear in any diagnostic.
 - B0734 missing local MCP registration (doctor warning; configuration only) · B0735 invalid backend resource/job contract (error; schema, policy or hook reference) · B0736 placeholder site URL (build and doctor warning): a reserved origin (example.com/org/net, `*.example`, `*.test`, `*.invalid`, localhost, loopback) from `.brain_env` or brain.json is no site outside development, so no sitemap, robots `Sitemap:` line or absolute URL is published; the build names the `sitemap()` routes it skips. An explicit `--site` is used as given.
+- B0737 credential in the signed session cookie (warning): a credential-shaped key or name passed to `ctx.session.set`; the fix moves it to `ctx.session.setSecret`. · B0751 backend setting missing or invalid (warning in check and doctor, startup error): see §31.
 - B07xx server and secrets (§11.1): B0701 server module used outside load/server: · B0702 env without `PUBLIC_` on the client · B0703 literal shaped like a key · B0704 `server:` function badly declared (not async, nested, in .jsbrain) or reading component state · B0707 invalid brain.json `server` setting (error; unknown key or a value outside its range).
 
 ## 6. Runtime (CODEGEN → RUNTIME contract), module `runtime/brain.js`
@@ -1243,6 +1244,10 @@ one way for the model, `brain build` then `brain start`.
   loop → exit 1 with log; `--install` output reviewed; static app without Node).
 - A host that already has its own process manager runs `brain start` as one more command; the framework emits no
   config for it.
+
+### Session secrets, rotation and revocation (2026-10-31)
+
+`sessionSecrets` (server.mjs) adds `setSecret`/`secret`/`clearSecret` to any session handle, signed or native: AES-256-GCM in `__Host-session-secret`, key from HKDF over `BRAIN_SECRET`, the cookie name as AAD, expiry inside the ciphertext, 3.5 KB limit. It never fills `ctx.user`. `BRAIN_SECRET_PREVIOUS` still verifies and decrypts; new cookies use the current key. `BRAIN_SESSION_VERSION` travels in the signed cookie, and a mismatch reads as anonymous. Logout remembers the MAC until expiry in one process only, because no shared store exists here; several processes revoke through the version.
 
 ## 35. Caching and the repeat visit: on by default (fixed 2026-10-13, Chris: "the second visit must be faster")
 Cache audit (2026-10-28): anonymous SSR caching bypasses every cookie-bearing request and Authorization. Captured

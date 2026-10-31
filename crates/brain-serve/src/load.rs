@@ -48,7 +48,7 @@ const withSession = async (S, ctx, secret, preauthenticated = false, nativeRequi
         req.$nativeAuth = Promise.resolve()
       }
       else await nativeBridge.prepare(req, res, rid)
-      const session = nativeBridge.session(req, res, rid)
+      const session = typeof S.sessionSecrets === 'function' ? S.sessionSecrets(nativeBridge.session(req, res, rid), ctx.cookies || {}, secret || '') : nativeBridge.session(req, res, rid)
       c.user = session.user; c.session = session
       c.backend = typeof nativeBridge.backend === 'function' ? nativeBridge.backend(req, res, rid) : Object.freeze({resource: name => nativeBridge.resource(req, res, rid, name),login:credentials=>nativeBridge.login(req,res,rid,credentials)})
       nativeContexts.set(c, { req, res })
@@ -65,7 +65,11 @@ const contextHeaders = async ctx => {
   const { req } = native
   if (req.$nativeLogout) await req.$nativeLogout
   if (req.$nativeLogoutError) throw Object.assign(Error('Native authentication is temporarily unavailable'), { status: 503 })
-  return req.$nativeLogoutHeaders || req.$nativeLoginHeaders || {}
+  const own = ctx.session.headers()['set-cookie']?.filter(c => c.startsWith('__Host-session-secret=')) || []
+  const relay = req.$nativeLogoutHeaders || req.$nativeLoginHeaders || {}
+  if (!own.length) return relay
+  const cookies = relay['set-cookie']
+  return { ...relay, 'set-cookie': [...(Array.isArray(cookies) ? cookies : cookies ? [cookies] : []), ...own] }
 }
 const finishContext = ctx => { const native = nativeContexts.get(ctx); if (native) { native.res.writableEnded = true; native.res.emit('finish'); native.res.emit('close'); nativeContexts.delete(ctx) } }
 process.once('exit', () => nativeBridge?.close())

@@ -14,7 +14,7 @@ fn diags_with(path: &str, src: &str, ctx: &Ctx) -> Vec<brain_parse::Diag> {
 
 /// Only the §31 codes (snippets touch `document` etc. loosely).
 fn codes_in(path: &str, src: &str, ctx: &Ctx) -> Vec<&'static str> {
-    diags_with(path, src, ctx).into_iter().map(|d| d.code).filter(|c| matches!(*c, "B0122" | "B0123" | "B0213" | "B0215" | "B0710" | "B0711" | "B0713" | "B1310" | "B1311")).collect()
+    diags_with(path, src, ctx).into_iter().map(|d| d.code).filter(|c| matches!(*c, "B0122" | "B0123" | "B0213" | "B0215" | "B0710" | "B0711" | "B0713" | "B0737" | "B1310" | "B1311")).collect()
 }
 
 fn codes(src: &str) -> Vec<&'static str> {
@@ -99,4 +99,30 @@ fn b1310_b1311_warnings() {
     assert!(codes("<script>let q = sig('')\nconst escape = (s) => s\nlet re = drv(() => new RegExp(escape(q), 'i'))\nconst digits = new RegExp('[0-9]+')</script><input aria-label=\"q\" bind:value={q} /><p>{re}{digits}</p>").is_empty());
     let d = diags_with("comp/x.brain", "<script>let q = sig('')\nlet re = drv(() => new RegExp(q))</script><input aria-label=\"q\" bind:value={q} /><p>{re}</p>", &Ctx::default());
     assert!(d.iter().all(|d| d.code != "B1311" || d.is_warning()));
+}
+
+#[test]
+fn b0737_credentials_in_the_signed_session_cookie() {
+    let flagged = [
+        "ctx.session.set({ id: user.id, access_token: t })",
+        "ctx.session.set({ accessToken })",
+        "ctx.session.set({ user: { password: p } })",
+        "ctx.session.set(refreshToken)",
+        "ctx.session.set({ apiKey: k })",
+    ];
+    for call in flagged {
+        let d = diags_with("server/auth.jsbrain", &format!("export async function login(ctx, t, p, k, accessToken, refreshToken, user) {{ {call} }}"), &Ctx::default());
+        let b = d.iter().find(|d| d.code == "B0737").unwrap_or_else(|| panic!("{call}: {d:?}"));
+        assert!(b.is_warning() && b.fix.contains("setSecret"), "{b:?}");
+    }
+    let clean = [
+        "ctx.session.set({ id: user.id, email: user.email, role: user.role })",
+        "ctx.session.set(user)",
+        "ctx.session.set({ tokens_used: 3, passwordless: true, monkey: 1 })",
+        "ctx.session.setSecret({ token: t })",
+    ];
+    for call in clean {
+        let d = diags_with("server/auth.jsbrain", &format!("export async function login(ctx, t, user) {{ {call} }}"), &Ctx::default());
+        assert!(!d.iter().any(|d| d.code == "B0737"), "{call}: {d:?}");
+    }
 }

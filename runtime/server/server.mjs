@@ -22,7 +22,7 @@ import net from 'node:net'
 import { installNativeSockets } from './native-sockets.mjs'
 import { Readable } from 'node:stream'
 import zlib from 'node:zlib'
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync, realpathSync, statSync, lstatSync } from 'node:fs'
 import * as Module from 'node:module'
 import { basename, dirname, extname, join, normalize, resolve, sep } from 'node:path'
@@ -483,7 +483,7 @@ export function nativeAuthBridge(raw) {
     session(req, res, rid) {
       return {
         user: req.$nativeUser,
-        set() { throw new HttpError(409, 'Use the native authentication API to establish a session') },
+        set() { throw new HttpError(409, 'With BRAIN_BACKEND_URL the backend owns the session: sign in with ctx.backend.login(credentials), and keep a server-only value with ctx.session.setSecret(value)') },
         clear() {
           if (req.$nativeLoginStarted) throw new HttpError(409,'Use a separate server request to sign out after signing in')
           if (req.method !== 'POST' || res.headersSent) throw new HttpError(403, 'Sign out through a same-origin POST request')
@@ -695,7 +695,7 @@ export function createServer(o = {}) {
 
   const context = (req, res, url, extra) => {
     const cookies = parseCookies(req.headers.cookie)
-    const { user, session: ses } = native ? { user: req.$nativeUser ?? null, session: native.session(req, res, res.getHeader('x-request-id')) } : sessionFrom(cookies, secret)
+    const { user, session: ses } = native ? { user: req.$nativeUser ?? null, session: sessionSecrets(native.session(req, res, res.getHeader('x-request-id')), cookies, secret) } : sessionFrom(cookies, secret)
     return {
       url, query: Object.fromEntries(url.searchParams), cookies, user, session: ses, env,
       ...(native ? { backend: native.backend(req, res, res.getHeader('x-request-id')) } : {}),
@@ -767,7 +767,7 @@ export function createServer(o = {}) {
     const ctx = context(req, res, url, { params })
     // a page rendered for a signed-in user is never stored (§35): after logout, Back must not show the previous
     // user's page from the HTTP cache or bfcache. Anonymous pages keep `no-cache` + ETag.
-    const own = ctx.user != null || ctx.cookies[COOKIE] !== undefined || native && /(?:^|;\s*)__Host-brain(?:-access|-refresh)?=/.test(req.headers.cookie || '')
+    const own = ctx.user != null || ctx.cookies[COOKIE] !== undefined || ctx.cookies[SECRET_COOKIE] !== undefined || native && /(?:^|;\s*)__Host-brain(?:-access|-refresh)?=/.test(req.headers.cookie || '')
     const keep = h => (own ? { ...h, 'cache-control': 'private, no-store' } : h)
     let props = fixed || {}, extra = {}
     if (!fixed && ((route.guards && route.guards.length) || (route.middleware && route.middleware.length))) {
@@ -1274,22 +1274,105 @@ export function createServer(o = {}) {
 }
 
 // ---------- session (signed cookie; shared with the dev server) ----------
-const COOKIE = '__Host-session'
-// The user of a request: the signed `__Host-session` cookie (HMAC-SHA256 with BRAIN_SECRET), plus the session handle
-// to set/clear it. Same in `node server.mjs` and in `brain run` (the dev sidecar imports it).
+const COOKIE = '__Host-session', SECRET_COOKIE = '__Host-session-secret', SECRET_MAX = 3500, DEFAULT_SESSION_SECONDS = 7 * 24 * 3600
+// Keys that still verify and decrypt during a rotation; new cookies always use the current key.
+const previousKeys = () => (process.env.BRAIN_SECRET_PREVIOUS || '').split(',').map(k => k.trim()).filter(Boolean)
+const sessionVersion = () => process.env.BRAIN_SESSION_VERSION || ''
+const sessionSeconds = () => { const n = Number(process.env.BRAIN_SESSION_SECONDS); return Number.isInteger(n) && n > 0 ? n : DEFAULT_SESSION_SECONDS }
+// Cookies of this process signed out before their expiry (mac -> exp). One process only: a shared store does not exist
+// here, so a deployment with several processes signs everybody out with BRAIN_SESSION_VERSION instead.
+const REVOKED = new Map(), REVOKED_MAX = 10000
+const revoke = (mac, exp) => {
+  const now = Date.now()
+  for (const [k, e] of REVOKED) if (e <= now) REVOKED.delete(k)
+  while (REVOKED.size >= REVOKED_MAX) REVOKED.delete(REVOKED.keys().next().value)
+  REVOKED.set(mac, exp)
+}
+const secretKey = secret => Buffer.from(hkdfSync('sha256', secret, '', 'brain session secret v1', 32))
+const seal = (secret, text) => {
+  const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm', secretKey(secret), iv)
+  cipher.setAAD(Buffer.from(SECRET_COOKIE))
+  const body = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()])
+  return Buffer.concat([iv, cipher.getAuthTag(), body]).toString('base64url')
+}
+const unseal = (secret, value) => {
+  try {
+    const raw = Buffer.from(value, 'base64url')
+    if (raw.length < 29) return null
+    const decipher = createDecipheriv('aes-256-gcm', secretKey(secret), raw.subarray(0, 12))
+    decipher.setAAD(Buffer.from(SECRET_COOKIE))
+    decipher.setAuthTag(raw.subarray(12, 28))
+    return Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString('utf8')
+  } catch { return null }
+}
+// `ctx.session.setSecret(value, { maxAge })`, `.secret()` and `.clearSecret()` on any session handle (signed cookie or
+// native bridge): server-only values such as a provider token, AES-256-GCM encrypted in their own cookie. They never
+// fill `ctx.user`, and `session.clear()` removes them too.
+export function sessionSecrets(session, cookies, secret) {
+  const out = []
+  const write = (value, maxAge) => { out.length = 0; out.push(`${SECRET_COOKIE}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${Math.max(0, maxAge)}`) }
+  let current
+  const read = () => {
+    if (current !== undefined) return current
+    current = null
+    const v = cookies && cookies[SECRET_COOKIE]
+    if (!v || !secret) return current
+    for (const key of [secret, ...previousKeys()]) {
+      const text = unseal(key, v)
+      if (text === null) continue
+      try {
+        const s = JSON.parse(text)
+        if (s && s.exp > Date.now()) current = s.v
+      } catch {}
+      break
+    }
+    return current
+  }
+  const { clear, headers } = session
+  const clearSecret = () => { write('', 0); current = null }
+  return Object.assign(session, {
+    secret: read,
+    setSecret(value, { maxAge = sessionSeconds() } = {}) {
+      if (!secret) throw new Error('BRAIN_SECRET is not set: session secrets need it (32+ random bytes in .brain_env)')
+      const text = JSON.stringify({ v: value, exp: Date.now() + maxAge * 1000 })
+      if (value === undefined || text === undefined || JSON.parse(text).v === undefined) throw new Error('session.setSecret needs a JSON value')
+      const sealed = seal(secret, text)
+      if (sealed.length > SECRET_MAX) throw new Error(`session secret too large (${sealed.length} bytes, limit ${SECRET_MAX}): keep it server-side and store a reference`)
+      write(sealed, maxAge)
+      current = value
+    },
+    clearSecret,
+    clear(...args) { const result = clear.apply(session, args); if (out.length || (cookies && cookies[SECRET_COOKIE] !== undefined)) clearSecret(); return result },
+    headers() {
+      const base = headers.call(session)
+      if (!out.length) return base
+      const own = base['set-cookie']
+      return { ...base, 'set-cookie': [...(Array.isArray(own) ? own : own ? [own] : []), ...out] }
+    },
+  })
+}
+// The user of a request: the signed `__Host-session` cookie (HMAC-SHA256 with BRAIN_SECRET; BRAIN_SECRET_PREVIOUS still
+// verifies during a rotation, BRAIN_SESSION_VERSION signs everybody out), plus the session handle to set/clear it. Same
+// in `node server.mjs` and in `brain run` (the dev sidecar imports it).
 export function sessionFrom(cookies, secret) {
-  const sign = data => b64u(createHmac('sha256', secret).update(data).digest())
-  let cur = null
+  const signWith = (key, data) => b64u(createHmac('sha256', key).update(data).digest())
+  const sign = data => signWith(secret, data)
+  let cur = null, curMac = null
   const v = cookies && cookies[COOKIE]
   if (v && secret) {
     const i = v.lastIndexOf('.')
     if (i > 0) {
-      const data = v.slice(0, i), mac = Buffer.from(v.slice(i + 1)), good = Buffer.from(sign(data))
-      if (mac.length === good.length && timingSafeEqual(mac, good))
-        try {
-          const s = JSON.parse(Buffer.from(data, 'base64url').toString())
-          if (s && s.exp > Date.now()) cur = s
-        } catch {}
+      const data = v.slice(0, i), mac = Buffer.from(v.slice(i + 1))
+      for (const key of [secret, ...previousKeys()]) {
+        const good = Buffer.from(signWith(key, data))
+        if (mac.length === good.length && timingSafeEqual(mac, good)) {
+          try {
+            const s = JSON.parse(Buffer.from(data, 'base64url').toString())
+            if (s && s.exp > Date.now() && (s.sv ?? '') === sessionVersion() && !REVOKED.has(v.slice(i + 1))) { cur = s; curMac = v.slice(i + 1) }
+          } catch {}
+          break
+        }
+      }
     }
   }
   const set = []
@@ -1298,14 +1381,16 @@ export function sessionFrom(cookies, secret) {
   const user = cur ? cur.u : null
   return {
     user,
-    session: {
+    session: sessionSecrets({
       user,
-      set(u, { maxAge = 7 * 24 * 3600 } = {}) {
+      set(u, { maxAge = sessionSeconds() } = {}) {
         if (!secret) throw new Error('BRAIN_SECRET is not set: sessions need it (32+ random bytes in .brain_env)')
-        const data = b64u(JSON.stringify({ u, exp: Date.now() + maxAge * 1000 }))
+        const version = sessionVersion()
+        const data = b64u(JSON.stringify({ u, exp: Date.now() + maxAge * 1000, ...(version ? { sv: version } : {}) }))
         set.push(cookie(`${data}.${sign(data)}`, maxAge))
       },
       clear() {
+        if (curMac) revoke(curMac, cur.exp)
         set.push(cookie('', 0))
         cleared = true
       },
@@ -1314,7 +1399,7 @@ export function sessionFrom(cookies, secret) {
       // response, so the logout call took ~18 s (F16). Nothing private is in that cache: RPC is no-store and SSR
       // HTML rendered with a session cookie is `private, no-store` (ssr() → keep).
       headers: () => ({ ...(set.length ? { 'set-cookie': set } : {}), ...(cleared ? { 'clear-site-data': '"storage"' } : {}) }),
-    },
+    }, cookies, secret),
   }
 }
 

@@ -36,6 +36,14 @@ environment. `brain check` reports an invalid value as B0707.
 1. Set `BRAIN_SECRET` in `.brain_env` (MCP: `brain_env_set { key, section, value }`).
 2. In a `server:` function: `ctx.session.set({ id, email })` signs it into the `__Host-session` cookie (HttpOnly,
    Secure, SameSite=Lax, 7 days; `ctx.session.set(user, { maxAge: seconds })` to change it).
+   That cookie is signed, not encrypted: a token or password in it warns B0737. Keep such values in
+   `ctx.session.setSecret(value, { maxAge })`, read them with `ctx.session.secret()` and remove them with
+   `ctx.session.clearSecret()` (`clear()` too). It is a separate AES-256-GCM cookie, limited to 3.5 KB, that never fills
+   `ctx.user`. With `BRAIN_BACKEND_URL` the backend owns the session, so `ctx.session.set` answers 409: sign in with
+   `ctx.backend.login(credentials)`; `setSecret` keeps working next to it.
+   Rotate the key with `BRAIN_SECRET_PREVIOUS=<old>` (comma separated) until old cookies expire; bump
+   `BRAIN_SESSION_VERSION` to sign everybody out; `BRAIN_SESSION_SECONDS` sets the default length. Logout invalidates a
+   copied cookie only inside one server process: with several processes, the version is the way to revoke.
 3. Every later request sees it as `ctx.user` in guards, `load` and server functions. `ctx.session.clear()` logs out.
 4. The cookie is signed, not encrypted: store ids and display data, never tokens, passwords or secrets.
 5. Protect a folder: `brain add guard account` → `export default (ctx) => ctx.user ? true : redirect('/login')`.
