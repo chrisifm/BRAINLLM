@@ -29,7 +29,7 @@ fixture tree and each gate script, so an updated test does not masquerade as the
 Fixture discovery rejects symlinks and bounds file count, individual size and aggregate bytes.
 
 The fixture schema migration affects only a generated `brain_live_*` database
-inside that owned container. It is **not** a migration of Vacantes or any other
+inside that owned container. It is **not** a migration of any existing
 application, and it does not read, authorize or perform such a migration.
 
 The bounded CDP metadata oracle can be checked without Docker or services:
