@@ -12,6 +12,13 @@ index and unrelated work. Never move the published tag or blindly retry a publis
 
 ## Published checkpoint and immutable evidence
 
+- **All 11 npm packages are published at 0.5.0** (`latest`), each with SLSA provenance. Tag `v0.5.0` =
+  `a916157`. Release run [41170712197](https://github.com/chrisifm/BRAINLLM/actions/runs/41170712197): source
+  verification, seven native builds, pack and publish passed. The first registry smoke failed with E404 about 30 s
+  after publish (registry propagation; `win32-x64` appeared minutes later); rerunning only the failed smoke jobs
+  passed on macOS, Windows and Ubuntu. Do not republish 0.5.0.
+- 0.5.0 gates on the release source: `verify.sh` exit 0, native fullchain 6/6, LLM gate 20/20 vs baseline 20/20,
+  gitleaks 0, privacy audit with history OK.
 - **All 11 npm packages are published at 0.4.0.** Exact public SHA-512 integrity matches every approved tarball;
   all 11 registry records advertise provenance. The publisher job succeeded in
   [41115493750](https://github.com/chrisifm/BRAINLLM/actions/runs/41115493750).
