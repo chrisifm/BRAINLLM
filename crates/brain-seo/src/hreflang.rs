@@ -121,19 +121,31 @@ pub fn split(route: &str, langs: &[String], default: &str) -> (String, String) {
 }
 
 /// Variants per route: `route → [(locale, route)]`, sorted, for every page that exists in two or more locales.
-/// `pages` is `(route, view file)`; a static view groups by file, everything else by the unprefixed route.
+/// `pages` is `(route, view file)`; a static view groups by file plus its page identity (the numeric segments, so page 2
+/// of a listing pairs with page 2 under a translated slug: S03), everything else by the unprefixed route. A view whose
+/// pages still collide in one locale falls back to the unprefixed route, so no page is dropped or mispaired.
 pub fn alternates(
     i: &I18n,
     pages: &[(&str, Option<&str>)],
 ) -> BTreeMap<String, Vec<(String, String)>> {
+    let page_id = |r: &str| i.strip(r).split('/').filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())).collect::<Vec<_>>().join("/");
+    let key = |route: &str, view: &Option<&str>, by_view: bool| match view {
+        Some(v) if by_view && !v.contains('[') => format!("view:{v}#{}", page_id(route)),
+        _ => format!("path:{}", i.strip(route)),
+    };
+    let mut clash = std::collections::BTreeSet::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for (route, view) in pages {
+        let k = key(route, view, true);
+        if !seen.insert((k.clone(), i.locale_of(route).to_string())) {
+            clash.insert(k);
+        }
+    }
     let mut groups: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
     for (route, view) in pages {
-        let key = match view {
-            Some(v) if !v.contains('[') => format!("view:{v}"),
-            _ => format!("path:{}", i.strip(route)),
-        };
+        let by_view = !clash.contains(&key(route, view, true));
         let entry = (i.locale_of(route).to_string(), route.to_string());
-        let g = groups.entry(key).or_default();
+        let g = groups.entry(key(route, view, by_view)).or_default();
         if !g.iter().any(|(l, _)| *l == entry.0) {
             g.push(entry);
         }
@@ -253,6 +265,30 @@ mod tests {
             ),
             ("es", "/acerca".to_string(), "/es".to_string())
         );
+    }
+
+    #[test]
+    fn paginated_listing_keeps_page_identity() {
+        // S03: one listing view renders page 1 and page 2 in each language (translated slug included)
+        let i = I18n {
+            default: "en".into(),
+            locales: vec!["en".into(), "es".into()],
+        };
+        let v = Some("views/blog/index.brain");
+        let pages = [
+            ("/blog", v),
+            ("/blog/page/2", v),
+            ("/es/blog", v),
+            ("/es/articulos/pagina/2", v),
+            ("/blog/page/3", v),
+        ];
+        let a = alternates(&i, &pages);
+        let pair = |x: &str, y: &str| vec![("en".to_string(), x.to_string()), ("es".to_string(), y.to_string())];
+        assert_eq!(a["/blog"], pair("/blog", "/es/blog"));
+        assert_eq!(a["/es/blog"], pair("/blog", "/es/blog"));
+        assert_eq!(a["/blog/page/2"], pair("/blog/page/2", "/es/articulos/pagina/2"), "page 2 never points to page 1");
+        assert_eq!(a["/es/articulos/pagina/2"], pair("/blog/page/2", "/es/articulos/pagina/2"));
+        assert!(!a.contains_key("/blog/page/3"), "a page in one language only has no alternates");
     }
 
     #[test]

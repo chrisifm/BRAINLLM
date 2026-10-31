@@ -11,6 +11,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Added
 
+- hreflang keeps page identity on paginated listings (S03): page 2 pairs with page 2 in each language (translated
+  slugs included) in head tags, the sitemap and the audit, instead of being dropped or paired with page 1.
 - `brain seo indexnow` reads a split sitemap through its index (S02): the local `sitemap-N.xml` children, deduplicated
   and sent 10 000 URLs per request. Child sitemap URLs are never sent as pages; a missing, nested or off-site child
   is an error with a fix.
