@@ -82,10 +82,12 @@ admin bypass. List queries enforce owner filtering in SQL; clients cannot select
 Public reads expose each record's owner UUID; do not grant public read when that identifier is sensitive.
 
 `GET /api/posts?search=words&limit=25&offset=0`, `POST /api/posts`, and `GET|PUT|DELETE /api/posts/<uuid>` use that
-contract. PUT replaces the record's data; PATCH is not supported. List limit: 1–100, offset: 0–10000, search: 256 bytes.
+contract. PUT replaces the record's data; PATCH changes only the sent fields. List limit: 1–100, offset: 0–10000, search: 256 bytes.
 OpenAPI 3.1 JSON is available at `/_brain/api` (admin session required with `--env production`). It documents resource
 routes and native account/media/job/link endpoints. CLI/MCP can inspect the same structured source contract;
 source saves report conservative contract diffs in `impact` without claiming a running backend was replaced.
+
+Domain writes: [PATCH](backend/patch.md).
 
 ## Opt-in administrative views
 
@@ -172,7 +174,7 @@ brain jobs prune
 
 The queue uses `FOR UPDATE SKIP LOCKED`, leases and unique lease tokens, with at-least-once delivery. Make side effects
 idempotent by `ctx.jobId`; an expired lease may be delivered again. A stale worker cannot acknowledge a newer lease.
-Limits: 10000 active jobs globally, 1–8 workers per process, no prefetched backlog, 60 seconds per execution, a 256 MB Node old-space heap setting, 90-second
+Limits: 10000 active jobs per queue, 1–8 workers per process, no prefetched backlog, 60 seconds per execution, a 256 MB Node old-space heap setting, 90-second
 lease, 64 KB payload, default three attempts (library/HTTP allow 1–10), exponential retry delay capped at five minutes.
 The final failure or expired final lease becomes `dead`. Errors persisted in job status are generic, never raw handler
 exceptions. CLI status and HTTP status omit payloads. Prune explicitly removes at most 1000 finished jobs older than

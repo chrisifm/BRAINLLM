@@ -260,6 +260,7 @@ validated file leases and compare-and-swap revisions. Existing files are never o
 routes or controls are created. Native backend policy remains authoritative. Review policy, migrate explicitly,
 then build and doctor the application. The app's default 30 KiB route budget remains unchanged.
 Set `DATABASE_URL`; explicitly `brain backend migrate`, then `brain backend serve` (loopback REST at `/api/<resource>`).
+`PATCH /api/<resource>/<uuid>` changes only the sent fields (`null` clears an optional one); see `docs/backend/patch.md`.
 `brain jobs enqueue|status|work|prune` manages persistent, at-least-once work. Handlers must be idempotent by `ctx.jobId`.
 After-write hooks commit `{resource,operation,record}` with their mutation. `brain add hook validate_order` creates
 `server/hooks/validate_order.jsbrain`; reference it as `before_create`, `before_update` or `before_delete` in a resource's

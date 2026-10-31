@@ -528,7 +528,7 @@ pub fn openapi_with_roles(resources: &[Resource], roles: &crate::auth_flows::Rol
             format!("/api/{}", r.name),
             json!({"get":op("list",false),"post":op("create",true)}),
         );
-        paths.insert(format!("/api/{}/{{id}}",r.name),json!({"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}],"get":op("read",false),"put":op("update",true),"delete":op("delete",false)}));
+        paths.insert(format!("/api/{}/{{id}}",r.name),json!({"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}],"get":op("read",false),"put":op("update",true),"patch":crate::domain::patch_operation(r, op("update",false)),"delete":op("delete",false)}));
     }
     paths.extend(native_paths(roles));
     json!({"openapi":"3.1.0","info":{"title":"BRAINLLM resource API (experimental)","version":env!("CARGO_PKG_VERSION")},"paths":paths,"components":{"securitySchemes":{"session":{"type":"apiKey","in":"cookie","name":"__Host-brain"},"accessCookie":{"type":"apiKey","in":"cookie","name":"__Host-brain-access"},"refreshCookie":{"type":"apiKey","in":"cookie","name":"__Host-brain-refresh"},"googleNonce":{"type":"apiKey","in":"cookie","name":"__Host-brain-google"},"bearer":{"type":"http","scheme":"bearer","bearerFormat":"JWT"}}}})

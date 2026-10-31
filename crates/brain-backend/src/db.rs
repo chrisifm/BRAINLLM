@@ -711,7 +711,7 @@ pub async fn get(pool: &PgPool, r: &Resource, id: Uuid) -> Result<Option<Value>,
         .await
         .map(|r| r.map(record))
 }
-async fn hook(
+pub(crate) async fn hook(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     r: &Resource,
     operation: &str,

@@ -15,9 +15,13 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   object field options `{type, default, unique}` and declarative checks in `constraints.jsbrain`. Decimals travel and
   are stored as canonical strings with a lossless database CHECK; unique and check violations answer 409/422. Records
   expose `created_at`/`updated_at`. Existing contracts record byte-identically and gain no database objects.
+- `PATCH /api/<resource>/<uuid>` updates only the sent fields; `null` clears an optional field. The merged record is
+  revalidated against the full contract and written with the same conflict check as `PUT` (`docs/backend/patch.md`).
 
 ### Changed
 
+- Job enqueue takes a per-queue transaction lock and a bounded count instead of one global lock and a full scan, so
+  hook-enabled writes on different queues no longer serialize. The 10000 active-job cap now applies per queue.
 - The shared lexer decodes ASCII directly, scans ASCII identifier runs as bytes and indexes punctuation by first byte
   in the same longest-first order. Source-map scanning skips slash-free trivia gaps and builds its generated line index
   only to locate a failure. Emitted JS, server JS, CSS, maps and diagnostics are byte-identical; no compiler-speed

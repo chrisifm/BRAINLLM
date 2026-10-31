@@ -5,6 +5,8 @@ mod auth_flows;
 mod auth_http;
 #[path = "backend.rs"]
 mod backend;
+#[path = "domain_writes.rs"]
+mod domain_writes;
 #[path = "exact_types.rs"]
 mod exact_types;
 #[path = "foundation.rs"]
@@ -19,3 +21,5 @@ mod media;
 mod native_openapi;
 #[path = "native_sockets.rs"]
 mod native_sockets;
+#[path = "queues.rs"]
+mod queues;
