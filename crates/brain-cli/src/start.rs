@@ -367,7 +367,7 @@ pub fn start(root: &Path, o: &Opts) -> Result<i32, String> {
     if !["index.html", "index.brain", "server.mjs"].iter().any(|f| dist.join(f).is_file()) {
         return Err("dist/ has no build; fix: run `brain build` first".into());
     }
-    let listener = TcpListener::bind((o.host.as_str(), o.port)).map_err(|e| format!("cannot listen on {}:{}: {e}; fix: pick another --port", o.host, o.port))?;
+    let listener = brain_serve::listen::bind_waiting(&o.host, o.port, brain_serve::listen::RESTART_WAIT).map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     // Resolve the selected environment once, before publishing readiness or control files.
     // A compiled manifest enables sockets; the presence of a helper never enables them.
@@ -391,6 +391,7 @@ pub fn start(root: &Path, o: &Opts) -> Result<i32, String> {
     install_signals();
     control(sock_path(root), status.clone(), stop.clone(), reload.clone()).map_err(|e| e.to_string())?;
     println!("brain start → {url}  (build {build})");
+    crate::backend::warn_queues_in_background(root, &o.env);
 
     let code = if let Some(gateway) = static_gateway {
         // static: Rust serves dist/

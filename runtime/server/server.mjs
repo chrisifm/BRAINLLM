@@ -1809,6 +1809,7 @@ function hook(base, app = '/') {
   )
 }
 
+const LISTEN_WAIT_MS = 10000
 // `node server.mjs` (directly or under `brain start`); paths compared after symlinks (/var → /private/var on macOS)
 function real(p) {
   try {
@@ -1822,10 +1823,22 @@ if (process.argv[1] && real(process.argv[1]) === real(fileURLToPath(import.meta.
   const s = createServer({ dist: fileURLToPath(new URL('.', import.meta.url)) })
   const fd = ENV.BRAIN_LISTEN_FD
   const where = fd ? { fd: Number(fd) } : { port: +(ENV.PORT || 3000), host: ENV.HOST || '127.0.0.1' }
-  s.listen(where, () => {
+  s.once('listening', () => {
     process.stdout.write(`brain:ready ${process.pid}\n`) // the supervisor waits for this line (§34)
     console.log(json({ t: new Date().toISOString(), level: 'info', msg: 'listening', ...(fd ? { fd: Number(fd) } : where) }))
   })
+  // A restart may find the previous instance still draining: wait for it, briefly. Two live servers never share a port.
+  const waitUntil = Date.now() + LISTEN_WAIT_MS
+  s.on('error', error => {
+    if (error.code === 'EADDRINUSE' && !fd && !s.listening && Date.now() < waitUntil) return void setTimeout(() => s.listen(where), 100)
+    if (s.listening) throw error
+    const port = where.port
+    const fix = error.code === 'EADDRINUSE' ? `find the owner with \`lsof -nP -iTCP:${port} -sTCP:LISTEN\` (Linux: \`ss -ltnp 'sport = :${port}'\`), stop it, or set another PORT` : 'use another HOST or PORT'
+    const cause = error.code === 'EADDRINUSE' ? `another live process still holds the port after ${LISTEN_WAIT_MS / 1000} s` : error.code
+    console.error(json({ t: new Date().toISOString(), level: 'error', msg: `cannot listen on ${where.host}:${port}: ${cause}`, fix }))
+    process.exit(1)
+  })
+  s.listen(where)
   // SIGTERM/SIGINT: stop accepting, answer what is in flight or arrives on open connections (each then closes), for up
   // to BRAIN_DRAIN_MS (10 s), then cut whatever is left; exit 0 either way
   const drain = () => {
