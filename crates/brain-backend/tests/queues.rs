@@ -228,3 +228,88 @@ async fn postgres_cron_runs_each_slot_once_across_schedulers() {
     assert_eq!(rows[0].1["report"], "daily");
     sqlx::query("DELETE FROM _brain_jobs WHERE queue=$1").bind(&job).execute(&pool).await.unwrap();
 }
+
+async fn collect(pool: &sqlx::PgPool, queue: &str, n: i64, within: Duration) -> bool {
+    let started = std::time::Instant::now();
+    while started.elapsed() < within {
+        let done: i64 = sqlx::query_scalar("SELECT count(*) FROM _brain_jobs WHERE queue=$1 AND state='succeeded'").bind(queue).fetch_one(pool).await.unwrap();
+        if done >= n { return true }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    false
+}
+
+/// A full queue drains without waiting between jobs, each job runs once at any concurrency, and an idle worker is woken by
+/// the commit instead of its poll. A delayed job still waits for its time.
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn postgres_workers_drain_without_idle_waits_and_wake_on_commit() {
+    let pool = pool().await;
+    let q = jobs::Queue::new(pool.clone());
+    for concurrency in [1usize, 4] {
+        let name = queue_name("drain");
+        for n in 0..40 { q.enqueue(&name, json!({"n": n}), None, 3).await.unwrap(); }
+        let (stop, recv) = tokio::sync::watch::channel(false);
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (policy, sink) = (jobs::QueuePolicy { concurrency, ..Default::default() }, seen.clone());
+        let worker = { let (q, name) = (q.clone(), name.clone()); tokio::spawn(async move {
+            q.work_with(&name, &policy, recv, move |job| { let sink = sink.clone(); async move { sink.lock().unwrap().push(job.id); Ok(()) } }).await
+        }) };
+        let started = std::time::Instant::now();
+        assert!(collect(&pool, &name, 40, Duration::from_secs(5)).await, "40 instant jobs must drain well under one idle wait each");
+        assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+        // Idle now: one more job runs long before the one-second idle poll.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let woken = std::time::Instant::now();
+        q.enqueue(&name, json!({"n": 40}), None, 3).await.unwrap();
+        assert!(collect(&pool, &name, 41, Duration::from_secs(3)).await);
+        assert!(woken.elapsed() < Duration::from_millis(500), "a commit wakes an idle worker: {:?}", woken.elapsed());
+        // Negative: a delayed job is not claimed by a wake-up.
+        let later = q.enqueue_with(&name, json!({"n": 41}), &jobs::Enqueue { delay_seconds: 2, ..Default::default() }).await.unwrap();
+        q.enqueue(&name, json!({"n": 42}), None, 3).await.unwrap();
+        assert!(collect(&pool, &name, 42, Duration::from_secs(1)).await);
+        assert_eq!(state(&pool, later).await, "pending");
+        assert!(collect(&pool, &name, 43, Duration::from_secs(5)).await, "the poll still finds a job that came due");
+        stop.send(true).unwrap();
+        worker.await.unwrap().unwrap();
+        let mut ids = seen.lock().unwrap().clone();
+        let total = ids.len();
+        ids.sort();
+        ids.dedup();
+        assert_eq!((total, ids.len()), (43, 43), "every job exactly once at concurrency {concurrency}");
+        sqlx::query("DELETE FROM _brain_jobs WHERE queue=$1").bind(&name).execute(&pool).await.unwrap();
+    }
+}
+
+/// `stats` reports the oldest wait and the live workers; a clean stop and an expired beat both read as no worker.
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn postgres_stats_report_oldest_wait_and_live_workers() {
+    let pool = pool().await;
+    let q = jobs::Queue::new(pool.clone());
+    let name = queue_name("alive");
+    assert_eq!(q.stats(&name).await.unwrap()["workers"], 0);
+    assert!(q.stats("").await.unwrap_err().contains("brain jobs stats"), "an empty name says what to pass");
+    let id = q.enqueue(&name, json!({}), None, 3).await.unwrap();
+    sqlx::query("UPDATE _brain_jobs SET available_at=now()-interval '90 seconds' WHERE id=$1").bind(id).execute(&pool).await.unwrap();
+    let stats = q.stats(&name).await.unwrap();
+    assert!(stats["oldestWaitSeconds"].as_i64().unwrap() >= 90, "{stats}");
+    assert!(q.active_queues().await.unwrap().contains(&name));
+    let (stop, recv) = tokio::sync::watch::channel(false);
+    let policy = jobs::QueuePolicy { concurrency: 1, ..Default::default() };
+    let worker = { let (q, name) = (q.clone(), name.clone()); tokio::spawn(async move { q.work_with(&name, &policy, recv, |_| async { Ok(()) }).await }) };
+    assert!(collect(&pool, &name, 1, Duration::from_secs(5)).await);
+    let stats = q.stats(&name).await.unwrap();
+    assert_eq!((stats["workers"].as_i64(), stats["oldestWaitSeconds"].as_i64()), (Some(1), Some(0)), "{stats}");
+    stop.send(true).unwrap();
+    worker.await.unwrap().unwrap();
+    assert_eq!(q.stats(&name).await.unwrap()["workers"], 0, "a clean stop removes the row");
+    // A killed process leaves its row; it stops counting once its beats are old.
+    let ghost = uuid::Uuid::new_v4();
+    q.beat(ghost, "worker", &name).await.unwrap();
+    assert_eq!(q.stats(&name).await.unwrap()["workers"], 1);
+    sqlx::query("UPDATE public._brain_workers SET seen_at=now()-interval '46 seconds' WHERE id=$1").bind(ghost).execute(&pool).await.unwrap();
+    assert_eq!(q.stats(&name).await.unwrap()["workers"], 0);
+    q.leave(ghost).await.unwrap();
+    sqlx::query("DELETE FROM _brain_jobs WHERE queue=$1").bind(&name).execute(&pool).await.unwrap();
+}
