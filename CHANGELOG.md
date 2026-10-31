@@ -17,6 +17,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   declared types before the function runs; a name another mounted instance holds is skipped instead of breaking the
   page. `brain check` no longer reports B0128 for `<meta tools>`, and the new B1704 reports a function that
   destructures other parameters than its tool declares. Only components with tools load `brain-mcp.js`.
+- B1837 (warning, `brain build`): a public dynamic view (no guard, not `noindex`) that exports neither `paths()` nor
+  `sitemap()` renders per request but no sitemap lists its pages; the warning names the view and the route with the
+  fix (`sitemap({ env })`, `paths()` or `noindex`).
 - B0309 (warning): a style rule outside any `@layer` in `tokens.cssbrain` beats every view and component rule whatever
   its specificity; `brain check` now reports it with the fix (wrap it in `@layer reset`). Custom properties and
   `color-scheme` stay unlayered.

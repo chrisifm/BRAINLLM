@@ -134,7 +134,8 @@ COMPILER assigns the next free code there in the same change that emits it, then
   headings not grouped as `faq`, B1832 article freshness, B1833 author as Person, B1834 no external sources ·
   B1835 video without poster or upload date (info: not indexed as a video) · B1836 no `keyword` and the title or
   description does not name the H1 topic (info; `brain seo audit` reads each route's `keyword` from its view, like the
-  build, through `brain_seo::cli_with`). Collections (`content/<name>/*.md`, §33): server-only `entries` `entry` `tags` `tagged` `pages`
+  build, through `brain_seo::cli_with`) · B1837 public dynamic route (no guard, not `noindex`) without `paths()` or
+  `sitemap()`: rendered per request but listed nowhere (warning from `brain build`, named with the fix). Collections (`content/<name>/*.md`, §33): server-only `entries` `entry` `tags` `tagged` `pages`
   `page` from `brain:content`, `content.perPage` (default 10), drafts only with `--env staging`.
 - B072x environment file `.brain_env` (§36): B0720 empty value in the build environment (error) · B0721 key used in
   code but missing (warning, edit adds `KEY=`) · B0722 key never used (info) · B0723 `PUBLIC_*` value shaped like a

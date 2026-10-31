@@ -256,6 +256,12 @@ pub const CATALOG: &[(&str, &str, &str, &str)] = &[
         "<meta seo title=\"Offline task planner — Acme\" description=\"An offline task planner that syncs when you reconnect.\">",
     ),
     (
+        "B1837",
+        "Dynamic route without a sitemap",
+        "Pages rendered per request are found by crawlers only through links or sitemap.xml; a public dynamic view that lists no pages may never be indexed.",
+        "export async function sitemap({ env }) { return (await posts()).map((p) => ({ slug: p.slug, lastmod: p.updated })) }",
+    ),
+    (
         "B1835",
         "Video not indexable",
         "Search engines index a video (rich result, video sitemap) only with a poster image and an upload date.",

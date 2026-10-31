@@ -57,6 +57,8 @@ page text, not after.
   <main><h1>Blog post</h1><p>{props.slug}</p></main>
   ```
   The server lists `/blog/hello-world` and `/blog/second-post` in /sitemap.xml (kept 5 min).
+  A public dynamic view (no `_guard.jsbrain`, not `noindex`) without `paths()` or `sitemap()` is rendered per request
+  but listed nowhere; `brain build` warns `B1837 views/blog/[slug].brain … dynamic route `/blog/:slug` …` with this fix.
 - Sitemaps and robots `Sitemap:` need the deployed origin: `PUBLIC_SITE_URL` in the `[production]` section of
   `.brain_env`. With none, or a placeholder (example.com, `*.test`, localhost: B0736, also in `brain doctor`), the build
   publishes neither and warns; `brain build --site https://your-domain` overrides it.
