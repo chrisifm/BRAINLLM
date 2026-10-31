@@ -762,9 +762,9 @@ fn generate_module(g: &mut Gen, c: &Component, opts: &Options) -> String {
         let dir = opts.runtime.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
         body.push_str(&format!("import {{ serve as $serve }} from {};\n$serve({{ {} }});\n", js_str(&format!("{dir}/brain-worker.js")), fns.join(", ")));
     }
-    let declared: HashSet<String> = scope::top_bindings(c).into_keys().collect();
+    let declared = module_bindings(c);
     let auto = auto_imports(&body, &declared, &BTreeSet::new(), opts, g.uses_i18n, &author_names(c), false);
-    let types = types_import(g, c, &declared, opts);
+    let types = types_import(g, c, &scope::top_bindings(c).into_keys().collect(), opts);
     format!("{}{auto}{types}{}{body}", runtime_import(g, opts), user_imports(c, opts, &|_| true))
 }
 
@@ -887,9 +887,10 @@ fn ui_refs(nodes: &[Node], out: &mut BTreeSet<String>) {
 /// Imports for primitives outside the core and for `brain/ui` components, none of which the user imports
 /// (SPEC). Modules sit next to `opts.runtime`; the kit under `<dir>/ui/<name>.brain`.
 /// Names the author wrote (script, markup, `<head>`, `<meta seo>` and prop defaults). An author-facing primitive is
-/// imported only when it is in here *and* in the generated code: a word in a string or a comment is not a use.
+/// imported only when it is in here *and* in the generated code: a word in a string or a comment is not a use, and
+/// neither is a local of the same name.
 fn author_names(c: &Component) -> HashSet<String> {
-    let mut u = brain_parse::visit::Uses::component(c);
+    let mut u = brain_parse::visit::Uses::free(c);
     u.nodes(&c.head);
     for m in &c.meta {
         if let Some(e) = &m.expr {
@@ -902,6 +903,15 @@ fn author_names(c: &Component) -> HashSet<String> {
         names.insert("http".into());
     }
     names
+}
+
+/// Top-level bindings plus names only a local scope binds: code without a free use of them must not import them, so a
+/// `const scope` or `const entries` inside a function adds no runtime or content import (the word test cannot tell).
+fn module_bindings(c: &Component) -> HashSet<String> {
+    let mut declared: HashSet<String> = scope::top_bindings(c).into_keys().collect();
+    let u = brain_parse::visit::Uses::free(c);
+    declared.extend(u.bound.into_iter().filter(|n| !u.reads.contains(n) && !u.calls.contains(n) && !u.writes.contains(n)));
+    declared
 }
 
 fn auto_imports(code: &str, declared: &HashSet<String>, ui: &BTreeSet<String>, opts: &Options, i18n: bool, author: &HashSet<String>, pure_server: bool) -> String {
@@ -1090,7 +1100,7 @@ fn generate_server(g: &mut Gen, c: &Component, opts: &Options) -> (String, Vec<S
     }
     let imports = user_imports(c, opts, &|i| import_names(i).iter().any(|n| mentions(&body, n)));
     // §33: collection readers used by `load`/`paths`/`server:` come from the build's `brain:content` module.
-    let declared: HashSet<String> = scope::top_bindings(c).into_keys().collect();
+    let declared = module_bindings(c);
     let content: Vec<&str> = scope::CONTENT.iter().copied().filter(|n| !declared.contains(*n) && body.contains(&format!("{n}("))).filter(|n| mentions(&body, n)).collect();
     let content = if content.is_empty() { String::new() } else { format!("import {{ {} }} from \"brain:content\";\n", content.join(", ")) };
     // §37: `t()`/`locale()`/`fmt` left in server code (`<meta seo title={t('…')}>`, `load`) read the request's locale.
