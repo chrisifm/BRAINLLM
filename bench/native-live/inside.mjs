@@ -4,6 +4,7 @@ import path from 'node:path'
 import os from 'node:os'
 import crypto from 'node:crypto'
 import { spawn, spawnSync } from 'node:child_process'
+import { frameMetadata } from './frame-metadata.mjs'
 const ensure = (value, code) => { if (!value) throw Error(code) }
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'brain-live-app-'))
@@ -87,12 +88,8 @@ async function newPage(actor) {
     if(event.method==='Network.responseReceived'&&event.params.type==='Document')page.documentStatus=event.params.response.status
     if(event.method==='Network.loadingFailed'){const kind=event.params.errorText;if(/^net::ERR_[A-Z_]+$/.test(kind)&&page.failures.length<8)page.failures.push(kind)}
     if (event.method !== 'Network.webSocketFrameReceived' || !page.nativeIds.has(event.params.requestId)) return
-    const text = event.params.response.payloadData
-    ensure(text.length <= 4096, 'BROWSER_SOCKET_FRAME_BOUND')
-    const value = JSON.parse(text)
-    const allowed = { ready: ['type','protocol','durable','resyncRequired'], resync: ['type','reason'], invalidate: ['type','resource','id','operation','eventId'], pong: ['type'], error: ['type','code'] }[value.type]
-    ensure(allowed && Object.keys(value).every(key => allowed.includes(key)), 'SOCKET_FRAME_MUST_NOT_CONTAIN_ROW_BODY')
-    ensure(!text.includes('private-') && !text.includes('secret'), 'PRIVATE_VALUE_IN_SOCKET_FRAME')
+    const value = frameMetadata(event.params.response)
+    if (!value) return
     ensure(page.frames.length < 128, 'BROWSER_FRAME_RETENTION_BOUND'); page.frames.push(value)
   })
   await cdp.call('Network.enable', {}, session); await cdp.call('Runtime.enable', {}, session)
@@ -129,15 +126,17 @@ try {
   fs.copyFileSync('/binary/brain', binary); fs.chmodSync(binary, 0o755); fs.cpSync('/fixture', root, { recursive: true })
   fs.writeFileSync(path.join(root, 'brain.json'), JSON.stringify({ name:'native-live-acceptance',base:'/app/',backend:{origins:[origin],sockets:{allowedOrigins:[origin]}} }))
   const env = { ...process.env, PUBLIC_SITE_URL: origin, BRAIN_BACKEND_URL: 'http://127.0.0.1:5182', BRAIN_JWT_SECRET: crypto.randomBytes(48).toString('base64url'), BRAIN_JWT_ISSUER: origin, BRAIN_JWT_AUDIENCE: origin }
-  ensure(/^postgres(?:ql)?:\/\/brain:[A-Za-z0-9]+@owned-pg:5432\/brain_live_[a-f0-9]+$/.test(env.DATABASE_URL || ''), 'ONLY_OWNED_DISPOSABLE_DATABASE_ALLOWED')
+  const databaseURL=new URL(env.DATABASE_URL||'')
+  ensure(['postgres:','postgresql:'].includes(databaseURL.protocol)&&databaseURL.hostname==='owned-pg'&&databaseURL.port==='5432'&&databaseURL.username==='brain'&&/^[a-f0-9]{48}$/.test(databaseURL.password)&&/^\/brain_live_[a-f0-9]{12}$/.test(databaseURL.pathname)&&!databaseURL.search&&!databaseURL.hash,'ONLY_OWNED_DISPOSABLE_DATABASE_ALLOWED')
   const migration = spawnSync(binary, ['backend','migrate','--env','development'], {cwd:root,env,encoding:'utf8',timeout:20000,maxBuffer:65536})
   setupDiagnostics.migrationStatus=migration.status;setupDiagnostics.migrationErrorKind=migration.error?.code;setupDiagnostics.migrationCategories=[...new Set(((migration.stderr||'')+(migration.stdout||'')).match(/\b(?:BDB_[A-Z_]+|DATABASE_URL|unavailable|refused|timeout|schema|fields|meta|contract|invalid)\b/g)||[])];
   ensure(migration.status === 0, 'EXPLICIT_NATIVE_MIGRATION_FAILED')
   const backend = child(binary, ['backend','serve','--port','5182','--env','development'], {env}); await ready('http://127.0.0.1:5182/health', backend)
-  const frontend = child(binary, ['run','--port','4180','--host','127.0.0.1','--no-inspect','--quiet','--json'], {env}); await ready(base + '/', frontend)
+  const frontEnv={...env};for(const key of ['DATABASE_URL','BRAIN_JWT_SECRET','BRAIN_JWT_ISSUER','BRAIN_JWT_AUDIENCE'])delete frontEnv[key]
+  const frontend = child(binary, ['run','--port','4180','--host','127.0.0.1','--no-inspect','--quiet','--json'], {env:frontEnv}); await ready(base + '/', frontend)
   const alice = await actor('alice'), bob = await actor('bob')
   const initialA = await create(alice, 'private-alice-initial'), initialB = await create(bob, 'private-bob-initial')
-  chrome = child('/usr/bin/chromium', ['--headless','--no-sandbox','--disable-dev-shm-usage','--no-first-run','--disable-background-networking','--remote-debugging-port=0','--user-data-dir='+profileRoot,'about:blank'])
+  chrome = child('/usr/bin/chromium', ['--headless','--no-sandbox','--disable-dev-shm-usage','--no-first-run','--disable-background-networking','--remote-debugging-port=0','--user-data-dir='+profileRoot,'about:blank'], {env:{PATH:'/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',HOME:profileRoot,TMPDIR:'/tmp',LANG:'C.UTF-8'}})
   const chromeEnd = Date.now()+12000; let endpoint
   while(Date.now()<chromeEnd){endpoint=chrome.kept.match(/DevTools listening on (ws:\/\/[^\s]+)/)?.[1];if(endpoint)break;await sleep(40)}
   ensure(endpoint,'OWNED_CHROME_DEBUG_ENDPOINT_MISSING')

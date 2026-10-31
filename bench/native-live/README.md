@@ -28,6 +28,12 @@ The fixture schema migration affects only a generated `brain_live_*` database
 inside that owned container. It is **not** a migration of Vacantes or any other
 application, and it does not read, authorize or perform such a migration.
 
+The bounded CDP metadata oracle can be checked without Docker or services:
+
+```sh
+node --test bench/native-live/frame-metadata.test.mjs
+```
+
 ## Acceptance cases
 
 The fixture imports real compiled `api/*.jsbrain` clients. Its resource handle is
