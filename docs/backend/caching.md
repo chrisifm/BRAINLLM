@@ -6,6 +6,8 @@ the browser serves repeat reads without reaching the backend. Writes accept `If-
 
 ## Validators
 
+The same-origin gateways forward `If-None-Match` and `If-Match` and relay `ETag`, `Last-Modified` and `Cache-Control`.
+
 | Response | `ETag` | Meaning |
 |---|---|---|
 | `GET /api/<resource>/<uuid>` (no `include`) | strong, `"r…"` | this record revision as this reader sees it (id, Postgres row revision, visible fields) |

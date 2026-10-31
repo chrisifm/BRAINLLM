@@ -20,6 +20,7 @@
 import { createServer as http, STATUS_CODES, request as httpRequest, Agent as HttpAgent } from 'node:http'
 import net from 'node:net'
 import { installNativeSockets } from './native-sockets.mjs'
+import { BlockList, isIP } from 'node:net'
 import { Readable } from 'node:stream'
 import zlib from 'node:zlib'
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
@@ -227,6 +228,7 @@ export function nativeAuthBridge(raw, refused) {
   const call = (incoming, response, path, method, rid, origin) => {
     if (stopped || active >= 8) return Promise.reject(unavailable())
     const cookie = cookies(incoming, method === 'POST')
+    const client = forwardedFor(incoming)
     active++
     return new Promise((resolve, reject) => {
       let outgoing, timer, finished = false
@@ -240,7 +242,7 @@ export function nativeAuthBridge(raw, refused) {
       const cancel = () => outgoing?.destroy(unavailable())
       const disconnected = () => { if (!response.writableEnded) cancel() }
       try {
-        outgoing = httpRequest(new URL(path, target), { method, agent, headers: { accept: 'application/json', ...(cookie ? { cookie } : {}), 'x-request-id': rid, ...(origin ? { origin } : {}), ...(method === 'POST' ? { 'content-length': '0' } : {}) } }, backend => {
+        outgoing = httpRequest(new URL(path, target), { method, agent, headers: { accept: 'application/json', ...(cookie ? { cookie } : {}), 'x-request-id': rid, ...(client ? { 'x-forwarded-for': client } : {}), ...(origin ? { origin } : {}), ...(method === 'POST' ? { 'content-length': '0' } : {}) } }, backend => {
           let bytes = 0; const chunks = []
           if (backend.headers['content-encoding'] || Number(backend.headers['content-length']) > 16384) { backend.destroy(); return finish(true) }
           backend.on('data', chunk => { bytes += chunk.length; if (bytes > 16384) { backend.destroy(); finish(true) } else chunks.push(chunk) })
@@ -269,27 +271,98 @@ export function nativeAuthBridge(raw, refused) {
       } catch { outgoing?.destroy(); finish(true) }
     })
   }
-  let proxyBytes = 0
-  function proxy(req, res, url, rid, reply, responseLimit = 20 * 1024 * 1024) {
+  let proxyBytes = 0, streams = 0
+  // A file transfer lasts as long as the client needs, so streams have their own sockets and budget and never hold API slots.
+  const streamAgent = new HttpAgent({ keepAlive: false, maxSockets: 32, maxTotalSockets: 32 })
+  const REQUEST_HEADERS = ['origin','authorization','x-api-key','content-type','content-length','x-brain-rpc','accept','if-match','if-none-match','x-brain-webhook-id','x-brain-webhook-timestamp','x-brain-webhook-signature','user-agent','dnt','sec-gpc','cf-ipcountry']
+  const FILE_HEADERS = ['range','if-range','if-modified-since','if-unmodified-since']
+  const RESPONSE_HEADERS = ['content-type','content-disposition','allow','retry-after','www-authenticate','location','etag','last-modified','clear-site-data','cache-control']
+  const FILE_RESPONSE_HEADERS = ['content-length','content-range','accept-ranges','vary','content-security-policy','x-content-type-options','cross-origin-resource-policy','referrer-policy']
+  // The identity the backend resolves through trustProxy: the hops already received plus the peer this gateway observed.
+  // Hops to the left of an untrusted peer are ignored by the backend, so a client header can never choose the identity.
+  const forwardedFor = req => {
+    if (req.$brainForwardedFor) return req.$brainForwardedFor
+    const peer = req.socket?.remoteAddress
+    if (!peer) return undefined
+    const prior = req.headers['x-forwarded-for']
+    return typeof prior === 'string' && prior.length <= 4096 ? prior + ', ' + peer : peer
+  }
+  const requestHeaders = (req, rid, extra = []) => {
+    const headers = { 'x-request-id':rid }
+    for (const key of [...REQUEST_HEADERS, ...extra]) {
+      const value = req.headers[key]
+      if (typeof value === 'string' && value.length <= 8192) headers[key] = value
+    }
+    const selected = []
+    for (const part of String(req.headers.cookie || '').split(';')) {
+      const name = part.trim().split('=')[0]
+      if (['__Host-brain','__Host-brain-access','__Host-brain-refresh','__Host-brain-google'].includes(name)) selected.push(part.trim())
+    }
+    if (selected.length) headers.cookie = selected.join('; ')
+    const client = forwardedFor(req)
+    if (client) headers['x-forwarded-for'] = client
+    return headers
+  }
+  const nativeCookies = values => (values || []).filter(value => /^(?:__Host-brain(?:-access|-refresh|-google)?)=/.test(value) && value.length <= 8192).slice(0,8)
+  // /_brain/files: both directions stream with backpressure. The bucket enforces its own maxBytes and access checks.
+  function fileStream(req, res, url, rid) {
+    if (stopped || streams >= 32) throw new HttpError(503, 'Backend stream capacity is unavailable')
+    if (!['GET','HEAD','POST','DELETE'].includes(req.method)) throw new HttpError(405, 'Method not allowed')
+    const ceiling = 2 * 1024 * 1024 * 1024 + 1024 * 1024
+    if (Number(req.headers['content-length'] || 0) > ceiling) throw new HttpError(413, 'Request body is too large')
+    clearTimeout(req.$brainBodyGuard)
+    streams++
+    return new Promise((resolve, reject) => {
+      let outgoing, deadline, done = false, sent = 0
+      const finish = failure => {
+        if (done) return
+        done = true; streams--; clearTimeout(deadline); owned.delete(outgoing)
+        req.unpipe(outgoing); req.removeListener('data', count); res.removeListener('close', closed)
+        if (failure && !res.headersSent && !res.destroyed) return reject(failure)
+        if (failure && !res.destroyed) res.destroy()
+        outgoing?.destroy(); resolve()
+      }
+      const closed = () => finish()
+      const count = chunk => { sent += chunk.length; if (sent > ceiling) finish(new HttpError(413, 'Request body is too large')) }
+      const unavailable = () => new HttpError(503, 'Backend request unavailable')
+      try {
+        outgoing = httpRequest(new URL(url.pathname + url.search, target), { agent:streamAgent, method:req.method, headers:requestHeaders(req, rid, FILE_HEADERS) }, backend => {
+          const safe = { 'cache-control':'no-store' }
+          for (const key of [...RESPONSE_HEADERS, ...FILE_RESPONSE_HEADERS]) {
+            const value = backend.headers[key]
+            if (typeof value === 'string' && value.length <= 8192) safe[key] = value
+          }
+          const cookies = nativeCookies(backend.headers['set-cookie'])
+          if (cookies.length) safe['set-cookie'] = cookies
+          res.writeHead(backend.statusCode || 502, safe)
+          backend.once('error', () => finish(unavailable()))
+          backend.once('aborted', () => finish(unavailable()))
+          backend.once('end', () => { res.end(() => finish()) })
+          backend.pipe(res)
+        })
+        owned.add(outgoing)
+        // No progress in either direction (a stalled backend, or a client that stopped reading and paused the socket).
+        outgoing.setTimeout(60000, () => finish(new HttpError(504, 'Backend request timed out')))
+        // The backend's own upload deadline is 300 s; nothing else needs a total limit after the headers.
+        if (req.method === 'POST') deadline = setTimeout(() => finish(new HttpError(504, 'Backend request timed out')), 310000)
+        outgoing.once('error', () => finish(unavailable()))
+        res.once('close', closed)
+        req.on('data', count)
+        req.pipe(outgoing)
+      } catch { finish(unavailable()) }
+    })
+  }
+  function proxy(req, res, url, rid, reply, responseLimit = 20 * 1024 * 1024, declared) {
     if (stopped || active >= 8) throw new HttpError(503, 'Backend request capacity is unavailable')
     if (!['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(req.method)) throw new HttpError(405, 'Method not allowed')
-    const limit = url.pathname === '/_brain/uploads' && req.method === 'POST' ? 5 * 1024 * 1024 + 65536 : 65536
+    const post = req.method === 'POST'
+    const limit = url.pathname === '/_brain/uploads' && post ? 5 * 1024 * 1024 + 65536 : declared || post && /^\/api\/[^/]+\/batch$/.test(url.pathname) ? 1024 * 1024 : 65536
     if (Number(req.headers['content-length'] || 0) > limit) throw new HttpError(413, 'Request body is too large')
     active++
     return new Promise((resolve, reject) => {
       let outgoing, timer, done = false, bytes = 0, requestBytes = 0, failure
       const chunks = []
-      const headers = { 'x-request-id':rid }
-      for (const key of ['origin','authorization','content-type','content-length','x-brain-rpc','accept','x-brain-webhook-id','x-brain-webhook-timestamp','x-brain-webhook-signature','user-agent','dnt','sec-gpc','cf-ipcountry']) {
-        const value = req.headers[key]
-        if (typeof value === 'string' && value.length <= 8192) headers[key] = value
-      }
-      const selected = []
-      for (const part of String(req.headers.cookie || '').split(';')) {
-        const name = part.trim().split('=')[0]
-        if (['__Host-brain','__Host-brain-access','__Host-brain-refresh','__Host-brain-google'].includes(name)) selected.push(part.trim())
-      }
-      if (selected.length) headers.cookie = selected.join('; ')
+      const headers = requestHeaders(req, rid, declared?.headers)
       const finish = (error, backend) => {
         if (done) return
         done = true; clearTimeout(timer); active--; proxyBytes -= bytes; owned.delete(outgoing)
@@ -297,12 +370,16 @@ export function nativeAuthBridge(raw, refused) {
         res.removeListener('close',cancel)
         if (error) { if (!res.destroyed) reject(failure || new HttpError(503,'Backend request unavailable')); else resolve(); return }
         const safe = { 'cache-control':'no-store' }
-        for (const key of ['content-type','content-disposition','allow','retry-after','www-authenticate','location','etag','last-modified','clear-site-data']) {
+        for (const key of RESPONSE_HEADERS) {
           const value = backend.headers[key]
           if (typeof value === 'string' && value.length <= 8192) safe[key] = value
         }
-        const cookies = (backend.headers['set-cookie'] || []).filter(value => /^(?:__Host-brain(?:-access|-refresh|-google)?)=/.test(value) && value.length <= 8192)
-        if (cookies.length) safe['set-cookie'] = cookies.slice(0,8)
+        // the response headers a route contract allows its handler to set (docs/backend/routes.md)
+        if (declared) for (const [key, value] of Object.entries(backend.headers)) {
+          if ((key === 'link' || key === 'content-language' || key.startsWith('x-') && key !== 'x-request-id') && typeof value === 'string' && value.length <= 8192) safe[key] = value
+        }
+        const cookies = nativeCookies(backend.headers['set-cookie'])
+        if (cookies.length) safe['set-cookie'] = cookies
         try { reply(res,backend.statusCode || 502,req.method === 'HEAD' ? '' : Buffer.concat(chunks,bytes),safe); resolve() } catch (e) { reject(e) }
       }
       const cancel = () => { outgoing?.destroy(); finish(true) }
@@ -322,7 +399,7 @@ export function nativeAuthBridge(raw, refused) {
           backend.once('end',()=>finish(false,backend)); backend.once('error',()=>finish(true)); backend.once('aborted',()=>finish(true))
         })
         owned.add(outgoing)
-        timer = setTimeout(()=>{failure = new HttpError(504,'Backend request timed out');outgoing.destroy();finish(true)},url.pathname === '/_brain/uploads' || url.pathname.startsWith('/_brain/uploads/') ? 35000 : 10000)
+        timer = setTimeout(()=>{failure = new HttpError(504,'Backend request timed out');outgoing.destroy();finish(true)},declared || url.pathname === '/_brain/uploads' || url.pathname.startsWith('/_brain/uploads/') ? 35000 : 10000)
         outgoing.once('error',()=>finish(true)); req.once('aborted',cancel); res.once('close',cancel)
         req.on('data',data); req.once('end',end)
         if (req.readableEnded) end()
@@ -346,6 +423,7 @@ export function nativeAuthBridge(raw, refused) {
       }
       const req = Readable.from(bytes.length ? [bytes] : [])
       req.method = method
+      req.$brainForwardedFor = forwardedFor(incoming)
       req.headers = { cookie: cookies(incoming, false), accept: 'application/json', 'content-type':'application/json', 'content-length':String(bytes.length) }
       if (method !== 'GET') {
         req.headers.origin = bridgeOrigin(incoming, rid, 'Native writes require a same-origin server request')
@@ -453,7 +531,7 @@ export function nativeAuthBridge(raw, refused) {
     const origin=bridgeOrigin(incoming,rid,'Sign in through a same-origin POST server function')
     incoming.$nativeLoginStarted=true
     const bytes=Buffer.from(JSON.stringify({email:credentials.email,password:credentials.password}))
-    const request=Readable.from([bytes]);request.method='POST';request.headers={origin,accept:'application/json','content-type':'application/json','content-length':String(bytes.length)}
+    const request=Readable.from([bytes]);request.method='POST';request.$brainForwardedFor=forwardedFor(incoming);request.headers={origin,accept:'application/json','content-type':'application/json','content-length':String(bytes.length)}
     let user
     try {
       await proxy(request,response,new URL('/_brain/auth/login',target),rid,(_res,status,data,headers)=>{
@@ -504,8 +582,10 @@ export function nativeAuthBridge(raw, refused) {
         headers: () => req.$nativeLoginHeaders || {},
       }
     },
+    fileStream,
     _socketCookie: req => cookies(req, false),
-    close() { stopped = true; for (const request of owned) request.destroy(); agent.destroy() },
+    _forwardedFor: forwardedFor,
+    close() { stopped = true; for (const request of owned) request.destroy(); agent.destroy(); streamAgent.destroy() },
   }
 }
 
@@ -580,6 +660,22 @@ export function createServer(o = {}) {
   if (nativeSockets && !native) throw Error('Native sockets require a configured native backend')
   // the build's single route table (#187): already in match order, each with its RegExp source (named groups = params)
   const routes = mf.routes.map(r => ({ ...r, rx: r.rx ? new RegExp(r.rx) : exact(r.path) }))
+  // The address RPC and form limits key on, ctx.req.ip and the logs: a client header counts only through a trusted proxy.
+  const proxies = trustedProxies(o.trustProxy ?? (env.BRAIN_TRUST_PROXY ? env.BRAIN_TRUST_PROXY.split(',').map(entry => entry.trim()) : mf.trustProxy) ?? [])
+  let proxyWarned = false
+  const ipOf = req => {
+    const forwarded = req.headers['x-forwarded-for']
+    if (forwarded && !proxies && !proxyWarned && /^(?:127\.|::1$|::ffff:127\.)/.test(req.socket.remoteAddress || '')) {
+      proxyWarned = true
+      log('warn', 'trust-proxy-not-configured', { fix: 'a local proxy is forwarding client addresses and they are ignored, so all clients share one rate-limit key; set trustProxy in server/platform.jsbrain or BRAIN_TRUST_PROXY=127.0.0.1,::1' })
+    }
+    return resolveClient(req.socket.remoteAddress, forwarded, proxies)
+  }
+  // server/routes/* of the native backend, listed by the build: only these exact shapes cross the bridge
+  const nativeRoutes = (Array.isArray(mf.nativeRoutes) ? mf.nativeRoutes : []).map(route => {
+    if (typeof route?.path !== 'string' || !Array.isArray(route.headers)) throw Error('Manifest nativeRoutes must list path and headers')
+    return { headers: route.headers, rx: new RegExp('^' + route.path.split('/').map(part => /^\{.+\}$/.test(part) ? '[^/]+' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('/') + '$') }
+  })
   // the real path: Node imports file URLs through realpath, and the /_b/ hook must name the same modules (a symlinked
   // dist such as /var → /private/var on macOS would otherwise load the core twice)
   const distURL = pathToFileURL(real(dist) + sep).href
@@ -1237,6 +1333,16 @@ export function createServer(o = {}) {
 
   // ---------- dispatch ----------
   const server = http(async (req, res) => {
+    // Only a file upload may outlast the 30-second body budget; the dispatcher lifts this guard for that path alone.
+    if (native) {
+      req.$brainBodyGuard = setTimeout(() => {
+        if (req.complete) return
+        if (!res.headersSent) res.writeHead(408, { connection:'close' })
+        res.end(); req.socket?.destroy()
+      }, 30000)
+      req.$brainBodyGuard.unref?.()
+      res.once('close', () => clearTimeout(req.$brainBodyGuard))
+    }
     const rid = req.headers['x-request-id'] && /^[\w-]{1,64}$/.test(req.headers['x-request-id']) ? req.headers['x-request-id'] : randomUUID()
     res.setHeader('x-request-id', rid)
     const t0 = performance.now()
@@ -1257,7 +1363,10 @@ export function createServer(o = {}) {
         url = new URL('/' + full.pathname.slice(BASE.length) + full.search, full) // the app path
       }
       req.$brainPath = url.pathname
+      if (native && /^\/_brain\/files(?:\/|$)/.test(url.pathname)) return await native.fileStream(req,res,url,rid)
       if (native && /^\/(?:api(?:\/|$)|_brain(?:\/|$)|s\/)/.test(url.pathname)) return await native.proxy(req,res,url,rid,send)
+      const declaredRoute = native && nativeRoutes.find(route => route.rx.test(url.pathname))
+      if (declaredRoute) return await native.proxy(req,res,url,rid,send,undefined,declaredRoute)
       // redirects.json (manifest `redirects`, brain-seo server_json): exact sources first, then patterns, on the app path;
       // same-site targets get the base, the query is kept when the target has none; slash policy and host in the same hop
       const to = (req.method === 'GET' || req.method === 'HEAD') && canonicalOf(req, url)
@@ -1287,9 +1396,10 @@ export function createServer(o = {}) {
     }
   })
   if (native) server.once('close', () => native.close())
-  if (native && nativeSockets) server.$brainSocketStop = installNativeSockets(server,{target:o.backendURL ?? env.BRAIN_BACKEND_URL,base:BASE,cookie:native._socketCookie,log})
+  if (native && nativeSockets) server.$brainSocketStop = installNativeSockets(server,{target:o.backendURL ?? env.BRAIN_BACKEND_URL,base:BASE,cookie:native._socketCookie,client:native._forwardedFor,log})
   server.headersTimeout = 15000
-  server.requestTimeout = 30000
+  // With a native backend the file upload deadline is enforced per request (above); 30 s stays for every other body.
+  server.requestTimeout = native ? 320000 : 30000
   return server
 }
 
@@ -1531,7 +1641,39 @@ function parseCookies(h = '') {
   }
   return out
 }
-const ipOf = req => String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '?'
+const plainIp = text => { const ip = String(text).trim().replace(/^"|"$/g, '').replace(/^\[([^\]]+)\](?::\d+)?$/, '$1').replace(/^(\d+\.\d+\.\d+\.\d+):\d+$/, '$1').replace(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i, '$1'); return isIP(ip) ? ip : null }
+/** platform.trustProxy: one BlockList of proxies. Same limits as the backend's parse_proxy (brain-backend/src/platform.rs). */
+export function trustedProxies(list = []) {
+  const nets = new BlockList()
+  for (const entry of list) {
+    const [address, prefix, extra] = String(entry).split('/')
+    const family = isIP(address)
+    const bits = prefix === undefined ? (family === 4 ? 32 : 128) : Number(prefix)
+    const wide = family === 4 ? bits < 8 : bits < 16 && !(bits === 7 && /^fc00::$/i.test(address))
+    if (!family || extra !== undefined || !Number.isInteger(bits) || bits > (family === 4 ? 32 : 128)) throw Error(`trustProxy entry \`${entry}\` must be an IP address or CIDR range`)
+    if (wide) throw Error(`trustProxy entry \`${entry}\` is too wide; use at least /8 for IPv4 and /16 for IPv6, and list your proxy ranges`)
+    nets.addSubnet(address, bits, family === 4 ? 'ipv4' : 'ipv6')
+  }
+  return list.length ? nets : null
+}
+/**
+ * The client is the right-most forwarded hop that is not a trusted proxy, and only when the TCP peer is trusted: hops
+ * left of it are client-supplied and never consulted. Same walk as resolve_client (brain-backend/src/edge_http.rs).
+ */
+export function resolveClient(peer, forwarded, nets) {
+  const socketPeer = plainIp(peer ?? '')
+  const trusted = ip => nets.check(ip, isIP(ip) === 4 ? 'ipv4' : 'ipv6')
+  if (!socketPeer) return '?'
+  if (!nets || !trusted(socketPeer)) return socketPeer
+  let client = socketPeer
+  for (const text of String(forwarded ?? '').split(',').reverse()) {
+    const ip = plainIp(text)
+    if (!ip) return client
+    client = ip
+    if (!trusted(ip)) return ip
+  }
+  return client
+}
 function body(req, max) {
   return new Promise((ok, fail) => {
     let n = 0

@@ -131,7 +131,7 @@ fn malformed_handshakes_are_rejected_before_any_upstream_contact() {
     proxy.stop().unwrap();
 }
 #[test]
-fn both_read_aheads_and_opaque_binary_bytes_survive_without_forwarded_identity() {
+fn both_read_aheads_and_opaque_binary_bytes_survive_and_the_observed_peer_is_the_last_forwarded_hop() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let proxy = proxy(listener.local_addr().unwrap());
     let outgoing = b"\x82\x05\0\xffxyz";
@@ -149,7 +149,9 @@ fn both_read_aheads_and_opaque_binary_bytes_survive_without_forwarded_identity()
             Some("https://frontend.example.test")
         );
         assert!(!request.header("cookie").unwrap().contains("private-"));
-        assert!(request.header("x-forwarded-for").is_none());
+        // The backend walks this chain from the right, so a browser-supplied value
+        // can only ever sit behind the peer this gateway observed.
+        assert_eq!(request.header("x-forwarded-for"), Some("private-spoof, 127.0.0.1"));
         assert_ne!(
             request.header("x-request-id"),
             Some("untrusted-request-identity")
@@ -323,7 +325,7 @@ impl HeldBackend {
                         let auth_count = auth_worker.clone();
                         workers.push(std::thread::spawn(move || {
                             s.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-                            let Ok(request) = native_proxy::read_request(&s,None) else { return; };
+                            let Ok(request) = native_proxy::read_request(&s,None,&|_,_|http::BodyPlan::Default) else { return; };
                             if request.path == "/api/authority" {
                                 http_count.fetch_add(1, Ordering::SeqCst);
                                 let body = "{\"authority\":\"explicit\"}";

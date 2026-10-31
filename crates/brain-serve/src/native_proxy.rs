@@ -1,4 +1,6 @@
-//! One explicit loopback backend authority. No arbitrary targets, redirects, credentials or forwarded identities.
+//! One explicit loopback backend authority. No arbitrary targets, redirects or credentials. The only forwarded identity
+//! is `x-forwarded-for`: prior hops plus the peer this gateway observed, which the backend walks right to left through
+//! `platform.trustProxy`, so a client's own header never chooses the address its rate limit is keyed on.
 use crate::http;
 use std::{
     io::{self, BufRead, BufReader, Read, Write},
@@ -8,6 +10,14 @@ use std::{
 };
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 static BUFFERED: AtomicUsize = AtomicUsize::new(0);
+static STREAMS: AtomicUsize = AtomicUsize::new(0);
+const MAX_STREAMS: usize = 32;
+/// Above the largest bucket `maxBytes` plus multipart framing; each bucket enforces its own limit.
+const MAX_FILE_BODY: usize = 2 * 1024 * 1024 * 1024 + 1024 * 1024;
+/// Backend limit of a batch and of a route `bodyLimit`.
+const MAX_DECLARED_BODY: usize = 1024 * 1024;
+const FILE_IDLE: Duration = Duration::from_secs(60);
+const FILE_UPLOAD_TOTAL: Duration = Duration::from_secs(310);
 const MAX_RESPONSE: usize = 20 * 1024 * 1024;
 const GLOBAL_RESPONSE: usize = 64 * 1024 * 1024;
 #[derive(Clone)]
@@ -65,12 +75,46 @@ impl Target {
         })
     }
 }
+/// One `server/routes/*` contract the build listed: only these exact shapes cross the bridge.
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+pub struct NativeRoute {
+    pub path: String,
+    #[serde(default)]
+    pub headers: Vec<String>,
+}
+#[derive(Clone, Default)]
+pub(crate) struct NativeRoutes(Vec<NativeRoute>);
+impl NativeRoutes {
+    pub(crate) fn new(routes: Vec<NativeRoute>) -> Self {
+        Self(routes)
+    }
+    pub(crate) fn find(&self, path: &str) -> Option<&NativeRoute> {
+        self.0.iter().find(|route| {
+            let (mut shape, mut parts) = (route.path.split('/'), path.split('/'));
+            loop {
+                match (shape.next(), parts.next()) {
+                    (None, None) => return true,
+                    (Some(want), Some(part)) => {
+                        let param = want.len() > 2 && want.starts_with('{') && want.ends_with('}');
+                        if !(if param { !part.is_empty() } else { want == part }) {
+                            return false;
+                        }
+                    }
+                    _ => return false,
+                }
+            }
+        })
+    }
+}
+/// Lists the declared routes of a live project (dev server); a build writes them to the manifest instead.
+pub type RouteLoader = std::sync::Arc<dyn Fn() -> Vec<NativeRoute> + Send + Sync>;
 /// Fixed native authority for an explicit gateway; sockets remain opt-in.
 #[derive(Clone)]
 pub struct NativeProxy {
     target: Target,
     sockets: bool,
     origins: Option<Vec<String>>,
+    routes: Option<RouteLoader>,
 }
 impl NativeProxy {
     pub fn new(url: &str) -> Result<Self, String> {
@@ -78,7 +122,15 @@ impl NativeProxy {
             target: Target::parse(url)?,
             sockets: false,
             origins: None,
+            routes: None,
         })
+    }
+    pub fn routes(mut self, loader: RouteLoader) -> Self {
+        self.routes = Some(loader);
+        self
+    }
+    pub(crate) fn route_loader(&self) -> Option<RouteLoader> {
+        self.routes.clone()
     }
     pub fn sockets(mut self, enabled: bool) -> Self {
         self.sockets = enabled;
@@ -121,14 +173,47 @@ pub(crate) fn socket_cookie(header: &str) -> Result<String, &'static str> {
 pub(crate) fn read_request(
     stream: &TcpStream,
     upload_path: Option<&str>,
+    plan: &dyn Fn(&str, &str) -> http::BodyPlan,
 ) -> io::Result<http::Request> {
-    http::read_request_with_uploads(
+    http::read_request_planned(
         Deadline {
             socket: stream.try_clone()?,
             end: Instant::now() + Duration::from_secs(5),
         },
         upload_path,
+        65536,
+        None,
+        plan,
     )
+}
+fn is_files(path: &str) -> bool {
+    path == "/_brain/files" || path.starts_with("/_brain/files/")
+}
+fn is_batch(path: &str) -> bool {
+    path.strip_prefix("/api/")
+        .and_then(|rest| rest.strip_suffix("/batch"))
+        .is_some_and(|name| !name.is_empty() && !name.contains('/'))
+}
+/// The body plan of a request bound for the backend; everything else keeps the gateway's default.
+pub(crate) fn plan(path: &str, method: &str, routes: &NativeRoutes, pre: &str) -> http::BodyPlan {
+    let Some(path) = (if pre.is_empty() { Some(path) } else { path.strip_prefix(pre).filter(|p| p.starts_with('/')) }) else {
+        return http::BodyPlan::Default;
+    };
+    if is_files(path) && handles(path) {
+        http::BodyPlan::Stream(MAX_FILE_BODY)
+    } else if (is_batch(path) && method == "POST") || (!handles(path) && routes.find(path).is_some()) {
+        http::BodyPlan::Limit(MAX_DECLARED_BODY)
+    } else {
+        http::BodyPlan::Default
+    }
+}
+/// `$proxy_add_x_forwarded_for`: the hops received plus the observed peer. A chain over 4 KiB is dropped, not truncated.
+pub(crate) fn forwarded_for(req: &http::Request, peer: Option<SocketAddr>) -> Option<String> {
+    let peer = peer?.ip().to_canonical();
+    match req.header("x-forwarded-for").map(str::trim) {
+        Some(prior) if !prior.is_empty() && prior.len() <= 4096 && !prior.chars().any(char::is_control) => Some(format!("{prior}, {peer}")),
+        _ => Some(peer.to_string()),
+    }
 }
 pub(crate) fn handles(path: &str) -> bool {
     (path.starts_with("/s/")
@@ -163,6 +248,20 @@ impl Permit {
 impl Drop for Permit {
     fn drop(&mut self) {
         ACTIVE.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+struct StreamPermit;
+impl StreamPermit {
+    fn acquire() -> Option<Self> {
+        STREAMS
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| (count < MAX_STREAMS).then_some(count + 1))
+            .ok()
+            .map(|_| Self)
+    }
+}
+impl Drop for StreamPermit {
+    fn drop(&mut self) {
+        STREAMS.fetch_sub(1, Ordering::AcqRel);
     }
 }
 struct BufferBudget(usize);
@@ -299,75 +398,9 @@ fn encode_path(path: &str) -> String {
     }
     out
 }
-fn fetch(
-    target: &Target,
-    req: &http::Request,
-) -> Result<
-    (
-        u16,
-        String,
-        Vec<(String, String)>,
-        Vec<u8>,
-        BufferBudget,
-        Option<usize>,
-        Instant,
-    ),
-    Failure,
-> {
-    let _permit = Permit::acquire().ok_or(Failure(503, "request-capacity"))?;
-    // Native image/GCS handlers have a thirty-second deadline; preserve their completed result through the edge.
-    let resource_path = req.path.split('?').next().unwrap_or("");
-    let media = resource_path == "/_brain/uploads" || resource_path.starts_with("/_brain/uploads/");
-    let end = Instant::now() + Duration::from_secs(if media { 35 } else { 10 });
-    let socket = TcpStream::connect_timeout(&target.address, Duration::from_secs(2))
-        .map_err(|_| Failure(503, "backend-unavailable"))?;
-    let mut stream = Deadline { socket, end };
-    let path = encode_path(&req.path);
-    let path = if req.query.is_empty() {
-        path
-    } else {
-        format!("{path}?{}", req.query)
-    };
-    let mut headers = format!(
-        "{} {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nAccept-Encoding: identity\r\nX-Request-Id: {}\r\nContent-Length: {}\r\n",
-        req.method,
-        target.host,
-        req.id,
-        req.body.len()
-    );
-    for name in [
-        "content-type",
-        "accept",
-        "origin",
-        "authorization",
-        "x-brain-webhook-id",
-        "x-brain-webhook-timestamp",
-        "x-brain-webhook-signature",
-        // Behavior analytics filters (bots, Do Not Track, Global Privacy Control); never stored as such.
-        "user-agent",
-        "dnt",
-        "sec-gpc",
-        "cf-ipcountry",
-    ] {
-        if let Some(value) = req.header(name) {
-            if value.len() > 8192 || value.chars().any(char::is_control) {
-                return Err(Failure(400, "request-header"));
-            }
-            headers.push_str(&format!("{name}: {value}\r\n"));
-        }
-    }
-    let auth = cookie(req.header("cookie").unwrap_or(""))?;
-    if !auth.is_empty() {
-        headers.push_str(&format!("Cookie: {auth}\r\n"));
-    }
-    headers.push_str("\r\n");
-    stream
-        .write_all(headers.as_bytes())
-        .and_then(|_| stream.write_all(&req.body))
-        .and_then(|_| stream.flush())
-        .map_err(io_failure)?;
-    let mut reader = BufReader::new(stream);
-    let status_line = line(&mut reader, 8192)?;
+/// Status and validated headers of a backend response.
+fn response_head<R: Read>(reader: &mut BufReader<R>) -> Result<(u16, Vec<(String, String)>), Failure> {
+    let status_line = line(reader, 8192)?;
     let mut status_parts = status_line.splitn(3, ' ');
     if !matches!(status_parts.next(), Some("HTTP/1.1" | "HTTP/1.0")) {
         return Err(Failure(502, "response-status"));
@@ -380,7 +413,7 @@ fn fetch(
     let mut raw_headers: Vec<(String, String)> = Vec::new();
     let mut bytes = status_line.len();
     loop {
-        let row = line(&mut reader, 8192)?;
+        let row = line(reader, 8192)?;
         bytes += row.len() + 2;
         if bytes > 32768 || raw_headers.len() >= 128 {
             return Err(Failure(502, "response-header-budget"));
@@ -412,6 +445,136 @@ fn fetch(
         }
         raw_headers.push((name, value.trim().into()));
     }
+    Ok((status, raw_headers))
+}
+/// The request headers every proxied call carries.
+fn upstream_headers(head: &mut String, req: &http::Request, names: &[&str]) -> Result<(), Failure> {
+    for name in names {
+        if let Some(value) = req.header(name) {
+            if value.len() > 8192 || value.chars().any(char::is_control) {
+                return Err(Failure(400, "request-header"));
+            }
+            head.push_str(&format!("{name}: {value}\r\n"));
+        }
+    }
+    let auth = cookie(req.header("cookie").unwrap_or(""))?;
+    if !auth.is_empty() {
+        head.push_str(&format!("Cookie: {auth}\r\n"));
+    }
+    Ok(())
+}
+const REQUEST_HEADERS: [&str; 14] = [
+    "content-type",
+    "accept",
+    "origin",
+    "authorization",
+    // A project API key: a non-ambient credential the backend verifies or refuses (docs/backend/api-keys.md).
+    "x-api-key",
+    // Validators: without them optimistic locking and conditional reads are silently off (docs/backend/caching.md).
+    "if-match",
+    "if-none-match",
+    "x-brain-webhook-id",
+    "x-brain-webhook-timestamp",
+    "x-brain-webhook-signature",
+    // Behavior analytics filters (bots, Do Not Track, Global Privacy Control); never stored as such.
+    "user-agent",
+    "dnt",
+    "sec-gpc",
+    "cf-ipcountry",
+];
+const FILE_HEADERS: [&str; 4] = ["range", "if-range", "if-modified-since", "if-unmodified-since"];
+const RESPONSE_HEADERS: [&str; 9] = [
+    "location",
+    "content-disposition",
+    "retry-after",
+    "www-authenticate",
+    "clear-site-data",
+    "allow",
+    "etag",
+    "last-modified",
+    "cache-control",
+];
+const FILE_RESPONSE_HEADERS: [&str; 7] = [
+    "content-range",
+    "accept-ranges",
+    "vary",
+    "content-security-policy",
+    "x-content-type-options",
+    "cross-origin-resource-policy",
+    "referrer-policy",
+];
+fn auth_cookie_reply(value: &str) -> bool {
+    ["__Host-brain", "__Host-brain-access", "__Host-brain-refresh", "__Host-brain-google"].contains(&value.split('=').next().unwrap_or(""))
+}
+#[cfg(test)]
+fn fetch(
+    target: &Target,
+    req: &http::Request,
+) -> Result<
+    (
+        u16,
+        String,
+        Vec<(String, String)>,
+        Vec<u8>,
+        BufferBudget,
+        Option<usize>,
+        Instant,
+    ),
+    Failure,
+> {
+    fetch_with(target, req, None, None)
+}
+fn fetch_with(
+    target: &Target,
+    req: &http::Request,
+    client: Option<&str>,
+    route: Option<&NativeRoute>,
+) -> Result<
+    (
+        u16,
+        String,
+        Vec<(String, String)>,
+        Vec<u8>,
+        BufferBudget,
+        Option<usize>,
+        Instant,
+    ),
+    Failure,
+> {
+    let _permit = Permit::acquire().ok_or(Failure(503, "request-capacity"))?;
+    // Native image/GCS handlers have a thirty-second deadline; preserve their completed result through the edge.
+    let resource_path = req.path.split('?').next().unwrap_or("");
+    let media = resource_path == "/_brain/uploads" || resource_path.starts_with("/_brain/uploads/");
+    let end = Instant::now() + Duration::from_secs(if media || route.is_some() { 35 } else { 10 });
+    let socket = TcpStream::connect_timeout(&target.address, Duration::from_secs(2))
+        .map_err(|_| Failure(503, "backend-unavailable"))?;
+    let mut stream = Deadline { socket, end };
+    let path = encode_path(&req.path);
+    let path = if req.query.is_empty() {
+        path
+    } else {
+        format!("{path}?{}", req.query)
+    };
+    let mut headers = format!(
+        "{} {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nAccept-Encoding: identity\r\nX-Request-Id: {}\r\nContent-Length: {}\r\n",
+        req.method,
+        target.host,
+        req.id,
+        req.body.len()
+    );
+    if let Some(client) = client {
+        headers.push_str(&format!("x-forwarded-for: {client}\r\n"));
+    }
+    let declared = route.map(|route| route.headers.iter().map(String::as_str).collect::<Vec<_>>()).unwrap_or_default();
+    upstream_headers(&mut headers, req, &[&REQUEST_HEADERS[..], &declared[..]].concat())?;
+    headers.push_str("\r\n");
+    stream
+        .write_all(headers.as_bytes())
+        .and_then(|_| stream.write_all(&req.body))
+        .and_then(|_| stream.flush())
+        .map_err(io_failure)?;
+    let mut reader = BufReader::new(stream);
+    let (status, raw_headers) = response_head(&mut reader)?;
     let get = |key: &str| {
         raw_headers
             .iter()
@@ -507,28 +670,14 @@ fn fetch(
         .to_string();
     let mut response_headers = vec![("X-Request-Id".into(), req.id.clone())];
     for (name, value) in raw_headers {
-        if name == "set-cookie" {
-            let cookie_name = value.split('=').next().unwrap_or("");
-            if ![
-                "__Host-brain",
-                "__Host-brain-access",
-                "__Host-brain-refresh",
-                "__Host-brain-google",
-            ]
-            .contains(&cookie_name)
-            {
-                continue;
-            }
-        } else if ![
-            "location",
-            "content-disposition",
-            "retry-after",
-            "www-authenticate",
-            "clear-site-data",
-            "allow",
-        ]
-        .contains(&name.as_str())
-        {
+        let allowed = if name == "set-cookie" {
+            auth_cookie_reply(&value)
+        } else {
+            RESPONSE_HEADERS.contains(&name.as_str())
+                // the response headers a route contract allows its handler to set (docs/backend/routes.md)
+                || (route.is_some() && (name == "link" || name == "content-language" || (name.starts_with("x-") && name != "x-request-id")))
+        };
+        if !allowed {
             continue;
         }
         response_headers.push((name, value));
@@ -547,8 +696,10 @@ pub(crate) fn serve(
     stream: &mut TcpStream,
     target: &Target,
     req: &http::Request,
+    route: Option<&NativeRoute>,
 ) -> io::Result<()> {
-    match fetch(target, req) {
+    let client = forwarded_for(req, stream.peer_addr().ok());
+    match fetch_with(target, req, client.as_deref(), route) {
         Ok((status, content_type, headers, body, _budget, length, end)) => {
             let refs = headers
                 .iter()
@@ -572,7 +723,12 @@ pub(crate) fn serve(
                 &refs,
             )
         }
-        Err(Failure(status, code)) => {
+        Err(failure) => failure_reply(stream, req, failure),
+    }
+}
+fn failure_reply(stream: &mut TcpStream, req: &http::Request, Failure(status, code): Failure) -> io::Result<()> {
+    {
+        {
             let body = format!(
                 "{{\"error\":\"Native backend request could not complete\",\"code\":\"{code}\",\"rid\":{}}}",
                 crate::json_str(&req.id)
@@ -591,6 +747,125 @@ pub(crate) fn serve(
             )
         }
     }
+}
+/// `/_brain/files`: both directions stream with backpressure; the bucket enforces its size limit and access checks.
+pub(crate) fn serve_files(stream: &mut TcpStream, target: &Target, req: &http::Request) -> io::Result<()> {
+    if !matches!(req.method.as_str(), "GET" | "HEAD" | "POST" | "DELETE") {
+        return failure_reply(stream, req, Failure(405, "method"));
+    }
+    let Some(_permit) = StreamPermit::acquire() else {
+        return failure_reply(stream, req, Failure(503, "stream-capacity"));
+    };
+    match transfer(stream, target, req) {
+        Ok(()) => Ok(()),
+        Err(Interrupted::BeforeReply(failure)) => failure_reply(stream, req, failure),
+        // bytes already reached the client: a dropped connection is the only honest signal left
+        Err(Interrupted::AfterReply) => Ok(()),
+    }
+}
+enum Interrupted {
+    BeforeReply(Failure),
+    AfterReply,
+}
+impl From<Failure> for Interrupted {
+    fn from(failure: Failure) -> Self {
+        Self::BeforeReply(failure)
+    }
+}
+fn transfer(stream: &mut TcpStream, target: &Target, req: &http::Request) -> Result<(), Interrupted> {
+    let mut upstream = TcpStream::connect_timeout(&target.address, Duration::from_secs(2)).map_err(|_| Failure(503, "backend-unavailable"))?;
+    let idle = |socket: &TcpStream| socket.set_read_timeout(Some(FILE_IDLE)).and_then(|_| socket.set_write_timeout(Some(FILE_IDLE)));
+    idle(&upstream).and_then(|_| idle(stream)).map_err(io_failure)?;
+    let length = req.upgrade.stream_body.unwrap_or(0);
+    let path = encode_path(&req.path);
+    let path = if req.query.is_empty() { path } else { format!("{path}?{}", req.query) };
+    let mut head = format!("{} {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nAccept-Encoding: identity\r\nX-Request-Id: {}\r\n", req.method, target.host, req.id);
+    if length > 0 || req.header("content-length").is_some() {
+        head.push_str(&format!("Content-Length: {length}\r\n"));
+    }
+    if let Some(client) = forwarded_for(req, stream.peer_addr().ok()) {
+        head.push_str(&format!("x-forwarded-for: {client}\r\n"));
+    }
+    upstream_headers(&mut head, req, &[&REQUEST_HEADERS[..], &FILE_HEADERS[..]].concat())?;
+    head.push_str("\r\n");
+    upstream.write_all(head.as_bytes()).map_err(io_failure)?;
+    let unread = send_body(stream, &mut upstream, req, length)?;
+    let mut reader = BufReader::with_capacity(65536, upstream);
+    let (status, headers) = response_head(&mut reader)?;
+    let get = |key: &str| headers.iter().find(|(name, _)| name == key).map(|(_, value)| value.as_str());
+    let framed_length = get("content-length").map(|value| value.parse::<u64>().map_err(|_| Failure(502, "response-length"))).transpose()?;
+    if get("transfer-encoding").is_some_and(|value| !value.eq_ignore_ascii_case("chunked") || framed_length.is_some()) {
+        return Err(Failure(502, "response-framing").into());
+    }
+    let mut reply = format!("HTTP/1.1 {status} {}\r\nX-Request-Id: {}\r\n", http::reason(status), req.id);
+    if get("cache-control").is_none() {
+        reply.push_str("Cache-Control: no-store\r\n");
+    }
+    for (name, value) in &headers {
+        let allowed = if name == "set-cookie" {
+            auth_cookie_reply(value)
+        } else {
+            matches!(name.as_str(), "content-type" | "content-length" | "transfer-encoding") || RESPONSE_HEADERS.contains(&name.as_str()) || FILE_RESPONSE_HEADERS.contains(&name.as_str())
+        };
+        if allowed {
+            reply.push_str(&format!("{name}: {value}\r\n"));
+        }
+    }
+    reply.push_str("Connection: close\r\n\r\n");
+    stream.write_all(reply.as_bytes()).map_err(|_| Interrupted::AfterReply)?;
+    if req.method != "HEAD" && status != 204 && status != 304 {
+        let mut left = framed_length;
+        let mut chunk = [0u8; 65536];
+        while left != Some(0) {
+            let want = left.map_or(chunk.len(), |left| left.min(chunk.len() as u64) as usize);
+            let n = reader.read(&mut chunk[..want]).map_err(|_| Interrupted::AfterReply)?;
+            if n == 0 {
+                // close-delimited or chunked bytes are complete at EOF; a short Content-Length stays visibly short
+                break;
+            }
+            stream.write_all(&chunk[..n]).map_err(|_| Interrupted::AfterReply)?;
+            left = left.map(|left| left - n as u64);
+        }
+        if left.is_some_and(|left| left > 0) {
+            return Err(Interrupted::AfterReply);
+        }
+    }
+    let _ = stream.flush();
+    if unread > 0 {
+        // the bucket refused mid-upload: finish sending first, or the client's unread bytes reset the connection
+        // and destroy the reply it is waiting for
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+        let _ = io::copy(&mut (&*stream).take(unread.min(1024 * 1024) as u64), &mut io::sink());
+    }
+    Ok(())
+}
+/// Copies the client's body upstream; returns how much it stopped short because the backend stopped reading.
+fn send_body(stream: &mut TcpStream, upstream: &mut TcpStream, req: &http::Request, length: usize) -> Result<usize, Interrupted> {
+    let buffered = &req.upgrade.head[..req.upgrade.head.len().min(length)];
+    if upstream.write_all(buffered).is_err() {
+        return Ok(length - buffered.len());
+    }
+    let mut left = length - buffered.len();
+    let end = Instant::now() + FILE_UPLOAD_TOTAL;
+    let mut chunk = [0u8; 65536];
+    while left > 0 {
+        if Instant::now() >= end {
+            return Err(Failure(504, "deadline").into());
+        }
+        let n = match stream.read(&mut chunk[..left.min(65536)]) {
+            Ok(0) => return Err(Interrupted::AfterReply),
+            Ok(n) => n,
+            Err(error) if matches!(error.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock) => return Err(Failure(408, "request-timeout").into()),
+            Err(_) => return Err(Interrupted::AfterReply),
+        };
+        left -= n;
+        if upstream.write_all(&chunk[..n]).is_err() {
+            return Ok(left);
+        }
+    }
+    let _ = upstream.flush();
+    Ok(0)
 }
 
 #[cfg(test)]
@@ -704,7 +979,7 @@ mod tests {
         for name in ["user-agent", "dnt", "sec-gpc", "cf-ipcountry"] {
             assert_eq!(received.header(name), req.header(name));
         }
-        assert!(received.header("x-forwarded-for").is_none(), "client addresses never reach analytics");
+        assert!(received.header("x-forwarded-for").is_none(), "only the observed peer adds an identity, never a client header alone");
     }
     #[test]
     fn actual_transport_forwards_only_native_credentials_and_owned_request_identity() {

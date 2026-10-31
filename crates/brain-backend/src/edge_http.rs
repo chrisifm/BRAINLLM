@@ -127,6 +127,12 @@ pub fn resolve_client(peer: IpAddr, headers: &HeaderMap, trusted: &[IpNet]) -> I
     client
 }
 
+static TRUST_WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// A local gateway or proxy is sending client addresses, and nothing is configured to read them.
+fn forwarding_unconfigured(peer: IpAddr, headers: &HeaderMap, trusted: &[IpNet]) -> bool {
+    trusted.is_empty() && peer.to_canonical().is_loopback() && headers.contains_key("x-forwarded-for")
+}
+
 /// Rate-limit key: the resolved client IP (falls back to the TCP peer).
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ClientKey;
@@ -166,6 +172,12 @@ impl Drop for Slot {
 pub(super) async fn edge(State(state): State<EdgeState>, mut req: Request, next: Next) -> Response {
     if let Some(peer) = req.extensions().get::<ConnectInfo<SocketAddr>>().map(|c| c.0.ip()) {
         let client = resolve_client(peer, req.headers(), &state.trusted);
+        if forwarding_unconfigured(peer, req.headers(), &state.trusted) && !TRUST_WARNED.swap(true, Ordering::Relaxed) {
+            eprintln!(
+                "{}",
+                serde_json::json!({"schemaVersion":1,"event":"trust-proxy-not-configured","message":"a local proxy forwards client addresses that are ignored, so all clients share one rate-limit bucket","fix":"set platform.trustProxy to ['127.0.0.1', '::1']","valuesCaptured":false})
+            );
+        }
         req.extensions_mut().insert(ClientIp(client));
     }
     req.extensions_mut().insert(state.lifecycle.clone());
@@ -253,6 +265,17 @@ mod tests {
         assert_eq!(request_event(Some(&all), StatusCode::OK, ms(5)), Some("backend-request"));
         assert_eq!(request_event(Some(&policy(RequestLog::All, None, true)), StatusCode::OK, ms(5)), None);
         assert_eq!(request_event(Some(&policy(RequestLog::Off, None, false)), StatusCode::INTERNAL_SERVER_ERROR, ms(5)), None);
+    }
+
+    #[test]
+    fn a_local_proxy_without_trust_proxy_is_noticed_and_a_public_peer_is_not() {
+        let mut headers = HeaderMap::new();
+        let local: IpAddr = "127.0.0.1".parse().unwrap();
+        assert!(!forwarding_unconfigured(local, &headers, &[]));
+        headers.insert("x-forwarded-for", "203.0.113.9".parse().unwrap());
+        assert!(forwarding_unconfigured(local, &headers, &[]));
+        assert!(!forwarding_unconfigured("203.0.113.1".parse().unwrap(), &headers, &[]));
+        assert!(!forwarding_unconfigured(local, &headers, &["127.0.0.1/32".parse().unwrap()]));
     }
 
     #[test]

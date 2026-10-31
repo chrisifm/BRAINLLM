@@ -120,6 +120,15 @@ pub fn parse_proxy(text: &str) -> Result<IpNet, String> {
     if net.prefix_len() == 0 {
         return Err(format!("trustProxy entry `{text}` trusts every address; list your proxy ranges instead"));
     }
+    // Several wide entries add up to everyone (`0.0.0.0/1` + `128.0.0.0/1`), and no real proxy needs more than a /8.
+    // fc00::/7 is the one wider range that stays private, so it is the one exception.
+    let wide = match net {
+        IpNet::V4(v4) => v4.prefix_len() < 8,
+        IpNet::V6(v6) => v6.prefix_len() < 16 && v6.trunc() != "fc00::/7".parse::<ipnet::Ipv6Net>().expect("literal range"),
+    };
+    if wide {
+        return Err(format!("trustProxy entry `{text}` is too wide; use at least /8 for IPv4 and /16 for IPv6, and list your proxy ranges"));
+    }
     Ok(net.trunc())
 }
 
@@ -224,6 +233,16 @@ pub(crate) fn note_database_error(error: &sqlx::Error) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ranges_wide_enough_to_add_up_to_everyone_are_refused() {
+        for wide in ["0.0.0.0/0", "0.0.0.0/1", "128.0.0.0/1", "10.0.0.0/7", "::/0", "::/1", "8000::/1", "2000::/3", "2000::/15"] {
+            assert!(parse_proxy(wide).is_err(), "{wide}");
+        }
+        for fine in ["127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12", "173.245.48.0/20", "2a06:98c0::/29", "fc00::/7"] {
+            assert!(parse_proxy(fine).is_ok(), "{fine}");
+        }
+    }
+
     use super::*;
     use serde_json::json;
 

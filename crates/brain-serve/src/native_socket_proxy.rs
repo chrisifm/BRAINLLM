@@ -151,6 +151,7 @@ struct Request {
     bearer: Option<String>,
     key: String,
     rid: String,
+    client: Option<String>,
     head: Vec<u8>,
 }
 fn one<'a>(req: &'a http::Request, name: &str) -> Result<Option<&'a str>, Failure> {
@@ -273,6 +274,7 @@ fn validate(req: &http::Request) -> Result<Request, Failure> {
         bearer: bearer.map(str::to_owned),
         key: key.into(),
         rid: req.id.clone(),
+        client: None,
         head: Vec::new(),
     })
 }
@@ -378,6 +380,7 @@ impl NativeSocketProxy {
                 ));
             }
             let mut request = validate(req)?;
+            request.client = crate::server::native_proxy::forwarded_for(req, stream.peer_addr().ok());
             if self
                 .0
                 .origins
@@ -653,6 +656,9 @@ async fn handshake(
     }
     if let Some(bearer) = &request.bearer {
         head.push_str(&format!("Authorization: {bearer}\r\n"));
+    }
+    if let Some(client) = &request.client {
+        head.push_str(&format!("X-Forwarded-For: {client}\r\n"));
     }
     head.push_str("\r\n");
     tokio::time::timeout(WRITE, upstream.write_all(head.as_bytes()))

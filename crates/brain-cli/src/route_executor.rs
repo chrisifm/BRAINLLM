@@ -41,6 +41,87 @@ fn spawn(root: &Path, vars: &[(String, String)], budget: Duration, production: b
 
 /// Reads every route contract. `env` resolves signing secret names.
 pub fn contracts(root: &Path, environment: &str) -> Result<Vec<Route>, String> {
+    let lookup = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty()).or_else(|| crate::env::value(root, environment, key));
+    read_routes(root, &lookup)
+}
+
+/// What a gateway needs to proxy each route: its path and the headers its contract reads. Signing secrets are not
+/// needed here and never reach the build, so a stand-in satisfies the contract's secret check.
+pub fn gateway_routes(root: &Path) -> Result<Vec<(String, Vec<String>)>, String> {
+    let stand_in = |_: &str| Some("0".repeat(32));
+    let routes = read_routes(root, &stand_in)?;
+    let hidden: Vec<String> = conflicts(root, &routes).into_iter().map(|(name, _)| name).collect();
+    Ok(routes
+        .into_iter()
+        .filter(|route| !hidden.contains(&route.name))
+        .map(|route| {
+            let mut headers = route.headers;
+            if let Some(verify) = route.verify {
+                headers.push(verify.header);
+            }
+            headers.sort();
+            headers.dedup();
+            (route.path, headers)
+        })
+        .collect())
+}
+
+/// B0750: a declared route the same-origin gateway could not serve without hiding something else. The gateway leaves
+/// it out, so the page or file keeps answering as it did before the route could cross the bridge.
+pub fn gateway_conflicts(root: &Path) -> Vec<String> {
+    let Ok(routes) = read_routes(root, &|_: &str| Some("0".repeat(32))) else { return vec![] };
+    conflicts(root, &routes).into_iter().map(|(_, message)| message).collect()
+}
+
+fn conflicts(root: &Path, routes: &[Route]) -> Vec<(String, String)> {
+    let views: Vec<(String, String)> = brain_pack::routes::discover(root).into_iter().map(|def| (def.path, def.view)).collect();
+    let file = |path: &str| root.join("public").join(path.trim_start_matches('/')).is_file();
+    let routes: Vec<(String, String)> = routes.iter().map(|route| (route.name.clone(), route.path.clone())).collect();
+    route_conflicts(&routes, &views, &file)
+}
+
+const GATEWAY_PREFIXES: [&str; 5] = ["_r", "_b", "_server", "_health", "@brain"];
+
+fn route_conflicts(routes: &[(String, String)], views: &[(String, String)], public_file: &dyn Fn(&str) -> bool) -> Vec<(String, String)> {
+    let param = |part: &str| part.starts_with('{') && part.ends_with('}');
+    let mut out = Vec::new();
+    for (name, path) in routes {
+        let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
+        if param(parts[0]) {
+            out.push((name.clone(), format!("route `{name}` ({path}) starts with a parameter, so it would answer every path of the site, assets included")));
+            continue;
+        }
+        if GATEWAY_PREFIXES.contains(&parts[0]) {
+            out.push((name.clone(), format!("route `{name}` ({path}) uses /{}, which the gateway keeps for the framework", parts[0])));
+        }
+        for (shape, view) in views {
+            if shape != "*" && overlaps(&parts, shape) {
+                out.push((name.clone(), format!("route `{name}` ({path}) hides the page {view} ({shape}): the gateway sends that path to the backend")));
+            }
+        }
+        if !parts.iter().any(|part| param(part)) && public_file(path) {
+            out.push((name.clone(), format!("route `{name}` ({path}) hides public{path}")));
+        }
+    }
+    out
+}
+
+/// True when one URL can match both the route (`{x}` is one segment) and the view (`:x` one, `*rest` the remainder).
+fn overlaps(route: &[&str], view: &str) -> bool {
+    let shape: Vec<&str> = view.trim_matches('/').split('/').collect();
+    for (at, part) in shape.iter().enumerate() {
+        if part.starts_with('*') {
+            return true;
+        }
+        let Some(other) = route.get(at) else { return false };
+        if !(part.starts_with(':') || other.starts_with('{') || part == other) {
+            return false;
+        }
+    }
+    shape.len() == route.len()
+}
+
+fn read_routes(root: &Path, lookup: &dyn Fn(&str) -> Option<String>) -> Result<Vec<Route>, String> {
     let dir = root.join(ROUTES);
     if !dir.is_dir() {
         return Ok(vec![]);
@@ -55,7 +136,6 @@ pub fn contracts(root: &Path, environment: &str) -> Result<Vec<Route>, String> {
     if names.len() > brain_backend::routes::MAX_ROUTES {
         return Err(format!("{ROUTES}: declare at most {} routes", brain_backend::routes::MAX_ROUTES));
     }
-    let lookup = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty()).or_else(|| crate::env::value(root, environment, key));
     let mut routes = Vec::new();
     for name in names {
         let relative = format!("{ROUTES}/{name}/route.jsbrain");
@@ -64,7 +144,7 @@ pub fn contracts(root: &Path, environment: &str) -> Result<Vec<Route>, String> {
             return Err(format!("{relative}: every route folder needs a route.jsbrain contract"));
         }
         let value = crate::backend::read_contract(root, &path).map_err(|e| format!("{relative}: {e}"))?;
-        routes.push(Route::from_contract(&name, &value, &lookup).map_err(|e| format!("{relative}: {e}"))?);
+        routes.push(Route::from_contract(&name, &value, lookup).map_err(|e| format!("{relative}: {e}"))?);
     }
     Ok(routes)
 }
@@ -200,5 +280,24 @@ mod tests {
         fs::remove_file(dir.join("route.jsbrain")).unwrap();
         assert!(contracts(&root, "development").unwrap_err().contains("route.jsbrain"));
         let _ = fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod conflict_tests {
+    #[test]
+    fn a_route_that_would_hide_a_page_an_asset_or_a_framework_path_is_reported() {
+        let views: Vec<(String, String)> = [("/", "views/index.brain"), ("/shop/:id", "views/shop/[id].brain"), ("/docs/*rest", "views/docs/[...rest].brain"), ("*", "views/404.brain")].iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
+        let check = |path: &str| super::route_conflicts(&[("r".into(), path.into())], &views, &|file| file == "/robots.txt").into_iter().map(|(_, message)| message).collect::<Vec<_>>();
+        assert!(check("/payments/events").is_empty(), "a free path crosses the bridge");
+        assert!(check("/orders/{id}/quote").is_empty());
+        assert!(check("/shop/1/quote").is_empty(), "one more segment is another URL");
+        assert!(check("/shop/new")[0].contains("views/shop/[id].brain"));
+        assert!(check("/shop/{id}")[0].contains("hides the page"));
+        assert!(check("/docs/a/b")[0].contains("views/docs"));
+        assert!(check("/")[0].contains("views/index.brain"));
+        assert!(check("/{slug}")[0].contains("every path"));
+        assert!(check("/_r/hook")[0].contains("framework"));
+        assert!(check("/robots.txt")[0].contains("public/robots.txt"));
     }
 }

@@ -65,6 +65,17 @@ pub(crate) struct UpgradeMetadata {
     pub version: String,
     pub query_present: bool,
     pub head: Vec<u8>,
+    /// Set when the planner left the body on the socket: its declared length (`head` holds what was already buffered).
+    pub stream_body: Option<usize>,
+}
+
+/// How a request's body is read, decided once the path and method are known.
+pub(crate) enum BodyPlan {
+    Default,
+    /// Buffered like any other body, under this limit instead of the caller's.
+    Limit(usize),
+    /// Left on the socket for a streaming proxy, under this limit.
+    Stream(usize),
 }
 
 pub struct Request {
@@ -93,6 +104,7 @@ impl Request {
 pub fn read_request<R: Read>(reader: R) -> io::Result<Request> {
     read_request_with_uploads(reader, None)
 }
+#[cfg(test)]
 pub fn read_request_with_uploads<R: Read>(
     reader: R,
     upload_path: Option<&str>,
@@ -102,11 +114,21 @@ pub fn read_request_with_uploads<R: Read>(
 /// `max_body`: the body limit outside the upload route (the dev server passes brain.json `server.maxBodyKB`).
 /// `on_continue` answers `Expect: 100-continue` once the length is known to fit (it writes the interim response);
 /// without it every expectation is refused with 417.
+#[cfg(test)]
 pub fn read_request_with<R: Read>(
     reader: R,
     upload_path: Option<&str>,
     max_body: usize,
     on_continue: Option<&mut dyn FnMut() -> io::Result<()>>,
+) -> io::Result<Request> {
+    read_request_planned(reader, upload_path, max_body, on_continue, &|_, _| BodyPlan::Default)
+}
+pub(crate) fn read_request_planned<R: Read>(
+    reader: R,
+    upload_path: Option<&str>,
+    max_body: usize,
+    on_continue: Option<&mut dyn FnMut() -> io::Result<()>>,
+    plan: &dyn Fn(&str, &str) -> BodyPlan,
 ) -> io::Result<Request> {
     const HEADERS: usize = 32768;
     let mut reader = BufReader::with_capacity(8192, reader);
@@ -205,10 +227,17 @@ pub fn read_request_with<R: Read>(
             .map_err(|_| io::Error::other("HTTP413 request body exceeds its budget"))?,
     };
     let upload = upload_path == Some(path.as_str()) && parts[0] == "POST";
-    let limit = if upload { 5 * 1024 * 1024 + 65536 } else { max_body };
+    let plan = plan(&path, parts[0]);
+    let limit = match plan {
+        _ if upload => 5 * 1024 * 1024 + 65536,
+        BodyPlan::Default => max_body,
+        BodyPlan::Limit(limit) | BodyPlan::Stream(limit) => limit,
+    };
     if length > limit {
         return Err(io::Error::other(if upload {
             "HTTP413 upload body exceeds 5 MB".to_string()
+        } else if !matches!(plan, BodyPlan::Default) {
+            format!("HTTP413 Body larger than {} KB", limit / 1024)
         } else {
             format!("HTTP413 Body larger than {} KB; raise brain.json server.maxBodyKB", max_body / 1024)
         }));
@@ -222,6 +251,23 @@ pub fn read_request_with<R: Read>(
                 "HTTP417 only Expect: 100-continue is supported",
             ));
         }
+    }
+    if matches!(plan, BodyPlan::Stream(_)) && !upload {
+        return Ok(Request {
+            upgrade: UpgradeMetadata {
+                version: parts[2].into(),
+                query_present: parts[1].contains('?'),
+                head: reader.buffer().to_vec(),
+                stream_body: Some(length),
+            },
+            method: parts[0].into(),
+            path,
+            query: query.into(),
+            headers,
+            body: Vec::new(),
+            id: request_id(),
+            _body_budget: None,
+        });
     }
     let body_budget = reserve_body(length)?;
     let mut body = Vec::new();
@@ -237,6 +283,7 @@ pub fn read_request_with<R: Read>(
         } else {
             Vec::new()
         },
+        stream_body: None,
     };
     Ok(Request {
         upgrade,
@@ -309,17 +356,19 @@ pub fn respond_with<W: Write>(
 ) -> io::Result<()> {
     respond_with_length(w, status, ctype, body, head_only, body.len(), extra)
 }
-pub(crate) fn respond_with_length<W: Write>(
-    w: &mut W,
-    status: u16,
-    ctype: &str,
-    body: &[u8],
-    head_only: bool,
-    advertised_length: usize,
-    extra: &[(&str, &str)],
-) -> io::Result<()> {
-    let reason = match status {
+pub(crate) fn reason(status: u16) -> &'static str {
+    match status {
         200 => "OK",
+        201 => "Created",
+        202 => "Accepted",
+        204 => "No Content",
+        206 => "Partial Content",
+        301 => "Moved Permanently",
+        302 => "Found",
+        304 => "Not Modified",
+        401 => "Unauthorized",
+        412 => "Precondition Failed",
+        416 => "Range Not Satisfiable",
         303 => "See Other",
         400 => "Bad Request",
         403 => "Forbidden",
@@ -337,14 +386,25 @@ pub(crate) fn respond_with_length<W: Write>(
         503 => "Service Unavailable",
         504 => "Gateway Timeout",
         _ => "",
-    };
+    }
+}
+pub(crate) fn respond_with_length<W: Write>(
+    w: &mut W,
+    status: u16,
+    ctype: &str,
+    body: &[u8],
+    head_only: bool,
+    advertised_length: usize,
+    extra: &[(&str, &str)],
+) -> io::Result<()> {
     let extra: String = extra.iter().map(|(k, v)| format!("{k}: {v}\r\n")).collect();
-    write!(
-        w,
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n{extra}Connection: close\r\n\r\n",
-        advertised_length
-    )?;
-    if !head_only {
+    let reason = reason(status);
+    // no-store unless the caller carries the backend's own lifetime (a public read, a file)
+    let cache = if extra.to_ascii_lowercase().contains("cache-control:") { "" } else { "Cache-Control: no-store\r\n" };
+    // 204 and 304 carry no representation headers: a Content-Length of 0 would misdescribe the cached one
+    let entity = if matches!(status, 204 | 304) { String::new() } else { format!("Content-Type: {ctype}\r\nContent-Length: {advertised_length}\r\n") };
+    write!(w, "HTTP/1.1 {status} {reason}\r\n{entity}{cache}{extra}Connection: close\r\n\r\n")?;
+    if !head_only && !matches!(status, 204 | 304) {
         w.write_all(body)?;
     }
     w.flush()

@@ -4,7 +4,7 @@
 pub(crate) mod http;
 mod native_socket_proxy;
 pub use native_socket_proxy::{NativeSocketProxy, SocketProxyDiagnostic, SocketProxyStats};
-pub use server::native_proxy::NativeProxy;
+pub use server::native_proxy::{NativeProxy, NativeRoute, RouteLoader};
 pub mod load;
 pub mod prod;
 mod route;

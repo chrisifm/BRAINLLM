@@ -12,6 +12,15 @@ server/routes/<name>/handler.jsbrain   export default async function handle(ctx)
 and probes its default export before HTTP starts; a contract error or a missing handler stops the boot
 with the file path in the message.
 
+## Same origin
+
+`brain build` lists every declared route in `_server/manifest.json`, and the gateways (`brain start`, `brain run`,
+the generated `server.mjs`) proxy exactly those method and path pairs to the backend. The raw body crosses byte for
+byte up to the route's `bodyLimit`, and the response keeps its status, its `x-*` headers and its `cache-control`. Any
+other path stays on the frontend, so a gateway never becomes an open proxy to the backend. `brain check` warns
+B0750 when a route would hide a view, a literal `public/` file or a framework prefix, or starts with a parameter. The
+gateway does not proxy that route until it is renamed, so the page or file keeps answering.
+
 ## Contract
 
 ```js

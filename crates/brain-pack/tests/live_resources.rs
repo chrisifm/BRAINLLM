@@ -132,6 +132,7 @@ fn opted_static_app_has_private_hashed_configuration_and_exact_public_socket_csp
         native_sockets: Some(
             brain_pack::NativeSocketOptions::new("https://app.example.test").unwrap(),
         ),
+        ..Default::default()
     };
     let first = build(&root.0, true, Some(&options), false);
     let manifest = brain_mcp::Json::parse(&first.files["_server/manifest.json"]).unwrap();
@@ -165,6 +166,7 @@ fn opted_static_app_has_private_hashed_configuration_and_exact_public_socket_csp
             native_sockets: Some(
                 brain_pack::NativeSocketOptions::new("http://localhost:4000").unwrap(),
             ),
+            ..Default::default()
         }),
         false,
     );

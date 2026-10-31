@@ -217,8 +217,10 @@ pub fn preview(root: &Path, target: &str, options: &Value) -> Result<Value, Stri
                     "production".into(),
                 ],
             )];
+            // Only a local proxy is believed: a client reaching the port directly is not loopback, so its header is ignored.
+            apps[0]["env"] = json!({"BRAIN_TRUST_PROXY":"127.0.0.1,::1"});
             if native_backend {
-                apps[0]["env"] = json!({"BRAIN_BACKEND_URL":format!("http://127.0.0.1:{backend}")});
+                apps[0]["env"]["BRAIN_BACKEND_URL"] = json!(format!("http://127.0.0.1:{backend}"));
                 let host = domain(options)?;
                 apps.push(common(
                     format!("{name}-backend"),
@@ -409,7 +411,7 @@ mod tests {
         assert_eq!(value["apps"][0]["script"], "/tmp/brain'quoted");
         assert_eq!(
             value["apps"][0]["env"],
-            json!({"BRAIN_BACKEND_URL":"http://127.0.0.1:5182"})
+            json!({"BRAIN_TRUST_PROXY":"127.0.0.1,::1","BRAIN_BACKEND_URL":"http://127.0.0.1:5182"})
         );
         assert!(value["apps"][1].get("env").is_none());
         assert!(!app.0.join("deploy").exists());
@@ -485,7 +487,8 @@ mod tests {
                     "http://127.0.0.1:5200"
                 );
             } else {
-                assert!(value["apps"][0].get("env").is_none());
+                assert!(value["apps"][0]["env"].get("BRAIN_BACKEND_URL").is_none());
+                assert_eq!(value["apps"][0]["env"]["BRAIN_TRUST_PROXY"], "127.0.0.1,::1");
             }
             let p=preview(&app.0,"nginx",&json!({"topology":topology,"domain":"example.test","certificate":"/etc/cert.pem","certificateKey":"/etc/key.pem","port":3100,"backendPort":5200})).unwrap();
             let source = p["operations"][0]["content"].as_str().unwrap();
@@ -617,7 +620,7 @@ mod tests {
             .unwrap();
             assert_eq!(
                 ecosystem["apps"][0]["env"],
-                json!({"BRAIN_BACKEND_URL":"http://127.0.0.1:5200"})
+                json!({"BRAIN_TRUST_PROXY":"127.0.0.1,::1","BRAIN_BACKEND_URL":"http://127.0.0.1:5200"})
             );
             assert_eq!(
                 ecosystem["apps"][1]["env"],

@@ -31,6 +31,7 @@ impl SocketSettings {
         }
         Ok(brain_pack::BuildOptions {
             native_sockets: Some(brain_pack::NativeSocketOptions::new(&origin)?),
+            ..Default::default()
         })
     }
 

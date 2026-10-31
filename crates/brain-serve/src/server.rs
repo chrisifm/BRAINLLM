@@ -162,6 +162,17 @@ fn now_ms() -> u64 {
 
 impl Ctx {
     fn backend_configured(&self)->bool{self.env_vars().iter().any(|(name,value)|name=="BRAIN_BACKEND_URL"&&!value.is_empty())}
+    /// The contracts in server/routes, re-read at most every two seconds so a new route needs no restart.
+    fn declared_routes(&self) -> Arc<native_proxy::NativeRoutes> {
+        let Some(loader) = &self.native_routes else { return Default::default() };
+        let mut cache = self.native_routes_cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((at, routes)) = cache.as_ref() && at.elapsed() < Duration::from_secs(2) {
+            return routes.clone();
+        }
+        let routes = Arc::new(native_proxy::NativeRoutes::new(loader()));
+        *cache = Some((Instant::now(), routes.clone()));
+        routes
+    }
     fn backend_target(&self)->Result<Option<native_proxy::Target>,String>{
         self.env_vars().into_iter().find(|(name,value)|name=="BRAIN_BACKEND_URL"&&!value.is_empty()).map(|(_,value)|native_proxy::Target::parse(&value)).transpose()
     }
@@ -394,6 +405,8 @@ impl Drop for Dev {
 struct Ctx {
     root: PathBuf,
     native_sockets: Option<crate::NativeSocketProxy>,
+    native_routes: Option<native_proxy::RouteLoader>,
+    native_routes_cache: Mutex<Option<(Instant, Arc<native_proxy::NativeRoutes>)>>,
     env: Option<EnvLoader>,
     /// resolved environment, computed once and dropped when `.brain_env` changes
     env_cache: Mutex<Option<Vec<(String, String)>>>,
@@ -490,6 +503,7 @@ fn start_with_threads(
     let addr = listener.local_addr()?;
     let feedback = crate::feedback::Spool::new(&root).map_err(io::Error::other)?;
     let native_sockets = native.as_ref().map(|proxy| proxy.start_sockets()).transpose()?.flatten();
+    let native_routes = native.as_ref().and_then(|proxy| proxy.route_loader());
     if let Some(proxy) = native {
         let origin = proxy.origin();
         let previous = opts.env.take();
@@ -501,6 +515,8 @@ fn start_with_threads(
         }));
     }
     let ctx = Arc::new(Ctx {
+        native_routes,
+        native_routes_cache: Mutex::new(None),
         root,
         native_sockets,
         env: opts.env,
@@ -598,11 +614,20 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
     let limits = ctx.server_limits();
     // Expect: 100-continue (§11.1): the interim response once the declared length fits brain.json server.maxBodyKB
     let mut send_continue = || -> io::Result<()> { (&s).write_all(b"HTTP/1.1 100 Continue\r\n\r\n") };
-    let read = http::read_request_with(RequestReader {
+    let routes = ctx.declared_routes();
+    let plan = |path: &str, method: &str| {
+        if !ctx.backend_configured() { return http::BodyPlan::Default }
+        match native_proxy::plan(path, method, &routes, &ctx.pre) {
+            // brain.json server.maxBodyKB keeps governing a larger limit in development
+            http::BodyPlan::Limit(limit) => http::BodyPlan::Limit(limit.max(limits.max_body_bytes())),
+            other => other,
+        }
+    };
+    let read = http::read_request_planned(RequestReader {
         stream: &s,
         // a large body limit gets a longer total read budget (1 s per 2 MB on top of the 5 s for headers)
         deadline: Instant::now() + Duration::from_secs(5 + limits.max_body_kb / 2048),
-    },upload_path.as_deref(),limits.max_body_bytes(),Some(&mut send_continue));
+    },upload_path.as_deref(),limits.max_body_bytes(),Some(&mut send_continue),&plan);
     let mut req = match read {
         Ok(request)=>request,
         Err(error)=>{let status=http::request_error_status(&error);let rid=http::request_id();
@@ -662,10 +687,12 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
     }
     if native_proxy::handles(&req.path) {
         match ctx.backend_target(){
-            Ok(Some(target))=>return native_proxy::serve(&mut s,&target,&req),
+            Ok(Some(target))=>return if req.upgrade.stream_body.is_some() {native_proxy::serve_files(&mut s,&target,&req)} else {native_proxy::serve(&mut s,&target,&req,None)},
             Ok(None)=>{},
             Err(_)=>return http::respond(&mut s,503,"application/json",b"{\"error\":\"Native backend configuration is invalid; use an explicit loopback HTTP origin\"}",req.method=="HEAD"),
         }
+    } else if let Some(route) = routes.find(&req.path) && let Ok(Some(target)) = ctx.backend_target() {
+        return native_proxy::serve(&mut s,&target,&req,Some(route));
     }
     if let Some(id) = req.path.strip_prefix("/_r/") {
         let (status, body, headers) = rpc(ctx, &req, id);
@@ -3213,7 +3240,7 @@ mod admission_tests {
     fn configured_native_backend_is_proxied_same_origin_and_runtime_routes_stay_local(){
         let root=std::env::temp_dir().join(format!("brain-native-dev-proxy-{}-{}",std::process::id(),now_ms()));std::fs::create_dir_all(&root).unwrap();
         let backend=TcpListener::bind("127.0.0.1:0").unwrap();let backend_url=format!("http://{}",backend.local_addr().unwrap());
-        let authority=std::thread::spawn(move||{let (mut socket,_)=backend.accept().unwrap();socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();let request=http::read_request(socket.try_clone().unwrap()).unwrap();assert_eq!(request.path,"/_brain/auth/me");assert_eq!(request.header("x-forwarded-for"),None);http::respond(&mut socket,200,"application/json",b"{\"user\":null}",false).unwrap();});
+        let authority=std::thread::spawn(move||{let (mut socket,_)=backend.accept().unwrap();socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();let request=http::read_request(socket.try_clone().unwrap()).unwrap();assert_eq!(request.path,"/_brain/auth/me");assert_eq!(request.header("x-forwarded-for"),Some("untrusted, 127.0.0.1"));http::respond(&mut socket,200,"application/json",b"{\"user\":null}",false).unwrap();});
         let env:EnvLoader=Arc::new(move||vec![("BRAIN_BACKEND_URL".into(),backend_url.clone())]);
         let compiler:CompileFn=Arc::new(|_,_|panic!("native API/runtime routing must not compile application source"));
         let opts=Options{root:root.clone(),host:"127.0.0.1".into(),port:0,head_prepend:String::new(),runtime:vec![("brain.js".into(),"export const localRuntime=true".into())],env:Some(env),base:"/".into(),diagnose:None,problems:None,upstream:None,mock:None};
@@ -3222,6 +3249,22 @@ mod admission_tests {
         let response=request("/_brain/auth/me","X-Forwarded-For: untrusted\r\n");assert!(response.starts_with("HTTP/1.1 200"));assert!(response.ends_with("{\"user\":null}"));assert!(response.to_ascii_lowercase().contains("x-request-id:"));authority.join().unwrap();
         let runtime=request("/@brain/brain.js","");assert!(runtime.starts_with("HTTP/1.1 200"));assert!(runtime.contains("localRuntime"));
         let rejected=request("/api/items","Content-Length: 1048577\r\n");assert!(rejected.starts_with("HTTP/1.1 413"));
+        dev.stop();drop(dev);std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn dev_proxy_forwards_an_api_key_so_the_backend_can_identify_the_caller(){
+        let root=std::env::temp_dir().join(format!("brain-native-dev-key-{}-{}",std::process::id(),now_ms()));std::fs::create_dir_all(&root).unwrap();
+        let backend=TcpListener::bind("127.0.0.1:0").unwrap();let backend_url=format!("http://{}",backend.local_addr().unwrap());
+        let authority=std::thread::spawn(move||{let (mut socket,_)=backend.accept().unwrap();socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();let request=http::read_request(socket.try_clone().unwrap()).unwrap();assert_eq!(request.path,"/api/notes");assert_eq!(request.header("x-api-key"),Some("bk_live_sample"));assert_eq!(request.header("origin"),None);http::respond(&mut socket,200,"application/json",b"{\"items\":[]}",false).unwrap();});
+        let env:EnvLoader=Arc::new(move||vec![("BRAIN_BACKEND_URL".into(),backend_url.clone())]);
+        let compiler:CompileFn=Arc::new(|_,_|panic!("native API routing must not compile application source"));
+        let opts=Options{root:root.clone(),host:"127.0.0.1".into(),port:0,head_prepend:String::new(),runtime:vec![],env:Some(env),base:"/".into(),diagnose:None,problems:None,upstream:None,mock:None};
+        let mut dev=start_dev(opts,compiler,false,None).unwrap();
+        let mut socket=TcpStream::connect(dev.addr).unwrap();socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        socket.write_all(b"GET /api/notes HTTP/1.1\r\nHost: localhost\r\nX-API-Key: bk_live_sample\r\nConnection: close\r\n\r\n").unwrap();
+        let mut bytes=Vec::new();socket.read_to_end(&mut bytes).unwrap();
+        assert!(String::from_utf8(bytes).unwrap().starts_with("HTTP/1.1 200"));authority.join().unwrap();
         dev.stop();drop(dev);std::fs::remove_dir_all(root).unwrap();
     }
 
