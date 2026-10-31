@@ -1,0 +1,10 @@
+{
+  "id": "guides-unchecked-rules",
+  "kind": "fix",
+  "title": "Guides mark the prohibitions no diagnostic enforces",
+  "why": "A clean `brain check` does not prove these rules were followed, so an author has to review them by hand.",
+  "changelog": [
+    "Guides say which prohibitions no diagnostic enforces"
+  ],
+  "guide": "crates/brain-cli/guides/start.md"
+}

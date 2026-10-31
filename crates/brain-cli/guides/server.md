@@ -49,7 +49,7 @@ environment. `brain check` reports an invalid value as B0707. Pass `ctx.signal` 
    copied cookie only inside one server process: with several processes, the version is the way to revoke.
 3. Every later request sees it as `ctx.user` in guards, `load` and server functions. `ctx.session.clear()` logs out.
 4. Protect a folder: `brain add guard account` → `export default (ctx) => ctx.user ? true : redirect('/login')`.
-5. Never set the session cookie from browser code (B0713); never keep the signed-in user in `store(…, { sync: 'storage' })`.
+5. Never set the session cookie from browser code (B0713); never keep the signed-in user in `store(…, { sync: 'storage' })` (not machine-checked).
 
 ## Server-only code
 - `load` and `server:` functions run only on the server. Modules that touch a database or secrets start with
@@ -82,7 +82,7 @@ In production set `BRAIN_SECRET` (32+ random bytes) in the `[production]` sectio
   the page keeps working. Do not wrap everything in try/catch.
 - Browser errors captured in development: `brain doctor` and MCP `brain_errors`.
 
-## Deploy (one way: `brain build` then `brain start`; never PM2 or another process manager)
+## Deploy (one way: `brain build` then `brain start`; never PM2 or another process manager; not machine-checked)
 ```bash
 brain build                       # production into dist/ (minify, CSP + SRI, sitemap, robots, llms.txt)
 brain start --port 3000 --instances 2   # static apps served from Rust; apps with server code run Node children

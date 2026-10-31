@@ -32,13 +32,13 @@ state. Pick the first row that fits:
    A 401 then redirects to `login?next=<path>`; GETs retry on network errors; POST/PATCH never retry automatically.
 8. **Develop without a backend:** `brain run --mock` serves fake data generated from the schemas.
 
-## Caching (automatic; never write a service worker or cache headers)
+## Caching (automatic; never write a service worker or cache headers; not machine-checked)
 - `brain build` adds immutable hashed assets, a service worker (visited pages work offline) and an in-memory
   `resource()` cache. Opt out in `brain.json` `"cache": { "sw": false }` (also `http`, `offline`, `data`).
 - Keep a GET across visits: `api('/posts', { get: { out: '[Post]', cache: '10m' } })` — GET only, never for personal
-  data (a malformed `cache` is B1102).
+  data (not machine-checked; a malformed `cache` is B1102).
 - Server pages: `<meta cache="60">` in a view rebuilds it at most every 60 s (stale-while-revalidate).
-- Keep client state across visits: `store(init, { persist: true })`. Never `sync: 'storage'` for the signed-in user.
+- Keep client state across visits: `store(init, { persist: true })`. Never `sync: 'storage'` for the signed-in user (not machine-checked).
 - Heavy computation off the main thread: name the module `*.worker.jsbrain`; its exports become async functions.
 
 ## Verify
