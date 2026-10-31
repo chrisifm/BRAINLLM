@@ -19,9 +19,9 @@ const TEXT_KEY: usize = 256;
 const OPS: &[&str] = &["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "prefix", "iprefix", "exists", "has"];
 const RESERVED: &[&str] = &["search", "limit", "offset", "sort", "include", "cursor", "after", "aggregate", "count"];
 const TIMESTAMPS: &[&str] = &["created_at", "updated_at"];
-/// Candidates per search branch, before ranking.
-const SEARCH_CANDIDATES: i64 = 500;
-/// Budget of the typo branch: past it the full-text results answer alone and the response says `degraded`.
+/// Typo matches kept for one search; reaching it marks `total` approximate.
+const FUZZY_CANDIDATES: i64 = 500;
+/// Budget of the typo branch: past it the search answers without typo matches and says `degraded`.
 const FUZZY_BUDGET: &str = "400ms";
 /// Deadline of every other statement of a search request.
 const SEARCH_DEADLINE: &str = "1s";
@@ -448,6 +448,10 @@ pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(Str
             problems.insert(key.clone(), "Value too long".into());
             continue;
         }
+        if raw.contains('\0') {
+            problems.insert(key.clone(), "Remove the NUL character from this value".into());
+            continue;
+        }
         let mut bad = |m: &str| {
             problems.insert(key.clone(), m.to_string());
         };
@@ -617,6 +621,21 @@ fn decode_cursor(raw: &str) -> Option<(Vec<Option<String>>, Uuid)> {
     Some((keys, Uuid::parse_str(value["id"].as_str()?).ok()?))
 }
 
+/// What the search text selects, decided once per request so page, total and aggregates agree.
+#[derive(Debug, Default)]
+enum Matches {
+    /// No search text.
+    #[default]
+    All,
+    /// Nothing can match: stop words only, punctuation only, or no searchable field.
+    Nothing,
+    /// One or two characters: prefix of the stored text.
+    Prefix,
+    /// Every full-text match; `total` is exact.
+    FullText,
+    /// Full text found nothing: these typo matches, bounded by [`FUZZY_CANDIDATES`].
+    Typos(Vec<Uuid>),
+}
 /// Why a list could not be produced.
 #[derive(Debug)]
 pub enum ListError {
@@ -778,7 +797,7 @@ struct Ctx<'a> {
     scope: &'a Scope,
     related: BTreeMap<String, Scope>,
     req: &'a ListRequest,
-    candidates: Option<Vec<Uuid>>,
+    matches: Matches,
 }
 impl Ctx<'_> {
     /// Authorization scope and declared filters over the alias-free columns of the current table.
@@ -799,31 +818,42 @@ impl Ctx<'_> {
             }
         }
     }
-    /// WHERE body: scope, filters and search. Three-character searches were resolved to `candidates` beforehand.
+    /// WHERE body: scope, filters and the search decision.
     fn push_where(&self, q: &mut QueryBuilder<Postgres>) {
         self.push_scope(q);
         let text = self.req.search.trim();
-        if text.is_empty() {
-            return;
-        }
-        if self.r.search.is_empty() {
-            q.push(" AND false");
-        } else if let Some(ids) = &self.candidates {
-            q.push(" AND id=ANY(").push_bind(ids.clone()).push(")");
-        } else {
-            q.push(" AND search_text LIKE public.unaccent('public.unaccent'::regdictionary,lower(")
-                .push_bind(escape_like(&text.to_lowercase()))
-                .push(")) ESCAPE '\\'");
+        match &self.matches {
+            Matches::All => {}
+            Matches::Nothing => {
+                q.push(" AND false");
+            }
+            Matches::Prefix => {
+                q.push(" AND search_text LIKE public.unaccent('public.unaccent'::regdictionary,lower(")
+                    .push_bind(escape_like(&text.to_lowercase()))
+                    .push(")) ESCAPE '\\'");
+            }
+            Matches::FullText => {
+                q.push(format!(" AND search_vector @@ {}", self.tsquery())).push_bind(text.to_string()).push("))");
+            }
+            Matches::Typos(ids) => {
+                q.push(" AND id=ANY(").push_bind(ids.clone()).push(")");
+            }
         }
     }
-    /// Full-text ids in rank order, each carrying the same authorization scope and filters as the page.
-    async fn full_text(&self, tx: &mut sqlx::Transaction<'_, Postgres>, text: &str) -> Result<Vec<Uuid>, sqlx::Error> {
-        let cfg = crate::search_config::regconfig(self.r);
-        let tsquery = format!("websearch_to_tsquery('{cfg}',public.unaccent('public.unaccent'::regdictionary,");
-        let mut q = QueryBuilder::<Postgres>::new(format!("SELECT id FROM _brain_res_{} WHERE ", self.r.name));
-        self.push_scope(&mut q);
-        q.push(format!(" AND search_vector @@ {tsquery}")).push_bind(text.to_string()).push(format!(")) ORDER BY ts_rank_cd(search_vector,{tsquery}")).push_bind(text.to_string()).push(format!("))) DESC,id LIMIT {SEARCH_CANDIDATES}"));
-        q.build_query_scalar().fetch_all(&mut **tx).await
+    /// Opening of the text-search query expression; the caller binds the text and closes two parentheses.
+    fn tsquery(&self) -> String {
+        format!("websearch_to_tsquery('{}',public.unaccent('public.unaccent'::regdictionary,", crate::search_config::regconfig(self.r))
+    }
+    /// Whether the text reduces to no search term at all (only stop words of the configured language).
+    async fn only_stop_words(&self, tx: &mut sqlx::Transaction<'_, Postgres>, text: &str) -> Result<bool, sqlx::Error> {
+        let mut q = QueryBuilder::<Postgres>::new(format!("SELECT numnode({}", self.tsquery()));
+        q.push_bind(text.to_string()).push(")))=0");
+        q.build_query_scalar().fetch_one(&mut **tx).await
+    }
+    async fn count(&self, tx: &mut sqlx::Transaction<'_, Postgres>) -> Result<i64, sqlx::Error> {
+        let mut q = QueryBuilder::<Postgres>::new(format!("SELECT count(*) FROM _brain_res_{} t WHERE ", self.r.name));
+        self.push_where(&mut q);
+        q.build_query_scalar().fetch_one(&mut **tx).await
     }
     /// Typo candidates within [`FUZZY_BUDGET`]; `None` when the budget ran out, which leaves the transaction usable.
     async fn fuzzy(&self, tx: &mut sqlx::Transaction<'_, Postgres>, text: &str) -> Result<Option<Vec<Uuid>>, sqlx::Error> {
@@ -832,7 +862,7 @@ impl Ctx<'_> {
         sqlx::raw_sql(sqlx::AssertSqlSafe(format!("SET LOCAL statement_timeout='{FUZZY_BUDGET}'"))).execute(&mut *savepoint).await?;
         let mut q = QueryBuilder::<Postgres>::new(format!("SELECT id FROM _brain_res_{} WHERE ", self.r.name));
         self.push_scope(&mut q);
-        q.push(" AND public.unaccent('public.unaccent'::regdictionary,").push_bind(text.to_lowercase()).push(format!(") OPERATOR(public.<%) search_text ORDER BY id LIMIT {SEARCH_CANDIDATES}"));
+        q.push(" AND public.unaccent('public.unaccent'::regdictionary,").push_bind(text.to_lowercase()).push(format!(") OPERATOR(public.<%) search_text ORDER BY id LIMIT {FUZZY_CANDIDATES}"));
         match q.build_query_scalar().fetch_all(&mut *savepoint).await {
             Ok(ids) => {
                 savepoint.commit().await?;
@@ -848,25 +878,43 @@ impl Ctx<'_> {
     }
 }
 
-/// Resolves a three-character search into candidate ids: full text first, then typo matches when they can still change
-/// the answer. A typo branch that runs out of budget degrades the response instead of failing it.
-async fn search_candidates(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, text: &str, ranked: bool) -> Result<(Vec<Uuid>, bool), ListError> {
-    let mut ids = ctx.full_text(tx, text).await.map_err(|e| ListError::from(e).in_branch("search.full_text"))?;
-    // Ranked pages list full-text matches first, so a filled page cannot change. Sorted pages and aggregates can.
-    let filled = ranked && ctx.req.aggregate.is_empty() && ids.len() as i64 >= ctx.req.limit + ctx.req.offset;
-    // pg_trgm extracts nothing from punctuation: the scan could only find no rows.
-    if filled || !text.chars().any(char::is_alphanumeric) {
-        return Ok((ids, false));
+/// How one search resolves. Full text decides: typo matches are a fallback for when it finds nothing, so they never
+/// dilute real results or `total`. Returns the decision, whether typo matching ran out of budget, and whether `total`
+/// is only a lower bound.
+async fn resolve_search(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &mut Ctx<'_>, text: &str) -> Result<(bool, bool), ListError> {
+    let in_branch = |name: &'static str| move |e: sqlx::Error| ListError::from(e).in_branch(name);
+    let has_term = text.chars().any(char::is_alphanumeric);
+    if ctx.r.search.is_empty() {
+        ctx.matches = Matches::Nothing;
+        return Ok((false, false));
     }
-    match ctx.fuzzy(tx, text).await.map_err(|e| ListError::from(e).in_branch("search.fuzzy"))? {
-        Some(more) => {
-            let known: BTreeSet<Uuid> = ids.iter().copied().collect();
-            ids.extend(more.into_iter().filter(|id| !known.contains(id)));
-            Ok((ids, false))
+    if has_term && ctx.only_stop_words(tx, text).await.map_err(in_branch("search.terms"))? {
+        ctx.matches = Matches::Nothing;
+        return Ok((false, false));
+    }
+    if text.chars().count() < 3 {
+        ctx.matches = Matches::Prefix;
+        return Ok((false, false));
+    }
+    ctx.matches = Matches::FullText;
+    if ctx.count(tx).await.map_err(in_branch("search.full_text"))? > 0 {
+        return Ok((false, false));
+    }
+    // pg_trgm extracts nothing from punctuation: the scan could only find no rows.
+    if !has_term {
+        ctx.matches = Matches::Nothing;
+        return Ok((false, false));
+    }
+    match ctx.fuzzy(tx, text).await.map_err(in_branch("search.fuzzy"))? {
+        Some(ids) => {
+            let capped = ids.len() as i64 >= FUZZY_CANDIDATES;
+            ctx.matches = Matches::Typos(ids);
+            Ok((false, capped))
         }
         None => {
             eprintln!("{}", json!({"schemaVersion":1,"event":"search-degraded","rid":crate::http::request_reference(),"resource":ctx.r.name,"operation":"list.search","branch":"search.fuzzy","budget":FUZZY_BUDGET,"private":true,"valuesCaptured":false}));
-            Ok((ids, true))
+            ctx.matches = Matches::Nothing;
+            Ok((true, true))
         }
     }
 }
@@ -888,7 +936,7 @@ pub async fn list(
             related.insert(target.clone(), s);
         }
     }
-    let mut ctx = Ctx { r, resources, scope: &scope, related, req, candidates: None };
+    let mut ctx = Ctx { r, resources, scope: &scope, related, req, matches: Matches::All };
     let keys = keys(r, req);
     let sig = signature(&keys);
     let ranked = req.sort.is_none() && search_ranked(r, req);
@@ -896,12 +944,11 @@ pub async fn list(
     let mut tx = pool.begin().await?;
     let timeout = if text.is_empty() { "SET LOCAL statement_timeout='5s';" } else { "SET LOCAL statement_timeout='1s';" };
     sqlx::raw_sql(sqlx::AssertSqlSafe(format!("{timeout} SET LOCAL lock_timeout='500ms'; SET LOCAL pg_trgm.word_similarity_threshold='0.45';"))).execute(&mut *tx).await?;
-    let mut degraded = false;
-    if search_ranked(r, req) {
-        let (ids, cut) = search_candidates(&mut tx, &ctx, &text, ranked).await?;
-        ctx.candidates = Some(ids);
-        degraded = cut;
+    let (mut degraded, mut approximate) = (false, false);
+    if !text.is_empty() {
+        (degraded, approximate) = resolve_search(&mut tx, &mut ctx, &text).await?;
     }
+    let ctx = ctx;
 
     // Page.
     let mut q = QueryBuilder::<Postgres>::new(concat!("SELECT ", crate::record_columns!()));
@@ -956,7 +1003,13 @@ pub async fn list(
     if req.cursor.is_none() {
         q.push(" OFFSET ").push_bind(req.offset);
     }
-    let rows = q.build().fetch_all(&mut *tx).await?;
+    let rows = match q.build().fetch_all(&mut *tx).await {
+        // A cursor is client text: a key its sort cannot cast (data exception) means it was edited, not that we failed.
+        Err(error) if req.cursor.is_some() && crate::db::sqlstate(&error).is_some_and(|state| state.starts_with("22")) => {
+            return Err(ListError::Invalid(Problems::from([("cursor".into(), "Invalid cursor; use next_cursor from the previous page unchanged".into())])));
+        }
+        other => other?,
+    };
     let mut items = Vec::with_capacity(rows.len());
     let mut last_keys = None;
     for row in rows {
@@ -996,6 +1049,9 @@ pub async fn list(
     }
     if degraded {
         out["degraded"] = json!(true);
+    }
+    if approximate {
+        out["total_approximate"] = json!(true);
     }
     Ok(out)
 }
