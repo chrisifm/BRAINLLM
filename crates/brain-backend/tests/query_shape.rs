@@ -331,3 +331,55 @@ async fn a_guard_can_require_that_the_field_changes() {
     let (status, moved) = a.call("POST", &action, Some(&token), None, Some(json!({"price": 6}))).await;
     assert!(status < 300, "{moved}");
 }
+
+#[tokio::test]
+#[ignore]
+async fn order_without_a_null_position_pages_the_same_and_punctuation_finds_nothing() {
+    let mut notes = resource("notes", vec![("title", field("str")), ("rank", field("int"))], json!(["public"]), json!({"sort": ["rank", "updated_at", {"field": "title", "nulls": "first"}]}));
+    notes.search = vec!["title".into()];
+    let a = api("brain_shape_order", vec![notes]).await;
+    let (_, token) = a.user("order@example.test").await;
+    for (title, rank) in [("% off", json!(1)), ("alpha", json!(3)), ("bravo", Value::Null), ("charlie", json!(2)), ("qa desk", json!(4))] {
+        let body = if rank.is_null() { json!({"title": title}) } else { json!({"title": title, "rank": rank}) };
+        a.post("/api/notes", &token, body).await;
+    }
+    let walk = |sort: &'static str| {
+        let a = &a;
+        async move {
+            let (mut seen, mut cursor) = (Vec::new(), None::<String>);
+            loop {
+                let after = cursor.as_ref().map_or(String::new(), |c| format!("&cursor={c}"));
+                let (status, page) = a.get(&format!("/api/notes?limit=2&sort={sort}{after}")).await;
+                assert_eq!(status, 200, "{page}");
+                seen.extend(page["items"].as_array().unwrap().iter().map(|i| i["data"]["title"].as_str().unwrap().to_string()));
+                match page["next_cursor"].as_str() {
+                    Some(next) => cursor = Some(next.to_string()),
+                    None => return seen,
+                }
+            }
+        }
+    };
+    // Timestamps have no null position to name; a cursor still walks each row once, in both directions.
+    let newest = walk("-created_at").await;
+    assert_eq!(newest, ["qa desk", "charlie", "bravo", "alpha", "% off"]);
+    assert_eq!(walk("created_at").await, ["% off", "alpha", "bravo", "charlie", "qa desk"]);
+    assert_eq!(walk("-updated_at").await, newest);
+    // A field that can be empty keeps its declared position in both directions.
+    assert_eq!(walk("rank").await, ["% off", "charlie", "alpha", "qa desk", "bravo"]);
+    assert_eq!(walk("-rank").await, ["qa desk", "alpha", "charlie", "% off", "bravo"]);
+    // Both directions of a declared sort have an index, whichever side its nulls are on.
+    let indexed: Vec<String> = sqlx::query_scalar("SELECT indexdef FROM pg_indexes WHERE tablename='_brain_res_notes'").fetch_all(&a.pool).await.unwrap();
+    assert!(indexed.iter().any(|d| d.contains("rank") && d.contains("DESC NULLS LAST")), "{indexed:?}");
+    assert!(indexed.iter().any(|d| d.contains("title") && d.contains("NULLS FIRST")), "{indexed:?}");
+
+    // Lone punctuation finds nothing without a scan, like longer punctuation; a term keeps its prefix match.
+    for text in ["%25", "%5C", "_", "%25%25", "%25%25%25", "%5C%5C%5C"] {
+        let (status, found) = a.get(&format!("/api/notes?search={text}")).await;
+        assert_eq!((status, found["total"].as_i64()), (200, Some(0)), "{text}: {found}");
+    }
+    let (_, prefix) = a.get("/api/notes?search=qa").await;
+    assert_eq!(prefix["total"], 1, "{prefix}");
+    for text in ["100%25", "a%5Cb"] {
+        assert_eq!(a.get(&format!("/api/notes?search={text}")).await.0, 200, "{text}");
+    }
+}

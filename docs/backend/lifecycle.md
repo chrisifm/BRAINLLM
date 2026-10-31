@@ -112,7 +112,10 @@ export default { logging: { requests: 'errors', slow: '1s' } }
 | `off` | none; internal error and lifecycle events still log |
 
 With `slow`, a successful request at or above that duration logs `backend-request-slow` in `errors` and
-`all` modes. A client may send its own `x-request-id` (a UUID) to correlate logs across services.
+`all` modes. Lines for resource reads and session lookups also carry `dbMs` (time in the database, including the wait
+for a connection) and `dbWaitMs` (that wait alone); `ms` minus `dbMs` is the server's own time. Writes, hooks and other
+operations are not measured yet: an absent field means not measured, not zero. A high `dbWaitMs` means requests are
+queueing for the pool (`BRAIN_DB_HTTP_POOL`); a high `dbMs` with a low wait points at the statements. A client may send its own `x-request-id` (a UUID) to correlate logs across services.
 
 ## Tested example
 

@@ -10,6 +10,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 ## [Unreleased]
 
 - Lists name aggregates that hit the 100-group cap in `aggregates_truncated`
+- Request log lines carry `dbMs` and `dbWaitMs` for resource reads, so database time and pool wait are visible apart from `ms`
+- Fix: plain lists and `created_at`/`updated_at` sorts use their index instead of sorting the whole table on every request
+- Declared sorts get an index for their other direction on the next `brain backend migrate`
+- `?search=` with one or two punctuation characters finds nothing without scanning, like longer punctuation
 - Declared `or` groups in `query.jsbrain` (`?group.field[op]=value`), indexed and bounded, validated by `brain check`
 - `?owner=me` lists the reader's own rows; the id comes from the session, never from the client
 - `?fields=a,b` narrows the `data` of each list item, after policy and visibility; hidden fields answer like undeclared ones

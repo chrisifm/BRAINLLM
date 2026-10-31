@@ -169,6 +169,15 @@ fn expr(kind: Kind, field: &str) -> String {
         Kind::Stamp => field.to_string(),
     }
 }
+/// One `ORDER BY` term. Timestamps are `NOT NULL`, so naming a null position changes no order, yet Postgres only matches an
+/// index whose null position is the same: `created_at DESC NULLS LAST` sorted the whole table on every plain list.
+fn order_term(k: &SortKey) -> String {
+    let direction = if k.desc { "DESC" } else { "ASC" };
+    if k.kind == Kind::Stamp {
+        return format!("{} {direction}", expr(k.kind, &k.field));
+    }
+    format!("{} {direction} NULLS {}", expr(k.kind, &k.field), if k.nulls_first { "FIRST" } else { "LAST" })
+}
 /// Canonical text of a sort key (cursor material). Timestamps keep microseconds so keyset comparison is exact.
 fn key_text(kind: Kind, field: &str) -> String {
     match kind {
@@ -355,6 +364,16 @@ pub(crate) fn indexes(r: &Resource) -> Vec<(String, String)> {
         let definition = format!("{method}:{expression}");
         out.insert(r.object_name("_brain_ix_", &definition), format!("USING {method} (({expression}))"));
     };
+    // A plain index read backwards puts nulls first, so it cannot serve the other direction of a declared null position.
+    let mut opposite = BTreeMap::new();
+    for entry in &r.query.sort {
+        let field = entry.field();
+        if let Some(k) = kind(r, field).filter(|k| !matches!(k, Kind::Stamp | Kind::Ref | Kind::List)) {
+            let order = if entry.nulls_first() { "ASC NULLS FIRST" } else { "DESC NULLS LAST" };
+            let expression = expr(k, field);
+            opposite.insert(r.object_name("_brain_ix_", &format!("btree:{expression}:{order}")), format!("USING btree (({expression}) {order})"));
+        }
+    }
     let mut fields: Vec<(&str, bool, bool)> = r
         .query
         .filter
@@ -380,6 +399,7 @@ pub(crate) fn indexes(r: &Resource) -> Vec<(String, String)> {
     if r.query.sort.iter().any(|e| e.field() == "updated_at") || r.query.filter.contains_key("updated_at") || r.query.or.values().any(|b| b.contains_key("updated_at")) {
         add("btree", "updated_at".into());
     }
+    out.extend(opposite);
     out.into_iter().collect()
 }
 pub(crate) async fn install_indexes(tx: &mut sqlx::Transaction<'_, Postgres>, r: &Resource) -> Result<(), String> {
@@ -1079,6 +1099,11 @@ async fn resolve_search(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &mut Ctx<
         ctx.matches = Matches::Nothing;
         return Ok((false, false));
     }
+    // Punctuation has no indexable term or trigram: a prefix match could only scan every row, twice, to find next to nothing.
+    if !has_term && text.chars().count() < 3 {
+        ctx.matches = Matches::Nothing;
+        return Ok((false, false));
+    }
     if text.chars().count() < 3 {
         ctx.matches = Matches::Prefix;
         return Ok((false, false));
@@ -1132,7 +1157,7 @@ pub async fn list(
     let sig = signature(&keys);
     let ranked = req.sort.is_none() && search_ranked(r, req);
     let text = req.search.trim().to_string();
-    let mut tx = pool.begin().await?;
+    let mut tx = crate::db::acquiring(pool.begin()).await?;
     let timeout = if text.is_empty() { "SET LOCAL statement_timeout='5s';" } else { "SET LOCAL statement_timeout='1s';" };
     sqlx::raw_sql(sqlx::AssertSqlSafe(format!("{timeout} SET LOCAL lock_timeout='500ms'; SET LOCAL pg_trgm.word_similarity_threshold='0.45';"))).execute(&mut *tx).await?;
     let (mut degraded, mut approximate) = (false, false);
@@ -1191,7 +1216,7 @@ pub async fn list(
         q.push("id");
     } else {
         for k in &keys {
-            q.push(format!("{} {} NULLS {},", expr(k.kind, &k.field), if k.desc { "DESC" } else { "ASC" }, if k.nulls_first { "FIRST" } else { "LAST" }));
+            q.push(format!("{},", order_term(k)));
         }
         q.push(if keys.last().is_some_and(|k| k.desc) { "id DESC" } else { "id ASC" });
     }
@@ -1296,7 +1321,7 @@ fn push_keyset(q: &mut QueryBuilder<Postgres>, keys: &[SortKey], values: &[Optio
                 Some(v) => {
                     q.push(format!(" AND ({e}{}", if k.desc { "<" } else { ">" }));
                     push_key(q, k.kind, v);
-                    if !k.nulls_first {
+                    if !k.nulls_first && k.kind != Kind::Stamp {
                         q.push(format!(" OR {e} IS NULL"));
                     }
                     q.push(")");
@@ -1440,6 +1465,13 @@ pub fn openapi_parameters(r: &Resource) -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn timestamps_order_without_a_null_position_so_their_index_serves_the_list() {
+        let key = |kind, field: &str, nulls_first| SortKey { field: field.into(), kind, desc: true, nulls_first };
+        assert_eq!(order_term(&key(Kind::Stamp, "created_at", false)), "created_at DESC");
+        assert_eq!(order_term(&key(Kind::Stamp, "updated_at", true)), "updated_at DESC");
+        assert_eq!(order_term(&key(Kind::Int, "stock", false)), "(data->'stock')::numeric DESC NULLS LAST");
+    }
     use super::*;
     #[test]
     fn relative_times_bind_fixed_intervals() {
