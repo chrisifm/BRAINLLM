@@ -408,3 +408,63 @@ async fn account_flows_are_single_use_bound_revocable_non_enumerating_and_server
     assert_eq!(inbox.messages.lock().unwrap().len(), count);
     pool.close().await;
 }
+
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn operators_disable_users_revoke_sessions_and_disable_identities_without_sql() {
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Use the disposable Postgres harness");
+    let pool = brain_backend::db::connect(&url).await.unwrap();
+    brain_backend::db::migrate(&pool, &[]).await.unwrap();
+    let auth = Auth::new(pool.clone()).await.unwrap();
+    let address = format!("ops-{}@example.test", Uuid::new_v4().simple());
+    let account = || Credentials { email: address.clone(), password: "synthetic-operator-password".into() };
+    let user = auth.signup(account()).await.unwrap();
+    let (_, session) = auth.login(account()).await.unwrap().unwrap();
+    let live = |token: String| { let auth = auth.clone(); async move { auth.user(Some(&token)).await.unwrap().is_some() } };
+    assert!(live(session.clone()).await);
+    assert_eq!(auth_flows::user_id_by_email(&pool, &address).await.unwrap(), Some(user.id));
+
+    assert!(auth_flows::revoke_user_sessions(&pool, user.id).await.unwrap());
+    assert!(!live(session).await);
+    let (_, session) = auth.login(account()).await.unwrap().unwrap();
+
+    assert!(auth_flows::set_user_disabled(&pool, user.id, true).await.unwrap());
+    assert!(!live(session).await);
+    assert!(auth.login(account()).await.unwrap().is_none());
+    assert!(auth_flows::set_user_disabled(&pool, user.id, true).await.unwrap(), "idempotent");
+    assert!(auth_flows::set_user_disabled(&pool, user.id, false).await.unwrap());
+    assert!(auth.login(account()).await.unwrap().is_some());
+
+    assert!(!auth_flows::set_identity_disabled(&pool, user.id, "google", true).await.unwrap(), "no such identity");
+    assert!(!auth_flows::revoke_user_sessions(&pool, Uuid::new_v4()).await.unwrap());
+    assert!(!auth_flows::set_user_disabled(&pool, Uuid::new_v4(), true).await.unwrap());
+
+    // the last enabled admin stays
+    sqlx::query("UPDATE _brain_users SET disabled_at=now() WHERE role='admin' AND disabled_at IS NULL").execute(&pool).await.unwrap();
+    assert!(auth_flows::bootstrap_first_admin(&pool, user.id).await.unwrap());
+    assert!(!auth_flows::set_user_disabled(&pool, user.id, true).await.unwrap());
+    sqlx::query("UPDATE _brain_users SET role='user' WHERE id=$1").bind(user.id).execute(&pool).await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn reset_mail_is_counted_per_email_and_client_so_a_third_party_cannot_spend_the_owners_budget() {
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Use the disposable Postgres harness");
+    let pool = brain_backend::db::connect(&url).await.unwrap();
+    brain_backend::db::migrate(&pool, &[]).await.unwrap();
+    let auth = Auth::new_with_role(pool.clone(), "user").await.unwrap();
+    let address = email();
+    auth.signup(credentials(&address, "synthetic-original-password")).await.unwrap();
+    let inbox = Arc::new(Inbox::default());
+    let mut roles = RolesConfig::default();
+    roles.signup_role = "user".into();
+    let flows = Flows::new(pool.clone(), auth, roles, "https://app.example.test/app", Some(inbox.clone())).unwrap();
+    let sent = || inbox.messages.lock().unwrap().len();
+    let (stranger, owner) = (Some("192.0.2.10".parse().unwrap()), Some("192.0.2.20".parse().unwrap()));
+    for _ in 0..5 {
+        flows.request_reset_from(&address, stranger).await.unwrap();
+    }
+    assert_eq!(sent(), 3, "the stranger stops at the budget of the pair");
+    flows.request_reset_from(&address, owner).await.unwrap();
+    assert_eq!(sent(), 4, "the owner still gets the mail");
+}

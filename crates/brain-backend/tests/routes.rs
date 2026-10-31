@@ -17,12 +17,13 @@ use uuid::Uuid;
 
 const ORIGIN: &str = "https://shop.example.test";
 const SECRET: &str = "whsec_synthetic_route_secret_01";
+const INTERNAL: &str = "synthetic-internal-route-secret-32-bytes";
 
 /// Echoes its context so the test can see exactly what a handler receives.
 struct Echo;
 impl RouteHandlers for Echo {
     fn names(&self) -> Vec<String> {
-        ["payment_events", "order_quote", "admin_report", "slow"].map(String::from).to_vec()
+        ["payment_events", "order_quote", "admin_report", "slow", "internal_open", "internal_local"].map(String::from).to_vec()
     }
     fn run(&self, name: &str, ctx: Value, _: Duration) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RouteFailure>> + Send + '_>> {
         let name = name.to_string();
@@ -41,13 +42,19 @@ impl RouteHandlers for Echo {
 }
 
 fn routes() -> Vec<Route> {
-    let env = |name: &str| (name == "PAYMENTS_WEBHOOK_SECRET").then(|| SECRET.to_string());
+    let env = |name: &str| match name {
+        "PAYMENTS_WEBHOOK_SECRET" => Some(SECRET.to_string()),
+        "INTERNAL_SECRET" => Some(INTERNAL.to_string()),
+        _ => None,
+    };
     [
         ("payment_events", json!({"method": "POST", "path": "/payments/events", "auth": "public", "body": "raw", "bodyLimit": "2kb", "rate": "3/min",
             "verify": {"scheme": "timestamped", "header": "x-payment-signature", "secret": "PAYMENTS_WEBHOOK_SECRET", "tolerance": "5m"}})),
         ("order_quote", json!({"method": "POST", "path": "/orders/{id}/quote", "params": {"id": "uuid"}, "query": {"currency": "str!", "rush": "bool"}, "headers": ["x-shop-channel"]})),
         ("admin_report", json!({"method": "GET", "path": "/reports/daily", "auth": ["admin"]})),
         ("slow", json!({"method": "GET", "path": "/reports/slow", "auth": "public", "timeout": "200ms"})),
+        ("internal_open", json!({"method": "POST", "path": "/ops/open", "auth": "internal", "internal": {"secret": "INTERNAL_SECRET"}})),
+        ("internal_local", json!({"method": "POST", "path": "/ops/local", "auth": "internal", "internal": {"secret": "INTERNAL_SECRET", "loopback": true}})),
     ]
     .iter()
     .map(|(name, contract)| Route::from_contract(name, contract, &env).unwrap())
@@ -113,6 +120,17 @@ async fn declared_routes_verify_signatures_type_input_and_shape_responses() {
     )
     .await
     .unwrap();
+
+    // Internal routes: a secret instead of a browser Origin or a session; loopback refuses anything forwarded.
+    let secret = ("x-internal-secret", INTERNAL);
+    let typed = ("content-type", "application/json");
+    assert_eq!(send(&http, "POST", "/ops/open", &[typed, secret], b"{}").await.status(), 200);
+    assert_eq!(send(&http, "POST", "/ops/open", &[typed, ("x-internal-secret", "wrong")], b"{}").await.status(), 403);
+    assert_eq!(send(&http, "POST", "/ops/open", &[typed, ("cookie", cookie.as_str())], b"{}").await.status(), 403, "a session is no secret");
+    assert_eq!(send(&http, "POST", "/ops/local", &[typed, secret], b"{}").await.status(), 200);
+    assert_eq!(send(&http, "POST", "/ops/local", &[typed, secret, ("x-forwarded-for", "192.0.2.9")], b"{}").await.status(), 403);
+    let remote = Request::builder().method("POST").uri("/ops/local").header("content-type", "application/json").header("x-internal-secret", INTERNAL).extension(ConnectInfo("192.0.2.9:42003".parse::<std::net::SocketAddr>().unwrap())).body(Body::from("{}")).unwrap();
+    assert_eq!(http.clone().oneshot(remote).await.unwrap().status(), 403);
 
     // Signed webhook: no browser Origin needed, exact raw bytes, timestamp tolerance.
     let event = br#"{"id":"evt_1","type":"payment.succeeded","amount":4200}"#;
@@ -206,4 +224,33 @@ async fn routes_without_compiled_handlers_fail_before_serving() {
         .err()
         .unwrap();
     assert!(err.contains("handler.jsbrain"), "{err}");
+}
+
+#[test]
+fn internal_routes_compare_a_rotatable_secret_and_declare_it_by_name() {
+    let (current, old) = ("synthetic-internal-secret-current-32b", "synthetic-internal-secret-previous-3");
+    let env = |name: &str| match name {
+        "INTERNAL_SECRET" => Some(current.to_string()),
+        "INTERNAL_SECRET_OLD" => Some(old.to_string()),
+        "INTERNAL_SHORT" => Some("short".to_string()),
+        _ => None,
+    };
+    let route = Route::from_contract("ops", &json!({"method": "POST", "path": "/ops/run", "auth": "internal", "internal": {"secret": ["INTERNAL_SECRET", "INTERNAL_SECRET_OLD"], "loopback": true}}), &env).unwrap();
+    let brain_backend::routes::Access::Internal(internal) = &route.access else { panic!("{route:?}") };
+    assert!(internal.accepts(current) && internal.accepts(old) && !internal.accepts("wrong") && !internal.accepts(""));
+    assert!(internal.loopback);
+    assert_eq!(internal.header, "x-internal-secret");
+    assert_eq!(route.schema()["auth"], "internal");
+    assert!(!format!("{route:?}").contains(current), "the secret never reaches Debug");
+    for bad in [
+        json!({"path": "/a", "auth": "internal"}),
+        json!({"path": "/a", "auth": "internal", "internal": {"secret": "INTERNAL_SHORT"}}),
+        json!({"path": "/a", "auth": "internal", "internal": {"secret": "MISSING"}}),
+        json!({"path": "/a", "auth": "internal", "internal": {"secret": "literal-secret-value"}}),
+        json!({"path": "/a", "auth": "internal", "internal": {"secret": "INTERNAL_SECRET", "header": "cookie"}}),
+        json!({"path": "/a", "auth": "public", "internal": {"secret": "INTERNAL_SECRET"}}),
+        json!({"path": "/a", "auth": "internal", "internal": {"secret": "INTERNAL_SECRET"}, "rate": "1/min per user"}),
+    ] {
+        assert!(Route::from_contract("ops", &bad, &env).is_err(), "{bad}");
+    }
 }

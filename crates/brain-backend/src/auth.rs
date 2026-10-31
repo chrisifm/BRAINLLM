@@ -264,7 +264,7 @@ impl Auth {
         if consumed != 1 {
             return Ok(None);
         }
-        let existing=sqlx::query("SELECT u.id,u.email,u.role,u.verified,u.disabled_at IS NOT NULL AS disabled FROM _brain_users u JOIN _brain_identities i ON i.user_id=u.id WHERE i.provider='google' AND i.subject=$1").bind(&identity.subject).fetch_optional(&mut *tx).await.map_err(crate::db::safe)?;
+        let existing=sqlx::query("SELECT u.id,u.email,u.role,u.verified,u.disabled_at IS NOT NULL OR i.disabled_at IS NOT NULL AS disabled FROM _brain_users u JOIN _brain_identities i ON i.user_id=u.id WHERE i.provider='google' AND i.subject=$1").bind(&identity.subject).fetch_optional(&mut *tx).await.map_err(crate::db::safe)?;
         let user = if let Some(row) = existing {
             if row.get::<bool, _>("disabled") {
                 tx.commit().await.map_err(crate::db::safe)?;
@@ -406,6 +406,28 @@ pub async fn reserve_session(
 #[cfg(test)]
 mod identity_tests {
     use super::*;
+    #[tokio::test]
+    #[ignore = "Use the disposable backend Postgres harness"]
+    async fn a_disabled_identity_opens_no_session_and_does_not_fall_through_to_linking() {
+        let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Disposable Postgres only");
+        let pool = crate::db::connect(&url).await.unwrap();
+        crate::db::migrate(&pool, &[]).await.unwrap();
+        let auth = Auth::new(pool.clone()).await.unwrap();
+        let identity = crate::google::Identity {
+            subject: Uuid::new_v4().simple().to_string(),
+            issuer: "https://accounts.google.com".into(),
+            email: format!("disabled-{}@example.test", Uuid::new_v4().simple()),
+            authoritative_email: true,
+        };
+        let sign_in = || async { auth.google_login(&identity, &auth.google_challenge().await.unwrap()).await.unwrap().map(|(user, _)| user) };
+        let user = sign_in().await.expect("first sign-in creates the account");
+        assert!(crate::auth_flows::set_identity_disabled(&pool, user.id, "google", true).await.unwrap());
+        assert!(sign_in().await.is_none(), "a disabled identity is denied");
+        let accounts: i64 = sqlx::query_scalar("SELECT count(*) FROM _brain_users WHERE email=$1").bind(&identity.email).fetch_one(&pool).await.unwrap();
+        assert_eq!(accounts, 1);
+        assert!(crate::auth_flows::set_identity_disabled(&pool, user.id, "google", false).await.unwrap());
+        assert_eq!(sign_in().await.expect("enabled again").id, user.id);
+    }
     #[tokio::test]
     #[ignore = "Use the disposable backend Postgres harness"]
     async fn google_nonces_are_single_use_and_existing_emails_never_link_implicitly() {

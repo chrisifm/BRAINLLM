@@ -642,6 +642,11 @@ async fn real_http_account_handlers_enforce_identity_replay_revocation_custom_ro
         "/_brain/auth/email/request",
         "/_brain/auth/email/verify",
         "/_brain/auth/users/{id}/role",
+        "/_brain/auth/users/{id}/disable",
+        "/_brain/auth/users/{id}/enable",
+        "/_brain/auth/users/{id}/sessions/revoke",
+        "/_brain/auth/users/{id}/identities/{provider}/disable",
+        "/_brain/auth/users/{id}/identities/{provider}/enable",
     ] {
         assert!(api["paths"][path]["post"]["security"].is_array())
     }
@@ -682,7 +687,7 @@ async fn real_http_account_handlers_enforce_identity_replay_revocation_custom_ro
             .0,
         403
     );
-    let (status, _, login) = server
+    let (status, signed_in, login) = server
         .post(
             "/_brain/auth/login",
             json!({"email":address,"password":replacement}),
@@ -691,6 +696,23 @@ async fn real_http_account_handlers_enforce_identity_replay_revocation_custom_ro
         .await;
     assert_eq!(status, 200);
     assert_eq!(login["user"]["role"], "editor");
+    // Operator actions: only an administrator, and the refusals carry no detail about the target.
+    let target = user;
+    let user_cookie = cookie(&signed_in);
+    for path in ["disable", "enable", "sessions/revoke", "identities/google/disable"] {
+        let route = format!("/_brain/auth/users/{target}/{path}");
+        assert_eq!(server.post(&route, json!({}), None).await.0, 401, "{route}");
+        assert_eq!(server.post(&route, json!({}), Some(&user_cookie)).await.0, 403, "{route}");
+    }
+    let unknown = Uuid::new_v4();
+    assert_eq!(server.post(&format!("/_brain/auth/users/{unknown}/disable"), json!({}), Some(&admin_cookie)).await.0, 409);
+    assert_eq!(server.post(&format!("/_brain/auth/users/{target}/identities/google/disable"), json!({}), Some(&admin_cookie)).await.0, 409, "no such identity");
+    assert_eq!(server.post(&format!("/_brain/auth/users/{target}/sessions/revoke"), json!({}), Some(&admin_cookie)).await.0, 200);
+    assert_eq!(server.post(&format!("/_brain/auth/users/{target}/disable"), json!({}), Some(&admin_cookie)).await.0, 200);
+    assert_eq!(server.post("/_brain/auth/login", json!({"email":address,"password":replacement}), None).await.0, 401, "a disabled account signs in nowhere");
+    assert_eq!(server.post(&format!("/_brain/auth/users/{}/disable", other.id), json!({}), Some(&admin_cookie)).await.0, 409, "the last enabled administrator stays");
+    assert_eq!(server.post(&format!("/_brain/auth/users/{target}/enable"), json!({}), Some(&admin_cookie)).await.0, 200);
+    assert_eq!(server.get("/_brain/auth/me", Some(&user_cookie)).await.0, 401, "enabling does not revive old sessions");
     let _ = server.stop.take().unwrap().send(());
     tokio::time::timeout(Duration::from_secs(2), &mut server.task)
         .await

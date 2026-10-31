@@ -1049,6 +1049,24 @@ fn native_paths(roles: &crate::auth_flows::RolesConfig) -> Map<String, Value> {
         ))),
         &[400, 401, 403, 404, 413, 415, 422, 429, 500, 503, 504],
     );
+    for (path, summary) in [
+        ("/_brain/auth/users/{id}/disable", "Administrator disables a user, ends its sessions and revokes its API keys; refuses the last enabled administrator"),
+        ("/_brain/auth/users/{id}/enable", "Administrator enables a disabled user; old sessions stay ended"),
+        ("/_brain/auth/users/{id}/sessions/revoke", "Administrator ends every session and refresh family of a user"),
+        ("/_brain/auth/users/{id}/identities/{provider}/disable", "Administrator stops a sign-in identity from opening sessions and ends the current ones"),
+        ("/_brain/auth/users/{id}/identities/{provider}/enable", "Administrator lets a disabled sign-in identity open sessions again"),
+    ] {
+        add(
+            path,
+            "post",
+            summary,
+            native_security(),
+            200,
+            Some(object(json!({"ok":{"const":true}}), &["ok"], true)),
+            None,
+            &[401, 403, 404, 409, 429, 500, 503, 504],
+        );
+    }
     let receipt = object(
         json!({"id":id,"eventId":id,"duplicate":{"type":"boolean"}}),
         &["id", "eventId", "duplicate"],

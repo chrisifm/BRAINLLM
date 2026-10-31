@@ -518,6 +518,11 @@ pub async fn router_full(
             post(complete_email_verification),
         )
         .route("/_brain/auth/users/{id}/role", post(assign_user_role))
+        .route("/_brain/auth/users/{id}/disable", post(disable_user))
+        .route("/_brain/auth/users/{id}/enable", post(enable_user))
+        .route("/_brain/auth/users/{id}/sessions/revoke", post(revoke_user_sessions))
+        .route("/_brain/auth/users/{id}/identities/{provider}/disable", post(disable_user_identity))
+        .route("/_brain/auth/users/{id}/identities/{provider}/enable", post(enable_user_identity))
         .route(
             "/_brain/webhooks/in/{name}",
             post(webhook_inbound).layer(DefaultBodyLimit::max(16384)),
@@ -2072,6 +2077,40 @@ async fn assign_user_role(
         return Err(Error::forbidden());
     }
     Ok(Json(json!({"ok":true})).into_response())
+}
+
+async fn administrator(app: &App, headers: &HeaderMap) -> Result<()> {
+    let user = app.user(headers).await?.ok_or_else(auth_denied)?;
+    if user.role != "admin" {
+        return Err(Error::forbidden());
+    }
+    Ok(())
+}
+fn operator_result(done: std::result::Result<bool, crate::auth_flows::Error>) -> Result<Response> {
+    if !done.map_err(account_flow_error)? {
+        return Err(Error::new(StatusCode::CONFLICT, "OPERATION_REFUSED", "The target does not exist, or it is the last enabled administrator"));
+    }
+    Ok(Json(json!({"ok":true})).into_response())
+}
+async fn disable_user(State(app): State<App>, headers: HeaderMap, Path(id): Path<Uuid>) -> Result<Response> {
+    administrator(&app, &headers).await?;
+    operator_result(crate::auth_flows::set_user_disabled(&app.pool, id, true).await)
+}
+async fn enable_user(State(app): State<App>, headers: HeaderMap, Path(id): Path<Uuid>) -> Result<Response> {
+    administrator(&app, &headers).await?;
+    operator_result(crate::auth_flows::set_user_disabled(&app.pool, id, false).await)
+}
+async fn revoke_user_sessions(State(app): State<App>, headers: HeaderMap, Path(id): Path<Uuid>) -> Result<Response> {
+    administrator(&app, &headers).await?;
+    operator_result(crate::auth_flows::revoke_user_sessions(&app.pool, id).await)
+}
+async fn disable_user_identity(State(app): State<App>, headers: HeaderMap, Path((id, provider)): Path<(Uuid, String)>) -> Result<Response> {
+    administrator(&app, &headers).await?;
+    operator_result(crate::auth_flows::set_identity_disabled(&app.pool, id, &provider, true).await)
+}
+async fn enable_user_identity(State(app): State<App>, headers: HeaderMap, Path((id, provider)): Path<(Uuid, String)>) -> Result<Response> {
+    administrator(&app, &headers).await?;
+    operator_result(crate::auth_flows::set_identity_disabled(&app.pool, id, &provider, false).await)
 }
 
 fn webhook_error(error: crate::webhooks::Error) -> Error {

@@ -62,9 +62,9 @@ impl State {
     pub(super) fn deadline(&self, matched: &str) -> Option<Duration> {
         self.deadlines.get(matched).map(|d| *d + Duration::from_secs(1))
     }
-    /// Signed routes authenticate the sender by signature, not by browser Origin.
+    /// Signed and internal routes authenticate the sender by signature or secret, not by browser Origin.
     pub(super) fn signed(&self, method: &Method, matched: &str) -> bool {
-        self.routes.iter().any(|r| r.verify.is_some() && &r.method == method && r.path == matched)
+        self.routes.iter().any(|r| (r.verify.is_some() || matches!(r.access, Access::Internal(_))) && &r.method == method && r.path == matched)
     }
 }
 
@@ -123,6 +123,19 @@ async fn serve(app: App, state: Arc<State>, route: Arc<Route>, req: Request) -> 
     let user = match &route.access {
         Access::Public => app.user(&parts.headers).await.ok().flatten(),
         Access::SignedIn => Some(app.required(&parts.headers).await?),
+        Access::Internal(internal) => {
+            let allowed = parts.headers.get(&internal.header).and_then(|v| v.to_str().ok()).is_some_and(|v| internal.accepts(v));
+            // Loopback means the connection itself and no proxy in front of it speaking for someone else.
+            let local = !internal.loopback
+                || (parts.extensions.get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().is_some_and(|c| c.0.ip().is_loopback())
+                    && parts.extensions.get::<ClientIp>().is_none_or(|c| c.0.is_loopback())
+                    && !parts.headers.contains_key("x-forwarded-for")
+                    && !parts.headers.contains_key("forwarded"));
+            if !allowed || !local {
+                return Err(Error::forbidden());
+            }
+            None
+        }
         Access::Roles(roles) => {
             let user = app.required(&parts.headers).await?;
             if !roles.contains(&user.role) {

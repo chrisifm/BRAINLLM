@@ -601,6 +601,61 @@ impl Flows {
         Ok(true)
     }
 }
+/// Operator actions without SQL, for the admin routes and `brain backend users`. Each ends every session of the target,
+/// stops its API keys when it disables, and leaves an audit event. `false`: unknown target or the last enabled admin.
+pub async fn set_user_disabled(pool: &PgPool, target: Uuid, disabled: bool) -> Result<bool, Error> {
+    let mut tx = pool.begin().await.map_err(|e| database(crate::db::safe(e)))?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext('brain:auth:role-change'))").execute(&mut *tx).await.map_err(|e| database(crate::db::safe(e)))?;
+    let row = sqlx::query("SELECT role,disabled_at IS NOT NULL AS disabled FROM public._brain_users WHERE id=$1 FOR UPDATE").bind(target).fetch_optional(&mut *tx).await.map_err(|e| database(crate::db::safe(e)))?;
+    let Some(row) = row else { return Ok(false) };
+    if row.get::<bool, _>("disabled") == disabled {
+        return Ok(true);
+    }
+    if disabled && row.get::<String, _>("role") == "admin" {
+        let admins: i64 = sqlx::query_scalar("SELECT count(*) FROM public._brain_users WHERE role='admin' AND disabled_at IS NULL").fetch_one(&mut *tx).await.map_err(|e| database(crate::db::safe(e)))?;
+        if admins <= 1 {
+            return Ok(false);
+        }
+    }
+    sqlx::query("UPDATE public._brain_users SET disabled_at=CASE WHEN $2 THEN now() END,auth_version=auth_version+1,updated_at=now() WHERE id=$1").bind(target).bind(disabled).execute(&mut *tx).await.map_err(|e| database(crate::db::safe(e)))?;
+    revoke(&mut tx, target).await?;
+    if disabled {
+        sqlx::query("UPDATE public._brain_api_keys SET revoked_at=now(),updated_at=now() WHERE user_id=$1 AND revoked_at IS NULL").bind(target).execute(&mut *tx).await.map_err(|e| database(crate::db::safe(e)))?;
+    }
+    audit(&mut tx, target, if disabled { "user-disabled" } else { "user-enabled" }).await?;
+    tx.commit().await.map_err(|e| database(crate::db::safe(e)))?;
+    Ok(true)
+}
+pub async fn revoke_user_sessions(pool: &PgPool, target: Uuid) -> Result<bool, Error> {
+    let mut tx = pool.begin().await.map_err(|e| database(crate::db::safe(e)))?;
+    let changed = sqlx::query("UPDATE public._brain_users SET auth_version=auth_version+1,updated_at=now() WHERE id=$1").bind(target).execute(&mut *tx).await.map_err(|e| database(crate::db::safe(e)))?.rows_affected();
+    if changed == 0 {
+        return Ok(false);
+    }
+    revoke(&mut tx, target).await?;
+    audit(&mut tx, target, "sessions-revoked").await?;
+    tx.commit().await.map_err(|e| database(crate::db::safe(e)))?;
+    Ok(true)
+}
+/// `false`: the user has no identity of that provider. Disabling also ends the sessions it could have opened.
+pub async fn set_identity_disabled(pool: &PgPool, target: Uuid, provider: &str, disabled: bool) -> Result<bool, Error> {
+    let mut tx = pool.begin().await.map_err(|e| database(crate::db::safe(e)))?;
+    let changed = sqlx::query("UPDATE public._brain_identities SET disabled_at=CASE WHEN $3 THEN now() END WHERE user_id=$1 AND provider=$2").bind(target).bind(provider).bind(disabled).execute(&mut *tx).await.map_err(|e| database(crate::db::safe(e)))?.rows_affected();
+    if changed == 0 {
+        return Ok(false);
+    }
+    if disabled {
+        sqlx::query("UPDATE public._brain_users SET auth_version=auth_version+1,updated_at=now() WHERE id=$1").bind(target).execute(&mut *tx).await.map_err(|e| database(crate::db::safe(e)))?;
+        revoke(&mut tx, target).await?;
+    }
+    audit(&mut tx, target, if disabled { "identity-disabled" } else { "identity-enabled" }).await?;
+    tx.commit().await.map_err(|e| database(crate::db::safe(e)))?;
+    Ok(true)
+}
+pub async fn user_id_by_email(pool: &PgPool, address: &str) -> Result<Option<Uuid>, Error> {
+    let Some(address) = email(address) else { return Ok(None) };
+    sqlx::query_scalar("SELECT id FROM public._brain_users WHERE email=$1").bind(address).fetch_optional(pool).await.map_err(|e| database(crate::db::safe(e)))
+}
 pub(crate) async fn revoke(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, user: Uuid) -> Result<(), Error> {
     for sql in [
         "UPDATE public._brain_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",
