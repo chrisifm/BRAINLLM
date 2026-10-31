@@ -13,8 +13,16 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Build-time zstd: `brain build` writes a `.zst` (level 19) next to a text asset when it is smaller than the `.br`;
   `brain start` and `server.mjs` send the smallest precompressed sibling the client accepts and the emitted Caddy
   block lists `precompressed zstd br gzip`.
+- Client navigation always gives feedback: the region gets `aria-busy="true"` and `route()` gains `navigating`
+  at once; past 150 ms `#brain-nav` shows (the app's own element in `app.brain`, else a native top `<progress>` bar);
+  past 400 ms (was 150 ms) `_loading.brain` replaces the region, so fast pages never flash a skeleton.
+  `brain guide views` documents a custom spinner.
 
 ### Fixed
+- Client navigation no longer flickers or swaps a stale page: one navigation token guards every late callback, so a
+  superseded navigation never swaps, never runs its View Transition callback, never scrolls or moves focus and never
+  mounts its loading view; a fetch, parse or swap that throws becomes a full page load; a click reuses a prefetch
+  still in flight (even a no-cache page) instead of fetching the page twice.
 - Scoped CSS keeps pseudo-elements (`::backdrop`, `::before`, `:after`, `::-webkit-*`) outside the root anchor's
   `:is()`, so Chrome no longer drops the whole rule list for components that style them at their root.
 - Conditional content passed to a named slot (`{#if}<a slot="footer">…{:else}<span slot="footer">…{/if}`) now
@@ -76,10 +84,6 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   non-200) are never stored; removed routes drop their caches. See `docs/BROWSER-DATA.md`.
 - User-controlled app updates: `"cache": { "update": "prompt" }` keeps a new service worker waiting; `updateReady()`
   and `applyUpdate()` let the page show a reload prompt (0 bytes for views that do not use them).
-- Client navigation always gives feedback: the region gets `aria-busy="true"` and `route()` gains `navigating`
-  at once; past 150 ms `#brain-nav` shows (the app's own element in `app.brain`, else a native top `<progress>` bar);
-  past 400 ms (was 150 ms) `_loading.brain` replaces the region, so fast pages never flash a skeleton.
-  `brain guide views` documents a custom spinner.
 - WebMCP imperative tools ship (#106): `<meta tools="add_task: Add a task (text:str!, due:date)">` plus a same-named
   function registers the tool with the browser's model context while the component is mounted and unregisters it on
   unmount. Nothing is registered without WebMCP, during SSR or prerender; arguments are validated against the
@@ -252,10 +256,6 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Fixed
 
-- Client navigation no longer flickers or swaps a stale page: one navigation token guards every late callback, so a
-  superseded navigation never swaps, never runs its View Transition callback, never scrolls or moves focus and never
-  mounts its loading view; a fetch, parse or swap that throws becomes a full page load; a click reuses a prefetch
-  still in flight (even a no-cache page) instead of fetching the page twice.
 - `throw redirect(url, status)` in `load` answers the redirect under `brain run` as it does in production; it was a
   500 with `[load] …: [object Object]` in the log. A thrown non-Error object is now logged as JSON.
 

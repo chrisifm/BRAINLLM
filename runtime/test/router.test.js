@@ -900,7 +900,7 @@ test('navigate rejects raw controls, whitespace and backslashes before URL norma
   } finally { globalThis.location = old }
 })
 
-// --- client navigation without flicker, races or stuck states (0.6.0) ---
+// --- client navigation without flicker, races or stuck states ---
 // A fetch whose responses the test releases by hand: no timing assumptions.
 const gated = () => {
   const f0 = globalThis.fetch, waiting = new Map(), signals = new Map()

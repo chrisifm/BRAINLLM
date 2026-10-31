@@ -1790,7 +1790,7 @@ a `Declared` extension that `response_headers` turns into `Cache-Control` instea
 in `precondition` against the same xmin the write CAS uses. See [backend/cluster.md](backend/cluster.md) and
 [backend/caching.md](backend/caching.md).
 
-Client navigation states (0.6.0, `runtime/brain-router.js` `load`): one navigation token (`seq`) decides every late
+Client navigation states (unreleased, `runtime/brain-router.js` `load`): one navigation token (`seq`) decides every late
 callback. A superseded navigation never swaps, never runs its View Transition callback, never scrolls or moves focus
 (History fallback), and never mounts its loading view. The current page stays until the next one is parsed; DOM, head,
 active links and the next-route plan change in one swap callback. The region gets `aria-busy="true"` and `route().navigating`
