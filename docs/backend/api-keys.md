@@ -147,3 +147,8 @@ brain backend keys summary 3f9a1c0b7d2e --days 30
 
 Each command accepts a key id or its public prefix, uses `DATABASE_URL`, and prints JSON. `create` and `rotate`
 print the secret once.
+
+## Row conditions and server-only resources
+
+A key sees the rows its owner sees: row conditions apply to it as they do to the owner's session. A resource declared
+with `api: false` is only reachable with a scope that names it (`ledgers:read`); the `*:*` wildcard answers `404`.

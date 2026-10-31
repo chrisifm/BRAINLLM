@@ -203,7 +203,7 @@ pub struct Step {
     pub input: Map<String, Value>,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Kind {
+pub(crate) enum Kind {
     Read,
     Create,
     Update,
@@ -213,7 +213,7 @@ enum Kind {
     Transition,
 }
 impl Step {
-    fn kind(&self) -> Result<(Kind, &str), String> {
+    pub(crate) fn kind(&self) -> Result<(Kind, &str), String> {
         let forms = [
             (Kind::Read, &self.read),
             (Kind::Create, &self.create),
@@ -625,6 +625,8 @@ pub enum Failure {
     Forbidden,
     /// 404 NOT_FOUND; the label names the step or batch item.
     Missing(String),
+    /// The row exists and this user holds no grant for the write: 403 when they may read it, else like `Missing`.
+    Denied { resource: String, id: Uuid, label: String },
     /// 422 INVALID_INPUT with field errors.
     Invalid(BTreeMap<String, String>),
     /// 409 GUARD_FAILED: the locked current record does not satisfy a declared condition.
@@ -982,11 +984,11 @@ impl<'a> Engine<'a> {
             Authority::Roles => {
                 let allowed = action.roles.iter().any(|role| role == &self.user.role || role == "owner" && owns(&existing, self.user));
                 if !allowed {
-                    return Err(Failure::Forbidden);
+                    return Err(Failure::Denied { resource: r.name.clone(), id, label: label.unwrap_or("id").into() });
                 }
             }
             Authority::Operation { owned } if owned && !owns(&existing, self.user) => {
-                return Err(Failure::Missing(label.unwrap_or("id").into()));
+                return Err(Failure::Denied { resource: r.name.clone(), id, label: label.unwrap_or("id").into() });
             }
             Authority::Operation { .. } => {}
         }
@@ -1143,7 +1145,7 @@ impl<'a> Engine<'a> {
                     let existing = lock(tx, r, id).await.map_err(located(&r.name, Some(label)))?
                         .ok_or_else(|| Failure::Missing(label.into()))?;
                     if step.owned && !owns(&existing, self.user) {
-                        return Err(Failure::Missing(label.into()));
+                        return Err(Failure::Denied { resource: r.name.clone(), id, label: label.into() });
                     }
                     match kind {
                         Kind::Read => existing,
@@ -1350,7 +1352,7 @@ impl<'a> Engine<'a> {
                         return Err(Failure::Missing(item(i)));
                     };
                     if owners_only && !owns(existing, self.user) {
-                        return Err(Failure::Missing(item(i)));
+                        return Err(Failure::Denied { resource: r.name.clone(), id: *id, label: item(i) });
                     }
                     if op == "update" {
                         let merged = merge_patch(r, &existing["data"], &request.items[i]["data"])
@@ -1418,7 +1420,7 @@ fn post(operation_id: String, description: &str, body: Value, output: Value, ext
 pub fn openapi(domain: &Domain, resources: &[Resource], api: &mut Value) {
     let Some(paths) = api["paths"].as_object_mut() else { return };
     let id_param = json!({"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}});
-    for r in resources {
+    for r in resources.iter().filter(|r| r.policy.api) {
         let d = domain.resource(&r.name);
         let max = domain.batch_max(&r.name);
         let row = row_schema(r);
@@ -1450,7 +1452,8 @@ pub fn openapi(domain: &Domain, resources: &[Resource], api: &mut Value) {
             }
             let target = step.kind().map(|(_, t)| t.split('.').next().unwrap_or(t).to_string()).unwrap_or_default();
             if let Some(r) = resources.iter().find(|r| r.name == target) {
-                result.insert(step.name.clone(), row_schema(r));
+                // A server-only step result carries no data; see `http::reveal`.
+                result.insert(step.name.clone(), if r.policy.api { row_schema(r) } else { json!({"type":"object"}) });
             }
         }
         let output = json!({"type":"object","required":["operation","result"],"properties":{"operation":{"const":name},"result":{"type":"object","additionalProperties":false,"required":result.keys().collect::<Vec<_>>(),"properties":result}}});

@@ -19,6 +19,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Added
 - `brain check` and `brain doctor` catch origin mistakes before they run: B0744 for a trailing slash, path, missing scheme, credentials or wildcard, with the exact replacement; B0745 for a socket origin outside the HTTP origins; B0746 for a page calling an undeclared origin.
+- `brain check` warns B0749 on an unconditioned public read of a resource with a state field; `expose_all_rows: true` declares it intentional.
+- `api: false` declares a server-only resource with no public routes or OpenAPI, reached with `ctx.backend.service(name)` and `BRAIN_SERVICE_API_KEY`.
 - `brain upgrade [--from V] [--to V] [--dry-run|--apply] [--json] [--no-doctor]` (MCP `brain_upgrade`) migrates an
   app between versions: from the recorded `brainVersion` in `brain.json` (now written by `brain new`) to the installed
   compiler, it reports codemods, manual steps with `file:line`, capabilities to adopt with their snippet and the gates;
@@ -35,7 +37,15 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   the page down, then the compiler's plan, then `footer` and `aside` links. A link that leaves the viewport before its
   turn is dropped, visible links never warm `fullLoad` routes, and a click never waits on the queue.
 
+### Security
+- Read grants accept row conditions: `read: [{ public: { where: { status: 'published' } } }, 'owner.shop', 'admin']`. They are OR-ed and enforced as bound SQL on lists, totals, filters, sort, search, aggregates, counts, includes, relational filters, get, slug history, sockets, `related` files, API keys and `ctx.backend`; a hidden row answers exactly like a missing one.
+- Writes no longer return a row their author may not read: create, update, patch, upsert, batch, action and transition responses keep the `id` and send `data: {}`.
+- `related` file buckets evaluate the same rule as a get on the linked record, through one shared evaluator, so an `owner.<ref>` owner who can read the row can read its file.
+- A write the policy does not grant answers `403 POLICY_DENIED` when the writer may read the row, and exactly like a missing row when not, on update, patch, delete, batch, actions, transitions and owned operation steps.
+- Anonymous `/meta` of a public file bucket no longer returns `owner`, `resource`, `record`, `field` or `sha256`.
+
 ### Fixed
+- `POLICY_DENIED` explains which rule classes were evaluated, without revealing data.
 - B0119 reports an imported module that exists but does not parse as such, with its first error, instead of a missing file.
 - The B0110 fix for a classic `for` shows the form for bounded retries.
 - A refused origin no longer receives `Access-Control-Allow-Credentials`, `-Expose-Headers`, `-Allow-Methods`, `-Allow-Headers` or `-Max-Age`; only allowed origins do, and `Vary: Origin` stays.

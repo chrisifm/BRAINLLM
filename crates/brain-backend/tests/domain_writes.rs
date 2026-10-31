@@ -435,7 +435,7 @@ async fn postgres_state_transitions_are_the_only_way_to_change_state() {
     assert_eq!((status, &order["data"]["status"]), (200, &json!("pending")));
     let t = |name: &str| format!("/api/shop_orders/{}/transitions/{name}", id(&order));
     let (status, _) = call(&s.app, "POST", &t("pay"), &s.bob, Some(json!({}))).await;
-    assert_eq!(status, 403, "owner role means the caller owns the row");
+    assert_eq!(status, 404, "owner role means the caller owns the row; bob may not read it, so it answers like a missing row");
     let (status, _) = call(&s.app, "POST", &t("ship"), &s.alice, Some(json!({}))).await;
     assert_eq!(status, 403, "only admin ships");
     let (status, paid) = call(&s.app, "POST", &t("pay"), &s.alice, Some(json!({}))).await;

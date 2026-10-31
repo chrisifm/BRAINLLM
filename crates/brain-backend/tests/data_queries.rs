@@ -24,7 +24,7 @@ fn field(kind: &str, required: bool) -> Field {
 }
 fn policy(read: &[&str], create: &[&str], update: &[&str], delete: &[&str]) -> Policy {
     let v = |x: &[&str]| x.iter().map(|s| s.to_string()).collect();
-    Policy { read: v(read), create: v(create), update: v(update), delete: v(delete) }
+    Policy { read: v(read), create: v(create), update: v(update), delete: v(delete), ..Default::default() }
 }
 fn resource(name: &str, fields: Vec<(&str, Field)>, policy: Policy, query: Value) -> Resource {
     Resource {
@@ -380,7 +380,7 @@ async fn relations_filters_sort_totals_aggregates_cursors_ownership_and_visibili
     assert_eq!(s, 409, "restrict keeps referenced rows: {e}");
     assert_eq!(e["error"]["code"], "REFERENCE_IN_USE");
     let (s, _) = api.call("DELETE", &format!("/api/products/{}", product["Anvil"]), Some(&rival), None).await;
-    assert_eq!(s, 404, "a non-owner cannot delete through the relation");
+    assert_eq!(s, 403, "a non-owner cannot delete through the relation, and the product is publicly readable");
 
     // set_null: deleting the product clears the order's reference in both the column and the record.
     let (_, order) = api.post("/api/orders", &buyer, json!({"product": product["Garden hose"], "quantity": 2})).await;

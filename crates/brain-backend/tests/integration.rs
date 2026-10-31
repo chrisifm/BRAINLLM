@@ -31,6 +31,8 @@ mod jwt_sessions;
 mod links;
 #[path = "media.rs"]
 mod media;
+#[path = "row_policy.rs"]
+mod row_policy;
 #[path = "routes.rs"]
 mod routes;
 #[path = "native_openapi.rs"]

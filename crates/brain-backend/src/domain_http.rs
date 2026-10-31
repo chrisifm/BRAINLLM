@@ -1,6 +1,6 @@
 //! HTTP entry points for declared domain writes. Child of `http`: the fixed lifecycle (limits, origin, auth,
 //! rate limit, deadline) applies unchanged; every request runs in one Postgres transaction.
-use super::{App, Error, Result, write_error};
+use super::{App, Error, Result, reveal, write_error};
 use crate::domain::{BatchRequest, Change, Domain, Engine, Failure, UpsertRequest};
 use axum::{
     Json, Router,
@@ -47,13 +47,19 @@ pub(super) fn validate(
     Ok(())
 }
 
-fn failure(app: &App, error: Failure) -> Error {
+async fn failure(app: &App, user: &crate::auth::User, error: Failure) -> Error {
     match error {
         Failure::Forbidden => Error::forbidden(),
         Failure::Missing(label) => {
             let mut e = Error::missing();
             e.fields = Some(json!({ label: "Not found" }));
             e
+        }
+        Failure::Denied { resource, id, label } => {
+            let mut missing = Error::missing();
+            missing.fields = Some(json!({ label: "Not found" }));
+            let Some(r) = app.resources.get(&resource) else { return missing };
+            super::write_denied(&app.pool, &app.resources, r, user, id, missing).await
         }
         Failure::Invalid(fields) => Error::validation(fields),
         Failure::Guard(fields) => {
@@ -109,7 +115,7 @@ macro_rules! transactional {
             }
             Err(error) => {
                 drop($tx);
-                Err(failure(&$app, error))
+                Err(failure(&$app, &$user, error).await)
             }
         }
     }};
@@ -121,9 +127,11 @@ async fn action(
     h: HeaderMap,
     Json(input): Json<Value>,
 ) -> Result<Json<Value>> {
-    app.resource(&name)?;
+    let r = app.resource(&name)?;
     let user = app.required(&h).await?;
-    transactional!(app, user, |engine, tx| engine.action(&mut tx, &name, &action, id, &input).await).map(Json)
+    let mut row = transactional!(app, user, |engine, tx| engine.action(&mut tx, &name, &action, id, &input).await)?;
+    reveal(&app, r, &mut row, &user, false).await?;
+    Ok(Json(row))
 }
 async fn transition(
     State(app): State<App>,
@@ -131,9 +139,11 @@ async fn transition(
     h: HeaderMap,
     Json(input): Json<Value>,
 ) -> Result<Json<Value>> {
-    app.resource(&name)?;
+    let r = app.resource(&name)?;
     let user = app.required(&h).await?;
-    transactional!(app, user, |engine, tx| engine.transition(&mut tx, &name, &transition, id, &input).await).map(Json)
+    let mut row = transactional!(app, user, |engine, tx| engine.transition(&mut tx, &name, &transition, id, &input).await)?;
+    reveal(&app, r, &mut row, &user, false).await?;
+    Ok(Json(row))
 }
 async fn batch(
     State(app): State<App>,
@@ -151,7 +161,13 @@ async fn batch(
     })?;
     let resources = app.resources.clone();
     let r = resources.get(&name).expect("resource exists");
-    transactional!(app, user, |engine, tx| engine.batch(&mut tx, r, &request).await).map(Json)
+    let mut out: Value = transactional!(app, user, |engine, tx| engine.batch(&mut tx, r, &request).await)?;
+    if let Some(items) = out["items"].as_array_mut() {
+        for row in items {
+            reveal(&app, r, row, &user, false).await?;
+        }
+    }
+    Ok(Json(out))
 }
 async fn upsert(
     State(app): State<App>,
@@ -159,15 +175,17 @@ async fn upsert(
     h: HeaderMap,
     Json(request): Json<UpsertRequest>,
 ) -> Result<Json<Value>> {
+    app.resource(&name)?;
     let resources = app.resources.clone();
     let r = resources.get(&name).ok_or_else(Error::missing)?;
     let user = app.required(&h).await?;
     hooked(r, &["create", "update"])?;
-    transactional!(app, user, |engine, tx| engine
+    let mut out: Value = transactional!(app, user, |engine, tx| engine
         .upsert_request(&mut tx, r, &request)
         .await
-        .map(|(record, created)| json!({"record": record, "created": created})))
-    .map(Json)
+        .map(|(record, created)| json!({"record": record, "created": created})))?;
+    reveal(&app, r, &mut out["record"], &user, false).await?;
+    Ok(Json(out))
 }
 async fn operation(
     State(app): State<App>,
@@ -179,5 +197,13 @@ async fn operation(
         return Err(Error::missing());
     }
     let user = app.required(&h).await?;
-    transactional!(app, user, |engine, tx| engine.operation(&mut tx, &name, &input).await).map(Json)
+    let mut out: Value = transactional!(app, user, |engine, tx| engine.operation(&mut tx, &name, &input).await)?;
+    // Each step result is a row of its target resource and passes the same response rules as a single write.
+    for step in &app.domain.operations[&name].steps {
+        let target = step.kind().ok().map(|(_, t)| t.split('.').next().unwrap_or(t).to_string());
+        if let (Some(r), Some(row)) = (target.and_then(|t| app.resources.get(&t)), out["result"].get_mut(&step.name)) {
+            reveal(&app, r, row, &user, false).await?;
+        }
+    }
+    Ok(Json(out))
 }

@@ -273,6 +273,17 @@ pub fn validate(r: &Resource) -> Result<(), String> {
 /// Cross-resource validation: related filters, counts and relational ownership grants.
 pub fn validate_graph(r: &Resource, resources: &[Resource]) -> Result<(), String> {
     let find = |name: &str| resources.iter().find(|x| x.name == name);
+    if r.policy.api {
+        let reached = r.query.include.iter().map(String::as_str)
+            .chain(r.query.filter.keys().filter_map(|k| k.split_once('.').map(|(local, _)| local)))
+            .filter_map(|local| crate::relations::target(r, local))
+            .chain(r.query.count.values().map(|c| c.resource.clone()));
+        for target in reached {
+            if find(&target).is_some_and(|t| !t.policy.api) {
+                return Err(format!("{}: query reaches server-only resource `{target}` (api: false); fix: remove that include, filter or count, or drop api: false", r.name));
+            }
+        }
+    }
     for (key, ops) in &r.query.filter {
         let Some((local, inner)) = key.split_once('.') else { continue };
         let target = crate::relations::target(r, local).and_then(|t| find(&t)).ok_or_else(|| format!("{}: query filter `{key}` reaches an unknown resource", r.name))?;
@@ -757,6 +768,62 @@ fn push_predicate(q: &mut QueryBuilder<Postgres>, f: &Filter) {
     }
 }
 
+/// The operands of one static row condition, or None when the value does not fit the field.
+fn condition_operands(r: &Resource, field: &str, value: &Value) -> Option<(Kind, &'static str, Vec<Operand>)> {
+    let f = r.fields.get(field)?;
+    let ty = f.ty()?;
+    let kind = Kind::of(&ty).filter(|k| *k != Kind::List)?;
+    let one = |v: &Value| {
+        if v.is_array() || v.is_object() || v.is_null() {
+            return None;
+        }
+        let v = ty.normalize(v, true)?;
+        Some(Operand::Value(v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string())))
+    };
+    match value {
+        Value::Null => (!f.required).then(|| (kind, "exists", vec![Operand::Value("false".into())])),
+        Value::Array(list) => {
+            if list.is_empty() || list.len() > 16 {
+                return None;
+            }
+            Some((kind, "in", list.iter().map(one).collect::<Option<Vec<_>>>()?))
+        }
+        v => Some((kind, "eq", vec![one(v)?])),
+    }
+}
+/// Pushes one validated row condition of a read grant; an unusable value fails closed.
+pub(crate) fn push_row_condition(q: &mut QueryBuilder<Postgres>, r: &Resource, field: &str, value: &Value) {
+    match condition_operands(r, field, value) {
+        Some((kind, op, values)) => push_predicate(q, &Filter { via: None, field: field.to_string(), kind, op: op.into(), values }),
+        None => {
+            q.push("false");
+        }
+    }
+}
+/// Static validation of the `where` conditions of read grants.
+pub(crate) fn validate_read_where(r: &Resource) -> Result<(), String> {
+    for (grant, conditions) in &r.policy.read_where {
+        let at = format!("{}: read grant `{grant}` where", r.name);
+        if conditions.is_empty() || conditions.len() > 8 {
+            return Err(format!("{at} needs 1..8 fields; fix: keep the row condition short and combine values with an array"));
+        }
+        for (field, value) in conditions {
+            let Some(f) = r.fields.get(field) else {
+                let known = r.fields.keys().map(String::as_str).collect::<Vec<_>>().join(", ");
+                return Err(format!("{at}: `{field}` is not a declared field; fix: use one of {known}"));
+            };
+            if f.ty().as_ref().and_then(Kind::of).is_none_or(|k| k == Kind::List) {
+                return Err(format!("{at}: `{field}` is a {} field; fix: condition on a scalar field (str, enum, bool, int, decimal, date, ref)", f.kind));
+            }
+            if condition_operands(r, field, value).is_none() {
+                let expected = f.ty().map(|t| t.expected()).unwrap_or_default();
+                return Err(format!("{at}: `{field}` value {value} does not fit the field; fix: use {expected}, an array of 1..16 such values, or null for an optional field"));
+            }
+        }
+    }
+    Ok(())
+}
+
 struct Ctx<'a> {
     r: &'a Resource,
     resources: &'a BTreeMap<String, Resource>,
@@ -992,9 +1059,7 @@ fn push_key(q: &mut QueryBuilder<Postgres>, kind: Kind, v: &str) {
 /// Relational read ownership of each row, used only for `owner` field visibility.
 fn relational_read(r: &Resource, viewer: Viewer<'_>) -> Option<Scope> {
     let owner_visible = r.fields.values().any(|f| f.visible.as_ref().is_some_and(|v| v.iter().any(|g| g == "owner")));
-    let user = viewer.id?;
-    let paths: Vec<Vec<String>> = r.policy.read.iter().filter_map(|g| crate::ownership::path(g)).collect();
-    (owner_visible && !paths.is_empty()).then_some(Scope::Owned { user, direct: false, paths })
+    owner_visible.then(|| crate::ownership::relational_read(r, viewer)).flatten()
 }
 
 async fn aggregate(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, a: &Aggregate) -> Result<Value, sqlx::Error> {

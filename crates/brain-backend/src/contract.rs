@@ -69,13 +69,21 @@ pub struct Check {
     pub together: Option<Vec<String>>,
 }
 const COMPARE_OPS: &[&str] = &["<", "<=", ">", ">=", "==", "!="];
+/// Who may do what with a resource. In source a read entry is a grant name or `{ <grant>: { where: { field: value } } }`:
+/// `read` keeps every grant name and `read_where` holds the row condition of the conditioned ones.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "RawPolicy", into = "RawPolicy")]
 pub struct Policy {
     pub read: Vec<String>,
     pub create: Vec<String>,
     pub update: Vec<String>,
     pub delete: Vec<String>,
+    /// Read grant name to the static `field: value` conditions its rows must satisfy (all of them).
+    pub read_where: BTreeMap<String, BTreeMap<String, Value>>,
+    /// False for a server-only resource: no public `/api/<resource>` surface (default true).
+    pub api: bool,
+    /// Declares that an unconditioned public read of a resource with state-like fields is intentional (B0749).
+    pub expose_all_rows: bool,
 }
 impl Default for Policy {
     fn default() -> Self {
@@ -85,6 +93,96 @@ impl Default for Policy {
             create: admin.clone(),
             update: admin.clone(),
             delete: admin,
+            read_where: BTreeMap::new(),
+            api: true,
+            expose_all_rows: false,
+        }
+    }
+}
+/// The source shape of `policy.jsbrain`; `Policy` is its validated form and serializes back to the same syntax.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RawPolicy {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    read: Option<Vec<Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    create: Option<Vec<Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    update: Option<Vec<Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    delete: Option<Vec<Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    api: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expose_all_rows: Option<bool>,
+}
+impl TryFrom<RawPolicy> for Policy {
+    type Error = String;
+    fn try_from(raw: RawPolicy) -> Result<Self, String> {
+        let api = raw.api.unwrap_or(true);
+        let mut policy = Policy { api, expose_all_rows: raw.expose_all_rows.unwrap_or(false), ..Policy::default() };
+        let mut read_where = BTreeMap::new();
+        for (op, list) in [("read", raw.read), ("create", raw.create), ("update", raw.update), ("delete", raw.delete)] {
+            // A server-only resource may omit its lists: they stay admin-only.
+            let Some(list) = list else {
+                if api {
+                    return Err(format!("policy must declare a {op} list; fix: add {op}: ['admin'] (or declare api: false for a server-only resource)"));
+                }
+                continue;
+            };
+            let mut names = Vec::with_capacity(list.len());
+            for entry in list {
+                let name = match entry {
+                    Value::String(name) => name,
+                    Value::Object(mut map) => {
+                        if op != "read" {
+                            return Err(format!("{op} policy cannot use `where`; row conditions apply to read grants only; fix: use a plain grant name such as 'owner' or a role, and check values with a guard or a before-hook"));
+                        }
+                        let bad = || "a conditioned read grant has the form { <grant>: { where: { field: value } } }; fix: name one grant and a non-empty where object, e.g. { public: { where: { status: 'published' } } }".to_string();
+                        if map.len() != 1 {
+                            return Err(bad());
+                        }
+                        let name = map.keys().next().cloned().ok_or_else(bad)?;
+                        let Some(Value::Object(mut spec)) = map.remove(&name) else { return Err(bad()) };
+                        let (Some(Value::Object(conditions)), true) = (spec.remove("where"), spec.is_empty()) else { return Err(bad()) };
+                        if conditions.is_empty() {
+                            return Err(bad());
+                        }
+                        read_where.insert(name.clone(), conditions.into_iter().collect());
+                        name
+                    }
+                    _ => return Err(format!("{op} policy entries must be grant names; fix: use 'public', 'owner', 'owner.<ref>' or a role name")),
+                };
+                if names.contains(&name) {
+                    return Err(format!("{op} policy lists `{name}` twice; fix: keep one entry, an unconditioned grant would make its row condition pointless"));
+                }
+                names.push(name);
+            }
+            match op {
+                "read" => policy.read = names,
+                "create" => policy.create = names,
+                "update" => policy.update = names,
+                _ => policy.delete = names,
+            }
+        }
+        policy.read_where = read_where;
+        Ok(policy)
+    }
+}
+impl From<Policy> for RawPolicy {
+    fn from(p: Policy) -> Self {
+        let names = |list: Vec<String>| Some(list.into_iter().map(Value::String).collect());
+        let read = p.read.into_iter().map(|name| match p.read_where.get(&name) {
+            Some(conditions) => json!({ name: { "where": conditions } }),
+            None => Value::String(name),
+        });
+        RawPolicy {
+            read: Some(read.collect()),
+            create: names(p.create),
+            update: names(p.update),
+            delete: names(p.delete),
+            api: (!p.api).then_some(false),
+            expose_all_rows: p.expose_all_rows.then_some(true),
         }
     }
 }
@@ -97,11 +195,16 @@ impl Policy {
             "delete" => &self.delete,
             _ => return false,
         };
-        grants.iter().any(|r| {
+        // A conditioned read grant depends on the row: it never allows by itself (see `ownership::scope`).
+        grants.iter().filter(|r| operation != "read" || !self.read_where.contains_key(*r)).any(|r| {
             r == "public" && operation == "read"
                 || r == "owner" && owns && role.is_some()
                 || role == Some(r.as_str())
         })
+    }
+    /// True when at least one read grant carries a row condition.
+    pub fn conditioned(&self) -> bool {
+        !self.read_where.is_empty()
     }
     pub fn owners_only(&self, operation: &str, role: Option<&str>) -> bool {
         !self.allows(operation, role, false) && self.allows(operation, role, true)
@@ -252,6 +355,13 @@ impl Resource {
                     ));
                 }
             }
+        }
+        crate::query::validate_read_where(self)?;
+        if !self.policy.api && self.policy.read.iter().any(|g| g == "public") {
+            return Err(format!("{}: a server-only resource (api: false) cannot grant public read; fix: remove public or drop api: false", self.name));
+        }
+        if self.policy.expose_all_rows && (!self.policy.api || !self.policy.read.iter().any(|g| g == "public") || self.policy.read_where.contains_key("public")) {
+            return Err(format!("{}: expose_all_rows only applies to an unconditioned public read; fix: remove expose_all_rows", self.name));
         }
         Ok(())
     }
@@ -518,7 +628,7 @@ pub fn openapi(resources: &[Resource]) -> Value {
 }
 pub fn openapi_with_roles(resources: &[Resource], roles: &crate::auth_flows::RolesConfig) -> Value {
     let mut paths = Map::new();
-    for r in resources {
+    for r in resources.iter().filter(|r| r.policy.api) {
         let body = json!({"required":true,"content":{"application/json":{"schema":r.schema()}}});
         let error_responses = json!({"400":{"description":"Invalid request"},"401":{"description":"Sign in required"},"403":{"description":"Policy denied"},"404":{"description":"Not found"},"422":{"description":"Validation errors"},"429":{"description":"Rate limited"}});
         let row = json!({"type":"object","additionalProperties":false,"required":["id","data","created_at","updated_at"],"properties":{"id":{"type":"string","format":"uuid"},"owner":{"type":"string","format":"uuid","description":"Shown to the owner, relational owners and roles named in the read policy, or to everyone with expose_owner"},"data":r.schema(),"created_at":{"type":"string","format":"date-time","readOnly":true},"updated_at":{"type":"string","format":"date-time","readOnly":true}}});
@@ -528,6 +638,11 @@ pub fn openapi_with_roles(resources: &[Resource], roles: &crate::auth_flows::Rol
                 json!({"type":"object","required":["items","limit","offset"],"properties":{"items":{"type":"array","items":row},"limit":{"type":"integer"},"offset":{"type":"integer"}}})
             } else if name == "delete" {
                 json!({"type":"object","required":["ok"],"properties":{"ok":{"type":"boolean"}}})
+            } else if name != "read" && r.policy.conditioned() {
+                // A writer who may not read the resulting row gets it without its data.
+                let mut redacted = row.clone();
+                redacted["properties"]["data"] = json!({"anyOf":[r.schema(),{"type":"object","maxProperties":0}]});
+                redacted
             } else {
                 row.clone()
             };

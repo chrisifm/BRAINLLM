@@ -160,6 +160,7 @@ async fn postgres_auth_policy_crud_transactional_hooks_and_leased_jobs() {
         create: vec!["user".into()],
         update: vec!["owner".into()],
         delete: vec!["owner".into()],
+        ..Default::default()
     };
     let http = brain_backend::http::router(
         pool.clone(),

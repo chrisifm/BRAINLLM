@@ -135,6 +135,7 @@ async fn api_keys_authenticate_scope_quota_trace_rotate_and_revoke() {
             create: vec!["user".into()],
             update: vec!["owner".into()],
             delete: vec!["owner".into()],
+            ..Default::default()
         },
     );
     let ledgers = resource(
@@ -144,6 +145,7 @@ async fn api_keys_authenticate_scope_quota_trace_rotate_and_revoke() {
             create: vec!["admin".into()],
             update: vec!["admin".into()],
             delete: vec!["admin".into()],
+            ..Default::default()
         },
     );
     db::migrate(&pool, &[notes.clone(), ledgers.clone()]).await.unwrap();
@@ -299,6 +301,7 @@ async fn slug_redirects_and_patch_with_key(pool: &sqlx::PgPool, auth: &Auth) {
             create: vec!["user".into()],
             update: vec!["owner".into()],
             delete: vec!["owner".into()],
+            ..Default::default()
         },
     );
     articles.fields.insert("slug".into(), Field { kind: "str".into(), required: true, unique: true, slug: true, ..Default::default() });

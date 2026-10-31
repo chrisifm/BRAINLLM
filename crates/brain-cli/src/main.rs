@@ -633,6 +633,11 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
                     "give the route a path nothing else answers (for example /hooks/payments), or move the page or file; brain run and brain start proxy declared routes on the site's own origin");
                 diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
             }
+            // B0749: every row of a resource with a state-like field is public; advisory, never a contract error
+            for (file, message, fix) in backend::row_exposure(&app) {
+                let mut diag = compiler::Diag::new("B0749", &file, brain_parse::Span::default(), message, fix);
+                diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
+            }
             // brain.json `server` (B0707): body, time and rate limits shared by brain run and the production server
             if let Err(message) = brain_pack::read_server_limits(&app) {
                 let (msg, fix) = message.split_once("; fix: ").unwrap_or((message.as_str(), "set whole numbers in range"));

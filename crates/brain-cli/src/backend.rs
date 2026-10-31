@@ -159,7 +159,7 @@ pub fn contracts(root: &Path, kind: &str) -> Result<Vec<Resource>, String> {
             .map_err(|message| format!("server/{kind}/{name}/schema.jsbrain: {message}"))?;
         let policy = if kind == "resources" {
             serde_json::from_value(read_contract(root, &e.path().join("policy.jsbrain"))?).map_err(
-                |_| format!("{name}: policy must declare read/create/update/delete lists"),
+                |error| format!("{name}: {error}"),
             )?
         } else {
             Policy::default()
@@ -347,6 +347,26 @@ pub fn add_roles(root: &Path) -> Result<String, String> {
     std::fs::write(&path, format!("<meta server>\nexport default {{ roles: [{list}], signup_role: '{}' }}\n", roles.signup_role))
         .map_err(|_| "could not write server/auth/roles.jsbrain")?;
     Ok("server/auth/roles.jsbrain".into())
+}
+/// B0749: resources whose unconditioned public read also serves rows a state-like field marks as not ready.
+pub fn row_exposure(root: &Path) -> Vec<(String, String, String)> {
+    let state_like = |name: &str, field: &brain_backend::Field| {
+        let name = name.strip_prefix("is_").or_else(|| name.strip_prefix("has_")).unwrap_or(name);
+        let name = name.strip_suffix("_at").unwrap_or(name);
+        matches!(field.ty(), Some(brain_backend::types::Ty::Enum(_))) || ["status", "state", "published", "draft", "visibility", "approved"].contains(&name)
+    };
+    let resources = contracts(root, "resources").unwrap_or_default();
+    resources.iter()
+        .filter(|r| r.policy.api && !r.policy.expose_all_rows && r.policy.read.iter().any(|g| g == "public") && !r.policy.read_where.contains_key("public"))
+        .filter_map(|r| {
+            let (field, _) = r.fields.iter().find(|(name, field)| state_like(name, field))?;
+            Some((
+                format!("server/resources/{}/policy.jsbrain", r.name),
+                format!("read: ['public'] on `{}` serves every row to anonymous visitors, whatever its `{field}` says", r.name),
+                format!("limit it with read: [{{ public: {{ where: {{ {field}: <public value> }} }} }}, 'owner', 'admin'], or declare expose_all_rows: true if every row is meant to be public"),
+            ))
+        })
+        .collect()
 }
 pub fn inspect(root: &Path) -> Result<Value, String> {
     let resources = contracts(root, "resources")?;

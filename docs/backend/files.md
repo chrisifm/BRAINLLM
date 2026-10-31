@@ -142,3 +142,14 @@ their headers, so large downloads are not cut by the deadline).
 
 `crates/brain-backend/tests/files.rs` runs the `orders`/`invoices` example above, an any-type `attachments` bucket and
 a public `banners` bucket against the disposable Postgres harness (`node scripts/backend-check.mjs --only-tests files`).
+
+## Who reads a file
+
+- **`related`** evaluates the same rule as `GET /api/<resource>/<id>` on the linked record, through the same evaluator,
+  for signed-in and anonymous readers. Whoever can get the row gets the file, including `owner.<ref>` owners. When the
+  linked resource has row conditions, a hidden row answers `404` like its record does. Otherwise a denial is `403
+  POLICY_DENIED`, and its `fix` names the rule classes evaluated and no data.
+- **Public buckets** serve every file to anyone: they do not evaluate row conditions, so do not link them to rows that
+  can be hidden.
+- **`/meta`** of a public bucket answers anonymous readers with public fields only. `owner`, `resource`, `record`,
+  `field` and `sha256` go to the uploader and to roles the bucket grants.

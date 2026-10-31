@@ -162,6 +162,11 @@ pub(super) async fn gate(State(app): State<App>, req: Request, next: Next) -> Re
             "The key lacks the resource:action scope for this request; create a key with the needed scope",
         );
     }
+    // A server-only resource needs a scope that names it; a wildcard key is not allowed to discover it.
+    if app.resources.get(&resource).is_some_and(|r| !r.policy.api) && !api_keys::names(&principal.scopes, &resource, action) {
+        keys.record(trace(principal.key_id, StatusCode::NOT_FOUND, None));
+        return Error::missing().into_response();
+    }
     let quota = match keys.admit(&principal).await {
         Err(error) => return Error::internal(error).into_response(),
         Ok(Admission::RateLimited) => {
