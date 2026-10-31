@@ -585,7 +585,7 @@ impl Flows {
         Ok(true)
     }
 }
-async fn revoke(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, user: Uuid) -> Result<(), Error> {
+pub(crate) async fn revoke(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, user: Uuid) -> Result<(), Error> {
     for sql in [
         "UPDATE public._brain_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",
         "UPDATE public._brain_refresh_families SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",

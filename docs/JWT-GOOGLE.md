@@ -15,7 +15,7 @@ GOOGLE_CLIENT_ID=<configured web OAuth client id>.apps.googleusercontent.com
 
 The signing secret is server-only. The Google web client ID is public and is returned by the nonce endpoint; no Google client secret is used for this ID-token flow. Configure the exact browser origin in Google Cloud's authorized JavaScript origins and the backend origin allowlist. Google sign-in refuses to start without JWT configuration. Existing unconfigured applications keep their opaque session behavior.
 
-Run reviewed database migrations first. Migration 0003 adds revocation/version fields, Google identities, refresh families/tokens and one-use challenges. It does not link existing accounts by email or silently migrate their authentication method.
+Run reviewed database migrations first. Migration 0003 adds revocation/version fields, Google identities, refresh families/tokens and one-use challenges. It does not link existing accounts on its own or silently migrate their authentication method.
 
 ## Endpoints
 
@@ -35,6 +35,19 @@ JWT access uses jsonwebtoken's HS256 implementation with a fixed algorithm, expl
 Refresh tokens have 244 random bits from two UUIDv4 values. Only SHA-256 digests are stored. Rotation consumes the old token and inserts one child in a transaction serialized by user. Reusing an old refresh token revokes the entire family and its session, invalidating its access tokens immediately. Refresh across tabs must be coordinated: concurrent reuse intentionally fails closed. Family expiration is absolute, at most seven days, and rotation does not extend it. Limits are ten live sessions per user, 1,000 retained refresh families per user and 4,096 token records per family. Expired evidence is cleaned in bounded batches; hitting a token-chain limit requires fresh sign-in.
 
 ## Google verification and identity policy
+
+## Linking an existing account
+
+Google's `sub` is the identity. The first Google sign-in for an address that already has an account links it only when Google is authoritative for the address (`gmail.com`, or a token with a Workspace `hd`):
+
+| Existing account | Result |
+|---|---|
+| Verified email | The identity links. Password and sessions stay. |
+| Never verified | The identity links and the account is verified. Its password, sessions, refresh tokens, recovery links and API keys are annulled, because whoever typed the address first proved nothing. Password reset by email still works for the owner. Records the account created stay with it. |
+| Already linked to another Google subject | Denied. A linked identity is never replaced. |
+| Disabled | Denied. |
+
+A Google account on another provider's address has `email_verified` true, but Google does not host that address, so it does not link and sign-in answers `AUTH_DENIED`. Its owner recovers through password reset by email. Every denial is the same `AUTH_DENIED`, so the response never reveals whether the address has an account, and each one writes a `google-link` row with outcome `denied` to `_brain_auth_events`.
 
 Google tokens must use RS256, one configured audience, an accepted Google issuer, an unexpired lifetime, an acceptable issued-at, the exact browser nonce and a verified email. Multi-audience tokens require the configured authorized party. The stable identity key is Google's `sub`, never email. An existing local email account cannot be linked by this flow; sign in using its existing method. New identities receive only the candidate role. The local verified flag is enabled automatically only when Google is authoritative for the address: Gmail or a verified Google Workspace hosted-domain claim. A third-party address can authenticate its stable Google subject without being marked locally verified.
 

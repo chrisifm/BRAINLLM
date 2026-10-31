@@ -745,7 +745,7 @@ fn native_paths(roles: &crate::auth_flows::RolesConfig) -> Map<String, Value> {
     add(
         "/_brain/auth/google",
         "post",
-        "Verify configured GIS ID token and nonce; never link by email",
+        "Verify configured GIS ID token and nonce; link an existing account only when Google is authoritative for its email",
         json!([{"googleNonce":[]}]),
         200,
         Some(tokens),

@@ -225,7 +225,7 @@ impl Auth {
         tx.commit().await.map_err(crate::db::safe)?;
         Ok(nonce)
     }
-    /// Identity fields come only from Google::verify. Existing email accounts are NEVER linked implicitly.
+    /// Identity fields come only from Google::verify. An existing email account links only as `link_google` allows.
     pub async fn google_login(
         &self,
         identity: &crate::google::Identity,
@@ -252,15 +252,17 @@ impl Auth {
                 verified: row.get("verified"),
             }
         } else {
-            if sqlx::query("SELECT id FROM _brain_users WHERE email=$1")
+            let holder = sqlx::query("SELECT id,email,role,verified,disabled_at IS NOT NULL AS disabled FROM _brain_users WHERE email=$1 FOR UPDATE")
                 .bind(&identity.email)
                 .fetch_optional(&mut *tx)
                 .await
-                .map_err(crate::db::safe)?
-                .is_some()
-            {
-                tx.commit().await.map_err(crate::db::safe)?;
-                return Ok(None);
+                .map_err(crate::db::safe)?;
+            if let Some(row) = holder {
+                let Some(user) = self.link_google(&mut tx, identity, &row).await? else {
+                    tx.commit().await.map_err(crate::db::safe)?;
+                    return Ok(None);
+                };
+                return self.finish_google(tx, user).await;
             }
             let id = Uuid::new_v4();
             sqlx::query("INSERT INTO _brain_users(id,email,password_hash,role,verified) VALUES ($1,$2,$3,$4,$5)").bind(id).bind(&identity.email).bind(&self.dummy).bind(self.signup_role()).bind(identity.authoritative_email).execute(&mut *tx).await.map_err(|_|"Cannot create identity account")?;
@@ -272,12 +274,70 @@ impl Auth {
                 verified: identity.authoritative_email,
             }
         };
+        self.finish_google(tx, user).await
+    }
+    async fn finish_google(
+        &self,
+        mut tx: sqlx::Transaction<'_, sqlx::Postgres>,
+        user: User,
+    ) -> Result<Option<(User, String)>, String> {
         reserve_session(&mut tx, user.id).await?;
         let token = token();
         sqlx::query("INSERT INTO _brain_sessions(token_hash,user_id,expires_at) VALUES ($1,$2,now()+interval '7 days')").bind(digest(&token)).bind(user.id).execute(&mut *tx).await.map_err(crate::db::safe)?;
         sqlx::query("INSERT INTO _brain_auth_events(user_id,event,outcome) VALUES ($1,'google-login','success')").bind(user.id).execute(&mut *tx).await.map_err(crate::db::safe)?;
         tx.commit().await.map_err(crate::db::safe)?;
         Ok(Some((user, token)))
+    }
+    /// The email already has an account and this Google subject has none. Link only when Google is authoritative for
+    /// the address. An account that never proved it holds nothing to preserve: its password, sessions, recovery links
+    /// and API keys may belong to whoever typed the address first, so the proven owner annuls them all.
+    /// A linked identity is never replaced, and a disabled account stays disabled.
+    async fn link_google(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        identity: &crate::google::Identity,
+        row: &sqlx::postgres::PgRow,
+    ) -> Result<Option<User>, String> {
+        let id: Uuid = row.get("id");
+        let linked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM _brain_identities WHERE user_id=$1 AND provider='google')")
+            .bind(id)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(crate::db::safe)?;
+        if row.get::<bool, _>("disabled") || linked || !identity.authoritative_email {
+            sqlx::query("INSERT INTO _brain_auth_events(user_id,event,outcome) VALUES ($1,'google-link','denied')").bind(id).execute(&mut **tx).await.map_err(crate::db::safe)?;
+            return Ok(None);
+        }
+        if !row.get::<bool, _>("verified") {
+            sqlx::query("UPDATE _brain_users SET password_hash=$2,verified=true,auth_version=auth_version+1,updated_at=now() WHERE id=$1")
+                .bind(id)
+                .bind(&self.dummy)
+                .execute(&mut **tx)
+                .await
+                .map_err(crate::db::safe)?;
+            crate::auth_flows::revoke(tx, id).await.map_err(|error| error.to_string())?;
+            sqlx::query("UPDATE public._brain_api_keys SET revoked_at=now(),updated_at=now() WHERE user_id=$1 AND revoked_at IS NULL")
+                .bind(id)
+                .execute(&mut **tx)
+                .await
+                .map_err(crate::db::safe)?;
+            sqlx::query("INSERT INTO _brain_auth_events(user_id,event,outcome) VALUES ($1,'unproven-credentials-annulled','success')").bind(id).execute(&mut **tx).await.map_err(crate::db::safe)?;
+        }
+        sqlx::query("INSERT INTO _brain_identities(provider,subject,user_id,issuer,verified_email) VALUES ('google',$1,$2,$3,$4)")
+            .bind(&identity.subject)
+            .bind(id)
+            .bind(&identity.issuer)
+            .bind(&identity.email)
+            .execute(&mut **tx)
+            .await
+            .map_err(crate::db::safe)?;
+        sqlx::query("INSERT INTO _brain_auth_events(user_id,event,outcome) VALUES ($1,'google-link','success')").bind(id).execute(&mut **tx).await.map_err(crate::db::safe)?;
+        Ok(Some(User {
+            id,
+            email: row.get("email"),
+            role: row.get("role"),
+            verified: true,
+        }))
     }
     pub async fn user(&self, token: Option<&str>) -> Result<Option<User>, String> {
         let Some(token) =
@@ -399,6 +459,100 @@ mod identity_tests {
             .execute(&pool)
             .await
             .unwrap();
+        pool.close().await;
+    }
+    fn gmail(subject: &str, email: &str) -> crate::google::Identity {
+        crate::google::Identity {
+            subject: subject.into(),
+            issuer: "https://accounts.google.com".into(),
+            email: email.into(),
+            authoritative_email: true,
+        }
+    }
+    fn account(email: &str) -> Credentials {
+        Credentials {
+            email: email.into(),
+            password: "synthetic-existing-account-password".into(),
+        }
+    }
+    #[tokio::test]
+    #[ignore = "Use the disposable backend Postgres harness"]
+    async fn google_links_when_both_sides_are_verified_and_keeps_the_proven_credentials() {
+        let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Disposable Postgres only");
+        let pool = crate::db::connect(&url).await.unwrap();
+        crate::db::migrate(&pool, &[]).await.unwrap();
+        let auth = Auth::new(pool.clone()).await.unwrap();
+        let email = format!("link-{}@example.test", Uuid::new_v4().simple());
+        let user = auth.signup(account(&email)).await.unwrap();
+        sqlx::query("UPDATE _brain_users SET verified=true WHERE id=$1").bind(user.id).execute(&pool).await.unwrap();
+        let (_, before) = auth.login(account(&email)).await.unwrap().unwrap();
+        let subject = Uuid::new_v4().simple().to_string();
+        // Not authoritative: Google only observed this address once, so it proves nothing about it today.
+        let mut weak = gmail(&subject, &email);
+        weak.authoritative_email = false;
+        let nonce = auth.google_challenge().await.unwrap();
+        assert!(auth.google_login(&weak, &nonce).await.unwrap().is_none());
+        let nonce = auth.google_challenge().await.unwrap();
+        let (linked, _) = auth.google_login(&gmail(&subject, &email), &nonce).await.unwrap().unwrap();
+        assert_eq!(linked.id, user.id);
+        assert!(linked.verified);
+        assert!(auth.user(Some(&before)).await.unwrap().is_some(), "a proven session survives linking");
+        assert!(auth.login(account(&email)).await.unwrap().is_some(), "a proven password survives linking");
+        // A second Google account claiming the same address never replaces the linked one.
+        let intruder = Uuid::new_v4().simple().to_string();
+        let nonce = auth.google_challenge().await.unwrap();
+        assert!(auth.google_login(&gmail(&intruder, &email), &nonce).await.unwrap().is_none());
+        let subjects: Vec<String> = sqlx::query_scalar("SELECT subject FROM _brain_identities WHERE user_id=$1").bind(user.id).fetch_all(&pool).await.unwrap();
+        assert_eq!(subjects, vec![subject.clone()]);
+        let nonce = auth.google_challenge().await.unwrap();
+        assert_eq!(auth.google_login(&gmail(&subject, &email), &nonce).await.unwrap().unwrap().0.id, user.id);
+        pool.close().await;
+    }
+    #[tokio::test]
+    #[ignore = "Use the disposable backend Postgres harness"]
+    async fn google_owner_annuls_every_credential_of_an_unverified_account_holding_the_email() {
+        let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Disposable Postgres only");
+        let pool = crate::db::connect(&url).await.unwrap();
+        crate::db::migrate(&pool, &[]).await.unwrap();
+        let auth = Auth::new(pool.clone()).await.unwrap();
+        let jwt = crate::jwt::Jwt::new(
+            pool.clone(),
+            crate::jwt::Config::new("synthetic-jwt-signing-secret-32-bytes".into(), "issuer".into(), "audience".into()).unwrap(),
+        );
+        let email = format!("squat-{}@example.test", Uuid::new_v4().simple());
+        let squatter = auth.signup(account(&email)).await.unwrap();
+        let (session_user, session) = auth.login(account(&email)).await.unwrap().unwrap();
+        let (token_user, opaque) = auth.login(account(&email)).await.unwrap().unwrap();
+        assert_eq!(session_user.id, token_user.id);
+        let tokens = jwt.issue(token_user, &opaque).await.unwrap();
+        // Every door the unproven holder may have prepared for later.
+        sqlx::query("INSERT INTO public._brain_auth_tokens(token_hash,user_id,purpose,expires_at,email_bound,auth_version,activated_at) VALUES($1,$2,'reset',now()+interval '1 hour',$3,0,now())")
+            .bind(digest(&email)).bind(squatter.id).bind(&email).execute(&pool).await.unwrap();
+        let key = Uuid::new_v4();
+        sqlx::query("INSERT INTO public._brain_api_keys(id,user_id,name,prefix,secret_hash,scopes) VALUES($1,$2,'prepared',$3,$4,ARRAY['*'])")
+            .bind(key).bind(squatter.id).bind(&key.simple().to_string()[..12]).bind(digest(&key.to_string())).execute(&pool).await.unwrap();
+        let subject = Uuid::new_v4().simple().to_string();
+        let nonce = auth.google_challenge().await.unwrap();
+        let (owner, owner_session) = auth.google_login(&gmail(&subject, &email), &nonce).await.unwrap().unwrap();
+        assert_eq!(owner.id, squatter.id);
+        assert!(owner.verified, "the real owner proved the address");
+        assert!(auth.login(account(&email)).await.unwrap().is_none(), "the unproven password no longer signs in");
+        assert!(auth.user(Some(&session)).await.unwrap().is_none(), "unproven opaque sessions end");
+        assert!(jwt.user(Some(&tokens.access_token)).await.unwrap().is_none(), "unproven access tokens end");
+        assert!(jwt.refresh(Some(&tokens.refresh_token)).await.unwrap().is_none(), "unproven refresh tokens end");
+        assert!(auth.user(Some(&owner_session)).await.unwrap().is_some());
+        let open: i64 = sqlx::query_scalar("SELECT count(*) FROM public._brain_auth_tokens WHERE user_id=$1 AND consumed_at IS NULL").bind(squatter.id).fetch_one(&pool).await.unwrap();
+        assert_eq!(open, 0, "prepared recovery links are consumed");
+        let keys: i64 = sqlx::query_scalar("SELECT count(*) FROM public._brain_api_keys WHERE user_id=$1 AND revoked_at IS NULL").bind(squatter.id).fetch_one(&pool).await.unwrap();
+        assert_eq!(keys, 0, "prepared API keys are revoked");
+        // Disabled stays disabled however the owner signs in.
+        let other = format!("disabled-{}@example.test", Uuid::new_v4().simple());
+        let disabled = auth.signup(account(&other)).await.unwrap();
+        sqlx::query("UPDATE _brain_users SET disabled_at=now() WHERE id=$1").bind(disabled.id).execute(&pool).await.unwrap();
+        let nonce = auth.google_challenge().await.unwrap();
+        assert!(auth.google_login(&gmail(&Uuid::new_v4().simple().to_string(), &other), &nonce).await.unwrap().is_none());
+        let identities: i64 = sqlx::query_scalar("SELECT count(*) FROM _brain_identities WHERE user_id=$1").bind(disabled.id).fetch_one(&pool).await.unwrap();
+        assert_eq!(identities, 0);
         pool.close().await;
     }
 }
