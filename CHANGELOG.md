@@ -27,6 +27,16 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 - The development compile cache keys each source by modification time, size and (on Unix) inode. A file replaced
   atomically while keeping its timestamp is recompiled instead of serving the previous output until a watch event.
+- Deeply nested BrainScript, markup or CSS reports B0002/B0003 instead of overflowing the compiler stack; one small
+  file could previously abort `check`, `build` and the MCP server. Span columns are computed in logarithmic time, so a
+  single very long line no longer makes diagnostics quadratic.
+- Live sockets that are accepted and then closed with "try again later" no longer reconnect and refetch forever; the
+  retry budget resets only after a healthy connection. Long-lived reconnects keep working.
+- Runtime resources are released: settled handler requests leave the component registry, synchronized stores free
+  their channels, listeners and sockets on close and subtree unmount, the History router removes its service worker
+  listener on stop, and cached Prompt API sessions are bounded to the eight most recent.
+- The development server unregisters closed HMR sockets immediately. `brain start` escalates workers that ignore
+  SIGTERM to SIGKILL after reloads, memory restarts and health restarts, so an old worker cannot keep the listener.
 
 ### Tests
 
