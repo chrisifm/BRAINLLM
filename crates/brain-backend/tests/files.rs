@@ -127,7 +127,7 @@ async fn declared_buckets_stream_any_type_enforce_policy_and_serve_ranges() {
     let response = client.upload("/_brain/files/invoices", owner_session, "invoice.pdf", "application/pdf", &pdf).await;
     assert_eq!(response.status(), 422);
     let response = client.upload(&invoice_path, stranger_session, "invoice.pdf", "application/pdf", &pdf).await;
-    assert_eq!(response.status(), 403, "only a user who may update the order attaches files to it");
+    assert_eq!(response.status(), 404, "only a user who may update the order attaches files to it; a stranger may not read it, so it answers like a missing row");
     // Content decides the type: PNG bytes declared as PDF are rejected by a PDF-only bucket.
     let png = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R'];
     let response = client.upload(&invoice_path, owner_session, "fake.pdf", "application/pdf", &png).await;

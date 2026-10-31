@@ -15,6 +15,20 @@ pub enum Scope {
     All,
     /// Rows owned by `user` directly (`owner`) and/or through declared relation paths (`owner.a.b`).
     Owned { user: Uuid, direct: bool, paths: Vec<Vec<String>> },
+    /// OR of read grants of which at least one carries a row condition (`{ public: { where: {...} } }`).
+    Rows(Vec<Branch>),
+}
+/// One held read grant: who it covers, and the row conditions it adds.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Branch {
+    pub who: Who,
+    pub conditions: Vec<(String, serde_json::Value)>,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub enum Who {
+    Anyone,
+    Owner(Uuid),
+    Through(Uuid, Vec<String>),
 }
 
 /// Parses `owner.<ref>[.<ref>]`; None for every other grant.
@@ -35,6 +49,9 @@ fn grants<'a>(r: &'a Resource, operation: &str) -> &'a [String] {
 
 /// The scope a viewer has for an operation, or None when the policy denies it entirely.
 pub fn scope(r: &Resource, operation: &str, viewer: Viewer<'_>) -> Option<Scope> {
+    if operation == "read" && r.policy.conditioned() {
+        return conditioned_scope(r, viewer);
+    }
     if r.policy.allows(operation, viewer.role, false) {
         return Some(Scope::All);
     }
@@ -43,6 +60,55 @@ pub fn scope(r: &Resource, operation: &str, viewer: Viewer<'_>) -> Option<Scope>
     let direct = r.policy.allows(operation, viewer.role, true);
     let paths: Vec<Vec<String>> = grants.iter().filter_map(|g| path(g)).collect();
     (direct || !paths.is_empty()).then_some(Scope::Owned { user, direct, paths })
+}
+/// The grants a viewer holds on a resource with conditioned reads. Any unconditioned general grant wins outright.
+fn conditioned_scope(r: &Resource, viewer: Viewer<'_>) -> Option<Scope> {
+    let mut branches = Vec::new();
+    for grant in &r.policy.read {
+        let who = match (grant.as_str(), path(grant)) {
+            ("public", _) => Who::Anyone,
+            ("owner", _) => match (viewer.id, viewer.role) {
+                (Some(user), Some(_)) => Who::Owner(user),
+                _ => continue,
+            },
+            (_, Some(hops)) => match viewer.id {
+                Some(user) => Who::Through(user, hops),
+                None => continue,
+            },
+            (role, None) if viewer.role == Some(role) => Who::Anyone,
+            _ => continue,
+        };
+        let conditions: Vec<_> = r.policy.read_where.get(grant).map(|c| c.iter().map(|(f, v)| (f.clone(), v.clone())).collect()).unwrap_or_default();
+        if who == Who::Anyone && conditions.is_empty() {
+            return Some(Scope::All);
+        }
+        branches.push(Branch { who, conditions });
+    }
+    (!branches.is_empty()).then_some(Scope::Rows(branches))
+}
+/// The single evaluator of "may this viewer do `operation` on this existing row": role, `owner`, `owner.<ref>` and
+/// row conditions, exactly as lists, get, sockets and related files apply them.
+pub async fn row_allowed(pool: &sqlx::PgPool, r: &Resource, resources: &BTreeMap<String, Resource>, operation: &str, viewer: Viewer<'_>, id: Uuid) -> Result<bool, sqlx::Error> {
+    let Some(scope) = scope(r, operation, viewer) else { return Ok(false) };
+    exists(pool, r, resources, &scope, id).await
+}
+async fn exists(pool: &sqlx::PgPool, r: &Resource, resources: &BTreeMap<String, Resource>, scope: &Scope, id: Uuid) -> Result<bool, sqlx::Error> {
+    let mut q = sqlx::QueryBuilder::<sqlx::Postgres>::new("SELECT EXISTS(SELECT 1 FROM _brain_res_");
+    q.push(&r.name).push(" WHERE id=").push_bind(id).push(" AND ");
+    scope.push(&mut q, r, resources);
+    q.push(")");
+    q.build_query_scalar::<bool>().fetch_one(pool).await
+}
+/// The relational (`owner.<ref>`) part of a viewer's read scope, used only for `owner` field visibility.
+pub fn relational_read(r: &Resource, viewer: Viewer<'_>) -> Option<Scope> {
+    let user = viewer.id?;
+    if r.policy.conditioned() {
+        let Some(Scope::Rows(branches)) = scope(r, "read", viewer) else { return None };
+        let branches: Vec<Branch> = branches.into_iter().filter(|b| matches!(b.who, Who::Through(..))).collect();
+        return (!branches.is_empty()).then_some(Scope::Rows(branches));
+    }
+    let paths: Vec<Vec<String>> = r.policy.read.iter().filter_map(|g| path(g)).collect();
+    (!paths.is_empty()).then_some(Scope::Owned { user, direct: false, paths })
 }
 pub fn read_scope(r: &Resource, _resources: &BTreeMap<String, Resource>, viewer: Viewer<'_>) -> Option<Scope> {
     scope(r, "read", viewer)
@@ -83,6 +149,27 @@ impl Scope {
                 }
                 q.push(")");
             }
+            Scope::Rows(branches) => {
+                q.push("(false");
+                for branch in branches {
+                    q.push(" OR (");
+                    match &branch.who {
+                        Who::Anyone => {
+                            q.push("true");
+                        }
+                        Who::Owner(user) => {
+                            q.push("owner=").push_bind(*user);
+                        }
+                        Who::Through(user, hops) => push_path(q, r, resources, hops, *user),
+                    }
+                    for (field, value) in &branch.conditions {
+                        q.push(" AND ");
+                        crate::query::push_row_condition(q, r, field, value);
+                    }
+                    q.push(")");
+                }
+                q.push(")");
+            }
         }
     }
 }
@@ -120,18 +207,19 @@ pub async fn owns_through(
     viewer: Viewer<'_>,
     id: Uuid,
 ) -> Result<bool, sqlx::Error> {
+    if operation == "read" && r.policy.conditioned() {
+        return match relational_read(r, viewer) {
+            Some(relational) => exists(pool, r, resources, &relational, id).await,
+            None => Ok(false),
+        };
+    }
     let Some(Scope::Owned { user, paths, .. }) = scope(r, operation, viewer) else {
         return Ok(false);
     };
     if paths.is_empty() {
         return Ok(false);
     }
-    let relational = Scope::Owned { user, direct: false, paths };
-    let mut q = sqlx::QueryBuilder::<sqlx::Postgres>::new("SELECT EXISTS(SELECT 1 FROM _brain_res_");
-    q.push(&r.name).push(" WHERE id=").push_bind(id).push(" AND ");
-    relational.push(&mut q, r, resources);
-    q.push(")");
-    q.build_query_scalar::<bool>().fetch_one(pool).await
+    exists(pool, r, resources, &Scope::Owned { user, direct: false, paths }, id).await
 }
 
 /// Whether a new or replacement record value keeps the viewer's relational ownership (prevents re-pointing a row

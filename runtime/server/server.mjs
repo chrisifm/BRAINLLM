@@ -187,7 +187,7 @@ function googleSignInPage(page) {
 }
 
 // One configured loopback authority. No user-controlled target, proxy, redirect, auth cache or pending queue.
-export function nativeAuthBridge(raw) {
+export function nativeAuthBridge(raw, serviceKey) {
   if (!raw) return null
   if (typeof raw !== 'string' || raw.length > 2048) throw Error('BRAIN_BACKEND_URL must be an explicit loopback HTTP origin')
   let target
@@ -320,7 +320,7 @@ export function nativeAuthBridge(raw) {
       } catch { outgoing?.destroy(); finish(true) }
     })
   }
-  const resource = (incoming, response, rid, name) => {
+  const resource = (incoming, response, rid, name, serviceKey) => {
     if (typeof name !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(name)) throw new HttpError(400, 'Invalid native resource name')
     const idPath = id => {
       if (typeof id !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id)) throw new HttpError(400, 'Invalid native record identifier')
@@ -337,7 +337,8 @@ export function nativeAuthBridge(raw) {
       }
       const req = Readable.from(bytes.length ? [bytes] : [])
       req.method = method
-      req.headers = { cookie: cookies(incoming, false), accept: 'application/json', 'content-type':'application/json', 'content-length':String(bytes.length) }
+      // A service call acts as the key's owner, never as the visitor: it sends no session.
+      req.headers = { ...(serviceKey ? { authorization: 'Bearer ' + serviceKey } : { cookie: cookies(incoming, false) }), accept: 'application/json', 'content-type':'application/json', 'content-length':String(bytes.length) }
       if (method !== 'GET') {
         let origin
         try { origin = new URL(incoming.headers.origin); if (origin.origin !== incoming.headers.origin || origin.host !== (incoming.headers['x-forwarded-host'] || incoming.headers.host)) throw Error() } catch { throw new HttpError(403, 'Native writes require a same-origin server request') }
@@ -467,6 +468,11 @@ export function nativeAuthBridge(raw) {
   // ctx.backend for one server request (load, actions, RPC, dev sidecar): the same object everywhere
   const backend = (incoming, response, rid) => Object.freeze({
     resource: name => resource(incoming, response, rid, name),
+    // A server-only resource (`api: false`) from trusted server code, with BRAIN_SERVICE_API_KEY
+    service: name => {
+      if (!serviceKey) throw new HttpError(503, 'ctx.backend.service needs BRAIN_SERVICE_API_KEY: create an API key with a scope naming the resource')
+      return resource(incoming, response, rid, name, serviceKey)
+    },
     slugRedirect: (name, slug) => resource(incoming, response, rid, name).slugRedirect(slug),
     login: credentials => login(incoming, response, rid, credentials),
   })
@@ -505,8 +511,10 @@ export function nativeAuthBridge(raw) {
 
 export function createServer(o = {}) {
   const dist = resolve(o.dist || process.cwd())
-  const env = Object.freeze({ ...(o.env || ENV) }) // ctx.env: what the supervisor passed, read-only
-  const native = nativeAuthBridge(o.backendURL ?? env.BRAIN_BACKEND_URL)
+  // ctx.env: what the supervisor passed, read-only; the service key stays with ctx.backend.service
+  const { BRAIN_SERVICE_API_KEY: serviceKey, ...visibleEnv } = o.env || ENV
+  const env = Object.freeze(visibleEnv)
+  const native = nativeAuthBridge(o.backendURL ?? env.BRAIN_BACKEND_URL, serviceKey)
   if (o.nativeSockets !== undefined && typeof o.nativeSockets !== 'boolean') throw Error('nativeSockets must be an explicit boolean')
   const SITEMAP_BYTES = +(o.sitemapBytes ?? 50 * 1024 * 1024) // protocol: 50 MB uncompressed per sitemap file
   const secret = o.secret ?? env.BRAIN_SECRET ?? ''

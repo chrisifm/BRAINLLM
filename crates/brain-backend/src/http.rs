@@ -156,7 +156,7 @@ impl Error {
         Self::new(
             StatusCode::FORBIDDEN,
             "POLICY_DENIED",
-            "Sign in with a role permitted by this resource's policy",
+            "The declared policy does not grant this operation to this identity (rules evaluated: role, owner, owner.<ref> and row conditions); sign in if anonymous, otherwise use an account those rules allow",
         )
     }
     fn missing() -> Self {
@@ -227,8 +227,13 @@ impl App {
         }
         Ok(u)
     }
+    /// A resource of the public surface: a server-only one (`api: false`) answers like an unknown name unless an
+    /// API key with an explicit scope for it (see `http_api_keys::gate`) is acting.
     fn resource(&self, name: &str) -> Result<&Resource> {
-        self.resources.get(name).ok_or_else(Error::missing)
+        self.resources
+            .get(name)
+            .filter(|r| r.policy.api || http_api_keys::key_user().is_some())
+            .ok_or_else(Error::missing)
     }
 }
 
@@ -1175,27 +1180,19 @@ async fn read(
         .await
         .map_err(|e| Error::internal(db::safe(e)))?
         .ok_or_else(Error::missing)?;
-    let owns = u
-        .as_ref()
-        .is_some_and(|u| row["owner"].as_str() == Some(&u.id.to_string()));
-    let mut through = false;
-    if !r
-        .policy
-        .allows("read", u.as_ref().map(|u| u.role.as_str()), owns)
-    {
-        through = match &u {
-            Some(u) if relational(r, "read") => owns_through(&app, r, "read", u, id).await?,
-            _ => false,
-        };
-        if !through {
-            return Err(Error::forbidden());
-        }
-    } else if let Some(u) = &u
-        && relational(r, "read")
-        && r.fields.values().any(|f| f.visible.is_some())
-    {
-        through = owns_through(&app, r, "read", u, id).await?;
+    let allowed = crate::ownership::row_allowed(&app.pool, r, &app.resources, "read", viewer(u.as_ref()), id)
+        .await
+        .map_err(|e| Error::internal(db::safe(e)))?;
+    if !allowed {
+        // A row hidden by a condition answers exactly like one that does not exist: no existence oracle.
+        return Err(if r.policy.conditioned() { Error::missing() } else { Error::forbidden() });
     }
+    let owns = u.as_ref().is_some_and(|u| row["owner"].as_str() == Some(&u.id.to_string()));
+    let general = r.policy.allows("read", u.as_ref().map(|u| u.role.as_str()), owns);
+    let through = match &u {
+        Some(u) if relational(r, "read") && (!general || r.fields.values().any(|f| f.visible.is_some())) => owns_through(&app, r, "read", u, id).await?,
+        _ => false,
+    };
     crate::visibility::project(r, &mut row, viewer(u.as_ref()), through);
     // A record without includes carries a strong revision validator usable in If-Match.
     let etag = names.is_empty().then(|| cache_http::record_etag(&row, &revision));
@@ -1205,6 +1202,28 @@ async fn read(
         response.headers_mut().insert(header::ETAG, etag);
     }
     Ok(response)
+}
+/// The last step of every write response: the projected row, or the row without its data when the writer may not read
+/// its resulting state (conditioned reads and server-only resources; a write must not reveal what a read would hide).
+pub(super) async fn reveal(app: &App, r: &Resource, record: &mut Value, u: &User, through: bool) -> Result<()> {
+    let id = record["id"].as_str().and_then(|s| Uuid::parse_str(s).ok());
+    let mut through = through;
+    let mut visible = r.policy.api || http_api_keys::key_user().is_some();
+    if visible && r.policy.conditioned() {
+        let Some(id) = id else { return Err(Error::internal("record")) };
+        let safe = |e| Error::internal(db::safe(e));
+        visible = crate::ownership::row_allowed(&app.pool, r, &app.resources, "read", viewer(Some(u)), id).await.map_err(safe)?;
+        through = through || owns_through(app, r, "read", u, id).await?;
+    }
+    if visible {
+        crate::visibility::project(r, record, viewer(Some(u)), through);
+    } else if let Some(row) = record.as_object_mut() {
+        row.retain(|k, _| matches!(k.as_str(), "id" | "data" | "created_at" | "updated_at"));
+        if row.contains_key("data") {
+            row.insert("data".into(), json!({}));
+        }
+    }
+    Ok(())
 }
 fn before_error(error: crate::before_hooks::HookFailure, r: &Resource) -> Error {
     match error {
@@ -1302,7 +1321,24 @@ async fn scoped_owner(
     if relational(r, operation) && owns_through(app, r, operation, u, id).await? {
         return Ok((None, true));
     }
-    Err(Error::missing())
+    Err(write_denied(&app.pool, &app.resources, r, u, id, Error::missing()).await)
+}
+/// The one answer to a write on an existing row the policy does not grant: `403 POLICY_DENIED` when the writer may
+/// read the row (its existence is no secret and "not found" would mislead), otherwise `missing`, which the caller
+/// builds byte-identical to its own answer for a row that does not exist.
+pub(super) async fn write_denied(
+    pool: &PgPool,
+    resources: &BTreeMap<String, Resource>,
+    r: &Resource,
+    u: &User,
+    id: Uuid,
+    missing: Error,
+) -> Error {
+    match crate::ownership::row_allowed(pool, r, resources, "read", viewer(Some(u)), id).await {
+        Ok(true) => Error::forbidden(),
+        Ok(false) => missing,
+        Err(error) => Error::internal(db::safe(error)),
+    }
 }
 /// A relational writer must keep pointing the record at a parent they own.
 async fn owns_data(app: &App, r: &Resource, operation: &str, u: &User, data: &Value) -> Result<bool> {
@@ -1340,7 +1376,7 @@ async fn create(
         .await
         .map_err(|error| write_error(r, error))?;
     app.sockets.changed(&name, "create", &record);
-    crate::visibility::project(r, &mut record, viewer(Some(&u)), through);
+    reveal(&app, r, &mut record, &u, through).await?;
     Ok(Json(record))
 }
 async fn update(
@@ -1376,7 +1412,7 @@ async fn update(
         .map_err(|error| write_error(r, error))?
         .ok_or_else(conflict)?;
     app.sockets.changed(&name, "update", &record);
-    crate::visibility::project(r, &mut record, viewer(Some(&u)), through);
+    reveal(&app, r, &mut record, &u, through).await?;
     Ok(Json(record))
 }
 /// Partial update: only sent fields change; the merged record is revalidated and written with the same CAS.
@@ -1412,7 +1448,7 @@ async fn patch(
         .map_err(|error| write_error(r, error))?
         .ok_or_else(conflict)?;
     app.sockets.changed(&name, "update", &record);
-    crate::visibility::project(r, &mut record, viewer(Some(&u)), through);
+    reveal(&app, r, &mut record, &u, through).await?;
     Ok(Json(record))
 }
 async fn delete(

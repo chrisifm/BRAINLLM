@@ -91,30 +91,41 @@ async fn authorize(app: &App, bucket: &Bucket, file: &files::Record, user: Optio
     if op == "read" && bucket.visibility == Visibility::Public {
         return Ok(());
     }
-    let user = user.ok_or_else(sign_in)?;
+    let grants = bucket.grants(op);
+    let linked = grants.iter().any(|g| g == "related");
+    if linked && related(app, file.resource.as_deref(), file.record, user, "read").await? {
+        return Ok(());
+    }
+    let Some(user) = user else {
+        return Err(if hides(app, linked, file.resource.as_deref()) { Error::missing() } else { sign_in() });
+    };
     if bucket.role_allows(op, &user.role) {
         return Ok(());
     }
-    let grants = bucket.grants(op);
     if grants.iter().any(|g| g == "owner") && file.owner == user.id {
         return Ok(());
     }
-    if grants.iter().any(|g| g == "related") && related(app, file.resource.as_deref(), file.record, user, "read").await? {
-        return Ok(());
-    }
-    Err(Error::forbidden())
+    Err(if hides(app, linked, file.resource.as_deref()) { Error::missing() } else { denied() })
 }
-/// Does the resource policy allow `op` on the linked record for this user?
-async fn related(app: &App, resource: Option<&str>, record: Option<Uuid>, user: &User, op: &str) -> Result<bool> {
+/// A file whose linked row is hidden by a read condition is denied like a get of that row: 404, no existence oracle.
+fn hides(app: &App, linked: bool, resource: Option<&str>) -> bool {
+    linked && resource.and_then(|r| app.resources.get(r)).is_some_and(|r| r.policy.conditioned())
+}
+fn denied() -> Error {
+    let mut error = Error::forbidden();
+    error.fix = "The bucket policy does not grant this operation to this identity (rules evaluated: bucket role, file owner and the linked record's policy); sign in if anonymous, otherwise use an account those rules allow".into();
+    error
+}
+/// Does the linked record's policy allow `op` for this viewer? The same evaluator as a get of that record.
+async fn related(app: &App, resource: Option<&str>, record: Option<Uuid>, user: Option<&User>, op: &str) -> Result<bool> {
     let (Some(resource), Some(record)) = (resource, record) else {
         return Ok(false);
     };
-    let r = app.resource(resource)?;
-    let Some(row) = crate::db::get(&app.pool, r, record).await.map_err(Error::internal)? else {
-        return Ok(false);
-    };
-    let owns = row["owner"].as_str() == Some(&user.id.to_string());
-    Ok(r.policy.allows(op, Some(&user.role), owns))
+    let r = app.resources.get(resource).ok_or_else(Error::missing)?;
+    let viewer = crate::visibility::Viewer { id: user.map(|u| u.id), role: user.map(|u| u.role.as_str()) };
+    crate::ownership::row_allowed(&app.pool, r, &app.resources, op, viewer, record)
+        .await
+        .map_err(Error::internal)
 }
 
 #[derive(Deserialize)]
@@ -142,8 +153,9 @@ async fn upload(
             return Err(Error::validation(json!({"record":"This bucket is not linked to a resource; omit record"})));
         }
         (Some(resource), Some(record)) => {
-            if !related(&app, Some(resource), Some(record), &user, "update").await? {
-                return Err(Error::forbidden());
+            if !related(&app, Some(resource), Some(record), Some(&user), "update").await? {
+                let r = app.resources.get(resource).ok_or_else(Error::missing)?;
+                return Err(super::write_denied(&app.pool, &app.resources, r, &user, record, Error::missing()).await);
             }
         }
         (None, None) => {}
@@ -225,7 +237,7 @@ async fn list(Extract(app): Extract<App>, Path(name): Path<String>, Query(q): Qu
         None
     } else if q.record.is_some()
         && grants.iter().any(|g| g == "related")
-        && related(&app, bucket.resource.as_deref(), q.record, &user, "read").await?
+        && related(&app, bucket.resource.as_deref(), q.record, Some(&user), "read").await?
     {
         None
     } else if grants.iter().any(|g| g == "owner") {
@@ -247,7 +259,14 @@ async fn record(app: &App, name: &str, id: Uuid, h: &HeaderMap, op: &str) -> Res
     Ok((bucket, file))
 }
 async fn meta(Extract(app): Extract<App>, Path((name, id)): Path<(String, Uuid)>, h: HeaderMap) -> Result<Json<serde_json::Value>> {
-    let (_, file) = record(&app, &name, id, &h, "read").await?;
+    let (bucket, file) = record(&app, &name, id, &h, "read").await?;
+    // A public bucket serves anyone; who uploaded it and which record it belongs to stay with its managers.
+    if bucket.visibility == Visibility::Public {
+        let user = app.user(&h).await.ok().flatten();
+        if !user.is_some_and(|u| file.owner == u.id || bucket.role_allows("read", &u.role)) {
+            return Ok(Json(file.public_json()));
+        }
+    }
     Ok(Json(file.json()))
 }
 async fn remove(Extract(app): Extract<App>, Path((name, id)): Path<(String, Uuid)>, h: HeaderMap) -> Result<Response> {

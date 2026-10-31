@@ -413,7 +413,8 @@ async fn authorize(
             return Ok(false);
         };
         if let Some(event) = event.filter(|event| event.operation == "delete") {
-            // Only fixed UUID authority metadata captured before hooks and successful COMMIT is retained.
+            // Only fixed UUID authority metadata captured before hooks and successful COMMIT is retained. The row is
+            // gone, so relational and conditioned grants cannot be evaluated: those viewers fail closed.
             return Ok(resource
                 .policy
                 .allows("read", Some(&user.role), event.owner == user.id));
@@ -422,30 +423,19 @@ async fn authorize(
             (Some(id), _) => *id,
             (None, Some(event)) => event.id,
             // Joining a collection authorizes interest only; each delivered id is checked independently.
-            (None, None) => return Ok(resource.policy.allows("read", Some(&user.role), true)),
+            (None, None) => {
+                let viewer = crate::visibility::Viewer { id: Some(user.id), role: Some(&user.role) };
+                return Ok(crate::ownership::read_scope(resource, &app.resources, viewer).is_some());
+            }
         };
-        // Current policies depend only on ownership and role: never fetch or retain arbitrary row JSON.
-        if !crate::contract::identifier(&resource.name) {
-            return Ok(false);
-        }
-        let sql = sqlx::AssertSqlSafe(format!(
-            "SELECT owner FROM _brain_res_{} WHERE id=$1",
-            resource.name
-        ));
-        let owner = sqlx::query_scalar::<_, Uuid>(sql)
-            .bind(id)
-            .fetch_optional(&app.pool)
+        // The shared evaluator answers from the row without fetching or retaining its JSON.
+        let viewer = crate::visibility::Viewer { id: Some(user.id), role: Some(&user.role) };
+        crate::ownership::row_allowed(&app.pool, resource, &app.resources, "read", viewer, id)
             .await
             .map_err(|error| {
                 let _ = Error::internal(crate::db::safe(error));
                 CheckFailure::Unavailable
-            })?;
-        let Some(owner) = owner else {
-            return Ok(false);
-        };
-        Ok(resource
-            .policy
-            .allows("read", Some(&user.role), owner == user.id))
+            })
     })
     .await
 }

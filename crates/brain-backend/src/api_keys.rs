@@ -102,6 +102,10 @@ pub fn allows(scopes: &[String], resource: &str, action: &str) -> bool {
         })
     })
 }
+/// Whether a scope names this resource explicitly (`orders:read`, `orders:*`), as opposed to `*:...`.
+pub fn names(scopes: &[String], resource: &str, action: &str) -> bool {
+    scopes.iter().any(|scope| scope.split_once(':').is_some_and(|(r, a)| r == resource && (a == "*" || a == action)))
+}
 /// The HTTP method decides the action: safe methods read, everything else writes.
 pub fn action(method: &axum::http::Method) -> &'static str {
     if matches!(*method, axum::http::Method::GET | axum::http::Method::HEAD) {

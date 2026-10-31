@@ -392,6 +392,10 @@ pub struct Record {
     pub created_at: String,
 }
 impl Record {
+    /// What an anonymous reader of a public bucket learns: enough to render the file, nothing about its origin.
+    pub fn public_json(&self) -> Value {
+        json!({"id":self.id,"bucket":self.bucket,"filename":self.filename,"contentType":self.content_type,"bytes":self.bytes,"visibility":self.visibility,"createdAt":self.created_at,"url":format!("/_brain/files/{}/{}",self.bucket,self.id)})
+    }
     pub fn json(&self) -> Value {
         json!({"id":self.id,"bucket":self.bucket,"owner":self.owner,"resource":self.resource,"record":self.record,"field":self.field,"filename":self.filename,"contentType":self.content_type,"sniffedType":self.sniffed_type,"declaredType":self.declared_type,"bytes":self.bytes,"sha256":self.sha256,"visibility":self.visibility,"createdAt":self.created_at,"url":format!("/_brain/files/{}/{}",self.bucket,self.id)})
     }

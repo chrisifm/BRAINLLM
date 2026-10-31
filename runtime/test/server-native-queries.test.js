@@ -10,7 +10,7 @@ const backend=createServer((req,res)=>{
   const chunks=[]
   req.on('data',chunk=>chunks.push(chunk))
   req.on('end',()=>{
-    seen.push({method:req.method,path:req.url,body:Buffer.concat(chunks).toString()})
+    seen.push({method:req.method,path:req.url,body:Buffer.concat(chunks).toString(),authorization:req.headers.authorization,cookie:req.headers.cookie})
     const json=(status,value)=>{res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(value))}
     if(req.url.startsWith('/api/articles/redirects/old-title'))return json(200,{slug:'new-title'})
     if(req.url.startsWith('/api/articles/redirects/'))return json(404,{schemaVersion:1,error:{code:'NOT_FOUND',fix:'',fields:null}})
@@ -73,4 +73,43 @@ test('slugRedirect answers the current slug or null and never confirms unknown s
   assert.equal(await backend.resource('articles').slugRedirect('missing'),null)
   assert.throws(()=>backend.slugRedirect('articles','a/b'),/slug/)
   assert.throws(()=>backend.slugRedirect('../auth','x'),/name/)
+})
+test('ctx.backend.service acts with the service key and never forwards the visitor session',async()=>{
+  const keyed=nativeAuthBridge(`http://127.0.0.1:${backend.address().port}`,'bk_live_synthetic_service_key')
+  try{
+    const req=new EventEmitter(),res=new EventEmitter()
+    req.method='GET';req.headers={host:'shop.example.test',origin:'https://shop.example.test',cookie:'__Host-brain-access=visitor'}
+    res.writableEnded=false;res.destroyed=false
+    await keyed.backend(req,res,id).service('ledgers').list()
+    assert.equal(new URL(seen.at(-1).path,'http://x').pathname,'/api/ledgers')
+    assert.equal(seen.at(-1).authorization,'Bearer bk_live_synthetic_service_key')
+    assert.equal(seen.at(-1).cookie,undefined)
+    await keyed.backend(req,res,id).resource('products').list()
+    assert.equal(seen.at(-1).authorization,undefined,'visitor calls never carry the service key')
+    assert.equal(seen.at(-1).cookie,'__Host-brain-access=visitor')
+  }finally{keyed.close()}
+  assert.throws(()=>context('GET').service('ledgers'),error=>error.status===503&&/BRAIN_SERVICE_API_KEY/.test(error.message))
+})
+test('anonymous get through the bridge answers a hidden row exactly like a missing one',async()=>{
+  const hiddenId='00000000-0000-4000-8000-00000000000a',missingId='00000000-0000-4000-8000-00000000000b'
+  const reader=createServer((req,res)=>{
+    // The backend decides: both ids get the same body. The bridge must not add or drop anything.
+    seen.push({path:req.url,cookie:req.headers.cookie})
+    res.writeHead(404,{'content-type':'application/json'})
+    res.end(JSON.stringify({schemaVersion:1,error:{code:'NOT_FOUND',fix:'Read the API contract and use an existing resource and id',fields:null}}))
+  })
+  await new Promise(resolve=>reader.listen(0,'127.0.0.1',resolve))
+  const anonymous=nativeAuthBridge(`http://127.0.0.1:${reader.address().port}`)
+  const attempt=async value=>{
+    const req=new EventEmitter(),res=new EventEmitter()
+    req.method='GET';req.headers={host:'shop.example.test',origin:'https://shop.example.test'}
+    res.writableEnded=false;res.destroyed=false
+    return anonymous.backend(req,res,id).resource('jobs').get(value).then(row=>({row}),error=>({status:error.status,code:error.code,message:error.message}))
+  }
+  try{
+    const hidden=await attempt(hiddenId),missing=await attempt(missingId)
+    assert.equal(seen.at(-1).cookie,undefined)
+    assert.equal(hidden.row,undefined)
+    assert.deepEqual(hidden,missing)
+  }finally{anonymous.close();await new Promise(resolve=>{reader.close(resolve);reader.closeAllConnections()})}
 })
