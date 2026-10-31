@@ -106,3 +106,29 @@ test('two children on the same socket: the old one drains, the new one keeps ser
   b.c.kill('SIGTERM')
   assert.equal(await b.exited, 0)
 })
+
+test('without an inherited socket a restart waits for the port, and a live holder is never shared', async () => {
+  const held = tcp()
+  await new Promise(r => held.listen(0, '127.0.0.1', r))
+  const port = held.address().port
+  const start = () => {
+    const child = spawn(process.execPath, [join(dist, 'server.mjs')], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...ENV, BRAIN_LISTEN_FD: '', PORT: String(port), HOST: '127.0.0.1' } })
+    let err = ''
+    child.stderr.on('data', d => (err += d))
+    const ready = new Promise(ok => child.stdout.on('data', d => /brain:ready/.test(d) && ok(true)))
+    const exited = new Promise(r => child.on('exit', code => r(code)))
+    return { child, ready, exited, err: () => err }
+  }
+  const waiting = start()
+  await new Promise(r => setTimeout(r, 400))
+  held.close()
+  assert.equal(await waiting.ready, true)
+  assert.equal((await fetch(`http://127.0.0.1:${port}/`)).status, 200)
+  // The running server is now the live holder: a second one must give up with the real cause, not share the port.
+  const second = start()
+  assert.equal(await second.exited, 1)
+  assert.match(second.err(), /another live process still holds the port/)
+  assert.match(second.err(), new RegExp(`lsof -nP -iTCP:${port}`))
+  waiting.child.kill('SIGTERM')
+  assert.equal(await waiting.exited, 0)
+})

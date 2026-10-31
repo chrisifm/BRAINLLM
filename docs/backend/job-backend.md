@@ -20,7 +20,7 @@ BRAIN_BACKEND_URL=http://127.0.0.1:5182
 BRAIN_JOBS_API_KEY=bk_live_3f9a1c0b7d2e_9c1e…
 ```
 
-4. Run the backend (`brain backend serve`) and the worker (`brain jobs work order_paid`).
+4. Run the backend (`brain backend serve`) and the worker (`brain jobs work order_paid`), or both with `brain backend serve --with-workers`.
 
 `BRAIN_BACKEND_URL` must be a loopback HTTP origin, as for the server runtime. The key is removed from `ctx.env`, so a
 handler that logs its environment does not print it. Without both variables, any `ctx.backend.resource(...)` call

@@ -112,7 +112,7 @@ granular:
   brain split <comp> <sel> <Name>    extract that subtree into a new component (refused if check fails)
   brain feedback query|watch         bounded compiler events for agents (watch: NDJSON)
   brain agent setup [--hooks]        project MCP registration and optional Claude Code edit feedback
-  brain jobs <enqueue|status|work|prune>  persistent Postgres jobs; workers run server/jobs handlers
+  brain jobs <enqueue|status|work|stats|prune>  persistent Postgres jobs; workers run server/jobs handlers (`stats` alone lists every queue)
   brain design [blueprint|query|check|seed|configure|gallery]  project-owned Design System
   brain manifest query|refresh        bounded component contracts and revisions
   brain quality [refresh]             persistent agent improvement JSON/Markdown/panel
@@ -122,7 +122,7 @@ granular:
   brain deploy config pm2|nginx       guarded front/backend deployment configuration
   brain media setup-gcs|list|cleanup  private media provisioning/library/owned cleanup
   brain e2e probe|run                 opt-in Claude/Codex Viewer scenarios plus AX/heap gates
-  brain backend <serve|migrate|schema|bootstrap-admin>  experimental Rust/Postgres resource API (loopback)
+  brain backend <serve|migrate|schema|bootstrap-admin>  experimental Rust/Postgres resource API (loopback); serve --with-workers also runs the queues
   brain mcp [--profile full|minimal|backend]  the same commands as MCP tools over stdio
 ";
 
@@ -625,7 +625,7 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
             }
             // declared origins and the origins a page calls (B0744, B0745, B0746)
             diags.extend(origin_check::check(&app));
-            for (code, file, message, fix) in backend::role_warnings(&app) {
+            for (code, file, message, fix) in backend::role_warnings(&app).into_iter().chain(backend::job_warnings(&app)) {
                 let mut diag = compiler::Diag::new(code, &file, brain_parse::Span::default(), message, fix);
                 diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
             }
@@ -1969,6 +1969,12 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
             advice.push(Json::obj([("code", Json::str("B0728")), ("level", Json::str("info")), ("file", Json::str("brain.json")), ("msg", Json::str("brain.json \"site\" is a legacy fallback: the site URL comes from PUBLIC_SITE_URL of each environment")), ("fix", Json::str("set PUBLIC_SITE_URL in each section of .brain_env and delete \"site\" from brain.json"))]));
         }
     }
+    // queues and schedules that nothing runs (B0765-B0768): warnings; a queue is often worked on another machine
+    if let Some(a) = &app {
+        for (code, file, msg, fix) in backend::queue_findings(a, "development") {
+            advice.push(Json::obj([("code", Json::str(code)), ("level", Json::str("warning")), ("file", Json::str(file)), ("msg", Json::str(msg)), ("fix", Json::str(fix))]));
+        }
+    }
     // behavior analytics (docs/backend/analytics.md): on by default, but it needs the native backend and Postgres
     if let Some(a) = &app {
         let set = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty()).or_else(|| env::value(a, "development", k)).or_else(|| env::value(a, "production", k)).is_some();
@@ -2229,6 +2235,8 @@ fn cmd_dev(args: &[String]) -> Result<(), String> {
         v.boot(&name, &url, lan_url(&host, addr.port()).as_deref(), views.len(), boot.elapsed());
     } else {
         eprintln!("brain run → {url}  (root {})", root.display());
+        // Plain output only: a raw line would corrupt the interactive board; `brain doctor` covers that case.
+        backend::warn_queues_in_background(&root, &env::name(args, "development"));
     }
     if let (Some(p), None) = (inspect_port, &view) {
         eprintln!("debugger → http://{host}:{p}");

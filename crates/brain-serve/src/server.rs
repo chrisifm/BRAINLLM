@@ -490,14 +490,16 @@ fn start_with_threads(
     threads: Threads,
 ) -> io::Result<Dev> {
     let root = opts.root.canonicalize()?;
-    // If the port is taken, try the next 20 (except 0, which the OS assigns).
+    // If the port is taken, try the next 20 (except 0, which the OS assigns). A restart first gets a moment to release it,
+    // so a supervised `brain run` keeps its port; an unrelated server still moves this one to the next port.
     let tries = if opts.port == 0 { 0 } else { 20 };
-    let listener = (0..=tries)
-        .find_map(|i| TcpListener::bind((opts.host.as_str(), opts.port.saturating_add(i))).ok())
+    let requested = crate::listen::bind_waiting(&opts.host, opts.port, std::time::Duration::from_secs(1)).ok();
+    let listener = requested
+        .or_else(|| (1..=tries).find_map(|i| TcpListener::bind((opts.host.as_str(), opts.port.saturating_add(i))).ok()))
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::AddrInUse,
-                format!("ports {}-{} are in use", opts.port, opts.port + 20),
+                format!("ports {}-{} are in use; fix: find the owner of the first with `lsof -nP -iTCP:{} -sTCP:LISTEN` (Linux: `ss -ltnp 'sport = :{}'`) or pick another --port", opts.port, opts.port.saturating_add(20), opts.port, opts.port),
             )
         })?;
     let addr = listener.local_addr()?;

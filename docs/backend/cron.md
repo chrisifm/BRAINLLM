@@ -29,6 +29,8 @@ brain jobs cron --once   # enqueue the slots due now and exit (for an external t
 brain jobs work order_receipts
 ```
 
+`brain doctor` and `brain backend serve` warn B0767 when schedules exist and no scheduler has reported within 45 s. `brain backend serve --with-workers` runs the scheduler beside the server.
+
 ```json
 {"schemaVersion":1,"event":"cron-enqueued","schedule":"daily_summary","slot":"2026-10-31T07:00:00Z","id":"75e4678a-…"}
 ```

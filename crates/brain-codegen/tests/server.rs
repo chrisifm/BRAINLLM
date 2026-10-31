@@ -61,3 +61,37 @@ fn server_js_imports_only_what_server_code_reads() {
     assert!(!o.server_js.contains("session.jsbrain"), "client-only import leaked into server_js:\n{}", o.server_js);
     assert!(o.js.contains("session.jsbrain"), "{}", o.js);
 }
+
+/// A job or server module may name a local anything: a local is no use of the runtime helper of the same name, so it
+/// must not add an import of a client module the server build does not emit.
+#[test]
+fn locals_named_like_runtime_helpers_add_no_import() {
+    let opts = brain_codegen::Options::default();
+    let compile = |src: &str| {
+        let o = brain_codegen::compile_with(src, Path::new("server/jobs/sample/handler.jsbrain"), &opts).unwrap_or_else(|d| panic!("{src}: {d:?}"));
+        if o.server_js.trim().is_empty() { o.js } else { o.server_js }
+    };
+    let names = brain_check::scope::EXT_PRIMITIVES.iter().map(|(name, _)| *name).chain(["t", "locale", "fmt", "entries", "entry", "tags", "pages", "page"]);
+    for name in names.filter(|n| !n.starts_with('$')) {
+        for body in [
+            format!("const {name} = 'x' + ctx.payload.n; return {name}"),
+            format!("const {{ {name} }} = ctx.payload; return {name}.length"),
+            format!("for (const {name} of ctx.payload.list) log2({name}.x)"),
+            format!("try {{ run() }} catch ({name}) {{ return {name}.message }}"),
+            format!("const run = ({name}) => {name}(1); return run(String)"),
+        ] {
+            let src = format!("<meta server>\nconst log2 = () => 1, run = () => 1\nexport default async function handle(ctx) {{ {body} }}\n");
+            let code = compile(&src);
+            let added = code.lines().filter(|l| l.starts_with("import ") && !l.contains("brain-budget.js")).count();
+            assert_eq!(added, 0, "`{name}` as a local added an import:\n{src}\n{code}");
+        }
+    }
+    // Negative: a real free use keeps its import, also next to a local of the same name in another scope.
+    let free = compile("<meta server>\nexport default async function handle(ctx) { return hashText(ctx.payload.n) }\n");
+    assert!(free.contains("brain-hash.js"), "{free}");
+    let both = compile("<meta server>\nconst one = (hashText) => hashText\nexport default async function handle(ctx) { return one(hashText(ctx.payload.n)) }\n");
+    assert!(both.contains("brain-hash.js"), "{both}");
+    // A block binding ends with its block: the read after it stays free.
+    let outer = compile("<meta server>\nexport default async function handle(ctx) { if (ctx.a) { const hashText = 1; return hashText } return hashText(ctx.b) }\n");
+    assert!(outer.contains("brain-hash.js"), "{outer}");
+}
