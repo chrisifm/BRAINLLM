@@ -1,0 +1,7 @@
+PUBLIC_SITE_URL=
+
+[development]
+PAYMENT_KEY=
+
+[production]
+PAYMENT_KEY=

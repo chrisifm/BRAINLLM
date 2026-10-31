@@ -1,0 +1,14 @@
+const products = [
+  { id: '1', name: 'Mug', price: 12, summary: 'A ceramic mug.' },
+  { id: '2', name: 'Shirt', price: 20, summary: 'A cotton shirt.' },
+]
+
+export function all() {
+  return products
+}
+
+export function find(id) {
+  return products.find((p) => p.id === id)
+}
+
+export default { all, find }

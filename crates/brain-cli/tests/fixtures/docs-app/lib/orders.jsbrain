@@ -1,0 +1,6 @@
+<meta server>
+// Server-only order placement; the browser calls it as a server function.
+
+export async function place(ctx, items) {
+  return { ok: items.length > 0 }
+}

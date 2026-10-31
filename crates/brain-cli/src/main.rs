@@ -17,6 +17,7 @@ mod cdp;
 mod compiler;
 mod env;
 mod guide;
+mod docs;
 mod icons;
 pub(crate) mod map;
 mod mcp;
@@ -95,6 +96,7 @@ granular:
   brain schema                       JSON Schema of brain.json
   brain i18n --missing [--json]      per language: keys missing (exit 1) and texts still in the default language
   brain theme <preset> | --list      writes tokens.cssbrain from a preset (glass, dark, paper, contrast)
+  brain docs [--check] [--out dir]   app docs generated from source (docs/app/*.md; kept fresh by brain build)
   brain card <comp>                  a component's contract (props, emits, slots, reads/writes, size, status)
   brain split <comp> <sel> <Name>    extract that subtree into a new component (refused if check fails)
   brain feedback query|watch         bounded compiler events for agents (watch: NDJSON)
@@ -275,6 +277,7 @@ fn main() -> ExitCode {
         // `dev` is a hidden alias of `run`: it is the name a model guesses from Vite/Next.
         Some("run") | Some("dev") => cmd_dev(&args[1..]),
         Some("doctor") => return cmd_doctor(&args[1..]),
+        Some("docs") => return docs::cmd(&args[1..]),
         Some("fix") => return cmd_fix(&args[1..]),
         Some("explain") => cmd_explain(&args[1..]),
         Some("edit") => cmd_edit(&args[1..]),

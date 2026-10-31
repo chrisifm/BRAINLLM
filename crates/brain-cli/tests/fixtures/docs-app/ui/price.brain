@@ -1,0 +1,3 @@
+<meta props="value:num currency:str='USD'">
+
+<span class="price">{value} {currency}</span>
