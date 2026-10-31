@@ -75,3 +75,9 @@ curl -si -X OPTIONS http://127.0.0.1:5182/api/orders \
 `crates/brain-backend/tests/edge.rs` runs this configuration against Postgres: one forwarded client exhausts its own
 rate-limit bucket, another client behind the same proxy keeps its own, a forged left-most hop does not create a new
 bucket, and the extra origin passes preflight with `max-age` and may send mutations.
+
+## HTTPS pinning
+
+In production every answer carries `Strict-Transport-Security: max-age=31536000; includeSubDomains`, so
+browsers keep using HTTPS for the API host and its subdomains for a year. Serve the backend only behind
+TLS in production; development answers do not send the header.

@@ -38,6 +38,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   bucket upload, download, delete and metadata operations, with a shared error schema.
 - `platform.logging` selects per-request JSON lines (`errors`, `all` or `off`) and a `slow` threshold; lines carry the
   request id and route template only, never paths, queries, headers, bodies or client addresses.
+- Production backend answers send `Strict-Transport-Security` (one year, subdomains included).
 
 ### Changed
 

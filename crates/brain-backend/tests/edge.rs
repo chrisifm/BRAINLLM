@@ -76,6 +76,7 @@ async fn edge_resolves_clients_reports_readiness_drains_and_sheds_load() {
     // Probes.
     let live = send(&http, "GET", "/health/live", &[]).await;
     assert_eq!(live.status(), 200);
+    assert_eq!(live.headers()["strict-transport-security"], "max-age=31536000; includeSubDomains", "production pins HTTPS");
     assert_eq!(json_body(live).await["status"], "live");
     let ready = send(&http, "GET", "/health/ready", &[]).await;
     assert_eq!(ready.status(), 200);

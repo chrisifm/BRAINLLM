@@ -517,6 +517,7 @@ pub async fn router_with_control(
         .layer(CompressionLayer::new())
         .layer(cors)
         .layer(middleware::from_fn(response_headers))
+        .layer(middleware::from_fn_with_state(app.production, transport_security))
         .with_state(app);
     Ok((routes, SocketControl::new(sockets), edge_control))
 }
@@ -704,6 +705,17 @@ async fn response_headers(req: Request, next: Next) -> Response {
             "{}",
             json!({"event":event,"rid":rid,"route":route,"method":method.as_str(),"status":response.status().as_u16(),"ms":started.elapsed().as_millis()})
         );
+    }
+    response
+}
+/// Production answers tell browsers to keep using HTTPS for this host and its subdomains.
+async fn transport_security(State(production): State<bool>, req: Request, next: Next) -> Response {
+    let mut response = next.run(req).await;
+    if production {
+        response
+            .headers_mut()
+            .entry(header::STRICT_TRANSPORT_SECURITY)
+            .or_insert(HeaderValue::from_static("max-age=31536000; includeSubDomains"));
     }
     response
 }
