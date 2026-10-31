@@ -399,7 +399,7 @@ fn database(root: &Path, environment: &str) -> Result<String, String> {
         .or_else(|| crate::env::value(root, environment, "DATABASE_URL"))
         .filter(|s| !s.is_empty())
         .ok_or(
-            "Set DATABASE_URL in .brain_env or the process environment; Postgres is required"
+            "B0762: DATABASE_URL is not set and the native backend requires Postgres; fix: set it in .brain_env or the process environment"
                 .into(),
         )
 }
@@ -474,6 +474,13 @@ pub fn run(args: &[String]) -> Result<(), String> {
         return Ok(());
     }
     let url = database(&root, &environment)?;
+    // Everything the environment alone can reveal stops before the first connection, with its code and fix.
+    if operation == "serve" {
+        let get = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty()).or_else(|| crate::env::value(&root, &environment, key));
+        if let Some(found) = crate::startup_config::findings(&get, environment == "production").into_iter().find(|f| f.fatal) {
+            return Err(found.message);
+        }
+    }
     let roles = auth_roles(&root)?;
     let resources = contracts(&root, "resources")?;
     let jobs = contracts(&root, "jobs")?;
@@ -511,23 +518,23 @@ pub fn run(args: &[String]) -> Result<(), String> {
             if !promoted {return Err("Admin bootstrap requires an enabled existing user and no active administrator".into());}
             println!("{}",json!({"schemaVersion":1,"ok":true,"user":user,"role":"admin","sessionsRevoked":true}));return Ok(());
         }
-        let port=crate::flag(args,"--port").unwrap_or("5182".into()).parse::<u16>().map_err(|_|"port must be 0..65535")?;
-        let listener=tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST,port)).await.map_err(|_|"Cannot bind backend loopback port")?;
+        let port=crate::flag(args,"--port").unwrap_or("5182".into()).parse::<u16>().map_err(|_|"B0763: --port is not a port number; fix: pass 0 to 65535")?;
+        let listener=tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST,port)).await.map_err(|_|format!("B0763: cannot listen on 127.0.0.1:{port}; fix: stop what uses that port or pass another with --port"))?;
         let addr=listener.local_addr().map_err(|e|e.to_string())?;
         let public_site=crate::env::value(&root,&environment,"PUBLIC_SITE_URL").unwrap_or_else(||format!("http://{addr}"));
         let sockets=socket_settings(&root,Some(&public_site),crate::flag(args,"--origin").as_deref())?;
-        let origin=sockets.http_origins.first().cloned().ok_or("Set an explicit backend HTTP origin")?;
+        let origin=sockets.http_origins.first().cloned().ok_or("B0744: the backend has no HTTP origin; fix: set PUBLIC_SITE_URL, pass --origin or add it to brain.json backend.origins")?;
         // Never migrate on serve: database changes are an explicit, reviewable command.
         let setting=|key:&str|std::env::var(key).ok().filter(|v|!v.is_empty()).or_else(||crate::env::value(&root,&environment,key));
         let jwt=setting("BRAIN_JWT_SECRET").map(|secret|brain_backend::jwt::Config::new(secret,setting("BRAIN_JWT_ISSUER").unwrap_or_else(||origin.clone()),setting("BRAIN_JWT_AUDIENCE").unwrap_or_else(||origin.clone()))).transpose()?;
         let google=setting("GOOGLE_CLIENT_ID").map(brain_backend::google::Config::new).transpose()?;
         if google.is_some() && jwt.is_none() {return Err("Google Sign-In requires configured native JWT sessions; set BRAIN_JWT_SECRET, issuer and audience".into());}
         let gcs=match setting("BRAIN_GCS_BUCKET") {
-            Some(bucket)=>Some(brain_backend::media::GcsConfig::new(bucket,setting("BRAIN_GCS_PREFIX").unwrap_or_else(||"brain-media".into()),std::path::PathBuf::from(setting("BRAIN_GCS_ADAPTER").ok_or("BRAIN_GCS_ADAPTER must point at the private official SDK adapter")?))?),
+            Some(bucket)=>Some(brain_backend::media::GcsConfig::new(bucket,setting("BRAIN_GCS_PREFIX").unwrap_or_else(||"brain-media".into()),std::path::PathBuf::from(setting("BRAIN_GCS_ADAPTER").ok_or("B0761: BRAIN_GCS_BUCKET is set without BRAIN_GCS_ADAPTER; fix: point BRAIN_GCS_ADAPTER at the absolute path of the private .mjs SDK adapter, or remove the bucket")?))?),
             None=>None,
         };
         let public_base=setting("PUBLIC_SITE_URL").unwrap_or_else(||origin.clone());
-        let mail=setting("BRAIN_MAIL_RESEND_KEY").map(|key|brain_backend::auth_flows::MailConfig::resend(key,setting("BRAIN_MAIL_FROM").ok_or("BRAIN_MAIL_FROM must name a verified sender email")?,public_base.clone())).transpose()?;
+        let mail=setting("BRAIN_MAIL_RESEND_KEY").map(|key|brain_backend::auth_flows::MailConfig::resend(key,setting("BRAIN_MAIL_FROM").ok_or("B0760: BRAIN_MAIL_RESEND_KEY is set without BRAIN_MAIL_FROM; fix: set BRAIN_MAIL_FROM to a verified sender, as `sender@your-domain` or `Name <sender@your-domain>`")?,public_base.clone())).transpose()?;
         let config=brain_backend::Config{api_keys:crate::api_key_config::load(&root)?,sockets:sockets.native_config()?,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,resources,jobs,uploads:root.join(".brain/uploads"),origins:sockets.http_origins,production:environment=="production"};
         brain_backend::analytics::configure(analytics_settings(&root)?)?;
         eprintln!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
@@ -536,7 +543,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         platform.handlers=crate::route_executor::load(&root,&environment,&platform.routes)?;
         // Separate HTTP and worker pools with declared sizes, checked against the server's connection budget.
         pool.close().await;
-        let size=|key:&str,default:u32|setting(key).map(|v|v.parse::<u32>().ok().filter(|n|(1..=64).contains(n)).ok_or(format!("{key} must be 1..64"))).transpose().map(|v|v.unwrap_or(default));
+        let size=|key:&str,default:u32|setting(key).map(|v|v.parse::<u32>().ok().filter(|n|(1..=64).contains(n)).ok_or(format!("B0763: {key} is out of range; fix: a whole number from 1 to 64, or remove it to use the default"))).transpose().map(|v|v.unwrap_or(default));
         let (http_size,worker_size)=(size("BRAIN_DB_HTTP_POOL",8)?,size("BRAIN_DB_WORKER_POOL",2)?);
         let processes=size("BRAIN_BACKEND_PROCESSES",1)?;
         // More than one process: rate windows and socket fan-out must live in Postgres, not in one process's memory.

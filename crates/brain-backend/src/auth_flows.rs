@@ -139,7 +139,40 @@ fn email(input: &str) -> Option<String> {
     }
     Auth::email(input).ok()
 }
+/// The `from` of a message: `sender@domain` or `Name <sender@domain>`, the two forms the provider documents. The name
+/// goes into a JSON field, but a provider renders it as a header: control and format characters never pass, and a name
+/// with address punctuation has to be quoted so it cannot add a recipient.
+fn sender(input: &str) -> Option<String> {
+    let input = input.trim();
+    if !input.contains(['<', '>']) {
+        return email(input);
+    }
+    let (name, rest) = input.rsplit_once('<')?;
+    let address = email(rest.strip_suffix('>')?)?;
+    let name = name.trim();
+    if name.is_empty() {
+        return Some(address);
+    }
+    let (inner, quoted) = match name.strip_prefix('"').and_then(|n| n.strip_suffix('"')) {
+        Some(inner) => (inner, true),
+        None => (name, false),
+    };
+    let safe = |c: char| {
+        !c.is_control()
+            && (c == ' ' || !c.is_whitespace())
+            && !matches!(c, '"' | '<' | '>' | '\\' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2069}' | '\u{feff}')
+            && (quoted || !matches!(c, ',' | ';' | ':' | '@' | '(' | ')' | '[' | ']'))
+    };
+    if inner.trim().is_empty() || inner.chars().count() > 128 || !inner.chars().all(safe) {
+        return None;
+    }
+    Some(if quoted { format!("\"{inner}\" <{address}>") } else { format!("{inner} <{address}>") })
+}
+/// A public base URL error names the variable and the fix; the value is not logged.
 fn base_url(input: &str) -> Result<String, String> {
+    public_base(input).map_err(|why| format!("B0764: PUBLIC_SITE_URL is unusable for links in mail: {why}; fix: set it to the deployed origin, such as https://shop.example"))
+}
+fn public_base(input: &str) -> Result<String, String> {
     if input.len() > 512 || !input.bytes().all(|c| c.is_ascii_graphic()) || input.contains('\\') {
         return Err("Auth public base URL exceeds its limit or contains unsafe characters".into());
     }
@@ -221,18 +254,13 @@ fn base_url(input: &str) -> Result<String, String> {
 }
 impl MailConfig {
     pub fn resend(key: String, from: String, public_base_url: String) -> Result<Self, String> {
-        if !(16..=4096).contains(&key.len())
-            || !key.bytes().all(|c| c.is_ascii_graphic())
-            || email(&from).is_none()
-        {
-            return Err(
-                "Resend requires a private API key and a verified plain sender email address"
-                    .into(),
-            );
+        if !(16..=4096).contains(&key.len()) || !key.bytes().all(|c| c.is_ascii_graphic()) {
+            return Err("B0760: BRAIN_MAIL_RESEND_KEY is not a Resend API key (16 to 4096 visible characters; its value is not logged); fix: copy the key from the Resend dashboard into the host's environment or .brain_env, or remove the variable to run without mail".into());
         }
+        let from = sender(&from).ok_or("B0760: BRAIN_MAIL_FROM is not a valid sender (its value is not logged); fix: use a verified address as `sender@your-domain` or `Name <sender@your-domain>`")?;
         Ok(Self {
             key: key.into(),
-            from: email(&from).ok_or("Auth mail sender is invalid")?,
+            from,
             public_base_url: base_url(&public_base_url)?,
         })
     }
@@ -698,4 +726,19 @@ pub async fn bootstrap_first_admin(pool: &PgPool, user: Uuid) -> Result<bool, Er
         .await
         .map_err(|e| database(crate::db::safe(e)))?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod sender_tests {
+    use super::sender;
+
+    #[test]
+    fn the_documented_friendly_form_passes_and_header_injection_does_not() {
+        assert_eq!(sender("hello@shop.example").as_deref(), Some("hello@shop.example"));
+        assert_eq!(sender("Shop Team <hello@shop.example>").as_deref(), Some("Shop Team <hello@shop.example>"));
+        assert_eq!(sender("\"Shop, Team\" <hello@shop.example>").as_deref(), Some("\"Shop, Team\" <hello@shop.example>"));
+        for bad in ["Shop\r\nBcc: x@evil.example <hello@shop.example>", "Shop, x@evil.example <hello@shop.example>", "Shop <not-an-address>", "Shop <hello@shop.example"] {
+            assert_eq!(sender(bad), None, "{bad}");
+        }
+    }
 }
