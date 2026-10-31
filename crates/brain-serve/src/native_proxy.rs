@@ -216,7 +216,8 @@ pub(crate) fn forwarded_for(req: &http::Request, peer: Option<SocketAddr>) -> Op
     }
 }
 pub(crate) fn handles(path: &str) -> bool {
-    (path.starts_with("/s/")
+    // the one script the backend serves; other `.js` paths are the dev server's modules
+    path == "/_brain/analytics.js" || (path.starts_with("/s/")
         || path == "/api"
         || path.starts_with("/api/")
         || path == "/_brain"
@@ -930,6 +931,8 @@ mod tests {
         }
         assert!(handles("/api/items"));
         assert!(handles("/_brain/auth/me"));
+        assert!(handles("/_brain/analytics.js"));
+        assert!(!handles("/_brain/other.js"));
         assert!(!handles("/@brain/call"));
         assert!(!handles("/api/_http.jsbrain"));
         assert!(!handles("/views/home.brain"));
