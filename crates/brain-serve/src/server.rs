@@ -1258,6 +1258,12 @@ fn app_page(ctx: &Ctx, req: &http::Request) -> (u16, String, Option<String>) {
                         html_escape(&e)
                     ),
                 ),
+                // `throw redirect(url, status)` from load: the same Location answer server.mjs gives in production
+                Ok(props) if props.starts_with("{\"redirect\":") => {
+                    let v: serde_json::Value = serde_json::from_str(&props).unwrap_or_default();
+                    let status = v["status"].as_u64().filter(|s| (300..400).contains(s)).unwrap_or(303) as u16;
+                    return (status, String::new(), Some(v["redirect"].as_str().unwrap_or("/").to_string()));
+                }
                 // `throw notFound()` / `return notFound()` from load (F11): views/404.brain with status 404, as in production
                 Ok(props) if props.starts_with("{\"notFound\":true") => (
                     404,

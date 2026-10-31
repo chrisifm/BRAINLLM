@@ -57,6 +57,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Fixed
 
+- `throw redirect(url, status)` in `load` answers the redirect under `brain run` as it does in production; it was a
+  500 with `[load] …: [object Object]` in the log. A thrown non-Error object is now logged as JSON.
+
 - A form posted without JS is validated in the page's language (`form.*` and `form.error` of its dictionary), in
   `dist/server.mjs` and in `brain run`; in development a POST to `/<locale>/page` reached the wrong view (400).
 - Pages that show `<ErrorState>` ship its `error_state.*` texts in their dictionary chunk.

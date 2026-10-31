@@ -139,9 +139,10 @@ for await (const line of createInterface({ input: process.stdin })) {
     } finally { if (S) finishContext(c) }
   } catch (e) {
     if (e && e.notFound === true) out(`OK ${id} {"notFound":true,"status":404}\n`) // `throw notFound()`: answered as a 404 page
+    else if (e && typeof e.redirect === 'string') out(`OK ${id} ${JSON.stringify({ redirect: e.redirect, status: Number(e.status) || 303 })}\n`) // `throw redirect(url, s)`: as server.mjs
     else if (e && e.errors && typeof e.errors === 'object') out(`BAD ${id} ${JSON.stringify({ error: e.message || 'Invalid input', errors: e.errors })}\n`)
     else if (contextServer && e?.status === 503) out(`STATUS ${id} ${JSON.stringify({status:503,message:'Native authentication is temporarily unavailable'})}\n`)
-    else out(`ERR ${id} ${JSON.stringify(String(e?.stack ?? e))}\n`)
+    else out(`ERR ${id} ${JSON.stringify(String(e?.stack ?? (e && typeof e === 'object' ? JSON.stringify(e) : e)))}\n`)
   }
 }
 "#;
@@ -953,6 +954,23 @@ mod tests {
         assert!(error.contains("original.brain:10:"), "{error}");
         drop(sidecar);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn sidecar_answers_redirect_from_load() {
+        if Command::new("node").arg("--version").output().is_err() {
+            return;
+        }
+        // `throw redirect(url, 301)` from load is the redirect marker in dev too (server.mjs answers it, never a 500)
+        let d = std::env::temp_dir().join(format!("brain-rd-load-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("rd.mjs");
+        std::fs::write(&f, "export async function load(ctx) { throw ({ redirect: '/jobs/' + ctx.params.id, status: 301 }) }").unwrap();
+        let mut sc = Sidecar::spawn(&d, &[]).unwrap();
+        let v = sc.call(&file_url(&f), "load", "{\"params\":{\"id\":\"a b\"}}").unwrap();
+        assert_eq!(v, "{\"redirect\":\"/jobs/a b\",\"status\":301}");
+        drop(sc);
+        std::fs::remove_dir_all(d).unwrap();
     }
 
     #[test]
