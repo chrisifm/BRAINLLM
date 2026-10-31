@@ -194,3 +194,23 @@ async fn login_lockout_counts_by_email_and_client_with_a_cap_per_email() {
     sqlx::query("UPDATE _brain_login_limits SET attempts=100 WHERE key=$1").bind(brain_backend::auth::digest(&email)).execute(&pool).await.unwrap();
     assert!(auth.login_from(good(), Some(owner)).await.unwrap().is_none());
 }
+
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn refresh_grace_is_configurable_and_zero_counts_any_replay_as_theft() {
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Use the disposable Postgres harness");
+    let pool = brain_backend::db::connect(&url).await.unwrap();
+    brain_backend::db::migrate(&pool, &[]).await.unwrap();
+    let auth = Auth::new(pool.clone()).await.unwrap();
+    let email = format!("no-grace-{}@example.test", Uuid::new_v4().simple());
+    let credentials = || Credentials { email: email.clone(), password: "synthetic-jwt-account-password".into() };
+    auth.signup(credentials()).await.unwrap();
+    let config = || Config::new("synthetic-jwt-signing-secret-32-bytes".into(), "i".into(), "a".into()).unwrap();
+    assert!(config().with_refresh_grace(61).is_err());
+    let jwt = Jwt::new(pool.clone(), config().with_refresh_grace(0).unwrap());
+    let (user, opaque) = auth.login(credentials()).await.unwrap().unwrap();
+    let first = jwt.issue(user, &opaque).await.unwrap();
+    let rotated = jwt.refresh(Some(&first.refresh_token)).await.unwrap().unwrap();
+    assert!(jwt.refresh(Some(&first.refresh_token)).await.unwrap().is_none(), "an immediate replay is theft without a grace");
+    assert!(jwt.user(Some(&rotated.access_token)).await.unwrap().is_none(), "and it revokes the family");
+}

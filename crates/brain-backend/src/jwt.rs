@@ -14,7 +14,7 @@ pub const REFRESH_COOKIE: &str = "__Host-brain-refresh";
 pub const ACCESS_SECONDS: u32 = 300;
 pub const REFRESH_SECONDS: u32 = 604800;
 /// How long a just-rotated refresh token still answers, and how many times, before a replay counts as theft.
-const REFRESH_GRACE_SECONDS: f64 = 10.0;
+const REFRESH_GRACE_SECONDS: u32 = 10;
 const REFRESH_GRACE_USES: i32 = 8;
 #[derive(Clone)]
 pub struct Config {
@@ -22,6 +22,7 @@ pub struct Config {
     previous: Vec<Arc<str>>,
     pub issuer: String,
     pub audience: String,
+    refresh_grace: u32,
 }
 impl Config {
     pub fn new(secret: String, issuer: String, audience: String) -> Result<Self, String> {
@@ -41,7 +42,17 @@ impl Config {
             previous: Vec::new(),
             issuer,
             audience,
+            refresh_grace: REFRESH_GRACE_SECONDS,
         })
+    }
+    /// `BRAIN_AUTH_REFRESH_GRACE_SECONDS`, 0..60; 0 turns the grace off and every replay counts as theft. The cap of
+    /// the range keeps a stolen token from staying usable for long after its owner rotated it.
+    pub fn with_refresh_grace(mut self, seconds: u32) -> Result<Self, String> {
+        if seconds > 60 {
+            return Err("BRAIN_AUTH_REFRESH_GRACE_SECONDS must be 0..60".into());
+        }
+        self.refresh_grace = seconds;
+        Ok(self)
     }
     /// Keys that still verify access tokens during a rotation; new tokens always use the current key. Access tokens
     /// live 5 minutes, so a previous key can leave the configuration after that.
@@ -242,7 +253,7 @@ impl Jwt {
             .await
             .map_err(crate::db::safe)?;
         let row=sqlx::query("SELECT u.id,u.email,u.role,u.verified,u.auth_version,s.session_id,f.id AS family_id,t.used_at IS NOT NULL AS used, t.used_at>now()-make_interval(secs=>$2) AND t.grace_uses<$3 AND COALESCE((SELECT r.used_at IS NULL FROM _brain_refresh_tokens r WHERE r.token_hash=t.replacement_hash),false) AS in_grace, f.revoked_at IS NULL AND f.expires_at>now() AND t.expires_at>now() AND s.expires_at>now() AND s.revoked_at IS NULL AND u.disabled_at IS NULL AND f.auth_version=u.auth_version AS live FROM _brain_refresh_tokens t JOIN _brain_refresh_families f ON f.id=t.family_id JOIN _brain_sessions s ON s.session_id=f.session_id JOIN _brain_users u ON u.id=s.user_id WHERE t.token_hash=$1 FOR UPDATE OF t,f,s")
-            .bind(&hash).bind(REFRESH_GRACE_SECONDS).bind(REFRESH_GRACE_USES).fetch_optional(&mut *tx).await.map_err(crate::db::safe)?;
+            .bind(&hash).bind(f64::from(self.config.refresh_grace)).bind(REFRESH_GRACE_USES).fetch_optional(&mut *tx).await.map_err(crate::db::safe)?;
         let Some(row) = row else { return Ok(None) };
         let family: Uuid = row.get("family_id");
         let sid: Uuid = row.get("session_id");

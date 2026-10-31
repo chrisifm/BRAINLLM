@@ -13,6 +13,7 @@ BRAIN_JWT_AUDIENCE=https://your-site.example
 GOOGLE_CLIENT_ID=<configured web OAuth client id>.apps.googleusercontent.com
 BRAIN_JWT_SECRET_PREVIOUS=<optional, retired keys separated by commas, 32..4096 bytes each, at most 8>
 BRAIN_AUTH_SESSION_SECONDS=<optional session and refresh length, 300..31536000; default 7 days>
+BRAIN_AUTH_REFRESH_GRACE_SECONDS=<optional window where a just-rotated refresh token still answers, 0..60; default 10, 0 is off>
 ```
 
 `GOOGLE_CLIENT_ID` without `BRAIN_JWT_SECRET` stops `brain backend serve` with B0751, and `brain check` and `brain doctor`

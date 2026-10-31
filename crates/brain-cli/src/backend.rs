@@ -502,6 +502,9 @@ pub fn config_problems(setting: &dyn Fn(&str) -> Option<String>) -> Vec<(String,
     {
         report("GOOGLE_CLIENT_ID is not a web OAuth client id".into(), "use the web client id that ends in .apps.googleusercontent.com");
     }
+    if setting("BRAIN_AUTH_REFRESH_GRACE_SECONDS").is_some_and(|v| !v.parse::<u32>().is_ok_and(|n| n <= 60)) {
+        report("BRAIN_AUTH_REFRESH_GRACE_SECONDS must be 0..60".into(), "set whole seconds (0 turns the grace off), or remove it to use 10");
+    }
     if setting("BRAIN_AUTH_SESSION_SECONDS").is_some_and(|v| !v.parse::<u32>().is_ok_and(|n| (300..=31_536_000).contains(&n))) {
         report("BRAIN_AUTH_SESSION_SECONDS must be 300..31536000".into(), "set the session length in whole seconds, or remove it to use the default");
     }
@@ -646,6 +649,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let setting=|key:&str|std::env::var(key).ok().filter(|v|!v.is_empty()).or_else(||crate::env::value(&root,&environment,key));
         let jwt=setting("BRAIN_JWT_SECRET").map(|secret|brain_backend::jwt::Config::new(secret,setting("BRAIN_JWT_ISSUER").unwrap_or_else(||origin.clone()),setting("BRAIN_JWT_AUDIENCE").unwrap_or_else(||origin.clone()))).transpose()?;
         let jwt=match (jwt,setting("BRAIN_JWT_SECRET_PREVIOUS")) {(Some(config),Some(previous))=>Some(config.with_previous(previous.split(',').map(str::to_string).collect())?),(config,_)=>config};
+        let jwt=match (jwt,setting("BRAIN_AUTH_REFRESH_GRACE_SECONDS")) {(Some(config),Some(seconds))=>Some(config.with_refresh_grace(seconds.parse().map_err(|_|"BRAIN_AUTH_REFRESH_GRACE_SECONDS must be 0..60")?)?),(config,_)=>config};
         if let Some(seconds)=setting("BRAIN_AUTH_SESSION_SECONDS") {brain_backend::auth::configure_session_seconds(seconds.parse().map_err(|_|"BRAIN_AUTH_SESSION_SECONDS must be 300..31536000")?)?;}
         let google=setting("GOOGLE_CLIENT_ID").map(brain_backend::google::Config::new).transpose()?;
         if google.is_some() && jwt.is_none() {return Err("Google Sign-In requires configured native JWT sessions; set BRAIN_JWT_SECRET, issuer and audience".into());}
