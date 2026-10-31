@@ -221,8 +221,11 @@ because multiple Viewer profiles were connected without an assigned profile/tab;
 - [x] Case 6: session revocation and actual owner disposal without destroying the browser document.
 - [x] Attribute the intermittent setup exit: cgroup peak256/max256, two limit hits, OS thread errno11 and zero
   OOM kills. The successful finite512-PID run reached262 with zero limit hits; CPU/memory/assertions unchanged.
-- [ ] Complete separate graceful thread-admission failure/recovery in the dev server; successful headroom tests
-  do not establish exhaustion recovery. A scoped Builder/503/RAII fix is under implementation.
+- [x] Integrate graceful dev thread-admission handling as a8f7be1 from 52c2643: fallible startup workers,
+  stack-owned pending request, best-effort503, permit recovery and coalesced diagnostics. Three deterministic
+  regressions and all69 serve tests passed on Rust1.99.1; the admission cap remains64.
+- [ ] Build a new pinned binary with that guard and the exposed live SPEC, then rerun final native and full gates.
+  The passing d0c7daf binary predates these final changes and must retain its actual provenance.
 - [x] Failed attempts disposed all three owned contexts/children and confirmed removal of owned Docker resources.
   The final passing run also proved zero remaining app database connections; no requesting application was migrated.
 
@@ -290,6 +293,18 @@ because multiple Viewer profiles were connected without an assigned profile/tab;
 - [x] Prepare a private full continuation document and send its path to the explicitly requested BRAIN-CLAUDE tab.
 - [x] Claude acknowledged the correct isolated worktree and preservation of the original main/index; it is waiting
   for an explicit ready message and has not started concurrent edits/jobs.
-- [ ] At the user's two-percent-weekly-remaining threshold, freeze current owned work, update exact commits/jobs/
-  first action and send the ready message through Herdr. The latest visible Codex terminal reading was four percent.
-  Private paths, pane identifiers and the receipt remain outside this public repository.
+- [x] Freeze all owned implementation slices at the user's later explicit request to conclude and transfer now.
+  All three subagents completed and reported no active owned jobs. Thread guard and benchmark evidence are saved.
+- [x] Prepare all project Markdown documents, private continuity notes and the supplied migration documents in an
+  indexed private handoff bundle. Account details, pane identifiers and receipt are kept outside this repository.
+- [ ] Confirm the explicit ready-message receipt and continuation in the assigned Claude tab. First action:
+  build/test the final integrated source with a new immutable snapshot and actual binary/spec provenance.
+
+## Final controlled compiler-scanner evidence
+
+Span-only scanning retains the same validation and exact output. A final seven-pair Rust1.99.1 cohort moved the
+fixture project onto owned Linux tmpfs, recorded CPU and wall time separately and compared JS/CSS/server/maps
+byte for byte. The large case improved CPU in7/7 rounds (paired median−8.47%); fixed weights, allocation counts
+and raw previous measurements remain recorded. Small cases remain noisy; there is no global compiler-speed claim,
+formal confidence interval or proof that every historical regression was eliminated. Final release gates and
+representative application/runtime/throughput measurements remain distinct requirements.

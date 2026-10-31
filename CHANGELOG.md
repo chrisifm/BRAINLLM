@@ -29,6 +29,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Fixed
 
+- Development thread-admission failures return actionable startup errors or best-effort503 responses instead of invoking the CLI panic hook. Admission permits recover and repeated diagnostics are coalesced; the64-connection cap and production worker behavior remain unchanged.
 - Development imports of invalid value modules now reject with their original compiler diagnostics instead of returning a component-shaped fallback. Component fallbacks, durable agent feedback and recovery remain intact; static named-import linking retains its explicit limitation.
 - Accept the existing GET `cache: 'no'` runtime contract in the checker, including when app-wide data caching is disabled. Keep that explicit endpoint privacy intent instead of suggesting its removal.
 - Source-map scanning requests validated token boundaries without copying discarded identifier and literal values.
