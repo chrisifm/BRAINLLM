@@ -29,7 +29,7 @@ function Dashboard($p = {}) {
     busy.v = true;
     error.v = '';
     try {
-      const saved = data.id === null ? $brainBudgetbudgetResume($$brainBudgetFrame6, await $brainBudgetbudgetSuspend($$brainBudgetFrame6, api.create(data))) : $brainBudgetbudgetResume($$brainBudgetFrame6, await $brainBudgetbudgetSuspend($$brainBudgetFrame6, api.update(data)));
+      const saved = data.id === null ? $brainBudgetbudgetResume($$brainBudgetFrame6, await $brainBudgetbudgetSuspend($$brainBudgetFrame6)(api.create(data))) : $brainBudgetbudgetResume($$brainBudgetFrame6, await $brainBudgetbudgetSuspend($$brainBudgetFrame6)(api.update(data)));
       users.v = data.id === null ? [...users.v, saved] : users.v.map((u) => { const $$brainBudgetFrame7 = $brainBudgetbudgetEnter({ file: "views/dashboard.brain", component: "Dashboard", line: 33, column: 21 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame7); { return u.id === saved.id ? saved : u; } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame7); } });
       editing.v = null;
     } catch (e) {
@@ -40,7 +40,7 @@ function Dashboard($p = {}) {
   const remove = async (id) => { const $$brainBudgetFrame8 = $brainBudgetbudgetEnter({ file: "views/dashboard.brain", component: "Dashboard", line: 41, column: 18 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame8); {
     error.v = '';
     try {
-      $brainBudgetbudgetResume($$brainBudgetFrame8, await $brainBudgetbudgetSuspend($$brainBudgetFrame8, api.remove(id)));
+      $brainBudgetbudgetResume($$brainBudgetFrame8, await $brainBudgetbudgetSuspend($$brainBudgetFrame8)(api.remove(id)));
       users.v = users.v.filter((u) => { const $$brainBudgetFrame9 = $brainBudgetbudgetEnter({ file: "views/dashboard.brain", component: "Dashboard", line: 45, column: 28 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame9); { return u.id !== id; } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame9); } });
     } catch (e) {
       error.v = e.message;
@@ -152,6 +152,6 @@ export default guard(Dashboard);
 import { budgetEnter as $brainBudgetbudgetEnter, budgetLeave as $brainBudgetbudgetLeave, budgetResume as $brainBudgetbudgetResume, budgetStep as $brainBudgetbudgetStep, budgetSuspend as $brainBudgetbudgetSuspend } from "/@brain/brain-budget.js";
 import api from "../lib/api.js";
 export async function load(ctx) { const $$brainBudgetFrame1 = $brainBudgetbudgetEnter({ file: "views/dashboard.brain", component: "Dashboard", line: 9, column: 10 }, null); try { $brainBudgetbudgetStep($$brainBudgetFrame1); {
-  return { users: $brainBudgetbudgetResume($$brainBudgetFrame1, await $brainBudgetbudgetSuspend($$brainBudgetFrame1, api.list(ctx))) };
+  return { users: $brainBudgetbudgetResume($$brainBudgetFrame1, await $brainBudgetbudgetSuspend($$brainBudgetFrame1)(api.list(ctx))) };
 } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame1); } }
 export const seo = (props) => ({ "title": "User admin", "description": "User admin for the example app: create, edit, activate and delete users, with search and an inline edit form.", "canonical": "/dashboard" });
