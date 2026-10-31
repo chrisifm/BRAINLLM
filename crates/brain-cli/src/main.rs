@@ -1750,6 +1750,14 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
             advice.push(Json::obj([("code", Json::str("B0728")), ("level", Json::str("info")), ("file", Json::str("brain.json")), ("msg", Json::str("brain.json \"site\" is a legacy fallback: the site URL comes from PUBLIC_SITE_URL of each environment")), ("fix", Json::str("set PUBLIC_SITE_URL in each section of .brain_env and delete \"site\" from brain.json"))]));
         }
     }
+    // behavior analytics (docs/backend/analytics.md): on by default, but it needs the native backend and Postgres
+    if let Some(a) = &app {
+        let set = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty()).or_else(|| env::value(a, "development", k)).or_else(|| env::value(a, "production", k)).is_some();
+        let off = matches!(backend::analytics_settings(a), Ok(None));
+        if !off && !(set("DATABASE_URL") && set("BRAIN_BACKEND_URL")) {
+            advice.push(Json::obj([("code", Json::str("B0729")), ("level", Json::str("info")), ("file", Json::str(env::FILE)), ("msg", Json::str("behavior analytics records nothing: it needs the native backend (DATABASE_URL and BRAIN_BACKEND_URL)")), ("fix", Json::str("set DATABASE_URL and BRAIN_BACKEND_URL in .brain_env, run `brain backend migrate` and `brain backend serve`; or set \"analytics\": false in brain.json"))]));
+        }
+    }
     // a quality bar lowered below its default does not count as passing: an agent must fix the pages, not the bar
     // (QA #153: a model reached doctor 0 by setting seo.minScore to 60)
     let mut bar_ok = true;
