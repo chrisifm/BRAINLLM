@@ -704,7 +704,7 @@ pub fn finish_with_og(
         ));
     }
     if sm.is_empty() && cfg.sitemap && !cfg.staging {
-        warnings.push("no sitemap.xml: it needs absolute URLs; fix: `brain build --site https://your-domain` or \"site\" in brain.json".into());
+        warnings.push("no sitemap.xml: it needs absolute URLs; fix: set PUBLIC_SITE_URL in the .brain_env block of this environment, or `brain build --site https://your-domain`".into());
     }
     files.extend(sm);
     files.extend(files::news_sitemap(cfg, &published));

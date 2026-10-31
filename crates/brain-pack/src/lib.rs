@@ -1771,6 +1771,13 @@ fn build_inner_with_options(
         files.extend(out.files);
         post_bin.extend(out.binary);
         warnings.extend(out.warnings);
+        // without a sitemap file server.mjs serves none, so these routes' sitemap() never runs
+        let mut skipped: Vec<String> = pages.iter().filter(|p| routes::is_dynamic(&p.route) && has_sitemap.contains(&p.view)).map(|p| p.route.clone()).collect();
+        skipped.sort();
+        skipped.dedup();
+        if let (false, Some(w)) = (skipped.is_empty(), warnings.iter_mut().find(|w| w.starts_with("no sitemap.xml"))) {
+            w.push_str(&format!("; sitemap() of {} is skipped until then", skipped.join(", ")));
+        }
         post_csp = out.csp;
     }
     if let Some(socket) = &options.native_sockets {

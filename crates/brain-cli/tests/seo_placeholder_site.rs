@@ -65,3 +65,25 @@ fn fresh_app_passes_doctor_seo_while_b0736_reports_the_placeholder_once() {
     assert_eq!(advice.iter().filter(|a| a["code"] == "B0736").count(), 1, "{advice:?}");
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn no_origin_warning_lists_the_sitemap_routes_it_skips_and_names_the_current_setting() {
+    let tmp = std::env::temp_dir().join(format!("bsite-dyn-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    assert!(brain(&tmp, &["new", "app"]).status.success());
+    let dir = tmp.join("app");
+    std::fs::create_dir_all(dir.join("views/blog")).unwrap();
+    std::fs::write(
+        dir.join("views/blog/[slug].brain"),
+        "<meta seo title=\"Blog post\" keyword=\"blog post\" description=\"Blog post: one article of the blog with its title and a short summary for readers.\">\n<script>\nexport async function load(ctx) { return { slug: ctx.params.slug } }\nexport async function sitemap() { return [{ slug: 'first' }] }\nconst { slug } = props\n</script>\n<main><h1>Blog post {slug}</h1></main>\n",
+    )
+    .unwrap();
+    let o = brain(&dir, &["build"]);
+    let t = text(&o);
+    assert!(o.status.success(), "{t}");
+    let line = t.lines().find(|l| l.contains("no sitemap.xml")).unwrap_or_else(|| panic!("{t}"));
+    assert!(line.contains("PUBLIC_SITE_URL") && !line.contains("in brain.json"), "{line}");
+    assert!(line.contains("/blog/:slug"), "{line}");
+    let _ = std::fs::remove_dir_all(&tmp);
+}
