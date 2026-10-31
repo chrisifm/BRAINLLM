@@ -18,6 +18,7 @@
 // A page template (`page`) is the route's final HTML with `<!--brain:ssr-->` inside #brain-view and
 // `<!--brain:props-->` inside <script type="application/json" id="brain-props">.
 import { createServer as http, STATUS_CODES, request as httpRequest, Agent as HttpAgent } from 'node:http'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import net from 'node:net'
 import { installNativeSockets } from './native-sockets.mjs'
 import { BlockList, isIP } from 'node:net'
@@ -1080,7 +1081,7 @@ export function createServer(o = {}) {
         const guards = [], middleware = []
         for (const g of route.guards || []) guards.push(await load(g))
         for (const m of route.middleware || []) middleware.push(await load(m))
-        r = await runChain({ guards, middleware, ctx })
+        r = await pageLocale.run(route.locale, () => runChain({ guards, middleware, ctx }))
       } catch (e) {
         log('error', 'guard failed', { rid, path: url.pathname, ...trace(e) })
         return errorPage(req, res, route, params, url, rid)
@@ -1102,7 +1103,8 @@ export function createServer(o = {}) {
     try {
       if (!fixed && route.server) {
         const m = await load(route.server)
-        if (typeof m.load === 'function') props = (await withTimeout(Promise.resolve(m.load(ctx)), TIMEOUT)) ?? {}
+        if (route.i18n) await load(route.i18n) // t() inside load(): the dictionary is there before it runs
+        if (typeof m.load === 'function') props = (await withTimeout(pageLocale.run(route.locale, () => Promise.resolve(m.load(ctx))), TIMEOUT)) ?? {}
       }
     } catch (e) {
       return loadOutcome(e)
@@ -1137,7 +1139,8 @@ export function createServer(o = {}) {
   async function streamed(req, res, route, params, url, rid, ctx, extra, outcome) {
     const [top, bottom = ''] = readFileSync(file(route.page), 'utf8').split('<!--brain:ssr-->')
     const sm = await load(route.server)
-    const loadP = typeof sm.load === 'function' ? withTimeout(Promise.resolve().then(() => sm.load(ctx)), TIMEOUT) : Promise.resolve(null)
+    if (route.i18n) await load(route.i18n)
+    const loadP = typeof sm.load === 'function' ? withTimeout(pageLocale.run(route.locale, () => Promise.resolve().then(() => sm.load(ctx))), TIMEOUT) : Promise.resolve(null)
     loadP.catch(() => {}) // handled below; never an unhandled rejection while the loading view renders
     let timer
     const early = await Promise.race([loadP.then(v => ({ v }), e => ({ e })), new Promise(r => (timer = setTimeout(r, STREAM_HOLD)))])
@@ -1790,6 +1793,11 @@ export function overLimit(key, max = 60) {
   if (!h || now - h[0] > 60000) HITS.set(key, (h = [now, 0]))
   return ++h[1] > max ? Math.ceil((h[0] + 60000 - now) / 1000) : 0
 }
+// t(), fmt and locale() read globalThis.__brainLocale. A render sets it while nothing else runs (renders are serialized);
+// load(), guards and form handlers overlap across awaits, so each carries its page's language in the async context.
+const pageLocale = new AsyncLocalStorage()
+let renderLocale = globalThis.__brainLocale
+Object.defineProperty(globalThis, '__brainLocale', { configurable: true, get: () => pageLocale.getStore() ?? renderLocale, set: v => (renderLocale = v) })
 const withTimeout = (p, ms) => {
   let t
   return Promise.race([p, new Promise((_, rej) => (t = setTimeout(() => rej(new HttpError(504, 'timeout')), ms)))]).finally(() => clearTimeout(t))
@@ -1861,7 +1869,7 @@ export async function callForm({ module, raw, ctx, rules, key, limit = 60, timeo
   if (Object.keys(errors).length) return again(errors, '')
   let r
   try {
-    r = await withTimeout(Promise.resolve(module[fn](ctx, values)), timeout)
+    r = await withTimeout(pageLocale.run(locale, () => Promise.resolve(module[fn](ctx, values))), timeout)
   } catch (e) {
     if (e && e.errors && typeof e.errors === 'object') return again(e.errors, '')
     if (e instanceof HttpError && e.status >= 400 && e.status < 500) return again({}, e.message)

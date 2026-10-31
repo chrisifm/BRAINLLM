@@ -1512,6 +1512,7 @@ language is one command.
   `<meta route es="/es/acerca">`. hreflang pairs pages by view plus page identity (S03): page 2 of a listing pairs
   with page 2 in each language, translated slug or not, and never with page 1. `/` with no prefix never auto-redirects by `Accept-Language` (crawlers and shared
   links must see the same page); instead the language switcher suggests the browser's language once.
+- **`t()` in server code** (2026-10-31): `load()`, guards and form handlers overlap across awaits, so each runs with its page's language in an `AsyncLocalStorage` behind the `__brainLocale` accessor, after the route's dictionary loads. An RPC has no page: it keeps the default language. Dev runs requests one at a time and passes the language and dictionaries to the sidecar.
 - **Framework texts:** messages the runtime and the kit write themselves read the app's dictionary by key and fall back
   to English when the key is missing, without loading `brain-i18n.js`: form validation (`form.*`, §14) and
   `<ErrorState>` (`error_state.offline`, `network`, `timeout`, `schema`, `unauthorized`, `forbidden`, `not_found`,

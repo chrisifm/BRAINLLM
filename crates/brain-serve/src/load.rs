@@ -166,15 +166,18 @@ for await (const line of createInterface({ input: process.stdin })) {
     if (probe) { out(`OK ${id} true\n`); continue }
     const S = contextServer ? await import(contextServer) : null
     // `$runAs` comes from the route contract, set by the backend after the client's request was parsed into fields.
-    const { $runAs, ...plain } = S ? {} : ctx
+    const { $runAs, $locale, $dict, ...plain } = S ? {} : ctx
     const c = S ? await withSession(S, ctx, secret, preauthenticated === true, nativeRequired === true) : { ...plain, env: process.env }
     if ($runAs && typeof keyBackend === 'function') c.backend = keyBackend(handlerEnv, $runAs === 'system' ? 'BRAIN_ROUTES_SYSTEM_KEY' : 'BRAIN_ROUTES_API_KEY', 'route')
+    // Requests here run one at a time, so the page's language can live in the global t() reads.
+    if (ctx?.$dict) { const D = (globalThis.__brainDict ||= {}); for (const l in ctx.$dict) D[l] = ctx.$dict[l] }
+    globalThis.__brainLocale = ctx?.$locale || null
     try {
       const v = await m[fn](c, ...(args || []))
       if (fn === 'load' && v && typeof v.redirect === 'string' && redirectProblem(v)) throw new Error(redirectProblem(v))
       if (S) await contextHeaders(c)
       out(`OK ${id} ${JSON.stringify(v ?? null)}\n`)
-    } finally { if (S) finishContext(c) }
+    } finally { globalThis.__brainLocale = null; if (S) finishContext(c) }
   } catch (e) {
     if (e && e.notFound === true) out(`OK ${id} ${e.gone === true ? '{"notFound":true,"gone":true,"status":410}' : '{"notFound":true,"status":404}'}\n`) // `throw notFound()` / `throw gone()`: a 404 / 410 page
     else if (e && typeof e.redirect === 'string') { const bad = redirectProblem(e); out(bad ? `ERR ${id} ${JSON.stringify(bad)}\n` : `OK ${id} ${JSON.stringify({ redirect: e.redirect, status: e.status ?? 303 })}\n`) } // `throw redirect(url, s)`: as server.mjs

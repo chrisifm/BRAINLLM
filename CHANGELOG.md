@@ -9,6 +9,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- Fix: `t()`, `fmt` and `locale()` inside `load()`, guards and form handlers read the page's language, in production and in `brain run`
 - Lists name aggregates that hit the 100-group cap in `aggregates_truncated`
 - Request log lines carry `dbMs` and `dbWaitMs` for resource reads, so database time and pool wait are visible apart from `ms`
 - Fix: plain lists and `created_at`/`updated_at` sorts use their index instead of sorting the whole table on every request

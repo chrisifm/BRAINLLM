@@ -1367,7 +1367,13 @@ fn run_load(
         );
     }
     let lctx = load_ctx_json(req, params);
-    let lctx = format!("{},\"user\":{user}}}", &lctx[..lctx.len() - 1]);
+    // t() and locale() inside load() read the page's language and dictionaries, as in production (§37)
+    let i18n = brain_pack::read_i18n(&ctx.root).filter(|(_, ls)| ls.len() > 1);
+    let language = match (split_locale(&i18n, &req.path).0, &i18n) {
+        (Some(loc), Some((def, _))) => format!(",\"$locale\":{},\"$dict\":{{{}:{},{}:{}}}", json_str(&loc), json_str(def), dict_json(&ctx.root, def), json_str(&loc), dict_json(&ctx.root, &loc)),
+        _ => String::new(),
+    };
+    let lctx = format!("{},\"user\":{user}{language}}}", &lctx[..lctx.len() - 1]);
     let r = if let Some(server)=runtime_server(ctx){sc.as_mut().unwrap().call_context(&url,"load",&lctx,&server,&ctx.secret(),preauthenticated)}else if ctx.backend_configured(){Err("BNATIVE_AUTH_UNAVAILABLE: Native authentication bridge is unavailable in this runtime".into())}else{sc.as_mut().unwrap().call(&url,"load",&lctx)};
     if r.as_ref()
         .is_err_and(|e| e.contains("load() node process exited"))
