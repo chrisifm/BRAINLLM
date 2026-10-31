@@ -44,6 +44,7 @@ export function lazy(el, imp, mode, props = {}) {
       })
       .catch(e => {
         el.$l = null
+        clicked = null // a retry must not replay a click from before the failure
         if (dead) return
         el.setAttribute('aria-busy', 'false')
         retry()
@@ -64,6 +65,7 @@ export function lazy(el, imp, mode, props = {}) {
       if (e.type === 'keydown') {
         if (e.key !== 'Enter' && e.key !== ' ') return
         e.preventDefault()
+        clicked = new Event('click', { bubbles: true, cancelable: true }) // the key press is what the user asked for
       }
       if (e.type === 'click') (clicked = e), e.preventDefault(), e.stopPropagation()
       go()

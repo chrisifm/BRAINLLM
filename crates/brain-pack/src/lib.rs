@@ -1036,6 +1036,7 @@ fn build_inner_with_options(
     let shell = std::fs::read_to_string(input.root.join("app.brain")).unwrap_or_else(|_| "<html lang=\"en\"><head><meta charset=\"utf-8\"></head><body><slot /></body></html>".into());
     let (shell, _) = take_block(&shell, "script");
     let shell = strip_meta_seo(&shell);
+    let shell = unindent_shell(&shell);
     let (shell, shell_style) = take_block(&shell, "style");
     let (shell, shell_style) = if class_map.is_empty() { (shell, shell_style) } else { (classes::rename_class_attrs(&shell, &class_map), classes::rename_css(&shell_style, &class_map)) };
     struct Plan {
@@ -2015,6 +2016,15 @@ fn rpc_hash(js: &str, f: &str) -> Option<String> {
     })
 }
 
+/// Indentation in front of a tag is never rendered and is sent on every page. Lines stay, so inline spacing is the same;
+/// a shell with whitespace-sensitive or inline-script content is left as written.
+fn unindent_shell(shell: &str) -> String {
+    if ["<pre", "<textarea", "<script"].iter().any(|t| shell.contains(t)) {
+        return shell.to_string();
+    }
+    shell.lines().map(|l| if l.trim_start().starts_with('<') { l.trim_start() } else { l }).collect::<Vec<_>>().join("\n")
+}
+
 /// The views the framework answers with an error status: `_error.brain` in any folder and `views/403|404|410|5xx.brain`.
 /// Gives the status and the title the page shows when the view names none.
 pub fn reserved_view(view: &str) -> Option<(u16, &'static str)> {
@@ -2285,6 +2295,15 @@ fn needs_space(prev: Option<char>, next: char) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_shell_loses_indentation_only_where_it_is_safe() {
+        assert_eq!(super::unindent_shell("<head>\n  <title>x</title>\n</head>\n  text\n"), "<head>\n<title>x</title>\n</head>\n  text");
+        let pre = "<body>\n  <pre>\n  a</pre>\n</body>";
+        assert_eq!(super::unindent_shell(pre), pre);
+        let script = "<head>\n  <script>const t = `\n  <b>`</script>\n</head>";
+        assert_eq!(super::unindent_shell(script), script);
+    }
+
     #[test]
     fn reserved_views_are_the_error_views_only() {
         use super::reserved_view as r;

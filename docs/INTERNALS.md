@@ -1840,7 +1840,7 @@ when it fell to `body`. `#brain-announce` (`aria-live=polite`, created at `route
 `document.title`. A root `_loading.brain` alone emits one `^/` pattern; an empty `fullLoad` is omitted.
 Past 8 s a navigation becomes a full load. `hold` lets real links through. `predict` orders its queue by rank: intent -1,
 main links by `getBoundingClientRect().top`, plan 1e6, `footer`/`aside` 1e7 + top. Measured on the admin edit route of the
-CRUD fixture (`backend.rs` test): 30703 B of the 30720 B default budget, 30698 B before this work.
+CRUD fixture (`backend.rs` test): 30704 B of the 30720 B default budget, 30698 B before this work; the shell's tag indentation is not sent (`unindent_shell`).
 
 
 ## 45. Agent coordination and focused evidence (2026-10-30)

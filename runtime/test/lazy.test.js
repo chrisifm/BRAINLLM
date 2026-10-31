@@ -188,3 +188,39 @@ test('interaction: keyboard activation ignores other keys and a failed import ca
   assert.equal(h.textContent, 'ready');
   delete globalThis.reportError;
 });
+
+test('interaction: the key that loaded the component activates it; a failed attempt never replays later', async () => {
+  const h = host(), clicks = []
+  let el, attempts = 0, fail = false
+  globalThis.reportError = () => {}
+  const real = () => {
+    const b = doc.createElement('button')
+    b.addEventListener('click', () => clicks.push('hit'))
+    return b
+  }
+  mount(() => (el = lazy(hole(), async () => {
+    attempts++
+    if (fail) throw Error('temporary import failure')
+    return real
+  }, 'interaction')), h)
+  const key = value => Object.assign(new Event('keydown', { bubbles: true, cancelable: true }), { key: value })
+  fail = true
+  el.dispatchEvent(key('Enter'))
+  await tick(); await tick()
+  assert.equal(attempts, 1)
+  assert.deepEqual(clicks, [])
+  // hovering is only intent: the earlier press was lost with the failure and must not fire now
+  fail = false
+  el.dispatchEvent(new Event('pointerover', { bubbles: true }))
+  await tick(); await tick()
+  assert.equal(attempts, 2)
+  assert.deepEqual(clicks, [])
+  // a fresh component and a press: it activates once
+  const second = host()
+  mount(() => (el = lazy(hole(), async () => real, 'interaction')), second)
+  el.dispatchEvent(key(' '))
+  await tick(); await tick()
+  assert.deepEqual(clicks, ['hit'])
+  delete globalThis.reportError
+})
+

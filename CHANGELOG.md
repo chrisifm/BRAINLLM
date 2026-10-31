@@ -41,6 +41,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `/favicon.ico` redirects to `public/favicon.svg` when the app has only the SVG icon, in production and in dev.
 - `brain check` reports a link nothing answers (B0776, one finding per source line) and a view title that repeats what `titleTemplate` adds (B0777); before, the first waited for `brain build` and the second went unnoticed.
 
+- A link inside an island whose chunk failed still navigates instead of losing the click, and a lazy component in `interaction` mode acts on the key that loaded it and never replays a press from before a failed import.
+- The new app's `/login` sends a signed-in user to `/account`, and `brain guide views` has the recipe for session-dependent navigation.
+
 ### Signature
 - HTML documents now carry `X-Generated-By` with the official site and repository in `brain start`, `_headers`, nginx and Caddy. It replaces `X-Powered-By` and adds nothing visible to the page.
 
