@@ -15,6 +15,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   `BRAIN_BACKEND_PROCESSES` is above 1) counts route `rate` windows and the API-key per-minute limit in Postgres
   (`_brain_rate_windows`, subjects stored as digests) and relays socket invalidation events between processes with
   `LISTEN/NOTIFY`. See `docs/backend/cluster.md`.
+- Native backend HTTP caching: every successful `GET /api/...` sends an `ETag` and answers `If-None-Match` with 304;
+  `server/cache.jsbrain` declares `maxAge`, `staleWhileRevalidate` and `staleIfError` for anonymous reads of
+  public-read resources; `PUT`/`PATCH`/`DELETE` honor `If-Match` and answer 412 `PRECONDITION_FAILED` on a stale
+  record. See `docs/backend/caching.md`.
 - WebMCP imperative tools ship (#106): `<meta tools="add_task: Add a task (text:str!, due:date)">` plus a same-named
   function registers the tool with the browser's model context while the component is mounted and unregisters it on
   unmount. Nothing is registered without WebMCP, during SSR or prerender; arguments are validated against the

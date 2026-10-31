@@ -1,6 +1,6 @@
 //! Literal platform contracts for the native backend: file buckets (`server/files/<name>.jsbrain`)
 //! and HTTP edge settings (`server/platform.jsbrain`).
-use brain_backend::{Resource, auth_flows::RolesConfig, cluster::Cluster, files::Bucket, platform::{Edge, Platform}};
+use brain_backend::{Resource, auth_flows::RolesConfig, cluster::Cluster, files::Bucket, http::cache_http::CachePolicy, platform::{Edge, Platform}};
 use serde_json::{Value, json};
 use std::{fs, path::Path};
 
@@ -19,6 +19,20 @@ fn edge(root: &Path) -> Result<(Edge, Cluster), String> {
     let edge = Edge::from_contract(&value).map_err(|e| format!("{EDGE}: {e}"))?;
     let cluster = Cluster::from_contract(value.get("cluster")).map_err(|e| format!("{EDGE}: {e}"))?;
     Ok((edge, cluster))
+}
+
+const CACHE: &str = "server/cache.jsbrain";
+
+fn cache(root: &Path, resources: &[Resource]) -> Result<CachePolicy, String> {
+    let path = root.join(CACHE);
+    if !path.exists() {
+        return Ok(CachePolicy::default());
+    }
+    if !path.is_file() {
+        return Err(format!("{CACHE}: must be a regular file"));
+    }
+    let value = crate::backend::read_contract(root, &path).map_err(|e| format!("{CACHE}: {e}"))?;
+    CachePolicy::from_contract(&value, resources).map_err(|e| format!("{CACHE}: {e}"))
 }
 
 fn buckets(root: &Path, resources: &[Resource], roles: &RolesConfig) -> Result<Vec<Bucket>, String> {
@@ -52,7 +66,7 @@ fn buckets(root: &Path, resources: &[Resource], roles: &RolesConfig) -> Result<V
 
 pub fn load(root: &Path, resources: &[Resource], roles: &RolesConfig) -> Result<Platform, String> {
     let (edge, cluster) = edge(root)?;
-    Ok(Platform { buckets: buckets(root, resources, roles)?, edge, cluster, ..Default::default() })
+    Ok(Platform { buckets: buckets(root, resources, roles)?, edge, cluster, cache: cache(root, resources)?, ..Default::default() })
 }
 
 /// Projection for `brain backend schema --json`; contains no environment values.
@@ -72,6 +86,7 @@ pub fn metadata(root: &Path, resources: &[Resource], roles: &RolesConfig) -> Res
             "slowMs": edge.slow.map(|d| d.as_millis() as u64),
         },
         "cluster": platform.cluster.schema(),
+        "cache": platform.cache.schema(),
     }))
 }
 

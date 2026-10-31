@@ -1,0 +1,28 @@
+{
+  "id": "backend-http-caching",
+  "kind": "capability",
+  "title": "ETag, 304, public cache lifetimes and If-Match for the native backend",
+  "why": "Repeat reads cost a 304 instead of a full body, public catalogs can be served by a CDN with stale-while-revalidate, and editors cannot silently overwrite each other.",
+  "changelog": [
+    "Native backend HTTP caching"
+  ],
+  "guide": "docs/backend/caching.md",
+  "apis": [
+    "server/cache.jsbrain",
+    "ETag",
+    "If-None-Match",
+    "If-Match"
+  ],
+  "affects": [
+    "server/cache.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/cache.jsbrain",
+    "snippet": "<meta server>\nexport default { products: { maxAge: '1m', staleWhileRevalidate: '10m' } }"
+  },
+  "uses": [
+    {
+      "glob": "server/cache.jsbrain"
+    }
+  ]
+}

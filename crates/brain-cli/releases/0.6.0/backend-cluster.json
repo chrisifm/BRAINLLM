@@ -1,0 +1,27 @@
+{
+  "id": "backend-cluster",
+  "kind": "capability",
+  "title": "Shared rate windows and socket fan-out across backend processes",
+  "why": "With several backend processes, route and API-key rate limits count one budget for the whole deployment and a write on one process reaches sockets on every process.",
+  "changelog": [
+    "Native backend multi-process mode"
+  ],
+  "guide": "docs/backend/cluster.md",
+  "apis": [
+    "server/platform.jsbrain cluster.shared",
+    "BRAIN_BACKEND_PROCESSES"
+  ],
+  "affects": [
+    "server/platform.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/platform.jsbrain",
+    "snippet": "<meta server>\nexport default { cluster: { shared: true } }"
+  },
+  "uses": [
+    {
+      "glob": "server/platform.jsbrain",
+      "contains": "cluster"
+    }
+  ]
+}
