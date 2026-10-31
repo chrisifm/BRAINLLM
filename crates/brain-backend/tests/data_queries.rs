@@ -686,7 +686,7 @@ async fn search_text_never_raises_an_internal_error() {
             ("status", field("enum(open|closed)", false)),
             ("views", field("int", false)),
         ],
-        policy(&["public"], &["candidate"], &["owner"], &["owner"]),
+        policy(&["public"], &["user"], &["owner"], &["owner"]),
         json!({
             "filter": {"status": ["eq", "in"], "views": ["gte"]},
             "sort": ["title", "views"],
@@ -769,7 +769,7 @@ async fn search_over_long_text_keeps_full_text_results() {
             ("status", field("enum(open|closed)", false)),
             ("views", field("int", false)),
         ],
-        policy(&["public"], &["candidate"], &["owner"], &["owner"]),
+        policy(&["public"], &["user"], &["owner"], &["owner"]),
         json!({
             "filter": {"status": ["eq"]},
             "sort": ["views"],
