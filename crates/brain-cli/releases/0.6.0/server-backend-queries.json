@@ -1,0 +1,29 @@
+{
+  "id": "server-backend-queries",
+  "kind": "capability",
+  "title": "Full list, get, patch and slug redirects from server code through ctx.backend",
+  "why": "Server functions can filter, sort, paginate, include relations, patch records and resolve old slugs with the same contract as the HTTP API, and hand 422 field errors back to a form.",
+  "changelog": [
+    "`ctx.backend` speaks the full HTTP list contract from server code"
+  ],
+  "guide": "docs/backend/server-queries.md",
+  "apis": [
+    "ctx.backend.list",
+    "ctx.backend.get",
+    "ctx.backend.patch",
+    "ctx.backend.slugRedirect"
+  ],
+  "affects": [
+    "server/**/*.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/posts.jsbrain",
+    "snippet": "<meta server>\nexport async function recent(ctx) {\n  return ctx.backend.list('posts', { sort: '-createdAt', limit: 10 })\n}"
+  },
+  "uses": [
+    {
+      "glob": "server/**/*.jsbrain",
+      "contains": "ctx.backend."
+    }
+  ]
+}

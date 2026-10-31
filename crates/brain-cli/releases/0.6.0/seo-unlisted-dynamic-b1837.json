@@ -1,0 +1,13 @@
+{
+  "id": "seo-unlisted-dynamic-b1837",
+  "kind": "change",
+  "title": "B1837 warns about public dynamic views no sitemap lists",
+  "why": "A public dynamic route without paths() or sitemap() is invisible to crawlers; the build now names the view and the fix.",
+  "changelog": [
+    "B1837 (warning, `brain build`)"
+  ],
+  "codes": [
+    "B1837"
+  ],
+  "guide": "brain guide seo"
+}

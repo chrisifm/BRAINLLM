@@ -4,7 +4,8 @@
   "title": "httpCall for outbound API calls",
   "why": "Server code calls third-party APIs with timeouts, safe retries, size caps and private-target refusal without a fetch wrapper of its own.",
   "changelog": [
-    "`httpCall(url, options)` is auto-imported"
+    "`httpCall(url, options)` is auto-imported",
+    "`httpCall` now checks every address a hostname resolves to"
   ],
   "guide": "docs/backend/outbound.md",
   "apis": [

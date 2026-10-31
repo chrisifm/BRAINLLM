@@ -10,7 +10,8 @@
     "Deeply nested BrainScript",
     "The development server unregisters closed HMR sockets",
     "Production logs recorded a compiler budget failure",
-    "Streamed SSR routes"
+    "Streamed SSR routes",
+    "`brain run` serves `/llms.txt`"
   ],
   "guide": "brain guide start"
 }

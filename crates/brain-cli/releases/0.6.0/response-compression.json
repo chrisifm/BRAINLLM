@@ -1,0 +1,14 @@
+{
+  "id": "response-compression",
+  "kind": "change",
+  "title": "Production server compresses HTML, JSON and errors with zstd, Brotli or gzip",
+  "why": "Pages and API responses leave the server compressed by default, so first loads are several times smaller with no app change; opt out with compress: false.",
+  "changelog": [
+    "Response compression in the production server"
+  ],
+  "guide": "docs/PERFORMANCE.md",
+  "apis": [
+    "createServer({ compress })",
+    "BRAIN_COMPRESS"
+  ]
+}
