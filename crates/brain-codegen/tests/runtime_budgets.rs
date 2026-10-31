@@ -125,3 +125,18 @@ fn static_constants_and_private_server_functions_do_not_import_client_budget_hel
         }
     }
 }
+#[test]
+fn native_work_inside_an_awaited_expression_is_not_charged_to_the_caller_deadline() {
+    // Four parallel reads whose synchronous start is slow (connection setup on a cold or busy process).
+    let source = r#"
+async function read(start) { const xs = await Promise.all([start(), start(), start(), start()]); return xs.length }
+async function nested(start) { return await start(await start()) }
+export default { read, nested }
+"#;
+    for dev in [false, true] {
+        let code = compile(source, dev);
+        node(&format!(
+            "import assert from 'node:assert/strict';\n{code}\nconst start = () => {{ const t = performance.now(); while (performance.now() - t < 80); return Promise.resolve(1) }};\nassert.equal(await read(start), 4); assert.equal(await nested(start), 1);"
+        ));
+    }
+}

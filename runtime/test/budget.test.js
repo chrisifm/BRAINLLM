@@ -37,20 +37,48 @@ test('recursion rejects before native stack overflow and ordinary finally restor
 test('await suspension excludes IO delay, preserves rejection identity and closes on throw', async () => {
   const f = budgetEnter(meta, null, { ms: 10 })
   try {
-    assert.equal(budgetResume(f, await budgetSuspend(f, wait(30).then(() => 42))), 42)
+    assert.equal(budgetResume(f, await budgetSuspend(f)(wait(30).then(() => 42))), 42)
     const original = new Error('original')
     assert.throws(() => budgetResume(f, { ok: false, error: original }), { code: 'B0910' })
-    const outcome = await budgetSuspend(f, Promise.reject(original))
+    const outcome = await budgetSuspend(f)(Promise.reject(original))
     assert.throws(() => budgetResume(f, outcome), error => error === original)
+  } finally { budgetLeave(f) }
+})
+
+const spin = ms => { const t = performance.now(); while (performance.now() - t < ms); }
+
+test('native work evaluated inside an await is not charged, author functions inside it still are', async () => {
+  const f = budgetEnter(meta, null, { ms: 20, steps: 3 })
+  try {
+    const pause = budgetSuspend(f)
+    spin(40) // a slow synchronous fetch start
+    budgetResume(f, await pause(Promise.resolve(1)))
+    const again = budgetSuspend(f)
+    const author = budgetEnter(meta) // an author callback called while the awaited expression is evaluated
+    budgetStep(author)
+    spin(40)
+    assert.throws(() => budgetStep(author), { code: 'B0910', budget: 'ms' })
+    budgetLeave(author)
+    await again(Promise.resolve(2))
+  } finally { budgetLeave(f) }
+})
+
+test('a synchronous throw inside a paused await expression restarts the clock at the next checkpoint', () => {
+  const f = budgetEnter(meta, null, { ms: 20 })
+  try {
+    try { budgetSuspend(f); throw new Error('sync') } catch {}
+    budgetStep(f)
+    spin(40)
+    assert.throws(() => budgetStep(f), { code: 'B0910', budget: 'ms' })
   } finally { budgetLeave(f) }
 })
 
 test('resumed work still shares the total step budget and concurrent suspended frames do not mix roots', async () => {
   const a = budgetEnter(meta, null, { steps: 1 })
   budgetStep(a)
-  const pa = budgetSuspend(a, Promise.resolve('a'))
+  const pa = budgetSuspend(a)(Promise.resolve('a'))
   const b = budgetEnter({ ...meta, file: 'comp/Other.brain' }, null, { steps: 2 })
-  const pb = budgetSuspend(b, Promise.resolve('b'))
+  const pb = budgetSuspend(b)(Promise.resolve('b'))
   try { assert.throws(() => budgetResume(a, { ok: true, value: 'a' }), { code: 'B0910', budget: 'steps' }) }
   finally { budgetLeave(a) }
   assert.equal(budgetResume(b, await pb), 'b')

@@ -30,6 +30,8 @@ export function budgetStep(frame, site) {
   if (!frame || frame.state !== 'active') throw failure('B0910', 'inactive-frame', 0, site)
   if (site) frame.meta = metaOf(site)
   const r = frame.root
+  // A synchronous throw inside a paused await expression must not leave the clock stopped.
+  if (frame.paused) { frame.paused = 0; r.running = true; r.started = now() }
   charge(r)
   enforce(frame, 'steps', ++r.steps)
   enforce(frame, 'ms', r.work)
@@ -41,18 +43,26 @@ function detach(f) {
   const r = f.root
   charge(r)
   r.depth--
-  if (!active.some(x => x.root === r)) r.running = false
+  // Native code continuing a paused await expression is not charged.
+  const top = active.at(-1)
+  if (top?.root !== r || top.paused) r.running = false
 }
 export function budgetLeave(frame) {
   if (!frame || frame.state === 'closed') return
   detach(frame)
   frame.state = 'closed'
 }
+// Generated as `budgetSuspend(frame)(expr)`: the clock stops before `expr` runs, so native work
+// (a fetch's connection setup) is not charged; author functions called inside it restart the clock.
 // The outcome always resolves: the generated resume runs even on a rejected await, preserving catch/finally.
-export function budgetSuspend(frame, promise) {
-  detach(frame)
-  frame.state = 'suspended'
-  return Promise.resolve(promise).then(value => ({ ok: true, value }), error => ({ ok: false, error }))
+export function budgetSuspend(frame) {
+  if (frame?.state === 'active' && !frame.paused) { charge(frame.root); frame.root.running = false; frame.paused = 1 }
+  return promise => {
+    frame.paused = 0
+    detach(frame)
+    frame.state = 'suspended'
+    return Promise.resolve(promise).then(value => ({ ok: true, value }), error => ({ ok: false, error }))
+  }
 }
 export function budgetResume(frame, outcome) {
   if (frame.state !== 'suspended') throw failure('B0910', 'inactive-frame', 0, frame.meta)
