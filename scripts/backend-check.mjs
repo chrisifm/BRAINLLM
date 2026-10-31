@@ -8,7 +8,7 @@ import net from 'node:net'
 import { createHmac, randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 const project = fileURLToPath(new URL('../', import.meta.url))
-const targets=['analytics','api_keys','backend','caching','cluster','data_queries','domain_writes','edge','exact_types','files','foundation','jwt_sessions','links','media','native_openapi','query_shape','routes','auth_flows','auth_http','native_sockets','queues','row_policy','system_keys']
+const targets=['analytics','api_keys','backend','caching','cluster','data_queries','domain_writes','edge','exact_types','files','foundation','jwt_sessions','links','media','native_openapi','production_shape','query_shape','routes','auth_flows','auth_http','native_sockets','queues','row_policy','system_keys']
 // Release gates that drive the real binary over real sockets (scripts/gates/<name>.mjs); selectable like a test target.
 const gates=['http-truth-table']
 // A module missing from `targets` could not be selected and would silently run in every focused pass of another target.
