@@ -136,6 +136,8 @@ pub const SECURITY_DOC: &[(&str, &str)] = &[
     ("X-Frame-Options", "DENY"),
     ("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()"),
     ("Cross-Origin-Opener-Policy", "same-origin"),
+    // what generated the page and where it lives, for crawlers and LLMs that read headers (no version: that stays in the HTML)
+    ("X-Generated-By", "BRAINLLM (https://chrisifm.github.io/BRAINLLM/; https://github.com/chrisifm/BRAINLLM)"),
 ];
 
 pub struct Applied {

@@ -350,7 +350,7 @@ so in that mode it is enough for the server to map each one to its type.
 - Clean URLs for SEO: `/users` resolves to `dist/users/index.html` (`index.brain` with `--ext brain`).
 - Precompression at build: each text file in `dist/` carries its `.gz` alongside (optimal deflate). `.br` is planned:#231
   (own encoder, enabled only if it beats that gzip in measured bytes); build-time Brotli is supplied by the maintained Rust codec (§26, updated 2026-10-29).
-- Brand: `<meta name="generator" content="BRAINLLM <version>">` and header `X-Powered-By: BRAINLLM` (`--no-brand` removes them).
+- Brand: `<meta name="generator" content="BRAINLLM <version>">` and header `X-Generated-By` on documents.
 - `brain build --ext brain` needs a host where MIME can be configured: unconfigured hosts (GitHub Pages, S3 without
   metadata, Netlify/Cloudflare Pages without `_headers`) serve `application/octet-stream` and the app does not start.
 - A plain `.js` `import` is still allowed as an escape hatch (§2) and is published as `.js` (`.jsbrain` with `--ext brain`).
@@ -1098,7 +1098,7 @@ manifest: site, generator, discovery files and every section with title, descrip
 with URL, Markdown copy and lastmod; `crates/brain-seo/src/sections.rs`). Every page gets `<link rel="alternate">` to
 `/rss.xml` and `/sections.json`; `seo.feed: false` / `seo.sections: false` turn them off. Attribution: next to
 `<meta name="generator">` each page carries `<!-- Built with BRAINLLM x.y.z … Home … Source … -->`, llms.txt and
-llms-full.txt end with `## Built with`, and `brain start` sends `X-Powered-By: BRAINLLM (<home>)` (2026-10-29).
+llms-full.txt end with `## Built with`, and documents carry `X-Generated-By: BRAINLLM (<home>; <repo>)` from `brain start` and the generated `_headers`, nginx and Caddy configs, without a version.
 All configurable in `brain.json`.
 **Google tags**: from `brain.json` `"google"` only. Analytics/Tag Manager are injected with the CSP nonce and Consent
 Mode v2 defaulting to denied until the app calls `consent('analytics')`; site verification becomes the meta tag.

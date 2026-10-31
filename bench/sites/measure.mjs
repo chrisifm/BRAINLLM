@@ -62,7 +62,7 @@ try {
     const r = await fetch(`http://127.0.0.1:${PORT}${u}`)
     const ext = u === '/' ? 'brain' : extname(u).slice(1)
     const ct = r.headers.get('content-type') ?? ''
-    result.contentType.push({ url: u, status: r.status, contentType: ct, ok: r.ok && ct.startsWith(want[ext] ?? '?'), poweredBy: r.headers.get('x-powered-by') })
+    result.contentType.push({ url: u, status: r.status, contentType: ct, ok: r.ok && ct.startsWith(want[ext] ?? '?'), poweredBy: r.headers.get('x-generated-by') })
   }
 } finally { dev.kill() }
 
