@@ -29,7 +29,8 @@ below distinguish the published baseline, current development and still-open acc
 
 IDs and priorities preserve the source inventory. Open means implementation or acceptance remains; covered
 reference means an existing capability, not whole-application migration readiness. Deliberate security/UX decisions
-must not be turned into automatic weakening of defaults.
+must not be turned into automatic weakening of defaults. A security-relevant incompatibility blocks cutover
+even if the source labels it P1 or P2.
 
 | ID | Priority | General requirement | Current disposition |
 |---|---|---|---|
@@ -46,7 +47,7 @@ must not be turned into automatic weakening of defaults.
 | B-11 | P0 | Declared scalar/related filters and visibility predicates | Open. |
 | B-12 | P0 | Declared multi-field sort with null ordering | Open. |
 | B-13 | P0 | Totals and bounded related aggregates | Open. |
-| B-14 | P1 | Search language, weights, related vocabulary and synonyms | Partial: FTS/trigram exist; application search parity remains open. |
+| B-14 | P1 | Search language, weights, related vocabulary and synonyms | Partial: FTS/trigram and fixed weights exist; configurable language/weights and application search parity remain open. |
 | B-15 | P2 | Exposed keyset pagination | Open; internal cursor helpers do not establish a public contract. |
 | B-16 | P0 | Transactional domain operations across resources | Open; asynchronous hooks/jobs do not substitute for atomic database commands. |
 | B-17 | P0 | Conditional changes, increments and idempotent insertion | Open beyond the existing single-record compare-and-swap behavior. |
@@ -60,7 +61,7 @@ must not be turned into automatic weakening of defaults.
 | B-25 | P1 | Long-running AI work with durable result writes | Partial: jobs/SDK adapters exist; configurable bounded execution and transactional result persistence remain open. |
 | B-26 | P2 | Real client IP from explicitly trusted proxies | Open; never trust arbitrary forwarded identity/IP headers. |
 | B-27 | P2 | Multiple declared HTTP origins | Implemented in development shared settings; full deployment application acceptance remains required. |
-| B-28 | P0 | Existing-password/user import and controlled rehash | Open; legacy hash verification and existing-account/session migration require explicit policy. |
+| B-28 | P0 | Existing-password/user import and controlled rehash | Open: no legacy scrypt/bcrypt verifier/importer. Do not infer that compatible external Argon2 PHC hashes are inherently unsupported without a test. |
 | B-29 | P0 | Safe bidirectional verified-provider account linking | Open: an already-linked provider subject can sign in; the first link to an existing email is deliberately refused. Any new linking policy must prevent pre-hijacking. |
 | B-30 | P1 | Redirect/code identity flow versus browser GIS | Explicit application decision; existing GIS support is not authorization-code support. |
 | B-31 | P1 | Bounded code verification and permitted signup role selection | Open; do not permit privileged roles from untrusted signup input. |
@@ -74,7 +75,7 @@ must not be turned into automatic weakening of defaults.
 | B-39 | P0 | Import preserving IDs, owners and references | Open; no silent manual data rewrite or production auto-migration. |
 | B-40 | P1 | Scheduled work, retention and deliberate dead-job retry | Open: bounded automatic retries and terminal states exist; scheduling and an explicit dead-job retry contract remain separate. |
 | B-41 | P1 | Application-owned ephemeral-database tests and service fakes | Partial framework harness; a stable app-facing seed/fake/integration contract remains open. |
-| B-42 | P2 | Operational metrics/tracing | Structured correlated logs exist; Prometheus/OTel capability and production acceptance remain open. |
+| B-42 | P2 | Operational metrics/tracing | Correlated logs, bounded backtraces/source locations and job frames exist; Prometheus/OTel and distributed tracing remain open. |
 | B-43 | P2 | Published throughput/p99 under deployment topology | Open; compile time and functional tests are not backend throughput measurements. |
 
 The source document also identifies defects or decisions in the requesting application itself. They are separate
