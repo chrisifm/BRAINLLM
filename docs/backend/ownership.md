@@ -46,7 +46,7 @@ any grant covers it.
 // server/resources/jobs/policy.jsbrain — visitors read published jobs, the shop's owner and admins read every job
 export default {
   read: [{ public: { where: { status: 'published' } } }, 'owner.shop', 'admin'],
-  create: ['candidate', 'admin'], update: ['owner.shop', 'admin'], delete: ['admin'],
+  create: ['member', 'admin'], update: ['owner.shop', 'admin'], delete: ['admin'],
 }
 ```
 

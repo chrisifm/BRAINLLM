@@ -75,7 +75,7 @@ test('slugRedirect answers the current slug or null and never confirms unknown s
   assert.throws(()=>backend.slugRedirect('../auth','x'),/name/)
 })
 test('ctx.backend.service acts with the service key and never forwards the visitor session',async()=>{
-  const keyed=nativeAuthBridge(`http://127.0.0.1:${backend.address().port}`,'bk_live_synthetic_service_key')
+  const keyed=nativeAuthBridge(`http://127.0.0.1:${backend.address().port}`,undefined,'bk_live_synthetic_service_key')
   try{
     const req=new EventEmitter(),res=new EventEmitter()
     req.method='GET';req.headers={host:'shop.example.test',origin:'https://shop.example.test',cookie:'__Host-brain-access=visitor'}
