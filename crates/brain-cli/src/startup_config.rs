@@ -81,7 +81,7 @@ mod tests {
 
     #[test]
     fn friendly_sender_is_accepted_and_header_injection_is_not() {
-        for from in ["hello@shop.example", "Shop Team <hello@shop.example>", "\"Shop, Team\" <hello@shop.example>", "Müller Café <hello@shop.example>"] {
+        for from in ["hello@shop.example", "Shop Team <hello@shop.example>", "\"Shop, Team\" <hello@shop.example>", "Zoë Müller <hello@shop.example>"] {
             assert!(run(&[("BRAIN_MAIL_RESEND_KEY", KEY), ("BRAIN_MAIL_FROM", from)], true).is_empty(), "{from}");
         }
         for from in ["Name <hello@shop.example>\r\nBcc: x@shop.example", "Name\nBcc: x <hello@shop.example>", "a, b <hello@shop.example>", "Name <hello@shop.example", "Name hello@shop.example>", "Name <not-an-address>", "<a@shop.example> <b@shop.example>", "Name\u{202e} <hello@shop.example>"] {
