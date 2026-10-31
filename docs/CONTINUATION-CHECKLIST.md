@@ -112,7 +112,7 @@ The inventory covers:
 
 ## Next-development implementation checkpoints
 
-Version: **0.4.1-dev.0**, branch `development/0.4.1`, integration checkpoint `3987d0b`. Everything below is local development unless explicitly
+Version: **0.4.1-dev.0**, branch `development/0.4.1`, verified code checkpoint `3987d0b` (additional documentation/CI prerequisites tracked separately). Everything below is local development unless explicitly
 linked to a published release. npm remains 0.4.0. Candidate tests and an integrated complete gate are distinct.
 
 - [x] Atomic state/preview/writer leases release explicitly: 15 focused tests passed, including retained-descriptor
@@ -158,13 +158,14 @@ Rust 1.99.1 release gate and do not establish cross-platform execution or whole-
 ## Remaining acceptance before freezing the next version
 
 - [x] Integrate Node bridge sources 5906096 + b5d6c5f locally (8c6434a + fd52ab6).
-- [ ] Run the actual pack/private-helper/dev-sidecar Rust embedding tests on the combined tree.
+- [x] Run actual pack/private-helper/dev-sidecar Rust embedding checks in the combined 3987d0b suite.
 - [x] Integrate the completed Rust development/static gateway component (d03d2fc).
-- [ ] Execute the added empty-context environment oracle and all serve tests on the combined tree. No ambient
+- [x] Execute the added empty-context environment oracle and all 65 serve tests on the combined tree. No ambient
   process environment may be added to ctx.env when its loader is absent.
 - [x] Integrate the scoped liveResource client/compiler/configuration/packaging component (0a411f9).
 - [x] Integrate CLI development/test/static startup, Node manifest consumers and MCP project-startup callsite.
-- [ ] Verify those consumers together on the combined tree, including selected-port Origin preflight and disabled defaults.
+- [x] Compile the shared CLI/MCP consumers together and pass startup tests, including selected-port Origin
+  preflight and disabled defaults. Actual MCP/browser/native network behavior remains a distinct end-to-end gate.
 - [x] Wire one reviewed brain.json backend.origins/sockets declaration into backend startup, private build manifest,
   Node SSR and Rust development/static gateways. Disabled defaults and explicit overrides have focused coverage.
 - [ ] Validate that shared declaration end to end in an actual native/browser application.
@@ -174,8 +175,8 @@ Rust 1.99.1 release gate and do not establish cross-platform execution or whole-
   Node routing preserves its credential projection and bridge lifecycle; it does not rename cookies.
 - [ ] Run actual browser plus native PostgreSQL end-to-end CRUD/live/auth/session-switch/shutdown checks. Prefer an
   installed connected Viewer as documented; report headless fallback, AX and heap coverage precisely.
-- [ ] Re-run administrative budget/required/no-JS cases on the final combined tree. Keep the 30 KiB reference gate;
-  do not hide the zero-headroom fixture or increase limits to pass.
+- [x] Re-run administrative budget/required/no-JS cases on combined checkpoint 3987d0b. Keep the 30 KiB reference
+  gate; fixed edit is 30,720 B exactly. Rerun when subsequent compiler/runtime changes affect emitted output.
 - [ ] Investigate source-map performance before any compiler-speed claim: seven paired diagnostic DEBUG runs showed
   large-prod **72.91 to 148.55 ms (+103.74%)**, despite the functional correction. Release-profile paired measurement
   completed with the same diagnostic toolchain: seven paired release runs measured large-prod **12.59 to 20.57 ms
