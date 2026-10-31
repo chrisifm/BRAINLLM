@@ -1,0 +1,7 @@
+<meta server>
+export default {
+  schedule: '0 7 * * *',
+  job: 'order_receipts',
+  payload: { order_id: 'daily-summary', email: 'shop@example.com' },
+  catchUp: 600
+}

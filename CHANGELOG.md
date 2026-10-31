@@ -42,6 +42,25 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   object field options `{type, default, unique}` and declarative checks in `constraints.jsbrain`. Decimals travel and
   are stored as canonical strings with a lossless database CHECK; unique and check violations answer 409/422. Records
   expose `created_at`/`updated_at`. Existing contracts record byte-identically and gain no database objects.
+- `PATCH /api/<resource>/<uuid>` updates only the sent fields; `null` clears an optional field. The merged record is
+  revalidated against the full contract and written with the same conflict check as `PUT` (`docs/backend/patch.md`).
+- Declarative operations (`server/operations/<name>.jsbrain`, `POST /_brain/operations/<name>`) run read, create,
+  update, upsert, delete, action and transition steps in one Postgres transaction and roll all of them back on any
+  failure, with step-prefixed errors (`docs/backend/transactions.md`).
+- Atomic actions (`server/resources/<r>/actions.jsbrain`, `POST /api/<r>/<uuid>/actions/<name>`) lock the row and
+  apply guarded `set`, `increment` and `decrement` (compare-and-set via `when`), and `POST /api/<r>/upsert` inserts
+  if absent on a declared unique key; both are race-safe under concurrent requests (`docs/backend/atomic-updates.md`).
+- `POST /api/<r>/batch` creates, updates (PATCH semantics), upserts or deletes up to `batch.jsbrain { max }` items
+  (default 100) in one transaction; every item is validated first and errors are keyed `items.<i>.<field>`
+  (`docs/backend/batch.md`).
+- `transitions.jsbrain` turns one `enum` field into a state machine: records start in a declared initial value and
+  change only through `POST /api/<r>/<uuid>/transitions/<name>` with `from` guards, roles, input and side effects
+  (`docs/backend/state-machines.md`).
+- Job queues accept `server/jobs/<name>/queue.jsbrain` (priority, attempts, fixed or exponential backoff, timeout up to
+  one hour with automatic lease renewal, drain on shutdown, concurrency); `brain jobs enqueue --priority/--delay`,
+  `dead`, `retry` and `stats` inspect and revive dead letters (`docs/backend/queues.md`).
+- `server/cron/<name>.jsbrain` schedules a declared job (`brain jobs cron`, `--once`); each slot is enqueued once even
+  with several schedulers, and missed slots outside `catchUp` are skipped (`docs/backend/cron.md`).
 
 - `urlState(initial, { key, values })`: a query value outside `values` falls back to the first allowed value (also
   on the server and on back/forward) without writing history; `<Tabs>` selects its first tab for an unknown bound
@@ -62,6 +81,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - The kit's `<ErrorState>` reads its texts from the app's dictionary (`error_state.*` keys, documented in the i18n
   guide and INTERNALS §37) like the `form.*` messages, with the English text as the default when a key is missing.
 
+- Job enqueue takes a per-queue transaction lock and a bounded count instead of one global lock and a full scan, so
+  hook-enabled writes on different queues no longer serialize. The 10000 active-job cap now applies per queue.
 - The shared lexer decodes ASCII directly, scans ASCII identifier runs as bytes and indexes punctuation by first byte
   in the same longest-first order. Source-map scanning skips slash-free trivia gaps and builds its generated line index
   only to locate a failure. Emitted JS, server JS, CSS, maps and diagnostics are byte-identical; no compiler-speed

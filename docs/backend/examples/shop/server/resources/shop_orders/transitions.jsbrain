@@ -1,0 +1,10 @@
+<meta server>
+export default {
+  field: 'status',
+  initial: ['pending'],
+  transitions: {
+    pay: { from: ['pending'], to: 'paid', roles: ['owner', 'admin'], set: { paid_at: '$now' } },
+    ship: { from: ['paid'], to: 'shipped', roles: ['admin'] },
+    cancel: { from: ['pending', 'paid'], to: 'cancelled', roles: ['owner', 'admin'], input: { reason: 'str!' }, set: { reason: '$input.reason' } }
+  }
+}

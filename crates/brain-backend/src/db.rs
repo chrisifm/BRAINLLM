@@ -24,6 +24,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../migrations/0007_search_empty_fields.sql"),
     ),
     ("analytics", include_str!("../migrations/0008_analytics.sql")),
+    ("domain_queues", include_str!("../migrations/0009_domain_queues.sql")),
 ];
 fn checksum(sql: &str) -> String {
     Sha256::digest(sql.as_bytes())
@@ -731,7 +732,7 @@ pub async fn get(pool: &PgPool, r: &Resource, id: Uuid) -> Result<Option<Value>,
         .await
         .map(|r| r.map(record))
 }
-async fn hook(
+pub(crate) async fn hook(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     r: &Resource,
     operation: &str,

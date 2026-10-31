@@ -1,0 +1,5 @@
+<meta server>
+// ctx: payload, jobId, attempt, env. Delivery is at least once; send at most one receipt per jobId.
+export default async function handle(ctx) {
+  if (!ctx.payload.email.includes('@')) throw new Error('invalid receipt address')
+}

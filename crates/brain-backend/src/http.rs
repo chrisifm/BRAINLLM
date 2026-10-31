@@ -24,6 +24,8 @@ use uuid::Uuid;
 
 #[path = "sockets.rs"]
 mod sockets;
+#[path = "domain_http.rs"]
+mod domain_http;
 pub use sockets::{SocketConfig, SocketControl};
 
 tokio::task_local! { static REQUEST_ID: String; }
@@ -66,6 +68,7 @@ pub struct App {
     media: crate::media::Store,
     production: bool,
     origins: Arc<Vec<String>>,
+    domain: Arc<crate::domain::Domain>,
 }
 #[derive(Debug)]
 pub struct Error {
@@ -215,6 +218,14 @@ pub async fn router_with_socket_control(
     pool: PgPool,
     config: Config,
 ) -> std::result::Result<(Router, SocketControl), String> {
+    router_with_domain(pool, config, crate::domain::Domain::default()).await
+}
+/// Same router plus declared domain contracts (actions, transitions, batches, upserts and operations).
+pub async fn router_with_domain(
+    pool: PgPool,
+    config: Config,
+    domain: crate::domain::Domain,
+) -> std::result::Result<(Router, SocketControl), String> {
     let socket_origins = config.sockets.as_ref().map(|s| s.allowed().to_vec()).unwrap_or_default();
     if socket_origins.iter().any(|origin| !config.origins.contains(origin)) {
         return Err("Socket origins must be an explicit subset of backend HTTP origins".into());
@@ -278,6 +289,7 @@ pub async fn router_with_socket_control(
         &jobs.values().cloned().collect::<Vec<_>>(),
     )?;
     db::verify(&pool, &resources.values().cloned().collect::<Vec<_>>()).await?;
+    domain_http::validate(&domain, &resources, &config.roles)?;
     let jwt = config
         .jwt
         .map(|config| crate::jwt::Jwt::new(pool.clone(), config));
@@ -358,6 +370,7 @@ pub async fn router_with_socket_control(
         uploads: config.uploads,
         production: config.production,
         origins: Arc::new(config.origins),
+        domain: Arc::new(domain),
     };
     let cors = CorsLayer::new()
         .allow_origin(origins)
@@ -435,8 +448,9 @@ pub async fn router_with_socket_control(
         .route("/_brain/analytics.js", get(analytics_script))
         .route("/_brain/jobs/{queue}", post(enqueue))
         .route("/_brain/jobs/status/{id}", get(job_status))
+        .merge(domain_http::routes())
         .route("/api/{name}", get(list).post(create))
-        .route("/api/{name}/{id}", get(read).put(update).delete(delete))
+        .route("/api/{name}/{id}", get(read).put(update).patch(patch).delete(delete))
         .route(
             "/_brain/uploads",
             post(upload_image).layer(DefaultBodyLimit::max(5 * 1024 * 1024 + 65536)),
@@ -477,6 +491,15 @@ pub async fn serve(
     pool: PgPool,
     config: Config,
 ) -> std::result::Result<(), String> {
+    serve_with_domain(listener, pool, config, crate::domain::Domain::default()).await
+}
+/// `serve` with declared domain contracts.
+pub async fn serve_with_domain(
+    listener: tokio::net::TcpListener,
+    pool: PgPool,
+    config: Config,
+    domain: crate::domain::Domain,
+) -> std::result::Result<(), String> {
     let address = listener
         .local_addr()
         .map_err(|_| "Cannot inspect backend address")?
@@ -487,7 +510,7 @@ pub async fn serve(
         .filter(|cfg| cfg.has_outbound())
         .map(|cfg| crate::webhooks::Webhooks::new(pool.clone(), cfg, &config.jobs))
         .transpose()?;
-    let (app, sockets) = router_with_socket_control(pool.clone(), config).await?;
+    let (app, sockets) = router_with_domain(pool.clone(), config, domain).await?;
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
     let mut http_stop = stop_rx.clone();
     let worker_failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -646,10 +669,10 @@ async fn docs(State(app): State<App>, h: HeaderMap) -> Result<Json<Value>> {
     if app.production {
         app.admin(&h).await?;
     }
-    Ok(Json(contract::openapi_with_roles(
-        &app.resources.values().cloned().collect::<Vec<_>>(),
-        app.auth_flows.roles(),
-    )))
+    let resources = app.resources.values().cloned().collect::<Vec<_>>();
+    let mut api = contract::openapi_with_roles(&resources, app.auth_flows.roles());
+    crate::domain::openapi(&app.domain, &resources, &mut api);
+    Ok(Json(api))
 }
 async fn signup(State(app): State<App>, Json(c): Json<Credentials>) -> Result<Json<Value>> {
     app.auth
@@ -986,6 +1009,7 @@ async fn create(
     }
     let input = before(&app, r, "create", input, None, &u).await?;
     let data = r.input(&input).map_err(Error::validation)?;
+    app.domain.protect(r, None, &data).map_err(Error::validation)?;
     let record = db::create(&app.pool, r, u.id, data)
         .await
         .map_err(|error| write_error(r, error))?;
@@ -1016,8 +1040,42 @@ async fn update(
     if owner.is_some_and(|owner| existing["owner"].as_str() != Some(owner.to_string().as_str())) {
         return Err(Error::missing());
     }
+    let previous = existing["data"].clone();
     let input = before(&app, r, "update", input, Some(existing), &u).await?;
     let data = r.input(&input).map_err(Error::validation)?;
+    app.domain.protect(r, Some(&previous), &data).map_err(Error::validation)?;
+    let record = db::update_checked(&app.pool, r, id, owner, data, Some(&revision))
+        .await
+        .map_err(|error| write_error(r, error))?
+        .ok_or_else(conflict)?;
+    app.sockets.changed(&name, "update", &record);
+    Ok(Json(record))
+}
+/// Partial update: only sent fields change; the merged record is revalidated and written with the same CAS.
+async fn patch(
+    State(app): State<App>,
+    Path((name, id)): Path<(String, Uuid)>,
+    h: HeaderMap,
+    Json(input): Json<Value>,
+) -> Result<Json<Value>> {
+    let r = app.resource(&name)?;
+    let u = app.required(&h).await?;
+    if !r.policy.allows("update", Some(&u.role), true) {
+        return Err(Error::forbidden());
+    }
+    let owner = r.policy.owners_only("update", Some(&u.role)).then_some(u.id);
+    let (existing, revision) = db::get_version(&app.pool, r, id)
+        .await
+        .map_err(|error| Error::internal(db::safe(error)))?
+        .ok_or_else(Error::missing)?;
+    if owner.is_some_and(|owner| existing["owner"].as_str() != Some(owner.to_string().as_str())) {
+        return Err(Error::missing());
+    }
+    let merged = crate::domain::merge_patch(r, &existing["data"], &input).map_err(Error::validation)?;
+    let previous = existing["data"].clone();
+    let merged = before(&app, r, "update", merged, Some(existing), &u).await?;
+    let data = r.input(&merged).map_err(Error::validation)?;
+    app.domain.protect(r, Some(&previous), &data).map_err(Error::validation)?;
     let record = db::update_checked(&app.pool, r, id, owner, data, Some(&revision))
         .await
         .map_err(|error| write_error(r, error))?

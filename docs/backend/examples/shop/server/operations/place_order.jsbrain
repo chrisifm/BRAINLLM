@@ -1,0 +1,10 @@
+<meta server>
+export default {
+  roles: ['candidate', 'admin'],
+  input: { product_id: 'str!', quantity: 'int!' },
+  steps: [
+    { as: 'product', action: 'shop_products.reserve', id: '$input.product_id', input: { quantity: '$input.quantity' } },
+    { as: 'order', create: 'shop_orders', data: { product: '$steps.product.id', quantity: '$input.quantity', pay_by: '$now+3d' } }
+  ],
+  result: ['order', 'product']
+}

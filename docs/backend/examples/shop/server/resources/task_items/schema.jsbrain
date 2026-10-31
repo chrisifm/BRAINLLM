@@ -1,0 +1,7 @@
+<meta server>
+export default {
+  title: 'str!',
+  code: { type: 'str!', unique: true },
+  done: 'bool',
+  points: { type: 'int', default: 0 }
+}

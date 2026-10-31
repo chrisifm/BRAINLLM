@@ -268,6 +268,13 @@ validated file leases and compare-and-swap revisions. Existing files are never o
 routes or controls are created. Native backend policy remains authoritative. Review policy, migrate explicitly,
 then build and doctor the application. The app's default 30 KiB route budget remains unchanged.
 Set `DATABASE_URL`; explicitly `brain backend migrate`, then `brain backend serve` (loopback REST at `/api/<resource>`).
+`PATCH /api/<resource>/<uuid>` changes only the sent fields (`null` clears an optional one); see `docs/backend/patch.md`.
+`server/operations/<name>.jsbrain` declares typed input and steps that `POST /_brain/operations/<name>` runs in one transaction (all or nothing); see `docs/backend/transactions.md`.
+`actions.jsbrain` declares guarded atomic writes (`when`, `set`, `increment`, `decrement`) at `POST /api/<r>/<uuid>/actions/<name>`; `POST /api/<r>/upsert` inserts if absent on a unique key; see `docs/backend/atomic-updates.md`.
+`POST /api/<r>/batch` (`op`: create|update|upsert|delete, `items`) is all-or-nothing, max from `batch.jsbrain { max }`; see `docs/backend/batch.md`.
+`transitions.jsbrain { field, initial, transitions }` makes an `enum` field a state machine changed only by `POST /api/<r>/<uuid>/transitions/<name>`; see `docs/backend/state-machines.md`.
+`server/jobs/<name>/queue.jsbrain { priority, attempts, backoff, timeout, lease, drain, concurrency }` tunes one queue; `brain jobs dead|retry|stats <queue>`; see `docs/backend/queues.md`.
+`server/cron/<name>.jsbrain { schedule: '0 7 * * *', job, payload?, catchUp?, priority? }` enqueues once per slot (UTC); run `brain jobs cron`; see `docs/backend/cron.md`.
 `brain jobs enqueue|status|work|prune` manages persistent, at-least-once work. Handlers must be idempotent by `ctx.jobId`.
 After-write hooks commit `{resource,operation,record}` with their mutation. `brain add hook validate_order` creates
 `server/hooks/validate_order.jsbrain`; reference it as `before_create`, `before_update` or `before_delete` in a resource's

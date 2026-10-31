@@ -1,0 +1,6 @@
+<meta server>
+export default {
+  restock: { roles: ['admin'], input: { amount: 'int!' }, when: { status: { ne: 'archived' } }, increment: { stock: '$input.amount' } },
+  reserve: { roles: ['admin'], input: { quantity: 'int!' }, when: { status: 'active', stock: { gte: '$input.quantity' } }, decrement: { stock: '$input.quantity' } },
+  reprice: { roles: ['admin'], input: { expected: 'decimal(10,2)!', price: 'decimal(10,2)!' }, when: { price: '$input.expected' }, set: { price: '$input.price' } }
+}
