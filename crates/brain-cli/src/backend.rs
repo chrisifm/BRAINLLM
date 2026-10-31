@@ -405,6 +405,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let size=|key:&str,default:u32|setting(key).map(|v|v.parse::<u32>().ok().filter(|n|(1..=64).contains(n)).ok_or(format!("{key} must be 1..64"))).transpose().map(|v|v.unwrap_or(default));
         let (http_size,worker_size)=(size("BRAIN_DB_HTTP_POOL",8)?,size("BRAIN_DB_WORKER_POOL",2)?);
         let processes=size("BRAIN_BACKEND_PROCESSES",1)?;
+        // More than one process: rate windows and socket fan-out must live in Postgres, not in one process's memory.
+        if processes>1 {platform.cluster.shared=true;}
         let http_pool=brain_backend::db::connect_named(&url,brain_backend::db::Workload::Http,http_size,&pg_name(&root,"http")).await?;
         brain_backend::db::check_connection_budget(&http_pool,(http_size+worker_size)*processes).await?;
         let worker_pool=brain_backend::db::connect_named(&url,brain_backend::db::Workload::Worker,worker_size,&pg_name(&root,"worker")).await?;

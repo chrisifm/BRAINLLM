@@ -163,6 +163,7 @@ pub struct Keys {
     events: mpsc::Sender<Event>,
     dropped: Arc<AtomicU64>,
     limiter: Arc<DefaultKeyedRateLimiter<Uuid>>,
+    shared: bool,
 }
 
 /// Public key fields as JSON; never includes the secret hash.
@@ -216,10 +217,16 @@ impl Keys {
             config,
             events,
             dropped: Arc::new(AtomicU64::new(0)),
+            shared: false,
         })
     }
     pub fn config(&self) -> &Config {
         &self.config
+    }
+    /// Counts the per-minute limit in Postgres so every process of the deployment shares one budget per key.
+    pub fn shared(mut self, shared: bool) -> Self {
+        self.shared = shared;
+        self
     }
     /// Trace events not written because the bounded channel was full.
     pub fn dropped_events(&self) -> u64 {
@@ -366,7 +373,12 @@ impl Keys {
     }
     /// Applies the per-key rate limit, then consumes one request from the UTC day and month counters atomically.
     pub async fn admit(&self, principal: &Principal) -> Result<Admission, String> {
-        if self.limiter.check_key(&principal.key_id).is_err() {
+        if self.shared {
+            let window = std::time::Duration::from_secs(60);
+            if crate::cluster::hit(&self.pool, "api-key", &principal.key_id.to_string(), self.config.per_key_per_minute, window).await?.is_err() {
+                return Ok(Admission::RateLimited);
+            }
+        } else if self.limiter.check_key(&principal.key_id).is_err() {
             return Ok(Admission::RateLimited);
         }
         if self.limiter.len() > 10_000 {

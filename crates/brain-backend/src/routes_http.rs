@@ -100,13 +100,23 @@ fn unix_now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// One rate-limit hit: in process memory, or in Postgres when the deployment shares state across processes.
+async fn limit(app: &App, state: &State, route: &str, subject: &str, rate: &crate::routes::Rate) -> Result<crate::cluster::Hit> {
+    if app.cluster.shared {
+        return crate::cluster::hit(&app.pool, &format!("route:{route}"), subject, rate.count, rate.window)
+            .await
+            .map_err(Error::internal);
+    }
+    Ok(state.limiter.hit(route, subject, rate, Instant::now()))
+}
+
 async fn serve(app: App, state: Arc<State>, route: Arc<Route>, req: Request) -> Result<Response> {
     let rid = super::request_reference();
     let client = req.extensions().get::<ClientIp>().map(|c| c.0.to_string());
     let (mut parts, body) = req.into_parts();
     let rate_limited = |retry: u64| with_retry(error(StatusCode::TOO_MANY_REQUESTS, "RATE_LIMITED", "Too many requests to this route; retry after the Retry-After delay").into_response(), retry);
     if let Some(rate) = route.rate.as_ref().filter(|r| r.key == RateKey::Ip) {
-        if let Err(retry) = state.limiter.hit(&route.name, client.as_deref().unwrap_or("unknown"), rate, Instant::now()) {
+        if let Err(retry) = limit(&app, &state, &route.name, client.as_deref().unwrap_or("unknown"), rate).await? {
             return Ok(rate_limited(retry));
         }
     }
@@ -122,7 +132,7 @@ async fn serve(app: App, state: Arc<State>, route: Arc<Route>, req: Request) -> 
         }
     };
     if let (Some(rate), Some(user)) = (route.rate.as_ref().filter(|r| r.key == RateKey::User), user.as_ref()) {
-        if let Err(retry) = state.limiter.hit(&route.name, &user.id.to_string(), rate, Instant::now()) {
+        if let Err(retry) = limit(&app, &state, &route.name, &user.id.to_string(), rate).await? {
             return Ok(rate_limited(retry));
         }
     }

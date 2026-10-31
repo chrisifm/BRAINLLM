@@ -4,6 +4,7 @@ pub mod api_keys;
 pub mod auth;
 pub mod auth_flows;
 pub mod boot;
+pub mod cluster;
 pub mod contract;
 pub mod db;
 pub mod domain;

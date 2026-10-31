@@ -9,6 +9,8 @@ mod auth_flows;
 mod auth_http;
 #[path = "backend.rs"]
 mod backend;
+#[path = "cluster.rs"]
+mod cluster;
 #[path = "data_queries.rs"]
 mod data_queries;
 #[path = "domain_writes.rs"]
