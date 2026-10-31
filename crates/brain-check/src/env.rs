@@ -3,10 +3,13 @@
 //! `KEY=value` lines before any `[section]` are shared; a `[name]` section overrides them for that environment.
 //! dotenv syntax: optional single/double quotes, `#` comments (outside quotes), `${OTHER}` expanded within the same
 //! environment. Keys are `UPPER_SNAKE_CASE`. Precedence: process environment > section > shared.
+//! `KEY?=` declares an optional key: empty is allowed and the program sees it as unset. The line that wins for an
+//! environment decides, so `[production]` can make required (`KEY=`) what the shared block leaves optional.
 //!
 //! Diagnostics never contain a value, only key names:
 //! - B0720 a key whose final value is empty in the build environment ([`empty_keys`], for `brain build`/`start`).
-//! - B0721 (warning) a key used in code but missing from `.brain_env` (edit adds `KEY=` to the shared block).
+//! - B0721 (warning) a key used in code but missing from `.brain_env` (edit adds `KEY=` to the shared block, or
+//!   `KEY?=` when the code reads it with a default).
 //! - B0722 (info) a key declared but used nowhere in the app ([`unused_keys`]).
 //! - B0723 a `PUBLIC_*` value shaped like a secret (it would ship to every visitor).
 //! - B0724 a malformed line or section header.
@@ -16,6 +19,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 pub const FILE: &str = ".brain_env";
+/// `public_env` value of an optional `PUBLIC_*` key with no value. No `.brain_env` value can contain it.
+pub const UNSET: &str = "\0";
 
 /// Keys the toolchain reads (brain build, brain-seo, brain start): never reported as unused (B0722).
 pub const TOOLING_KEYS: &[&str] = &["PUBLIC_SITE_URL", "PUBLIC_SITE_NAME", "INDEXNOW_KEY", "BRAIN_SECRET", "PORT", "HOST", "NODE_ENV", "DATABASE_URL", "BRAIN_BACKEND_URL", "BRAIN_JWT_SECRET", "BRAIN_JWT_ISSUER", "BRAIN_JWT_AUDIENCE", "GOOGLE_CLIENT_ID", "BRAIN_GCS_BUCKET", "BRAIN_GCS_PREFIX", "BRAIN_GCS_ADAPTER", "BRAIN_MAIL_RESEND_KEY", "BRAIN_MAIL_FROM", "BRAIN_VIEWER_PROFILE"];
@@ -24,6 +29,8 @@ pub const TOOLING_KEYS: &[&str] = &["PUBLIC_SITE_URL", "PUBLIC_SITE_NAME", "INDE
 pub struct Entry {
     pub key: String,
     pub value: String,
+    /// Declared as `KEY?=`: an empty value is not an error and the program sees the key as unset.
+    pub optional: bool,
     /// 1-based line in the file.
     pub line: u32,
     /// Byte offset of the start of the line.
@@ -112,7 +119,11 @@ pub fn parse(src: &str) -> EnvFile {
             f.errors.push((line, start, "expected `KEY=value`".into()));
             continue;
         };
-        let key = k.trim();
+        let k = k.trim();
+        let (key, optional) = match k.strip_suffix('?') {
+            Some(rest) => (rest.trim_end(), true),
+            None => (k, false),
+        };
         if !is_key(key) {
             f.errors.push((line, start, format!("`{key}` is not an UPPER_SNAKE_CASE key")));
             continue;
@@ -128,7 +139,7 @@ pub fn parse(src: &str) -> EnvFile {
         if !seen.insert(key.to_string()) {
             f.errors.push((line, start, format!("`{key}` is declared twice in the same block")));
         }
-        let e = Entry { key: key.to_string(), value, line, offset: start };
+        let e = Entry { key: key.to_string(), value, optional, line, offset: start };
         match current {
             Some(s) => f.sections[s].1.push(e),
             None => {
@@ -202,9 +213,32 @@ impl EnvFile {
         out
     }
 
-    /// The `PUBLIC_*` values of `env`, for the codegen (constants in client code, §13).
+    /// Whether the line that wins for `env` (its section, else the shared block) declares `key` optional.
+    pub fn optional_in(&self, env: &str, key: &str) -> bool {
+        self.sections
+            .iter()
+            .find(|(n, _)| n == env)
+            .and_then(|(_, es)| es.iter().find(|e| e.key == key))
+            .or_else(|| self.shared.iter().find(|e| e.key == key))
+            .is_some_and(|e| e.optional)
+    }
+
+    /// What a program of `env` receives: [`Self::resolve`] without optional keys that have no value, so
+    /// `process.env.KEY ?? fallback` takes its fallback.
+    pub fn runtime(&self, env: &str, process: &dyn Fn(&str) -> Option<String>) -> BTreeMap<String, String> {
+        let mut vars = self.resolve(env, process);
+        vars.retain(|k, v| !(v.trim().is_empty() && self.optional_in(env, k)));
+        vars
+    }
+
+    /// The `PUBLIC_*` values of `env`, for the codegen (constants in client code, §13). An optional key with no value
+    /// is [`UNSET`], which compiles to `undefined` instead of leaving a `process.env` read in browser code.
     pub fn public(&self, env: &str, process: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
-        self.resolve(env, process).into_iter().filter(|(k, _)| k.starts_with("PUBLIC_")).collect()
+        self.resolve(env, process)
+            .into_iter()
+            .filter(|(k, _)| k.starts_with("PUBLIC_"))
+            .map(|(k, v)| if v.trim().is_empty() && self.optional_in(env, &k) { (k, UNSET.to_string()) } else { (k, v) })
+            .collect()
     }
 }
 
@@ -240,10 +274,10 @@ pub fn empty_keys(src: &str, file: &str, env: &str, process: &dyn Fn(&str) -> Op
     let resolved = f.resolve(env, process);
     let mut out = Vec::new();
     for (k, v) in &resolved {
-        if v.trim().is_empty() {
+        if v.trim().is_empty() && !f.optional_in(env, k) {
             let decl = f.sections.iter().find(|(n, _)| n == env).and_then(|(_, es)| es.iter().find(|e| &e.key == k)).or_else(|| f.shared.iter().find(|e| &e.key == k));
             let span = decl.map(|e| span_at(src, e.line, e.offset)).unwrap_or(Span { start: 0, end: 0, line: 1, col: 1 });
-            out.push(Diag::new("B0720", file, span, format!("variable `{k}` has no value in `{env}`"), format!("set `{k}=…` under `[{env}]` in .brain_env or in the host's environment")));
+            out.push(Diag::new("B0720", file, span, format!("variable `{k}` has no value in `{env}`"), format!("set `{k}=…` under `[{env}]` in .brain_env or in the host's environment; if the app works without it, declare it optional with `{k}?=`")));
         }
     }
     out
@@ -251,23 +285,94 @@ pub fn empty_keys(src: &str, file: &str, env: &str, process: &dyn Fn(&str) -> Op
 
 /// Env keys read by a source file: `import.meta.env.X`, `process.env.X`, `ctx.env.X` (also `['X']`).
 pub fn keys_used(src: &str) -> Vec<(String, usize)> {
+    reads(src).into_iter().map(|r| (r.key, r.at)).collect()
+}
+
+/// One env read in a source file.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Read {
+    pub key: String,
+    /// Byte offset of the read.
+    pub at: usize,
+    /// The code handles the key being absent: a default, a condition or a comparison.
+    pub guarded: bool,
+}
+
+/// `X || d`, `X ?? d`, `X && y`, `X ? a : b`, `X?.y`, `X === y`, `Number(X) || d`, `parseInt(X, 10) || d`,
+/// `!X` and `if (X)`: the read at `src[at..end]` tolerates an absent key. A whitespace and parenthesis scan, because it
+/// only chooses the wording of a fix; a guard in another statement is not seen, and the fix still names `KEY?=`.
+fn guarded(src: &str, at: usize, end: usize) -> bool {
+    let mut after = src[end..].trim_start();
+    if let Some(rest) = after.strip_prefix(',') {
+        let rest = rest.trim_start();
+        let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+        if digits > 0 && rest[digits..].trim_start().starts_with(')') {
+            after = rest[digits..].trim_start();
+        }
+    }
+    let closed = after.starts_with(')');
+    let after = after.trim_start_matches(|c: char| c == ')' || c.is_whitespace());
+    if ["||", "??", "&&", "?", "===", "!==", "==", "!="].iter().any(|t| after.starts_with(t)) {
+        return true;
+    }
+    let before = src[..at].trim_end();
+    if before.ends_with('!') {
+        return true;
+    }
+    let Some(open) = before.strip_suffix('(') else { return false };
+    let open = open.trim_end();
+    closed && open.strip_suffix("if").is_some_and(|w| !w.ends_with(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == '$'))
+}
+
+/// Every env read of a source file, with whether it tolerates an absent key.
+pub fn reads(src: &str) -> Vec<Read> {
     let mut out = Vec::new();
     for prefix in ["import.meta.env", "process.env", "ctx.env"] {
         let mut from = 0;
         while let Some(i) = src[from..].find(prefix) {
             let at = from + i;
             let rest = &src[at + prefix.len()..];
-            let key = if let Some(r) = rest.strip_prefix('.') {
-                r.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).next().unwrap_or("")
+            let (key, tail) = if let Some(r) = rest.strip_prefix('.') {
+                (r.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).next().unwrap_or(""), 1)
             } else if let Some(r) = rest.strip_prefix("['").or_else(|| rest.strip_prefix("[\"")) {
-                r.split(['\'', '"']).next().unwrap_or("")
+                (r.split(['\'', '"']).next().unwrap_or(""), 4)
             } else {
-                ""
+                ("", 0)
             };
             if is_key(key) {
-                out.push((key.to_string(), at));
+                let end = at + prefix.len() + tail + key.len();
+                out.push(Read { key: key.to_string(), at, guarded: guarded(src, at, end) });
             }
             from = at + prefix.len();
+        }
+    }
+    out
+}
+
+/// Keys the app's `.brain`/`.jsbrain` files read, the ones B0721 covers, with whether any read tolerates absence.
+/// Framework-managed keys are left out: they are only listed when an app declares them.
+pub fn code_reads(root: &Path) -> BTreeMap<String, bool> {
+    let mut out: BTreeMap<String, bool> = BTreeMap::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        for e in rd.flatten() {
+            let p = e.path();
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || matches!(name.as_str(), "node_modules" | "dist" | "target") {
+                continue;
+            }
+            if p.is_dir() {
+                stack.push(p);
+            } else if (name.ends_with(".brain") || name.ends_with(".jsbrain"))
+                && let Ok(text) = std::fs::read_to_string(&p)
+            {
+                for r in reads(&text) {
+                    if !TOOLING_KEYS.contains(&r.key.as_str()) {
+                        *out.entry(r.key).or_insert(false) |= r.guarded;
+                    }
+                }
+            }
         }
     }
     out

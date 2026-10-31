@@ -85,3 +85,32 @@ fn optional_framework_environment_keys_do_not_become_required_application_secret
     assert!(empty_keys(&info.src,brain_check::env::FILE,"production",&|_|None).is_empty());
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn optional_keys_are_tolerated_and_the_winning_line_decides() {
+    let src = "CALL_LIMIT?=\nGATEWAY_KEY?=abc\nREQUIRED=\nSTRICT_LATER?=\nPUBLIC_NOTE?=\n\n[production]\nSTRICT_LATER=\n";
+    let f = parse(src);
+    assert!(f.errors.is_empty(), "{:?}", f.errors);
+    let names = |e: &str| empty_keys(src, ".brain_env", e, &none).into_iter().map(|d| d.msg).collect::<Vec<_>>().join("|");
+    let dev = names("development");
+    assert!(dev.contains("REQUIRED") && !dev.contains("CALL_LIMIT") && !dev.contains("STRICT_LATER"), "{dev}");
+    assert!(names("production").contains("STRICT_LATER"), "a section line overrides the shared optional one");
+    let run = f.runtime("development", &none);
+    assert!(!run.contains_key("CALL_LIMIT"), "an empty optional key reads as unset");
+    assert_eq!(run["GATEWAY_KEY"], "abc");
+    assert!(run.contains_key("REQUIRED"), "negative: a required empty key stays");
+    let public = f.public("development", &none);
+    assert!(public.iter().any(|(k, v)| k == "PUBLIC_NOTE" && v == brain_check::env::UNSET), "{public:?}");
+}
+
+#[test]
+fn reads_with_a_default_or_a_condition_are_guarded_and_plain_reads_are_not() {
+    let src = "a(process.env.A1 || 1); b(process.env.A2 ?? 1); if (process.env.A3) c(); d(ctx.env.A4 ? 1 : 0); e(process.env['A5'] || 1); f(process.env.PLAIN); g(process.env.CMP === 'x'); h(ctx.env.PLAIN2);";
+    let got: std::collections::BTreeMap<String, bool> = brain_check::env::reads(src).into_iter().map(|r| (r.key, r.guarded)).collect();
+    for k in ["A1", "A2", "A3", "A4", "A5"] {
+        assert_eq!(got.get(k), Some(&true), "{k}: {got:?}");
+    }
+    for k in ["PLAIN", "PLAIN2"] {
+        assert_eq!(got.get(k), Some(&false), "{k}: {got:?}");
+    }
+}
