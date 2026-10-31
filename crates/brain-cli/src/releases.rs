@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 include!(concat!(env!("OUT_DIR"), "/releases.rs"));
 
 /// Codemods `brain upgrade --apply` can run; a manifest naming another id fails the schema test.
+#[cfg_attr(not(test), allow(dead_code))] // read by `brain upgrade` (0.6.1)
 pub const CODEMODS: &[(&str, &str)] = &[
     ("package-pin", "set the @christianirack/brainllm pin in package.json to the target version (revision-checked)"),
     ("record-version", "record the target version as \"brainVersion\" in brain.json"),
@@ -124,6 +125,7 @@ pub fn cmp(a: &str, b: &str) -> Ordering {
 }
 
 /// Releases in `(from, to]`.
+#[cfg_attr(not(test), allow(dead_code))] // read by `brain upgrade` (0.6.1)
 pub fn between(from: &str, to: &str) -> Result<Vec<Release>, String> {
     Ok(all()?.into_iter().filter(|r| cmp(&r.version, from) == Ordering::Greater && cmp(&r.version, to) != Ordering::Greater).collect())
 }
