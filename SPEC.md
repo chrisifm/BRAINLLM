@@ -201,7 +201,7 @@ passes an existing resource handle; `updates.state` / `updates.connected` are re
 `backend:{origins:['https://app.example.com'],sockets:{allowedOrigins:['https://app.example.com']}}`; socket origins must
 be a subset of HTTP origins (1–8 canonical origins; `brain check` reports B0744/B0745). Absent/false sockets disables it. It connects only to the app's
 `<base>/_brain/socket`, sends no credentials in the URL, refetches after JOIN acknowledgement/reconnect/invalidation,
-and closes on unmount. Scope is a public user/revision key or null, never a token; null disconnects. HttpOnly cookie
+and closes on unmount. Scope is a public user/revision key or null, never a token; null disconnects and `state` says `anonymous` (sockets admit only signed-in users; a public page uses `resource(..., {every:'30s'})`, B0775). A session that ended becomes `auth-required`. HttpOnly cookie
 changes are not detected: call `updates.reconnect()` after same-scope login/session rotation and clear scope on logout.
 `updates.close()` stops it. Metadata observers `onInvalidate`/`onResync` are synchronous, coalesced and receive no row
 bodies. Native backend policy remains authoritative; this ephemeral single-process channel is not a durable queue.

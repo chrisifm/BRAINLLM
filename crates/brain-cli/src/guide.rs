@@ -11,6 +11,7 @@ pub const GUIDES: &[(&str, &str, &str)] = &[
     ("start", "the working loop: spec → map → add → fix/check → test → doctor → build, which command when", include_str!("../guides/start.md")),
     ("views", "routes from files, layouts, guards, 404/403, navigation", include_str!("../guides/views.md")),
     ("data", "load, server functions, api() + resource(), channels, caching", include_str!("../guides/data.md")),
+    ("sockets", "liveResource: who can connect, its states, public pages, session changes", include_str!("../guides/sockets.md")),
     ("forms", "form() schema, submit, server field errors, edit forms", include_str!("../guides/forms.md")),
     ("server", "sessions, server-only code, .brain_env, errors, deploy with brain start", include_str!("../guides/server.md")),
     ("seo", "pick the target query first; answer-first pages for search and AI answers (GEO)", include_str!("../guides/seo.md")),
@@ -63,7 +64,7 @@ mod tests {
     /// The topics the owner asked for (2026-10-29); removing one is a decision, not a refactor.
     #[test]
     fn every_required_topic_exists_and_is_a_dense_playbook() {
-        for t in ["start", "views", "data", "forms", "server", "seo", "a11y", "webmcp", "tests", "i18n", "performance", "ai"] {
+        for t in ["start", "views", "data", "sockets", "forms", "server", "seo", "a11y", "webmcp", "tests", "i18n", "performance", "ai"] {
             let (_, sum, body) = find(t).unwrap_or_else(|e| panic!("{e}"));
             assert!(!sum.trim().is_empty(), "{t}: empty summary");
             assert!(body.starts_with(&format!("# guide: {t} ")), "{t}: must open with `# guide: {t} — …`");

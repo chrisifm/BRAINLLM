@@ -1075,6 +1075,26 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// B0775: `liveResource(r, { scope: () => null })` asks for a socket nobody can open.
+    fn live_scope(&mut self, e: &Expr) {
+        let Expr::Call { callee, args, span, .. } = e else { return };
+        if !matches!(callee.unparen(), Expr::Ident(i) if i.name == "liveResource") {
+            return;
+        }
+        let Some(Expr::Object { props, .. }) = args.get(1).map(Expr::unparen) else { return };
+        let never = props.iter().any(|p| match p {
+            ObjProp::KeyValue { key: PropKey::Ident(k), value, .. } if k.name == "scope" => match value.unparen() {
+                Expr::Null(_) => true,
+                Expr::Func(f) => matches!(&f.body, FnBody::Expr(b) if matches!(b.unparen(), Expr::Null(_))),
+                _ => false,
+            },
+            _ => false,
+        });
+        if never {
+            self.push("B0775", *span, "this live resource can never connect: sockets admit only a signed-in user", "return the user's id from `scope`, or refresh a public page with `resource(..., { every: '30s' })`");
+        }
+    }
+
     /// B0129: `location.assign('/x')`, `location.replace('/x')` or `location.href = '/x'` with an app path leaves the
     /// base path and reloads the page; `navigate('/x')` does neither.
     fn location_nav(&mut self, e: &Expr) {
@@ -1150,6 +1170,7 @@ impl<'a> Checker<'a> {
 
     fn expr(&mut self, e: &Expr) {
         self.location_nav(e);
+        self.live_scope(e);
         self.form_replace(e);
         self.explicit_v(e);
         match e {

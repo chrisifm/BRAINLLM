@@ -34,6 +34,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Error pages always say what happened: `_error.brain` and `views/403|404|410|5xx.brain` without a `<meta seo title>` get a default title and `noindex`, in the build, in production and in dev; a view's own values win.
 - A status page opened directly answers its status: `/403`, `/404`, `/410`, `/5xx` and their `.html` return that code instead of 200 when the app has the page, and the new app's `views/403.brain` no longer says "Missing permission: not specified" when no permission was named. Static hosts keep their own rules.
 
+- `liveResource` no longer looks stuck when the session is gone: a refused connection reads the resource once per outage, and a 401 ends in `auth-required` instead of spending the retries.
+- `liveResource` says why a public page has no socket: rooms with a null scope report `anonymous` instead of `idle`, `scope: () => null` is reported by `brain check` (B0775), and `brain guide sockets` covers who can connect, every state and session changes.
+
 ### Signature
 - HTML documents now carry `X-Generated-By` with the official site and repository in `brain start`, `_headers`, nginx and Caddy. It replaces `X-Powered-By` and adds nothing visible to the page.
 

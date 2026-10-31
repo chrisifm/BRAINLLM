@@ -49,11 +49,11 @@ const ready = socket => { socket.open(); socket.message({ type: 'ready', protoco
 const ack = socket => socket.message({ type: 'resync', reason: 'joined' })
 const event = (suffix = '1') => ({ type: 'invalidate', resource: 'posts', id: '00000000-0000-4000-8000-000000000001', operation: 'update', eventId: '00000000-0000-4000-8000-' + suffix.padStart(12, '0') })
 
-test('null scope is idle; the fixed base endpoint contains no credentials, query or custom URL', async t => {
+test('null scope is anonymous; the fixed base endpoint contains no credentials, query or custom URL', async t => {
   const own = await fixture(t, { base: '/product/' }), user = sig(null)
   let calls = 0
   const { updates } = own({ refetch() { calls++ }, v: Promise.resolve([]) }, settings(() => user.v))
-  await micro(); assert.equal(Socket.instances.length, 0); assert.equal(updates.state, 'idle')
+  await micro(); assert.equal(Socket.instances.length, 0); assert.equal(updates.state, 'anonymous', 'rooms without a signed-in scope say why nothing connects')
   user.v = 'public-user:1'; await micro()
   const socket = Socket.instances[0]
   assert.equal(socket.url, 'wss://app.example.test/product/_brain/socket')
@@ -274,4 +274,59 @@ test('a connection that stayed healthy resets the reconnect budget for later dro
   }
   assert.equal(Socket.instances.length, 11, 'Every drop after a long healthy session reconnects')
   assert.notEqual(updates.state, 'exhausted')
+})
+
+test('a refused upgrade with a closed session ends in auth-required instead of retrying', async t => {
+  const own = await fixture(t)
+  let reads = 0, failure = null
+  const node = { refetch() { reads++ }, get v() { return failure ? Promise.reject(failure) : Promise.resolve([]) } }
+  const { updates } = own(node, settings(() => 'user:one'))
+  await micro()
+  failure = { status: 401 }
+  Socket.instances[0].remoteClose(1006)
+  await advance(t, 1); await micro()
+  assert.equal(reads, 1)
+  assert.equal(updates.state, 'auth-required')
+  const opened = Socket.instances.length
+  await advance(t, 60000)
+  assert.equal(Socket.instances.length, opened, 'no more attempts once the session is known to be gone')
+  updates.reconnect(); await micro(); await advance(t, 250)
+  assert.equal(Socket.instances.length, opened + 1, 'an explicit reconnect after signing in starts again')
+})
+
+test('a refused upgrade that is not a session problem keeps retrying and reads the resource once per outage', async t => {
+  const own = await fixture(t)
+  let reads = 0, failure = { status: 503 }
+  const node = { refetch() { reads++ }, get v() { return failure ? Promise.reject(failure) : Promise.resolve([]) } }
+  const { updates } = own(node, settings(() => 'user:one'))
+  await micro()
+  Socket.instances[0].remoteClose(1006)
+  await advance(t, 1); await micro()
+  assert.equal(updates.state, 'retrying')
+  await advance(t, 400); await micro()
+  Socket.instances[1].remoteClose(1006)
+  await advance(t, 1); await micro()
+  assert.equal(reads, 1, 'one read per outage, not one per attempt')
+  // a connection that opened and then dropped is a network matter: it never reads
+  failure = null
+  await advance(t, 1000); await micro()
+  const third = Socket.instances.at(-1); ready(third); ack(third); await advance(t)
+  const before = reads
+  third.remoteClose(1006); await advance(t, 1); await micro()
+  assert.equal(reads, before)
+  assert.notEqual(updates.state, 'auth-required')
+})
+
+test('a public page: rooms with a null scope say anonymous, and signing in connects', async t => {
+  const own = await fixture(t), user = sig(null)
+  const { updates } = own({ refetch() {}, v: Promise.resolve([]) }, settings(() => user.v))
+  await micro()
+  assert.equal(updates.state, 'anonymous')
+  assert.equal(Socket.instances.length, 0)
+  user.v = 'user:one'; await micro(); await advance(t, 250)
+  assert.equal(Socket.instances.length, 1)
+  assert.notEqual(updates.state, 'anonymous')
+  const none = own({ refetch() {}, v: Promise.resolve([]) }, { scope: () => null, rooms: [] })
+  await micro()
+  assert.equal(none.updates.state, 'idle', 'no rooms: nothing was asked')
 })
