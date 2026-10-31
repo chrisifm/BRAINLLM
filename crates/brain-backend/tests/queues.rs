@@ -35,3 +35,146 @@ async fn postgres_enqueue_locks_per_queue_not_globally() {
     assert_eq!(count, 2);
     sqlx::query("DELETE FROM _brain_jobs WHERE queue=ANY($1)").bind(vec![first, second]).execute(&pool).await.unwrap();
 }
+
+fn queue_name(prefix: &str) -> String {
+    format!("{prefix}_{}", &uuid::Uuid::new_v4().simple().to_string()[..10])
+}
+async fn state(pool: &sqlx::PgPool, id: uuid::Uuid) -> String {
+    sqlx::query_scalar("SELECT state FROM _brain_jobs WHERE id=$1").bind(id).fetch_one(pool).await.unwrap()
+}
+
+/// Higher priority is claimed first; equal priority keeps FIFO; delayed jobs wait for their time.
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn postgres_priorities_and_delays_order_claims() {
+    let pool = pool().await;
+    let q = jobs::Queue::new(pool.clone());
+    let name = queue_name("prio");
+    let enqueue = |n: i64, priority: i16, delay: i64| {
+        let (q, name) = (q.clone(), name.clone());
+        async move { q.enqueue_with(&name, json!({"n":n}), &jobs::Enqueue { priority, delay_seconds: delay, ..Default::default() }).await.unwrap() }
+    };
+    enqueue(1, 0, 0).await;
+    enqueue(2, -5, 0).await;
+    enqueue(3, 10, 0).await;
+    enqueue(4, 0, 0).await;
+    enqueue(5, 100, 3600).await;
+    let mut order = Vec::new();
+    while let Some(job) = q.claim(&name, 30).await.unwrap() {
+        order.push(job.payload["n"].as_i64().unwrap());
+        q.ack(&job).await.unwrap();
+    }
+    assert_eq!(order, [3, 1, 4, 2], "priority desc, then FIFO; the delayed job is not due");
+    let stats = q.stats(&name).await.unwrap();
+    assert_eq!((stats["succeeded"].as_i64(), stats["delayed"].as_i64()), (Some(4), Some(1)), "{stats}");
+    assert!(q.enqueue_with(&name, json!({}), &jobs::Enqueue { priority: 101, ..Default::default() }).await.is_err());
+    sqlx::query("DELETE FROM _brain_jobs WHERE queue=$1").bind(&name).execute(&pool).await.unwrap();
+}
+
+/// Exhausted attempts land in the dead letters; they can be listed and revived with fresh attempts.
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn postgres_dead_letters_list_and_retry() {
+    let pool = pool().await;
+    let q = jobs::Queue::new(pool.clone());
+    let name = queue_name("dead");
+    let id = q.enqueue_with(&name, json!({"n":1}), &jobs::Enqueue { attempts: Some(2), ..Default::default() }).await.unwrap();
+    let backoff = jobs::Backoff { kind: jobs::BackoffKind::Fixed, delay: 0, max: 0 };
+    for _ in 0..2 {
+        let job = q.claim(&name, 30).await.unwrap().expect("job is due");
+        assert!(q.fail_after(&job, backoff.seconds(job.attempt)).await.unwrap());
+    }
+    assert_eq!(state(&pool, id).await, "dead");
+    assert!(q.claim(&name, 30).await.unwrap().is_none(), "dead jobs are never claimed");
+    let dead = q.dead(&name, 10).await.unwrap();
+    assert_eq!(dead.len(), 1);
+    assert_eq!(dead[0]["attempts"], 2);
+    assert!(dead[0].get("payload").is_none(), "dead letters omit payloads");
+    assert_eq!(q.retry_dead(&name, Some(id), 10).await.unwrap(), 1);
+    let job = q.claim(&name, 30).await.unwrap().expect("revived job is due");
+    assert_eq!(job.attempt, 1, "a revived job starts with fresh attempts");
+    q.ack(&job).await.unwrap();
+    assert_eq!(q.retry_dead(&name, None, 10).await.unwrap(), 0);
+    let exp = jobs::Backoff::default();
+    assert_eq!([1, 2, 3, 9].map(|a| exp.seconds(a)), [2, 4, 8, 300]);
+    sqlx::query("DELETE FROM _brain_jobs WHERE queue=$1").bind(&name).execute(&pool).await.unwrap();
+}
+
+/// A job longer than its lease keeps the lease alive and is delivered exactly once to concurrent workers.
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn postgres_long_jobs_renew_their_lease() {
+    let pool = pool().await;
+    let q = jobs::Queue::new(pool.clone());
+    let name = queue_name("long");
+    let id = q.enqueue(&name, json!({}), None, 1).await.unwrap();
+    let runs = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let policy = jobs::QueuePolicy { lease: 10, timeout: 60, concurrency: 3, ..Default::default() };
+    let (stop, recv) = tokio::sync::watch::channel(false);
+    let counter = runs.clone();
+    let worker = tokio::spawn({
+        let (q, name) = (q.clone(), name.clone());
+        async move {
+            q.work_with(&name, &policy, recv, move |_job| {
+                let counter = counter.clone();
+                async move {
+                    counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_secs(14)).await;
+                    Ok(())
+                }
+            }).await
+        }
+    });
+    let start = std::time::Instant::now();
+    while state(&pool, id).await != "succeeded" && start.elapsed() < Duration::from_secs(30) {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    stop.send(true).unwrap();
+    worker.await.unwrap().unwrap();
+    assert_eq!(state(&pool, id).await, "succeeded");
+    assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 1, "the renewed lease prevents a second delivery");
+    sqlx::query("DELETE FROM _brain_jobs WHERE queue=$1").bind(&name).execute(&pool).await.unwrap();
+}
+
+/// Stopping a worker with `drain` lets the in-flight job finish; without it the attempt is released for retry.
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn postgres_workers_drain_in_flight_jobs() {
+    let pool = pool().await;
+    let q = jobs::Queue::new(pool.clone());
+    for (drain, expected) in [(5, "succeeded"), (0, "pending")] {
+        let name = queue_name("drain");
+        let id = q.enqueue(&name, json!({}), None, 3).await.unwrap();
+        let policy = jobs::QueuePolicy { drain, concurrency: 1, ..Default::default() };
+        let (stop, recv) = tokio::sync::watch::channel(false);
+        let (started, mut started_rx) = tokio::sync::mpsc::channel::<()>(1);
+        let worker = tokio::spawn({
+            let (q, name) = (q.clone(), name.clone());
+            async move {
+                q.work_with(&name, &policy, recv, move |_job| {
+                    let started = started.clone();
+                    async move {
+                        let _ = started.send(()).await;
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        Ok(())
+                    }
+                }).await
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(10), started_rx.recv()).await.unwrap();
+        stop.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(10), worker).await.unwrap().unwrap().unwrap();
+        assert_eq!(state(&pool, id).await, expected, "drain {drain}");
+        sqlx::query("DELETE FROM _brain_jobs WHERE queue=$1").bind(&name).execute(&pool).await.unwrap();
+    }
+}
+
+#[test]
+fn queue_policy_validation_names_the_rule() {
+    let bad = jobs::QueuePolicy { lease: 5, ..Default::default() };
+    assert!(bad.validate().unwrap_err().contains("lease: 10..600"));
+    let parsed: Result<jobs::QueuePolicy, _> = serde_json::from_value(json!({"attempts": 5, "backoff": {"type": "fixed", "delay": 30}, "extra": 1}));
+    assert!(parsed.is_err(), "unknown keys are rejected");
+    let parsed: jobs::QueuePolicy = serde_json::from_value(json!({"attempts": 5, "backoff": {"type": "fixed", "delay": 30}})).unwrap();
+    assert_eq!((parsed.attempts, parsed.backoff.seconds(4), parsed.timeout), (5, 30, 60));
+}

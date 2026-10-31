@@ -1,0 +1,10 @@
+<meta server>
+export default {
+  priority: 10,
+  attempts: 5,
+  backoff: { type: 'exponential', delay: 5, max: 600 },
+  timeout: 900,
+  lease: 60,
+  drain: 30,
+  concurrency: 4
+}

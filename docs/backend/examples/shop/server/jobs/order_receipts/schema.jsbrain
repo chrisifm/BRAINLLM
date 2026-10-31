@@ -1,0 +1,5 @@
+<meta server>
+export default {
+  "order_id": "str!",
+  "email": "str!"
+}

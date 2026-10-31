@@ -217,8 +217,12 @@ pub fn inspect(root: &Path) -> Result<Value, String> {
     let domain = domain::checked(root, &resources, &roles)?;
     let mut openapi = contract::openapi_with_roles(&resources, &roles);
     brain_backend::domain::openapi(&domain, &resources, &mut openapi);
+    let queues: serde_json::Map<String, Value> = jobs
+        .iter()
+        .map(|j| Ok((j.name.clone(), json!(domain::queue_policy(root, &j.name)?))))
+        .collect::<Result<_, String>>()?;
     Ok(
-        json!({"schemaVersion":1,"experimental":true,"resources":resources,"jobs":jobs,"roles":roles,"domain":domain,"webhooks":crate::webhook_config::metadata(root)?,"openapi":openapi,"limits":{"activeJobs":10000,"workers":8,"jobSeconds":60,"leaseSeconds":90},"delivery":"at-least-once; handlers must be idempotent"}),
+        json!({"schemaVersion":1,"experimental":true,"resources":resources,"jobs":jobs,"queues":queues,"roles":roles,"domain":domain,"webhooks":crate::webhook_config::metadata(root)?,"openapi":openapi,"limits":{"activeJobs":10000,"workers":8,"jobSeconds":60,"leaseSeconds":90},"delivery":"at-least-once; handlers must be idempotent"}),
     )
 }
 fn database(root: &Path, environment: &str) -> Result<String, String> {
@@ -609,12 +613,13 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
     let root = crate::app_root()?;
     let environment = crate::env::name(args, "development");
     let op = args.first().map(String::as_str).unwrap_or("");
-    if !matches!(op, "enqueue" | "status" | "work" | "prune") {
-        return Err("usage: brain jobs enqueue <queue> --payload '<json>' [--key K] | status <id> | work <queue> [--concurrency 2] | prune".into());
+    if !matches!(op, "enqueue" | "status" | "work" | "prune" | "dead" | "retry" | "stats") {
+        return Err("usage: brain jobs enqueue <queue> --payload '<json>' [--key K] [--priority N] [--delay S] | status <id> | work <queue> [--concurrency 2] | dead <queue> | retry <queue> [--id <uuid>] | stats <queue> | prune".into());
     }
     let snapshot = inspect(&root)?;
     let url = database(&root, &environment)?;
     let name = args.get(1).cloned().unwrap_or_default();
+    let policy = if matches!(op, "enqueue" | "work") { Some(domain::queue_policy(&root, &name)?) } else { None };
     let job_contract = if matches!(op, "enqueue" | "work") {
         Some(
             contracts(&root, "jobs")?
@@ -650,9 +655,18 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
                     .unwrap()
                     .input(&payload)
                     .map_err(|e| json!({"code":"INVALID_JOB_PAYLOAD","fields":e}).to_string())?;
-                let id = queue
-                    .enqueue(&name, payload, crate::flag(args, "--key").as_deref(), 3)
-                    .await?;
+                let policy = policy.as_ref().unwrap();
+                let number = |flag: &str, default: i64| -> Result<i64, String> {
+                    crate::flag(args, flag).map_or(Ok(default), |v| v.parse().map_err(|_| format!("{flag} must be an integer")))
+                };
+                let key = crate::flag(args, "--key");
+                let options = brain_backend::jobs::Enqueue {
+                    key: key.as_deref(),
+                    attempts: Some(policy.attempts),
+                    priority: i16::try_from(number("--priority", policy.priority.into())?).map_err(|_| "--priority must be -100..100")?,
+                    delay_seconds: number("--delay", 0)?,
+                };
+                let id = queue.enqueue_with(&name, payload, &options).await?;
                 println!("{}", json!({"schemaVersion":1,"id":id}));
             }
             "status" => {
@@ -662,6 +676,16 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
                     json!({"schemaVersion":1,"job":queue.status(id).await?})
                 );
             }
+            "dead" => {
+                println!("{}", json!({"schemaVersion":1,"dead":queue.dead(&name, 100).await?}));
+            }
+            "retry" => {
+                let id = crate::flag(args, "--id").map(|v| v.parse().map_err(|_| "--id must be a UUID")).transpose()?;
+                println!("{}", json!({"schemaVersion":1,"revived":queue.retry_dead(&name, id, 1000).await?}));
+            }
+            "stats" => {
+                println!("{}", json!({"schemaVersion":1,"stats":queue.stats(&name).await?}));
+            }
             "prune" => {
                 println!(
                     "{}",
@@ -669,8 +693,9 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
                 );
             }
             "work" => {
+                let mut policy = policy.clone().unwrap();
                 let n = crate::flag(args, "--concurrency")
-                    .unwrap_or("2".into())
+                    .unwrap_or(policy.concurrency.to_string())
                     .parse()
                     .map_err(|_| "Concurrency must be 1..8")?;
                 if !(1..=8).contains(&n) {
@@ -683,7 +708,8 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
                     "{}",
                     json!({"schemaVersion":1,"event":"worker-ready","queue":name,"concurrency":n})
                 );
-                let worker = queue.work(&name, n, recv, move |mut job| {
+                policy.concurrency = n;
+                let worker = queue.work_with(&name, &policy, recv, move |mut job| {
                     let (module, env, contract, webhooks) = (module.clone(), env.clone(), contract.clone(), webhooks.clone());
                     async move {
                         if let Some(webhooks) = webhooks {

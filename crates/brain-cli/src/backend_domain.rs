@@ -52,6 +52,17 @@ pub fn load(root: &Path, resources: &[Resource]) -> Result<Domain, String> {
     Ok(domain)
 }
 
+/// `server/jobs/<name>/queue.jsbrain`: priority, attempts, backoff, timeout, lease, drain and concurrency. Absent → defaults.
+pub fn queue_policy(root: &Path, name: &str) -> Result<brain_backend::jobs::QueuePolicy, String> {
+    let path = root.join("server/jobs").join(name).join("queue.jsbrain");
+    if !path.is_file() {
+        return Ok(Default::default());
+    }
+    let policy: brain_backend::jobs::QueuePolicy = parse(root, &path, "{ priority?, attempts?, backoff?: { type: 'fixed'|'exponential', delay, max }, timeout?, lease?, drain?, concurrency? }")?;
+    policy.validate().map_err(|e| format!("server/jobs/{name}/queue.jsbrain: {e}"))?;
+    Ok(policy)
+}
+
 /// Load and validate against resources and configured roles; the same checks run again before serving.
 pub fn checked(root: &Path, resources: &[Resource], roles: &brain_backend::auth_flows::RolesConfig) -> Result<Domain, String> {
     let domain = load(root, resources)?;
@@ -98,6 +109,26 @@ mod tests {
         assert!(paths["/_brain/operations/place_order"]["post"].is_object());
         assert!(paths["/api/shop_orders/{id}/transitions/pay"]["post"].is_object());
         assert_eq!(paths["/api/task_items/batch"]["post"]["x-brain-batch-max"], 5);
+    }
+
+    /// `queue.jsbrain` is projected in `brain backend schema --json`; invalid values fail with the file name.
+    #[test]
+    fn queue_policies_are_projected_and_validated() {
+        let root = example().canonicalize().unwrap();
+        let snapshot = super::super::inspect(&root).unwrap();
+        let receipts = &snapshot["queues"]["order_receipts"];
+        assert_eq!((receipts["priority"].as_i64(), receipts["timeout"].as_i64(), receipts["backoff"]["type"].as_str()), (Some(10), Some(900), Some("exponential")));
+        let dir = std::env::temp_dir().join(format!("brain-queue-cli-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let job = dir.join("server/jobs/mail");
+        std::fs::create_dir_all(&job).unwrap();
+        std::fs::write(job.join("schema.jsbrain"), "export default { to: 'str!' }\n").unwrap();
+        let root = dir.canonicalize().unwrap();
+        assert_eq!(super::super::inspect(&root).unwrap()["queues"]["mail"]["attempts"], 3, "absent file uses defaults");
+        std::fs::write(job.join("queue.jsbrain"), "export default { lease: 5 }\n").unwrap();
+        let error = super::super::inspect(&root).unwrap_err();
+        assert!(error.contains("server/jobs/mail/queue.jsbrain") && error.contains("lease: 10..600"), "{error}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

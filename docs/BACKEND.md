@@ -87,7 +87,7 @@ OpenAPI 3.1 JSON is available at `/_brain/api` (admin session required with `--e
 routes and native account/media/job/link endpoints. CLI/MCP can inspect the same structured source contract;
 source saves report conservative contract diffs in `impact` without claiming a running backend was replaced.
 
-Domain writes: [PATCH](backend/patch.md) · [transactions](backend/transactions.md) · [atomic updates](backend/atomic-updates.md) · [batch writes](backend/batch.md) · [state machines](backend/state-machines.md).
+Domain writes: [PATCH](backend/patch.md) · [transactions](backend/transactions.md) · [atomic updates](backend/atomic-updates.md) · [batch writes](backend/batch.md) · [state machines](backend/state-machines.md) · [queue policies](backend/queues.md).
 
 ## Opt-in administrative views
 
@@ -178,7 +178,8 @@ Limits: 10000 active jobs per queue, 1–8 workers per process, no prefetched ba
 lease, 64 KB payload, default three attempts (library/HTTP allow 1–10), exponential retry delay capped at five minutes.
 The final failure or expired final lease becomes `dead`. Errors persisted in job status are generic, never raw handler
 exceptions. CLI status and HTTP status omit payloads. Prune explicitly removes at most 1000 finished jobs older than
-30 days; idempotency keys expire with those records. There is no automatic retry of dead jobs or scheduler yet.
+30 days; idempotency keys expire with those records. Priorities, delays, backoff, longer timeouts, drain and dead-letter
+retry are configured per queue (see [queue policies](backend/queues.md)); the values above are the defaults.
 
 Ctrl+C stops claiming work and cancels owned execution. This trusted-project worker is not a sandbox for untrusted
 handler code. Node execution costs and delivery semantics must be measured before production adoption.

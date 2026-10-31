@@ -29,6 +29,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `transitions.jsbrain` turns one `enum` field into a state machine: records start in a declared initial value and
   change only through `POST /api/<r>/<uuid>/transitions/<name>` with `from` guards, roles, input and side effects
   (`docs/backend/state-machines.md`).
+- Job queues accept `server/jobs/<name>/queue.jsbrain` (priority, attempts, fixed or exponential backoff, timeout up to
+  one hour with automatic lease renewal, drain on shutdown, concurrency); `brain jobs enqueue --priority/--delay`,
+  `dead`, `retry` and `stats` inspect and revive dead letters (`docs/backend/queues.md`).
 
 ### Changed
 
