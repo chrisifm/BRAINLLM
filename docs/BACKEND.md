@@ -188,6 +188,7 @@ PNG/JPEG/WebP originals remain private and unchanged, with separately versioned 
 ownership metadata. Image work, input/output bytes, dimensions and decoding memory have explicit budgets.
 The media library supports metadata pagination, guarded edits, private downloads and leased deletion cleanup.
 See [MEDIA.md](MEDIA.md) for the exact current routes, limits and optional private Google Cloud Storage adapter.
+Behavior analytics (collector, privacy, `brain analytics report`) is described in [backend/analytics.md](backend/analytics.md).
 General active-content/file formats are not implicitly treated as safe images.
 
 ## Remaining acceptance work

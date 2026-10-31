@@ -11,6 +11,18 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Added
 
+- Behavior analytics on by default for apps with a native backend: a served collector (`/_brain/analytics.js`,
+  zero build bytes) records page views with UTM, dwell, scroll depth, sessions, SPA navigations and every interaction
+  kind (clicks, keys, focus, input, toggles, submits, clipboard, drag, hover intent, media, rage and dead clicks) in
+  batched beacons. It honors GPC, DNT and webdriver, sends no field values, and stores no IP.
+- `POST /_brain/analytics` ingestion with size, batch and per-visitor rate limits, bot filtering, anonymous visitor and
+  session ids, configurable retention (default 180 days) and parameterized SQL into `_brain_analytics_*` tables.
+- `brain.json` `analytics` switch (`enabled`, `consent: "required"`, `retentionDays`, `countryHeader`,
+  `eventsPerMinute`), `data-track` attributes and `brain:track` custom events.
+- `brain analytics report|funnel|segment|export|map|purge|erase`: per-route and per-element usage resolved to
+  `file:line` through `.brain/analytics/elements.json`, never-used UI, time to first interaction, funnels, segments,
+  JSON/CSV export and per-user erasure. MCP tool `brain_analytics_report`; doctor info `B0729` when no backend is set.
+- Postgres connections set `application_name` to `brain:<app>:<http|worker:<queue>|migrate|cli>`.
 - Backend contracts accept exact `int`, `decimal(p,s)`, `date`, `datetime`, `enum(a|b)` and `list<str[,N]>` fields,
   object field options `{type, default, unique}` and declarative checks in `constraints.jsbrain`. Decimals travel and
   are stored as canonical strings with a lossless database CHECK; unique and check violations answer 409/422. Records
