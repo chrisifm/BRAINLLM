@@ -236,6 +236,41 @@ pub(crate) fn pg_name(root: &Path, role: &str) -> String {
         .unwrap_or_default();
     brain_backend::db::application_name(&name, role)
 }
+/// `brain.json` `analytics` (docs/backend/analytics.md): on by default; `false` or `{"enabled": false}` turns it off.
+/// Keys: `consent` ("required"), `retentionDays` (1–3650, default 180), `countryHeader`, `eventsPerMinute`.
+pub(crate) fn analytics_settings(root: &Path) -> Result<Option<brain_backend::analytics::Config>, String> {
+    let manifest = std::fs::read_to_string(root.join("brain.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .unwrap_or(Value::Null);
+    let a = &manifest["analytics"];
+    if a == &Value::Bool(false) || a["enabled"] == Value::Bool(false) {
+        return Ok(None);
+    }
+    if !(a.is_null() || a.is_object() || a == &Value::Bool(true)) {
+        return Err("brain.json analytics must be true, false or an object".into());
+    }
+    let mut cfg = brain_backend::analytics::Config::default();
+    if let Some(obj) = a.as_object() {
+        for key in obj.keys() {
+            if !matches!(key.as_str(), "enabled" | "consent" | "retentionDays" | "countryHeader" | "eventsPerMinute") {
+                return Err(format!("brain.json analytics.{key} is unknown; use enabled, consent, retentionDays, countryHeader or eventsPerMinute"));
+            }
+        }
+        match &a["consent"] {
+            Value::Null => {}
+            Value::String(s) if s == "required" => cfg.consent_required = true,
+            Value::String(s) if s == "none" => {}
+            _ => return Err("brain.json analytics.consent must be \"required\" or \"none\"".into()),
+        }
+        let num = |k: &str| a[k].as_u64().map(|n| u32::try_from(n).unwrap_or(u32::MAX));
+        if let Some(n) = num("retentionDays") { cfg.retention_days = n; }
+        if let Some(n) = num("eventsPerMinute") { cfg.events_per_minute = n; }
+        if let Some(h) = a["countryHeader"].as_str() { cfg.country_header = Some(h.to_string()); }
+    }
+    cfg.validate()?;
+    Ok(Some(cfg))
+}
 fn runtime() -> Result<tokio::runtime::Runtime, String> {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -296,6 +331,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let public_base=setting("PUBLIC_SITE_URL").unwrap_or_else(||origin.clone());
         let mail=setting("BRAIN_MAIL_RESEND_KEY").map(|key|brain_backend::auth_flows::MailConfig::resend(key,setting("BRAIN_MAIL_FROM").ok_or("BRAIN_MAIL_FROM must name a verified sender email")?,public_base.clone())).transpose()?;
         let config=brain_backend::Config{sockets:sockets.native_config()?,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,resources,jobs,uploads:root.join(".brain/uploads"),origins:sockets.http_origins,production:environment=="production"};
+        brain_backend::analytics::configure(analytics_settings(&root)?)?;
         eprintln!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
         brain_backend::serve(listener,pool,config).await
     })
@@ -967,6 +1003,24 @@ impl Drop for HandlerGroup {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn brain_json_analytics_switch_defaults_on_and_validates() {
+        let root = std::env::temp_dir().join(format!("brain-analytics-switch-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let with = |v: &str| {
+            fs::write(root.join("brain.json"), format!("{{\"name\":\"shop\"{v}}}")).unwrap();
+            analytics_settings(&root)
+        };
+        assert_eq!(with("").unwrap().unwrap().retention_days, 180);
+        assert!(with(",\"analytics\":false").unwrap().is_none());
+        assert!(with(",\"analytics\":{\"enabled\":false}").unwrap().is_none());
+        let c = with(",\"analytics\":{\"consent\":\"required\",\"retentionDays\":30,\"countryHeader\":\"cf-ipcountry\"}").unwrap().unwrap();
+        assert!(c.consent_required && c.retention_days == 30 && c.country_header.as_deref() == Some("cf-ipcountry"));
+        assert!(with(",\"analytics\":{\"retentionDays\":0}").is_err());
+        assert!(with(",\"analytics\":{\"track\":true}").is_err());
+        assert!(with(",\"analytics\":\"yes\"").is_err());
+        let _ = fs::remove_dir_all(&root);
+    }
     #[test]
     fn generated_backend_contracts_check_compile_and_preserve_existing_files() {
         let root =

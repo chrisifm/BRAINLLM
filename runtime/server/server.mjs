@@ -434,6 +434,7 @@ export function createServer(o = {}) {
   // Base path (§23 #148): the app lives under mf.base ("/app/"); routes, files and functions are matched on the app
   // path (base stripped); redirects the app gives as app paths get it back.
   const BASE = mf.base || '/'
+  const analyticsTag = native && (o.analytics ?? env.BRAIN_ANALYTICS) !== 'off' && o.analytics !== false ? `<script type="module" async src="${BASE}_brain/analytics.js"></script>` : ''
   const RD = mf.redirects || {}, RDX = (RD.patterns || []).map(p => ({ re: new RegExp(p.re), to: p.to, status: p.status || 301 }))
   // `/old/` and `/old` are the same source (brain-seo normalizes the trailing slash)
   const redirectOf = path => {
@@ -495,6 +496,9 @@ export function createServer(o = {}) {
       if (inm && inm.split(',').some(t => t.trim().replace(/^W\//, '') === etag.replace(/^W\//, ''))) return send(res, 304, '', headers)
     }
     const nonce = randomBytes(16).toString('base64')
+    // behavior analytics (docs/backend/analytics.md): with a native backend every page loads its collector as an async
+    // module served by that backend, outside the build and the route budgets; BRAIN_ANALYTICS=off skips the tag
+    if (analyticsTag && !page.includes(analyticsTag)) page = page.includes('</head>') ? page.replace('</head>', analyticsTag + '</head>') : page + analyticsTag
     const body = page.replace(/<script(?![^>]*\bnonce=)/g, `<script nonce="${nonce}"`)
     send(res, status, body, { 'content-type': MIME['.html'], 'content-security-policy': withNonce(mf.csp || CSP0, nonce), 'cache-control': 'no-cache', ...(googleSignInPage(page) ? { 'cross-origin-opener-policy': 'same-origin-allow-popups' } : {}), ...(mf.build ? { 'x-brain-build': mf.build } : {}), ...headers })
   }

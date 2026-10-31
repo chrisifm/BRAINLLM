@@ -181,6 +181,23 @@
         }
       }
     },
+    "analytics": {
+      "description": "First-party behavior analytics stored in the native backend's Postgres (docs/backend/analytics.md). On by default when a native backend runs; false turns it off.",
+      "oneOf": [
+        { "type": "boolean" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "consent": { "enum": ["required", "none"], "description": "required: record nothing until consent('analytics')" },
+            "retentionDays": { "type": "integer", "minimum": 1, "maximum": 3650, "default": 180 },
+            "countryHeader": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$", "description": "Proxy header with an ISO country code, e.g. cf-ipcountry" },
+            "eventsPerMinute": { "type": "integer", "minimum": 1, "maximum": 6000, "default": 600 }
+          }
+        }
+      ]
+    },
     "budget": {
       "type": "object",
       "additionalProperties": false,
