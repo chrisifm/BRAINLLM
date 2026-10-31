@@ -593,6 +593,11 @@ pub fn run(args: &[String]) -> Result<(), String> {
             return Err(found.message);
         }
     }
+    if operation == "serve" && environment == "production"
+        && let Some((message, fix, _)) = crate::platform_config::proxy_findings(&root, None).into_iter().find(|f| f.2)
+    {
+        return Err(format!("B0784: {message}; fix: {fix}"));
+    }
     let roles = auth_roles(&root)?;
     let resources = contracts(&root, "resources")?;
     let jobs = contracts(&root, "jobs")?;

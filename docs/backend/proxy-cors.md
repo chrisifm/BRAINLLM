@@ -21,6 +21,11 @@ export default {
 `brain backend schema` shows the parsed values under `platform.edge`. Unknown keys, malformed ranges and catch-all
 ranges (`0.0.0.0/0`, `::/0`) fail at startup with the file name in the message.
 
+A public range in `trustProxy` is a warning in `brain check` and `brain doctor` and stops `brain backend serve --env
+production` (B0784): whoever holds such an address could choose a client's rate-limit key. A CDN that really fronts the
+backend goes in `trustPublicProxy` with its published ranges, which says the choice is deliberate. An app with an HTTPS
+production site and no `trustProxy` gets the same warning, because a loopback backend implies a proxy.
+
 ## Client address
 
 Behind nginx every request reaches the backend from `127.0.0.1`. Without `trustProxy` the rate limiter therefore puts

@@ -43,6 +43,8 @@ pub enum RequestLog {
 pub struct Edge {
     /// Proxies whose `X-Forwarded-For` hops are trusted. Empty: the TCP peer is the client.
     pub trust_proxy: Vec<IpNet>,
+    /// Public ranges of `trust_proxy` the app declared on purpose (`trustPublicProxy`, a CDN in front of the backend).
+    pub public_proxy: Vec<IpNet>,
     /// Extra browser origins allowed for CORS and mutations, on top of the site origin.
     pub cors_origins: Vec<String>,
     /// `Access-Control-Max-Age` for preflight responses.
@@ -61,6 +63,7 @@ impl Default for Edge {
     fn default() -> Self {
         Self {
             trust_proxy: Vec::new(),
+            public_proxy: Vec::new(),
             cors_origins: Vec::new(),
             cors_max_age: None,
             max_in_flight: DEFAULT_MAX_IN_FLIGHT,
@@ -132,11 +135,28 @@ pub fn parse_proxy(text: &str) -> Result<IpNet, String> {
     Ok(net.trunc())
 }
 
+/// Whether a whole range stays inside addresses the internet cannot reach. A public proxy entry lets whoever holds that
+/// address choose a client's rate-limit key, so it has to be a decision, not a typo.
+pub fn private_range(net: &IpNet) -> bool {
+    let inside = |outer: &str| outer.parse::<IpNet>().is_ok_and(|outer| outer.contains(net));
+    match net {
+        IpNet::V4(_) => ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16", "100.64.0.0/10"].into_iter().any(inside),
+        IpNet::V6(v6) => match v6.addr().to_ipv4_mapped() {
+            Some(v4) => v6.prefix_len() >= 96 && ipnet::Ipv4Net::new(v4, v6.prefix_len() - 96).is_ok_and(|mapped| private_range(&IpNet::V4(mapped))),
+            None => ["::1/128", "fc00::/7", "fe80::/10"].into_iter().any(inside),
+        },
+    }
+}
+
 impl Edge {
+    /// `trustProxy` entries that reach public addresses and are not listed in `trustPublicProxy`.
+    pub fn undeclared_public_proxies(&self) -> Vec<IpNet> {
+        self.trust_proxy.iter().filter(|net| !private_range(net) && !self.public_proxy.contains(net)).copied().collect()
+    }
     /// Reads the `server/platform.jsbrain` literal. Unknown keys are rejected so typos never
     /// silently fall back to defaults.
     pub fn from_contract(value: &Value) -> Result<Self, String> {
-        let map = object(value, "platform", &["trustProxy", "cors", "limits", "shutdown", "logging", "cluster"])?;
+        let map = object(value, "platform", &["trustProxy", "trustPublicProxy", "cors", "limits", "shutdown", "logging", "cluster"])?;
         let mut edge = Edge::default();
         if let Some(list) = map.get("trustProxy") {
             let list = list.as_array().ok_or("platform.trustProxy must be an array of IPs or CIDR ranges")?;
@@ -146,6 +166,22 @@ impl Edge {
             for entry in list {
                 let text = entry.as_str().ok_or("platform.trustProxy entries must be strings")?;
                 let net = parse_proxy(text)?;
+                if !edge.trust_proxy.contains(&net) {
+                    edge.trust_proxy.push(net);
+                }
+            }
+        }
+        if let Some(list) = map.get("trustPublicProxy") {
+            let list = list.as_array().ok_or("platform.trustPublicProxy must be an array of IPs or CIDR ranges")?;
+            if list.len() + edge.trust_proxy.len() > MAX_TRUSTED_PROXIES {
+                return Err(format!("platform.trustProxy and trustPublicProxy accept at most {MAX_TRUSTED_PROXIES} entries"));
+            }
+            for entry in list {
+                let net = parse_proxy(entry.as_str().ok_or("platform.trustPublicProxy entries must be strings")?)?;
+                if private_range(&net) {
+                    return Err(format!("platform.trustPublicProxy entry `{net}` is a private range; list it in trustProxy"));
+                }
+                edge.public_proxy.push(net);
                 if !edge.trust_proxy.contains(&net) {
                     edge.trust_proxy.push(net);
                 }

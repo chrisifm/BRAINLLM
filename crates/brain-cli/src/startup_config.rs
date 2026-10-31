@@ -62,6 +62,16 @@ pub fn findings(get: &dyn Fn(&str) -> Option<String>, production: bool) -> Vec<F
     {
         add("B0762", "DATABASE_URL", true, message);
     }
+    if production
+        && let Some(list) = get("BRAIN_TRUST_PROXY")
+    {
+        for entry in list.split(',').map(str::trim) {
+            if brain_backend::platform::parse_proxy(entry).is_ok_and(|net| !brain_backend::platform::private_range(&net)) {
+                add("B0784", "BRAIN_TRUST_PROXY", false, "B0784: BRAIN_TRUST_PROXY reaches public addresses, so whoever holds one can choose a client's rate-limit key; fix: list only your own proxies".into());
+                break;
+            }
+        }
+    }
     for variable in POOLS {
         if get(variable).is_some_and(|v| !v.parse::<u32>().is_ok_and(|n| (1..=64).contains(&n))) {
             add("B0763", variable, true, format!("B0763: {variable} is out of range; fix: a whole number from 1 to 64, or remove it to use the default"));
