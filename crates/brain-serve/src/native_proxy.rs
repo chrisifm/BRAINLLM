@@ -97,7 +97,7 @@ impl NativeProxy {
                 != origins.len()
         {
             return Err(
-                "Native sockets require 1..8 distinct canonical HTTP(S) frontend origins".into(),
+                "B0744: native sockets require 1..8 distinct canonical HTTP(S) frontend origins; fix: brain.json backend.sockets.allowedOrigins. Run brain explain B0744".into(),
             );
         }
         self.origins = Some(origins);

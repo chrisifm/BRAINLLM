@@ -27,11 +27,21 @@ impl SocketSettings {
         let site = site.ok_or("Native sockets require PUBLIC_SITE_URL or --site naming this frontend's public HTTP(S) URL")?;
         let origin = public_origin(site)?;
         if !allowed.contains(&origin) {
-            return Err("The selected frontend origin must appear in backend.sockets.allowedOrigins; configure the exact environment/port instead of adding a wildcard".into());
+            return Err(format!("B0745: the selected frontend origin {origin:?} is absent from {} {allowed:?}; fix: add this exact origin there and to {}, or build for a listed site; never a wildcard. Run brain explain B0745", brain_backend::origins::SOCKET_KEY, brain_backend::origins::BRAIN_JSON_KEY));
         }
         Ok(brain_pack::BuildOptions {
             native_sockets: Some(brain_pack::NativeSocketOptions::new(&origin)?),
         })
+    }
+
+    /// A loopback bind answers both `127.0.0.1` and `localhost`, so a declared `localhost` origin is this frontend too.
+    /// Nothing is widened: the handshake still compares the browser's Origin with the exact list. Returns the origin
+    /// the browser has to open when it is not the bound address.
+    pub fn loopback_alias(&self, frontend: &str, port: u16) -> Option<String> {
+        let allowed = self.allowed_origins.as_ref()?;
+        let origin = public_origin(frontend).ok()?;
+        let alias = format!("http://localhost:{port}");
+        (!allowed.contains(&origin) && allowed.contains(&alias)).then_some(alias)
     }
 
     pub fn frontend_enabled(&self, frontend: &str) -> Result<bool, String> {
@@ -40,7 +50,7 @@ impl SocketSettings {
         };
         let origin = public_origin(frontend)?;
         if !allowed.contains(&origin) {
-            return Err("This frontend's exact origin/port is absent from backend.sockets.allowedOrigins; update the shared declaration and backend HTTP origins before enabling the proxy".into());
+            return Err(format!("B0745: this frontend is absent from {}: computed={origin} allowed={allowed:?}; fix: add this exact origin/port there and to {} before enabling the proxy; never a wildcard. Run brain explain B0745", brain_backend::origins::SOCKET_KEY, brain_backend::origins::BRAIN_JSON_KEY));
         }
         Ok(true)
     }
@@ -67,23 +77,22 @@ fn object<'a>(value: &'a Json, allowed: &[&str]) -> Result<&'a [(String, Json)],
     Ok(fields)
 }
 
-fn origins(value: &Json) -> Result<Vec<String>, String> {
+fn origins(value: &Json, key: &str) -> Result<Vec<String>, String> {
+    let count = || format!("B0744: {key} must declare 1..8 distinct canonical HTTP(S) origin strings, such as \"https://shop.example\". Run brain explain B0744");
     let Json::Arr(values) = value else {
-        return Err("Declare 1..8 distinct canonical HTTP(S) origins".into());
+        return Err(count());
     };
     if values.is_empty() || values.len() > 8 {
-        return Err("Declare 1..8 distinct canonical HTTP(S) origins".into());
+        return Err(count());
     }
     let values = values
         .iter()
-        .map(|value| {
-            value
-                .as_str()
-                .map(str::to_string)
-                .ok_or_else(|| "Origins must be canonical HTTP(S) strings".to_string())
-        })
+        .map(|value| value.as_str().map(str::to_string).ok_or_else(count))
         .collect::<Result<Vec<_>, _>>()?;
-    brain_backend::http::SocketConfig::new(values.clone()).map_err(|_| "Origins must be distinct canonical HTTP(S) origins without paths, credentials, query, fragment or wildcards")?;
+    if let Some(raw) = values.iter().find(|raw| brain_backend::origins::problem(raw).is_some()) {
+        return Err(brain_backend::origins::declaration_message(raw, key));
+    }
+    brain_backend::http::SocketConfig::new(values.clone()).map_err(|_| count())?;
     Ok(values)
 }
 
@@ -120,7 +129,7 @@ pub fn socket_settings(
     if let Some((_, backend)) = declarations.first() {
         let fields = object(backend, &["origins", "sockets"])?;
         if let Some((_, value)) = fields.iter().find(|(name, _)| name == "origins") {
-            configured = Some(origins(value)?);
+            configured = Some(origins(value, brain_backend::origins::BRAIN_JSON_KEY)?);
         }
         if let Some((_, value)) = fields.iter().find(|(name, _)| name == "sockets") {
             if value != &Json::Bool(false) {
@@ -129,12 +138,12 @@ pub fn socket_settings(
                     .iter()
                     .find(|(name, _)| name == "allowedOrigins")
                     .ok_or("backend.sockets requires explicit allowedOrigins")?;
-                sockets = Some(origins(&value.1)?);
+                sockets = Some(origins(&value.1, brain_backend::origins::SOCKET_KEY)?);
             }
         }
     }
     let http_origins = if let Some(origin) = explicit_origin {
-        origins(&Json::Arr(vec![Json::Str(origin.into())]))?
+        origins(&Json::Arr(vec![Json::Str(origin.into())]), "--origin")?
     } else if let Some(origins) = configured {
         origins
     } else if let Some(site) = site {
@@ -145,11 +154,11 @@ pub fn socket_settings(
     if let Some(allowed) = &sockets {
         if http_origins.is_empty() {
             return Err(
-                "Set PUBLIC_SITE_URL or backend.origins before enabling native sockets".into(),
+                "B0745: backend.sockets.allowedOrigins needs HTTP origins to be a subset of; fix: set PUBLIC_SITE_URL or brain.json backend.origins. Run brain explain B0745".into(),
             );
         }
-        if allowed.iter().any(|origin| !http_origins.contains(origin)) {
-            return Err("backend.sockets.allowedOrigins must be a subset of HTTP backend.origins after any --origin replacement".into());
+        if let Some(origin) = allowed.iter().find(|origin| !http_origins.contains(origin)) {
+            return Err(format!("B0745: {} must be a subset of the HTTP origins: {origin:?} is outside {http_origins:?} (--origin replaces {}); fix: add {origin:?} to {} and pass it to --origin, or remove it from the socket list. Run brain explain B0745", brain_backend::origins::SOCKET_KEY, brain_backend::origins::BRAIN_JSON_KEY, brain_backend::origins::BRAIN_JSON_KEY));
         }
     }
     Ok(SocketSettings {
@@ -199,6 +208,26 @@ mod tests {
                     .native_sockets
                     .is_none()
             );
+        }
+    }
+    #[test]
+    fn origin_failures_name_the_code_the_value_the_key_and_the_fix() {
+        let bad = fixture(r#"{"backend":{"origins":["https://shop.example.test/"]}}"#);
+        let error = socket_settings(&bad.0, None, None).unwrap_err();
+        for needle in ["B0744", "https://shop.example.test/", "backend.origins", "\"https://shop.example.test\"", "brain explain B0744"] {
+            assert!(error.contains(needle), "{needle} missing from {error}");
+        }
+        let outside = fixture(r#"{"backend":{"origins":["https://shop.example.test"],"sockets":{"allowedOrigins":["https://blog.example.test"]}}}"#);
+        let error = socket_settings(&outside.0, None, None).unwrap_err();
+        for needle in ["B0745", "https://blog.example.test", "https://shop.example.test", "backend.origins", "backend.sockets.allowedOrigins", "brain explain B0745"] {
+            assert!(error.contains(needle), "{needle} missing from {error}");
+        }
+        let selected = fixture(r#"{"backend":{"origins":["https://shop.example.test"],"sockets":{"allowedOrigins":["https://shop.example.test"]}}}"#);
+        let settings = socket_settings(&selected.0, None, None).unwrap();
+        for error in [settings.build_options(Some("https://blog.example.test")).unwrap_err(), settings.frontend_enabled("https://blog.example.test").unwrap_err()] {
+            for needle in ["B0745", "https://blog.example.test", "https://shop.example.test", "backend.sockets.allowedOrigins"] {
+                assert!(error.contains(needle), "{needle} missing from {error}");
+            }
         }
     }
     #[test]

@@ -17,6 +17,7 @@ pub mod links;
 pub mod query;
 pub mod relations;
 pub mod media;
+pub mod origins;
 pub mod ownership;
 pub mod response;
 pub mod openapi;

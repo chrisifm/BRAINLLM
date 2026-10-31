@@ -190,3 +190,118 @@ async fn a_saturated_pool_answers_overloaded_instead_of_internal_error() {
     drop(held);
     assert_eq!(send(&http, "GET", &format!("/api/{}", notes.name), &[]).await.status(), 200);
 }
+
+#[tokio::test]
+#[ignore = "Use scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn refused_origins_explain_themselves_in_development_and_stay_minimal_in_production() {
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Disposable Postgres only; no developer database is selected");
+    let pool = brain_backend::db::connect(&url).await.unwrap();
+    brain_backend::db::migrate(&pool, &[]).await.unwrap();
+    const STRANGER: &str = "https://blog.example.test";
+    let refused = |http: Router| async move {
+        let response = send(&http, "POST", "/_brain/auth/logout", &[("origin", STRANGER), ("content-type", "application/json")]).await;
+        assert_eq!(response.status(), 403);
+        assert!(response.headers().get("access-control-allow-origin").is_none(), "a refusal never reflects the origin");
+        json_body(response).await
+    };
+
+    let (production, _) = brain_backend::http::router_with_platform(pool.clone(), config(vec![]), Platform::default()).await.map_err(|e| e.to_string()).unwrap();
+    let body = refused(production).await;
+    assert_eq!(body["error"]["code"], "ORIGIN_DENIED");
+    assert_eq!(body["error"]["brainCode"], "B0740");
+    assert!(body["error"].get("origin").is_none());
+    assert!(!body.to_string().contains(ORIGIN), "production never reveals the allowlist: {body}");
+
+    let mut development = config(vec![]);
+    development.production = false;
+    let (development, _) = brain_backend::http::router_with_platform(pool.clone(), development, Platform::default()).await.map_err(|e| e.to_string()).unwrap();
+    let body = refused(development).await;
+    let detail = &body["error"]["origin"];
+    assert_eq!(detail["brainCode"], "B0740");
+    assert_eq!(detail["seenOrigin"], STRANGER);
+    assert_eq!(detail["allowedOrigins"], json!([ORIGIN]));
+    assert!(detail["fix"].as_str().unwrap().contains(STRANGER) && !detail["fix"].as_str().unwrap().contains('*'), "{detail}");
+
+    let mut outside = config(vec![]);
+    outside.auth_public_base_url = Some(format!("{STRANGER}/app"));
+    let error = brain_backend::http::router_with_platform(pool.clone(), outside, Platform::default()).await.map(|_| ()).unwrap_err().to_string();
+    for needle in ["B0748", "https://blog.example.test/app", ORIGIN, "--origin https://blog.example.test"] {
+        assert!(error.contains(needle), "{needle} missing from {error}");
+    }
+}
+
+#[tokio::test]
+#[ignore = "Use scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn a_refused_origin_receives_no_cors_header_and_an_allowed_one_keeps_them() {
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Disposable Postgres only; no developer database is selected");
+    let pool = brain_backend::db::connect(&url).await.unwrap();
+    brain_backend::db::migrate(&pool, &[]).await.unwrap();
+    let edge = Edge::from_contract(&json!({"cors": {"origins": [ADMIN], "maxAge": 600}})).unwrap();
+    let (http, _) = brain_backend::http::router_with_platform(pool.clone(), config(vec![]), Platform { edge, ..Default::default() }).await.map_err(|e| e.to_string()).unwrap();
+    const STRANGER: &str = "https://evil.example";
+    let cors_headers = |response: &Response<Body>| response.headers().keys().filter(|k| k.as_str().starts_with("access-control-")).map(|k| k.to_string()).collect::<Vec<_>>();
+    let preflight = |origin: &'static str| [("origin", origin), ("access-control-request-method", "POST"), ("access-control-request-headers", "content-type")];
+    for (method, path, headers) in [
+        ("GET", "/health/live", vec![("origin", STRANGER)]),
+        ("HEAD", "/health/live", vec![("origin", STRANGER)]),
+        ("POST", "/_brain/auth/logout", vec![("origin", STRANGER), ("content-type", "application/json")]),
+        ("OPTIONS", "/_brain/auth/logout", preflight(STRANGER).to_vec()),
+    ] {
+        let response = send(&http, method, path, &headers).await;
+        assert_eq!(cors_headers(&response), Vec::<String>::new(), "{method} {path} from a refused origin");
+    }
+    for origin in [ORIGIN, ADMIN] {
+        let read = send(&http, "GET", "/health/live", &[("origin", origin)]).await;
+        assert_eq!(read.headers()["access-control-allow-origin"], origin);
+        assert_eq!(read.headers()["access-control-allow-credentials"], "true");
+        assert!(read.headers().contains_key("access-control-expose-headers"));
+        assert!(read.headers().get_all("vary").iter().any(|v| v.to_str().unwrap().to_ascii_lowercase().contains("origin")), "shared caches must key on Origin");
+        let allowed = send(&http, "OPTIONS", "/_brain/auth/logout", &preflight(origin)).await;
+        assert_eq!(allowed.headers()["access-control-allow-origin"], origin);
+        assert_eq!(allowed.headers()["access-control-max-age"], "600");
+        assert!(allowed.headers().contains_key("access-control-allow-methods"));
+    }
+    let refused = send(&http, "GET", "/health/live", &[("origin", STRANGER)]).await;
+    assert!(refused.headers().get_all("vary").iter().any(|v| v.to_str().unwrap().to_ascii_lowercase().contains("origin")), "a refusal varies on Origin too");
+    let plain = send(&http, "GET", "/health/live", &[]).await;
+    assert_eq!(cors_headers(&plain).iter().filter(|h| h.as_str() == "access-control-allow-origin").count(), 0);
+}
+
+#[tokio::test]
+#[ignore = "Use scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn auth_errors_separate_bad_input_from_a_busy_database() {
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Disposable Postgres only; no developer database is selected");
+    let setup = brain_backend::db::connect(&url).await.unwrap();
+    brain_backend::db::migrate(&setup, &[]).await.unwrap();
+    setup.close().await;
+    let pool = sqlx::postgres::PgPoolOptions::new().max_connections(2).acquire_timeout(Duration::from_millis(1000)).connect(&url).await.unwrap();
+    let (http, _) = brain_backend::http::router_with_platform(pool.clone(), config(vec![]), Platform::default()).await.map_err(|e| e.to_string()).unwrap();
+    let auth = |path: &'static str, email: String, password: &'static str| {
+        let http = http.clone();
+        async move {
+            let body = json!({"email": email, "password": password}).to_string();
+            let response = http.oneshot(request("POST", path, &[("origin", ORIGIN), ("content-type", "application/json")]).body(Body::from(body)).unwrap()).await.unwrap();
+            let status = response.status().as_u16();
+            (status, json_body(response).await["error"]["code"].as_str().unwrap_or("").to_string())
+        }
+    };
+    const PASSWORD: &str = "synthetic-long-enough-password";
+    let unique = || format!("shopper-{}@example.test", Uuid::new_v4().simple());
+
+    let unknown = auth("/_brain/auth/login", unique(), PASSWORD).await;
+    assert_eq!(unknown, (401, "LOGIN_FAILED".to_string()));
+    assert_eq!(auth("/_brain/auth/login", "not-an-email".into(), PASSWORD).await, unknown, "a malformed email looks like any failed sign-in");
+    assert_eq!(auth("/_brain/auth/signup", "not-an-email".into(), PASSWORD).await, (422, "SIGNUP_FAILED".to_string()));
+    assert_eq!(auth("/_brain/auth/signup", unique(), "short").await, (422, "SIGNUP_FAILED".to_string()));
+    let taken = unique();
+    assert_eq!(auth("/_brain/auth/signup", taken.clone(), PASSWORD).await.0, 200);
+    assert_eq!(auth("/_brain/auth/signup", taken, PASSWORD).await, (422, "SIGNUP_FAILED".to_string()), "a taken email looks like any refused signup");
+
+    let held = (pool.acquire().await.unwrap(), pool.acquire().await.unwrap());
+    for path in ["/_brain/auth/signup", "/_brain/auth/login"] {
+        let (status, code) = auth(path, unique(), PASSWORD).await;
+        assert_eq!(status, 503, "{path} on a busy database answered {code}");
+        assert!(code != "SIGNUP_FAILED" && code != "LOGIN_FAILED", "{path}: {code}");
+    }
+    drop(held);
+}

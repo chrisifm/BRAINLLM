@@ -13,6 +13,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - HTML documents now carry `X-Generated-By` with the official site and repository in `brain start`, `_headers`, nginx and Caddy. It replaces `X-Powered-By` and adds nothing visible to the page.
 
 ### Added
+- `brain check` and `brain doctor` catch origin mistakes before they run: B0744 for a trailing slash, path, missing scheme, credentials or wildcard, with the exact replacement; B0745 for a socket origin outside the HTTP origins; B0746 for a page calling an undeclared origin.
 - `brain upgrade [--from V] [--to V] [--dry-run|--apply] [--json] [--no-doctor]` (MCP `brain_upgrade`) migrates an
   app between versions: from the recorded `brainVersion` in `brain.json` (now written by `brain new`) to the installed
   compiler, it reports codemods, manual steps with `file:line`, capabilities to adopt with their snippet and the gates;
@@ -32,6 +33,12 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 ### Fixed
 - B0119 reports an imported module that exists but does not parse as such, with its first error, instead of a missing file.
 - The B0110 fix for a classic `for` shows the form for bounded retries.
+- A refused origin no longer receives `Access-Control-Allow-Credentials`, `-Expose-Headers`, `-Allow-Methods`, `-Allow-Headers` or `-Max-Age`; only allowed origins do, and `Vary: Origin` stays.
+- `brain run` with `localhost` in `backend.sockets.allowedOrigins` no longer stops on its own port: a loopback bind serves that origin. A real mismatch prints `computed=… allowed=[…]`.
+- Auth errors tell bad input from a busy server: a busy database answers 503 `SIGNUP_UNAVAILABLE` or `LOGIN_UNAVAILABLE`, a malformed email at sign-in answers the same 401 as any failed sign-in, and a sign-in refused for its origin says B0740 instead of "Wrong email or password".
+- Every origin refusal now names its code, the seen and allowed origins, the key and the exact fix in server logs and development answers (B0740–B0743); production answers carry only the code and never the allowlist.
+- `brain dev` explains the browser's opaque CORS, `connect-src` and socket failures in the console (B0747, B0743), and production bundles do not carry that code.
+- `brain backend serve` names the auth public URL, what it resolves to and the `--origin` values when they do not match (B0748), and origin errors from `brain.json` name the value and key without echoing credentials (B0744, B0745).
 - `brain start` answers 404 for a request path starting with `//`. It answered 500 for `//`.
 - Service worker caches are scoped to the app: under a base path they are named `brain/app-<sig>` and `brain/app:*`, so
   activating or opting out one app no longer deletes another app's caches on the same origin, and `sw: false` deletes

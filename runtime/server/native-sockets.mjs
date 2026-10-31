@@ -29,15 +29,17 @@ export function installNativeSockets(server, {target, base='/', cookie, log}) {
   const path = (base === '/' ? '' : base.slice(0,-1)) + '/_brain/socket'
   const owned = new Set()
   let stopped = false, window = 0, reports = 0
-  // Fixed fields only: never log target URLs, credentials, frames, request headers or exception messages.
-  const report = (code,rid) => {
+  // Fixed fields only: never log target URLs, credentials, frames or exception messages. The one request header that
+  // is logged is a refused Origin, bounded, because it is the whole evidence of that refusal (B0743).
+  const report = (code,rid,origin) => {
     const current = Math.floor(Date.now()/60000)
     if (window !== current) { window=current; reports=0 }
     if (reports++ >= 16) return
-    try { log('warn','native socket unavailable',{code,rid,fix:'Check native socket activation, the trusted Origin, authentication and backend availability; reconnect after correcting the cause'}) } catch {}
+    const refused = code === 'NATIVE_SOCKET_ORIGIN' ? {brainCode:'B0743',seenOrigin:typeof origin === 'string' ? origin.slice(0,256) : null,fix:'This Origin is not one canonical http(s) origin. Open the site at an exact origin listed in brain.json backend.sockets.allowedOrigins (never a wildcard). Run brain explain B0743'} : {fix:'Check native socket activation, the trusted Origin, authentication and backend availability; reconnect after correcting the cause'}
+    try { log('warn','native socket unavailable',{code,rid,...refused}) } catch {}
   }
-  const reject = (socket,status,rid,code) => {
-    report(code,rid)
+  const reject = (socket,status,rid,code,origin) => {
+    report(code,rid,origin)
     if (socket.destroyed) return
     socket.setTimeout(LIMITS.close,()=>socket.destroy())
     socket.end(`HTTP/1.1 ${status} Socket unavailable\r\nConnection: close\r\nCache-Control: no-store\r\nX-Request-Id: ${rid}\r\nContent-Length: 0\r\n\r\n`,()=>socket.destroy())
@@ -58,8 +60,8 @@ export function installNativeSockets(server, {target, base='/', cookie, log}) {
     if (headerBytes>LIMITS.headers || !unique(incoming.rawHeaders,SINGLE)) return reject(browser,431,rid,'NATIVE_SOCKET_HEADERS')
     if (head.length>LIMITS.head || incoming.headers['content-length'] && incoming.headers['content-length'] !== '0' || incoming.headers['transfer-encoding']) return reject(browser,400,rid,'NATIVE_SOCKET_BODY')
     let site
-    try { site=new URL(incoming.headers.origin) } catch { return reject(browser,403,rid,'NATIVE_SOCKET_ORIGIN') }
-    if (!['http:','https:'].includes(site.protocol) || site.origin !== incoming.headers.origin || site.origin.length>2048) return reject(browser,403,rid,'NATIVE_SOCKET_ORIGIN')
+    try { site=new URL(incoming.headers.origin) } catch { return reject(browser,403,rid,'NATIVE_SOCKET_ORIGIN',incoming.headers.origin) }
+    if (!['http:','https:'].includes(site.protocol) || site.origin !== incoming.headers.origin || site.origin.length>2048) return reject(browser,403,rid,'NATIVE_SOCKET_ORIGIN',incoming.headers.origin)
     const key = incoming.headers['sec-websocket-key']
     if (incoming.headers.upgrade?.toLowerCase() !== 'websocket' || !connectionUpgrade(incoming.headers.connection) || incoming.headers['sec-websocket-version'] !== '13' || incoming.headers['sec-websocket-protocol'] !== PROTOCOL || typeof key !== 'string' || !/^[A-Za-z0-9+/]{22}==$/.test(key) || Buffer.from(key,'base64').toString('base64') !== key) return reject(browser,400,rid,'NATIVE_SOCKET_HANDSHAKE')
     let credentials

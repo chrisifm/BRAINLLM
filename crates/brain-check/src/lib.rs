@@ -19,6 +19,7 @@ pub mod tools;
 pub mod worker;
 mod quality;
 pub mod doctor;
+pub mod origins;
 pub mod types;
 mod infer;
 mod design_system;

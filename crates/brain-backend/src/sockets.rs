@@ -52,7 +52,7 @@ impl SocketConfig {
                 || parsed.origin().ascii_serialization() != *origin
                 || origin.contains('*')
             {
-                return Err("Socket origins must be canonical http(s) origins without credentials, paths, query, fragment or wildcards".into());
+                return Err(crate::origins::declaration_message(origin, crate::origins::SOCKET_KEY));
             }
         }
         Ok(Self { origins })
@@ -292,7 +292,11 @@ pub(super) async fn upgrade(
         .and_then(|v| v.to_str().ok())
         .ok_or_else(forbidden)?;
     if !app.sockets.origins.iter().any(|allowed| allowed == origin) {
-        return Err(forbidden());
+        // A browser hides the 403 of a failed WebSocket: the log is the only place the reason can reach.
+        crate::origins::log_refusal("B0743", "socket", "GET", uri.path(), Some(origin), &app.sockets.origins);
+        let mut refused = forbidden();
+        refused = refused.origin_refused("B0743", Some(origin), &app.sockets.origins, app.production);
+        return Err(refused);
     }
     let admission = app.sockets.checks.try_acquire().map_err(|_| {
         Error::new(
