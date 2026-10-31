@@ -464,16 +464,21 @@ pub fn check(c: &Component, ctx: &Ctx) -> Vec<Diag> {
     if let Some(env) = &ctx.env {
         let mut seen = HashSet::new();
         let idx = brain_parse::LineIndex::new(&c.src);
-        for (k, at) in env::keys_used(&c.src) {
+        let reads = env::reads(&c.src);
+        for env::Read { key: k, at, .. } in &reads {
+            let (k, at) = (k.clone(), *at);
             if env.keys.contains(&k) || !seen.insert(k.clone()) {
                 continue;
             }
+            // `if (process.env.X) use(process.env.X)`: one tolerant read makes the key optional for this file.
+            let optional = reads.iter().any(|r| r.key == k && r.guarded);
             let (line, col) = idx.line_col(&c.src, at);
             let eidx = brain_parse::LineIndex::new(&env.src);
             let (eline, _) = eidx.line_col(&env.src, env.insert_at.min(env.src_len));
             let span = Span { start: env.insert_at as u32, end: env.insert_at as u32, line: eline, col: 1 };
-            let mut diag = Diag::new("B0721", env::FILE, span, format!("`{k}` is read in `{}:{line}:{col}` but not declared in .brain_env", c.file), format!("add `{k}=` to the shared block of .brain_env (and a value per environment)"));
-            let text = if env.src.is_empty() || env.src[..env.insert_at.min(env.src_len)].ends_with('\n') || env.insert_at == 0 { format!("{k}=\n") } else { format!("\n{k}=") };
+            let mut diag = Diag::new("B0721", env::FILE, span, format!("`{k}` is read in `{}:{line}:{col}` but not declared in .brain_env", c.file), if optional { format!("add `{k}?=` to the shared block of .brain_env: this code reads it with a default or a condition, so it is optional and needs no value") } else { format!("add `{k}=` to the shared block of .brain_env and set a value per environment; if the app works without it, declare it optional with `{k}?=`") });
+            let line = if optional { format!("{k}?=") } else { format!("{k}=") };
+            let text = if env.src.is_empty() || env.src[..env.insert_at.min(env.src_len)].ends_with('\n') || env.insert_at == 0 { format!("{line}\n") } else { format!("\n{line}") };
             diag = diag.edit(span.start, span.end, text);
             diag.locate(&env.src);
             d.push(diag);

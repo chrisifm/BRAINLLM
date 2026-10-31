@@ -6,7 +6,7 @@
 use crate::cdp::Chrome;
 use brain_mcp::Json;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub struct TestResult {
     pub name: String,
@@ -49,6 +49,10 @@ impl FileReport {
             || self.tests.iter().any(|t| !t.ok)
             || !self.a11y.is_empty()
             || !self.leaks.is_empty()
+    }
+    /// `failed()` without the leak watch: what `brain doctor` counts as failed tests, judging leaks on its own.
+    pub fn failed_tests(&self) -> bool {
+        self.load_error.is_some() || self.tests.iter().any(|t| !t.ok) || !self.a11y.is_empty()
     }
     pub fn to_json(&self) -> Json {
         let tests = self
@@ -239,6 +243,10 @@ pub(crate) fn audit(
 }
 
 /// Runs the files against the server at `base` (e.g. `http://127.0.0.1:53211`).
+/// How long unmounted tests wait for their in-flight requests before aborting them and counting leaks.
+#[cfg(unix)]
+const SETTLE_MS: u64 = 3000;
+
 /// `brain test --heap` / `brain doctor`: watch for leaks while the tests run (§9, §18).
 static HEAP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub fn set_heap(on: bool) {
@@ -577,17 +585,36 @@ fn run_headless(
             audit(&mut chrome, &session, &name, &mut rep.a11y)?;
         }
         if heap {
-            // unmount, then a few forced GC cycles: an instance still alive after two of them is a leak
+            // unmount, then give requests still on the way a bounded time to settle: a pending `.then` retains its
+            // component until it does, which says nothing about a leak
             let _ = chrome.eval(
                 &session,
                 "globalThis.__brainDispose && globalThis.__brainDispose(), true",
             );
+            let settle = Instant::now() + Duration::from_millis(SETTLE_MS);
+            while Instant::now() < settle {
+                match chrome.eval(&session, "import('/@brain/brain-inspect.js').then(m => m.inspect().inflight().length, () => 0)") {
+                    Ok(Json::Num(n)) if n > 0.0 => std::thread::sleep(Duration::from_millis(50)),
+                    _ => break,
+                }
+            }
+        }
+        // before the abort below: the rejected calls it causes are the runner's own, not the app's errors
+        if let Ok(Json::Arr(errs)) = chrome.eval(
+            &session,
+            "import('/@brain/brain-err.js').then(m => m.errors.map(r => ({ type: r.type, msg: r.msg, line: r.line, location: r.location, generatedLocation: r.generatedLocation, frames: r.frames, causes: r.causes, truncated: r.truncated, mapping: r.mapping, stack: r.stack, src: r.src, brainStack: r.brainStack, crumbs: r.crumbs, comp: r.comp ? (r.comp.name || r.comp.file || null) : null, n: r.n })), () => [])",
+        ) {
+            rep.errors = errs;
+        }
+        if heap {
+            let _ = chrome.eval(&session, "import('/@brain/brain-inspect.js').then(m => (m.inspect().abortInflight(), new Promise(r => setTimeout(r, 50))).then(() => true), () => false)");
             // the accessibility audit keeps DOM nodes bound in DevTools' agents: release them, or every unmounted
             // component would look alive
             for d in ["Accessibility.disable", "DOM.disable"] {
                 let _ = chrome.call(Some(&session), d, Json::Obj(vec![]));
             }
             let _ = chrome.call(Some(&session), "HeapProfiler.enable", Json::Obj(vec![]));
+            // a few forced GC cycles: an instance still alive after two of them is a suspected leak
             for _ in 0..4 {
                 let _ = chrome.call(
                     Some(&session),
@@ -603,12 +630,6 @@ fn run_headless(
             if let Ok(Json::Arr(ls)) = chrome.eval(&session, "import('/@brain/brain-inspect.js').then(m => m.inspect().leaks().map(l => ({ code: l.code, name: l.name, file: l.file, line: l.line || null, msg: l.msg, fix: l.fix })), () => [])") {
                 rep.leaks = ls;
             }
-        }
-        if let Ok(Json::Arr(errs)) = chrome.eval(
-            &session,
-            "import('/@brain/brain-err.js').then(m => m.errors.map(r => ({ type: r.type, msg: r.msg, line: r.line, location: r.location, generatedLocation: r.generatedLocation, frames: r.frames, causes: r.causes, truncated: r.truncated, mapping: r.mapping, stack: r.stack, src: r.src, brainStack: r.brainStack, crumbs: r.crumbs, comp: r.comp ? (r.comp.name || r.comp.file || null) : null, n: r.n })), () => [])",
-        ) {
-            rep.errors = errs;
         }
         reports.push(rep);
     }

@@ -273,7 +273,11 @@ impl Gen<'_> {
                 format!("new {c}({})", self.args(args))
             }
             Expr::Member { prop: MemberProp::Name(k), obj, .. } if k.name.starts_with("PUBLIC_") && self.public_env(obj, &k.name).is_some() => {
-                js_str(&self.public_env(obj, &k.name).unwrap_or_default())
+                // An optional key with no value (brain_check::env::UNSET) is absent, like on the server.
+                match self.public_env(obj, &k.name).unwrap_or_default() {
+                    v if v == "\0" => "undefined".to_string(),
+                    v => js_str(&v),
+                }
             }
             // `wide.v` written by the author (B0130) is the same single read as `wide`.
             Expr::Member { obj, prop: MemberProp::Name(n), .. }

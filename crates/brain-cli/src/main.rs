@@ -2,6 +2,7 @@
 
 #[cfg(unix)]
 mod browser;
+mod startup_config;
 #[cfg(unix)]
 mod shot;
 mod seo_routes;
@@ -808,6 +809,13 @@ fn run_fix_only_body(target: Option<PathBuf>, only: Option<&[&str]>, before_writ
                     all.push(e.clone());
                 }
             }
+            // B0721 from two files may disagree (`X=` and `X?=`): one line per key, and a tolerant read makes it optional.
+            if file == env::FILE {
+                let key = |t: &str| t.trim().split('=').next().unwrap_or("").trim_end_matches('?').to_string();
+                all.sort_by_key(|e| !e.text.contains("?="));
+                let mut keys = std::collections::HashSet::new();
+                all.retain(|e| keys.insert(key(&e.text)));
+            }
             let (out, used): (Option<String>, Vec<&&compiler::Diag>) = match compiler::Diag::apply(&src, &all) {
                 Some(o) => (Some(o), ds.iter().collect()),
                 None => (compiler::Diag::apply(&src, &ds[0].edits), vec![&ds[0]]),
@@ -832,6 +840,15 @@ fn run_fix_only_body(target: Option<PathBuf>, only: Option<&[&str]>, before_writ
         }
         if !changed {
             break;
+        }
+    }
+    // The template follows the edits above; a `only` run was asked for specific codes.
+    if only.is_none() || only.is_some_and(|o| o.contains(&"B0727")) {
+        let app = target.as_deref().map(|p| std::path::absolute(p).unwrap_or(p.to_path_buf())).and_then(|p| scaffold::find_root(&p)).or_else(|| if target.is_none() { app_root().ok() } else { None });
+        if let Some(app) = app
+            && env::sync_example(&app, before_write)?
+        {
+            applied.push(Json::obj([("code", Json::str("B0727")), ("file", Json::str(env::EXAMPLE)), ("line", Json::Num(1.0)), ("fix", Json::str("updated with the current keys (no values); commit it"))]));
         }
     }
     let (_, remaining) = run_check(target)?;
@@ -1852,7 +1869,8 @@ fn cmd_explain(args: &[String]) -> Result<(), String> {
 /// `brain doctor`: check (errors + B10xx overengineering warnings) → tests in Chrome with accessibility → leaks.
 /// A single summary; `ok` is false on any check error or failed test.
 pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json), String> {
-    // doctor = check + tests + leaks (§18): the tests run with the leak watch on (B0601/B0602 fail their file)
+    // doctor = check + tests + leaks (§18): the tests run with the leak watch on. B0602 is a fact and fails; B0601 is
+    // a suspicion (retained after GC) reported as a warning unless brain.json opts in with doctor.failOnSuspectedLeaks.
     #[cfg(unix)]
     testrun::set_heap(true);
     use brain_mcp::Json;
@@ -1866,13 +1884,18 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
         ("diags", brain_mcp::Json::parse(&diags_json(&diags)).unwrap_or(Json::Arr(vec![]))),
     ]);
     #[cfg(unix)]
-    let (test_ok, test) = match run_tests(root.clone(), 60) {
+    let (test_ok, leaks_ok, test) = match run_tests(root.clone(), 60) {
         Ok(reports) => {
             let passed = reports.iter().flat_map(|r| &r.tests).filter(|t| t.ok).count();
             let failed = reports.iter().map(|r| r.tests.iter().filter(|t| !t.ok).count() + usize::from(r.load_error.is_some())).sum::<usize>();
             let a11y = reports.iter().map(|r| r.a11y.len()).sum::<usize>();
-            let ok = !reports.iter().any(testrun::FileReport::failed);
-            (ok, Json::obj([
+            let ok = !reports.iter().any(testrun::FileReport::failed_tests);
+            let strict = scaffold::find_root(&root.as_deref().map(|p| std::path::absolute(p).unwrap_or(p.to_path_buf())).unwrap_or_else(cwd))
+                .and_then(|a| std::fs::read_to_string(a.join("brain.json")).ok())
+                .and_then(|s| Json::parse(&s).ok())
+                .is_some_and(|j| j.get("doctor").and_then(|d| d.get("failOnSuspectedLeaks")) == Some(&Json::Bool(true)));
+            let leaks_ok = !reports.iter().flat_map(|r| &r.leaks).any(|l| strict || l.get("code").and_then(Json::as_str) != Some("B0601"));
+            (ok, leaks_ok, Json::obj([
                 ("passed", Json::Num(passed as f64)),
                 ("failed", Json::Num(failed as f64)),
                 ("a11y", Json::Num(a11y as f64)),
@@ -1884,10 +1907,10 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
                 ("files", Json::Arr(reports.iter().map(testrun::FileReport::to_json).collect())),
             ]))
         }
-        Err(e) => (false, Json::obj([("error", Json::str(e))])),
+        Err(e) => (false, true, Json::obj([("error", Json::str(e))])),
     };
     #[cfg(not(unix))]
-    let (test_ok, test) = (true, Json::obj([("skipped", Json::str("brain test needs macOS or Linux"))]));
+    let (test_ok, leaks_ok, test) = (true, true, Json::obj([("skipped", Json::str("brain test needs macOS or Linux"))]));
     // the app folder (a file target checks its app); SEO audits the last build, advice reads the sources
     let app = root.as_deref().map(|p| std::path::absolute(p).unwrap_or(p.to_path_buf())).and_then(|p| scaffold::find_root(&p)).or_else(|| app_root().ok());
     // the production build (§25: done = doctor exit 0 = the app ships): what fails `brain build` fails doctor too —
@@ -1974,8 +1997,14 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
             advice.push(Json::obj([("code", Json::str("docs")), ("level", Json::str("warning")), ("file", Json::str(docs::DEFAULT_OUT)), ("msg", Json::str(format!("generated docs are stale: {}", stale.join(", ")))), ("fix", Json::str("run `brain docs` (or `brain build`) and commit docs/app"))]));
         }
     }
-    let ok = errors.is_empty() && test_ok && build_ok && seo_ok && env_ok && bar_ok;
-    // leaks found while the tests ran (each also fails its test file): B0601 / B0602 with their fix
+    // the gates that failed, so the summary says what happened
+    let failed: Vec<&str> = [("check", errors.is_empty()), ("tests", test_ok), ("leaks", leaks_ok), ("build", build_ok), ("seo", seo_ok), ("env", env_ok), ("seoBar", bar_ok)]
+        .into_iter()
+        .filter(|(_, passed)| !passed)
+        .map(|(gate, _)| gate)
+        .collect();
+    let ok = failed.is_empty();
+    // leaks found while the tests ran: B0601 / B0602 with their fix
     let heap = match test.get("files") {
         Some(Json::Arr(fs)) if !fs.is_empty() => Json::obj([(
             "leaks",
@@ -1989,7 +2018,7 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
         )]),
         _ => Json::obj([("skipped", Json::str("the tests did not run"))]),
     };
-    Ok((ok, Json::obj([("ok", Json::Bool(ok)), ("check", check), ("test", test), ("build", build), ("seo", seo), ("advice", Json::Arr(advice)), ("heap", heap), ("compatibility", compatibility(app.as_deref()))])))
+    Ok((ok, Json::obj([("ok", Json::Bool(ok)), ("failed", Json::Arr(failed.iter().map(|g| Json::str(*g)).collect())), ("check", check), ("test", test), ("build", build), ("seo", seo), ("advice", Json::Arr(advice)), ("heap", heap), ("compatibility", compatibility(app.as_deref()))])))
 }
 
 fn cmd_doctor(args: &[String]) -> ExitCode {
@@ -2057,8 +2086,9 @@ fn cmd_doctor(args: &[String]) -> ExitCode {
                 };
                 let leaks_line = match j.get("heap").and_then(|h| h.get("leaks")) {
                     Some(brain_mcp::Json::Arr(ls)) if !ls.is_empty() => format!(
-                        "{} suspected:\n{}",
+                        "{} {}:\n{}",
                         ls.len(),
+                        if j.get("failed").is_some_and(|f| matches!(f, brain_mcp::Json::Arr(g) if g.iter().any(|x| x.as_str() == Some("leaks")))) { "suspected or found" } else { "suspected (a warning; \"doctor\": { \"failOnSuspectedLeaks\": true } in brain.json makes it fail)" },
                         ls.iter().map(|l| { let s = |k: &str| l.get(k).and_then(brain_mcp::Json::as_str).unwrap_or("").to_string(); format!("  {} {} {} ({})\n  fix: {}", s("code"), s("name"), s("msg"), s("test"), s("fix")) }).collect::<Vec<_>>().join("\n")
                     ),
                     Some(_) => "none after the tests unmounted (GC forced)".into(),
@@ -2080,7 +2110,11 @@ fn cmd_doctor(args: &[String]) -> ExitCode {
                         Some(e) => format!("did not run: {e}"),
                         None => format!("{} ok · {} failed · {} accessibility issues", n("test", "passed"), n("test", "failed"), n("test", "a11y")),
                     },
-                    if ok { "✓ no errors" } else { "✗ there are errors: fix them and run `brain doctor` again" }
+                    match (ok, j.get("failed")) {
+                        (true, _) => "✓ no errors".to_string(),
+                        (false, Some(brain_mcp::Json::Arr(g))) => format!("✗ failed: {}. Fix them and run `brain doctor` again", g.iter().filter_map(brain_mcp::Json::as_str).collect::<Vec<_>>().join(", ")),
+                        (false, _) => "✗ failed. Fix it and run `brain doctor` again".to_string(),
+                    }
                 );
             }
             if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }

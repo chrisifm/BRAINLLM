@@ -62,9 +62,9 @@ fn loopback(options: &PgConnectOptions) -> bool {
 /// an attacker in the network path.
 pub fn require_verified_tls(url: &str, production: bool) -> Result<PgConnectOptions, String> {
     let options = PgConnectOptions::from_str(url)
-        .map_err(|_| "DATABASE_URL is not a valid Postgres URL (its value is not logged)".to_string())?;
+        .map_err(|_| "B0762: DATABASE_URL is not a valid Postgres URL (its value is not logged); fix: use postgres://user:password@host:5432/database".to_string())?;
     if production && !loopback(&options) && !matches!(options.get_ssl_mode(), PgSslMode::VerifyFull) {
-        return Err("BDB_TLS_UNVERIFIED: production DATABASE_URL points at a remote host without sslmode=verify-full; append ?sslmode=verify-full (plus sslrootcert=<ca.pem> for a private CA) or connect through loopback or a unix socket".into());
+        return Err("BDB_TLS_UNVERIFIED (B0762): production DATABASE_URL points at a remote host without sslmode=verify-full; fix: append ?sslmode=verify-full (plus sslrootcert=<ca.pem> for a private CA) or connect through loopback or a unix socket".into());
     }
     Ok(options)
 }
@@ -124,11 +124,11 @@ pub async fn connect(url: &str, boot: &Boot) -> Result<PgPool, String> {
         let elapsed = started.elapsed();
         if !retryable(&error) || elapsed >= boot.give_up {
             return Err(if retryable(&error) && !boot.give_up.is_zero() {
-                format!("BDB_CONNECT_TIMEOUT: Postgres stayed unreachable for {}s over {} attempts; check that it is running and DATABASE_URL is correct (credentials are not logged)", elapsed.as_secs(), attempt + 1)
+                format!("BDB_CONNECT_TIMEOUT (B0762): Postgres stayed unreachable for {}s over {} attempts; fix: check that it is running and DATABASE_URL is correct (credentials are not logged)", elapsed.as_secs(), attempt + 1)
             } else if matches!(error, sqlx::Error::Tls(_)) {
-                "Cannot establish verified TLS with Postgres; check sslrootcert and that the certificate names the DATABASE_URL host".into()
+                "Cannot establish verified TLS with Postgres (B0762); fix: check sslrootcert and that the certificate names the DATABASE_URL host".into()
             } else {
-                "Cannot connect to Postgres; check DATABASE_URL (credentials are not logged)".into()
+                "Cannot connect to Postgres (B0762); fix: check DATABASE_URL (credentials are not logged)".into()
             });
         }
         let delay = boot.delay(attempt, unit_random()).min(boot.give_up - elapsed);

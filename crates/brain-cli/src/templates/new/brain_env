@@ -1,5 +1,6 @@
 # Variables for every environment (rules: `brain spec --topic server`). Never commit this file: .brain_env.example lists the keys.
 # Lines before any [section] are shared. Only PUBLIC_* keys reach the browser; the rest stay on the server.
+# An empty key fails the build; `KEY?=` declares one the app works without.
 PUBLIC_SITE_NAME={{name}}
 PUBLIC_SITE_URL=http://localhost:5180
 

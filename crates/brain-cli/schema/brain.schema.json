@@ -132,6 +132,16 @@
         }
       }
     },
+    "doctor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "failOnSuspectedLeaks": {
+          "type": "boolean",
+          "description": "Make `brain doctor` fail on B0601, an instance still alive after GC. Off by default: B0601 is a suspicion and is reported as a warning."
+        }
+      }
+    },
     "seo": {
       "type": "object",
       "properties": {

@@ -83,7 +83,7 @@ pub async fn connect_for(url: &str, workload: Workload, size: u32) -> Result<PgP
 }
 /// `connect_for` with an explicit `application_name`.
 pub async fn connect_named(url: &str, workload: Workload, size: u32, application: &str) -> Result<PgPool, String> {
-    let failed = |_| "Cannot connect to Postgres; check DATABASE_URL (credentials are not logged)".to_string();
+    let failed = |_| "Cannot connect to Postgres (B0762); fix: check DATABASE_URL (credentials are not logged)".to_string();
     let base = PgConnectOptions::from_str(url).map_err(failed)?.application_name(application);
     // transaction_timeout exists from Postgres 17; an unknown startup option would refuse the connection.
     let version = if workload == Workload::Default {
@@ -127,7 +127,7 @@ pub async fn check_connection_budget(pool: &PgPool, total: u32) -> Result<(), St
     let budget = (max - reserved - 5).max(0);
     if i64::from(total) > i64::from(budget) {
         return Err(format!(
-            "BDB_POOL_BUDGET: pools need {total} connections but max_connections={max} leaves {budget} after reserved slots and 5 of headroom; fix: lower BRAIN_DB_HTTP_POOL/BRAIN_DB_WORKER_POOL or the process count, or raise max_connections"
+            "BDB_POOL_BUDGET (B0763): pools need {total} connections but max_connections={max} leaves {budget} after reserved slots and 5 of headroom; fix: lower BRAIN_DB_HTTP_POOL/BRAIN_DB_WORKER_POOL or the process count, or raise max_connections"
         ));
     }
     Ok(())

@@ -35,7 +35,7 @@ pub fn select(root: &Path, env: &str) -> Vec<(String, String)> {
     };
     let f = brain_check::env::parse(&src);
     *PUBLIC.write().unwrap() = f.public(env, &process);
-    f.resolve(env, &process).into_iter().collect()
+    f.runtime(env, &process).into_iter().collect()
 }
 
 /// Dev/test loader for brain-serve: selects `env` (refreshing the PUBLIC_* constants) each time it is called.
@@ -68,9 +68,41 @@ pub fn placeholder_origin(url: &str) -> bool {
 /// B0724/B0723 of the file itself (`brain check` of the app).
 pub fn check(root: &Path) -> Vec<crate::compiler::Diag> {
     match std::fs::read_to_string(root.join(FILE)) {
-        Ok(src) => brain_check::env::check_file(&src, FILE),
+        Ok(src) => {
+            let mut diags = brain_check::env::check_file(&src, FILE);
+            diags.extend(startup(root, &src));
+            diags
+        }
         Err(_) => Vec::new(),
     }
+}
+
+/// Backend settings that cannot start, per environment the file declares, as warnings (B0760–B0764): `brain backend
+/// serve` refuses them, while an app can be built and checked without running that backend. A key with no value here
+/// may come from the host, so only values present are judged, and the database only for an app with a native backend.
+fn startup(root: &Path, src: &str) -> Vec<crate::compiler::Diag> {
+    let f = brain_check::env::parse(src);
+    let native = root.join("server/resources").is_dir() || root.join("server/auth").is_dir();
+    let mut envs = f.environments();
+    if !envs.iter().any(|e| e == "production") {
+        envs.push("production".into());
+    }
+    let mut out = Vec::new();
+    for env in envs {
+        let vars = f.resolve(&env, &process);
+        let native = native || vars.get("BRAIN_BACKEND_URL").is_some_and(|v| !v.is_empty());
+        let get = |k: &str| vars.get(k).filter(|v| !v.trim().is_empty() && (native || k != "DATABASE_URL")).cloned();
+        for found in crate::startup_config::findings(&get, env == "production") {
+            let (text, fix) = found.message.split_once("; fix: ").unwrap_or((found.message.as_str(), "see `brain explain`"));
+            let text = text.split_once(": ").map_or(text, |(_, t)| t);
+            let line = src.lines().position(|l| l.trim().trim_start_matches("export ").split(['=', '?']).next().is_some_and(|k| k.trim() == found.key)).map_or(1, |i| i + 1);
+            let mut diag = crate::compiler::Diag::new(found.code, FILE, brain_parse::Span::default(), format!("{text} (environment `{env}`)"), fix.to_string());
+            diag.line = line as u32;
+            diag.col = 1;
+            out.push(diag);
+        }
+    }
+    out
 }
 
 /// B0720 for `env`: a key with no value fails `brain build`/`brain start`.
@@ -96,7 +128,8 @@ pub fn map(root: &Path) -> Option<brain_mcp::Json> {
     Some(Json::Obj(envs))
 }
 
-/// Doctor findings about the env files, as (code, level, message, fix); plus the example kept in sync (written here).
+/// Doctor findings about the env files, as (code, level, message, fix). Doctor is a diagnosis: it writes no file here;
+/// `brain fix` and `brain doctor --fix` apply the pending `.brain_env.example` change ([`sync_example`]).
 pub fn doctor(root: &Path) -> Vec<(String, &'static str, String, String)> {
     let mut out = Vec::new();
     let tracked = std::process::Command::new("git")
@@ -113,9 +146,22 @@ pub fn doctor(root: &Path) -> Vec<(String, &'static str, String, String)> {
         out.push(("B0726".into(), "warning", "a .env file is ignored: variables live in .brain_env".into(), "move its lines into the shared block (or a [section]) of .brain_env and delete .env".into()));
     }
     if let Ok(src) = std::fs::read_to_string(root.join(FILE)) {
-        let want = example_of(&src);
-        if std::fs::read_to_string(root.join(EXAMPLE)).ok().as_deref() != Some(want.as_str()) && std::fs::write(root.join(EXAMPLE), &want).is_ok() {
-            out.push(("B0727".into(), "info", ".brain_env.example was out of sync with .brain_env".into(), "updated it with the current keys (no values); commit it".into()));
+        let want = example_for(root, &src);
+        let have = std::fs::read_to_string(root.join(EXAMPLE)).unwrap_or_default();
+        let (want_keys, have_keys) = (declared(&want), declared(&have));
+        if want_keys != have_keys {
+            let names = |a: &std::collections::BTreeSet<(String, String, bool)>, b: &std::collections::BTreeSet<(String, String, bool)>| {
+                a.difference(b).map(|(_, k, _)| k.clone()).collect::<std::collections::BTreeSet<_>>().into_iter().collect::<Vec<_>>().join(", ")
+            };
+            let (missing, stale) = (names(&want_keys, &have_keys), names(&have_keys, &want_keys));
+            let mut detail = Vec::new();
+            if !missing.is_empty() {
+                detail.push(format!("needs {missing}"));
+            }
+            if !stale.is_empty() {
+                detail.push(format!("drops {stale}"));
+            }
+            out.push(("B0727".into(), "info", format!(".brain_env.example is out of sync with .brain_env and the code: {}", detail.join("; ")), "run `brain doctor --fix` to update it (keys only, no values), then commit it".into()));
         }
     }
     // keys the toolchain itself reads: PUBLIC_SITE_URL (canonical, sitemap, og:url), PUBLIC_SITE_NAME (site name
@@ -127,9 +173,56 @@ pub fn doctor(root: &Path) -> Vec<(String, &'static str, String, String)> {
     out
 }
 
+/// The `(block, key, optional)` triples a `.brain_env`-shaped text declares, ignoring comments and layout.
+fn declared(src: &str) -> std::collections::BTreeSet<(String, String, bool)> {
+    let f = brain_check::env::parse(src);
+    let shared = f.shared.iter().map(|e| (String::new(), e.key.clone(), e.optional));
+    let sections = f.sections.iter().flat_map(|(n, es)| es.iter().map(move |e| (n.clone(), e.key.clone(), e.optional)));
+    shared.chain(sections).collect()
+}
+
+/// The template for an app: every key of `src` plus every key its code reads, so it never loses one the code needs.
+/// A key the code reads with a default or a condition is listed as optional (`KEY?=`).
+pub fn example_for(root: &Path, src: &str) -> String {
+    let keys = brain_check::env::parse(src).keys();
+    let extra: Vec<String> = brain_check::env::code_reads(root)
+        .into_iter()
+        .filter(|(k, _)| !keys.contains(k))
+        .map(|(k, optional)| if optional { format!("{k}?=") } else { format!("{k}=") })
+        .collect();
+    let example = example_of(src);
+    if extra.is_empty() {
+        return example;
+    }
+    // Into the shared block, which ends at the first section header.
+    let mut lines: Vec<&str> = example.lines().collect();
+    let mut at = lines.iter().position(|l| l.starts_with('[')).unwrap_or(lines.len());
+    while at > 0 && lines[at - 1].trim().is_empty() {
+        at -= 1;
+    }
+    for (i, line) in extra.iter().enumerate() {
+        lines.insert(at + i, line);
+    }
+    lines.join("\n") + "\n"
+}
+
+/// Writes the pending `.brain_env.example` change; `Ok(true)` when the file changed. Only explicit commands call it.
+pub fn sync_example(root: &Path, before_write: &mut dyn FnMut(&Path, &str)) -> Result<bool, String> {
+    let Ok(src) = std::fs::read_to_string(root.join(FILE)) else { return Ok(false) };
+    let want = example_for(root, &src);
+    let path = root.join(EXAMPLE);
+    let have = std::fs::read_to_string(&path).unwrap_or_default();
+    if declared(&have) == declared(&want) {
+        return Ok(false);
+    }
+    before_write(&path, &have);
+    std::fs::write(&path, want).map_err(|e| format!("{EXAMPLE}: {e}"))?;
+    Ok(true)
+}
+
 /// The example file for `src`: the same comments, keys and sections, with every value removed.
 pub fn example_of(src: &str) -> String {
-    let mut o = String::from("# Keys of .brain_env (values live only in .brain_env, which git ignores). `brain doctor` keeps this list in sync.\n");
+    let mut o = String::from("# Keys of .brain_env (values live only in .brain_env, which git ignores). `brain doctor --fix` keeps this list in sync.\n");
     for line in src.lines() {
         let t = line.trim();
         if t.starts_with('#') && o.len() > 0 && line.starts_with("# Variables") {
@@ -211,9 +304,10 @@ pub fn set(root: &Path, key: &str, section: &str, value: &str) -> Result<(), Str
             }
         }
     };
-    let is_key = |l: &str| l.trim().split_once('=').is_some_and(|(k, _)| k.trim() == key);
+    let is_key = |l: &str| l.trim().split_once('=').is_some_and(|(k, _)| k.trim().trim_end_matches('?').trim_end() == key);
     match (start..end).find(|&i| is_key(&lines[i])) {
-        Some(i) => lines[i] = line,
+        // Giving an optional key a value keeps it optional.
+        Some(i) => lines[i] = if lines[i].trim().split_once('=').is_some_and(|(k, _)| k.trim().ends_with('?')) { line.replacen('=', "?=", 1) } else { line },
         None => {
             // after the block's last non-empty line
             let mut at = end;
@@ -229,7 +323,7 @@ pub fn set(root: &Path, key: &str, section: &str, value: &str) -> Result<(), Str
         return Err(format!("{key} was not set in [{section}]: {}", bad.join("; ")));
     }
     std::fs::write(&path, out).map_err(|e| format!("{FILE}: {e}"))?;
-    let _ = std::fs::write(root.join(EXAMPLE), example_of(&std::fs::read_to_string(&path).unwrap_or_default()) + "\n");
+    let _ = sync_example(root, &mut |_, _| {});
     Ok(())
 }
 

@@ -223,16 +223,22 @@ impl GcsConfig {
                     || byte.is_ascii_digit()
                     || matches!(byte, b'-' | b'.' | b'_')
             })
-            || prefix.is_empty()
+        {
+            return Err("B0761: BRAIN_GCS_BUCKET is not a bucket name; fix: 3 to 63 lowercase letters, digits, `-`, `.` or `_`".into());
+        }
+        if prefix.is_empty()
             || prefix.len() > 80
             || !prefix
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-            || !adapter.is_absolute()
+        {
+            return Err("B0761: BRAIN_GCS_PREFIX is not a simple object prefix; fix: up to 80 letters, digits, `-` or `_`, or remove it to use the default".into());
+        }
+        if !adapter.is_absolute()
             || adapter.extension().is_none_or(|ext| ext != "mjs")
             || std::fs::symlink_metadata(&adapter).is_ok_and(|meta| meta.file_type().is_symlink())
         {
-            return Err("GCS requires an explicit bucket, simple object prefix and private absolute .mjs SDK adapter".into());
+            return Err("B0761: BRAIN_GCS_ADAPTER must be the absolute path of a private .mjs SDK adapter, not a symbolic link; fix: point it at the absolute path of server/storage/gcs-adapter.mjs".into());
         }
         Ok(Self {
             bucket,

@@ -30,7 +30,7 @@ fn google_without_jwt_is_named_by_check_doctor_and_startup_without_values() {
     assert!(!text(&brain(&dir, &["check"])).contains("B0751"), "a fresh app has no finding");
     add_env(&dir, &format!("GOOGLE_CLIENT_ID={CLIENT}\nBRAIN_MAIL_RESEND_KEY=synthetic-mail-provider-key\nBRAIN_DB_HTTP_POOL=900"));
     let check = text(&brain(&dir, &["check"]));
-    for expected in ["B0751", "BRAIN_JWT_SECRET", "BRAIN_MAIL_FROM", "BRAIN_DB_HTTP_POOL must be 1..64"] {
+    for expected in ["B0751", "BRAIN_JWT_SECRET", "B0760", "BRAIN_MAIL_FROM", "B0763", "BRAIN_DB_HTTP_POOL"] {
         assert!(check.contains(expected), "{expected}: {check}");
     }
     let doctor = text(&brain(&dir, &["doctor"]));

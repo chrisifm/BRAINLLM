@@ -18,6 +18,13 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Concurrent JWT refresh inside a 10-second grace no longer revokes the family, so tabs and prefetches keep their session, and the SSR bridge renews an expired access cookie during render.
 - Failed sign-ins and reset mail are counted per email and client with a cap per email, so a third party can no longer lock out the owner from another client.
 - `ctx.session.setSecret` stores server-only values encrypted; `BRAIN_SECRET_PREVIOUS` rotates the key, `BRAIN_SESSION_VERSION` ends every signed session and `BRAIN_SESSION_SECONDS` sets their length. B0737 warns about a credential passed to `ctx.session.set`.
+- Optional variables: `KEY?=` in `.brain_env` declares a variable the app works without. It silences B0720 and B0721, may stay empty, and reads as unset on the server and in the browser.
+- B0721 detects reads with a default or a condition (`process.env.X || d`, `?? d`, `if (process.env.X)`, `ctx.env` too) and proposes `KEY?=` instead of asking for a value per environment.
+- `brain doctor` no longer rewrites `.brain_env.example`: B0727 reports the pending change and `brain doctor --fix` or `brain fix` writes it. The template is the union of `.brain_env` and the keys the code reads, so it never drops a key in use.
+- `BRAIN_MAIL_FROM` accepts `Name <sender@domain>`, the friendly form Resend documents; control characters and unquoted address punctuation in the name are refused.
+- Backend startup errors for mail, object storage, the database, pools and the public URL carry a code (B0760–B0764), the variable name without its value, and a fix. `brain check` and `brain doctor` warn about them before start, and `brain backend serve` stops on them before connecting.
+- `brain doctor` no longer fails on suspected leak B0601 unless `brain.json` sets `doctor.failOnSuspectedLeaks`; its summary names the gates that failed, and the report has a `failed` list.
+- Leak checks wait for in-flight requests before judging an instance (`brain test --heap` and `brain doctor` settle, then abort what remains), and the B0601 fix names in-flight promises and the requests pending at unmount.
 
 ### Signature
 - HTML documents now carry `X-Generated-By` with the official site and repository in `brain start`, `_headers`, nginx and Caddy. It replaces `X-Powered-By` and adds nothing visible to the page.

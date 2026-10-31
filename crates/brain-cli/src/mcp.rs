@@ -639,7 +639,7 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
     });
     tools.push(Tool {
         name: "brain_env_keys",
-        description: "The keys of .brain_env per environment (development, staging, production…), never their values. Keys whose value is empty in an environment still appear; `brain build --env production` fails on them (B0720).",
+        description: "The keys of .brain_env per environment (development, staging, production…), never their values. Keys whose value is empty in an environment still appear; `brain build --env production` fails on them (B0720) unless they are declared optional (`KEY?=`).",
         input_schema: schema([("app", "string", "app folder; defaults to the current one")], &[]),
         output_schema: None,
         run: Box::new(|a| Ok(crate::env::map(&app(a)?).unwrap_or(Json::Obj(vec![])).stringify())),
