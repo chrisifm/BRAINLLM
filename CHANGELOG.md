@@ -18,6 +18,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Changed
 
+- The kit's `<ErrorState>` reads its texts from the app's dictionary (`error_state.*` keys, documented in the i18n
+  guide and INTERNALS §37) like the `form.*` messages, with the English text as the default when a key is missing.
+
 - The shared lexer decodes ASCII directly, scans ASCII identifier runs as bytes and indexes punctuation by first byte
   in the same longest-first order. Source-map scanning skips slash-free trivia gaps and builds its generated line index
   only to locate a failure. Emitted JS, server JS, CSS, maps and diagnostics are byte-identical; no compiler-speed

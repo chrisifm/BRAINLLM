@@ -1378,6 +1378,10 @@ language is one command.
   the router and the prerender produce one page per locale. Optional translated slugs per view:
   `<meta route es="/es/acerca">`. `/` with no prefix never auto-redirects by `Accept-Language` (crawlers and shared
   links must see the same page); instead the language switcher suggests the browser's language once.
+- **Framework texts:** messages the runtime and the kit write themselves read the app's dictionary by key and fall back
+  to English when the key is missing, without loading `brain-i18n.js`: form validation (`form.*`, §14) and
+  `<ErrorState>` (`error_state.offline`, `network`, `timeout`, `schema`, `unauthorized`, `forbidden`, `not_found`,
+  `invalid`, `rate_limited` with `{n}`, `server`, `sign_in`, `retry`, `reference` with `{id}`).
 - **Switcher:** `<LangSwitch>` in the `brain/ui` kit: links to the same page in each locale (keeps the path, query and
   hash), names each language in itself (`Deutsch`, not `German`), sets `hreflang` on the links; the scaffold puts it in the nav,
   hidden while there is one locale.

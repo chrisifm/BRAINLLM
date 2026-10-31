@@ -3,18 +3,31 @@
   // One message and one action per error kind (INTERNALS §40.2), for {:catch e} and failed resources. Offline and
   // network errors retry by themselves when the connection comes back; 429 retries after its Retry-After. A cancelled
   // request (kind 'aborted') shows nothing.
+  // Texts (§37): the app's dictionary wins when it has the key (`"error_state.offline": "…"` in i18n/<locale>.json),
+  // else the English default. The table is read directly (globalThis.__brainDict, filled by brain-i18n.js `add`), like
+  // the form.* messages, so a single-language page does not load brain-i18n.js.
+  // Keys: error_state.offline network timeout schema unauthorized forbidden not_found invalid rate_limited ({n}) server
+  // sign_in retry reference ({id}).
+  const say = (key, en, vars) => {
+    const D = globalThis.__brainDict, h = globalThis.document && document.documentElement
+    const loc = globalThis.__brainLocale || (h && h.getAttribute('lang')) || 'en'
+    const def = (h && h.getAttribute('data-default-lang')) || 'en'
+    const m = D && ((D[loc] && D[loc]['error_state.' + key]) ?? (D[def] && D[def]['error_state.' + key]))
+    const s = typeof m === 'string' ? m : en
+    return vars ? s.replace(/\{(\w+)\}/g, (x, k) => (k in vars ? String(vars[k]) : x)) : s
+  }
   const text = (e) => {
     if (!e) return ''
-    if (e.kind === 'offline') return 'You are offline.'
-    if (e.kind === 'network') return 'The connection was lost.'
-    if (e.kind === 'timeout') return 'The server took too long to answer.'
-    if (e.kind === 'schema') return 'The server sent something unexpected.'
-    if (e.status === 401) return 'Sign in to continue.'
-    if (e.status === 403) return 'You do not have permission to see this.'
-    if (e.status === 404) return 'Not found.'
-    if (e.status === 422) return 'Check the highlighted fields.'
-    if (e.status === 429) return 'Too many requests. Trying again in ' + (e.retryAfter || 30) + ' seconds.'
-    return 'Something went wrong on our side.'
+    if (e.kind === 'offline') return say('offline', 'You are offline.')
+    if (e.kind === 'network') return say('network', 'The connection was lost.')
+    if (e.kind === 'timeout') return say('timeout', 'The server took too long to answer.')
+    if (e.kind === 'schema') return say('schema', 'The server sent something unexpected.')
+    if (e.status === 401) return say('unauthorized', 'Sign in to continue.')
+    if (e.status === 403) return say('forbidden', 'You do not have permission to see this.')
+    if (e.status === 404) return say('not_found', 'Not found.')
+    if (e.status === 422) return say('invalid', 'Check the highlighted fields.')
+    if (e.status === 429) return say('rate_limited', 'Too many requests. Trying again in {n} seconds.', { n: e.retryAfter || 30 })
+    return say('server', 'Something went wrong on our side.')
   }
   const canRetry = (e) => !!retry && !!e && (e.kind !== 'http' || e.status >= 500)
   const signIn = () => login + (globalThis.location ? '?next=' + encodeURIComponent(location.pathname + location.search) : '')
@@ -33,9 +46,9 @@
 {#if error && error.kind !== 'aborted'}
 <div class="error-state" role="alert">
   <p>{text(error)}</p>
-  {#if error && error.status === 401}<a href={signIn()}>Sign in</a>{/if}
-  {#if canRetry(error)}<button type="button" on:click={retry()}>Retry</button>{/if}
-  {#if error && error.id && error.status >= 500}<small>Reference: {error.id}</small>{/if}
+  {#if error && error.status === 401}<a href={signIn()}>{say('sign_in', 'Sign in')}</a>{/if}
+  {#if canRetry(error)}<button type="button" on:click={retry()}>{say('retry', 'Retry')}</button>{/if}
+  {#if error && error.id && error.status >= 500}<small>{say('reference', 'Reference: {id}', { id: error.id })}</small>{/if}
 </div>
 {/if}
 <style>
