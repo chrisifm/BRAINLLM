@@ -532,8 +532,10 @@ raw-code or comment escape hatch. The emitter's exact `/*@L<positive canonical u
 owned mapping directives. The framework's own lexer identifies comment trivia while keeping strings, regular
 expressions and template text opaque; template substitutions are scanned normally, including nested function
 bodies. Regex-leading expression statements are parenthesized by the emitter so inserted `if`/`for` blocks
-do not change lexical context. Byte-only token scanning omits successful-token columns, while errors retain
-exact generated coordinates. Before HMR wiring becomes quoted metadata, the same scan strips compiler
+do not change lexical context. `Lexer::next_span` uses the same scanners and validation without materializing
+discarded token values or successful-token columns. Its empty span denotes EOF after trailing trivia; normal
+`next_token`/`next_token_bytes` keep their complete payloads and saved lexer context remains interchangeable.
+Errors retain exact generated coordinates. Before HMR wiring becomes quoted metadata, the same scan strips compiler
 comments from that code, preserving author literals; the existing 64 KiB wiring eligibility bound is unchanged.
 This additional scan is limited to eligible development metadata, with no second generation or extra map/base64.
 Marker-shaped quoted HTML/CSS, inlined child text and public environment constants remain data. Author

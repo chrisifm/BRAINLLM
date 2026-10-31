@@ -44,15 +44,15 @@ fn emitted_markers(js: &str, file: &str) -> Result<Vec<Marker>, brain_lex::Diag>
     let mut previous = 0;
     let mut markers = Vec::new();
     loop {
-        let token = lexer.next_token_bytes().map_err(|mut diagnostic| {
+        let span = lexer.next_span().map_err(|mut diagnostic| {
             diagnostic.msg = format!("Framework-generated JavaScript could not be scanned for source maps: {}", diagnostic.msg);
             diagnostic.fix = format!("Report a compiler defect with component `{file}` and this generated JavaScript location; it is not an author source location. Do not edit generated output.");
             diagnostic.edits.clear();
             diagnostic
         })?;
-        trivia_markers(js, previous, token.span.start as usize, &mut markers);
-        if matches!(token.tok, brain_lex::Tok::Eof) { break; }
-        previous = token.span.end as usize;
+        trivia_markers(js, previous, span.start as usize, &mut markers);
+        if span.start == span.end { break; }
+        previous = span.end as usize;
     }
     Ok(markers)
 }

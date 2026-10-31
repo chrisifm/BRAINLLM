@@ -165,52 +165,62 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn next_token(&mut self) -> Result<Token, Diag> {
-        self.next_token_located(true)
+        self.next_token_mode::<true, true, _>(|tok, span, nl_before| Token { tok, span, nl_before })
     }
 
     /// The same tokenization with byte ranges only: successful token spans have zero line/column.
     /// Consumers that only need token boundaries avoid repeatedly counting Unicode columns on long lines.
     /// Errors still carry the normal exact line and column; lexer state and snapshots are unchanged.
     pub fn next_token_bytes(&mut self) -> Result<Token, Diag> {
-        self.next_token_located(false)
+        self.next_token_mode::<false, true, _>(|tok, span, nl_before| Token { tok, span, nl_before })
     }
 
-    fn next_token_located(&mut self, located: bool) -> Result<Token, Diag> {
+    /// The same scanner and validation with byte boundaries only, without copying token values.
+    /// Line/column are zero on success; an empty span denotes EOF after trailing trivia. Errors retain exact
+    /// Unicode locations. Template/regex state and save/restore work identically in every token mode.
+    pub fn next_span(&mut self) -> Result<Span, Diag> {
+        self.next_token_mode::<false, false, _>(|_, span, _| span)
+    }
+
+    fn next_token_mode<const LOCATED: bool, const PAYLOAD: bool, T>(&mut self, complete: impl FnOnce(Tok, Span, bool) -> T) -> Result<T, Diag> {
         let nl_before = self.skip_trivia()?;
         let start = self.pos;
         let Some(c) = self.peek() else {
-            let span = if located { self.span(start, start) } else { Span { start: start as u32, end: start as u32, line: 0, col: 0 } };
-            return Ok(Token { tok: Tok::Eof, span, nl_before });
+            let span = if LOCATED { self.span(start, start) } else { Span { start: start as u32, end: start as u32, line: 0, col: 0 } };
+            return Ok(complete(Tok::Eof, span, nl_before));
         };
         let tok = if is_ident_start(c) {
-            self.ident()
+            self.ident::<PAYLOAD>()
         } else if c.is_ascii_digit() || (c == '.' && self.peek_at(1).is_some_and(|d| d.is_ascii_digit())) {
-            self.number(start)?
+            self.number::<PAYLOAD>(start)?
         } else if c == '"' || c == '\'' {
-            self.string(start, c)?
+            self.string::<PAYLOAD>(start, c)?
         } else if c == '`' {
             self.bump();
-            self.template_part(start, true)?
+            self.template_part::<PAYLOAD>(start, true)?
         } else if c == '}' && self.braces.last() == Some(&true) {
             self.braces.pop();
             self.bump();
-            self.template_part(start, false)?
+            self.template_part::<PAYLOAD>(start, false)?
         } else if c == '/' && self.regex_ok {
-            self.regex(start)?
+            self.regex::<PAYLOAD>(start)?
         } else {
             self.punct(start)?
         };
         self.regex_ok = match &tok {
-            Tok::Ident(w) => REGEX_AFTER_WORDS.contains(&w.as_str()),
+            Tok::Ident(_) => {
+                let word = &self.src[start..self.pos];
+                REGEX_AFTER_WORDS.contains(&word)
+            }
             Tok::Punct(p) => !matches!(*p, ")" | "]" | "}" | "++" | "--"),
             Tok::TplHead(_) | Tok::TplMiddle(_) => true,
             _ => false,
         };
-        let span = if located { self.span(start, self.pos) } else { Span { start: start as u32, end: self.pos as u32, line: 0, col: 0 } };
-        Ok(Token { tok, span, nl_before })
+        let span = if LOCATED { self.span(start, self.pos) } else { Span { start: start as u32, end: self.pos as u32, line: 0, col: 0 } };
+        Ok(complete(tok, span, nl_before))
     }
 
-    fn ident(&mut self) -> Tok {
+    fn ident<const PAYLOAD: bool>(&mut self) -> Tok {
         let start = self.pos;
         while let Some(c) = self.peek() {
             if is_ident_part(c) {
@@ -219,10 +229,10 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
-        Tok::Ident(self.src[start..self.pos].to_string())
+        Tok::Ident(if PAYLOAD { self.src[start..self.pos].to_string() } else { String::new() })
     }
 
-    fn number(&mut self, start: usize) -> Result<Tok, Diag> {
+    fn number<const PAYLOAD: bool>(&mut self, start: usize) -> Result<Tok, Diag> {
         let radix_prefix = self.peek() == Some('0') && matches!(self.peek_at(1), Some('x' | 'X' | 'b' | 'B' | 'o' | 'O'));
         if radix_prefix {
             self.pos += 2;
@@ -258,21 +268,21 @@ impl<'a> Lexer<'a> {
         if self.peek().is_some_and(is_ident_start) {
             return Err(self.err(self.pos, "an identifier cannot start right after a number", "separate the number from the name with a space or an operator"));
         }
-        Ok(Tok::Num(self.src[start..self.pos].to_string()))
+        Ok(Tok::Num(if PAYLOAD { self.src[start..self.pos].to_string() } else { String::new() }))
     }
 
-    fn escape(&mut self, out: &mut String, start: usize) -> Result<(), Diag> {
+    fn escape<const PAYLOAD: bool>(&mut self, out: &mut String, start: usize) -> Result<(), Diag> {
         let Some(e) = self.bump() else {
             return Err(self.err(start, "unclosed string", "close the string with the same quote it opens with"));
         };
         match e {
-            'n' => out.push('\n'),
-            't' => out.push('\t'),
-            'r' => out.push('\r'),
-            'b' => out.push('\u{08}'),
-            'f' => out.push('\u{0c}'),
-            'v' => out.push('\u{0b}'),
-            '0' if !self.peek().is_some_and(|c| c.is_ascii_digit()) => out.push('\0'),
+            'n' => if PAYLOAD { out.push('\n') },
+            't' => if PAYLOAD { out.push('\t') },
+            'r' => if PAYLOAD { out.push('\r') },
+            'b' => if PAYLOAD { out.push('\u{08}') },
+            'f' => if PAYLOAD { out.push('\u{0c}') },
+            'v' => if PAYLOAD { out.push('\u{0b}') },
+            '0' if !self.peek().is_some_and(|c| c.is_ascii_digit()) => if PAYLOAD { out.push('\0') },
             '\n' => {}
             '\r' => {
                 if self.peek() == Some('\n') {
@@ -282,7 +292,7 @@ impl<'a> Lexer<'a> {
             'x' => {
                 let h: String = (0..2).filter_map(|_| self.bump()).collect();
                 let v = u32::from_str_radix(&h, 16).map_err(|_| self.err(start, "invalid `\\x` escape", "use two hex digits: `\\x41`"))?;
-                out.push(char::from_u32(v).unwrap_or('\u{fffd}'));
+                if PAYLOAD { out.push(char::from_u32(v).unwrap_or('\u{fffd}')); }
             }
             'u' => {
                 let v = if self.peek() == Some('{') {
@@ -300,14 +310,14 @@ impl<'a> Lexer<'a> {
                     u32::from_str_radix(&h, 16).ok()
                 };
                 let v = v.ok_or_else(|| self.err(start, "invalid `\\u` escape", "use `\\u00e1` or `\\u{1F600}`"))?;
-                out.push(char::from_u32(v).unwrap_or('\u{fffd}'));
+                if PAYLOAD { out.push(char::from_u32(v).unwrap_or('\u{fffd}')); }
             }
-            c => out.push(c),
+            c => if PAYLOAD { out.push(c) },
         }
         Ok(())
     }
 
-    fn string(&mut self, start: usize, q: char) -> Result<Tok, Diag> {
+    fn string<const PAYLOAD: bool>(&mut self, start: usize, q: char) -> Result<Tok, Diag> {
         self.bump();
         let mut value = String::new();
         loop {
@@ -316,15 +326,15 @@ impl<'a> Lexer<'a> {
                     return Err(self.err(start, "unclosed string", &format!("close the string with {q} on the same line; for multiple lines use a template string `...`")));
                 }
                 Some(c) if c == q => break,
-                Some('\\') => self.escape(&mut value, start)?,
-                Some(c) => value.push(c),
+                Some('\\') => self.escape::<PAYLOAD>(&mut value, start)?,
+                Some(c) => if PAYLOAD { value.push(c) },
             }
         }
-        Ok(Tok::Str { value, raw: self.src[start..self.pos].to_string() })
+        Ok(Tok::Str { value, raw: if PAYLOAD { self.src[start..self.pos].to_string() } else { String::new() } })
     }
 
     /// Scans template text after `` ` `` or after the `}` closing a substitution.
-    fn template_part(&mut self, start: usize, head: bool) -> Result<Tok, Diag> {
+    fn template_part<const PAYLOAD: bool>(&mut self, start: usize, head: bool) -> Result<Tok, Diag> {
         let text_start = self.pos;
         loop {
             match self.peek() {
@@ -334,12 +344,12 @@ impl<'a> Lexer<'a> {
                     self.bump();
                 }
                 Some('`') => {
-                    let raw = self.src[text_start..self.pos].to_string();
+                    let raw = if PAYLOAD { self.src[text_start..self.pos].to_string() } else { String::new() };
                     self.bump();
                     return Ok(if head { Tok::TplFull(raw) } else { Tok::TplTail(raw) });
                 }
                 Some('$') if self.peek_at(1) == Some('{') => {
-                    let raw = self.src[text_start..self.pos].to_string();
+                    let raw = if PAYLOAD { self.src[text_start..self.pos].to_string() } else { String::new() };
                     self.pos += 2;
                     self.braces.push(true);
                     return Ok(if head { Tok::TplHead(raw) } else { Tok::TplMiddle(raw) });
@@ -351,7 +361,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn regex(&mut self, start: usize) -> Result<Tok, Diag> {
+    fn regex<const PAYLOAD: bool>(&mut self, start: usize) -> Result<Tok, Diag> {
         self.bump();
         let mut in_class = false;
         loop {
@@ -369,7 +379,7 @@ impl<'a> Lexer<'a> {
         while self.peek().is_some_and(is_ident_part) {
             self.bump();
         }
-        Ok(Tok::Regex(self.src[start..self.pos].to_string()))
+        Ok(Tok::Regex(if PAYLOAD { self.src[start..self.pos].to_string() } else { String::new() }))
     }
 
     fn punct(&mut self, start: usize) -> Result<Tok, Diag> {
@@ -505,6 +515,66 @@ mod tests {
                 tokens => panic!("byte-only lexing diverged: {tokens:?}"),
             }
         }
+    }
+
+    fn compare_span_mode(src: &str) {
+        let idx = LineIndex::new(src);
+        let mut normal = Lexer::new(src, "modes.brain", &idx, 0, src.len());
+        let mut spans = Lexer::new(src, "modes.brain", &idx, 0, src.len());
+        loop {
+            let saved = spans.save();
+            let located = normal.next_token();
+            let boundary = spans.next_span();
+            let a = normal.save();
+            let b = spans.save();
+            assert_eq!((a.pos, a.braces, a.regex_ok), (b.pos, b.braces, b.regex_ok), "{src}");
+            match (located, boundary) {
+                (Ok(token), Ok(span)) => {
+                    assert_eq!((token.span.start, token.span.end), (span.start, span.end), "{src}");
+                    assert_eq!((span.line, span.col), (0, 0));
+                    assert_eq!(token.tok == Tok::Eof, span.start == span.end);
+                    // Replay a payload token from the same snapshot, then continue mixing modes. Template
+                    // substitution braces and regex/division context must not depend on token materialization.
+                    spans.restore(saved);
+                    let replay = spans.next_token_bytes().unwrap();
+                    assert_eq!(replay.tok, token.tok);
+                    assert_eq!(replay.nl_before, token.nl_before);
+                    assert_eq!(replay.span, span);
+                    if token.tok == Tok::Eof { break; }
+                }
+                (Err(a), Err(b)) => { assert_eq!(a, b, "{src}"); break; }
+                tokens => panic!("span-only tokenization diverged for {src}: {tokens:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn span_mode_matches_token_boundaries_payload_replay_and_saved_context() {
+        for src in [
+            "const π = 'naïve 😀';\nlet n = 12.5e-2; n /= 3; // trailing /*@L2*/",
+            r#"const escapes = "\n\t\r\b\f\v\0\x41\u0042\u{1F600}";"#,
+            r#"const value = `a ${(() => { return /[/*@L71*/]/giu.source; })()} b${`nested ${1}`}`;"#,
+            r#"const divide = ({n:12}).n / 3; const regex = /[/a-z]+/g;"#,
+            r#"const escaped = `a\`b${{value:'/*@L2*/'}.value}c`;"#,
+            "const numbers = [0xFF, 0b10, 0o17, 1_000, 1e-2, 42n];\n/* trailing */",
+            "return /[/*@L99*/]/; typeof x; delete y; void 0; await value;",
+            "/* only trivia */\n// comment",
+        ] { compare_span_mode(src); }
+        for punct in PUNCTS { compare_span_mode(&format!("left {punct} right;")); }
+    }
+
+    #[test]
+    fn span_mode_keeps_exact_diagnostics_for_invalid_input() {
+        for src in [
+            "const π = 'naïve';\nconst value = 'unfinished",
+            r#"const value = '\xzz';"#,
+            r#"const value = '\u{bad-}';"#,
+            "const value = 1e+;",
+            "const value = /[unfinished/;",
+            "const value = `unfinished ${1}",
+            "const value = 1;\n/* unfinished",
+            "const value = 👻;",
+        ] { compare_span_mode(src); }
     }
 
     #[test]
