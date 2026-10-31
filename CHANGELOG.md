@@ -29,6 +29,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 ### Navigation, forms and views
 - After a client navigation focus moves to the page heading (or the URL's fragment target, or the region) and `#brain-announce` reads the new title; a focus the new page set itself is respected and scroll behaviour is unchanged.
 - New apps start with a skip link to `#brain-view` in `app.brain`.
+- A rejected form no longer says "Check the highlighted fields." when nothing is highlighted: a 422 without fields shows the backend's fix or a plain sentence, errors naming no field of the form become `f.error` (`form.rejected` when empty), also without JS, and `<ErrorState>` has `error_state.rejected`.
 
 ### Signature
 - HTML documents now carry `X-Generated-By` with the official site and repository in `brain start`, `_headers`, nginx and Caddy. It replaces `X-Powered-By` and adds nothing visible to the page.

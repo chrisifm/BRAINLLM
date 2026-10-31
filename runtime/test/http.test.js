@@ -479,3 +479,20 @@ test('native backend errors retain actionable codes and fields without rendering
     assert.ok(!failure.message.includes('private')&&!failure.message.includes('TypeError'))
   }
 })
+
+test('a 422 without fields never points at highlighted fields: backend fix, then its own text, then a plain sentence',async()=>{
+  http({retry:0})
+  reset({
+    'POST /a':[{status:422,body:JSON.stringify({schemaVersion:1,error:{code:'INVALID_INPUT',fix:'Remove NUL characters and invalid bytes from the text values',fields:null}})}],
+    'POST /b':[{status:422,body:JSON.stringify({error:'Slug already taken'})}],
+    'POST /c':[{status:422,body:''}],
+    'POST /d':[{status:422,body:JSON.stringify({errors:{}})}],
+    'POST /e':[{status:422,body:JSON.stringify({errors:{name:'Too short'}})}],
+  })
+  const fail=path=>api(path,{post:{}}).post({}).catch(error=>error)
+  const a=await fail('/a');assert.equal(a.message,'Remove NUL characters and invalid bytes from the text values');assert.equal(a.errors,null)
+  assert.equal((await fail('/b')).message,'Slug already taken')
+  assert.equal((await fail('/c')).message,'The server rejected this request. Check it and try again.')
+  assert.equal((await fail('/d')).message,'The server rejected this request. Check it and try again.')
+  assert.equal((await fail('/e')).message,'Check the highlighted fields.')
+})
