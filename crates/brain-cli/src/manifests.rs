@@ -79,7 +79,15 @@ pub(crate) fn read_json(path: &Path, limit: usize) -> Result<Value, String> {
     }
     serde_json::from_slice(&bytes).map_err(|_| "metadata JSON is invalid".into())
 }
-pub(crate) fn lock(dir: &Path) -> Result<File, String> {
+/// Close releases a flock only after all inherited descriptors close (a concurrently forked child keeps a copy until
+/// exec). Explicitly unlock the owned lease first so the next writer is not refused as busy.
+pub(crate) struct WriterLease(File);
+impl Drop for WriterLease {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+pub(crate) fn lock(dir: &Path) -> Result<WriterLease, String> {
     let path = dir.join("writer.lock");
     if fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink() || !m.is_file()) {
         return Err("metadata lock is unsafe".into());
@@ -96,7 +104,7 @@ pub(crate) fn lock(dir: &Path) -> Result<File, String> {
     let file = options.open(path).map_err(|_| "cannot own metadata lock")?;
     file.try_lock()
         .map_err(|_| "metadata refresh is busy; retry shortly".to_string())?;
-    Ok(file)
+    Ok(WriterLease(file))
 }
 pub(crate) fn atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if bytes.len() > MAX_METADATA {
@@ -733,6 +741,18 @@ mod tests {
         assert!(!card.to_string().contains("export const data"));
         assert!(!app.0.join("dist").exists());
         assert!(app.0.join(".brain/manifests/index.json").is_file());
+    }
+    #[test]
+    fn released_lease_is_not_held_by_an_inherited_descriptor() {
+        let app = App::new();
+        let dir = private_dir(&app.0, "manifests").unwrap();
+        let lease = lock(&dir).unwrap();
+        // A forked child holds a duplicate of the same open file description until exec.
+        let inherited = lease.0.try_clone().unwrap();
+        drop(lease);
+        assert!(lock(&dir).is_ok());
+        drop(inherited);
+        assert!(refresh(&app.0).is_ok());
     }
     #[test]
     fn dependency_and_token_changes_invalidate_only_current_metadata() {

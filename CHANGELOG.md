@@ -40,6 +40,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Development 0.4.1: release change-metadata, preview-admission and legacy-writer locks explicitly when their leases end,
   including when a forked child temporarily retains the same descriptor. Contention still fails immediately;
   interrupted lock syscalls retry at most three times and other errors preserve their safe error category.
+- Release the project-manifest writer lock explicitly when its lease ends. A child forked concurrently by the same
+  process (for example an MCP session or a parallel test) no longer makes the next metadata refresh report busy.
 - Preserve author strings, template text, regular-expression literals and generated HTML containing source-marker
   lookalikes such as `/*@L71*/`. Source-map stripping recognizes only exact compiler marker comments in the
   framework lexer's trivia; literal tokens remain data, including inlined components and public environment
