@@ -535,3 +535,46 @@ export default async function handle(ctx) {
 @file server/jobs/probe/schema.jsbrain
 <meta server>
 export default { x: 'str' }
+
+### B1823 frontmatter date
+@file content/blog/bad.md
+---
+title: A post about planning
+description: A description long enough for this post.
+date: soon
+---
+Body.
+@expect B1823 content/blog/bad.md 4:1
+
+### B1850 framework messages without a translation
+@expect B1850 views/home.brain 1:1
+@file brain.json
+{ "name": "Corpus", "i18n": { "default": "es", "locales": ["es"] } }
+@file i18n/es.json
+{
+  "hi": "Hola"
+}
+@file views/home.brain
+<meta seo title={t('hi')} description={t('hi')}>
+<script>
+let f = form({ a: 'email!' }, { submit: async (v) => v })
+</script>
+<main><h1>{t('hi')}</h1>{f}</main>
+
+### B1824 duplicate slug
+@file content/blog/a.md
+---
+title: A post about planning
+description: A description long enough for this post.
+slug: same
+---
+Body.
+@file content/blog/b.md
+---
+title: Another post about planning
+description: A description long enough for that post.
+slug: same
+---
+Body.
+@expect B1824 content/blog/b.md 4:1
+

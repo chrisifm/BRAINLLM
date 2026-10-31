@@ -1,5 +1,5 @@
 //! `brain check` error corpus: each case in `corpus/check.txt` is a small app; the test runs the real command and compares
-//! every B07xx and B14xx finding, and every error of any family, with the expected code, file, line and column.
+//! every B07xx, B14xx and B18xx finding, and every error of any family, with the expected code, file, line and column.
 //! `@unreachable` names the codes `brain check` cannot produce from source files, with the reason: a new code in those
 //! families must get a case or a reason, or this test fails.
 use serde_json::Value;
@@ -38,7 +38,7 @@ fn parse(src: &str) -> (Vec<Case>, Vec<(String, String)>) {
 
 fn in_scope(d: &Value) -> bool {
     let code = d["code"].as_str().unwrap_or("");
-    code.starts_with("B07") || code.starts_with("B14") || d["level"] == "error"
+    code.starts_with("B07") || code.starts_with("B14") || code.starts_with("B18") || d["level"] == "error"
 }
 
 fn run(root: &Path, case: &Case) -> Vec<String> {
