@@ -2153,6 +2153,10 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
             }
         }
     }
+    // an app behind the installed compiler: a warning with the report to read, never a failure
+    if let Some((version, source)) = app.as_deref().and_then(migrate::behind) {
+        advice.push(Json::obj([("code", Json::str("upgrade")), ("level", Json::str("warning")), ("file", Json::str(source.split(' ').next().unwrap_or("brain.json"))), ("msg", Json::str(format!("this app targets {version} ({source}) and the installed compiler is newer"))), ("fix", Json::str("run `brain upgrade --dry-run`, follow its report, then `brain upgrade --apply`"))]));
+    }
     // generated app docs (docs/app) that no longer match the source: a warning, never a failure
     if let Some(root) = app.as_deref().filter(|r| r.join(docs::DEFAULT_OUT).join("index.md").is_file()) {
         let stale = docs::stale(root, docs::DEFAULT_OUT);

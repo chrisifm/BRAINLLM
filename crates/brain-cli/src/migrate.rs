@@ -115,6 +115,11 @@ pub fn run(root: &Path, opts: &Options) -> Result<Value, String> {
 
 /// [`run`] with a hook called before each file write with the path and its previous content (MCP journals it so
 /// `brain_undo` can revert an applied upgrade).
+/// `brain doctor`: the version the app targets when the installed compiler is newer, and where it was read.
+pub fn behind(root: &Path) -> Option<(String, &'static str)> {
+    recorded(root).filter(|(v, _)| releases::cmp(v, installed()) == Ordering::Less)
+}
+
 pub fn run_with(root: &Path, opts: &Options, before_write: &mut dyn FnMut(&Path, &str)) -> Result<Value, String> {
     let root = root.canonicalize().map_err(|_| "app root is unavailable")?;
     let (from, from_source) = match &opts.from {
@@ -376,6 +381,19 @@ mod tests {
         assert!(with_brain_version("[]", "0.6.0").is_err());
         assert!(with_brain_version("{", "0.6.0").is_err());
         assert!(with_brain_version("{\"brainVersion\": 5}", "0.6.0").unwrap_err().contains("must be a string"));
+    }
+
+    #[test]
+    fn doctor_warns_only_about_an_app_behind_the_installed_version() {
+        let d = app("behind", "0.0.1");
+        assert_eq!(behind(&d).unwrap(), ("0.0.1".to_string(), "package.json pin"));
+        fs::write(d.join("package.json"), format!("{{\"devDependencies\":{{\"{PACKAGE}\":\"{}\"}}}}", installed())).unwrap();
+        assert_eq!(behind(&d), None);
+        fs::write(d.join("package.json"), format!("{{\"devDependencies\":{{\"{PACKAGE}\":\"99.0.0\"}}}}")).unwrap();
+        assert_eq!(behind(&d), None, "an app ahead of the compiler is not behind");
+        fs::remove_file(d.join("package.json")).unwrap();
+        assert_eq!(behind(&d), None, "an app that records no version is not guessed");
+        let _ = fs::remove_dir_all(&d);
     }
 
     #[test]
