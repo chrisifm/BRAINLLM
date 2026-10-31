@@ -11,6 +11,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Added
 
+- JSON-LD checks follow Google's rich-result requirements (Search Central, fetched 2026-10-31). Product and
+  SoftwareApplication offers need a price, and AggregateOffer needs `lowPrice` + `priceCurrency`. SoftwareApplication
+  needs `name` and a rating or review. JobPosting is checked for `address.addressCountry` and its
+  `employmentType`/`unitText` enums. An Event Place location needs an `address`.
 - Zero-config icons: the build links the icon the app declares in `public/` (`favicon.svg`, else an icon PNG) as
   every page's `rel=icon`, plus an icon PNG as `apple-touch-icon`, unless the page links its own.
 - `brain run` serves /robots.txt and /sitemap.xml with no build step: static routes plus the URLs of `paths()` and
