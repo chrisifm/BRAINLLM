@@ -246,6 +246,54 @@ because multiple Viewer profiles were connected without an assigned profile/tab;
   lists wholesale. Full cross-module flow inference, arbitrary minified-byte provenance/explain-output and general
   CSE/strength reduction/loop-invariant hoisting are not established by these changes.
 
+## Construction observations reconciled (cut a41ed89, reconciled 2026-10-30)
+
+Twenty-two observations recorded during construction, reconciled against later commits. Status words are distinct:
+implemented, tested, published. Items that were already fixed are not reopened.
+
+- [x] OBS-01 DOM path cost: tracked by the "linearize repeated DOM sibling paths" gap above; string appending is not linearization.
+- [x] OBS-02 Admin budget: 0.5.0 release gate kept the fixed edit at 30,720 B with zero headroom; no budget increase.
+- [ ] OBS-03 JWT renewal before socket reconnect: audited; no automatic renewal by design, bounded stop proven by a
+  test (0.5.1 development). A tab-coordinated renewal helper remains a proposal.
+- [ ] OBS-04 Legacy broad `wss:` CSP: confirmed in `brain-pack` cache headers and the SSR fallback; needs an author
+  `connect-src` allowlist first. Proposal only.
+- [ ] OBS-05 Named-import linking can precede the original diagnostic; the feedback spool remains the authority.
+- [x] OBS-06 GET `cache: 'no'` contract fixed (f2287f6). [ ] Compile documentation examples with the real SDK.
+- [ ] OBS-07 Native inference remains partial; backend exact types (B-02..B-07) landed separately in 0.5.1 development.
+- [ ] OBS-08 Arbitrary minified-offset provenance is not established; the ledger is accounting, not provenance.
+- [ ] OBS-09 Algebraic rewrites (CSE, strength reduction, hoisting) need type/effect proofs before any use.
+- [x] OBS-10 Development compile cache trusted mtime alone: reproduced (an atomic replacement keeping the timestamp
+  served stale output) and fixed by keying on mtime, size and inode, with a regression test (0.5.1 development).
+- [ ] OBS-11 Compact capability metadata (proven vs fallback vs unplanned) in map/card/context/quality.
+- [ ] OBS-12 MCP stdio still advertises no resource subscriptions; any addition needs bounded queues and Origin/auth.
+- [ ] OBS-13 Socket invalidation broker is single-process and ephemeral; do not scale backend processes as distributed.
+- [ ] OBS-14 Real navigation latency and retained heap are unmeasured; build size is not runtime evidence.
+- [x] OBS-15 Thread-admission guard (a8f7be1) is in the 0.5.0 release binary, which passed the six native cases.
+- [x] OBS-16 Empty environment context invariant is covered by the serve oracle.
+- [x] OBS-17 Release verification cleans owned packages per source identity in an isolated target volume.
+- [x] OBS-18 Benchmark rows retained; a further byte-identical lexer/source-map speedup awaits paired measurement.
+- [x] OBS-19 Harness preflight lessons applied: owned writable snapshot, short exec TMPDIR, explicit toolchain and browser.
+- [x] OBS-20 E2E oracles precise (403 for anonymous owner reads, control frames excluded, real cleanup counts).
+- [x] OBS-21 Fresh release evidence: 0.5.0 binary, SPEC and LLM gate measured on the same frozen source.
+- [x] OBS-22 Checklist drift reconciled in this section without deleting history.
+
+## Memory, loop and leak audit (0.5.1 development)
+
+Three disjoint audits (runtime JS, Rust serve/backend/CLI, compiler). Every confirmed finding has a failing test first.
+
+- [x] Live sockets accepted then closed with "try again later" no longer reconnect forever; budget resets after 30 s healthy.
+- [x] Settled handler requests leave the component registry; synchronized stores release channels, listeners and
+  sockets on close and unmount; the History router removes its service worker listener; Prompt API sessions are
+  bounded to eight.
+- [x] Closed HMR sockets leave the dev-server client set; `brain start` escalates SIGTERM to SIGKILL after 12 s.
+- [x] Deep nesting reports B0002/B0003 instead of overflowing the stack; span columns are computed in O(log n).
+- [x] macOS-only flake in the native socket proxy test: accepted sockets inherit O_NONBLOCK on BSD; the test backend
+  resets it (product accept loops already did).
+- [ ] RPC rate limiting keys on `X-Forwarded-For` without a trusted-proxy setting; needs an explicit policy.
+- [ ] A request body read promise is not settled on client abort (no retained memory measured).
+- [ ] `brain-mcp` reads stdin lines without a per-line size cap.
+- [ ] Debug builds of the CLI still overflow near 120 nested `if` blocks; release builds are within the budget.
+
 ## Existing-backend migration requirements
 
 - [x] Capture all nine capability rows from the requesting project's assessment; distinguish actual limitations
