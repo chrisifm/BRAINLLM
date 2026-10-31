@@ -9,6 +9,24 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in `brain add resource ... --admin-ui` prepares project-owned, role-guarded list/detail/create/edit views,
+  progressive forms and missing Design System controls in one revision-checked change plan. Existing files are
+  never overwritten. The fixed reference edit fixture has no headroom at 30,720 B; arbitrary layouts are not
+  guaranteed to fit that budget.
+- Experimental native invalidation sockets with explicit exact-Origin configuration, persisted-session/JWT
+  authentication, row/role revalidation, bounded rooms and graceful shutdown. Events carry invalidation metadata,
+  not records or a durable replay log; this is a single-backend-process capability.
+- Development `liveResource(resourceHandle, options)` attaches owner-scoped, coalesced HTTP refresh to those
+  metadata events. Public principal changes release the previous connection; unmount releases owned timers and
+  handles. Full browser/native acceptance remains required before exposing the planned author contract.
+- One `brain.json` declaration feeds native HTTP/socket origins, private build metadata and fixed development,
+  static-production and Node gateways. Explicit false overrides disable Node activation. Disabled projects do not
+  acquire a socket listener or live runtime asset.
+- nginx/PM2 templates route opt-in sockets through the appropriate fixed Rust or Node authority. Exact route,
+  query/method/protocol checks, credential projection and disabled-topology compatibility have component coverage.
+
 ### Fixed
 
 - Build DOM access-path strings by appending instead of repeatedly copying their growing prefixes. Generated traversal expressions remain byte-identical; this is not a claim that browser sibling traversal is already linearized.
@@ -29,7 +47,17 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Add an opt-in Node Upgrade bridge for native invalidation sockets, including private production/helper
   packaging and development sidecar copies. It delegates protocol authentication and authorization to Rust,
   preserves trusted Origin and native credentials, and bounds connections, buffering and lifetime. Public
-  project configuration, browser subscriptions and the Rust development proxy remain separate integration work.
+  project configuration, browser subscriptions and Rust gateways are now integrated in development; combined
+  source and native/browser acceptance remain required. The private manifest boolean and explicit overrides are
+  strictly typed; helper presence does not activate transport.
+
+### Upgrading
+
+Socket configuration is disabled by default. To opt in, declare canonical `backend.origins` and its explicit
+`sockets.allowedOrigins` subset, select the public site URL, and configure a fixed private backend authority.
+Development/test servers fail if their actual Origin is not declared; an automatically chosen port is never
+silently authorized. Access-token renewal before socket reconnection is not automatic. Administrative views are
+an explicit generator flag and preserve existing project sources. Stable npm remains 0.4.0 until final acceptance.
 
 ## [0.4.0] - 2026-10-30
 
