@@ -502,11 +502,55 @@ export function nativeAuthBridge(raw) {
     } finally {request.destroy();bytes.fill(0)}
     return {user}
   }
+  // Google needs its nonce bound to the browser that asked for it, so both steps relay the HttpOnly nonce cookie. The page
+  // only ever sees the public client id and nonce it hands to Google.
+  const sessionCookie = /^(?:__Host-brain|__Host-brain-access|__Host-brain-refresh|__Host-brain-google)=/
+  const strictCookie = value => /(?:^|;)\s*HttpOnly(?:;|$)/i.test(value) && /(?:^|;)\s*Secure(?:;|$)/i.test(value) && /(?:^|;)\s*Path=\/(?:;|$)/i.test(value) && /(?:^|;)\s*SameSite=Lax(?:;|$)/i.test(value)
+  async function googleStep(incoming,response,rid,path,payload,cookie,read) {
+    if (incoming.method !== 'POST' || response.headersSent || response.writableEnded || response.destroyed) throw new HttpError(403,'Sign in through a same-origin POST server function')
+    if (incoming.$nativeLoginStarted || incoming.$nativeLogout) throw new HttpError(409,'Use one authentication change per server request')
+    let origin
+    try { origin=new URL(incoming.headers.origin);if(origin.origin!==incoming.headers.origin || origin.host!==(incoming.headers['x-forwarded-host']||incoming.headers.host))throw Error() }catch{throw new HttpError(403,'Sign in through a same-origin POST server function')}
+    incoming.$nativeLoginStarted=true
+    const bytes=Buffer.from(JSON.stringify(payload))
+    const request=Readable.from([bytes]);request.method='POST';request.headers={origin:origin.origin,accept:'application/json','content-type':'application/json','content-length':String(bytes.length),...(cookie?{cookie}:{})}
+    let result
+    try {
+      await proxy(request,response,new URL(path,target),rid,(_res,status,data,headers)=>{
+        if(status!==200)throw new HttpError(status===429?429:status<500?401:503,status===429?'Too many attempts. Wait before trying again.':status<500?'Google sign-in was not accepted':'Sign-in is temporarily unavailable')
+        let parsed
+        try {parsed=JSON.parse(data.toString('utf8'))}catch{throw unavailable()}
+        const selected=headers['set-cookie']||[]
+        if(new Set(selected.map(value=>value.split('=',1)[0])).size!==selected.length||!selected.length||selected.length>4||selected.some(value=>!sessionCookie.test(value)||!strictCookie(value)))throw unavailable()
+        result=read(parsed)
+        if(response.writableEnded||response.destroyed)throw unavailable()
+        incoming.$nativeLoginHeaders={'set-cookie':selected,'cache-control':'no-store'}
+      },16384)
+    } finally {request.destroy();bytes.fill(0)}
+    return result
+  }
+  const googleChallenge = (incoming,response,rid) => googleStep(incoming,response,rid,'/_brain/auth/google/challenge',{},null,payload=>{
+    if(typeof payload?.client_id!=='string'||typeof payload?.nonce!=='string'||!/^[a-f0-9]{64}$/.test(payload.nonce)||!Number.isInteger(payload?.expires_in))throw unavailable()
+    return {client_id:payload.client_id,nonce:payload.nonce,expires_in:payload.expires_in}
+  })
+  const googleLogin = (incoming,response,rid,values) => {
+    if(!values||typeof values!=='object'||Array.isArray(values)||Object.keys(values).some(key=>key!=='credential')||typeof values.credential!=='string'||!values.credential||Buffer.byteLength(values.credential)>16384)throw new HttpError(422,'Send the credential Google returned')
+    const nonce=String(incoming.headers.cookie||'').split(';').map(part=>part.trim()).find(part=>part.startsWith('__Host-brain-google='))?.slice('__Host-brain-google='.length)
+    if(!nonce||!/^[a-f0-9]{64}$/.test(nonce))throw new HttpError(401,'Google sign-in was not accepted')
+    return googleStep(incoming,response,rid,'/_brain/auth/google',{credential:values.credential},'__Host-brain-google='+nonce,payload=>{
+      const user=safeUser(payload?.user)
+      return {user}
+    })
+  }
   // ctx.backend for one server request (load, actions, RPC, dev sidecar): the same object everywhere
   const backend = (incoming, response, rid) => Object.freeze({
     resource: name => resource(incoming, response, rid, name),
     slugRedirect: (name, slug) => resource(incoming, response, rid, name).slugRedirect(slug),
     login: credentials => login(incoming, response, rid, credentials),
+    google: Object.freeze({
+      challenge: () => googleChallenge(incoming, response, rid),
+      login: values => googleLogin(incoming, response, rid, values),
+    }),
   })
   return {
     proxy,
