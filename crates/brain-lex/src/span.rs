@@ -21,17 +21,24 @@ impl Span {
 #[derive(Clone, Debug)]
 pub struct LineIndex {
     starts: Vec<usize>,
+    /// Offsets of UTF-8 continuation bytes, so a column is a subtraction plus a binary search instead of
+    /// counting every char from the line start (which made long single-line files quadratic).
+    continuation: Vec<u32>,
+    len: usize,
 }
 
 impl LineIndex {
     pub fn new(src: &str) -> Self {
         let mut starts = vec![0];
+        let mut continuation = Vec::new();
         for (i, b) in src.bytes().enumerate() {
             if b == b'\n' {
                 starts.push(i + 1);
+            } else if b & 0xC0 == 0x80 {
+                continuation.push(i as u32);
             }
         }
-        LineIndex { starts }
+        LineIndex { starts, continuation, len: src.len() }
     }
 
     pub fn line_col(&self, src: &str, offset: usize) -> (u32, u32) {
@@ -41,7 +48,12 @@ impl LineIndex {
         };
         let start = self.starts[line];
         let end = offset.min(src.len());
-        let col = src.get(start..end).map(|s| s.chars().count()).unwrap_or(end - start);
+        let col = if src.len() == self.len && start <= end && src.is_char_boundary(start) && src.is_char_boundary(end) {
+            let below = |at: usize| self.continuation.partition_point(|&c| (c as usize) < at);
+            end - start - (below(end) - below(start))
+        } else {
+            src.get(start..end).map(|s| s.chars().count()).unwrap_or(end - start)
+        };
         (line as u32 + 1, col as u32 + 1)
     }
 
