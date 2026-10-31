@@ -195,6 +195,9 @@ function jobBackend(env) {
         if (values && typeof values === 'object' && !Array.isArray(values) && !Object.keys(values).length) throw fail(422, 'Send at least one field', { errors: { body: 'Send at least one field to change' } })
         return request('PATCH', idPath(id), values)
       },
+      // a declared atomic action or state transition (docs/backend/atomic-updates.md); the key still needs `<resource>:write`
+      action: (id, action, input = {}) => request('POST', idPath(id) + '/actions/' + encodeURIComponent(action), input),
+      transition: (id, transition, input = {}) => request('POST', idPath(id) + '/transitions/' + encodeURIComponent(transition), input),
       remove: id => request('DELETE', idPath(id)),
       slugRedirect(slug) {
         if (typeof slug !== 'string' || !/^[A-Za-z0-9._~-]{1,512}$/.test(slug)) throw fail(400, 'Invalid native slug')

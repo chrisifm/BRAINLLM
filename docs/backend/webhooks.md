@@ -46,7 +46,7 @@ Both use HMAC-SHA256 with a constant-time comparison. `hmac` takes `encoding: 'h
 
 ## Secrets
 
-`secret` names an environment variable (`.env`, or the host's secret store). Pass a list of up to four
+`secret` names an environment variable (`.brain_env`, or the host's secret store). Pass a list of up to four
 names to rotate: `secret: ['PAYMENTS_WEBHOOK_SECRET', 'PAYMENTS_WEBHOOK_SECRET_PREVIOUS']`. Each secret
 must be at least 16 bytes. A missing variable or a literal secret in the contract stops the boot.
 

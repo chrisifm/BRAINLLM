@@ -1,5 +1,5 @@
 // Job handlers get ctx.backend (docs/backend/job-backend.md): the job runner template talks to the native backend
-// with a scoped project API key, using the same list/get/create/update/patch/remove/slugRedirect calls as load().
+// with a scoped project API key, using the same list/get/create/update/patch/action/transition/remove/slugRedirect calls as load().
 import {test, after} from 'node:test'
 import assert from 'node:assert/strict'
 import {createServer} from 'node:http'
@@ -49,15 +49,17 @@ test('a job reads and writes through ctx.backend with its API key and never forw
     await orders.create({total:'12.00'})
     await orders.update('${id}',{total:'13.00'})
     await orders.patch('${id}',{status:'paid'})
+    await orders.action('${id}','reserve',{quantity:2})
+    await orders.transition('${id}','ship')
     await orders.remove('${id}')
     return {slug:await ctx.backend.slugRedirect('articles','old'),missing:await ctx.backend.resource('articles').slugRedirect('nope'),keyInEnv:'BRAIN_JOBS_API_KEY' in ctx.env}
   `,{BRAIN_BACKEND_URL:url,BRAIN_JOBS_API_KEY:key})
   assert.equal(r.code,0,r.stderr)
   assert.deepEqual(r.value,{slug:'new',missing:null,keyInEnv:false})
-  const calls=seen.slice(-8)
+  const calls=seen.slice(-10)
   assert.deepEqual(calls.map(c=>c.method+' '+c.path),[
     'GET /api/orders?status%5Bin%5D=pending%2Cpaid&total%5Bgte%5D=10.00&limit=5&sort=-created_at',
-    `GET /api/orders/${id}?include=customer`,'POST /api/orders',`PUT /api/orders/${id}`,`PATCH /api/orders/${id}`,`DELETE /api/orders/${id}`,
+    `GET /api/orders/${id}?include=customer`,'POST /api/orders',`PUT /api/orders/${id}`,`PATCH /api/orders/${id}`,`POST /api/orders/${id}/actions/reserve`,`POST /api/orders/${id}/transitions/ship`,`DELETE /api/orders/${id}`,
     'GET /api/articles/redirects/old','GET /api/articles/redirects/nope'])
   assert.ok(calls.every(c=>c.headers['x-api-key']===key&&c.headers.cookie===undefined&&c.headers.origin===undefined))
   assert.equal(calls[4].body,'{"status":"paid"}')

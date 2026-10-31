@@ -1212,7 +1212,8 @@ async fn list(
     let r = app.resource(&name)?;
     let u = app.user(&h).await?;
     let viewer = viewer(u.as_ref());
-    let req = crate::query::parse(r, &app.resources, &pairs).map_err(Error::validation)?;
+    let req = crate::query::parse(r, &app.resources, &pairs)
+        .map_err(|problems| Error::validation(if app.production { crate::query::without_declared_names(problems) } else { problems }))?;
     let mut out = crate::query::list(&app.pool, &app.resources, r, &req, viewer)
         .await
         .map_err(|error| match error {

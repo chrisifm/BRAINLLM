@@ -278,6 +278,7 @@ async fn api_keys_authenticate_scope_quota_trace_rotate_and_revoke() {
     assert_eq!(call(&disabled, session("GET", "/_brain/keys", &token, None)).await.status, StatusCode::NOT_FOUND);
 
     slug_redirects_and_patch_with_key(&pool, &auth).await;
+    atomic_actions_with_key(&pool, &auth).await;
 
     // Retention purge is bounded and owner deletion cascades keys, counters and trace.
     assert_eq!(brain_backend::api_keys::purge(&pool, 1).await.unwrap(), 0);
@@ -293,6 +294,39 @@ async fn api_keys_authenticate_scope_quota_trace_rotate_and_revoke() {
 
 /// Job handlers reach slug history and partial updates with a key (docs/backend/job-backend.md). Runs inside the
 /// main test so the global cleanup count below stays exact.
+/// A job's counter goes through a declared action: the key needs write scope and the action's roles still decide.
+async fn atomic_actions_with_key(pool: &sqlx::PgPool, auth: &Auth) {
+    let mut counters = resource(
+        "key_counters",
+        Policy { read: vec!["user".into()], create: vec!["user".into()], update: vec!["owner".into()], delete: vec!["owner".into()], ..Default::default() },
+    );
+    counters.fields.insert("hits".into(), Field { kind: "int".into(), required: true, ..Default::default() });
+    db::migrate(pool, std::slice::from_ref(&counters)).await.unwrap();
+    let domain: brain_backend::domain::Domain = serde_json::from_value(json!({"resources":{"key_counters":{"actions":{
+        "bump":{"roles":["owner"],"increment":{"hits":1}},
+        "audit":{"roles":["admin"],"increment":{"hits":1}}
+    }}}}))
+    .unwrap();
+    let (router, _) = brain_backend::http::router_with_domain(pool.clone(), config(vec![counters], Some(Default::default())), domain).await.unwrap();
+    let (counter_owner, token) = user(auth).await;
+    let (_, writer) = create_key(&router, &token, json!({"name":"Writer","scopes":["key_counters:*"]})).await;
+    let (_, reader) = create_key(&router, &token, json!({"name":"Reader","scopes":["key_counters:read"]})).await;
+    let created = call(&router, keyed("POST", "/api/key_counters", &writer, false, Some(json!({"title":"Views","hits":1})))).await;
+    assert_eq!(created.status, StatusCode::OK, "{}", created.body);
+    let id = created.body["id"].as_str().unwrap();
+    let bumped = call(&router, keyed("POST", &format!("/api/key_counters/{id}/actions/bump"), &writer, false, Some(json!({})))).await;
+    assert_eq!(bumped.status, StatusCode::OK, "{}", bumped.body);
+    assert_eq!(bumped.body["data"]["hits"], 2);
+    let scoped = call(&router, keyed("POST", &format!("/api/key_counters/{id}/actions/bump"), &reader, false, Some(json!({})))).await;
+    assert_eq!(scoped.body["error"]["code"], "API_KEY_SCOPE_DENIED");
+    let role = call(&router, keyed("POST", &format!("/api/key_counters/{id}/actions/audit"), &writer, false, Some(json!({})))).await;
+    assert_eq!(role.status, StatusCode::FORBIDDEN, "{}", role.body);
+    let other = call(&router, keyed("GET", &format!("/api/key_counters/{id}/other/bump"), &writer, false, None)).await;
+    assert_eq!(other.body["error"]["code"], "API_KEY_NOT_ACCEPTED");
+    sqlx::query("DELETE FROM _brain_res_key_counters WHERE owner=$1").bind(counter_owner).execute(pool).await.unwrap();
+    sqlx::query("DELETE FROM _brain_users WHERE id=$1").bind(counter_owner).execute(pool).await.unwrap();
+}
+
 async fn slug_redirects_and_patch_with_key(pool: &sqlx::PgPool, auth: &Auth) {
     let mut articles = resource(
         "key_articles",

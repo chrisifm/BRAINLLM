@@ -50,7 +50,7 @@ Refresh tokens have 244 random bits from two UUIDv4 values. Only SHA-256 digests
 
 ## Google verification and identity policy
 
-Google tokens must use RS256, one configured audience, an accepted Google issuer, an unexpired lifetime, an acceptable issued-at, the exact browser nonce and a verified email. Multi-audience tokens require the configured authorized party. The stable identity key is Google's `sub`, never email. An existing local email account cannot be linked by this flow; sign in using its existing method. New identities receive only the candidate role. The local verified flag is enabled automatically only when Google is authoritative for the address: Gmail or a verified Google Workspace hosted-domain claim. A third-party address can authenticate its stable Google subject without being marked locally verified.
+Google tokens must use RS256, one configured audience, an accepted Google issuer, an unexpired lifetime, an acceptable issued-at, the exact browser nonce and a verified email. Multi-audience tokens require the configured authorized party. The stable identity key is Google's `sub`, never email. An existing local email account cannot be linked by this flow; sign in using its existing method. New identities receive only the configured `signup_role` (`server/auth/roles.jsbrain`). The local verified flag is enabled automatically only when Google is authoritative for the address: Gmail or a verified Google Workspace hosted-domain claim. A third-party address can authenticate its stable Google subject without being marked locally verified.
 
 ## Linking an existing account
 

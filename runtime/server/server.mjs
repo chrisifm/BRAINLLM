@@ -555,6 +555,9 @@ export function nativeAuthBridge(raw, refused, serviceKey) {
         if (values && typeof values === 'object' && !Array.isArray(values) && !Object.keys(values).length) throw new HttpError(422, 'Send at least one field', { errors: { body: 'Send at least one field to change' } })
         return request('PATCH', idPath(id), values)
       },
+      // a declared atomic action or state transition (docs/backend/atomic-updates.md); the key still needs `<resource>:write`
+      action: (id, action, input = {}) => request('POST', idPath(id) + '/actions/' + encodeURIComponent(action), input),
+      transition: (id, transition, input = {}) => request('POST', idPath(id) + '/transitions/' + encodeURIComponent(transition), input),
       remove: id => request('DELETE', idPath(id)),
       // an earlier slug of a readable record → its current slug; live, unknown or unreadable slugs → null
       slugRedirect(slug) {

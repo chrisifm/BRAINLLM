@@ -57,8 +57,8 @@ export default async function handle(ctx) {
 }
 ```
 
-`ctx` carries `rid`, `route`, `method`, `path`, `params`, `query`, `headers`, `user` (`{id, roles}` or
-`null`), `client` (the resolved client IP), `body`, and for raw or signed routes `rawBody` with
+`ctx` carries `rid`, `route`, `method`, `path`, `params`, `query`, `headers`, `user` (`{id, role, verified}` or
+`null`), `client` (the resolved client IP), `env` (the resolved environment), `body`, and for raw or signed routes `rawBody` with
 `rawBodyEncoding` (`utf8` or `base64`) plus `verified` (see [webhooks.md](webhooks.md)).
 
 Return either a plain value (answered as `200` JSON) or `{status, body, headers}`. A returned `status` from 200 to 599
@@ -86,7 +86,7 @@ they can use `fetch` and any server module of the app.
 
 ## OpenAPI
 
-`GET /_brain/docs` (admin-only in production) and `brain backend inspect` include every route as an
+`GET /_brain/api` (admin-only with `--env production`) includes every route as an
 operation `route_<name>` with its path, query and header parameters, request body, error responses and an
 `x-brain-route` extension (limits, rate, signature header). File buckets appear as
 `files_<bucket>_upload`, `_download`, `_delete` and `_meta` with an `x-brain-bucket` extension. Signing
