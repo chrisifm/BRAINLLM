@@ -244,3 +244,34 @@ test('disposed pending resource handles are collectible even when the caller ret
   assert.equal(owned.reference.deref(), undefined)
   assert.equal(owned.updates.state, 'closed')
 })
+
+test('repeated try-again-later closes after successful joins still exhaust the reconnect budget', async t => {
+  // A server that keeps accepting the join and then closing with 1013 must not turn the client into a
+  // reconnect-and-refetch loop: a join only proves health once the connection has stayed up for a while.
+  const own = await fixture(t)
+  let calls = 0
+  const { updates } = own({ refetch() { calls++ }, v: Promise.resolve([]) }, settings(() => 'user'))
+  await micro()
+  for (let n = 0; n < 200; n++) {
+    const socket = Socket.instances.at(-1)
+    if (socket && socket.readyState === 0) { ready(socket); ack(socket); await advance(t); socket.remoteClose(1013, 'Try again later') }
+    await advance(t, 1000)
+  }
+  assert.equal(updates.state, 'exhausted')
+  assert.ok(Socket.instances.length <= 6, `At most the initial attempt plus five retries, got ${Socket.instances.length}`)
+  assert.ok(calls <= 6, `Bounded refetches, got ${calls}`)
+})
+
+test('a connection that stayed healthy resets the reconnect budget for later drops', async t => {
+  const own = await fixture(t)
+  const { updates } = own({ refetch() {}, v: Promise.resolve([]) }, settings(() => 'user'))
+  await micro()
+  for (let n = 0; n < 10; n++) {
+    const socket = Socket.instances.at(-1)
+    ready(socket); ack(socket); await advance(t)
+    for (let s = 0; s < 4; s++) { await advance(t, 25000); socket.message({ type: 'pong' }) }
+    socket.remoteClose(1006); await advance(t, 9000)
+  }
+  assert.equal(Socket.instances.length, 11, 'Every drop after a long healthy session reconnects')
+  assert.notEqual(updates.state, 'exhausted')
+})

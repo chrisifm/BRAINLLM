@@ -4,6 +4,8 @@ import { sig, fx, untrack, _rt } from './brain.js'
 const G = globalThis, I = _rt()
 const MAX_OWNERS = 128, MAX_ROOMS = 32, FRAME = 4096, BUFFER = 32768
 const COALESCE = 100, READY_MS = 8000, REFRESH_MS = 10000, RETRY_MS = 60000
+// A joined room proves health only once the connection stays up this long; shorter sessions keep spending the budget.
+const STABLE_MS = 30000
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key)
 const RESERVED = new Set(['constructor', 'prototype', '__proto__', 'id', 'owner', 'created_at', 'updated_at', 'search'])
@@ -66,7 +68,7 @@ function createBroker() {
   const members = new Set(), joined = new Map(), waiting = [], events = new Map()
   let socket = null, epoch = 0, scope = null, terminal = '', ready = false
   let reconcileQueued = false, retryTimer, readyTimer, heartbeat, pongTimer, flushTimer
-  let attempts = 0, retryStart = 0, lastConnect = 0
+  let attempts = 0, retryStart = 0, lastConnect = 0, healthySince = 0
 
   const update = () => {
     for (const member of members) {
@@ -89,7 +91,7 @@ function createBroker() {
     }
   }
   const stop = () => {
-    epoch++; ready = false
+    epoch++; ready = false; healthySince = 0
     clearTimeout(retryTimer); retryTimer = null
     clearTimeout(readyTimer); clearInterval(heartbeat); clearTimeout(pongTimer)
     readyTimer = heartbeat = pongTimer = null
@@ -160,6 +162,7 @@ function createBroker() {
     }
   }
   const retry = () => {
+    if (healthySince && Date.now() - healthySince >= STABLE_MS) { attempts = 0; retryStart = 0 }
     stop()
     if (++attempts > 5 || (retryStart && Date.now() - retryStart >= RETRY_MS)) { terminal = 'exhausted'; update(); return }
     if (!retryStart) retryStart = Date.now()
@@ -227,7 +230,7 @@ function createBroker() {
         const key = waiting.shift()
         if (!key) { reject('protocol-error'); return }
         joined.set(key, value.type === 'resync' ? 'ready' : 'forbidden')
-        if (value.type === 'resync') { attempts = 0; retryStart = 0 }
+        if (value.type === 'resync' && !healthySince) healthySince = Date.now()
         update()
         if (value.type === 'resync') invalidate(value, key)
       } else {
