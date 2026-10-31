@@ -140,6 +140,8 @@ deterministic normalization (info diagnostic) → template that already has the 
 - Runtime size budget respected; no new dependency.
 - INTERNALS updated (section + date) and SPEC updated (planned markers removed only for what now works).
 - If it affects app authors: LLM gate does not regress.
+- A bug fix covers the class, not the instance: name the defect class, search it in other modules, options, both gateways
+  and every channel, and fix what you confirm. Add the gate that would have caught it; it must fail on the unfixed code.
 - Commits: semantic, English (`feat(check): add B1305 heavy work inside each`). Push contributions only to your own
   fork or an explicitly configured review branch. Every merge requires the principal author's review; no automatic
   merge or npm publication. See [the evolution workflow](docs/EVOLUTION.md).
