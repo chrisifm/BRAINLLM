@@ -25,6 +25,9 @@ async function command(args,{deadline=30000,allowFailure=false}={}) {
   try {const status=await new Promise((resolve,reject)=>{child.once('error',()=>reject(Error('DOCKER_PROCESS_START_FAILED')));child.once('close',(code,signal)=>resolve(signal?124:code))});ensure(!limit,'DOCKER_OUTPUT_BOUND');if(status!==0&&!allowFailure)throw Error('DOCKER_OPERATION_FAILED');return {status,out,err}}
   finally{clearTimeout(timer);clearTimeout(escalation);if(active===child)active=null}
 }
+let canceled=false
+const cancel=()=>{canceled=true;timedOut=true;active?.terminateOwned()}
+process.on('SIGINT',cancel);process.on('SIGTERM',cancel)
 const total=setTimeout(()=>{timedOut=true;active?.terminateOwned()},240000)
 let report={schemaVersion:1,ok:false,sourceSHA,viewer:{used:false,reason:'multiple-connected-profiles-without-explicit-selection'},valuesCaptured:false}
 try{
@@ -51,7 +54,7 @@ try{
   ensure(cleanup?.ownedChildrenReaped&&cleanup.browserContextsCreated===cleanup.browserContextsDisposed,'OWNED_CHILDREN_OR_CONTEXTS_NOT_REAPED')
   const connections=await command(['exec',pg,'psql','-U','brain','-d',database,'-Atc','SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()'])
   report.remainingDatabaseConnections=Number(connections.out.trim());ensure(report.remainingDatabaseConnections===0,'OWNED_DATABASE_CONNECTIONS_REMAIN')
-}catch(error){report.ok=false;report.gateCode=/^[A-Z0-9_]+$/.test(error.message)?error.message:'NATIVE_LIVE_GATE_FAILED';process.exitCode=1}
+}catch(error){report.ok=false;report.gateCode=canceled?'NATIVE_LIVE_GATE_CANCELED':/^[A-Z0-9_]+$/.test(error.message)?error.message:'NATIVE_LIVE_GATE_FAILED';process.exitCode=1}
 finally{
   clearTimeout(total)
   // A timed-out create may already have succeeded. Inspect exact ownership
@@ -62,5 +65,5 @@ finally{
     if(owned?.status===0&&owned.out.trim()===id)await command([kind,'rm',...(kind==='container'?['-f']:[]),name],{deadline:10000,allowFailure:true}).catch(()=>{})
   }
   for(const file of ['postgres.env','app.env'])fs.rmSync(path.join(scratch,file),{force:true})
-  const containers=await command(['ps','-aq','--filter','name='+id],{allowFailure:true}).catch(()=>({status:1,out:'unknown'}));const networks=await command(['network','ls','--filter','name='+network,'--format','{{.ID}}'],{allowFailure:true}).catch(()=>({status:1,out:'unknown'}));report.ownedDockerRemoved=containers.status===0&&!containers.out.trim()&&networks.status===0&&!networks.out.trim();if(!report.ownedDockerRemoved){report.ok=false;report.cleanupCode='OWNED_DOCKER_CLEANUP_NOT_CONFIRMED';process.exitCode=1};fs.writeFileSync(output,JSON.stringify(report,null,2)+'\n',{mode:0o600});console.log(JSON.stringify(report))
+  const containers=await command(['ps','-aq','--filter','name='+id],{allowFailure:true}).catch(()=>({status:1,out:'unknown'}));const networks=await command(['network','ls','--filter','name='+network,'--format','{{.ID}}'],{allowFailure:true}).catch(()=>({status:1,out:'unknown'}));report.ownedDockerRemoved=containers.status===0&&!containers.out.trim()&&networks.status===0&&!networks.out.trim();if(!report.ownedDockerRemoved){report.ok=false;report.cleanupCode='OWNED_DOCKER_CLEANUP_NOT_CONFIRMED';process.exitCode=1};fs.writeFileSync(output,JSON.stringify(report,null,2)+'\n',{mode:0o600});console.log(JSON.stringify(report));process.removeListener('SIGINT',cancel);process.removeListener('SIGTERM',cancel)
 }
