@@ -13,6 +13,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `brain add roles` declares the roles an app already has; `brain backend rename-role --from <role> --to <role> [--apply]` moves accounts explicitly, and `brain backend migrate` reports accounts whose role is not declared.
 - B0735 names the real file and a concrete fix for role errors. B0738 warns when a grant names an undeclared role in field visibility or a route, or when no grant names the signup role.
 - Domain vocabulary from one app removed from defaults, messages, docs and examples; `scripts/check-general.sh` keeps it out.
+- `brain <command> | head -1` ends quietly: a closed pipe no longer reports an internal error, on any command.
+- `--help` on any command, at any position, prints its usage and acts on nothing; `brain build --help` used to build and `brain new x --help` used to create the app.
+- `brain add` without arguments lists every kind it can create.
 ### Security
 - Google sign-in links an existing account when Google hosts the address (`gmail.com` or a Workspace `hd`); a never-verified account also loses its password, sessions and recovery links, and any other address is denied with the same `AUTH_DENIED`.
 - Concurrent JWT refresh inside a 10-second grace no longer revokes the family, so tabs and prefetches keep their session, and the SSR bridge renews an expired access cookie during render.

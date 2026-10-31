@@ -94,7 +94,7 @@ granular:
   brain lib list | lib new <name>    discover native functions or create a pure project helper
   brain upgrade [--from V] [--to V] [--dry-run|--apply] [--no-doctor]  migration report from the app's recorded version to this compiler (--apply runs the safe codemods)
   brain upgrade <exact-version>      preview package pin changes and remaining decisions
-  brain add view|comp|ui <name> [--props \"a:num=0 b:str?\"]   (also layout, lib, channel, service, api, type, guard, server, hook, resource, job, collection, locale)
+  brain add <kind> <name> [--props \"a:num=0 b:str?\"]   creates a file from its template; `brain add` lists every kind
   brain check [path]                 errors and warnings with an exact fix
   brain explain <code>               what a diagnostic code means, why, and a minimal correct example
   brain fix [path]                   applies the mechanical fixes and checks again
@@ -123,6 +123,8 @@ granular:
   brain media setup-gcs|list|cleanup  private media provisioning/library/owned cleanup
   brain e2e probe|run                 opt-in Claude/Codex Viewer scenarios plus AX/heap gates
   brain backend <serve|migrate|schema|bootstrap-admin>  experimental Rust/Postgres resource API (loopback); serve --with-workers also runs the queues
+  brain analytics <report|funnel|segment>  usage reports over the behavior events the backend stores
+  brain risk <name> [--measure]       what changing a symbol can break, with its evidence
   brain mcp [--profile full|minimal|backend]  the same commands as MCP tools over stdio
 ";
 
@@ -134,10 +136,15 @@ fn main() -> ExitCode {
         std::panic::set_hook(Box::new(|info| {
             let at = info.location().map(|l| format!(" at {}:{}", l.file(), l.line())).unwrap_or_default();
             let msg = info.payload().downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| info.payload().downcast_ref::<String>().cloned()).unwrap_or_default();
+            // `print!` panics on a closed pipe (`brain spec | head -1`): the reader has what it wanted, so end quietly
+            if closed_pipe(&msg) { std::process::exit(0); }
             eprintln!("error: internal brain error{at}: {msg}");
             eprintln!("  next: run `brain doctor` to see the app state; if it repeats, report it with the command and this message");
             std::process::exit(3);
         }));
+    }
+    if let Some(code) = command_help(&args) {
+        return code;
     }
     let res = match args.first().map(String::as_str) {
         Some("--version") | Some("-V") | Some("version") => {
@@ -389,6 +396,8 @@ fn main() -> ExitCode {
     };
     match res {
         Ok(()) => ExitCode::SUCCESS,
+        // a command that reports its own write failure (`?` on a `writeln!`) ends as quietly as a `print!` does
+        Err(e) if closed_pipe(&e) => ExitCode::SUCCESS,
         Err(e) => {
             if args.iter().any(|a| a == "--json") {
                 println!("{}", error_json(&e));
@@ -398,6 +407,53 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+/// The text of a write to a pipe whose reader left, as `print!` panics with it and as an `io::Error` displays it.
+fn closed_pipe(message: &str) -> bool {
+    message.contains("Broken pipe (os error 32)")
+}
+
+/// The `USAGE` lines of one command. A line is `  brain a <x> | b | c   description`: each `|` at the top level of the
+/// command part opens an alternative, so `brain stop | reload | status` answers to the three.
+fn usage_of(command: &str) -> String {
+    let command = match command { "dev" => "run", "version" => "--version", other => other };
+    let mut lines = Vec::new();
+    for line in USAGE.lines().filter(|l| l.starts_with("  brain ")) {
+        let spec = line.trim_start().split("  ").next().unwrap_or_default();
+        let names = spec.split(" | ").map(|alternative| alternative.trim_start_matches("brain ").split(' ').next().unwrap_or_default());
+        if names.into_iter().any(|name| name == command) {
+            lines.push(line.trim_start());
+        }
+    }
+    lines.join("\n")
+}
+
+/// `brain <command> --help` (anywhere before a `--`) and `brain help <command>`: the usage and nothing else, before
+/// any command can act on the other arguments. An unknown command falls through to its own error.
+fn command_help(args: &[String]) -> Option<ExitCode> {
+    let first = args.first()?;
+    let asked = args[1..].iter().take_while(|a| *a != "--").any(|a| a == "--help" || a == "-h");
+    let command = match first.as_str() {
+        "help" | "--help" | "-h" => args.get(1)?,
+        _ if asked => first,
+        _ => return None,
+    };
+    #[cfg(unix)]
+    if command == "start" {
+        print!("{START_USAGE}");
+        return Some(ExitCode::SUCCESS);
+    }
+    let usage = usage_of(command);
+    if usage.is_empty() {
+        return None;
+    }
+    if want_json(args) {
+        println!("{}", serde_json::json!({"schemaVersion":1,"command":command,"usage":usage}));
+    } else {
+        println!("{usage}");
+    }
+    Some(ExitCode::SUCCESS)
 }
 
 const UPGRADE_USAGE: &str = "usage: brain upgrade [--from <version>] [--to <version>] [--dry-run|--apply] [--json] [--no-doctor] | brain upgrade <exact-version> [--json] (package pin preview)";
@@ -540,13 +596,13 @@ fn cmd_edit(args: &[String]) -> Result<(), String> {
 
 fn cmd_add(args: &[String]) -> Result<(), String> {
     let pos = positional(args, &["--props", "--store", "--get", "--post", "--fields"]);
-    if pos.len() == 1 && pos[0] == "roles" {
+    if pos.len() == 1 && scaffold::add_route(&pos[0]) == Some(scaffold::AddRoute::NoName) {
         println!("+ {}", backend::add_roles(&app_root()?)?);
         return Ok(());
     }
-    let [kind, name] = <[String; 2]>::try_from(pos).map_err(|_| "usage: brain add view|comp|ui <name> [--props \"...\"]".to_string())?;
+    let [kind, name] = <[String; 2]>::try_from(pos).map_err(|_| scaffold::add_usage())?;
     let root = app_root()?;
-    if matches!(kind.as_str(), "resource" | "job") {
+    if scaffold::add_route(&kind) == Some(scaffold::AddRoute::Backend) {
         if args.iter().any(|a|a.starts_with("--") && !matches!(a.as_str(),"--fields"|"--json"|"--admin-ui") && !a.starts_with("--fields=")) {return Err("resource/job accepts only --fields, --admin-ui and --json".into())}
         let report = backend::add_with_admin(&root, &kind, &name, &flag(args,"--fields").unwrap_or_default(), args.iter().any(|a| a == "--admin-ui"))?;
         println!("{report}"); return Ok(());
