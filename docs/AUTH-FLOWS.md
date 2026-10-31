@@ -105,20 +105,33 @@ same-origin mutation body. Never put challenge links in analytics, error message
 
 ## Server-owned roles and first administrator
 
-`RolesConfig` includes `admin`, `company`, `candidate` and `user`, with at most 32 distinct role names total.
-Custom names use lowercase ASCII identifiers of 1..48 characters. `public` and `owner` remain policy keywords,
-not assignable account roles. The default signup role remains `candidate` for compatibility; a server operator can
-select another configured non-admin role. `RolesConfig::register` registers only explicit server configuration;
-it never removes historical roles or silently reassigns existing users.
+Without `server/auth/roles.jsbrain` an app has the roles `admin` and `user`, and people who sign up get `user`. Only `admin`
+is required; every other name is the app's own, with at most 32 distinct names. Names are lowercase ASCII identifiers of
+1..48 characters. `public` and `owner` remain policy keywords, not assignable account roles. The signup role must be a
+declared non-admin role. `RolesConfig::register` registers only explicit server configuration; it never removes
+historical roles or silently reassigns existing users.
 
-Declare a literal server-owned configuration in `server/auth/roles.jsbrain`, for example:
+Declare a literal server-owned configuration with `brain add roles`, then edit `server/auth/roles.jsbrain`, for example:
 
 ```js
 export default {
-  roles: ['admin', 'company', 'candidate', 'user', 'editor'],
-  signup_role: 'candidate'
+  roles: ['admin', 'member', 'editor'],
+  signup_role: 'member'
 }
 ```
+
+A role grant admits exactly the accounts holding that role, so `create: ['member']` does not admit `editor` or `admin`:
+list each role that should act. Route `auth: 'user'` means any signed-in account, whatever its role. A route list
+`auth: ['user']` names the role.
+
+Changing `signup_role` applies to new accounts only. Earlier accounts keep their role and their owner grants.
+`brain backend migrate` reports accounts whose role is no longer declared (`undeclaredRoles`), and
+`brain backend rename-role --from <role> --to <role>` counts them; add `--apply` to move them in one transaction, which
+revokes their sessions.
+
+Apps from 0.6.1 or earlier: those versions implied the roles `admin`, `company`, `candidate` and `user`, with signup role
+`candidate`. An app with no roles file whose grants still name `company` or `candidate` keeps exactly that (warning B0739;
+`brain add roles` declares it). An app with a roles file is unaffected and may remove names it does not use.
 
 Run the explicit `brain backend migrate` for that environment to register configured roles. Serving checks that
 they were provisioned; it does not add roles or run migrations during startup. Resource policies may reference

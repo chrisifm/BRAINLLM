@@ -311,7 +311,7 @@ Three disjoint audits (runtime JS, Rust serve/backend/CLI, compiler). Every conf
   root above its frontend after it became available. Capture all 43 original IDs/priorities B-01 through B-43 in
   the readiness ledger. Exact private requirements are recorded outside this public repository; reading is not
   implementation or migration approval. Source SHA is recorded in the ledger.
-- [ ] Complete exact money/date/enum types, relational company/vacancy/application scope and lossless legacy bigint
+- [ ] Complete exact money/date/enum types, relational organization scope and lossless legacy bigint
   compatibility with explicit migration plans; existing role/owner permissions are not organization membership.
 - [ ] Preserve typed arrays, partial-update behavior, authorized state transitions and atomic multi-resource
   commands. Also freeze existing API/projection/localization/auth-session/search behavior before any cutover;

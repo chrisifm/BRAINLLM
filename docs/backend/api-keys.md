@@ -35,7 +35,7 @@ Scopes are `resource:action`: `resource` is a resource name or `*`; `action` is 
 (POST/PUT/PATCH/DELETE) or `*`. Examples: `posts:read`, `orders:write`, `*:read`, `posts:*`.
 
 A key always acts as its owner. The owner's current role is loaded on every request and the resource policy still
-applies, so a scope can only narrow what the owner may do: a `*:*` key of a `candidate` user still gets
+applies, so a scope can only narrow what the owner may do: a `*:*` key of a `member` user still gets
 `403 POLICY_DENIED` on an admin-only resource. Disabling or deleting the owner disables or deletes their keys.
 
 ## Use

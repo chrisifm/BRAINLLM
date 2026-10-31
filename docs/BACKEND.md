@@ -54,11 +54,11 @@ An optional `constraints.jsbrain` next to the schema declares composite uniquene
 ```js
 <meta server>
 export default {
-  unique: [['title', 'closes_on']],
+  unique: [['title', 'ends_on']],
   check: [
-    { field: 'openings', min: 1, max: 500 },
-    { compare: ['salary_min', '<=', 'salary_max'] },
-    { together: ['salary_min', 'salary_max', 'currency'] }
+    { field: 'seats', min: 1, max: 500 },
+    { compare: ['price_min', '<=', 'price_max'] },
+    { together: ['price_min', 'price_max', 'currency'] }
   ]
 }
 ```
@@ -76,8 +76,10 @@ items are enforced by the application layer only. `--admin-ui` generates control
 Every record read (`GET`, list, search, create, update) now includes `created_at` and `updated_at` as UTC RFC 3339
 strings with millisecond precision; they are read-only and documented in OpenAPI.
 
-Policy exports all four operation lists. Default grants are admin-only. Available grants: `admin`, `company`,
-`candidate`, `user`, configured role names, `owner` (existing rows only), and `public` (read only). Empty lists deny everyone. There is no implicit
+Policy exports all four operation lists. Default grants are admin-only. Available grants: the role names of
+`server/auth/roles.jsbrain` (default `admin` and `user`), `owner` (existing rows only), and `public` (read only). A role grant
+admits exactly the accounts holding that role: `['user']` does not admit `admin` or any other role, so list each role that
+should act. Route `auth: 'user'` is different: it means any signed-in account. Empty lists deny everyone. There is no implicit
 admin bypass. List queries enforce owner filtering in SQL; clients cannot select an owner or supply system columns.
 Public reads expose each record's owner UUID; do not grant public read when that identifier is sensitive.
 
@@ -136,7 +138,7 @@ are connection startup options, not a session `SET`: `statement_timeout` 5 s, `i
 and CLI commands are not capped). A transaction-mode pooler must forward the `options` startup parameter; otherwise
 set the same values with `ALTER ROLE <app role> SET …`.
 
-- `POST /_brain/auth/signup` accepts `{ email, password }`, creates a candidate, and never accepts a role.
+- `POST /_brain/auth/signup` accepts `{ email, password }`, creates an account with the configured signup role, and never accepts a role.
 - `POST /_brain/auth/login` accepts the same input and sets an opaque `__Host-brain` cookie: HttpOnly, Secure,
   SameSite=Lax, seven days. The token is hashed in Postgres; roles are loaded from the users table on every request.
 - `GET /_brain/auth/me` returns the authenticated user. `POST /_brain/auth/logout` revokes that session.
