@@ -68,6 +68,7 @@ target/debug/brain doctor              # inside any app
 10. **English everywhere in the repo:** code comments, identifiers, every string literal and UI text (sample and test
     data included), diagnostics (`msg`, `fix`), CLI/MCP output, test names, templates and docs.
     `scripts/check-english.sh` must pass.
+11. **BRAINLLM is a general-purpose framework.** A report from a real app is evidence, not a spec: understand its context, find the general defect or missing capability, and make the adjustment for every app. Never build for one app: no app names, or tables, fields, functions, roles or rules from one app's domain, in defaults, generated code, messages or docs. If nothing general remains, the change stays in that app. `scripts/check-general.sh` enforces the names.
 
 ## Compatibility review
 

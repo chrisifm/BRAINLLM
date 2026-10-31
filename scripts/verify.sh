@@ -17,3 +17,4 @@ node bench/fixtures-check.mjs
 node scripts/source-inputs-check.mjs
 node scripts/privacy-audit.mjs
 scripts/check-english.sh
+scripts/check-general.sh
