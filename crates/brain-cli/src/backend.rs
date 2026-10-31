@@ -75,11 +75,19 @@ fn fields(value: Value) -> Result<BTreeMap<String, Field>, String> {
             // `'int!'` or the object form `{ type: 'int!', default: 0, unique: true, on_delete, visible }`.
             let mut on_delete = None;
             let mut visible = None;
+            let mut access = None;
             let (kind, default, unique) = match v {
-                Value::String(kind) => (kind.as_str(), None, false),
+                // `'str! private'`: an optional access modifier after the type.
+                Value::String(kind) => match kind.rsplit_once(' ').filter(|(_, m)| matches!(*m, "private" | "readonly" | "writeonly")) {
+                    Some((kind, modifier)) => {
+                        access = Some(modifier.to_string());
+                        (kind.trim_end(), None, false)
+                    }
+                    None => (kind.as_str(), None, false),
+                },
                 Value::Object(spec) => {
-                    if let Some(key) = spec.keys().find(|k| !matches!(k.as_str(), "type" | "default" | "unique" | "on_delete" | "visible")) {
-                        return Err(format!("field `{name}`: unknown option `{key}`; fix: use type, default, unique, on_delete and visible"));
+                    if let Some(key) = spec.keys().find(|k| !matches!(k.as_str(), "type" | "default" | "unique" | "on_delete" | "visible" | "access")) {
+                        return Err(format!("field `{name}`: unknown option `{key}`; fix: use type, default, unique, on_delete, visible and access"));
                     }
                     let kind = spec.get("type").and_then(Value::as_str).ok_or_else(|| format!("field `{name}` needs type: 'str' (or another kind)"))?;
                     let unique = match spec.get("unique") {
@@ -90,12 +98,15 @@ fn fields(value: Value) -> Result<BTreeMap<String, Field>, String> {
                     if let Some(action) = spec.get("on_delete") {
                         on_delete = Some(action.as_str().ok_or_else(|| format!("field `{name}`: on_delete must be 'restrict', 'cascade' or 'set_null'"))?.to_string());
                     }
+                    if let Some(mode) = spec.get("access") {
+                        access = Some(mode.as_str().ok_or_else(|| format!("field `{name}`: access must be 'private', 'readonly' or 'writeonly'"))?.to_string());
+                    }
                     if let Some(grants) = spec.get("visible") {
                         visible = Some(serde_json::from_value(grants.clone()).map_err(|_| format!("field `{name}`: visible must be a list such as ['owner', 'admin']"))?);
                     }
                     (kind, spec.get("default").cloned(), unique)
                 }
-                _ => return Err("Field shape must be a string or { type, default, unique, on_delete, visible }".into()),
+                _ => return Err("Field shape must be a string or { type, default, unique, on_delete, visible, access }".into()),
             };
             Ok((
                 name.clone(),
@@ -106,6 +117,7 @@ fn fields(value: Value) -> Result<BTreeMap<String, Field>, String> {
                     unique,
                     on_delete,
                     visible,
+                    access,
                 },
             ))
         })
@@ -1316,6 +1328,16 @@ mod tests {
             std::os::unix::fs::symlink(root.0.join("actual"), root.0.join("linked")).unwrap();
             assert!(read_contract(&root.0, &root.0.join("linked/schema.jsbrain")).is_err());
         }
+    }
+    #[test]
+    fn field_access_modifiers_parse_in_string_and_object_forms() {
+        let parsed = fields(json!({"title":"str!","secret":"str writeonly","state":"enum(draft|live)! readonly","score":{"type":"int","access":"private"},"price":"decimal(10,2)"})).unwrap();
+        assert_eq!((parsed["secret"].kind.as_str(), parsed["secret"].access.as_deref()), ("str", Some("writeonly")));
+        assert_eq!((parsed["state"].kind.as_str(), parsed["state"].required, parsed["state"].access.as_deref()), ("enum(draft|live)", true, Some("readonly")));
+        assert_eq!(parsed["score"].access.as_deref(), Some("private"));
+        assert_eq!(parsed["title"].access, None);
+        assert_eq!(parsed["price"].access, None);
+        assert!(fields(json!({"x":{"type":"str","access":1}})).is_err());
     }
     #[test]
     fn exact_type_contracts_read_object_fields_numbers_and_constraints() {

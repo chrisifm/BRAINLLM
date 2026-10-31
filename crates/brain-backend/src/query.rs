@@ -23,6 +23,10 @@ const TIMESTAMPS: &[&str] = &["created_at", "updated_at"];
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct QueryContract {
+    /// Serialize the record `owner` id to every reader (default false: owners, relational owners and roles named
+    /// in the read policy only).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub expose_owner: bool,
     /// Field (or `created_at`/`updated_at`, or `<ref>.<field>`) to the operators it accepts.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub filter: BTreeMap<String, Vec<String>>,

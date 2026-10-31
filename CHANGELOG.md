@@ -27,12 +27,17 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Backend relational ownership grants `owner.<ref>[.<ref>]` for read, create, update and delete (docs/backend/ownership.md).
 - Backend per-field `visible` grants project responses and close restricted fields to filters, sorts, search and
   aggregates (docs/backend/visibility.md).
+- Backend field access modifiers `readonly`, `writeonly` and `private` (`'str writeonly'` or `{ access }`): rejected from
+  client input or never serialized as declared, preserved on full replacement, and marked in OpenAPI.
 - `brain backend serve` uses separate HTTP and worker pools (`BRAIN_DB_HTTP_POOL`, `BRAIN_DB_WORKER_POOL`), checks
   them against `max_connections` at boot, and sends Postgres timeouts as startup options instead of a session `SET`;
   HTTP adds a 1 s lock wait and, on Postgres 17+, a 9 s transaction cap.
 
 ### Changed
 
+- Backend responses no longer include the record `owner` id for anonymous or unrelated readers; owners, relational
+  owners and roles named in the read policy still receive it. Declare `expose_owner: true` in `query.jsbrain` to
+  publish it. The OpenAPI row schema marks `owner` optional.
 - The shared lexer decodes ASCII directly, scans ASCII identifier runs as bytes and indexes punctuation by first byte
   in the same longest-first order. Source-map scanning skips slash-free trivia gaps and builds its generated line index
   only to locate a failure. Emitted JS, server JS, CSS, maps and diagnostics are byte-identical; no compiler-speed

@@ -24,6 +24,11 @@ pub struct Field {
     /// Serialization-only: excluded from the recorded storage contract (see `recorded_fields`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible: Option<Vec<String>>,
+    /// Who writes and who reads the field: `private` (server only: never accepted from clients, never serialized),
+    /// `readonly` (serialized, set only by defaults and before-write hooks) or `writeonly` (accepted, never
+    /// serialized, e.g. a secret). None: clients read and write it. Serialization-only, like `visible`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access: Option<String>,
 }
 impl Field {
     pub fn ty(&self) -> Option<Ty> {
@@ -311,10 +316,16 @@ impl Resource {
                 if f.unique {
                     schema["x-brain-unique"] = json!(true);
                 }
+                match f.access.as_deref() {
+                    Some("readonly") => schema["readOnly"] = json!(true),
+                    Some("writeonly") => schema["writeOnly"] = json!(true),
+                    Some("private") => schema["x-brain-private"] = json!(true),
+                    _ => {}
+                }
                 (n.clone(), schema)
             })
             .collect();
-        let mut schema = json!({"type":"object","additionalProperties":false,"properties":props,"required":self.fields.iter().filter(|(_,f)| f.required && f.default.is_none()).map(|(n,_)|n).collect::<Vec<_>>()});
+        let mut schema = json!({"type":"object","additionalProperties":false,"properties":props,"required":self.fields.iter().filter(|(_,f)| f.required && f.default.is_none() && !crate::visibility::server_set(f)).map(|(n,_)|n).collect::<Vec<_>>()});
         if !self.constraints.is_empty() {
             schema["x-brain-constraints"] = serde_json::to_value(&self.constraints).unwrap_or(Value::Null);
         }
@@ -330,6 +341,7 @@ impl Resource {
             for field in map.values_mut() {
                 if let Some(field) = field.as_object_mut() {
                     field.remove("visible");
+                    field.remove("access");
                 }
             }
         }
@@ -504,7 +516,7 @@ pub fn openapi_with_roles(resources: &[Resource], roles: &crate::auth_flows::Rol
     for r in resources {
         let body = json!({"required":true,"content":{"application/json":{"schema":r.schema()}}});
         let error_responses = json!({"400":{"description":"Invalid request"},"401":{"description":"Sign in required"},"403":{"description":"Policy denied"},"404":{"description":"Not found"},"422":{"description":"Validation errors"},"429":{"description":"Rate limited"}});
-        let row = json!({"type":"object","additionalProperties":false,"required":["id","owner","data","created_at","updated_at"],"properties":{"id":{"type":"string","format":"uuid"},"owner":{"type":"string","format":"uuid"},"data":r.schema(),"created_at":{"type":"string","format":"date-time","readOnly":true},"updated_at":{"type":"string","format":"date-time","readOnly":true}}});
+        let row = json!({"type":"object","additionalProperties":false,"required":["id","data","created_at","updated_at"],"properties":{"id":{"type":"string","format":"uuid"},"owner":{"type":"string","format":"uuid","description":"Shown to the owner, relational owners and roles named in the read policy, or to everyone with expose_owner"},"data":r.schema(),"created_at":{"type":"string","format":"date-time","readOnly":true},"updated_at":{"type":"string","format":"date-time","readOnly":true}}});
         let op = |name: &str, write: bool| {
             let mut out = json!({"operationId":format!("{}_{}",r.name,name),"security":native_security(),"responses":error_responses});
             let output = if name == "list" {

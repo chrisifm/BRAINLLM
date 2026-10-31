@@ -474,3 +474,65 @@ async fn workload_pools_use_startup_timeouts_and_respect_the_connection_budget()
         pool.close().await;
     }
 }
+
+/// OWASP API3: access modifiers and the hidden owner id on public reads.
+#[tokio::test]
+#[ignore = "requires scripts/backend-check.mjs disposable Postgres"]
+async fn access_modifiers_and_owner_exposure() {
+    let pool = database("brain_access").await;
+    let with = |kind: &str, access: &str| Field { kind: kind.into(), access: Some(access.into()), ..Default::default() };
+    let mut status = with("enum(draft|live)", "readonly");
+    status.default = Some(json!("draft"));
+    let posts = resource(
+        "posts",
+        vec![("title", field("str", true)), ("status", status), ("api_key", with("str", "writeonly")), ("score", with("int", "private"))],
+        policy(&["public"], &["candidate"], &["owner"], &["owner"]),
+        json!({}),
+    );
+    let mut notes = resource("notes", vec![("body", field("str", true))], policy(&["public"], &["candidate"], &["owner"], &["owner"]), json!({"expose_owner": true}));
+    notes.search = Vec::new();
+    let api = api(&pool, vec![posts, notes]).await;
+    let (author_id, author) = api.user("author@blog.test").await;
+    let (_, reader) = api.user("reader@blog.test").await;
+
+    // readonly and private fields are rejected from client input; writeonly is accepted.
+    let (s, e) = api.post("/api/posts", &author, json!({"title": "Hello", "status": "live"})).await;
+    assert_eq!(s, 422, "{e}");
+    assert!(e["error"]["fields"]["status"].as_str().unwrap().contains("readonly"), "{e}");
+    let (s, e) = api.post("/api/posts", &author, json!({"title": "Hello", "score": 3})).await;
+    assert_eq!((s, e["error"]["fields"]["score"].is_string()), (422, true), "{e}");
+    let (s, post) = api.post("/api/posts", &author, json!({"title": "Hello", "api_key": "secret-value"})).await;
+    assert_eq!(s, 200, "{post}");
+    assert_eq!(post["data"], json!({"title": "Hello", "status": "draft"}), "writeonly is never returned; readonly default applies");
+    let id = post["id"].as_str().unwrap().to_string();
+    let stored: Value = sqlx::query_scalar("SELECT data FROM _brain_res_posts WHERE id = $1::uuid").bind(&id).fetch_one(&pool).await.unwrap();
+    assert_eq!(stored["api_key"], "secret-value");
+
+    // A full replacement keeps fields the client cannot send or read back.
+    let (s, updated) = api.call("PUT", &format!("/api/posts/{id}"), Some(&author), Some(json!({"title": "Hello again"}))).await;
+    assert_eq!(s, 200, "{updated}");
+    let stored: Value = sqlx::query_scalar("SELECT data FROM _brain_res_posts WHERE id = $1::uuid").bind(&id).fetch_one(&pool).await.unwrap();
+    assert_eq!((stored["api_key"].as_str(), stored["status"].as_str()), (Some("secret-value"), Some("draft")));
+
+    // Owner id: hidden from anonymous and other readers, shown to the owner, opt-in with expose_owner.
+    let (_, list) = api.get("/api/posts", None).await;
+    assert!(list["items"][0].get("owner").is_none(), "{list}");
+    assert!(list["items"][0]["data"].get("api_key").is_none());
+    let (_, list) = api.get("/api/posts", Some(&reader)).await;
+    assert!(list["items"][0].get("owner").is_none());
+    let (_, one) = api.get(&format!("/api/posts/{id}"), None).await;
+    assert!(one.get("owner").is_none(), "{one}");
+    let (_, mine) = api.get(&format!("/api/posts/{id}"), Some(&author)).await;
+    assert_eq!(mine["owner"], author_id.to_string());
+    api.post("/api/notes", &author, json!({"body": "Visible author"})).await;
+    let (_, notes) = api.get("/api/notes", None).await;
+    assert_eq!(notes["items"][0]["owner"], author_id.to_string(), "expose_owner opts in");
+
+    // Hidden fields stay off the query surface.
+    let mut bad = resource("bad", vec![("secret", with("str", "writeonly"))], policy(&["public"], &["candidate"], &["owner"], &["owner"]), json!({"filter": {"secret": ["eq"]}}));
+    bad.search = Vec::new();
+    assert!(brain_backend::query::validate(&bad).is_err());
+    let odd = resource("odd", vec![("x", with("str", "hidden"))], policy(&["public"], &["candidate"], &["owner"], &["owner"]), json!({}));
+    assert!(brain_backend::db::migrate(&pool, &[odd]).await.is_err(), "unknown access modes are rejected");
+    pool.close().await;
+}

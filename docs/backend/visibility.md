@@ -37,4 +37,43 @@ Restricted fields cannot be declared as filters, sort keys, search fields, aggre
 contract fails to load with a fix message. A reader therefore cannot infer hidden values by filtering or sorting on
 them.
 
-Not yet implemented: `private`, `readonly` and `writeonly` modifiers, and hiding `owner` from public reads by default.
+## Access modifiers
+
+A modifier after the type (or `access` in the object form) says who writes and who reads a field:
+
+```js
+// server/resources/posts/schema.jsbrain
+export default {
+  title: 'str!',
+  status: { type: 'enum(draft|live)', default: 'draft', access: 'readonly' },
+  api_key: 'str writeonly',
+  score: 'int private',
+}
+```
+
+| Modifier | Client may send it | Returned to readers |
+|---|---|---|
+| `readonly` | no; defaults and before-write hooks set it | yes (OpenAPI `readOnly`) |
+| `writeonly` | yes | never (OpenAPI `writeOnly`) |
+| `private` | no; defaults and before-write hooks set it | never |
+
+Sending a `readonly` or `private` field answers 422 before any hook runs:
+
+```json
+{"error": {"code": "INVALID_INPUT", "fields": {"status": "Field is readonly; it is set by the server, remove it from the request"},
+  "fix": "Apply the field errors and send only fields declared in schema.jsbrain"}, "rid": "…", "schemaVersion": 1}
+```
+
+A full replacement (`PUT`) that omits a field with a modifier keeps its stored value, so a write-only secret is not
+erased by a client that cannot read it back. `writeonly` and `private` fields are closed to the query surface like
+restricted fields. After-write hooks and jobs still receive the full record on the server.
+
+## Owner id
+
+The record `owner` id is returned only to the owner, to relational owners and to roles named in the read policy.
+Anonymous and other readers do not receive it. To publish it (for example an author link), declare it:
+
+```js
+// server/resources/notes/query.jsbrain
+export default { expose_owner: true }
+```
