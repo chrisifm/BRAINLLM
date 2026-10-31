@@ -139,9 +139,15 @@ export function router(o = {}) {
   const loads = o.loading || [], adopt = n => document.adoptNode?.(n) || n
   // the previous page's click hold ends with it, mounted or not
   const dispose = r => { r.$hold?.(); for (const e of [r, ...r.querySelectorAll('*')]) if (e.$d) e.$d(), (e.$d = null) }
+  const fixed = (t, id, css) => {
+    const b = document.body.appendChild(document.createElement(t))
+    b.id = id
+    b.style.cssText = 'position:fixed;' + css
+    return b
+  }
   const ui = on => {
     let b = document.getElementById('brain-nav')
-    if (!b && on) ((b = document.body.appendChild(document.createElement('progress'))).id = 'brain-nav'), (b.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:3px'), (b.ariaLabel = 'Loading')
+    if (!b && on) (b = fixed('progress', 'brain-nav', 'top:0;left:0;width:100%;height:3px')).ariaLabel = 'Loading'
     if (b) b.hidden = !on
   }
   const busy = (my, on) => {
@@ -250,6 +256,27 @@ export function router(o = {}) {
       busy(my, 0)
     }
   }
+  // After a swap, for assistive technology (§19): focus moves to the URL's target, else the page's h1, else the region,
+  // unless the new page already holds focus; #brain-announce (polite, created at start) reads the new title.
+  const place = (u, lost) => {
+    const m = document.querySelector(region), a = document.activeElement
+    if (!m || (a && a !== document.body && a !== m && (lost || m.contains(a)))) return
+    const id = new URL(u, location.href).hash.slice(1), h = (id && document.getElementById(id)) || m.querySelector('h1') || m
+    h.hasAttribute('tabindex') || h.setAttribute('tabindex', '-1')
+    h.focus({ preventScroll: true })
+  }
+  const say = t => {
+    let a = document.getElementById('brain-announce')
+    if (!a) (a = fixed('div', 'brain-announce', 'clip-path:inset(50%)')).setAttribute('aria-live', 'polite')
+    a.textContent = t
+  }
+  say('')
+  const landed = u => {
+    place(u)
+    say(document.title)
+    const m = document.querySelector(region)
+    if (m?.$hold) m.$mounted = () => place(u, 1) // mounting replaces the server's nodes: a focus lost there comes back
+  }
   // a full load must not be intercepted again (Navigation API): `through` lets that one navigation pass
   const hard = url => ((through = new URL(url, location.href).href), (o.hard || (u => location.assign(u)))(url))
   const same = (u, prefetch = false) => {
@@ -270,10 +297,12 @@ export function router(o = {}) {
       if (!e.canIntercept || e.hashChange || e.downloadRequest || e.formData || !same(e.destination.url)) return
       if (e.cancelable && !leave()) return e.preventDefault()
       const to = e.destination.url, from = nav.currentEntry?.url
-      if (G.__brainURLOnly?.(from || location.href, to)) return e.intercept({ handler: () => G.__brainURLRestore?.() })
-      if (!gs.length) return e.intercept({ handler: () => load(to) }) // scroll + focus reset handled by the browser
+      if (G.__brainURLOnly?.(from || location.href, to)) return e.intercept({ focusReset: 'manual', handler: () => G.__brainURLRestore?.() })
+      const shown = u => load(u).then(ok => ok && landed(u)) // the browser restores scroll; focus is ours (it would reset to body)
+      if (!gs.length) return e.intercept({ focusReset: 'manual', handler: () => shown(to) })
       let g
       e.intercept({
+        focusReset: 'manual',
         // Chrome 141+: decided before the URL commits (cancel = the address bar never changes; native redirect).
         async precommitHandler(c) {
           g = await check(to)
@@ -282,7 +311,7 @@ export function router(o = {}) {
         },
         async handler() {
           if (g === undefined) g = await check(to) // no precommit support: the URL already committed
-          if (g === true) return load(nav.currentEntry ? nav.currentEntry.url : to)
+          if (g === true) return shown(nav.currentEntry ? nav.currentEntry.url : to)
           if (g === null) return hard(to)
           nav.navigate(g === false ? from : new URL(app(g), location.href).href, { history: 'replace' })
         },
@@ -313,7 +342,7 @@ export function router(o = {}) {
     const hash = new URL(u, location.href).hash, t = hash && document.getElementById(hash.slice(1))
     if (t) t.scrollIntoView()
     else G.scrollTo?.(0, push ? 0 : history.state?.y || 0)
-    focusMain()
+    landed(u)
   }
   const click = e => {
     if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
@@ -328,13 +357,6 @@ export function router(o = {}) {
   const pop = () => {
     if (G.__brainURLOnly?.(here, location.href)) { here = location.href; G.__brainURLRestore?.(); return }
     return go(location.href, false)
-  }
-  const focusMain = () => {
-    const m = document.querySelector(region), h = m && (m.querySelector('h1') || m)
-    if (h?.focus) {
-      h.hasAttribute('tabindex') || h.setAttribute('tabindex', '-1')
-      h.focus({ preventScroll: true }) // screen readers announce the new view
-    }
   }
   document.addEventListener('click', click)
   G.addEventListener?.('popstate', pop)
@@ -572,6 +594,8 @@ function hold(el) {
     set(v) {
       done()
       el.$d = v
+      el.$mounted?.()
+      el.$mounted = null
       for (const [e, path] of q) {
         let n = el
         for (const i of path) n = n?.childNodes[i]

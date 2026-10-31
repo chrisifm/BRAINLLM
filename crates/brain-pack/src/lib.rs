@@ -1381,7 +1381,10 @@ fn build_inner_with_options(
                     String::new()
                 } else {
                     let entries: Vec<_> = with_loading.iter().map(|(route,url)|((*route).clone(),url.clone())).collect();
-                    format!(",core:{},loading:[{}]", prerender_json(&core), navigation::loading(&entries))
+                    // one loading view for every route (views/_loading.brain alone): one pattern instead of one per route
+                    let every = with_loading.len() == views.iter().filter(|(r, _)| r != "*").count() && with_loading.windows(2).all(|w| w[0].1 == w[1].1);
+                    let table = if every { format!("{{rx:\"^/\",view:{}}}", prerender_json(&with_loading[0].1)) } else { navigation::loading(&entries) };
+                    format!(",core:{},loading:[{table}]", prerender_json(&core))
                 };
                 // #283: `guards` = folder route → chunk of its `_guard.jsbrain` (RUNTIME runs them outermost first)
                 let mut guard_dirs: BTreeMap<String, String> = BTreeMap::new();
@@ -1484,7 +1487,7 @@ fn build_inner_with_options(
         .map(|path|if path=="/" {path} else {path.trim_end_matches('/').to_string()}).collect();
     zero_paths.sort();
     let zero_json = format!("[{}]",zero_paths.iter().map(|path|prerender_json(path)).collect::<Vec<_>>().join(","));
-    let router_tag = router_tag.replace("__BRAIN_ZERO_PATHS__",&zero_json);
+    let router_tag = if zero_json == "[]" { router_tag.replace(",fullLoad:__BRAIN_ZERO_PATHS__", "") } else { router_tag.replace("__BRAIN_ZERO_PATHS__", &zero_json) };
     // Nonstatic pages retain hydration across client navigation; static targets use full navigation.
     // hydrate() so islands arriving through the router resume (the core is one cached chunk).
     let hydrate_everywhere = !router_tag.is_empty() && plans.iter().any(|p| p.interactive);

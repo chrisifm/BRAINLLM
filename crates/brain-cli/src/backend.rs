@@ -1647,6 +1647,10 @@ mod tests {
         assert_eq!(config["budget"]["viewKB"], 30);
         let report = crate::run_build(&root.0, Some("https://example.test".into())).unwrap();
         eprintln!("CRUD default-budget fixture bytes by route: {:?}", report.report);
+        // one root _loading.brain is one pattern, and an empty fullLoad is not emitted: both keep every route's HTML small
+        let page = fs::read_dir(root.0.join("dist/_server/pages")).unwrap().map(|f| fs::read_to_string(f.unwrap().path()).unwrap()).find(|html| html.contains("router({")).unwrap();
+        assert!(page.contains("loading:[{rx:\"^/\",view:") && !page.contains("fullLoad:[]"), "{page}");
+        assert!(page.contains("href=\"#brain-view\">Skip to content</a>") && page.contains("id=\"brain-view\""), "the scaffold's skip link targets the region: {page}");
         for entry in &report.ledger {
             let mut entry: Value = serde_json::from_str(&entry.stringify()).unwrap();
             let route = entry["route"].as_str().unwrap_or("");

@@ -1360,3 +1360,106 @@ test('prefetch queue: intent, then main by position, then footer and aside; a li
   delete globalThis.IntersectionObserver
   delete globalThis.requestIdleCallback
 })
+
+// Focus and announcement after a client navigation (§19). The Navigation API resets focus to body unless told otherwise.
+const viaNavigation = () => {
+  globalThis.location = new URL('http://x.test/a')
+  let h
+  globalThis.navigation = { addEventListener: (t, f) => (h = f), removeEventListener() {}, navigate() {} }
+  delete doc.startViewTransition
+  return async (url, o = {}) => {
+    let opts
+    h({ canIntercept: true, destination: { url }, intercept: x => (opts = x), ...o })
+    await opts.handler()
+    return opts
+  }
+}
+
+test('Navigation API: focus stays ours, lands on the new h1 and the title is announced', async () => {
+  const go = viaNavigation()
+  const { m } = page()
+  const r = router({ parse, hard: u => assert.fail('hard ' + u) })
+  const live = doc.getElementById('brain-announce')
+  assert.equal(live.getAttribute('aria-live'), 'polite') // present before the first navigation: screen readers need that
+  assert.equal(live.textContent, '')
+  const opts = await go('http://x.test/b')
+  assert.equal(opts.focusReset, 'manual')
+  assert.equal(doc.activeElement, m.firstChild)
+  assert.equal(m.firstChild.textContent, 'Page B')
+  assert.equal(m.firstChild.getAttribute('tabindex'), '-1')
+  assert.equal(live.textContent, 'Title Page B')
+  r.stop()
+  delete globalThis.navigation
+})
+
+test('without an h1 focus lands on the region, and a URL fragment target wins over the h1', async () => {
+  const go = viaNavigation()
+  const { m } = page()
+  m.id = 'brain-view'
+  pages['/plain'] = '<div id="brain-view"><p>no heading</p></div>'
+  pages['/frag'] = '<div id="brain-view"><h1>Frag</h1><section id="part">x</section></div>'
+  const r = router({ parse, region: '#brain-view', hard: u => assert.fail('hard ' + u) })
+  await go('http://x.test/plain')
+  assert.equal(doc.activeElement.getAttribute('id') ?? doc.activeElement.id, 'brain-view')
+  await go('http://x.test/frag#part')
+  assert.equal(doc.activeElement.getAttribute('id'), 'part')
+  r.stop()
+  delete pages['/plain'], delete pages['/frag']
+  delete globalThis.navigation
+})
+
+test('a focus the new page set itself is respected: no move to the h1, even after its mount', async () => {
+  const go = viaNavigation()
+  const { m } = page()
+  pages['/self'] = '<main><h1>Self</h1><input id="own"></main>'
+  globalThis.__brainRouted = on => { if (on === undefined) m.querySelector('#own')?.focus() }
+  const r = router({ parse, hard: u => assert.fail('hard ' + u) })
+  await go('http://x.test/self')
+  assert.equal(doc.activeElement.getAttribute('id'), 'own')
+  assert.equal(doc.getElementById('brain-announce').textContent, 'Title Self') // the title is still read
+  r.stop()
+  delete globalThis.__brainRouted
+  delete pages['/self']
+  delete globalThis.navigation
+})
+
+test('mounting that replaces the server nodes brings a lost focus back, but never yanks one the user moved', async () => {
+  const go = viaNavigation()
+  const { m } = page()
+  m.id = 'brain-view'
+  const r = router({ parse, hard: u => assert.fail('hard ' + u) })
+  await go('http://x.test/m')
+  assert.equal(doc.activeElement, m.querySelector('h1'))
+  // the mount script runs now: new nodes, the focused h1 is gone
+  m.textContent = ''
+  doc.activeElement = doc.body
+  m.innerHTML = '<h1>Mount</h1>'
+  m.$d = () => {}
+  assert.equal(doc.activeElement, m.querySelector('h1'))
+  // again, with the user already on a nav link outside the region
+  m.$d(); m.$d = null
+  await go('http://x.test/m')
+  const nav = doc.body.appendChild(doc.createElement('a'))
+  nav.setAttribute('href', '#x')
+  nav.focus()
+  m.textContent = ''
+  m.innerHTML = '<h1>Mount</h1>'
+  m.$d = () => {}
+  assert.equal(doc.activeElement, nav)
+  r.stop()
+  delete globalThis.navigation
+})
+
+test('a failed navigation neither moves focus nor announces', async () => {
+  const go = viaNavigation()
+  page()
+  const hard = []
+  const r = router({ parse, hard: u => hard.push(u) })
+  doc.activeElement = doc.body
+  await go('http://x.test/missing')
+  assert.deepEqual(hard, ['http://x.test/missing'])
+  assert.equal(doc.activeElement, doc.body)
+  assert.equal(doc.getElementById('brain-announce').textContent, '')
+  r.stop()
+  delete globalThis.navigation
+})

@@ -26,6 +26,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `brain doctor` no longer fails on suspected leak B0601 unless `brain.json` sets `doctor.failOnSuspectedLeaks`; its summary names the gates that failed, and the report has a `failed` list.
 - Leak checks wait for in-flight requests before judging an instance (`brain test --heap` and `brain doctor` settle, then abort what remains), and the B0601 fix names in-flight promises and the requests pending at unmount.
 
+### Navigation, forms and views
+- After a client navigation focus moves to the page heading (or the URL's fragment target, or the region) and `#brain-announce` reads the new title; a focus the new page set itself is respected and scroll behaviour is unchanged.
+- New apps start with a skip link to `#brain-view` in `app.brain`.
+
 ### Signature
 - HTML documents now carry `X-Generated-By` with the official site and repository in `brain start`, `_headers`, nginx and Caddy. It replaces `X-Powered-By` and adds nothing visible to the page.
 

@@ -630,7 +630,7 @@ fn pseudo_element_start(s: &str) -> usize {
 }
 
 /// Order of the cascade layers every build declares first.
-pub const LAYER_ORDER: &str = "@layer reset, tokens, ui, comp, view;";
+pub const LAYER_ORDER: &str = "@layer reset,tokens,ui,comp,view;";
 
 #[cfg(test)]
 mod tests {

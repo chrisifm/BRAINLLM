@@ -21,6 +21,9 @@ Before each kind of task run `brain guide <topic>` (`brain guide` lists them): s
   `<progress>` bar; color it with `accent-color` on `#brain-nav` in `tokens.cssbrain`, or put your own
   `<div id="brain-nav" hidden>…</div>` in `app.brain`); past 400 ms `_loading.brain` replaces the region. A failed
   navigation is a full page load.
+- After a client navigation focus moves to the URL's fragment target, else the page's `<h1>`, else the region, unless
+  the new page already holds focus, and `#brain-announce` (polite live region) reads the new title. `app.brain` starts
+  with `<a class="skip" href="#brain-view">Skip to content</a>`; keep it first in `<body>`.
 - Languages: `brain.json` `"i18n": { "default": "en", "locales": ["en", "es"] }`; texts in `i18n/<locale>.json`
   (`"nav.home": "Home"`, plurals `{ "one": "{n} post", "other": "{n} posts" }`); write `t('nav.home')`, never literal
   text once there are 2+ locales. Add a language with `brain add locale es`: it moves every fixed text (text, visible

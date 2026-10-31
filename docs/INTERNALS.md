@@ -1832,6 +1832,12 @@ active links and the next-route plan change in one swap callback. The region get
 is true at once; at 150 ms `#brain-nav` shows (the app's own element, else a fixed native `<progress>`); at 400 ms the
 nearest `_loading.brain` replaces the region. A fetch, parse or swap that throws ends in
 a full page load, never a half-swapped page. View Transitions are skipped by CSS under reduced motion (SPEC). The nonce for recreated scripts is read once at `router()` start.
+After a swap the current navigation runs `landed`: `place` focuses the fragment target, else the region's `h1`, else the
+region (`tabindex=-1` added, `preventScroll`), unless focus is already on a descendant of the region; the Navigation API path
+passes `focusReset: 'manual'` so the browser neither resets focus to `body` nor overrides this, and keeps its own scroll
+handling. A mount script replaces the server's nodes, so `hold`'s `$d` setter calls `$mounted`, which brings focus back only
+when it fell to `body`. `#brain-announce` (`aria-live=polite`, created at `router()` start, outside the region) takes
+`document.title`. A root `_loading.brain` alone emits one `^/` pattern; an empty `fullLoad` is omitted.
 Past 8 s a navigation becomes a full load. `hold` lets real links through. `predict` orders its queue by rank: intent -1,
 main links by `getBoundingClientRect().top`, plan 1e6, `footer`/`aside` 1e7 + top. Measured on the admin edit route of the
 CRUD fixture (`backend.rs` test): 30703 B of the 30720 B default budget, 30698 B before this work.
