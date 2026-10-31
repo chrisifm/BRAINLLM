@@ -1493,8 +1493,11 @@ language is one command.
   `help`, `hint`, `caption`, `heading`, `message`, `empty`, and `value` on submit/button/reset inputs);
   `<meta seo title/description>` (`<scope>.meta_title`, `<scope>.meta_description`); string literals in markup
   expressions (both branches of `a ? 'x' : 'y'`, the right side of `||`/`??`, `+` concatenations, untagged
-  templates). Not moved: `app.brain` (static shell, B0132: put translatable chrome in `views/_layout.brain`) and
-  literals inside `<script>`.
+  templates); on the client, `<script>` literals a person reads: the value of a variable markup only displays when it
+  reads as prose (a space or a capital), messages of `alert`, `confirm`, `prompt`, `toast.send` and what is assigned to
+  `.textContent`, `.innerText`, `.title`, `.placeholder`, `.alt`. A variable the code also reads stays: `t()` would change what
+  it compares or sends. Not moved: `app.brain` (static shell, B0132: put translatable chrome in `views/_layout.brain`),
+  server code, data returned by `load()` and props defaults.
 - **Key names** (2026-10-31): `<scope>.<first four ASCII words>`. The scope is the view path without `views/` and
   `index` (`views/account/index.brain` is `account`, `views/posts/[id]/edit.brain` is `posts-id-edit`, `home` for the
   root) or the component file name. Words are folded to ASCII (accented Latin letters lose the accent); a text with no word
