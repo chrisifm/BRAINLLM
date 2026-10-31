@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0780",
+    "level": "warning",
+    "file": "invalid/comp/b0780-stray-brace.brain",
+    "line": 4,
+    "col": 7,
+    "msg": "this `}` closes nothing and renders as text",
+    "fix": "delete it; to show a brace on purpose write `{'}'}`"
+  }
+]

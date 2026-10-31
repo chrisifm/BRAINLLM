@@ -117,6 +117,43 @@ pub fn outer_root(from: &Path) -> Option<PathBuf> {
     from.ancestors().filter(|d| is_app_dir(d)).last().map(Path::to_path_buf)
 }
 
+/// How `brain add` creates one kind of file. Dispatch and usage read the same table, so a kind cannot go unlisted.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum AddRoute {
+    /// A component or module from a template (`add`).
+    Template,
+    /// A generated module with its own options (`add_with_options`).
+    Generated,
+    /// A hook, which brings its own scaffold.
+    Hook,
+    /// A backend contract (`backend::add_with_admin`), CLI only.
+    Backend,
+    /// A file that takes no name.
+    NoName,
+}
+
+pub const ADD_KINDS: &[(&str, AddRoute)] = &[
+    ("view", AddRoute::Template), ("comp", AddRoute::Template), ("ui", AddRoute::Template), ("layout", AddRoute::Template),
+    ("lib", AddRoute::Template), ("test", AddRoute::Template), ("collection", AddRoute::Template), ("locale", AddRoute::Template),
+    ("channel", AddRoute::Generated), ("service", AddRoute::Generated), ("api", AddRoute::Generated), ("type", AddRoute::Generated),
+    ("guard", AddRoute::Generated), ("server", AddRoute::Generated), ("hook", AddRoute::Hook),
+    ("resource", AddRoute::Backend), ("job", AddRoute::Backend), ("roles", AddRoute::NoName),
+];
+
+/// `micro` is the old name of `ui`: it still works and is no longer advertised.
+pub fn add_route(kind: &str) -> Option<AddRoute> {
+    if kind == "micro" { return Some(AddRoute::Template); }
+    ADD_KINDS.iter().find(|(name, _)| *name == kind).map(|(_, route)| *route)
+}
+
+fn add_kind_names() -> String {
+    ADD_KINDS.iter().map(|(name, _)| *name).collect::<Vec<_>>().join(", ")
+}
+
+pub fn add_usage() -> String {
+    format!("usage: brain add <kind> <name> [--props \"...\"]; kinds: {}; `roles` takes no name", add_kind_names())
+}
+
 /// Options shared by the CLI and MCP generators. Flags outside their kind are rejected.
 #[derive(Default)]
 pub struct AddOptions {
@@ -135,7 +172,11 @@ pub fn add_with_options(root: &Path, kind: &str, name: &str, o: &AddOptions) -> 
         || o.fields.is_some() && kind != "type"
         || !o.props.is_empty() && !matches!(kind, "view" | "comp" | "ui" | "micro")
     { return Err("options do not match the file kind; fix: use channel store/bus/key, api get/post, type fields or component props".into()); }
-    if kind == "hook" {
+    let Some(route) = add_route(kind) else { return Err(format!("unknown kind `{kind}`; fix: use {}", add_kind_names())) };
+    if matches!(route, AddRoute::Backend | AddRoute::NoName) {
+        return Err(format!("kind `{kind}` is created by the `brain add` command; fix: run `brain add {kind}{}`", if route == AddRoute::NoName { "" } else { " <name> --fields \"...\"" }));
+    }
+    if route == AddRoute::Hook {
         let _writer = crate::edit::writer_lock(root)?;
         let files = crate::hooks_executor::scaffold(name)?;
         let (relative, body) = files.into_iter().next().ok_or("Missing hook template")?;
@@ -144,7 +185,7 @@ pub fn add_with_options(root: &Path, kind: &str, name: &str, o: &AddOptions) -> 
         crate::changes::create_source(root, &relative, &body)?;
         return Ok(path);
     }
-    if !matches!(kind, "channel" | "service" | "api" | "type" | "guard" | "server") {
+    if route == AddRoute::Template {
         return add(root, kind, name, &o.props);
     }
     let _writer = crate::edit::writer_lock(root)?;
@@ -283,7 +324,7 @@ pub fn add(root: &Path, kind: &str, name: &str, props: &str) -> Result<PathBuf, 
         "view" => "views",
         "comp" => "comp",
         "ui" | "micro" => "ui",
-        _ => return Err(format!("unknown kind `{kind}`; fix: use view, comp, ui, layout, lib, collection, locale or test")),
+        _ => return Err(format!("unknown kind `{kind}`; fix: use {}", add_kind_names())),
     };
     // views take a route path (`about`, `users/[id]`, `404`, `blog/index`); components a single name
     let stem = if kind == "view" {

@@ -36,7 +36,8 @@ environment. `brain check` reports an invalid value as B0707.
 1. Set `BRAIN_SECRET` in `.brain_env` (MCP: `brain_env_set { key, section, value }`).
 2. In a `server:` function: `ctx.session.set({ id, email })` signs it into the `__Host-session` cookie (HttpOnly,
    Secure, SameSite=Lax, 7 days; `ctx.session.set(user, { maxAge: seconds })` to change it).
-   That cookie is signed, not encrypted: a token or password in it warns B0737. Keep such values in
+   That cookie is signed, not encrypted: a token or password in it warns B0737, and one in `console.*`, browser
+   storage or a password in a returned value warns B0783. Keep such values in
    `ctx.session.setSecret(value, { maxAge })`, read them with `ctx.session.secret()` and remove them with
    `ctx.session.clearSecret()` (`clear()` too). It is a separate AES-256-GCM cookie, limited to 3.5 KB, that never fills
    `ctx.user`. With `BRAIN_BACKEND_URL` the backend owns the session, so `ctx.session.set` answers 409: sign in with

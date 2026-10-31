@@ -21,6 +21,17 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - API keys work on `/api/<resource>/<id>/actions/<name>` and `/transitions/<name>`, and `ctx.backend.resource(r)` gains `.action()` and `.transition()`, so a job can update a counter atomically.
 - A route handler can return `{ file: { base64, name, type } }`: always an attachment, with `nosniff` and a sandboxing policy.
 - Backend docs corrected: route `ctx.user` is `{id, role, verified}`, `ctx.env` is documented, OpenAPI lives at `/_brain/api`, migration does not add constraints to a registered resource, and API keys cover batch and upsert.
+- `brain <command> | head -1` ends quietly: a closed pipe no longer reports an internal error, on any command.
+- `--help` on any command, at any position, prints its usage and acts on nothing; `brain build --help` used to build and `brain new x --help` used to create the app.
+- `brain add` without arguments lists every kind it can create.
+- B0780 warns on a `}` in markup that closes nothing (`<p>{x}}</p>`) and on `{{x}}`, with the exact edit; an unclosed `{` now names the tag it ran into.
+- B0781 reports `await` with no enclosing `async` function, including nested functions and the top of a component script: that code emitted JavaScript that does not parse.
+- B0737 names every credential in `ctx.session.set` and reads `d.password`; B0783 warns on a credential in `console.*` or browser storage, and on a stored password returned by a server function, `load` or a route handler.
+- `*.test.brain` under `views/` no longer gets B0501 when it is checked on its own: a test file has no route.
+- A `DATABASE_URL` without a user connects as the system account, as `psql` does; it used to try the role `anonymous`. B0762 connection failures now say the host, database and user tried and why it failed, never the password.
+B0721 and B0722 read `process.env`, `ctx.env` and `import.meta.env` from tokens: a comment, a string, prose or a CSS rule that mentions a key no longer counts as a read, and a guard in a later statement (`const k = ctx.env.K; if (!k) ...`) makes the key optional.
+A session write without `BRAIN_SECRET` fails with B0782 and how to set it.
+`brain dev` refuses the redirects production refuses (an invalid status, an off-site or malformed location), thrown or returned from `load`; it used to answer them and production then failed with a 500.
 ### Security
 - `brain backend` commands stop with B0785 when no `--env` was given and the database is remote or `NODE_ENV=production`, `users` actions honor production TLS, and a proxied `/_brain/api` request needs an administrator in every environment.
 - The refresh grace window is configurable with `BRAIN_AUTH_REFRESH_GRACE_SECONDS` (0..60, default 10; 0 turns it off), and reuse detection stays on.

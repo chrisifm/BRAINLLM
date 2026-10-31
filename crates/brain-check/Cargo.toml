@@ -7,6 +7,7 @@ authors.workspace = true
 description = "Semantic checks for .brain components with actionable fixes"
 
 [dependencies]
+brain-lex = { path = "../brain-lex" }
 brain-parse = { path = "../brain-parse" }
 brain-css = { path = "../brain-css" }
 sha2 = "0.11.1"

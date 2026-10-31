@@ -1547,6 +1547,7 @@ const unseal = (secret, value) => {
 // `ctx.session.setSecret(value, { maxAge })`, `.secret()` and `.clearSecret()` on any session handle (signed cookie or
 // native bridge): server-only values such as a provider token, AES-256-GCM encrypted in their own cookie. They never
 // fill `ctx.user`, and `session.clear()` removes them too.
+const missingSecret = what => new Error(`B0782: BRAIN_SECRET is not set: ${what} need it; fix: set 32+ random bytes in the host environment or in .brain_env (openssl rand -hex 32)`)
 export function sessionSecrets(session, cookies, secret) {
   const out = []
   const write = (value, maxAge) => { out.length = 0; out.push(`${SECRET_COOKIE}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${Math.max(0, maxAge)}`) }
@@ -1572,7 +1573,7 @@ export function sessionSecrets(session, cookies, secret) {
   return Object.assign(session, {
     secret: read,
     setSecret(value, { maxAge = sessionSeconds() } = {}) {
-      if (!secret) throw new Error('BRAIN_SECRET is not set: session secrets need it (32+ random bytes in .brain_env)')
+      if (!secret) throw missingSecret('session secrets')
       const text = JSON.stringify({ v: value, exp: Date.now() + maxAge * 1000 })
       if (value === undefined || text === undefined || JSON.parse(text).v === undefined) throw new Error('session.setSecret needs a JSON value')
       const sealed = seal(secret, text)
@@ -1623,7 +1624,7 @@ export function sessionFrom(cookies, secret) {
     session: sessionSecrets({
       user,
       set(u, { maxAge = sessionSeconds() } = {}) {
-        if (!secret) throw new Error('BRAIN_SECRET is not set: sessions need it (32+ random bytes in .brain_env)')
+        if (!secret) throw missingSecret('sessions')
         const version = sessionVersion()
         const data = b64u(JSON.stringify({ u, exp: Date.now() + maxAge * 1000, ...(version ? { sv: version } : {}) }))
         set.push(cookie(`${data}.${sign(data)}`, maxAge))

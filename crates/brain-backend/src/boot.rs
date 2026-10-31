@@ -62,16 +62,60 @@ pub fn database_is_local(url: &str) -> bool {
     PgConnectOptions::from_str(url).map_or(true, |options| loopback(&options))
 }
 
+/// The account name, as libpq takes it from the password database. sqlx builds whoami without its `std` feature, whose
+/// stub answers `anonymous` on every platform, so a URL without a user would never reach the role `psql` connects as.
+fn system_user() -> Option<String> {
+    let id = std::process::Command::new("id").arg("-un").stdin(std::process::Stdio::null()).output().ok().filter(|o| o.status.success());
+    id.and_then(|o| String::from_utf8(o.stdout).ok()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+        .or_else(|| ["USER", "LOGNAME", "USERNAME"].iter().find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty())))
+}
+
+fn names_user(url: &str) -> bool {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let (location, query) = rest.split_once('?').unwrap_or((rest, ""));
+    location.split('/').next().unwrap_or_default().contains('@') || query.split('&').any(|pair| pair.starts_with("user="))
+}
+
+/// `DATABASE_URL` as connection options: without a user, `PGUSER` and then the system account, the same as `psql`.
+pub fn connect_options(url: &str) -> Result<PgConnectOptions, sqlx::Error> {
+    let options = PgConnectOptions::from_str(url)?;
+    if names_user(url) || std::env::var_os("PGUSER").is_some() {
+        return Ok(options);
+    }
+    Ok(match system_user() {
+        Some(user) => options.username(&user),
+        None => options,
+    })
+}
+
 /// Production databases outside this machine must use `sslmode=verify-full`: the default
 /// `prefer` mode encrypts without checking the certificate, so it gives no protection against
 /// an attacker in the network path.
 pub fn require_verified_tls(url: &str, production: bool) -> Result<PgConnectOptions, String> {
-    let options = PgConnectOptions::from_str(url)
+    let options = connect_options(url)
         .map_err(|_| "B0762: DATABASE_URL is not a valid Postgres URL (its value is not logged); fix: use postgres://user:password@host:5432/database".to_string())?;
     if production && !loopback(&options) && !matches!(options.get_ssl_mode(), PgSslMode::VerifyFull) {
         return Err("BDB_TLS_UNVERIFIED (B0762): production DATABASE_URL points at a remote host without sslmode=verify-full; fix: append ?sslmode=verify-full (plus sslrootcert=<ca.pem> for a private CA) or connect through loopback or a unix socket".into());
     }
     Ok(options)
+}
+
+/// Why a connection failed, naming what was tried: the host, the database and the user, which libpq and sqlx take from
+/// `PGUSER` or the system account when the URL has none. The password never appears.
+pub fn connect_failure(options: &PgConnectOptions, error: &sqlx::Error) -> String {
+    let user = options.get_username();
+    let database = options.get_database().unwrap_or(user);
+    let tried = format!("{}:{} database `{database}` as user `{user}`", options.get_host(), options.get_port());
+    let (reason, fix) = match error {
+        sqlx::Error::Database(db) => match db.code().as_deref() {
+            Some("28P01" | "28000") => ("the server refused this user", format!("create the role (`createuser {user}`) or name another one: postgres://user:password@host:5432/{database}")),
+            Some("3D000") => ("this database does not exist", format!("create it: `createdb {database}`")),
+            _ => ("the server refused the connection", "check DATABASE_URL and the server log".to_string()),
+        },
+        sqlx::Error::Io(_) | sqlx::Error::PoolTimedOut => ("nothing answered there", "start Postgres or correct the host and port in DATABASE_URL".to_string()),
+        _ => ("the connection failed", "check DATABASE_URL".to_string()),
+    };
+    format!("Cannot connect to Postgres at {tried}: {reason} (B0762); fix: {fix} (credentials are not logged)")
 }
 
 fn retryable(error: &sqlx::Error) -> bool {
@@ -133,7 +177,7 @@ pub async fn connect(url: &str, boot: &Boot) -> Result<PgPool, String> {
             } else if matches!(error, sqlx::Error::Tls(_)) {
                 "Cannot establish verified TLS with Postgres (B0762); fix: check sslrootcert and that the certificate names the DATABASE_URL host".into()
             } else {
-                "Cannot connect to Postgres (B0762); fix: check DATABASE_URL (credentials are not logged)".into()
+                connect_failure(&options, &error)
             });
         }
         let delay = boot.delay(attempt, unit_random()).min(boot.give_up - elapsed);
@@ -182,13 +226,26 @@ mod tests {
         assert!((0.0..1.0).contains(&u));
     }
 
+    #[test]
+    fn a_url_without_a_user_connects_as_the_system_account() {
+        let account = std::env::var("PGUSER").ok().unwrap_or_else(|| String::from_utf8(std::process::Command::new("id").arg("-un").output().unwrap().stdout).unwrap().trim().to_string());
+        assert_ne!(account, "anonymous");
+        for url in ["postgresql://127.0.0.1:5432/db", "postgres://db.internal/db?sslmode=require", "postgres:///db"] {
+            assert_eq!(connect_options(url).unwrap().get_username(), account, "{url}");
+        }
+        for (url, user) in [("postgres://alice@127.0.0.1/db", "alice"), ("postgres://alice:p%40ss@127.0.0.1/db", "alice"), ("postgres://127.0.0.1/db?user=bob", "bob")] {
+            assert_eq!(connect_options(url).unwrap().get_username(), user, "{url}");
+        }
+    }
+
     #[tokio::test]
     async fn refused_connections_retry_until_the_budget_then_explain() {
         // Port 1 on loopback refuses immediately on every supported platform.
         let boot = Boot { give_up: Duration::from_millis(300), base: Duration::from_millis(20), ..Boot::server(false) };
         let err = connect("postgres://shop@127.0.0.1:1/shop", &boot).await.unwrap_err();
         assert!(err.starts_with("BDB_CONNECT_TIMEOUT"), "{err}");
-        let err = connect("postgres://shop@127.0.0.1:1/shop", &Boot::command(false)).await.unwrap_err();
+        let err = connect("postgres://alice:s3cret@127.0.0.1:1/shop", &Boot::command(false)).await.unwrap_err();
         assert!(err.starts_with("Cannot connect to Postgres"), "{err}");
+        assert!(err.contains("as user `alice`") && err.contains("127.0.0.1:1") && err.contains("database `shop`") && !err.contains("s3cret"), "{err}");
     }
 }
