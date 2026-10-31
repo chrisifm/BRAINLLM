@@ -71,24 +71,34 @@ acceptance environment had multiple connected Viewer profiles without an assigne
 profile or tab; none was selected or commandeered. This runner records the explicit
 owned-headless fallback and preserves all user browser sessions.
 
-## Current evidence boundary
+## Verified acceptance and limits
 
-The first pinned binary (`3987d0b`, SHA-256
-`c57c36e234c736dbcf2a2f13b4d3b5d993da4f7f7cf0d46ad63765906e3e56b0`)
-completed synthetic schema migration, HTTP signup/login and fixture-row creation;
-three actual Chromium contexts loaded the compiled view successfully. No acceptance
-case is claimed complete yet: B1102 incorrectly rejected the documented endpoint
-`cache: 'no'`, and dev module fallback hid that diagnostic behind a component export.
-The fixture deliberately retains `cache: 'no'`. Checker correction `f2287f6`
-is available; the explicit module-error behavior has a separate owner. Rerun the complete gate with a fresh
-verified binary after those corrections before claiming full-chain acceptance.
+All six cases passed with the actual compiled fixture, Chromium
+`Chrome/156.0.8078.73` and disposable PostgreSQL 18.6. The verified binary came
+from source `d0c7daffd7470a896897d0fbce440f9e5fa326d4`, built with Rust 1.99.1;
+its SHA-256 is
+`c08686d7a2ba3f8bd96bb152fdd5acee738f90dc5f3095f9525ffd60a649d978`.
+Compiler input provenance is recorded separately from fixture and gate-script
+hashes. The passing nine-file fixture hash is
+`cdcaebe0b8fe9bb5bb53edc93beda59c52fd443ca7358487af46dac5b22ea169`.
 
+The run observed 15 allowlisted metadata frames. All three browser contexts and
+owned children were disposed, no app database connections remained, and the
+owned containers/network were confirmed removed. Viewer fallback was explicit;
+no user profile or existing tab was selected.
 
-## Browser-container process budget
+The acceptance container combines the backend, frontend and three Chrome
+contexts. Its finite PID limit is 512: the observed peak was 262, with zero PID
+limit hits and zero OOM kills. An earlier 256-PID run reached exactly 256, recorded
+two limit hits and an OS thread-spawn error (errno 11). CPU, memory budgets,
+authorization and all six assertions remained unchanged. Recovery from OS thread-admission failure remains a separate reliability
+acceptance requirement; this successful run with headroom does not establish
+resource-exhaustion recovery. The database retains its separate 96-process limit.
 
-The worker has a finite 512-process/thread cgroup limit for the backend, development server and three Chromium
-contexts together; the database retains its separate 96-process limit. A controlled failed run at 256 recorded
-peak256, two process-limit hits and OS errno11/thread-spawn failure, with zero OOM kills and memory below its
-unchanged 3 GiB ceiling. Increasing only this test-container process budget does not prove graceful framework
-behavior under thread exhaustion. That development-server failure path is tracked separately; memory/CPU limits,
-identity assertions and acceptance cases were not relaxed.
+The first binary rejected the documented endpoint `cache: 'no'` as B1102, and
+the dev module fallback concealed the diagnostic behind a component export.
+Those defects were corrected before this acceptance run. The fixture retains the
+explicit no-cache endpoint contract and uses real compiled SDK methods throughout.
+This gate is a single owned-process deployment proof, not distributed durability,
+an application migration or a replacement for the framework's broader release
+gates and actual deployment verification.
