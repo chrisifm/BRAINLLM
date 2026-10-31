@@ -15,6 +15,18 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   object field options `{type, default, unique}` and declarative checks in `constraints.jsbrain`. Decimals travel and
   are stored as canonical strings with a lossless database CHECK; unique and check violations answer 409/422. Records
   expose `created_at`/`updated_at`. Existing contracts record byte-identically and gain no database objects.
+- Backend relations: `ref:<resource>` fields install a foreign key with `on_delete` `restrict`, `cascade` or
+  `set_null`, reject missing ids with 422 `REFERENCE_NOT_FOUND`, and support one-level `?include=` (docs/backend/relations.md).
+- Backend list filters declared in `query.jsbrain`: typed operators, comma lists, related-field filters and relative
+  times (`now-7d`); undeclared or repeated parameters answer 422 (docs/backend/filters.md).
+- Backend list sorting by declared fields with null placement and a stable id tie-break (docs/backend/sorting.md).
+- Backend list `total`, named aggregates with exact decimal sums and averages, and per-row related counts
+  (docs/backend/aggregates.md).
+- Backend keyset pagination: `next_cursor`, accepted back as `cursor` or `after`, bound to its sort (docs/backend/pagination.md).
+- Backend search combines with declared filters, totals, aggregates and cursor paging when sorted (docs/backend/search.md).
+- Backend relational ownership grants `owner.<ref>[.<ref>]` for read, create, update and delete (docs/backend/ownership.md).
+- Backend per-field `visible` grants project responses and close restricted fields to filters, sorts, search and
+  aggregates (docs/backend/visibility.md).
 
 ### Changed
 
