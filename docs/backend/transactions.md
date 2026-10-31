@@ -25,7 +25,7 @@ export default {
 ```js
 <meta server>
 export default {
-  roles: ['candidate', 'admin'],
+  roles: ['user', 'admin'],
   input: { product_id: 'str!', quantity: 'int!' },
   steps: [
     { as: 'product', action: 'shop_products.reserve', id: '$input.product_id', input: { quantity: '$input.quantity' } },

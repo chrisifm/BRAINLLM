@@ -15,7 +15,7 @@ use uuid::Uuid;
 const ORIGIN: &str = "https://shop.example.test";
 
 fn resources() -> Vec<brain_backend::Resource> {
-    let policy = json!({"read":["public"],"create":["candidate"],"update":["owner"],"delete":["owner"]});
+    let policy = json!({"read":["public"],"create":["user"],"update":["owner"],"delete":["owner"]});
     vec![
         serde_json::from_value(json!({"name":"products","fields":{"title":{"kind":"str","required":true}},"policy":policy})).unwrap(),
         serde_json::from_value(json!({"name":"notes","fields":{"title":{"kind":"str","required":true}},"policy":policy})).unwrap(),
@@ -59,7 +59,7 @@ async fn reads_carry_validators_public_lifetimes_and_writes_honor_if_match() {
     db::migrate(&pool, &resources()).await.unwrap();
     let user = Uuid::new_v4();
     let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-    sqlx::query("INSERT INTO _brain_users(id,email,password_hash,role) VALUES($1,$2,'synthetic-unused-hash','candidate')").bind(user).bind(format!("{user}@example.test")).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO _brain_users(id,email,password_hash,role) VALUES($1,$2,'synthetic-unused-hash','user')").bind(user).bind(format!("{user}@example.test")).execute(&pool).await.unwrap();
     sqlx::query("INSERT INTO _brain_sessions(token_hash,user_id,expires_at) VALUES($1,$2,now()+interval '1 hour')").bind(auth::digest(&token)).bind(user).execute(&pool).await.unwrap();
     let cookie = format!("{}={token}", auth::COOKIE);
     let signed = [("origin", ORIGIN), ("cookie", cookie.as_str())];

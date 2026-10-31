@@ -115,7 +115,7 @@ async fn postgres_migrations_search_scope_session_serialization_and_storage_outb
     db::migrate(&pool, &[r.clone()]).await.unwrap();
     let owners = [Uuid::new_v4(), Uuid::new_v4()];
     for (n, owner) in owners.iter().enumerate() {
-        sqlx::query("INSERT INTO _brain_users(id,email,password_hash,role)VALUES($1,$2,'synthetic-unusable','candidate')").bind(owner).bind(format!("owner{n}@example.test")).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO _brain_users(id,email,password_hash,role)VALUES($1,$2,'synthetic-unusable','user')").bind(owner).bind(format!("owner{n}@example.test")).execute(&pool).await.unwrap();
     }
     // 100000 synthetic rows, batched under the runtime statement deadline. No private payload in logs.
     for batch in 0..20 {

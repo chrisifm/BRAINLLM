@@ -539,6 +539,10 @@ fn cmd_edit(args: &[String]) -> Result<(), String> {
 
 fn cmd_add(args: &[String]) -> Result<(), String> {
     let pos = positional(args, &["--props", "--store", "--get", "--post", "--fields"]);
+    if pos.len() == 1 && pos[0] == "roles" {
+        println!("+ {}", backend::add_roles(&app_root()?)?);
+        return Ok(());
+    }
     let [kind, name] = <[String; 2]>::try_from(pos).map_err(|_| "usage: brain add view|comp|ui <name> [--props \"...\"]".to_string())?;
     let root = app_root()?;
     if matches!(kind.as_str(), "resource" | "job") {
@@ -612,12 +616,18 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
         if let Some(app) = scaffold::find_root(&target) {
             diags.extend(env::check(&app));
             if let Err(message) = backend::inspect(&app) {
-                let mut diag = compiler::Diag::new("B0735", "server/", brain_parse::Span::default(), message,
-                    "inspect `brain backend schema --json`; fix the named literal schema, explicit policy or hook/job contract, then run brain check again");
+                // Contract errors start with the file that names the problem and may end with their own fix.
+                let (text, fix) = message.split_once("; fix: ").unwrap_or((message.as_str(), "inspect `brain backend schema --json`; fix the named literal schema, explicit policy or hook/job contract, then run brain check again"));
+                let file = text.split_once(": ").map(|(at, _)| at).filter(|at| at.starts_with("server/") && !at.contains(' ')).unwrap_or("server/");
+                let mut diag = compiler::Diag::new("B0735", file, brain_parse::Span::default(), text.to_string(), fix.to_string());
                 diag.line=1;diag.col=1;diags.push(diag);
             }
             // declared origins and the origins a page calls (B0744, B0745, B0746)
             diags.extend(origin_check::check(&app));
+            for (code, file, message, fix) in backend::role_warnings(&app) {
+                let mut diag = compiler::Diag::new(code, &file, brain_parse::Span::default(), message, fix);
+                diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
+            }
             // brain.json `server` (B0707): body, time and rate limits shared by brain run and the production server
             if let Err(message) = brain_pack::read_server_limits(&app) {
                 let (msg, fix) = message.split_once("; fix: ").unwrap_or((message.as_str(), "set whole numbers in range"));

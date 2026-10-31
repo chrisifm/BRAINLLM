@@ -11,7 +11,7 @@ hop must be a `ref:` field.
 export default { read: ['public'], create: ['owner.shop'], update: ['owner.shop'], delete: ['owner.shop', 'admin'] }
 
 // server/resources/reviews/policy.jsbrain — authors and the reviewed shop's owner read reviews
-export default { read: ['owner', 'owner.product.shop'], create: ['candidate'], update: ['owner'], delete: ['owner'] }
+export default { read: ['owner', 'owner.product.shop'], create: ['user'], update: ['owner'], delete: ['owner'] }
 ```
 
 ## Behavior

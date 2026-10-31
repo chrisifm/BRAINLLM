@@ -18,7 +18,7 @@ below distinguish the published baseline, current development and still-open acc
 | Email/password and Google login | Native accounts, persisted sessions, optional JWT and Google recipes exist. | Real project identity, account linking, role and migration parity still require application tests. |
 | Verification and recovery email | Native flows and optional private Resend delivery exist. | Configure the provider and verify delivery/replay/account enumeration behavior with synthetic accounts. |
 | Persistent background work | PostgreSQL leases, retries and at-least-once processing exist. | Application jobs must be idempotent; verify real retries and side effects before removing the existing worker. |
-| CRUD with permissions | Schema/policy and request-scoped `ctx.backend.resource()` exist. | A role is not an organization membership. Company access to a candidate-owned application needs relational authorization. |
+| CRUD with permissions | Schema/policy and request-scoped `ctx.backend.resource()` exist. | A role is not an organization membership. Access by one organization to a record owned by a person needs relational authorization. |
 | Amounts, dates, enums and relationships | App fields accept `str`, `num`, `bool`, `email`, `obj`; resource IDs are UUID. | Exact typed values, references/FKs, organizational scope and legacy bigint identity compatibility are open blockers. |
 | PDF resume uploads | Uploads are private, content-validated PNG/JPEG/WebP images. The upload route allows 5 MiB plus multipart overhead; the general 64 KiB body limit is not universal. | General document/PDF storage, authorized attachment download, quotas, retention and transport limits must be implemented and tested end to end. |
 | Stripe and PayPal webhooks | Native webhooks implement the BRAIN HMAC envelope, not those providers' protocols. | Provider-specific verification and header ingress, raw-body preservation, replay/idempotency and durable receipt are required. |
@@ -91,9 +91,9 @@ Do not reproduce private application security findings in public release notes.
 - [ ] Separate calendar dates from timezone-aware instants. Define accepted inputs and normalization; do not
   silently turn calendar dates into another local day.
 - [ ] Add bounded enum contracts shared by validation, OpenAPI, generated clients and administrative controls.
-- [ ] Model company to vacancy to application references with database-enforced existence, explicit delete rules,
-  uniqueness and organizational access checks. A string field or the `company` role alone does not enforce a FK
-  or tenant boundary. Check cross-company reads/writes and candidate ownership together.
+- [ ] Model parent-to-child references across organizations with database-enforced existence, explicit delete rules,
+  uniqueness and organizational access checks. A string field or a role alone does not enforce a FK
+  or tenant boundary. Check cross-organization reads/writes and record ownership together.
 - [ ] Preserve legacy bigint identity and all foreign references. Define external-ID mapping or an explicitly
   supported ID mode; never silently replace existing IDs or send unsafe integers through JavaScript numbers.
 - [ ] Preview migrations with reviewed revisions/checksums, incompatible-row diagnostics and bounded backfills.
@@ -151,7 +151,7 @@ Do not reproduce private application security findings in public release notes.
   diagnostics. Representative tests must distinguish returned rows from evidence of an index-backed plan.
 - [ ] Preserve filters, sorting, pagination, accents and typo behavior; measure representative datasets rather
   than assuming PostgreSQL always chooses an index.
-- [ ] Verify authentication, role/company boundaries, CRUD, documents, webhooks, queues and admin flows before
+- [ ] Verify authentication, role/organization boundaries, CRUD, documents, webhooks, queues and admin flows before
   deleting the existing backend. Framework component tests do not establish whole-application parity.
 
 ## Dependency order for implementation

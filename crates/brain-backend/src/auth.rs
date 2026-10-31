@@ -81,7 +81,7 @@ impl From<&str> for AuthFailure {
 
 impl Auth {
     pub async fn new(pool: PgPool) -> Result<Self, String> {
-        Self::new_with_role(pool, "candidate").await
+        Self::new_with_role(pool, &crate::auth_flows::RolesConfig::default().signup_role).await
     }
     pub async fn new_with_role(pool: PgPool, signup_role: &str) -> Result<Self, String> {
         if !crate::auth_flows::role_name(signup_role) || signup_role == "admin" {
@@ -397,7 +397,7 @@ mod identity_tests {
         identity.email = format!("new-{}@example.test", Uuid::new_v4().simple());
         let nonce = auth.google_challenge().await.unwrap();
         let (user, token) = auth.google_login(&identity, &nonce).await.unwrap().unwrap();
-        assert_eq!(user.role, "candidate");
+        assert_eq!(user.role, "user");
         assert!(!user.verified);
         assert!(auth.user(Some(&token)).await.unwrap().is_some());
         assert!(

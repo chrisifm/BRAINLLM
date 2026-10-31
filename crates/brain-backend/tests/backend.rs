@@ -44,7 +44,7 @@ fn contracts_reject_unsafe_names_public_writes_unknown_fields_and_missing_requir
             read: vec!["owner".into()],
             ..Policy::default()
         }
-        .owners_only("read", Some("candidate"))
+        .owners_only("read", Some("user"))
     );
 }
 
@@ -66,7 +66,7 @@ async fn postgres_auth_policy_crud_transactional_hooks_and_leased_jobs() {
         })
         .await
         .unwrap();
-    assert_eq!(user.role, "candidate");
+    assert_eq!(user.role, "user");
     assert!(
         auth.login(Credentials {
             email: "reader@example.test".into(),
@@ -157,7 +157,7 @@ async fn postgres_auth_policy_crud_transactional_hooks_and_leased_jobs() {
     let mut exposed = r.clone();
     exposed.policy = Policy {
         read: vec!["owner".into()],
-        create: vec!["candidate".into()],
+        create: vec!["user".into()],
         update: vec!["owner".into()],
         delete: vec!["owner".into()],
     };

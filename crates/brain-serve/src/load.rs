@@ -985,10 +985,10 @@ mod tests {
         let d = std::env::temp_dir().join(format!("brain-rd-load-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
         let f = d.join("rd.mjs");
-        std::fs::write(&f, "export async function load(ctx) { throw ({ redirect: '/jobs/' + ctx.params.id, status: 301 }) }").unwrap();
+        std::fs::write(&f, "export async function load(ctx) { throw ({ redirect: '/posts/' + ctx.params.id, status: 301 }) }").unwrap();
         let mut sc = Sidecar::spawn(&d, &[]).unwrap();
         let v = sc.call(&file_url(&f), "load", "{\"params\":{\"id\":\"a b\"}}").unwrap();
-        assert_eq!(v, "{\"redirect\":\"/jobs/a b\",\"status\":301}");
+        assert_eq!(v, "{\"redirect\":\"/posts/a b\",\"status\":301}");
         drop(sc);
         std::fs::remove_dir_all(d).unwrap();
     }

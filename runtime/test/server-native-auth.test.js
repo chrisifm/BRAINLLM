@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer, sessionFrom } from '../server/server.mjs'
-const user = { id: '00000000-0000-4000-8000-000000000001', email: 'candidate@example.test', role: 'candidate', verified: true }
+const user = { id: '00000000-0000-4000-8000-000000000001', email: 'member@example.test', role: 'user', verified: true }
 const dist = mkdtempSync(join(tmpdir(), 'brain-native-ssr-')); mkdirSync(join(dist, '_server'))
 writeFileSync(join(dist, '_server/native.mjs'), `export function who(ctx) { return { user:ctx.user, sessionUser:ctx.session.user } } export function set(ctx) { ctx.session.set({role:'admin'});return 'changed' } export function logout(ctx) { ctx.session.clear();return 'signed out' }`)
 writeFileSync(join(dist, '_server/guard.mjs'), `export default ctx => ctx.user?.role==='admin' ? {redirect:'/permitted'} : false`)

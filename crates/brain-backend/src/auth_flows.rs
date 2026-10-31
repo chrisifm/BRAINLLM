@@ -16,10 +16,8 @@ pub struct RolesConfig {
 impl Default for RolesConfig {
     fn default() -> Self {
         Self {
-            roles: ["admin", "company", "candidate", "user"]
-                .map(String::from)
-                .to_vec(),
-            signup_role: "candidate".into(),
+            roles: ["admin", "user"].map(String::from).to_vec(),
+            signup_role: "user".into(),
         }
     }
 }
@@ -30,23 +28,38 @@ pub fn role_name(role: &str) -> bool {
         && bytes.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
         && !matches!(role, "public" | "owner")
 }
+/// What an app without `server/auth/roles.jsbrain` received implicitly from 0.4.0 to 0.6.1. Compatibility only: it
+/// applies solely to such an app whose grants still name one of these words, so published apps keep compiling and
+/// signing people up unchanged. New apps never receive it; every other name is the app's own declaration.
+pub const LEGACY_IMPLICIT_ROLES: [&str; 4] = ["admin", "company", "candidate", "user"];
+pub const LEGACY_IMPLICIT_SIGNUP_ROLE: &str = "candidate";
 impl RolesConfig {
+    pub fn legacy_implicit() -> Self {
+        Self {
+            roles: LEGACY_IMPLICIT_ROLES.map(String::from).to_vec(),
+            signup_role: LEGACY_IMPLICIT_SIGNUP_ROLE.into(),
+        }
+    }
     pub fn validate(&self) -> Result<(), String> {
-        if self.roles.len() > 32
-            || self.roles.iter().any(|r| !role_name(r))
-            || self
-                .roles
-                .iter()
-                .collect::<std::collections::HashSet<_>>()
-                .len()
-                != self.roles.len()
-            || ["admin", "company", "candidate", "user"]
-                .iter()
-                .any(|r| !self.roles.iter().any(|s| s.as_str() == *r))
-            || self.signup_role == "admin"
-            || !self.roles.contains(&self.signup_role)
-        {
-            return Err("Auth roles require 4..32 distinct safe names including admin/company/candidate/user, and a configured non-admin signup role".into());
+        const AT: &str = "server/auth/roles.jsbrain";
+        if self.roles.len() > 32 {
+            return Err(format!("{AT}: {} roles exceed the limit of 32; fix: remove the unused names", self.roles.len()));
+        }
+        if let Some(role) = self.roles.iter().find(|r| !role_name(r)) {
+            return Err(format!("{AT}: role `{role}` is not a usable name; fix: use a lowercase identifier of at most 48 characters, other than public or owner"));
+        }
+        let distinct = self.roles.iter().collect::<std::collections::HashSet<_>>().len();
+        if distinct != self.roles.len() {
+            return Err(format!("{AT}: roles repeat a name; fix: list each role once"));
+        }
+        if !self.roles.iter().any(|r| r == "admin") {
+            return Err(format!("{AT}: roles must include `admin`; fix: add 'admin' to roles (administrators manage roles and first-admin bootstrap uses it)"));
+        }
+        if self.signup_role == "admin" {
+            return Err(format!("{AT}: signup_role cannot be `admin`; fix: name a non-admin role, e.g. roles: ['admin', 'user'], signup_role: 'user'"));
+        }
+        if !self.roles.contains(&self.signup_role) {
+            return Err(format!("{AT}: signup_role `{}` is not in roles; fix: add it to roles or name a declared role", self.signup_role));
         }
         Ok(())
     }
@@ -613,6 +626,51 @@ async fn audit(
     .await
     .map_err(|e| database(crate::db::safe(e)))?;
     Ok(())
+}
+
+/// Accounts per stored role that `roles` does not declare, largest first. They keep working (owner grants still apply,
+/// nothing is rewritten) but no role grant can name them, so an operator should see them after every migration.
+pub async fn undeclared_accounts(pool: &PgPool, roles: &RolesConfig) -> Result<Vec<(String, i64)>, String> {
+    let rows = sqlx::query("SELECT role,count(*) AS accounts FROM public._brain_users WHERE NOT role=ANY($1) GROUP BY role ORDER BY accounts DESC,role")
+        .bind(&roles.roles)
+        .fetch_all(pool)
+        .await
+        .map_err(crate::db::safe)?;
+    Ok(rows.iter().map(|r| (r.get("role"), r.get("accounts"))).collect())
+}
+
+/// Private operator entry point only. Moves every account from one role to another, in one transaction, revoking their
+/// sessions the way a single role change does. Without `apply` it only counts. Administrators are never moved in or
+/// out here: that stays an explicit per-account decision.
+pub async fn rename_role(pool: &PgPool, roles: &RolesConfig, from: &str, to: &str, apply: bool) -> Result<i64, String> {
+    if from == to || from == "admin" || to == "admin" || !role_name(from) {
+        return Err("rename-role moves accounts between two different non-admin roles".into());
+    }
+    if !roles.roles.iter().any(|r| r == to) {
+        return Err(format!("rename-role: `{to}` is not declared; fix: add it to server/auth/roles.jsbrain and run `brain backend migrate`"));
+    }
+    let safe = |e: Error| e.to_string();
+    let mut tx = pool.begin().await.map_err(crate::db::safe)?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext('brain:auth:role-change'))").execute(&mut *tx).await.map_err(crate::db::safe)?;
+    let users: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM public._brain_users WHERE role=$1 ORDER BY id FOR UPDATE")
+        .bind(from)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(crate::db::safe)?;
+    if apply {
+        for user in &users {
+            sqlx::query("UPDATE public._brain_users SET role=$2,auth_version=auth_version+1,updated_at=now() WHERE id=$1")
+                .bind(user)
+                .bind(to)
+                .execute(&mut *tx)
+                .await
+                .map_err(crate::db::safe)?;
+            revoke(&mut tx, *user).await.map_err(safe)?;
+            audit(&mut tx, *user, "role-changed").await.map_err(safe)?;
+        }
+        tx.commit().await.map_err(crate::db::safe)?;
+    }
+    Ok(users.len() as i64)
 }
 
 /// Private operator entry point only. Never expose this bootstrap as a public HTTP route.

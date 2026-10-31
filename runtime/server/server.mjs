@@ -1590,7 +1590,7 @@ export function prefersMarkdown(accept) {
   return md > 0 && (md > html || (md === html && mdAt < htmlAt))
 }
 // SEO head from View.seo(props): title, description, canonical, og:*/twitter:*, JSON-LD and the view's <head> block
-// F5: the build writes an SSR route's canonical/og:url from its pattern (/jobs/:slug); the request has the real path.
+// F5: the build writes an SSR route's canonical/og:url from its pattern (/posts/:slug); the request has the real path.
 // A view's own <head> tags replace the generated ones with the same name/property (one tag per key, SPEC «SEO»).
 function head(page, seo, path) {
   let h = page

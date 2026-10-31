@@ -163,7 +163,7 @@ async fn a_saturated_pool_answers_overloaded_instead_of_internal_error() {
     let notes: Resource = serde_json::from_value(json!({
         "name": format!("notes_{suffix}"),
         "fields": {"title": {"kind": "str", "required": true}},
-        "policy": {"read": ["public"], "create": ["candidate"], "update": ["owner"], "delete": ["owner"]}
+        "policy": {"read": ["public"], "create": ["user"], "update": ["owner"], "delete": ["owner"]}
     }))
     .unwrap();
     brain_backend::db::migrate(&setup, std::slice::from_ref(&notes)).await.unwrap();

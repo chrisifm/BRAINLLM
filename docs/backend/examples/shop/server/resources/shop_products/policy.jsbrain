@@ -1,2 +1,2 @@
 <meta server>
-export default { read: ['candidate', 'admin'], create: ['admin'], update: ['admin'], delete: ['admin'] }
+export default { read: ['user', 'admin'], create: ['admin'], update: ['admin'], delete: ['admin'] }

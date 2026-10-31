@@ -34,7 +34,7 @@ async fn database(url: &str) -> sqlx::PgPool {
 }
 
 fn resources() -> Vec<brain_backend::Resource> {
-    vec![serde_json::from_value(json!({"name":"orders","fields":{"title":{"kind":"str","required":true}},"policy":{"read":["owner","admin"],"create":["candidate","admin"],"update":["owner","admin"],"delete":["owner","admin"]}})).unwrap()]
+    vec![serde_json::from_value(json!({"name":"orders","fields":{"title":{"kind":"str","required":true}},"policy":{"read":["owner","admin"],"create":["user","admin"],"update":["owner","admin"],"delete":["owner","admin"]}})).unwrap()]
 }
 
 /// One backend process: its own router, broker and limiter memory over the shared database.
@@ -75,7 +75,7 @@ async fn process(pool: &sqlx::PgPool, shared: bool) -> (String, http::SocketCont
 async fn session(pool: &sqlx::PgPool) -> String {
     let id = Uuid::new_v4();
     let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-    sqlx::query("INSERT INTO _brain_users(id,email,password_hash,role) VALUES($1,$2,'synthetic-unused-hash','candidate')")
+    sqlx::query("INSERT INTO _brain_users(id,email,password_hash,role) VALUES($1,$2,'synthetic-unused-hash','user')")
         .bind(id).bind(format!("{id}@example.test")).execute(pool).await.unwrap();
     sqlx::query("INSERT INTO _brain_sessions(token_hash,user_id,expires_at) VALUES($1,$2,now()+interval '1 hour')")
         .bind(auth::digest(&token)).bind(id).execute(pool).await.unwrap();

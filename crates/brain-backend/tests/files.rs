@@ -68,13 +68,15 @@ async fn declared_buckets_stream_any_type_enforce_policy_and_serve_ranges() {
     let orders: Resource = serde_json::from_value(json!({
         "name": format!("orders_{suffix}"),
         "fields": {"title": {"kind": "str", "required": true}, "invoice": {"kind": "str"}},
-        "policy": {"read": ["owner", "company"], "create": ["candidate"], "update": ["owner"], "delete": ["owner"]}
+        "policy": {"read": ["owner", "staff"], "create": ["user"], "update": ["owner"], "delete": ["owner"]}
     }))
     .unwrap();
     brain_backend::db::migrate(&pool, std::slice::from_ref(&orders)).await.unwrap();
+    let roles = brain_backend::auth_flows::RolesConfig { roles: ["admin", "user", "staff"].map(String::from).to_vec(), signup_role: "user".into() };
+    roles.register(&pool).await.unwrap();
     let auth = Auth::new(pool.clone()).await.unwrap();
     let mut sessions = Vec::new();
-    for role in ["candidate", "company", "candidate"] {
+    for role in ["user", "staff", "user"] {
         let email = format!("files-{}@example.test", Uuid::new_v4().simple());
         let password = "synthetic-files-account-password";
         let user = auth.signup(Credentials { email: email.clone(), password: password.into() }).await.unwrap();
@@ -83,24 +85,24 @@ async fn declared_buckets_stream_any_type_enforce_policy_and_serve_ranges() {
         sessions.push((user, session));
     }
     let (owner, owner_session) = &sessions[0];
-    let (_, company_session) = &sessions[1];
+    let (_, staff_session) = &sessions[1];
     let (_, stranger_session) = &sessions[2];
     let order = brain_backend::db::create(&pool, &orders, owner.id, json!({"title": "Desk lamp"})).await.unwrap();
     let order_id = order["id"].as_str().unwrap().to_string();
 
     let invoices = Bucket::from_contract("invoices", json!({
         "resource": orders.name, "field": "invoice", "types": ["application/pdf"], "maxBytes": "1kb",
-        "create": ["candidate"], "read": ["owner", "related", "admin"]
+        "create": ["user"], "read": ["owner", "related", "admin"]
     }))
     .unwrap();
-    let attachments = Bucket::from_contract("attachments", json!({"create": ["candidate"], "maxBytes": 4096})).unwrap();
-    let banners = Bucket::from_contract("banners", json!({"visibility": "public", "create": ["candidate"]})).unwrap();
+    let attachments = Bucket::from_contract("attachments", json!({"create": ["user"], "maxBytes": 4096})).unwrap();
+    let banners = Bucket::from_contract("banners", json!({"visibility": "public", "create": ["user"]})).unwrap();
     let root = Scratch(std::env::temp_dir().join(format!("brain-files-http-{}", Uuid::new_v4())));
     let (http, _) = brain_backend::http::router_with_platform(
         pool.clone(),
         brain_backend::Config {
         api_keys: None,
-            roles: Default::default(),
+            roles,
             mail: None,
             auth_public_base_url: None,
             webhooks: None,
@@ -160,7 +162,7 @@ async fn declared_buckets_stream_any_type_enforce_policy_and_serve_ranges() {
     assert!(response.headers()["content-disposition"].to_str().unwrap().starts_with("attachment;"));
     let etag = response.headers()["etag"].to_str().unwrap().to_string();
     assert_eq!(body(response).await, pdf);
-    assert_eq!(client.send("GET", &location, Some(company_session), &[], vec![]).await.status(), 200);
+    assert_eq!(client.send("GET", &location, Some(staff_session), &[], vec![]).await.status(), 200);
     assert_eq!(client.send("GET", &location, Some(stranger_session), &[], vec![]).await.status(), 403);
     assert_eq!(client.send("GET", &location, None, &[], vec![]).await.status(), 401);
 
@@ -186,7 +188,7 @@ async fn declared_buckets_stream_any_type_enforce_policy_and_serve_ranges() {
     assert_eq!(listed["items"].as_array().unwrap().len(), 1);
     let listed = json_body(client.send("GET", "/_brain/files/invoices", Some(stranger_session), &[], vec![]).await).await;
     assert_eq!(listed["items"].as_array().unwrap().len(), 0);
-    let listed = json_body(client.send("GET", &format!("/_brain/files/invoices?record={order_id}"), Some(company_session), &[], vec![]).await).await;
+    let listed = json_body(client.send("GET", &format!("/_brain/files/invoices?record={order_id}"), Some(staff_session), &[], vec![]).await).await;
     assert_eq!(listed["items"][0]["id"], id);
     let meta = json_body(client.send("GET", &format!("{location}/meta"), Some(owner_session), &[], vec![]).await).await;
     assert_eq!(meta["sha256"].as_str().unwrap().len(), 64);
@@ -206,7 +208,7 @@ async fn declared_buckets_stream_any_type_enforce_policy_and_serve_ranges() {
     assert_eq!(response.status(), 400);
     // Unknown bucket and role without create grant.
     assert_eq!(client.upload("/_brain/files/nope", owner_session, "a.txt", "text/plain", b"a").await.status(), 404);
-    assert_eq!(client.upload("/_brain/files/attachments", company_session, "a.txt", "text/plain", b"a").await.status(), 403);
+    assert_eq!(client.upload("/_brain/files/attachments", staff_session, "a.txt", "text/plain", b"a").await.status(), 403);
 
     // Public buckets serve without a session and with an immutable cache policy.
     let response = client.upload("/_brain/files/banners", owner_session, "hero.png", "image/png", &png).await;

@@ -727,7 +727,7 @@ impl brain_backend::before_hooks::BeforeHooks for HookFixture {
             self.calls
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             assert_eq!(context["resource"], "hook_items");
-            assert_eq!(context["user"]["role"], "candidate");
+            assert_eq!(context["user"]["role"], "user");
             assert!(
                 context["rid"]
                     .as_str()
@@ -765,7 +765,7 @@ impl brain_backend::before_hooks::BeforeHooks for HookFixture {
 async fn all_native_mutations_enforce_before_hooks_policy_validation_deadlines_and_row_conflicts() {
     use std::sync::{Arc, atomic::Ordering};
     let pool = database().await;
-    let resource:brain_backend::Resource=serde_json::from_value(json!({"name":"hook_items","fields":{"title":{"kind":"str","required":true}},"policy":{"read":["owner"],"create":["candidate"],"update":["owner"],"delete":["owner"]},"hooks":{"before_create":"validate_item","before_update":"validate_item","before_delete":"validate_item","after_create":"item_changed","after_update":"item_changed","after_delete":"item_changed"}})).unwrap();
+    let resource:brain_backend::Resource=serde_json::from_value(json!({"name":"hook_items","fields":{"title":{"kind":"str","required":true}},"policy":{"read":["owner"],"create":["user"],"update":["owner"],"delete":["owner"]},"hooks":{"before_create":"validate_item","before_update":"validate_item","before_delete":"validate_item","after_create":"item_changed","after_update":"item_changed","after_delete":"item_changed"}})).unwrap();
     let job:brain_backend::Resource=serde_json::from_value(json!({"name":"item_changed","fields":{"resource":{"kind":"str","required":true},"operation":{"kind":"str","required":true},"record":{"kind":"obj","required":true}},"policy":{"read":["admin"],"create":["admin"],"update":["admin"],"delete":["admin"]}})).unwrap();
     db::migrate(&pool, &[resource.clone()]).await.unwrap();
     let hooks = Arc::new(HookFixture {
@@ -1008,7 +1008,7 @@ async fn all_native_mutations_enforce_before_hooks_policy_validation_deadlines_a
 #[ignore = "Use the explicitly owned disposable Postgres harness; exact types over real HTTP"]
 async fn exact_typed_resources_report_field_errors_unique_conflicts_and_timestamps_over_http() {
     let pool = database().await;
-    let resource: brain_backend::Resource = serde_json::from_value(json!({"name":"priced","fields":{"sku":{"kind":"str","required":true,"unique":true},"price":{"kind":"decimal(8,2)","required":true},"state":{"kind":"enum(new|sold)","required":true,"default":"new"}},"policy":{"read":["owner"],"create":["candidate"],"update":["owner"],"delete":["owner"]}})).unwrap();
+    let resource: brain_backend::Resource = serde_json::from_value(json!({"name":"priced","fields":{"sku":{"kind":"str","required":true,"unique":true},"price":{"kind":"decimal(8,2)","required":true},"state":{"kind":"enum(new|sold)","required":true,"default":"new"}},"policy":{"read":["owner"],"create":["user"],"update":["owner"],"delete":["owner"]}})).unwrap();
     db::migrate(&pool, &[resource.clone()]).await.unwrap();
     let files = std::env::temp_dir().join(format!("brain-typed-http-{}", Uuid::new_v4().simple()));
     let router = brain_backend::http::router(

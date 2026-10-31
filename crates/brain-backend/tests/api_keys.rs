@@ -131,8 +131,8 @@ async fn api_keys_authenticate_scope_quota_trace_rotate_and_revoke() {
     let notes = resource(
         "key_notes",
         Policy {
-            read: vec!["candidate".into()],
-            create: vec!["candidate".into()],
+            read: vec!["user".into()],
+            create: vec!["user".into()],
             update: vec!["owner".into()],
             delete: vec!["owner".into()],
         },
@@ -295,8 +295,8 @@ async fn slug_redirects_and_patch_with_key(pool: &sqlx::PgPool, auth: &Auth) {
     let mut articles = resource(
         "key_articles",
         Policy {
-            read: vec!["candidate".into()],
-            create: vec!["candidate".into()],
+            read: vec!["user".into()],
+            create: vec!["user".into()],
             update: vec!["owner".into()],
             delete: vec!["owner".into()],
         },

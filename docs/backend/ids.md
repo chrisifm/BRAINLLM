@@ -5,7 +5,7 @@ foreign key, the key of file attachments and slug history, and the `<id>` in `/a
 every table keeps references, cursors and policies uniform, and a UUID does not reveal how many records exist.
 
 An app that moves from another backend often already has numeric ids in public URLs (`/products/1042`,
-`/jobs/garden-designer-1042`). Keep them as an ordinary unique field and look records up by it.
+`/products/garden-chair-1042`). Keep them as an ordinary unique field and look records up by it.
 
 ## Contract
 

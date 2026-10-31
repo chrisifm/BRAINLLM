@@ -24,7 +24,7 @@ Edits copy the loaded row. Updates use the backend's full-replacement PUT semant
 
 ## Account access
 
-`auth-ui` generates signup, login, current-session checking and logout, with errors, retry and busy states. Signup creates a candidate account and then asks the user to sign in. The generated client never grants administrator privileges. Password reset, email verification, administrator provisioning and invitations are not implemented by this recipe.
+`auth-ui` generates signup, login, current-session checking and logout, with errors, retry and busy states. Signup creates an account with the signup role and then asks the user to sign in. The generated client never grants administrator privileges. Password reset, email verification, administrator provisioning and invitations are not implemented by this recipe.
 
 ## Deployment requirements
 
