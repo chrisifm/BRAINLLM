@@ -373,7 +373,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_handler_returns_a_file_only_as_a_sandboxed_attachment() {
-        let response = respond(json!({"file": {"base64": "aGk=", "type": "text/html", "name": "report é.html"}, "headers": {"content-disposition": "inline", "x-shop": "a"}})).unwrap();
+        let response = respond(json!({"file": {"base64": "aGk=", "type": "text/html", "name": "report €.html"}, "headers": {"content-disposition": "inline", "x-shop": "a"}})).unwrap();
         assert_eq!(response.status(), 200);
         assert_eq!(response.headers()["content-type"], "text/html");
         assert!(response.headers()["content-disposition"].to_str().unwrap().starts_with("attachment;"), "the handler cannot make it inline");
