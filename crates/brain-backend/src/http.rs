@@ -432,6 +432,7 @@ pub async fn router_with_socket_control(
             "/_brain/analytics",
             post(analytics_ingest).layer(DefaultBodyLimit::max(crate::analytics::MAX_BODY)),
         )
+        .route("/_brain/analytics.js", get(analytics_script))
         .route("/_brain/jobs/{queue}", post(enqueue))
         .route("/_brain/jobs/status/{id}", get(job_status))
         .route("/api/{name}", get(list).post(create))
@@ -1463,6 +1464,14 @@ async fn analytics_ingest(State(app): State<App>, headers: HeaderMap, body: Byte
         Err(IngestError::SessionConflict) => Err(Error::new(StatusCode::CONFLICT, "ANALYTICS_SESSION_CONFLICT", "Start a new random session identifier for this visitor")),
         Err(IngestError::Database(e)) => Err(Error::internal(e)),
     }
+}
+
+async fn analytics_script() -> Response {
+    let headers = [
+        (axum::http::header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
+        (axum::http::header::CACHE_CONTROL, "public, max-age=300"),
+    ];
+    (headers, crate::analytics::collector_js(crate::analytics::settings())).into_response()
 }
 
 // Native owner-managed links; no destination, credential or query content enters request logs.

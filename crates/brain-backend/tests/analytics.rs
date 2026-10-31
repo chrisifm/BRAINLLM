@@ -173,6 +173,11 @@ async fn ingestion_reports_segments_exports_and_retention_on_owned_postgres() {
     let mut no_origin = Request::post("/_brain/analytics").header("user-agent", BROWSER).body(Body::from("{}")).unwrap();
     no_origin.extensions_mut().insert(ConnectInfo(std::net::SocketAddr::from(([127, 0, 0, 1], 9))));
     assert_eq!(router.clone().oneshot(no_origin).await.unwrap().status().as_u16(), 403);
+    let mut script = Request::get("/_brain/analytics.js").body(Body::empty()).unwrap();
+    script.extensions_mut().insert(ConnectInfo(std::net::SocketAddr::from(([127, 0, 0, 1], 9))));
+    let script = router.clone().oneshot(script).await.unwrap();
+    assert_eq!(script.status().as_u16(), 200);
+    assert!(script.headers()["content-type"].to_str().unwrap().starts_with("text/javascript"));
 
     // Stored shape: no query string, no unknown kinds, no UTM keys outside the allowlist, no referrer path.
     let routes: Vec<String> = sqlx::query_scalar("SELECT DISTINCT route FROM _brain_analytics_events ORDER BY 1")
@@ -260,4 +265,15 @@ async fn named_connections_show_up_in_pg_stat_activity() {
     let default: String = sqlx::query_scalar("SELECT current_setting('application_name')")
         .fetch_one(&brain_backend::db::connect(&url).await.unwrap()).await.unwrap();
     assert_eq!(default, "brain:app:http");
+}
+
+#[test]
+fn collector_module_starts_with_settings_and_drops_comment_lines() {
+    let on = analytics::collector_js(Some(&analytics::Config::default()));
+    assert!(on.contains("export function start("));
+    assert!(on.trim_end().ends_with("start({endpoint:new URL('analytics',import.meta.url).pathname})"));
+    assert!(!on.lines().any(|l| l.trim_start().starts_with("//")));
+    let consent = analytics::collector_js(Some(&analytics::Config { consent_required: true, ..Default::default() }));
+    assert!(consent.contains(",consent:'required'})"));
+    assert_eq!(analytics::collector_js(None), "export {}\n");
 }

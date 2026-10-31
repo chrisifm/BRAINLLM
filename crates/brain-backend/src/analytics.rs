@@ -35,10 +35,12 @@ pub struct Config {
     pub country_header: Option<String>,
     /// Accepted events per visitor per minute (1–6000).
     pub events_per_minute: u32,
+    /// `brain.json` `analytics.consent: "required"`: the collector records nothing until `consent('analytics')`.
+    pub consent_required: bool,
 }
 impl Default for Config {
     fn default() -> Self {
-        Self { retention_days: DEFAULT_RETENTION_DAYS, country_header: None, events_per_minute: 600 }
+        Self { retention_days: DEFAULT_RETENTION_DAYS, country_header: None, events_per_minute: 600, consent_required: false }
     }
 }
 impl Config {
@@ -536,6 +538,23 @@ pub fn settings() -> Option<&'static Config> {
 }
 pub fn limiter() -> &'static Limiter {
     LIMITER.get_or_init(|| Limiter::new(settings().map_or(600, |c| c.events_per_minute)))
+}
+
+const COLLECTOR: &str = include_str!("../../../runtime/brain-analytics.js");
+/// The browser collector served at `GET /_brain/analytics.js`: the runtime module without its comment lines, started
+/// with this process' settings. Disabled analytics serve an empty module so pages that still link it stay quiet.
+pub fn collector_js(config: Option<&Config>) -> String {
+    let Some(cfg) = config else { return "export {}\n".into() };
+    let mut out = String::with_capacity(COLLECTOR.len());
+    for line in COLLECTOR.lines() {
+        if !line.trim_start().starts_with("//") {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    let consent = if cfg.consent_required { ",consent:'required'" } else { "" };
+    out.push_str(&format!("start({{endpoint:new URL('analytics',import.meta.url).pathname{consent}}})\n"));
+    out
 }
 
 #[path = "analytics_query.rs"]
