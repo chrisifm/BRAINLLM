@@ -10,6 +10,9 @@ already creates the test file; fill it before calling the task done.
 3. Arrange: `await mount(Comp, props)`; swap services with `await mount(Comp, props, { provide: [[Api, fakeApi]] })`
    (`Api` is the key exported from `channels/` or `services/`). Pass slot content as text:
    `await mount(LinkButton, { href: '/next' }, { slot: 'Continue', slots: { hint: 'Opens the next step' } })`.
+   A `server:` function or an endpoint answers from a stub, without a server: `const save = stub('save', { ok: true })`,
+   `stub('GET /api/posts', [{ id: 1 }])`, `stub('save', reply(422, { errors: { email: 'Taken' } }))`; `save.calls` holds
+   what it received. It lasts one test, and one never called fails it.
 4. Act: `await click(sel)`, `await type(sel, text)`.
 5. Assert: `text(sel)`, `attr(sel, name)`, `hasClass(sel, c)`, `count(sel)` with
    `expect(x).toBe(y) | toEqual(y) | toBeTruthy()`.

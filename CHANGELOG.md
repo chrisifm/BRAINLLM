@@ -33,6 +33,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - With native sockets, `brain test` and `brain doctor` run against the app's own `brain run` on the declared port; another process there is named, with how to find it.
 - `brain doctor` no longer says no errors were captured when the tests did not run.
 - `--env=<name>` and `brain seo --since=<date>` take effect; they used to be ignored in that spelling.
+- `/_brain/analytics.js` answers under `brain run` with native sockets and under `brain start`, and its link keeps the base path.
+- `stub()` and `reply()` in `*.test.brain` answer a `server:` function or an endpoint without a server.
+- In `*.test.brain`, `#id` finds a component's element on every mount of the file, not only the first.
+- A rejected submit puts focus on the first rejected field, or back on the control `disabled={f.busy}` took it from; it used to fall to the page body.
+- Leaving a form that holds a password field no longer asks to discard changes.
 - A `DATABASE_URL` without a user connects as the system account, as `psql` does; it used to try the role `anonymous`. B0762 connection failures now say the host, database and user tried and why it failed, never the password.
 B0721 and B0722 read `process.env`, `ctx.env` and `import.meta.env` from tokens: a comment, a string, prose or a CSS rule that mentions a key no longer counts as a read, and a guard in a later statement (`const k = ctx.env.K; if (!k) ...`) makes the key optional.
 A session write without `BRAIN_SECRET` fails with B0782 and how to set it.
