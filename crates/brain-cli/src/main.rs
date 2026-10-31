@@ -913,6 +913,7 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
         return Err(empty.iter().map(|d| format!("{} {}:{}:{} {}; fix: {}", d.code, d.file, d.line, d.col, d.msg, d.fix)).collect::<Vec<_>>().join("\n"));
     }
     // the site URL: --site > PUBLIC_SITE_URL of the environment > brain.json "site" (legacy)
+    let explicit = site.is_some();
     let site = site.or_else(|| env::value(root, env_name, "PUBLIC_SITE_URL")).or_else(|| {
         let j = brain_mcp::Json::parse(&std::fs::read_to_string(root.join("brain.json")).ok()?).ok()?;
         j.get("site")?.as_str().filter(|s| !s.is_empty()).map(str::to_string)
@@ -922,6 +923,10 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
     {
         return Err(format!("`--site {s}` must be absolute; fix: `--site https://{s}`"));
     }
+    // B0736: a placeholder origin from .brain_env/brain.json is "no site" outside development (an explicit --site is
+    // the author's intent): no sitemap, no robots Sitemap line, no absolute URL pointing at it
+    let placeholder = site.clone().filter(|s| !explicit && env_name != "development" && env::placeholder_origin(s));
+    let site = if placeholder.is_some() { None } else { site };
     let mut rep = BuildReport { files: vec![], warnings: vec![], ledger: vec![], build_cache:brain_mcp::Json::Null, optimizations:vec![], report: vec![], written: 0, unchanged: 0, signature: String::new(), seo: None };
     // the native linter (INTERNALS §20): the same diagnostics as `brain check`; errors stop the build with a summary,
     // warnings are listed with their count (info stays in `brain check`)
@@ -940,6 +945,13 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
     std::fs::create_dir_all(&dist).map_err(|e| e.to_string())?;
     // robots.txt, sitemap.xml, llms.txt, manifest and the head rewrite come from brain-seo's finish (inside bundle)
     bundle(root, &dist, site.as_deref(), env_name, &mut rep, progress)?;
+    if let Some(p) = &placeholder {
+        let live: Vec<String> = std::fs::read_to_string(dist.join("_server/manifest.json")).ok().and_then(|s| brain_mcp::Json::parse(&s).ok())
+            .and_then(|m| m.get("routes").and_then(|r| if let brain_mcp::Json::Arr(a) = r { Some(a) } else { None }).map(|a| a.iter().filter(|r| r.get("sitemap") == Some(&brain_mcp::Json::Bool(true))).filter_map(|r| r.get("path").and_then(brain_mcp::Json::as_str).map(str::to_string)).collect()))
+            .unwrap_or_default();
+        let skipped = if live.is_empty() { String::new() } else { format!("; the sitemap() routes {} are not listed either", live.join(", ")) };
+        rep.warnings.push(format!("B0736 .brain_env:1:1 the {env_name} site URL {p} is a placeholder, so the build publishes no sitemap.xml, no robots.txt Sitemap line and no absolute URL{skipped}; fix: set PUBLIC_SITE_URL in the [{env_name}] section of .brain_env (or `brain build --site https://your-domain`)"));
+    }
     let budget_error = budget::enforce(root, &rep.report).err();
     if budget_error.is_none() {
         let feedback:serde_json::Value=serde_json::from_str(&build_json(&rep).stringify()).map_err(|_|"build feedback serialization failed")?;
@@ -1196,7 +1208,10 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
         if !built.redirects.is_empty() {
             files.push(("_brain/redirects.nginx".into(), brain_seo::redirects::nginx(&built.redirects)));
             files.push(("_brain/redirects.caddy".into(), brain_seo::redirects::caddy(&built.redirects)));
-            files.push(("_server/redirects.json".into(), brain_seo::redirects::server_json(&built.redirects).stringify()));
+        }
+        // §33: rules + trailing-slash/canonical-host policy, one hop in server.mjs
+        if !built.redirects.is_empty() || !built.policy.is_default() {
+            files.push(("_server/redirects.json".into(), brain_seo::redirects::server_json_with(&built.redirects, &built.policy).stringify()));
         }
         Ok(brain_pack::PostOut { files, binary: built.binary, warnings: built.warnings, csp: built.csp.iter().map(|(d, o)| (d.to_string(), o.to_string())).collect() })
     };
@@ -1775,6 +1790,11 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
     for (code, level, msg, fix) in app.as_deref().map(env::doctor).unwrap_or_default() {
         env_ok &= level != "error";
         advice.push(Json::obj([("code", Json::str(code)), ("level", Json::str(level)), ("file", Json::str(env::FILE)), ("msg", Json::str(msg)), ("fix", Json::str(fix))]));
+    }
+    if let Some(a) = &app
+        && let Some(p) = env::value(a, "production", "PUBLIC_SITE_URL").or_else(|| std::fs::read_to_string(a.join("brain.json")).ok().and_then(|s| Json::parse(&s).ok()).and_then(|j| j.get("site").and_then(Json::as_str).map(str::to_string))).filter(|s| env::placeholder_origin(s))
+    {
+        advice.push(Json::obj([("code", Json::str("B0736")), ("level", Json::str("warning")), ("file", Json::str(env::FILE)), ("msg", Json::str(&format!("the production site URL {} is a placeholder: production builds publish no sitemap, robots Sitemap line or absolute URL", p.split("://").nth(1).map(|h| h.split('/').next().unwrap_or(h)).unwrap_or(&p)))), ("fix", Json::str("set PUBLIC_SITE_URL in the [production] section of .brain_env to the deployed origin"))]));
     }
     if let Some(a) = &app {
         let legacy = std::fs::read_to_string(a.join("brain.json")).ok().and_then(|s| Json::parse(&s).ok()).and_then(|j| j.get("site").and_then(Json::as_str).map(str::to_string));

@@ -50,8 +50,33 @@ pub fn urls(sitemap: &str, since: Option<&str>) -> Vec<String> {
                 _ => Some(loc),
             }
         })
-        .take(MAX_URLS)
         .collect()
+}
+
+/// The page URLs of the built sitemap (S02): a urlset as is, or the local children of a sitemap index (`sitemap-N.xml`
+/// under `site`, the origin plus base path), deduplicated in order. Children are read from `dist` only: one under
+/// another origin, with `..`, missing, or itself an index (no nesting, so no cycle) is an error with a fix.
+pub fn page_urls(dist: &std::path::Path, sitemap: &str, site: &str, since: Option<&str>) -> Result<Vec<String>, String> {
+    if !sitemap.contains("<sitemapindex") {
+        return Ok(urls(sitemap, since));
+    }
+    let root = site.trim_end_matches('/');
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for loc in sitemap.split("<sitemap>").skip(1).filter_map(|c| c.split("<loc>").nth(1)?.split("</loc>").next()) {
+        let loc = loc.replace("&amp;", "&");
+        let rel = loc
+            .strip_prefix(root)
+            .filter(|r| r.starts_with('/') && r.ends_with(".xml") && !r.contains("..") && !r.contains('\\') && !r.contains("//"))
+            .ok_or_else(|| format!("sitemap index child {loc} is not a sitemap file of {root}; fix: rebuild with `brain build` so every child lives under the site URL"))?;
+        let child = std::fs::read_to_string(dist.join(&rel[1..]))
+            .map_err(|_| format!("sitemap index child {loc} is missing from dist/{}; fix: run `brain build` again and deploy every sitemap-N.xml", &rel[1..]))?;
+        if child.contains("<sitemapindex") {
+            return Err(format!("sitemap index child {loc} is itself an index; fix: list only urlset files in dist/sitemap.xml"));
+        }
+        out.extend(urls(&child, since).into_iter().filter(|u| seen.insert(u.clone())));
+    }
+    Ok(out)
 }
 
 /// Request body for [`ENDPOINT`]. `site` is the origin plus the base path (`https://acme.dev/app`): the key file

@@ -138,7 +138,7 @@ for await (const line of createInterface({ input: process.stdin })) {
       out(`OK ${id} ${JSON.stringify(v ?? null)}\n`)
     } finally { if (S) finishContext(c) }
   } catch (e) {
-    if (e && e.notFound === true) out(`OK ${id} {"notFound":true,"status":404}\n`) // `throw notFound()`: answered as a 404 page
+    if (e && e.notFound === true) out(`OK ${id} ${e.gone === true ? '{"notFound":true,"gone":true,"status":410}' : '{"notFound":true,"status":404}'}\n`) // `throw notFound()` / `throw gone()`: a 404 / 410 page
     else if (e && typeof e.redirect === 'string') out(`OK ${id} ${JSON.stringify({ redirect: e.redirect, status: Number(e.status) || 303 })}\n`) // `throw redirect(url, s)`: as server.mjs
     else if (e && e.errors && typeof e.errors === 'object') out(`BAD ${id} ${JSON.stringify({ error: e.message || 'Invalid input', errors: e.errors })}\n`)
     else if (contextServer && e?.status === 503) out(`STATUS ${id} ${JSON.stringify({status:503,message:'Native authentication is temporarily unavailable'})}\n`)
@@ -989,6 +989,25 @@ mod tests {
         let mut sc = Sidecar::spawn(&d, &[]).unwrap();
         let v = sc.call(&file_url(&f), "load", "{\"params\":{\"id\":\"a b\"}}").unwrap();
         assert_eq!(v, "{\"redirect\":\"/jobs/a b\",\"status\":301}");
+        drop(sc);
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn sidecar_answers_gone_from_load() {
+        if Command::new("node").arg("--version").output().is_err() {
+            return;
+        }
+        // §33: `throw gone()` and `return gone()` reach app_page as the 410 marker
+        let d = std::env::temp_dir().join(format!("brain-gone-load-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("g.mjs");
+        std::fs::write(&f, "export async function load(ctx) { if (ctx.params.id === 't') throw ({ notFound: true, gone: true, status: 410 }); return ({ notFound: true, gone: true, status: 410 }) }").unwrap();
+        let mut sc = Sidecar::spawn(&d, &[]).unwrap();
+        for id in ["t", "r"] {
+            let v = sc.call(&file_url(&f), "load", &format!("{{\"params\":{{\"id\":\"{id}\"}}}}")).unwrap();
+            assert_eq!(v, "{\"notFound\":true,\"gone\":true,\"status\":410}", "{id}");
+        }
         drop(sc);
         std::fs::remove_dir_all(d).unwrap();
     }

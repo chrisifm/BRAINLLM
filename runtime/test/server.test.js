@@ -153,7 +153,8 @@ test('SSR: load timeout → 504 page, load error → generic 500 (stack only in 
 
 test('static: clean URLs, index, gzip when accepted, immutable /_b/, 404 page, server code never served', async () => {
   assert.match(await (await get('/about')).text(), /About/)
-  assert.match(await (await get('/docs/')).text(), /Docs/)
+  assert.match(await (await get('/docs')).text(), /Docs/)
+  assert.equal((await get('/docs/')).headers.get('location'), '/docs') // §33 trailingSlash "never": one 301
   const home = await get('/')
   assert.match(home.headers.get('content-security-policy'), /nonce-/)
   assert.match(await home.text(), /<script nonce="[^"]+" type="module" src="\/_b\/app.js">/)
@@ -283,7 +284,8 @@ test("BUILD #177: the manifest's CSP is used as is, with this response's nonce a
 })
 
 test('#193 routes come from the manifest (rx, order): :param one segment, *rest catch-all, _segments never match', async () => {
-  assert.match(await (await get('/users/7/')).text(), /<p>id 7/)
+  assert.match(await (await get('/users/7')).text(), /<p>id 7/)
+  assert.equal((await get('/users/7/')).headers.get('location'), '/users/7')
   assert.equal((await get('/users/_x')).status, 404)
   assert.equal((await get('/users/a/b')).status, 404)
   const doc = await (await get('/docs/a/b/c')).text()
@@ -351,6 +353,37 @@ test('sitemap.xml: past 50 000 URLs in total it becomes an index of the static a
   }
 })
 
+
+test('sitemap.xml: dynamic URLs are split by serialized bytes too, and a URL over 2 048 characters is left out', async () => {
+  const d3 = mkdtempSync(join(tmpdir(), 'brain-dist-smb-'))
+  const w3 = (rel, s) => (mkdirSync(join(d3, rel, '..'), { recursive: true }), writeFileSync(join(d3, rel), s))
+  w3('sitemap.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>https://bytes.test/</loc></url>\n</urlset>\n')
+  w3('_server/b.mjs', `export async function sitemap() { return [...Array.from({ length: 6 }, (_, i) => ({ id: i + '-' + '€'.repeat(60) })), { id: 'x'.repeat(2100) }] }\n`)
+  w3('_server/manifest.json', JSON.stringify({ v: 1, build: 'b1', routes: [{ path: '/items/:id', rx: '^/items/(?<id>[^/]+)/?$', view: '/_b/view.js', layouts: [], server: '_server/b.mjs', page: '_server/pages/user.html', sitemap: true }] }))
+  const logs3 = []
+  const s3 = createServer({ dist: d3, timeout: 2000, sitemapBytes: 1200, log: (level, msg, x) => logs3.push({ level, msg, ...x }) })
+  await new Promise(r => s3.listen(0, '127.0.0.1', r))
+  try {
+    const b3 = `http://127.0.0.1:${s3.address().port}`
+    const idx = await (await fetch(b3 + '/sitemap.xml')).text()
+    assert.ok(idx.includes('<sitemapindex'), idx)
+    const kids = [...idx.matchAll(/<loc>https:\/\/bytes\.test(\/[^<]+)<\/loc>/g)].map(m => m[1])
+    assert.ok(kids.includes('/sitemap-static.xml') && kids.includes('/sitemap-dynamic.xml') && kids.includes('/sitemap-dynamic-2.xml'), idx)
+    let n = 0
+    for (const k of kids.filter(k => k.startsWith('/sitemap-dynamic'))) {
+      const r = await fetch(b3 + k)
+      assert.equal(r.status, 200, k)
+      const body = Buffer.from(await r.arrayBuffer())
+      assert.ok(body.length <= 1200, `${k} is ${body.length} bytes`)
+      n += (body.toString().match(/<url>/g) || []).length
+    }
+    assert.equal(n, 6)
+    assert.equal((await fetch(b3 + '/sitemap-dynamic-9.xml')).status, 404)
+    assert.ok(logs3.some(l => l.level === 'warn' && /2048/.test(l.msg)), JSON.stringify(logs3))
+  } finally {
+    s3.close()
+  }
+})
 
 test('static Brotli: q weights, explicit exclusions and identity keep the immutable asset contract', async () => {
   const br = await fetch(base + '/_b/app.js', {headers:{'accept-encoding':'br, gzip'}})

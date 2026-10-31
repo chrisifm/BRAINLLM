@@ -149,6 +149,16 @@
           "default": true,
           "description": "Write sections.json, the manifest of every section (title, description, home page, feed and pages with URL, Markdown copy and lastmod), linked from every page; false turns it off"
         },
+        "trailingSlash": {
+          "enum": ["never", "always", "ignore"],
+          "default": "never",
+          "description": "One URL per page for crawlers: never = /about/ answers 301 to /about; always = /about answers 301 to /about/; ignore = both are served. Folded into the same single hop as redirects.json"
+        },
+        "canonicalHost": {
+          "type": "boolean",
+          "default": false,
+          "description": "Send every other host (www., an old domain) to `site` with one 301; loopback hosts are never redirected. Needs `site`"
+        },
         "ai": {
           "enum": [
             "allow",

@@ -39,18 +39,39 @@ page text, not after.
   `jsonld={{ '@type': 'Article', headline: props.post.title, datePublished: props.post.date }}` (B1603/B1818 without `@type`).
 - Keep each attribute value on one line (newlines are kept in the output). Values may be expressions from `load` props: `title={props.user.name}`.
 - Site defaults once in `app.brain`: `<meta seo titleTemplate="%s · Acme" og:image="/og.png" twitter="@acme">`.
+- Status codes from `load`: `throw notFound()` → 404, `throw gone()` → 410 (deleted for good), a renamed record
+  `throw redirect('/jobs/' + job.slug, 301)`. Never render an empty page with 200 (a soft 404).
+- URLs: `/about/` answers one 301 to `/about` (`brain.json` `"seo": { "trailingSlash": "never" | "always" |
+  "ignore" }`); `"canonicalHost": true` sends `www.` or old domains to `site` in the same hop. Moved pages go in
+  `redirects.json` (`[{ "from": "/old", "to": "/new", "status": 301 }]`), never a meta refresh or a script.
 - `robots="noindex"` for pages that must not be indexed (403, thank-you pages). Other head tags: a `<head>` block in the view.
 - `[id]` views: `export async function paths()` (prerendered, in the sitemap) or, for live pages,
-  `export async function sitemap({ env })` returning `[{ id, lastmod }]` (needs `brain.json` `site`). Never both (B0117).
+  `export async function sitemap({ env })`. Never both (B0117). It returns one object per page keyed by the bracket name;
+  `lastmod` is optional (`YYYY-MM-DD` or a Date); an item without the key is skipped. `views/blog/[slug].brain`:
+  ```html
+  <meta seo title="Blog post" keyword="blog post" description="One article of the blog with its title and a short summary.">
+  <script>
+    export async function load(ctx) { return { slug: ctx.params.slug } }
+    export async function sitemap({ env }) { return [{ slug: 'hello-world', lastmod: '2026-10-01' }, { slug: 'second-post' }] }
+  </script>
+  <main><h1>Blog post</h1><p>{props.slug}</p></main>
+  ```
+  The server lists `/blog/hello-world` and `/blog/second-post` in /sitemap.xml (kept 5 min).
+- Sitemaps and robots `Sitemap:` need the deployed origin: `PUBLIC_SITE_URL` in the `[production]` section of
+  `.brain_env`. With none, or a placeholder (example.com, `*.test`, localhost: B0736, also in `brain doctor`), the build
+  publishes neither and warns; `brain build --site https://your-domain` overrides it.
 - Collections: `brain add collection blog` turns `content/blog/*.md` (frontmatter `title description date updated?
   tags? cover? author? draft?`) into pages, tag pages, RSS and Atom, with Article JSON-LD.
 
 ## 4. What is automatic (never hand-write it)
 `brain build` writes robots.txt, sitemap.xml, llms.txt, llms-full.txt, a Markdown twin of every indexable page
-(`/pricing.md`, `seo.markdown`), the manifest, missing Open Graph/Twitter tags from `brain.json` `social`, BreadcrumbList,
+(`/pricing.md`, `seo.markdown`), the manifest, the page icon and apple-touch-icon from `public/` (`favicon.svg`,
+`icon-*.png`, `apple-touch-icon*.png`; a page's own `<link rel="icon">` wins), missing Open Graph/Twitter tags from `brain.json` `social`, BreadcrumbList,
 `hreflang` for every locale, and Google tags from `brain.json` `"google"`. AI crawler policy:
 `brain.json` `"seo": { "ai": "allow" | "search-only" | "block" }` (`search-only` = AI search and answers yes, training no).
 Non-production builds force `noindex` (B1822).
+`brain run` answers /robots.txt and /sitemap.xml with no build step, from the request's host: every static route plus
+what `paths()` and `sitemap({ env })` return (a file in `public/` still wins). Try it: `curl localhost:5180/sitemap.xml`.
 
 ## Common mistakes — do NOT
 - Stuff the keyword or repeat it beyond a natural density (B1816 reports over 3 %); use synonyms.

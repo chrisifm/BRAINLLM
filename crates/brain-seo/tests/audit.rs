@@ -1937,3 +1937,75 @@ fn site_feed_exists_without_top_level_pages() {
     assert!(m.contains("\"feed\":\"https://acme.dev/rss.xml\""), "{m}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn indexnow_traverses_a_sitemap_index() {
+    // S02: a split sitemap is an index; IndexNow reads its local children, never sends the child sitemap URLs as pages
+    let dir = fresh_dir("indexnow-index");
+    std::fs::create_dir_all(dir.join("dist")).unwrap();
+    std::fs::write(dir.join("brain.json"), r#"{"site":"https://acme.dev","seo":{"indexnow":true}}"#).unwrap();
+    std::fs::write(dir.join(".brain_env"), "[production]\nINDEXNOW_KEY=prodkey0123456789\n").unwrap(); // gitleaks:allow -- synthetic fixture key
+    let set = |range: std::ops::Range<usize>| {
+        let mut o = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
+        for i in range {
+            o.push_str(&format!("  <url><loc>https://acme.dev/p/{i}</loc></url>\n"));
+        }
+        o + "</urlset>\n"
+    };
+    let index = |kids: &[&str]| {
+        let mut o = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<sitemapindex xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
+        for k in kids {
+            o.push_str(&format!("  <sitemap><loc>{k}</loc></sitemap>\n"));
+        }
+        o + "</sitemapindex>\n"
+    };
+    std::fs::write(dir.join("dist/sitemap.xml"), index(&["https://acme.dev/sitemap-1.xml", "https://acme.dev/sitemap-2.xml"])).unwrap();
+    std::fs::write(dir.join("dist/sitemap-1.xml"), set(0..50_000)).unwrap();
+    std::fs::write(dir.join("dist/sitemap-2.xml"), set(49_999..50_001)).unwrap(); // one duplicate across children
+    if std::env::var("INDEXNOW_KEY").is_ok() {
+        return;
+    }
+    let (code, out) = brain_seo::cli(&dir, &["indexnow".into(), "--dry-run".into()]);
+    assert_eq!(code, 0, "{}", &out[..out.len().min(400)]);
+    assert!(!out.contains("sitemap-1.xml") && !out.contains("sitemap-2.xml"), "child sitemaps are not pages");
+    assert!(out.contains("\"https://acme.dev/p/0\"") && out.contains("\"https://acme.dev/p/50000\""));
+    assert_eq!(out.matches("https://acme.dev/p/49999\"").count(), 1, "deduplicated");
+    assert_eq!(out.matches("POST https://api.indexnow.org/indexnow").count(), 6, "10 000 URLs per request");
+    // a missing child, or one outside the site, is an actionable failure
+    std::fs::remove_file(dir.join("dist/sitemap-2.xml")).unwrap();
+    let (code, out) = brain_seo::cli(&dir, &["indexnow".into(), "--dry-run".into()]);
+    assert_eq!(code, 1);
+    assert!(out.contains("sitemap-2.xml") && out.contains("fix:"), "{out}");
+    std::fs::write(dir.join("dist/sitemap.xml"), index(&["https://acme.dev/../secret.xml"])).unwrap();
+    let (code, out) = brain_seo::cli(&dir, &["indexnow".into(), "--dry-run".into()]);
+    assert_eq!(code, 1);
+    assert!(out.contains("fix:"), "{out}");
+    std::fs::write(dir.join("dist/sitemap.xml"), index(&["https://other.example/sitemap-1.xml"])).unwrap();
+    let (code, out) = brain_seo::cli(&dir, &["indexnow".into(), "--dry-run".into()]);
+    assert_eq!(code, 1);
+    assert!(out.contains("other.example") && out.contains("fix:"), "{out}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn declared_icon_in_public_becomes_the_page_icon() {
+    // zero config: public/favicon.svg (or an icon PNG) is linked as the page icon when the page links none
+    let dir = fresh_dir("icon-default");
+    std::fs::create_dir_all(dir.join("public")).unwrap();
+    std::fs::write(dir.join("public/favicon.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1 1\"/>").unwrap();
+    std::fs::write(dir.join("public/icon-192.png"), [0x89u8, b'P', b'N', b'G']).unwrap();
+    let mut pages = good_site();
+    pages[1].html = pages[1].html.replace("</head>", "<link rel=\"icon\" href=\"/own.png\"></head>");
+    finish(&cfg(), &dir, &mut pages, &[], &[]).unwrap();
+    assert!(pages[0].html.contains("<link rel=\"icon\" href=\"/favicon.svg\" type=\"image/svg+xml\">"), "{}", pages[0].html);
+    assert!(pages[0].html.contains("<link rel=\"apple-touch-icon\" href=\"/icon-192.png\">"), "{}", pages[0].html);
+    assert_eq!(pages[1].html.matches("rel=\"icon\"").count(), 1, "a page's own icon wins: {}", pages[1].html);
+    assert!(pages[1].html.contains("/own.png"));
+    // nothing declared, nothing linked
+    let bare = fresh_dir("icon-none");
+    let mut pages = good_site();
+    finish(&cfg(), &bare, &mut pages, &[], &[]).unwrap();
+    assert!(!pages[0].html.contains("rel=\"icon\""));
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&bare);
+}

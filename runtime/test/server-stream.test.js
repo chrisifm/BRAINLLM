@@ -93,12 +93,21 @@ test('103 Early Hints carry the preloads; the head and layout shell arrive befor
 })
 
 test('a redirect or a failure after the head went out: location.replace / inline notice with the request id', async () => {
+  // §33: a load() that redirects inside the short window keeps a real 303 (no 200 stub)
   globalThis.__release = null
   let p = req('/s?go=1')
-  await late()
+  await until(() => globalThis.__release)
   globalThis.__release()
   let r = await p
-  assert.match(r.body, /<script nonce="[^"]+">location\.replace\("\/elsewhere"\)<\/script>/)
+  assert.equal(r.status, 303)
+  // past the window the head is out: location.replace, and the stub says noindex
+  globalThis.__release = null
+  p = req('/s?go=1')
+  await late()
+  globalThis.__release()
+  r = await p
+  assert.equal(r.status, 200)
+  assert.match(r.body, /<meta name="robots" content="noindex"><script nonce="[^"]+">location\.replace\("\/elsewhere"\)<\/script>/)
   globalThis.__release = null
   p = req('/s?fail=1')
   await late()

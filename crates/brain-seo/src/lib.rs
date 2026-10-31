@@ -119,6 +119,8 @@ pub struct Built {
     /// `redirects.json` rules, validated: feed them to [`redirects::nginx`], [`redirects::caddy`] and
     /// [`redirects::server_json`] for the server configs (`_redirects` is already in `files`).
     pub redirects: Vec<redirects::Rule>,
+    /// `seo.trailingSlash` / `seo.canonicalHost`: feed with the rules to [`redirects::server_json_with`].
+    pub policy: redirects::Policy,
     /// `(dist path, bytes)` of generated binary files (social images).
     pub binary: Vec<(String, Vec<u8>)>,
     pub report: Report,
@@ -348,6 +350,18 @@ pub fn finish_with_og(
             ));
         }
     }
+    // zero config: the icon the app declares in public/ (favicon.svg or an icon SVG, else an icon PNG) is the page icon,
+    // and an icon PNG doubles as the apple-touch-icon; a page that links its own keeps it
+    let declared = public_icons(root);
+    let svg = declared.iter().map(|(p, _)| p).find(|p| p.eq_ignore_ascii_case("favicon.svg")).or_else(|| declared.iter().map(|(p, _)| p).find(|p| p.to_ascii_lowercase().ends_with(".svg")));
+    let png = declared.iter().map(|(p, _)| p).find(|p| p.to_ascii_lowercase().starts_with("apple-touch-icon") && p.to_ascii_lowercase().ends_with(".png"))
+        .or_else(|| declared.iter().map(|(p, _)| p).find(|p| p.to_ascii_lowercase().ends_with(".png")));
+    let icon_tag = match (svg, png) {
+        (Some(s), _) => format!("<link rel=\"icon\" href=\"/{}\" type=\"image/svg+xml\">", files::encode_path(s)),
+        (None, Some(p)) => format!("<link rel=\"icon\" href=\"/{}\" type=\"image/png\">", files::encode_path(p)),
+        _ => String::new(),
+    };
+    let touch_tag = png.map(|p| format!("<link rel=\"apple-touch-icon\" href=\"/{}\">", files::encode_path(p))).unwrap_or_default();
     let end = if cfg.staging {
         "<meta name=\"robots\" content=\"noindex, nofollow\">"
     } else {
@@ -486,8 +500,16 @@ pub fn finish_with_og(
                 tags.push_str(&format!("<link rel=\"alternate\" type=\"application/rss+xml\" title=\"{}\" href=\"/{base}/rss.xml\">", files::xml(&c.name)));
             }
         }
+        let head_of = p.html.split("</head>").next().unwrap_or("").to_ascii_lowercase();
+        let mut icons = String::new();
+        if !head_of.contains("rel=\"icon\"") && !head_of.contains("rel=\"shortcut icon\"") && !head_of.contains("rel=icon") {
+            icons.push_str(&icon_tag);
+        }
+        if !head_of.contains("apple-touch-icon") {
+            icons.push_str(&touch_tag);
+        }
         p.html = dedupe_head(&inject_head(
-            &inject_head(&p.html, &start, false),
+            &inject_head(&p.html, &format!("{start}{icons}"), false),
             &format!("{tags}{end}"),
             true,
         ));
@@ -674,7 +696,13 @@ pub fn finish_with_og(
             cfg.abs("/sitemap.xml")
         ));
     }
-    let sm = files::sitemaps(cfg, &entries);
+    let (sm, rejected) = files::sitemaps_with(cfg, &entries, files::SITEMAP_MAX, files::SITEMAP_MAX_BYTES);
+    for u in rejected {
+        warnings.push(format!(
+            "sitemap: {u} is left out, its URL is longer than {} characters or its entry is larger than a sitemap file; fix: shorten the route or the slug",
+            files::LOC_MAX
+        ));
+    }
     if sm.is_empty() && cfg.sitemap && !cfg.staging {
         warnings.push("no sitemap.xml: it needs absolute URLs; fix: `brain build --site https://your-domain` or \"site\" in brain.json".into());
     }
@@ -797,8 +825,8 @@ pub fn finish_with_og(
                 .join("\n")
         ));
     }
-    if !rules.is_empty() {
-        files.push(("_redirects".into(), redirects::netlify(&rules)));
+    if !rules.is_empty() || !cfg.redirect_policy.is_default() {
+        files.push(("_redirects".into(), redirects::netlify_with(&rules, &cfg.redirect_policy)));
     }
     if let (Some(site), Ok(prev)) = (
         &cfg.site,
@@ -838,6 +866,7 @@ pub fn finish_with_og(
         warnings,
         csp: google.csp,
         redirects: rules,
+        policy: cfg.redirect_policy.clone(),
         binary,
         report,
     })
@@ -1252,24 +1281,29 @@ fn indexnow_cmd(
     let site = cfg
         .root()
         .or_else(|| {
-            indexnow::urls(&sitemap, None).first().and_then(|u| {
+            sitemap.split("<loc>").nth(1).and_then(|u| u.split("</loc>").next()).and_then(|u| {
                 u.split_once("://")
                     .map(|(s, r)| format!("{s}://{}", r.split('/').next().unwrap_or(r)))
             })
         })
         .ok_or("the sitemap has no URLs")?;
-    let urls = indexnow::urls(&sitemap, since);
+    let urls = indexnow::page_urls(&root.join("dist"), &sitemap, &site, since)?;
     if urls.is_empty() {
         return Ok("nothing to send: no sitemap URL matches".into());
     }
-    let body = indexnow::payload(&site, &key, &urls);
+    // one request per MAX_URLS (protocol limit), in sitemap order
+    let bodies: Vec<Json> = urls.chunks(indexnow::MAX_URLS).map(|c| indexnow::payload(&site, &key, c)).collect();
     if dry_run {
-        return Ok(format!("POST {}\n{}", indexnow::ENDPOINT, body.stringify()));
+        return Ok(bodies.iter().map(|b| format!("POST {}\n{}", indexnow::ENDPOINT, b.stringify())).collect::<Vec<_>>().join("\n"));
     }
-    let code = indexnow::send(&body)?;
+    let mut codes = Vec::new();
+    for b in &bodies {
+        codes.push(indexnow::send(b)?.to_string());
+    }
     Ok(format!(
-        "IndexNow accepted {} URL(s) (HTTP {code})",
-        urls.len()
+        "IndexNow accepted {} URL(s) (HTTP {})",
+        urls.len(),
+        codes.join(", ")
     ))
 }
 

@@ -508,6 +508,24 @@ test('#106 SEO tags follow the page on client navigation: og:*, twitter:*, robot
   doc.head.innerHTML = ''
 })
 
+test('S04 route-owned head links follow the page: canonical, hreflang/Markdown alternates, prev/next replaced; site links kept', async () => {
+  const st = hist()
+  page()
+  doc.head.innerHTML = '<link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/_b/app.css"><link rel="alternate" type="application/rss+xml" href="/rss.xml"><meta name="description" content="A"><link rel="canonical" href="https://x.test/a"><link rel="alternate" hreflang="en" href="https://x.test/a"><link rel="alternate" hreflang="es" href="https://x.test/es/a"><link rel="alternate" type="text/markdown" href="/a.md">'
+  pages['/p2'] = '<meta name="description" content="P"><link rel="canonical" href="https://x.test/p2"><link rel="alternate" hreflang="en" href="https://x.test/p2"><link rel="prev" href="/p1"><main><h1>P2</h1></main>'
+  pages['/bare'] = '<main><h1>Bare</h1></main>'
+  const r = router({ parse, hard: () => assert.fail('hard') })
+  const links = () => [...doc.head.querySelectorAll('link')].map(l => [l.getAttribute('rel'), l.getAttribute('hreflang') || l.getAttribute('type') || '', l.getAttribute('href')].join(' ')).sort()
+  await r.go('/p2')
+  assert.deepEqual(links(), ['alternate application/rss+xml /rss.xml', 'alternate en https://x.test/p2', 'canonical  https://x.test/p2', 'icon  /favicon.svg', 'prev  /p1', 'stylesheet  /_b/app.css'])
+  assert.equal(doc.head.querySelector('meta[name=description]').getAttribute('content'), 'P')
+  await r.go('/bare') // a page without its own: nothing of the previous page survives
+  assert.deepEqual(links(), ['alternate application/rss+xml /rss.xml', 'icon  /favicon.svg', 'stylesheet  /_b/app.css'])
+  assert.equal(doc.head.querySelector('meta[name=description]'), null)
+  r.stop()
+  doc.head.innerHTML = ''
+})
+
 test('#235 _loading: mounted in the region when the next page takes > 150 ms, replaced when it arrives; fast pages never show it', async () => {
   const { writeFileSync, mkdtempSync } = await import('node:fs')
   const { join } = await import('node:path')

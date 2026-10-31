@@ -139,7 +139,7 @@ COMPILER assigns the next free code there in the same change that emits it, then
 - B072x environment file `.brain_env` (§36): B0720 empty value in the build environment (error) · B0721 key used in
   code but missing (warning, edit adds `KEY=`) · B0722 key never used (info) · B0723 `PUBLIC_*` value shaped like a
   secret (error) · B0724 malformed line or section (error). Values never appear in any diagnostic.
-- B0734 missing local MCP registration (doctor warning; configuration only) · B0735 invalid backend resource/job contract (error; schema, policy or hook reference).
+- B0734 missing local MCP registration (doctor warning; configuration only) · B0735 invalid backend resource/job contract (error; schema, policy or hook reference) · B0736 placeholder site URL (build and doctor warning): a reserved origin (example.com/org/net, `*.example`, `*.test`, `*.invalid`, localhost, loopback) from `.brain_env` or brain.json is no site outside development, so no sitemap, robots `Sitemap:` line or absolute URL is published; the build names the `sitemap()` routes it skips. An explicit `--site` is used as given.
 - B07xx server and secrets (§11.1): B0701 server module used outside load/server: · B0702 env without `PUBLIC_` on the client · B0703 literal shaped like a key · B0704 `server:` function badly declared (not async, nested, in .jsbrain) or reading component state · B0707 invalid brain.json `server` setting (error; unknown key or a value outside its range).
 
 ## 6. Runtime (CODEGEN → RUNTIME contract), module `runtime/brain.js`
@@ -1060,17 +1060,24 @@ specified elsewhere; ➕ = new in this section.
   `<meta seo>` holds site defaults (`titleTemplate`, `og:image`, `twitter`, `locale`); views override per page.
 - A view may contain a `<head>` block for anything else (alternate hreflang, preload, custom meta). Merged into the
   document head at SSR/prerender; deduplicated by `name`/`property`/`rel+hreflang`; on client navigation the router
-  swaps title, description, canonical, og:* and JSON-LD (RUNTIME extends the existing swap).
+  swaps every route-owned tag: title, description, canonical, hreflang and Markdown alternates, `prev`/`next`, og:*,
+  twitter:*, robots and JSON-LD. The page's own tags replace the previous page's, and none stay when it has none (S04);
+  icons, stylesheets and the RSS feed are site tags and stay.
 - Dynamic routes export `paths()` → prerendered per param and listed in the sitemap; without `paths()` they are SSR.
 - A dynamic route without `paths()` (live content: SSR) may export `sitemap()` instead: it returns the params of its pages
   (`[{ slug: 'a', lastmod: '2026-10-01' }]`) and gets `{ env }`. The manifest marks the route `sitemap: true`, and
   server.mjs serves /sitemap.xml as the build's file plus those URLs (a sitemap index gets one more child,
-  `/sitemap-dynamic.xml`), with the origin of the build's own sitemap. One file holds at most 50 000 URLs: when the
-  build's URLs plus the dynamic ones pass that, /sitemap.xml becomes an index of `/sitemap-static.xml` (the build's
-  file) and `/sitemap-dynamic.xml`, and dynamic URLs past 50 000 are dropped with a warning. The list is kept 5 min
+  `/sitemap-dynamic.xml`), with the origin of the build's own sitemap. One file holds at most 50 000 URLs and 50 MB of
+  UTF-8 XML (escaping included; S01): when the build's URLs plus the dynamic ones pass either limit, /sitemap.xml
+  becomes an index of `/sitemap-static.xml` (the build's file) and `/sitemap-dynamic.xml`, `/sitemap-dynamic-2.xml`, …
+  filled in `sitemap()` order. Dynamic URLs past 50 000 are dropped with a warning, and a URL over 2 048 characters is
+  left out with a warning. The build splits its own sitemap the same way (`sitemap-N.xml`, by count and bytes) and
+  warns about each URL it leaves out. The list is kept 5 min
   (`max-age=300`; requests after expiry share one run); a throwing `sitemap()` is logged and skipped. B0117 outside a
   dynamic view, like `paths()`, and in a view that also exports `paths()` (those pages are prerendered and already
-  in the build's sitemap). Static hosting has no
+  in the build's sitemap). The dev server (`brain run`) answers /robots.txt and /sitemap.xml itself, with no build
+  step: the origin is the request's Host, the pages are every static route plus what `paths()` or `sitemap({ env })`
+  returns (sidecar), without noindex and error views; a file in `public/` wins. Static hosting has no
   server, so the route needs `paths()` there. Not in llms.txt (built before any request).
 - B1601 view without description; B1602 title longer than 60 or description longer than 160 chars (warning);
   B1603 invalid JSON-LD (missing `@type`); B1604 duplicate canonical across views.
@@ -1129,14 +1136,14 @@ time from the prerendered HTML, the route graph and the content collections — 
 |---|---|---|
 | Per-page audit with score | plugin, per edit | `brain seo audit`: score 0–100 per page with actionable `fix`es (title/description length, H1, focus keyword in title/H1/first paragraph/URL, word count, image alt, internal links in/out, canonical, indexability, LCP image weight); B18xx diagnostics; fails `doctor` and `build` when a page scores below `seo.minScore` (default 80, Chris 2026-10-13; `brain.json`) |
 | Focus keyword | manual field | `<meta seo keyword="…">`; density and placement checked; cannibalization (two pages on the same keyword) reported |
-| Structured data | plugin per type | JSON-LD from `jsonld`/`schema`, plus one automatic `@graph` per page (with `site`): `WebSite`+`SearchAction` (`<site>/#website`) and `Organization` (`<site>/#organization`) on every page, `WebPage` (`<url>#webpage`: name, description, `isPartOf`, `about`/`publisher`, `inLanguage`, `dateModified` from `lastmod` or the entry date, `primaryImageOfPage` from `og:image`, `breadcrumb`), typed `["WebPage","FAQPage"]` with `mainEntity` when `<details>` groups are marked `faq`, `BreadcrumbList` (`<url>#breadcrumb`) from the route tree and `BlogPosting` (`<url>#article`, `isPartOf`/`mainEntityOfPage` → the WebPage) for content collections. Every `@id` reference names a node of the same graph; an author-declared type replaces its automatic node (a declared page type such as `AboutPage` replaces `WebPage`). Without `site` only the self-contained `FAQPage`/`BlogPosting` blocks are emitted. Validated against required properties per type |
+| Structured data | plugin per type | JSON-LD from `jsonld`/`schema`, plus one automatic `@graph` per page (with `site`): `WebSite`+`SearchAction` (`<site>/#website`) and `Organization` (`<site>/#organization`) on every page, `WebPage` (`<url>#webpage`: name, description, `isPartOf`, `about`/`publisher`, `inLanguage`, `dateModified` from `lastmod` or the entry date, `primaryImageOfPage` from `og:image`, `breadcrumb`), typed `["WebPage","FAQPage"]` with `mainEntity` when `<details>` groups are marked `faq`, `BreadcrumbList` (`<url>#breadcrumb`) from the route tree and `BlogPosting` (`<url>#article`, `isPartOf`/`mainEntityOfPage` → the WebPage) for content collections. Every `@id` reference names a node of the same graph; an author-declared type replaces its automatic node (a declared page type such as `AboutPage` replaces `WebPage`). Without `site` only the self-contained `FAQPage`/`BlogPosting` blocks are emitted. Validated against required properties per type, including Google's nested rules (Search Central, fetched 2026-10-31): Product/SoftwareApplication offers need `price` (AggregateOffer: `lowPrice` + `priceCurrency`), SoftwareApplication needs `name` and a rating or review, JobPosting `jobLocation.address.addressCountry` and the `employmentType`/`unitText` enums, Event Place locations an `address` |
 | Social images | manual upload | `views/_og.brain` template rendered per page to PNG at build (headless Chrome via the CDP client) with title/description; cached by content hash |
 | Links | plugin, partial | broken internal links and anchors fail the build; external links checked on `brain seo links --external`; orphan pages and internal-link suggestions by shared keywords |
-| Redirects | plugin + DB | `redirects.json` (`from`, `to`, `301|302`) emitted into nginx/_headers/Caddy/server.mjs; renamed routes detected from the journal propose a redirect automatically |
+| Redirects | plugin + DB | `redirects.json` (`from`, `to`, `301|302|307|308`, `:param`, trailing `*`) emitted into nginx/_headers/Caddy/server.mjs; renamed routes detected from the journal propose a redirect automatically. One hop (2026-10-31, `redirects::resolve`): server.mjs `canonicalOf` and the Rust static server (`prod.rs`, reading `_redirects` and its `# brain trailingSlash=… host=…` line) apply the rule, then `seo.trailingSlash` (`never` default: `/a/` → `/a`; `always`; `ignore`) on its target, then `seo.canonicalHost` (other non-loopback `Host` → `site`), as one response; the query is kept unless the rule's target has one. Guard redirects and 403 answers carry `X-Robots-Tag: noindex, nofollow`. `gone()` in `load` compiles to `{ notFound: true, gone: true, status: 410 }` (410 page, else the 404 page; dev server too). Streamed routes wait `STREAM_WAIT` (50 ms) for `load()` before the 200 head, so a quick notFound/gone/redirect keeps its status; a later redirect becomes `location.replace` behind `<meta name="robots" content="noindex">` |
 | i18n | plugin | `hreflang` + `x-default` from `i18n/` languages and localized routes |
 | Content | posts in a DB | content collections: `content/blog/*.md` with frontmatter (title, description, date, tags, cover) → typed pages through a `views/blog/[slug].brain` template; tag/category pages, pagination with `rel` links, reading time |
 | Feeds & sitemaps | plugin | RSS 2.0 + Atom per collection, sitemap index + image sitemap, robots.txt, llms.txt, llms-full.txt (§32) |
-| Freshness | plugin | IndexNow ping on deploy (opt-in, key in env); `lastmod` from content dates |
+| Freshness | plugin | IndexNow ping on deploy (opt-in, key in env; a sitemap index is read through its local `sitemap-N.xml` children, deduplicated, 10 000 URLs per request); `lastmod` from content dates |
 | Preview | plugin box | `brain seo preview <route>`: Google result snippet (title truncation by pixel width), social cards, JSON-LD — text for the LLM, HTML in devtools |
 | AI answers (GEO) | — | info hints that never change the score: B1830 answer first (opening paragraph ≤ 300 chars), B1831 question headings not grouped as `faq` (the FAQPage markup is for answer engines and Bing: Google stopped showing FAQ rich results on 2026-05-07), B1832 visible `<time>` + `dateModified` on articles, B1833 author as Person with `url`/`sameAs` (`authors` in brain.json fills it), B1834 long content without external sources |
 | Video & news | — | `VideoObject` + video sitemap from `<video poster>` (duration from `data-duration` or the MP4 header), `sitemap-news.xml` from `seo.news` collections; B1835 video without poster/date |
@@ -1433,7 +1440,8 @@ language is one command.
     the other languages is downloaded before. The service worker precaches only the current locale (§35).
 - **Routing:** the default locale has no prefix (`/about`); the others do (`/es/about`). Views are not duplicated:
   the router and the prerender produce one page per locale. Optional translated slugs per view:
-  `<meta route es="/es/acerca">`. `/` with no prefix never auto-redirects by `Accept-Language` (crawlers and shared
+  `<meta route es="/es/acerca">`. hreflang pairs pages by view plus page identity (S03): page 2 of a listing pairs
+  with page 2 in each language, translated slug or not, and never with page 1. `/` with no prefix never auto-redirects by `Accept-Language` (crawlers and shared
   links must see the same page); instead the language switcher suggests the browser's language once.
 - **Framework texts:** messages the runtime and the kit write themselves read the app's dictionary by key and fall back
   to English when the key is missing, without loading `brain-i18n.js`: form validation (`form.*`, §14) and

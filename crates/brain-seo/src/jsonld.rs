@@ -517,6 +517,7 @@ const REQUIRED: &[(&str, &[&str])] = &[
     ("Product", &["name", "offers|review|aggregateRating"]),
     ("Question", &["name", "acceptedAnswer"]),
     ("Recipe", &["name", "image"]),
+    ("SoftwareApplication", &["name", "aggregateRating|review"]),
     ("VideoObject", &["name", "thumbnailUrl", "uploadDate"]),
     ("WebSite", &["name", "url"]),
 ];
@@ -527,7 +528,6 @@ const RECOMMENDED: &[(&str, &[&str])] = &[
     ("BlogPosting", &["image", "datePublished", "author"]),
     ("NewsArticle", &["image", "datePublished", "author"]),
     ("Organization", &["url", "logo"]),
-    ("SoftwareApplication", &["offers", "aggregateRating|review"]),
     ("WebApplication", &["offers", "aggregateRating|review"]),
 ];
 
@@ -545,6 +545,62 @@ fn has(n: &Json, alts: &str) -> bool {
         Some(Json::Arr(a)) => !a.is_empty(),
         Some(_) => true,
     })
+}
+
+/// Google rich-result rules that look inside a property (Search Central, fetched 2026-10-31, pages last updated
+/// 2026-09-08): Product/SoftwareApplication offers, JobPosting location and enums, Event location.
+fn google_rules(t: &str, n: &Json, out: &mut Vec<Issue>) {
+    let list = |k: &str| -> Vec<&Json> {
+        match n.get(k) {
+            Some(Json::Arr(a)) => a.iter().collect(),
+            Some(v @ Json::Obj(_)) => vec![v],
+            _ => vec![],
+        }
+    };
+    let mut warn = |msg: String, fix: String| out.push(Issue { level: Level::Warning, msg, fix });
+    let str_of = |v: Option<&Json>| v.and_then(Json::as_str).map(str::to_string);
+    match t {
+        "Product" | "SoftwareApplication" => {
+            if t == "SoftwareApplication" && !has(n, "offers") {
+                warn(format!("{t} has no `offers`"), format!("add `offers` with a `price` (0 for free) to the {t} JSON-LD"));
+            }
+            for o in list("offers") {
+                let need: &[&str] = if types(o).iter().any(|x| x == "AggregateOffer") { &["lowPrice", "priceCurrency"] } else { &["price"] };
+                for p in need.iter().filter(|p| !has(o, p)) {
+                    warn(format!("{t} offer has no `{p}`"), format!("add `{p}` to the {t} offers (Google requires it for the rich result)"));
+                }
+            }
+        }
+        "JobPosting" => {
+            for l in list("jobLocation") {
+                if !l.get("address").is_some_and(|a| has(a, "addressCountry")) {
+                    warn("JobPosting jobLocation has no `address.addressCountry`".into(), "add `address: { \"@type\": \"PostalAddress\", \"addressCountry\": \"US\" }` (ISO 3166-1 alpha-2) to jobLocation".into());
+                }
+            }
+            const KINDS: &[&str] = &["FULL_TIME", "PART_TIME", "CONTRACTOR", "TEMPORARY", "INTERN", "VOLUNTEER", "PER_DIEM", "OTHER"];
+            let kinds: Vec<String> = match n.get("employmentType") {
+                Some(Json::Arr(a)) => a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),
+                v => str_of(v).into_iter().collect(),
+            };
+            for k in kinds.iter().filter(|k| !KINDS.contains(&k.as_str())) {
+                warn(format!("JobPosting employmentType `{k}` is not a Google value"), format!("use one of {}", KINDS.join(", ")));
+            }
+            if let Some(s) = n.get("baseSalary") {
+                let unit = str_of(s.get("value").and_then(|v| v.get("unitText"))).or_else(|| str_of(s.get("unitText")));
+                if let Some(u) = unit.filter(|u| !["HOUR", "DAY", "WEEK", "MONTH", "YEAR"].contains(&u.as_str())) {
+                    warn(format!("JobPosting baseSalary unitText `{u}` is not HOUR, DAY, WEEK, MONTH or YEAR"), "set baseSalary.value.unitText to HOUR, DAY, WEEK, MONTH or YEAR".into());
+                }
+            }
+        }
+        "Event" => {
+            for l in list("location") {
+                if !types(l).iter().any(|x| x == "VirtualLocation") && !has(l, "address") {
+                    warn("Event location has no `address`".into(), "add `address` (PostalAddress) to the Event location, or use a VirtualLocation with `url` for online events".into());
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 fn check_node(n: &Json, top: bool, out: &mut Vec<Issue>) {
@@ -570,6 +626,9 @@ fn check_node(n: &Json, top: bool, out: &mut Vec<Issue>) {
                 }
             }
         }
+    }
+    for t in &ts {
+        google_rules(t, n, out);
     }
     // nested typed objects (ListItem, Question, Answer, Offer…)
     if let Json::Obj(kv) = n {
@@ -813,6 +872,35 @@ mod tests {
                 && j.contains(r#""image":"https://acme.dev/c.png""#)
         );
         assert!(validate(&j).is_empty(), "{:?}", validate(&j));
+    }
+
+    #[test]
+    fn google_rich_result_requirements() {
+        // Google Search Central structured-data pages (fetched 2026-10-31, last updated 2026-09-08)
+        let msgs = |j: &str| validate(j).into_iter().filter(|i| i.level == Level::Warning).map(|i| i.msg).collect::<Vec<_>>();
+        let c = r#""@context":"https://schema.org""#;
+        // Product: an Offer needs price; an AggregateOffer needs lowPrice and priceCurrency
+        let m = msgs(&format!(r#"{{{c},"@type":"Product","name":"Desk","offers":{{"@type":"Offer","priceCurrency":"USD"}}}}"#));
+        assert!(m.iter().any(|x| x == "Product offer has no `price`"), "{m:?}");
+        let m = msgs(&format!(r#"{{{c},"@type":"Product","name":"Desk","offers":{{"@type":"AggregateOffer","lowPrice":"10"}}}}"#));
+        assert!(m.iter().any(|x| x == "Product offer has no `priceCurrency`"), "{m:?}");
+        assert!(msgs(&format!(r#"{{{c},"@type":"Product","name":"Desk","offers":{{"@type":"Offer","price":"10","priceCurrency":"USD"}}}}"#)).is_empty());
+        // SoftwareApplication: name, offers.price and a rating or review are required (no longer info only)
+        let m = msgs(&format!(r#"{{{c},"@type":"SoftwareApplication","offers":{{"@type":"Offer"}}}}"#));
+        for want in ["SoftwareApplication has no `name`", "SoftwareApplication has no `aggregateRating` or `review`", "SoftwareApplication offer has no `price`"] {
+            assert!(m.iter().any(|x| x == want), "{want}: {m:?}");
+        }
+        // JobPosting: jobLocation needs address.addressCountry; unitText and employmentType are enums
+        let m = msgs(&format!(
+            r#"{{{c},"@type":"JobPosting","title":"Engineer","description":"Build things","datePosted":"2026-10-01","hiringOrganization":{{"@type":"Organization","name":"Acme"}},"jobLocation":{{"@type":"Place","address":{{"@type":"PostalAddress","addressLocality":"Springfield"}}}},"employmentType":"FULLTIME","baseSalary":{{"@type":"MonetaryAmount","currency":"USD","value":{{"@type":"QuantitativeValue","value":40,"unitText":"HOURLY"}}}}}}"#
+        ));
+        for want in ["JobPosting jobLocation has no `address.addressCountry`", "JobPosting employmentType `FULLTIME` is not a Google value", "JobPosting baseSalary unitText `HOURLY` is not HOUR, DAY, WEEK, MONTH or YEAR"] {
+            assert!(m.iter().any(|x| x == want), "{want}: {m:?}");
+        }
+        // Event: a Place location needs an address; a VirtualLocation does not
+        let m = msgs(&format!(r#"{{{c},"@type":"Event","name":"Talk","startDate":"2026-11-01","location":{{"@type":"Place","name":"Hall"}}}}"#));
+        assert!(m.iter().any(|x| x == "Event location has no `address`"), "{m:?}");
+        assert!(msgs(&format!(r#"{{{c},"@type":"Event","name":"Talk","startDate":"2026-11-01","location":{{"@type":"VirtualLocation","url":"https://a.dev/live"}}}}"#)).is_empty());
     }
 
     #[test]

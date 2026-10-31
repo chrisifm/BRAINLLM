@@ -51,6 +51,20 @@ pub fn value(root: &Path, env: &str, key: &str) -> Option<String> {
     brain_check::env::parse(&src).resolve(env, &process).get(key).cloned().filter(|v| !v.is_empty())
 }
 
+/// B0736: an origin nobody can deploy to (RFC 2606/6761 reserved names, loopback). A build from `.brain_env` or
+/// brain.json treats it as "no site", so sitemaps and absolute URLs never advertise it.
+pub fn placeholder_origin(url: &str) -> bool {
+    let rest = url.split_once("://").map_or(url, |(_, r)| r);
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("").rsplit('@').next().unwrap_or("");
+    let host = if host.starts_with('[') { host.split(']').next().unwrap_or("").trim_start_matches('[') } else { host.split(':').next().unwrap_or("") };
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    ["example.com", "example.org", "example.net", "localhost"].iter().any(|d| host == *d || host.ends_with(&format!(".{d}")))
+        || [".example", ".test", ".invalid", ".localhost"].iter().any(|t| host.ends_with(t))
+        || host.starts_with("127.")
+        || host == "::1"
+        || host == "0.0.0.0"
+}
+
 /// B0724/B0723 of the file itself (`brain check` of the app).
 pub fn check(root: &Path) -> Vec<crate::compiler::Diag> {
     match std::fs::read_to_string(root.join(FILE)) {
@@ -138,6 +152,16 @@ pub fn example_of(src: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn placeholder_origins() {
+        for u in ["https://example.com", "https://staging.example.com/", "http://localhost:5180", "https://shop.test", "http://127.0.0.1:8080", "http://[::1]:3000", "https://a.example"] {
+            assert!(placeholder_origin(u), "{u}");
+        }
+        for u in ["https://acme.dev", "https://example.co", "https://myexample.com", "https://testing.io"] {
+            assert!(!placeholder_origin(u), "{u}");
+        }
+    }
 
     #[test]
     fn example_keeps_keys_and_sections_without_values() {

@@ -960,7 +960,7 @@ impl<'a> Checker<'a> {
         if matches!(name, "redirect" | "deny") && (self.server_ctx || route_file) {
             return;
         }
-        if name == "notFound" && self.server_ctx {
+        if matches!(name, "notFound" | "gone") && self.server_ctx {
             return;
         }
         if name == "import.meta" || (name == "process" && self.server_ctx) {

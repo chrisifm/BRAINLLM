@@ -126,6 +126,8 @@ pub struct Config {
     pub feed: bool,
     /// `seo.sections`: `sections.json`, the manifest of every section (default true).
     pub sections: bool,
+    /// `seo.trailingSlash` and `seo.canonicalHost` (§33): folded into the servers' single redirect hop.
+    pub redirect_policy: crate::redirects::Policy,
 }
 
 impl Default for Config {
@@ -160,6 +162,7 @@ impl Default for Config {
             built_with: None,
             feed: true,
             sections: true,
+            redirect_policy: crate::redirects::Policy::default(),
         }
     }
 }
@@ -296,6 +299,20 @@ impl Config {
                         ));
                     }
                 };
+            }
+            if let Some(v) = s(seo, "trailingSlash") {
+                c.redirect_policy.slash = match v.as_str() {
+                    "never" => crate::redirects::Slash::Never,
+                    "always" => crate::redirects::Slash::Always,
+                    "ignore" => crate::redirects::Slash::Ignore,
+                    _ => return Err(format!("brain.json: `seo.trailingSlash` is `{v}`; fix: use \"never\", \"always\" or \"ignore\"")),
+                };
+            }
+            if b(seo, "canonicalHost", false)? {
+                let Some(site) = &c.site else {
+                    return Err("brain.json: `seo.canonicalHost` needs `site` (the origin every other host is sent to); fix: \"site\": \"https://example.com\"".into());
+                };
+                c.redirect_policy.host = Some(site.clone());
             }
             if let Some(q) = s(seo, "search") {
                 if !q.contains("{query}") {
@@ -600,6 +617,16 @@ mod tests {
             0,
             "0 turns the threshold off"
         );
+    }
+
+    #[test]
+    fn reads_the_redirect_policy() {
+        use crate::redirects::{Policy, Slash};
+        let c = Config::from_json(&Json::parse(r#"{"site":"https://shop.example","seo":{"trailingSlash":"always","canonicalHost":true}}"#).unwrap()).unwrap();
+        assert_eq!(c.redirect_policy, Policy { slash: Slash::Always, host: Some("https://shop.example".into()) });
+        assert!(Config::from_json(&Json::parse("{}").unwrap()).unwrap().redirect_policy.is_default());
+        assert!(Config::from_json(&Json::parse(r#"{"seo":{"canonicalHost":true}}"#).unwrap()).unwrap_err().contains("needs `site`"));
+        assert!(Config::from_json(&Json::parse(r#"{"seo":{"trailingSlash":"yes"}}"#).unwrap()).unwrap_err().contains("trailingSlash"));
     }
 
     /// brain.schema.json (editor validation) lists exactly the `seo.*` keys this file reads: a key added on one side

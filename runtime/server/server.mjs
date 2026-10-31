@@ -95,6 +95,7 @@ function publicError(error) {
   return Number.isInteger(status) && status >= 400 && status < 500 && STATUS_CODES[status] ? { status, message } : null
 }
 const REDIRECT_CODES = new Set([301, 302, 303, 307, 308])
+const NOINDEX = 'noindex, nofollow'
 function safeLocation(value) {
   if (typeof value !== 'string' || value.length > 8192 || !value.startsWith('/') || value.startsWith('//') || /[\\\x00-\x20\x7f]/.test(value) || /^\/%2f/i.test(value) || /%(?:0[0-9a-f]|1[0-9a-f]|5c|7f)/i.test(value) || /%20/i.test(value.split(/[?#]/,1)[0])) throw new HttpError(500, 'Invalid same-site redirect location')
   return value
@@ -412,6 +413,7 @@ export function createServer(o = {}) {
   const env = Object.freeze({ ...(o.env || ENV) }) // ctx.env: what the supervisor passed, read-only
   const native = nativeAuthBridge(o.backendURL ?? env.BRAIN_BACKEND_URL)
   if (o.nativeSockets !== undefined && typeof o.nativeSockets !== 'boolean') throw Error('nativeSockets must be an explicit boolean')
+  const SITEMAP_BYTES = +(o.sitemapBytes ?? 50 * 1024 * 1024) // protocol: 50 MB uncompressed per sitemap file
   const secret = o.secret ?? env.BRAIN_SECRET ?? ''
   const sink = o.log || ((level, msg, extra) => console[level === 'error' ? 'error' : 'log'](json({ t: new Date().toISOString(), level, msg, ...extra })))
   const log = (level, msg, extra = {}) => {
@@ -482,6 +484,28 @@ export function createServer(o = {}) {
     return null
   }
   const withBase = u => (typeof u === 'string' && BASE !== '/' && u.startsWith('/') && !u.startsWith('//') && !(u + '/').startsWith(BASE) ? BASE + u.slice(1) : u)
+  // §33 crawler-safe URLs: the redirect rule, the trailing-slash policy (brain.json seo.trailingSlash, default "never")
+  // and the canonical host (seo.canonicalHost → site) are folded into ONE hop; loopback hosts are never redirected
+  // (a proxy that does not forward Host, local runs). The query is kept unless a rule's target has its own.
+  const SLASH = RD.slash || 'never', HOST = typeof RD.host === 'string' && /^https?:\/\//.test(RD.host) ? new URL(RD.host) : null
+  const loopback = h => !h || /^(?:localhost|127(?:\.\d+){3}|\[::1\])(?::\d+)?$/i.test(h)
+  const canonicalOf = (req, url) => {
+    let path = url.pathname, query = url.search, status = 301, moved = false
+    const to = redirectOf(path)
+    if (to) {
+      if (/^https?:\/\//.test(to[0])) return [to[0], to[1], true]
+      const q = to[0].indexOf('?')
+      path = q < 0 ? to[0] : to[0].slice(0, q)
+      if (q >= 0) query = to[0].slice(q)
+      status = to[1]
+      moved = true
+    }
+    if (path !== '/' && SLASH === 'never' && path.endsWith('/')) path = path.replace(/\/+$/, '') || '/'
+    else if (path !== '/' && SLASH === 'always' && !path.endsWith('/') && !/\.[^/]*$/.test(path)) path += '/'
+    const host = HOST && !loopback(req.headers.host) && req.headers.host.toLowerCase() !== HOST.host
+    if (!moved && !host && path === url.pathname) return null
+    return [(host ? HOST.origin : '') + withBase(path) + query, status, host]
+  }
   hook(distURL, BASE)
 
   // ---------- helpers ----------
@@ -537,9 +561,11 @@ export function createServer(o = {}) {
     send(res, status, body, { 'content-type': MIME['.html'], 'content-security-policy': withNonce(mf.csp || CSP0, nonce), 'cache-control': 'no-cache', ...(googleSignInPage(page) ? { 'cross-origin-opener-policy': 'same-origin-allow-popups' } : {}), ...(mf.build ? { 'x-brain-build': mf.build } : {}), ...headers })
   }
   const notFound = (req, res) => failPage(res, 404, res.getHeader('x-request-id'))
+  // `gone()` from load (§33): 410 tells crawlers the URL was removed for good; views/410.brain, else the 404 page
+  const missing = (req, res, x) => (x && x.gone === true ? failPage(res, 410, res.getHeader('x-request-id')) : notFound(req, res))
   const failPage = (res, status, rid) => {
     if (!wantsHtml(res.req)) return send(res, status, json({ schemaVersion: 1, status, rid, error: STATUS_CODES[status] || 'Request failed' }), { 'content-type': MIME['.json'] })
-    const custom = (status === 404 && mf.notFound) || (mf.errors && mf.errors[status]) || `${status}.html`
+    const custom = (status === 404 && mf.notFound) || (mf.errors && mf.errors[status]) || (status === 410 && !file('410.html') ? mf.notFound : `${status}.html`)
     const path = typeof custom === 'string' && file(custom)
     return html(res, status, path ? readFileSync(path, 'utf8') : defaultError(status, rid, BASE))
   }
@@ -649,14 +675,15 @@ export function createServer(o = {}) {
         log('error', 'guard failed', { rid, path: url.pathname, ...trace(e) })
         return errorPage(req, res, route, params, url, rid)
       }
-      if (r.redirect) return send(res, r.status, '', { location: withBase(redirect(r.redirect, r.status ?? 303).redirect), 'cache-control': 'no-store', ...ctx.session.headers() })
+      // a guarded page must not reach the index through its login redirect (§33): the redirect itself says noindex
+      if (r.redirect) return send(res, r.status, '', { location: withBase(redirect(r.redirect, r.status ?? 303).redirect), 'cache-control': 'no-store', 'x-robots-tag': NOINDEX, ...ctx.session.headers() })
       if (r.deny !== undefined) return forbidden(req, res, url, rid, r.deny)
       extra = r.headers
     }
     // what load() thrown or returned instead of props answers: redirect, notFound() (F11), deliberate status, failure
     const loadOutcome = e => {
       if (e && e.redirect) return send(res, e.status || 303, '', { location: withBase(redirect(e.redirect, e.status ?? 303).redirect), ...ctx.session.headers() })
-      if ((e instanceof HttpError && e.status === 404) || (e && e.notFound === true)) return notFound(req, res)
+      if ((e instanceof HttpError && e.status === 404) || (e && e.notFound === true)) return missing(req, res, e) // `notFound()` 404 / `gone()` 410
       const status = intendedStatus(e) || 500
       log('error', 'load failed', { rid, path: url.pathname, status, ...trace(e) })
       return status === 500 ? errorPage(req, res, route, params, url, rid) : failPage(res, status, rid)
@@ -752,7 +779,8 @@ export function createServer(o = {}) {
       props = (await loadP) ?? {}
       if (props.redirect || props.notFound === true) throw props
     } catch (e) {
-      if (e && e.redirect) return end(`<script>location.replace(${jsonInHtml(withBase(redirect(e.redirect, e.status ?? 303).redirect))})</script>`)
+      // too late for a real redirect: the page says noindex so the stub never enters the index
+      if (e && e.redirect) return end(`<meta name="robots" content="noindex"><script>location.replace(${jsonInHtml(withBase(redirect(e.redirect, e.status ?? 303).redirect))})</script>`)
       // a streamed page already sent its 200 head: the region gets the not-found notice and the page is noindex
       if (e && e.notFound === true) return end(`<meta name="robots" content="noindex"><p role="alert" class="brain-fallback">Page not found.</p>`, {}, bottom.replace(/<script type="module">(?:(?!<\/script>)[\s\S])*?brain-view[\s\S]*?<\/script>/g, ''))
       log('error', 'load failed (streamed)', { rid, path: url.pathname, status: 200, ...trace(e) }) // headers already out
@@ -781,6 +809,7 @@ export function createServer(o = {}) {
   }
   // deny → views/403.brain (manifest `forbidden`, props.reason) or the static 403.html, always status 403
   function forbidden(req, res, url, rid, reason) {
+    res.setHeader('x-robots-tag', NOINDEX) // a members-only page never enters the index (§33)
     if (!wantsHtml(req)) return failPage(res, 403, rid)
     if (mf.forbidden) return ssr(req, res, mf.forbidden, {}, url, rid, null, 403, { reason })
     const f = file('403.html')
@@ -949,7 +978,9 @@ export function createServer(o = {}) {
         for (const p of Array.isArray(list) ? list : []) {
           const path = fill(r.path, p)
           if (!path) continue
-          if (urls.length < MAX_URLS) urls.push({ loc: origin + withBase(path), lastmod: day(p.lastmod) })
+          const loc = origin + withBase(path)
+          if (loc.length > 2048) log('warn', 'sitemap(): URL longer than 2048 characters left out; fix: shorten the slug', { view: r.view, loc: loc.slice(0, 120) })
+          else if (urls.length < MAX_URLS) urls.push({ loc, lastmod: day(p.lastmod) })
           else dropped++
         }
       } catch (e) {
@@ -966,6 +997,23 @@ export function createServer(o = {}) {
     if (!dynRun) dynRun = collect(origin).finally(() => (dynRun = null))
     return dynRun
   }
+  // §33 S01: every sitemap file holds at most 50 000 URLs and SITEMAP_BYTES bytes of UTF-8 XML; the dynamic URLs fill
+  // /sitemap-dynamic.xml, /sitemap-dynamic-2.xml, … in sitemap() order, so the split is deterministic
+  const SET_HEAD = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+  const SET_FOOT = '</urlset>\n'
+  const bytes = t => Buffer.byteLength(t)
+  function pages(urls) {
+    const out = [[]]
+    let size = bytes(SET_HEAD + SET_FOOT)
+    for (const u of urls) {
+      const line = `  <url><loc>${esc(u.loc)}</loc>${u.lastmod ? `<lastmod>${esc(u.lastmod)}</lastmod>` : ''}</url>\n`
+      const n = bytes(line)
+      if (out.at(-1).length && (out.at(-1).length >= MAX_URLS || size + n > SITEMAP_BYTES)) out.push([]), (size = bytes(SET_HEAD + SET_FOOT))
+      out.at(-1).push(line)
+      size += n
+    }
+    return out.map(p => p.join(''))
+  }
   async function serveSitemap(req, res, url) {
     const f = file('/sitemap.xml')
     if (!f) return false
@@ -973,22 +1021,24 @@ export function createServer(o = {}) {
     const origin = [...text.matchAll(/<loc>(https?:\/\/[^<]+)<\/loc>/g)].map(m => URL.canParse(m[1]) && new URL(m[1]).origin).find(Boolean)
     if (!origin) return false
     const index = text.includes('<sitemapindex')
-    const urls = await dynamicUrls(origin)
-    // a urlset that would pass 50 000 URLs with the dynamic ones is split: index → static file + dynamic file
-    const split = !index && (text.match(/<url>/g) || []).length + urls.length > MAX_URLS
+    const sets = pages(await dynamicUrls(origin))
+    // a urlset that would pass either limit with the dynamic URLs is split: index → static file + dynamic file(s)
+    const split = !index && (sets.length > 1 || (text.match(/<url>/g) || []).length + (sets[0].match(/<url>/g) || []).length > MAX_URLS || bytes(text) + bytes(sets[0]) > SITEMAP_BYTES)
     const xml = body => send(res, 200, req.method === 'HEAD' ? '' : body, { 'content-type': MIME['.xml'], 'cache-control': 'public, max-age=300' })
     if (url.pathname === '/sitemap-static.xml') return split ? (xml(text), true) : false
-    if (url.pathname === '/sitemap-dynamic.xml' && !index && !split) return false
+    const name = i => (i ? `/sitemap-dynamic-${i + 1}.xml` : '/sitemap-dynamic.xml')
     const child = p => `  <sitemap><loc>${esc(origin + withBase(p))}</loc></sitemap>\n`
-    const set = urls.map(u => `  <url><loc>${esc(u.loc)}</loc>${u.lastmod ? `<lastmod>${esc(u.lastmod)}</lastmod>` : ''}</url>\n`).join('')
+    const kids = sets.map((_, i) => child(name(i))).join('')
+    if (url.pathname !== '/sitemap.xml') {
+      const i = sets.findIndex((_, i) => name(i) === url.pathname)
+      return i >= 0 && (index || split) ? (xml(SET_HEAD + sets[i] + SET_FOOT), true) : false
+    }
     xml(
-      url.pathname === '/sitemap-dynamic.xml'
-        ? `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${set}</urlset>\n`
-        : index
-          ? text.replace('</sitemapindex>', `${child('/sitemap-dynamic.xml')}</sitemapindex>`)
-          : split
-            ? `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${child('/sitemap-static.xml')}${child('/sitemap-dynamic.xml')}</sitemapindex>\n`
-            : text.replace('</urlset>', set + '</urlset>'),
+      index
+        ? text.replace('</sitemapindex>', `${kids}</sitemapindex>`)
+        : split
+          ? `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${child('/sitemap-static.xml')}${kids}</sitemapindex>\n`
+          : text.replace('</urlset>', sets[0] + '</urlset>'),
     )
     return true
   }
@@ -1017,7 +1067,7 @@ export function createServer(o = {}) {
   function serveStatic(req, res, url) {
     const p = publicStaticPath(url.pathname)
     if (p === null) return false
-    const candidates = p.endsWith('/') ? [p + 'index.html'] : [p, p + '.html', p + '/index.html']
+    const candidates = p.endsWith('/') ? [p + 'index.html', ...(p.length > 1 ? [p.slice(0, -1) + '.html'] : [])] : [p, p + '.html', p + '/index.html']
     for (const c of candidates) {
       const f = file(c)
       if (!f) continue
@@ -1072,12 +1122,9 @@ export function createServer(o = {}) {
       req.$brainPath = url.pathname
       if (native && /^\/(?:api(?:\/|$)|_brain(?:\/|$)|s\/)/.test(url.pathname)) return await native.proxy(req,res,url,rid,send)
       // redirects.json (manifest `redirects`, brain-seo server_json): exact sources first, then patterns, on the app path;
-      // same-site targets get the base, the query is kept when the target has none
-      const to = redirectOf(url.pathname)
-      if (to && (req.method === 'GET' || req.method === 'HEAD')) {
-        const loc = /^https?:\/\//.test(to[0]) ? to[0] : withBase(to[0]) + (to[0].includes('?') ? '' : url.search)
-        return send(res, to[1], '', { location: loc, 'cache-control': to[1] === 301 || to[1] === 308 ? 'public, max-age=3600' : 'no-store' }, true)
-      }
+      // same-site targets get the base, the query is kept when the target has none; slash policy and host in the same hop
+      const to = (req.method === 'GET' || req.method === 'HEAD') && canonicalOf(req, url)
+      if (to) return send(res, to[1], '', { location: to[0], 'cache-control': to[1] === 301 || to[1] === 308 ? 'public, max-age=3600' : 'no-store' }, to[2])
       const r = /^\/_r\/([\w-]+)\/([\w$]+)$/.exec(url.pathname)
       if (r) return await rpc(req, res, r[1], r[2], url, rid)
       if (url.pathname.startsWith('/_r/')) return send(res, 404, json({ error: 'Unknown function' }), { 'content-type': MIME['.json'] })
@@ -1093,7 +1140,7 @@ export function createServer(o = {}) {
         return await (post ? formPost : ssr)(req, res, route, m.groups ? { ...m.groups } : {}, url, rid)
       }
       if (post) return send(res, 405, 'Method not allowed', { allow: 'GET, HEAD' })
-      if (DYN.length && (url.pathname === '/sitemap.xml' || url.pathname === '/sitemap-dynamic.xml' || url.pathname === '/sitemap-static.xml') && (await serveSitemap(req, res, url))) return
+      if (DYN.length && /^\/sitemap(-static|-dynamic(-\d+)?)?\.xml$/.test(url.pathname) && (await serveSitemap(req, res, url))) return
       if (serveStatic(req, res, url)) return
       notFound(req, res)
     } catch (e) {

@@ -24,7 +24,7 @@ fn build_lists_warnings_and_stops_on_errors_with_a_summary() {
     assert!(o.status.success(), "{t}");
     let warning_lines: Vec<_> = t.lines().filter(|line| line.starts_with("warning: ")).collect();
     assert!(warning_lines.iter().any(|line| line.starts_with("warning: B0130 comp/warn.brain:3:")), "{t}");
-    assert_eq!(warning_lines.iter().filter(|line| line.starts_with("warning: B")).count(), 1, "one source diagnostic; production cleanup feedback is a separate, explicit build notice: {t}");
+    assert_eq!(warning_lines.iter().filter(|line| line.starts_with("warning: B") && !line.starts_with("warning: B0736")).count(), 1, "one source diagnostic (B0736: the scaffold's placeholder production origin); production cleanup feedback is a separate, explicit build notice: {t}");
     assert!(t.contains(&format!("{} warning", warning_lines.len())), "summary includes both diagnostics and production feedback: {t}");
     // an error anywhere stops it: every error with file:line:col and fix, then the counts
     std::fs::write(dir.join("comp/bad.brain"), "<script>\n  let x = \n</script>\n<p>{x}</p>\n").unwrap();

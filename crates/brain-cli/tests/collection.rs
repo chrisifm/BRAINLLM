@@ -22,7 +22,8 @@ fn a_new_collection_checks_and_builds() {
     assert!(std::fs::read_to_string(dir.join("app.brain")).unwrap().contains("<a href=\"/blog\">Blog</a>"), "linked from the nav");
     let (ok, chk) = brain(&dir, &["check"]);
     assert!(ok && chk.contains("0 error(s), 0 warning(s)"), "{chk}");
-    let (ok, b) = brain(&dir, &["build", "--progress=off"]);
+    // RSS needs absolute URLs: the scaffold's placeholder production origin is "no site" (B0736)
+    let (ok, b) = brain(&dir, &["build", "--progress=off", "--site", "https://blog.acme.dev"]);
     assert!(ok, "{b}");
     let entry = std::fs::read_to_string(dir.join("dist/blog/hello-world/index.html")).unwrap();
     assert!(entry.contains("<h1>First entry of Blog") && entry.contains("min read"), "prerendered entry: {entry}");
