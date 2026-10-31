@@ -107,10 +107,10 @@ test('a wall-clock overrun is reported once with its source and measured time bu
   assert.equal(w, 'budget')
   assert.deepEqual([e.code, e.budget, e.limit, e.file, e.line], ['B0910', 'ms', 20, meta.file, 7])
   assert.ok(e.measured >= 40, String(e.measured))
-  assert.match(e.message, /^B0910: comp\/Counter\.brain:7 ran \d+ ms > 20 ms \(wall clock\)$/)
+  assert.match(e.message, /^B0910: ms budget exceeded at comp\/Counter\.brain:7: \d+ ms$/)
   assert.match(e.fix, /worker/)
   assert.equal(warned.length, 1)
-  assert.match(warned[0], /B0910: comp\/Counter\.brain:7 ran \d+ ms/)
+  assert.match(warned[0], /B0910: ms budget exceeded at comp\/Counter\.brain:7: \d+ ms/)
 })
 
 test('deterministic guards stay fatal under load', () => {

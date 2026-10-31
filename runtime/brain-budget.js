@@ -2,35 +2,33 @@
 import { _rt, fx } from './brain.js'
 const I = _rt(), owners = new WeakMap(), active = []
 const LIMITS = { steps: 1000000, depth: 128, ms: 200, rows: 100000, signals: 100000, resources: 1024, pending: 32, workerMs: 30000 } // module-private, never mutated
-const now = () => globalThis.performance ? performance.now() : Date.now()
-const str = (v, n) => typeof v == 'string' ? v.slice(0, n) : null, pos = v => Number.isSafeInteger(v) && v > 0 ? v : null
+const now = () => performance.now()
+const str = (v, n) => typeof v == 'string' ? v.slice(0, n) : null, pos = v => v > 0 ? v | 0 : null
 const metaOf = m => ({ file: str(m?.file, 256), component: str(m?.component, 80), line: pos(m?.line), column: pos(m?.column) })
-const limitsOf = options => Object.fromEntries(Object.entries(LIMITS).map(([k, max]) => [k, Number.isFinite(options?.[k]) && options[k] >= 1 ? Math.min(max, options[k]) : max]))
-const failure = (code, kind, limit, meta) => Object.assign(new Error(`${code}: ${kind} budget exceeded`), { code, kind: 'budget', budget: kind, limit, ...metaOf(meta), fix: code == 'B0910' ? 'Bound the work or move it to an owned worker.' : 'Bound the collection; dispose with its owner.' })
+const limitsOf = options => Object.fromEntries(Object.entries(LIMITS).map(([k, max]) => [k, Math.min(max, options?.[k] >= 1 ? options[k] : max)]))
+const failure = (code, kind, limit, meta) => Object.assign(new Error(`${code}: ${kind} budget exceeded`), { code, kind: 'budget', budget: kind, limit, ...metaOf(meta), fix: code == 'B0910' ? 'Bound the work or use an owned worker.' : 'Bound it; dispose with its owner.' })
 const start = r => { r.running = true; r.started = now() }
 function charge(root) {
-  if (root.running) { const t = now(); root.work += Math.max(0, t - root.started); root.started = t }
+  if (root.running) { const t = now(); root.work += t - root.started; root.started = t }
 }
 // Elapsed time is wall-clock (browsers expose no CPU clock): a loaded machine inflates it, so an overrun is a
 // diagnostic, not a failure. It is reported once per execution with its source and measured time, without an owner
 // (no error boundary replaces the view), and the page keeps running. Steps and depth are deterministic and always
 // fatal: they stop runaway loops and recursion.
 function enforce(frame, kind, value) {
-  const r = frame.root, ms = kind == 'ms'
+  const r = frame.root
   if (r.error) throw r.error
-  if (value > r.limits[kind] && !(ms && r.warned)) {
+  if (value > r.limits[kind]) {
     const e = failure('B0910', kind, r.limits[kind], frame.meta)
-    if (!ms) throw (r.error = e)
-    r.warned = e.measured = Math.round(value)
-    e.message = `B0910: ${e.file}:${e.line} ran ${r.warned} ms > ${e.limit} ms (wall clock)`
-    console.warn(e.message)
-    I.oops(e, null, 'budget')
+    if (kind != 'ms') throw (r.error = e)
+    r.limits.ms = 1 / 0
+    console.warn(e.message += ` at ${e.file}:${e.line}: ${e.measured = value | 0} ms`), I.oops(e, null, 'budget')
   }
 }
 export function budgetOwner() { return I.owner() }
 export function budgetEnter(meta, owner = I.owner(), options) {
   const parent = active.at(-1)
-  const root = parent?.root || { limits: limitsOf(options), steps: 0, work: 0, depth: 0, running: false, started: 0, error: null }
+  const root = parent?.root || { limits: limitsOf(options), steps: 0, work: 0, depth: 0 }
   const f = { root, meta: metaOf(meta), owner, state: 'active' }
   charge(root)
   enforce(f, 'depth', root.depth + 1)
@@ -94,7 +92,7 @@ function ledger(owner, meta, options) {
   if (owner.s == 3) throw failure('B0911', 'disposed-owner', 0, meta)
   let l = owners.get(owner)
   if (!l) {
-    l = { limits: limitsOf(options), counts: Object.create(null), releases: new Set(), disposed: false }
+    l = { limits: limitsOf(options), counts: {}, releases: new Set(), disposed: false }
     owners.set(owner, l)
     I.root(() => fx(() => () => {
       l.disposed = true
