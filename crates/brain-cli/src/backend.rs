@@ -213,7 +213,7 @@ pub fn inspect(root: &Path) -> Result<Value, String> {
     let roles = auth_roles(root)?;
     validate_roles(&roles, &resources)?;
     Ok(
-        json!({"schemaVersion":1,"experimental":true,"resources":resources,"jobs":jobs,"roles":roles,"webhooks":crate::webhook_config::metadata(root)?,"openapi":contract::openapi_with_roles(&resources,&roles),"limits":{"activeJobs":10000,"workers":8,"jobSeconds":60,"leaseSeconds":90},"delivery":"at-least-once; handlers must be idempotent"}),
+        json!({"schemaVersion":1,"experimental":true,"resources":resources,"jobs":jobs,"roles":roles,"webhooks":crate::webhook_config::metadata(root)?,"apiKeys":crate::api_key_config::metadata(root)?,"openapi":contract::openapi_with_roles(&resources,&roles),"limits":{"activeJobs":10000,"workers":8,"jobSeconds":60,"leaseSeconds":90},"delivery":"at-least-once; handlers must be idempotent"}),
     )
 }
 fn database(root: &Path, environment: &str) -> Result<String, String> {

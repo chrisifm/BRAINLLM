@@ -45,6 +45,25 @@ pub fn load(root: &Path) -> Result<Option<Config>, String> {
     Ok(Some(config))
 }
 
+/// `brain backend schema` projection: null when disabled, otherwise the effective settings and the key contract.
+pub fn metadata(root: &Path) -> Result<Value, String> {
+    Ok(match load(root)? {
+        None => Value::Null,
+        Some(config) => json!({
+            "source": SOURCE,
+            "dailyQuota": config.default_daily_quota,
+            "monthlyQuota": config.default_monthly_quota,
+            "retentionDays": config.retention_days,
+            "perKeyPerMinute": config.per_key_per_minute,
+            "format": "bk_live_<12 hex prefix>_<64 hex secret>",
+            "headers": ["X-API-Key", "Authorization: Bearer"],
+            "routes": "/api/<resource>[/<id>] only",
+            "scopes": "resource:read|write|* (resource may be *); never exceeds the owner's role",
+            "docs": "docs/backend/api-keys.md"
+        }),
+    })
+}
+
 const USAGE: &str = "usage: brain backend keys create --user <uuid> --name <name> --scopes posts:read,posts:write [--expires-days N] [--daily N] [--monthly N] | list [--user <uuid>] | revoke <prefix|id> | rotate <prefix|id> | events <prefix|id> [--limit 50] [--status 200] [--resource posts] [--from ISO] [--to ISO] [--before ID] | summary <prefix|id> [--days 7] [--env development]";
 
 fn number(args: &[String], flag: &str) -> Result<Option<i64>, String> {

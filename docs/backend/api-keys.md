@@ -21,7 +21,8 @@ export default {
 Then `brain backend migrate` (creates `_brain_api_keys`, `_brain_api_key_usage`, `_brain_api_key_events`) and
 `brain backend serve`. Without the file (or with `enabled: false`) any presented key is rejected with
 `401 API_KEYS_DISABLED` and the `/_brain/keys` routes answer 404. The generated OpenAPI document gains the
-`apiKey` (`X-API-Key` header) and `apiKeyBearer` (`Authorization: Bearer`) security schemes on every `/api` operation.
+`apiKey` (`X-API-Key` header) and `apiKeyBearer` (`Authorization: Bearer`) security schemes on every `/api` operation,
+and `brain backend schema --json` reports the effective settings under `apiKeys` (null when disabled).
 
 ## Key format and scopes
 
