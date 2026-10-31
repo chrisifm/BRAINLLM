@@ -306,6 +306,10 @@ pub fn record_build(root: &Path, build: &Value) -> Result<Value> {
                 .contains(s)
             });
             let Some(action) = action else { continue };
+            // kept in the server bundle by a server: function: not a source cleanup item
+            if fact["serverOnly"] == true {
+                continue;
+            }
             count += 1;
             visited += 1;
             if visited > 8192 {
@@ -812,7 +816,7 @@ mod tests {
         let app = App::new();
         let source = fs::read(app.0.join("comp/example.brain")).unwrap();
         let hash = crate::manifests::hash(&source);
-        record_build(&app.0,&json!({"schemaVersion":1,"build":"abc123","warnings":["private-warning-value"],"payload":"private-payload-value","report":[{"jsMin":20,"css":5}],"optimizations":[{"sourceFile":"comp/example.brain","originalSourceHash":hash,"stage":"module-minify","removedBindings":1,"facts":[{"action":"removed","originalLine":1,"originalColumn":1,"line":17,"body":"private-literal-value"}]}]})).unwrap();
+        record_build(&app.0,&json!({"schemaVersion":1,"build":"abc123","warnings":["private-warning-value"],"payload":"private-payload-value","report":[{"jsMin":20,"css":5}],"optimizations":[{"sourceFile":"comp/example.brain","originalSourceHash":hash,"stage":"module-minify","removedBindings":1,"facts":[{"action":"removed","originalLine":1,"originalColumn":1,"line":17,"body":"private-literal-value"},{"action":"removed","originalLine":2,"originalColumn":1,"line":18,"serverOnly":true}]}]})).unwrap();
         let stored = fs::read_to_string(app.0.join(".brain/quality/build.json")).unwrap();
         for value in [
             "private-warning-value",
@@ -829,6 +833,14 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|i| i["code"] == "QCLEANUP" && i["location"]["line"] == 1)
+        );
+        // a binding kept for a server: function is not a cleanup item
+        assert!(
+            !result["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|i| i["code"] == "QCLEANUP" && i["location"]["line"] == 2)
         );
         fs::write(app.0.join("comp/example.brain"), "<p>Changed</p>").unwrap();
         let result = refresh(&app.0).unwrap();

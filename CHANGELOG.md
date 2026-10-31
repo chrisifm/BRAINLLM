@@ -34,6 +34,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Fixed
 
+- `brain build` no longer reports "Production removed unused bindings" for constants and imports of a `.brain` view
+  that only its `server:` functions use; such facts are marked `serverOnly` and skipped by `brain quality`. The
+  warning now needs a verified app-source removal, so runtime tree-shaking and generated helpers do not raise it.
 - The development compile cache keys each source by modification time, size and (on Unix) inode. A file replaced
   atomically while keeping its timestamp is recompiled instead of serving the previous output until a watch event.
 - Deeply nested BrainScript, markup or CSS reports B0002/B0003 instead of overflowing the compiler stack; one small

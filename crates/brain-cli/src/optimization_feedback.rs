@@ -482,6 +482,36 @@ fn positive(value: &Value) -> Value {
 }
 
 /// Annotates a bounded cleanup report. Read/parse uncertainty is reported in metadata, never guessed.
+/// Names a top-level `server:` function reads that it does not declare itself: the client module keeps their
+/// declarations only for the minifier to drop, so a removal there is not a source cleanup.
+fn server_only_references(c: &Component) -> std::collections::BTreeSet<String> {
+    let mut names = std::collections::BTreeSet::new();
+    for s in &c.script {
+        if let Stmt::Server { func, .. } = s {
+            let mut d = Declarations {
+                capture_references: true,
+                ..Declarations::default()
+            };
+            d.func(func, false, 1);
+            for r in &d.references {
+                if !d.names.contains_key(&r.name) {
+                    names.insert(r.name.clone());
+                }
+            }
+        }
+    }
+    names
+}
+/// True when an annotated report has a removal at a verified app-source location that the author should clean.
+pub fn actionable(report: &Value) -> bool {
+    report["facts"].as_array().is_some_and(|facts| {
+        facts.iter().any(|f| {
+            f["mapped"] == json!(true)
+                && f["serverOnly"] != json!(true)
+                && f["action"] != json!("retained")
+        })
+    })
+}
 pub fn annotate(root: &Path, source_file: &str, report: &mut Value) -> Result<(), String> {
     let object = report
         .as_object()
@@ -505,6 +535,7 @@ pub fn annotate(root: &Path, source_file: &str, report: &mut Value) -> Result<()
             .iter()
             .any(|ext| source_file.ends_with(ext));
     let mut declarations = None;
+    let mut server_refs = std::collections::BTreeSet::new();
     let mut revision = Value::Null;
     let mut status = if !safe {
         "unsafe-source"
@@ -532,6 +563,7 @@ pub fn annotate(root: &Path, source_file: &str, report: &mut Value) -> Result<()
                         };
                     match brain_parse::parse(src, parse_path) {
                         Ok(c) => {
+                            server_refs = server_only_references(&c);
                             let found = Declarations::collect(&c);
                             status = if found.truncated {
                                 "declaration-limit"
@@ -550,6 +582,7 @@ pub fn annotate(root: &Path, source_file: &str, report: &mut Value) -> Result<()
         }
     }
     let mut mapped = 0usize;
+    let mut server_only = 0usize;
     let mut ambiguous = 0usize;
     for fact in report["facts"].as_array_mut().unwrap() {
         // Keep minifier coordinates unchanged and label their input-JS coordinate space explicitly.
@@ -579,6 +612,17 @@ pub fn annotate(root: &Path, source_file: &str, report: &mut Value) -> Result<()
             fact["mapped"] = json!(true);
             fact["mappingReason"] = json!("unique-binding-declaration");
             mapped += 1;
+            // the client minifier drops it, but the server bundle still uses it: nothing to clean in the source
+            if fact["binding"]
+                .as_str()
+                .is_some_and(|name| server_refs.contains(name))
+            {
+                fact["serverOnly"] = json!(true);
+                fact["fix"] = json!(
+                    "Used by a server: function and kept in the server bundle; no source change is needed"
+                );
+                server_only += 1;
+            }
         } else {
             fact["location"] = json!({"file":if safe{Some(source_file)}else{None},"line":Value::Null,"column":Value::Null,"precision":if fact["generatedLocation"]["line"].is_number(){"generated"}else{"module-only"}});
             fact["originalLine"] = Value::Null;
@@ -595,7 +639,7 @@ pub fn annotate(root: &Path, source_file: &str, report: &mut Value) -> Result<()
         }
     }
     let total = report["facts"].as_array().unwrap().len();
-    report["sourceMapping"] = json!({"schemaVersion":1,"strategy":"unique-binding-declaration","status":status,"sourceRevision":revision,"mapped":mapped,"unmapped":total-mapped,"ambiguous":ambiguous,"truncated":status=="declaration-limit","limits":{"sourceBytes":MAX_SOURCE_BYTES,"visits":MAX_VISITS,"declarations":MAX_DECLARATIONS,"depth":MAX_DEPTH,"facts":MAX_FACTS},"qualification":"Source declaration only; originalSourceHash matched the guarded read snapshot when mapped. Instruction/source-map equivalence and later filesystem changes are not inferred."});
+    report["sourceMapping"] = json!({"schemaVersion":1,"strategy":"unique-binding-declaration","status":status,"sourceRevision":revision,"mapped":mapped,"serverOnly":server_only,"unmapped":total-mapped,"ambiguous":ambiguous,"truncated":status=="declaration-limit","limits":{"sourceBytes":MAX_SOURCE_BYTES,"visits":MAX_VISITS,"declarations":MAX_DECLARATIONS,"depth":MAX_DEPTH,"facts":MAX_FACTS},"qualification":"Source declaration only; originalSourceHash matched the guarded read snapshot when mapped. Instruction/source-map equivalence and later filesystem changes are not inferred."});
     Ok(())
 }
 
@@ -757,5 +801,36 @@ mod tests {
         annotate(&f.0, "runtime/brain-data.js", &mut r).unwrap();
         assert_eq!(r["sourceMapping"]["status"], "non-app-source");
         assert!(r["facts"][0]["originalLine"].is_null());
+    }
+    #[test]
+    fn bindings_used_only_by_server_functions_are_not_source_cleanup() {
+        let r = run(
+            "<script>\nimport { slugify } from '../lib/slug.jsbrain'\nconst LIMIT = 80\nconst unused = 1\nserver: async function save(ctx, v) {\n  const local = 2\n  return slugify(v.title).slice(0, LIMIT + local)\n}\n</script><p>OK</p>",
+            vec![
+                fact("slugify", "import"),
+                fact("LIMIT", "variable"),
+                fact("unused", "variable"),
+            ],
+        );
+        for i in 0..2 {
+            assert_eq!(r["facts"][i]["serverOnly"], true, "{}", r["facts"][i]);
+            assert!(
+                r["facts"][i]["fix"]
+                    .as_str()
+                    .unwrap()
+                    .contains("no source change")
+            );
+        }
+        assert!(r["facts"][2].get("serverOnly").is_none());
+        assert_eq!(r["sourceMapping"]["serverOnly"], 2);
+        assert!(actionable(&r));
+        let only_server = run(
+            "<script>\nconst LIMIT = 80\nserver: async function save(ctx, v) { return LIMIT }\n</script><p>OK</p>",
+            vec![fact("LIMIT", "variable")],
+        );
+        assert!(
+            !actionable(&only_server),
+            "a server-only binding must not raise the cleanup warning"
+        );
     }
 }
