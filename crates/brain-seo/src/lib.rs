@@ -1261,24 +1261,29 @@ fn indexnow_cmd(
     let site = cfg
         .root()
         .or_else(|| {
-            indexnow::urls(&sitemap, None).first().and_then(|u| {
+            sitemap.split("<loc>").nth(1).and_then(|u| u.split("</loc>").next()).and_then(|u| {
                 u.split_once("://")
                     .map(|(s, r)| format!("{s}://{}", r.split('/').next().unwrap_or(r)))
             })
         })
         .ok_or("the sitemap has no URLs")?;
-    let urls = indexnow::urls(&sitemap, since);
+    let urls = indexnow::page_urls(&root.join("dist"), &sitemap, &site, since)?;
     if urls.is_empty() {
         return Ok("nothing to send: no sitemap URL matches".into());
     }
-    let body = indexnow::payload(&site, &key, &urls);
+    // one request per MAX_URLS (protocol limit), in sitemap order
+    let bodies: Vec<Json> = urls.chunks(indexnow::MAX_URLS).map(|c| indexnow::payload(&site, &key, c)).collect();
     if dry_run {
-        return Ok(format!("POST {}\n{}", indexnow::ENDPOINT, body.stringify()));
+        return Ok(bodies.iter().map(|b| format!("POST {}\n{}", indexnow::ENDPOINT, b.stringify())).collect::<Vec<_>>().join("\n"));
     }
-    let code = indexnow::send(&body)?;
+    let mut codes = Vec::new();
+    for b in &bodies {
+        codes.push(indexnow::send(b)?.to_string());
+    }
     Ok(format!(
-        "IndexNow accepted {} URL(s) (HTTP {code})",
-        urls.len()
+        "IndexNow accepted {} URL(s) (HTTP {})",
+        urls.len(),
+        codes.join(", ")
     ))
 }
 

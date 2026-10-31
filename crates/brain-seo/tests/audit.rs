@@ -1937,3 +1937,52 @@ fn site_feed_exists_without_top_level_pages() {
     assert!(m.contains("\"feed\":\"https://acme.dev/rss.xml\""), "{m}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn indexnow_traverses_a_sitemap_index() {
+    // S02: a split sitemap is an index; IndexNow reads its local children, never sends the child sitemap URLs as pages
+    let dir = fresh_dir("indexnow-index");
+    std::fs::create_dir_all(dir.join("dist")).unwrap();
+    std::fs::write(dir.join("brain.json"), r#"{"site":"https://acme.dev","seo":{"indexnow":true}}"#).unwrap();
+    std::fs::write(dir.join(".brain_env"), "[production]\nINDEXNOW_KEY=prodkey0123456789\n").unwrap(); // gitleaks:allow -- synthetic fixture key
+    let set = |range: std::ops::Range<usize>| {
+        let mut o = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
+        for i in range {
+            o.push_str(&format!("  <url><loc>https://acme.dev/p/{i}</loc></url>\n"));
+        }
+        o + "</urlset>\n"
+    };
+    let index = |kids: &[&str]| {
+        let mut o = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<sitemapindex xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
+        for k in kids {
+            o.push_str(&format!("  <sitemap><loc>{k}</loc></sitemap>\n"));
+        }
+        o + "</sitemapindex>\n"
+    };
+    std::fs::write(dir.join("dist/sitemap.xml"), index(&["https://acme.dev/sitemap-1.xml", "https://acme.dev/sitemap-2.xml"])).unwrap();
+    std::fs::write(dir.join("dist/sitemap-1.xml"), set(0..50_000)).unwrap();
+    std::fs::write(dir.join("dist/sitemap-2.xml"), set(49_999..50_001)).unwrap(); // one duplicate across children
+    if std::env::var("INDEXNOW_KEY").is_ok() {
+        return;
+    }
+    let (code, out) = brain_seo::cli(&dir, &["indexnow".into(), "--dry-run".into()]);
+    assert_eq!(code, 0, "{}", &out[..out.len().min(400)]);
+    assert!(!out.contains("sitemap-1.xml") && !out.contains("sitemap-2.xml"), "child sitemaps are not pages");
+    assert!(out.contains("\"https://acme.dev/p/0\"") && out.contains("\"https://acme.dev/p/50000\""));
+    assert_eq!(out.matches("https://acme.dev/p/49999\"").count(), 1, "deduplicated");
+    assert_eq!(out.matches("POST https://api.indexnow.org/indexnow").count(), 6, "10 000 URLs per request");
+    // a missing child, or one outside the site, is an actionable failure
+    std::fs::remove_file(dir.join("dist/sitemap-2.xml")).unwrap();
+    let (code, out) = brain_seo::cli(&dir, &["indexnow".into(), "--dry-run".into()]);
+    assert_eq!(code, 1);
+    assert!(out.contains("sitemap-2.xml") && out.contains("fix:"), "{out}");
+    std::fs::write(dir.join("dist/sitemap.xml"), index(&["https://acme.dev/../secret.xml"])).unwrap();
+    let (code, out) = brain_seo::cli(&dir, &["indexnow".into(), "--dry-run".into()]);
+    assert_eq!(code, 1);
+    assert!(out.contains("fix:"), "{out}");
+    std::fs::write(dir.join("dist/sitemap.xml"), index(&["https://other.example/sitemap-1.xml"])).unwrap();
+    let (code, out) = brain_seo::cli(&dir, &["indexnow".into(), "--dry-run".into()]);
+    assert_eq!(code, 1);
+    assert!(out.contains("other.example") && out.contains("fix:"), "{out}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

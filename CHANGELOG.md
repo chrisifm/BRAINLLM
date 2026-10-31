@@ -11,6 +11,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Added
 
+- `brain seo indexnow` reads a split sitemap through its index (S02): the local `sitemap-N.xml` children, deduplicated
+  and sent 10 000 URLs per request. Child sitemap URLs are never sent as pages; a missing, nested or off-site child
+  is an error with a fix.
 - B0736: a placeholder site URL (the scaffold's `https://example.com`, `*.test`, localhost) is no site in a production
   build. The build warns, names the skipped `sitemap()` routes and publishes no sitemap or robots `Sitemap:` line
   pointing at it; `brain doctor` flags it before deploy. SPEC and `brain guide seo` show a runnable `[slug]`
