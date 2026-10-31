@@ -308,6 +308,13 @@ pub(crate) fn read_module(root: Option<&Path>, path: &Path) -> Option<Component>
     let source = String::from_utf8(bytes).ok()?;
     brain_parse::parse(&source, Path::new(&relative)).ok()
 }
+/// First parse error of a module `read_module` refused, under the same bounded read.
+pub(crate) fn module_parse_error(root: Option<&Path>, path: &Path) -> Option<Diag> {
+    let (base, relative) = module_location(root, path)?;
+    let bytes = crate::remote_imports::read(&base, &relative, 256 * 1024)?;
+    let source = String::from_utf8(bytes).ok()?;
+    brain_parse::parse(&source, Path::new(&relative)).err()?.into_iter().next()
+}
 pub(crate) fn shared_types(root: &Path) -> (Option<HashSet<String>>, HashMap<String, Shape>) {
     let Some(module) = read_module(Some(root), &root.join("types.jsbrain")) else {
         return (None, HashMap::new());

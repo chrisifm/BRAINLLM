@@ -60,6 +60,8 @@ pub struct Ctx {
     pub missing_hint: HashMap<String, String>,
     /// Import source → the one existing file it most likely meant (B0119 edit).
     pub missing_best: HashMap<String, String>,
+    /// Import source → first parse error of a module that exists but does not compile (B0119 says so).
+    pub missing_broken: HashMap<String, String>,
     /// `.brain` import source → its declared channels (§12: emits, expose).
     pub children: HashMap<String, Child>,
     /// Context keys imported from `channels/*.jsbrain` (local name → has a default value).
@@ -232,6 +234,9 @@ pub fn load_ctx(disk_path: &Path, c: &Component) -> (Ctx, Vec<PathBuf>) {
                 }
             }
             let missing=module.is_none();
+            if missing && let Some(d) = infer::module_parse_error(import_root.as_deref(), &target) {
+                ctx.missing_broken.insert(i.source.clone(), format!("{} {}:{} {}", d.code, i.source, d.line, d.msg));
+            }
             let server = module.is_some_and(|m| m.meta.iter().any(|a| a.name == "server"));
             deps.push(infer::watched_module(import_root.as_deref(),&target));
             if missing {if !infer::module_hint_safe(import_root.as_deref(),&target){ctx.missing_hint.insert(i.source.clone(),"use a regular readable app module inside the project <=256 KiB; symlinks and nonregular files are refused".into());}Imported::Missing} else if server { Imported::Server } else { Imported::Other }
@@ -890,6 +895,10 @@ impl<'a> Checker<'a> {
                     return;
                 }
                 if let Some(Imported::Missing) = self.ctx.imports.get(&i.source) {
+                    if let Some(first) = self.ctx.missing_broken.get(&i.source) {
+                        self.push("B0119", i.span, format!("imported file `{}` exists but does not compile: {first}", i.source), format!("fix that error in `{}`; this import resolves once it compiles", i.source));
+                        return;
+                    }
                     let fix = self.ctx.missing_hint.get(&i.source).cloned().unwrap_or_else(|| "fix the relative path (start with `./` or `../`) or create the file".into());
                     let mut edits = Vec::new();
                     if let Some(best) = self.ctx.missing_best.get(&i.source)

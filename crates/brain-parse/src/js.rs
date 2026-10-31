@@ -397,7 +397,7 @@ impl<'a> JsParser<'a> {
         }
         self.expect("(")?;
         let classic = || {
-            Diag::new("B0110", "", start, "only `for (const x of list)` exists in BrainScript", "rewrite the loop as `for (const x of list) { ... }`; for indices use `list.forEach((x, i) => ...)`")
+            Diag::new("B0110", "", start, "only `for (const x of list)` exists in BrainScript", "rewrite the loop as `for (const x of list) { ... }`; for indices use `list.forEach((x, i) => ...)`; for bounded retries use `for (const attempt of [1, 2, 3]) { ... }`")
         };
         if !(self.is_word("let") || self.is_word("const") || self.is_word("var")) {
             let mut d = classic();

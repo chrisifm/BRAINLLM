@@ -23,6 +23,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   block lists `precompressed zstd br gzip`.
 
 ### Fixed
+- B0119 reports an imported module that exists but does not parse as such, with its first error, instead of a missing file.
+- The B0110 fix for a classic `for` shows the form for bounded retries.
 - `brain start` answers 404 for a request path starting with `//`. It answered 500 for `//`.
 - Service worker caches are scoped to the app: under a base path they are named `brain/app-<sig>` and `brain/app:*`, so
   activating or opting out one app no longer deletes another app's caches on the same origin, and `sw: false` deletes

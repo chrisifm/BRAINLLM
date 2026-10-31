@@ -107,3 +107,23 @@ fn missing_import_hints_are_project_bounded_regular_and_complete() {
     let capped=check("<script>import value from '../lib/formats.jsbrain'</script>{value}");
     assert_eq!(capped[0].code,"B0119");assert!(capped[0].fix.contains("512"));assert!(capped[0].edits.is_empty());
 }
+
+#[test]
+fn import_of_a_module_that_does_not_parse_names_its_first_error_not_a_missing_file() {
+    let root = std::env::temp_dir().join(format!("brain-broken-import-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("lib")).unwrap();
+    std::fs::create_dir_all(root.join("comp")).unwrap();
+    std::fs::write(root.join("brain.json"), "{}").unwrap();
+    std::fs::write(root.join("lib/format.jsbrain"), "export default 1\n").unwrap();
+    std::fs::write(root.join("lib/retry.jsbrain"), "export const a = 1\nwhile (a) {}\n").unwrap();
+    let file = root.join("comp/x.brain");
+    let c = brain_parse::parse("<script>import r from '../lib/retry.jsbrain'</script>{r}", std::path::Path::new("comp/x.brain")).unwrap();
+    let (ctx, _) = brain_check::load_ctx(&file, &c);
+    let d = brain_check::check(&c, &ctx);
+    let _ = std::fs::remove_dir_all(&root);
+    assert_eq!(d[0].code, "B0119");
+    assert!(d[0].msg.contains("exists but does not compile"), "{}", d[0].msg);
+    assert!(d[0].msg.contains("B0110") && d[0].msg.contains(":2"), "{}", d[0].msg);
+    assert!(d[0].edits.is_empty(), "the path is right: nothing to rewrite");
+}
