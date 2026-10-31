@@ -1791,7 +1791,7 @@ deviations and the unmeasured HTTP/SSR topology decision. No replacement for exi
 Navigation update (2026-10-29): `brain-pack::navigation` emits page-local `brain-next` routes/assets before signature and
 CSP/SRI. The router validates plans against current links and uses a dedicated content-hashed `brain-prefetch.js` worker
 when available, with a main-thread fallback. Two concurrent requests, 512 KB/page, 4 MB tab memory, six-second deadline,
-48 preload links, and at most 150 ms waiting for unfinished speculation on a click. Writes advance an epoch and abort
+48 preload links; a click reuses a speculative request still in flight (its deadline dropped) instead of starting a second one (0.6.0). Writes advance an epoch and abort
 requests, preventing late responses from reappearing after logout. Build changes stop speculation; stop removes owned
 workers/listeners/idle jobs. Static assets retain one-year immutable HTTP caching and cache-first service-worker reuse;
 data/private HTML remains separate. Browser/benchmark acceptance is tracked in GAPS.md.
@@ -1804,6 +1804,17 @@ is the innermost layer for `GET /api/...`: it hashes bodies up to 2 MiB into wea
 a `Declared` extension that `response_headers` turns into `Cache-Control` instead of `no-store`. `If-Match` is checked
 in `precondition` against the same xmin the write CAS uses. See [backend/cluster.md](backend/cluster.md) and
 [backend/caching.md](backend/caching.md).
+
+Client navigation states (unreleased, `runtime/brain-router.js` `load`): one navigation token (`seq`) decides every late
+callback. A superseded navigation never swaps, never runs its View Transition callback, never scrolls or moves focus
+(History fallback), and never mounts its loading view. The current page stays until the next one is parsed; DOM, head,
+active links and the next-route plan change in one swap callback. The region gets `aria-busy="true"` and `route().navigating`
+is true at once; at 150 ms `#brain-nav` shows (the app's own element, else a fixed native `<progress>`); at 400 ms the
+nearest `_loading.brain` replaces the region. A fetch, parse or swap that throws ends in
+a full page load, never a half-swapped page. View Transitions are skipped by CSS under reduced motion (SPEC). The nonce for recreated scripts is read once at `router()` start.
+Past 8 s a navigation becomes a full load. `hold` lets real links through. `predict` orders its queue by rank: intent -1,
+main links by `getBoundingClientRect().top`, plan 1e6, `footer`/`aside` 1e7 + top. Measured on the admin edit route of the
+CRUD fixture (`backend.rs` test): 30703 B of the 30720 B default budget, 30698 B before this work.
 
 
 ## 45. Agent coordination and focused evidence (2026-10-30)

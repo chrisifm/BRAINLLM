@@ -21,6 +21,13 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Build-time zstd: `brain build` writes a `.zst` (level 19) next to a text asset when it is smaller than the `.br`;
   `brain start` and `server.mjs` send the smallest precompressed sibling the client accepts and the emitted Caddy
   block lists `precompressed zstd br gzip`.
+- Client navigation always gives feedback: the region gets `aria-busy="true"` and `route()` gains `navigating`
+  at once; past 150 ms `#brain-nav` shows (the app's own element in `app.brain`, else a native top `<progress>` bar);
+  past 400 ms (was 150 ms) `_loading.brain` replaces the region, so fast pages never flash a skeleton.
+  `brain guide views` documents a custom spinner.
+- Prefetch runs from an ordered queue: hover and focus first, then visible links in the main content from the top of
+  the page down, then the compiler's plan, then `footer` and `aside` links. A link that leaves the viewport before its
+  turn is dropped, visible links never warm `fullLoad` routes, and a click never waits on the queue.
 
 ### Fixed
 - B0119 reports an imported module that exists but does not parse as such, with its first error, instead of a missing file.
@@ -31,6 +38,17 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   only the app's own caches instead of every cache on the origin. An app at the root keeps its cache names.
 - Service worker cache writes for hashed chunks and public files are registered with `waitUntil`, so they finish before
   the worker can stop; a failed write no longer surfaces as an unhandled rejection.
+- Client navigation no longer flickers or swaps a stale page: one navigation token guards every late callback, so a
+  superseded navigation never swaps, never runs its View Transition callback, never scrolls or moves focus and never
+  mounts its loading view; a fetch, parse or swap that throws becomes a full page load; a click reuses a prefetch
+  still in flight (even a no-cache page) instead of fetching the page twice.
+- The first click on an internal link always navigates: links are no longer held until the view's chunk mounts, a page
+  without a mount script no longer inherits the previous page's click hold, a failed prefetch only costs a new request,
+  and a navigation that gets no answer in 8 s becomes a full load.
+- Client navigation no longer breaks the CSP after the first page: the router keeps the nonce the document was served
+  with, instead of reading the first `script[nonce]`, which could be a data script adopted from an earlier response.
+- Stopping the History router now removes its service worker `message` listener, as the Navigation API branch
+  already did, so repeated start/stop keeps no listener.
 - Scoped CSS keeps pseudo-elements (`::backdrop`, `::before`, `:after`, `::-webkit-*`) outside the root anchor's
   `:is()`, so Chrome no longer drops the whole rule list for components that style them at their root.
 - Conditional content passed to a named slot (`{#if}<a slot="footer">…{:else}<span slot="footer">…{/if}`) now

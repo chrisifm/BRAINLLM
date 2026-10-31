@@ -156,12 +156,20 @@ class Node {
     if (!e.defaultPrevented && e.type === 'click' && this.tagName === 'INPUT' && this.type === 'checkbox') this.checked = !this.checked
     return !e.defaultPrevented
   }
+  closest(sel) {
+    const tests = sel.split(',').map(x => compound(x.trim()))
+    for (let n = this; n && n.getAttribute; n = n.parentNode) if (tests.some(t => t(n))) return n
+    return null
+  }
+  getBoundingClientRect() {
+    return { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 }
+  }
   contains(n) {
     for (; n; n = n.parentNode) if (n === this) return true
     return false
   }
   // Supported selectors: lists (`a, b`), descendant (`a b`), compounds of `tag`, `.class`, `#id`, `[attr]`,
-  // `[attr=v]` (quoted or not) and `:not(<compound>)`. Enough for the runtime and the ui kit.
+  // `[attr=v]` (quoted or not), `*` and `:not(<compound>)`. Enough for the runtime and the ui kit.
   querySelectorAll(sel) {
     const alts = sel.split(',').map(a => a.trim().split(/\s+/).map(compound))
     const out = []
@@ -409,12 +417,13 @@ class Document extends Node {
 // Selector helpers for querySelectorAll: a compound is a list of tests on one element.
 function compound(str) {
   const tests = []
-  const rx = /^(?:([\w-]+)|\.([\w-]+)|#([\w-]+)|\[([\w-]+)(?:=["']?([^"'\]]*)["']?)?\]|:not\(([^)]*)\))/
+  const rx = /^(?:\*|([\w-]+)|\.([\w-]+)|#([\w-]+)|\[([\w-]+)(?:=["']?([^"'\]]*)["']?)?\]|:not\(([^)]*)\))/
   let rest = str
   while (rest) {
     const m = rx.exec(rest)
     if (!m) throw Error('unsupported selector: ' + str)
     rest = rest.slice(m[0].length)
+    if (m[0] === '*') continue
     if (m[1]) tests.push(e => e.tagName === m[1].toUpperCase())
     else if (m[2]) tests.push(e => (e.getAttribute('class') || '').split(/\s+/).includes(m[2]))
     else if (m[3]) tests.push(e => e.getAttribute('id') === m[3])

@@ -125,7 +125,8 @@ export function portal(target, f) {
   return []
 }
 
-// route() → { path, params, query }, read-only and reactive (each a signal read): path without the base path
+// route() → { path, params, query, navigating }, read-only and reactive (each a signal read); navigating is true while
+// a client navigation is on its way (brain-router passes it as __brainRouted(true|false)): path without the base path
 // (<meta name="brain-base">), query from the URL, params from the page's <meta name="brain-params" content='{"id":"7"}'>
 // (the server knows the route's pattern; the client does not). brain-router calls globalThis.__brainRouted after every
 // client navigation. While the server renders, the values come from globalThis.__brainRoute (server.mjs, prerender).
@@ -148,13 +149,14 @@ const read = () => {
 }
 export function route() {
   const s = G.__brainRoute
-  if (s) return { path: s.path, params: s.params || {}, query: s.query || {} }
+  if (s) return { path: s.path, params: s.params || {}, query: s.query || {}, navigating: false }
   if (!cur) {
-    const S = read().map(v => sig(v))
-    cur = { get path() { return S[0].v }, get params() { return S[1].v }, get query() { return S[2].v } }
-    G.__brainRouted = () => {
+    const S = [...read(), false].map(v => sig(v))
+    cur = { get path() { return S[0].v }, get params() { return S[1].v }, get query() { return S[2].v }, get navigating() { return S[3].v } }
+    G.__brainRouted = on => {
+      if (on !== undefined) return void (S[3].v = !!on)
       const v = read()
-      S.forEach((s, i) => JSON.stringify(untrack(() => s.v)) !== JSON.stringify(v[i]) && (s.v = v[i])) // only what changed
+      v.forEach((x, i) => JSON.stringify(untrack(() => S[i].v)) !== JSON.stringify(x) && (S[i].v = x)) // only what changed
     }
   }
   return cur

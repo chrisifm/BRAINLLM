@@ -16,6 +16,11 @@ Before each kind of task run `brain guide <topic>` (`brain guide` lists them): s
 - `services/*.jsbrain` are injectable: `provide(Api, realApi)` in `app.brain`, `use(Api)` anywhere; tests swap them with
   `mount(Comp, props, { provide: [[Api, fakeApi]] })`.
 - `_loading.brain` shows while `load` runs. `<meta cache="60">` in a view = rebuild at most every 60 s.
+- Client navigation always gives feedback and never flashes: the current page stays until the next one is ready; the
+  region gets `aria-busy="true"` and `route().navigating` is true at once; past 150 ms `#brain-nav` shows (a top
+  `<progress>` bar; color it with `accent-color` on `#brain-nav` in `tokens.cssbrain`, or put your own
+  `<div id="brain-nav" hidden>…</div>` in `app.brain`); past 400 ms `_loading.brain` replaces the region. A failed
+  navigation is a full page load.
 - Languages: `brain.json` `"i18n": { "default": "en", "locales": ["en", "es"] }`; texts in `i18n/<locale>.json`
   (`"nav.home": "Home"`, plurals `{ "one": "{n} post", "other": "{n} posts" }`); write `t('nav.home')`, never literal
   text once there are 2+ locales. Add a language with `brain add locale es`: it moves every fixed text (text, visible
