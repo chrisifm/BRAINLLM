@@ -437,7 +437,7 @@ async fn authorize(
         crate::ownership::row_allowed(&app.pool, resource, &app.resources, "read", viewer, id)
             .await
             .map_err(|error| {
-                let _ = Error::internal(crate::db::safe(error));
+                let _ = Error::database(error);
                 CheckFailure::Unavailable
             })
     })

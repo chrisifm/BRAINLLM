@@ -8,7 +8,7 @@ use crate::{
 use axum::{
     Json, Router,
     body::{Body, Bytes},
-    extract::{DefaultBodyLimit, Multipart, Path, Query, Request, State},
+    extract::{DefaultBodyLimit, FromRequestParts, Multipart, Query, Request, State},
     http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -117,15 +117,36 @@ impl Error {
         }
         self
     }
+    /// A failed database operation: the cause goes to the log, the client gets a retryable or an internal response.
+    #[track_caller]
+    fn database(error: sqlx::Error) -> Self {
+        Self::database_in(&error, std::panic::Location::caller(), json!({}))
+    }
+    /// `context` holds finite identifiers only (resource, operation, branch), never request values.
+    fn database_in(error: &sqlx::Error, at: &'static std::panic::Location<'static>, context: Value) -> Self {
+        crate::platform::note_database_error(error);
+        db::log_failure(error, at, context);
+        // Text Postgres cannot store (a NUL or invalid bytes) came from the request.
+        if db::sqlstate(error).is_some_and(|state| matches!(state.as_str(), "22P05" | "22021")) {
+            return Self::new(StatusCode::UNPROCESSABLE_ENTITY, "INVALID_INPUT", "Remove NUL characters and invalid bytes from the text values");
+        }
+        if db::sqlstate(error).is_some_and(|state| db::retryable(&state)) {
+            return Self::new(StatusCode::SERVICE_UNAVAILABLE, "DATABASE_BUSY", "The database could not finish in time and nothing was changed; retry after the Retry-After delay");
+        }
+        Self::internal_at(at)
+    }
     #[track_caller]
     fn internal(error: impl std::fmt::Display + 'static) -> Self {
-        if let Some(error) = (&error as &dyn std::any::Any).downcast_ref::<sqlx::Error>() {
-            crate::platform::note_database_error(error);
-        }
         let at = std::panic::Location::caller();
+        if let Some(error) = (&error as &dyn std::any::Any).downcast_ref::<sqlx::Error>() {
+            return Self::database_in(error, at, json!({}));
+        }
+        Self::internal_at(at)
+    }
+    fn internal_at(at: &'static std::panic::Location<'static>) -> Self {
+        let rid = REQUEST_ID.try_with(Clone::clone).ok();
         static DIAGNOSTIC_BUSY: std::sync::atomic::AtomicBool =
             std::sync::atomic::AtomicBool::new(false);
-        let rid = REQUEST_ID.try_with(Clone::clone).ok();
         let reserved = DIAGNOSTIC_BUSY
             .compare_exchange(
                 false,
@@ -134,10 +155,7 @@ impl Error {
                 std::sync::atomic::Ordering::Relaxed,
             )
             .is_ok();
-        eprintln!(
-            "{}",
-            json!({"schemaVersion":1,"event":"backend-internal-error","rid":rid,"code":"BACKEND_INTERNAL","location":{"file":at.file(),"line":at.line(),"column":at.column()},"stackDeferred":reserved,"stackOmitted":!reserved,"queueDepth":0,"private":true,"valuesCaptured":false})
-        );
+        db::diagnostic(&json!({"schemaVersion":1,"event":"backend-internal-error","rid":rid,"code":"BACKEND_INTERNAL","location":{"file":at.file(),"line":at.line(),"column":at.column()},"stackDeferred":reserved,"stackOmitted":!reserved,"queueDepth":0,"private":true,"valuesCaptured":false}));
         if reserved {
             let trace = std::backtrace::Backtrace::force_capture();
             let diagnostic=std::thread::Builder::new().name("brain-diagnostic".into()).spawn(move || {
@@ -150,7 +168,9 @@ impl Error {
                     if n<value.len(){self.truncated=true;Err(std::fmt::Error)}else{Ok(())}
                 }}
                 let mut stack=Bounded{text:String::new(),truncated:false};let _=std::fmt::write(&mut stack,format_args!("{trace}"));
-                eprintln!("{}",json!({"schemaVersion":1,"event":"backend-internal-stack","rid":rid,"location":{"file":at.file(),"line":at.line(),"column":at.column()},"stack":stack.text,"truncated":stack.truncated,"queueDepth":0,"private":true,"valuesCaptured":false}));
+                // A stripped release binary has no symbols: its frames say nothing, so the event says that instead.
+                let useful=stack_is_symbolized(&stack.text);
+                eprintln!("{}",json!({"schemaVersion":1,"event":"backend-internal-stack","rid":rid,"location":{"file":at.file(),"line":at.line(),"column":at.column()},"stack":useful.then_some(&stack.text),"stackUnavailable":(!useful).then_some("binary has no symbols; use the location"),"truncated":stack.truncated,"queueDepth":0,"private":true,"valuesCaptured":false}));
             });
             if diagnostic.is_err() {
                 DIAGNOSTIC_BUSY.store(false, std::sync::atomic::Ordering::Release);
@@ -200,6 +220,9 @@ impl IntoResponse for Error {
         response
             .extensions_mut()
             .insert(crate::response::DefaultError);
+        if self.code == "DATABASE_BUSY" {
+            response.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
+        }
         if self.code == "AUTH_DENIED" {
             response
                 .headers_mut()
@@ -208,7 +231,22 @@ impl IntoResponse for Error {
         response
     }
 }
+/// Whether a captured backtrace names this crate's code, which a stripped binary cannot do.
+fn stack_is_symbolized(stack: &str) -> bool {
+    stack.contains("brain_backend")
+}
 type Result<T> = std::result::Result<T, Error>;
+/// URL parameters; a value of the wrong shape (a record id that is not a UUID) answers with what to send instead.
+pub(crate) struct Path<T>(pub T);
+impl<S: Send + Sync, T: serde::de::DeserializeOwned + Send> FromRequestParts<S> for Path<T> {
+    type Rejection = Error;
+    async fn from_request_parts(parts: &mut axum::http::request::Parts, state: &S) -> std::result::Result<Self, Error> {
+        match axum::extract::Path::<T>::from_request_parts(parts, state).await {
+            Ok(axum::extract::Path(value)) => Ok(Path(value)),
+            Err(_) => Err(Error::new(StatusCode::BAD_REQUEST, "INVALID_ID", "The id in the URL is not a valid id; record ids are UUIDs, send the id the API returned")),
+        }
+    }
+}
 impl App {
     async fn user(&self, h: &HeaderMap) -> Result<Option<User>> {
         if let Some(user) = http_api_keys::key_user() {
@@ -302,6 +340,7 @@ pub async fn router_full(
     domain: crate::domain::Domain,
     platform: crate::platform::Platform,
 ) -> std::result::Result<(Router, SocketControl, EdgeControl), String> {
+    db::log_values(config.production);
     for origin in &platform.edge.cors_origins {
         if !config.origins.contains(origin) {
             config.origins.push(origin.clone());
@@ -1170,7 +1209,9 @@ async fn list(
         .map_err(|error| match error {
             crate::query::ListError::Invalid(fields) => Error::validation(fields),
             crate::query::ListError::Denied(_) => Error::forbidden(),
-            crate::query::ListError::Database(e) => Error::internal(db::safe(e)),
+            crate::query::ListError::Database { error, at, branch } => {
+                Error::database_in(&error, at, json!({"resource": name, "operation": if req.search.trim().is_empty() { "list" } else { "list.search" }, "branch": branch}))
+            }
         })?;
     if let Some(items) = out["items"].as_array_mut() {
         include(&app, r, &req.include, items, viewer).await?;
@@ -1192,14 +1233,14 @@ async fn include(
         .map_err(|error| match error {
             crate::relations::IncludeError::Unknown(name) => Error::validation(json!({"include": format!("`{name}` is not includable")})),
             crate::relations::IncludeError::Denied(_) => Error::forbidden(),
-            crate::relations::IncludeError::Database => Error::internal("include"),
+            crate::relations::IncludeError::Database(error) => Error::internal(error),
         })
 }
 /// Whether the viewer owns `id` through a declared `owner.<ref>` grant of `operation`.
 async fn owns_through(app: &App, r: &Resource, operation: &str, u: &User, id: Uuid) -> Result<bool> {
     crate::ownership::owns_through(&app.pool, r, &app.resources, operation, viewer(Some(u)), id)
         .await
-        .map_err(|error| Error::internal(db::safe(error)))
+        .map_err(|error| Error::database(error))
 }
 fn relational(r: &Resource, operation: &str) -> bool {
     let grants = match operation {
@@ -1225,7 +1266,7 @@ async fn slug_redirect(
     match crate::slugs::redirect(&app.pool, &app.resources, r, &scope, &slug).await {
         Ok(Some(current)) => Ok(Json(json!({ "slug": current }))),
         Ok(None) => Err(Error::missing()),
-        Err(error) => Err(Error::internal(db::safe(error))),
+        Err(error) => Err(Error::database(error)),
     }
 }
 async fn read(
@@ -1245,7 +1286,7 @@ async fn read(
     }
     let (mut row, revision) = db::get_version(&app.pool, r, id)
         .await
-        .map_err(|e| Error::internal(db::safe(e)))?
+        .map_err(|e| Error::database(e))?
         .ok_or_else(Error::missing)?;
     let allowed = crate::ownership::row_allowed(&app.pool, r, &app.resources, "read", viewer(u.as_ref()), id)
         .await
@@ -1365,7 +1406,7 @@ fn write_error(r: &Resource, error: sqlx::Error) -> Error {
             "CONSTRAINT_VIOLATION",
             "The record violates a declared type or check constraint; correct the values and retry",
         ),
-        None => Error::internal(db::safe(error)),
+        None => Error::database(error),
     }
 }
 /// Row filter for a write: None when the role may change any row, the user id for direct owners, or None after the
@@ -1411,7 +1452,7 @@ pub(super) async fn write_denied(
 async fn owns_data(app: &App, r: &Resource, operation: &str, u: &User, data: &Value) -> Result<bool> {
     crate::ownership::data_owned_through(&app.pool, r, &app.resources, operation, viewer(Some(u)), data)
         .await
-        .map_err(|error| Error::internal(db::safe(error)))
+        .map_err(|error| Error::database(error))
 }
 fn conflict() -> Error {
     Error::new(
@@ -1460,7 +1501,7 @@ async fn update(
     // Capture a real row before application code; policy never relies on client-supplied existing data.
     let (existing, revision) = db::get_version(&app.pool, r, id)
         .await
-        .map_err(|error| Error::internal(db::safe(error)))?
+        .map_err(|error| Error::database(error))?
         .ok_or_else(Error::missing)?;
     let (owner, through) = scoped_owner(&app, r, "update", &u, &existing, id).await?;
     precondition(r, &h, &existing, &revision, &u, through)?;
@@ -1496,7 +1537,7 @@ async fn patch(
     }
     let (existing, revision) = db::get_version(&app.pool, r, id)
         .await
-        .map_err(|error| Error::internal(db::safe(error)))?
+        .map_err(|error| Error::database(error))?
         .ok_or_else(Error::missing)?;
     let (owner, through) = scoped_owner(&app, r, "update", &u, &existing, id).await?;
     precondition(r, &h, &existing, &revision, &u, through)?;
@@ -1530,7 +1571,7 @@ async fn delete(
     }
     let (existing, revision) = db::get_version(&app.pool, r, id)
         .await
-        .map_err(|error| Error::internal(db::safe(error)))?
+        .map_err(|error| Error::database(error))?
         .ok_or_else(Error::missing)?;
     let (owner, through) = scoped_owner(&app, r, "delete", &u, &existing, id).await?;
     precondition(r, &h, &existing, &revision, &u, through)?;
@@ -1558,7 +1599,7 @@ async fn delete(
                     "Other records still reference this one (on_delete: restrict); delete or re-point them first",
                 );
             }
-            Error::internal(db::safe(error))
+            Error::database(error)
         })?
     {
         return Err(conflict());
@@ -2263,6 +2304,11 @@ async fn webhook_status(
 #[cfg(test)]
 mod diagnostic_tests {
     use super::*;
+    #[test]
+    fn stripped_stacks_are_not_logged_as_if_they_helped() {
+        assert!(stack_is_symbolized("0: brain_backend::http::list\n"));
+        assert!(!stack_is_symbolized("0: <unknown>\n1: __rust_try\n"));
+    }
     #[tokio::test]
     async fn internal_errors_return_safe_response_without_waiting_for_stack_symbolization() {
         struct Sensitive;

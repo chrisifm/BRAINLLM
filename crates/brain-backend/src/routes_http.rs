@@ -246,18 +246,20 @@ async fn serve(app: App, state: Arc<State>, route: Arc<Route>, req: Request) -> 
         Err(_) => Err(RouteFailure::Timeout),
     };
     match outcome {
-        Ok(value) => Ok(respond(value)),
+        Ok(value) => respond(value).ok_or_else(|| invalid_status(&route.name, &rid)),
         Err(RouteFailure::Status(status, body)) => {
-            let status = StatusCode::from_u16(status).ok().filter(|s| s.is_client_error()).unwrap_or(StatusCode::BAD_REQUEST);
+            let Some(status) = failure_status(status) else {
+                return Err(invalid_status(&route.name, &rid));
+            };
             Ok((status, Json(body)).into_response())
         }
         Err(RouteFailure::Capacity) => Ok(with_retry(error(StatusCode::SERVICE_UNAVAILABLE, "OVERLOADED", "All route workers are busy; retry after the Retry-After delay").into_response(), 1)),
         Err(RouteFailure::Timeout) => {
-            eprintln!("{}", json!({"schemaVersion":1,"event":"route-timeout","route":route.name,"timeoutMs":route.timeout.as_millis() as u64,"rid":rid}));
+            crate::db::diagnostic(&json!({"schemaVersion":1,"event":"route-timeout","route":route.name,"timeoutMs":route.timeout.as_millis() as u64,"rid":rid}));
             Err(error(StatusCode::GATEWAY_TIMEOUT, "ROUTE_TIMEOUT", "The route handler did not finish within its timeout"))
         }
         Err(RouteFailure::Unavailable) => {
-            eprintln!("{}", json!({"schemaVersion":1,"event":"route-failed","code":"ROUTE_FAILED","route":route.name,"location":{"file":format!("server/routes/{}/handler.jsbrain", route.name)},"rid":rid,"valuesCaptured":false}));
+            crate::db::diagnostic(&json!({"schemaVersion":1,"event":"route-failed","code":"ROUTE_FAILED","route":route.name,"location":{"file":format!("server/routes/{}/handler.jsbrain", route.name)},"rid":rid,"valuesCaptured":false}));
             Err(error(StatusCode::INTERNAL_SERVER_ERROR, "ROUTE_FAILED", "The route handler failed; inspect server diagnostics with the request reference"))
         }
     }
@@ -265,19 +267,34 @@ async fn serve(app: App, state: Arc<State>, route: Arc<Route>, req: Request) -> 
 
 const RESPONSE_HEADERS: &[&str] = &["location", "cache-control", "etag", "retry-after", "link", "content-language"];
 
-/// `{status, body, headers}` from the handler; any other value is a `200` JSON body.
-fn respond(value: Value) -> Response {
+fn failure_status(status: u16) -> Option<StatusCode> {
+    StatusCode::from_u16(status).ok().filter(|s| s.is_client_error() || s.is_server_error())
+}
+fn invalid_status(route: &str, rid: &impl serde::Serialize) -> Error {
+    crate::db::diagnostic(&json!({"schemaVersion":1,"event":"route-invalid-status","code":"ROUTE_INVALID_STATUS","route":route,"rid":rid,"valuesCaptured":false}));
+    error(StatusCode::INTERNAL_SERVER_ERROR, "ROUTE_INVALID_STATUS", "The route handler returned an invalid status; return an integer from 200 to 599, excluding 1xx")
+}
+
+/// `{status, body, headers}` from the handler; any other value is a `200` JSON body. The handler's status is sent as
+/// written, 5xx included, because a webhook provider reads the status to decide whether to redeliver. `None`: the
+/// envelope names a status no response can have. A lone `{status: 'open'}` is ordinary data, not an envelope.
+fn respond(value: Value) -> Option<Response> {
     let envelope = value.as_object().filter(|m| !m.is_empty() && m.keys().all(|k| matches!(k.as_str(), "status" | "body" | "headers")));
-    let Some(envelope) = envelope else {
-        return Json(value).into_response();
+    let envelope = match envelope {
+        Some(m) if m.len() == 1 && m.get("status").is_some_and(|s| !s.is_number()) => None,
+        other => other,
     };
-    let status = envelope
-        .get("status")
-        .and_then(Value::as_u64)
-        .and_then(|s| u16::try_from(s).ok())
-        .and_then(|s| StatusCode::from_u16(s).ok())
-        .filter(|s| s.is_success() || s.is_redirection() || s.is_client_error())
-        .unwrap_or(StatusCode::OK);
+    let Some(envelope) = envelope else {
+        return Some(Json(value).into_response());
+    };
+    let status = match envelope.get("status") {
+        None => StatusCode::OK,
+        Some(raw) => raw
+            .as_u64()
+            .and_then(|s| u16::try_from(s).ok())
+            .and_then(|s| StatusCode::from_u16(s).ok())
+            .filter(|s| !s.is_informational() && s.as_u16() <= 599)?,
+    };
     let mut response = if status == StatusCode::NO_CONTENT || status == StatusCode::NOT_MODIFIED {
         status.into_response()
     } else {
@@ -294,7 +311,7 @@ fn respond(value: Value) -> Response {
             }
         }
     }
-    response
+    Some(response)
 }
 
 /// Request deadline lookup for the outer middleware.
@@ -308,14 +325,25 @@ mod tests {
 
     #[tokio::test]
     async fn handler_envelopes_map_status_body_and_safe_headers() {
-        let response = respond(json!({"status": 201, "body": {"id": 7}, "headers": {"Location": "/orders/7", "Set-Cookie": "x=1", "X-Shop": "a"}}));
+        let response = respond(json!({"status": 201, "body": {"id": 7}, "headers": {"Location": "/orders/7", "Set-Cookie": "x=1", "X-Shop": "a"}})).unwrap();
         assert_eq!(response.status(), 201);
         assert_eq!(response.headers()["location"], "/orders/7");
         assert_eq!(response.headers()["x-shop"], "a");
         assert!(response.headers().get("set-cookie").is_none());
-        assert_eq!(respond(json!({"status": 500})).status(), 200, "handlers cannot fake server errors");
-        assert_eq!(respond(json!({"status": 204})).status(), 204);
-        let plain = respond(json!({"items": []}));
+        // A handler's 5xx reaches the client: a webhook provider must see the failure and redeliver.
+        for status in [500, 502, 503, 504, 599] {
+            assert_eq!(respond(json!({"status": status, "body": {"retry": true}})).unwrap().status(), status);
+        }
+        for invalid in [json!(0), json!(99), json!(101), json!(600), json!(70000), json!(1.5), json!(-1), json!("500")] {
+            assert!(respond(json!({"status": invalid, "body": null})).is_none(), "{invalid}");
+        }
+        let data = respond(json!({"status": "open"})).unwrap();
+        assert_eq!(data.status(), 200);
+        assert_eq!(&to_bytes(data.into_body(), 64).await.unwrap()[..], br#"{"status":"open"}"#);
+        assert_eq!(respond(json!({"status": 204})).unwrap().status(), 204);
+        assert_eq!(failure_status(503), Some(StatusCode::SERVICE_UNAVAILABLE));
+        assert_eq!(failure_status(200), None);
+        let plain = respond(json!({"items": []})).unwrap();
         assert_eq!(plain.status(), 200);
         let body = to_bytes(plain.into_body(), 1024).await.unwrap();
         assert_eq!(&body[..], br#"{"items":[]}"#);

@@ -31,6 +31,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("endpoints_platform", include_str!("../migrations/0013_endpoints_platform.sql")),
     ("cluster_rate_windows", include_str!("../migrations/0014_cluster_rate_windows.sql")),
     ("search_language", include_str!("../migrations/0015_search_language.sql")),
+    ("search_text_bound", include_str!("../migrations/0016_search_text_bound.sql")),
 ];
 fn checksum(sql: &str) -> String {
     Sha256::digest(sql.as_bytes())
@@ -721,10 +722,14 @@ pub async fn migrate(pool: &PgPool, resources: &[Resource]) -> Result<(), String
             .join(",");
         let previous: Option<Vec<u8>> = sqlx::query_scalar("SELECT tgargs FROM pg_trigger WHERE tgrelid=to_regclass($1) AND tgname='_brain_search'").bind(format!("public.{table}")).fetch_optional(&mut *tx).await.map_err(safe)?;
         sqlx::raw_sql(sqlx::AssertSqlSafe(format!("DROP TRIGGER IF EXISTS _brain_search ON {table}; CREATE TRIGGER _brain_search BEFORE INSERT OR UPDATE OF data ON {table} FOR EACH ROW EXECUTE FUNCTION public._brain_search_update({args});"))).execute(&mut *tx).await.map_err(safe)?;
-        if previous.is_some_and(|p| p != crate::search_config::trigger_args_bytes(r)) {
-            // A changed language or weight rebuilds stored search documents; updated_at is not touched.
-            sqlx::raw_sql(sqlx::AssertSqlSafe(format!("UPDATE {table} SET data=data"))).execute(&mut *tx).await.map_err(safe)?;
-        }
+        // A changed language or weight rebuilds every stored search document; rows written before typo text was
+        // bounded (0016) rebuild once. updated_at is not touched, and the rebuild may outlast the migration deadline.
+        let rebuild = if previous.is_some_and(|p| p != crate::search_config::trigger_args_bytes(r)) {
+            String::new()
+        } else {
+            format!(" WHERE length(search_text)>{}", 257 * r.search.len())
+        };
+        sqlx::raw_sql(sqlx::AssertSqlSafe(format!("SET LOCAL statement_timeout=0; UPDATE {table} SET data=data{rebuild}; SET LOCAL statement_timeout='60s';"))).execute(&mut *tx).await.map_err(safe)?;
         sqlx::query("INSERT INTO _brain_resource_schemas(name,fields,search_fields) VALUES($1,$2,$3) ON CONFLICT DO NOTHING").bind(&r.name).bind(fields).bind(json!(r.search)).execute(&mut *tx).await.map_err(safe)?;
         install_constraints(&mut tx, r).await?;
         resource_shape(&mut tx, r).await?;
@@ -744,9 +749,9 @@ fn table(r: &Resource) -> String {
     assert!(crate::contract::identifier(&r.name));
     format!("_brain_res_{}", r.name)
 }
-fn failure_metadata(error: &sqlx::Error) -> Value {
-    // SQLSTATE is a finite five-character identifier. Never format an error, SQL text, URL or bound value.
-    let code = error
+/// The SQLSTATE of a database error: a finite five-character identifier, safe to log and compare.
+pub(crate) fn sqlstate(error: &sqlx::Error) -> Option<String> {
+    error
         .as_database_error()
         .and_then(|e| e.code())
         .filter(|code| {
@@ -755,7 +760,11 @@ fn failure_metadata(error: &sqlx::Error) -> Value {
                     .bytes()
                     .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
         })
-        .map(|code| code.into_owned());
+        .map(|code| code.into_owned())
+}
+fn failure_metadata(error: &sqlx::Error) -> Value {
+    // Never format an error, SQL text, URL or bound value.
+    let code = sqlstate(error);
     let category = match code.as_deref() {
         Some("57014") => "statement deadline",
         Some("55P03") => "lock deadline",
@@ -770,13 +779,77 @@ fn failure_metadata(error: &sqlx::Error) -> Value {
 pub fn safe(error: sqlx::Error) -> String {
     crate::platform::note_database_error(&error);
     let metadata = failure_metadata(&error);
-    eprintln!("{metadata}");
+    diagnostic(&metadata);
     format!(
         "Postgres {} failed; inspect sanitized server diagnostics",
         metadata["category"]
             .as_str()
             .unwrap_or("database operation")
     )
+}
+
+/// SQLSTATEs that say "not now" rather than "this request is wrong": deadlines, lock and serialization conflicts,
+/// exhausted connections and a server going away. The transaction rolled back, so a retry is safe.
+pub(crate) fn retryable(state: &str) -> bool {
+    matches!(state, "57014" | "55P03" | "40001" | "40P01" | "53300" | "57P01" | "57P02" | "57P03") || state.starts_with("08")
+}
+static DIAGNOSTICS: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+const DIAGNOSTICS_MAX_BYTES: u64 = 5 * 1024 * 1024;
+/// Also keeps failure events in `file`, one JSON object per line, so a request id can be looked up later
+/// (`brain backend logs <rid>`). The older half moves to `<file>.1` at 5 MB.
+pub fn keep_diagnostics(file: std::path::PathBuf) {
+    if let Some(parent) = file.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    *DIAGNOSTICS.lock().unwrap_or_else(|e| e.into_inner()) = Some(file);
+}
+/// Writes one failure event to stderr and to the kept file. A logging failure never affects the request.
+pub(crate) fn diagnostic(event: &Value) {
+    eprintln!("{event}");
+    let kept = DIAGNOSTICS.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(file) = kept.as_ref() else { return };
+    if std::fs::metadata(file).is_ok_and(|m| m.len() > DIAGNOSTICS_MAX_BYTES) {
+        let _ = std::fs::rename(file, file.with_extension("jsonl.1"));
+    }
+    if let Ok(mut out) = std::fs::OpenOptions::new().create(true).append(true).open(file) {
+        use std::io::Write;
+        let _ = out.write_all(format!("{event}\n").as_bytes());
+    }
+}
+static DEVELOPMENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Development logs add the database message, which can quote values; production never does.
+pub(crate) fn log_values(production: bool) {
+    DEVELOPMENT.store(!production, std::sync::atomic::Ordering::Relaxed);
+}
+/// One line a developer can follow from the request id to the cause: SQLSTATE, category, the code that ran the query
+/// and finite identifiers from `context`.
+pub(crate) fn log_failure(error: &sqlx::Error, at: &std::panic::Location<'_>, context: Value) {
+    let mut event = failure_metadata(error);
+    event["location"] = json!({"file": at.file(), "line": at.line(), "column": at.column()});
+    if let Value::Object(context) = context {
+        event.as_object_mut().unwrap().extend(context);
+    }
+    if let Some(database) = error.as_database_error() {
+        if let Some(constraint) = database.constraint() {
+            event["constraint"] = json!(constraint);
+        }
+        if DEVELOPMENT.load(std::sync::atomic::Ordering::Relaxed) {
+            event["message"] = json!(database.message());
+            event["valuesCaptured"] = json!(true);
+        }
+    } else {
+        event["kind"] = json!(match error {
+            sqlx::Error::PoolTimedOut => "pool timeout",
+            sqlx::Error::PoolClosed => "pool closed",
+            sqlx::Error::Io(_) => "connection",
+            sqlx::Error::Tls(_) => "tls",
+            sqlx::Error::RowNotFound => "row not found",
+            sqlx::Error::ColumnDecode { .. } | sqlx::Error::Decode(_) => "decode",
+            sqlx::Error::Protocol(_) => "protocol",
+            _ => "driver",
+        });
+    }
+    diagnostic(&event);
 }
 
 /// Public record columns. Timestamps are rendered by Postgres in UTC as `YYYY-MM-DDTHH:MM:SS.sssZ`
@@ -1234,4 +1307,31 @@ pub async fn get_version(
             (record(row), revision)
         })
     })
+}
+
+#[cfg(test)]
+mod failure_log_tests {
+    use super::*;
+    #[tokio::test]
+    #[ignore = "Run with the explicitly owned disposable Postgres harness"]
+    async fn production_failure_events_never_quote_request_values() {
+        let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("owned disposable harness URL required");
+        let pool = sqlx::postgres::PgPoolOptions::new().connect(&url).await.unwrap();
+        let error = sqlx::query("SELECT 'private-value'::int").execute(&pool).await.unwrap_err();
+        let file = std::env::temp_dir().join(format!("brain-failure-values-{}.jsonl", std::process::id()));
+        let _ = std::fs::remove_file(&file);
+        keep_diagnostics(file.clone());
+        let at = std::panic::Location::caller();
+        log_values(false);
+        log_failure(&error, at, json!({"resource": "shop"}));
+        log_values(true);
+        log_failure(&error, at, json!({"resource": "shop"}));
+        let kept = std::fs::read_to_string(&file).unwrap();
+        let lines: Vec<Value> = kept.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        assert_eq!((lines[0]["sqlstate"].as_str(), lines[0]["resource"].as_str()), (Some("22P02"), Some("shop")));
+        assert!(lines[0]["message"].as_str().unwrap().contains("private-value"), "development keeps the full cause");
+        assert_eq!((lines[1]["sqlstate"].as_str(), lines[1].get("message")), (Some("22P02"), None));
+        assert!(!lines[1].to_string().contains("private-value"));
+        std::fs::remove_file(file).unwrap();
+    }
 }

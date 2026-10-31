@@ -4,10 +4,11 @@ use crate::{
     auth::User,
     files::{self, Bucket, ReceiveError, Storage, Visibility},
 };
+use super::Path;
 use axum::{
     Json, Router,
     body::Body,
-    extract::{DefaultBodyLimit, Multipart, Path, Query, Request, State as Extract},
+    extract::{DefaultBodyLimit, Multipart, Query, Request, State as Extract},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::get,
@@ -209,7 +210,7 @@ async fn upload(
         Ok(created) => created,
         Err(error) => {
             app.platform.storage.remove(&stored.key).await;
-            return Err(Error::internal(crate::db::safe(error)));
+            return Err(Error::database(error));
         }
     };
     let body = created.json();

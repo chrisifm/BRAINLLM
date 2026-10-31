@@ -40,7 +40,8 @@ test('server repositories use native policy, cookie identity and bounded JSON tr
 })
 test('server resource validation rejects injection, unbounded inputs and writes from GET before network access',async()=>{
   const {resource}=context(),before=seen.length
-  assert.throws(()=>resource.get('../auth/me'),/identifier/)
+  assert.throws(()=>resource.get('../auth/me'),e=>e.status===404)
+  for(const malformed of ['nope','1',''])assert.throws(()=>resource.get(malformed),e=>e.status===404&&e.constructor.name==='HttpError'&&/UUID/.test(e.message))
   assert.throws(()=>resource.list({limit:101}),/pagination/)
   assert.throws(()=>resource.list({unknown:true}),/options/)
   assert.throws(()=>bridge.resource(context().req,context().res,'ref','../auth'),/name/)

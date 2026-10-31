@@ -46,6 +46,25 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Fixed
 - `POLICY_DENIED` explains which rule classes were evaluated, without revealing data.
+- `brain backend logs [rid]` (MCP `brain_backend_logs`) returns failure events kept by `brain backend serve` in
+  `.brain/backend/failures.jsonl`: SQLSTATE, resource, operation, branch and code location. Stack frames that a stripped
+  binary cannot symbolize are omitted, and production events never quote values.
+
+### Fixed
+- Backend search over long text no longer answers 500: typo matching reads the first 256 characters of each field under
+  a 400 ms budget, `brain backend migrate` rebuilds older rows once, and a search that cannot finish answers
+  `503 DATABASE_BUSY` with `Retry-After`. `degraded: true` marks a typo search that ran out of budget.
+- Backend search `total` is exact for full-text results and stop words find nothing. Typo matches now appear only when
+  full text finds nothing, and `total_approximate: true` marks a capped typo total. Full-text pages no longer rescan long
+  text for a tie-break.
+- A route handler returning `{status: 5xx, body}` now answers that status instead of 200, replacing the earlier
+  assertion that handlers cannot fake server errors. A status outside 200-599 answers `500 ROUTE_INVALID_STATUS`, and a
+  lone `{status: 'open'}` is plain data rather than an empty response.
+- A malformed id through `ctx.backend` is now 404 on pages and in jobs, not a 400 or an error view with the raw message;
+  development pages honor deliberate `HttpError` statuses as production does. `GET /api/<r>/<bad-id>` answers
+  `400 INVALID_ID` and names the UUID format.
+- Text Postgres cannot store (a NUL character) answers `422 INVALID_INPUT` on reads and writes, and a malformed cursor
+  answers 422. Include failures keep their SQLSTATE and can answer `503 DATABASE_BUSY`.
 - B0119 reports an imported module that exists but does not parse as such, with its first error, instead of a missing file.
 - The B0110 fix for a classic `for` shows the form for bounded retries.
 - A refused origin no longer receives `Access-Control-Allow-Credentials`, `-Expose-Headers`, `-Allow-Methods`, `-Allow-Headers` or `-Max-Age`; only allowed origins do, and `Vary: Origin` stays.

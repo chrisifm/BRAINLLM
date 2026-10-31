@@ -409,7 +409,7 @@ export function nativeAuthBridge(raw, refused, serviceKey) {
   const resource = (incoming, response, rid, name, serviceKey) => {
     if (typeof name !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(name)) throw new HttpError(400, 'Invalid native resource name')
     const idPath = id => {
-      if (typeof id !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id)) throw new HttpError(400, 'Invalid native record identifier')
+      if (typeof id !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id)) throw new HttpError(404, 'No record has this id; record ids are UUIDs')
       return '/api/' + name + '/' + id
     }
     const request = async (method, path, body, notFound) => {
@@ -520,7 +520,7 @@ export function nativeAuthBridge(raw, refused, serviceKey) {
       remove: id => request('DELETE', idPath(id)),
       // an earlier slug of a readable record → its current slug; live, unknown or unreadable slugs → null
       slugRedirect(slug) {
-        if (typeof slug !== 'string' || !/^[A-Za-z0-9._~-]{1,512}$/.test(slug)) throw new HttpError(400, 'Invalid native slug')
+        if (typeof slug !== 'string' || !/^[A-Za-z0-9._~-]{1,512}$/.test(slug)) return Promise.resolve(null)
         return request('GET', '/api/' + name + '/redirects/' + slug, undefined, () => null).then(value => typeof value?.slug === 'string' ? value.slug : null)
       },
     })

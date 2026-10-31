@@ -238,11 +238,11 @@ pub fn referenced(error: &sqlx::Error) -> bool {
 }
 
 /// Why related records could not be attached.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum IncludeError {
     Unknown(String),
     Denied(String),
-    Database,
+    Database(sqlx::Error),
 }
 
 /// Attaches `included.<field>` (the referenced record or null) to each row. One query per included field,
@@ -273,10 +273,7 @@ pub async fn include(
             let mut q = sqlx::QueryBuilder::<sqlx::Postgres>::new(concat!("SELECT ", crate::record_columns!(), " FROM "));
             q.push(table(&target.name)).push(" WHERE id=ANY(").push_bind(ids).push(") AND ");
             scope.push(&mut q, target, resources);
-            let fetched = q.build().fetch_all(pool).await.map_err(|error| {
-                crate::db::safe(error);
-                IncludeError::Database
-            })?;
+            let fetched = q.build().fetch_all(pool).await.map_err(IncludeError::Database)?;
             for row in fetched {
                 let mut record = crate::db::record(row);
                 crate::visibility::project(target, &mut record, viewer, false);

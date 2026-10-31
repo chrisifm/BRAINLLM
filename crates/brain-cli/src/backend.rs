@@ -459,6 +459,11 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let root = crate::app_root()?;
     let environment = crate::env::name(args, "development");
     let operation = args.first().map(String::as_str).unwrap_or("schema");
+    if operation == "logs" {
+        let rid = args.get(1).filter(|a| !a.starts_with("--")).map(String::as_str);
+        println!("{}", failure_logs(&root, rid));
+        return Ok(());
+    }
     if operation == "keys" {
         return crate::api_key_config::run(&root, &args[1..], database(&root, &environment)?);
     }
@@ -466,7 +471,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         operation,
         "schema" | "migrate" | "serve" | "bootstrap-admin" | "rename-role"
     ) {
-        return Err("usage: brain backend schema|migrate|serve|bootstrap-admin|rename-role --from <role> --to <role> [--apply]|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182]".into());
+        return Err("usage: brain backend schema|migrate|serve|bootstrap-admin|rename-role --from <role> --to <role> [--apply]|logs [rid]|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182]".into());
     }
     let snapshot = inspect(&root)?;
     if operation == "schema" {
@@ -511,6 +516,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
             if !promoted {return Err("Admin bootstrap requires an enabled existing user and no active administrator".into());}
             println!("{}",json!({"schemaVersion":1,"ok":true,"user":user,"role":"admin","sessionsRevoked":true}));return Ok(());
         }
+        brain_backend::db::keep_diagnostics(failure_log(&root));
         let port=crate::flag(args,"--port").unwrap_or("5182".into()).parse::<u16>().map_err(|_|"port must be 0..65535")?;
         let listener=tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST,port)).await.map_err(|_|"Cannot bind backend loopback port")?;
         let addr=listener.local_addr().map_err(|e|e.to_string())?;
@@ -546,6 +552,30 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let worker_pool=brain_backend::db::connect_named(&url,brain_backend::db::Workload::Worker,worker_size,&pg_name(&root,"worker")).await?;
         brain_backend::http::serve_full(listener,http_pool,worker_pool,config,domain,platform).await
     })
+}
+/// Where `brain backend serve` keeps its failure events.
+fn failure_log(root: &Path) -> std::path::PathBuf {
+    root.join(".brain/backend/failures.jsonl")
+}
+/// Kept failure events, oldest first: the ones of one request id, or the latest 50.
+pub fn failure_logs(root: &Path, rid: Option<&str>) -> Value {
+    let file = failure_log(root);
+    let older = std::fs::read_to_string(file.with_extension("jsonl.1")).unwrap_or_default();
+    let newer = std::fs::read_to_string(&file).unwrap_or_default();
+    let mut events: Vec<Value> = older.lines().chain(newer.lines()).filter_map(|line| serde_json::from_str(line).ok()).collect();
+    match rid {
+        Some(rid) => events.retain(|event| event["rid"] == rid),
+        None => {
+            let extra = events.len().saturating_sub(50);
+            events.drain(..extra);
+        }
+    }
+    let empty = events.is_empty();
+    let mut out = json!({"schemaVersion":1,"file":".brain/backend/failures.jsonl","events":events});
+    if empty {
+        out["fix"] = json!("No kept failure matches. Events are kept while `brain backend serve` runs; each one also goes to its stderr.");
+    }
+    out
 }
 /// All generated files are reserved with create_new; roll back only files created by this invocation.
 pub fn add(root: &Path, kind: &str, name: &str, shapes: &str) -> Result<Value, String> {
@@ -1814,4 +1844,24 @@ pub fn media(args: &[String]) -> Result<(), String> {
         println!("{}", result?);
         Ok(())
     })
+}
+
+#[cfg(test)]
+mod failure_log_tests {
+    use super::*;
+    #[test]
+    fn failure_logs_find_a_request_and_tolerate_a_missing_or_damaged_file() {
+        let root = std::env::temp_dir().join(format!("brain-failure-logs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(failure_logs(&root, Some("r1"))["events"], json!([]));
+        assert!(failure_logs(&root, Some("r1"))["fix"].is_string());
+        std::fs::create_dir_all(root.join(".brain/backend")).unwrap();
+        std::fs::write(root.join(".brain/backend/failures.jsonl.1"), "{\"rid\":\"r1\",\"n\":1}\n").unwrap();
+        std::fs::write(failure_log(&root), "not json\n{\"rid\":\"r2\",\"n\":2}\n{\"rid\":\"r1\",\"n\":3}\n").unwrap();
+        let found = failure_logs(&root, Some("r1"));
+        assert_eq!(found["events"], json!([{"rid":"r1","n":1},{"rid":"r1","n":3}]));
+        assert!(found.get("fix").is_none());
+        assert_eq!(failure_logs(&root, None)["events"].as_array().unwrap().len(), 3);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

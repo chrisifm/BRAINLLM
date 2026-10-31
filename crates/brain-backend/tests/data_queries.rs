@@ -670,3 +670,196 @@ async fn search_language_weights_and_legacy_numeric_ids() {
     assert!(vector(fresh["id"].as_str().unwrap().to_string()).await.contains("'walk'"));
     pool.close().await;
 }
+
+/// Hostile and ordinary search text never reaches a 500, in any declared language and with any query option.
+#[tokio::test]
+#[ignore = "requires scripts/backend-check.mjs disposable Postgres"]
+async fn search_text_never_raises_an_internal_error() {
+    let pool = database("brain_search_hostile").await;
+    let mut listings = resource(
+        "listings",
+        vec![
+            ("title", field("str", true)),
+            ("company_name", field("str", false)),
+            ("search_terms", field("str", false)),
+            ("description", field("str", false)),
+            ("status", field("enum(open|closed)", false)),
+            ("views", field("int", false)),
+        ],
+        policy(&["public"], &["candidate"], &["owner"], &["owner"]),
+        json!({
+            "filter": {"status": ["eq", "in"], "views": ["gte"]},
+            "sort": ["title", "views"],
+            "default_sort": ["-created_at"],
+            "search": {"language": "spanish", "weights": {"title": "A", "company_name": "B", "search_terms": "B", "description": "C"}}
+        }),
+    );
+    listings.search = vec!["title".into(), "company_name".into(), "search_terms".into(), "description".into()];
+    let api = api(&pool, vec![listings]).await;
+    let (_, author) = api.user("author@shop.test").await;
+    let (s, row) = api.post("/api/listings", &author, json!({"title": "React developer", "company_name": "Corner Shop", "search_terms": "frontend web", "description": "Build the shop front", "status": "open", "views": 3})).await;
+    assert_eq!(s, 200, "{row}");
+    for text in ["react", "%C3%B1and%C3%BA", "a%27b", "%27%3B--", "%5C", "a%3Ab", "%3C-%3E", "%25", "%3Cscript%3E", "%27", "%22", "--", "(", ")", "%26", "%7C", "!", "%3A*", "%20"] {
+        for extra in ["", "&status=open", "&sort=title", "&sort=-views"] {
+            let (s, body) = api.get(&format!("/api/listings?search={text}{extra}"), None).await;
+            assert_eq!(s, 200, "search={text}{extra} {body}");
+        }
+    }
+    // Input that cannot be valid is the caller's mistake: a 4xx that says what to send.
+    let id = row["id"].as_str().unwrap().to_string();
+    let forged = |key: &str| json!({"s": "views:last", "k": [key], "id": id}).to_string().bytes().map(|b| format!("{b:02x}")).collect::<String>();
+    for (uri, want) in [
+        ("/api/listings?search=a%00b".to_string(), 422),
+        ("/api/listings?status=%00".to_string(), 422),
+        ("/api/listings?search=%FF%FE".to_string(), 200),
+        (format!("/api/listings?search={}", "a".repeat(5000)), 422),
+        ("/api/listings?views[gte]=abc".to_string(), 422),
+        ("/api/listings?views[gte]=99999999999999999999".to_string(), 422),
+        ("/api/listings?sort=%00".to_string(), 422),
+        ("/api/listings?cursor=zz".to_string(), 422),
+        (format!("/api/listings?sort=views&cursor={}", forged("not-a-number")), 422),
+        ("/api/listings/not-a-uuid".to_string(), 400),
+        ("/api/listings/%00".to_string(), 400),
+        ("/api/listings?include=%00".to_string(), 422),
+        ("/api/listings?count=%00".to_string(), 422),
+        ("/api/listings/redirects/%00".to_string(), 404),
+        (format!("/api/listings/redirects/{}", "a".repeat(5000)), 404),
+    ] {
+        let (s, body) = api.get(&uri, None).await;
+        assert_eq!(s, want, "{uri} {body}");
+    }
+    let (_, invalid) = api.get("/api/listings/not-a-uuid", None).await;
+    assert_eq!(invalid["error"]["code"], "INVALID_ID");
+    assert!(invalid["error"]["fix"].as_str().unwrap().contains("UUID"), "{invalid}");
+    let (s, nul) = api.post("/api/listings", &author, json!({"title": "a\u{0}b"})).await;
+    assert_eq!(s, 422, "a NUL in a text value is invalid input {nul}");
+    pool.close().await;
+}
+
+/// Seeds `rows` records whose long description is about 4 KB of varied words, so trigram scans are really expensive.
+async fn seed_long_listings(pool: &sqlx::PgPool, owner: Uuid, rows: i32) {
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query("SET LOCAL statement_timeout=0").execute(&mut *tx).await.unwrap();
+    sqlx::query(
+        "INSERT INTO _brain_res_listings(id,owner,data) SELECT gen_random_uuid(),$1,jsonb_build_object(\
+         'title','Shop worker '||n,'company_name','Corner Shop '||(n%50),'search_terms','retail store','status','open','views',n,\
+         'description','a store of the city '||(CASE WHEN n%5=0 THEN 'react ' ELSE '' END)||(CASE WHEN n%100=0 THEN 'globant ' ELSE '' END)||(SELECT string_agg(md5((n*k)::text),' ') FROM generate_series(1,125) k)) FROM generate_series(1,$2) n",
+    )
+    .bind(owner)
+    .bind(rows)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    sqlx::query("ANALYZE _brain_res_listings").execute(pool).await.unwrap();
+}
+
+/// Long text must not turn a search into an error: full-text results survive whatever the typo branch costs.
+#[tokio::test]
+#[ignore = "requires scripts/backend-check.mjs disposable Postgres"]
+async fn search_over_long_text_keeps_full_text_results() {
+    let pool = database("brain_search_long").await;
+    let mut listings = resource(
+        "listings",
+        vec![
+            ("title", field("str", true)),
+            ("company_name", field("str", false)),
+            ("search_terms", field("str", false)),
+            ("description", field("str", false)),
+            ("status", field("enum(open|closed)", false)),
+            ("views", field("int", false)),
+        ],
+        policy(&["public"], &["candidate"], &["owner"], &["owner"]),
+        json!({
+            "filter": {"status": ["eq"]},
+            "sort": ["views"],
+            "aggregate": {"everything": {}},
+            "search": {"language": "english", "weights": {"title": "A", "company_name": "B", "search_terms": "B", "description": "C"}}
+        }),
+    );
+    listings.search = vec!["title".into(), "company_name".into(), "search_terms".into(), "description".into()];
+    let definition = listings.clone();
+    let api = api(&pool, vec![listings]).await;
+    let (owner, author) = api.user("author@shop.test").await;
+    seed_long_listings(&pool, owner, 5000).await;
+    let (s, row) = api.post("/api/listings", &author, json!({"title": "React developer", "status": "open"})).await;
+    assert_eq!(s, 200, "{row}");
+    let row = row["id"].as_str().unwrap().to_string();
+    let longest = |pool: sqlx::PgPool| async move {
+        sqlx::query_scalar::<_, i32>("SELECT max(length(search_text)) FROM _brain_res_listings").fetch_one(&pool).await.unwrap()
+    };
+    let bound = 257 * 4;
+    assert!(longest(pool.clone()).await <= bound, "new rows store bounded typo text");
+    let indexed: i64 = sqlx::query_scalar("SELECT count(*) FROM _brain_res_listings WHERE search_vector @@ websearch_to_tsquery('spanish',md5((7*125)::text))").fetch_one(&pool).await.unwrap();
+    assert!(indexed >= 1, "full-text search still indexes the end of the long field");
+
+    // `total` counts every match, far past any page or candidate limit, and full-text matches rank by weight.
+    let (s, page) = api.get("/api/listings?search=react", None).await;
+    assert_eq!((s, page["total"].clone(), page.get("degraded"), page.get("total_approximate")), (200, json!(1001), None, None), "{page}");
+    assert_eq!(ids(&page)[0], row, "the title match (weight A) outranks description matches (weight C)");
+    let (_, few) = api.get("/api/listings?search=globant&limit=100", None).await;
+    assert_eq!((few["total"].clone(), few["items"].as_array().unwrap().len()), (json!(50), 50), "no typo noise joins real matches");
+    // Stop words of the language find nothing even though every row contains them.
+    for stop in ["of", "the", "a"] {
+        let (s, none) = api.get(&format!("/api/listings?search={stop}"), None).await;
+        assert_eq!((s, none["total"].clone()), (200, json!(0)), "{stop} {none}");
+    }
+    // Sorting, cursors, filters and aggregates see the same exact set.
+    let (_, first) = api.get("/api/listings?search=react&sort=-views&limit=10", None).await;
+    assert_eq!(first["total"], 1001);
+    let (s, second) = api.get(&format!("/api/listings?search=react&sort=-views&limit=10&cursor={}", first["next_cursor"].as_str().unwrap()), None).await;
+    assert_eq!((s, second["total"].clone(), second["items"].as_array().unwrap().len()), (200, json!(1001), 10), "{second}");
+    assert!(ids(&second).iter().all(|id| !ids(&first).contains(id)));
+    let (_, totals) = api.get("/api/listings?search=react&aggregate=everything", None).await;
+    assert_eq!(totals["aggregates"]["everything"]["count"], 1001, "{totals}");
+    // Full text found nothing: typo matches are the fallback.
+    let (s, typo) = api.get("/api/listings?search=developr&limit=5", None).await;
+    assert_eq!(s, 200, "{typo}");
+    if typo.get("degraded").is_none() {
+        assert_eq!(ids(&typo), vec![row.clone()], "{typo}");
+    }
+
+    // Rows from before the bound (the shape an upgrade finds): typo matching cannot finish within its budget, so the
+    // response says so instead of failing, while full-text searches are untouched.
+    let legacy = "ALTER TABLE _brain_res_listings DISABLE TRIGGER _brain_search; SET statement_timeout=0; UPDATE _brain_res_listings SET search_text=search_text||' '||coalesce(data->>'description',''); ALTER TABLE _brain_res_listings ENABLE TRIGGER _brain_search; RESET statement_timeout; ANALYZE _brain_res_listings;";
+    sqlx::raw_sql(legacy).execute(&pool).await.unwrap();
+    assert!(longest(pool.clone()).await > bound);
+    let (s, cut) = api.get("/api/listings?search=developr", None).await;
+    assert_eq!((s, cut["degraded"].clone(), cut["total_approximate"].clone()), (200, json!(true), json!(true)), "{cut}");
+    let (s, found) = api.get("/api/listings?search=react", None).await;
+    assert_eq!((s, found["total"].clone(), found.get("degraded")), (200, json!(1001), None), "{found}");
+
+    // A retryable database condition is a 503 with Retry-After, never BACKEND_INTERNAL.
+    let kept = std::env::temp_dir().join(format!("brain-search-failures-{}.jsonl", std::process::id()));
+    let _ = std::fs::remove_file(&kept);
+    db::keep_diagnostics(kept.clone());
+    let mut lock = pool.begin().await.unwrap();
+    sqlx::query("LOCK TABLE _brain_res_listings IN ACCESS EXCLUSIVE MODE").execute(&mut *lock).await.unwrap();
+    let response = api.http.clone().oneshot(Request::builder()
+        .extension(axum::extract::ConnectInfo("127.0.0.1:3456".parse::<std::net::SocketAddr>().unwrap()))
+        .uri("/api/listings?search=react").header("origin", ORIGIN).body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), 503);
+    assert_eq!(response.headers()["retry-after"], "1");
+    let body: Value = serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
+    assert_eq!(body["error"]["code"], "DATABASE_BUSY", "{body}");
+    lock.rollback().await.unwrap();
+    // The request id in the response leads to the cause: where it ran, what it was doing and which branch failed.
+    let events = std::fs::read_to_string(&kept).unwrap();
+    let event: Value = events.lines().map(|l| serde_json::from_str::<Value>(l).unwrap()).find(|e| e["rid"] == body["rid"]).unwrap_or_else(|| panic!("{body} {events}"));
+    assert_eq!((event["sqlstate"].as_str(), event["resource"].as_str(), event["operation"].as_str()), (Some("55P03"), Some("listings"), Some("list.search")), "{event}");
+    assert!(event["branch"].is_string() && event["location"]["file"].as_str().unwrap().ends_with("query.rs"), "{event}");
+    std::fs::remove_file(kept).unwrap();
+
+    // The next migrate rebuilds those rows once and leaves their timestamps alone.
+    let before: String = sqlx::query_scalar("SELECT max(updated_at)::text FROM _brain_res_listings").fetch_one(&pool).await.unwrap();
+    db::migrate(&pool, &[definition]).await.unwrap();
+    assert!(longest(pool.clone()).await <= bound, "migrate rebuilds rows stored before the bound");
+    let after: String = sqlx::query_scalar("SELECT max(updated_at)::text FROM _brain_res_listings").fetch_one(&pool).await.unwrap();
+    assert_eq!(before, after);
+    let (s, typo) = api.get("/api/listings?search=developr&limit=5", None).await;
+    assert_eq!(s, 200, "{typo}");
+    if typo.get("degraded").is_none() {
+        assert_eq!(ids(&typo), vec![row.clone()], "the typo fallback still finds short fields");
+    }
+    pool.close().await;
+}

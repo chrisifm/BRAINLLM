@@ -2,9 +2,10 @@
 use super::{App, Error, Result};
 use crate::api_keys::{self, Admission, Denied, EventFilter, NewKey, Principal, QuotaState};
 use crate::auth::User;
+use super::Path;
 use axum::{
     Json, Router,
-    extract::{ConnectInfo, MatchedPath, Path, Query, Request, State},
+    extract::{ConnectInfo, MatchedPath, Query, Request, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Response},

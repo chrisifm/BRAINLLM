@@ -71,7 +71,9 @@ test('slugRedirect answers the current slug or null and never confirms unknown s
   assert.equal(await backend.slugRedirect('articles','old-title'),'new-title')
   assert.equal(seen.at(-1).path,'/api/articles/redirects/old-title')
   assert.equal(await backend.resource('articles').slugRedirect('missing'),null)
-  assert.throws(()=>backend.slugRedirect('articles','a/b'),/slug/)
+  const asked=seen.length
+  assert.equal(await backend.slugRedirect('articles','a/b'),null,'a slug that cannot exist is an unknown slug')
+  assert.equal(seen.length,asked)
   assert.throws(()=>backend.slugRedirect('../auth','x'),/name/)
 })
 test('ctx.backend.service acts with the service key and never forwards the visitor session',async()=>{
