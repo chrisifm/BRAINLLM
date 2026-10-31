@@ -28,9 +28,13 @@ jobs:
       - run: rustup toolchain install stable --profile minimal
       - name: Ensure verification tools
         run: |
-          if ! command -v rg >/dev/null; then
+          set -euo pipefail
+          missing=()
+          command -v rg >/dev/null || missing+=(ripgrep)
+          command -v python3 >/dev/null || missing+=(python3)
+          if (( ${#missing[@]} )); then
             sudo apt-get update
-            sudo apt-get install --yes ripgrep
+            sudo apt-get install --yes "${missing[@]}"
           fi
       - name: Select the runner browser for real CDP checks
         shell: bash
