@@ -1,0 +1,30 @@
+--js--
+import { guard } from "/@brain/brain-guard.js";
+import { tpl, insert } from "/@brain/brain.js";
+import { dev, fragment as $brainBudgetFragment } from "/@brain/brain-dev.js";
+const $t0 = $brainBudgetFragment(tpl("<main data-b=\"3lwgxh\"><h1><!></h1></main>"), "3lwgxh", 0);
+function Server($p = {}) {
+  const $r3 = $t0();
+  const $e2 = $r3.firstChild.firstChild;
+  insert(null, () => $p.value, $e2);
+  return $r3;
+}
+Server.h = "3lwgxh";
+Server.seo = ($p) => ({ "title": "Source map identity", "description": "Client and server generation share the source-map pass." });
+Server.f = "views/server.brain";
+Server.$hmr = { version: 1, wiring: "import { guard } from \"/@brain/brain-guard.js\";\nimport { tpl, insert } from \"/@brain/brain.js\";\nimport { dev, fragment as $brainBudgetFragment } from \"/@brain/brain-dev.js\";\nconst $t0 = $brainBudgetFragment(tpl(\"__brain_static_template__\"), \"3lwgxh\", 0);\nfunction Server($p = {}) {\n  const $r3 = $t0();\n  const $e2 = $r3.firstChild.firstChild;\n  insert(null, () => $p.value, $e2);\n  return $r3;\n}\nServer.h = \"3lwgxh\";\nServer.seo = ($p) => ({ \"title\": \"Source map identity\", \"description\": \"Client and server generation share the source-map pass.\" });\nServer.f = \"views/server.brain\";\nexport default dev(guard(Server));\n", templates: ["<main data-b=\"3lwgxh\"><h1><!></h1></main>"] };
+export default dev(guard(Server));
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoic2VydmVyLmJyYWluLmpzIiwic291cmNlcyI6WyJzZXJ2ZXIuYnJhaW4iXSwic291cmNlc0NvbnRlbnQiOlsiPG1ldGEgc2VvIHRpdGxlPVwiU291cmNlIG1hcCBpZGVudGl0eVwiIGRlc2NyaXB0aW9uPVwiQ2xpZW50IGFuZCBzZXJ2ZXIgZ2VuZXJhdGlvbiBzaGFyZSB0aGUgc291cmNlLW1hcCBwYXNzLlwiPjxzY3JpcHQ+ZXhwb3J0IGFzeW5jIGZ1bmN0aW9uIGxvYWQoKSB7cmV0dXJuIHt2YWx1ZTonc2VydmVyIC8qQEw5Ki8gdmFsdWUnfX08L3NjcmlwdD48bWFpbj48aDE+e3Byb3BzLnZhbHVlfTwvaDE+PC9tYWluPiJdLCJuYW1lcyI6W10sIm1hcHBpbmdzIjoiOzs7Ozs7O0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTsifQ==
+
+--map--
+{"version":3,"file":"server.brain.js","sources":["server.brain"],"sourcesContent":["<meta seo title=\"Source map identity\" description=\"Client and server generation share the source-map pass.\"><script>export async function load() {return {value:'server /*@L9*/ value'}}</script><main><h1>{props.value}</h1></main>"],"names":[],"mappings":";;;;;;;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;"}
+--server--
+import { budgetEnter as $brainBudgetbudgetEnter, budgetLeave as $brainBudgetbudgetLeave, budgetStep as $brainBudgetbudgetStep } from "/@brain/brain-budget.js";
+export async function load() { const $$brainBudgetFrame1 = $brainBudgetbudgetEnter({ file: "views/server.brain", component: "Server", line: 1, column: 124 }, null); try { $brainBudgetbudgetStep($$brainBudgetFrame1); {
+  return { value: 'server /*@L9*/ value' };
+} } finally { $brainBudgetbudgetLeave($$brainBudgetFrame1); } }
+export const seo = (props) => ({ "title": "Source map identity", "description": "Client and server generation share the source-map pass." });
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoic2VydmVyLmJyYWluLmpzIiwic291cmNlcyI6WyJzZXJ2ZXIuYnJhaW4iXSwic291cmNlc0NvbnRlbnQiOlsiPG1ldGEgc2VvIHRpdGxlPVwiU291cmNlIG1hcCBpZGVudGl0eVwiIGRlc2NyaXB0aW9uPVwiQ2xpZW50IGFuZCBzZXJ2ZXIgZ2VuZXJhdGlvbiBzaGFyZSB0aGUgc291cmNlLW1hcCBwYXNzLlwiPjxzY3JpcHQ+ZXhwb3J0IGFzeW5jIGZ1bmN0aW9uIGxvYWQoKSB7cmV0dXJuIHt2YWx1ZTonc2VydmVyIC8qQEw5Ki8gdmFsdWUnfX08L3NjcmlwdD48bWFpbj48aDE+e3Byb3BzLnZhbHVlfTwvaDE+PC9tYWluPiJdLCJuYW1lcyI6W10sIm1hcHBpbmdzIjoiOztBQUFBO0FBQUE7QUFBQTsifQ==
+
+--css--
+

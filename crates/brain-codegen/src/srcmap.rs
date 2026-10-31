@@ -13,6 +13,8 @@ struct Marker {
 }
 
 fn trivia_markers(js: &str, mut at: usize, end: usize, markers: &mut Vec<Marker>) {
+    // Only `//` and `/*` change the scan; whitespace-only gaps between tokens are the common case.
+    if !js.as_bytes()[at..end].contains(&b'/') { return; }
     while at < end {
         let rest = &js[at..end];
         if rest.starts_with("//") {
@@ -38,9 +40,14 @@ fn trivia_markers(js: &str, mut at: usize, end: usize, markers: &mut Vec<Marker>
 /// nested function bodies; their owned statement markers must still be stripped and mapped.
 fn emitted_markers(js: &str, file: &str) -> Result<Vec<Marker>, brain_lex::Diag> {
     if !js.contains("/*@L") { return Ok(Vec::new()); }
-    let index = brain_lex::LineIndex::new(js);
+    // Successful byte-span scans never read line positions, so the line index is built only to locate a failure.
+    // The scan is deterministic: the indexed rerun stops at the same byte with the exact line and column.
+    scan_markers(js, file, &brain_lex::LineIndex::new("")).or_else(|_| scan_markers(js, file, &brain_lex::LineIndex::new(js)))
+}
+
+fn scan_markers(js: &str, file: &str, index: &brain_lex::LineIndex) -> Result<Vec<Marker>, brain_lex::Diag> {
     let generated = format!("generated:{file}");
-    let mut lexer = brain_lex::Lexer::new(js, &generated, &index, 0, js.len());
+    let mut lexer = brain_lex::Lexer::new(js, &generated, index, 0, js.len());
     let mut previous = 0;
     let mut markers = Vec::new();
     loop {
@@ -189,6 +196,14 @@ mod tests {
         let js = "/*@L0*//*@L01*//*@L-1*//*@L4294967296*//*@Lnope*//*@L1:2*//*@L 2*/const n = 1;";
         assert_eq!(finish(js, "c.brain", "", false).unwrap().0, js);
         assert_eq!(finish("/*@L4294967295*/const n = 1;", "c.brain", "", false).unwrap().0, "const n = 1;");
+    }
+
+    #[test]
+    fn deferred_line_index_keeps_exact_failure_locations() {
+        let js = "/*@L2*/const a = 'naïve';\n/*@L3*/const b = `π ${1}`;\n/*@L4*/const c = 'bad";
+        let diagnostic = finish(js, "comp/c.brain", "", false).unwrap_err();
+        assert_eq!((diagnostic.file.as_str(), diagnostic.line, diagnostic.col), ("generated:comp/c.brain", 3, 18));
+        assert_eq!(strip(js, "comp/c.brain").unwrap_err(), diagnostic);
     }
 
     #[test]

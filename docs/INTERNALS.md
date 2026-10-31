@@ -535,7 +535,8 @@ bodies. Regex-leading expression statements are parenthesized by the emitter so 
 do not change lexical context. `Lexer::next_span` uses the same scanners and validation without materializing
 discarded token values or successful-token columns. Its empty span denotes EOF after trailing trivia; normal
 `next_token`/`next_token_bytes` keep their complete payloads and saved lexer context remains interchangeable.
-Errors retain exact generated coordinates. Before HMR wiring becomes quoted metadata, the same scan strips compiler
+Errors retain exact generated coordinates; the generated line index is built only when a scan fails, and the
+failing scan is repeated with it. Before HMR wiring becomes quoted metadata, the same scan strips compiler
 comments from that code, preserving author literals; the existing 64 KiB wiring eligibility bound is unchanged.
 This additional scan is limited to eligible development metadata, with no second generation or extra map/base64.
 Marker-shaped quoted HTML/CSS, inlined child text and public environment constants remain data. Author

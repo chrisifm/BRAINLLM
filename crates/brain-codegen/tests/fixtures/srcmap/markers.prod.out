@@ -1,0 +1,29 @@
+--js--
+import { guard } from "/@brain/brain-guard.js";
+import { sig, tpl, insert, on } from "/@brain/brain.js";
+import { budgetEnter as $brainBudgetbudgetEnter, budgetLeave as $brainBudgetbudgetLeave, budgetOwner as $brainBudgetbudgetOwner, budgetStep as $brainBudgetbudgetStep } from "/@brain/brain-budget.js";
+const $t0 = tpl("<main data-b=\"4t8d6m\"><p>html /*@L75*/ <!></p><button>Go</button></main>");
+function Markers($p = {}) {
+  const $brainBudgetOwner = $brainBudgetbudgetOwner();
+  const value = sig('naïve /*@L71*/');
+  const re = /[/*@L73*/]\/x/g;
+  const change = () => { const $$brainBudgetFrame1 = $brainBudgetbudgetEnter({ file: "comp/markers.brain", component: "Markers", line: 4, column: 16 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame1); {
+    value.v = `π ${re.source} /*@L72*/`;
+  } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame1); } };
+  const $r4 = $t0();
+  const $e2 = $r4.firstChild.firstChild.nextSibling;
+  const $e3 = $r4.firstChild.nextSibling;
+  insert(null, () => value.v, $e2);
+  on($e3, "click", change);
+  return $r4;
+}
+Markers.h = "4t8d6m";
+Markers.f = "comp/markers.brain";
+export default guard(Markers);
+
+--map--
+{"version":3,"file":"markers.brain.js","sources":["markers.brain"],"sourcesContent":["<script>\nlet value = sig('naïve /*@L71*/')\nconst re = /[/*@L73*/]\\/x/g\nconst change = () => {\nvalue = `π ${re.source} /*@L72*/`\n}\n</script>\n<main><p>html /*@L75*/ {value}</p><button on:click={change}>Go</button></main>"],"names":[],"mappings":";;;;;;AACA;AACA;AACA;AACA;AAAA;AAAA;AAAA;AAAA;AAGA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;"}
+--server--
+
+--css--
+

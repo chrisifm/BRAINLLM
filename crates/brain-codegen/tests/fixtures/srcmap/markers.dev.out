@@ -1,0 +1,32 @@
+--js--
+import { guard } from "/@brain/brain-guard.js";
+import { sig, tpl, insert, on } from "/@brain/brain.js";
+import { budgetEnter as $brainBudgetbudgetEnter, budgetLeave as $brainBudgetbudgetLeave, budgetOwner as $brainBudgetbudgetOwner, budgetStep as $brainBudgetbudgetStep } from "/@brain/brain-budget.js";
+import { dev, fragment as $brainBudgetFragment } from "/@brain/brain-dev.js";
+const $t0 = $brainBudgetFragment(tpl("<main data-b=\"4t8d6m\"><p>html /*@L75*/ <!></p><button>Go</button></main>"), "4t8d6m", 0);
+function Markers($p = {}) {
+  const $brainBudgetOwner = $brainBudgetbudgetOwner();
+  const value = sig('naïve /*@L71*/', "value");
+  const re = /[/*@L73*/]\/x/g;
+  const change = () => { const $$brainBudgetFrame1 = $brainBudgetbudgetEnter({ file: "comp/markers.brain", component: "Markers", line: 4, column: 16 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame1); {
+    value.v = `π ${re.source} /*@L72*/`;
+  } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame1); } };
+  const $r4 = $t0();
+  const $e2 = $r4.firstChild.firstChild.nextSibling;
+  const $e3 = $r4.firstChild.nextSibling;
+  insert(null, () => value.v, $e2);
+  on($e3, "click", change);
+  return $r4;
+}
+Markers.h = "4t8d6m";
+Markers.f = "comp/markers.brain";
+Markers.$hmr = { version: 1, wiring: "import { guard } from \"/@brain/brain-guard.js\";\nimport { sig, tpl, insert, on } from \"/@brain/brain.js\";\nimport { budgetEnter as $brainBudgetbudgetEnter, budgetLeave as $brainBudgetbudgetLeave, budgetOwner as $brainBudgetbudgetOwner, budgetStep as $brainBudgetbudgetStep } from \"/@brain/brain-budget.js\";\nimport { dev, fragment as $brainBudgetFragment } from \"/@brain/brain-dev.js\";\nconst $t0 = $brainBudgetFragment(tpl(\"__brain_static_template__\"), \"4t8d6m\", 0);\nfunction Markers($p = {}) {\n  const $brainBudgetOwner = $brainBudgetbudgetOwner();\n  const value = sig('naïve /*@L71*/', \"value\");\n  const re = /[/*@L73*/]\\/x/g;\n  const change = () => { const $$brainBudgetFrame1 = $brainBudgetbudgetEnter({ file: \"comp/markers.brain\", component: \"Markers\", line: 4, column: 16 }, $brainBudgetOwner); try { $brainBudgetbudgetStep($$brainBudgetFrame1); {\n    value.v = `π ${re.source} /*@L72*/`;\n  } } finally { $brainBudgetbudgetLeave($$brainBudgetFrame1); } };\n  const $r4 = $t0();\n  const $e2 = $r4.firstChild.firstChild.nextSibling;\n  const $e3 = $r4.firstChild.nextSibling;\n  insert(null, () => value.v, $e2);\n  on($e3, \"click\", change);\n  return $r4;\n}\nMarkers.h = \"4t8d6m\";\nMarkers.f = \"comp/markers.brain\";\nexport default dev(guard(Markers));\n", templates: ["<main data-b=\"4t8d6m\"><p>html /*@L75*/ <!></p><button>Go</button></main>"] };
+export default dev(guard(Markers));
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoibWFya2Vycy5icmFpbi5qcyIsInNvdXJjZXMiOlsibWFya2Vycy5icmFpbiJdLCJzb3VyY2VzQ29udGVudCI6WyI8c2NyaXB0PlxubGV0IHZhbHVlID0gc2lnKCduYcOvdmUgLypATDcxKi8nKVxuY29uc3QgcmUgPSAvWy8qQEw3MyovXVxcL3gvZ1xuY29uc3QgY2hhbmdlID0gKCkgPT4ge1xudmFsdWUgPSBgz4AgJHtyZS5zb3VyY2V9IC8qQEw3MiovYFxufVxuPC9zY3JpcHQ+XG48bWFpbj48cD5odG1sIC8qQEw3NSovIHt2YWx1ZX08L3A+PGJ1dHRvbiBvbjpjbGljaz17Y2hhbmdlfT5HbzwvYnV0dG9uPjwvbWFpbj4iXSwibmFtZXMiOltdLCJtYXBwaW5ncyI6Ijs7Ozs7OztBQUNBO0FBQ0E7QUFDQTtBQUNBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFHQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBOyJ9
+
+--map--
+{"version":3,"file":"markers.brain.js","sources":["markers.brain"],"sourcesContent":["<script>\nlet value = sig('naïve /*@L71*/')\nconst re = /[/*@L73*/]\\/x/g\nconst change = () => {\nvalue = `π ${re.source} /*@L72*/`\n}\n</script>\n<main><p>html /*@L75*/ {value}</p><button on:click={change}>Go</button></main>"],"names":[],"mappings":";;;;;;;AACA;AACA;AACA;AACA;AAAA;AAAA;AAAA;AAAA;AAGA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;"}
+--server--
+
+--css--
+

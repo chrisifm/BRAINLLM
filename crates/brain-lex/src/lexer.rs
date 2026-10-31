@@ -63,6 +63,22 @@ const PUNCTS: &[&str] = &[
     "@", "#",
 ];
 
+/// `PUNCTS` indices (plus one) grouped by first byte, in table order, so longest-first matching is unchanged.
+const PUNCTS_BY_FIRST: [[u8; 8]; 128] = {
+    let mut table = [[0u8; 8]; 128];
+    let mut i = 0;
+    while i < PUNCTS.len() {
+        let first = PUNCTS[i].as_bytes()[0] as usize;
+        let mut k = 0;
+        while table[first][k] != 0 {
+            k += 1;
+        }
+        table[first][k] = (i + 1) as u8;
+        i += 1;
+    }
+    table
+};
+
 const REGEX_AFTER_WORDS: &[&str] = &[
     "return", "typeof", "instanceof", "in", "of", "new", "delete", "void", "throw", "case", "do", "else", "await",
     "yield",
@@ -110,11 +126,20 @@ impl<'a> Lexer<'a> {
         if self.pos >= self.end {
             return None;
         }
+        // ASCII bytes are always whole characters; other bytes decode exactly as before.
+        let byte = self.src.as_bytes()[self.pos];
+        if byte.is_ascii() {
+            return Some(byte as char);
+        }
         self.src[self.pos..self.end].chars().next()
     }
     fn peek_at(&self, n: usize) -> Option<char> {
         if self.pos >= self.end {
             return None;
+        }
+        let bytes = &self.src.as_bytes()[self.pos..self.end];
+        if bytes.len() > n && bytes[..=n].is_ascii() {
+            return Some(bytes[n] as char);
         }
         self.src[self.pos..self.end].chars().nth(n)
     }
@@ -222,6 +247,11 @@ impl<'a> Lexer<'a> {
 
     fn ident<const PAYLOAD: bool>(&mut self) -> Tok {
         let start = self.pos;
+        // ASCII identifier bytes advance directly; any other character takes the exact Unicode path below.
+        let bytes = self.src.as_bytes();
+        while self.pos < self.end && matches!(bytes[self.pos], b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'$') {
+            self.pos += 1;
+        }
         while let Some(c) = self.peek() {
             if is_ident_part(c) {
                 self.bump();
@@ -384,7 +414,9 @@ impl<'a> Lexer<'a> {
 
     fn punct(&mut self, start: usize) -> Result<Tok, Diag> {
         let rest = &self.src[self.pos..self.end];
-        for p in PUNCTS {
+        let first = rest.as_bytes().first().copied().unwrap_or(0);
+        let candidates: &[u8] = if first.is_ascii() { &PUNCTS_BY_FIRST[first as usize] } else { &[] };
+        for p in candidates.iter().take_while(|&&i| i != 0).map(|&i| &PUNCTS[i as usize - 1]) {
             if rest.starts_with(p) {
                 // `a?.5:1` is a conditional, not optional chaining.
                 if *p == "?." && rest[2..].starts_with(|c: char| c.is_ascii_digit()) {
@@ -479,6 +511,47 @@ mod tests {
         let t = lx.next_token().unwrap();
         assert_eq!(t.tok, Tok::Ident("π".into()));
         assert_eq!((t.span.line, t.span.col), (2, 7));
+    }
+
+    #[test]
+    fn indexed_punctuation_matches_the_ordered_table_scan() {
+        // Reference: the original longest-first linear scan over `PUNCTS`, including the `?.<digit>` exception.
+        fn reference(rest: &str) -> Option<&'static str> {
+            PUNCTS.iter().copied().find(|p| rest.starts_with(p) && !(*p == "?." && rest[2..].starts_with(|c: char| c.is_ascii_digit())))
+        }
+        let alphabet: Vec<char> = PUNCTS.iter().flat_map(|p| p.chars()).chain(['a', '1', ' ', 'π']).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+        let mut inputs: Vec<String> = PUNCTS.iter().flat_map(|p| alphabet.iter().map(move |c| format!("{p}{c}"))).collect();
+        for a in &alphabet { for b in &alphabet { for c in &alphabet { inputs.push(format!("{a}{b}{c}")); } } }
+        let idx = LineIndex::new("");
+        for src in &inputs {
+            let mut lexer = Lexer::new(src, "t.brain", &idx, 0, src.len());
+            match (lexer.punct(0), reference(src)) {
+                (Ok(Tok::Punct(got)), Some(want)) => { assert_eq!(got, want, "{src:?}"); assert_eq!(lexer.pos, want.len(), "{src:?}"); }
+                (Err(_), None) => assert_eq!(lexer.pos, 0, "{src:?}"),
+                other => panic!("{src:?}: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn ascii_fast_paths_keep_unicode_identifiers_whole() {
+        let src = "aπb1 $ø_x9 x٣ 日本語x a?.5:b ?.b\u{2028}y";
+        let idx = LineIndex::new(src);
+        let mut lexer = Lexer::new(src, "t.brain", &idx, 0, src.len());
+        let mut tokens = Vec::new();
+        loop {
+            match lexer.next_token() {
+                Ok(token) if token.tok == Tok::Eof => break,
+                Ok(token) => tokens.push((token.tok, token.span.col)),
+                Err(diagnostic) => { tokens.push((Tok::Punct("ERR"), diagnostic.col)); break; }
+            }
+        }
+        let words = |w: &str| Tok::Ident(w.to_string());
+        assert_eq!(tokens, vec![
+            (words("aπb1"), 1), (words("$ø_x9"), 6), (words("x٣"), 12), (words("日本語x"), 15),
+            (words("a"), 20), (Tok::Punct("?"), 21), (Tok::Num(".5".into()), 22), (Tok::Punct(":"), 24), (words("b"), 25),
+            (Tok::Punct("?."), 27), (words("b"), 29), (words("y"), 31),
+        ]);
     }
 
     #[test]

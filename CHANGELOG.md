@@ -36,6 +36,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Accept the existing GET `cache: 'no'` runtime contract in the checker, including when app-wide data caching is disabled. Keep that explicit endpoint privacy intent instead of suggesting its removal.
 - Source-map scanning requests validated token boundaries without copying discarded identifier and literal values.
   The parser keeps its normal token payloads; marker ownership, source maps and generated-code diagnostics remain intact.
+- The shared lexer decodes ASCII directly, scans ASCII identifier runs as bytes and indexes punctuation by first byte
+  in the same longest-first order. Source-map scanning skips slash-free trivia gaps and builds its generated line index
+  only to locate a failure. Emitted JS, server JS, CSS, maps and diagnostics are byte-identical; no compiler-speed
+  claim is made until paired measurement.
 - Build DOM access-path strings by appending instead of repeatedly copying their growing prefixes. Generated traversal expressions remain byte-identical; this is not a claim that browser sibling traversal is already linearized.
 - Doctor retains fresh build measurements when the payload budget fails, runs SEO against those current pages, and keeps its overall build gate failed. Source failures never reuse stale SEO output; absent test files no longer appear as a measured zero-leak result.
 - Future release publication requires the same-commit source verification job to pass, including when reusing reviewed package artifacts. Canceled runs and manual pack-only dispatch cannot publish.

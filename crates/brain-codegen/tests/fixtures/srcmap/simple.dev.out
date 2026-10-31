@@ -1,0 +1,28 @@
+--js--
+import { guard } from "/@brain/brain-guard.js";
+import { sig, tpl, insert, on } from "/@brain/brain.js";
+import { budgetOwner as $brainBudgetbudgetOwner } from "/@brain/brain-budget.js";
+import { dev, fragment as $brainBudgetFragment } from "/@brain/brain-dev.js";
+const $t0 = $brainBudgetFragment(tpl("<button data-b=\"vs7liw\"><!></button>"), "vs7liw", 0);
+function Simple($p = {}) {
+  const $brainBudgetOwner = $brainBudgetbudgetOwner();
+  const n = sig(0, "n");
+  const $r3 = $t0();
+  const $e1 = $r3;
+  const $e2 = $r3.firstChild;
+  on($e1, "click", () => { n.v++; });
+  insert(null, () => n.v, $e2);
+  return $r3;
+}
+Simple.h = "vs7liw";
+Simple.f = "comp/simple.brain";
+Simple.$hmr = { version: 1, wiring: "import { guard } from \"/@brain/brain-guard.js\";\nimport { sig, tpl, insert, on } from \"/@brain/brain.js\";\nimport { budgetOwner as $brainBudgetbudgetOwner } from \"/@brain/brain-budget.js\";\nimport { dev, fragment as $brainBudgetFragment } from \"/@brain/brain-dev.js\";\nconst $t0 = $brainBudgetFragment(tpl(\"__brain_static_template__\"), \"vs7liw\", 0);\nfunction Simple($p = {}) {\n  const $brainBudgetOwner = $brainBudgetbudgetOwner();\n  const n = sig(0, \"n\");\n  const $r3 = $t0();\n  const $e1 = $r3;\n  const $e2 = $r3.firstChild;\n  on($e1, \"click\", () => { n.v++; });\n  insert(null, () => n.v, $e2);\n  return $r3;\n}\nSimple.h = \"vs7liw\";\nSimple.f = \"comp/simple.brain\";\nexport default dev(guard(Simple));\n", templates: ["<button data-b=\"vs7liw\"><!></button>"] };
+export default dev(guard(Simple));
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoic2ltcGxlLmJyYWluLmpzIiwic291cmNlcyI6WyJzaW1wbGUuYnJhaW4iXSwic291cmNlc0NvbnRlbnQiOlsiPHNjcmlwdD5sZXQgbiA9IHNpZygwKTwvc2NyaXB0PjxidXR0b24gb246Y2xpY2s9e24rK30+e259PC9idXR0b24+Il0sIm5hbWVzIjpbXSwibWFwcGluZ3MiOiI7Ozs7Ozs7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7In0=
+
+--map--
+{"version":3,"file":"simple.brain.js","sources":["simple.brain"],"sourcesContent":["<script>let n = sig(0)</script><button on:click={n++}>{n}</button>"],"names":[],"mappings":";;;;;;;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;"}
+--server--
+
+--css--
+

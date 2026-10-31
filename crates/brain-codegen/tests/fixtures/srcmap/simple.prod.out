@@ -1,0 +1,25 @@
+--js--
+import { guard } from "/@brain/brain-guard.js";
+import { sig, tpl, insert, on } from "/@brain/brain.js";
+import { budgetOwner as $brainBudgetbudgetOwner } from "/@brain/brain-budget.js";
+const $t0 = tpl("<button data-b=\"vs7liw\"><!></button>");
+function Simple($p = {}) {
+  const $brainBudgetOwner = $brainBudgetbudgetOwner();
+  const n = sig(0);
+  const $r3 = $t0();
+  const $e1 = $r3;
+  const $e2 = $r3.firstChild;
+  on($e1, "click", () => { n.v++; });
+  insert(null, () => n.v, $e2);
+  return $r3;
+}
+Simple.h = "vs7liw";
+Simple.f = "comp/simple.brain";
+export default guard(Simple);
+
+--map--
+{"version":3,"file":"simple.brain.js","sources":["simple.brain"],"sourcesContent":["<script>let n = sig(0)</script><button on:click={n++}>{n}</button>"],"names":[],"mappings":";;;;;;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;"}
+--server--
+
+--css--
+
