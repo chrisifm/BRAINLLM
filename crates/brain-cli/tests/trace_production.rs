@@ -61,3 +61,38 @@ fn the_cli_answers_quietly_and_names_its_fix() {
     assert!(explained.status.success(), "{}", String::from_utf8_lossy(&explained.stderr));
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn the_mcp_tool_reads_the_same_store() {
+    use std::io::{BufRead, BufReader, Write};
+    let tmp = std::env::temp_dir().join(format!("brain-trace-mcp-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    assert!(brain(&tmp, &["new", "app"]).status.success());
+    let app = tmp.join("app");
+    std::fs::create_dir_all(app.join(".brain/trace-spool")).unwrap();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
+    std::fs::write(app.join(".brain/trace-spool/test.ndjson"), format!("{{\"ts\":{now},\"module\":\"server\",\"kind\":\"exception\",\"level\":\"error\",\"title\":\"Error: broke\",\"file\":\"views/home.brain\",\"line\":3}}\n")).unwrap();
+    let mut server = Command::new(env!("CARGO_BIN_EXE_brain")).arg("mcp").current_dir(&app).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+    let mut stdin = server.stdin.take().unwrap();
+    let mut out = BufReader::new(server.stdout.take().unwrap());
+    let mut call = |id: u32, method: &str, params: &str| -> String {
+        writeln!(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":{id},\"method\":\"{method}\",\"params\":{params}}}").unwrap();
+        loop {
+            let mut line = String::new();
+            assert!(out.read_line(&mut line).unwrap() > 0, "mcp closed");
+            if line.contains(&format!("\"id\":{id},")) {
+                return line;
+            }
+        }
+    };
+    call(1, "initialize", r#"{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}"#);
+    assert!(call(2, "tools/list", "{}").contains("\"name\":\"brain_trace\""));
+    let issues = call(3, "tools/call", r#"{"name":"brain_trace","arguments":{"issues":true}}"#);
+    assert!(issues.contains("B1841") && issues.contains("views/home.brain") && !issues.contains("\"isError\":true"), "{issues}");
+    let bad = call(4, "tools/call", r#"{"name":"brain_trace","arguments":{"since":"soon"}}"#);
+    assert!(bad.contains("fix:"), "{bad}");
+    let _ = server.kill();
+    let _ = server.wait();
+    let _ = std::fs::remove_dir_all(&tmp);
+}

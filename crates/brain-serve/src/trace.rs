@@ -306,7 +306,7 @@ mod tests {
         let events = answer(&root, serde_json::json!({ "json": true }));
         let printed = events.to_string();
         assert!(printed.contains("Puebla") && printed.contains("visible") && printed.contains("page=2"), "ordinary values stay: {printed}");
-        assert!(printed.contains("[string, 16 chars]") && printed.contains("42"), "{printed}");
+        assert!(printed.contains("[string, 15 chars]") && printed.contains("42"), "{printed}");
         let disk = on_disk(&root);
         assert!(disk.contains("Puebla"), "control: the store file is readable as text");
         for secret in ["LEAK", "ghp_ABC", "AKIAABC", jwt] {

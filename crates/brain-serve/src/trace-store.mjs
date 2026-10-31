@@ -149,7 +149,9 @@ function normalize(raw) {
     }
     event.fingerprint = failedRequest(event)
       ? fingerprint(['request', data.method || 'GET', stable(event.route), event.status])
-      : fingerprint([module, kind, event.issue.code, stable(event.title), event.file, event.line])
+      // a coded message is one problem, whichever channel reported it (brain-err and the console both print it)
+      : event.issue.code ? fingerprint([event.issue.code, stable(event.title)])
+      : fingerprint([module, kind, stable(event.title), event.file, event.line])
   } else event.fingerprint = null
   // brain-err also reports a failed server function: the failed request is that issue, with its id and payload
   if (kind === 'error' && data.type === 'rpc') event.fingerprint = null

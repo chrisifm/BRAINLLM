@@ -131,7 +131,7 @@ COMPILER assigns the next free code there in the same change that emits it, then
   over 1 MB) · B1828 canonical pointing to another locale (error, fails doctor; `<html lang>` that differs from the
   URL locale is a warning) · B1829 entry shown with the default locale's text because its translation is missing
   (warning) · B1830–B1834 AI-answer (GEO) hints, info, never change the score: B1830 answer first, B1831 question
-  headings not grouped as `faq`, B1832 article freshness, B1833 author as Person, B1834 no external sources ·
+  headings not grouped as `faq`, B1832 article freshness, B1833 author as Person, B1834 no external sources · B1840–B1844 `brain trace` findings (§48): failed request, server exception, CSP violation, cross-origin failure, socket failure ·
   B1835 video without poster or upload date (info: not indexed as a video) · B1836 no `keyword` and the title or
   description does not name the H1 topic (info; `brain seo audit` reads each route's `keyword` from its view, like the
   build, through `brain_seo::cli_with`) · B1837 public dynamic route (no guard, not `noindex`) without `paths()` or
@@ -803,7 +803,7 @@ The MCP server is the AI's main interface: everything the CLI does and more, wit
 | Modules and files | `brain_add {kind: view\|comp\|ui\|channel\|service\|api\|test, name, props?}` · `brain_edit {op: add-prop\|remove-prop\|rename\|move\|extract, …}` · `brain_remove {path, confirm}` · `brain_undo {steps}` · `brain_read {path}` (with summarized AST) |
 | Quality | `brain_check {path?}` · `brain_fix` · `brain_doctor {fix?}` · `brain_test {path?, heap?}` · `brain_shot {route, viewport?, baseline?}` · `brain_explain {code}` |
 | APIs and data | `brain_api_add {path, methods, types}` · `brain_api_call {path, method, body?}` (against the dev server, with the test session) · `brain_load {route}` (runs `load` and returns the props) · `brain_rpc {component, fn, args}` · `brain_mock {on}` |
-| Execution and debug | `brain_run_start` · `brain_run_status` · `brain_run_stop` (the dev server as a managed process) · `brain_logs {since?, level?}` · `brain_errors {since?}` · `brain_inspect {view: memory\|log\|latency\|network\|state\|storage\|connections\|timers}` · `brain_eval {expr, component?}` (dev only, in the live page, without access to HttpOnly cookies) · `brain_navigate {route}` · `brain_click\|type {selector}` (via CDP, to reproduce a bug) |
+| Execution and debug | `brain_run_start` · `brain_run_status` · `brain_run_stop` (the dev server as a managed process) · `brain_trace {since?, failed?, module?, requestId?, issues?, limit?}` (§48) · `brain_logs {since?, level?}` · `brain_errors {since?}` · `brain_inspect {view: memory\|log\|latency\|network\|state\|storage\|connections\|timers}` · `brain_eval {expr, component?}` (dev only, in the live page, without access to HttpOnly cookies) · `brain_navigate {route}` · `brain_click\|type {selector}` (via CDP, to reproduce a bug) |
 | Build and delivery | `brain_build {analyze?}` · `brain_preview_start\|stop` · `brain_pack` (dry-run of the npm package). **There is no `brain_publish`:** publishing is Chris's action. |
 
 **Generated app docs (2026-10-31).** `brain docs` (`src/docs.rs`) builds one JSON model from `map::build`,
@@ -2042,3 +2042,49 @@ only on request, `impact::measure` against `budget.viewKB`. Factors, points and 
 sources give the same report; [INTELLIGENCE.md](INTELLIGENCE.md#measured-edit-risk) lists them. `preflight` embeds the
 static score (no build). The score orders review effort and names `requiredChecks`; it never claims runtime safety.
 Atomic changesets, claims and the multi-agent view that consume it are planned for 0.6.1.
+
+## 48. Development trace (2026-10-31)
+
+`brain run` and MCP `brain_run_start` call `brain_serve::trace::enable(root)`; nothing else does, so `brain test`,
+`brain doctor`, the debugger and every production path never record. Off with `--no-trace`, `BRAIN_TRACE=0` or
+`brain.json` `trace.enabled: false`.
+
+**Store.** `.brain/trace.db` (mode 600), in the app's gitignored `.brain/`. `crates/brain-serve/src/trace-store.mjs` runs in
+a long-lived Node child (`node:sqlite`, Node 22.13 or newer) because the compiler crates carry no SQLite and
+`runtime/brain-sqlite.js` is browser OPFS only. All redaction happens in that process, before the first write. Two
+tables: `events` (id, ts, session, tab, request_id, module, kind, level, fingerprint, route, component, file, line,
+duration_ms, status, data JSON) and `issues` (fingerprint, title, module, kind, level, count, first_seen, last_seen,
+b_code, fix, route, component, file, line, last_request_id). Age first, then size: `trace.maxAgeHours` (72),
+`trace.maxMB` (64), oldest events go first; bodies stop at `trace.maxBodyKB` (16).
+
+**Sources.** Server: `handle` opens a `RequestScope` that records the request when the handler returns; the status comes
+from `http::respond_with_length` or the proxied file writer through a thread-local that production never sets. Sidecar:
+`TRC <json>` lines on the protocol channel for exceptions and `console.warn`/`error`, with the stack Node already maps
+through source maps. Browser: `runtime/brain-trace.js`, imported by the dev client only and listed with the other dev
+modules excluded from a build (empty stub when capture is off). Backend: `brain-backend/src/dev_trace.rs` appends to
+`.brain/trace-spool/backend.ndjson` the `sqlx::query` events of a request (statement text, rows, time; bound values never
+exist there) and the finished request by route template; installed by `brain backend serve` outside production only.
+
+**One id.** The browser sets `x-brain-trace` (a UUID, only same-origin) and the dev server adopts it as `req.id`, which
+the sidecar sees as `ctx.rid` and the native proxy forwards as `X-Request-Id`. A document cannot set a header on its own
+load, so the server returns the id in `Server-Timing: rid;desc=…`. A failed request counts once per id in `issues`,
+however many layers saw it.
+
+**CSP.** A dev page gets `Content-Security-Policy-Report-Only` with the production directives (`cache::csp`) plus
+`'unsafe-inline'` scripts, local HTTP APIs, wasm and Google sign-in, which a build adds per page. A build's `ext` sources
+are not known to the dev server, so those appear as violations.
+
+**Limits.** Server-function arguments are positional, so their top-level strings keep only their length. A streamed
+upload's body is not recorded. Only requests through the dev server carry the id; a direct call to the backend gets its
+own. A violation with no source file is placed at the active route.
+
+**Codes.** B1840 failed request · B1841 server exception · B1842 CSP violation · B1843 cross-origin failure · B1844
+socket failure (`brain-seo` `CATALOG`, §5 lists the B18xx family). An event may bring its own `code`, `fix` and `title`.
+
+**A new module** picks a lowercase name and its kinds; no table changes. Browser:
+`globalThis.__brainTrace('payments', 'declined', { level: 'error', title: 'Card declined', code, fix, request_id, data })`.
+Another process: append the same object as one line, with `module` and `kind`, to
+`.brain/trace-spool/<module>.ndjson`. `level` of `warn` or `error` opens an issue.
+
+**Proof.** `crates/brain-cli/tests/trace_production.rs` scans a real `dist/`, `crates/brain-serve/src/trace.rs` tests drive
+redaction, caps and grouping through the store, `runtime/test/trace.test.js` covers the browser half.

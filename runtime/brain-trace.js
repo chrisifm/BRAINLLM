@@ -206,7 +206,8 @@ function watchCsp() {
     const where = sourceFile && lineNumber ? await mapping(sourceFile, lineNumber) : null
     note('browser', 'csp', {
       level: 'error', title: `CSP ${effectiveDirective || violatedDirective} refused ${blockedURI || 'inline code'}`,
-      file: where?.file ?? (sourceFile ? new URL(sourceFile, G.location.href).pathname : null), line: where ? where.line : lineNumber || null,
+      // a call made through the runtime's own wrappers says nothing about the app: the event keeps its route
+      file: where?.file ?? (sourceFile && !sourceFile.includes(RUNTIME) ? new URL(sourceFile, G.location.href).pathname : null), line: where ? where.line : sourceFile?.includes(RUNTIME) ? null : lineNumber || null,
       data: { violation: { directive: effectiveDirective || violatedDirective, blocked: blockedURI, disposition, sample, sourceFile, line: lineNumber, column: columnNumber, precision: where?.precision || 'generated' } },
     })
   })

@@ -9,6 +9,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- `brain run` now records requests, payloads, responses, timings and errors in a local store, with one id from browser to server to backend; read it with `brain trace`, `brain trace <requestId>` or `brain trace issues`.
+- `brain trace` shows server exceptions and browser errors at their `.brain` line, CSP violations production would block, cross-origin failures, broken sockets, backend queries and leak findings, with B1840-B1844 and a fix.
+- The capture never reaches a production build, hides passwords, tokens, cookies and secrets before writing, caps size and age, and turns off with `brain run --no-trace` or `"trace": { "enabled": false }`.
+- A new module records with `__brainTrace(module, kind, fields)` or one line in `.brain/trace-spool/`, with no schema change.
 - Roles are general: only `admin` is required, a new app has `admin` and `user`, and people who sign up get `user`, so `create: ['user']` admits them. Apps with no roles file whose grants still name `company` or `candidate` keep the old implicit roles and signup role, with warning B0739.
 - `brain add roles` declares the roles an app already has; `brain backend rename-role --from <role> --to <role> [--apply]` moves accounts explicitly, and `brain backend migrate` reports accounts whose role is not declared.
 - B0735 names the real file and a concrete fix for role errors. B0738 warns when a grant names an undeclared role in field visibility or a route, or when no grant names the signup role.
