@@ -72,12 +72,14 @@ fn fields(value: Value) -> Result<BTreeMap<String, Field>, String> {
         .ok_or("Schema must be an object of field:type pairs")?;
     obj.iter()
         .map(|(name, v)| {
-            // `'int!'` or the object form `{ type: 'int!', default: 0, unique: true }`.
+            // `'int!'` or the object form `{ type: 'int!', default: 0, unique: true, on_delete, visible }`.
+            let mut on_delete = None;
+            let mut visible = None;
             let (kind, default, unique) = match v {
                 Value::String(kind) => (kind.as_str(), None, false),
                 Value::Object(spec) => {
-                    if let Some(key) = spec.keys().find(|k| !matches!(k.as_str(), "type" | "default" | "unique")) {
-                        return Err(format!("field `{name}`: unknown option `{key}`; fix: use type, default and unique"));
+                    if let Some(key) = spec.keys().find(|k| !matches!(k.as_str(), "type" | "default" | "unique" | "on_delete" | "visible")) {
+                        return Err(format!("field `{name}`: unknown option `{key}`; fix: use type, default, unique, on_delete and visible"));
                     }
                     let kind = spec.get("type").and_then(Value::as_str).ok_or_else(|| format!("field `{name}` needs type: 'str' (or another kind)"))?;
                     let unique = match spec.get("unique") {
@@ -85,9 +87,15 @@ fn fields(value: Value) -> Result<BTreeMap<String, Field>, String> {
                         Some(Value::Bool(b)) => *b,
                         Some(_) => return Err(format!("field `{name}`: unique must be true or false")),
                     };
+                    if let Some(action) = spec.get("on_delete") {
+                        on_delete = Some(action.as_str().ok_or_else(|| format!("field `{name}`: on_delete must be 'restrict', 'cascade' or 'set_null'"))?.to_string());
+                    }
+                    if let Some(grants) = spec.get("visible") {
+                        visible = Some(serde_json::from_value(grants.clone()).map_err(|_| format!("field `{name}`: visible must be a list such as ['owner', 'admin']"))?);
+                    }
                     (kind, spec.get("default").cloned(), unique)
                 }
-                _ => return Err("Field shape must be a string or { type, default, unique }".into()),
+                _ => return Err("Field shape must be a string or { type, default, unique, on_delete, visible }".into()),
             };
             Ok((
                 name.clone(),
@@ -96,6 +104,8 @@ fn fields(value: Value) -> Result<BTreeMap<String, Field>, String> {
                     required: kind.ends_with('!'),
                     default,
                     unique,
+                    on_delete,
+                    visible,
                 },
             ))
         })
@@ -158,6 +168,14 @@ pub fn contracts(root: &Path, kind: &str) -> Result<Vec<Resource>, String> {
         } else {
             Default::default()
         };
+        let query_path = e.path().join("query.jsbrain");
+        let query = if kind == "resources" && query_path.is_file() {
+            serde_json::from_value(read_contract(root, &query_path)?).map_err(|_| {
+                format!("server/{kind}/{name}/query.jsbrain must export {{ filter: {{ field: ['eq', ...] }}, sort: [field | {{ field, nulls }}], default_sort: ['-field'], include: [ref], aggregate: {{ name: {{ group, sum, avg, min, max }} }}, count: {{ name: {{ resource, field, where }} }} }}")
+            })?
+        } else {
+            Default::default()
+        };
         let r = Resource {
             search,
             name,
@@ -165,6 +183,7 @@ pub fn contracts(root: &Path, kind: &str) -> Result<Vec<Resource>, String> {
             policy,
             hooks,
             constraints,
+            query,
         };
         r.validate()
             .map_err(|message| format!("server/{kind}/{}: {message}", r.name))?;
@@ -195,7 +214,10 @@ fn validate_roles(
             &resource.policy.delete,
         ] {
             for role in grants {
-                if !matches!(role.as_str(), "public" | "owner") && !roles.roles.contains(role) {
+                if !matches!(role.as_str(), "public" | "owner")
+                    && brain_backend::ownership::path(role).is_none()
+                    && !roles.roles.contains(role)
+                {
                     return Err(format!(
                         "server/resources/{}/policy.jsbrain: role {role} is not declared in server/auth/roles.jsbrain",
                         resource.name
@@ -322,6 +344,7 @@ pub fn add_with_admin(root: &Path, kind: &str, name: &str, shapes: &str, admin_u
         policy: Policy::default(),
         hooks: Hooks::default(),
         constraints: Default::default(),
+        query: Default::default(),
     };
     r.validate()?;
     let dir = if kind == "resource" {

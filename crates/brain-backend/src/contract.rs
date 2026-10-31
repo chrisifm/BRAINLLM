@@ -17,6 +17,13 @@ pub struct Field {
     /// Single-field uniqueness enforced by a Postgres unique index.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unique: bool,
+    /// Referential action of a `ref:<resource>` field: `restrict` (default), `cascade` or `set_null`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_delete: Option<String>,
+    /// Grants that may see this field in responses (`public`, `owner`, role names). None: every reader.
+    /// Serialization-only: excluded from the recorded storage contract (see `recorded_fields`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visible: Option<Vec<String>>,
 }
 impl Field {
     pub fn ty(&self) -> Option<Ty> {
@@ -133,6 +140,9 @@ pub struct Resource {
     pub hooks: Hooks,
     #[serde(default, skip_serializing_if = "Constraints::is_empty")]
     pub constraints: Constraints,
+    /// Declared list capabilities (`query.jsbrain`): filters, sort, include, aggregates and counts.
+    #[serde(default, skip_serializing_if = "crate::query::QueryContract::is_empty")]
+    pub query: crate::query::QueryContract,
 }
 
 pub fn identifier(s: &str) -> bool {
@@ -180,11 +190,14 @@ impl Resource {
             }
             if field.unique && !ty.unique_eligible() {
                 return Err(format!(
-                    "field `{name}` cannot be unique; fix: unique applies to str, email, int, decimal, date, datetime and enum fields"
+                    "field `{name}` cannot be unique; fix: unique applies to str, email, int, decimal, date, datetime, enum and ref fields"
                 ));
             }
+            crate::relations::validate_field(name, field, &ty)?;
+            crate::visibility::validate_field(name, field)?;
         }
         self.validate_constraints()?;
+        crate::query::validate(self)?;
         let search_unique: std::collections::HashSet<_> = self.search.iter().collect();
         if self.search.len() > 8
             || search_unique.len() != self.search.len()
@@ -217,6 +230,9 @@ impl Resource {
             ("delete", &self.policy.delete),
         ] {
             for role in grants {
+                if crate::ownership::path(role).is_some() {
+                    continue;
+                }
                 if !(matches!(role.as_str(), "owner" | "public")
                     || crate::auth_flows::role_name(role))
                     || role == "public" && op != "read"
@@ -309,6 +325,14 @@ impl Resource {
     /// that can never be a field identifier.
     pub fn recorded_fields(&self) -> Value {
         let mut fields = serde_json::to_value(&self.fields).unwrap_or(Value::Null);
+        // Response visibility is not storage: changing it never requires a reviewed data migration.
+        if let Some(map) = fields.as_object_mut() {
+            for field in map.values_mut() {
+                if let Some(field) = field.as_object_mut() {
+                    field.remove("visible");
+                }
+            }
+        }
         if !self.constraints.is_empty()
             && let Some(map) = fields.as_object_mut()
         {
@@ -465,7 +489,7 @@ impl Resource {
             .collect()
     }
     /// Deterministic object name: the definition hash changes when the definition changes.
-    fn object_name(&self, prefix: &str, definition: &str) -> String {
+    pub(crate) fn object_name(&self, prefix: &str, definition: &str) -> String {
         use sha2::{Digest, Sha256};
         let digest = Sha256::digest(format!("{}\0{definition}", self.name).as_bytes());
         format!("{prefix}{}", digest.iter().take(10).map(|b| format!("{b:02x}")).collect::<String>())
@@ -1130,6 +1154,10 @@ fn native_paths(roles: &crate::auth_flows::RolesConfig) -> Map<String, Value> {
 pub fn validate_graph(resources: &[Resource], jobs: &[Resource]) -> Result<(), String> {
     for r in resources.iter().chain(jobs) {
         r.validate()?;
+    }
+    crate::relations::validate_graph(resources)?;
+    if jobs.iter().any(|j| j.fields.values().any(|f| f.kind.starts_with("ref:"))) {
+        return Err("job payload fields cannot use ref:<resource>; fix: send the id as str".into());
     }
     for r in resources {
         for operation in ["create", "update", "delete"] {

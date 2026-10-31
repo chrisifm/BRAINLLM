@@ -8,11 +8,15 @@ pub mod http;
 pub mod jobs;
 pub mod jwt;
 pub mod links;
+pub mod query;
+pub mod relations;
 pub mod media;
+pub mod ownership;
 pub mod response;
 pub mod search;
 pub mod types;
 pub mod upload;
+pub mod visibility;
 pub mod webhooks;
 
 pub use contract::{Check, Constraints, Field, Policy, Resource};

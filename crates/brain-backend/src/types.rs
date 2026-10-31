@@ -28,6 +28,9 @@ pub enum Ty {
     DateTime,
     Enum(Vec<String>),
     ListStr { max: usize },
+    /// Reference to another resource's record id (`ref:<resource>`), stored as a canonical lowercase UUID string
+    /// and mirrored into a real `ref_<field> uuid` column with a foreign key (see `relations.rs`).
+    Ref(String),
 }
 
 fn enum_value(s: &str) -> bool {
@@ -52,6 +55,12 @@ pub fn parse(kind: &str) -> Option<Ty> {
             max: LIST_DEFAULT_ITEMS,
         },
         _ => {
+            if let Some(target) = kind.strip_prefix("ref:") {
+                if !crate::contract::identifier(target) {
+                    return None;
+                }
+                return Some(Ty::Ref(target.to_string()));
+            }
             if let Some(args) = kind
                 .strip_prefix("decimal(")
                 .and_then(|s| s.strip_suffix(')'))
@@ -101,7 +110,7 @@ fn canonical_small(s: &str) -> Option<u8> {
     s.parse::<u16>().ok().filter(|n| *n <= 255).map(|n| n as u8)
 }
 
-pub const KIND_HELP: &str = "str|num|bool|email|obj|int|decimal(p,s)|date|datetime|enum(a|b)|list<str>|list<str,N>";
+pub const KIND_HELP: &str = "str|num|bool|email|obj|int|decimal(p,s)|date|datetime|enum(a|b)|list<str>|list<str,N>|ref:<resource>";
 
 impl Ty {
     /// Kinds that existed before exact types; they keep legacy validation and never get database checks.
@@ -112,7 +121,7 @@ impl Ty {
     pub fn unique_eligible(&self) -> bool {
         matches!(
             self,
-            Ty::Str | Ty::Email | Ty::Int | Ty::Decimal { .. } | Ty::Date | Ty::DateTime | Ty::Enum(_)
+            Ty::Str | Ty::Email | Ty::Int | Ty::Decimal { .. } | Ty::Date | Ty::DateTime | Ty::Enum(_) | Ty::Ref(_)
         )
     }
     /// Kinds with a total order supported by `check` ranges and comparisons.
@@ -138,6 +147,7 @@ impl Ty {
             Ty::ListStr { max } => format!(
                 "Expected an array of at most {max} strings, each at most {LIST_ITEM_BYTES} bytes"
             ),
+            Ty::Ref(target) => format!("Expected the UUID string of an existing {target} record"),
         }
     }
     /// Validates and returns the canonical stored value. `required` matters only for non-empty text/list rules.
@@ -187,6 +197,11 @@ impl Ty {
                     .all(|item| item.as_str().is_some_and(|s| s.len() <= LIST_ITEM_BYTES))
                     .then(|| v.clone())
             }
+            Ty::Ref(_) => v
+                .as_str()
+                .filter(|s| s.len() == 36)
+                .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                .map(|id| json!(id.hyphenated().to_string())),
         }
     }
     pub fn json_schema(&self, required: bool) -> Value {
@@ -218,6 +233,7 @@ impl Ty {
                 "minItems": if required {1} else {0},
                 "items":{"type":"string","x-brain-maxBytes":LIST_ITEM_BYTES}
             }),
+            Ty::Ref(target) => json!({"type":"string","format":"uuid","x-brain-ref":target}),
         }
     }
     /// Postgres boolean expression for one present value at `data->'<field>'`, or None for legacy kinds.
@@ -247,6 +263,9 @@ impl Ty {
                     .map(|v| format!("'{v}'"))
                     .collect::<Vec<_>>()
                     .join(",")
+            ),
+            Ty::Ref(_) => format!(
+                "jsonb_typeof({j})='string' AND ({t}) ~ '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$'"
             ),
             Ty::ListStr { max } => format!(
                 "jsonb_typeof({j})='array' AND jsonb_array_length({j})<={max} AND NOT jsonb_path_exists({j},'$[*] ? (@.type() != \"string\")')"

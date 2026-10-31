@@ -23,6 +23,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "search_empty_fields",
         include_str!("../migrations/0007_search_empty_fields.sql"),
     ),
+    (
+        "data_queries",
+        include_str!("../migrations/0008_data_queries.sql"),
+    ),
 ];
 fn checksum(sql: &str) -> String {
     Sha256::digest(sql.as_bytes())
@@ -564,6 +568,7 @@ pub async fn migrate(pool: &PgPool, resources: &[Resource]) -> Result<(), String
     for r in resources {
         r.validate()?;
     }
+    crate::relations::validate_graph(resources)?;
     let mut tx = pool.begin().await.map_err(safe)?;
     sqlx::raw_sql("SET LOCAL statement_timeout='60s'; SET LOCAL lock_timeout='5s'; SET LOCAL idle_in_transaction_session_timeout='60s';").execute(&mut *tx).await.map_err(safe)?;
     sqlx::query("SELECT pg_advisory_xact_lock(728196410)")
@@ -629,6 +634,12 @@ pub async fn migrate(pool: &PgPool, resources: &[Resource]) -> Result<(), String
         install_constraints(&mut tx, r).await?;
         resource_shape(&mut tx, r).await?;
     }
+    // Second pass: every table exists, so references (including self references and cycles) can be keyed.
+    for r in resources {
+        crate::relations::install(&mut tx, r).await?;
+        crate::query::install_indexes(&mut tx, r).await?;
+        crate::relations::verify(&mut tx, r).await?;
+    }
     foundation(&mut tx).await?;
     tx.commit().await.map_err(safe)
 }
@@ -653,7 +664,7 @@ fn failure_metadata(error: &sqlx::Error) -> Value {
         Some("57014") => "statement deadline",
         Some("55P03") => "lock deadline",
         Some("23505") => "unique constraint",
-        Some("23503") => "reference constraint",
+        Some("23503" | "23001") => "reference constraint",
         Some("23514") => "check constraint",
         Some("42501") => "database privilege",
         _ => "database operation",
@@ -920,6 +931,7 @@ pub async fn verify(pool: &PgPool, resources: &[Resource]) -> Result<(), String>
     for r in resources {
         r.validate()?;
         resource_shape(&mut conn, r).await?;
+        crate::relations::verify(&mut conn, r).await?;
         let stored =
             sqlx::query("SELECT fields,search_fields FROM _brain_resource_schemas WHERE name=$1")
                 .bind(&r.name)

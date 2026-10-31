@@ -27,6 +27,7 @@ fn legacy() -> Resource {
         policy: Policy::default(),
         hooks: Hooks::default(),
         constraints: Constraints::default(),
+        query: Default::default(),
     }
 }
 fn vacancies() -> Resource {
@@ -51,6 +52,7 @@ fn vacancies() -> Resource {
         fields,
         policy: Policy::default(),
         hooks: Hooks::default(),
+        query: Default::default(),
         constraints: Constraints {
             unique: vec![vec!["title".into(), "closes_on".into()]],
             check: vec![

@@ -23,6 +23,7 @@ fn resource() -> Resource {
         policy: Policy::default(),
         hooks: Hooks::default(),
         constraints: Default::default(),
+        query: Default::default(),
     }
 }
 #[test]
@@ -203,6 +204,7 @@ async fn postgres_auth_policy_crud_transactional_hooks_and_leased_jobs() {
                 policy: Policy::default(),
                 hooks: Hooks::default(),
                 constraints: Default::default(),
+                query: Default::default(),
             }],
             uploads: std::env::temp_dir().join(format!("brain-upload-test-{}", std::process::id())),
             origins: vec!["http://localhost:5182".into()],
