@@ -1,4 +1,4 @@
-//! Google Identity Services ID-token verification. No token-controlled URLs or implicit email linking.
+//! Google Identity Services ID-token verification. No token-controlled URLs; linking rules live in `Auth::google_login`.
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header, jwk::JwkSet};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -41,6 +41,7 @@ struct Claims {
     hd: Option<String>,
 }
 /// Produced only after signature and fixed issuer/audience/nonce validation.
+/// `authoritative_email`: Google hosts the address (gmail.com or a Workspace domain), so the holder owns it today.
 pub struct Identity {
     pub(crate) subject: String,
     pub(crate) issuer: String,

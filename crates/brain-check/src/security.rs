@@ -4,6 +4,7 @@
 //! - B0215 (info) `target="_blank"` without `rel="noopener noreferrer"`: added automatically.
 //! - B0122 import by URL (`http(s)://`, `//host`).
 //! - B0123 third-party `<script src>` in `app.brain` without `integrity`.
+//! - B0737 (warning) a credential-shaped value in `ctx.session.set`: signed, not encrypted (use `ctx.session.setSecret`).
 //! - B0710 `redirect(url)` to another origin (not a same-origin path and not a host listed in `brain.json`
 //!   `"redirects"`).
 //! - B0711 (warning) server `fetch` whose URL is built from `ctx.params`/`ctx.query`/RPC arguments.
@@ -227,6 +228,56 @@ fn each_sources(nodes: &[Node], out: &mut HashSet<String>) {
     }
 }
 
+/// A key that names a credential: `token`, `accessToken`, `refresh_token`, `password`, `apiKey`… Word-based so that
+/// `tokens_used` style counters and `passwordless` flags stay quiet.
+fn secret_key(name: &str) -> bool {
+    let mut words: Vec<String> = Vec::new();
+    let mut word = String::new();
+    for c in name.chars() {
+        if c == '_' || c == '-' {
+            words.push(std::mem::take(&mut word));
+        } else if c.is_ascii_uppercase() {
+            words.push(std::mem::take(&mut word));
+            word.push(c.to_ascii_lowercase());
+        } else {
+            word.push(c);
+        }
+    }
+    words.push(word);
+    words.retain(|w| !w.is_empty());
+    let Some(last) = words.last().map(String::as_str) else { return false };
+    let before = words.len().checked_sub(2).map(|i| words[i].as_str());
+    matches!(last, "token" | "jwt" | "password" | "passwd" | "pwd" | "secret" | "credential" | "credentials" | "apikey")
+        || (last == "key" && matches!(before, Some("api" | "private" | "secret")))
+}
+
+/// Credential-shaped keys in a literal object (nested too) and credential-shaped identifiers: `{ token: t }`, `{ user: { password } }`, `accessToken`.
+fn secret_shaped(e: &Expr, out: &mut Vec<String>) {
+    match e.unparen() {
+        Expr::Object { props, .. } => {
+            for p in props {
+                match p {
+                    ObjProp::KeyValue { key, value, .. } => {
+                        let name = match key {
+                            PropKey::Ident(i) => Some(i.name.as_str()),
+                            PropKey::Str { value, .. } => Some(value.as_str()),
+                            _ => None,
+                        };
+                        if let Some(name) = name.filter(|n| secret_key(n)) {
+                            out.push(name.to_string());
+                        }
+                        secret_shaped(value, out);
+                    }
+                    ObjProp::Shorthand(i) if secret_key(&i.name) => out.push(i.name.clone()),
+                    _ => {}
+                }
+            }
+        }
+        Expr::Ident(i) if secret_key(&i.name) => out.push(i.name.clone()),
+        _ => {}
+    }
+}
+
 impl Checker<'_> {
     pub(crate) fn security(&mut self) {
         let c = self.c;
@@ -269,6 +320,13 @@ impl Checker<'_> {
                     let tainted = r.iter().any(|x| x.starts_with("ctx.params") || x.starts_with("ctx.query") || rpc_args.iter().any(|a| x == a || x.starts_with(&format!("{a}."))));
                     if tainted && !fixed_host {
                         out.push(("B0711", *span, "server `fetch` to a URL built from request input: it can reach internal hosts (SSRF)".into(), "fix the origin in the code (`fetch(`https://api.example.com/users/${id}`)`) or check the host against an allowlist first".into()));
+                    }
+                }
+                if (name == "ctx.session.set" || name.ends_with(".session.set")) && let Some(a) = args.first() {
+                    let mut found = Vec::new();
+                    secret_shaped(a, &mut found);
+                    if let Some(key) = found.first() {
+                        out.push(("B0737", *span, format!("`{key}` goes into `ctx.session.set`: that cookie is signed, not encrypted, so anyone holding it can read the value"), "keep only the user's identity in `ctx.session.set`, and move the value to the encrypted `ctx.session.setSecret(value)` (read it with `ctx.session.secret()`)".into()));
                     }
                 }
                 if name == "RegExp"

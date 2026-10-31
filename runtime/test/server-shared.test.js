@@ -111,3 +111,95 @@ test('plain deliberate client errors preserve HTTP status without exposing their
     assert.equal(response.status,500)
   }
 })
+
+test('session secrets: encrypted cookie, bound to the key, never a user, cleared with the session', async () => {
+  const { sessionFrom, sessionSecrets } = await import('../server/server.mjs')
+  const value = 'synthetic-provider-token-value'
+  const first = sessionFrom({}, 'k1')
+  first.session.setSecret({ token: value }, { maxAge: 60 })
+  const header = first.session.headers()['set-cookie'].find(c => c.startsWith('__Host-session-secret='))
+  assert.match(header, /HttpOnly; Secure; SameSite=Lax; Max-Age=60/)
+  const cookie = header.split(';')[0].slice('__Host-session-secret='.length)
+  assert.ok(!Buffer.from(cookie, 'base64url').toString('latin1').includes(value), 'the value is not readable in the cookie')
+  const later = sessionFrom({ '__Host-session-secret': cookie }, 'k1')
+  assert.deepEqual(later.session.secret(), { token: value })
+  assert.equal(later.user, null, 'a secret never authenticates')
+  assert.equal(sessionFrom({ '__Host-session-secret': cookie }, 'other').session.secret(), null)
+  assert.equal(sessionFrom({ '__Host-session-secret': cookie.slice(0, -2) + 'xx' }, 'k1').session.secret(), null)
+  // the signed session cookie cannot be replayed as a secret, or the reverse
+  first.session.set({ name: 'Ada' })
+  const signed = first.session.headers()['set-cookie'].find(c => c.startsWith('__Host-session=')).split(';')[0].slice('__Host-session='.length)
+  assert.equal(sessionFrom({ '__Host-session-secret': signed }, 'k1').session.secret(), null)
+  assert.equal(sessionFrom({ '__Host-session': cookie }, 'k1').user, null)
+  // expiry travels inside the ciphertext
+  const expired = sessionFrom({}, 'k1')
+  expired.session.setSecret('x', { maxAge: -1 })
+  const stale = expired.session.headers()['set-cookie'][0].split(';')[0].slice('__Host-session-secret='.length)
+  assert.equal(sessionFrom({ '__Host-session-secret': stale }, 'k1').session.secret(), null)
+  // clearing
+  later.session.clearSecret()
+  assert.match(later.session.headers()['set-cookie'][0], /^__Host-session-secret=; .*Max-Age=0/)
+  assert.equal(later.session.secret(), null)
+  const out = sessionFrom({ '__Host-session-secret': cookie }, 'k1')
+  out.session.clear()
+  assert.ok(out.session.headers()['set-cookie'].some(c => /^__Host-session-secret=; .*Max-Age=0/.test(c)), 'logout clears the secret')
+  // limits and configuration fail loudly instead of truncating
+  assert.throws(() => sessionFrom({}, 'k1').session.setSecret('x'.repeat(4000)), /too large/)
+  assert.throws(() => sessionFrom({}, '').session.setSecret('x'), /BRAIN_SECRET/)
+  assert.throws(() => sessionFrom({}, 'k1').session.setSecret(undefined), /JSON/)
+  // a session from another handle (the native bridge) gains the same API and keeps its headers
+  const native = sessionSecrets({ user: { id: 'u' }, set() { throw new Error('native') }, clear() { return 'done' }, headers: () => ({ 'set-cookie': ['a=1'], 'cache-control': 'no-store' }) }, {}, 'k1')
+  native.setSecret('x')
+  const h = native.headers()
+  assert.equal(h['cache-control'], 'no-store')
+  assert.equal(h['set-cookie'][0], 'a=1')
+  assert.match(h['set-cookie'][1], /^__Host-session-secret=/)
+  assert.deepEqual(native.user, { id: 'u' })
+  assert.equal(native.clear(), 'done')
+  assert.ok(native.headers()['set-cookie'].some(c => /^__Host-session-secret=; .*Max-Age=0/.test(c)))
+})
+
+test('session rotation, version, revocation and configured length', async () => {
+  const { sessionFrom } = await import('../server/server.mjs')
+  const saved = { p: process.env.BRAIN_SECRET_PREVIOUS, v: process.env.BRAIN_SESSION_VERSION, s: process.env.BRAIN_SESSION_SECONDS }
+  try {
+    const old = sessionFrom({}, 'old-key'); old.session.set({ name: 'Ada' }); old.session.setSecret('kept')
+    const cookies = Object.fromEntries(old.session.headers()['set-cookie'].map(c => { const p = c.split(';')[0], i = p.indexOf('='); return [p.slice(0, i), p.slice(i + 1)] }))
+    assert.equal(sessionFrom(cookies, 'new-key').user, null)
+    process.env.BRAIN_SECRET_PREVIOUS = 'other, old-key'
+    const rotated = sessionFrom(cookies, 'new-key')
+    assert.deepEqual(rotated.user, { name: 'Ada' }, 'a previous key still verifies')
+    assert.equal(rotated.session.secret(), 'kept', 'a previous key still decrypts')
+    rotated.session.set({ name: 'Ada' })
+    delete process.env.BRAIN_SECRET_PREVIOUS
+    const fresh = rotated.session.headers()['set-cookie'][0].split(';')[0].slice('__Host-session='.length)
+    assert.deepEqual(sessionFrom({ '__Host-session': fresh }, 'new-key').user, { name: 'Ada' }, 'new cookies use the current key')
+
+    // bumping the version signs everybody out
+    const v = sessionFrom({}, 'k'); v.session.set({ name: 'Ada' })
+    const vc = v.session.headers()['set-cookie'][0].split(';')[0].slice('__Host-session='.length)
+    assert.deepEqual(sessionFrom({ '__Host-session': vc }, 'k').user, { name: 'Ada' })
+    process.env.BRAIN_SESSION_VERSION = '2'
+    assert.equal(sessionFrom({ '__Host-session': vc }, 'k').user, null)
+    const v2 = sessionFrom({}, 'k'); v2.session.set({ name: 'Ada' })
+    const vc2 = v2.session.headers()['set-cookie'][0].split(';')[0].slice('__Host-session='.length)
+    assert.deepEqual(sessionFrom({ '__Host-session': vc2 }, 'k').user, { name: 'Ada' })
+    delete process.env.BRAIN_SESSION_VERSION
+
+    // logout invalidates a copy of the cookie in this process
+    const a = sessionFrom({}, 'k'); a.session.set({ name: 'Ada' })
+    const copy = a.session.headers()['set-cookie'][0].split(';')[0].slice('__Host-session='.length)
+    sessionFrom({ '__Host-session': copy }, 'k').session.clear()
+    assert.equal(sessionFrom({ '__Host-session': copy }, 'k').user, null)
+
+    // default length
+    process.env.BRAIN_SESSION_SECONDS = '3600'
+    const l = sessionFrom({}, 'k'); l.session.set({ name: 'Ada' })
+    assert.match(l.session.headers()['set-cookie'][0], /Max-Age=3600/)
+    process.env.BRAIN_SESSION_SECONDS = 'nonsense'
+    const d = sessionFrom({}, 'k'); d.session.set({ name: 'Ada' })
+    assert.match(d.session.headers()['set-cookie'][0], new RegExp(`Max-Age=${7 * 24 * 3600}`))
+  } finally {
+    for (const [k, n] of [['p', 'BRAIN_SECRET_PREVIOUS'], ['v', 'BRAIN_SESSION_VERSION'], ['s', 'BRAIN_SESSION_SECONDS']]) saved[k] === undefined ? delete process.env[n] : process.env[n] = saved[k]
+  }
+})

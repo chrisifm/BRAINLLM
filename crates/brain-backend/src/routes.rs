@@ -23,6 +23,37 @@ pub enum Access {
     Public,
     SignedIn,
     Roles(Vec<String>),
+    Internal(InternalAuth),
+}
+
+/// `auth: 'internal'`: a shared secret in a header, for operators and machines, never for browsers. Several secrets
+/// allow rotation. Comparison is HMAC verification under a per-process key, so it does not depend on where bytes differ.
+#[derive(Clone)]
+pub struct InternalAuth {
+    pub header: String,
+    pub loopback: bool,
+    key: ring::hmac::Key,
+    tags: Vec<ring::hmac::Tag>,
+}
+impl std::fmt::Debug for InternalAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InternalAuth").field("header", &self.header).field("loopback", &self.loopback).field("secrets", &self.tags.len()).finish()
+    }
+}
+impl PartialEq for InternalAuth {
+    fn eq(&self, other: &Self) -> bool {
+        self.header == other.header && self.loopback == other.loopback && self.tags.len() == other.tags.len()
+    }
+}
+impl Eq for InternalAuth {}
+impl InternalAuth {
+    pub fn accepts(&self, presented: &str) -> bool {
+        let mut accepted = false;
+        for tag in &self.tags {
+            accepted |= ring::hmac::verify(&self.key, presented.as_bytes(), tag.as_ref()).is_ok();
+        }
+        accepted
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -260,7 +291,7 @@ impl Route {
             return Err(format!("route `{name}`: the folder name must be a lowercase identifier"));
         }
         let at = format!("route `{name}`");
-        let map = object(value, &at, &["method", "path", "auth", "body", "bodyLimit", "timeout", "rate", "verify", "params", "query", "headers"])?;
+        let map = object(value, &at, &["method", "path", "auth", "body", "bodyLimit", "timeout", "rate", "verify", "internal", "params", "query", "headers"])?;
         let method = match map.get("method").and_then(Value::as_str).unwrap_or("GET").to_ascii_uppercase().as_str() {
             "GET" => axum::http::Method::GET,
             "POST" => axum::http::Method::POST,
@@ -297,12 +328,16 @@ impl Route {
             None => Access::SignedIn,
             Some(Value::String(s)) if s == "public" => Access::Public,
             Some(Value::String(s)) if s == "user" => Access::SignedIn,
+            Some(Value::String(s)) if s == "internal" => Access::Internal(internal(&at, map.get("internal"), env)?),
             Some(Value::Array(roles)) if !roles.is_empty() && roles.len() <= 16 => Access::Roles(
                 roles.iter().map(|r| r.as_str().filter(|r| crate::contract::identifier(r)).map(str::to_owned)).collect::<Option<Vec<_>>>()
                     .ok_or_else(|| format!("{at}.auth roles must be identifiers"))?,
             ),
-            _ => return Err(format!("{at}.auth must be 'public', 'user' or a list of roles")),
+            _ => return Err(format!("{at}.auth must be 'public', 'user', 'internal' or a list of roles")),
         };
+        if map.contains_key("internal") && !matches!(access, Access::Internal(_)) {
+            return Err(format!("{at}.internal applies only to auth: 'internal'"));
+        }
         let raw_body = match map.get("body").and_then(Value::as_str) {
             None | Some("json") => false,
             Some("raw") => true,
@@ -320,7 +355,7 @@ impl Route {
             None => None,
             Some(v) => Some(v.as_str().and_then(parse_rate).ok_or_else(|| format!("{at}.rate must look like '60/min' or '10/min per user'"))?),
         };
-        if matches!(rate, Some(Rate { key: RateKey::User, .. })) && access == Access::Public {
+        if matches!(rate, Some(Rate { key: RateKey::User, .. })) && matches!(access, Access::Public | Access::Internal(_)) {
             return Err(format!("{at}: a per-user rate needs auth 'user' or roles"));
         }
         let mut query = BTreeMap::new();
@@ -361,7 +396,7 @@ impl Route {
     pub fn schema(&self) -> Value {
         json!({
             "name": self.name, "method": self.method.as_str(), "path": self.path,
-            "auth": match &self.access { Access::Public => json!("public"), Access::SignedIn => json!("user"), Access::Roles(r) => json!(r) },
+            "auth": match &self.access { Access::Public => json!("public"), Access::SignedIn => json!("user"), Access::Roles(r) => json!(r), Access::Internal(_) => json!("internal") },
             "body": if self.raw_body { "raw" } else { "json" }, "bodyLimit": self.body_limit, "timeoutMs": self.timeout.as_millis() as u64,
             "rate": self.rate.as_ref().map(|r| json!({"count": r.count, "windowSeconds": r.window.as_secs(), "per": if r.key == RateKey::User { "user" } else { "ip" }})),
             "signed": self.verify.as_ref().map(|v| json!({"header": v.header, "scheme": match v.scheme { Scheme::Timestamped => "timestamped", Scheme::Hmac { .. } => "hmac" }})),
@@ -370,6 +405,38 @@ impl Route {
             "headers": self.headers,
         })
     }
+}
+
+fn internal(at: &str, value: Option<&Value>, env: &dyn Fn(&str) -> Option<String>) -> Result<InternalAuth, String> {
+    let at = format!("{at}.internal");
+    let value = value.ok_or_else(|| format!("{at} is required: {{ secret: 'INTERNAL_SECRET', header: 'x-internal-secret', loopback: true }}"))?;
+    let map = object(value, &at, &["secret", "header", "loopback"])?;
+    let header = map.get("header").and_then(Value::as_str).unwrap_or("x-internal-secret").to_ascii_lowercase();
+    if header.is_empty() || header.len() > 64 || !header.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') || matches!(header.as_str(), "cookie" | "authorization" | "proxy-authorization") {
+        return Err(format!("{at}.header must be a dedicated header name"));
+    }
+    let loopback = match map.get("loopback") {
+        None => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(format!("{at}.loopback must be true or false")),
+    };
+    let names: Vec<&str> = match map.get("secret") {
+        Some(Value::String(s)) => vec![s.as_str()],
+        Some(Value::Array(list)) if !list.is_empty() && list.len() <= 4 => list.iter().map(|v| v.as_str().ok_or_else(|| format!("{at}.secret entries are environment variable names"))).collect::<Result<_, _>>()?,
+        _ => return Err(format!("{at}.secret is the environment variable name holding the secret (or up to 4 for rotation)")),
+    };
+    let mut seed = [0u8; 32];
+    ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut seed).map_err(|_| format!("{at}: no system randomness"))?;
+    let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, &seed);
+    let mut tags = Vec::new();
+    for name in names {
+        if name.is_empty() || !name.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_') {
+            return Err(format!("{at}.secret must be an environment variable name like INTERNAL_SECRET, never the secret itself"));
+        }
+        let secret = env(name).filter(|s| s.len() >= 32).ok_or_else(|| format!("{at}: set {name} (at least 32 bytes) in the environment or .brain_env"))?;
+        tags.push(ring::hmac::sign(&key, secret.as_bytes()));
+    }
+    Ok(InternalAuth { header, loopback, key, tags })
 }
 
 fn verifier(at: &str, value: &Value, env: &dyn Fn(&str) -> Option<String>) -> Result<Verifier, String> {

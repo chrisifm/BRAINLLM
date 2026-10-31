@@ -102,7 +102,8 @@ async fn postgres_migrations_search_scope_session_serialization_and_storage_outb
             (13, "endpoints_platform".into()),
             (14, "cluster_rate_windows".into()),
             (15, "search_language".into()),
-            (16, "search_text_bound".into())
+            (16, "search_text_bound".into()),
+            (17, "auth_hardening".into())
         ]
     );
     assert_eq!(

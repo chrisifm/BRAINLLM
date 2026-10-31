@@ -263,7 +263,10 @@ subclass with a 4xx `status` reaches the calling form's `f.error` as is; other e
 Server-only modules may signal a deliberate client failure with `throw {status:403}` (standard 4xx only); RPC returns
 the status with a generic public message. Arbitrary exception messages remain private and are excluded from server logs too.
 Sessions: `ctx.session.set(user)` in a server function, `ctx.user` on later requests, `ctx.session.clear()` logs out
-(signed cookie, not encrypted: ids and display data only; setup in `brain guide server`).
+(signed cookie, not encrypted: ids and display data only; a credential passed to it warns B0737). A server-only value
+such as a provider token goes in `ctx.session.setSecret(value, {maxAge})`, read with `ctx.session.secret()`, removed with
+`ctx.session.clearSecret()` or `clear()`: its own encrypted cookie, never `ctx.user`, also available with `BRAIN_BACKEND_URL`
+(setup in `brain guide server`).
 `load` belongs to views: in `_layout.brain` it is not run.
 Server limits (dev and production alike): brain.json `"server": { "maxBodyKB": 1024, "timeoutMs": 10000,
 "rpcPerMinute": 60 }` bounds RPC/form bodies (413 past it, at most 65536), function calls and `load` (504) and calls
@@ -317,10 +320,11 @@ Roles: `admin` and `user` by default, signup role `user`; `brain add roles` writ
 mail needs private `BRAIN_MAIL_RESEND_KEY`, `BRAIN_MAIL_FROM` and `PUBLIC_SITE_URL` (HTTPS, optional hosting prefix).
 `brain backend bootstrap-admin --user <existing-uuid>` explicitly assigns the first administrator; signup never grants it.
 API keys: add `server/api-keys.jsbrain` `{enabled:true}`; signed-in users manage keys at `/_brain/keys` (secret shown once), callers send `X-API-Key: bk_live_...` to `/api/<resource>` only; scopes `posts:read|write|*` never exceed the owner. See `docs/backend/api-keys.md`.
+`brain backend users disable|enable|revoke-sessions|disable-identity|enable-identity` and their administrator routes act without SQL; a route with `auth:'internal'` takes a rotatable secret in a header (`docs/backend/routes.md`).
 See `docs/AUTH-FLOWS.md`; mail responses deliberately do not disclose account existence or delivery failures.
 In a same-origin POST server function, `await ctx.backend.login({email,password})` establishes native JWT or opaque
 HttpOnly cookies and returns the sanitized user; the backend chooses the configured mode. Never expose signing keys
-or copy tokens into browser storage. `ctx.session.clear()` revokes native sessions. See `docs/NATIVE-AUTH-SSR.md`.
+or copy tokens into browser storage. `ctx.backend.google.challenge()` and `.login({credential})` do the same for Google. `ctx.session.clear()` revokes native sessions. See `docs/NATIVE-AUTH-SSR.md`.
 With native mode configured, server `load(ctx)` and server functions can use `ctx.backend.resource('posts')`:
 `list({filter:{price:{gte:'10.00'},category:{in:['a','b']}},sort:['-price'],limit,after,include,search})` (same contract
 as `GET /api/<name>`; undeclared filters reject with `error.status 422` and `error.errors`), `get(uuid,{include})`,

@@ -13,6 +13,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `brain add roles` declares the roles an app already has; `brain backend rename-role --from <role> --to <role> [--apply]` moves accounts explicitly, and `brain backend migrate` reports accounts whose role is not declared.
 - B0735 names the real file and a concrete fix for role errors. B0738 warns when a grant names an undeclared role in field visibility or a route, or when no grant names the signup role.
 - Domain vocabulary from one app removed from defaults, messages, docs and examples; `scripts/check-general.sh` keeps it out.
+### Security
+- Google sign-in links an existing account when Google hosts the address (`gmail.com` or a Workspace `hd`); a never-verified account also loses its password, sessions and recovery links, and any other address is denied with the same `AUTH_DENIED`.
+- Concurrent JWT refresh inside a 10-second grace no longer revokes the family, so tabs and prefetches keep their session, and the SSR bridge renews an expired access cookie during render.
+- Failed sign-ins and reset mail are counted per email and client with a cap per email, so a third party can no longer lock out the owner from another client.
+- `ctx.session.setSecret` stores server-only values encrypted; `BRAIN_SECRET_PREVIOUS` rotates the key, `BRAIN_SESSION_VERSION` ends every signed session and `BRAIN_SESSION_SECONDS` sets their length. B0737 warns about a credential passed to `ctx.session.set`.
 
 ### Signature
 - HTML documents now carry `X-Generated-By` with the official site and repository in `brain start`, `_headers`, nginx and Caddy. It replaces `X-Powered-By` and adds nothing visible to the page.
@@ -21,6 +26,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `brain check` and `brain doctor` catch origin mistakes before they run: B0744 for a trailing slash, path, missing scheme, credentials or wildcard, with the exact replacement; B0745 for a socket origin outside the HTTP origins; B0746 for a page calling an undeclared origin.
 - `brain check` warns B0749 on an unconditioned public read of a resource with a state field; `expose_all_rows: true` declares it intentional.
 - `api: false` declares a server-only resource with no public routes or OpenAPI, reached with `ctx.backend.service(name)` and `BRAIN_SERVICE_API_KEY`.
+- `brain backend users disable|enable|revoke-sessions|disable-identity|enable-identity` and matching administrator routes disable users and identities and end sessions without SQL.
+- Declared routes accept `auth: 'internal'` with a rotatable secret compared in constant time, limitable to loopback from the manifest.
+- `ctx.backend.google.challenge()` and `.login({credential})` bind Google's nonce to the browser over a server function.
+- `BRAIN_JWT_SECRET_PREVIOUS` rotates the JWT signing key and `BRAIN_AUTH_SESSION_SECONDS` sets the native session length.
+- B0751: `brain check`, `brain doctor` and `brain backend serve` name the exact backend setting that is missing or out of range, such as `GOOGLE_CLIENT_ID` without `BRAIN_JWT_SECRET`.
 - `brain upgrade [--from V] [--to V] [--dry-run|--apply] [--json] [--no-doctor]` (MCP `brain_upgrade`) migrates an
   app between versions: from the recorded `brainVersion` in `brain.json` (now written by `brain new`) to the installed
   compiler, it reports codemods, manual steps with `file:line`, capabilities to adopt with their snippet and the gates;

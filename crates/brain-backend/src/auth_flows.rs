@@ -322,6 +322,10 @@ impl std::fmt::Display for Error {
         f.write_str(self.code())
     }
 }
+async fn flow_budget(tx:&mut sqlx::Transaction<'_,sqlx::Postgres>,key:&str,cap:i32)->Result<bool,Error>{
+    let count:i32=sqlx::query_scalar("INSERT INTO public._brain_login_limits(key,attempts,expires_at) VALUES($1,1,now()+interval '15 minutes') ON CONFLICT(key) DO UPDATE SET attempts=least(_brain_login_limits.attempts+1,$2+1) RETURNING attempts").bind(key).bind(cap).fetch_one(&mut **tx).await.map_err(|e|database(crate::db::safe(e)))?;
+    Ok(count>cap)
+}
 fn database(_: String) -> Error {
     diagnostic(
         "AUTH_FLOW_DATABASE",
@@ -373,16 +377,21 @@ impl Flows {
         &self.roles
     }
     pub async fn request_reset(&self, address: &str) -> Result<(), Error> {
-        self.request(Purpose::Reset, address, None).await
+        self.request(Purpose::Reset, address, None, None).await
+    }
+    /// Counted per email and client, so a third party cannot use up the owner's reset mails, plus a cap per email.
+    pub async fn request_reset_from(&self, address: &str, client: Option<std::net::IpAddr>) -> Result<(), Error> {
+        self.request(Purpose::Reset, address, None, client).await
     }
     pub async fn request_verification(&self, user: Uuid) -> Result<(), Error> {
-        self.request(Purpose::Verify, "", Some(user)).await
+        self.request(Purpose::Verify, "", Some(user), None).await
     }
     async fn request(
         &self,
         purpose: Purpose,
         address: &str,
         bound: Option<Uuid>,
+        client: Option<std::net::IpAddr>,
     ) -> Result<(), Error> {
         let Some(delivery) = &self.delivery else {
             diagnostic(
@@ -399,7 +408,7 @@ impl Flows {
         let finish = tokio::time::Instant::now() + Duration::from_millis(2100);
         // Always use the same response floor for known, unknown, throttled and failed delivery cases.
         let result=tokio::time::timeout(Duration::from_secs(2),async {
-            if let Some((token_hash,message))=self.prepare(purpose,address,bound).await? {
+            if let Some((token_hash,message))=self.prepare(purpose,address,bound,client).await? {
                 if delivery.deliver(message).await.is_err() {return Err(Error::Unavailable)}
                 // Pending hashes authorize nothing until delivery is confirmed. Never retry an uncertain send.
                 sqlx::query("UPDATE public._brain_auth_tokens t SET activated_at=now() FROM public._brain_users u WHERE t.token_hash=$1 AND u.id=t.user_id AND u.email=t.email_bound AND u.auth_version=t.auth_version AND u.disabled_at IS NULL AND t.consumed_at IS NULL AND t.expires_at>now()")
@@ -420,6 +429,7 @@ impl Flows {
         purpose: Purpose,
         address: &str,
         bound: Option<Uuid>,
+        client: Option<std::net::IpAddr>,
     ) -> Result<Option<(String, Message)>, Error> {
         let address = match (email(address), bound) {
             (Some(address), _) => address,
@@ -447,8 +457,14 @@ impl Flows {
         if retained >= 10000 {
             return Ok(None);
         }
-        let count:i32=sqlx::query_scalar("INSERT INTO public._brain_login_limits(key,attempts,expires_at) VALUES($1,1,now()+interval '15 minutes') ON CONFLICT(key) DO UPDATE SET attempts=least(_brain_login_limits.attempts+1,4) RETURNING attempts").bind(key).fetch_one(&mut *tx).await.map_err(|e|database(crate::db::safe(e)))?;
-        if count > 3 {
+        let spent=match client {
+            Some(ip)=>{
+                let pair=flow_budget(&mut tx,&digest(&format!("{key}|{ip}")),3).await?;
+                flow_budget(&mut tx,&key,10).await? || pair
+            }
+            None=>flow_budget(&mut tx,&key,3).await?,
+        };
+        if spent {
             tx.commit()
                 .await
                 .map_err(|e| database(crate::db::safe(e)))?;
@@ -598,7 +614,62 @@ impl Flows {
         Ok(true)
     }
 }
-async fn revoke(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, user: Uuid) -> Result<(), Error> {
+/// Operator actions without SQL, for the admin routes and `brain backend users`. Each ends every session of the target,
+/// stops its API keys when it disables, and leaves an audit event. `false`: unknown target or the last enabled admin.
+pub async fn set_user_disabled(pool: &PgPool, target: Uuid, disabled: bool) -> Result<bool, Error> {
+    let mut tx = pool.begin().await.map_err(|e| database(crate::db::safe(e)))?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext('brain:auth:role-change'))").execute(&mut *tx).await.map_err(|e| database(crate::db::safe(e)))?;
+    let row = sqlx::query("SELECT role,disabled_at IS NOT NULL AS disabled FROM public._brain_users WHERE id=$1 FOR UPDATE").bind(target).fetch_optional(&mut *tx).await.map_err(|e| database(crate::db::safe(e)))?;
+    let Some(row) = row else { return Ok(false) };
+    if row.get::<bool, _>("disabled") == disabled {
+        return Ok(true);
+    }
+    if disabled && row.get::<String, _>("role") == "admin" {
+        let admins: i64 = sqlx::query_scalar("SELECT count(*) FROM public._brain_users WHERE role='admin' AND disabled_at IS NULL").fetch_one(&mut *tx).await.map_err(|e| database(crate::db::safe(e)))?;
+        if admins <= 1 {
+            return Ok(false);
+        }
+    }
+    sqlx::query("UPDATE public._brain_users SET disabled_at=CASE WHEN $2 THEN now() END,auth_version=auth_version+1,updated_at=now() WHERE id=$1").bind(target).bind(disabled).execute(&mut *tx).await.map_err(|e| database(crate::db::safe(e)))?;
+    revoke(&mut tx, target).await?;
+    if disabled {
+        sqlx::query("UPDATE public._brain_api_keys SET revoked_at=now(),updated_at=now() WHERE user_id=$1 AND revoked_at IS NULL").bind(target).execute(&mut *tx).await.map_err(|e| database(crate::db::safe(e)))?;
+    }
+    audit(&mut tx, target, if disabled { "user-disabled" } else { "user-enabled" }).await?;
+    tx.commit().await.map_err(|e| database(crate::db::safe(e)))?;
+    Ok(true)
+}
+pub async fn revoke_user_sessions(pool: &PgPool, target: Uuid) -> Result<bool, Error> {
+    let mut tx = pool.begin().await.map_err(|e| database(crate::db::safe(e)))?;
+    let changed = sqlx::query("UPDATE public._brain_users SET auth_version=auth_version+1,updated_at=now() WHERE id=$1").bind(target).execute(&mut *tx).await.map_err(|e| database(crate::db::safe(e)))?.rows_affected();
+    if changed == 0 {
+        return Ok(false);
+    }
+    revoke(&mut tx, target).await?;
+    audit(&mut tx, target, "sessions-revoked").await?;
+    tx.commit().await.map_err(|e| database(crate::db::safe(e)))?;
+    Ok(true)
+}
+/// `false`: the user has no identity of that provider. Disabling also ends the sessions it could have opened.
+pub async fn set_identity_disabled(pool: &PgPool, target: Uuid, provider: &str, disabled: bool) -> Result<bool, Error> {
+    let mut tx = pool.begin().await.map_err(|e| database(crate::db::safe(e)))?;
+    let changed = sqlx::query("UPDATE public._brain_identities SET disabled_at=CASE WHEN $3 THEN now() END WHERE user_id=$1 AND provider=$2").bind(target).bind(provider).bind(disabled).execute(&mut *tx).await.map_err(|e| database(crate::db::safe(e)))?.rows_affected();
+    if changed == 0 {
+        return Ok(false);
+    }
+    if disabled {
+        sqlx::query("UPDATE public._brain_users SET auth_version=auth_version+1,updated_at=now() WHERE id=$1").bind(target).execute(&mut *tx).await.map_err(|e| database(crate::db::safe(e)))?;
+        revoke(&mut tx, target).await?;
+    }
+    audit(&mut tx, target, if disabled { "identity-disabled" } else { "identity-enabled" }).await?;
+    tx.commit().await.map_err(|e| database(crate::db::safe(e)))?;
+    Ok(true)
+}
+pub async fn user_id_by_email(pool: &PgPool, address: &str) -> Result<Option<Uuid>, Error> {
+    let Some(address) = email(address) else { return Ok(None) };
+    sqlx::query_scalar("SELECT id FROM public._brain_users WHERE email=$1").bind(address).fetch_optional(pool).await.map_err(|e| database(crate::db::safe(e)))
+}
+pub(crate) async fn revoke(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, user: Uuid) -> Result<(), Error> {
     for sql in [
         "UPDATE public._brain_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",
         "UPDATE public._brain_refresh_families SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",
