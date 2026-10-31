@@ -309,7 +309,15 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let mail=setting("BRAIN_MAIL_RESEND_KEY").map(|key|brain_backend::auth_flows::MailConfig::resend(key,setting("BRAIN_MAIL_FROM").ok_or("BRAIN_MAIL_FROM must name a verified sender email")?,public_base.clone())).transpose()?;
         let config=brain_backend::Config{sockets:sockets.native_config()?,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,resources,jobs,uploads:root.join(".brain/uploads"),origins:sockets.http_origins,production:environment=="production"};
         eprintln!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
-        brain_backend::serve(listener,pool,config).await
+        // Separate HTTP and worker pools with declared sizes, checked against the server's connection budget.
+        pool.close().await;
+        let size=|key:&str,default:u32|setting(key).map(|v|v.parse::<u32>().ok().filter(|n|(1..=64).contains(n)).ok_or(format!("{key} must be 1..64"))).transpose().map(|v|v.unwrap_or(default));
+        let (http_size,worker_size)=(size("BRAIN_DB_HTTP_POOL",8)?,size("BRAIN_DB_WORKER_POOL",2)?);
+        let processes=size("BRAIN_BACKEND_PROCESSES",1)?;
+        let http_pool=brain_backend::db::connect_for(&url,brain_backend::db::Workload::Http,http_size).await?;
+        brain_backend::db::check_connection_budget(&http_pool,(http_size+worker_size)*processes).await?;
+        let worker_pool=brain_backend::db::connect_for(&url,brain_backend::db::Workload::Worker,worker_size).await?;
+        brain_backend::http::serve_pools(listener,http_pool,worker_pool,config).await
     })
 }
 /// All generated files are reserved with create_new; roll back only files created by this invocation.

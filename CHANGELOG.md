@@ -27,6 +27,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Backend relational ownership grants `owner.<ref>[.<ref>]` for read, create, update and delete (docs/backend/ownership.md).
 - Backend per-field `visible` grants project responses and close restricted fields to filters, sorts, search and
   aggregates (docs/backend/visibility.md).
+- `brain backend serve` uses separate HTTP and worker pools (`BRAIN_DB_HTTP_POOL`, `BRAIN_DB_WORKER_POOL`), checks
+  them against `max_connections` at boot, and sends Postgres timeouts as startup options instead of a session `SET`;
+  HTTP adds a 1 s lock wait and, on Postgres 17+, a 9 s transaction cap.
 
 ### Changed
 

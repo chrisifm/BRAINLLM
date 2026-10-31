@@ -2,8 +2,8 @@
 use crate::Resource;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use sqlx::{PgPool, Row, postgres::PgPoolOptions};
-use std::time::Duration;
+use sqlx::{Connection, PgConnection, PgPool, Row, postgres::{PgConnectOptions, PgPoolOptions}};
+use std::{str::FromStr, time::Duration};
 use uuid::Uuid;
 
 const MIGRATIONS: &[(&str, &str)] = &[
@@ -34,13 +34,71 @@ fn checksum(sql: &str) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect()
 }
+/// What a pool serves. Each workload gets its own pool (bulkhead) and its own timeouts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Workload {
+    /// CLI commands, migrations and tests: today's defaults.
+    Default,
+    /// HTTP requests: short lock waits and, on Postgres 17+, a whole-transaction cap below the 10 s request deadline.
+    Http,
+    /// Job and webhook workers: no whole-transaction cap, so long handlers are not cut.
+    Worker,
+}
+/// Connects with the default workload and 8 connections.
 pub async fn connect(url: &str) -> Result<PgPool, String> {
-    PgPoolOptions::new().max_connections(8).acquire_timeout(Duration::from_secs(5))
-        .after_connect(|conn, _| Box::pin(async move {
-            // Keep pg_catalog implicit: it resolves first, while unqualified CREATE targets public.
-            sqlx::raw_sql("SET search_path=public; SET statement_timeout='5s'; SET lock_timeout='2s'; SET idle_in_transaction_session_timeout='10s';").execute(conn).await?;
-            Ok(())
-        })).connect(url).await.map_err(|_| "Cannot connect to Postgres; check DATABASE_URL (credentials are not logged)".into())
+    connect_for(url, Workload::Default, 8).await
+}
+/// Connects a pool for one workload. Timeouts travel as startup options instead of a session `SET` after connect,
+/// so they survive a transaction-mode pooler (a server-side `SET` would leak to or be lost by other clients).
+pub async fn connect_for(url: &str, workload: Workload, size: u32) -> Result<PgPool, String> {
+    let failed = |_| "Cannot connect to Postgres; check DATABASE_URL (credentials are not logged)".to_string();
+    let base = PgConnectOptions::from_str(url).map_err(failed)?;
+    // transaction_timeout exists from Postgres 17; an unknown startup option would refuse the connection.
+    let version = if workload == Workload::Default {
+        0
+    } else {
+        let mut probe = PgConnection::connect_with(&base).await.map_err(failed)?;
+        let version: i32 = sqlx::query_scalar("SELECT current_setting('server_version_num')::int")
+            .fetch_one(&mut probe)
+            .await
+            .map_err(failed)?;
+        let _ = probe.close().await;
+        version
+    };
+    let lock = if workload == Workload::Http { "1s" } else { "2s" };
+    let mut options = vec![
+        // Keep pg_catalog implicit: it resolves first, while unqualified CREATE targets public.
+        ("search_path", "public"),
+        ("statement_timeout", "5s"),
+        ("lock_timeout", lock),
+        ("idle_in_transaction_session_timeout", "10s"),
+    ];
+    if version >= 170000 {
+        options.push(("transaction_timeout", if workload == Workload::Http { "9s" } else { "0" }));
+    }
+    PgPoolOptions::new()
+        .max_connections(size.clamp(1, 64))
+        .acquire_timeout(Duration::from_secs(5))
+        .connect_with(base.options(options))
+        .await
+        .map_err(failed)
+}
+/// Refuses to start when `total` connections (all pools of all processes) exceed
+/// `max_connections - superuser_reserved_connections - reserved_connections - 5`.
+pub async fn check_connection_budget(pool: &PgPool, total: u32) -> Result<(), String> {
+    let (max, reserved): (i32, i32) = sqlx::query_as(
+        "SELECT current_setting('max_connections')::int, current_setting('superuser_reserved_connections')::int + coalesce(current_setting('reserved_connections', true)::int, 0)",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(safe)?;
+    let budget = (max - reserved - 5).max(0);
+    if i64::from(total) > i64::from(budget) {
+        return Err(format!(
+            "BDB_POOL_BUDGET: pools need {total} connections but max_connections={max} leaves {budget} after reserved slots and 5 of headroom; fix: lower BRAIN_DB_HTTP_POOL/BRAIN_DB_WORKER_POOL or the process count, or raise max_connections"
+        ));
+    }
+    Ok(())
 }
 fn drift(object: &str) -> String {
     format!(

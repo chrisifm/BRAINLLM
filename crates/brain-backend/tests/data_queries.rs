@@ -436,3 +436,41 @@ fn contracts_reject_unknown_targets_unsafe_actions_and_restricted_query_fields()
     r[1].query.filter.insert("shop.name".into(), vec!["eq".into()]);
     assert!(brain_backend::contract::validate_graph(&r, &[]).unwrap_err().contains("query filter"));
 }
+
+/// P3/P4: per-workload pools carry their timeouts as startup options (pooler-safe, no session SET) and the declared
+/// pool sizes are checked against the server's connection budget.
+#[tokio::test]
+#[ignore = "requires scripts/backend-check.mjs disposable Postgres"]
+async fn workload_pools_use_startup_timeouts_and_respect_the_connection_budget() {
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Use scripts/backend-check.mjs; no developer database is selected implicitly");
+    let setting = |pool: sqlx::PgPool, name: &'static str| async move {
+        sqlx::query_as::<_, (String, String)>("SELECT setting || coalesce(unit, ''), source FROM pg_settings WHERE name = $1")
+            .bind(name)
+            .fetch_optional(&pool)
+            .await
+            .unwrap()
+    };
+    let http = db::connect_for(&url, db::Workload::Http, 2).await.unwrap();
+    let worker = db::connect_for(&url, db::Workload::Worker, 1).await.unwrap();
+    assert_eq!(setting(http.clone(), "lock_timeout").await, Some(("1000ms".into(), "client".into())), "HTTP lock_timeout is a startup option");
+    assert_eq!(setting(http.clone(), "statement_timeout").await, Some(("5000ms".into(), "client".into())));
+    assert_eq!(setting(http.clone(), "idle_in_transaction_session_timeout").await, Some(("10000ms".into(), "client".into())));
+    assert_eq!(setting(worker.clone(), "lock_timeout").await, Some(("2000ms".into(), "client".into())));
+    let version: i32 = sqlx::query_scalar("SELECT current_setting('server_version_num')::int").fetch_one(&http).await.unwrap();
+    if version >= 170000 {
+        assert_eq!(setting(http.clone(), "transaction_timeout").await, Some(("9000ms".into(), "client".into())));
+        assert_eq!(setting(worker.clone(), "transaction_timeout").await.map(|s| s.0), Some("0ms".into()), "workers keep long jobs");
+    }
+    // The default connection keeps today's values, now without a session SET.
+    let base = db::connect(&url).await.unwrap();
+    assert_eq!(setting(base.clone(), "lock_timeout").await, Some(("2000ms".into(), "client".into())));
+    let path: String = sqlx::query_scalar("SHOW search_path").fetch_one(&base).await.unwrap();
+    assert_eq!(path, "public");
+    // Budget: the declared pools must fit under max_connections minus reserved slots and headroom.
+    db::check_connection_budget(&base, 3).await.unwrap();
+    let error = db::check_connection_budget(&base, 100_000).await.unwrap_err();
+    assert!(error.contains("BDB_POOL_BUDGET") && error.contains("max_connections"), "{error}");
+    for pool in [http, worker, base] {
+        pool.close().await;
+    }
+}

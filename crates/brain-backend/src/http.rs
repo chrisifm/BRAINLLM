@@ -474,6 +474,16 @@ pub async fn serve(
     pool: PgPool,
     config: Config,
 ) -> std::result::Result<(), String> {
+    serve_pools(listener, pool.clone(), pool, config).await
+}
+/// Serves HTTP from `pool` and runs the in-process webhook worker on its own `worker_pool` (bulkhead), so slow
+/// deliveries cannot take the connections requests need.
+pub async fn serve_pools(
+    listener: tokio::net::TcpListener,
+    pool: PgPool,
+    worker_pool: PgPool,
+    config: Config,
+) -> std::result::Result<(), String> {
     let address = listener
         .local_addr()
         .map_err(|_| "Cannot inspect backend address")?
@@ -482,7 +492,7 @@ pub async fn serve(
         .webhooks
         .clone()
         .filter(|cfg| cfg.has_outbound())
-        .map(|cfg| crate::webhooks::Webhooks::new(pool.clone(), cfg, &config.jobs))
+        .map(|cfg| crate::webhooks::Webhooks::new(worker_pool, cfg, &config.jobs))
         .transpose()?;
     let (app, sockets) = router_with_socket_control(pool.clone(), config).await?;
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
