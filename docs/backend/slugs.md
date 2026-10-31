@@ -35,6 +35,5 @@ GET /api/articles/redirects/hello-world
 A slug that a record takes again (the same record moving back, or another record) stops redirecting: the live slug
 always wins. History is kept in `_brain_slug_history` by a database trigger, so it covers every write path.
 
-Pages use the record's `updated_at` for `lastmod` and validators. Calling the lookup from `load()` through
-`ctx.backend` (`slugRedirect`) is pending in the server runtime; until then a server function can request the route
-through the native backend bridge.
+Pages use the record's `updated_at` for `lastmod` and validators. Server code calls the lookup with
+`await ctx.backend.slugRedirect('articles', slug)` (see [server-queries.md](server-queries.md)).

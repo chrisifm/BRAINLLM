@@ -50,7 +50,7 @@ const withSession = async (S, ctx, secret, preauthenticated = false, nativeRequi
       else await nativeBridge.prepare(req, res, rid)
       const session = nativeBridge.session(req, res, rid)
       c.user = session.user; c.session = session
-      c.backend = Object.freeze({resource: name => nativeBridge.resource(req, res, rid, name),login:credentials=>nativeBridge.login(req,res,rid,credentials)})
+      c.backend = typeof nativeBridge.backend === 'function' ? nativeBridge.backend(req, res, rid) : Object.freeze({resource: name => nativeBridge.resource(req, res, rid, name),login:credentials=>nativeBridge.login(req,res,rid,credentials)})
       nativeContexts.set(c, { req, res })
       return c
     } catch (error) { res.writableEnded = true; res.emit('finish'); res.emit('close'); throw error }
