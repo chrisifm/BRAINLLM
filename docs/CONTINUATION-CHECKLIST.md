@@ -185,6 +185,21 @@ Rust 1.99.1 release gate and do not establish cross-platform execution or whole-
   stable Rust 1.99.1, plus a fresh frozen LLM gate for author-facing SPEC/CLI changes. No next-version publication yet.
 - [ ] Keep the original main checkout/index and all unrelated sessions intact; commits/push/review do not imply a main merge.
 
+## End-to-end findings under active correction
+
+- [x] Reproduce the actual B1102 mismatch: a documented GET `cache: 'no'` endpoint is rejected by the checker,
+  although the runtime implements it. The private fullchain fixture uses the native SDK and did not bypass it.
+- [x] Implement the narrow checker correction and regression in f2287f6. An explicit GET opt-out is retained even
+  when global data caching is off; invalid values and write-method cache options remain rejected.
+- [ ] Execute that checker regression, fresh CLI and complete native/browser fixture after integration. The old
+  3987d0b binary still contains the reproduced rejection and must not be reused as the corrected binary.
+- [ ] Correct and prove development value-module errors: an invalid `.jsbrain` currently exports a component-style
+  error fallback, obscuring the compile diagnostic behind missing API methods. Preserve component HMR fallback,
+  source diagnostics and persistent agent feedback while making module import failures actionable.
+- [ ] Complete the actual compiled-app/PG/browser acceptance. Three owned browser contexts loaded the synthetic
+  app, and its disposable schema/auth/HTTP setup passed; CRUD/live cases stopped at the compile mismatch above.
+  This is not a successful end-to-end run or a migration of the requesting application.
+
 ## Additional measured or explicit gaps
 
 - [ ] Linearize repeated DOM sibling paths where ownership permits: a stress fixture with 300 bindings/siblings
