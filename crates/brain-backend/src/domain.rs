@@ -746,14 +746,13 @@ async fn insert_absent(tx: &mut Tx, r: &Resource, owner: Uuid, data: &Value, key
     }
     Ok(row)
 }
+/// Equality on the same expression as the unique index. `IS NOT DISTINCT FROM` cannot use a btree, and turned every
+/// upsert of an existing row into a sequential scan. Key fields are always present here, so NULL never reaches it.
+fn key_filter(key: &[String]) -> String {
+    key.iter().enumerate().map(|(i, f)| format!("data->>'{f}' = ${}", i + 1)).collect::<Vec<_>>().join(" AND ")
+}
 async fn lock_by_key(tx: &mut Tx, r: &Resource, data: &Value, key: &[String]) -> Result<Option<Value>, sqlx::Error> {
-    let filter = key
-        .iter()
-        .enumerate()
-        .map(|(i, f)| format!("data->>'{f}' IS NOT DISTINCT FROM ${}", i + 1))
-        .collect::<Vec<_>>()
-        .join(" AND ");
-    let sql = format!("SELECT {} FROM {} WHERE {filter} FOR UPDATE", columns(), table(r));
+    let sql = format!("SELECT {} FROM {} WHERE {} FOR UPDATE", columns(), table(r), key_filter(key));
     let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
     for field in key {
         let text = data.get(field).map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string()));
@@ -1526,5 +1525,14 @@ pub fn openapi(domain: &Domain, resources: &[Resource], api: &mut Value) {
         }
         let output = json!({"type":"object","required":["operation","result"],"properties":{"operation":{"const":name},"result":{"type":"object","additionalProperties":false,"required":result.keys().collect::<Vec<_>>(),"properties":result}}});
         paths.insert(format!("/_brain/operations/{name}"), json!({"post": post(format!("operation_{name}"), "Declared domain operation: every step runs in ONE Postgres transaction and any failure rolls all of them back.", input_schema(&op.input), output, json!({"x-brain-roles":op.roles,"x-brain-steps":op.steps}))}));
+    }
+}
+
+#[cfg(test)]
+mod key_filter_tests {
+    #[test]
+    fn upsert_key_lookup_is_an_equality_the_unique_index_can_serve() {
+        let filter = super::key_filter(&["org".into(), "code".into()]);
+        assert_eq!(filter, "data->>'org' = $1 AND data->>'code' = $2");
     }
 }

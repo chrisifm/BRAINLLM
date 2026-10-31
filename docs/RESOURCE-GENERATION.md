@@ -23,7 +23,7 @@ Native migration drift checks continue to protect existing stored data.
 Configure fixed loopback `BRAIN_BACKEND_URL` for the production or development
 server. Sign in with an existing administrator; signup never grants this role.
 First-admin promotion remains the explicit operator command
-`brain backend bootstrap-admin --user <existing-user-uuid>`.
+`brain backend bootstrap-admin --user <existing-user-uuid>` (or `--email <address>`).
 
 Server functions pass their authoritative `ctx` to the service and repository.
 Native policy remains the final authority. Repository writes require a

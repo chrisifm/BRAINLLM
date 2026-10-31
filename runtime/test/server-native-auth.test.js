@@ -56,6 +56,20 @@ test('native mode never accepts a valid legacy signed session and cannot establi
   const guarded=await fetch(base+'/guarded',{headers:{cookie:legacy},redirect:'manual'});assert.equal(guarded.status,403)
   const set=await rpc('set');assert.equal(set.status,409);assert.equal(set.headers.get('set-cookie'),null)
 })
+test('BRAIN_BACKEND_SESSION=app keeps the signed session beside the native proxy; nothing else opens it', async () => {
+  assert.throws(() => createServer({dist,backendURL,backendSession:'both',secret:'synthetic-own-session-secret'}),/BRAIN_BACKEND_SESSION must be app/)
+  const own=createServer({dist,backendURL,backendSession:'app',secret:'synthetic-own-session-secret',log(){}})
+  await new Promise(done=>own.listen(0,'127.0.0.1',done))
+  try {
+    const at=`http://127.0.0.1:${own.address().port}`
+    const call=(name,cookie='')=>fetch(`${at}/_r/native/${name}`,{method:'POST',headers:{origin:at,'x-brain-rpc':'1','content-type':'application/json',cookie},body:'[]',redirect:'manual'})
+    const set=await call('set');assert.equal(set.status,200)
+    const signed=set.headers.getSetCookie()[0].split(';')[0]
+    assert.deepEqual((await (await call('who',signed)).json()).user,{role:'admin'})
+    // a backend cookie never fills ctx.user here, so the two sessions cannot be confused
+    assert.equal((await (await call('who','__Host-brain=native')).json()).user,null)
+  } finally { await new Promise(done=>{own.close(done);own.closeAllConnections()}) }
+})
 test('unawaited native clear waits for revocation and relays only native clear cookies', async () => {
   seen.length=0
   const response=await rpc('logout','__Host-brain-access=native; __Host-brain-refresh=refresh-token; other=private')

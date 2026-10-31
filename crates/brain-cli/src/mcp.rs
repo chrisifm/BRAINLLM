@@ -1108,6 +1108,13 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
         run: Box::new(|a| crate::backend::card(&crate::app_root()?,arg(a,"name").as_deref()).map(|v|v.to_string())),
     });
     tools.push(Tool {
+        name: "brain_backend_capabilities",
+        description: "What this backend version supports, generated from its own code: field types and their filter operators, sorting, field options, policy grants and limits. Read it before assuming a filter or type exists.",
+        input_schema: schema([], &[]),
+        output_schema: out([("schemaVersion","number"),("fieldTypes","array")]),
+        run: Box::new(|_| Ok(brain_backend::capabilities::inventory().to_string())),
+    });
+    tools.push(Tool {
         name: "brain_backend_logs",
         description: "Failure events kept by `brain backend serve`. Give the rid from an error response to get its cause: SQLSTATE, resource, operation, branch and code location; omit it for the latest 50.",
         input_schema: schema([("rid","string","request id from the error response; omit for the latest")], &[]),
@@ -1441,7 +1448,7 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
 /// Keep a stable six-tool minimal vocabulary; backend adds only its focused contract/generation tools.
 fn profile_tool(profile:&str,name:&str)->bool {
     matches!(name,"brain_spec"|"brain_check"|"brain_fix"|"brain_map"|"brain_test"|"brain_doctor")
-        || profile=="backend" && matches!(name,"brain_backend_contract"|"brain_backend_logs"|"brain_resource_add"|"brain_job_add"|"brain_agent_setup")
+        || profile=="backend" && matches!(name,"brain_backend_contract"|"brain_backend_capabilities"|"brain_backend_logs"|"brain_resource_add"|"brain_job_add"|"brain_agent_setup")
 }
 
 fn backend_add(args:&Json,kind:&str)->Result<String,String> {

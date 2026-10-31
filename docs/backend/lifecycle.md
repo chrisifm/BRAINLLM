@@ -42,6 +42,11 @@ without TLS. Development keeps accepting any mode. The check applies to every CL
 
 **Restart.** `brain backend serve` waits up to 10 s for its port while a previous instance exits, then stops and names the live holder. Two live servers never share a port.
 
+**Environment.** `brain backend` commands that connect stop with B0785 when no `--env` was given and `DATABASE_URL`
+points at another machine or `NODE_ENV=production`, because the default is development: no TLS check on the database, an
+open API description and no HSTS. Even in development, `/_brain/api` needs an administrator for a request that came
+through a proxy.
+
 **Boot retry.** `brain backend serve` and `brain jobs work` start even if Postgres is still coming up. A refused
 connection, a server that is starting (`57P03`) or full connection slots (`53300`) are retried with full-jitter
 backoff: a random delay up to 250 ms, doubling per attempt up to 5 s, for at most 60 s. Each retry logs

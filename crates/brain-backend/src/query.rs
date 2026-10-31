@@ -16,7 +16,7 @@ pub const MAX_IN: usize = 50;
 pub const GROUP_LIMIT: i64 = 100;
 /// Text comparisons and text indexes use the first 256 characters; equality is rechecked on the full value.
 const TEXT_KEY: usize = 256;
-const OPS: &[&str] = &["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "prefix", "iprefix", "exists", "has"];
+pub const OPS: &[&str] = &["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "prefix", "iprefix", "exists", "has"];
 const RESERVED: &[&str] = &["search", "limit", "offset", "sort", "include", "cursor", "after", "aggregate", "count", "fields", "owner"];
 const TIMESTAMPS: &[&str] = &["created_at", "updated_at"];
 /// Typo matches kept for one search; reaching it marks `total` approximate.
@@ -122,6 +122,18 @@ enum Kind {
     Ref,
     List,
     Stamp,
+}
+/// Filter operators of a parsed field type, as the query parser enforces them (`None`: it cannot be filtered).
+pub fn filter_operators(ty: &Ty) -> Option<&'static [&'static str]> {
+    Kind::of(ty).map(Kind::ops)
+}
+/// Filter and sort abilities of `created_at` and `updated_at`.
+pub fn timestamp_operators() -> &'static [&'static str] {
+    Kind::Stamp.ops()
+}
+/// Whether lists can sort by a parsed field type.
+pub fn sortable(ty: &Ty) -> bool {
+    Kind::of(ty).is_some_and(Kind::sortable)
 }
 impl Kind {
     fn of(ty: &Ty) -> Option<Kind> {

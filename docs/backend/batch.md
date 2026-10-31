@@ -24,6 +24,11 @@ export default { max: 5 }
 The default is 100 items; the allowed range is 1–1000. The batch body may be up to 1 MiB. Resources with a mandatory
 before-hook for the operation answer 422 `BEFORE_HOOK_REQUIRES_SINGLE_WRITES`, so hooks are never bypassed.
 
+One batch is one transaction, so it also has to fit the time limit of an HTTP transaction: 9 seconds on Postgres 17 and
+later, with 5 seconds per statement on every version. Past it the answer is 503 `BATCH_TOO_SLOW`, without `Retry-After`:
+nothing was written, and the same batch will need that time again, so split it. Long text, many indexes and search
+fields make each row slower. A value the database cannot store or index answers 413 `VALUE_TOO_LARGE`.
+
 ## Example
 
 ```http

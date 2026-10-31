@@ -2,8 +2,8 @@
 use crate::Resource;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use sqlx::{Connection, PgConnection, PgPool, Row, postgres::{PgConnectOptions, PgPoolOptions}};
-use std::{str::FromStr, time::Duration};
+use sqlx::{Connection, PgConnection, PgPool, Row, postgres::PgPoolOptions};
+use std::time::Duration;
 use uuid::Uuid;
 
 const MIGRATIONS: &[(&str, &str)] = &[
@@ -459,6 +459,25 @@ async fn install_constraints(
     }
     Ok(())
 }
+/// Removes generated checks and unique indexes the approved contract no longer declares: a type that now allows more
+/// would otherwise still be refused by the old check. Only `_brain_ck_*` and `_brain_ux_*` objects of this table.
+async fn drop_retired_constraints(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, r: &Resource) -> Result<(), String> {
+    let table = table(r);
+    let checks: Vec<String> = r.sql_checks().into_iter().map(|(name, _)| name).collect();
+    let uniques: Vec<String> = r.unique_sets().into_iter().map(|(name, _)| name).collect();
+    let stored: Vec<String> = sqlx::query_scalar("SELECT conname::text FROM pg_constraint WHERE conrelid=to_regclass($1) AND contype='c' AND conname LIKE '\\_brain\\_ck\\_%'")
+        .bind(format!("public.{table}")).fetch_all(&mut **tx).await.map_err(safe)?;
+    for name in stored.iter().filter(|name| !checks.contains(name)) {
+        // Audited SQL: both identifiers were read from the catalog or validated.
+        sqlx::raw_sql(sqlx::AssertSqlSafe(format!("ALTER TABLE {table} DROP CONSTRAINT {name}"))).execute(&mut **tx).await.map_err(safe)?;
+    }
+    let stored: Vec<String> = sqlx::query_scalar("SELECT indexname::text FROM pg_indexes WHERE schemaname='public' AND tablename=$1 AND indexname LIKE '\\_brain\\_ux\\_%'")
+        .bind(&table).fetch_all(&mut **tx).await.map_err(safe)?;
+    for name in stored.iter().filter(|name| !uniques.contains(name)) {
+        sqlx::raw_sql(sqlx::AssertSqlSafe(format!("DROP INDEX public.{name}"))).execute(&mut **tx).await.map_err(safe)?;
+    }
+    Ok(())
+}
 /// Field names covered by the declared constraint or unique index named in a database error.
 pub fn constraint_fields(r: &Resource, error: &sqlx::Error) -> Option<(&'static str, Vec<String>)> {
     let db = error.as_database_error()?;
@@ -658,6 +677,11 @@ async fn ledger(conn: &mut sqlx::PgConnection) -> Result<Vec<i32>, String> {
 }
 /// Explicit transactional migrations; history, schema drift and resource contracts fail closed.
 pub async fn migrate(pool: &PgPool, resources: &[Resource]) -> Result<(), String> {
+    migrate_approving(pool, resources, &[]).await
+}
+/// `migrate`, recording the new contract of the named resources (see `contract_review`). Everything stays one
+/// transaction: a stored row that violates the new contract rolls all of it back.
+pub async fn migrate_approving(pool: &PgPool, resources: &[Resource], approved: &[String]) -> Result<(), String> {
     if resources.len() > 128 {
         return Err("backend migration supports at most 128 resources per invocation".into());
     }
@@ -707,7 +731,14 @@ pub async fn migrate(pool: &PgPool, resources: &[Resource]) -> Result<(), String
             row.get::<Value, _>("fields") != fields
                 || row.get::<Value, _>("search_fields") != json!(r.search)
         }) {
-            return Err(drift(&format!("resource {} contract", r.name)));
+            if !approved.contains(&r.name) {
+                return Err(format!(
+                    "BDB_SCHEMA_DRIFT (B0787): resource {} contract changed; no rows were removed; fix: review it with `brain backend approve-contract`",
+                    r.name
+                ));
+            }
+            sqlx::query("UPDATE _brain_resource_schemas SET fields=$2,search_fields=$3 WHERE name=$1").bind(&r.name).bind(&fields).bind(json!(r.search)).execute(&mut *tx).await.map_err(safe)?;
+            drop_retired_constraints(&mut tx, r).await?;
         }
         let table = table(r);
         // The legacy generated `search` column is preserved for existing data but removed from indexing/use.
@@ -772,6 +803,8 @@ fn failure_metadata(error: &sqlx::Error) -> Value {
     let code = sqlstate(error);
     let category = match code.as_deref() {
         Some("57014") => "statement deadline",
+        Some("25P04") => "transaction deadline",
+        Some("25P03") => "idle transaction deadline",
         Some("55P03") => "lock deadline",
         Some("23505") => "unique constraint",
         Some("23503" | "23001") => "reference constraint",
@@ -796,7 +829,15 @@ pub fn safe(error: sqlx::Error) -> String {
 /// SQLSTATEs that say "not now" rather than "this request is wrong": deadlines, lock and serialization conflicts,
 /// exhausted connections and a server going away. The transaction rolled back, so a retry is safe.
 pub(crate) fn retryable(state: &str) -> bool {
-    matches!(state, "57014" | "55P03" | "40001" | "40P01" | "53300" | "57P01" | "57P02" | "57P03") || state.starts_with("08")
+    deadline(state) || matches!(state, "55P03" | "40001" | "40P01" | "57P01" | "57P02" | "57P03" | "57P05") || state.starts_with("08") || state.starts_with("53")
+}
+/// A time budget ended the work: statement, transaction or idle-in-transaction. The same request will need the time again.
+pub(crate) fn deadline(state: &str) -> bool {
+    matches!(state, "57014" | "25P03" | "25P04")
+}
+/// The request itself exceeds a database limit (class 54, such as a value too long for an index): a retry cannot help.
+pub(crate) fn too_large(state: &str) -> bool {
+    state.starts_with("54") || state == "22001"
 }
 static DIAGNOSTICS: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
 const DIAGNOSTICS_MAX_BYTES: u64 = 5 * 1024 * 1024;
@@ -1118,7 +1159,7 @@ pub async fn verify(pool: &PgPool, resources: &[Resource]) -> Result<(), String>
                 || row.get::<Value, _>("search_fields") != json!(r.search)
         }) {
             return Err(format!(
-                "{}: database schema differs from schema.jsbrain; review migrations before serving",
+                "{} (B0787): database schema differs from schema.jsbrain; fix: review it with `brain backend approve-contract`",
                 r.name
             ));
         }

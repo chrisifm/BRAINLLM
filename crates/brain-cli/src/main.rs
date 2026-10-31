@@ -125,7 +125,7 @@ granular:
   brain deploy config pm2|nginx       guarded front/backend deployment configuration
   brain media setup-gcs|list|cleanup  private media provisioning/library/owned cleanup
   brain e2e probe|run                 opt-in Claude/Codex Viewer scenarios plus AX/heap gates
-  brain backend <serve|migrate|schema|bootstrap-admin>  experimental Rust/Postgres resource API (loopback); serve --with-workers also runs the queues
+  brain backend <serve|migrate|approve-contract|capabilities|schema|bootstrap-admin>  experimental Rust/Postgres resource API (loopback); serve --with-workers also runs the queues
   brain analytics <report|funnel|segment>  usage reports over the behavior events the backend stores
   brain risk <name> [--measure]       what changing a symbol can break, with its evidence
   brain mcp [--profile full|minimal|backend]  the same commands as MCP tools over stdio
@@ -709,6 +709,11 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
             // backend settings the server would refuse at startup (B0751): names only, never values
             for (message, fix) in backend::config_diagnostics(&app) {
                 let mut diag = compiler::Diag::new("B0751", env::FILE, brain_parse::Span::default(), message, fix);
+                diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
+            }
+            // platform.trustProxy (B0784): a public range, or none behind the proxy a loopback backend implies
+            for (message, fix, _) in platform_config::proxy_findings(&app, env::value(&app, "production", "PUBLIC_SITE_URL").as_deref()) {
+                let mut diag = compiler::Diag::new("B0784", "server/platform.jsbrain", brain_parse::Span::default(), message, fix);
                 diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
             }
             // brain.json `server` (B0707): body, time and rate limits shared by brain run and the production server
@@ -2019,6 +2024,11 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
     }
     for (msg, fix) in app.as_deref().map(backend::config_diagnostics).unwrap_or_default() {
         advice.push(Json::obj([("code", Json::str("B0751")), ("level", Json::str("warning")), ("file", Json::str(env::FILE)), ("msg", Json::str(msg)), ("fix", Json::str(fix))]));
+    }
+    if let Some(a) = &app {
+        for (msg, fix, _) in platform_config::proxy_findings(a, env::value(a, "production", "PUBLIC_SITE_URL").as_deref()) {
+            advice.push(Json::obj([("code", Json::str("B0784")), ("level", Json::str("warning")), ("file", Json::str("server/platform.jsbrain")), ("msg", Json::str(msg)), ("fix", Json::str(fix))]));
+        }
     }
     if let Some(a) = &app
         && let Some(p) = env::value(a, "production", "PUBLIC_SITE_URL").or_else(|| std::fs::read_to_string(a.join("brain.json")).ok().and_then(|s| Json::parse(&s).ok()).and_then(|j| j.get("site").and_then(Json::as_str).map(str::to_string))).filter(|s| env::placeholder_origin(s))

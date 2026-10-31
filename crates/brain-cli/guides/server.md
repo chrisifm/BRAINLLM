@@ -40,15 +40,15 @@ environment. `brain check` reports an invalid value as B0707.
    storage or a password in a returned value warns B0783. Keep such values in
    `ctx.session.setSecret(value, { maxAge })`, read them with `ctx.session.secret()` and remove them with
    `ctx.session.clearSecret()` (`clear()` too). It is a separate AES-256-GCM cookie, limited to 3.5 KB, that never fills
-   `ctx.user`. With `BRAIN_BACKEND_URL` the backend owns the session, so `ctx.session.set` answers 409: sign in with
-   `ctx.backend.login(credentials)`; `setSecret` keeps working next to it.
+   `ctx.user`. With `BRAIN_BACKEND_URL` the backend owns the session, so `ctx.session.set` answers 409 and `brain check` warns B0786:
+   sign in with `ctx.backend.login(credentials)`, or set `BRAIN_BACKEND_SESSION=app` to keep the signed session and use
+   the backend only for data, where the visitor is anonymous unless a service key acts. `setSecret` works in both.
    Rotate the key with `BRAIN_SECRET_PREVIOUS=<old>` (comma separated) until old cookies expire; bump
    `BRAIN_SESSION_VERSION` to sign everybody out; `BRAIN_SESSION_SECONDS` sets the default length. Logout invalidates a
    copied cookie only inside one server process: with several processes, the version is the way to revoke.
 3. Every later request sees it as `ctx.user` in guards, `load` and server functions. `ctx.session.clear()` logs out.
-4. The cookie is signed, not encrypted: store ids and display data, never tokens, passwords or secrets.
-5. Protect a folder: `brain add guard account` → `export default (ctx) => ctx.user ? true : redirect('/login')`.
-6. Never set the session cookie from browser code (B0713); never keep the signed-in user in `store(…, { sync: 'storage' })`.
+4. Protect a folder: `brain add guard account` → `export default (ctx) => ctx.user ? true : redirect('/login')`.
+5. Never set the session cookie from browser code (B0713); never keep the signed-in user in `store(…, { sync: 'storage' })`.
 
 ## Server-only code
 - `load` and `server:` functions run only on the server. Modules that touch a database or secrets start with

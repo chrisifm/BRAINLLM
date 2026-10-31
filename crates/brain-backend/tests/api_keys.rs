@@ -269,6 +269,10 @@ async fn api_keys_authenticate_scope_quota_trace_rotate_and_revoke() {
     // OpenAPI documents both schemes when keys are enabled.
     let doc = call(&router, Request::get("/_brain/api").extension(axum::extract::ConnectInfo(std::net::SocketAddr::from(([203, 0, 113, 7], 40000)))).body(Body::empty()).unwrap()).await.body;
     assert_eq!(doc["components"]["securitySchemes"]["apiKey"]["name"], "X-API-Key");
+    for header in ["x-forwarded-for", "x-forwarded-host", "forwarded"] {
+        let proxied = call(&router, Request::get("/_brain/api").header(header, "203.0.113.7").extension(axum::extract::ConnectInfo(std::net::SocketAddr::from(([127, 0, 0, 1], 40000)))).body(Body::empty()).unwrap()).await;
+        assert!(proxied.status == StatusCode::UNAUTHORIZED || proxied.status == StatusCode::FORBIDDEN, "{header}: outside production a proxied request still needs admin, got {}", proxied.status);
+    }
 
     // Disabled projects reject any presented key with a typed error.
     let disabled = brain_backend::http::router(pool.clone(), config(vec![notes, ledgers], None)).await.unwrap();

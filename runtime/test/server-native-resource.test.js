@@ -11,6 +11,7 @@ const backend=createServer((req,res)=>{
   req.on('end',()=>{
     seen.push({method:req.method,path:req.url,headers:req.headers,body:Buffer.concat(chunks).toString()})
     if(mode==='denied'){res.writeHead(403,{'content-type':'application/json'});res.end('{"error":"private driver detail"}');return}
+    if(mode==='limit'){res.writeHead(503,{'content-type':'application/json'});res.end('{"error":{"code":"BATCH_TOO_SLOW","fix":"Split it"}}');return}
     if(mode==='oversize'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({value:'x'.repeat(2*1024*1024)}));return}
     res.writeHead(req.method==='DELETE'?204:200,{'content-type':'application/json'})
     res.end(req.method==='DELETE'?'':JSON.stringify({ok:true,items:[]}))
@@ -55,5 +56,6 @@ test('upstream failures remain generic and responses have a separate two MiB ser
   try {
     mode='denied';await assert.rejects(resource.list(),error=>error.status===403&&!error.message.includes('driver'))
     mode='oversize';await assert.rejects(resource.list(),error=>error.status===502)
+    mode='limit';await assert.rejects(resource.list(),error=>error.status===503&&error.code==='BATCH_TOO_SLOW'&&/Split/.test(error.fix)&&error.message==='Native resource request failed')
   } finally {mode='normal'}
 })

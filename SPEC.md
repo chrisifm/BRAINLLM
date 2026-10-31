@@ -277,6 +277,7 @@ Server limits (dev and production alike): brain.json `"server": { "maxBodyKB": 1
 per IP and function (429). Raise `maxBodyKB` to send a file as base64 in an RPC argument; invalid values are B0707.
 
 ### Experimental Rust/Postgres backend
+`brain backend capabilities` lists what this version supports (field types, filter operators, policy grants, limits), generated from the code.
 First read `brain backend schema --json` (resolved resource/job contracts + resource OpenAPI); inspect one with
 `brain card resource:posts` / `brain card job:notify`. Generate with `brain add resource posts --fields "title:str! body:str"`
 or `brain add job notify --fields "message:str!"`; fields: `str num bool email obj`, `!` required. Resources have explicit
@@ -322,7 +323,7 @@ Native JWT accounts use short-lived access and rotating refresh cookies, persist
 Roles: `admin` and `user` by default, signup role `user`; `brain add roles` writes `server/auth/roles.jsbrain` for your own names (only `admin` is required). A role grant admits only that role; route `auth: 'user'` means any signed-in account.
 `brain recipe auth-ui|password-reset|email-verification|google-signin` prepares project-owned account UI;
 mail needs private `BRAIN_MAIL_RESEND_KEY`, `BRAIN_MAIL_FROM` and `PUBLIC_SITE_URL` (HTTPS, optional hosting prefix).
-`brain backend bootstrap-admin --user <existing-uuid>` explicitly assigns the first administrator; signup never grants it.
+`brain backend bootstrap-admin --user <existing-uuid>` (or `--email <address>`) explicitly assigns the first administrator; signup never grants it.
 API keys: add `server/api-keys.jsbrain` `{enabled:true}`; signed-in users manage keys at `/_brain/keys` (secret shown once), callers send `X-API-Key: bk_live_...` to `/api/<resource>` only; scopes `posts:read|write|*` never exceed the owner. See `docs/backend/api-keys.md`.
 `brain backend users disable|enable|revoke-sessions|disable-identity|enable-identity` and their administrator routes act without SQL; a route with `auth:'internal'` takes a rotatable secret in a header (`docs/backend/routes.md`).
 See `docs/AUTH-FLOWS.md`; mail responses deliberately do not disclose account existence or delivery failures.

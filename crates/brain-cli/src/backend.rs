@@ -502,6 +502,9 @@ pub fn config_problems(setting: &dyn Fn(&str) -> Option<String>) -> Vec<(String,
     {
         report("GOOGLE_CLIENT_ID is not a web OAuth client id".into(), "use the web client id that ends in .apps.googleusercontent.com");
     }
+    if setting("BRAIN_AUTH_REFRESH_GRACE_SECONDS").is_some_and(|v| !v.parse::<u32>().is_ok_and(|n| n <= 60)) {
+        report("BRAIN_AUTH_REFRESH_GRACE_SECONDS must be 0..60".into(), "set whole seconds (0 turns the grace off), or remove it to use 10");
+    }
     if setting("BRAIN_AUTH_SESSION_SECONDS").is_some_and(|v| !v.parse::<u32>().is_ok_and(|n| (300..=31_536_000).contains(&n))) {
         report("BRAIN_AUTH_SESSION_SECONDS must be 300..31536000".into(), "set the session length in whole seconds, or remove it to use the default");
     }
@@ -516,7 +519,7 @@ pub fn config_diagnostics(root: &Path) -> Vec<(String, String)> {
     }
     config_problems(&|key| crate::env::value(root, "development", key).filter(|v| !v.is_empty()))
 }
-fn operator(args: &[String], url: &str) -> Result<(), String> {
+fn operator(args: &[String], url: &str, production: bool) -> Result<(), String> {
     let usage = "usage: brain backend users disable|enable|revoke-sessions|disable-identity|enable-identity --user <uuid>|--email <address> [--provider google] [--env development]";
     let action = args.get(1).map(String::as_str).ok_or(usage)?;
     if !matches!(action, "disable" | "enable" | "revoke-sessions" | "disable-identity" | "enable-identity") {
@@ -529,7 +532,7 @@ fn operator(args: &[String], url: &str) -> Result<(), String> {
     };
     runtime()?.block_on(async {
         use brain_backend::auth_flows as flows;
-        let pool = brain_backend::boot::connect(url, &brain_backend::boot::Boot::command(false)).await?;
+        let pool = brain_backend::boot::connect(url, &brain_backend::boot::Boot::command(production)).await?;
         let user = match (crate::flag(args, "--user"), crate::flag(args, "--email")) {
             (Some(user), None) => user.parse().map_err(|_| "--user must be a UUID".to_string())?,
             (None, Some(address)) => flows::user_id_by_email(&pool, &address).await.map_err(|e| e.to_string())?.ok_or("No user has that email")?,
@@ -551,7 +554,33 @@ fn operator(args: &[String], url: &str) -> Result<(), String> {
         Ok(())
     })
 }
+/// B0785: without `--env`, `serve` runs as development: no TLS check on the database, open API description, no HSTS.
+/// That default is only right on a developer's machine, so anything that looks deployed has to say what it is.
+fn unstated_environment(args: &[String], database: Option<&str>, node_env: Option<&str>) -> Option<String> {
+    if args.iter().any(|a| a == "--env") {
+        return None;
+    }
+    let why = if node_env == Some("production") {
+        "NODE_ENV is production"
+    } else if database.is_some_and(|url| !brain_backend::boot::database_is_local(url)) {
+        "DATABASE_URL points at another machine"
+    } else {
+        return None;
+    };
+    Some(format!("B0785: {why} and no --env was given, so this would run with development defaults; fix: pass --env production (or --env development if this really is a development machine)"))
+}
+fn stated_database(args: &[String], root: &Path, environment: &str) -> Result<String, String> {
+    let url = database(root, environment)?;
+    match unstated_environment(args, Some(&url), std::env::var("NODE_ENV").ok().as_deref()) {
+        Some(refusal) => Err(refusal),
+        None => Ok(url),
+    }
+}
 pub fn run(args: &[String]) -> Result<(), String> {
+    if args.first().is_some_and(|a| a == "capabilities") {
+        println!("{}", brain_backend::capabilities::inventory());
+        return Ok(());
+    }
     let root = crate::app_root()?;
     let environment = crate::env::name(args, "development");
     let operation = args.first().map(String::as_str).unwrap_or("schema");
@@ -561,13 +590,13 @@ pub fn run(args: &[String]) -> Result<(), String> {
         return Ok(());
     }
     if operation == "keys" {
-        return crate::api_key_config::run(&root, &args[1..], database(&root, &environment)?);
+        return crate::api_key_config::run(&root, &args[1..], stated_database(args, &root, &environment)?);
     }
     if !matches!(
         operation,
-        "schema" | "migrate" | "serve" | "bootstrap-admin" | "rename-role" | "users"
+        "schema" | "migrate" | "approve-contract" | "serve" | "bootstrap-admin" | "rename-role" | "users"
     ) {
-        return Err("usage: brain backend schema|migrate|serve|bootstrap-admin|rename-role --from <role> --to <role> [--apply]|logs [rid]|users|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182] [--with-workers]".into());
+        return Err("usage: brain backend capabilities|schema|migrate|approve-contract [--accept <resource>] [--apply]|serve|bootstrap-admin|rename-role --from <role> --to <role> [--apply]|logs [rid]|users|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182] [--with-workers]".into());
     }
     let snapshot = inspect(&root)?;
     if operation == "schema" {
@@ -582,9 +611,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
             return Err(format!("B0751 backend settings: {}", lines.join(" | ")));
         }
     }
-    let url = database(&root, &environment)?;
+    let url = stated_database(args, &root, &environment)?;
     if operation == "users" {
-        return operator(args, &url);
+        return operator(args, &url, environment == "production");
     }
     // Everything the environment alone can reveal stops before the first connection, with its code and fix.
     if operation == "serve" {
@@ -592,6 +621,11 @@ pub fn run(args: &[String]) -> Result<(), String> {
         if let Some(found) = crate::startup_config::findings(&get, environment == "production").into_iter().find(|f| f.fatal) {
             return Err(found.message);
         }
+    }
+    if operation == "serve" && environment == "production"
+        && let Some((message, fix, _)) = crate::platform_config::proxy_findings(&root, None).into_iter().find(|f| f.2)
+    {
+        return Err(format!("B0784: {message}; fix: {fix}"));
     }
     let roles = auth_roles(&root)?;
     let resources = contracts(&root, "resources")?;
@@ -614,6 +648,20 @@ pub fn run(args: &[String]) -> Result<(), String> {
             }
             println!("{report}");return Ok(())
         }
+        if operation=="approve-contract" {
+            let reviewed=brain_backend::contract_review::review(&pool,&resources).await?;
+            let accepted=crate::flag(args,"--accept").map(|list|list.split(',').map(str::to_string).collect::<Vec<_>>()).unwrap_or_default();
+            let decision=brain_backend::contract_review::approved(&reviewed,&accepted);
+            let apply=args.iter().any(|a|a=="--apply");
+            if apply {
+                let names=decision.as_ref().map_err(|blocked|format!("B0787: nothing was changed: {} has changes that can invalidate stored rows; fix: review them without --apply, then pass --accept {}",blocked.join(", "),blocked.join(",")))?;
+                brain_backend::db::migrate_approving(&pool,&resources,names).await?;
+            }
+            pool.close().await;
+            let needs:Vec<String>=decision.err().unwrap_or_default();
+            let next=if apply||reviewed.is_empty(){Value::Null}else if needs.is_empty(){json!("brain backend approve-contract --apply")}else{json!(format!("Review the rows each change touches, then: brain backend approve-contract --accept {} --apply",needs.join(",")))};
+            println!("{}",json!({"schemaVersion":1,"ok":true,"applied":apply&&!reviewed.is_empty(),"changes":reviewed,"needsAccept":needs,"next":next}));return Ok(());
+        }
         if operation=="rename-role" {
             let from=crate::flag(args,"--from").ok_or("rename-role requires --from <role> --to <role>")?;
             let to=crate::flag(args,"--to").ok_or("rename-role requires --from <role> --to <role>")?;
@@ -624,7 +672,13 @@ pub fn run(args: &[String]) -> Result<(), String> {
         }
         if operation=="bootstrap-admin" {
             brain_backend::db::verify(&pool,&resources).await?;
-            let user=crate::flag(args,"--user").ok_or("bootstrap-admin requires the explicit UUID of an existing enabled user; no account is created")?.parse().map_err(|_|"user must be a UUID")?;
+            let user=match (crate::flag(args,"--user"),crate::flag(args,"--email")) {
+                (Some(_),Some(_))=>return Err("bootstrap-admin takes --user or --email, not both".into()),
+                (None,Some(address))=>brain_backend::auth_flows::user_id_by_email(&pool,&address).await.map_err(|error|error.to_string())?.ok_or("bootstrap-admin: no account has this email; no account is created. Sign up first")?.to_string(),
+                (Some(user),None)=>user,
+                (None,None)=>return Err("bootstrap-admin requires --email or the explicit --user UUID of an existing enabled user; no account is created".into()),
+            };
+            let user=user.parse().map_err(|_|"user must be a UUID")?;
             let promoted=brain_backend::auth_flows::bootstrap_first_admin(&pool,user).await.map_err(|error|error.to_string())?;
             pool.close().await;
             if !promoted {return Err("Admin bootstrap requires an enabled existing user and no active administrator".into());}
@@ -642,6 +696,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let setting=|key:&str|std::env::var(key).ok().filter(|v|!v.is_empty()).or_else(||crate::env::value(&root,&environment,key));
         let jwt=setting("BRAIN_JWT_SECRET").map(|secret|brain_backend::jwt::Config::new(secret,setting("BRAIN_JWT_ISSUER").unwrap_or_else(||origin.clone()),setting("BRAIN_JWT_AUDIENCE").unwrap_or_else(||origin.clone()))).transpose()?;
         let jwt=match (jwt,setting("BRAIN_JWT_SECRET_PREVIOUS")) {(Some(config),Some(previous))=>Some(config.with_previous(previous.split(',').map(str::to_string).collect())?),(config,_)=>config};
+        let jwt=match (jwt,setting("BRAIN_AUTH_REFRESH_GRACE_SECONDS")) {(Some(config),Some(seconds))=>Some(config.with_refresh_grace(seconds.parse().map_err(|_|"BRAIN_AUTH_REFRESH_GRACE_SECONDS must be 0..60")?)?),(config,_)=>config};
         if let Some(seconds)=setting("BRAIN_AUTH_SESSION_SECONDS") {brain_backend::auth::configure_session_seconds(seconds.parse().map_err(|_|"BRAIN_AUTH_SESSION_SECONDS must be 300..31536000")?)?;}
         let google=setting("GOOGLE_CLIENT_ID").map(brain_backend::google::Config::new).transpose()?;
         if google.is_some() && jwt.is_none() {return Err("Google Sign-In requires configured native JWT sessions; set BRAIN_JWT_SECRET, issuer and audience".into());}
@@ -1248,7 +1303,7 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
         return Err("usage: brain jobs enqueue <queue> --payload '<json>' [--key K] [--priority N] [--delay S] | status <id> | work <queue> [--concurrency 2] | dead <queue> | retry <queue> [--id <uuid>] | stats [queue] | cron [--once] | prune".into());
     }
     let snapshot = inspect(&root)?;
-    let url = database(&root, &environment)?;
+    let url = stated_database(args, &root, &environment)?;
     let name = args.get(1).filter(|a| !a.starts_with("--")).cloned().unwrap_or_default();
     let declared: Vec<String> = contracts(&root, "jobs")?.into_iter().map(|job| job.name).collect();
     if name.is_empty() && matches!(op, "enqueue" | "work" | "dead" | "retry") {
@@ -1660,6 +1715,23 @@ impl Drop for HandlerGroup {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unstated_environment_stops_what_looks_deployed() {
+        let args = |list: &[&str]| list.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let remote = "postgres://u@db.internal/app";
+        for (given, database, node_env, refused) in [
+            (&["serve"][..], Some("postgres://u@127.0.0.1/app"), None, false),
+            (&["serve"][..], Some("postgres://u@%2Ftmp/app"), Some("development"), false),
+            (&["serve"][..], Some(remote), None, true),
+            (&["serve"][..], Some("postgres://u@127.0.0.1/app"), Some("production"), true),
+            (&["serve", "--env", "development"][..], Some(remote), None, false),
+            (&["migrate", "--env", "production"][..], Some(remote), Some("production"), false),
+        ] {
+            let found = unstated_environment(&args(given), database, node_env);
+            assert_eq!(found.is_some(), refused, "{given:?} {database:?} {node_env:?}");
+            assert!(found.is_none_or(|text| text.starts_with("B0785") && text.contains("--env production") && !text.contains("db.internal")));
+        }
+    }
     fn roles_app(files: &[(&str, &str)]) -> (std::path::PathBuf, Vec<&'static str>) {
         static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let root = std::env::temp_dir().join(format!("brain-roles-{}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
@@ -2188,7 +2260,7 @@ pub fn media(args: &[String]) -> Result<(), String> {
         return Err("usage: brain media setup-gcs | list --owner <uuid> [--limit 50] [--offset 0] | cleanup [--limit 8]; cleanup processes only recorded owned deletion work".into());
     }
     let environment = crate::env::name(args, "development");
-    let url = database(&root, &environment)?;
+    let url = stated_database(args, &root, &environment)?;
     let limit = crate::flag(args, "--limit")
         .unwrap_or_else(|| {
             if operation == "list" {

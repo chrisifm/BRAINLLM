@@ -80,7 +80,7 @@ Composite unique sets have 2–4 fields; single-field uniqueness uses `unique: t
 enforced in the request validator and in Postgres (deterministic `_brain_ck_*` constraints and `_brain_ux_*`
 expression indexes). On a new resource, migration creates them; if existing rows violate one, the migration rolls back
 with an actionable message. Fields, search fields and constraints are part of the registered contract, so adding one to a
-resource that is already registered answers `BDB_SCHEMA_DRIFT` and changes nothing. `verify` reports a missing object the same way. A duplicate returns HTTP 409
+resource that is already registered answers `BDB_SCHEMA_DRIFT` (B0787) and changes nothing. `brain backend approve-contract` previews the difference with the rows each change touches; `--apply` records it. An added optional field or a relaxed `required` applies directly, and anything that can invalidate a stored row also needs `--accept <resource>`. Rows are never rewritten or removed, and a row that violates the new contract rolls everything back. `verify` reports a missing object the same way. A duplicate returns HTTP 409
 `UNIQUE_CONFLICT` with the field names; a database check violation returns 422 `CONSTRAINT_VIOLATION`.
 Legacy contracts serialize and record exactly as before and receive no new database objects. Byte limits of list
 items are enforced by the application layer only. `--admin-ui` generates controls only for the legacy types.
@@ -167,7 +167,7 @@ Native sessions populate the verified `ctx.user` in Node SSR and the development
 bridge; legacy signed sessions never act as a fallback in native mode. JWT uses five-minute access tokens and
 rotating persisted refresh families; reuse detection and account mutations revoke active sessions.
 Roles and their signup default are declared in `server/auth/roles.jsbrain`; public signup cannot choose a role.
-`brain backend bootstrap-admin --user <existing-uuid>` explicitly provisions the first administrator.
+`brain backend bootstrap-admin --user <existing-uuid>` (or `--email <address>`) explicitly provisions the first administrator.
 Single-use password recovery/email verification and optional Resend delivery are described in [AUTH-FLOWS.md](AUTH-FLOWS.md).
 No automatic administrator or production demo login is created. New app display hints are ephemeral, never localStorage authority.
 

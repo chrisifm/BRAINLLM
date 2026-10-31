@@ -57,6 +57,11 @@ fn loopback(options: &PgConnectOptions) -> bool {
     host.parse::<IpAddr>().is_ok_and(|ip| ip.to_canonical().is_loopback())
 }
 
+/// The database is on this machine. An unparsable URL counts as local: B0762 reports it on its own.
+pub fn database_is_local(url: &str) -> bool {
+    PgConnectOptions::from_str(url).map_or(true, |options| loopback(&options))
+}
+
 /// The account name, as libpq takes it from the password database. sqlx builds whoami without its `std` feature, whose
 /// stub answers `anonymous` on every platform, so a URL without a user would never reach the role `psql` connects as.
 fn system_user() -> Option<String> {

@@ -26,6 +26,23 @@ pub fn trust_proxy(root: &Path) -> Vec<String> {
     edge(root).map(|(edge, _)| edge.trust_proxy.iter().map(ToString::to_string).collect()).unwrap_or_default()
 }
 
+/// B0784: what `brain doctor`, `brain check` and a production `brain backend serve` say about `platform.trustProxy`.
+/// (message, fix); `refuse` marks the public range a production start stops on.
+pub fn proxy_findings(root: &Path, site: Option<&str>) -> Vec<(String, String, bool)> {
+    let Ok((edge, _)) = edge(root) else { return Vec::new() };
+    let mut out = Vec::new();
+    for net in edge.undeclared_public_proxies() {
+        out.push((format!("{EDGE}: trustProxy entry `{net}` reaches public addresses, so whoever holds one can choose a client's rate-limit key; a production start refuses it"),
+            "list only your own proxies; a CDN in front of the backend goes in `trustPublicProxy` with its published ranges".to_string(), true));
+    }
+    let public_site = site.is_some_and(|site| site.starts_with("https://"));
+    if edge.trust_proxy.is_empty() && public_site && (root.join("server/resources").is_dir() || root.join("server/auth").is_dir()) {
+        out.push((format!("{EDGE}: no trustProxy, and the native backend listens only on loopback, so behind a proxy every visitor shares one rate-limit and lockout key"),
+            "declare the proxy that reaches the backend: `export default { trustProxy: ['127.0.0.1', '::1'] }`".to_string(), false));
+    }
+    out
+}
+
 const CACHE: &str = "server/cache.jsbrain";
 
 fn cache(root: &Path, resources: &[Resource]) -> Result<CachePolicy, String> {
@@ -119,6 +136,12 @@ mod tests {
         assert_eq!(meta["edge"]["corsMaxAge"], 600);
         assert_eq!(meta["edge"]["readyDelayMs"], 5000);
         assert_eq!(meta["edge"]["requestLog"], "errors");
+        for (entries, flagged) in [("trustProxy: ['127.0.0.1', '10.0.0.0/8', 'fd00::/8']", 0), ("trustProxy: ['127.0.0.1', '8.8.8.0/24']", 1), ("trustProxy: ['11.0.0.0/8']", 1), ("trustPublicProxy: ['8.8.8.0/24']", 0)] {
+            fs::write(root.join(EDGE), format!("<meta server>\nexport default {{ {entries} }}\n")).unwrap();
+            assert_eq!(proxy_findings(&root, None).iter().filter(|f| f.2).count(), flagged, "{entries}");
+        }
+        fs::write(root.join(EDGE), "<meta server>\nexport default { trustPublicProxy: ['10.0.0.0/8'] }\n").unwrap();
+        assert!(metadata(&root, &[], &roles).unwrap_err().contains("private range"));
         fs::write(root.join(EDGE), "<meta server>\nexport default { trustProxy: ['0.0.0.0/0'] }\n").unwrap();
         let error = metadata(&root, &[], &roles).unwrap_err();
         assert!(error.contains("server/platform.jsbrain") && error.contains("every address"), "{error}");

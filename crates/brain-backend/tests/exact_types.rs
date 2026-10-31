@@ -278,7 +278,27 @@ async fn postgres_enforces_exact_types_constraints_and_exposes_timestamps() {
     let mut changed = typed.clone();
     changed.fields.get_mut("currency").unwrap().kind = "enum(MXN|USD|EUR)".into();
     assert!(db::migrate(&pool, &[changed.clone()]).await.unwrap_err().contains("BDB_SCHEMA_DRIFT"));
-    assert!(db::verify(&pool, &[changed]).await.is_err());
+    assert!(db::verify(&pool, &[changed.clone()]).await.is_err());
+    // The reviewed path: the preview writes nothing, a wider enum needs naming, and the old check no longer refuses it.
+    let reviewed = brain_backend::contract_review::review(&pool, std::slice::from_ref(&changed)).await.unwrap();
+    assert_eq!(reviewed[0]["safe"], false, "{reviewed:?}");
+    assert!(db::verify(&pool, &[changed.clone()]).await.is_err(), "the preview changes nothing");
+    assert_eq!(brain_backend::contract_review::approved(&reviewed, &[]).unwrap_err(), [changed.name.clone()]);
+    db::migrate_approving(&pool, &[changed.clone()], &[changed.name.clone()]).await.unwrap();
+    db::verify(&pool, &[changed.clone()]).await.unwrap();
+    assert!(brain_backend::contract_review::review(&pool, std::slice::from_ref(&changed)).await.unwrap().is_empty());
+    let table = format!("_brain_res_{}", changed.name);
+    let widened = sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE {table} SET data=data||'{{\"currency\":\"EUR\"}}' WHERE data ? 'currency'"))).execute(&pool).await;
+    assert!(widened.is_ok(), "{widened:?}");
+    // An approval the stored rows violate rolls everything back and leaves the approved contract in place.
+    let mut narrow = changed.clone();
+    narrow.fields.get_mut("currency").unwrap().kind = "enum(MXN|USD)".into();
+    if !sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!("SELECT count(*) FROM {table} WHERE data->>'currency'='EUR'"))).fetch_one(&pool).await.unwrap().eq(&0) {
+        assert!(db::migrate_approving(&pool, &[narrow.clone()], &[narrow.name.clone()]).await.unwrap_err().contains("nothing was changed"));
+        db::verify(&pool, &[changed.clone()]).await.unwrap();
+    }
+    sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE {table} SET data=data||'{{\"currency\":\"MXN\"}}' WHERE data->>'currency'='EUR'"))).execute(&pool).await.unwrap();
+    db::migrate_approving(&pool, &[typed.clone()], &[typed.name.clone()]).await.unwrap();
     // A dropped constraint is detected before serving.
     let (name, _) = typed.sql_checks().remove(0);
     sqlx::raw_sql(sqlx::AssertSqlSafe(format!("ALTER TABLE _brain_res_listings DROP CONSTRAINT {name}"))).execute(&pool).await.unwrap();
