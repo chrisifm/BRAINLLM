@@ -1,28 +1,10 @@
 <meta seo robots="noindex" title="Native live acceptance" description="Isolated owner-scoped native resource browser acceptance." canonical="/">
 <script>
-  import posts from '../api/posts.jsbrain'
-  import account from '../api/account.jsbrain'
-  let principal = sig(null)
-  const rows = resource(() => principal ? posts.get() : Promise.resolve({ items: [] }))
-  const updates = liveResource(rows, { rooms: [{ resource: 'posts' }], scope: () => principal })
-  async function activate() {
-    const current = await account.get()
-    principal = current.user.id
-  }
-  function clear() { principal = null }
+  import LivePanel from '../comp/live-panel.brain'
+  let showPanel = sig(true)
 </script>
 <main>
   <h1>Native live acceptance</h1>
-  <p id="principal">{principal || 'none'}</p>
-  <p id="live-state" role="status">{updates.state}</p>
-  <p id="live-connected">{updates.connected ? 'yes' : 'no'}</p>
-  <button id="activate" type="button" on:click={activate()}>Use current session</button>
-  <button id="clear" type="button" on:click={clear()}>Clear current scope</button>
-  <button id="reconnect" type="button" on:click={updates.reconnect()}>Reconnect live resource</button>
-  <button id="close-live" type="button" on:click={updates.close()}>Close live resource</button>
-  <a id="leave" href="/other">Leave live view</a>
-  {#await rows}<p id="loading">Loading records.</p>
-  {:then result}
-    <ul id="records">{#each result.items as row (row.id)}<li data-record={row.id}>{row.data.title}</li>{:empty}<li id="empty">No records yet.</li>{/each}</ul>
-  {:catch error}<p id="http-error" role="alert">{error.kind === 'offline' ? 'Connect to the network.' : error.status === 401 ? 'Sign in to load records.' : error.status === 403 ? 'This account cannot read these records.' : error.status === 422 ? 'Review the request fields.' : 'Resource request failed; try again.'}</p>{/await}
+  <button id="unmount" type="button" disabled={!showPanel} on:click={showPanel = false}>Unmount live panel</button>
+  {#if showPanel}<LivePanel />{:else}<p id="disposed">Live resource owner disposed.</p>{/if}
 </main>

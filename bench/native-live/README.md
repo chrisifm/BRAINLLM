@@ -52,8 +52,8 @@ The gate fails fast and counts only completed cases:
 4. A fresh join resynchronizes a mutation missed while the scope was disabled;
    explicit reconnect creates a fresh socket generation.
 5. A principal switch clears private view state and closes the previous generation.
-6. Revoked JWT sessions close on delivery. Navigating a healthy owner away closes
-   its socket and prevents reconnection after disposal.
+6. Revoked JWT sessions close on delivery. Unmounting a healthy child component closes its socket without navigating or
+   replacing the document, and prevents reconnection after disposal.
 
 Protocol frames are retained in a bounded allowlisted form; row fields and secret
 values are prohibited. Reports contain status, known error categories and source
