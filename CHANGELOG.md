@@ -21,6 +21,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   renders in that named slot instead of the default one, and the `slot` attribute no longer reaches the DOM.
 - `npm/smoke-registry.mjs` reports invalid arguments, versions and deadlines as structured `invalid-arguments`,
   `invalid-exact-version` and `invalid-deadline` failures instead of only printing the usage text.
+- `brain seo indexnow` decodes every XML entity in sitemap `<loc>` values (`&apos;`, `&quot;`, `&lt;`, `&gt;`, not only
+  `&amp;`), reads a child listed twice once, and fails with a fix when a sitemap index lists no children or a child is
+  not a complete `<urlset>` (S02), instead of sending escaped URLs or silently skipping a truncated child.
 
 ## [0.6.1] - 2026-10-31
 
