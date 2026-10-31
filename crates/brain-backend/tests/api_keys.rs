@@ -275,6 +275,8 @@ async fn api_keys_authenticate_scope_quota_trace_rotate_and_revoke() {
     assert_eq!(off.body["error"]["code"], "API_KEYS_DISABLED");
     assert_eq!(call(&disabled, session("GET", "/_brain/keys", &token, None)).await.status, StatusCode::NOT_FOUND);
 
+    slug_redirects_and_patch_with_key(&pool, &auth).await;
+
     // Retention purge is bounded and owner deletion cascades keys, counters and trace.
     assert_eq!(brain_backend::api_keys::purge(&pool, 1).await.unwrap(), 0);
     sqlx::query("DELETE FROM _brain_res_key_notes WHERE owner=$1").bind(owner).execute(&pool).await.unwrap();
@@ -285,4 +287,43 @@ async fn api_keys_authenticate_scope_quota_trace_rotate_and_revoke() {
         .unwrap();
     assert_eq!(left, 0);
     pool.close().await;
+}
+
+/// Job handlers reach slug history and partial updates with a key (docs/backend/job-backend.md). Runs inside the
+/// main test so the global cleanup count below stays exact.
+async fn slug_redirects_and_patch_with_key(pool: &sqlx::PgPool, auth: &Auth) {
+    let mut articles = resource(
+        "key_articles",
+        Policy {
+            read: vec!["candidate".into()],
+            create: vec!["candidate".into()],
+            update: vec!["owner".into()],
+            delete: vec!["owner".into()],
+        },
+    );
+    articles.fields.insert("slug".into(), Field { kind: "str".into(), required: true, unique: true, slug: true, ..Default::default() });
+    db::migrate(pool, &[articles.clone()]).await.unwrap();
+    let router = brain_backend::http::router(pool.clone(), config(vec![articles], Some(Default::default()))).await.unwrap();
+    let (job_owner, token) = user(auth).await;
+    let (_, writer) = create_key(&router, &token, json!({"name":"Job","scopes":["key_articles:*"]})).await;
+    let (_, other) = create_key(&router, &token, json!({"name":"Other","scopes":["key_notes:read"]})).await;
+    let slug = format!("first-{}", Uuid::new_v4().simple());
+    let created = call(&router, keyed("POST", "/api/key_articles", &writer, false, Some(json!({"title":"Hello","slug":slug})))).await;
+    assert_eq!(created.status, StatusCode::OK, "{}", created.body);
+    let id = created.body["id"].as_str().unwrap().to_string();
+    let patched = call(&router, keyed("PATCH", &format!("/api/key_articles/{id}"), &writer, false, Some(json!({"slug":format!("{slug}-v2")})))).await;
+    assert_eq!(patched.status, StatusCode::OK, "{}", patched.body);
+    assert_eq!(patched.body["data"]["title"], "Hello");
+    let moved = call(&router, keyed("GET", &format!("/api/key_articles/redirects/{slug}"), &writer, false, None)).await;
+    assert_eq!(moved.status, StatusCode::OK, "{}", moved.body);
+    assert_eq!(moved.body["slug"].as_str(), Some(format!("{slug}-v2").as_str()));
+    let unknown = call(&router, keyed("GET", "/api/key_articles/redirects/never-used", &writer, false, None)).await;
+    assert_eq!(unknown.status, StatusCode::NOT_FOUND);
+    let denied = call(&router, keyed("GET", &format!("/api/key_articles/redirects/{slug}"), &other, false, None)).await;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN);
+    assert_eq!(denied.body["error"]["code"], "API_KEY_SCOPE_DENIED");
+    let deeper = call(&router, keyed("GET", &format!("/api/key_articles/{id}/extra/path"), &writer, false, None)).await;
+    assert_eq!(deeper.body["error"]["code"], "API_KEY_NOT_ACCEPTED");
+    sqlx::query("DELETE FROM _brain_res_key_articles WHERE owner=$1").bind(job_owner).execute(pool).await.unwrap();
+    sqlx::query("DELETE FROM _brain_users WHERE id=$1").bind(job_owner).execute(pool).await.unwrap();
 }

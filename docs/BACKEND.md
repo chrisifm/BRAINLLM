@@ -172,7 +172,8 @@ payload is revalidated. Generate them with `brain add hook` and read [BEFORE-HOO
 execution limits, safe rejection contract and same-record CAS conflict protection.
 
 Implement the generated handler before starting a worker; its initial body throws deliberately, so unfinished work
-cannot be reported as successful. It receives `{ payload, jobId, attempt, env }`. The worker compiles its BrainScript
+cannot be reported as successful. It receives `{ payload, jobId, attempt, env, backend }`; `ctx.backend` reads and writes resources with a project
+API key ([backend/job-backend.md](backend/job-backend.md)). The worker compiles its BrainScript
 module graph with the existing compiler and runs it in an owned Node child; it never evaluates job payloads as code.
 
 ```sh

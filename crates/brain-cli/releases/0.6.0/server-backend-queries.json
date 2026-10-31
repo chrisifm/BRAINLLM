@@ -1,0 +1,29 @@
+{
+  "id": "server-backend-queries",
+  "kind": "capability",
+  "title": "Full list queries, PATCH and slug redirects from ctx.backend",
+  "why": "Server load() and server functions reach the same filters, sort, cursor pages, PATCH and slug history as the HTTP API without a second database client.",
+  "changelog": [
+    "`ctx.backend` speaks the full HTTP list contract from server code"
+  ],
+  "guide": "docs/backend/server-queries.md",
+  "apis": [
+    "ctx.backend.resource(name).list(options)",
+    "ctx.backend.resource(name).patch(id, values)",
+    "ctx.backend.slugRedirect(name, slug)"
+  ],
+  "affects": [
+    "**/*.brain",
+    "**/*.jsbrain"
+  ],
+  "adopt": {
+    "file": "views/products.brain",
+    "snippet": "const page = await ctx.backend.resource('products').list({ filter: { category: 'tools' }, sort: ['price'], limit: 24 })"
+  },
+  "uses": [
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "ctx.backend.resource("
+    }
+  ]
+}

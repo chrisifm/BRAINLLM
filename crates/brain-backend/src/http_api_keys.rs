@@ -21,11 +21,14 @@ tokio::task_local! { pub(super) static KEY_USER: User; }
 pub(super) fn key_user() -> Option<User> {
     KEY_USER.try_with(Clone::clone).ok()
 }
-/// `/api/{name}` or `/api/{name}/{id}` → resource name. Keys are accepted nowhere else.
+/// `/api/{name}`, `/api/{name}/{id}` or the read-only `/api/{name}/redirects/{slug}` → resource name. Keys are
+/// accepted nowhere else.
 fn resource_of(path: &str) -> Option<&str> {
     let rest = path.strip_prefix("/api/")?;
-    let name = rest.split('/').next()?;
-    (crate::contract::identifier(name) && rest.split('/').count() <= 2).then_some(name)
+    let parts: Vec<&str> = rest.split('/').collect();
+    let name = parts[0];
+    let shape = parts.len() <= 2 || (parts.len() == 3 && parts[1] == "redirects");
+    (crate::contract::identifier(name) && shape).then_some(name)
 }
 /// True when origin enforcement may be skipped: a non-ambient credential on a resource route.
 pub(super) fn keyed_resource_request(req: &Request) -> bool {
