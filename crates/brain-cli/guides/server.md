@@ -113,3 +113,9 @@ brain start && brain status       # "ok": true
 </script>
 <Button on:click={out}>Sign out</Button>
 ```
+
+Row conditions: `read: [{ public: { where: { status: 'published' } } }, 'owner.shop', 'admin']` limits a grant to matching
+rows; grants are OR-ed, and hidden rows answer 404 like missing ones on every read channel. `brain check` warns B0749 on
+an unconditioned public read with a state field; add a `where` or declare `expose_all_rows: true`. `api: false` makes a
+resource server-only (no routes, no OpenAPI); reach it with `ctx.backend.service(name)` and `BRAIN_SERVICE_API_KEY`.
+See docs/backend/ownership.md.

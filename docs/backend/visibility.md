@@ -77,3 +77,9 @@ Anonymous and other readers do not receive it. To publish it (for example an aut
 // server/resources/notes/query.jsbrain
 export default { expose_owner: true }
 ```
+
+## Rows and fields
+
+`visible` hides fields of rows the reader may read. To hide whole rows, add a `where` to the read grant:
+see [row conditions](ownership.md#row-conditions-on-read-grants). A row the reader may not read is never projected: a
+write that leaves it hidden answers with `data: {}`.

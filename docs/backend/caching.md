@@ -68,3 +68,9 @@ with status 412 and nothing written. A weak tag (`W/"…"`) never satisfies `If-
 record. The check runs against the same row revision the write's compare-and-swap uses, so two writers holding the
 same tag cannot both succeed. Without `If-Match` writes behave as before. Domain actions, transitions and batches do
 not read `If-Match`.
+
+## Row conditions and lifetimes
+
+Public lifetimes apply to anonymous reads only; a signed-in reader never receives a shared `Cache-Control`. A hidden
+row never answers `304`, whatever `If-None-Match` says. A row that stops matching a condition (a job unpublished) stays
+in shared caches until its declared lifetime ends, so keep lifetimes short on resources whose rows can be hidden again.

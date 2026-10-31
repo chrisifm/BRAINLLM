@@ -119,3 +119,19 @@ Request bodies are limited to 64 KiB and responses to 2 MiB; the call shares the
 never retries a write. Tested by `runtime/test/server-native-queries.test.js` (query string mapping, local
 validation, PATCH, slug redirects, field errors) and `runtime/test/server-native-resource.test.js` (transport,
 cookies, budgets).
+
+## Server-only resources: `ctx.backend.service`
+
+`ctx.backend.resource(name)` acts as the visitor: it forwards the session, and row conditions apply to it as they do to
+HTTP. A resource declared with `api: false` is reached from trusted server code with a service key instead:
+
+```js
+export async function POST(ctx) {
+  const ledgers = ctx.backend.service('ledgers')
+  return ledgers.list({ limit: 20 })
+}
+```
+
+Create an API key whose scope names the resource (`ledgers:*`) and set `BRAIN_SERVICE_API_KEY`. The call sends the key
+and no visitor session, so it acts as the key's owner. The key is not exposed through `ctx.env`, and without it
+`service()` answers `503`.

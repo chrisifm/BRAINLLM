@@ -299,6 +299,7 @@ See `docs/backend/analytics.md`.
 referenced on restrict delete → 409 `REFERENCE_IN_USE`). Optional `query.jsbrain` declares list filters (`?f=v`, `?f[op]=v`,
 `now-7d`), `sort` (`?sort=-price,title`, ties by id), `include` (one level), named `aggregate`s and related `count`s;
 undeclared or repeated parameters → 422. Lists return `total` and `next_cursor` (pass back as `cursor` or `after`).
+Read grants take row conditions (`{ public: { where: { status: 'published' } } }`, OR-ed; hidden rows answer 404 on every read channel; B0749 warns on an unconditioned public read with a state field, `expose_all_rows: true` declares it); `api: false` makes a resource server-only (`ctx.backend.service(name)`).
 Policy grants `owner.<ref>[.<ref>]` scope rows through relations; field option `visible: ['owner','admin']` hides
 a field from other readers and from the query surface. Modifiers `'str writeonly'`, `readonly`, `private` control
 client writes and reads. `owner` is returned only to owners and named read roles unless `expose_owner: true`.
