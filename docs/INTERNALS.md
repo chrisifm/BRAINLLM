@@ -2105,3 +2105,13 @@ Another process: append the same object as one line, with `module` and `kind`, t
 
 **Proof.** `crates/brain-cli/tests/trace_production.rs` scans a real `dist/`, `crates/brain-serve/src/trace.rs` tests drive
 redaction, caps and grouping through the store, `runtime/test/trace.test.js` covers the browser half.
+
+## 50. File deletion tombstones (2026-10-31)
+
+Migration 0020 adds `_brain_file_deletions` and an `AFTER DELETE` trigger on `_brain_files`, the pattern of
+`_brain_media_deletions`: any removal of a row records its `storage_key` in the same transaction, whichever path removed
+it. `files::finish` removes the bytes and clears the tombstone, `files::sweep` claims due tombstones with `FOR UPDATE SKIP
+LOCKED` and pushes `next_attempt_at` forward as its lease and backoff, and `files::sweep_loop` runs from `http::serve_full`.
+`Storage::remove` treats missing bytes as finished and refuses a key outside storage, which then waits in the table instead
+of being followed. Rejected uploads use `files::discard`. Bytes written just before a crash, with neither row nor
+tombstone, are still not recovered: nothing records them until the row exists.

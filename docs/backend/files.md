@@ -147,6 +147,22 @@ rejected upload removes its part. Client file names never enter a path: they are
 stripped of control characters and quotes, and bounded to 255 bytes. Downloads verify the stored size against the
 record before streaming.
 
+## Deleting a file
+
+`DELETE /_brain/files/<bucket>/<id>` removes the record and, in the same transaction, a database trigger records its
+bytes in `_brain_file_deletions` (migration 0020). The route then removes the bytes and clears that tombstone, so a
+normal delete answers 204 with nothing left behind.
+
+If storage refuses, or the process stops first, the delete still counts: the file answers 404 at once and the tombstone
+stays. Every running `brain backend serve` sweeps due tombstones at boot and then every minute, with waits doubling from
+1 minute to 1 hour, and logs `file-deletion-failed` while removals keep failing. Rows removed by hand through SQL are
+recorded the same way. Run several processes freely: each tombstone is claimed by one. The bytes of a rejected upload
+that storage cannot drop are recorded too.
+
+Deleting a user does not cascade to files: `_brain_files.owner` is `ON DELETE RESTRICT`, so Postgres refuses the
+account while it owns files and neither rows nor bytes are orphaned. Delete the files first. Deleting a linked record
+does not delete its files; remove them through this route when they should go with it.
+
 The upload route's body limit is the largest declared `maxBytes` plus 1 MiB of multipart framing; each bucket enforces
 its own limit. Uploads have a 300-second request deadline and other file requests 30 seconds (downloads stream after
 their headers, so large downloads are not cut by the deadline).

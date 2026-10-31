@@ -9,6 +9,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- Fix: a file whose bytes could not be removed is no longer orphaned; `_brain_file_deletions` keeps the delete and `brain backend serve` retries it until the bytes are gone. Run `brain backend migrate`
 - `brain check` warns B0790 when a route or webhook secret is missing or too short, instead of `brain backend serve` failing later; a route without its secret is still documented
 - Fix: `brain check` and `brain backend schema` report an invalid route contract as B0735 (it was dropped silently)
 - `brain check` reports invalid `brain.json` analytics settings and a route handler or before-hook file that does not exist as B0735, instead of `brain backend serve` failing later
