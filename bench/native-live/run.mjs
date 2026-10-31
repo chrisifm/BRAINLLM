@@ -22,7 +22,7 @@ function fixtureFingerprint() {
     ensure(stat.isFile()&&stat.size<=262144&&hashes.length<64,'FIXTURE_SOURCE_BOUND')
     bytes+=stat.size;ensure(bytes<=1048576,'FIXTURE_SOURCE_BOUND');hashes.push([relative.split(path.sep).join('/'),digest(fs.readFileSync(full))])
   }
-  hashes.sort(([a],[b])=>a.localeCompare(b,'en'));return {sha256:digest(JSON.stringify(hashes)),files:hashes.length,bytes}
+  hashes.sort(([a],[b])=>a<b?-1:a>b?1:0);return {sha256:digest(JSON.stringify(hashes)),files:hashes.length,bytes}
 }
 async function command(args,{deadline=30000,allowFailure=false}={}) {
   ensure(!timedOut||allowFailure,'TOTAL_DEADLINE')
