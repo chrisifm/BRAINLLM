@@ -1,0 +1,17 @@
+<meta seo keyword="shop" title="Shop" description="Every product of the shop with its price and a button to add it to the cart.">
+
+<script>
+  import ProductCard from '../comp/product-card.brain'
+  import catalog from '../lib/catalog.jsbrain'
+  import cart from '../channels/cart.jsbrain'
+
+  let list = catalog.all()
+  const add = (id) => { cart.items = [...cart.items, id] }
+</script>
+
+<h1>Shop</h1>
+{#each list as p (p.id)}
+  <ProductCard name={p.name} price={p.price} on:add={() => add(p.id)}>
+    <p>{p.summary}</p>
+  </ProductCard>
+{/each}

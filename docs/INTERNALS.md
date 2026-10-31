@@ -781,6 +781,13 @@ The MCP server is the AI's main interface: everything the CLI does and more, wit
 | Execution and debug | `brain_run_start` · `brain_run_status` · `brain_run_stop` (the dev server as a managed process) · `brain_logs {since?, level?}` · `brain_errors {since?}` · `brain_inspect {view: memory\|log\|latency\|network\|state\|storage\|connections\|timers}` · `brain_eval {expr, component?}` (dev only, in the live page, without access to HttpOnly cookies) · `brain_navigate {route}` · `brain_click\|type {selector}` (via CDP, to reproduce a bug) |
 | Build and delivery | `brain_build {analyze?}` · `brain_preview_start\|stop` · `brain_pack` (dry-run of the npm package). **There is no `brain_publish`:** publishing is Chris's action. |
 
+**Generated app docs (2026-10-31).** `brain docs` (`src/docs.rs`) builds one JSON model from `map::build`,
+`brain_check::contract::card`, `backend::inspect` (rendered generically: new contract keys appear without code changes)
+and the env key names of `.brain_env.example`, then renders seven sorted Markdown pages with a "generated" banner and
+merges `docs/app/notes/<page>.md`. No timestamps or absolute paths (invariant 8). `cmd_build` rewrites changed pages
+when `docs::enabled`; `run_doctor` adds a `docs` warning advice for stale pages and never fails on it. Golden output:
+`crates/brain-cli/tests/fixtures/docs-app/docs/app` (`BRAIN_UPDATE_GOLDEN=1 cargo test -p brain-cli --test docs`).
+
 **Guides (2026-10-29).** `brain guide [topic] [--json]` and `brain_guide {topic?}` serve task playbooks embedded from
 `crates/brain-cli/guides/*.md` (`src/guide.rs`: start, views, data, forms, server, seo, a11y, webmcp, tests, i18n,
 performance). SPEC says what exists; a guide says what to do, in order, how to verify it and which code catches each

@@ -1,0 +1,8 @@
+<meta seo robots="noindex" title="Orders" description="Orders placed in the shop, visible to signed-in staff only.">
+
+<script>
+  import cart from '../../channels/cart.jsbrain'
+</script>
+
+<h1>Orders</h1>
+<p>{cart.items.length} items in the cart.</p>

@@ -1,0 +1,13 @@
+<meta props="name:str price:num featured:bool=false">
+<meta emits="add">
+
+<script>
+  import Price from '../ui/price.brain'
+</script>
+
+<article class="card" data-featured={featured}>
+  <h2>{name}</h2>
+  <Price value={price} />
+  <slot />
+  <button type="button" on:click={() => emit('add')}>Add to cart</button>
+</article>

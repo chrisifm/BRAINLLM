@@ -1,0 +1,15 @@
+<meta seo title={props.product.name} description={props.product.summary}>
+
+<script>
+  import catalog from '../../lib/catalog.jsbrain'
+
+  export async function paths() {
+    return catalog.all().map((p) => ({ id: p.id }))
+  }
+  export async function load(ctx) {
+    return { product: catalog.find(ctx.params.id) }
+  }
+</script>
+
+<h1>{props.product.name}</h1>
+<p>{props.product.summary}</p>

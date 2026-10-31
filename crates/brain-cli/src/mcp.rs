@@ -369,6 +369,22 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
         }),
     });
     tools.push(Tool {
+        name: "brain_docs",
+        description: "Generated app documentation (docs/app/*.md: routes, components, data, backend, env keys, SEO) built from the source. Writes the pages that changed and returns the documentation model; with check=true writes nothing and lists stale pages. Read docs/app/index.md for an overview; prose goes in docs/app/notes/<page>.md.",
+        input_schema: schema([("app", "string", "app folder; defaults to the current one"), ("check", "boolean", "only report stale pages (no writes)")], &[]),
+        output_schema: out([("out", "string")]),
+        run: Box::new(|a| {
+            let root = app(a)?;
+            let out = crate::docs::DEFAULT_OUT;
+            if a.get("check") == Some(&Json::Bool(true)) {
+                let stale = crate::docs::stale(&root, out);
+                return Ok(serde_json::json!({"schemaVersion": 1, "ok": stale.is_empty(), "out": out, "stale": stale}).to_string());
+            }
+            let (model, updated) = crate::docs::write(&root, out)?;
+            Ok(serde_json::json!({"schemaVersion": 1, "out": out, "updated": updated, "model": model}).to_string())
+        }),
+    });
+    tools.push(Tool {
         name: "brain_new",
         description: "Creates a new BRAINLLM app (app.brain, tokens.cssbrain, views/, comp/, ui/, AGENTS.md). With `dir`, the app is created EXACTLY in that folder (use \".\" for the current one; it must be empty apart from dot files) and `name` only names it. Without `dir`, it creates the folder `<name>` inside the current one.",
         input_schema: schema(

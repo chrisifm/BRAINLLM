@@ -53,6 +53,18 @@ brain fix && brain check --json   # → []
 brain doctor                      # exit 0
 ```
 
+## App documentation
+`brain docs` writes `docs/app/` from the source: `index.md` (summary and links), `routes.md`, `components.md` (props,
+events, slots, stores, a usage example), `data.md`, `backend.md`, `env.md` (key names only) and `seo.md`. Output is
+deterministic, so diffs show real changes. Never edit those pages: write prose in `docs/app/notes/<page>.md` and it is
+merged under "Notes". New apps set `"docs": true` in `brain.json`, so `brain build` refreshes the pages; `brain docs
+--check` exits 1 when committed pages are stale and `brain doctor` warns. Over MCP: `brain_docs {check?}`.
+```bash
+brain docs                 # docs/app: 7 pages, N updated
+brain docs --check         # exit 1 lists stale pages
+brain docs --json          # the documentation model for an agent
+```
+
 ## Other guides
 `views` routing, layouts, guards · `data` load, server functions, resources, channels, caching · `forms` ·
 `server` sessions, errors, env, deploy · `seo` search and AI answers · `a11y` · `webmcp` agent tools · `tests` ·

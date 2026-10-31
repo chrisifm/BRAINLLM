@@ -17,6 +17,7 @@ mod cdp;
 mod compiler;
 mod env;
 mod guide;
+mod docs;
 mod icons;
 pub(crate) mod map;
 mod mcp;
@@ -97,6 +98,7 @@ granular:
   brain schema                       JSON Schema of brain.json
   brain i18n --missing [--json]      per language: keys missing (exit 1) and texts still in the default language
   brain theme <preset> | --list      writes tokens.cssbrain from a preset (glass, dark, paper, contrast)
+  brain docs [--check] [--out dir]   app docs generated from source (docs/app/*.md; kept fresh by brain build)
   brain card <comp>                  a component's contract (props, emits, slots, reads/writes, size, status)
   brain split <comp> <sel> <Name>    extract that subtree into a new component (refused if check fails)
   brain feedback query|watch         bounded compiler events for agents (watch: NDJSON)
@@ -280,6 +282,7 @@ fn main() -> ExitCode {
         // `dev` is a hidden alias of `run`: it is the name a model guesses from Vite/Next.
         Some("run") | Some("dev") => cmd_dev(&args[1..]),
         Some("doctor") => return cmd_doctor(&args[1..]),
+        Some("docs") => return docs::cmd(&args[1..]),
         Some("fix") => return cmd_fix(&args[1..]),
         Some("explain") => cmd_explain(&args[1..]),
         Some("edit") => cmd_edit(&args[1..]),
@@ -1364,6 +1367,13 @@ fn cmd_build(args: &[String]) -> Result<(), String> {
         Err(error) => { identity.finish("Build stopped. Resolve the diagnostic and try again."); return Err(error); }
     };
     identity.finish("Build complete. Your intent, compiled.");
+    if docs::enabled(&root) {
+        match docs::write(&root, docs::DEFAULT_OUT) {
+            Ok((_, updated)) if !updated.is_empty() => eprintln!("docs: updated {}", updated.join(", ")),
+            Ok(_) => {}
+            Err(e) => eprintln!("warning: brain docs: {e}"),
+        }
+    }
     if want_json(args) {
         println!("{}", build_json(&rep).stringify());
         return Ok(());
@@ -1794,6 +1804,13 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
                     ("fix", Json::str("set \"minScore\": 80 (or remove it) and fix the findings `brain seo audit` lists")),
                 ]));
             }
+        }
+    }
+    // generated app docs (docs/app) that no longer match the source: a warning, never a failure
+    if let Some(root) = app.as_deref().filter(|r| r.join(docs::DEFAULT_OUT).join("index.md").is_file()) {
+        let stale = docs::stale(root, docs::DEFAULT_OUT);
+        if !stale.is_empty() {
+            advice.push(Json::obj([("code", Json::str("docs")), ("level", Json::str("warning")), ("file", Json::str(docs::DEFAULT_OUT)), ("msg", Json::str(format!("generated docs are stale: {}", stale.join(", ")))), ("fix", Json::str("run `brain docs` (or `brain build`) and commit docs/app"))]));
         }
     }
     let ok = errors.is_empty() && test_ok && build_ok && seo_ok && env_ok && bar_ok;
