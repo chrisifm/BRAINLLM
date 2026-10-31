@@ -39,6 +39,27 @@ an explicit pending input; this ledger must not be presented as a completed revi
 - [ ] Preview migrations with reviewed revisions/checksums, incompatible-row diagnostics and bounded backfills.
   Require an explicit apply step and a tested recovery plan. Startup must not silently alter a production schema.
 
+### Behavioral compatibility beyond schema names
+
+- [ ] Support bounded typed arrays where an existing contract requires them. A generic object field does not
+  validate an array's element type, length, normalization or duplicate policy.
+- [ ] Preserve partial-update semantics explicitly. Sending omitted fields to a full-replacement endpoint may
+  erase data; a migration facade must distinguish omission, null, empty and unchanged values.
+- [ ] Preserve authorized state transitions and side effects, not only enum membership. Transition preconditions,
+  expiration and related timestamp changes must remain consistent under concurrent requests.
+- [ ] Provide transactional multi-resource business commands where atomicity is required. Cross-row invariants,
+  conditional state changes, uniqueness and an outbox must commit together; asynchronous after-hooks cannot
+  substitute for those database transactions.
+- [ ] Preserve public API paths, stable slugs, pagination totals, projections, statuses and localized error
+  envelopes through a tested compatibility boundary. Generic resource response shapes do not prove parity.
+- [ ] Plan authentication cutover explicitly: existing password algorithms, active opaque/JWT sessions, cookies,
+  account linking and application-space selection. A new hash algorithm does not make old stored hashes compatible.
+  Never silently invalidate every account or import old secrets as if they already used the native scheme.
+- [ ] Compare search language, related-field vocabulary, synonyms, facets and eligibility/expiration filters.
+  Existing trigram support alone does not establish matching results.
+- [ ] Treat historical application findings as regression requirements. Reproduce them on the current framework
+  before labeling them current defects, and preserve behavior that was already fixed.
+
 ### Documents and media
 
 - [ ] Add a separate private document capability without weakening image decoding/re-encoding rules.

@@ -209,6 +209,9 @@ Rust 1.99.1 release gate and do not establish cross-platform execution or whole-
   but that file/docs directory was absent during inspection; exact remaining input requested from the user.
 - [ ] Complete exact money/date/enum types, relational company/vacancy/application scope and lossless legacy bigint
   compatibility with explicit migration plans; existing role/owner permissions are not organization membership.
+- [ ] Preserve typed arrays, partial-update behavior, authorized state transitions and atomic multi-resource
+  commands. Also freeze existing API/projection/localization/auth-session/search behavior before any cutover;
+  existing object fields, role labels or asynchronous hooks do not imply that compatibility.
 - [ ] Implement private PDF/general-document capability with matching limits across every gateway. Existing image
   multipart accepts 5 MiB, not the generic 64 KiB limit, but does not accept PDF.
 - [ ] Add genuine Stripe/PayPal signature adapters and provider-specific raw-body/header ingress, durable receipt
