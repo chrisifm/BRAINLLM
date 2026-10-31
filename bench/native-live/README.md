@@ -20,7 +20,9 @@ node bench/native-live/run.mjs \
 The owned compiler/browser image defaults to
 `brainllm-next-verify:rust-1.99.1-owned`. The caller provisions that image and the
 official `postgres:18` image before running the gate. The runner records their
-actual image identities, binary digest, PostgreSQL version and browser version.
+actual image identities, binary digest, PostgreSQL version and browser version. The binary digest uses a bounded
+stream rather than retaining an entire debug executable. `--browser` selects an explicit absolute executable
+inside the owned container; the default remains `/usr/bin/chromium`.
 The image's Rust version does not establish which compiler built a supplied binary.
 The source pin comes from the caller's verified artifact provenance. The report separately fingerprints the
 fixture tree and each gate script, so an updated test does not masquerade as the supplied binary source.

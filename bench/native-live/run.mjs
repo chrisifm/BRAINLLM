@@ -6,14 +6,24 @@ import crypto from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 const args=process.argv.slice(2), option=(name,fallback)=>{const at=args.indexOf(name);return at<0?fallback:args[at+1]}
-const binary=option('--binary'), sourceSHA=option('--source-sha'), image=option('--image','brainllm-next-verify:rust-1.99.1-owned')
-if(!binary||!sourceSHA||!(/^[0-9a-f]{7,40}$/.test(sourceSHA))){console.error('Usage: node bench/native-live/run.mjs --binary <owned Linux brain> --source-sha <actual binary source commit> [--scratch <private directory>] [--image <owned image>]');process.exit(2)}
+const binary=option('--binary'), sourceSHA=option('--source-sha'), image=option('--image','brainllm-next-verify:rust-1.99.1-owned'), browser=option('--browser','/usr/bin/chromium')
+if(!binary||!sourceSHA||!(/^[0-9a-f]{7,40}$/.test(sourceSHA))){console.error('Usage: node bench/native-live/run.mjs --binary <owned Linux brain> --source-sha <actual binary source commit> [--scratch <private directory>] [--image <owned image>] [--browser <owned container executable>]');process.exit(2)}
 const scratch=fs.mkdtempSync(path.join(option('--scratch',os.tmpdir()),'brain-live-fullchain-'));fs.chmodSync(scratch,0o700)
 const id=crypto.randomBytes(6).toString('hex'), network='brain-live-'+id, pg='brain-live-pg-'+id, worker='brain-live-browser-'+id
 const output=option('--out',path.join(scratch,'report.json')), source=path.dirname(fileURLToPath(import.meta.url))
 let active, timedOut=false
 const ensure=(value,code)=>{if(!value)throw Error(code)}
 const digest=bytes=>crypto.createHash('sha256').update(bytes).digest('hex')
+function binaryFingerprint() {
+  const fd=fs.openSync(binary,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0))
+  try {
+    const stat=fs.fstatSync(fd);ensure(stat.isFile()&&stat.size>=4&&stat.size<=1073741824,'OWNED_BOUNDED_LINUX_BINARY_REQUIRED')
+    const header=Buffer.alloc(4);ensure(fs.readSync(fd,header,0,4,0)===4&&header.equals(Buffer.from([127,69,76,70])),'LINUX_ELF_BINARY_REQUIRED')
+    const hash=crypto.createHash('sha256'),buffer=Buffer.allocUnsafe(1048576);let offset=0
+    while(offset<stat.size){const length=fs.readSync(fd,buffer,0,Math.min(buffer.length,stat.size-offset),offset);ensure(length>0,'BINARY_CHANGED_DURING_READ');hash.update(buffer.subarray(0,length));offset+=length}
+    ensure(fs.fstatSync(fd).size===stat.size,'BINARY_CHANGED_DURING_READ');return hash.digest('hex')
+  }finally{fs.closeSync(fd)}
+}
 function fixtureFingerprint() {
   const hashes=[],pending=['fixture'];let bytes=0
   while(pending.length){const relative=pending.pop(),full=path.join(source,relative),stat=fs.lstatSync(full)
@@ -42,7 +52,8 @@ process.on('SIGINT',cancel);process.on('SIGTERM',cancel)
 const total=setTimeout(()=>{timedOut=true;active?.terminateOwned()},240000)
 let report={schemaVersion:1,ok:false,sourceSHA,viewer:{used:false,reason:'multiple-connected-profiles-without-explicit-selection'},valuesCaptured:false}
 try{
-  ensure(fs.lstatSync(binary).isFile(),'OWNED_REGULAR_LINUX_BINARY_REQUIRED');const bytes=fs.readFileSync(binary);ensure(bytes.subarray(0,4).equals(Buffer.from([127,69,76,70])),'LINUX_ELF_BINARY_REQUIRED');report.binarySHA256=crypto.createHash('sha256').update(bytes).digest('hex')
+  ensure(fs.lstatSync(binary).isFile(),'OWNED_REGULAR_LINUX_BINARY_REQUIRED');report.binarySHA256=binaryFingerprint()
+  ensure(browser.startsWith('/')&&browser.length<=1024&&!/[\x00-\x1f\x7f]/.test(browser),'OWNED_BROWSER_PATH_REQUIRED')
   const expected=option('--expect-sha');if(expected)ensure(report.binarySHA256===expected,'BINARY_DIGEST_MISMATCH')
   report.fixture=fixtureFingerprint();report.gateScripts=Object.fromEntries(['run.mjs','inside.mjs','frame-metadata.mjs'].map(name=>[name,digest(fs.readFileSync(path.join(source,name)))]))
   report.image=(await command(['image','inspect',image,'--format','{{.Id}}'])).out.trim()
@@ -57,7 +68,7 @@ try{
   let ready=false
   for(let attempt=0;attempt<40;attempt++){const value=await command(['exec',pg,'pg_isready','-h','127.0.0.1','-U','brain','-d',database],{allowFailure:true});if(value.status===0){ready=true;break}await new Promise(resolve=>setTimeout(resolve,150))}ensure(ready,'OWNED_POSTGRES_READY_DEADLINE')
   report.postgresVersion=(await command(['exec',pg,'postgres','--version'])).out.trim()
-  const result=await command(['run','--rm','--name',worker,'--label',`brainllm.native-live=${id}`,'--network',network,'--user','1000:1000','--cpus','2','--memory','3g','--pids-limit','256','--read-only','--tmpfs','/tmp:rw,exec,nosuid,size=1g,mode=1777','--log-opt','compress=false','--log-opt','max-size=128k','--log-opt','max-file=1','--env-file',appEnv,'--mount',`type=bind,src=${path.resolve(binary)},dst=/binary/brain,readonly`,'--mount',`type=bind,src=${source}/fixture,dst=/fixture,readonly`,'--mount',`type=bind,src=${source}/inside.mjs,dst=/inside.mjs,readonly`,'--mount',`type=bind,src=${source}/frame-metadata.mjs,dst=/frame-metadata.mjs,readonly`,'--entrypoint','node',image,'/inside.mjs'],{deadline:195000,allowFailure:true})
+  const result=await command(['run','--rm','--name',worker,'--label',`brainllm.native-live=${id}`,'--network',network,'--user','1000:1000','--cpus','2','--memory','3g','--pids-limit','256','--read-only','--tmpfs','/tmp:rw,exec,nosuid,size=1g,mode=1777','--log-opt','compress=false','--log-opt','max-size=128k','--log-opt','max-file=1','--env-file',appEnv,'--env',`BRAIN_CHROME=${browser}`,'--mount',`type=bind,src=${path.resolve(binary)},dst=/binary/brain,readonly`,'--mount',`type=bind,src=${source}/fixture,dst=/fixture,readonly`,'--mount',`type=bind,src=${source}/inside.mjs,dst=/inside.mjs,readonly`,'--mount',`type=bind,src=${source}/frame-metadata.mjs,dst=/frame-metadata.mjs,readonly`,'--entrypoint','node',image,'/inside.mjs'],{deadline:195000,allowFailure:true})
   report.workerExit=result.status;report.workerErrorKinds=[...new Set(result.err.match(/\b(?:EACCES|ENOENT|MODULE_NOT_FOUND|ERR_[A-Z_]+|SyntaxError|TypeError|ReferenceError|RangeError)\b/g)||[])];report.workerSourceLines=[...result.err.matchAll(/file:\/\/[^\n:]+:(\d+):(\d+)/g)].map(match=>({line:Number(match[1]),column:Number(match[2])})).slice(0,8)
   const records=(result.out+'\n'+result.err).split('\n').filter(line=>line.startsWith('{')).map(line=>{try{return JSON.parse(line)}catch{return null}}).filter(Boolean)
   const final=records.find(value=>value.schemaVersion===1),cleanup=records.find(value=>value.kind==='cleanup')
