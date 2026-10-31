@@ -742,10 +742,12 @@ async fn docs(State(app): State<App>, h: HeaderMap) -> Result<Json<Value>> {
     if app.production {
         app.admin(&h).await?;
     }
-    Ok(Json(contract::openapi_with_roles(
+    let mut doc = contract::openapi_with_roles(
         &app.resources.values().cloned().collect::<Vec<_>>(),
         app.auth_flows.roles(),
-    )))
+    );
+    crate::openapi::extend(&mut doc, &app.routes.declared(), &app.platform.buckets());
+    Ok(Json(doc))
 }
 async fn signup(State(app): State<App>, Json(c): Json<Credentials>) -> Result<Json<Value>> {
     app.auth

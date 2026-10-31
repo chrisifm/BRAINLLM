@@ -26,6 +26,9 @@ pub(super) struct State {
 }
 
 impl State {
+    pub(super) fn declared(&self) -> Vec<Route> {
+        self.routes.iter().map(|r| Route::clone(r)).collect()
+    }
     pub(super) fn new(routes: &[Route], handlers: Option<Handlers>, roles: &[String]) -> std::result::Result<Self, String> {
         if routes.len() > crate::routes::MAX_ROUTES {
             return Err(format!("Declare at most {} routes", crate::routes::MAX_ROUTES));

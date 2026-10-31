@@ -72,3 +72,11 @@ OVERLOADED`.
 
 Handlers run in private Node sidecars (four per server) with the selected environment's variables, so
 they can use `fetch` and any server module of the app.
+
+## OpenAPI
+
+`GET /_brain/docs` (admin-only in production) and `brain backend inspect` include every route as an
+operation `route_<name>` with its path, query and header parameters, request body, error responses and an
+`x-brain-route` extension (limits, rate, signature header). File buckets appear as
+`files_<bucket>_upload`, `_download`, `_delete` and `_meta` with an `x-brain-bucket` extension. Signing
+secrets never appear in the document.

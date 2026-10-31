@@ -212,8 +212,13 @@ pub fn inspect(root: &Path) -> Result<Value, String> {
     contract::validate_graph(&resources, &jobs)?;
     let roles = auth_roles(root)?;
     validate_roles(&roles, &resources)?;
+    let mut openapi = contract::openapi_with_roles(&resources, &roles);
+    // Routes need their signing secrets to load; inspection without them documents buckets only.
+    let routes = crate::route_executor::contracts(root, "development").unwrap_or_default();
+    let buckets = crate::platform_config::load(root, &resources, &roles).map(|p| p.buckets).unwrap_or_default();
+    brain_backend::openapi::extend(&mut openapi, &routes, &buckets);
     Ok(
-        json!({"schemaVersion":1,"experimental":true,"resources":resources,"jobs":jobs,"roles":roles,"webhooks":crate::webhook_config::metadata(root)?,"platform":crate::platform_config::metadata(root,&resources,&roles)?,"openapi":contract::openapi_with_roles(&resources,&roles),"limits":{"activeJobs":10000,"workers":8,"jobSeconds":60,"leaseSeconds":90},"delivery":"at-least-once; handlers must be idempotent"}),
+        json!({"schemaVersion":1,"experimental":true,"resources":resources,"jobs":jobs,"roles":roles,"webhooks":crate::webhook_config::metadata(root)?,"platform":crate::platform_config::metadata(root,&resources,&roles)?,"openapi":openapi,"limits":{"activeJobs":10000,"workers":8,"jobSeconds":60,"leaseSeconds":90},"delivery":"at-least-once; handlers must be idempotent"}),
     )
 }
 fn database(root: &Path, environment: &str) -> Result<String, String> {

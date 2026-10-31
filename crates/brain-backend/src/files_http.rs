@@ -28,6 +28,9 @@ pub struct State {
     max_upload: u64,
 }
 impl State {
+    pub fn buckets(&self) -> Vec<Bucket> {
+        self.buckets.values().cloned().collect()
+    }
     pub fn new(
         platform: &crate::platform::Platform,
         resources: &[crate::Resource],

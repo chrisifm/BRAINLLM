@@ -34,6 +34,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `httpCall(url, options)` is auto-imported in server code for outbound API calls: per-attempt timeout, jittered
   retries only for idempotent requests or those with an `Idempotency-Key`, `Retry-After`, a response size cap,
   refusal of private targets and errors that never include query strings or header values.
+- The backend OpenAPI document (`/_brain/docs`, `brain backend inspect`) now covers app-declared routes and file
+  bucket upload, download, delete and metadata operations, with a shared error schema.
 
 ### Changed
 
