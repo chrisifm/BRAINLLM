@@ -82,5 +82,17 @@
     "rule": "credential-url",
     "sha256": "fbddae166ead16d1dd67736b19403ab1ac0095e344f663573848af911a7ce273",
     "reason": "Reviewed outbound webhook rejection fixture: synthetic user:pass credentials at a reserved .test host are refused before transport."
+  },
+  {
+    "path": "crates/brain-cli/src/socket_settings.rs",
+    "rule": "credential-url",
+    "sha256": "936541b0dd1bc76dd5ef70ee989987de6436f759cd23b9abbd9bbe17d140c0ba",
+    "reason": "Reviewed rejection-only fixture uses synthetic credentials at the reserved app.example.test host. Configuration must reject the URL without transport or echoing its credentials."
+  },
+  {
+    "path": "crates/brain-pack/src/socket_options.rs",
+    "rule": "credential-url",
+    "sha256": "ec25b8fa54a9d7a878a86e6f38233af24d5d27d184b396136d6d7f0251d33c19",
+    "reason": "Reviewed rejection-only fixture uses synthetic credentials at the reserved app.example.test host. Configuration must reject the URL without transport or echoing its credentials."
   }
 ]
