@@ -678,8 +678,15 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
             s.write_all(ws::handshake_response(key).as_bytes())?;
             s.set_read_timeout(None)?; // WebSockets are intentionally long-lived, unlike request headers.
             s.set_write_timeout(Some(Duration::from_millis(100)))?;
+            let peer = s.peer_addr()?;
             ctx.clients.lock().unwrap().push(s.try_clone()?);
-            return ws::drain_client(&mut s, &mut |t| ctx.client_message(t));
+            let drained = ws::drain_client(&mut s, &mut |t| ctx.client_message(t));
+            // Unregister on close or error: otherwise the clone (and its descriptor) lives until the next broadcast.
+            ctx.clients
+                .lock()
+                .unwrap()
+                .retain(|c| c.peer_addr().is_ok_and(|a| a != peer));
+            return drained;
         }
         "/@brain/client.js" => {
             return http::respond(&mut s, 200, http::mime("x.js"), CLIENT_JS.as_bytes(), head);
@@ -2787,6 +2794,27 @@ mod admission_tests {
         let response=request("/_brain/auth/me","X-Forwarded-For: untrusted\r\n");assert!(response.starts_with("HTTP/1.1 200"));assert!(response.ends_with("{\"user\":null}"));assert!(response.to_ascii_lowercase().contains("x-request-id:"));authority.join().unwrap();
         let runtime=request("/@brain/brain.js","");assert!(runtime.starts_with("HTTP/1.1 200"));assert!(runtime.contains("localRuntime"));
         let rejected=request("/api/items","Content-Length: 65537\r\n");assert!(rejected.starts_with("HTTP/1.1 413"));
+        dev.stop();drop(dev);std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn closed_hmr_sockets_leave_the_client_registry_without_a_broadcast() {
+        let root=std::env::temp_dir().join(format!("brain-hmr-registry-{}-{}",std::process::id(),now_ms()));std::fs::create_dir_all(&root).unwrap();
+        let compiler:CompileFn=Arc::new(|_,_|panic!("HMR sockets never compile application source"));
+        let opts=Options{root:root.clone(),host:"127.0.0.1".into(),port:0,head_prepend:String::new(),runtime:Vec::new(),env:None,base:"/".into(),diagnose:None,problems:None,upstream:None,mock:None};
+        let mut dev=start_dev(opts,compiler,false,None).unwrap();
+        for _ in 0..8 {
+            let mut socket=TcpStream::connect(dev.addr).unwrap();socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            socket.write_all(b"GET /@brain/hmr HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n").unwrap(); // gitleaks:allow -- RFC WebSocket example nonce, not a credential
+            let mut head=[0u8;12];socket.read_exact(&mut head).unwrap();assert_eq!(&head,b"HTTP/1.1 101");
+            // Masked client close frame with an empty payload; the server answers and ends the drain loop.
+            socket.write_all(&[0x88,0x80,0,0,0,0]).unwrap();
+            let mut rest=Vec::new();let _=socket.read_to_end(&mut rest);
+        }
+        let deadline=Instant::now()+Duration::from_secs(3);
+        while !dev.ctx.clients.lock().unwrap().is_empty() && Instant::now()<deadline {std::thread::sleep(Duration::from_millis(10));}
+        let registered=dev.ctx.clients.lock().unwrap().len();
+        assert_eq!(registered,0,"closed HMR connections must not keep their socket in the broadcast registry");
         dev.stop();drop(dev);std::fs::remove_dir_all(root).unwrap();
     }
 
