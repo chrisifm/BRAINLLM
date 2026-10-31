@@ -40,6 +40,8 @@ DATABASE_URL='postgres://shop@db.shop.example:5432/shop?sslmode=verify-full&sslr
 Loopback addresses (`127.0.0.0/8`, `::1`, `localhost`) and unix sockets (`?host=/var/run/postgresql`) are allowed
 without TLS. Development keeps accepting any mode. The check applies to every CLI command that opens the database.
 
+**Restart.** `brain backend serve` waits up to 10 s for its port while a previous instance exits, then stops and names the live holder. Two live servers never share a port.
+
 **Boot retry.** `brain backend serve` and `brain jobs work` start even if Postgres is still coming up. A refused
 connection, a server that is starting (`57P03`) or full connection slots (`53300`) are retried with full-jitter
 backoff: a random delay up to 250 ms, doubling per attempt up to 5 s, for at most 60 s. Each retry logs
