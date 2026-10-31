@@ -72,7 +72,7 @@ async fn originals_versions_library_metadata_owner_isolation_and_durable_cleanup
         .unwrap();
     let http = brain_backend::http::router(
         pool.clone(),
-        brain_backend::Config {
+        brain_backend::Config { api_keys: None,
             roles: Default::default(),
             mail: None,
             auth_public_base_url: None,

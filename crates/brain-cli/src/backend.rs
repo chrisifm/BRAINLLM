@@ -237,11 +237,14 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let root = crate::app_root()?;
     let environment = crate::env::name(args, "development");
     let operation = args.first().map(String::as_str).unwrap_or("schema");
+    if operation == "keys" {
+        return crate::api_key_config::run(&root, &args[1..], database(&root, &environment)?);
+    }
     if !matches!(
         operation,
         "schema" | "migrate" | "serve" | "bootstrap-admin"
     ) {
-        return Err("usage: brain backend schema|migrate|serve|bootstrap-admin --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182]".into());
+        return Err("usage: brain backend schema|migrate|serve|bootstrap-admin|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182]".into());
     }
     let snapshot = inspect(&root)?;
     if operation == "schema" {
@@ -285,7 +288,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         };
         let public_base=setting("PUBLIC_SITE_URL").unwrap_or_else(||origin.clone());
         let mail=setting("BRAIN_MAIL_RESEND_KEY").map(|key|brain_backend::auth_flows::MailConfig::resend(key,setting("BRAIN_MAIL_FROM").ok_or("BRAIN_MAIL_FROM must name a verified sender email")?,public_base.clone())).transpose()?;
-        let config=brain_backend::Config{sockets:sockets.native_config()?,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,resources,jobs,uploads:root.join(".brain/uploads"),origins:sockets.http_origins,production:environment=="production"};
+        let config=brain_backend::Config{api_keys:crate::api_key_config::load(&root)?,sockets:sockets.native_config()?,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,resources,jobs,uploads:root.join(".brain/uploads"),origins:sockets.http_origins,production:environment=="production"};
         eprintln!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
         brain_backend::serve(listener,pool,config).await
     })

@@ -162,7 +162,7 @@ async fn postgres_auth_policy_crud_transactional_hooks_and_leased_jobs() {
     };
     let http = brain_backend::http::router(
         pool.clone(),
-        brain_backend::Config {
+        brain_backend::Config { api_keys: None,
             roles: Default::default(),
             mail: None,
             auth_public_base_url: None,

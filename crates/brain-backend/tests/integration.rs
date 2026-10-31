@@ -1,4 +1,6 @@
 //! One integration executable preserves each isolated fixture and avoids repeated platform loader startup.
+#[path = "api_keys.rs"]
+mod api_keys;
 #[path = "auth_flows.rs"]
 mod auth_flows;
 #[path = "auth_http.rs"]

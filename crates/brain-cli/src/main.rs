@@ -24,6 +24,7 @@ mod mcp_setup;
 mod agent;
 mod backend;
 mod resource_admin;
+mod api_key_config;
 mod webhook_config;
 mod hooks_executor;
 mod backend_diff;

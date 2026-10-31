@@ -25,6 +25,8 @@ use uuid::Uuid;
 #[path = "sockets.rs"]
 mod sockets;
 pub use sockets::{SocketConfig, SocketControl};
+#[path = "http_api_keys.rs"]
+mod http_api_keys;
 
 tokio::task_local! { static REQUEST_ID: String; }
 pub(crate) fn request_reference() -> Option<String> {
@@ -48,6 +50,8 @@ pub struct Config {
     pub before_hooks: Option<crate::before_hooks::Executor>,
     /// None omits the Upgrade route; enabling requires an explicit subset of HTTP origins.
     pub sockets: Option<SocketConfig>,
+    /// None disables project API keys (any presented key is rejected with API_KEYS_DISABLED).
+    pub api_keys: Option<crate::api_keys::Config>,
 }
 #[derive(Clone)]
 pub struct App {
@@ -66,6 +70,7 @@ pub struct App {
     media: crate::media::Store,
     production: bool,
     origins: Arc<Vec<String>>,
+    api_keys: Option<crate::api_keys::Keys>,
 }
 #[derive(Debug)]
 pub struct Error {
@@ -169,6 +174,9 @@ impl IntoResponse for Error {
 type Result<T> = std::result::Result<T, Error>;
 impl App {
     async fn user(&self, h: &HeaderMap) -> Result<Option<User>> {
+        if let Some(user) = http_api_keys::key_user() {
+            return Ok(Some(user));
+        }
         if h.contains_key(header::AUTHORIZATION)
             || crate::jwt::cookie(h, crate::jwt::ACCESS_COOKIE).is_some()
         {
@@ -342,6 +350,10 @@ pub async fn router_with_socket_control(
         })
         .transpose()?;
     let sockets = Arc::new(sockets::Broker::new(socket_origins));
+    let api_keys = config
+        .api_keys
+        .map(|cfg| crate::api_keys::Keys::new(pool.clone(), cfg))
+        .transpose()?;
     let app = App {
         sockets: sockets.clone(),
         webhooks,
@@ -358,6 +370,7 @@ pub async fn router_with_socket_control(
         uploads: config.uploads,
         production: config.production,
         origins: Arc::new(config.origins),
+        api_keys,
     };
     let cors = CorsLayer::new()
         .allow_origin(origins)
@@ -444,8 +457,10 @@ pub async fn router_with_socket_control(
         )
         .route("/_brain/media/{id}/variants", post(media_variants))
         .route("/_brain/media/{id}/v/{version}/{preset}", get(media_asset))
+        .merge(http_api_keys::routes())
         .fallback(|| async { Error::missing() })
         .layer(DefaultBodyLimit::max(65536))
+        .layer(middleware::from_fn_with_state(app.clone(), http_api_keys::gate))
         .layer(middleware::from_fn_with_state(app.clone(), protect))
         .layer(GovernorLayer::new(governor))
         .layer(middleware::from_fn(move |req: Request, next: Next| {
@@ -608,7 +623,9 @@ async fn protect(State(app): State<App>, req: Request, next: Next) -> Response {
             .path()
             .strip_prefix("/_brain/webhooks/in/")
             .is_some_and(|name| name.len() <= 48 && crate::contract::identifier(name));
-    if !signed_inbound && !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS) {
+    // A presented API key on /api is a non-ambient credential; the key gate verifies or rejects it.
+    let keyed = http_api_keys::keyed_resource_request(&req);
+    if !signed_inbound && !keyed && !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS) {
         let origin = req
             .headers()
             .get(header::ORIGIN)
@@ -636,10 +653,14 @@ async fn docs(State(app): State<App>, h: HeaderMap) -> Result<Json<Value>> {
     if app.production {
         app.admin(&h).await?;
     }
-    Ok(Json(contract::openapi_with_roles(
+    let mut doc = contract::openapi_with_roles(
         &app.resources.values().cloned().collect::<Vec<_>>(),
         app.auth_flows.roles(),
-    )))
+    );
+    if app.api_keys.is_some() {
+        crate::api_keys::document(&mut doc);
+    }
+    Ok(Json(doc))
 }
 async fn signup(State(app): State<App>, Json(c): Json<Credentials>) -> Result<Json<Value>> {
     app.auth

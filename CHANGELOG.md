@@ -11,6 +11,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Added
 
+- Native project API keys (opt-in `server/api-keys.jsbrain`): `bk_live_<prefix>_<secret>` keys hashed with SHA-256,
+  accepted as `X-API-Key` or `Authorization: Bearer` on `/api` resource routes only, `resource:read|write` scopes that
+  never exceed the owner's role, per-key daily/monthly quotas in Postgres with `X-Quota-*` headers, a per-key burst
+  limit, an append-only request trace with retention, session endpoints under `/_brain/keys`, OpenAPI security
+  schemes and `brain backend keys create|list|rotate|revoke|events|summary`. See `docs/backend/api-keys.md`.
 - Backend contracts accept exact `int`, `decimal(p,s)`, `date`, `datetime`, `enum(a|b)` and `list<str[,N]>` fields,
   object field options `{type, default, unique}` and declarative checks in `constraints.jsbrain`. Decimals travel and
   are stored as canonical strings with a lossless database CHECK; unique and check violations answer 409/422. Records

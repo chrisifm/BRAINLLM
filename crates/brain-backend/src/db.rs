@@ -23,6 +23,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "search_empty_fields",
         include_str!("../migrations/0007_search_empty_fields.sql"),
     ),
+    ("api_keys", include_str!("../migrations/0008_api_keys.sql")),
 ];
 fn checksum(sql: &str) -> String {
     Sha256::digest(sql.as_bytes())
