@@ -292,7 +292,7 @@ struct Disposition {
     inline: bool,
 }
 /// RFC 6266 / 8187 disposition with an ASCII fallback; the stored name is already sanitized.
-fn disposition(kind: &str, filename: &str) -> HeaderValue {
+pub(super) fn disposition(kind: &str, filename: &str) -> HeaderValue {
     let ascii: String = filename
         .chars()
         .map(|c| if c.is_ascii_graphic() && !matches!(c, '"' | '\\' | ';' | '%') || c == ' ' { c } else { '_' })

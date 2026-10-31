@@ -291,7 +291,52 @@ fn invalid_status(route: &str, rid: &impl serde::Serialize) -> Error {
 /// `{status, body, headers}` from the handler; any other value is a `200` JSON body. The handler's status is sent as
 /// written, 5xx included, because a webhook provider reads the status to decide whether to redeliver. `None`: the
 /// envelope names a status no response can have. A lone `{status: 'open'}` is ordinary data, not an envelope.
+/// `{ file: { base64, type, name } }`, optionally with `status` and `headers`: an attachment built by the handler.
+/// It gets the same download headers as a stored file, so handler output never renders in the site's origin.
+fn file_response(file: &Value) -> Option<Response> {
+    let spec = file.as_object().filter(|m| m.keys().all(|k| matches!(k.as_str(), "base64" | "type" | "name")))?;
+    let bytes = crate::routes::base64(spec.get("base64")?.as_str()?)?;
+    let name = spec.get("name")?.as_str().filter(|n| !n.is_empty() && n.len() <= 255)?;
+    let kind = spec.get("type").and_then(Value::as_str).unwrap_or("application/octet-stream");
+    let (top, sub) = kind.split_once('/')?;
+    let token = |t: &str| !t.is_empty() && t.len() <= 64 && t.bytes().all(|b| b.is_ascii_alphanumeric() || b"!#$&^_.+-".contains(&b));
+    if !token(top) || !token(sub) {
+        return None;
+    }
+    let mut response = bytes.into_response();
+    response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_str(kind).ok()?);
+    response.headers_mut().insert(header::CONTENT_DISPOSITION, super::files_http::disposition("attachment", name));
+    response.headers_mut().insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    response.headers_mut().insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("default-src 'none'; sandbox"));
+    Some(response)
+}
+
+fn apply_headers(response: &mut Response, headers: Option<&Value>) {
+    if let Some(headers) = headers.and_then(Value::as_object) {
+        for (name, value) in headers.iter().take(16) {
+            let lower = name.to_ascii_lowercase();
+            if !(RESPONSE_HEADERS.contains(&lower.as_str()) || lower.starts_with("x-")) || lower == "x-request-id" {
+                continue;
+            }
+            if let (Ok(name), Some(Ok(value))) = (HeaderName::from_bytes(lower.as_bytes()), value.as_str().filter(|v| v.len() <= 1024).map(HeaderValue::from_str)) {
+                response.headers_mut().insert(name, value);
+            }
+        }
+    }
+}
+
 fn respond(value: Value) -> Option<Response> {
+    let wants_file = value.as_object().is_some_and(|m| {
+        m.keys().all(|k| matches!(k.as_str(), "status" | "headers" | "file")) && m.get("file").is_some_and(|f| f.get("base64").is_some())
+    });
+    if wants_file {
+        let mut response = file_response(&value["file"])?;
+        if let Some(status) = value.get("status") {
+            *response.status_mut() = status.as_u64().and_then(|s| u16::try_from(s).ok()).and_then(|s| StatusCode::from_u16(s).ok()).filter(StatusCode::is_success)?;
+        }
+        apply_headers(&mut response, value.get("headers"));
+        return Some(response);
+    }
     let envelope = value.as_object().filter(|m| !m.is_empty() && m.keys().all(|k| matches!(k.as_str(), "status" | "body" | "headers")));
     let envelope = match envelope {
         Some(m) if m.len() == 1 && m.get("status").is_some_and(|s| !s.is_number()) => None,
@@ -313,17 +358,7 @@ fn respond(value: Value) -> Option<Response> {
     } else {
         (status, Json(envelope.get("body").cloned().unwrap_or(Value::Null))).into_response()
     };
-    if let Some(headers) = envelope.get("headers").and_then(Value::as_object) {
-        for (name, value) in headers.iter().take(16) {
-            let lower = name.to_ascii_lowercase();
-            if !(RESPONSE_HEADERS.contains(&lower.as_str()) || lower.starts_with("x-")) || lower == "x-request-id" {
-                continue;
-            }
-            if let (Ok(name), Some(Ok(value))) = (HeaderName::from_bytes(lower.as_bytes()), value.as_str().filter(|v| v.len() <= 1024).map(HeaderValue::from_str)) {
-                response.headers_mut().insert(name, value);
-            }
-        }
-    }
+    apply_headers(&mut response, envelope.get("headers"));
     Some(response)
 }
 
@@ -335,6 +370,23 @@ pub(super) fn matched(req: &Request) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_handler_returns_a_file_only_as_a_sandboxed_attachment() {
+        let response = respond(json!({"file": {"base64": "aGk=", "type": "text/html", "name": "report é.html"}, "headers": {"content-disposition": "inline", "x-shop": "a"}})).unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.headers()["content-type"], "text/html");
+        assert!(response.headers()["content-disposition"].to_str().unwrap().starts_with("attachment;"), "the handler cannot make it inline");
+        assert_eq!(response.headers()["x-shop"], "a");
+        assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+        assert!(response.headers()["content-security-policy"].to_str().unwrap().contains("default-src 'none'"));
+        assert_eq!(axum::body::to_bytes(response.into_body(), 64).await.unwrap(), "hi".as_bytes());
+        for bad in [json!({"file": {"base64": "***", "name": "a"}}), json!({"file": {"base64": "aGk="}}), json!({"file": {"base64": "aGk=", "name": "a", "type": "text/html\r\nx: y"}}), json!({"status": 404, "file": {"base64": "aGk=", "name": "a"}})] {
+            assert!(respond(bad.clone()).is_none(), "{bad}");
+        }
+        let plain = respond(json!({"file": "a.pdf", "status": 200})).unwrap();
+        assert_eq!(axum::body::to_bytes(plain.into_body(), 64).await.unwrap(), r#"{"file":"a.pdf","status":200}"#.as_bytes(), "data with a `file` key stays data");
+    }
 
     #[tokio::test]
     async fn handler_envelopes_map_status_body_and_safe_headers() {

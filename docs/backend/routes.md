@@ -66,6 +66,14 @@ is answered as written, 5xx included. A number outside that range is a handler b
 `500 ROUTE_INVALID_STATUS` and logs a `route-invalid-status` event, never a silent `200`. An object whose only key is a
 non-numeric `status` is plain data. Response headers are limited to `location`, `cache-control`, `etag`, `retry-after`, `link`, `content-language` and `x-*`.
 
+To answer a file built by the handler, return `{ file: { base64, name, type } }` (optionally with `status` and `headers`):
+`return { file: { base64: pdf.toString('base64'), name: 'report.pdf', type: 'application/pdf' } }`. It is always an
+attachment with `nosniff` and a `default-src 'none'` policy, as a stored file is; `Content-Disposition` cannot be set
+any other way. Invalid base64, a missing `name` or a non-2xx status answers `500 ROUTE_INVALID_STATUS`.
+
+Handlers follow the same source rules as the rest of `server/` (one default export; no `for`, `do` or `class`).
+`brain check`, `brain build` and `brain doctor` report them; run one before starting the backend or a worker.
+
 Throwing `{errors: {field: 'message'}}` answers `422 INVALID_INPUT` with those fields. Throwing an error
 with a 4xx `status` answers that status with a generic `ROUTE_REJECTED` code. Any other throw answers
 `500 ROUTE_FAILED`; its message is never sent to the client.

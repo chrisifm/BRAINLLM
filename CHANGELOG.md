@@ -13,7 +13,16 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `brain add roles` declares the roles an app already has; `brain backend rename-role --from <role> --to <role> [--apply]` moves accounts explicitly, and `brain backend migrate` reports accounts whose role is not declared.
 - B0735 names the real file and a concrete fix for role errors. B0738 warns when a grant names an undeclared role in field visibility or a route, or when no grant names the signup role.
 - Domain vocabulary from one app removed from defaults, messages, docs and examples; `scripts/check-general.sh` keeps it out.
+- A bucket can state `types: '*'` to accept any file; a bucket that omits `types` keeps accepting everything and now warns with B0770. `.docx`, `.xlsx`, `.pptx`, `.doc`, `.xls` and `.ppt` are told apart from plain ZIP and OLE containers, and common type aliases (`image/jpg`, `audio/mp3`, `application/x-pdf`) match their canonical type.
+- `console.error` and `console.warn` stay in the build (B1308 only removes the debugging calls). B0722 counts keys named as quoted literals under `server/`, and `BRAIN_JOBS_API_KEY` and `BRAIN_SERVICE_API_KEY`.
+- A `str` field can declare `pattern`: the whole value must match on every write, or the write answers 422. Adding one needs no migration.
+- `transitions.jsbrain` accepts `editable: { field: [states] }`: that field changes only in those states, on every write path.
+- Actions and transitions accept `when_any` (at least one guard group holds) and `owner.<ref>[.<ref>]` in `roles`.
+- API keys work on `/api/<resource>/<id>/actions/<name>` and `/transitions/<name>`, and `ctx.backend.resource(r)` gains `.action()` and `.transition()`, so a job can update a counter atomically.
+- A route handler can return `{ file: { base64, name, type } }`: always an attachment, with `nosniff` and a sandboxing policy.
+- Backend docs corrected: route `ctx.user` is `{id, role, verified}`, `ctx.env` is documented, OpenAPI lives at `/_brain/api`, migration does not add constraints to a registered resource, and API keys cover batch and upsert.
 ### Security
+- In production, a refused list query no longer lists the declared filters and sorts in its 422; outside production it still does.
 - Google sign-in links an existing account when Google hosts the address (`gmail.com` or a Workspace `hd`); a never-verified account also loses its password, sessions and recovery links, and any other address is denied with the same `AUTH_DENIED`.
 - Concurrent JWT refresh inside a 10-second grace no longer revokes the family, so tabs and prefetches keep their session, and the SSR bridge renews an expired access cookie during render.
 - Failed sign-ins and reset mail are counted per email and client with a cap per email, so a third party can no longer lock out the owner from another client.
