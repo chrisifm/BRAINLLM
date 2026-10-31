@@ -16,6 +16,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   are stored as canonical strings with a lossless database CHECK; unique and check violations answer 409/422. Records
   expose `created_at`/`updated_at`. Existing contracts record byte-identically and gain no database objects.
 
+- `urlState(initial, { key, values })`: a query value outside `values` falls back to the first allowed value (also
+  on the server and on back/forward) without writing history; `<Tabs>` selects its first tab for an unknown bound
+  value; `watch(src, cb, { immediate: true })` also runs once with the initial value.
 - A `server:` function that throws `{ message }` (400) or an Error subclass with a 4xx `status` reaches the calling
   form's `f.error` through RPC and through a form posted without JS; other exceptions stay private.
 

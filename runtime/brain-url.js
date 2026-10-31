@@ -15,11 +15,13 @@ function decode(raw, base) {
   else if (Array.isArray(base)) { try { v = JSON.parse(raw) } catch { return base }; if (!Array.isArray(v) || (base.length && v.some(x => typeof x !== typeof base[0]))) return base }
   return encode(v) == null ? base : v
 }
+// `values`: an allowed set; a query value outside it reads as the first allowed value
+const allow = (v, b) => !Array.isArray(b?.values) || !b.values.length || b.values.includes(v) ? v : b.values[0]
 function restore() {
   if (!G.location) return
   const url = new URL(G.location.href)
   for (const [key, b] of bindings) if (b.path === url.pathname) {
-    const value = decode(url.searchParams.get(key), b.base)
+    const value = allow(decode(url.searchParams.get(key), b.base), b)
     b.last = encode(value)
     b.cell.v = value
   }
@@ -37,7 +39,7 @@ G.__brainURLOnly = (from, to) => {
 G.__brainURLRestore = restore
 
 export function urlState(initial, options) {
-  const cell = sig(initial)
+  const cell = sig(allow(initial, options))
   if (!options?.disabled) urlBind(cell, options?.key, options)
   return cell
 }
@@ -78,7 +80,7 @@ export function urlBind(cell, key, options = {}) {
   if (G.__brainRoute || G.__brainSSR) {
     if (typeof key === 'string' && key.length <= 200 && !privateKey.test(key) && encode(untrack(() => cell.v)) != null) {
       const raw = G.__brainRoute?.query?.[key]
-      cell.v = decode(typeof raw === 'string' ? raw : null, untrack(() => cell.v))
+      cell.v = allow(decode(typeof raw === 'string' ? raw : null, untrack(() => cell.v)), options)
     }
     return cell
   }
@@ -97,8 +99,8 @@ export function urlBind(cell, key, options = {}) {
   if (bindings.size >= 128 || known.size >= 512) { report('URL state key capacity exceeded; reduce public state or reuse stable keys'); return cell }
   const base = untrack(() => cell.v), url = new URL(G.location.href)
   if (url.search.length > 8192) { report('URL state exceeds 8 KiB; shorten public selections'); return cell }
-  cell.v = decode(url.searchParams.get(key), base)
-  const b = { cell, base, path: url.pathname, last: encode(cell.v) }
+  cell.v = allow(decode(url.searchParams.get(key), base), options)
+  const b = { cell, base, path: url.pathname, last: encode(cell.v), values: options.values }
   bindings.set(key, b); known.add(key)
   if (!listening) { G.addEventListener('popstate', restore); listening = true }
   fx(() => {

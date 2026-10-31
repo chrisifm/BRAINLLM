@@ -1,10 +1,11 @@
 <meta props="tabs:list value:str~ label:str">
 <script>
-  // tabs: [{ id: 'a', label: 'Overview' }] · the parent renders the panel of `value` in the slot
+  // tabs: [{ id: 'a', label: 'Overview' }] · the parent renders the panel of `value` in the slot; an unknown `value`
+  // selects the first tab
   let list = ref()
   const current = drv(() => tabs.find((t) => t.id === value) || tabs[0])
   const keys = (e) => {
-    const i = tabs.findIndex((t) => t.id === value)
+    const i = tabs.indexOf(current)
     let j = -1
     if (e.key === 'ArrowRight') j = (i + 1) % tabs.length
     else if (e.key === 'ArrowLeft') j = (i - 1 + tabs.length) % tabs.length
@@ -19,7 +20,7 @@
 <div class="tabs">
   <div class="list" role="tablist" aria-label={label} bind:ref={list} on:keydown={keys}>
     {#each tabs as t (t.id)}
-      <button type="button" role="tab" aria-selected={t.id === value ? 'true' : 'false'} tabindex={t.id === value ? 0 : -1} on:click={value = t.id}>{t.label}</button>
+      <button type="button" role="tab" aria-selected={t === current ? 'true' : 'false'} tabindex={t === current ? 0 : -1} on:click={value = t.id}>{t.label}</button>
     {/each}
   </div>
   <div class="panel" role="tabpanel" aria-label={current ? current.label : label} tabindex="0"><slot /></div>

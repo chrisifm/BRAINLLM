@@ -100,7 +100,7 @@ Raw HTML only as `{@html sanitize(x)}`.
 
 ## Lifecycle and helpers
 `mounted(() => { …; return cleanup })` runs once after the DOM is in the page · `watch(() => q, (now, prev) => …)`
-runs only when `q` changes · `await tick()` after DOM updates · `every('30s', fn)` timer stopped on unmount ·
+runs only when `q` changes (`{ immediate: true }` as third argument also runs it once with the initial value) · `await tick()` after DOM updates · `every('30s', fn)` timer stopped on unmount ·
 `media('(max-width: 600px)')` `visible(ref)` `debounce(v, '300ms')` `online()` are read-only signals, read like any other ·
 `<component is={C}>` · `<Portal>` · `transition:fade` on elements inside `{#if}`/`{#each}` ·
 `ai` is Chrome's on-device model when present (`brain guide ai`).
@@ -213,6 +213,8 @@ Keep data across visits: `api('/posts', { get: { out: '[Post]', cache: '10m' } }
 `store(init, { persist: true })`. Heavy work off the main thread: name the module `*.worker.jsbrain`; its exports
 become async functions. Their native bridge bounds pending work, deadlines, bytes and cancellation.
 Public navigable state: `urlState('overview', {key:'tab'})`; selections and native Dialog integrate with query history.
+`{key:'tab', values:['overview','details']}` limits it: an unknown query value reads as the first allowed value; `<Tabs>`
+with an unknown value selects its first tab.
 Preserve unrelated query parameters; never serialize credentials or private form input. Use distinct keys in repeated UI.
 Structured local cache: `database('navigation', {namespace:'my-app',build:'v1'})` supports get/put/batch/scan/prune/close
 with native IndexedDB, quotas, expiry and atomic batches. `storage()` and `cookie()` are small public preferences.

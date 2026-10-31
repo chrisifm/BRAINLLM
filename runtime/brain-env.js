@@ -24,10 +24,11 @@ export function mounted(f) {
   onDispose(() => ((alive = false), typeof c === 'function' && c()))
 }
 
-// watch(() => src, (v, old) => …): runs the callback when the source changes, not on the first read; the callback is
-// not tracked. A returned function is its cleanup (before the next run and on unmount).
-export function watch(src, cb) {
-  let first = true, old
+// watch(() => src, (v, old) => …): runs the callback when the source changes, not on the first read (with
+// `{ immediate: true }` also once with the initial value, `old` undefined); the callback is not tracked. A returned
+// function is its cleanup (before the next run and on unmount).
+export function watch(src, cb, options) {
+  let first = !options?.immediate, old
   fx(() => {
     const v = src()
     if (first) return void ((first = false), (old = v))
