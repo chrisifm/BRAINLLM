@@ -8,10 +8,9 @@ impl Drop for App {
     }
 }
 fn build(mixed: bool, base: &str) -> (App, brain_pack::Output) {
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
+    // the clock alone collides between test threads (microsecond resolution on macOS)
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let stamp = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let app =
         App(std::env::temp_dir().join(format!("brain-zero-js-{}-{stamp}", std::process::id())));
     let root = &app.0;
