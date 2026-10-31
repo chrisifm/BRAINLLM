@@ -1272,14 +1272,16 @@ fn build_inner_with_options(
             keys.dedup();
             // a page that validates (form(), api() schemas) reads its messages from the `form.*` keys (§14, §37)
             let validates = reach.iter().any(|n| matches!(n, Node::Runtime(r) if r == "brain-schema.js"));
+            // a page with the kit's <ErrorState> reads its texts from the `error_state.*` keys (§37)
+            let error_state = reach.iter().any(|n| modules.get(n).is_some_and(|m| m.js.contains("'error_state.'")));
             let mut entries: Vec<String> = Vec::new();
-            if !keys.is_empty() || validates {
+            if !keys.is_empty() || validates || error_state {
                 let mine = read_dict(&input.root, loc);
                 let fallback = if loc == def { Vec::new() } else { read_dict(&input.root, def) };
                 let all = keys.iter().any(|k| k == "*");
                 let mut seen: HashSet<String> = HashSet::new();
                 for (k, v) in mine.iter().chain(fallback.iter()) {
-                    if (all || keys.contains(k) || (validates && k.starts_with("form."))) && seen.insert(k.clone()) {
+                    if (all || keys.contains(k) || (validates && k.starts_with("form.")) || (error_state && k.starts_with("error_state."))) && seen.insert(k.clone()) {
                         entries.push(format!("{}:{v}", prerender_json(k)));
                     }
                 }
