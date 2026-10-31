@@ -1,0 +1,26 @@
+{
+  "id": "job-cron",
+  "kind": "capability",
+  "title": "Cron schedules for declared jobs",
+  "why": "Recurring work (daily summaries, cleanups) is declared once and enqueued exactly once per slot even with several schedulers.",
+  "changelog": [
+    "`server/cron/<name>.jsbrain` schedules a declared job"
+  ],
+  "guide": "docs/backend/cron.md",
+  "apis": [
+    "brain jobs cron",
+    "brain jobs cron --once"
+  ],
+  "affects": [
+    "server/cron/**"
+  ],
+  "adopt": {
+    "file": "server/cron/daily_summary.jsbrain",
+    "snippet": "<meta server>\nexport default { schedule: '0 7 * * *', job: 'daily_summary' }"
+  },
+  "uses": [
+    {
+      "glob": "server/cron/*.jsbrain"
+    }
+  ]
+}

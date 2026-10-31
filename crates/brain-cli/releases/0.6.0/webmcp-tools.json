@@ -1,0 +1,30 @@
+{
+  "id": "webmcp-tools",
+  "kind": "capability",
+  "title": "WebMCP tools: expose page actions to browser AI agents",
+  "why": "A component can register typed actions (add a task, search) with the browser's model context, so AI agents act through declared tools instead of guessing clicks.",
+  "changelog": [
+    "WebMCP imperative tools ship"
+  ],
+  "guide": "brain guide webmcp",
+  "codes": [
+    "B1704"
+  ],
+  "apis": [
+    "<meta tools>"
+  ],
+  "affects": [
+    "comp/**/*.brain",
+    "views/**/*.brain"
+  ],
+  "adopt": {
+    "file": "comp/task-form.brain",
+    "snippet": "<meta tools=\"add_task: Add a task (text:str!, due:date)\">\n<script>\n  const tasks = sig([])\n  function add_task({ text, due }) { tasks.push({ text, due }) }\n</script>"
+  },
+  "uses": [
+    {
+      "glob": "**/*.brain",
+      "contains": "<meta tools="
+    }
+  ]
+}

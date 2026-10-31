@@ -1,0 +1,9 @@
+{
+  "id": "compiler-internals-0-6-0",
+  "kind": "internal",
+  "title": "Faster lexer and source-map scanning",
+  "why": "No author action: emitted JS, CSS, maps and diagnostics are byte-identical.",
+  "changelog": [
+    "The shared lexer decodes ASCII directly"
+  ]
+}

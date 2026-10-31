@@ -1,0 +1,27 @@
+{
+  "id": "database-tls-required",
+  "kind": "breaking",
+  "title": "Production refuses a remote DATABASE_URL without verified TLS",
+  "why": "A production backend whose remote DATABASE_URL lacks sslmode=verify-full no longer boots (BDB_TLS_UNVERIFIED); local databases are unaffected.",
+  "changelog": [
+    "Production refuses a remote `DATABASE_URL`"
+  ],
+  "guide": "docs/backend/lifecycle.md",
+  "apis": [
+    "DATABASE_URL",
+    "BDB_TLS_UNVERIFIED"
+  ],
+  "affects": [
+    ".brain_env"
+  ],
+  "finds": [
+    {
+      "glob": ".brain_env",
+      "contains": "DATABASE_URL"
+    }
+  ],
+  "steps": [
+    "In the [production] section of .brain_env, add `sslmode=verify-full` to a remote DATABASE_URL (and the CA the provider documents).",
+    "Run `brain backend serve` against production settings once to confirm it boots."
+  ]
+}

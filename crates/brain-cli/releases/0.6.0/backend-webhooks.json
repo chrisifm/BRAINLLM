@@ -1,0 +1,26 @@
+{
+  "id": "backend-webhooks",
+  "kind": "capability",
+  "title": "Signed webhook verification",
+  "why": "Incoming payment or integration webhooks are verified (HMAC over the raw body, timestamp tolerance, secret rotation) before the handler runs.",
+  "changelog": [
+    "Signed webhook routes verify HMAC-SHA256 signatures"
+  ],
+  "guide": "docs/backend/webhooks.md",
+  "apis": [
+    "route.jsbrain verify"
+  ],
+  "affects": [
+    "server/routes/**"
+  ],
+  "adopt": {
+    "file": "server/routes/payment_events/route.jsbrain",
+    "snippet": "<meta server>\nexport default {\n  method: 'POST', path: '/payments/events', auth: 'public', body: 'raw',\n  verify: { scheme: 'timestamped', header: 'x-payment-signature', secret: 'PAYMENTS_WEBHOOK_SECRET' }\n}"
+  },
+  "uses": [
+    {
+      "glob": "server/routes/*/route.jsbrain",
+      "contains": "verify"
+    }
+  ]
+}

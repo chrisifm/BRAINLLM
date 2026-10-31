@@ -1,0 +1,10 @@
+{
+  "id": "load-redirect-dev",
+  "kind": "fix",
+  "title": "redirect() in load works under brain run",
+  "why": "Development now answers a thrown redirect like production; code that special-cased the 500 in development can be simplified.",
+  "changelog": [
+    "`throw redirect(url, status)` in `load` answers the redirect under `brain run`"
+  ],
+  "guide": "brain guide views"
+}

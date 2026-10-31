@@ -1,0 +1,37 @@
+{
+  "id": "crawler-answers",
+  "kind": "capability",
+  "title": "Crawler-safe answers: gone(), one-hop redirects, trailing slash and canonical host",
+  "why": "Removed pages answer 410, redirects and canonical-host fixes are one 301 hop and guard redirects are noindex, so search engines drop or move pages cleanly.",
+  "changelog": [
+    "Crawler-safe answers (§33)"
+  ],
+  "guide": "brain guide seo",
+  "apis": [
+    "throw gone()",
+    "brain.json seo.trailingSlash",
+    "brain.json seo.canonicalHost"
+  ],
+  "affects": [
+    "views/**/*.brain",
+    "brain.json"
+  ],
+  "adopt": {
+    "file": "views/blog/[slug].brain",
+    "snippet": "export async function load({ params }) {\n  const post = await posts.get(params.slug)\n  if (post?.removed) throw gone()\n  return { post }\n}"
+  },
+  "uses": [
+    {
+      "glob": "**/*.brain",
+      "contains": "gone()"
+    },
+    {
+      "glob": "brain.json",
+      "contains": "\"trailingSlash\""
+    },
+    {
+      "glob": "brain.json",
+      "contains": "\"canonicalHost\""
+    }
+  ]
+}

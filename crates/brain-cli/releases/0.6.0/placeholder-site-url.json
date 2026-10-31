@@ -1,0 +1,20 @@
+{
+  "id": "placeholder-site-url",
+  "kind": "change",
+  "title": "B0736: a placeholder site URL publishes no sitemap",
+  "why": "With PUBLIC_SITE_URL still at example.com, *.test or localhost, production builds now skip the sitemap and absolute URLs; doctor flags it before deploy.",
+  "changelog": [
+    "B0736: a placeholder site URL"
+  ],
+  "guide": "brain guide seo",
+  "codes": [
+    "B0736"
+  ],
+  "affects": [
+    ".brain_env",
+    "brain.json"
+  ],
+  "steps": [
+    "Set PUBLIC_SITE_URL in the [production] section of .brain_env to the deployed origin."
+  ]
+}

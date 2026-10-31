@@ -79,6 +79,31 @@ fn main() {
     }
     code.push_str("];\n");
     std::fs::write(out_dir.join("runtime_files.rs"), code).unwrap();
+    embed_releases(&Path::new(&manifest).join("releases"), &out_dir);
+}
+
+/// Versioned change manifests (`releases/<version>/<entry>.json`, see `src/releases.rs`): every file is embedded,
+/// so adding an entry is one new file and the npm package ships them inside the binary.
+fn embed_releases(root: &Path, out_dir: &Path) {
+    println!("cargo:rerun-if-changed={}", root.display());
+    let mut files = vec![];
+    for v in std::fs::read_dir(root).into_iter().flatten().flatten().filter(|e| e.path().is_dir()) {
+        println!("cargo:rerun-if-changed={}", v.path().display());
+        for f in std::fs::read_dir(v.path()).into_iter().flatten().flatten() {
+            let p = f.path();
+            if p.extension().is_some_and(|x| x == "json") {
+                println!("cargo:rerun-if-changed={}", p.display());
+                files.push((v.file_name().to_string_lossy().into_owned(), f.file_name().to_string_lossy().into_owned(), p));
+            }
+        }
+    }
+    files.sort();
+    let mut code = String::from("pub(crate) const RELEASE_FILES: &[(&str, &str, &str)] = &[\n");
+    for (version, name, path) in files {
+        writeln!(code, "    ({version:?}, {name:?}, include_str!({:?})),", path.display().to_string()).unwrap();
+    }
+    code.push_str("];\n");
+    std::fs::write(out_dir.join("releases.rs"), code).unwrap();
 }
 
 /// Fails the build if SPEC.md has a `<!--planned-->` marker that is not alone on its line, an unclosed block, an

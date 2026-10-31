@@ -1,0 +1,28 @@
+{
+  "id": "backend-routes",
+  "kind": "capability",
+  "title": "Custom backend routes with typed contracts",
+  "why": "Endpoints that are not resources (webhooks, checkout, exports) get a declared method, path, typed input, limits and auth, and appear in the OpenAPI document.",
+  "changelog": [
+    "Native backend routes (`server/routes/<name>/route.jsbrain`",
+    "The backend OpenAPI document (`/_brain/docs`"
+  ],
+  "guide": "docs/backend/routes.md",
+  "apis": [
+    "server/routes/<name>/route.jsbrain",
+    "server/routes/<name>/handler.jsbrain",
+    "/_brain/docs"
+  ],
+  "affects": [
+    "server/routes/**"
+  ],
+  "adopt": {
+    "file": "server/routes/health_report/route.jsbrain",
+    "snippet": "<meta server>\nexport default { method: 'GET', path: '/reports/daily', auth: 'user', rate: '60/min' }"
+  },
+  "uses": [
+    {
+      "glob": "server/routes/*/route.jsbrain"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "id": "layout-load-b0117",
+  "kind": "breaking",
+  "title": "load() in views/_layout.brain is now B0117",
+  "why": "A layout load was silently never run; check now rejects it so the layout stops rendering empty props.",
+  "changelog": [
+    "A `load()` exported from `views/_layout.brain`"
+  ],
+  "codes": [
+    "B0117"
+  ],
+  "affects": [
+    "views/**/_layout.brain"
+  ],
+  "finds": [
+    {
+      "glob": "views/**/_layout.brain",
+      "contains": "function load"
+    }
+  ],
+  "steps": [
+    "Move the layout load into each view that needs the data, or read shared state from a channel store."
+  ]
+}

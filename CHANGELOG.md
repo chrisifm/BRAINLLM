@@ -11,6 +11,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Added
 
+- Versioned change manifests ship inside every binary (`crates/brain-cli/releases/<version>/<id>.json`): for each
+  release, the new capabilities with why they matter, the smallest adoption snippet and the guide to read, plus
+  deprecations and breaking changes with the files they affect, manual steps, diagnostic codes and a codemod id. A test
+  fails when a CHANGELOG bullet has no entry (CONTRIBUTING "Release: add a change manifest entry").
 - WebMCP imperative tools ship (#106): `<meta tools="add_task: Add a task (text:str!, due:date)">` plus a same-named
   function registers the tool with the browser's model context while the component is mounted and unregisters it on
   unmount. Nothing is registered without WebMCP, during SSR or prerender; arguments are validated against the

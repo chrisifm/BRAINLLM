@@ -1,0 +1,16 @@
+{
+  "id": "dev-tooling-fixes-0-6-0",
+  "kind": "fix",
+  "title": "Development server, Viewer lane, build and cache fixes",
+  "why": "The Viewer lane picks the right Viewer, the build stops reporting server-only bindings as removed, the dev cache sees atomic replacements and closed HMR sockets are released.",
+  "changelog": [
+    "The opt-in Viewer lane no longer fails",
+    "`brain build` no longer reports \"Production removed unused bindings\"",
+    "The development compile cache keys each source",
+    "Deeply nested BrainScript",
+    "The development server unregisters closed HMR sockets",
+    "Production logs recorded a compiler budget failure",
+    "Streamed SSR routes"
+  ],
+  "guide": "brain guide start"
+}

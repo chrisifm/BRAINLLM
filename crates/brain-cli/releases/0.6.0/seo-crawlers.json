@@ -1,0 +1,25 @@
+{
+  "id": "seo-crawlers",
+  "kind": "change",
+  "title": "SEO: rich-result checks, dev sitemap, split sitemaps, hreflang paging, head tags on navigation",
+  "why": "Structured data must satisfy Google rich-result rules, the dev server answers robots/sitemap, and navigation replaces route-owned head tags; audits may report new findings.",
+  "changelog": [
+    "JSON-LD checks follow Google",
+    "`brain run` serves /robots.txt and /sitemap.xml",
+    "hreflang keeps page identity on paginated listings",
+    "`brain seo indexnow` reads a split sitemap",
+    "Sitemaps respect the 50 MB limit",
+    "Client navigation replaces every route-owned head tag"
+  ],
+  "guide": "brain guide seo",
+  "apis": [
+    "brain seo audit",
+    "brain seo indexnow"
+  ],
+  "affects": [
+    "views/**/*.brain"
+  ],
+  "steps": [
+    "Run `brain seo audit --json` after `brain build` and fix new JSON-LD findings (price, address, rating fields)."
+  ]
+}

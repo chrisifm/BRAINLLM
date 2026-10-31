@@ -1,0 +1,24 @@
+{
+  "id": "global-selector-b0301",
+  "kind": "breaking",
+  "title": "`:global(…)` anywhere is now B0301",
+  "why": "A component selector using :global after its first compound passed check before but the browser dropped the rule; it is now a compile error.",
+  "changelog": [
+    "`:global(…)` after the first compound"
+  ],
+  "codes": [
+    "B0301"
+  ],
+  "affects": [
+    "**/*.brain"
+  ],
+  "finds": [
+    {
+      "glob": "**/*.brain",
+      "contains": ":global("
+    }
+  ],
+  "steps": [
+    "Replace each `:global(…)` with a class on the element the component owns, or move the rule to tokens.cssbrain inside an @layer."
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "id": "backend-operations",
+  "kind": "capability",
+  "title": "Declarative transactional operations",
+  "why": "Multi-step writes (place an order, reserve stock) run in one Postgres transaction and roll back entirely on any failure.",
+  "changelog": [
+    "Declarative operations (`server/operations/<name>.jsbrain`"
+  ],
+  "guide": "docs/backend/transactions.md",
+  "apis": [
+    "POST /_brain/operations/<name>"
+  ],
+  "affects": [
+    "server/operations/**"
+  ],
+  "adopt": {
+    "file": "server/operations/place_order.jsbrain",
+    "snippet": "<meta server>\nexport default {\n  roles: ['user'],\n  input: { product: 'str!', quantity: 'int!' },\n  steps: []\n}"
+  },
+  "uses": [
+    {
+      "glob": "server/operations/*.jsbrain"
+    }
+  ]
+}

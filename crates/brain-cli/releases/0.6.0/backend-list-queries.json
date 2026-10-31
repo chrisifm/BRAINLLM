@@ -1,0 +1,35 @@
+{
+  "id": "backend-list-queries",
+  "kind": "capability",
+  "title": "Backend list filters, sorting, totals, aggregates, cursor paging and search",
+  "why": "List pages filter, sort, count, sum and page through records declared in query.jsbrain, with exact decimals, instead of loading everything and filtering in the browser.",
+  "changelog": [
+    "Backend list filters declared in `query.jsbrain`",
+    "Backend list sorting by declared fields",
+    "Backend list `total`, named aggregates",
+    "Backend keyset pagination",
+    "Backend search combines with declared filters"
+  ],
+  "guide": "docs/backend/filters.md",
+  "apis": [
+    "query.jsbrain filter|sort|aggregates",
+    "next_cursor"
+  ],
+  "affects": [
+    "server/resources/**/query.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/products/query.jsbrain",
+    "snippet": "export default { filter: { price: ['gte', 'lte'], category: ['eq', 'in'] } }"
+  },
+  "uses": [
+    {
+      "glob": "server/resources/**/query.jsbrain",
+      "contains": "filter"
+    },
+    {
+      "glob": "server/resources/**/query.jsbrain",
+      "contains": "sort"
+    }
+  ]
+}

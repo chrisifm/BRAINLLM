@@ -1,0 +1,26 @@
+{
+  "id": "backend-atomic-actions",
+  "kind": "capability",
+  "title": "Atomic resource actions and upsert",
+  "why": "Counters, stock and guarded field changes become race-safe compare-and-set actions instead of read-modify-write code.",
+  "changelog": [
+    "Atomic actions (`server/resources/<r>/actions.jsbrain`"
+  ],
+  "guide": "docs/backend/atomic-updates.md",
+  "apis": [
+    "POST /api/<r>/<uuid>/actions/<name>",
+    "POST /api/<r>/upsert"
+  ],
+  "affects": [
+    "server/resources/**/actions.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/products/actions.jsbrain",
+    "snippet": "<meta server>\nexport default {\n  restock: { roles: ['admin'], input: { amount: 'int!' }, increment: { stock: '$input.amount' } }\n}"
+  },
+  "uses": [
+    {
+      "glob": "server/resources/**/actions.jsbrain"
+    }
+  ]
+}

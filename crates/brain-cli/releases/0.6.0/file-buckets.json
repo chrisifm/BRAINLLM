@@ -1,0 +1,25 @@
+{
+  "id": "file-buckets",
+  "kind": "capability",
+  "title": "Native file buckets for uploads and downloads",
+  "why": "Uploads of any type stream to private disk with size limits, type detection and owner/role download policies, replacing base64-in-RPC workarounds.",
+  "changelog": [
+    "Native file buckets (`server/files/<name>.jsbrain`)"
+  ],
+  "guide": "docs/backend/files.md",
+  "apis": [
+    "server/files/<name>.jsbrain"
+  ],
+  "affects": [
+    "server/files/**"
+  ],
+  "adopt": {
+    "file": "server/files/attachments.jsbrain",
+    "snippet": "<meta server>\nexport default { visibility: 'private', maxBytes: '25mb', create: ['user'], read: ['owner', 'admin'] }"
+  },
+  "uses": [
+    {
+      "glob": "server/files/*.jsbrain"
+    }
+  ]
+}

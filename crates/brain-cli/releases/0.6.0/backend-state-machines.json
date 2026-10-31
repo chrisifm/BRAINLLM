@@ -1,0 +1,25 @@
+{
+  "id": "backend-state-machines",
+  "kind": "capability",
+  "title": "State machines on an enum field",
+  "why": "Order or ticket statuses change only through declared transitions with guards, roles and side effects, so invalid jumps are impossible.",
+  "changelog": [
+    "`transitions.jsbrain` turns one `enum` field into a state machine"
+  ],
+  "guide": "docs/backend/state-machines.md",
+  "apis": [
+    "POST /api/<r>/<uuid>/transitions/<name>"
+  ],
+  "affects": [
+    "server/resources/**/transitions.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/orders/transitions.jsbrain",
+    "snippet": "<meta server>\nexport default {\n  field: 'status',\n  initial: ['pending'],\n  transitions: { pay: { from: ['pending'], to: 'paid', roles: ['owner'] } }\n}"
+  },
+  "uses": [
+    {
+      "glob": "server/resources/**/transitions.jsbrain"
+    }
+  ]
+}

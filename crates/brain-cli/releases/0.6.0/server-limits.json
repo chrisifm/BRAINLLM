@@ -1,0 +1,40 @@
+{
+  "id": "server-limits",
+  "kind": "capability",
+  "title": "brain.json server limits: body size, deadline and RPC rate",
+  "why": "Apps that send files or run slow loads can raise the RPC/form body limit, the call deadline and the per-IP rate in one place, identical in development and production.",
+  "changelog": [
+    "brain.json `\"server\": { \"maxBodyKB\", \"timeoutMs\", \"rpcPerMinute\" }`",
+    "RPC and form bodies were capped at 64 KB"
+  ],
+  "guide": "brain guide server",
+  "codes": [
+    "B0707"
+  ],
+  "apis": [
+    "brain.json server.maxBodyKB",
+    "brain.json server.timeoutMs",
+    "brain.json server.rpcPerMinute"
+  ],
+  "affects": [
+    "brain.json"
+  ],
+  "adopt": {
+    "file": "brain.json",
+    "snippet": "\"server\": { \"maxBodyKB\": 4096, \"timeoutMs\": 15000, \"rpcPerMinute\": 120 }"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "\"maxBodyKB\""
+    },
+    {
+      "glob": "brain.json",
+      "contains": "\"timeoutMs\""
+    },
+    {
+      "glob": "brain.json",
+      "contains": "\"rpcPerMinute\""
+    }
+  ]
+}

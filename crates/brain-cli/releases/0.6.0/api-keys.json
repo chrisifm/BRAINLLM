@@ -1,0 +1,27 @@
+{
+  "id": "api-keys",
+  "kind": "capability",
+  "title": "Project API keys with scopes, quotas and request traces",
+  "why": "An app can let other programs call its /api resources with revocable, scoped, quota-limited keys instead of sharing a user session.",
+  "changelog": [
+    "Native project API keys (opt-in `server/api-keys.jsbrain`)"
+  ],
+  "guide": "docs/backend/api-keys.md",
+  "apis": [
+    "brain backend keys create|list|rotate|revoke|events|summary",
+    "X-API-Key"
+  ],
+  "affects": [
+    "server/api-keys.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/api-keys.jsbrain",
+    "command": "brain backend keys create --json",
+    "snippet": "<meta server>\nexport default { enabled: true, dailyQuota: 1000, perKeyPerMinute: 600 }"
+  },
+  "uses": [
+    {
+      "glob": "server/api-keys.jsbrain"
+    }
+  ]
+}

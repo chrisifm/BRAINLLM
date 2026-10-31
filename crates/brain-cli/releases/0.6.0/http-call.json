@@ -1,0 +1,26 @@
+{
+  "id": "http-call",
+  "kind": "capability",
+  "title": "httpCall for outbound API calls",
+  "why": "Server code calls third-party APIs with timeouts, safe retries, size caps and private-target refusal without a fetch wrapper of its own.",
+  "changelog": [
+    "`httpCall(url, options)` is auto-imported"
+  ],
+  "guide": "docs/backend/outbound.md",
+  "apis": [
+    "httpCall(url, options)"
+  ],
+  "affects": [
+    "server/**"
+  ],
+  "adopt": {
+    "file": "server/routes/checkout/handler.jsbrain",
+    "snippet": "const charge = await httpCall('https://payments.example.test/v1/charges', { method: 'POST', json: { amount: 10 }, idempotencyKey: 'order-1', timeout: 8000 })"
+  },
+  "uses": [
+    {
+      "glob": "server/**/*.jsbrain",
+      "contains": "httpCall("
+    }
+  ]
+}

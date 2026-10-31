@@ -1,0 +1,28 @@
+{
+  "id": "form-server-errors",
+  "kind": "capability",
+  "title": "Server function errors reach the form",
+  "why": "A server function can reject input with a message the user sees in f.error, with or without JavaScript, instead of a generic failure.",
+  "changelog": [
+    "A `server:` function that throws `{ message }`"
+  ],
+  "guide": "brain guide forms",
+  "apis": [
+    "throw { message }",
+    "f.error"
+  ],
+  "affects": [
+    "**/*.brain",
+    "server/**"
+  ],
+  "adopt": {
+    "file": "views/signup.brain",
+    "snippet": "server: async function signup({ email }) {\n  if (await users.exists(email)) throw { message: 'That email is already registered' }\n}"
+  },
+  "uses": [
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "throw { message"
+    }
+  ]
+}

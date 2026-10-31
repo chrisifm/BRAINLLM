@@ -1,0 +1,9 @@
+{
+  "id": "upgrade-guidance",
+  "kind": "change",
+  "title": "Versioned change manifests for upgrades",
+  "why": "Each release now describes its capabilities, deprecations and breaking changes in a machine-readable form that the CLI and MCP read to guide an upgrade.",
+  "changelog": [
+    "Versioned change manifests ship inside every binary"
+  ]
+}

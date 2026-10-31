@@ -1,0 +1,26 @@
+{
+  "id": "backend-logging",
+  "kind": "capability",
+  "title": "Per-request backend logs",
+  "why": "Production backends can log errors or every request with a slow threshold, carrying the request id and route template only.",
+  "changelog": [
+    "`platform.logging` selects per-request JSON lines"
+  ],
+  "guide": "docs/backend/lifecycle.md",
+  "apis": [
+    "server/platform.jsbrain logging"
+  ],
+  "affects": [
+    "server/platform.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/platform.jsbrain",
+    "snippet": "<meta server>\nexport default { logging: { requests: 'errors', slow: '1s' } }"
+  },
+  "uses": [
+    {
+      "glob": "server/platform.jsbrain",
+      "contains": "logging"
+    }
+  ]
+}
