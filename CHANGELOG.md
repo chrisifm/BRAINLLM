@@ -9,6 +9,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- `ctx.signal` in `load()`, guards and server functions aborts when the client disconnects or the deadline passes
+- Fix: a newer client navigation aborts the page request it replaced
 - Fix: `t()`, `fmt` and `locale()` inside `load()`, guards and form handlers read the page's language, in production and in `brain run`
 - Lists name aggregates that hit the 100-group cap in `aggregates_truncated`
 - Request log lines carry `dbMs` and `dbWaitMs` for resource reads, so database time and pool wait are visible apart from `ms`

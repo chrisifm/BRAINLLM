@@ -9,7 +9,7 @@ Before each kind of task run `brain guide <topic>` (`brain guide` lists them): s
 - `views/docs/[...rest].brain` matches `/docs/a/b/c` with `ctx.params.rest = 'a/b/c'` (ranked after static and `[id]` routes).
 - Route files per folder: `_guard.jsbrain` (`export default (ctx) => ctx.user ? true : redirect('/login')`, runs on server
   and before client navigation; `deny('reason')` renders `views/403.brain`) · `_error.brain` · `_middleware.jsbrain`.
-  `ctx` = `{ params, query, user, session, cookies, url, env }`. In the browser there is no `ctx.user` (the session
+  `ctx` = `{ params, query, user, session, cookies, url, env, signal }`; pass `ctx.signal` to `fetch` so the work stops when the client leaves or the deadline passes. In the browser there is no `ctx.user` (the session
   cookie is HttpOnly): a guard that reads it and would stop the navigation makes a full page load, and the server guard decides.
 - In code: `navigate('/x')` (router, no reload; never `location.assign`) · `let r = route()` → `r.path`, `r.params.id`,
   `r.query.q` (reactive).

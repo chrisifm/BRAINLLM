@@ -172,6 +172,7 @@ for await (const line of createInterface({ input: process.stdin })) {
     // Requests here run one at a time, so the page's language can live in the global t() reads.
     if (ctx?.$dict) { const D = (globalThis.__brainDict ||= {}); for (const l in ctx.$dict) D[l] = ctx.$dict[l] }
     globalThis.__brainLocale = ctx?.$locale || null
+    c.signal ||= new AbortController().signal // a timed-out call ends this process, which stops everything it started
     try {
       const v = await m[fn](c, ...(args || []))
       if (fn === 'load' && v && typeof v.redirect === 'string' && redirectProblem(v)) throw new Error(redirectProblem(v))

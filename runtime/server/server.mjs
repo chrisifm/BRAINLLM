@@ -1006,7 +1006,7 @@ export function createServer(o = {}) {
       ...(native ? { backend: native.backend(req, res, res.getHeader('x-request-id')) } : {}),
       // `prefetch`: the router fetched this page ahead of a click (§19); a `load` with side effects can skip them
       prefetch: req.headers['x-brain-prefetch'] === '1',
-      req: { method: req.method, headers: req.headers, ip: ipOf(req) }, ...extra,
+      req: { method: req.method, headers: req.headers, ip: ipOf(req) }, signal: lifetime(res), ...extra,
     }
   }
 
@@ -1104,7 +1104,7 @@ export function createServer(o = {}) {
       if (!fixed && route.server) {
         const m = await load(route.server)
         if (route.i18n) await load(route.i18n) // t() inside load(): the dictionary is there before it runs
-        if (typeof m.load === 'function') props = (await withTimeout(pageLocale.run(route.locale, () => Promise.resolve(m.load(ctx))), TIMEOUT)) ?? {}
+        if (typeof m.load === 'function') props = (await withTimeout(pageLocale.run(route.locale, () => Promise.resolve(m.load(ctx))), TIMEOUT, ctx)) ?? {}
       }
     } catch (e) {
       return loadOutcome(e)
@@ -1140,7 +1140,7 @@ export function createServer(o = {}) {
     const [top, bottom = ''] = readFileSync(file(route.page), 'utf8').split('<!--brain:ssr-->')
     const sm = await load(route.server)
     if (route.i18n) await load(route.i18n)
-    const loadP = typeof sm.load === 'function' ? withTimeout(pageLocale.run(route.locale, () => Promise.resolve().then(() => sm.load(ctx))), TIMEOUT) : Promise.resolve(null)
+    const loadP = typeof sm.load === 'function' ? withTimeout(pageLocale.run(route.locale, () => Promise.resolve().then(() => sm.load(ctx))), TIMEOUT, ctx) : Promise.resolve(null)
     loadP.catch(() => {}) // handled below; never an unhandled rejection while the loading view renders
     let timer
     const early = await Promise.race([loadP.then(v => ({ v }), e => ({ e })), new Promise(r => (timer = setTimeout(r, STREAM_HOLD)))])
@@ -1798,9 +1798,25 @@ export function overLimit(key, max = 60) {
 const pageLocale = new AsyncLocalStorage()
 let renderLocale = globalThis.__brainLocale
 Object.defineProperty(globalThis, '__brainLocale', { configurable: true, get: () => pageLocale.getStore() ?? renderLocale, set: v => (renderLocale = v) })
-const withTimeout = (p, ms) => {
+// ctx.signal: aborted when the client disconnects before the answer ends or the function passes its deadline, so the
+// work it started (fetch, a query) stops with it.
+const aborts = new WeakMap()
+const newSignal = () => {
+  const c = new AbortController()
+  aborts.set(c.signal, c)
+  return c.signal
+}
+const lifetime = res => {
+  const signal = newSignal()
+  res.once?.('close', () => res.writableFinished || aborts.get(signal).abort()) // a captured render has no socket
+  return signal
+}
+const withTimeout = (p, ms, ctx) => {
   let t
-  return Promise.race([p, new Promise((_, rej) => (t = setTimeout(() => rej(new HttpError(504, 'timeout')), ms)))]).finally(() => clearTimeout(t))
+  return Promise.race([p, new Promise((_, rej) => (t = setTimeout(() => {
+    aborts.get(ctx?.signal)?.abort()
+    rej(new HttpError(504, 'timeout'))
+  }, ms)))]).finally(() => clearTimeout(t))
 }
 // RPC body → arguments: a JSON array, with __proto__/constructor/prototype keys dropped. Throws HttpError(400).
 export function parseArgs(raw) {
@@ -1828,7 +1844,8 @@ export async function callRpc({ fn, args, ctx, key, limit = 60, timeout = 10000 
     return { status: e.status || 400, body: { error: e.message } }
   }
   try {
-    const v = await withTimeout(Promise.resolve(fn(ctx, ...a)), timeout)
+    ctx.signal ||= newSignal() // the dev sidecar builds its own ctx
+    const v = await withTimeout(Promise.resolve(fn(ctx, ...a)), timeout, ctx)
     return { status: 200, body: v ?? null }
   } catch (e) {
     if (e && e.errors && typeof e.errors === 'object') return { status: 422, body: { error: e.message || 'Invalid input', errors: e.errors } }
@@ -1869,7 +1886,8 @@ export async function callForm({ module, raw, ctx, rules, key, limit = 60, timeo
   if (Object.keys(errors).length) return again(errors, '')
   let r
   try {
-    r = await withTimeout(pageLocale.run(locale, () => Promise.resolve(module[fn](ctx, values))), timeout)
+    ctx.signal ||= newSignal()
+    r = await withTimeout(pageLocale.run(locale, () => Promise.resolve(module[fn](ctx, values))), timeout, ctx)
   } catch (e) {
     if (e && e.errors && typeof e.errors === 'object') return again(e.errors, '')
     if (e instanceof HttpError && e.status >= 400 && e.status < 500) return again({}, e.message)

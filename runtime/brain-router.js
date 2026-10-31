@@ -176,16 +176,19 @@ export function router(o = {}) {
     return w
   }
 
+  let navFetch // the navigation in flight: a newer one aborts its fetch
   // → true when this navigation swapped the region (a newer one, a full load or a failure → falsy)
   async function load(url) {
     const my = ++seq
     if (stale) return hard(url)
+    navFetch?.abort()
+    const ctl = (navFetch = new AbortController())
     const slow = waiting(url, my)
     busy(my, 1)
     // the previous route's background requests (prefetch) are dropped by brain-data's queue (§41.4)
     G.dispatchEvent?.(new Event('brain:navigate'))
     try {
-      const r = (await ahead.take(url)) || (await fetch(url, { headers: { 'x-brain-nav': '1' } }))
+      const r = (await ahead.take(url)) || (await fetch(url, { headers: { 'x-brain-nav': '1' }, signal: ctl.signal }))
       if (my !== seq) return
       const hd = k => r.headers?.get?.(k), b = hd('x-brain-build')
       if (b && build() && b !== build()) return hard(url) // a new deploy: load it whole
