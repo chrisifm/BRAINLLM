@@ -105,6 +105,16 @@ fn blocks(src: &str, protected: &[Span]) -> Vec<(Block, usize, usize)> {
     out
 }
 
+/// A server entry point the runtime calls: its default export is the whole contract.
+fn is_handler(file: &str) -> bool {
+    let parts: Vec<&str> = file.split('/').collect();
+    match parts.as_slice() {
+        ["server", "routes" | "jobs", _, "handler.jsbrain"] => true,
+        ["server", "hooks", name] => name.ends_with(".jsbrain"),
+        _ => false,
+    }
+}
+
 impl Checker<'_> {
     pub(crate) fn structure(&mut self) {
         let c = self.c;
@@ -128,6 +138,26 @@ impl Checker<'_> {
                     format!("a `.jsbrain` module has one export; this one has {}", exports.len()),
                     "export a single object (`export default { a, b }`) or move the extra export to its own file",
                 );
+            }
+            // Routes, jobs and hooks run under `brain backend serve` and `brain jobs work`, which refuse both of these at boot.
+            if is_handler(&c.file) {
+                let start = Span { line: 1, col: 1, ..Span::default() };
+                if !c.script.iter().any(|s| matches!(s, Stmt::ExportDefault { .. })) {
+                    self.push(
+                        "B0772",
+                        start,
+                        "this handler has no default export, so `brain backend serve` and `brain jobs work` refuse to start",
+                        "add `export default async function handle(ctx) { ... }`",
+                    );
+                }
+                if !crate::scan_secrets(&c.src).is_empty() {
+                    self.push(
+                        "B0773",
+                        start,
+                        "this handler holds a secret-shaped literal, so `brain backend serve` and `brain jobs work` refuse to start",
+                        "move the value to `.brain_env` or the host environment and read it from `ctx.env`",
+                    );
+                }
             }
             return;
         }

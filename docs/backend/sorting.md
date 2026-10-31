@@ -26,3 +26,7 @@ Text sorts by its first 256 bytes in byte order (`COLLATE "C"`), independent of 
 numerically, not as strings.
 
 A field that is not declared answers `422` with the list of sortable fields.
+
+`created_at` is always indexed, and `brain backend migrate` indexes each declared sort in both directions, so a page
+reads only the rows it returns. Until an older app migrates, the direction without an index still works but sorts the
+table. A deep `offset` reads every skipped row: use a [cursor](pagination.md) past the first pages.

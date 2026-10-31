@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
-const runner=readFileSync(new URL('../../crates/brain-cli/src/templates/job-runner.mjs',import.meta.url),'utf8')
+const runner=readFileSync(new URL('../../crates/brain-cli/src/templates/job-runner.mjs',import.meta.url),'utf8')+'\n'+readFileSync(new URL('../../crates/brain-serve/src/key-backend.js',import.meta.url),'utf8')
 const jobId='11111111-2222-4333-8444-555555555555'
 function fixture(run) {
   const root=mkdtempSync(join(tmpdir(),'brain-job-runner-'))

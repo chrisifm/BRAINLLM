@@ -41,10 +41,13 @@ pub struct QueuePolicy {
     pub drain: u64,
     /// Workers per process, 1..8.
     pub concurrency: usize,
+    /// Identity of `ctx.backend` in the handler: absent or `key` uses BRAIN_JOBS_API_KEY, `system` BRAIN_JOBS_SYSTEM_KEY.
+    #[serde(rename = "runAs", skip_serializing_if = "Option::is_none")]
+    pub run_as: Option<String>,
 }
 impl Default for QueuePolicy {
     fn default() -> Self {
-        Self { priority: 0, attempts: 3, backoff: Backoff::default(), timeout: 60, lease: 90, drain: 0, concurrency: 2 }
+        Self { priority: 0, attempts: 3, backoff: Backoff::default(), timeout: 60, lease: 90, drain: 0, concurrency: 2, run_as: None }
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -86,6 +89,7 @@ impl QueuePolicy {
             ((1..=8).contains(&self.concurrency), "concurrency: 1..8"),
             (self.backoff.delay <= 86400 && self.backoff.max <= 86400, "backoff delay and max: 0..86400 seconds"),
             (self.backoff.kind == BackoffKind::Fixed || self.backoff.delay <= self.backoff.max, "backoff: delay must not exceed max"),
+            (self.run_as.as_deref().is_none_or(|r| matches!(r, "key" | "system")), "runAs: 'key' or 'system'"),
         ];
         match checks.iter().find(|(ok, _)| !ok) {
             Some((_, rule)) => Err(format!("invalid queue policy; fix: {rule}")),

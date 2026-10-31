@@ -15,6 +15,8 @@ mod caching;
 mod cluster;
 #[path = "data_queries.rs"]
 mod data_queries;
+#[path = "query_shape.rs"]
+mod query_shape;
 #[path = "domain_writes.rs"]
 mod domain_writes;
 #[path = "edge.rs"]
@@ -33,6 +35,8 @@ mod links;
 mod media;
 #[path = "row_policy.rs"]
 mod row_policy;
+#[path = "system_keys.rs"]
+mod system_keys;
 #[path = "routes.rs"]
 mod routes;
 #[path = "native_openapi.rs"]

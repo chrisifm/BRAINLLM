@@ -156,6 +156,12 @@ their headers, so large downloads are not cut by the deadline).
 `crates/brain-backend/tests/files.rs` runs the `orders`/`invoices` example above, an any-type `attachments` bucket and
 a public `banners` bucket against the disposable Postgres harness (`node scripts/backend-check.mjs --only-tests files`).
 
+## Keys and server code
+
+`/_brain/files` accepts a project API key with a `files.<bucket>` scope under the same rules as a session, except that
+a system key skips the bucket's roles. Jobs and routes use `ctx.backend.files(bucket)` ([job-backend.md](job-backend.md));
+server `load()` and server functions use it with `BRAIN_SERVICE_API_KEY` and answer `503` without that variable.
+
 ## Who reads a file
 
 - **`related`** evaluates the same rule as `GET /api/<resource>/<id>` on the linked record, through the same evaluator,

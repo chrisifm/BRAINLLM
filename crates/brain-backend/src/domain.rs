@@ -1033,7 +1033,7 @@ impl<'a> Engine<'a> {
             .ok_or_else(|| Failure::Missing(label.unwrap_or("id").into()))?;
         match authority {
             Authority::Roles => {
-                let mut allowed = action.roles.iter().any(|role| role == &self.user.role || role == "owner" && owns(&existing, self.user));
+                let mut allowed = crate::api_keys::system_active() || action.roles.iter().any(|role| role == &self.user.role || role == "owner" && owns(&existing, self.user));
                 if !allowed {
                     allowed = self.owns_through(tx, r, id, &action.roles).await.map_err(located(&r.name, label))?;
                 }
@@ -1041,7 +1041,7 @@ impl<'a> Engine<'a> {
                     return Err(Failure::Denied { resource: r.name.clone(), id, label: label.unwrap_or("id").into() });
                 }
             }
-            Authority::Operation { owned } if owned && !owns(&existing, self.user) => {
+            Authority::Operation { owned } if owned && !owns(&existing, self.user) && !crate::api_keys::system_active() => {
                 return Err(Failure::Denied { resource: r.name.clone(), id, label: label.unwrap_or("id").into() });
             }
             Authority::Operation { .. } => {}
@@ -1183,7 +1183,7 @@ impl<'a> Engine<'a> {
     /// `POST /_brain/operations/<name>`: every step in one transaction; any failure rolls all of them back.
     pub async fn operation(&mut self, tx: &mut Tx, name: &str, input: &Value) -> Result<Value, Failure> {
         let op = self.domain.operations.get(name).ok_or_else(|| Failure::Missing("operation".into()))?;
-        if !op.roles.iter().any(|role| role == &self.user.role) {
+        if !crate::api_keys::system_active() && !op.roles.iter().any(|role| role == &self.user.role) {
             return Err(Failure::Forbidden);
         }
         let input = Self::validate_input(&op.input, input, "input")?;

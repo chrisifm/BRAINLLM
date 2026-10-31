@@ -35,7 +35,8 @@ GET /api/products?category=tools&aggregate=totals,by_category&limit=1
 
 - Decimal sums and averages are exact strings (`numeric`), never floats; an average has the field's scale plus two.
 - `int` `min`/`max` are numbers; other values keep their stored string form. An empty set gives `null` values.
-- Grouped aggregates return at most 100 groups, largest first.
+- Grouped aggregates return at most 100 groups, largest first; `min`/`max`/`sum`/`avg` are per group. When a group was cut,
+  the response lists that aggregate in `aggregates_truncated`.
 - `sum`/`avg` take `int` or `decimal`; `min`/`max` also take `date` and `datetime`; `group` takes a filterable field.
   Fields with restricted [visibility](visibility.md) are rejected at load time.
 

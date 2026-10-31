@@ -17,7 +17,7 @@ pub const GROUP_LIMIT: i64 = 100;
 /// Text comparisons and text indexes use the first 256 characters; equality is rechecked on the full value.
 const TEXT_KEY: usize = 256;
 pub const OPS: &[&str] = &["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "prefix", "iprefix", "exists", "has"];
-const RESERVED: &[&str] = &["search", "limit", "offset", "sort", "include", "cursor", "after", "aggregate", "count"];
+const RESERVED: &[&str] = &["search", "limit", "offset", "sort", "include", "cursor", "after", "aggregate", "count", "fields", "owner"];
 const TIMESTAMPS: &[&str] = &["created_at", "updated_at"];
 /// Typo matches kept for one search; reaching it marks `total` approximate.
 const FUZZY_CANDIDATES: i64 = 500;
@@ -42,6 +42,9 @@ pub struct QueryContract {
     /// Order applied when the request has no `sort` (JSON:API style, `-` = descending). Default `-created_at`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub default_sort: Vec<String>,
+    /// Named alternatives: `?<name>.<field>[op]=value` for each branch sent; at least one must hold (`docs/backend/filters.md`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub or: BTreeMap<String, BTreeMap<String, Vec<String>>>,
     /// `ref:<resource>` fields whose records may be attached with `?include=`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub include: Vec<String>,
@@ -178,6 +181,15 @@ fn expr(kind: Kind, field: &str) -> String {
         Kind::Stamp => field.to_string(),
     }
 }
+/// One `ORDER BY` term. Timestamps are `NOT NULL`, so naming a null position changes no order, yet Postgres only matches an
+/// index whose null position is the same: `created_at DESC NULLS LAST` sorted the whole table on every plain list.
+fn order_term(k: &SortKey) -> String {
+    let direction = if k.desc { "DESC" } else { "ASC" };
+    if k.kind == Kind::Stamp {
+        return format!("{} {direction}", expr(k.kind, &k.field));
+    }
+    format!("{} {direction} NULLS {}", expr(k.kind, &k.field), if k.nulls_first { "FIRST" } else { "LAST" })
+}
 /// Canonical text of a sort key (cursor material). Timestamps keep microseconds so keyset comparison is exact.
 fn key_text(kind: Kind, field: &str) -> String {
     match kind {
@@ -205,6 +217,32 @@ pub fn validate(r: &Resource) -> Result<(), String> {
     let at = |what: String| format!("{}: query {what}", r.name);
     if q.filter.len() > 32 || q.sort.len() > 16 || q.default_sort.len() > 4 || q.include.len() > 8 || q.aggregate.len() > 8 || q.count.len() > 8 {
         return Err(at("declares too many entries; fix: at most 32 filters, 16 sort fields, 4 default sort keys, 8 includes, 8 aggregates and 8 counts".into()));
+    }
+    if q.or.len() > 4 {
+        return Err(at("declares too many or groups; fix: at most 4".into()));
+    }
+    for (group, branches) in &q.or {
+        if !crate::contract::identifier(group) || RESERVED.contains(&group.as_str()) || group == "owner" || q.filter.contains_key(group) || r.fields.contains_key(group) {
+            return Err(at(format!("or group `{group}` needs its own name; fix: use an identifier that is not a field, a filter or a reserved parameter")));
+        }
+        if !(2..=4).contains(&branches.len()) {
+            return Err(at(format!("or group `{group}` needs 2..4 fields; fix: list the alternatives, or use a plain filter for one")));
+        }
+        for (field, ops) in branches {
+            let Some(kind) = kind(r, field) else {
+                return Err(at(format!("or group `{group}`: `{field}` is not a declared field of this resource of a filterable type; fix: use a local field (related fields cannot be alternatives)")));
+            };
+            if restricted(r, field) {
+                return Err(at(format!("or group `{group}` names `{field}`, which has restricted visibility; fix: remove it or make the field public")));
+            }
+            let unique: BTreeSet<_> = ops.iter().collect();
+            if ops.is_empty() || unique.len() != ops.len() {
+                return Err(at(format!("or group `{group}`: `{field}` needs distinct operators; allowed: {}", kind.ops().join(", "))));
+            }
+            if let Some(op) = ops.iter().find(|op| !kind.ops().contains(&op.as_str())) {
+                return Err(at(format!("or group `{group}`: `{field}` does not support `{op}`; allowed: {}", kind.ops().join(", "))));
+            }
+        }
     }
     for (key, ops) in &q.filter {
         let unique: BTreeSet<_> = ops.iter().collect();
@@ -338,6 +376,16 @@ pub(crate) fn indexes(r: &Resource) -> Vec<(String, String)> {
         let definition = format!("{method}:{expression}");
         out.insert(r.object_name("_brain_ix_", &definition), format!("USING {method} (({expression}))"));
     };
+    // A plain index read backwards puts nulls first, so it cannot serve the other direction of a declared null position.
+    let mut opposite = BTreeMap::new();
+    for entry in &r.query.sort {
+        let field = entry.field();
+        if let Some(k) = kind(r, field).filter(|k| !matches!(k, Kind::Stamp | Kind::Ref | Kind::List)) {
+            let order = if entry.nulls_first() { "ASC NULLS FIRST" } else { "DESC NULLS LAST" };
+            let expression = expr(k, field);
+            opposite.insert(r.object_name("_brain_ix_", &format!("btree:{expression}:{order}")), format!("USING btree (({expression}) {order})"));
+        }
+    }
     let mut fields: Vec<(&str, bool, bool)> = r
         .query
         .filter
@@ -346,6 +394,8 @@ pub(crate) fn indexes(r: &Resource) -> Vec<(String, String)> {
         .map(|(k, ops)| (k.as_str(), ops.iter().any(|o| o == "iprefix"), ops.iter().any(|o| o == "exists")))
         .collect();
     fields.extend(r.query.sort.iter().map(|e| (e.field(), false, false)));
+    // Each alternative of an `or` group has its own index, so the planner can combine them instead of scanning.
+    fields.extend(r.query.or.values().flatten().map(|(k, ops)| (k.as_str(), ops.iter().any(|o| o == "iprefix"), ops.iter().any(|o| o == "exists"))));
     for (field, iprefix, _) in fields {
         match kind(r, field) {
             Some(Kind::Stamp | Kind::Ref) | None => {}
@@ -358,9 +408,10 @@ pub(crate) fn indexes(r: &Resource) -> Vec<(String, String)> {
             }
         }
     }
-    if r.query.sort.iter().any(|e| e.field() == "updated_at") || r.query.filter.contains_key("updated_at") {
+    if r.query.sort.iter().any(|e| e.field() == "updated_at") || r.query.filter.contains_key("updated_at") || r.query.or.values().any(|b| b.contains_key("updated_at")) {
         add("btree", "updated_at".into());
     }
+    out.extend(opposite);
     out.into_iter().collect()
 }
 pub(crate) async fn install_indexes(tx: &mut sqlx::Transaction<'_, Postgres>, r: &Resource) -> Result<(), String> {
@@ -410,6 +461,30 @@ pub struct ListRequest {
     pub include: Vec<String>,
     aggregate: Vec<String>,
     count: Vec<String>,
+    /// `?fields=`: the `data` keys each item keeps. Id, timestamps, `included` and `counts` always stay.
+    fields: Option<BTreeSet<String>>,
+    /// Sent branches of each declared `or` group.
+    alternatives: BTreeMap<String, Vec<Filter>>,
+    /// `?owner=me`: limit to the reader's own rows. The id always comes from the authenticated session.
+    owner_me: bool,
+}
+impl ListRequest {
+    /// Narrows items to `?fields=`. It runs after projection and includes, so it can only remove what the reader
+    /// already received, and includes may still follow a reference it drops.
+    pub fn keep_fields(&self, items: &mut [Value]) {
+        let Some(fields) = &self.fields else { return };
+        for data in items.iter_mut().filter_map(|item| item.get_mut("data").and_then(Value::as_object_mut)) {
+            data.retain(|name, _| fields.contains(name));
+        }
+    }
+}
+/// Whether `?fields=` may name a field. Fields no reader receives answer like undeclared ones, so a request learns nothing.
+fn selectable(r: &Resource, field: &str) -> bool {
+    r.fields.get(field).is_some_and(|f| match f.access.as_deref() {
+        Some("writeonly") => false,
+        Some("private") => crate::api_keys::system_active(),
+        _ => true,
+    })
 }
 pub type Problems = BTreeMap<String, String>;
 
@@ -531,12 +606,31 @@ pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(Str
                 None => bad("Invalid cursor; use next_cursor from the previous page unchanged"),
             },
             "include" => {
+                if split(raw).len() > crate::relations::MAX_INCLUDE_PATHS {
+                    bad(&format!("include takes at most {} paths", crate::relations::MAX_INCLUDE_PATHS));
+                }
                 for name in split(raw) {
-                    if !r.query.include.iter().any(|x| x == name) {
-                        bad(&format!("`{name}` is not includable; declared: {}", r.query.include.join(", ")));
+                    if !crate::relations::include_path_declared(r, resources, name) {
+                        bad(&format!("`{name}` is not includable (at most {} levels, each declared by its resource); declared: {}", crate::relations::MAX_INCLUDE_DEPTH, r.query.include.join(", ")));
                     }
                 }
                 req.include = split(raw).into_iter().map(str::to_string).collect();
+            }
+            // A filter declared on a field of this name keeps working as before.
+            "fields" if !r.query.filter.contains_key("fields") => {
+                let names: BTreeSet<String> = split(raw).into_iter().map(str::to_string).collect();
+                if names.len() > 64 {
+                    bad("fields takes at most 64 names");
+                }
+                if let Some(name) = names.iter().find(|name| !selectable(r, name)) {
+                    let declared: Vec<&str> = r.fields.keys().map(String::as_str).filter(|f| selectable(r, f)).collect();
+                    bad(&format!("`{name}` cannot be selected; declared: {}", declared.join(", ")));
+                }
+                req.fields = Some(names);
+            }
+            // A filter declared on a field of this name keeps working as before.
+            "owner" if !r.query.filter.contains_key("owner") => {
+                if raw == "me" { req.owner_me = true } else { bad("owner accepts only `me`; the server resolves it from the session") }
             }
             "aggregate" | "count" => {
                 let names: Vec<String> = split(raw).into_iter().map(str::to_string).collect();
@@ -557,6 +651,23 @@ pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(Str
                     },
                     None => (key.as_str(), "eq"),
                 };
+                if let Some((group, name)) = field.split_once('.').filter(|(group, _)| r.query.or.contains_key(*group)) {
+                    let Some(k) = r.query.or[group].get(name).filter(|ops| ops.iter().any(|o| o == op)).and_then(|_| kind(r, name)) else {
+                        bad(&format!("`{name}` with `{op}` is not an alternative of `{group}`; declared: {}", r.query.or[group].keys().cloned().collect::<Vec<_>>().join(", ")));
+                        continue;
+                    };
+                    let raws = if matches!(op, "in" | "between") { split(raw) } else { vec![raw.as_str()] };
+                    if op == "in" && !(1..=MAX_IN).contains(&raws.len()) || op == "between" && raws.len() != 2 {
+                        bad(if op == "in" { "in takes 1..50 comma-separated values" } else { "between takes two comma-separated values: low,high" });
+                        continue;
+                    }
+                    let values: Option<Vec<Operand>> = raws.iter().map(|v| operand(r, name, k, op, v)).collect();
+                    match values {
+                        Some(values) => req.alternatives.entry(group.to_string()).or_default().push(Filter { via: None, field: name.to_string(), kind: k, op: op.to_string(), values }),
+                        None => bad(&format!("Invalid value for `{field}` ({op}); expected {}", expected(r, name, k))),
+                    }
+                    continue;
+                }
                 let Some(ops) = r.query.filter.get(field).filter(|ops| ops.iter().any(|o| o == op)) else {
                     let declared = r.query.filter.get(field).map(|ops| ops.join(", "));
                     bad(&match declared {
@@ -592,7 +703,7 @@ pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(Str
             }
         }
     }
-    if req.filters.len() > MAX_FILTERS {
+    if req.filters.len() + req.alternatives.values().map(Vec::len).sum::<usize>() > MAX_FILTERS {
         problems.insert("query".into(), format!("At most {MAX_FILTERS} filters per request"));
     }
     if req.cursor.is_some() && req.offset != 0 {
@@ -676,6 +787,8 @@ enum Matches {
 pub enum ListError {
     Invalid(Problems),
     Denied(String),
+    /// `owner=me` from a request without a session or key.
+    SignInRequired,
     Database { error: sqlx::Error, at: &'static std::panic::Location<'static>, branch: &'static str },
 }
 impl From<sqlx::Error> for ListError {
@@ -889,11 +1002,26 @@ struct Ctx<'a> {
     related: BTreeMap<String, Scope>,
     req: &'a ListRequest,
     matches: Matches,
+    /// The session's user when the request says `owner=me`.
+    owner: Option<Uuid>,
 }
 impl Ctx<'_> {
     /// Authorization scope and declared filters over the alias-free columns of the current table.
     fn push_scope(&self, q: &mut QueryBuilder<Postgres>) {
         self.scope.push(q, self.r, self.resources);
+        if let Some(owner) = self.owner {
+            q.push(" AND owner=").push_bind(owner);
+        }
+        for branches in self.req.alternatives.values() {
+            q.push(" AND (");
+            for (i, f) in branches.iter().enumerate() {
+                if i > 0 {
+                    q.push(" OR ");
+                }
+                push_predicate(q, f);
+            }
+            q.push(")");
+        }
         for f in &self.req.filters {
             q.push(" AND ");
             match &f.via {
@@ -983,6 +1111,11 @@ async fn resolve_search(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &mut Ctx<
         ctx.matches = Matches::Nothing;
         return Ok((false, false));
     }
+    // Punctuation has no indexable term or trigram: a prefix match could only scan every row, twice, to find next to nothing.
+    if !has_term && text.chars().count() < 3 {
+        ctx.matches = Matches::Nothing;
+        return Ok((false, false));
+    }
     if text.chars().count() < 3 {
         ctx.matches = Matches::Prefix;
         return Ok((false, false));
@@ -1027,12 +1160,16 @@ pub async fn list(
             related.insert(target.clone(), s);
         }
     }
-    let mut ctx = Ctx { r, resources, scope: &scope, related, req, matches: Matches::All };
+    if req.owner_me && viewer.id.is_none() {
+        return Err(ListError::SignInRequired);
+    }
+    let owner = if req.owner_me { viewer.id } else { None };
+    let mut ctx = Ctx { r, resources, scope: &scope, related, req, matches: Matches::All, owner };
     let keys = keys(r, req);
     let sig = signature(&keys);
     let ranked = req.sort.is_none() && search_ranked(r, req);
     let text = req.search.trim().to_string();
-    let mut tx = pool.begin().await?;
+    let mut tx = crate::db::acquiring(pool.begin()).await?;
     let timeout = if text.is_empty() { "SET LOCAL statement_timeout='5s';" } else { "SET LOCAL statement_timeout='1s';" };
     sqlx::raw_sql(sqlx::AssertSqlSafe(format!("{timeout} SET LOCAL lock_timeout='500ms'; SET LOCAL pg_trgm.word_similarity_threshold='0.45';"))).execute(&mut *tx).await?;
     let (mut degraded, mut approximate) = (false, false);
@@ -1091,7 +1228,7 @@ pub async fn list(
         q.push("id");
     } else {
         for k in &keys {
-            q.push(format!("{} {} NULLS {},", expr(k.kind, &k.field), if k.desc { "DESC" } else { "ASC" }, if k.nulls_first { "FIRST" } else { "LAST" }));
+            q.push(format!("{},", order_term(k)));
         }
         q.push(if keys.last().is_some_and(|k| k.desc) { "id DESC" } else { "id ASC" });
     }
@@ -1127,9 +1264,14 @@ pub async fn list(
     let total: i64 = q.build_query_scalar().fetch_one(&mut *tx).await?;
 
     let mut aggregates = Map::new();
+    let mut truncated = Vec::new();
     for name in &req.aggregate {
         let a = &r.query.aggregate[name];
-        aggregates.insert(name.clone(), aggregate(&mut tx, &ctx, a).await?);
+        let (value, cut) = aggregate(&mut tx, &ctx, a).await?;
+        aggregates.insert(name.clone(), value);
+        if cut {
+            truncated.push(name.clone());
+        }
     }
     tx.commit().await?;
 
@@ -1142,6 +1284,10 @@ pub async fn list(
     }
     if !aggregates.is_empty() {
         out["aggregates"] = Value::Object(aggregates);
+    }
+    if !truncated.is_empty() {
+        // Named aggregates that hit GROUP_LIMIT: their largest groups are present, the rest are not.
+        out["aggregates_truncated"] = json!(truncated);
     }
     if degraded {
         out["degraded"] = json!(true);
@@ -1187,7 +1333,7 @@ fn push_keyset(q: &mut QueryBuilder<Postgres>, keys: &[SortKey], values: &[Optio
                 Some(v) => {
                     q.push(format!(" AND ({e}{}", if k.desc { "<" } else { ">" }));
                     push_key(q, k.kind, v);
-                    if !k.nulls_first {
+                    if !k.nulls_first && k.kind != Kind::Stamp {
                         q.push(format!(" OR {e} IS NULL"));
                     }
                     q.push(")");
@@ -1217,7 +1363,8 @@ fn relational_read(r: &Resource, viewer: Viewer<'_>) -> Option<Scope> {
     owner_visible.then(|| crate::ownership::relational_read(r, viewer)).flatten()
 }
 
-async fn aggregate(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, a: &Aggregate) -> Result<Value, sqlx::Error> {
+/// One aggregate and whether its groups were cut at [`GROUP_LIMIT`].
+async fn aggregate(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, a: &Aggregate) -> Result<(Value, bool), sqlx::Error> {
     let r = ctx.r;
     let mut columns: Vec<(String, String, String)> = Vec::new();
     for f in &a.sum {
@@ -1254,9 +1401,11 @@ async fn aggregate(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, a: &
     q.push(format!(" FROM _brain_res_{} t WHERE ", r.name));
     ctx.push_where(&mut q);
     if let Some((_, e)) = &group {
-        q.push(format!(" GROUP BY {e} ORDER BY count(*) DESC,{e} NULLS LAST LIMIT {GROUP_LIMIT}"));
+        q.push(format!(" GROUP BY {e} ORDER BY count(*) DESC,{e} NULLS LAST LIMIT {}", GROUP_LIMIT + 1));
     }
-    let rows = q.build().fetch_all(&mut **tx).await?;
+    let mut rows = q.build().fetch_all(&mut **tx).await?;
+    let cut = group.is_some() && rows.len() as i64 > GROUP_LIMIT;
+    rows.truncate(GROUP_LIMIT as usize);
     let render = |row: &sqlx::postgres::PgRow| {
         let mut out = Map::new();
         out.insert("count".into(), json!(row.get::<i64, _>("_n")));
@@ -1272,8 +1421,8 @@ async fn aggregate(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, a: &
         out
     };
     match group {
-        None => Ok(rows.first().map(|row| Value::Object(render(row))).unwrap_or(json!({"count": 0}))),
-        Some((k, _)) => Ok(Value::Array(
+        None => Ok((rows.first().map(|row| Value::Object(render(row))).unwrap_or(json!({"count": 0})), false)),
+        Some((k, _)) => Ok((Value::Array(
             rows.iter()
                 .map(|row| {
                     let mut out = render(row);
@@ -1288,7 +1437,7 @@ async fn aggregate(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, a: &
                     Value::Object(out)
                 })
                 .collect(),
-        )),
+        ), cut)),
     }
 }
 
@@ -1301,6 +1450,7 @@ pub fn openapi_parameters(r: &Resource) -> Vec<Value> {
         json!({"name":"cursor","in":"query","description":"next_cursor of the previous page (keyset pagination)","schema":{"type":"string"}}),
         json!({"name":"after","in":"query","description":"Alias of cursor","schema":{"type":"string"}}),
         json!({"name":"sort","in":"query","description":format!("Comma-separated, '-' for descending: {}", sort_names(r)),"schema":{"type":"string"}}),
+        json!({"name":"fields","in":"query","description":"Comma-separated data fields each item keeps; id and timestamps always stay","schema":{"type":"string"}}),
     ];
     for (field, ops) in &r.query.filter {
         for op in ops {
@@ -1308,9 +1458,18 @@ pub fn openapi_parameters(r: &Resource) -> Vec<Value> {
             params.push(json!({"name": name, "in":"query", "schema":{"type":"string"}}));
         }
     }
+    params.push(json!({"name":"owner","in":"query","description":"`me` limits the list to the reader's own rows; requires a session or key","schema":{"type":"string","enum":["me"]}}));
+    for (group, branches) in &r.query.or {
+        for (field, ops) in branches {
+            for op in ops {
+                let name = if op == "eq" { format!("{group}.{field}") } else { format!("{group}.{field}[{op}]") };
+                params.push(json!({"name": name, "in":"query", "description": format!("Alternative of `{group}`: at least one sent branch must hold"), "schema":{"type":"string"}}));
+            }
+        }
+    }
     for (key, list) in [("include", r.query.include.clone()), ("aggregate", r.query.aggregate.keys().cloned().collect()), ("count", r.query.count.keys().cloned().collect())] {
         if !list.is_empty() {
-            params.push(json!({"name": key, "in":"query", "description": format!("Comma-separated: {}", list.join(", ")), "schema":{"type":"string"}}));
+            params.push(json!({"name": key, "in":"query", "description": if key == "include" { format!("Comma-separated: {}. Dotted paths follow references up to {} levels", list.join(", "), crate::relations::MAX_INCLUDE_DEPTH) } else { format!("Comma-separated: {}", list.join(", ")) }, "schema":{"type":"string"}}));
         }
     }
     params
@@ -1318,6 +1477,13 @@ pub fn openapi_parameters(r: &Resource) -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn timestamps_order_without_a_null_position_so_their_index_serves_the_list() {
+        let key = |kind, field: &str, nulls_first| SortKey { field: field.into(), kind, desc: true, nulls_first };
+        assert_eq!(order_term(&key(Kind::Stamp, "created_at", false)), "created_at DESC");
+        assert_eq!(order_term(&key(Kind::Stamp, "updated_at", true)), "updated_at DESC");
+        assert_eq!(order_term(&key(Kind::Int, "stock", false)), "(data->'stock')::numeric DESC NULLS LAST");
+    }
     use super::*;
     #[test]
     fn relative_times_bind_fixed_intervals() {

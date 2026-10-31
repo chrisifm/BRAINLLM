@@ -141,6 +141,7 @@ COMPILER assigns the next free code there in the same change that emits it, then
   code but missing (warning, edit adds `KEY=`, or `KEY?=` when the file reads it with a default or a condition) · B0722 key never used (info) · B0723 `PUBLIC_*` value shaped like a
   secret (error) · B0724 malformed line or section (error). Values never appear in any diagnostic. `KEY?=` (2026-10-31) declares an optional key: the winning line of an environment decides, an empty one is omitted from the program's environment and a `PUBLIC_*` one compiles to `undefined`. B0727 `.brain_env.example` differs from the union of `.brain_env` and the keys the code reads, compared by key, block and optional flag: doctor only reports it; `brain fix` and `brain doctor --fix` write it.
 - B076x backend settings (2026-10-31, `crates/brain-cli/src/startup_config.rs`): the validators of `brain backend serve`, also run per environment by `brain check`/`brain doctor` as warnings on values present in `.brain_env` and the process environment. B0760 mail keys and sender (`sender@domain` or `Name <sender@domain>`) · B0761 object storage · B0762 `DATABASE_URL` (missing, malformed, unreachable, unverified TLS in production; the `BDB_*` tokens stay in the message) · B0763 pool sizes, process count, port · B0764 `PUBLIC_SITE_URL` unusable in mail links. Serve stops on the fatal ones before its first database connection; messages name the variable, never its value.
+- B0771 anonymous API catalog (warning, `backend.rs` `anonymous_catalog_warning`, printed at `backend serve`, silent for an explicit `--env development`) · B0772 handler without a default export (warning in `check`, `structure.rs`; refused at boot) · B0773 secret-shaped literal in a route, job or hook handler (error; `read_source_limit` is the boot refusal)
 - B0784 trusted proxy on public addresses (warning, 2026-10-31, `crates/brain-cli/src/platform_config.rs` `proxy_findings`, fatal for `brain backend serve --env production`; `trustPublicProxy` declares a CDN).
 - B0787 resource contract changed (error, 2026-10-31, `crates/brain-backend/src/contract_review.rs`, `db::migrate_approving`): `migrate` and `verify` refuse a recorded contract that differs from the code until `brain backend approve-contract` records it.
 - B0786 own session with a native backend (warning, 2026-10-31, `crates/brain-cli/src/env.rs` `own_session`): `ctx.session.set` in a file that does not branch on the backend, in an app whose `.brain_env` sets `BRAIN_BACKEND_URL` without `BRAIN_BACKEND_SESSION=app`.
@@ -2047,3 +2048,13 @@ only on request, `impact::measure` against `budget.viewKB`. Factors, points and 
 sources give the same report; [INTELLIGENCE.md](INTELLIGENCE.md#measured-edit-risk) lists them. `preflight` embeds the
 static score (no build). The score orders review effort and names `requiredChecks`; it never claims runtime safety.
 Atomic changesets, claims and the multi-agent view that consume it are planned for 0.6.1.
+
+## 48. System identity and key-backed files (2026-10-31)
+
+A system key is a row flag (`_brain_api_keys.system`, migration 0019) settable only through `api_keys::create_system`,
+which the CLI reaches. `http_api_keys` runs the request inside the `api_keys::as_system` task-local; the bypass reads
+`system_active()` at the four central checks (`Policy::allows`, `ownership::scope`, `visibility`, `domain` roles plus
+`files::role_allows`), so no handler can forget it and work spawned on another task (socket fan-out) does not inherit
+it. Runtime hooks run in another process, so they see no bypass. Scopes remain the boundary: wildcard resources are
+refused at creation. `crates/brain-serve/src/key-backend.js` is the single key client, concatenated into both the job
+runner and the route sidecar, which delete every key variable from `process.env` before importing user code.

@@ -199,6 +199,9 @@ impl Policy {
             "delete" => &self.delete,
             _ => return false,
         };
+        if crate::api_keys::system_active() {
+            return true;
+        }
         // A conditioned read grant depends on the row: it never allows by itself (see `ownership::scope`).
         grants.iter().filter(|r| operation != "read" || !self.read_where.contains_key(*r)).any(|r| {
             r == "public" && operation == "read"

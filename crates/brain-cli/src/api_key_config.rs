@@ -57,14 +57,14 @@ pub fn metadata(root: &Path) -> Result<Value, String> {
             "perKeyPerMinute": config.per_key_per_minute,
             "format": "bk_live_<12 hex prefix>_<64 hex secret>",
             "headers": ["X-API-Key", "Authorization: Bearer"],
-            "routes": "/api/<resource>[/<id>] only",
-            "scopes": "resource:read|write|* (resource may be *); never exceeds the owner's role",
+            "routes": "/api/<resource>[/<id>] and /_brain/files/<bucket> with a files.<bucket> scope",
+            "scopes": "resource:read|write|* (resource may be *); files.<bucket>:read|write|*; never exceeds the owner's role except for a system key",
             "docs": "docs/backend/api-keys.md"
         }),
     })
 }
 
-const USAGE: &str = "usage: brain backend keys create --user <uuid> --name <name> --scopes posts:read,posts:write [--expires-days N] [--daily N] [--monthly N] | list [--user <uuid>] | revoke <prefix|id> | rotate <prefix|id> | events <prefix|id> [--limit 50] [--status 200] [--resource posts] [--from ISO] [--to ISO] [--before ID] | summary <prefix|id> [--days 7] [--env development]";
+const USAGE: &str = "usage: brain backend keys create --user <uuid> --name <name> --scopes posts:read,posts:write [--expires-days N] [--daily N] [--monthly N] [--system] | list [--user <uuid>] | revoke <prefix|id> | rotate <prefix|id> | events <prefix|id> [--limit 50] [--status 200] [--resource posts] [--from ISO] [--to ISO] [--before ID] | summary <prefix|id> [--days 7] [--env development]";
 
 fn number(args: &[String], flag: &str) -> Result<Option<i64>, String> {
     crate::flag(args, flag)
@@ -119,7 +119,8 @@ pub fn run(root: &Path, args: &[String], url: String) -> Result<(), String> {
                     daily_quota: number(args, "--daily")?,
                     monthly_quota: number(args, "--monthly")?,
                 };
-                let (key, secret) = keys.create(owner, key).await?.map_err(str::to_string)?;
+                let issued = if args.iter().any(|a| a == "--system") { keys.create_system(owner, key).await? } else { keys.create(owner, key).await? };
+                let (key, secret) = issued.map_err(str::to_string)?;
                 json!({"schemaVersion":1,"key":key,"secret":secret,"note":"The secret is shown only once; store it in a secret manager"})
             }
             "list" => {
@@ -135,7 +136,7 @@ pub fn run(root: &Path, args: &[String], url: String) -> Result<(), String> {
             "rotate" => {
                 let key = find(reference()?.clone()).await?;
                 let (key, secret) = keys
-                    .rotate(id_of(&key)?, None)
+                    .rotate_operator(id_of(&key)?)
                     .await?
                     .ok_or("Only an active, unexpired key can be rotated")?;
                 json!({"schemaVersion":1,"key":key,"secret":secret,"note":"The secret is shown only once; the previous key is revoked"})

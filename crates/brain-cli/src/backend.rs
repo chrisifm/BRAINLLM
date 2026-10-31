@@ -197,7 +197,7 @@ pub fn contracts(root: &Path, kind: &str) -> Result<Vec<Resource>, String> {
         let query_path = e.path().join("query.jsbrain");
         let query = if kind == "resources" && query_path.is_file() {
             serde_json::from_value(read_contract(root, &query_path)?).map_err(|_| {
-                format!("server/{kind}/{name}/query.jsbrain must export {{ filter: {{ field: ['eq', ...] }}, sort: [field | {{ field, nulls }}], default_sort: ['-field'], include: [ref], aggregate: {{ name: {{ group, sum, avg, min, max }} }}, count: {{ name: {{ resource, field, where }} }}, search: {{ language, weights: {{ field: 'A' }} }} }}")
+                format!("server/{kind}/{name}/query.jsbrain must export {{ filter: {{ field: ['eq', ...] }}, sort: [field | {{ field, nulls }}], default_sort: ['-field'], include: [ref], or: {{ name: {{ field: ['eq'] }} }}, aggregate: {{ name: {{ group, sum, avg, min, max }} }}, count: {{ name: {{ resource, field, where }} }}, search: {{ language, weights: {{ field: 'A' }} }} }}")
             })?
         } else {
             Default::default()
@@ -708,6 +708,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let config=brain_backend::Config{api_keys:crate::api_key_config::load(&root)?,sockets:sockets.native_config()?,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,resources,jobs,uploads:root.join(".brain/uploads"),origins:sockets.http_origins,production:environment=="production"};
         brain_backend::analytics::configure(analytics_settings(&root)?)?;
         eprintln!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
+        if let Some((msg,fix))=anonymous_catalog_warning(args,&environment){eprintln!("{}",json!({"schemaVersion":1,"event":"backend-warning","code":"B0771","msg":msg,"fix":fix}));}
         let mut platform=crate::platform_config::load(&root,&config.resources,&config.roles)?;
         for bucket in platform.buckets.iter().filter(|b|b.open_by_omission()){eprintln!("{}",json!({"schemaVersion":1,"event":"backend-warning","code":"B0770","file":format!("server/files/{}.jsbrain",bucket.name),"message":"this bucket accepts every file type because it does not declare types; list them or say types: '*'"}));}
         platform.routes=crate::route_executor::contracts(&root,&environment)?;
@@ -972,8 +973,27 @@ impl Drop for Scratch {
 }
 fn worker_module(root: &Path, name: &str) -> Result<(Scratch, PathBuf), String> {
     let rel = format!("server/jobs/{name}/handler.jsbrain");
-    server_module(root, &rel)
+    // The same refusals as a route handler, before any job is claimed: otherwise every attempt fails and retries.
+    let source = crate::map::read_source_limit(root, &rel, 256 * 1024).map_err(|reason| format!("{rel}: handler source refused: {reason}; run brain check"))?;
+    let exports_default = brain_parse::parse(&source, Path::new(&rel)).is_ok_and(|c| c.script.iter().any(|s| matches!(s, brain_parse::ast::Stmt::ExportDefault { .. })));
+    let module = server_module(root, &rel)?;
+    if !exports_default {
+        return Err(format!("B0772 {rel}: this handler has no default export; fix: add `export default async function handle(ctx) {{ ... }}`"));
+    }
+    Ok(module)
 }
+/// B0771: the API catalog answers anyone unless the process runs with `--env production`. A plain development run says
+/// so through `--env development` and stays quiet; a serve with no `--env`, or any other name, is usually a deployment.
+fn anonymous_catalog_warning(args: &[String], environment: &str) -> Option<(String, String)> {
+    let chosen = args.iter().any(|arg| arg == "--env" || arg.starts_with("--env="));
+    (environment != "production" && (!chosen || environment != "development")).then(|| {
+        (
+            format!("`/_brain/api` lists every resource, field and route to anonymous callers because this process runs with environment `{environment}`"),
+            "start deployed servers with `brain backend serve --env production`, which limits the catalog to admins and turns on the other production defaults".to_string(),
+        )
+    })
+}
+
 pub(crate) fn server_module(root: &Path, rel: &str) -> Result<(Scratch, PathBuf), String> {
     let mut files = BTreeMap::new();
     let mut written = BTreeMap::new();
@@ -1306,7 +1326,11 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
     } else {
         None
     };
-    let env: Vec<_> = crate::env::select(&root, &environment);
+    let mut env: Vec<_> = crate::env::select(&root, &environment);
+    env.retain(|(name, _)| name != "BRAIN_JOB_RUN_AS");
+    if policy.as_ref().is_some_and(|p| p.run_as.as_deref() == Some("system")) {
+        env.push(("BRAIN_JOB_RUN_AS".to_string(), "system".to_string()));
+    }
     let _ = snapshot;
     runtime()?.block_on(async {
         let production = environment == "production";
@@ -1499,7 +1523,7 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
                             .unwrap_or_default();
                         let job_id = job.id.to_string();
                         let queue_name = job.queue.clone();
-                        let runner = include_str!("templates/job-runner.mjs");
+                        let runner = concat!(include_str!("templates/job-runner.mjs"), "\n", include_str!("../../brain-serve/src/key-backend.js"));
                         let mut cmd = tokio::process::Command::new("node");
                         cmd.args([
                             "--enable-source-maps",
@@ -2295,6 +2319,14 @@ pub fn media(args: &[String]) -> Result<(), String> {
 
 #[cfg(test)]
 mod failure_log_tests {
+    #[test]
+    fn anonymous_catalog_warns_unless_the_environment_is_chosen_and_local() {
+        let args = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(super::anonymous_catalog_warning(&args(&["serve"]), "development").is_some());
+        assert!(super::anonymous_catalog_warning(&args(&["serve", "--env", "staging"]), "staging").is_some());
+        assert!(super::anonymous_catalog_warning(&args(&["serve", "--env", "development"]), "development").is_none());
+        assert!(super::anonymous_catalog_warning(&args(&["serve", "--env", "production"]), "production").is_none());
+    }
     use super::*;
     #[test]
     fn failure_logs_find_a_request_and_tolerate_a_missing_or_damaged_file() {

@@ -275,8 +275,7 @@ impl App {
                 None => Ok(None),
             };
         }
-        self.auth
-            .user(auth::session_cookie(h))
+        db::timed(self.auth.user(auth::session_cookie(h)))
             .await
             .map_err(|error| Error::internal(error))
     }
@@ -871,7 +870,8 @@ async fn response_headers(req: Request, next: Next) -> Response {
         .get(header::ACCEPT)
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
-    let response = REQUEST_ID.scope(rid.clone(), next.run(req)).await;
+    let db_time = std::sync::Arc::new(db::DbTime::default());
+    let response = db::with_db_time(db_time.clone(), REQUEST_ID.scope(rid.clone(), next.run(req))).await;
     let log_policy = response.extensions().get::<edge_http::LogPolicy>().copied();
     let mut response = crate::response::finalize(&method, &path, accept.as_deref(), &rid, response);
     let cacheable = response.status().is_success() || response.status() == StatusCode::NOT_MODIFIED;
@@ -905,10 +905,12 @@ async fn response_headers(req: Request, next: Next) -> Response {
     headers.insert("x-request-id", rid.parse().unwrap());
     // Lines carry the matched route template, never the raw path, query, headers or body.
     if let Some(event) = edge_http::request_event(log_policy.as_ref(), response.status(), started.elapsed()) {
-        eprintln!(
-            "{}",
-            json!({"event":event,"rid":rid,"route":route,"method":method.as_str(),"status":response.status().as_u16(),"ms":started.elapsed().as_millis()})
-        );
+        let mut line = json!({"event":event,"rid":rid,"route":route,"method":method.as_str(),"status":response.status().as_u16(),"ms":started.elapsed().as_millis()});
+        if let Some((db_ms, wait_ms)) = db_time.fields() {
+            line["dbMs"] = json!(db_ms);
+            line["dbWaitMs"] = json!(wait_ms);
+        }
+        eprintln!("{line}");
     }
     response
 }
@@ -1227,17 +1229,19 @@ async fn list(
     let viewer = viewer(u.as_ref());
     let req = crate::query::parse(r, &app.resources, &pairs)
         .map_err(|problems| Error::validation(if app.production { crate::query::without_declared_names(problems) } else { problems }))?;
-    let mut out = crate::query::list(&app.pool, &app.resources, r, &req, viewer)
+    let mut out = db::timed(crate::query::list(&app.pool, &app.resources, r, &req, viewer))
         .await
         .map_err(|error| match error {
             crate::query::ListError::Invalid(fields) => Error::validation(fields),
             crate::query::ListError::Denied(_) => Error::forbidden(),
+            crate::query::ListError::SignInRequired => Error::new(StatusCode::UNAUTHORIZED, "SIGN_IN_REQUIRED", "Sign in, or send a project API key, to use owner=me"),
             crate::query::ListError::Database { error, at, branch } => {
                 Error::database_in(&error, at, json!({"resource": name, "operation": if req.search.trim().is_empty() { "list" } else { "list.search" }, "branch": branch}))
             }
         })?;
     if let Some(items) = out["items"].as_array_mut() {
         include(&app, r, &req.include, items, viewer).await?;
+        req.keep_fields(items);
     }
     Ok(Json(out))
 }
@@ -1251,11 +1255,12 @@ async fn include(
     if names.is_empty() {
         return Ok(());
     }
-    crate::relations::include(&app.pool, &app.resources, r, names, rows, viewer)
+    db::timed(crate::relations::include(&app.pool, &app.resources, r, names, rows, viewer))
         .await
         .map_err(|error| match error {
             crate::relations::IncludeError::Unknown(name) => Error::validation(json!({"include": format!("`{name}` is not includable")})),
             crate::relations::IncludeError::Denied(_) => Error::forbidden(),
+            crate::relations::IncludeError::TooMany => Error::validation(json!({"include": format!("This include attaches more than {} records; lower limit or include fewer levels", crate::relations::MAX_INCLUDED_RECORDS)})),
             crate::relations::IncludeError::Database(error) => Error::internal(error),
         })
 }
@@ -1307,7 +1312,7 @@ async fn read(
         }
         names = value.split(',').map(str::to_string).collect();
     }
-    let (mut row, revision) = db::get_version(&app.pool, r, id)
+    let (mut row, revision) = db::timed(db::get_version(&app.pool, r, id))
         .await
         .map_err(|e| Error::database(e))?
         .ok_or_else(Error::missing)?;

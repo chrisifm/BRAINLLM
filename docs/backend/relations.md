@@ -53,7 +53,7 @@ An id that does not exist answers:
 
 Existence is enforced by the database foreign key, so a concurrent delete cannot leave a dangling reference.
 
-## Include (one level)
+## Include
 
 ```http
 GET /api/products?include=shop
@@ -67,8 +67,28 @@ GET /api/products/4c2e…?include=shop
 ```
 
 Only fields listed in `include` can be requested. The included record follows the target resource's read policy and
-field visibility; a record the reader may not see is returned as `null`. Includes are one level deep and run as one
-query per included field, never one query per row.
+field visibility; a record the reader may not see is returned as `null`. Includes run as one query per included field,
+never one query per row.
+
+### Nested levels
+
+A dotted path follows references into the attached records, up to three levels:
+
+```http
+GET /api/reviews?include=product.shop.region
+```
+
+```json
+{"id": "71aa…", "data": {"product": "4c2e…"}, "included": {"product": {"id": "4c2e…", "data": {"shop": "9b1f…"},
+  "included": {"shop": {"id": "9b1f…", "data": {"region": "e07b…"}, "included": {"region": {"id": "e07b…", "data": {"name": "North"}}}}}}}}
+```
+
+Each level must be listed in the `include` of its own resource, so `reviews` declares `product`, `products` declares
+`shop` and `shops` declares `region`. Every level applies that resource's read policy and field visibility: a hidden row
+renders as `null`, exactly like a missing one, and nothing below it is read. A reference field the reader cannot see is
+not followed. A request takes at most 16 paths and attaches at most 500 records in total; past that it answers
+`422` instead of a partial result. With a project API key, every level also needs a read scope (see
+[api-keys.md](api-keys.md#related-resources)).
 
 ## Filter by a related field
 

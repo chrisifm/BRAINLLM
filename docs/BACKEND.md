@@ -97,7 +97,8 @@ Public reads expose each record's owner UUID; do not grant public read when that
 
 `GET /api/posts?search=words&limit=25&offset=0`, `POST /api/posts`, and `GET|PUT|DELETE /api/posts/<uuid>` use that
 contract. PUT replaces the record's data; PATCH changes only the sent fields. List limit: 1–100, offset: 0–10000, search: 256 bytes.
-OpenAPI 3.1 JSON is available at `/_brain/api` (admin session required with `--env production`). It documents resource
+OpenAPI 3.1 JSON is available at `/_brain/api` (admin session required with `--env production`; without it the catalog is
+anonymous, and `brain backend serve` warns B0771 unless you chose `--env development`). It documents resource
 routes and native account/media/job/link endpoints. CLI/MCP can inspect the same structured source contract;
 source saves report conservative contract diffs in `impact` without claiming a running backend was replaced.
 

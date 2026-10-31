@@ -60,7 +60,7 @@ pub fn load(
         let relative = format!("server/hooks/{name}.jsbrain");
         crate::changes::source_path(root, &relative)?;
         crate::map::read_source_limit(root, &relative, 65536)
-            .map_err(|_| format!("{relative}: hook source must be a regular file within 64 KiB"))?;
+            .map_err(|reason| format!("{relative}: hook source refused: {reason}; run brain check"))?;
         let (scratch,module)=crate::backend::server_module(root,&relative).map_err(|_|format!("{relative}: private hook compilation failed; run brain check for structured source diagnostics"))?;
         modules.insert(
             name,

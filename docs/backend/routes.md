@@ -71,8 +71,26 @@ To answer a file built by the handler, return `{ file: { base64, name, type } }`
 attachment with `nosniff` and a `default-src 'none'` policy, as a stored file is; `Content-Disposition` cannot be set
 any other way. Invalid base64, a missing `name` or a non-2xx status answers `500 ROUTE_INVALID_STATUS`.
 
-Handlers follow the same source rules as the rest of `server/` (one default export; no `for`, `do` or `class`).
-`brain check`, `brain build` and `brain doctor` report them; run one before starting the backend or a worker.
+## Calling resources from a handler
+
+Declare `runAs` in the contract to give the handler `ctx.backend`, with `resource(name)`, `files(bucket)` and
+`slugRedirect(name, slug)` as in [job handlers](job-backend.md):
+
+| `runAs` | Key read from the backend's environment |
+|---|---|
+| absent | none: `ctx.backend` is not present |
+| `'key'` | `BRAIN_ROUTES_API_KEY` |
+| `'system'` | `BRAIN_ROUTES_SYSTEM_KEY` ([system identity](job-backend.md#system-identity); no fallback) |
+
+The call acts as the key, not as `ctx.user`: check the caller yourself before reading on their behalf, above all with
+`runAs: 'system'`. Neither variable appears in `ctx.env`.
+
+## Source rules
+
+Handlers follow the same source rules as the rest of `server/`: one default export; no `class`, `while`, `do` or
+classic `for`. `for (const x of list)` is allowed. `brain check`, `brain build` and `brain doctor` report them, and
+`brain backend serve` and `brain jobs work` refuse to start on them. A handler with no default export (B0772) or a
+secret-shaped literal in its source (B0773) is refused the same way; read keys from `ctx.env`.
 
 Throwing `{errors: {field: 'message'}}` answers `422 INVALID_INPUT` with those fields. Throwing an error
 with a 4xx `status` answers that status with a generic `ROUTE_REJECTED` code. Any other throw answers
@@ -94,7 +112,7 @@ they can use `fetch` and any server module of the app.
 
 ## OpenAPI
 
-`GET /_brain/api` (admin-only with `--env production`) includes every route as an
+`GET /_brain/api` (admin-only with `--env production`; any other process warns B0771 at start) includes every route as an
 operation `route_<name>` with its path, query and header parameters, request body, error responses and an
 `x-brain-route` extension (limits, rate, signature header). File buckets appear as
 `files_<bucket>_upload`, `_download`, `_delete` and `_meta` with an `x-brain-bucket` extension. Signing

@@ -3,7 +3,7 @@
 A resource opts fields into search (see [BACKEND.md](../BACKEND.md)). `?search=` (at most 256 bytes and 16 words)
 matches those fields with accent-insensitive full-text search (`websearch_to_tsquery`). Trigram word similarity for
 typos runs only when full text finds nothing. Text under 3 characters matches by prefix, and text made only of stop
-words finds nothing. Full-text ranking is rank, then id; typo ranking adds similarity.
+words or punctuation finds nothing. Full-text ranking is rank, then id; typo ranking adds similarity.
 
 ```http
 GET /api/products?search=garden%20trowel&category=tools&limit=10

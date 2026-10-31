@@ -54,7 +54,7 @@ pub async fn list(
                 .push(")");
         }
         q.push(" ORDER BY created_at DESC,id DESC");
-    } else if r.search.is_empty() {
+    } else if r.search.is_empty() || (text.chars().count() < 3 && !text.chars().any(char::is_alphanumeric)) {
         q.push(" AND false ORDER BY created_at DESC,id DESC");
     } else if text.chars().count() < 3 {
         // Fixed prefix behavior, no unrestricted typo scan for one/two-character input.
