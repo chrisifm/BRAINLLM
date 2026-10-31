@@ -9,6 +9,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- Fix: a route handler that throws a 4xx `status`, `notFound()`, `gone()` or `redirect()` answers that status instead of a 500 or a `200` holding the helper object
 - Lists name aggregates that hit the 100-group cap in `aggregates_truncated`
 - Request log lines carry `dbMs` and `dbWaitMs` for resource reads, so database time and pool wait are visible apart from `ms`
 - Fix: plain lists and `created_at`/`updated_at` sorts use their index instead of sorting the whole table on every request

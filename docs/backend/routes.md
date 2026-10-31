@@ -93,8 +93,10 @@ classic `for`. `for (const x of list)` is allowed. `brain check`, `brain build` 
 secret-shaped literal in its source (B0773) is refused the same way; read keys from `ctx.env`.
 
 Throwing `{errors: {field: 'message'}}` answers `422 INVALID_INPUT` with those fields. Throwing an error
-with a 4xx `status` answers that status with a generic `ROUTE_REJECTED` code. Any other throw answers
-`500 ROUTE_FAILED`; its message is never sent to the client.
+with a 4xx `status` answers that status with a generic `ROUTE_REJECTED` code, and `throw notFound()` or `throw gone()` answers `404` or `410` the same way.
+`redirect(url, status)`, returned or thrown, answers that redirect with `Location`. Any other throw answers
+`500 ROUTE_FAILED`; its message is never sent to the client. `scripts/gates/http-truth-table.mjs` pins every shape on
+the backend and on each gateway.
 
 ## Checks the backend runs before the handler
 

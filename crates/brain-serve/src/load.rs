@@ -166,10 +166,14 @@ for await (const line of createInterface({ input: process.stdin })) {
       const v = await m[fn](c, ...(args || []))
       if (fn === 'load' && v && typeof v.redirect === 'string' && redirectProblem(v)) throw new Error(redirectProblem(v))
       if (S) await contextHeaders(c)
-      out(`OK ${id} ${JSON.stringify(v ?? null)}\n`)
+      if (typeof routeExecutor === 'function' && v && typeof v.redirect === 'string') { const bad = redirectProblem(v); out(bad ? `ERR ${id} ${JSON.stringify(bad)}\n` : `OK ${id} ${JSON.stringify({ status: v.status ?? 303, headers: { location: v.redirect } })}\n`) }
+      else out(`OK ${id} ${JSON.stringify(v ?? null)}\n`)
     } finally { if (S) finishContext(c) }
   } catch (e) {
-    if (e && e.notFound === true) out(`OK ${id} ${e.gone === true ? '{"notFound":true,"gone":true,"status":410}' : '{"notFound":true,"status":404}'}\n`) // `throw notFound()` / `throw gone()`: a 404 / 410 page
+    // A route answers HTTP directly: these are its documented statuses (docs/backend/routes.md), with no page behind them.
+    if (typeof routeExecutor === 'function' && (e?.notFound === true || (typeof e?.redirect !== 'string' && !(e?.errors && typeof e.errors === 'object') && Number.isInteger(e?.status) && e.status >= 400 && e.status < 500))) out(`STATUS ${id} ${JSON.stringify({ status: e.notFound === true ? (e.gone === true ? 410 : 404) : e.status, message: 'The route rejected this request' })}\n`)
+    else if (typeof routeExecutor === 'function' && typeof e?.redirect === 'string') { const bad = redirectProblem(e); out(bad ? `ERR ${id} ${JSON.stringify(bad)}\n` : `OK ${id} ${JSON.stringify({ status: e.status ?? 303, headers: { location: e.redirect } })}\n`) }
+    else if (e && e.notFound === true) out(`OK ${id} ${e.gone === true ? '{"notFound":true,"gone":true,"status":410}' : '{"notFound":true,"status":404}'}\n`) // `throw notFound()` / `throw gone()`: a 404 / 410 page
     else if (e && typeof e.redirect === 'string') { const bad = redirectProblem(e); out(bad ? `ERR ${id} ${JSON.stringify(bad)}\n` : `OK ${id} ${JSON.stringify({ redirect: e.redirect, status: e.status ?? 303 })}\n`) } // `throw redirect(url, s)`: as server.mjs
     else if (e && e.errors && typeof e.errors === 'object') out(`BAD ${id} ${JSON.stringify({ error: e.message || 'Invalid input', errors: e.errors })}\n`)
     else if (contextServer && e?.status === 404 && e?.constructor?.name === 'HttpError') out(`OK ${id} {"notFound":true,"status":404}\n`) // as server.mjs: the 404 page
@@ -262,7 +266,7 @@ impl Sidecar {
         {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid bounded sidecar limits"));
         }
-        Self::spawn_script(root, vars, timeout, frame_limit, production, true, &format!("{RUNNER}\n{KEY_BACKEND}"))
+        Self::spawn_script(root, vars, timeout, frame_limit, production, true, &format!("{RUNNER}\n{KEY_BACKEND}\nfunction routeExecutor() {{}}"))
     }
     fn spawn_with(
         root: &Path,
