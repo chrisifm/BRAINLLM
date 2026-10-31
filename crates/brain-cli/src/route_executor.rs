@@ -182,10 +182,16 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("route.jsbrain"), "<meta server>\nexport default { method: 'POST', path: '/orders/quote', auth: 'public' }\n").unwrap();
         fs::write(dir.join("handler.jsbrain"), "<meta server>\nexport default async function handle(ctx) {\n  if (ctx.body.items < 1) throw { errors: { items: 'add at least one item' } }\n  return { status: 201, body: { total: ctx.body.items * 5 } }\n}\n").unwrap();
+        let rates = root.join(ROUTES).join("rates");
+        fs::create_dir_all(&rates).unwrap();
+        fs::write(rates.join("route.jsbrain"), "<meta server>\nexport default { path: '/rates', auth: 'public' }\n").unwrap();
+        fs::write(rates.join("handler.jsbrain"), "<meta server>\nexport default async function handle() {\n  const refused = await httpCall('http://127.0.0.1:9/rates').catch((e) => e.code)\n  return { refused }\n}\n").unwrap();
         let routes = contracts(&root, "development").unwrap();
         assert_eq!(routes[0].path, "/orders/quote");
         let handlers = load(&root, "development", &routes).unwrap().unwrap();
-        assert_eq!(handlers.names(), vec!["order_quote".to_string()]);
+        assert_eq!(handlers.names(), vec!["order_quote".to_string(), "rates".to_string()]);
+        let rates = handlers.run("rates", json!({}), Duration::from_secs(5)).await.unwrap();
+        assert_eq!(rates, json!({"refused": "UNSAFE_URL"}), "httpCall is auto-imported into route handlers");
         let out = handlers.run("order_quote", json!({"body": {"items": 3}}), Duration::from_secs(5)).await.unwrap();
         assert_eq!(out, json!({"status": 201, "body": {"total": 15}}));
         let denied = handlers.run("order_quote", json!({"body": {"items": 0}}), Duration::from_secs(5)).await.unwrap_err();

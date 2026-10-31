@@ -23,3 +23,12 @@ fn pure_helpers_autoimport_in_component_server_functions_and_map_private_dev_out
     assert!(output.server_js.contains("sourceMappingURL=data:application/json;base64,"));
     assert!(!brain_codegen::compile(src,Path::new("views/native.brain")).unwrap().server_js.contains("sourcesContent"));
 }
+
+#[test]
+fn outbound_calls_auto_import_in_server_modules() {
+    let output=brain_codegen::compile("<meta server>\nexport async function quote(order) { const out = await httpCall('https://rates.example.test/v1/quote', { method: 'POST', json: order, idempotencyKey: true }); return out.json }",Path::new("server/quote.jsbrain")).unwrap();
+    let code=output.js+&output.server_js;
+    assert!(code.contains("brain-outbound.js"),"{code}");
+    let output=brain_codegen::compile("<script>const httpCall = (url) => url</script><p>{httpCall('local')}</p>",Path::new("comp/local.brain")).unwrap();
+    assert!(!output.js.contains("brain-outbound.js"));
+}

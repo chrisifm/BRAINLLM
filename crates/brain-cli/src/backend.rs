@@ -525,7 +525,7 @@ pub(crate) fn server_module(root: &Path, rel: &str) -> Result<(Scratch, PathBuf)
         .filter(|(name, _)| {
             matches!(
                 name.as_str(),
-                "brain.js" | "brain-budget.js" | "brain-time.js" | "brain-hash.js"
+                "brain.js" | "brain-budget.js" | "brain-time.js" | "brain-hash.js" | "brain-outbound.js"
             )
         })
         .collect();

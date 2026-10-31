@@ -31,6 +31,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   limit and auth; JSON keys that reach prototypes are refused.
 - Signed webhook routes verify HMAC-SHA256 signatures (`t=…,v1=…` with timestamp tolerance, or `sha256=…` in hex
   or base64) over the exact raw body, with constant-time comparison and secret rotation from environment variables.
+- `httpCall(url, options)` is auto-imported in server code for outbound API calls: per-attempt timeout, jittered
+  retries only for idempotent requests or those with an `Idempotency-Key`, `Retry-After`, a response size cap,
+  refusal of private targets and errors that never include query strings or header values.
 
 ### Changed
 

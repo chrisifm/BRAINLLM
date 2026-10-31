@@ -916,7 +916,7 @@ fn auto_imports(code: &str, declared: &HashSet<String>, ui: &BTreeSet<String>, o
     };
     let mut by_mod: Vec<(&str, Vec<&str>)> = Vec::new();
     for (name, module) in scope::EXT_PRIMITIVES {
-        if pure_server && !matches!(*module,"brain-time.js"|"brain-hash.js") {continue;}
+        if pure_server && !matches!(*module,"brain-time.js"|"brain-hash.js"|"brain-outbound.js") {continue;}
         if declared.contains(*name) || !used(name) || (matches!(*name, "t" | "locale") && !i18n) || (scope::PRIMITIVES.contains(name) && !author.contains(*name))
             // Emitted by the codegen as calls only; the word in template text is not a use.
             || (matches!(*name, "dyn" | "portal" | "transition" | "lazy" | "fc" | "nx") && !code.contains(&format!("{name}("))) {
