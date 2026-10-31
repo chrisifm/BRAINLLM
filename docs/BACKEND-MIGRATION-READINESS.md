@@ -61,7 +61,7 @@ must not be turned into automatic weakening of defaults.
 | B-26 | P2 | Real client IP from explicitly trusted proxies | Open; never trust arbitrary forwarded identity/IP headers. |
 | B-27 | P2 | Multiple declared HTTP origins | Implemented in development shared settings; full deployment application acceptance remains required. |
 | B-28 | P0 | Existing-password/user import and controlled rehash | Open; legacy hash verification and existing-account/session migration require explicit policy. |
-| B-29 | P0 | Safe bidirectional verified-provider account linking | Open pending exact implementation review; protect against pre-hijacking and revoke obsolete credentials/sessions deliberately. |
+| B-29 | P0 | Safe bidirectional verified-provider account linking | Open: an already-linked provider subject can sign in; the first link to an existing email is deliberately refused. Any new linking policy must prevent pre-hijacking. |
 | B-30 | P1 | Redirect/code identity flow versus browser GIS | Explicit application decision; existing GIS support is not authorization-code support. |
 | B-31 | P1 | Bounded code verification and permitted signup role selection | Open; do not permit privileged roles from untrusted signup input. |
 | B-32 | P1 | Multiple memberships and active application space | Open; one assigned role is not the same model. |
@@ -72,7 +72,7 @@ must not be turned into automatic weakening of defaults.
 | B-37 | P2 | Versioned image/logo storage | Existing image capability; public-display/ownership behavior still needs application acceptance. |
 | B-38 | P0 | Reviewed versioned contract/data evolution | Open; schema-drift refusal is a safety boundary, not an evolution tool. |
 | B-39 | P0 | Import preserving IDs, owners and references | Open; no silent manual data rewrite or production auto-migration. |
-| B-40 | P1 | Scheduled work, retention and deliberate dead-job retry | Open pending exact command review; preserve finite retries and explicit operator control. |
+| B-40 | P1 | Scheduled work, retention and deliberate dead-job retry | Open: bounded automatic retries and terminal states exist; scheduling and an explicit dead-job retry contract remain separate. |
 | B-41 | P1 | Application-owned ephemeral-database tests and service fakes | Partial framework harness; a stable app-facing seed/fake/integration contract remains open. |
 | B-42 | P2 | Operational metrics/tracing | Structured correlated logs exist; Prometheus/OTel capability and production acceptance remain open. |
 | B-43 | P2 | Published throughput/p99 under deployment topology | Open; compile time and functional tests are not backend throughput measurements. |
@@ -152,6 +152,25 @@ Do not reproduce private application security findings in public release notes.
   than assuming PostgreSQL always chooses an index.
 - [ ] Verify authentication, role/company boundaries, CRUD, documents, webhooks, queues and admin flows before
   deleting the existing backend. Framework component tests do not establish whole-application parity.
+
+## Dependency order for implementation
+
+1. Finish the current coherent development checkpoint and its performance/native-browser/full-source acceptance.
+   Publishing it does not mean the existing application can remove its backend.
+2. Design reviewed contract-evolution/import previews alongside richer scalar/array/default/constraint contracts.
+   Implementing schema growth without an evolution path would reproduce the current drift blocker.
+3. Add database-enforced references and organization scope, then related filters, sorting, aggregates, projections
+   and policy. Validate hostile cross-organization cases before presenting an administrative UI as sufficient.
+4. Add atomic domain commands, conditional mutations, state transitions and durable idempotent event receipts.
+5. Implement provider ingress/operations, private documents and controlled account/hash/link migration using the
+   established typed/transactional policy boundaries.
+6. Verify import/backfill/recovery and complete app-facing fixtures, scheduled operations, observability and
+   deployment throughput. Approve a tested cutover only after behavior/data parity.
+
+A Node server function can already perform synchronous HTTP/SDK work and call request-scoped native resource
+repositories in 0.4.0. Its production request timeout defaults to 10 seconds but is configurable; the RPC body
+limit is a separate control. These capabilities do not provide a transaction spanning multiple native resource
+calls, a payment-state machine or unrestricted database access from a job. Keep those distinctions in proposals.
 
 ## Evidence anchors
 
