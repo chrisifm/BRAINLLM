@@ -10,7 +10,7 @@ const MAX_BYTES: u64 = 2 * 1024 * 1024;
 
 type Result<T> = std::result::Result<T, String>;
 #[derive(Debug, PartialEq, Eq)]
-struct Version {
+pub(crate) struct Version {
     numbers: [u64; 3],
     pre: Vec<String>,
 }
@@ -68,6 +68,12 @@ fn version(input: &str) -> Result<Version> {
             .transpose()?
             .unwrap_or_default(),
     })
+}
+pub(crate) fn parse_version(input: &str) -> Result<Version> {
+    version(input)
+}
+pub(crate) fn compare_versions(a: &Version, b: &Version) -> Ordering {
+    compare(a, b)
 }
 fn compare(a: &Version, b: &Version) -> Ordering {
     let core = a.numbers.cmp(&b.numbers);

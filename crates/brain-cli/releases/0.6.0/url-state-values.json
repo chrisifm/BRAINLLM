@@ -1,0 +1,27 @@
+{
+  "id": "url-state-values",
+  "kind": "capability",
+  "title": "urlState allowed values and immediate watch",
+  "why": "Query-string state can declare its allowed values, so an unknown value falls back instead of rendering a broken tab; watch can run once at start.",
+  "changelog": [
+    "`urlState(initial, { key, values })`"
+  ],
+  "guide": "brain guide views",
+  "apis": [
+    "urlState(initial, { key, values })",
+    "watch(src, cb, { immediate: true })"
+  ],
+  "affects": [
+    "**/*.brain"
+  ],
+  "adopt": {
+    "file": "views/products.brain",
+    "snippet": "<script>\n  const tab = urlState('all', { key: 'tab', values: ['all', 'active', 'archived'] })\n</script>"
+  },
+  "uses": [
+    {
+      "glob": "**/*.brain",
+      "contains": "values: ["
+    }
+  ]
+}

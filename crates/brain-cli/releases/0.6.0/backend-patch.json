@@ -1,0 +1,26 @@
+{
+  "id": "backend-patch",
+  "kind": "capability",
+  "title": "PATCH partial updates",
+  "why": "Clients send only the changed fields; the merged record is revalidated and conflict-checked like PUT.",
+  "changelog": [
+    "`PATCH /api/<resource>/<uuid>` updates only the sent fields"
+  ],
+  "guide": "docs/backend/patch.md",
+  "apis": [
+    "PATCH /api/<resource>/<uuid>"
+  ],
+  "affects": [
+    "**/*.brain"
+  ],
+  "adopt": {
+    "file": "views/products/[id].brain",
+    "snippet": "await fetch(`/api/products/${id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ stock: 3 }) })"
+  },
+  "uses": [
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "'PATCH'"
+    }
+  ]
+}

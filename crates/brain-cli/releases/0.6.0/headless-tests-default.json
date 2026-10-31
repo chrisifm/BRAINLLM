@@ -1,0 +1,17 @@
+{
+  "id": "headless-tests-default",
+  "kind": "change",
+  "title": "Tests run in owned headless Chrome by default",
+  "why": "brain test, brain doctor and MCP brain_test no longer open a connected Viewer extension; opt in with --viewer when a user asks for it.",
+  "changelog": [
+    "`brain test`, `brain doctor` and MCP `brain_test` run in owned headless Chrome"
+  ],
+  "guide": "brain guide tests",
+  "apis": [
+    "brain test --viewer",
+    "BRAIN_VIEWER=1"
+  ],
+  "affects": [
+    "AGENTS.md"
+  ]
+}

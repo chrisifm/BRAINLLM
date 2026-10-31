@@ -1,0 +1,22 @@
+{
+  "id": "i18n-keys",
+  "kind": "change",
+  "title": "Adding a language moves every fixed text to scoped keys",
+  "why": "The first extra language turns texts, attributes, SEO titles and string literals into view-scoped keys; <ErrorState> reads its texts from the dictionary.",
+  "changelog": [
+    "Adding the first extra language moves every fixed text to keys",
+    "The kit's `<ErrorState>` reads its texts"
+  ],
+  "guide": "brain guide i18n",
+  "apis": [
+    "brain add locale <lang>",
+    "error_state.*"
+  ],
+  "affects": [
+    "locales/**",
+    "**/*.brain"
+  ],
+  "steps": [
+    "If the app already has a second language, run `brain add locale <lang>` again on a branch and review the moved keys; add `error_state.*` keys to each dictionary."
+  ]
+}

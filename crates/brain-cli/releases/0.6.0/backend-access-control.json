@@ -1,0 +1,38 @@
+{
+  "id": "backend-access-control",
+  "kind": "capability",
+  "title": "Relational ownership, field visibility and access modifiers",
+  "why": "Multi-tenant apps grant access through owner.<ref> chains, hide fields like cost from some roles and mark fields readonly, writeonly or private.",
+  "changelog": [
+    "Backend relational ownership grants",
+    "Backend per-field `visible` grants",
+    "Backend field access modifiers"
+  ],
+  "guide": "docs/backend/ownership.md",
+  "apis": [
+    "owner.<ref>",
+    "visible",
+    "readonly|writeonly|private"
+  ],
+  "affects": [
+    "server/resources/**"
+  ],
+  "adopt": {
+    "file": "server/resources/products/policy.jsbrain",
+    "snippet": "export default { read: ['public'], create: ['owner.shop'], update: ['owner.shop'], delete: ['owner.shop', 'admin'] }"
+  },
+  "uses": [
+    {
+      "glob": "server/**/*.jsbrain",
+      "contains": "'owner."
+    },
+    {
+      "glob": "server/**/*.jsbrain",
+      "contains": "visible:"
+    },
+    {
+      "glob": "server/**/*.jsbrain",
+      "contains": "writeonly"
+    }
+  ]
+}

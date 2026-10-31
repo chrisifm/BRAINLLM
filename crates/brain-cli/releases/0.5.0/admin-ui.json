@@ -1,0 +1,26 @@
+{
+  "id": "admin-ui",
+  "kind": "capability",
+  "title": "Generated admin views for a backend resource",
+  "why": "One command prepares role-guarded list, detail, create and edit views with progressive forms, so an app gets a working back office without hand-writing CRUD screens.",
+  "changelog": [
+    "brain add resource ... --admin-ui"
+  ],
+  "guide": "docs/BACKEND.md",
+  "apis": [
+    "brain add resource <name> --admin-ui"
+  ],
+  "affects": [
+    "views/admin/**"
+  ],
+  "adopt": {
+    "file": "views/admin/<resource>/index.brain",
+    "command": "brain add resource posts --admin-ui",
+    "snippet": "brain add resource posts --admin-ui --json   # review the change plan, then apply it with brain changes apply"
+  },
+  "uses": [
+    {
+      "glob": "views/admin/**/*.brain"
+    }
+  ]
+}

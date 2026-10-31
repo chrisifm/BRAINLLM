@@ -1,0 +1,27 @@
+{
+  "id": "backend-owner-hidden",
+  "kind": "breaking",
+  "title": "Backend responses hide the record owner from unrelated readers",
+  "why": "Anonymous and unrelated readers no longer receive the `owner` id; client code that showed or compared it gets undefined.",
+  "changelog": [
+    "Backend responses no longer include the record `owner` id"
+  ],
+  "guide": "docs/backend/visibility.md",
+  "apis": [
+    "expose_owner"
+  ],
+  "affects": [
+    "**/*.brain",
+    "server/resources/**/query.jsbrain"
+  ],
+  "finds": [
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": ".owner"
+    }
+  ],
+  "steps": [
+    "For each listed read of `.owner`, confirm the reader is the owner, a relational owner or a role in the read policy.",
+    "If the owner id must stay public, declare `expose_owner: true` in that resource's query.jsbrain."
+  ]
+}

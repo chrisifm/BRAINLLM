@@ -1,0 +1,19 @@
+{
+  "id": "tokens-unlayered-rule",
+  "kind": "change",
+  "title": "B0309: unlayered style rules in tokens.cssbrain are reported",
+  "why": "A rule outside any @layer in tokens.cssbrain silently beats every component rule; the new warning shows where and how to wrap it.",
+  "changelog": [
+    "B0309 (warning): a style rule outside any `@layer`"
+  ],
+  "codes": [
+    "B0309"
+  ],
+  "affects": [
+    "tokens.cssbrain"
+  ],
+  "codemod": "brain-fix",
+  "steps": [
+    "Wrap each reported rule of tokens.cssbrain in `@layer reset { … }`; custom properties stay unlayered."
+  ]
+}

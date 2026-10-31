@@ -1,0 +1,32 @@
+{
+  "id": "backend-proxy-cors",
+  "kind": "capability",
+  "title": "trustProxy and CORS settings for the native backend",
+  "why": "Behind nginx the backend rate-limits the real visitor instead of the proxy, and extra origins can call the API with cached preflights.",
+  "changelog": [
+    "Native backend `trustProxy` takes a list"
+  ],
+  "guide": "docs/backend/proxy-cors.md",
+  "apis": [
+    "server/platform.jsbrain trustProxy",
+    "cors.origins",
+    "cors.maxAge"
+  ],
+  "affects": [
+    "server/platform.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/platform.jsbrain",
+    "snippet": "<meta server>\nexport default { trustProxy: ['127.0.0.1', '::1'], cors: { maxAge: 600 } }"
+  },
+  "uses": [
+    {
+      "glob": "server/platform.jsbrain",
+      "contains": "trustProxy"
+    },
+    {
+      "glob": "server/platform.jsbrain",
+      "contains": "cors"
+    }
+  ]
+}

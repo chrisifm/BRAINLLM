@@ -102,6 +102,27 @@ by `node --test bench/agents/runner.test.mjs`; actual model evaluation still req
 `brain-parse/src/markup.rs` + `ast.rs` → rule in `brain-check` (and `src/scope.rs` if the directive declares names) → `brain-codegen/src/template.rs` → snapshot in
 `tests/snapshots/` → behaviour in `tests/e2e.rs` → fixture → SPEC line. Measure with bench/llm before and after.
 
+**Release: add a change manifest entry (every feature, fix or breaking PR)**
+Every CHANGELOG bullet is mirrored by one machine-readable entry that `brain upgrade`, `brain guide whats-new`,
+`brain guide migrate`, `brain doctor` and MCP `brain_upgrade` read. Adding one is a single new file:
+`crates/brain-cli/releases/<next-version>/<id>.json` (the newest folder holds `[Unreleased]`; create the folder for a
+new version). `build.rs` embeds every file, so the npm package ships them inside the binary.
+```json
+{ "id": "file-buckets", "kind": "capability", "title": "Native file buckets for uploads and downloads",
+  "why": "What changes for an app author, in one or two sentences.",
+  "changelog": ["Native file buckets (`server/files/<name>.jsbrain`)"],
+  "guide": "docs/backend/files.md", "codes": [], "apis": ["server/files/<name>.jsbrain"], "affects": ["server/files/**"],
+  "adopt": { "file": "server/files/attachments.jsbrain", "snippet": "<meta server>\nexport default { maxBytes: '25mb' }" },
+  "uses": [{ "glob": "server/files/*.jsbrain" }] }
+```
+- `kind`: `capability` (needs `adopt`, `uses`, `guide`), `change`, `deprecation` and `breaking` (need `steps` plus
+  `finds` probes or `codes` so the report can point at `file:line`), `fix`, `internal`.
+- `changelog`: short phrases copied from the CHANGELOG bullets the entry covers. `cargo test -p brain-cli releases`
+  fails when a bullet outside `### Tests`/`### Internal`/`### Upgrading` matches no entry, or a phrase matches no bullet.
+- `codemod`: only an id from `releases::CODEMODS`; `codes` must exist in the catalog; `guide` is `brain guide <topic>`
+  or a repository path. Probes are app-relative globs (`**`, `*`, `{a,b}`) with an optional `contains` substring.
+- At release time rename `[Unreleased]` to the version; the folder name already matches it.
+
 **Add a CLI command or MCP tool**
 `crates/brain-cli/src/main.rs` (+ `--json` with `schemaVersion`, exit codes 0/1/2/3 — from #68) and `mcp.rs` (tool with
 `inputSchema`/`outputSchema`; destructive tools require `confirm: true`; never a publish tool). Add a test and the

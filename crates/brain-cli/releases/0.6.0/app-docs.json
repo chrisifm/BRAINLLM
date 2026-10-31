@@ -1,0 +1,32 @@
+{
+  "id": "app-docs",
+  "kind": "capability",
+  "title": "Generated app documentation (brain docs)",
+  "why": "Agents read routes, component contracts, stores, server functions and env key names from docs/app instead of re-reading every source file; doctor warns when it is stale.",
+  "changelog": [
+    "`brain docs [--json] [--out docs/app] [--check]`"
+  ],
+  "guide": "brain guide start",
+  "apis": [
+    "brain docs",
+    "MCP brain_docs"
+  ],
+  "affects": [
+    "brain.json",
+    "docs/app/**"
+  ],
+  "adopt": {
+    "file": "brain.json",
+    "command": "brain docs",
+    "snippet": "\"docs\": true"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "\"docs\": true"
+    },
+    {
+      "glob": "docs/app/index.md"
+    }
+  ]
+}

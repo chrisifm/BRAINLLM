@@ -1,0 +1,36 @@
+{
+  "id": "native-sockets",
+  "kind": "capability",
+  "title": "Native invalidation sockets and liveResource (experimental)",
+  "why": "Pages can refresh a resource the moment another user changes it, instead of polling; one brain.json declaration configures origins for development and production.",
+  "changelog": [
+    "Experimental native invalidation sockets",
+    "Development `liveResource(resourceHandle, options)`",
+    "One `brain.json` declaration feeds native HTTP/socket origins",
+    "nginx/PM2 templates route opt-in sockets"
+  ],
+  "guide": "docs/DEV-NATIVE-SOCKETS.md",
+  "apis": [
+    "liveResource(resourceHandle, options)",
+    "brain.json backend.origins",
+    "brain.json sockets.allowedOrigins"
+  ],
+  "affects": [
+    "brain.json",
+    "**/*.brain"
+  ],
+  "adopt": {
+    "file": "views/tasks.brain",
+    "snippet": "<script>\n  const tasks = resource(api.tasks.list)\n  liveResource(tasks)\n</script>"
+  },
+  "uses": [
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "liveResource("
+    },
+    {
+      "glob": "brain.json",
+      "contains": "\"sockets\""
+    }
+  ]
+}

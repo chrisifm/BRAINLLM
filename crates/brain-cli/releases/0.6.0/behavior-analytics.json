@@ -1,0 +1,41 @@
+{
+  "id": "behavior-analytics",
+  "kind": "capability",
+  "title": "Behavior analytics on by default with the native backend",
+  "why": "Apps with a native backend learn which routes and elements are used, never-used UI, funnels and segments, resolved to file:line, without a third-party tracker.",
+  "changelog": [
+    "Behavior analytics on by default",
+    "`POST /_brain/analytics` ingestion",
+    "`brain.json` `analytics` switch",
+    "`brain analytics report|funnel|segment|export|map|purge|erase`"
+  ],
+  "guide": "docs/backend/analytics.md",
+  "codes": [
+    "B0729"
+  ],
+  "apis": [
+    "brain analytics report",
+    "MCP brain_analytics_report",
+    "data-track",
+    "brain:track"
+  ],
+  "affects": [
+    "brain.json",
+    "**/*.brain"
+  ],
+  "adopt": {
+    "file": "brain.json",
+    "command": "brain analytics report --json",
+    "snippet": "\"analytics\": { \"enabled\": true, \"consent\": \"required\", \"retentionDays\": 90 }"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "\"analytics\""
+    },
+    {
+      "glob": "**/*.brain",
+      "contains": "data-track"
+    }
+  ]
+}

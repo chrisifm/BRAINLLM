@@ -1,0 +1,12 @@
+{
+  "id": "forms-i18n-fixes",
+  "kind": "fix",
+  "title": "Forms and error texts in the page language",
+  "why": "No-JS form validation speaks the page language, ErrorState texts ship with the page and tests can pass slot content.",
+  "changelog": [
+    "A form posted without JS is validated in the page's language",
+    "Pages that show `<ErrorState>` ship",
+    "Tests can pass slot content"
+  ],
+  "guide": "brain guide forms"
+}

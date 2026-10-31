@@ -1,0 +1,13 @@
+{
+  "id": "runtime-fixes-0-6-0",
+  "kind": "fix",
+  "title": "Runtime fixes: guarded blocks, budgets, resources and sockets",
+  "why": "Workarounds for {#if} blocks throwing on null, B0910 false positives on loaded machines, endless socket reconnects or leaked listeners can be removed.",
+  "changelog": [
+    "An `{#if}` block no longer throws",
+    "B0910 no longer takes a page down",
+    "Live sockets that are accepted and then closed",
+    "Runtime resources are released"
+  ],
+  "guide": "brain guide performance"
+}

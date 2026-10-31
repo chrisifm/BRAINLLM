@@ -1,0 +1,14 @@
+{
+  "id": "internals-0-5-0",
+  "kind": "internal",
+  "title": "Source-map scanning, DOM paths and release pipeline hardening",
+  "why": "No author action: generated code stays byte-identical, and release publication and metadata locks are stricter.",
+  "changelog": [
+    "Source-map scanning requests validated token",
+    "Build DOM access-path strings",
+    "Future release publication requires",
+    "Release change-metadata, preview-admission",
+    "Release the project-manifest writer lock",
+    "Preserve author strings, template text"
+  ]
+}

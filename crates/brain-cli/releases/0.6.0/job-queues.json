@@ -1,0 +1,27 @@
+{
+  "id": "job-queues",
+  "kind": "capability",
+  "title": "Per-queue job settings: priority, retries, backoff, timeouts, dead letters",
+  "why": "Background jobs get retries with backoff, long timeouts with lease renewal and inspectable dead letters, and queues no longer serialize each other.",
+  "changelog": [
+    "Job queues accept `server/jobs/<name>/queue.jsbrain`",
+    "Job enqueue takes a per-queue transaction lock"
+  ],
+  "guide": "docs/backend/queues.md",
+  "apis": [
+    "brain jobs enqueue --priority --delay",
+    "brain jobs dead|retry|stats"
+  ],
+  "affects": [
+    "server/jobs/**"
+  ],
+  "adopt": {
+    "file": "server/jobs/<name>/queue.jsbrain",
+    "snippet": "<meta server>\nexport default { attempts: 5, backoff: { type: 'exponential', delay: 5, max: 600 }, timeout: 900 }"
+  },
+  "uses": [
+    {
+      "glob": "server/jobs/*/queue.jsbrain"
+    }
+  ]
+}

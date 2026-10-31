@@ -1,0 +1,26 @@
+{
+  "id": "zero-config-icons",
+  "kind": "capability",
+  "title": "Zero-config icons from public/",
+  "why": "Dropping favicon.svg or an icon PNG in public/ links rel=icon and apple-touch-icon on every page; hand-written icon links become unnecessary.",
+  "changelog": [
+    "Zero-config icons: the build links the icon"
+  ],
+  "guide": "brain guide seo",
+  "affects": [
+    "public/**",
+    "app.brain"
+  ],
+  "adopt": {
+    "file": "public/favicon.svg",
+    "snippet": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><circle cx=\"16\" cy=\"16\" r=\"14\" fill=\"#0071e3\"/></svg>"
+  },
+  "uses": [
+    {
+      "glob": "public/favicon.svg"
+    },
+    {
+      "glob": "public/*icon*.png"
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "id": "backend-exact-types",
+  "kind": "capability",
+  "title": "Exact backend field types and declarative constraints",
+  "why": "Contracts can say int, decimal(p,s), date, datetime, enum and bounded lists, with unique and check constraints enforced by Postgres; money stays exact.",
+  "changelog": [
+    "Backend contracts accept exact `int`"
+  ],
+  "guide": "docs/backend/patch.md",
+  "apis": [
+    "decimal(p,s)",
+    "enum(a|b)",
+    "constraints.jsbrain"
+  ],
+  "affects": [
+    "server/resources/**/schema.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/products/schema.jsbrain",
+    "snippet": "<meta server>\nexport default {\n  name: 'str!',\n  sku: { type: 'str!', unique: true },\n  price: { type: 'decimal(10,2)', default: '0.00' }\n}"
+  },
+  "uses": [
+    {
+      "glob": "server/**/*.jsbrain",
+      "contains": "decimal("
+    },
+    {
+      "glob": "server/**/*.jsbrain",
+      "contains": "'int"
+    },
+    {
+      "glob": "server/**/*.jsbrain",
+      "contains": "enum("
+    },
+    {
+      "glob": "server/resources/**/constraints.jsbrain"
+    }
+  ]
+}

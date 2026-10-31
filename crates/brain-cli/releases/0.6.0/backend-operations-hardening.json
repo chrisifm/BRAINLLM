@@ -1,0 +1,27 @@
+{
+  "id": "backend-operations-hardening",
+  "kind": "change",
+  "title": "Native backend operations: pools, health, overload, TLS, HSTS, connection names",
+  "why": "Production deployments behave differently: health checks have two endpoints, overload answers 503 with Retry-After, remote databases need verified TLS and Postgres connections are named per role.",
+  "changelog": [
+    "Postgres connections set `application_name`",
+    "Native backend health is split",
+    "`brain backend serve` uses separate HTTP and worker pools",
+    "Production backend answers send `Strict-Transport-Security`"
+  ],
+  "guide": "docs/backend/lifecycle.md",
+  "apis": [
+    "GET /health/live",
+    "GET /health/ready",
+    "BRAIN_DB_HTTP_POOL",
+    "BRAIN_DB_WORKER_POOL"
+  ],
+  "affects": [
+    "server/platform.jsbrain",
+    "deploy/**",
+    "*.config.cjs"
+  ],
+  "steps": [
+    "Point load-balancer and orchestrator health checks at GET /health/ready (readiness) and GET /health/live (liveness)."
+  ]
+}

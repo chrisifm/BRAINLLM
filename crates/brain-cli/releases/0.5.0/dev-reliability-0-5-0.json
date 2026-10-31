@@ -1,0 +1,13 @@
+{
+  "id": "dev-reliability-0-5-0",
+  "kind": "fix",
+  "title": "Development server, imports, cache and doctor fixes",
+  "why": "Workarounds for development 503s, component-shaped fallbacks for invalid modules, a checker complaint about `cache: 'no'` or stale SEO in doctor can be removed.",
+  "changelog": [
+    "Development thread-admission failures",
+    "Development imports of invalid value modules",
+    "Accept the existing GET `cache: 'no'`",
+    "Doctor retains fresh build measurements"
+  ],
+  "guide": "brain guide start"
+}

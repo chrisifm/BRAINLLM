@@ -1,0 +1,27 @@
+{
+  "id": "backend-relations",
+  "kind": "capability",
+  "title": "Relations with foreign keys and include",
+  "why": "ref:<resource> fields become real foreign keys with on_delete rules, missing ids answer 422 and lists can include the related record.",
+  "changelog": [
+    "Backend relations: `ref:<resource>` fields install a foreign key"
+  ],
+  "guide": "docs/backend/relations.md",
+  "apis": [
+    "ref:<resource>",
+    "?include="
+  ],
+  "affects": [
+    "server/resources/**/schema.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/products/schema.jsbrain",
+    "snippet": "export default { shop: { type: 'ref:shops!', on_delete: 'cascade' }, title: 'str!' }"
+  },
+  "uses": [
+    {
+      "glob": "server/**/*.jsbrain",
+      "contains": "'ref:"
+    }
+  ]
+}

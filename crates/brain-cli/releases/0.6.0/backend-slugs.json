@@ -1,0 +1,26 @@
+{
+  "id": "backend-slugs",
+  "kind": "capability",
+  "title": "Slug history for permanent redirects",
+  "why": "Renaming an article keeps its old slugs, so old links can redirect permanently to the current one.",
+  "changelog": [
+    "Backend slug history"
+  ],
+  "guide": "docs/backend/slugs.md",
+  "apis": [
+    "GET /api/<resource>/redirects/<slug>"
+  ],
+  "affects": [
+    "server/resources/**/schema.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/articles/schema.jsbrain",
+    "snippet": "export default { title: 'str!', slug: { type: 'str!', unique: true, slug: true } }"
+  },
+  "uses": [
+    {
+      "glob": "server/**/*.jsbrain",
+      "contains": "slug: true"
+    }
+  ]
+}

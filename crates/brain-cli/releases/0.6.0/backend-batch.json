@@ -1,0 +1,29 @@
+{
+  "id": "backend-batch",
+  "kind": "capability",
+  "title": "Batch writes in one transaction",
+  "why": "Import or bulk-edit up to N records in one request with per-item errors, instead of N requests.",
+  "changelog": [
+    "`POST /api/<r>/batch` creates, updates"
+  ],
+  "guide": "docs/backend/batch.md",
+  "apis": [
+    "POST /api/<r>/batch"
+  ],
+  "affects": [
+    "server/resources/**/batch.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/products/batch.jsbrain",
+    "snippet": "<meta server>\nexport default { max: 100 }"
+  },
+  "uses": [
+    {
+      "glob": "server/resources/**/batch.jsbrain"
+    },
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "/batch"
+    }
+  ]
+}

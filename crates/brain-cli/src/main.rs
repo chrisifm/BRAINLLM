@@ -35,6 +35,7 @@ mod backend_diff;
 mod changes;
 mod intelligence;
 mod recipes;
+mod releases;
 mod upgrade;
 mod agent_cli;
 mod libraries;
