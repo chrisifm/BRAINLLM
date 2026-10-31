@@ -351,10 +351,11 @@ MCP registration: new apps include Claude Code `.mcp.json`, Cursor `.cursor/mcp.
 Existing app: `brain agent setup [--hooks]`; restart the client and verify its tools. Optional hooks check after source edits,
 with no tests, downloads or auto-fixes. `brain mcp --profile minimal` exposes spec/check/fix/map/test/doctor; `backend` adds
 focused resource/job contract tools. Default is `full`.
-`brain e2e probe --json` detects Codex Viewer/Claude Viewer; install the extension and enable user scripts. With multiple
-connected profiles, set private BRAIN_VIEWER_PROFILE. `brain test` executes declared scenarios in a fresh owned Viewer tab
-and retains the separate full Chrome AX/optional heap lane. Connected Viewer failures fail the run; unavailable adapters
-have an explicit headless fallback. Follow `docs/VIEWER-E2E.md` to author complete disposable-data E2E scenarios. `doctor` warning B0734 checks local registration, not connectivity.
+`brain test` and `brain doctor` run declared scenarios in owned headless Chrome; no browser extension is required.
+A connected Claude Viewer/Codex Viewer is opt-in, only when the user asks: `brain e2e probe --json`, then `brain test
+--viewer` (or `BRAIN_VIEWER=1`, or `brain e2e run`); with several connected profiles set private BRAIN_VIEWER_PROFILE. The
+opted-in lane keeps the separate full Chrome AX/optional heap replay, an opted-in Viewer failure fails the run, and an
+unavailable one falls back explicitly. Follow `docs/VIEWER-E2E.md` to author complete disposable-data E2E scenarios. `doctor` warning B0734 checks local registration, not connectivity.
 
 ## Loop
 1 `brain add` · 2 edit · 3 `brain fix` then `brain check --json` → apply each remaining `fix` literally, repeat until `[]` ·

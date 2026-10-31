@@ -88,7 +88,7 @@ granular:
   brain fix [path]                   applies the mechanical fixes and checks again
   brain edit <operation> <file> ...  checked AST edits: add-prop, remove-prop, rename, move, extract
   brain shot [route] [--text] [--baseline name] [--update-baseline]  Chrome screenshot and accessibility outline
-  brain test [path] [--timeout 60] [--heap]   *.test.brain in headless Chrome + accessibility audit (+ leaks)
+  brain test [path] [--timeout 60] [--heap] [--viewer]   *.test.brain in headless Chrome + accessibility audit (+ leaks); --viewer opts in to Claude/Codex Viewer
   brain map                          project graph: routes, components and props, modules, tests, tokens
   brain spec [--topic X] [--all]     the spec for the LLM (topics: files script markup channels css a11y tests cli)
   brain guide [topic] [--json]       playbooks per task: start views data forms server seo a11y webmcp tests i18n performance
@@ -108,7 +108,7 @@ granular:
   brain deps analyze|preview|fetch    dependency evidence and explicit pinned CDN acquisition
   brain deploy config pm2|nginx       guarded front/backend deployment configuration
   brain media setup-gcs|list|cleanup  private media provisioning/library/owned cleanup
-  brain e2e probe|run                 detected Viewer scenarios plus existing AX/heap gates
+  brain e2e probe|run                 opt-in Claude/Codex Viewer scenarios plus AX/heap gates
   brain backend <serve|migrate|schema|bootstrap-admin>  experimental Rust/Postgres resource API (loopback)
   brain mcp [--profile full|minimal|backend]  the same commands as MCP tools over stdio
 ";
@@ -154,7 +154,7 @@ fn main() -> ExitCode {
         Some("e2e") => {
             if args.get(1).map(String::as_str)==Some("probe") {viewer::probe().map(|value|println!("{value}"))}
             else if args.get(1).map(String::as_str)==Some("run") {
-                #[cfg(unix)] {return cmd_test(&args[2..]);}
+                #[cfg(unix)] {let mut rest=args[2..].to_vec(); if !rest.iter().any(|a|a=="--viewer") {rest.push("--viewer".into());} return cmd_test(&rest);}
                 #[cfg(not(unix))] {Err("E2E needs a supported local browser runner".into())}
             } else {Err("usage: brain e2e probe | brain e2e run [file-or-folder] [--json]".into())}
         },
@@ -1598,6 +1598,7 @@ fn cmd_test(args: &[String]) -> ExitCode {
     let t0 = std::time::Instant::now();
     // --heap: an instance alive after its test unmounted, or an fx timer/listener without cleanup, fails the file (§9)
     testrun::set_heap(args.iter().any(|a| a == "--heap"));
+    testrun::set_viewer(testrun::viewer_requested(args, std::env::var("BRAIN_VIEWER").ok().as_deref()));
     let reports = match run_tests(positional(args, &["--timeout"]).first().map(PathBuf::from), timeout) {
         Ok(r) => r,
         Err(e) => {
@@ -1785,6 +1786,8 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
 
 fn cmd_doctor(args: &[String]) -> ExitCode {
     let target = positional(args, &[]).first().map(PathBuf::from);
+    #[cfg(unix)]
+    testrun::set_viewer(testrun::viewer_requested(args, std::env::var("BRAIN_VIEWER").ok().as_deref()));
     let checked = if args.iter().any(|a| a == "--fix") {
         run_fix(target.clone()).and_then(|fix| run_doctor(target).map(|(ok, mut report)| {
             if let brain_mcp::Json::Obj(ref mut fields) = report { fields.push(("fix".into(), fix)); }

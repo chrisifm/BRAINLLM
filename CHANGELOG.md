@@ -18,6 +18,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Changed
 
+- `brain test`, `brain doctor` and MCP `brain_test` run in owned headless Chrome by default and never probe or open a
+  connected Claude Viewer/Codex Viewer unless the user opts in with `--viewer`, `BRAIN_VIEWER=1`, `brain e2e run` or
+  MCP `viewer: true`; the scaffold's agent guide no longer requires an extension.
 - The shared lexer decodes ASCII directly, scans ASCII identifier runs as bytes and indexes punctuation by first byte
   in the same longest-first order. Source-map scanning skips slash-free trivia gaps and builds its generated line index
   only to locate a failure. Emitted JS, server JS, CSS, maps and diagnostics are byte-identical; no compiler-speed
