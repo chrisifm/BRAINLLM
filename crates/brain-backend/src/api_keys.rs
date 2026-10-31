@@ -31,6 +31,17 @@ pub fn system_active() -> bool {
 pub(crate) async fn as_system<F: std::future::Future>(future: F) -> F::Output {
     SYSTEM.scope((), future).await
 }
+tokio::task_local! { static KEY_SCOPES: Vec<String>; }
+pub(crate) async fn with_scopes<F: std::future::Future>(scopes: Vec<String>, future: F) -> F::Output {
+    KEY_SCOPES.scope(scopes, future).await
+}
+/// Whether the request's key, if any, may read `resource`. Includes, related filters and counts read other resources
+/// than the one the gate checked, and a key's scopes narrow all of them. A server-only resource needs a scope naming it.
+pub(crate) fn scopes_read(resource: &str, api: bool) -> bool {
+    KEY_SCOPES
+        .try_with(|scopes| if api { allows(scopes, resource, "read") } else { names(scopes, resource, "read") })
+        .unwrap_or(true)
+}
 
 /// Opt-in settings (`apiKeys` in the backend contract). `None` on the server config disables keys entirely.
 #[derive(Clone, Debug)]

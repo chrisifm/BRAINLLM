@@ -1243,6 +1243,7 @@ async fn include(
         .map_err(|error| match error {
             crate::relations::IncludeError::Unknown(name) => Error::validation(json!({"include": format!("`{name}` is not includable")})),
             crate::relations::IncludeError::Denied(_) => Error::forbidden(),
+            crate::relations::IncludeError::TooMany => Error::validation(json!({"include": format!("This include attaches more than {} records; lower limit or include fewer levels", crate::relations::MAX_INCLUDED_RECORDS)})),
             crate::relations::IncludeError::Database(error) => Error::internal(error),
         })
 }

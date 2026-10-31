@@ -519,9 +519,12 @@ pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(Str
                 None => bad("Invalid cursor; use next_cursor from the previous page unchanged"),
             },
             "include" => {
+                if split(raw).len() > crate::relations::MAX_INCLUDE_PATHS {
+                    bad(&format!("include takes at most {} paths", crate::relations::MAX_INCLUDE_PATHS));
+                }
                 for name in split(raw) {
-                    if !r.query.include.iter().any(|x| x == name) {
-                        bad(&format!("`{name}` is not includable; declared: {}", r.query.include.join(", ")));
+                    if !crate::relations::include_path_declared(r, resources, name) {
+                        bad(&format!("`{name}` is not includable (at most {} levels, each declared by its resource); declared: {}", crate::relations::MAX_INCLUDE_DEPTH, r.query.include.join(", ")));
                     }
                 }
                 req.include = split(raw).into_iter().map(str::to_string).collect();
@@ -1298,7 +1301,7 @@ pub fn openapi_parameters(r: &Resource) -> Vec<Value> {
     }
     for (key, list) in [("include", r.query.include.clone()), ("aggregate", r.query.aggregate.keys().cloned().collect()), ("count", r.query.count.keys().cloned().collect())] {
         if !list.is_empty() {
-            params.push(json!({"name": key, "in":"query", "description": format!("Comma-separated: {}", list.join(", ")), "schema":{"type":"string"}}));
+            params.push(json!({"name": key, "in":"query", "description": if key == "include" { format!("Comma-separated: {}. Dotted paths follow references up to {} levels", list.join(", "), crate::relations::MAX_INCLUDE_DEPTH) } else { format!("Comma-separated: {}", list.join(", ")) }, "schema":{"type":"string"}}));
         }
     }
     params

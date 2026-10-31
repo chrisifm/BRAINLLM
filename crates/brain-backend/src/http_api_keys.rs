@@ -211,7 +211,7 @@ pub(super) async fn gate(State(app): State<App>, req: Request, next: Next) -> Re
     };
     let key_id = principal.key_id;
     let system = principal.system;
-    let run = KEY_USER.scope(principal.user.clone(), next.run(req));
+    let run = api_keys::with_scopes(principal.scopes.clone(), KEY_USER.scope(principal.user.clone(), next.run(req)));
     let mut response = if system { api_keys::as_system(run).await } else { run.await };
     if let Some(quota) = &quota {
         quota_headers(&mut response, quota);

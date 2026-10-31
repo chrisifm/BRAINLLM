@@ -45,7 +45,8 @@ function keyBackend(env, keyName, kind) {
   }
   const names = (value, label) => {
     const list = typeof value === 'string' ? value.split(',') : value
-    if (!Array.isArray(list) || list.length > 16 || list.some(item => typeof item !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(item))) throw fail(400, `Invalid native ${label} names`)
+    const shape = label === 'include' ? /^[a-z][a-z0-9_]{0,47}(?:\.[a-z][a-z0-9_]{0,47}){0,2}$/ : /^[a-z][a-z0-9_]{0,47}$/
+    if (!Array.isArray(list) || list.length > 16 || list.some(item => typeof item !== 'string' || !shape.test(item))) throw fail(400, `Invalid native ${label} names`)
     return list.join(',')
   }
   const scalar = value => {

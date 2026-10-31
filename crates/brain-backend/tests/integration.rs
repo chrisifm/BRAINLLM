@@ -15,6 +15,8 @@ mod caching;
 mod cluster;
 #[path = "data_queries.rs"]
 mod data_queries;
+#[path = "query_shape.rs"]
+mod query_shape;
 #[path = "domain_writes.rs"]
 mod domain_writes;
 #[path = "edge.rs"]

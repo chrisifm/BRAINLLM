@@ -9,6 +9,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- `?include=a.b.c` follows references up to three levels; each level declares it and applies its own read policy, at most 500 records per request
+- Fix: a project API key needs a read scope for every resource reached by `include`, related filters and `count` (they answered with only the list's scope)
 - System identity for jobs and routes: `keys create --system` (CLI only), `runAs: 'system'` in `queue.jsbrain` and route contracts; each request is marked `system` in the key's events
 - `ctx.backend` in route handlers with `runAs: 'key'|'system'` in the contract
 - `ctx.backend.files(bucket)` in jobs, routes and server code; `/_brain/files` accepts keys with a `files.<bucket>` scope
