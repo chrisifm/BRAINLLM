@@ -11,6 +11,7 @@ pub mod jwt;
 pub mod links;
 pub mod media;
 pub mod response;
+pub mod routes;
 pub mod search;
 pub mod types;
 pub mod upload;

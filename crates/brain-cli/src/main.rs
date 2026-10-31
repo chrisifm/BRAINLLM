@@ -26,6 +26,7 @@ mod backend;
 mod resource_admin;
 mod webhook_config;
 mod platform_config;
+mod route_executor;
 mod hooks_executor;
 mod backend_diff;
 mod changes;

@@ -26,6 +26,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   open requests within a bound.
 - Production refuses a remote `DATABASE_URL` without `sslmode=verify-full` (`BDB_TLS_UNVERIFIED`); `serve` and
   `jobs work` retry the boot connection with full-jitter backoff for up to 60 s.
+- Native backend routes (`server/routes/<name>/route.jsbrain` + `handler.jsbrain`) declare method, path, typed
+  path/query parameters, forwarded headers, raw or JSON body, and per-route body limit (≤ 1 MiB), timeout, rate
+  limit and auth; JSON keys that reach prototypes are refused.
+- Signed webhook routes verify HMAC-SHA256 signatures (`t=…,v1=…` with timestamp tolerance, or `sha256=…` in hex
+  or base64) over the exact raw body, with constant-time comparison and secret rotation from environment variables.
 
 ### Changed
 

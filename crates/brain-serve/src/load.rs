@@ -202,6 +202,26 @@ impl Sidecar {
         }
         Self::spawn_with(root, vars, timeout, frame_limit, production, true)
     }
+    /// Like [`Sidecar::spawn_bounded`] for application routes: up to 30 s per call (outbound
+    /// requests to providers) and 1 MiB frames, with the same private process-group supervision.
+    pub fn spawn_route(
+        root: &Path,
+        vars: &[(String, String)],
+        timeout: std::time::Duration,
+        frame_limit: usize,
+        production: bool,
+    ) -> io::Result<Sidecar> {
+        if !cfg!(unix) {
+            return Err(io::Error::new(io::ErrorKind::Unsupported, "Native routes require Unix process-group supervision in this release"));
+        }
+        if timeout < std::time::Duration::from_millis(50)
+            || timeout > std::time::Duration::from_secs(30)
+            || !(1024..=1024 * 1024).contains(&frame_limit)
+        {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid bounded sidecar limits"));
+        }
+        Self::spawn_with(root, vars, timeout, frame_limit, production, true)
+    }
     fn spawn_with(
         root: &Path,
         vars: &[(String, String)],

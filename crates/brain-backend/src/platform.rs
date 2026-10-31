@@ -17,6 +17,9 @@ pub const DEFAULT_DRAIN: Duration = Duration::from_secs(25);
 pub struct Platform {
     pub buckets: Vec<Bucket>,
     pub edge: Edge,
+    /// Application-declared routes and the executor that runs their handlers.
+    pub routes: Vec<crate::routes::Route>,
+    pub handlers: Option<crate::routes::Handlers>,
 }
 
 /// HTTP edge settings read from the `server/platform.jsbrain` literal.

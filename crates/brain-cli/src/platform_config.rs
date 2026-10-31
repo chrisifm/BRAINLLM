@@ -49,7 +49,7 @@ fn buckets(root: &Path, resources: &[Resource], roles: &RolesConfig) -> Result<V
 }
 
 pub fn load(root: &Path, resources: &[Resource], roles: &RolesConfig) -> Result<Platform, String> {
-    Ok(Platform { buckets: buckets(root, resources, roles)?, edge: edge(root)? })
+    Ok(Platform { buckets: buckets(root, resources, roles)?, edge: edge(root)?, ..Default::default() })
 }
 
 /// Projection for `brain backend schema --json`; contains no environment values.

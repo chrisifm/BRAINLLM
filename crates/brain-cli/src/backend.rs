@@ -289,7 +289,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let mail=setting("BRAIN_MAIL_RESEND_KEY").map(|key|brain_backend::auth_flows::MailConfig::resend(key,setting("BRAIN_MAIL_FROM").ok_or("BRAIN_MAIL_FROM must name a verified sender email")?,public_base.clone())).transpose()?;
         let config=brain_backend::Config{sockets:sockets.native_config()?,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,resources,jobs,uploads:root.join(".brain/uploads"),origins:sockets.http_origins,production:environment=="production"};
         eprintln!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
-        let platform=crate::platform_config::load(&root,&config.resources,&config.roles)?;
+        let mut platform=crate::platform_config::load(&root,&config.resources,&config.roles)?;
+        platform.routes=crate::route_executor::contracts(&root,&environment)?;
+        platform.handlers=crate::route_executor::load(&root,&environment,&platform.routes)?;
         brain_backend::http::serve_with_platform(listener,pool,config,platform).await
     })
 }

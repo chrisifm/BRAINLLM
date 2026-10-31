@@ -28,6 +28,8 @@ mod sockets;
 mod files_http;
 #[path = "edge_http.rs"]
 mod edge_http;
+#[path = "routes_http.rs"]
+mod routes_http;
 pub use edge_http::{ClientIp, EdgeControl, resolve_client};
 pub use sockets::{SocketConfig, SocketControl};
 
@@ -72,6 +74,7 @@ pub struct App {
     production: bool,
     origins: Arc<Vec<String>>,
     platform: Arc<files_http::State>,
+    routes: Arc<routes_http::State>,
 }
 #[derive(Debug)]
 pub struct Error {
@@ -247,6 +250,7 @@ pub async fn router_with_control(
     }
     let (edge_state, edge_control) = edge_http::EdgeState::new(&platform.edge);
     let cors_max_age = platform.edge.cors_max_age;
+    let (custom_routes, custom_handlers) = (platform.routes.clone(), platform.handlers.clone());
     let socket_origins = config.sockets.as_ref().map(|s| s.allowed().to_vec()).unwrap_or_default();
     if socket_origins.iter().any(|origin| !config.origins.contains(origin)) {
         return Err("Socket origins must be an explicit subset of backend HTTP origins".into());
@@ -310,6 +314,7 @@ pub async fn router_with_control(
         &jobs.values().cloned().collect::<Vec<_>>(),
     )?;
     db::verify(&pool, &resources.values().cloned().collect::<Vec<_>>()).await?;
+    let custom = Arc::new(routes_http::State::new(&custom_routes, custom_handlers, &config.roles.roles)?);
     let platform = Arc::new(files_http::State::new(
         &platform,
         &resources.values().cloned().collect::<Vec<_>>(),
@@ -382,6 +387,7 @@ pub async fn router_with_control(
     let sockets = Arc::new(sockets::Broker::new(socket_origins));
     let app = App {
         platform: platform.clone(),
+        routes: custom.clone(),
         sockets: sockets.clone(),
         webhooks,
         before_hooks: config.before_hooks,
@@ -491,6 +497,7 @@ pub async fn router_with_control(
         .route("/_brain/media/{id}/variants", post(media_variants))
         .route("/_brain/media/{id}/v/{version}/{preset}", get(media_asset))
         .merge(files_http::routes(&platform))
+        .merge(routes_http::routes(&custom))
         .fallback(|| async { Error::missing() })
         .layer(DefaultBodyLimit::max(65536))
         .layer(middleware::from_fn_with_state(app.clone(), protect))
@@ -506,7 +513,7 @@ pub async fn router_with_control(
                 next.run(req).await
             }
         }))
-        .layer(middleware::from_fn(request_deadline))
+        .layer(middleware::from_fn_with_state(custom.clone(), request_deadline))
         .layer(CompressionLayer::new())
         .layer(cors)
         .layer(middleware::from_fn(response_headers))
@@ -614,7 +621,13 @@ pub async fn serve_with_platform(
     }
     result
 }
-async fn request_deadline(req: Request, next: Next) -> Response {
+async fn request_deadline(State(custom): State<Arc<routes_http::State>>, req: Request, next: Next) -> Response {
+    if let Some(budget) = routes_http::matched(&req).and_then(|m| custom.deadline(m)) {
+        return match tokio::time::timeout(budget, next.run(req)).await {
+            Ok(response) => response,
+            Err(_) => StatusCode::GATEWAY_TIMEOUT.into_response(),
+        };
+    }
     let path = req.uri().path();
     if path.starts_with("/_brain/files/") {
         let budget = files_http::deadline(&req);
@@ -700,7 +713,8 @@ async fn protect(State(app): State<App>, req: Request, next: Next) -> Response {
             .path()
             .strip_prefix("/_brain/webhooks/in/")
             .is_some_and(|name| name.len() <= 48 && crate::contract::identifier(name));
-    if !signed_inbound && !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS) {
+    let signed_route = routes_http::matched(&req).is_some_and(|m| app.routes.signed(req.method(), m));
+    if !signed_inbound && !signed_route && !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS) {
         let origin = req
             .headers()
             .get(header::ORIGIN)

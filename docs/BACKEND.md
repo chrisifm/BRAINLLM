@@ -192,6 +192,8 @@ General active-content/file formats are not implicitly treated as safe images.
 Files of any type (documents, archives, audio, video) use declared buckets: [backend/files.md](backend/files.md).
 Running behind a proxy, extra CORS origins and preflight caching: [backend/proxy-cors.md](backend/proxy-cors.md).
 Database TLS and boot retry, health probes, backpressure and graceful shutdown: [backend/lifecycle.md](backend/lifecycle.md).
+App-declared routes with typed path, query and headers, per-route limits and auth: [backend/routes.md](backend/routes.md).
+Signed webhook routes for payment and shipping providers (HMAC, timestamp tolerance, raw body): [backend/webhooks.md](backend/webhooks.md).
 
 ## Remaining acceptance work
 

@@ -19,6 +19,8 @@ mod jwt_sessions;
 mod links;
 #[path = "media.rs"]
 mod media;
+#[path = "routes.rs"]
+mod routes;
 #[path = "native_openapi.rs"]
 mod native_openapi;
 #[path = "native_sockets.rs"]
