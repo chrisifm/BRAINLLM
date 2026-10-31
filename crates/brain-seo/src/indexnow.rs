@@ -39,8 +39,8 @@ pub fn urls(sitemap: &str, since: Option<&str>) -> Vec<String> {
                 .split("<loc>")
                 .nth(1)?
                 .split("</loc>")
-                .next()?
-                .replace("&amp;", "&");
+                .next()
+                .map(unescape)?;
             let lastmod = u
                 .split("<lastmod>")
                 .nth(1)
@@ -53,9 +53,20 @@ pub fn urls(sitemap: &str, since: Option<&str>) -> Vec<String> {
         .collect()
 }
 
+/// XML text → plain text for the five predefined entities [`crate::files::xml`] writes (`&amp;` last, so `&amp;lt;`
+/// stays `&lt;`).
+fn unescape(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
 /// The page URLs of the built sitemap (S02): a urlset as is, or the local children of a sitemap index (`sitemap-N.xml`
 /// under `site`, the origin plus base path), deduplicated in order. Children are read from `dist` only: one under
-/// another origin, with `..`, missing, or itself an index (no nesting, so no cycle) is an error with a fix.
+/// another origin, with `..`, missing, not a complete urlset, or itself an index (no nesting, so no cycle) is an error
+/// with a fix; a child listed twice is read once.
 pub fn page_urls(dist: &std::path::Path, sitemap: &str, site: &str, since: Option<&str>) -> Result<Vec<String>, String> {
     if !sitemap.contains("<sitemapindex") {
         return Ok(urls(sitemap, since));
@@ -63,8 +74,19 @@ pub fn page_urls(dist: &std::path::Path, sitemap: &str, site: &str, since: Optio
     let root = site.trim_end_matches('/');
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
-    for loc in sitemap.split("<sitemap>").skip(1).filter_map(|c| c.split("<loc>").nth(1)?.split("</loc>").next()) {
-        let loc = loc.replace("&amp;", "&");
+    let locs: Vec<String> = sitemap
+        .split("<sitemap>")
+        .skip(1)
+        .filter_map(|c| c.split("<loc>").nth(1)?.split("</loc>").next().map(unescape))
+        .collect();
+    if locs.is_empty() {
+        return Err("dist/sitemap.xml is a sitemap index without <sitemap><loc> children; fix: run `brain build` again".into());
+    }
+    let mut read = std::collections::HashSet::new();
+    for loc in locs {
+        if !read.insert(loc.clone()) {
+            continue;
+        }
         let rel = loc
             .strip_prefix(root)
             .filter(|r| r.starts_with('/') && r.ends_with(".xml") && !r.contains("..") && !r.contains('\\') && !r.contains("//"))
@@ -73,6 +95,9 @@ pub fn page_urls(dist: &std::path::Path, sitemap: &str, site: &str, since: Optio
             .map_err(|_| format!("sitemap index child {loc} is missing from dist/{}; fix: run `brain build` again and deploy every sitemap-N.xml", &rel[1..]))?;
         if child.contains("<sitemapindex") {
             return Err(format!("sitemap index child {loc} is itself an index; fix: list only urlset files in dist/sitemap.xml"));
+        }
+        if !child.contains("<urlset") || !child.contains("</urlset>") {
+            return Err(format!("sitemap index child {loc} is not a complete <urlset>; fix: run `brain build` again and deploy dist/{} unchanged", &rel[1..]));
         }
         out.extend(urls(&child, since).into_iter().filter(|u| seen.insert(u.clone())));
     }
@@ -149,5 +174,60 @@ mod tests {
             key_file("abcdef0123456789"),
             ("abcdef0123456789.txt".into(), "abcdef0123456789".into())
         );
+    }
+
+    #[test]
+    fn sitemap_entities_are_decoded() {
+        // the build escapes every <loc> with files::xml; IndexNow must send the URL, not its XML form
+        let sm = format!("<urlset><url><loc>{}</loc></url></urlset>", crate::files::xml("https://acme.dev/it's/a&b?q=\"x\""));
+        assert_eq!(urls(&sm, None), vec!["https://acme.dev/it's/a&b?q=\"x\"".to_string()]);
+        assert_eq!(unescape("&amp;lt;"), "&lt;", "decoded once");
+    }
+
+    #[test]
+    fn page_urls_walk_local_children_with_the_date_filter() {
+        // S02: an index yields its children's page URLs (deduplicated, `since` applied per URL), never child sitemap URLs
+        let dist = std::env::temp_dir().join(format!("brain-indexnow-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dist);
+        std::fs::create_dir_all(dist.join("app")).unwrap();
+        let w = |n: &str, s: &str| std::fs::write(dist.join(n), s).unwrap();
+        let set = |rows: &[(&str, Option<&str>)]| {
+            let mut o = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
+            for (u, d) in rows {
+                o.push_str(&format!("  <url><loc>{u}</loc>{}</url>\n", d.map(|d| format!("<lastmod>{d}</lastmod>")).unwrap_or_default()));
+            }
+            o + "</urlset>\n"
+        };
+        let index = |kids: &[&str]| {
+            let mut o = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<sitemapindex xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
+            for k in kids {
+                o.push_str(&format!("  <sitemap><loc>{k}</loc><lastmod>2026-10-01</lastmod></sitemap>\n"));
+            }
+            o + "</sitemapindex>\n"
+        };
+        let site = "https://acme.dev/app";
+        w("app/sitemap-1.xml", &set(&[("https://acme.dev/app/", None), ("https://acme.dev/app/old", Some("2025-01-01")), ("https://acme.dev/app/a?x=1&amp;y=2", Some("2026-10-02"))]));
+        w("app/sitemap-2.xml", &set(&[("https://acme.dev/app/a?x=1&amp;y=2", Some("2026-10-02")), ("https://acme.dev/app/new", Some("2026-10-30"))]));
+        let idx = index(&["https://acme.dev/app/sitemap-1.xml", "https://acme.dev/app/sitemap-2.xml", "https://acme.dev/app/sitemap-1.xml"]);
+        let all = page_urls(&dist.join("app"), &idx, site, None).unwrap();
+        assert_eq!(all, ["https://acme.dev/app/", "https://acme.dev/app/old", "https://acme.dev/app/a?x=1&y=2", "https://acme.dev/app/new"]);
+        assert!(all.iter().all(|u| !u.ends_with(".xml")), "child sitemaps are not pages");
+        let recent = page_urls(&dist.join("app"), &idx, site, Some("2026-10-01")).unwrap();
+        assert_eq!(recent, ["https://acme.dev/app/", "https://acme.dev/app/a?x=1&y=2", "https://acme.dev/app/new"]);
+        // malformed: a truncated child, a nested index (cycle guard), an index with no children, a path escape
+        w("app/sitemap-3.xml", "<?xml version=\"1.0\"?>\n<urlset><url><loc>https://acme.dev/app/cut</loc></url>");
+        w("app/sitemap-4.xml", &index(&["https://acme.dev/app/sitemap-4.xml"]));
+        w("secret.xml", &set(&[("https://acme.dev/secret", None)]));
+        for (kids, needle) in [
+            (vec!["https://acme.dev/app/sitemap-3.xml"], "not a complete <urlset>"),
+            (vec!["https://acme.dev/app/sitemap-4.xml"], "itself an index"),
+            (vec!["https://acme.dev/app/../secret.xml"], "not a sitemap file of"),
+            (vec!["https://acme.dev/app/sitemap-9.xml"], "missing from dist/sitemap-9.xml"),
+            (vec![], "without <sitemap><loc> children"),
+        ] {
+            let e = page_urls(&dist.join("app"), &index(&kids), site, None).unwrap_err();
+            assert!(e.contains(needle) && e.contains("fix:"), "{e}");
+        }
+        let _ = std::fs::remove_dir_all(&dist);
     }
 }
