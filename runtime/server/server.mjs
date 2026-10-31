@@ -427,6 +427,9 @@ export function createServer(o = {}) {
   if (!Number.isInteger(BODY_KB) || BODY_KB < 1 || BODY_KB > 65536) throw Error('brain.json server.maxBodyKB must be an integer from 1 to 65536 (KB)')
   const MAX_BODY = BODY_KB * 1024 // RPC and form bodies; bounded reads never buffer more
   const TOO_BIG = `Body larger than ${BODY_KB} KB; raise brain.json server.maxBodyKB`
+  // a streamed route holds its 200 head this long for load() (#232): a load that settles in time still answers its
+  // real status (303 redirect, 404 notFound, deliberate 4xx, 500); a slower one streams and handles them inline
+  const STREAM_HOLD = +(o.streamHoldMs ?? 200)
   const tooBig = (rid, path) => (log('warn', 'body too large', { rid, path, limitKB: BODY_KB, fix: 'Raise brain.json server.maxBodyKB (or BRAIN_MAX_BODY_KB), up to 65536' }), TOO_BIG)
   const hasManifestSockets = Object.hasOwn(mf,'nativeSockets')
   if (hasManifestSockets && typeof mf.nativeSockets !== 'boolean') throw Error('Manifest nativeSockets must be an explicit boolean')
@@ -621,21 +624,24 @@ export function createServer(o = {}) {
       if (r.deny !== undefined) return forbidden(req, res, url, rid, r.deny)
       extra = r.headers
     }
-    if (route.stream && route.server && !fixed && !forms && status === 200 && !res.$capture) return streamed(req, res, route, params, url, rid, ctx, keep(extra || {}))
+    // what load() thrown or returned instead of props answers: redirect, notFound() (F11), deliberate status, failure
+    const loadOutcome = e => {
+      if (e && e.redirect) return send(res, e.status || 303, '', { location: withBase(redirect(e.redirect, e.status ?? 303).redirect), ...ctx.session.headers() })
+      if ((e instanceof HttpError && e.status === 404) || (e && e.notFound === true)) return notFound(req, res)
+      const status = intendedStatus(e) || 500
+      log('error', 'load failed', { rid, path: url.pathname, status, stack: String((e && e.stack) || e) })
+      return status === 500 ? errorPage(req, res, route, params, url, rid) : failPage(res, status, rid)
+    }
+    if (route.stream && route.server && !fixed && !forms && status === 200 && !res.$capture) return streamed(req, res, route, params, url, rid, ctx, keep(extra || {}), loadOutcome)
     try {
       if (!fixed && route.server) {
         const m = await load(route.server)
         if (typeof m.load === 'function') props = (await withTimeout(Promise.resolve(m.load(ctx)), TIMEOUT)) ?? {}
       }
     } catch (e) {
-      if (e && e.redirect) return send(res, e.status || 303, '', { location: withBase(redirect(e.redirect, e.status ?? 303).redirect), ...ctx.session.headers() })
-      if ((e instanceof HttpError && e.status === 404) || (e && e.notFound === true)) return notFound(req, res) // `throw notFound()` (F11)
-      const status = intendedStatus(e) || 500
-      log('error', 'load failed', { rid, path: url.pathname, status, stack: String((e && e.stack) || e) })
-      return status === 500 ? errorPage(req, res, route, params, url, rid) : failPage(res, status, rid)
+      return loadOutcome(e)
     }
-    if (props && props.redirect) return send(res, props.status || 303, '', { location: withBase(redirect(props.redirect, props.status ?? 303).redirect), ...ctx.session.headers() })
-    if (props && props.notFound === true) return notFound(req, res) // `return notFound()` (F11)
+    if (props && (props.redirect || props.notFound === true)) return loadOutcome(props) // `return redirect()` / `return notFound()`
     let body, seo, failed
     try {
       const at = { path: url.pathname, params: params || {}, query: Object.fromEntries(url.searchParams) } // route() (§41.5)
@@ -657,12 +663,20 @@ export function createServer(o = {}) {
     html(res, status, out, keep({ ...extra, ...ctx.session.headers() }), own ? undefined : 'W/"' + tag(out) + '"')
   }
   // Streaming SSR (#232, `route.stream`: the build sets it when the view's <meta seo> is static and it has a load()):
-  // the page up to the region (head, CSS, layout shell) is sent at once, the view when load() ends. The status and
-  // headers are already out by then, so a redirect from load() becomes location.replace and a failure an inline notice
-  // with the request id (both logged); load() cannot change the session on a streamed route.
-  async function streamed(req, res, route, params, url, rid, ctx, extra) {
+  // load() starts first and the head waits up to STREAM_HOLD for it: a load that redirects, is not found or throws a
+  // status in that time gets the same answer as a non-streamed route (`outcome`). Past it, the page up to the region
+  // (head, CSS, layout shell) is sent, the view when load() ends. The status and headers are out by then, so a late
+  // redirect becomes location.replace and a late failure an inline notice with the request id (both logged); load()
+  // cannot change the session on a streamed route.
+  async function streamed(req, res, route, params, url, rid, ctx, extra, outcome) {
     const [top, bottom = ''] = readFileSync(file(route.page), 'utf8').split('<!--brain:ssr-->')
     const sm = await load(route.server)
+    const loadP = typeof sm.load === 'function' ? withTimeout(Promise.resolve().then(() => sm.load(ctx)), TIMEOUT) : Promise.resolve(null)
+    loadP.catch(() => {}) // handled below; never an unhandled rejection while the loading view renders
+    let timer
+    const early = await Promise.race([loadP.then(v => ({ v }), e => ({ e })), new Promise(r => (timer = setTimeout(r, STREAM_HOLD)))])
+    clearTimeout(timer)
+    if (early && (early.e !== undefined || (early.v && (early.v.redirect || early.v.notFound === true)))) return outcome(early.e !== undefined ? early.e : early.v)
     const seoF = sm.seo || (await load(route.view)).default.seo
     if (route.i18n) await load(route.i18n)
     const nonce = randomBytes(16).toString('base64'), n = h => h.replace(/<script(?![^>]*\bnonce=)/g, `<script nonce="${nonce}"`)
@@ -677,15 +691,12 @@ export function createServer(o = {}) {
     } finally {
       globalThis.__brainLocale = null
     }
-    // load() starts now: the loading view (#253) renders while it runs
-    const loadP = typeof sm.load === 'function' ? withTimeout(Promise.resolve().then(() => sm.load(ctx)), TIMEOUT) : Promise.resolve(null)
-    loadP.catch(() => {}) // handled below; never an unhandled rejection while the loading view renders
     const at = { path: url.pathname, params: params || {}, query: Object.fromEntries(url.searchParams) }
     res.write(n(head(top, seo0, url.pathname)))
     // QA #253: the folder's _loading.brain goes in the region with the first chunk (SPEC: shows while load runs),
     // between two marker comments; the last chunk starts with a script that removes them and what is between
     let clear = ''
-    if (route.loading) {
+    if (route.loading && !early) { // the loading view (#253) only when load() is still running
       try {
         const lr = { ...route, view: route.loading, layouts: [], server: null }
         const { body } = await (queue = queue.then(() => render(lr, {}, null, at), () => render(lr, {}, null, at)))

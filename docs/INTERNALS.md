@@ -693,7 +693,10 @@ Coverage against React/Next, Vue/Nuxt, Angular, Svelte/Kit and Astro; all with a
   the session. Guards that never read `user` keep deciding on the client.
 - `notFound()` (codegen intrinsic → `{ notFound: true, status: 404 }`, server code only) thrown or returned from `load`:
   server.mjs answers 404 with the app's 404 page; the dev sidecar answers `OK {"notFound":true…}` and brain-serve
-  renders `views/404.brain` with 404. A streamed route already sent its 200 head: it ends with a noindex notice.
+  renders `views/404.brain` with 404. A streamed route holds its head up to 200 ms (`createServer({ streamHoldMs })`)
+  for `load()`: a redirect, `notFound()` (also from an imported helper), deliberate 4xx or failure in that time gets
+  the same 303/404/4xx/500 as a non-streamed route (2026-10-30, real app: they answered 200). A slower `load()` has
+  its 200 head out already: a redirect becomes `location.replace`, not found a noindex notice.
 - server.mjs `head(page, seo, path)`: an SSR template's canonical/og:url carry the route pattern (`/jobs/:slug`);
   they are rewritten to the request path, og:url follows a `seo(props).canonical` unless the view sets `og:url`, and a
   tag in the view's `<head>` block replaces the generated tag with the same `name`/`property` (or canonical).

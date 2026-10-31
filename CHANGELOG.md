@@ -31,6 +31,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Fixed
 
+- Streamed SSR routes (static `<meta seo>` with `load`) answered 200 when `load` redirected, threw `notFound()` from
+  an imported helper or threw a deliberate 4xx, because the head went out before `load` settled. The head now waits
+  up to 200 ms for `load`; an outcome in that time gets the same 303/404/4xx/500 as a non-streamed route. Slower
+  loads keep streaming and handle the outcome inline.
+
 - RPC and form bodies were capped at 64 KB with no setting, so an app sending a small file (for example base64 in an
   RPC argument) failed with 413. The default is now 1 MB, configurable up to 64 MB with `server.maxBodyKB`; the 413
   text names that setting and the production server logs it with the limit. Bodies are still read bounded. The dev
