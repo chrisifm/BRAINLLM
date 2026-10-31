@@ -29,6 +29,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   aggregates (docs/backend/visibility.md).
 - Backend field access modifiers `readonly`, `writeonly` and `private` (`'str writeonly'` or `{ access }`): rejected from
   client input or never serialized as declared, preserved on full replacement, and marked in OpenAPI.
+- Backend slug history: a field `{ type: 'str!', unique: true, slug: true }` keeps earlier slugs, and
+  `GET /api/<resource>/redirects/<slug>` returns the current one for a permanent redirect (docs/backend/slugs.md).
 - `brain backend serve` uses separate HTTP and worker pools (`BRAIN_DB_HTTP_POOL`, `BRAIN_DB_WORKER_POOL`), checks
   them against `max_connections` at boot, and sends Postgres timeouts as startup options instead of a session `SET`;
   HTTP adds a 1 s lock wait and, on Postgres 17+, a 9 s transaction cap.

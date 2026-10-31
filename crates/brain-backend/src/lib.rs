@@ -14,6 +14,7 @@ pub mod media;
 pub mod ownership;
 pub mod response;
 pub mod search;
+pub mod slugs;
 pub mod types;
 pub mod upload;
 pub mod visibility;

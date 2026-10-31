@@ -536,3 +536,55 @@ async fn access_modifiers_and_owner_exposure() {
     assert!(brain_backend::db::migrate(&pool, &[odd]).await.is_err(), "unknown access modes are rejected");
     pool.close().await;
 }
+
+/// Slug history: a renamed record keeps resolving from its old slug for a permanent redirect.
+#[tokio::test]
+#[ignore = "requires scripts/backend-check.mjs disposable Postgres"]
+async fn slug_history_resolves_old_slugs_to_the_current_one() {
+    let pool = database("brain_slugs").await;
+    let slug = Field { kind: "str".into(), required: true, unique: true, slug: true, ..Default::default() };
+    let mut articles = resource("articles", vec![("title", field("str", true)), ("slug", slug)], policy(&["public"], &["candidate"], &["owner"], &["owner"]), json!({}));
+    articles.search = Vec::new();
+    let mut drafts = articles.clone();
+    drafts.name = "drafts".into();
+    drafts.policy = policy(&["owner"], &["candidate"], &["owner"], &["owner"]);
+    let api = api(&pool, vec![articles, drafts]).await;
+    let (_, author) = api.user("author@news.test").await;
+    let (_, other) = api.user("other@news.test").await;
+    let (_, a) = api.post("/api/articles", &author, json!({"title": "Hello", "slug": "hello"})).await;
+    let id = a["id"].as_str().unwrap().to_string();
+    let uri = format!("/api/articles/{id}");
+    let put = |slug: &'static str| api.call("PUT", &uri, Some(&author), Some(json!({"title": "Hello", "slug": slug})));
+    assert_eq!(put("hello-world").await.0, 200);
+    assert_eq!(put("hello-world-2026").await.0, 200);
+    for old in ["hello", "hello-world"] {
+        let (s, r) = api.get(&format!("/api/articles/redirects/{old}"), None).await;
+        assert_eq!((s, r["slug"].as_str()), (200, Some("hello-world-2026")), "{old}: {r}");
+    }
+    let (s, _) = api.get("/api/articles/redirects/hello-world-2026", None).await;
+    assert_eq!(s, 404, "the live slug does not redirect");
+    let (s, _) = api.get("/api/articles/redirects/never", None).await;
+    assert_eq!(s, 404);
+    // A slug taken again by another record stops redirecting.
+    let (s, _) = api.post("/api/articles", &author, json!({"title": "New", "slug": "hello"})).await;
+    assert_eq!(s, 200);
+    let (s, _) = api.get("/api/articles/redirects/hello", None).await;
+    assert_eq!(s, 404);
+    // Moving back to an old slug removes it from the history.
+    assert_eq!(put("hello-world").await.0, 200);
+    let (s, _) = api.get("/api/articles/redirects/hello-world", None).await;
+    assert_eq!(s, 404);
+    // Redirects follow the read scope: a private record never confirms its slugs to other readers.
+    let (_, d) = api.post("/api/drafts", &author, json!({"title": "Secret", "slug": "plan"})).await;
+    let draft = d["id"].as_str().unwrap().to_string();
+    assert_eq!(api.call("PUT", &format!("/api/drafts/{draft}"), Some(&author), Some(json!({"title": "Secret", "slug": "plan-b"}))).await.0, 200);
+    let (s, r) = api.get("/api/drafts/redirects/plan", Some(&author)).await;
+    assert_eq!((s, r["slug"].as_str()), (200, Some("plan-b")));
+    let (s, _) = api.get("/api/drafts/redirects/plan", Some(&other)).await;
+    assert_eq!(s, 404);
+    // Contract: a slug must be a unique str.
+    let mut bad = resource("bad", vec![("slug", Field { kind: "str".into(), slug: true, ..Default::default() })], policy(&["public"], &["candidate"], &["owner"], &["owner"]), json!({}));
+    bad.search = Vec::new();
+    assert!(bad.validate().is_err());
+    pool.close().await;
+}

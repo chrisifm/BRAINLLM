@@ -434,6 +434,7 @@ pub async fn router_with_socket_control(
         .route("/_brain/jobs/status/{id}", get(job_status))
         .route("/api/{name}", get(list).post(create))
         .route("/api/{name}/{id}", get(read).put(update).delete(delete))
+        .route("/api/{name}/redirects/{slug}", get(slug_redirect))
         .route(
             "/_brain/uploads",
             post(upload_image).layer(DefaultBodyLimit::max(5 * 1024 * 1024 + 65536)),
@@ -900,6 +901,24 @@ fn relational(r: &Resource, operation: &str) -> bool {
         _ => &r.policy.delete,
     };
     grants.iter().any(|g| crate::ownership::path(g).is_some())
+}
+/// `GET /api/<resource>/redirects/<old slug>` → `{"slug": "<current>"}` for a permanent redirect, or 404.
+async fn slug_redirect(
+    State(app): State<App>,
+    Path((name, slug)): Path<(String, String)>,
+    h: HeaderMap,
+) -> Result<Json<Value>> {
+    let r = app.resource(&name)?;
+    if slug.is_empty() || slug.len() > 512 {
+        return Err(Error::missing());
+    }
+    let u = app.user(&h).await?;
+    let scope = crate::ownership::read_scope(r, &app.resources, viewer(u.as_ref())).ok_or_else(Error::forbidden)?;
+    match crate::slugs::redirect(&app.pool, &app.resources, r, &scope, &slug).await {
+        Ok(Some(current)) => Ok(Json(json!({ "slug": current }))),
+        Ok(None) => Err(Error::missing()),
+        Err(error) => Err(Error::internal(db::safe(error))),
+    }
 }
 async fn read(
     State(app): State<App>,

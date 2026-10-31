@@ -29,6 +29,9 @@ pub struct Field {
     /// serialized, e.g. a secret). None: clients read and write it. Serialization-only, like `visible`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub access: Option<String>,
+    /// The resource's slug: previous values keep resolving for permanent redirects (see `slugs.rs`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub slug: bool,
 }
 impl Field {
     pub fn ty(&self) -> Option<Ty> {
@@ -203,6 +206,7 @@ impl Resource {
         }
         self.validate_constraints()?;
         crate::query::validate(self)?;
+        crate::slugs::validate(self)?;
         let search_unique: std::collections::HashSet<_> = self.search.iter().collect();
         if self.search.len() > 8
             || search_unique.len() != self.search.len()
@@ -342,6 +346,7 @@ impl Resource {
                 if let Some(field) = field.as_object_mut() {
                     field.remove("visible");
                     field.remove("access");
+                    field.remove("slug");
                 }
             }
         }

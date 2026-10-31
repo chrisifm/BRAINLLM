@@ -27,6 +27,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "data_queries",
         include_str!("../migrations/0008_data_queries.sql"),
     ),
+    (
+        "data_queries_slugs",
+        include_str!("../migrations/0009_data_queries_slugs.sql"),
+    ),
 ];
 fn checksum(sql: &str) -> String {
     Sha256::digest(sql.as_bytes())
@@ -696,6 +700,7 @@ pub async fn migrate(pool: &PgPool, resources: &[Resource]) -> Result<(), String
     for r in resources {
         crate::relations::install(&mut tx, r).await?;
         crate::query::install_indexes(&mut tx, r).await?;
+        crate::slugs::install(&mut tx, r).await?;
         crate::relations::verify(&mut tx, r).await?;
     }
     foundation(&mut tx).await?;
