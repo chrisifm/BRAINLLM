@@ -6,6 +6,7 @@ pub mod auth_flows;
 pub mod boot;
 pub mod cluster;
 pub mod contract;
+pub mod contract_review;
 pub mod db;
 pub mod domain;
 pub mod schedules;

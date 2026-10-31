@@ -33,6 +33,7 @@ B0721 and B0722 read `process.env`, `ctx.env` and `import.meta.env` from tokens:
 A session write without `BRAIN_SECRET` fails with B0782 and how to set it.
 `brain dev` refuses the redirects production refuses (an invalid status, an off-site or malformed location), thrown or returned from `load`; it used to answer them and production then failed with a 500.
 ### Security
+- `brain backend approve-contract` previews a changed resource contract with the rows it touches and records it on `--apply`; changes that can invalidate stored rows also need `--accept <resource>`.
 - `brain backend bootstrap-admin --email <address>` selects the account by email.
 - `ctx.backend.resource()` failures carry the backend's `code` and `fix` for server code to branch on; the message stays generic.
 - `BRAIN_BACKEND_SESSION=app` keeps an app's own signed session beside the native backend; `ctx.session.set` that would answer 409 now warns B0786.

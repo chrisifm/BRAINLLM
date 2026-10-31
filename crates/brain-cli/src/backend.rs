@@ -590,9 +590,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }
     if !matches!(
         operation,
-        "schema" | "migrate" | "serve" | "bootstrap-admin" | "rename-role" | "users"
+        "schema" | "migrate" | "approve-contract" | "serve" | "bootstrap-admin" | "rename-role" | "users"
     ) {
-        return Err("usage: brain backend schema|migrate|serve|bootstrap-admin|rename-role --from <role> --to <role> [--apply]|logs [rid]|users|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182] [--with-workers]".into());
+        return Err("usage: brain backend schema|migrate|approve-contract [--accept <resource>] [--apply]|serve|bootstrap-admin|rename-role --from <role> --to <role> [--apply]|logs [rid]|users|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182] [--with-workers]".into());
     }
     let snapshot = inspect(&root)?;
     if operation == "schema" {
@@ -643,6 +643,20 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 report["next"]=json!("Declare those roles in server/auth/roles.jsbrain, or preview moving their accounts with `brain backend rename-role --from <role> --to <role>` (add --apply; sessions are revoked)");
             }
             println!("{report}");return Ok(())
+        }
+        if operation=="approve-contract" {
+            let reviewed=brain_backend::contract_review::review(&pool,&resources).await?;
+            let accepted=crate::flag(args,"--accept").map(|list|list.split(',').map(str::to_string).collect::<Vec<_>>()).unwrap_or_default();
+            let decision=brain_backend::contract_review::approved(&reviewed,&accepted);
+            let apply=args.iter().any(|a|a=="--apply");
+            if apply {
+                let names=decision.as_ref().map_err(|blocked|format!("B0787: nothing was changed: {} has changes that can invalidate stored rows; fix: review them without --apply, then pass --accept {}",blocked.join(", "),blocked.join(",")))?;
+                brain_backend::db::migrate_approving(&pool,&resources,names).await?;
+            }
+            pool.close().await;
+            let needs:Vec<String>=decision.err().unwrap_or_default();
+            let next=if apply||reviewed.is_empty(){Value::Null}else if needs.is_empty(){json!("brain backend approve-contract --apply")}else{json!(format!("Review the rows each change touches, then: brain backend approve-contract --accept {} --apply",needs.join(",")))};
+            println!("{}",json!({"schemaVersion":1,"ok":true,"applied":apply&&!reviewed.is_empty(),"changes":reviewed,"needsAccept":needs,"next":next}));return Ok(());
         }
         if operation=="rename-role" {
             let from=crate::flag(args,"--from").ok_or("rename-role requires --from <role> --to <role>")?;
