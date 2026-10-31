@@ -144,7 +144,13 @@ struct Shop {
 async fn shop() -> Shop {
     let url = std::env::var("BRAIN_BACKEND_TEST_URL")
         .expect("Use scripts/backend-check.mjs; no developer database is selected implicitly");
-    let pool = db::connect(&url).await.unwrap();
+    // Own database: tests here hold row locks and add triggers, and a concurrent fixture's migration would wait on them.
+    let base = db::connect(&url).await.unwrap();
+    let name = format!("brain_domain_writes_{}", uuid::Uuid::new_v4().simple());
+    sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE {name}"))).execute(&base).await.unwrap();
+    base.close().await;
+    let options: sqlx::postgres::PgConnectOptions = url.parse().unwrap();
+    let pool = db::connect(sqlx::ConnectOptions::to_url_lossy(&options.database(&name)).as_str()).await.unwrap();
     db::migrate(&pool, &resources()).await.unwrap();
     let auth = Auth::new(pool.clone()).await.unwrap();
     let run = uuid::Uuid::new_v4().simple().to_string()[..12].to_string();
@@ -371,6 +377,51 @@ async fn postgres_atomic_actions_and_upserts_are_race_safe_under_concurrent_requ
     assert_eq!(status, 403);
     let (status, body) = call(&s.app, "POST", "/api/task_items/upsert", &s.alice, Some(json!({"key":["title"],"data":{"title":"x","code":"y"}}))).await;
     assert_eq!((status, body["error"]["fields"]["key"].is_string()), (422, true));
+}
+
+/// Every deadline Postgres enforces on a write path ends in an answer the client can act on. These waits are real, not raised.
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn postgres_real_lock_and_statement_deadlines_answer_503_and_write_nothing() {
+    let s = shop().await;
+    let busy = |what: &str, status: u16, body: &Value| {
+        assert_eq!((status, body["error"]["code"].as_str()), (503, Some("DATABASE_BUSY")), "{what}: {body}");
+        assert!(body["rid"].is_string(), "{what}: {body}");
+    };
+    let code = format!("L-{}", s.run);
+    let (status, row) = call(&s.app, "POST", "/api/task_items", &s.alice, Some(json!({"title":"Held","code":code}))).await;
+    assert_eq!(status, 200, "{row}");
+    let task = id(&row);
+    let uri = format!("/api/task_items/{task}");
+    // lock_timeout: another transaction holds the row.
+    let mut holder = s.pool.begin().await.unwrap();
+    sqlx::query("SELECT 1 FROM _brain_res_task_items WHERE id=$1::uuid FOR UPDATE").bind(&task).execute(&mut *holder).await.unwrap();
+    let (status, body) = call(&s.app, "PATCH", &uri, &s.alice, Some(json!({"title":"Changed"}))).await;
+    busy("patch", status, &body);
+    let (status, body) = call(&s.app, "DELETE", &uri, &s.alice, None).await;
+    busy("delete", status, &body);
+    let (status, body) = batch(&s, json!({"op":"update","items":[{"id":task,"data":{"title":"Changed"}}]})).await;
+    busy("batch update", status, &body);
+    let (status, body) = call(&s.app, "POST", "/api/task_items/upsert", &s.alice, Some(json!({"key":["code"],"data":{"title":"Changed","code":code}}))).await;
+    busy("upsert", status, &body);
+    holder.rollback().await.unwrap();
+    let (status, body) = call(&s.app, "GET", &uri, &s.alice, None).await;
+    assert_eq!((status, body["data"]["title"].as_str()), (200, Some("Held")), "{body}");
+    // statement_timeout: a trigger outlasts the five seconds a request statement may take.
+    for statement in [
+        "CREATE OR REPLACE FUNCTION _test_outlast() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN PERFORM pg_sleep(30); RETURN NEW; END $f$",
+        "DROP TRIGGER IF EXISTS _test_outlast ON _brain_res_task_items",
+        "CREATE TRIGGER _test_outlast BEFORE INSERT ON _brain_res_task_items FOR EACH ROW WHEN (NEW.data->>'code' LIKE 'outlast~%') EXECUTE FUNCTION _test_outlast()",
+    ] {
+        sqlx::query(statement).execute(&s.pool).await.unwrap();
+    }
+    let row = |n: u32| json!({"title":format!("Slow {n}"),"code":format!("outlast~{}~{n}", s.run)});
+    let (status, body) = call(&s.app, "POST", "/api/task_items", &s.alice, Some(row(0))).await;
+    busy("create", status, &body);
+    let (status, body) = batch(&s, json!({"op":"create","items":[row(1), row(2)]})).await;
+    assert_eq!(status, 503, "batch create: {body}");
+    assert_eq!(tasks_with_prefix(&s, &format!("outlast~{}", s.run)).await, 0);
+    sqlx::query("DROP TRIGGER _test_outlast ON _brain_res_task_items").execute(&s.pool).await.unwrap();
 }
 
 async fn batch(s: &Shop, body: Value) -> (u16, Value) {
