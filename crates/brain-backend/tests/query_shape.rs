@@ -182,7 +182,8 @@ async fn fields_narrow_lists_without_revealing_or_breaking_anything() {
     let (status, private) = a.get("/api/products?fields=note").await;
     assert_eq!(status, 422, "{private}");
     assert_eq!(a.get("/api/products?fields=").await.0, 422);
-    let strip = |v: &Value| v["error"]["fields"]["fields"].to_string().replace("nothing", "X").replace("note", "X");
+    let strip = |v: &Value| v.pointer("/error/fields/fields").or_else(|| v.pointer("/fields/fields")).expect("field error").to_string().replace("nothing", "X").replace("note", "X");
+    assert!(unknown.to_string().contains("cannot be selected"), "{unknown}");
     assert_eq!(strip(&unknown), strip(&private));
     // A field only some readers see stays hidden when named by others, and appears for its owner.
     let (status, anon) = a.get("/api/products?fields=title,cost").await;
@@ -209,4 +210,76 @@ async fn fields_narrow_lists_without_revealing_or_breaking_anything() {
     let ordinary = a.key(s.owner, &["products:read"], false).await;
     assert_eq!(a.call("GET", "/api/products?fields=note", None, Some(&system), None).await.0, 200);
     assert_eq!(a.call("GET", "/api/products?fields=note", None, Some(&ordinary), None).await.0, 422);
+}
+
+fn listings() -> Vec<Resource> {
+    vec![resource("listings", vec![("title", field("str")), ("expires_on", field("date")), ("source", field("enum(direct|legacy)")), ("rank", field("int")), ("secret", Field { access: Some("private".into()), ..field("str") })], json!(["public"]), json!({
+        "filter": {"rank": ["gte"]},
+        "sort": ["rank"],
+        "or": {"live": {"expires_on": ["gte", "exists"], "source": ["eq"]}},
+    }))]
+}
+
+#[tokio::test]
+#[ignore]
+async fn declared_or_groups_and_owner_me() {
+    let a = api("brain_shape_or", listings()).await;
+    let (first, token) = a.user("first@example.test").await;
+    let (_, other) = a.user("other@example.test").await;
+    for (who, title, expires, source, rank) in [(&token, "future", "2999-01-01", "direct", 1), (&token, "legacy", "2000-01-01", "legacy", 2), (&other, "expired", "2000-01-01", "direct", 3), (&other, "both", "2999-01-01", "legacy", 4)] {
+        a.post("/api/listings", who, json!({"title": title, "expires_on": expires, "source": source, "rank": rank})).await;
+    }
+    let titles = |v: &Value| v["items"].as_array().unwrap().iter().map(|i| i["data"]["title"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+
+    // Alternatives OR with each other and AND with filters; total and pages agree.
+    let (status, either) = a.get("/api/listings?live.expires_on[gte]=2026-01-01&live.source=legacy&sort=rank").await;
+    assert_eq!(status, 200, "{either}");
+    assert_eq!(titles(&either), ["future", "legacy", "both"]);
+    assert_eq!(either["total"], 3);
+    let (_, narrowed) = a.get("/api/listings?live.expires_on[gte]=2026-01-01&live.source=legacy&rank[gte]=2&sort=rank").await;
+    assert_eq!(titles(&narrowed), ["legacy", "both"]);
+    let (_, single) = a.get("/api/listings?live.source=legacy&sort=rank").await;
+    assert_eq!(titles(&single), ["legacy", "both"]);
+    // Injection attempts stay bound values.
+    let (status, none) = a.get("/api/listings?live.source=direct%27%20OR%201=1--").await;
+    assert_eq!(status, 422, "{none}");
+    // Undeclared branches, operators and groups are refused.
+    for bad in ["live.title=x", "live.source[ne]=direct", "other.source=legacy", "live.secret=x"] {
+        assert_eq!(a.get(&format!("/api/listings?{bad}")).await.0, 422, "{bad}");
+    }
+    // Every alternative has an index the planner can combine.
+    let defs: Vec<String> = sqlx::query_scalar("SELECT indexdef FROM pg_indexes WHERE tablename='_brain_res_listings'").fetch_all(&a.pool).await.unwrap();
+    for name in ["expires_on", "source"] {
+        assert!(defs.iter().any(|d| d.contains(name)), "{name}: {defs:?}");
+    }
+
+    // owner=me comes from the session; no client value can name someone else, and it never replaces the read scope.
+    let (status, mine) = a.call("GET", "/api/listings?owner=me&sort=rank", Some(&token), None, None).await;
+    assert_eq!(status, 200, "{mine}");
+    assert_eq!(titles(&mine), ["future", "legacy"]);
+    assert_eq!(mine["total"], 2);
+    assert_eq!(a.get("/api/listings?owner=me").await.0, 401);
+    let (status, _) = a.call("GET", &format!("/api/listings?owner={first}"), Some(&other), None, None).await;
+    assert_eq!(status, 422);
+    let (_, combined) = a.call("GET", "/api/listings?owner=me&live.source=legacy", Some(&token), None, None).await;
+    assert_eq!(titles(&combined), ["legacy"]);
+    // A key resolves to its owner.
+    let key = a.key(first, &["listings:read"], false).await;
+    let (_, by_key) = a.call("GET", "/api/listings?owner=me&sort=rank", None, Some(&key), None).await;
+    assert_eq!(titles(&by_key), ["future", "legacy"]);
+}
+
+#[test]
+fn or_groups_are_validated() {
+    let bad = |or: Value| {
+        let mut r = listings().remove(0);
+        r.query.or = serde_json::from_value(or).unwrap();
+        r.validate().unwrap_err()
+    };
+    assert!(bad(json!({"live": {"source": ["eq"]}})).contains("2..4 fields"));
+    assert!(bad(json!({"live": {"source": ["eq"], "ghost": ["eq"]}})).contains("ghost"));
+    assert!(bad(json!({"live": {"source": ["eq"], "secret": ["eq"]}})).contains("restricted"));
+    assert!(bad(json!({"live": {"source": ["eq"], "rank": ["prefix"]}})).contains("does not support"));
+    assert!(bad(json!({"rank": {"source": ["eq"], "title": ["eq"]}})).contains("own name"));
+    assert!(bad(json!({"owner": {"source": ["eq"], "title": ["eq"]}})).contains("own name"));
 }

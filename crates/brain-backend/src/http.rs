@@ -1219,6 +1219,7 @@ async fn list(
         .map_err(|error| match error {
             crate::query::ListError::Invalid(fields) => Error::validation(fields),
             crate::query::ListError::Denied(_) => Error::forbidden(),
+            crate::query::ListError::SignInRequired => Error::new(StatusCode::UNAUTHORIZED, "SIGN_IN_REQUIRED", "Sign in, or send a project API key, to use owner=me"),
             crate::query::ListError::Database { error, at, branch } => {
                 Error::database_in(&error, at, json!({"resource": name, "operation": if req.search.trim().is_empty() { "list" } else { "list.search" }, "branch": branch}))
             }

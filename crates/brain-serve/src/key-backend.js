@@ -3,7 +3,7 @@
 // what the handler may read or write; the option mapping matches the runtime's ctx.backend.
 // A hoisted function with everything inside: the route sidecar's top-level loop starts before later consts initialize.
 function keyBackend(env, keyName, kind) {
-  const LIST_OPTIONS = ['search', 'limit', 'offset', 'filter', 'sort', 'cursor', 'after', 'include', 'aggregate', 'count', 'fields']
+  const LIST_OPTIONS = ['search', 'limit', 'offset', 'filter', 'sort', 'cursor', 'after', 'include', 'aggregate', 'count', 'fields', 'owner']
   const FILTER_OPS = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'between', 'in', 'exists', 'prefix', 'iprefix', 'has']
   const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
   const fail = (status, message, extra) => Object.assign(new Error(message), { status }, extra)
@@ -99,6 +99,10 @@ function keyBackend(env, keyName, kind) {
           q.set(k, value)
         }
         for (const [k, value] of [['include', include], ['aggregate', aggregate], ['count', count], ['fields', fields]]) if (value !== undefined) q.set(k, names(value, k))
+        if (options.owner !== undefined) {
+          if (options.owner !== 'me') throw fail(400, "Invalid native list owner; use 'me'")
+          q.set('owner', 'me')
+        }
         const query = q.toString()
         return request('GET', '/api/' + name + (query ? '?' + query : ''))
       },

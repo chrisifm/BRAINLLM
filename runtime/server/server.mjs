@@ -69,7 +69,7 @@ const b64u = b => Buffer.from(b).toString('base64url')
 const tag = s => createHash('sha1').update(s).digest('base64url').slice(0, 22)
 
 // Errors a server function may throw on purpose: { errors: { field: msg } } → 422; { status, message } with 4xx → that
-const LIST_OPTIONS = ['search','limit','offset','filter','sort','cursor','after','include','aggregate','count','fields']
+const LIST_OPTIONS = ['search','limit','offset','filter','sort','cursor','after','include','aggregate','count','fields','owner']
 const FILTER_OPS = ['eq','ne','gt','gte','lt','lte','between','in','exists','prefix','iprefix','has']
 export class HttpError extends Error {
   constructor(status, message, extra) {
@@ -582,6 +582,10 @@ export function nativeAuthBridge(raw, refused, serviceKey) {
           q.set(key, value)
         }
         for (const [key, value] of [['include', include], ['aggregate', aggregate], ['count', count], ['fields', fields]]) if (value !== undefined) q.set(key, names(value, key))
+        if (options.owner !== undefined) {
+          if (options.owner !== 'me') throw new HttpError(400, "Invalid native list owner; use 'me'")
+          q.set('owner', 'me')
+        }
         const query = q.toString()
         return request('GET', '/api/' + name + (query ? '?' + query : ''))
       },

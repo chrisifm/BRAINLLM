@@ -17,7 +17,7 @@ pub const GROUP_LIMIT: i64 = 100;
 /// Text comparisons and text indexes use the first 256 characters; equality is rechecked on the full value.
 const TEXT_KEY: usize = 256;
 const OPS: &[&str] = &["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "prefix", "iprefix", "exists", "has"];
-const RESERVED: &[&str] = &["search", "limit", "offset", "sort", "include", "cursor", "after", "aggregate", "count", "fields"];
+const RESERVED: &[&str] = &["search", "limit", "offset", "sort", "include", "cursor", "after", "aggregate", "count", "fields", "owner"];
 const TIMESTAMPS: &[&str] = &["created_at", "updated_at"];
 /// Typo matches kept for one search; reaching it marks `total` approximate.
 const FUZZY_CANDIDATES: i64 = 500;
@@ -42,6 +42,9 @@ pub struct QueryContract {
     /// Order applied when the request has no `sort` (JSON:API style, `-` = descending). Default `-created_at`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub default_sort: Vec<String>,
+    /// Named alternatives: `?<name>.<field>[op]=value` for each branch sent; at least one must hold (`docs/backend/filters.md`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub or: BTreeMap<String, BTreeMap<String, Vec<String>>>,
     /// `ref:<resource>` fields whose records may be attached with `?include=`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub include: Vec<String>,
@@ -194,6 +197,32 @@ pub fn validate(r: &Resource) -> Result<(), String> {
     if q.filter.len() > 32 || q.sort.len() > 16 || q.default_sort.len() > 4 || q.include.len() > 8 || q.aggregate.len() > 8 || q.count.len() > 8 {
         return Err(at("declares too many entries; fix: at most 32 filters, 16 sort fields, 4 default sort keys, 8 includes, 8 aggregates and 8 counts".into()));
     }
+    if q.or.len() > 4 {
+        return Err(at("declares too many or groups; fix: at most 4".into()));
+    }
+    for (group, branches) in &q.or {
+        if !crate::contract::identifier(group) || RESERVED.contains(&group.as_str()) || group == "owner" || q.filter.contains_key(group) || r.fields.contains_key(group) {
+            return Err(at(format!("or group `{group}` needs its own name; fix: use an identifier that is not a field, a filter or a reserved parameter")));
+        }
+        if !(2..=4).contains(&branches.len()) {
+            return Err(at(format!("or group `{group}` needs 2..4 fields; fix: list the alternatives, or use a plain filter for one")));
+        }
+        for (field, ops) in branches {
+            let Some(kind) = kind(r, field) else {
+                return Err(at(format!("or group `{group}`: `{field}` is not a declared field of this resource of a filterable type; fix: use a local field (related fields cannot be alternatives)")));
+            };
+            if restricted(r, field) {
+                return Err(at(format!("or group `{group}` names `{field}`, which has restricted visibility; fix: remove it or make the field public")));
+            }
+            let unique: BTreeSet<_> = ops.iter().collect();
+            if ops.is_empty() || unique.len() != ops.len() {
+                return Err(at(format!("or group `{group}`: `{field}` needs distinct operators; allowed: {}", kind.ops().join(", "))));
+            }
+            if let Some(op) = ops.iter().find(|op| !kind.ops().contains(&op.as_str())) {
+                return Err(at(format!("or group `{group}`: `{field}` does not support `{op}`; allowed: {}", kind.ops().join(", "))));
+            }
+        }
+    }
     for (key, ops) in &q.filter {
         let unique: BTreeSet<_> = ops.iter().collect();
         if ops.is_empty() || unique.len() != ops.len() || ops.iter().any(|op| !OPS.contains(&op.as_str())) {
@@ -334,6 +363,8 @@ pub(crate) fn indexes(r: &Resource) -> Vec<(String, String)> {
         .map(|(k, ops)| (k.as_str(), ops.iter().any(|o| o == "iprefix"), ops.iter().any(|o| o == "exists")))
         .collect();
     fields.extend(r.query.sort.iter().map(|e| (e.field(), false, false)));
+    // Each alternative of an `or` group has its own index, so the planner can combine them instead of scanning.
+    fields.extend(r.query.or.values().flatten().map(|(k, ops)| (k.as_str(), ops.iter().any(|o| o == "iprefix"), ops.iter().any(|o| o == "exists"))));
     for (field, iprefix, _) in fields {
         match kind(r, field) {
             Some(Kind::Stamp | Kind::Ref) | None => {}
@@ -346,7 +377,7 @@ pub(crate) fn indexes(r: &Resource) -> Vec<(String, String)> {
             }
         }
     }
-    if r.query.sort.iter().any(|e| e.field() == "updated_at") || r.query.filter.contains_key("updated_at") {
+    if r.query.sort.iter().any(|e| e.field() == "updated_at") || r.query.filter.contains_key("updated_at") || r.query.or.values().any(|b| b.contains_key("updated_at")) {
         add("btree", "updated_at".into());
     }
     out.into_iter().collect()
@@ -400,6 +431,10 @@ pub struct ListRequest {
     count: Vec<String>,
     /// `?fields=`: the `data` keys each item keeps. Id, timestamps, `included` and `counts` always stay.
     fields: Option<BTreeSet<String>>,
+    /// Sent branches of each declared `or` group.
+    alternatives: BTreeMap<String, Vec<Filter>>,
+    /// `?owner=me`: limit to the reader's own rows. The id always comes from the authenticated session.
+    owner_me: bool,
 }
 impl ListRequest {
     /// Narrows items to `?fields=`. It runs after projection and includes, so it can only remove what the reader
@@ -561,6 +596,10 @@ pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(Str
                 }
                 req.fields = Some(names);
             }
+            // A filter declared on a field of this name keeps working as before.
+            "owner" if !r.query.filter.contains_key("owner") => {
+                if raw == "me" { req.owner_me = true } else { bad("owner accepts only `me`; the server resolves it from the session") }
+            }
             "aggregate" | "count" => {
                 let names: Vec<String> = split(raw).into_iter().map(str::to_string).collect();
                 let declared: Vec<&String> = if key == "aggregate" { r.query.aggregate.keys().collect() } else { r.query.count.keys().collect() };
@@ -580,6 +619,23 @@ pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(Str
                     },
                     None => (key.as_str(), "eq"),
                 };
+                if let Some((group, name)) = field.split_once('.').filter(|(group, _)| r.query.or.contains_key(*group)) {
+                    let Some(k) = r.query.or[group].get(name).filter(|ops| ops.iter().any(|o| o == op)).and_then(|_| kind(r, name)) else {
+                        bad(&format!("`{name}` with `{op}` is not an alternative of `{group}`; declared: {}", r.query.or[group].keys().cloned().collect::<Vec<_>>().join(", ")));
+                        continue;
+                    };
+                    let raws = if matches!(op, "in" | "between") { split(raw) } else { vec![raw.as_str()] };
+                    if op == "in" && !(1..=MAX_IN).contains(&raws.len()) || op == "between" && raws.len() != 2 {
+                        bad(if op == "in" { "in takes 1..50 comma-separated values" } else { "between takes two comma-separated values: low,high" });
+                        continue;
+                    }
+                    let values: Option<Vec<Operand>> = raws.iter().map(|v| operand(r, name, k, op, v)).collect();
+                    match values {
+                        Some(values) => req.alternatives.entry(group.to_string()).or_default().push(Filter { via: None, field: name.to_string(), kind: k, op: op.to_string(), values }),
+                        None => bad(&format!("Invalid value for `{field}` ({op}); expected {}", expected(r, name, k))),
+                    }
+                    continue;
+                }
                 let Some(ops) = r.query.filter.get(field).filter(|ops| ops.iter().any(|o| o == op)) else {
                     let declared = r.query.filter.get(field).map(|ops| ops.join(", "));
                     bad(&match declared {
@@ -615,7 +671,7 @@ pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(Str
             }
         }
     }
-    if req.filters.len() > MAX_FILTERS {
+    if req.filters.len() + req.alternatives.values().map(Vec::len).sum::<usize>() > MAX_FILTERS {
         problems.insert("query".into(), format!("At most {MAX_FILTERS} filters per request"));
     }
     if req.cursor.is_some() && req.offset != 0 {
@@ -699,6 +755,8 @@ enum Matches {
 pub enum ListError {
     Invalid(Problems),
     Denied(String),
+    /// `owner=me` from a request without a session or key.
+    SignInRequired,
     Database { error: sqlx::Error, at: &'static std::panic::Location<'static>, branch: &'static str },
 }
 impl From<sqlx::Error> for ListError {
@@ -912,11 +970,26 @@ struct Ctx<'a> {
     related: BTreeMap<String, Scope>,
     req: &'a ListRequest,
     matches: Matches,
+    /// The session's user when the request says `owner=me`.
+    owner: Option<Uuid>,
 }
 impl Ctx<'_> {
     /// Authorization scope and declared filters over the alias-free columns of the current table.
     fn push_scope(&self, q: &mut QueryBuilder<Postgres>) {
         self.scope.push(q, self.r, self.resources);
+        if let Some(owner) = self.owner {
+            q.push(" AND owner=").push_bind(owner);
+        }
+        for branches in self.req.alternatives.values() {
+            q.push(" AND (");
+            for (i, f) in branches.iter().enumerate() {
+                if i > 0 {
+                    q.push(" OR ");
+                }
+                push_predicate(q, f);
+            }
+            q.push(")");
+        }
         for f in &self.req.filters {
             q.push(" AND ");
             match &f.via {
@@ -1050,7 +1123,11 @@ pub async fn list(
             related.insert(target.clone(), s);
         }
     }
-    let mut ctx = Ctx { r, resources, scope: &scope, related, req, matches: Matches::All };
+    if req.owner_me && viewer.id.is_none() {
+        return Err(ListError::SignInRequired);
+    }
+    let owner = if req.owner_me { viewer.id } else { None };
+    let mut ctx = Ctx { r, resources, scope: &scope, related, req, matches: Matches::All, owner };
     let keys = keys(r, req);
     let sig = signature(&keys);
     let ranked = req.sort.is_none() && search_ranked(r, req);
@@ -1330,6 +1407,15 @@ pub fn openapi_parameters(r: &Resource) -> Vec<Value> {
         for op in ops {
             let name = if op == "eq" { field.clone() } else { format!("{field}[{op}]") };
             params.push(json!({"name": name, "in":"query", "schema":{"type":"string"}}));
+        }
+    }
+    params.push(json!({"name":"owner","in":"query","description":"`me` limits the list to the reader's own rows; requires a session or key","schema":{"type":"string","enum":["me"]}}));
+    for (group, branches) in &r.query.or {
+        for (field, ops) in branches {
+            for op in ops {
+                let name = if op == "eq" { format!("{group}.{field}") } else { format!("{group}.{field}[{op}]") };
+                params.push(json!({"name": name, "in":"query", "description": format!("Alternative of `{group}`: at least one sent branch must hold"), "schema":{"type":"string"}}));
+            }
         }
     }
     for (key, list) in [("include", r.query.include.clone()), ("aggregate", r.query.aggregate.keys().cloned().collect()), ("count", r.query.count.keys().cloned().collect())] {
