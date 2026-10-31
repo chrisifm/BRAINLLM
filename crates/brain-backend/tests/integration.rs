@@ -9,6 +9,8 @@ mod auth_flows;
 mod auth_http;
 #[path = "backend.rs"]
 mod backend;
+#[path = "data_queries.rs"]
+mod data_queries;
 #[path = "domain_writes.rs"]
 mod domain_writes;
 #[path = "exact_types.rs"]

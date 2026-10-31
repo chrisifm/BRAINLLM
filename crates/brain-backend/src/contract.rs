@@ -17,6 +17,21 @@ pub struct Field {
     /// Single-field uniqueness enforced by a Postgres unique index.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unique: bool,
+    /// Referential action of a `ref:<resource>` field: `restrict` (default), `cascade` or `set_null`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_delete: Option<String>,
+    /// Grants that may see this field in responses (`public`, `owner`, role names). None: every reader.
+    /// Serialization-only: excluded from the recorded storage contract (see `recorded_fields`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visible: Option<Vec<String>>,
+    /// Who writes and who reads the field: `private` (server only: never accepted from clients, never serialized),
+    /// `readonly` (serialized, set only by defaults and before-write hooks) or `writeonly` (accepted, never
+    /// serialized, e.g. a secret). None: clients read and write it. Serialization-only, like `visible`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access: Option<String>,
+    /// The resource's slug: previous values keep resolving for permanent redirects (see `slugs.rs`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub slug: bool,
 }
 impl Field {
     pub fn ty(&self) -> Option<Ty> {
@@ -133,6 +148,9 @@ pub struct Resource {
     pub hooks: Hooks,
     #[serde(default, skip_serializing_if = "Constraints::is_empty")]
     pub constraints: Constraints,
+    /// Declared list capabilities (`query.jsbrain`): filters, sort, include, aggregates and counts.
+    #[serde(default, skip_serializing_if = "crate::query::QueryContract::is_empty")]
+    pub query: crate::query::QueryContract,
 }
 
 pub fn identifier(s: &str) -> bool {
@@ -180,11 +198,15 @@ impl Resource {
             }
             if field.unique && !ty.unique_eligible() {
                 return Err(format!(
-                    "field `{name}` cannot be unique; fix: unique applies to str, email, int, decimal, date, datetime and enum fields"
+                    "field `{name}` cannot be unique; fix: unique applies to str, email, int, decimal, date, datetime, enum and ref fields"
                 ));
             }
+            crate::relations::validate_field(name, field, &ty)?;
+            crate::visibility::validate_field(name, field)?;
         }
         self.validate_constraints()?;
+        crate::query::validate(self)?;
+        crate::slugs::validate(self)?;
         let search_unique: std::collections::HashSet<_> = self.search.iter().collect();
         if self.search.len() > 8
             || search_unique.len() != self.search.len()
@@ -217,6 +239,9 @@ impl Resource {
             ("delete", &self.policy.delete),
         ] {
             for role in grants {
+                if crate::ownership::path(role).is_some() {
+                    continue;
+                }
                 if !(matches!(role.as_str(), "owner" | "public")
                     || crate::auth_flows::role_name(role))
                     || role == "public" && op != "read"
@@ -295,10 +320,16 @@ impl Resource {
                 if f.unique {
                     schema["x-brain-unique"] = json!(true);
                 }
+                match f.access.as_deref() {
+                    Some("readonly") => schema["readOnly"] = json!(true),
+                    Some("writeonly") => schema["writeOnly"] = json!(true),
+                    Some("private") => schema["x-brain-private"] = json!(true),
+                    _ => {}
+                }
                 (n.clone(), schema)
             })
             .collect();
-        let mut schema = json!({"type":"object","additionalProperties":false,"properties":props,"required":self.fields.iter().filter(|(_,f)| f.required && f.default.is_none()).map(|(n,_)|n).collect::<Vec<_>>()});
+        let mut schema = json!({"type":"object","additionalProperties":false,"properties":props,"required":self.fields.iter().filter(|(_,f)| f.required && f.default.is_none() && !crate::visibility::server_set(f)).map(|(n,_)|n).collect::<Vec<_>>()});
         if !self.constraints.is_empty() {
             schema["x-brain-constraints"] = serde_json::to_value(&self.constraints).unwrap_or(Value::Null);
         }
@@ -309,6 +340,16 @@ impl Resource {
     /// that can never be a field identifier.
     pub fn recorded_fields(&self) -> Value {
         let mut fields = serde_json::to_value(&self.fields).unwrap_or(Value::Null);
+        // Response visibility is not storage: changing it never requires a reviewed data migration.
+        if let Some(map) = fields.as_object_mut() {
+            for field in map.values_mut() {
+                if let Some(field) = field.as_object_mut() {
+                    field.remove("visible");
+                    field.remove("access");
+                    field.remove("slug");
+                }
+            }
+        }
         if !self.constraints.is_empty()
             && let Some(map) = fields.as_object_mut()
         {
@@ -465,7 +506,7 @@ impl Resource {
             .collect()
     }
     /// Deterministic object name: the definition hash changes when the definition changes.
-    fn object_name(&self, prefix: &str, definition: &str) -> String {
+    pub(crate) fn object_name(&self, prefix: &str, definition: &str) -> String {
         use sha2::{Digest, Sha256};
         let digest = Sha256::digest(format!("{}\0{definition}", self.name).as_bytes());
         format!("{prefix}{}", digest.iter().take(10).map(|b| format!("{b:02x}")).collect::<String>())
@@ -480,7 +521,7 @@ pub fn openapi_with_roles(resources: &[Resource], roles: &crate::auth_flows::Rol
     for r in resources {
         let body = json!({"required":true,"content":{"application/json":{"schema":r.schema()}}});
         let error_responses = json!({"400":{"description":"Invalid request"},"401":{"description":"Sign in required"},"403":{"description":"Policy denied"},"404":{"description":"Not found"},"422":{"description":"Validation errors"},"429":{"description":"Rate limited"}});
-        let row = json!({"type":"object","additionalProperties":false,"required":["id","owner","data","created_at","updated_at"],"properties":{"id":{"type":"string","format":"uuid"},"owner":{"type":"string","format":"uuid"},"data":r.schema(),"created_at":{"type":"string","format":"date-time","readOnly":true},"updated_at":{"type":"string","format":"date-time","readOnly":true}}});
+        let row = json!({"type":"object","additionalProperties":false,"required":["id","data","created_at","updated_at"],"properties":{"id":{"type":"string","format":"uuid"},"owner":{"type":"string","format":"uuid","description":"Shown to the owner, relational owners and roles named in the read policy, or to everyone with expose_owner"},"data":r.schema(),"created_at":{"type":"string","format":"date-time","readOnly":true},"updated_at":{"type":"string","format":"date-time","readOnly":true}}});
         let op = |name: &str, write: bool| {
             let mut out = json!({"operationId":format!("{}_{}",r.name,name),"security":native_security(),"responses":error_responses});
             let output = if name == "list" {
@@ -1140,6 +1181,10 @@ fn native_paths(roles: &crate::auth_flows::RolesConfig) -> Map<String, Value> {
 pub fn validate_graph(resources: &[Resource], jobs: &[Resource]) -> Result<(), String> {
     for r in resources.iter().chain(jobs) {
         r.validate()?;
+    }
+    crate::relations::validate_graph(resources)?;
+    if jobs.iter().any(|j| j.fields.values().any(|f| f.kind.starts_with("ref:"))) {
+        return Err("job payload fields cannot use ref:<resource>; fix: send the id as str".into());
     }
     for r in resources {
         for operation in ["create", "update", "delete"] {

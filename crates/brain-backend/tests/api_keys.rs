@@ -30,6 +30,7 @@ fn resource(name: &str, policy: Policy) -> Resource {
         policy,
         hooks: Hooks::default(),
         constraints: Default::default(),
+        query: Default::default(),
     }
 }
 fn config(resources: Vec<Resource>, api_keys: Option<brain_backend::api_keys::Config>) -> brain_backend::Config {

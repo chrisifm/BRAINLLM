@@ -270,7 +270,9 @@ pub async fn router_with_domain(
             &r.policy.delete,
         ] {
             if grants.iter().any(|role| {
-                !matches!(role.as_str(), "public" | "owner") && !config.roles.roles.contains(role)
+                !matches!(role.as_str(), "public" | "owner")
+                    && crate::ownership::path(role).is_none()
+                    && !config.roles.roles.contains(role)
             }) {
                 return Err(
                     "Resource policy names an unconfigured role; inspect server/auth/roles.jsbrain"
@@ -464,6 +466,7 @@ pub async fn router_with_domain(
         .merge(domain_http::routes())
         .route("/api/{name}", get(list).post(create))
         .route("/api/{name}/{id}", get(read).put(update).patch(patch).delete(delete))
+        .route("/api/{name}/redirects/{slug}", get(slug_redirect))
         .route(
             "/_brain/uploads",
             post(upload_image).layer(DefaultBodyLimit::max(5 * 1024 * 1024 + 65536)),
@@ -506,12 +509,32 @@ pub async fn serve(
     pool: PgPool,
     config: Config,
 ) -> std::result::Result<(), String> {
-    serve_with_domain(listener, pool, config, crate::domain::Domain::default()).await
+    serve_pools(listener, pool.clone(), pool, config).await
 }
 /// `serve` with declared domain contracts.
 pub async fn serve_with_domain(
     listener: tokio::net::TcpListener,
     pool: PgPool,
+    config: Config,
+    domain: crate::domain::Domain,
+) -> std::result::Result<(), String> {
+    serve_pools_with_domain(listener, pool.clone(), pool, config, domain).await
+}
+/// Serves HTTP from `pool` and runs the in-process webhook worker on its own `worker_pool` (bulkhead), so slow
+/// deliveries cannot take the connections requests need.
+pub async fn serve_pools(
+    listener: tokio::net::TcpListener,
+    pool: PgPool,
+    worker_pool: PgPool,
+    config: Config,
+) -> std::result::Result<(), String> {
+    serve_pools_with_domain(listener, pool, worker_pool, config, crate::domain::Domain::default()).await
+}
+/// `serve_pools` with declared domain contracts.
+pub async fn serve_pools_with_domain(
+    listener: tokio::net::TcpListener,
+    pool: PgPool,
+    worker_pool: PgPool,
     config: Config,
     domain: crate::domain::Domain,
 ) -> std::result::Result<(), String> {
@@ -523,7 +546,7 @@ pub async fn serve_with_domain(
         .webhooks
         .clone()
         .filter(|cfg| cfg.has_outbound())
-        .map(|cfg| crate::webhooks::Webhooks::new(pool.clone(), cfg, &config.jobs))
+        .map(|cfg| crate::webhooks::Webhooks::new(worker_pool, cfg, &config.jobs))
         .transpose()?;
     let (app, sockets) = router_with_domain(pool.clone(), config, domain).await?;
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
@@ -883,63 +906,125 @@ async fn google_login(
 async fn me(State(app): State<App>, h: HeaderMap) -> Result<Json<Value>> {
     Ok(Json(json!({"user":app.required(&h).await?})))
 }
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Page {
-    #[serde(default)]
-    search: String,
-    limit: Option<i64>,
-    offset: Option<i64>,
+fn viewer(u: Option<&User>) -> crate::visibility::Viewer<'_> {
+    crate::visibility::Viewer { id: u.map(|u| u.id), role: u.map(|u| u.role.as_str()) }
 }
+/// Declared filters, sort, cursor, totals, aggregates, counts and includes (see query.rs).
 async fn list(
     State(app): State<App>,
     Path(name): Path<String>,
     h: HeaderMap,
-    Query(p): Query<Page>,
+    Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Json<Value>> {
     let r = app.resource(&name)?;
     let u = app.user(&h).await?;
-    let role = u.as_ref().map(|u| u.role.as_str());
-    if !r.policy.allows("read", role, true) {
-        return Err(Error::forbidden());
-    }
-    let owner = if r.policy.owners_only("read", role) {
-        u.as_ref().map(|u| u.id)
-    } else {
-        None
-    };
-    let limit = p.limit.unwrap_or(25);
-    let offset = p.offset.unwrap_or(0);
-    if !(1..=100).contains(&limit) || !(0..=10000).contains(&offset) || p.search.len() > 256 {
-        return Err(Error::validation(
-            json!({"query":"limit 1..100, offset 0..10000, search <=256 bytes"}),
-        ));
-    }
-    let rows = db::list(&app.pool, r, owner, &p.search, limit, offset)
+    let viewer = viewer(u.as_ref());
+    let req = crate::query::parse(r, &app.resources, &pairs).map_err(Error::validation)?;
+    let mut out = crate::query::list(&app.pool, &app.resources, r, &req, viewer)
         .await
-        .map_err(|e| Error::internal(e))?;
-    Ok(Json(json!({"items":rows,"limit":limit,"offset":offset})))
+        .map_err(|error| match error {
+            crate::query::ListError::Invalid(fields) => Error::validation(fields),
+            crate::query::ListError::Denied(_) => Error::forbidden(),
+            crate::query::ListError::Database(e) => Error::internal(db::safe(e)),
+        })?;
+    if let Some(items) = out["items"].as_array_mut() {
+        include(&app, r, &req.include, items, viewer).await?;
+    }
+    Ok(Json(out))
+}
+async fn include(
+    app: &App,
+    r: &Resource,
+    names: &[String],
+    rows: &mut [Value],
+    viewer: crate::visibility::Viewer<'_>,
+) -> Result<()> {
+    if names.is_empty() {
+        return Ok(());
+    }
+    crate::relations::include(&app.pool, &app.resources, r, names, rows, viewer)
+        .await
+        .map_err(|error| match error {
+            crate::relations::IncludeError::Unknown(name) => Error::validation(json!({"include": format!("`{name}` is not includable")})),
+            crate::relations::IncludeError::Denied(_) => Error::forbidden(),
+            crate::relations::IncludeError::Database => Error::internal("include"),
+        })
+}
+/// Whether the viewer owns `id` through a declared `owner.<ref>` grant of `operation`.
+async fn owns_through(app: &App, r: &Resource, operation: &str, u: &User, id: Uuid) -> Result<bool> {
+    crate::ownership::owns_through(&app.pool, r, &app.resources, operation, viewer(Some(u)), id)
+        .await
+        .map_err(|error| Error::internal(db::safe(error)))
+}
+fn relational(r: &Resource, operation: &str) -> bool {
+    let grants = match operation {
+        "read" => &r.policy.read,
+        "create" => &r.policy.create,
+        "update" => &r.policy.update,
+        _ => &r.policy.delete,
+    };
+    grants.iter().any(|g| crate::ownership::path(g).is_some())
+}
+/// `GET /api/<resource>/redirects/<old slug>` → `{"slug": "<current>"}` for a permanent redirect, or 404.
+async fn slug_redirect(
+    State(app): State<App>,
+    Path((name, slug)): Path<(String, String)>,
+    h: HeaderMap,
+) -> Result<Json<Value>> {
+    let r = app.resource(&name)?;
+    if slug.is_empty() || slug.len() > 512 {
+        return Err(Error::missing());
+    }
+    let u = app.user(&h).await?;
+    let scope = crate::ownership::read_scope(r, &app.resources, viewer(u.as_ref())).ok_or_else(Error::forbidden)?;
+    match crate::slugs::redirect(&app.pool, &app.resources, r, &scope, &slug).await {
+        Ok(Some(current)) => Ok(Json(json!({ "slug": current }))),
+        Ok(None) => Err(Error::missing()),
+        Err(error) => Err(Error::internal(db::safe(error))),
+    }
 }
 async fn read(
     State(app): State<App>,
     Path((name, id)): Path<(String, Uuid)>,
     h: HeaderMap,
+    Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Json<Value>> {
     let r = app.resource(&name)?;
     let u = app.user(&h).await?;
-    let row = db::get(&app.pool, r, id)
+    let mut names = Vec::new();
+    for (key, value) in &pairs {
+        if key != "include" || !names.is_empty() {
+            return Err(Error::validation(json!({key: "Single-record reads accept only include"})));
+        }
+        names = value.split(',').map(str::to_string).collect();
+    }
+    let mut row = db::get(&app.pool, r, id)
         .await
         .map_err(|e| Error::internal(e))?
         .ok_or_else(Error::missing)?;
     let owns = u
         .as_ref()
         .is_some_and(|u| row["owner"].as_str() == Some(&u.id.to_string()));
+    let mut through = false;
     if !r
         .policy
         .allows("read", u.as_ref().map(|u| u.role.as_str()), owns)
     {
-        return Err(Error::forbidden());
+        through = match &u {
+            Some(u) if relational(r, "read") => owns_through(&app, r, "read", u, id).await?,
+            _ => false,
+        };
+        if !through {
+            return Err(Error::forbidden());
+        }
+    } else if let Some(u) = &u
+        && relational(r, "read")
+        && r.fields.values().any(|f| f.visible.is_some())
+    {
+        through = owns_through(&app, r, "read", u, id).await?;
     }
+    crate::visibility::project(r, &mut row, viewer(u.as_ref()), through);
+    include(&app, r, &names, std::slice::from_mut(&mut row), viewer(u.as_ref())).await?;
     Ok(Json(row))
 }
 fn before_error(error: crate::before_hooks::HookFailure, r: &Resource) -> Error {
@@ -988,6 +1073,15 @@ async fn before(
 }
 /// Declared unique/check violations are client errors with field names; everything else stays generic.
 fn write_error(r: &Resource, error: sqlx::Error) -> Error {
+    if let Some((field, target)) = crate::relations::missing_reference(r, &error) {
+        let mut e = Error::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "REFERENCE_NOT_FOUND",
+            "Reference an existing record of the target resource in the listed fields",
+        );
+        e.fields = Some(json!({ field: format!("No {target} record with this id") }));
+        return e;
+    }
     match db::constraint_fields(r, &error) {
         Some(("unique", fields)) => {
             let mut e = Error::new(
@@ -1009,6 +1103,34 @@ fn write_error(r: &Resource, error: sqlx::Error) -> Error {
         None => Error::internal(db::safe(error)),
     }
 }
+/// Row filter for a write: None when the role may change any row, the user id for direct owners, or None after the
+/// row was proven to be owned through a declared relation (`through`). Anything else is reported as missing.
+async fn scoped_owner(
+    app: &App,
+    r: &Resource,
+    operation: &str,
+    u: &User,
+    existing: &Value,
+    id: Uuid,
+) -> Result<(Option<Uuid>, bool)> {
+    if r.policy.allows(operation, Some(&u.role), false) {
+        return Ok((None, false));
+    }
+    let direct = existing["owner"].as_str() == Some(u.id.to_string().as_str());
+    if direct && r.policy.allows(operation, Some(&u.role), true) {
+        return Ok((Some(u.id), false));
+    }
+    if relational(r, operation) && owns_through(app, r, operation, u, id).await? {
+        return Ok((None, true));
+    }
+    Err(Error::missing())
+}
+/// A relational writer must keep pointing the record at a parent they own.
+async fn owns_data(app: &App, r: &Resource, operation: &str, u: &User, data: &Value) -> Result<bool> {
+    crate::ownership::data_owned_through(&app.pool, r, &app.resources, operation, viewer(Some(u)), data)
+        .await
+        .map_err(|error| Error::internal(db::safe(error)))
+}
 fn conflict() -> Error {
     Error::new(
         StatusCode::CONFLICT,
@@ -1024,16 +1146,22 @@ async fn create(
 ) -> Result<Json<Value>> {
     let r = app.resource(&name)?;
     let u = app.required(&h).await?;
-    if !r.policy.allows("create", Some(&u.role), false) {
+    let through = !r.policy.allows("create", Some(&u.role), false);
+    if through && !relational(r, "create") {
         return Err(Error::forbidden());
     }
+    crate::visibility::reject_server_fields(r, &input).map_err(Error::validation)?;
     let input = before(&app, r, "create", input, None, &u).await?;
     let data = r.input(&input).map_err(Error::validation)?;
+    if through && !owns_data(&app, r, "create", &u, &data).await? {
+        return Err(Error::forbidden());
+    }
     app.domain.protect(r, None, &data).map_err(Error::validation)?;
-    let record = db::create(&app.pool, r, u.id, data)
+    let mut record = db::create(&app.pool, r, u.id, data)
         .await
         .map_err(|error| write_error(r, error))?;
     app.sockets.changed(&name, "create", &record);
+    crate::visibility::project(r, &mut record, viewer(Some(&u)), through);
     Ok(Json(record))
 }
 async fn update(
@@ -1044,31 +1172,31 @@ async fn update(
 ) -> Result<Json<Value>> {
     let r = app.resource(&name)?;
     let u = app.required(&h).await?;
-    if !r.policy.allows("update", Some(&u.role), true) {
+    if !r.policy.allows("update", Some(&u.role), true) && !relational(r, "update") {
         return Err(Error::forbidden());
     }
-    let owner = if r.policy.owners_only("update", Some(&u.role)) {
-        Some(u.id)
-    } else {
-        None
-    };
     // Capture a real row before application code; policy never relies on client-supplied existing data.
     let (existing, revision) = db::get_version(&app.pool, r, id)
         .await
         .map_err(|error| Error::internal(db::safe(error)))?
         .ok_or_else(Error::missing)?;
-    if owner.is_some_and(|owner| existing["owner"].as_str() != Some(owner.to_string().as_str())) {
-        return Err(Error::missing());
-    }
+    let (owner, through) = scoped_owner(&app, r, "update", &u, &existing, id).await?;
+    crate::visibility::reject_server_fields(r, &input).map_err(Error::validation)?;
+    let mut input = input;
+    crate::visibility::keep_stored(r, &mut input, &existing["data"]);
     let previous = existing["data"].clone();
     let input = before(&app, r, "update", input, Some(existing), &u).await?;
     let data = r.input(&input).map_err(Error::validation)?;
+    if through && !owns_data(&app, r, "update", &u, &data).await? {
+        return Err(Error::forbidden());
+    }
     app.domain.protect(r, Some(&previous), &data).map_err(Error::validation)?;
-    let record = db::update_checked(&app.pool, r, id, owner, data, Some(&revision))
+    let mut record = db::update_checked(&app.pool, r, id, owner, data, Some(&revision))
         .await
         .map_err(|error| write_error(r, error))?
         .ok_or_else(conflict)?;
     app.sockets.changed(&name, "update", &record);
+    crate::visibility::project(r, &mut record, viewer(Some(&u)), through);
     Ok(Json(record))
 }
 /// Partial update: only sent fields change; the merged record is revalidated and written with the same CAS.
@@ -1080,27 +1208,30 @@ async fn patch(
 ) -> Result<Json<Value>> {
     let r = app.resource(&name)?;
     let u = app.required(&h).await?;
-    if !r.policy.allows("update", Some(&u.role), true) {
+    if !r.policy.allows("update", Some(&u.role), true) && !relational(r, "update") {
         return Err(Error::forbidden());
     }
-    let owner = r.policy.owners_only("update", Some(&u.role)).then_some(u.id);
     let (existing, revision) = db::get_version(&app.pool, r, id)
         .await
         .map_err(|error| Error::internal(db::safe(error)))?
         .ok_or_else(Error::missing)?;
-    if owner.is_some_and(|owner| existing["owner"].as_str() != Some(owner.to_string().as_str())) {
-        return Err(Error::missing());
-    }
-    let merged = crate::domain::merge_patch(r, &existing["data"], &input).map_err(Error::validation)?;
+    let (owner, through) = scoped_owner(&app, r, "update", &u, &existing, id).await?;
+    crate::visibility::reject_server_fields(r, &input).map_err(Error::validation)?;
+    let mut merged = crate::domain::merge_patch(r, &existing["data"], &input).map_err(Error::validation)?;
+    crate::visibility::keep_stored(r, &mut merged, &existing["data"]);
     let previous = existing["data"].clone();
     let merged = before(&app, r, "update", merged, Some(existing), &u).await?;
     let data = r.input(&merged).map_err(Error::validation)?;
+    if through && !owns_data(&app, r, "update", &u, &data).await? {
+        return Err(Error::forbidden());
+    }
     app.domain.protect(r, Some(&previous), &data).map_err(Error::validation)?;
-    let record = db::update_checked(&app.pool, r, id, owner, data, Some(&revision))
+    let mut record = db::update_checked(&app.pool, r, id, owner, data, Some(&revision))
         .await
         .map_err(|error| write_error(r, error))?
         .ok_or_else(conflict)?;
     app.sockets.changed(&name, "update", &record);
+    crate::visibility::project(r, &mut record, viewer(Some(&u)), through);
     Ok(Json(record))
 }
 async fn delete(
@@ -1110,21 +1241,14 @@ async fn delete(
 ) -> Result<Json<Value>> {
     let r = app.resource(&name)?;
     let u = app.required(&h).await?;
-    if !r.policy.allows("delete", Some(&u.role), true) {
+    if !r.policy.allows("delete", Some(&u.role), true) && !relational(r, "delete") {
         return Err(Error::forbidden());
     }
-    let owner = if r.policy.owners_only("delete", Some(&u.role)) {
-        Some(u.id)
-    } else {
-        None
-    };
     let (existing, revision) = db::get_version(&app.pool, r, id)
         .await
         .map_err(|error| Error::internal(db::safe(error)))?
         .ok_or_else(Error::missing)?;
-    if owner.is_some_and(|owner| existing["owner"].as_str() != Some(owner.to_string().as_str())) {
-        return Err(Error::missing());
-    }
+    let (owner, _) = scoped_owner(&app, r, "delete", &u, &existing, id).await?;
     // Retain only fixed authority metadata before handing the row to application code.
     let deleted = json!({"id": existing["id"], "owner": existing["owner"]});
     let output = before(
@@ -1141,7 +1265,16 @@ async fn delete(
     }
     if !db::delete_checked(&app.pool, r, id, owner, Some(&revision))
         .await
-        .map_err(|error| Error::internal(db::safe(error)))?
+        .map_err(|error| {
+            if crate::relations::referenced(&error) {
+                return Error::new(
+                    StatusCode::CONFLICT,
+                    "REFERENCE_IN_USE",
+                    "Other records still reference this one (on_delete: restrict); delete or re-point them first",
+                );
+            }
+            Error::internal(db::safe(error))
+        })?
     {
         return Err(conflict());
     }

@@ -32,6 +32,7 @@ fn resource() -> Resource {
         policy: Policy::default(),
         hooks: Hooks::default(),
         constraints: Default::default(),
+        query: Default::default(),
     }
 }
 #[test]
@@ -76,7 +77,7 @@ async fn postgres_migrations_search_scope_session_serialization_and_storage_outb
             .fetch_one(&pool)
             .await
             .unwrap(),
-        8
+        12
     );
     assert_eq!(
         sqlx::query_as::<_, (i32, String)>(
@@ -95,7 +96,9 @@ async fn postgres_migrations_search_scope_session_serialization_and_storage_outb
             (7, "search_empty_fields".into()),
             (8, "analytics".into()),
             (9, "domain_queues".into()),
-            (10, "api_keys".into())
+            (10, "api_keys".into()),
+            (11, "data_queries".into()),
+            (12, "data_queries_slugs".into())
         ]
     );
     assert_eq!(

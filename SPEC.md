@@ -285,6 +285,15 @@ Behavior analytics is on by default with a native backend: the served page loads
 bytes), events go to the project's Postgres, and `brain analytics report [--since 7d] [--json]` resolves elements to
 `file:line`. Mark custom events with `data-track="name"`; turn it off with `"analytics": false` or `BRAIN_ANALYTICS=off`.
 See `docs/backend/analytics.md`.
+
+`ref:<resource>` fields keep a foreign key (`on_delete: restrict|cascade|set_null`; missing id → 422 `REFERENCE_NOT_FOUND`,
+referenced on restrict delete → 409 `REFERENCE_IN_USE`). Optional `query.jsbrain` declares list filters (`?f=v`, `?f[op]=v`,
+`now-7d`), `sort` (`?sort=-price,title`, ties by id), `include` (one level), named `aggregate`s and related `count`s;
+undeclared or repeated parameters → 422. Lists return `total` and `next_cursor` (pass back as `cursor` or `after`).
+Policy grants `owner.<ref>[.<ref>]` scope rows through relations; field option `visible: ['owner','admin']` hides
+a field from other readers and from the query surface. Modifiers `'str writeonly'`, `readonly`, `private` control
+client writes and reads. `owner` is returned only to owners and named read roles unless `expose_owner: true`.
+See `docs/backend/*.md`.
 Set `BRAIN_BACKEND_URL` to the fixed loopback native backend URL to connect native API requests and SSR session verification.
 Native JWT accounts use short-lived access and rotating refresh cookies, persisted revocation, configured roles and Google Sign-In.
 `brain recipe auth-ui|password-reset|email-verification|google-signin` prepares project-owned account UI;

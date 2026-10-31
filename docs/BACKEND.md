@@ -128,6 +128,14 @@ full-text indexes. It serializes migrations with a transaction advisory lock. Al
 only validated identifiers enter SQL text. A changed field contract is refused until a reviewed data migration
 updates its recorded schema. No destructive or implicit schema sync runs during serve.
 
+`brain backend serve` opens two pools: HTTP (`BRAIN_DB_HTTP_POOL`, default 8) and the in-process webhook worker
+(`BRAIN_DB_WORKER_POOL`, default 2). At boot it refuses to start (`BDB_POOL_BUDGET`) when
+`(http + worker) × BRAIN_BACKEND_PROCESSES` exceeds `max_connections` minus reserved slots and 5 of headroom. Timeouts
+are connection startup options, not a session `SET`: `statement_timeout` 5 s, `idle_in_transaction_session_timeout`
+10 s, `lock_timeout` 1 s for HTTP and 2 s otherwise, and on Postgres 17+ `transaction_timeout` 9 s for HTTP (workers
+and CLI commands are not capped). A transaction-mode pooler must forward the `options` startup parameter; otherwise
+set the same values with `ALTER ROLE <app role> SET …`.
+
 - `POST /_brain/auth/signup` accepts `{ email, password }`, creates a candidate, and never accepts a role.
 - `POST /_brain/auth/login` accepts the same input and sets an opaque `__Host-brain` cookie: HttpOnly, Secure,
   SameSite=Lax, seven days. The token is hashed in Postgres; roles are loaded from the users table on every request.
@@ -195,6 +203,8 @@ The media library supports metadata pagination, guarded edits, private downloads
 See [MEDIA.md](MEDIA.md) for the exact current routes, limits and optional private Google Cloud Storage adapter.
 Behavior analytics (collector, privacy, `brain analytics report`) is described in [backend/analytics.md](backend/analytics.md).
 General active-content/file formats are not implicitly treated as safe images.
+
+Lists, relations and readers: [relations](backend/relations.md) · [filters](backend/filters.md) · [sorting](backend/sorting.md) · [aggregates](backend/aggregates.md) · [pagination](backend/pagination.md) · [search](backend/search.md) · [ownership](backend/ownership.md) · [visibility](backend/visibility.md) · [slug history](backend/slugs.md).
 
 ## Remaining acceptance work
 

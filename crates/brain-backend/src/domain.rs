@@ -262,6 +262,7 @@ fn input_validator(name: &str, shapes: &BTreeMap<String, String>) -> Result<Opti
         policy: Default::default(),
         hooks: Default::default(),
         constraints: Default::default(),
+        query: Default::default(),
     }))
 }
 

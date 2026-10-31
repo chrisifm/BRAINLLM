@@ -88,6 +88,31 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 - Job enqueue takes a per-queue transaction lock and a bounded count instead of one global lock and a full scan, so
   hook-enabled writes on different queues no longer serialize. The 10000 active-job cap now applies per queue.
+- Backend relations: `ref:<resource>` fields install a foreign key with `on_delete` `restrict`, `cascade` or
+  `set_null`, reject missing ids with 422 `REFERENCE_NOT_FOUND`, and support one-level `?include=` (docs/backend/relations.md).
+- Backend list filters declared in `query.jsbrain`: typed operators, comma lists, related-field filters and relative
+  times (`now-7d`); undeclared or repeated parameters answer 422 (docs/backend/filters.md).
+- Backend list sorting by declared fields with null placement and a stable id tie-break (docs/backend/sorting.md).
+- Backend list `total`, named aggregates with exact decimal sums and averages, and per-row related counts
+  (docs/backend/aggregates.md).
+- Backend keyset pagination: `next_cursor`, accepted back as `cursor` or `after`, bound to its sort (docs/backend/pagination.md).
+- Backend search combines with declared filters, totals, aggregates and cursor paging when sorted (docs/backend/search.md).
+- Backend relational ownership grants `owner.<ref>[.<ref>]` for read, create, update and delete (docs/backend/ownership.md).
+- Backend per-field `visible` grants project responses and close restricted fields to filters, sorts, search and
+  aggregates (docs/backend/visibility.md).
+- Backend field access modifiers `readonly`, `writeonly` and `private` (`'str writeonly'` or `{ access }`): rejected from
+  client input or never serialized as declared, preserved on full replacement, and marked in OpenAPI.
+- Backend slug history: a field `{ type: 'str!', unique: true, slug: true }` keeps earlier slugs, and
+  `GET /api/<resource>/redirects/<slug>` returns the current one for a permanent redirect (docs/backend/slugs.md).
+- `brain backend serve` uses separate HTTP and worker pools (`BRAIN_DB_HTTP_POOL`, `BRAIN_DB_WORKER_POOL`), checks
+  them against `max_connections` at boot, and sends Postgres timeouts as startup options instead of a session `SET`;
+  HTTP adds a 1 s lock wait and, on Postgres 17+, a 9 s transaction cap.
+
+### Changed
+
+- Backend responses no longer include the record `owner` id for anonymous or unrelated readers; owners, relational
+  owners and roles named in the read policy still receive it. Declare `expose_owner: true` in `query.jsbrain` to
+  publish it. The OpenAPI row schema marks `owner` optional.
 - The shared lexer decodes ASCII directly, scans ASCII identifier runs as bytes and indexes punctuation by first byte
   in the same longest-first order. Source-map scanning skips slash-free trivia gaps and builds its generated line index
   only to locate a failure. Emitted JS, server JS, CSS, maps and diagnostics are byte-identical; no compiler-speed

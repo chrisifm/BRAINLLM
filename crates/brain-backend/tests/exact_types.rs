@@ -27,6 +27,7 @@ fn legacy() -> Resource {
         policy: Policy::default(),
         hooks: Hooks::default(),
         constraints: Constraints::default(),
+        query: Default::default(),
     }
 }
 fn vacancies() -> Resource {
@@ -51,6 +52,7 @@ fn vacancies() -> Resource {
         fields,
         policy: Policy::default(),
         hooks: Hooks::default(),
+        query: Default::default(),
         constraints: Constraints {
             unique: vec![vec!["title".into(), "closes_on".into()]],
             check: vec![
@@ -209,7 +211,7 @@ fn database_objects_are_deterministic_bounded_and_documented_in_openapi() {
     assert_eq!(post["properties"]["slug"]["x-brain-unique"], true);
     assert_eq!(post["required"], json!(["slug", "title"]), "a defaulted required field is optional input");
     let row = &api["paths"]["/api/vacancies/{id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"];
-    assert_eq!(row["required"], json!(["id", "owner", "data", "created_at", "updated_at"]));
+    assert_eq!(row["required"], json!(["id", "data", "created_at", "updated_at"]), "owner is hidden from public reads unless expose_owner");
     assert_eq!(row["properties"]["created_at"]["format"], "date-time");
 }
 

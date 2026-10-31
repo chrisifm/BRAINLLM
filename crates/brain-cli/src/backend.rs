@@ -74,12 +74,23 @@ fn fields(value: Value) -> Result<BTreeMap<String, Field>, String> {
         .ok_or("Schema must be an object of field:type pairs")?;
     obj.iter()
         .map(|(name, v)| {
-            // `'int!'` or the object form `{ type: 'int!', default: 0, unique: true }`.
+            // `'int!'` or the object form `{ type: 'int!', default: 0, unique: true, on_delete, visible }`.
+            let mut on_delete = None;
+            let mut visible = None;
+            let mut access = None;
+            let mut slug = false;
             let (kind, default, unique) = match v {
-                Value::String(kind) => (kind.as_str(), None, false),
+                // `'str! private'`: an optional access modifier after the type.
+                Value::String(kind) => match kind.rsplit_once(' ').filter(|(_, m)| matches!(*m, "private" | "readonly" | "writeonly")) {
+                    Some((kind, modifier)) => {
+                        access = Some(modifier.to_string());
+                        (kind.trim_end(), None, false)
+                    }
+                    None => (kind.as_str(), None, false),
+                },
                 Value::Object(spec) => {
-                    if let Some(key) = spec.keys().find(|k| !matches!(k.as_str(), "type" | "default" | "unique")) {
-                        return Err(format!("field `{name}`: unknown option `{key}`; fix: use type, default and unique"));
+                    if let Some(key) = spec.keys().find(|k| !matches!(k.as_str(), "type" | "default" | "unique" | "on_delete" | "visible" | "access" | "slug")) {
+                        return Err(format!("field `{name}`: unknown option `{key}`; fix: use type, default, unique, on_delete, visible, access and slug"));
                     }
                     let kind = spec.get("type").and_then(Value::as_str).ok_or_else(|| format!("field `{name}` needs type: 'str' (or another kind)"))?;
                     let unique = match spec.get("unique") {
@@ -87,9 +98,23 @@ fn fields(value: Value) -> Result<BTreeMap<String, Field>, String> {
                         Some(Value::Bool(b)) => *b,
                         Some(_) => return Err(format!("field `{name}`: unique must be true or false")),
                     };
+                    if let Some(action) = spec.get("on_delete") {
+                        on_delete = Some(action.as_str().ok_or_else(|| format!("field `{name}`: on_delete must be 'restrict', 'cascade' or 'set_null'"))?.to_string());
+                    }
+                    match spec.get("slug") {
+                        None => {}
+                        Some(Value::Bool(b)) => slug = *b,
+                        Some(_) => return Err(format!("field `{name}`: slug must be true or false")),
+                    }
+                    if let Some(mode) = spec.get("access") {
+                        access = Some(mode.as_str().ok_or_else(|| format!("field `{name}`: access must be 'private', 'readonly' or 'writeonly'"))?.to_string());
+                    }
+                    if let Some(grants) = spec.get("visible") {
+                        visible = Some(serde_json::from_value(grants.clone()).map_err(|_| format!("field `{name}`: visible must be a list such as ['owner', 'admin']"))?);
+                    }
                     (kind, spec.get("default").cloned(), unique)
                 }
-                _ => return Err("Field shape must be a string or { type, default, unique }".into()),
+                _ => return Err("Field shape must be a string or { type, default, unique, on_delete, visible, access, slug }".into()),
             };
             Ok((
                 name.clone(),
@@ -98,6 +123,10 @@ fn fields(value: Value) -> Result<BTreeMap<String, Field>, String> {
                     required: kind.ends_with('!'),
                     default,
                     unique,
+                    on_delete,
+                    visible,
+                    access,
+                    slug,
                 },
             ))
         })
@@ -160,6 +189,14 @@ pub fn contracts(root: &Path, kind: &str) -> Result<Vec<Resource>, String> {
         } else {
             Default::default()
         };
+        let query_path = e.path().join("query.jsbrain");
+        let query = if kind == "resources" && query_path.is_file() {
+            serde_json::from_value(read_contract(root, &query_path)?).map_err(|_| {
+                format!("server/{kind}/{name}/query.jsbrain must export {{ filter: {{ field: ['eq', ...] }}, sort: [field | {{ field, nulls }}], default_sort: ['-field'], include: [ref], aggregate: {{ name: {{ group, sum, avg, min, max }} }}, count: {{ name: {{ resource, field, where }} }} }}")
+            })?
+        } else {
+            Default::default()
+        };
         let r = Resource {
             search,
             name,
@@ -167,6 +204,7 @@ pub fn contracts(root: &Path, kind: &str) -> Result<Vec<Resource>, String> {
             policy,
             hooks,
             constraints,
+            query,
         };
         r.validate()
             .map_err(|message| format!("server/{kind}/{}: {message}", r.name))?;
@@ -197,7 +235,10 @@ fn validate_roles(
             &resource.policy.delete,
         ] {
             for role in grants {
-                if !matches!(role.as_str(), "public" | "owner") && !roles.roles.contains(role) {
+                if !matches!(role.as_str(), "public" | "owner")
+                    && brain_backend::ownership::path(role).is_none()
+                    && !roles.roles.contains(role)
+                {
                     return Err(format!(
                         "server/resources/{}/policy.jsbrain: role {role} is not declared in server/auth/roles.jsbrain",
                         resource.name
@@ -350,7 +391,15 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let config=brain_backend::Config{api_keys:crate::api_key_config::load(&root)?,sockets:sockets.native_config()?,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,resources,jobs,uploads:root.join(".brain/uploads"),origins:sockets.http_origins,production:environment=="production"};
         brain_backend::analytics::configure(analytics_settings(&root)?)?;
         eprintln!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
-        brain_backend::http::serve_with_domain(listener,pool,config,domain).await
+        // Separate HTTP and worker pools with declared sizes, checked against the server's connection budget.
+        pool.close().await;
+        let size=|key:&str,default:u32|setting(key).map(|v|v.parse::<u32>().ok().filter(|n|(1..=64).contains(n)).ok_or(format!("{key} must be 1..64"))).transpose().map(|v|v.unwrap_or(default));
+        let (http_size,worker_size)=(size("BRAIN_DB_HTTP_POOL",8)?,size("BRAIN_DB_WORKER_POOL",2)?);
+        let processes=size("BRAIN_BACKEND_PROCESSES",1)?;
+        let http_pool=brain_backend::db::connect_named(&url,brain_backend::db::Workload::Http,http_size,&pg_name(&root,"http")).await?;
+        brain_backend::db::check_connection_budget(&http_pool,(http_size+worker_size)*processes).await?;
+        let worker_pool=brain_backend::db::connect_named(&url,brain_backend::db::Workload::Worker,worker_size,&pg_name(&root,"worker")).await?;
+        brain_backend::http::serve_pools_with_domain(listener,http_pool,worker_pool,config,domain).await
     })
 }
 /// All generated files are reserved with create_new; roll back only files created by this invocation.
@@ -385,6 +434,7 @@ pub fn add_with_admin(root: &Path, kind: &str, name: &str, shapes: &str, admin_u
         policy: Policy::default(),
         hooks: Hooks::default(),
         constraints: Default::default(),
+        query: Default::default(),
     };
     r.validate()?;
     let dir = if kind == "resource" {
@@ -1409,6 +1459,16 @@ mod tests {
             std::os::unix::fs::symlink(root.0.join("actual"), root.0.join("linked")).unwrap();
             assert!(read_contract(&root.0, &root.0.join("linked/schema.jsbrain")).is_err());
         }
+    }
+    #[test]
+    fn field_access_modifiers_parse_in_string_and_object_forms() {
+        let parsed = fields(json!({"title":"str!","secret":"str writeonly","state":"enum(draft|live)! readonly","score":{"type":"int","access":"private"},"price":"decimal(10,2)"})).unwrap();
+        assert_eq!((parsed["secret"].kind.as_str(), parsed["secret"].access.as_deref()), ("str", Some("writeonly")));
+        assert_eq!((parsed["state"].kind.as_str(), parsed["state"].required, parsed["state"].access.as_deref()), ("enum(draft|live)", true, Some("readonly")));
+        assert_eq!(parsed["score"].access.as_deref(), Some("private"));
+        assert_eq!(parsed["title"].access, None);
+        assert_eq!(parsed["price"].access, None);
+        assert!(fields(json!({"x":{"type":"str","access":1}})).is_err());
     }
     #[test]
     fn exact_type_contracts_read_object_fields_numbers_and_constraints() {
