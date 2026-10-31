@@ -2123,6 +2123,20 @@ fn serve_brain(
             http::respond(s, 200, http::mime("x.js"), js.as_bytes(), head)
         }
         Err(_) if css => http::respond(s, 200, http::mime("x.css"), b"", head),
+        Err(diags) if brain_parse::file_kind(file) == brain_parse::ast::FileKind::Module => {
+            // A value module cannot render a component fallback. Keep its default binding linkable,
+            // then reject evaluation with the original diagnostics instead of returning a fake API.
+            // Named imports can still fail at linking; durable compiler feedback remains authoritative.
+            let js = format!(concat!(
+                "const diagnostics=[{}],file={};\n",
+                "const first=diagnostics.find(d=>!d.level||d.level==='error')||diagnostics[0]||{{}};\n",
+                "const error=new Error(file+' does not compile\\n'+diagnostics.map(d=>d.code+' '+(d.file||file)+':'+d.line+':'+d.col+' '+d.msg+'\\n  fix: '+d.fix).join('\\n'));\n",
+                "error.name='BrainCompileError';error.diagnostics=diagnostics;\n",
+                "error.code=first.code??null;error.file=first.file??file;error.line=first.line??null;error.column=first.col??null;error.fix=first.fix??null;\n",
+                "export default undefined;\nthrow error;\n",
+            ), diags.join(","), json_str(url.trim_start_matches('/')));
+            http::respond(s, 200, http::mime("x.js"), js.as_bytes(), head)
+        }
         Err(diags) => {
             // INTERNALS §42: a component that does not compile renders a box with its diagnostics and their exact
             // fix in its place, so the rest of the page keeps working (and keeps HMR); `brain build` still fails.
@@ -2710,3 +2724,7 @@ mod admission_tests {
     }
 
 }
+
+#[cfg(test)]
+#[path = "value_module_diagnostic_tests.rs"]
+mod value_module_diagnostic_tests;
