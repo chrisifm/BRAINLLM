@@ -82,3 +82,13 @@ case is claimed complete yet: B1102 incorrectly rejected the documented endpoint
 The fixture deliberately retains `cache: 'no'`. Checker correction `f2287f6`
 is available; the explicit module-error behavior has a separate owner. Rerun the complete gate with a fresh
 verified binary after those corrections before claiming full-chain acceptance.
+
+
+## Browser-container process budget
+
+The worker has a finite 512-process/thread cgroup limit for the backend, development server and three Chromium
+contexts together; the database retains its separate 96-process limit. A controlled failed run at 256 recorded
+peak256, two process-limit hits and OS errno11/thread-spawn failure, with zero OOM kills and memory below its
+unchanged 3 GiB ceiling. Increasing only this test-container process budget does not prove graceful framework
+behavior under thread exhaustion. That development-server failure path is tracked separately; memory/CPU limits,
+identity assertions and acceptance cases were not relaxed.
