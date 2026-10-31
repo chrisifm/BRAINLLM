@@ -4,6 +4,7 @@
 mod browser;
 #[cfg(unix)]
 mod shot;
+mod seo_routes;
 mod card;
 mod brand;
 mod edit;
@@ -946,6 +947,12 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
     std::fs::create_dir_all(&dist).map_err(|e| e.to_string())?;
     // robots.txt, sitemap.xml, llms.txt, manifest and the head rewrite come from brain-seo's finish (inside bundle)
     bundle(root, &dist, site.as_deref(), env_name, &mut rep, progress)?;
+    for (route, view) in seo_routes::unlisted(root) {
+        // a static host already reports the route as left out of dist/
+        if !rep.warnings.iter().any(|w| w.starts_with(&format!("{view}: dynamic route"))) {
+            rep.warnings.push(seo_routes::warning(&route, &view));
+        }
+    }
     if let Some(p) = &placeholder {
         let live: Vec<String> = std::fs::read_to_string(dist.join("_server/manifest.json")).ok().and_then(|s| brain_mcp::Json::parse(&s).ok())
             .and_then(|m| m.get("routes").and_then(|r| if let brain_mcp::Json::Arr(a) = r { Some(a) } else { None }).map(|a| a.iter().filter(|r| r.get("sitemap") == Some(&brain_mcp::Json::Bool(true))).filter_map(|r| r.get("path").and_then(brain_mcp::Json::as_str).map(str::to_string)).collect()))

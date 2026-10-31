@@ -134,7 +134,8 @@ COMPILER assigns the next free code there in the same change that emits it, then
   headings not grouped as `faq`, B1832 article freshness, B1833 author as Person, B1834 no external sources ·
   B1835 video without poster or upload date (info: not indexed as a video) · B1836 no `keyword` and the title or
   description does not name the H1 topic (info; `brain seo audit` reads each route's `keyword` from its view, like the
-  build, through `brain_seo::cli_with`). Collections (`content/<name>/*.md`, §33): server-only `entries` `entry` `tags` `tagged` `pages`
+  build, through `brain_seo::cli_with`) · B1837 public dynamic route (no guard, not `noindex`) without `paths()` or
+  `sitemap()`: rendered per request but listed nowhere (warning from `brain build`, named with the fix). Collections (`content/<name>/*.md`, §33): server-only `entries` `entry` `tags` `tagged` `pages`
   `page` from `brain:content`, `content.perPage` (default 10), drafts only with `--env staging`.
 - B072x environment file `.brain_env` (§36): B0720 empty value in the build environment (error) · B0721 key used in
   code but missing (warning, edit adds `KEY=`) · B0722 key never used (info) · B0723 `PUBLIC_*` value shaped like a
@@ -1075,9 +1076,13 @@ specified elsewhere; ➕ = new in this section.
   warns about each URL it leaves out. The list is kept 5 min
   (`max-age=300`; requests after expiry share one run); a throwing `sitemap()` is logged and skipped. B0117 outside a
   dynamic view, like `paths()`, and in a view that also exports `paths()` (those pages are prerendered and already
-  in the build's sitemap). The dev server (`brain run`) answers /robots.txt and /sitemap.xml itself, with no build
-  step: the origin is the request's Host, the pages are every static route plus what `paths()` or `sitemap({ env })`
-  returns (sidecar), without noindex and error views; a file in `public/` wins. Static hosting has no
+  in the build's sitemap). The dev server (`brain run`) answers /robots.txt, /sitemap.xml (+ sitemap-N.xml) and
+  /llms.txt (+ /<locale>/llms.txt) itself, with no build step: the origin is the request's Host, the pages are every
+  static route plus what `paths()` or `sitemap({ env })` returns (sidecar), in every locale, without noindex and error
+  views; a file in `public/` wins. Each page (up to 300) is rendered once through the dev page path, and the files come
+  from the same `brain_seo::files` generators as the build: titles and descriptions in llms.txt, hreflang alternates
+  with x-default, and image entries for the view's literal `<img src>` (images bound to props need SSR, so only the
+  build lists them). Static hosting has no
   server, so the route needs `paths()` there. Not in llms.txt (built before any request).
 - B1601 view without description; B1602 title longer than 60 or description longer than 160 chars (warning);
   B1603 invalid JSON-LD (missing `@type`); B1604 duplicate canonical across views.

@@ -21,6 +21,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   declared types before the function runs; a name another mounted instance holds is skipped instead of breaking the
   page. `brain check` no longer reports B0128 for `<meta tools>`, and the new B1704 reports a function that
   destructures other parameters than its tool declares. Only components with tools load `brain-mcp.js`.
+- B1837 (warning, `brain build`): a public dynamic view (no guard, not `noindex`) that exports neither `paths()` nor
+  `sitemap()` renders per request but no sitemap lists its pages; the warning names the view and the route with the
+  fix (`sitemap({ env })`, `paths()` or `noindex`).
 - B0309 (warning): a style rule outside any `@layer` in `tokens.cssbrain` beats every view and component rule whatever
   its specificity; `brain check` now reports it with the fix (wrap it in `@layer reset`). Custom properties and
   `color-scheme` stay unlayered.
@@ -240,6 +243,20 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   the eight most recent.
 - The development server unregisters closed HMR sockets immediately. `brain start` escalates workers that ignore
   SIGTERM to SIGKILL after reloads, memory restarts and health restarts, so an old worker cannot keep the listener.
+- `brain run` serves `/llms.txt` (and `/<locale>/llms.txt`) like the build, and its dev `/sitemap.xml` now carries
+  hreflang alternates with `x-default` for every locale and image entries for a view's literal `<img src>`, generated
+  by the same code as `brain build`; a split sitemap answers `/sitemap-N.xml`.
+
+### Security
+
+- `httpCall` now checks every address a hostname resolves to, at connect time, and refuses private, loopback,
+  link-local (cloud metadata), CGNAT, benchmark, multicast and reserved IPv4 and IPv6 targets, including IPv4-mapped,
+  IPv4-compatible, NAT64 and 6to4 forms of them; before, a public name that resolved or rebound to such an address was
+  contacted. Connections are not pooled, so a socket opened for an allowed private host is never reused. New options:
+  `allowPrivate: ['billing.internal']` allows only the named hosts, `redirects: n` (default 0, redirects stay
+  unfollowed) follows up to n hops and checks each target again, refuses https→http downgrades and drops credential
+  headers on cross-origin hops, and `lookup` swaps the resolver whose answers are still checked. The development
+  opt-out `BRAIN_OUTBOUND_ALLOW_PRIVATE=1` is ignored when `NODE_ENV` is `production`.
 
 ### Tests
 
