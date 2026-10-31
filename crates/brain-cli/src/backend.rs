@@ -226,6 +226,16 @@ fn database(root: &Path, environment: &str) -> Result<String, String> {
                 .into(),
         )
 }
+/// `application_name` for this app's Postgres sessions: `brain:<brain.json name>:<role>`.
+pub(crate) fn pg_name(root: &Path, role: &str) -> String {
+    let name = std::fs::read_to_string(root.join("brain.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v["name"].as_str().map(str::to_string))
+        .or_else(|| root.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_default();
+    brain_backend::db::application_name(&name, role)
+}
 fn runtime() -> Result<tokio::runtime::Runtime, String> {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -253,7 +263,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let resources = contracts(&root, "resources")?;
     let jobs = contracts(&root, "jobs")?;
     runtime()?.block_on(async{
-        let pool=brain_backend::db::connect(&url).await?;
+        let pool=brain_backend::db::connect_as(&url,&pg_name(&root,match operation{"serve"=>"http","migrate"=>"migrate",_=>"cli"})).await?;
         if operation=="migrate"{
             brain_backend::db::migrate(&pool,&resources).await?;
             roles.register(&pool).await?;
@@ -627,7 +637,8 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
     let env: Vec<_> = crate::env::select(&root, &environment);
     let _ = snapshot;
     runtime()?.block_on(async {
-        let pool = brain_backend::db::connect(&url).await?;
+        let role = if op == "work" { format!("worker:{name}") } else { "cli".into() };
+        let pool = brain_backend::db::connect_as(&url, &pg_name(&root, &role)).await?;
         brain_backend::db::verify(&pool, &contracts(&root, "resources")?).await?;
         let queue = brain_backend::jobs::Queue::new(pool.clone());
         let webhooks = if op == "work" {
@@ -1371,7 +1382,7 @@ pub fn media(args: &[String]) -> Result<(), String> {
         return Err(format!("media limit must be 1..{max}"));
     }
     runtime()?.block_on(async {
-        let pool = brain_backend::db::connect(&url).await?;
+        let pool = brain_backend::db::connect_as(&url, &pg_name(&root, "cli")).await?;
         let result = if operation == "list" {
             let owner = crate::flag(args, "--owner")
                 .ok_or("media list requires an explicit owner UUID")?

@@ -239,3 +239,25 @@ async fn ingestion_reports_segments_exports_and_retention_on_owned_postgres() {
     let _ = std::fs::remove_dir_all(files);
     sqlx::query(sqlx::AssertSqlSafe(format!("DROP DATABASE {name} WITH (FORCE)"))).execute(&base).await.unwrap();
 }
+
+#[test]
+fn postgres_sessions_carry_a_bounded_application_name() {
+    use brain_backend::db::application_name;
+    assert_eq!(application_name("shop", "http"), "brain:shop:http");
+    assert_eq!(application_name("my shop", "worker:emails"), "brain:my-shop:worker:emails");
+    assert_eq!(application_name("", "migrate"), "brain:app:migrate");
+    assert!(application_name(&"x".repeat(200), "http").len() <= 63);
+}
+
+#[tokio::test]
+#[ignore = "needs BRAIN_BACKEND_TEST_URL"]
+async fn named_connections_show_up_in_pg_stat_activity() {
+    let Ok(url) = std::env::var("BRAIN_BACKEND_TEST_URL") else { return };
+    let pool = brain_backend::db::connect_as(&url, "brain:shop:worker:emails").await.unwrap();
+    let name: String = sqlx::query_scalar("SELECT application_name FROM pg_stat_activity WHERE pid = pg_backend_pid()")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(name, "brain:shop:worker:emails");
+    let default: String = sqlx::query_scalar("SELECT current_setting('application_name')")
+        .fetch_one(&brain_backend::db::connect(&url).await.unwrap()).await.unwrap();
+    assert_eq!(default, "brain:app:http");
+}
