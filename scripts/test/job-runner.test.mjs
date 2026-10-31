@@ -106,3 +106,19 @@ test('job stdin decodes UTF-8 incrementally without retaining values in reports'
   assert.equal(result.status,0,result.stderr)
   assert.equal(result.stdout,'');assert.equal(result.stderr,'')
 }))
+
+test('an open handle does not hold the job after the handler settled',()=>fixture(({root,module,execute})=>{
+  writeFileSync(module,`setInterval(()=>{},1000)\nexport default async ctx=>{}\n`)
+  const started=Date.now(),ok=execute()
+  assert.equal(ok.status,0,ok.stderr)
+  assert.ok(Date.now()-started<5000,'a 1 s interval that never clears must not keep the process alive')
+  writeFileSync(module,`setInterval(()=>{},1000)\nexport default async ctx=>{throw new Error('private-payload')}\n`)
+  const failed=execute()
+  assert.equal(failed.status,1,'a failed attempt still fails after the forced exit')
+  assert.ok(failed.stderr.startsWith('JOB_TRACE '),'its trace is flushed first')
+  // Negative: awaited work always finishes, however long it takes, because only a settled handler starts the grace.
+  const out=join(root,'done.txt')
+  writeFileSync(module,`import { writeFileSync } from 'node:fs'\nexport default async ctx=>{await new Promise(r=>setTimeout(r,400));writeFileSync(${JSON.stringify(out)},'done')}\n`)
+  assert.equal(execute().status,0)
+  assert.equal(readFileSync(out,'utf8'),'done')
+}))

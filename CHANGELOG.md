@@ -26,6 +26,16 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `brain doctor` no longer fails on suspected leak B0601 unless `brain.json` sets `doctor.failOnSuspectedLeaks`; its summary names the gates that failed, and the report has a `failed` list.
 - Leak checks wait for in-flight requests before judging an instance (`brain test --heap` and `brain doctor` settle, then abort what remains), and the B0601 fix names in-flight promises and the requests pending at unmount.
 
+- `brain doctor`, `brain backend serve`, `brain start` and `brain run` now list what nothing is running: B0765 a queue with no live worker, B0767 schedules with no scheduler, B0768 active jobs in a queue with no declaration, and B0766 when the database cannot answer so workers were not checked. All are warnings; they never fail doctor.
+- `brain check` warns B0769 for a job with a schema and no `handler.jsbrain`, which could be enqueued but never run.
+- `brain backend serve` logs a `queue-stalled` line every minute for each queue with due jobs and no worker, or with a job waiting over 5 minutes: queue, pending count and oldest wait, never a payload value. `BRAIN_QUEUE_CHECK_SECONDS` changes the period.
+- `brain backend serve --with-workers` also runs one supervised worker per declared queue and a scheduler when there are schedules, for a deployment small enough to run them together.
+- `brain jobs stats` with no queue lists every declared queue, and any other queue that still holds jobs, with `oldestWaitSeconds`, live `workers` and `declared`. `brain jobs work`, `enqueue`, `dead` and `retry` without a queue name list the declared queues instead of `invalid queue`.
+- A job finishes when its handler settles. A handle left open, such as an idle database pool, kept each job alive until it closed, about 10 s per job; a job that held one now takes under 200 ms. Upgrading: work the handler does not await is cut off 100 ms after it settles, so await everything.
+- An idle worker starts a new job within about 50 ms through Postgres `LISTEN/NOTIFY`, with polling as a fallback. Upgrading: run `brain backend migrate` to add the `_brain_workers` table.
+- A restart under a process manager no longer fails with `Address already in use`: `brain start`, `brain backend serve` and the generated `server.mjs` wait up to 10 s for the port, and `brain run` waits 1 s before moving to the next port. Two live servers never share a port, and the error now names the live holder and how to find it.
+- A job or server module with a local variable named like a runtime helper, such as `const key`, no longer fails the build with `imports /@brain/brain-ch.js, which the build did not emit`.
+
 ### Signature
 - HTML documents now carry `X-Generated-By` with the official site and repository in `brain start`, `_headers`, nginx and Caddy. It replaces `X-Powered-By` and adds nothing visible to the page.
 

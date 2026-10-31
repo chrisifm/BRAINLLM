@@ -190,6 +190,7 @@ brain jobs enqueue post_created --payload '{"resource":"posts","operation":"crea
 brain jobs work post_created --concurrency 2
 brain jobs status <uuid>
 brain jobs prune
+brain jobs stats                     # every queue: pending, oldest wait, live workers
 ```
 
 The queue uses `FOR UPDATE SKIP LOCKED`, leases and unique lease tokens, with at-least-once delivery. Make side effects

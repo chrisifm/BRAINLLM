@@ -552,7 +552,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         operation,
         "schema" | "migrate" | "serve" | "bootstrap-admin" | "rename-role" | "users"
     ) {
-        return Err("usage: brain backend schema|migrate|serve|bootstrap-admin|rename-role --from <role> --to <role> [--apply]|logs [rid]|users|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182]".into());
+        return Err("usage: brain backend schema|migrate|serve|bootstrap-admin|rename-role --from <role> --to <role> [--apply]|logs [rid]|users|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182] [--with-workers]".into());
     }
     let snapshot = inspect(&root)?;
     if operation == "schema" {
@@ -617,7 +617,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         }
         brain_backend::db::keep_diagnostics(failure_log(&root));
         let port=crate::flag(args,"--port").unwrap_or("5182".into()).parse::<u16>().map_err(|_|"B0763: --port is not a port number; fix: pass 0 to 65535")?;
-        let listener=tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST,port)).await.map_err(|_|format!("B0763: cannot listen on 127.0.0.1:{port}; fix: stop what uses that port or pass another with --port"))?;
+        let listener=brain_serve::listen::bind_waiting("127.0.0.1",port,brain_serve::listen::RESTART_WAIT).and_then(|l|{l.set_nonblocking(true)?;tokio::net::TcpListener::from_std(l)}).map_err(|e|format!("B0763: cannot listen on 127.0.0.1:{port} ({e}); fix: stop what uses that port or pass another with --port"))?;
         let addr=listener.local_addr().map_err(|e|e.to_string())?;
         let public_site=crate::env::value(&root,&environment,"PUBLIC_SITE_URL").unwrap_or_else(||format!("http://{addr}"));
         let sockets=socket_settings(&root,Some(&public_site),crate::flag(args,"--origin").as_deref())?;
@@ -651,7 +651,19 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let http_pool=brain_backend::db::connect_named(&url,brain_backend::db::Workload::Http,http_size,&pg_name(&root,"http")).await?;
         brain_backend::db::check_connection_budget(&http_pool,(http_size+worker_size)*processes).await?;
         let worker_pool=brain_backend::db::connect_named(&url,brain_backend::db::Workload::Worker,worker_size,&pg_name(&root,"worker")).await?;
-        brain_backend::http::serve_full(listener,http_pool,worker_pool,config,domain,platform).await
+        let queues:Vec<String>=config.jobs.iter().map(|job|job.name.clone()).collect();
+        let schedules:Vec<String>=domain::cron(&root,&config.jobs).unwrap_or_default().into_iter().map(|(name,_)|name).collect();
+        let with_workers=args.iter().any(|a|a=="--with-workers");
+        if !queues.is_empty()||!schedules.is_empty() {
+            tokio::spawn(monitor_queues(brain_backend::jobs::Queue::new(worker_pool.clone()),queues.clone(),schedules.clone(),with_workers));
+        }
+        let workers=with_workers.then(||own_workers(&root,&environment,&format!("http://{addr}"),&queues,!schedules.is_empty()));
+        let served=brain_backend::http::serve_full(listener,http_pool,worker_pool,config,domain,platform).await;
+        if let Some((stop,tasks))=workers {
+            let _=stop.send(true);
+            for task in tasks {let _=task.await;}
+        }
+        served
     })
 }
 /// Where `brain backend serve` keeps its failure events.
@@ -988,16 +1000,225 @@ pub(crate) fn server_module(root: &Path, rel: &str) -> Result<(Scratch, PathBuf)
     Ok((scratch, path))
 }
 
+/// One liveness finding: code, file, message, fix.
+pub(crate) type Finding = (&'static str, String, String, String);
+
+/// Stats of the declared queues plus any other queue that still holds active jobs (`declared: false`).
+async fn queue_rows(queue: &brain_backend::jobs::Queue, declared: &[String]) -> Result<Vec<Value>, String> {
+    let mut names: Vec<String> = declared.to_vec();
+    names.extend(queue.active_queues().await?.into_iter().filter(|name| !declared.contains(name)));
+    let mut rows = Vec::with_capacity(names.len());
+    for name in names {
+        let mut row = queue.stats(&name).await?;
+        row["declared"] = json!(declared.contains(&name));
+        rows.push(row);
+    }
+    Ok(rows)
+}
+
+/// What the rows mean for an operator. Pure, so the wording and the conditions have a unit test.
+fn liveness_findings(rows: &[Value], schedules: &[String], schedulers: i64) -> Vec<Finding> {
+    let mut out = Vec::new();
+    for row in rows {
+        let name = row["queue"].as_str().unwrap_or("");
+        let (pending, oldest) = (row["pending"].as_i64().unwrap_or(0), row["oldestWaitSeconds"].as_i64().unwrap_or(0));
+        if row["declared"] != json!(true) {
+            out.push(("B0768", format!("server/jobs/{name}/"),
+                format!("queue `{name}` holds {pending} due job(s) but no longer has a declaration under server/jobs, so no worker can run them"),
+                format!("restore server/jobs/{name}/ and run `brain jobs work {name}`, or inspect them with `brain jobs stats {name}`")));
+        } else if row["workers"].as_i64().unwrap_or(0) == 0 {
+            let backlog = if pending > 0 { format!("{pending} job(s) due, the oldest waiting {oldest} s") } else { "nothing due yet, but new jobs will wait".to_string() };
+            out.push(("B0765", format!("server/jobs/{name}/"),
+                format!("queue `{name}` has no running worker: {backlog}; `brain backend serve` and `brain start` do not process queues"),
+                format!("run `brain jobs work {name}` as its own process, or `brain backend serve --with-workers` for a small deployment")));
+        }
+    }
+    if !schedules.is_empty() && schedulers == 0 {
+        out.push(("B0767", "server/cron/".to_string(),
+            format!("{} schedule(s) declared ({}) but no scheduler is running, so no slot is enqueued", schedules.len(), schedules.join(", ")),
+            "run `brain jobs cron` as its own process, or `brain backend serve --with-workers`".to_string()));
+    }
+    out
+}
+
+/// One-shot liveness check for `brain doctor`, `brain run` and `brain start`. Never fails: when the database cannot
+/// answer, that is the finding (B0766). Workers need the same database, so they are not running either.
+pub(crate) fn queue_findings(root: &Path, environment: &str) -> Vec<Finding> {
+    let unknown = |message: &str, fix: &str| vec![("B0766", crate::env::FILE.to_string(), message.to_string(), fix.to_string())];
+    let Ok(jobs) = contracts(root, "jobs") else { return vec![] };
+    let queues: Vec<String> = jobs.iter().map(|job| job.name.clone()).collect();
+    let schedules: Vec<String> = domain::cron(root, &jobs).unwrap_or_default().into_iter().map(|(name, _)| name).collect();
+    if queues.is_empty() && schedules.is_empty() {
+        return vec![];
+    }
+    let Ok(url) = database(root, environment) else {
+        return unknown("queue workers were not checked: no DATABASE_URL, so jobs can be neither stored nor run here", "set DATABASE_URL in .brain_env and run `brain backend migrate`");
+    };
+    let Ok(rt) = runtime() else { return vec![] };
+    let checked = rt.block_on(async {
+        let boot = brain_backend::boot::Boot::command(environment == "production");
+        let pool = tokio::time::timeout(std::time::Duration::from_secs(5), brain_backend::boot::connect(&url, &boot)).await.map_err(|_| "timeout")?.map_err(|_| "connect")?;
+        let queue = brain_backend::jobs::Queue::new(pool.clone());
+        let rows = queue_rows(&queue, &queues).await.map_err(|_| "query")?;
+        let schedulers = queue.schedulers().await.map_err(|_| "query")?;
+        pool.close().await;
+        Ok::<_, &str>(liveness_findings(&rows, &schedules, schedulers))
+    });
+    match checked {
+        Ok(findings) => findings,
+        Err("query") => unknown("queue workers were not checked: the database is reachable but has no worker table", "run `brain backend migrate`"),
+        Err(_) => unknown("queue workers were not checked: the database is unreachable. Stored jobs stay safe and wait, but no worker can claim them and no new job can be enqueued until it returns", "start Postgres or correct DATABASE_URL, then run `brain doctor` again"),
+    }
+}
+
+/// Run the one-shot check beside a starting server, so a slow database never delays it.
+pub(crate) fn warn_queues_in_background(root: &Path, environment: &str) {
+    if !root.join("server/jobs").is_dir() && !root.join("server/cron").is_dir() {
+        return;
+    }
+    let (root, environment) = (root.to_path_buf(), environment.to_string());
+    std::thread::spawn(move || {
+        for (code, file, message, fix) in queue_findings(&root, &environment) {
+            eprintln!("{}", json!({"schemaVersion":1,"event":"queue-warning","code":code,"file":file,"msg":message,"fix":fix,"valuesCaptured":false}));
+        }
+    });
+}
+
+/// A static sibling of the same failure: a job with a schema but no handler can be enqueued and can never run.
+pub fn job_warnings(root: &Path) -> Vec<Finding> {
+    let names = contracts(root, "jobs").unwrap_or_default();
+    names.iter().filter(|job| !root.join("server/jobs").join(&job.name).join("handler.jsbrain").is_file()).map(|job| {
+        ("B0769", format!("server/jobs/{}/", job.name),
+            format!("job `{}` has a schema but no handler.jsbrain: it can be enqueued and no worker can ever run it", job.name),
+            format!("add server/jobs/{}/handler.jsbrain with `export default async function handle(ctx) {{ … }}`", job.name))
+    }).collect()
+}
+
+/// Backend startup list, then a periodic `queue-stalled` line for each queue not being drained. Counts and ages only:
+/// never a payload value. `BRAIN_QUEUE_CHECK_SECONDS` sets the period (5..3600, default 60).
+async fn monitor_queues(queue: brain_backend::jobs::Queue, queues: Vec<String>, schedules: Vec<String>, own_workers: bool) {
+    /// A due job this old means the queue is not keeping up even with workers alive.
+    const BEHIND_SECONDS: i64 = 300;
+    let period = std::env::var("BRAIN_QUEUE_CHECK_SECONDS").ok().and_then(|v| v.parse::<u64>().ok()).filter(|n| (5..=3600).contains(n)).unwrap_or(60);
+    if own_workers {
+        // Give the workers started beside this server time to report in before the first list.
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    }
+    let mut first = true;
+    let mut unknown = false;
+    loop {
+        let read = async { Ok::<_, String>((queue_rows(&queue, &queues).await?, queue.schedulers().await?)) };
+        match read.await {
+            Ok((rows, schedulers)) => {
+                unknown = false;
+                if first {
+                    let list: Vec<Value> = rows.iter().map(|row| json!({"queue":row["queue"],"pending":row["pending"],"oldestWaitSeconds":row["oldestWaitSeconds"],"workers":row["workers"]})).collect();
+                    eprintln!("{}", json!({"schemaVersion":1,"event":"queue-workers","queues":list,"schedules":schedules,"schedulers":schedulers,"valuesCaptured":false}));
+                    for (code, file, message, fix) in liveness_findings(&rows, &schedules, schedulers) {
+                        eprintln!("{}", json!({"schemaVersion":1,"event":"queue-warning","code":code,"file":file,"msg":message,"fix":fix,"valuesCaptured":false}));
+                    }
+                    first = false;
+                }
+                for row in &rows {
+                    let (pending, oldest, workers) = (row["pending"].as_i64().unwrap_or(0), row["oldestWaitSeconds"].as_i64().unwrap_or(0), row["workers"].as_i64().unwrap_or(0));
+                    if pending > 0 && (workers == 0 || oldest >= BEHIND_SECONDS) {
+                        let name = row["queue"].as_str().unwrap_or("");
+                        eprintln!("{}", json!({"schemaVersion":1,"event":"queue-stalled","code":"B0765","queue":name,"pending":pending,"oldestWaitSeconds":oldest,"workers":workers,"fix":format!("run `brain jobs work {name}`; `brain jobs stats` shows every queue"),"valuesCaptured":false}));
+                    }
+                }
+            }
+            Err(_) if !unknown => {
+                unknown = true;
+                eprintln!("{}", json!({"schemaVersion":1,"event":"queue-liveness-unknown","code":"B0766","fix":"Postgres is not answering: stored jobs wait, and this check resumes when it returns","valuesCaptured":false}));
+            }
+            Err(_) => {}
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(period)).await;
+    }
+}
+
+/// `brain backend serve --with-workers`: one supervised child per declared queue (and one scheduler), for a deployment
+/// small enough to run them together. Children are the same `brain jobs` commands, so a handler cannot take the server
+/// down. A stopped server stops them and lets each drain; one that dies is restarted with a capped backoff.
+fn own_workers(root: &Path, environment: &str, backend: &str, queues: &[String], schedules: bool) -> (tokio::sync::watch::Sender<bool>, Vec<tokio::task::JoinHandle<()>>) {
+    let (stop, recv) = tokio::sync::watch::channel(false);
+    let mut commands: Vec<Vec<String>> = queues.iter().map(|queue| vec!["work".to_string(), queue.clone()]).collect();
+    if schedules {
+        commands.push(vec!["cron".to_string()]);
+    }
+    let backend_set = std::env::var_os("BRAIN_BACKEND_URL").is_some() || crate::env::value(root, environment, "BRAIN_BACKEND_URL").is_some();
+    let tasks = commands.into_iter().map(|command| {
+        let (root, environment, backend, mut recv) = (root.to_path_buf(), environment.to_string(), backend.to_string(), recv.clone());
+        tokio::spawn(async move {
+            let mut backoff = 1u64;
+            loop {
+                let Ok(program) = std::env::current_exe() else { return };
+                let mut cmd = tokio::process::Command::new(program);
+                cmd.arg("jobs").args(&command).args(["--env", &environment]).current_dir(&root).stdin(Stdio::null()).kill_on_drop(true).env(OWNED_BY, std::process::id().to_string());
+                if !backend_set {
+                    cmd.env("BRAIN_BACKEND_URL", &backend);
+                }
+                let started = std::time::Instant::now();
+                let Ok(mut child) = cmd.spawn() else { return };
+                tokio::select! {
+                    status = child.wait() => {
+                        if started.elapsed().as_secs() > 60 { backoff = 1; }
+                        eprintln!("{}", json!({"schemaVersion":1,"event":"worker-exited","command":command,"code":status.ok().and_then(|s|s.code()),"restartSeconds":backoff,"valuesCaptured":false}));
+                    }
+                    _ = recv.changed() => {
+                        #[cfg(unix)]
+                        if let Some(pid) = child.id() {
+                            // SAFETY: a signal to the child this task owns and has not reaped yet.
+                            unsafe { libc::kill(pid as i32, libc::SIGTERM); }
+                        }
+                        // The longest drain is 600 s by policy; past that the child is dropped and killed.
+                        let _ = tokio::time::timeout(std::time::Duration::from_secs(610), child.wait()).await;
+                        return;
+                    }
+                }
+                tokio::select! {
+                    _ = recv.changed() => return,
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(backoff)) => {}
+                }
+                backoff = (backoff * 2).min(30);
+            }
+        })
+    }).collect();
+    (stop, tasks)
+}
+/// Set on workers a server owns: they stop if that server dies without stopping them (SIGKILL), so a restart under a
+/// process manager never leaves a second set running.
+const OWNED_BY: &str = "BRAIN_WORKER_PARENT";
+async fn owner_gone() {
+    let owner = std::env::var(OWNED_BY).ok().and_then(|v| v.parse::<i32>().ok());
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        #[cfg(unix)]
+        // SAFETY: getppid has no preconditions.
+        if owner.is_some_and(|pid| unsafe { libc::getppid() } != pid) {
+            return;
+        }
+        #[cfg(not(unix))]
+        let _ = owner;
+    }
+}
+
 pub fn jobs(args: &[String]) -> Result<(), String> {
     let root = crate::app_root()?;
     let environment = crate::env::name(args, "development");
     let op = args.first().map(String::as_str).unwrap_or("");
     if !matches!(op, "enqueue" | "status" | "work" | "prune" | "dead" | "retry" | "stats" | "cron") {
-        return Err("usage: brain jobs enqueue <queue> --payload '<json>' [--key K] [--priority N] [--delay S] | status <id> | work <queue> [--concurrency 2] | dead <queue> | retry <queue> [--id <uuid>] | stats <queue> | cron [--once] | prune".into());
+        return Err("usage: brain jobs enqueue <queue> --payload '<json>' [--key K] [--priority N] [--delay S] | status <id> | work <queue> [--concurrency 2] | dead <queue> | retry <queue> [--id <uuid>] | stats [queue] | cron [--once] | prune".into());
     }
     let snapshot = inspect(&root)?;
     let url = database(&root, &environment)?;
-    let name = args.get(1).cloned().unwrap_or_default();
+    let name = args.get(1).filter(|a| !a.starts_with("--")).cloned().unwrap_or_default();
+    let declared: Vec<String> = contracts(&root, "jobs")?.into_iter().map(|job| job.name).collect();
+    if name.is_empty() && matches!(op, "enqueue" | "work" | "dead" | "retry") {
+        let example = declared.first().map_or("order_receipts", String::as_str);
+        let list = if declared.is_empty() { "none yet; add one with `brain add job`".to_string() } else { declared.join(", ") };
+        return Err(format!("`brain jobs {op}` needs a queue name; declared queues: {list}; example: brain jobs {op} {example}"));
+    }
     let policy = if matches!(op, "enqueue" | "work") { Some(domain::queue_policy(&root, &name)?) } else { None };
     let job_contract = if matches!(op, "enqueue" | "work") {
         Some(
@@ -1078,14 +1299,23 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
                     let (send, recv) = tokio::sync::watch::channel(false);
                     eprintln!("{}", json!({"schemaVersion":1,"event":"cron-ready","schedules":schedules.len()}));
                     let runner = brain_backend::schedules::run(queue.clone(), schedules, recv, print);
+                    tokio::pin!(runner);
                     tokio::select! {
-                        result = runner => result?,
-                        _ = tokio::signal::ctrl_c() => { let _ = send.send(true); }
+                        result = &mut runner => result?,
+                        _ = brain_backend::http::wait_shutdown() => { let _ = send.send(true); runner.await?; }
+                        _ = owner_gone() => { let _ = send.send(true); runner.await?; }
                     }
                 }
             }
             "stats" => {
-                println!("{}", json!({"schemaVersion":1,"stats":queue.stats(&name).await?}));
+                if name.is_empty() {
+                    let schedules = domain::cron(&root, &contracts(&root, "jobs")?).unwrap_or_default().len();
+                    println!("{}", json!({"schemaVersion":1,"queues":queue_rows(&queue, &declared).await?,"schedules":schedules,"schedulers":queue.schedulers().await?}));
+                } else {
+                    let mut stats = queue.stats(&name).await?;
+                    stats["declared"] = json!(declared.contains(&name));
+                    println!("{}", json!({"schemaVersion":1,"stats":stats}));
+                }
             }
             "prune" => {
                 println!(
@@ -1312,6 +1542,7 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
                 tokio::select! {
                     r=&mut worker=>r?,
                     _=brain_backend::http::wait_shutdown()=>{let _=send.send(true);worker.await?;},
+                    _=owner_gone()=>{let _=send.send(true);worker.await?;},
                 }
             }
             _ => unreachable!(),
@@ -1404,6 +1635,29 @@ mod tests {
     fn policy(create: &str) -> String {
         format!("<meta server>\nexport default {{ read: ['owner'], create: {create}, update: ['owner'], delete: ['owner'] }}\n")
     }
+    #[test]
+    fn liveness_findings_name_each_queue_that_nothing_runs() {
+        let row = |queue: &str, pending: i64, workers: i64, declared: bool| json!({"queue":queue,"pending":pending,"oldestWaitSeconds":90,"workers":workers,"declared":declared});
+        let codes = |rows: &[Value], schedules: &[String], schedulers: i64| liveness_findings(rows, schedules, schedulers).into_iter().map(|f| f.0).collect::<Vec<_>>();
+        let stuck = liveness_findings(&[row("mail", 78, 0, true)], &[], 0);
+        assert_eq!(stuck[0].0, "B0765");
+        assert!(stuck[0].2.contains("`mail`") && stuck[0].2.contains("78 job(s)") && stuck[0].2.contains("90 s") && stuck[0].3.contains("brain jobs work mail"), "{stuck:?}");
+        assert_eq!(codes(&[row("idle", 0, 0, true)], &[], 0), ["B0765"], "a queue with nothing due still has no worker");
+        assert_eq!(codes(&[row("old", 3, 0, false)], &[], 0), ["B0768"]);
+        let daily = ["daily".to_string()];
+        assert_eq!(codes(&[], &daily, 0), ["B0767"]);
+        // Negative: a worker and a scheduler silence them.
+        assert!(codes(&[row("mail", 78, 1, true)], &daily, 1).is_empty());
+    }
+
+    #[test]
+    fn a_job_without_a_handler_is_reported() {
+        let (root, _) = roles_app(&[("server/jobs/mail/schema.jsbrain", "<meta server>\nexport default { to: 'str!' }\n")]);
+        assert_eq!(job_warnings(&root).into_iter().map(|w| w.0).collect::<Vec<_>>(), ["B0769"]);
+        std::fs::write(root.join("server/jobs/mail/handler.jsbrain"), "<meta server>\nexport default async function handle(ctx) {}\n").unwrap();
+        assert!(job_warnings(&root).is_empty());
+    }
+
     #[test]
     fn a_new_app_has_general_roles_and_signup_is_granted_by_user() {
         let p = policy("['user']");

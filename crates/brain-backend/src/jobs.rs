@@ -2,8 +2,19 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{PgPool, Row};
-use std::{future::Future, time::{Duration, Instant}};
+use std::{future::Future, sync::{Arc, atomic::{AtomicBool, Ordering}}, time::{Duration, Instant}};
 use uuid::Uuid;
+
+/// `NOTIFY` channel of ready jobs; the payload is the queue name. Delivered at commit, so a rolled back job wakes nobody.
+const READY_CHANNEL: &str = "_brain_jobs_ready";
+/// How often a running worker or scheduler refreshes its row in `_brain_workers`.
+const WORKER_BEAT: Duration = Duration::from_secs(15);
+/// A worker seen within this many seconds counts as alive: three missed beats.
+pub const WORKER_FRESH_SECONDS: i64 = 45;
+/// Idle poll with a live wake-up connection: it only finds delayed jobs, retries and expired leases.
+const IDLE_POLL: Duration = Duration::from_millis(1000);
+/// Idle poll without one (a pooler that does not support LISTEN, a lost connection).
+const IDLE_POLL_NO_WAKE: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Job {
@@ -146,16 +157,39 @@ impl Queue {
         }
         let revived = sqlx::query("UPDATE _brain_jobs SET state='pending',attempts=0,available_at=now(),finished_at=NULL,last_error=NULL WHERE id IN (SELECT id FROM _brain_jobs WHERE queue=$1 AND state='dead' AND ($2::uuid IS NULL OR id=$2) ORDER BY finished_at,id LIMIT $3 FOR UPDATE)")
             .bind(queue).bind(id).bind(room).execute(&mut *tx).await.map_err(crate::db::safe)?.rows_affected();
+        notify_ready(&mut tx, queue).await?;
         tx.commit().await.map_err(crate::db::safe)?;
         Ok(revived)
     }
-    /// Job counts by state; `delayed` are pending jobs not yet due.
+    /// Job counts by state; `delayed` are pending jobs not yet due, `oldestWaitSeconds` is how long the oldest due job
+    /// has waited and `workers` how many processes working this queue were seen recently.
     pub async fn stats(&self, queue: &str) -> Result<Value, String> {
         if !crate::contract::identifier(queue) {
-            return Err("invalid queue".into());
+            return Err(format!("invalid queue `{queue}`; fix: a declared job name, like `brain jobs stats order_receipts`"));
         }
-        sqlx::query_scalar("SELECT jsonb_build_object('queue',$1::text,'pending',count(*) FILTER (WHERE state='pending' AND available_at<=now()),'delayed',count(*) FILTER (WHERE state='pending' AND available_at>now()),'running',count(*) FILTER (WHERE state='running'),'succeeded',count(*) FILTER (WHERE state='succeeded'),'dead',count(*) FILTER (WHERE state='dead')) FROM _brain_jobs WHERE queue=$1")
-            .bind(queue).fetch_one(&self.pool).await.map_err(crate::db::safe)
+        sqlx::query_scalar("SELECT jsonb_build_object('queue',$1::text,'pending',count(*) FILTER (WHERE state='pending' AND available_at<=now()),'delayed',count(*) FILTER (WHERE state='pending' AND available_at>now()),'running',count(*) FILTER (WHERE state='running'),'succeeded',count(*) FILTER (WHERE state='succeeded'),'dead',count(*) FILTER (WHERE state='dead'),'oldestWaitSeconds',coalesce(floor(extract(epoch FROM now()-min(available_at) FILTER (WHERE state='pending' AND available_at<=now()))),0)::bigint,'workers',(SELECT count(*) FROM public._brain_workers w WHERE w.kind='worker' AND w.queue=$1 AND w.seen_at>now()-make_interval(secs=>$2))) FROM _brain_jobs WHERE queue=$1")
+            .bind(queue).bind(WORKER_FRESH_SECONDS as f64).fetch_one(&self.pool).await.map_err(crate::db::safe)
+    }
+    /// Queues holding active jobs (the reserved outbound webhook queue has its own in-process worker).
+    pub async fn active_queues(&self) -> Result<Vec<String>, String> {
+        sqlx::query_scalar("SELECT DISTINCT queue FROM _brain_jobs WHERE state IN ('pending','running') AND queue<>$1 ORDER BY queue")
+            .bind(crate::webhooks::OUTBOUND_QUEUE).fetch_all(&self.pool).await.map_err(crate::db::safe)
+    }
+    /// Record that a worker or scheduler process is alive. Rows of processes gone for a day are removed here.
+    pub async fn beat(&self, id: Uuid, kind: &str, queue: &str) -> Result<(), String> {
+        sqlx::query("INSERT INTO public._brain_workers(id,kind,queue,pid) VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO UPDATE SET seen_at=now()")
+            .bind(id).bind(kind).bind(queue).bind(std::process::id() as i32).execute(&self.pool).await.map_err(crate::db::safe)?;
+        sqlx::query("DELETE FROM public._brain_workers WHERE seen_at<now()-interval '1 day'").execute(&self.pool).await.map_err(crate::db::safe)?;
+        Ok(())
+    }
+    /// A clean stop leaves no row behind, so the next liveness check is right at once.
+    pub async fn leave(&self, id: Uuid) -> Result<(), String> {
+        sqlx::query("DELETE FROM public._brain_workers WHERE id=$1").bind(id).execute(&self.pool).await.map(|_| ()).map_err(crate::db::safe)
+    }
+    /// Scheduler processes seen recently.
+    pub async fn schedulers(&self) -> Result<i64, String> {
+        sqlx::query_scalar("SELECT count(*)::bigint FROM public._brain_workers WHERE kind='scheduler' AND seen_at>now()-make_interval(secs=>$1)")
+            .bind(WORKER_FRESH_SECONDS as f64).fetch_one(&self.pool).await.map_err(crate::db::safe)
     }
     /// `SKIP LOCKED` lets independent processes claim disjoint jobs. Expired work can be delivered again.
     pub async fn claim(&self, queue: &str, lease_seconds: i32) -> Result<Option<Job>, String> {
@@ -226,19 +260,40 @@ impl Queue {
             return Err("workers need a valid queue and concurrency 1..8".into());
         }
         policy.validate().map_err(|e| format!("workers need a valid queue and concurrency 1..8; {e}"))?;
+        // Liveness: best effort, a missing row must never stop work. `claim` reports a real database failure.
+        let worker_id = Uuid::new_v4();
+        let _ = self.beat(worker_id, "worker", queue).await;
+        let beat = {
+            let (q, name) = (self.clone(), queue.to_string());
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(WORKER_BEAT).await;
+                    let _ = q.beat(worker_id, "worker", &name).await;
+                }
+            })
+        };
+        let wake = Arc::new(tokio::sync::Notify::new());
+        let listening = Arc::new(AtomicBool::new(false));
+        let listener = tokio::spawn(wake_on_ready(self.pool.clone(), queue.to_string(), wake.clone(), listening.clone()));
         let mut tasks = tokio::task::JoinSet::new();
         for _ in 0..policy.concurrency {
-            let (q, name, h, mut stop, p) = (self.clone(), queue.to_string(), handler.clone(), shutdown.clone(), policy.clone());
+            let (q, name, h, mut stop, p, wake, listening) = (self.clone(), queue.to_string(), handler.clone(), shutdown.clone(), policy.clone(), wake.clone(), listening.clone());
             tasks.spawn(async move {
                 loop {
                     if *stop.borrow() { break }
+                    // Armed before the claim, so a job committed between an empty claim and the sleep still wakes it.
+                    let woken = wake.notified();
+                    tokio::pin!(woken);
+                    woken.as_mut().enable();
                     let job = tokio::select! {
                         biased;
                         _ = stop.changed() => break,
                         job = q.claim(&name, p.lease as i32) => job?,
                     };
+                    // Claims again at once while there is work; waits only on an empty queue.
                     let Some(job) = job else {
-                        tokio::select! { _ = stop.changed() => break, _ = tokio::time::sleep(Duration::from_millis(250)) => {} }
+                        let idle = if listening.load(Ordering::Relaxed) { IDLE_POLL } else { IDLE_POLL_NO_WAKE };
+                        tokio::select! { _ = stop.changed() => break, _ = &mut woken => {}, _ = tokio::time::sleep(idle) => {} }
                         continue;
                     };
                     if q.run_one(&job, &p, h(job.clone()), &mut stop).await? { break }
@@ -246,12 +301,18 @@ impl Queue {
                 Ok::<(), String>(())
             });
         }
+        let mut failed = false;
         while let Some(result) = tasks.join_next().await {
             if !matches!(result, Ok(Ok(()))) {
+                failed = true;
                 tasks.abort_all();
-                while tasks.join_next().await.is_some() {}
-                return Err("worker stopped after a queue or task failure".into());
             }
+        }
+        beat.abort();
+        listener.abort();
+        let _ = self.leave(worker_id).await;
+        if failed {
+            return Err("worker stopped after a queue or task failure".into());
         }
         Ok(())
     }
@@ -293,6 +354,31 @@ impl Queue {
         }
         Ok(stopping)
     }
+}
+
+/// Wake idle workers when a job of `queue` commits. Uses its own connection: a listener held from the shared pool could
+/// starve the claims. When LISTEN does not work the workers simply keep polling at the shorter interval.
+async fn wake_on_ready(pool: PgPool, queue: String, wake: Arc<tokio::sync::Notify>, listening: Arc<AtomicBool>) {
+    let own = sqlx::postgres::PgPoolOptions::new().max_connections(1).connect_lazy_with((*pool.connect_options()).clone());
+    loop {
+        if let Ok(mut listener) = sqlx::postgres::PgListener::connect_with(&own).await
+            && listener.listen(READY_CHANNEL).await.is_ok()
+        {
+            listening.store(true, Ordering::Relaxed);
+            // A reconnect may have missed a commit: claim once.
+            wake.notify_waiters();
+            while let Ok(note) = listener.recv().await {
+                if note.payload() == queue {
+                    wake.notify_waiters();
+                }
+            }
+        }
+        listening.store(false, Ordering::Relaxed);
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+}
+async fn notify_ready(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, queue: &str) -> Result<(), String> {
+    sqlx::query("SELECT pg_notify($1,$2)").bind(READY_CHANNEL).bind(queue).execute(&mut **tx).await.map(|_| ()).map_err(crate::db::safe)
 }
 
 /// Maximum pending or running jobs per queue.
@@ -359,5 +445,8 @@ pub async fn enqueue_tx_with(
     }
     let id = Uuid::new_v4();
     sqlx::query("INSERT INTO _brain_jobs(id,queue,payload,max_attempts,idempotency_key,priority,available_at) VALUES ($1,$2,$3,$4,$5,$6,now()+make_interval(secs=>$7))").bind(id).bind(queue).bind(payload).bind(max_attempts).bind(key).bind(options.priority).bind(options.delay_seconds as f64).execute(&mut **tx).await.map_err(crate::db::safe)?;
+    if options.delay_seconds == 0 {
+        notify_ready(tx, queue).await?;
+    }
     Ok(id)
 }

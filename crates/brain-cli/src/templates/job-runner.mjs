@@ -226,3 +226,6 @@ try {
   process.exitCode = 1
   try { emit(`JOB_TRACE ${JSON.stringify(trace(error, jobId))}\n`) } catch {}
 }
+// The handler's promise is the job. A handle it left open (a database pool, a keep-alive socket, a timer) must not hold
+// the attempt, and with it the next job, until that handle times out. Unref'd: no open handle means an immediate exit.
+setTimeout(() => process.exit(), 100).unref()

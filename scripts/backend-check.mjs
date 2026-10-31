@@ -154,6 +154,14 @@ try {
     assertId(queued.id)
     const duplicate=brain(['jobs','enqueue','deliver','--payload','{"message":"Hello"}','--key','smoke-event','--json'],app)
     if(queued.id!==duplicate.id) throw Error('CLI idempotency key created a duplicate job')
+    // Queue liveness: the waiting job is visible with no queue named, and doctor says nothing is running it, until a worker is.
+    const queueRow=()=>brain(['jobs','stats'],app).queues.find(row=>row.queue==='deliver')
+    const doctorSays=code=>spawnSync(binary,['doctor','--json'],{cwd:app,env:cliEnv,encoding:'utf8',timeout:20000,maxBuffer:1024*1024}).stdout.includes(`"${code}"`)
+    const waiting=queueRow()
+    if(waiting?.pending!==1||waiting.workers!==0||waiting.declared!==true||typeof waiting.oldestWaitSeconds!=='number') throw Error('`brain jobs stats` did not report the waiting queue: '+JSON.stringify(waiting))
+    if(!doctorSays('B0765')) throw Error('`brain doctor` did not warn B0765 for a queue with no worker')
+    const unnamed=spawnSync(binary,['jobs','work'],{cwd:app,env:cliEnv,encoding:'utf8',timeout:20000})
+    if(unnamed.status===0||!unnamed.stderr.includes('declared queues: deliver')) throw Error('`brain jobs work` without a queue must list the declared queues')
     test=spawn(binary,['jobs','work','deliver','--concurrency','1'],{cwd:app,env:cliEnv,stdio:'ignore',detached:true})
     test.once('error',()=>{})
     try {
@@ -166,6 +174,8 @@ try {
         await sleep(100)
       }
       if(!succeeded) throw Error('CLI worker did not finish the synthetic job within its bounded smoke check')
+      if(queueRow()?.workers!==1) throw Error('`brain jobs stats` did not count the running worker')
+      if(doctorSays('B0765')) throw Error('`brain doctor` still warned B0765 with a worker running')
       console.log('Backend CLI queue smoke: PASS (compiled handler, leased delivery, idempotency, acknowledgement)')
     } finally {
       await terminateOwned(test,'SIGINT')

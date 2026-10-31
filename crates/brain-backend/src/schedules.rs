@@ -98,10 +98,14 @@ pub async fn run(
         s.validate().map_err(|e| format!("server/cron/{name}.jsbrain: {e}"))?;
     }
     let mut seen = std::collections::HashSet::new();
+    let scheduler = Uuid::new_v4();
     loop {
         if *shutdown.borrow() {
+            let _ = queue.leave(scheduler).await;
             return Ok(());
         }
+        // Liveness: every pass, at most 30 s apart (WORKER_FRESH_SECONDS). Best effort; `tick` reports a real failure.
+        let _ = queue.beat(scheduler, "scheduler", "_scheduler").await;
         let now = Utc::now();
         for (name, slot, id) in tick(&queue, &schedules, now).await? {
             if seen.insert((name.clone(), slot)) {
@@ -112,7 +116,10 @@ pub async fn run(
         let next = schedules.iter().filter_map(|(_, s)| s.next(now)).min();
         let wait = next.map_or(Duration::from_secs(30), |t| (t - Utc::now()).to_std().unwrap_or_default()).min(Duration::from_secs(30));
         tokio::select! {
-            _ = shutdown.changed() => return Ok(()),
+            _ = shutdown.changed() => {
+                let _ = queue.leave(scheduler).await;
+                return Ok(());
+            }
             _ = tokio::time::sleep(wait + Duration::from_millis(20)) => {}
         }
     }

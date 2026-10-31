@@ -1,5 +1,6 @@
-//! Name usage over the AST, ignoring shadowing (conservative: a local with the same name counts as a use).
-//! Used by the codegen to fold signals that are never written (INTERNALS §13).
+//! Name usage over the AST. `Uses::component` ignores shadowing (conservative: a local with the same name counts as a
+//! use), which the codegen needs to fold signals that are never written (INTERNALS §13). `Uses::free` honors the scopes
+//! of functions, blocks, loops and catch clauses, which is what deciding a module-level import needs.
 
 use crate::ast::*;
 use std::collections::HashSet;
@@ -12,6 +13,64 @@ pub struct Uses {
     pub writes: HashSet<String>,
     /// Identifiers called directly: `f(…)`.
     pub calls: HashSet<String>,
+    /// `free` only: every name some function, block, loop or catch clause binds.
+    pub bound: HashSet<String>,
+    scoped: bool,
+    scopes: Vec<HashSet<String>>,
+}
+
+fn pat_names(p: &Pat, out: &mut HashSet<String>) {
+    match p {
+        Pat::Ident(i) => {
+            out.insert(i.name.clone());
+        }
+        Pat::Default { pat, .. } => pat_names(pat, out),
+        Pat::Rest { arg, .. } => pat_names(arg, out),
+        Pat::Object { props, rest, .. } => {
+            props.iter().for_each(|p| pat_names(&p.value, out));
+            rest.iter().for_each(|r| pat_names(r, out));
+        }
+        Pat::Array { elems, rest, .. } => {
+            elems.iter().flatten().for_each(|e| pat_names(e, out));
+            rest.iter().for_each(|r| pat_names(r, out));
+        }
+    }
+}
+/// `let`, `const` and function declarations directly in a block.
+fn block_names(body: &[Stmt], out: &mut HashSet<String>) {
+    for s in body {
+        match s {
+            Stmt::Var(v) => v.decls.iter().for_each(|d| pat_names(&d.pat, out)),
+            Stmt::Func(f) | Stmt::Server { func: f, .. } => out.extend(f.name.iter().map(|n| n.name.clone())),
+            Stmt::Export { decl, .. } => block_names(std::slice::from_ref(decl), out),
+            _ => {}
+        }
+    }
+}
+/// `var` hoists to its function from any nested statement.
+fn hoisted_names(body: &[Stmt], out: &mut HashSet<String>) {
+    for s in body {
+        match s {
+            Stmt::Var(v) if v.kind == VarKind::Var => v.decls.iter().for_each(|d| pat_names(&d.pat, out)),
+            Stmt::Block { body, .. } => hoisted_names(body, out),
+            Stmt::If { cons, alt, .. } => {
+                hoisted_names(std::slice::from_ref(cons), out);
+                alt.iter().for_each(|a| hoisted_names(std::slice::from_ref(a), out));
+            }
+            Stmt::ForOf { kind, pat, body, .. } => {
+                if *kind == VarKind::Var {
+                    pat_names(pat, out);
+                }
+                hoisted_names(std::slice::from_ref(body), out);
+            }
+            Stmt::Try { block, handler, finalizer, .. } => {
+                hoisted_names(block, out);
+                handler.iter().for_each(|h| hoisted_names(h, out));
+                finalizer.iter().for_each(|f| hoisted_names(f, out));
+            }
+            _ => {}
+        }
+    }
 }
 
 fn root(e: &Expr) -> Option<&str> {
@@ -23,10 +82,38 @@ fn root(e: &Expr) -> Option<&str> {
 }
 
 impl Uses {
+    fn shadowed(&self, name: &str) -> bool {
+        self.scopes.iter().any(|s| s.contains(name))
+    }
+    fn read(&mut self, name: &str) {
+        if !self.shadowed(name) {
+            self.reads.insert(name.to_string());
+        }
+    }
+    fn write(&mut self, name: &str) {
+        if !self.shadowed(name) {
+            self.writes.insert(name.to_string());
+        }
+    }
+    fn call(&mut self, name: &str) {
+        if !self.shadowed(name) {
+            self.calls.insert(name.to_string());
+        }
+    }
+    /// Run `walk` inside a scope that binds `names`; without scope tracking it just walks.
+    fn within(&mut self, names: HashSet<String>, walk: impl FnOnce(&mut Self)) {
+        if !self.scoped {
+            return walk(self);
+        }
+        self.bound.extend(names.iter().cloned());
+        self.scopes.push(names);
+        walk(self);
+        self.scopes.pop();
+    }
     pub fn expr(&mut self, e: &Expr) {
         match e {
             Expr::Ident(i) => {
-                self.reads.insert(i.name.clone());
+                self.read(&i.name);
             }
             Expr::This(_) | Expr::Num { .. } | Expr::Str { .. } | Expr::Regex { .. } | Expr::Bool { .. } | Expr::Null(_) => {}
             Expr::Template { tag, exprs, .. } => {
@@ -44,7 +131,7 @@ impl Uses {
                             self.expr(value);
                         }
                         ObjProp::Shorthand(i) => {
-                            self.reads.insert(i.name.clone());
+                            self.read(&i.name);
                         }
                         ObjProp::Method { key, func, .. } => {
                             self.key(key);
@@ -59,19 +146,19 @@ impl Uses {
                 if *op == "delete"
                     && let Some(r) = root(arg)
                 {
-                    self.writes.insert(r.to_string());
+                    self.write(r);
                 }
                 self.expr(arg);
             }
             Expr::Update { arg, .. } => {
                 if let Some(r) = root(arg) {
-                    self.writes.insert(r.to_string());
+                    self.write(r);
                 }
                 self.expr(arg);
             }
             Expr::Assign { target, value, .. } => {
                 if let Some(r) = root(target) {
-                    self.writes.insert(r.to_string());
+                    self.write(r);
                 }
                 self.expr(target);
                 self.expr(value);
@@ -87,13 +174,13 @@ impl Uses {
             }
             Expr::Call { callee, args, .. } | Expr::New { callee, args, .. } => {
                 if let Expr::Ident(i) = callee.unparen() {
-                    self.calls.insert(i.name.clone());
+                    self.call(&i.name);
                 }
                 // A method call may mutate its receiver (`xs.push`): count it as a write.
                 if let Expr::Member { obj, .. } = callee.unparen()
                     && let Some(r) = root(obj)
                 {
-                    self.writes.insert(r.to_string());
+                    self.write(r);
                 }
                 self.expr(callee);
                 args.iter().for_each(|x| self.expr(x));
@@ -116,11 +203,20 @@ impl Uses {
     }
 
     pub fn func(&mut self, f: &Func) {
-        f.params.iter().for_each(|p| self.pat(p));
-        match &f.body {
-            FnBody::Expr(e) => self.expr(e),
-            FnBody::Block(b) => b.iter().for_each(|s| self.stmt(s)),
+        let mut names = HashSet::new();
+        f.params.iter().for_each(|p| pat_names(p, &mut names));
+        names.extend(f.name.iter().map(|n| n.name.clone()));
+        if let FnBody::Block(b) = &f.body {
+            block_names(b, &mut names);
+            hoisted_names(b, &mut names);
         }
+        self.within(names, |u| {
+            f.params.iter().for_each(|p| u.pat(p));
+            match &f.body {
+                FnBody::Expr(e) => u.expr(e),
+                FnBody::Block(b) => b.iter().for_each(|s| u.stmt(s)),
+            }
+        });
     }
 
     pub fn pat(&mut self, p: &Pat) {
@@ -168,29 +264,42 @@ impl Uses {
                 }
             }
             Stmt::ForOf { pat, iter, body, .. } => {
-                self.pat(pat);
                 self.expr(iter);
-                self.stmt(body);
+                let mut names = HashSet::new();
+                pat_names(pat, &mut names);
+                self.within(names, |u| {
+                    u.pat(pat);
+                    u.stmt(body);
+                });
             }
             Stmt::Return { arg, .. } => {
                 if let Some(a) = arg {
                     self.expr(a);
                 }
             }
-            Stmt::Block { body, .. } => body.iter().for_each(|s| self.stmt(s)),
+            Stmt::Block { body, .. } => self.block(body),
             Stmt::Func(f) | Stmt::Server { func: f, .. } => self.func(f),
             Stmt::Try { block, param, handler, finalizer, .. } => {
-                block.iter().for_each(|s| self.stmt(s));
-                if let Some(p) = param {
-                    self.pat(p);
-                }
-                handler.iter().flatten().for_each(|s| self.stmt(s));
-                finalizer.iter().flatten().for_each(|s| self.stmt(s));
+                self.block(block);
+                let mut names = HashSet::new();
+                param.iter().for_each(|p| pat_names(p, &mut names));
+                handler.iter().for_each(|h| block_names(h, &mut names));
+                self.within(names, |u| {
+                    param.iter().for_each(|p| u.pat(p));
+                    handler.iter().flatten().for_each(|s| u.stmt(s));
+                });
+                finalizer.iter().for_each(|f| self.block(f));
             }
             Stmt::Export { decl, .. } => self.stmt(decl),
             Stmt::ExportDefault { expr, .. } => self.expr(expr),
             Stmt::Import(_) | Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Empty { .. } => {}
         }
+    }
+
+    fn block(&mut self, body: &[Stmt]) {
+        let mut names = HashSet::new();
+        block_names(body, &mut names);
+        self.within(names, |u| body.iter().for_each(|s| u.stmt(s)));
     }
 
     pub fn nodes(&mut self, nodes: &[Node]) {
@@ -205,7 +314,7 @@ impl Uses {
                     self.nodes(&e.children);
                 }
                 Node::ComponentRef(r) => {
-                    self.reads.insert(r.name.clone());
+                    self.read(&r.name);
                     self.attrs(&r.attrs);
                     self.nodes(&r.children);
                 }
@@ -246,7 +355,7 @@ impl Uses {
                     if a.kind == AttrKind::Bind
                         && let Some(r) = root(e)
                     {
-                        self.writes.insert(r.to_string());
+                        self.write(r);
                     }
                     self.expr(e);
                 }
@@ -264,7 +373,15 @@ impl Uses {
 
     /// Script and markup of a whole component.
     pub fn component(c: &Component) -> Uses {
-        let mut u = Uses::default();
+        Self::walk(c, false)
+    }
+    /// Like `component`, but a name only counts where no enclosing function, block, loop or catch clause binds it.
+    /// Template bindings (`each`, `await`) are not scopes here: their names still count, which at worst adds an import.
+    pub fn free(c: &Component) -> Uses {
+        Self::walk(c, true)
+    }
+    fn walk(c: &Component, scoped: bool) -> Uses {
+        let mut u = Uses { scoped, ..Uses::default() };
         c.script.iter().for_each(|s| u.stmt(s));
         u.nodes(&c.template);
         for p in &c.props {
