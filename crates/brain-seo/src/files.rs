@@ -738,6 +738,63 @@ mod tests {
     }
 
     #[test]
+    fn sitemap_bytes_count_images_videos_and_alternates() {
+        // S01: the byte budget covers the whole <url> element — image, video and hreflang children, escaped and in UTF-8
+        let cfg = Config {
+            site: Some("https://acme.dev".into()),
+            ..Config::default()
+        };
+        let d = parse("<html><head><title>T</title></head><body><main><h1>T</h1><img src=\"/img/caf\u{e9}-&-t\u{e9}.png\" alt=\"x\"></main></body></html>");
+        let video = crate::video::Video {
+            name: "Demo \u{2014} \"quoted\" & <tagged>".into(),
+            description: "\u{1F680} launch ".repeat(8),
+            thumbnail: "https://acme.dev/thumb.jpg".into(),
+            content: Some("https://acme.dev/demo.mp4".into()),
+            upload: "2026-10-01".into(),
+            seconds: Some(90),
+        };
+        let routes: Vec<String> = (0..6).map(|i| format!("/p{i}")).collect();
+        let entries: Vec<Entry> = routes
+            .iter()
+            .map(|r| Entry {
+                route: r,
+                url: cfg.abs(r),
+                doc: &d,
+                lastmod: Some("2026-10-01"),
+                indexable: true,
+                alternates: vec![
+                    ("en".into(), cfg.abs(r)),
+                    ("es".into(), cfg.abs(&format!("/es/p\u{e1}gina-{r}-&"))),
+                    ("x-default".into(), cfg.abs(r)),
+                ],
+                videos: vec![video.clone()],
+            })
+            .collect();
+        // one entry alone, as written in a file
+        let (single, _) = sitemaps_with(&cfg, &entries[..1], SITEMAP_MAX, SITEMAP_MAX_BYTES);
+        let line = single[0].1.lines().find(|l| l.contains("<url>")).unwrap().len() + 1;
+        assert!(line > 800, "images, videos and alternates are part of the entry: {line} bytes");
+        assert!(single[0].1.contains("<image:image>") && single[0].1.contains("<video:video>") && single[0].1.contains("<xhtml:link"));
+        // a limit that fits two entries (plus the widest header) but not three: every child respects it
+        let limit = 2 * line + line / 2 + 400;
+        let (sm, rejected) = sitemaps_with(&cfg, &entries, SITEMAP_MAX, limit);
+        assert!(rejected.is_empty(), "{rejected:?}");
+        let children = &sm[1..];
+        assert_eq!(children.len(), 3, "{:?}", children.iter().map(|(n, b)| (n, b.len())).collect::<Vec<_>>());
+        for (name, body) in children {
+            assert!(body.len() <= limit, "{name} is {} bytes, limit {limit}", body.len());
+            assert_eq!(body.matches("<url>").count(), 2, "{name}");
+            assert!(body.contains("xmlns:image=") && body.contains("xmlns:video=") && body.contains("xmlns:xhtml="));
+            assert!(body.contains("&amp;") && body.contains("&lt;tagged&gt;") && body.contains('\u{e1}'));
+        }
+        assert_eq!(sitemaps_with(&cfg, &entries, SITEMAP_MAX, limit).0, sm, "deterministic");
+        // an entry that cannot fit any file on its own is rejected, never written into an oversized child
+        let (sm, rejected) = sitemaps_with(&cfg, &entries, SITEMAP_MAX, line + 100);
+        assert_eq!(rejected.len(), 6, "{sm:?}");
+        assert!(sm.iter().all(|(_, b)| b.len() <= line + 100 && !b.contains("<url>")));
+    }
+
+    #[test]
     fn llms_sections_take_the_section_page_title() {
         let cfg = Config {
             site: Some("https://acme.dev".into()),

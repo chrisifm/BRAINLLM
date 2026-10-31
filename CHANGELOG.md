@@ -25,6 +25,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   `&amp;`), reads a child listed twice once, and fails with a fix when a sitemap index lists no children or a child is
   not a complete `<urlset>` (S02), instead of sending escaped URLs or silently skipping a truncated child.
 
+### Tests
+- S01: sitemap byte limits are covered with image, video and hreflang children, escaped non-ASCII text and an entry
+  larger than a whole file (rejected, never written into an oversized child).
+
 ## [0.6.1] - 2026-10-31
 
 ### Fixed
