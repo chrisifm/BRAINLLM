@@ -879,6 +879,16 @@ impl Gen<'_> {
                 Node::Element(e) => e.attrs.iter().position(|a| a.kind == AttrKind::Plain && a.name == "slot").map(|i| (i, &e.attrs[i])),
                 _ => None,
             };
+            if let (Node::If(b), None) = (n, slot) {
+                // `{#if c}<a slot="x">…</a>{/if}`: the whole conditional fills slot `x`, not the default slot.
+                if let Some((name, b)) = slotted_if(b) {
+                    match named.iter_mut().find(|(k, _)| *k == name) {
+                        Some((_, v)) => v.push(Node::If(b)),
+                        None => named.push((name, vec![Node::If(b)])),
+                    }
+                    continue;
+                }
+            }
             match (n, slot) {
                 (Node::Element(e), Some((i, a))) => {
                     let name = match &a.value {
@@ -924,6 +934,40 @@ impl Gen<'_> {
         }
         format!("{}({{ {} }})", r.name, props.join(", "))
     }
+}
+
+/// An `{#if}` whose every branch holds only elements with the same plain `slot="x"` (plus whitespace):
+/// returns `x` and the block with those `slot` attributes removed.
+pub(crate) fn slotted_if(b: &IfBlock) -> Option<(String, IfBlock)> {
+    let mut name: Option<String> = None;
+    let mut strip = |body: &[Node]| -> Option<Vec<Node>> {
+        let mut out = Vec::new();
+        for n in body {
+            match n {
+                Node::Text(t) if t.value.trim().is_empty() => out.push(n.clone()),
+                Node::Element(e) => {
+                    let i = e.attrs.iter().position(|a| a.kind == AttrKind::Plain && a.name == "slot")?;
+                    let AttrValue::Text(t) = &e.attrs[i].value else { return None };
+                    if name.get_or_insert_with(|| t.clone()) != t {
+                        return None;
+                    }
+                    let mut e = e.clone();
+                    e.attrs.remove(i);
+                    out.push(Node::Element(e));
+                }
+                _ => return None,
+            }
+        }
+        Some(out)
+    };
+    let mut block = b.clone();
+    for br in &mut block.branches {
+        br.body = strip(&br.body)?;
+    }
+    if let Some(o) = &mut block.otherwise {
+        *o = strip(o)?;
+    }
+    name.map(|n| (n, block))
 }
 
 /// `f.v.address.city` → (`f`, `address.city`): the field path of a `form()` binding.

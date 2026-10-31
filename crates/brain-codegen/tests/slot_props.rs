@@ -36,3 +36,21 @@ fn slot_scope_rules() {
     let d = c(&format!("{base}<List>{{#slot item}}<p>{{item}}</p>{{/slot}}</List><p>{{item}}</p>\n"));
     assert_eq!(d.iter().filter(|x| **x == "B0111").count(), 1, "{d:?}");
 }
+
+#[test]
+fn conditional_named_slot_content_fills_its_named_slot() {
+    let root = std::env::temp_dir().join(format!("brain-slot-if-{}", std::process::id()));
+    std::fs::create_dir_all(root.join("comp")).unwrap();
+    std::fs::write(root.join("comp/sheet.brain"), "<section><slot /><footer><slot name=\"footer\" /></footer></section>\n").unwrap();
+    let parent = "<script>\n  import Sheet from './sheet.brain'\n  let slug = sig('acme')\n</script>\n<Sheet><p>Body</p>{#if slug}<a slot=\"footer\" href=\"/public\">Public page</a>{:else}<span slot=\"footer\">Draft</span>{/if}</Sheet>\n";
+    std::fs::write(root.join("comp/page.brain"), parent).unwrap();
+    let o = brain_codegen::compile_with(parent, &root.join("comp/page.brain"), &brain_codegen::Options::default());
+    std::fs::remove_dir_all(&root).ok();
+    let js = o.unwrap_or_else(|d| panic!("{d:#?}")).js;
+    let (default, footer) = (js.find("children: () =>").expect(&js), js.find("\"slot:footer\": () =>").expect(&js));
+    assert!(footer < default, "{js}");
+    let (named, rest) = (&js[footer..default], &js[default..]);
+    // The conditional (both branch templates) lives in slot:footer; the default slot only renders the body.
+    assert!(named.contains("$t0()") && named.contains("$t1()") && !rest.contains("$t0()") && rest.contains("$t3()"), "{js}");
+    assert!(!js.contains("slot=\\\"footer"), "the slot attribute must not reach the DOM\n{js}");
+}

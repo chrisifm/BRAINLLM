@@ -76,7 +76,7 @@ fn nodes_ok(nodes: &[Node]) -> bool {
 /// A use can be inlined when it only passes plain props the child declares (no events, bindings or named slots).
 pub(crate) fn use_ok(r: &ComponentRef, child: &Component) -> bool {
     r.attrs.iter().all(|a| a.kind == AttrKind::Plain && child.props.iter().any(|p| p.name == a.name))
-        && r.children.iter().all(|n| !matches!(n, Node::Element(e) if e.attrs.iter().any(|a| a.name == "slot")) && !matches!(n, Node::SlotScope(_)))
+        && r.children.iter().all(|n| !matches!(n, Node::Element(e) if e.attrs.iter().any(|a| a.name == "slot")) && !matches!(n, Node::If(b) if crate::template::slotted_if(b).is_some()) && !matches!(n, Node::SlotScope(_)))
         && (r.children.iter().all(|n| matches!(n, Node::Text(t) if t.value.trim().is_empty())) || has_default_slot(&child.template))
 }
 
