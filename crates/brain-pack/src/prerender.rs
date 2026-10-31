@@ -208,7 +208,9 @@ pub struct Aux<'a> {
 }
 
 fn node_with(files: &BTreeMap<String, String>, shim: &str, aux: &Aux, mode: &str, input: &str) -> Result<String, String> {
-    let tmp = std::env::temp_dir().join(format!("brain-prerender-{}-{mode}-{}", std::process::id(), crate::content_hash(input)));
+    static RUN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let run = RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = std::env::temp_dir().join(format!("brain-prerender-{}-{mode}-{run}-{}", std::process::id(), crate::content_hash(input)));
     let _ = std::fs::remove_dir_all(&tmp);
     for (p, c) in files.iter().filter(|(p, _)| p.starts_with("_b/")) {
         let f = tmp.join(p);
