@@ -32,6 +32,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Job queues accept `server/jobs/<name>/queue.jsbrain` (priority, attempts, fixed or exponential backoff, timeout up to
   one hour with automatic lease renewal, drain on shutdown, concurrency); `brain jobs enqueue --priority/--delay`,
   `dead`, `retry` and `stats` inspect and revive dead letters (`docs/backend/queues.md`).
+- `server/cron/<name>.jsbrain` schedules a declared job (`brain jobs cron`, `--once`); each slot is enqueued once even
+  with several schedulers, and missed slots outside `catchUp` are skipped (`docs/backend/cron.md`).
 
 ### Changed
 

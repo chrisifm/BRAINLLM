@@ -4,6 +4,7 @@ pub mod auth_flows;
 pub mod contract;
 pub mod db;
 pub mod domain;
+pub mod schedules;
 pub mod google;
 pub mod http;
 pub mod jobs;

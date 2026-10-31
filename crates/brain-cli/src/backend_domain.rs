@@ -63,6 +63,34 @@ pub fn queue_policy(root: &Path, name: &str) -> Result<brain_backend::jobs::Queu
     Ok(policy)
 }
 
+/// `server/cron/<name>.jsbrain` schedules, validated against the declared jobs and their payload schemas.
+pub fn cron(root: &Path, jobs: &[Resource]) -> Result<Vec<(String, brain_backend::schedules::CronSchedule)>, String> {
+    let dir = root.join("server/cron");
+    if !dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut files: Vec<_> = fs::read_dir(&dir).map_err(|e| e.to_string())?.collect::<std::io::Result<Vec<_>>>().map_err(|e| e.to_string())?;
+    files.sort_by_key(|e| e.file_name());
+    let mut out = Vec::new();
+    for e in files {
+        let file = e.file_name().to_string_lossy().into_owned();
+        let Some(name) = file.strip_suffix(".jsbrain") else { continue };
+        if out.len() >= MAX_OPERATIONS {
+            return Err(format!("server/cron: at most {MAX_OPERATIONS} schedules"));
+        }
+        let at = format!("server/cron/{file}");
+        if !brain_backend::contract::identifier(name) {
+            return Err(format!("{at}: file name must be an identifier"));
+        }
+        let s: brain_backend::schedules::CronSchedule = parse(root, &e.path(), "{ schedule: '*/5 * * * *', job, payload?, catchUp?, priority? }")?;
+        s.validate().map_err(|e| format!("{at}: {e}"))?;
+        let job = jobs.iter().find(|j| j.name == s.job).ok_or_else(|| format!("{at}: job {} is not declared under server/jobs", s.job))?;
+        job.input(&s.payload).map_err(|fields| format!("{at}: payload does not match server/jobs/{}/schema.jsbrain: {}", s.job, serde_json::to_string(&fields).unwrap_or_default()))?;
+        out.push((name.to_string(), s));
+    }
+    Ok(out)
+}
+
 /// Load and validate against resources and configured roles; the same checks run again before serving.
 pub fn checked(root: &Path, resources: &[Resource], roles: &brain_backend::auth_flows::RolesConfig) -> Result<Domain, String> {
     let domain = load(root, resources)?;
@@ -118,6 +146,7 @@ mod tests {
         let snapshot = super::super::inspect(&root).unwrap();
         let receipts = &snapshot["queues"]["order_receipts"];
         assert_eq!((receipts["priority"].as_i64(), receipts["timeout"].as_i64(), receipts["backoff"]["type"].as_str()), (Some(10), Some(900), Some("exponential")));
+        assert_eq!(snapshot["cron"]["daily_summary"]["schedule"], "0 7 * * *");
         let dir = std::env::temp_dir().join(format!("brain-queue-cli-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let job = dir.join("server/jobs/mail");
@@ -128,6 +157,15 @@ mod tests {
         std::fs::write(job.join("queue.jsbrain"), "export default { lease: 5 }\n").unwrap();
         let error = super::super::inspect(&root).unwrap_err();
         assert!(error.contains("server/jobs/mail/queue.jsbrain") && error.contains("lease: 10..600"), "{error}");
+        std::fs::create_dir_all(dir.join("server/cron")).unwrap();
+        std::fs::write(job.join("queue.jsbrain"), "export default {}\n").unwrap();
+        std::fs::write(dir.join("server/cron/digest.jsbrain"), "export default { schedule: '0 7 * * 1', job: 'mail', payload: { to: 'team@example.com' } }\n").unwrap();
+        assert_eq!(super::super::inspect(&root).unwrap()["cron"]["digest"]["schedule"], "0 7 * * 1");
+        std::fs::write(dir.join("server/cron/digest.jsbrain"), "export default { schedule: '0 7 * * 1', job: 'mail', payload: {} }\n").unwrap();
+        let error = super::super::inspect(&root).unwrap_err();
+        assert!(error.contains("server/cron/digest.jsbrain") && error.contains("payload does not match"), "{error}");
+        std::fs::write(dir.join("server/cron/digest.jsbrain"), "export default { schedule: '61 7 * * 1', job: 'mail', payload: { to: 'a@b.c' } }\n").unwrap();
+        assert!(super::super::inspect(&root).unwrap_err().contains("not a valid cron expression"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

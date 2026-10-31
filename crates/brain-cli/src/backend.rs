@@ -221,8 +221,9 @@ pub fn inspect(root: &Path) -> Result<Value, String> {
         .iter()
         .map(|j| Ok((j.name.clone(), json!(domain::queue_policy(root, &j.name)?))))
         .collect::<Result<_, String>>()?;
+    let cron: serde_json::Map<String, Value> = domain::cron(root, &jobs)?.into_iter().map(|(n, s)| (n, json!(s))).collect();
     Ok(
-        json!({"schemaVersion":1,"experimental":true,"resources":resources,"jobs":jobs,"queues":queues,"roles":roles,"domain":domain,"webhooks":crate::webhook_config::metadata(root)?,"openapi":openapi,"limits":{"activeJobs":10000,"workers":8,"jobSeconds":60,"leaseSeconds":90},"delivery":"at-least-once; handlers must be idempotent"}),
+        json!({"schemaVersion":1,"experimental":true,"resources":resources,"jobs":jobs,"queues":queues,"cron":cron,"roles":roles,"domain":domain,"webhooks":crate::webhook_config::metadata(root)?,"openapi":openapi,"limits":{"activeJobs":10000,"workers":8,"jobSeconds":60,"leaseSeconds":90},"delivery":"at-least-once; handlers must be idempotent"}),
     )
 }
 fn database(root: &Path, environment: &str) -> Result<String, String> {
@@ -613,8 +614,8 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
     let root = crate::app_root()?;
     let environment = crate::env::name(args, "development");
     let op = args.first().map(String::as_str).unwrap_or("");
-    if !matches!(op, "enqueue" | "status" | "work" | "prune" | "dead" | "retry" | "stats") {
-        return Err("usage: brain jobs enqueue <queue> --payload '<json>' [--key K] [--priority N] [--delay S] | status <id> | work <queue> [--concurrency 2] | dead <queue> | retry <queue> [--id <uuid>] | stats <queue> | prune".into());
+    if !matches!(op, "enqueue" | "status" | "work" | "prune" | "dead" | "retry" | "stats" | "cron") {
+        return Err("usage: brain jobs enqueue <queue> --payload '<json>' [--key K] [--priority N] [--delay S] | status <id> | work <queue> [--concurrency 2] | dead <queue> | retry <queue> [--id <uuid>] | stats <queue> | cron [--once] | prune".into());
     }
     let snapshot = inspect(&root)?;
     let url = database(&root, &environment)?;
@@ -682,6 +683,26 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
             "retry" => {
                 let id = crate::flag(args, "--id").map(|v| v.parse().map_err(|_| "--id must be a UUID")).transpose()?;
                 println!("{}", json!({"schemaVersion":1,"revived":queue.retry_dead(&name, id, 1000).await?}));
+            }
+            "cron" => {
+                let schedules = domain::cron(&root, &contracts(&root, "jobs")?)?;
+                if schedules.is_empty() {
+                    return Err("No schedules; add server/cron/<name>.jsbrain".into());
+                }
+                let print = |name: &str, slot: brain_backend::schedules::Slot, id: brain_backend::schedules::JobId| println!("{}", json!({"schemaVersion":1,"event":"cron-enqueued","schedule":name,"slot":slot.format("%Y-%m-%dT%H:%M:%SZ").to_string(),"id":id}));
+                if args.iter().any(|a| a == "--once") {
+                    for (name, slot, id) in brain_backend::schedules::tick(&queue, &schedules, brain_backend::schedules::now()).await? {
+                        print(&name, slot, id);
+                    }
+                } else {
+                    let (send, recv) = tokio::sync::watch::channel(false);
+                    eprintln!("{}", json!({"schemaVersion":1,"event":"cron-ready","schedules":schedules.len()}));
+                    let runner = brain_backend::schedules::run(queue.clone(), schedules, recv, print);
+                    tokio::select! {
+                        result = runner => result?,
+                        _ = tokio::signal::ctrl_c() => { let _ = send.send(true); }
+                    }
+                }
             }
             "stats" => {
                 println!("{}", json!({"schemaVersion":1,"stats":queue.stats(&name).await?}));

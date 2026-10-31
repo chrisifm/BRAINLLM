@@ -178,3 +178,53 @@ fn queue_policy_validation_names_the_rule() {
     let parsed: jobs::QueuePolicy = serde_json::from_value(json!({"attempts": 5, "backoff": {"type": "fixed", "delay": 30}})).unwrap();
     assert_eq!((parsed.attempts, parsed.backoff.seconds(4), parsed.timeout), (5, 30, 60));
 }
+
+fn every_five_minutes(job: &str) -> brain_backend::schedules::CronSchedule {
+    serde_json::from_value(json!({"schedule": "*/5 * * * *", "job": job, "payload": {"report": "daily"}})).unwrap()
+}
+
+#[test]
+fn cron_slots_respect_the_catch_up_window() {
+    use chrono::TimeZone;
+    let s = every_five_minutes("reports");
+    s.validate().unwrap();
+    let at = |h, m, sec| chrono::Utc.with_ymd_and_hms(2026, 10, 31, h, m, sec).unwrap();
+    assert_eq!(s.due(at(1, 10, 0)), Some(at(1, 10, 0)), "a slot is due at its exact time");
+    assert_eq!(s.due(at(1, 12, 30)), Some(at(1, 10, 0)), "inside the 300 s catch-up window");
+    let strict: brain_backend::schedules::CronSchedule = serde_json::from_value(json!({"schedule": "0 3 * * *", "job": "reports", "catchUp": 60})).unwrap();
+    assert_eq!(strict.due(at(3, 0, 59)), Some(at(3, 0, 0)));
+    assert_eq!(strict.due(at(3, 5, 0)), None, "a missed slot outside the window is skipped, not run late");
+    assert_eq!(s.next(at(1, 10, 0)), Some(at(1, 15, 0)));
+    let bad: brain_backend::schedules::CronSchedule = serde_json::from_value(json!({"schedule": "every day", "job": "reports"})).unwrap();
+    assert!(bad.validate().unwrap_err().contains("5 fields"));
+    assert!(serde_json::from_value::<brain_backend::schedules::CronSchedule>(json!({"schedule": "* * * * *", "job": "x", "when": 1})).is_err());
+}
+
+/// Many scheduler processes ticking the same slot create exactly one job; the next slot creates the next job.
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn postgres_cron_runs_each_slot_once_across_schedulers() {
+    use chrono::TimeZone;
+    let pool = pool().await;
+    let q = jobs::Queue::new(pool.clone());
+    let job = queue_name("cron");
+    let schedules = vec![("daily_report".to_string(), every_five_minutes(&job))];
+    let now = chrono::Utc.with_ymd_and_hms(2026, 10, 31, 1, 11, 0).unwrap();
+    let ticks = (0..8).map(|_| {
+        let (q, schedules) = (q.clone(), schedules.clone());
+        tokio::spawn(async move { brain_backend::schedules::tick(&q, &schedules, now).await.unwrap() })
+    });
+    let mut ids = std::collections::HashSet::new();
+    for t in ticks {
+        for (_, _, id) in t.await.unwrap() {
+            ids.insert(id);
+        }
+    }
+    assert_eq!(ids.len(), 1, "eight concurrent schedulers agree on one job for the slot");
+    brain_backend::schedules::tick(&q, &schedules, now + chrono::Duration::minutes(5)).await.unwrap();
+    let rows: Vec<(String, serde_json::Value)> = sqlx::query_as("SELECT idempotency_key,payload FROM _brain_jobs WHERE queue=$1 ORDER BY idempotency_key")
+        .bind(&job).fetch_all(&pool).await.unwrap();
+    assert_eq!(rows.iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["cron:daily_report:2026-10-31T01:10:00Z", "cron:daily_report:2026-10-31T01:15:00Z"]);
+    assert_eq!(rows[0].1["report"], "daily");
+    sqlx::query("DELETE FROM _brain_jobs WHERE queue=$1").bind(&job).execute(&pool).await.unwrap();
+}

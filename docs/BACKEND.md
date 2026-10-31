@@ -87,7 +87,7 @@ OpenAPI 3.1 JSON is available at `/_brain/api` (admin session required with `--e
 routes and native account/media/job/link endpoints. CLI/MCP can inspect the same structured source contract;
 source saves report conservative contract diffs in `impact` without claiming a running backend was replaced.
 
-Domain writes: [PATCH](backend/patch.md) · [transactions](backend/transactions.md) · [atomic updates](backend/atomic-updates.md) · [batch writes](backend/batch.md) · [state machines](backend/state-machines.md) · [queue policies](backend/queues.md).
+Domain writes: [PATCH](backend/patch.md) · [transactions](backend/transactions.md) · [atomic updates](backend/atomic-updates.md) · [batch writes](backend/batch.md) · [state machines](backend/state-machines.md) · [queue policies](backend/queues.md) · [cron](backend/cron.md).
 
 ## Opt-in administrative views
 
