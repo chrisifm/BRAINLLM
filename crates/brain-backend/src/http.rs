@@ -894,12 +894,12 @@ async fn signup(State(app): State<App>, Json(c): Json<Credentials>) -> Result<Js
             )
         })
 }
-async fn login(State(app): State<App>, Json(c): Json<Credentials>) -> Result<Response> {
+async fn login(State(app): State<App>, client: Option<axum::Extension<ClientIp>>, Json(c): Json<Credentials>) -> Result<Response> {
     // The backend owns the session mode. A configured JWT authority never falls back to opaque login on failure.
     if app.jwt.is_some() {
-        return token_login(State(app), Json(c)).await;
+        return token_login(State(app), client, Json(c)).await;
     }
-    let Some((user, token)) = app.auth.login(c).await.map_err(|_| {
+    let Some((user, token)) = app.auth.login_from(c, client.map(|c| c.0.0)).await.map_err(|_| {
         Error::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "LOGIN_UNAVAILABLE",
@@ -916,7 +916,7 @@ async fn login(State(app): State<App>, Json(c): Json<Credentials>) -> Result<Res
     let mut response = Json(json!({"user":user})).into_response();
     response.headers_mut().insert(
         header::SET_COOKIE,
-        auth::cookie(&token, 604800).parse().unwrap(),
+        auth::cookie(&token, auth::session_seconds()).parse().unwrap(),
     );
     Ok(response)
 }
@@ -969,28 +969,32 @@ fn jwt_response(tokens: crate::jwt::Tokens) -> Response {
         &tokens.access_token,
         crate::jwt::ACCESS_SECONDS,
     );
-    let refresh = crate::jwt::cookie_header(
+    // A grace answer carries no refresh token: the browser keeps the one the first answer set.
+    let refresh = (!tokens.refresh_token.is_empty()).then(|| crate::jwt::cookie_header(
         crate::jwt::REFRESH_COOKIE,
         &tokens.refresh_token,
-        crate::jwt::REFRESH_SECONDS,
-    );
+        crate::auth::session_seconds(),
+    ));
     let mut response = Json(tokens).into_response();
     response
         .headers_mut()
         .append(header::SET_COOKIE, access.parse().unwrap());
-    response
-        .headers_mut()
-        .append(header::SET_COOKIE, refresh.parse().unwrap());
+    if let Some(refresh) = refresh {
+        response
+            .headers_mut()
+            .append(header::SET_COOKIE, refresh.parse().unwrap());
+    }
     response
 }
 async fn token_login(
     State(app): State<App>,
+    client: Option<axum::Extension<ClientIp>>,
     Json(credentials): Json<Credentials>,
 ) -> Result<Response> {
     let jwt = app.jwt.as_ref().ok_or_else(auth_disabled)?;
     let (user, opaque) = app
         .auth
-        .login(credentials)
+        .login_from(credentials, client.map(|c| c.0.0))
         .await
         .map_err(|_| auth_denied())?
         .ok_or_else(auth_denied)?;
@@ -1981,10 +1985,11 @@ fn account_flow_error(error: crate::auth_flows::Error) -> Error {
 }
 async fn request_password_reset(
     State(app): State<App>,
+    client: Option<axum::Extension<ClientIp>>,
     Json(input): Json<ResetRequest>,
 ) -> Result<Response> {
     app.auth_flows
-        .request_reset(&input.email)
+        .request_reset_from(&input.email, client.map(|c| c.0.0))
         .await
         .map_err(account_flow_error)?;
     Ok((StatusCode::ACCEPTED, Json(json!({"accepted":true}))).into_response())

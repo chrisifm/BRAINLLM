@@ -31,6 +31,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("endpoints_platform", include_str!("../migrations/0013_endpoints_platform.sql")),
     ("cluster_rate_windows", include_str!("../migrations/0014_cluster_rate_windows.sql")),
     ("search_language", include_str!("../migrations/0015_search_language.sql")),
+    ("auth_hardening", include_str!("../migrations/0016_auth_hardening.sql")),
 ];
 fn checksum(sql: &str) -> String {
     Sha256::digest(sql.as_bytes())
@@ -498,6 +499,7 @@ async fn foundation(conn: &mut sqlx::PgConnection) -> Result<(), String> {
                 ("user_id", "uuid", true),
                 ("issuer", "text", true),
                 ("verified_email", "text", false),
+                ("disabled_at", "timestamp with time zone", false),
             ],
         ),
         (
@@ -520,6 +522,7 @@ async fn foundation(conn: &mut sqlx::PgConnection) -> Result<(), String> {
                 ("replacement_hash", "text", false),
                 ("expires_at", "timestamp with time zone", true),
                 ("used_at", "timestamp with time zone", false),
+                ("grace_uses", "integer", true),
             ],
         ),
         (

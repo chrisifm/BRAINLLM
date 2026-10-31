@@ -309,6 +309,10 @@ impl std::fmt::Display for Error {
         f.write_str(self.code())
     }
 }
+async fn flow_budget(tx:&mut sqlx::Transaction<'_,sqlx::Postgres>,key:&str,cap:i32)->Result<bool,Error>{
+    let count:i32=sqlx::query_scalar("INSERT INTO public._brain_login_limits(key,attempts,expires_at) VALUES($1,1,now()+interval '15 minutes') ON CONFLICT(key) DO UPDATE SET attempts=least(_brain_login_limits.attempts+1,$2+1) RETURNING attempts").bind(key).bind(cap).fetch_one(&mut **tx).await.map_err(|e|database(crate::db::safe(e)))?;
+    Ok(count>cap)
+}
 fn database(_: String) -> Error {
     diagnostic(
         "AUTH_FLOW_DATABASE",
@@ -360,16 +364,21 @@ impl Flows {
         &self.roles
     }
     pub async fn request_reset(&self, address: &str) -> Result<(), Error> {
-        self.request(Purpose::Reset, address, None).await
+        self.request(Purpose::Reset, address, None, None).await
+    }
+    /// Counted per email and client, so a third party cannot use up the owner's reset mails, plus a cap per email.
+    pub async fn request_reset_from(&self, address: &str, client: Option<std::net::IpAddr>) -> Result<(), Error> {
+        self.request(Purpose::Reset, address, None, client).await
     }
     pub async fn request_verification(&self, user: Uuid) -> Result<(), Error> {
-        self.request(Purpose::Verify, "", Some(user)).await
+        self.request(Purpose::Verify, "", Some(user), None).await
     }
     async fn request(
         &self,
         purpose: Purpose,
         address: &str,
         bound: Option<Uuid>,
+        client: Option<std::net::IpAddr>,
     ) -> Result<(), Error> {
         let Some(delivery) = &self.delivery else {
             diagnostic(
@@ -386,7 +395,7 @@ impl Flows {
         let finish = tokio::time::Instant::now() + Duration::from_millis(2100);
         // Always use the same response floor for known, unknown, throttled and failed delivery cases.
         let result=tokio::time::timeout(Duration::from_secs(2),async {
-            if let Some((token_hash,message))=self.prepare(purpose,address,bound).await? {
+            if let Some((token_hash,message))=self.prepare(purpose,address,bound,client).await? {
                 if delivery.deliver(message).await.is_err() {return Err(Error::Unavailable)}
                 // Pending hashes authorize nothing until delivery is confirmed. Never retry an uncertain send.
                 sqlx::query("UPDATE public._brain_auth_tokens t SET activated_at=now() FROM public._brain_users u WHERE t.token_hash=$1 AND u.id=t.user_id AND u.email=t.email_bound AND u.auth_version=t.auth_version AND u.disabled_at IS NULL AND t.consumed_at IS NULL AND t.expires_at>now()")
@@ -407,6 +416,7 @@ impl Flows {
         purpose: Purpose,
         address: &str,
         bound: Option<Uuid>,
+        client: Option<std::net::IpAddr>,
     ) -> Result<Option<(String, Message)>, Error> {
         let address = match (email(address), bound) {
             (Some(address), _) => address,
@@ -434,8 +444,14 @@ impl Flows {
         if retained >= 10000 {
             return Ok(None);
         }
-        let count:i32=sqlx::query_scalar("INSERT INTO public._brain_login_limits(key,attempts,expires_at) VALUES($1,1,now()+interval '15 minutes') ON CONFLICT(key) DO UPDATE SET attempts=least(_brain_login_limits.attempts+1,4) RETURNING attempts").bind(key).fetch_one(&mut *tx).await.map_err(|e|database(crate::db::safe(e)))?;
-        if count > 3 {
+        let spent=match client {
+            Some(ip)=>{
+                let pair=flow_budget(&mut tx,&digest(&format!("{key}|{ip}")),3).await?;
+                flow_budget(&mut tx,&key,10).await? || pair
+            }
+            None=>flow_budget(&mut tx,&key,3).await?,
+        };
+        if spent {
             tx.commit()
                 .await
                 .map_err(|e| database(crate::db::safe(e)))?;

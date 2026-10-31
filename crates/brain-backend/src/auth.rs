@@ -11,6 +11,20 @@ use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 pub const COOKIE: &str = "__Host-brain";
+const LOGIN_ATTEMPTS: i32 = 10;
+const LOGIN_ATTEMPTS_ACCOUNT: i32 = 100;
+const DEFAULT_SESSION_SECONDS: u32 = 604800;
+static SESSION_SECONDS: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+/// `BRAIN_AUTH_SESSION_SECONDS`: the length of new sessions and refresh families, set once at startup.
+pub fn configure_session_seconds(seconds: u32) -> Result<(), String> {
+    if !(300..=31_536_000).contains(&seconds) {
+        return Err("BRAIN_AUTH_SESSION_SECONDS must be 300..31536000".into());
+    }
+    SESSION_SECONDS.set(seconds).map_err(|_| "Session length is already configured".to_string())
+}
+pub fn session_seconds() -> u32 {
+    SESSION_SECONDS.get().copied().unwrap_or(DEFAULT_SESSION_SECONDS)
+}
 #[derive(Clone, Debug, Serialize)]
 pub struct User {
     pub id: Uuid,
@@ -138,16 +152,27 @@ impl Auth {
             verified: false,
         })
     }
+    async fn login_attempt(&self, key: &str, cap: i32) -> Result<i32, String> {
+        sqlx::query_scalar("INSERT INTO _brain_login_limits(key,attempts,expires_at) VALUES ($1,1,now()+interval '15 minutes') ON CONFLICT(key) DO UPDATE SET attempts=CASE WHEN _brain_login_limits.expires_at<=now() THEN 1 WHEN _brain_login_limits.attempts>=$2 THEN $2+1 ELSE _brain_login_limits.attempts+1 END, expires_at=CASE WHEN _brain_login_limits.expires_at<=now() THEN now()+interval '15 minutes' ELSE _brain_login_limits.expires_at END RETURNING attempts").bind(key).bind(cap).fetch_one(&self.pool).await.map_err(crate::db::safe)
+    }
     pub async fn login(&self, credentials: Credentials) -> Result<Option<(User, String)>, String> {
+        self.login_from(credentials, None).await
+    }
+    /// One failure counter per email and client, so a third party cannot lock the owner out from elsewhere, plus a
+    /// higher cap per email for attacks spread over many addresses. Unknown accounts count the same.
+    pub async fn login_from(&self, credentials: Credentials, client: Option<std::net::IpAddr>) -> Result<Option<(User, String)>, String> {
         let email = Self::email(&credentials.email)?;
         if credentials.password.len() > 1024 {
             return Ok(None);
         }
-        let key = digest(&email);
-        // Persistent account lockout, including unknown accounts. Cleanup is bounded and never logs email/key.
+        let account = digest(&email);
+        let key = client.map_or_else(|| account.clone(), |ip| digest(&format!("{email}|{ip}")));
+        // Cleanup is bounded and never logs email/key.
         sqlx::query("DELETE FROM _brain_login_limits WHERE key IN (SELECT key FROM _brain_login_limits WHERE expires_at<now() LIMIT 100)").execute(&self.pool).await.map_err(crate::db::safe)?;
-        let attempts: i32 = sqlx::query_scalar("INSERT INTO _brain_login_limits(key,attempts,expires_at) VALUES ($1,1,now()+interval '15 minutes') ON CONFLICT(key) DO UPDATE SET attempts=CASE WHEN _brain_login_limits.expires_at<=now() THEN 1 WHEN _brain_login_limits.attempts>=10 THEN 11 ELSE _brain_login_limits.attempts+1 END, expires_at=CASE WHEN _brain_login_limits.expires_at<=now() THEN now()+interval '15 minutes' ELSE _brain_login_limits.expires_at END RETURNING attempts").bind(&key).fetch_one(&self.pool).await.map_err(crate::db::safe)?;
-        if attempts > 10 {
+        if self.login_attempt(&key, LOGIN_ATTEMPTS).await? > LOGIN_ATTEMPTS {
+            return Ok(None);
+        }
+        if client.is_some() && self.login_attempt(&account, LOGIN_ATTEMPTS_ACCOUNT).await? > LOGIN_ATTEMPTS_ACCOUNT {
             return Ok(None);
         }
         let row = sqlx::query(
@@ -199,7 +224,7 @@ impl Auth {
         if !live {
             return Ok(None);
         }
-        sqlx::query("INSERT INTO _brain_sessions(token_hash,user_id,expires_at) VALUES ($1,$2,now()+interval '7 days')").bind(digest(&token)).bind(user.id).execute(&mut *tx).await.map_err(crate::db::safe)?;
+        sqlx::query("INSERT INTO _brain_sessions(token_hash,user_id,expires_at) VALUES ($1,$2,now()+make_interval(secs=>$3))").bind(digest(&token)).bind(user.id).bind(f64::from(session_seconds())).execute(&mut *tx).await.map_err(crate::db::safe)?;
         sqlx::query("INSERT INTO _brain_auth_events(user_id,event) VALUES ($1,'login')")
             .bind(user.id)
             .execute(&mut *tx)
@@ -283,7 +308,7 @@ impl Auth {
     ) -> Result<Option<(User, String)>, String> {
         reserve_session(&mut tx, user.id).await?;
         let token = token();
-        sqlx::query("INSERT INTO _brain_sessions(token_hash,user_id,expires_at) VALUES ($1,$2,now()+interval '7 days')").bind(digest(&token)).bind(user.id).execute(&mut *tx).await.map_err(crate::db::safe)?;
+        sqlx::query("INSERT INTO _brain_sessions(token_hash,user_id,expires_at) VALUES ($1,$2,now()+make_interval(secs=>$3))").bind(digest(&token)).bind(user.id).bind(f64::from(session_seconds())).execute(&mut *tx).await.map_err(crate::db::safe)?;
         sqlx::query("INSERT INTO _brain_auth_events(user_id,event,outcome) VALUES ($1,'google-login','success')").bind(user.id).execute(&mut *tx).await.map_err(crate::db::safe)?;
         tx.commit().await.map_err(crate::db::safe)?;
         Ok(Some((user, token)))

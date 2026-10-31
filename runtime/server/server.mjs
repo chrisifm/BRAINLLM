@@ -260,6 +260,44 @@ export function nativeAuthBridge(raw) {
       } catch { outgoing?.destroy(); finish(true) }
     })
   }
+  // The access cookie lives 5 minutes and the session far longer: a password JWT session would read as anonymous on the
+  // next page. The backend answers concurrent refreshes with the same token inside its grace window, so tabs and
+  // prefetches cannot revoke the family. A denied refresh is anonymous; an unavailable backend stays an error.
+  const renew = (req, res, rid) => {
+    const selected = cookies(req, true)
+    let origin
+    try { origin = new URL(process.env.PUBLIC_SITE_URL).origin } catch { origin = 'https://' + (req.headers['x-forwarded-host'] || req.headers.host) }
+    return new Promise((resolve, reject) => {
+      if (stopped || active >= 8) return reject(unavailable())
+      active++
+      let settled = false
+      const done = (error, value) => { if (settled) return; settled = true; active--; clearTimeout(timer); error ? reject(unavailable()) : resolve(value) }
+      const outgoing = httpRequest(new URL('/_brain/auth/refresh', target), { method: 'POST', agent, headers: { accept: 'application/json', cookie: selected, origin, 'x-request-id': rid, 'content-length': '0' } }, backend => {
+        let bytes = 0; const chunks = []
+        backend.on('data', chunk => { bytes += chunk.length; if (bytes > 16384) { backend.destroy(); done(true) } else chunks.push(chunk) })
+        backend.on('error', () => done(true))
+        backend.on('end', () => {
+          if (backend.statusCode === 401 || backend.statusCode === 403) return done(false)
+          if (backend.statusCode !== 200) return done(true)
+          try {
+            const user = safeUser(JSON.parse(Buffer.concat(chunks).toString('utf8'))?.user)
+            const set = (backend.headers['set-cookie'] || []).filter(value => /^__Host-brain-(?:access|refresh)=/.test(value) && value.length <= 8192 && !/[\r\n]/.test(value))
+            if (!set.some(value => value.startsWith('__Host-brain-access='))) return done(true)
+            req.$nativeUser = user
+            req.$nativeLoginHeaders = { 'set-cookie': set, 'cache-control': 'no-store' }
+            // later backend calls of this same request use the new tokens
+            const fresh = new Map(set.map(value => { const pair = value.split(';', 1)[0], at = pair.indexOf('='); return [pair.slice(0, at), pair.slice(at + 1)] }))
+            const kept = (req.headers.cookie || '').split(';').map(part => part.trim()).filter(part => part && !fresh.has(part.split('=', 1)[0]))
+            req.headers.cookie = [...kept, ...[...fresh].map(([name, value]) => name + '=' + value)].join('; ')
+            done(false)
+          } catch { done(true) }
+        })
+      })
+      const timer = setTimeout(() => outgoing.destroy(unavailable()), 2000)
+      owned.add(outgoing); outgoing.once('close', () => owned.delete(outgoing))
+      outgoing.once('error', () => done(true)); outgoing.end()
+    })
+  }
   let proxyBytes = 0
   function proxy(req, res, url, rid, reply, responseLimit = 20 * 1024 * 1024) {
     if (stopped || active >= 8) throw new HttpError(503, 'Backend request capacity is unavailable')
@@ -476,8 +514,11 @@ export function nativeAuthBridge(raw) {
     backend,
     login,
     async prepare(req, res, rid) {
-      if (!cookies(req, false)) { req.$nativeUser = null; req.$nativeAuth ||= Promise.resolve(); return }
-      if (!req.$nativeAuth) req.$nativeAuth = call(req, res, '/_brain/auth/me', 'GET', rid).then(result => { req.$nativeUser = result.user })
+      if (!cookies(req, true)) { req.$nativeUser = null; req.$nativeAuth ||= Promise.resolve(); return }
+      if (!req.$nativeAuth) req.$nativeAuth = (async () => {
+        req.$nativeUser = cookies(req, false) ? (await call(req, res, '/_brain/auth/me', 'GET', rid)).user : null
+        if (req.$nativeUser === null && /(?:^|;\s*)__Host-brain-refresh=/.test(req.headers.cookie || '')) await renew(req, res, rid)
+      })()
       await req.$nativeAuth
     },
     session(req, res, rid) {
