@@ -1939,6 +1939,45 @@ fn site_feed_exists_without_top_level_pages() {
 }
 
 #[test]
+fn paginated_listing_pairs_hreflang_by_page() {
+    // S03: one listing view renders /blog, /blog/page/2 and their Spanish twins (page 2 under a translated slug); each
+    // page gets self + reciprocal alternates of its own page number, in the head and in the sitemap
+    let dir = fresh_dir("hreflang-pages");
+    let j = brain_lex::Json::parse(r#"{"site":"https://acme.dev","name":"Acme","i18n":{"default":"en","locales":["en","es"]}}"#).unwrap();
+    let c = Config::from_json(&j).unwrap();
+    let mut pages = good_site();
+    for r in ["/blog", "/blog/page/2", "/es/blog", "/es/articulos/pagina/2"] {
+        let mut p = page(
+            r,
+            &format!("Blog listing {r} — Acme offline task planner"),
+            "A description that is long enough for the search result snippet of this listing page.",
+            "<h1>Blog</h1><p><a href=\"/\">home</a></p>",
+        );
+        p.view = Some("views/blog/index.brain".into());
+        if r.starts_with("/es/") {
+            p.html = p.html.replace("<html lang=\"en\">", "<html lang=\"es\">");
+        }
+        pages.push(p);
+    }
+    let built = finish(&c, &dir, &mut pages, &[], &[]).unwrap();
+    let by = |r: &str| pages.iter().find(|p| p.route == r).unwrap().html.clone();
+    let alt = |l: &str, r: &str| format!("<link rel=\"alternate\" hreflang=\"{l}\" href=\"https://acme.dev{r}\">");
+    for (en, es) in [("/blog", "/es/blog"), ("/blog/page/2", "/es/articulos/pagina/2")] {
+        let want = format!("{}{}{}", alt("en", en), alt("es", es), alt("x-default", en));
+        for r in [en, es] {
+            let h = by(r);
+            assert!(h.contains(&want), "{r}: {h}");
+            assert_eq!(h.matches("hreflang=").count(), 3, "{r}: one group only");
+        }
+    }
+    assert!(!by("/blog/page/2").contains("href=\"https://acme.dev/es/blog\""), "page 2 never points to page 1");
+    assert!(!by("/es/articulos/pagina/2").contains("hreflang=\"en\" href=\"https://acme.dev/blog\""));
+    let sm = built.files.iter().find(|(n, _)| n == "sitemap.xml").map(|(_, c)| c.clone()).unwrap();
+    assert!(sm.contains("<loc>https://acme.dev/es/articulos/pagina/2</loc><xhtml:link rel=\"alternate\" hreflang=\"en\" href=\"https://acme.dev/blog/page/2\"/><xhtml:link rel=\"alternate\" hreflang=\"es\" href=\"https://acme.dev/es/articulos/pagina/2\"/>"), "{sm}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn indexnow_traverses_a_sitemap_index() {
     // S02: a split sitemap is an index; IndexNow reads its local children, never sends the child sitemap URLs as pages
     let dir = fresh_dir("indexnow-index");

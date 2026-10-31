@@ -28,6 +28,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 ### Tests
 - S01: sitemap byte limits are covered with image, video and hreflang children, escaped non-ASCII text and an entry
   larger than a whole file (rejected, never written into an oversized child).
+- S03: a paginated listing with a translated page-2 slug gets self and reciprocal hreflang per page number in the
+  built head tags and the sitemap; page 2 never points at page 1.
 
 ## [0.6.1] - 2026-10-31
 
