@@ -34,6 +34,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Fixed
 
+- The opt-in Viewer lane no longer fails "at open" when Claude Viewer and Codex Viewer are both connected and
+  `BRAIN_VIEWER_PROFILE` names a profile of the second one: an explicit open refusal (nothing opened) moves to the next
+  connected Viewer, `BRAIN_VIEWER_SERVICE=claude-viewer|codex-viewer` pins one, and Viewer failures now carry the
+  adapter code and fix (`VIEWER_OPEN_REFUSED`, `VIEWER_PROFILE_REQUIRED`) instead of a bare stage.
+
 - `brain build` no longer reports "Production removed unused bindings" for constants and imports of a `.brain` view
   that only its `server:` functions use; such facts are marked `serverOnly` and skipped by `brain quality`. The
   warning now needs a verified app-source removal, so runtime tree-shaking and generated helpers do not raise it.

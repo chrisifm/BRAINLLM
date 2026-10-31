@@ -356,7 +356,7 @@ with no tests, downloads or auto-fixes. `brain mcp --profile minimal` exposes sp
 focused resource/job contract tools. Default is `full`.
 `brain test` and `brain doctor` run declared scenarios in owned headless Chrome; no browser extension is required.
 A connected Claude Viewer/Codex Viewer is opt-in, only when the user asks: `brain e2e probe --json`, then `brain test
---viewer` (or `BRAIN_VIEWER=1`, or `brain e2e run`); with several connected profiles set private BRAIN_VIEWER_PROFILE. The
+--viewer` (or `BRAIN_VIEWER=1`, or `brain e2e run`); with several connected profiles set private BRAIN_VIEWER_PROFILE, and BRAIN_VIEWER_SERVICE=claude-viewer|codex-viewer to pin one Viewer (an explicit open refusal moves to the next connected Viewer; docs/VIEWER-E2E.md). The
 opted-in lane keeps the separate full Chrome AX/optional heap replay, an opted-in Viewer failure fails the run, and an
 unavailable one falls back explicitly. Follow `docs/VIEWER-E2E.md` to author complete disposable-data E2E scenarios. `doctor` warning B0734 checks local registration, not connectivity.
 

@@ -104,3 +104,53 @@ test('multiple connected profiles require private explicit selection before open
   const fetcher=async(url)=>{if(url.endsWith('/health'))return json({...health,bridge:{connected:3,userScripts:true}});mutations++;throw Error('No mutation expected')};
   const result=await viewerClient(suite,fetcher);assert.equal(result.code,'VIEWER_PROFILE_REQUIRED');assert.equal(mutations,0);assert.equal(result.fallbackEligible,false);
 });
+
+// Both Claude Viewer and Codex Viewer may be connected at once, each with its own browser profiles. A profile named in
+// BRAIN_VIEWER_PROFILE belongs to one of them; the other refuses the open explicitly (no tab is created), so the
+// adapter moves to the next connected service instead of failing at stage open.
+function twoServices({ codexRefuses = true, claudeRefuses = false, loseCodexOpen = false } = {}) {
+  const claude = bridge(), seen = []
+  const fetcher = async (url, options) => {
+    const codex = url.startsWith('http://127.0.0.1:4315/')
+    if (url.endsWith('/health')) return json({ ...health, service: codex ? 'codex-viewer' : 'claude-viewer' })
+    const command = JSON.parse(options.body); seen.push([codex ? 'codex' : 'claude', command.action, command.profile])
+    if (codex) {
+      if (loseCodexOpen) throw Error('connection reset after the request was sent')
+      if (codexRefuses) return new Response(JSON.stringify({ ok: false, error: 'private-profile-detail' }), { status: 422 })
+      return claude.fetch(url.replace(':4315', ':4313'), { ...options, headers: { ...options.headers, 'X-CV-Session': options.headers['X-XV-Session'], 'X-CV-Label': options.headers['X-XV-Label'] } })
+    }
+    if (claudeRefuses && command.action === 'open') return new Response(JSON.stringify({ ok: false, error: 'private-limit-detail' }), { status: 422 })
+    return claude.fetch(url, options)
+  }
+  return { fetcher, seen }
+}
+test('an explicit open refusal from one connected Viewer moves to the next service; no tab was opened there', async () => {
+  const mock = twoServices(), result = await viewerClient({ ...suite, profile: 'WORK' }, mock.fetcher)
+  assert.equal(result.ok, true)
+  assert.equal(result.adapter, 'claude-viewer')
+  assert.deepEqual(mock.seen.filter(s => s[1] === 'open'), [['codex', 'open', 'WORK'], ['claude', 'open', 'WORK']])
+  assert.ok(!JSON.stringify(result).includes('private-profile-detail'))
+})
+test('BRAIN_VIEWER_SERVICE pins the service; an unknown service name is rejected before any browser call', async () => {
+  const mock = twoServices(), pinned = await viewerClient({ ...suite, profile: 'WORK', service: 'claude-viewer' }, mock.fetcher)
+  assert.equal(pinned.ok, true)
+  assert.ok(mock.seen.every(s => s[0] === 'claude'))
+  const bad = await viewerClient({ ...suite, service: 'other-viewer' }, mock.fetcher)
+  assert.equal(bad.code, 'VIEWER_SERVICE_INVALID')
+  assert.equal(bad.fallbackEligible, false)
+})
+test('every connected Viewer refusing the open is an actionable failure with nothing to clean up', async () => {
+  const mock = twoServices({ claudeRefuses: true }), result = await viewerClient({ ...suite, profile: 'WORK' }, mock.fetcher)
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'VIEWER_OPEN_REFUSED')
+  assert.equal(result.stage, 'open')
+  assert.equal(result.cleanup, 'none; no tab was opened')
+  assert.match(result.fix, /BRAIN_VIEWER_PROFILE/)
+  assert.ok(!/private-(profile|limit)-detail/.test(JSON.stringify(result)))
+})
+test('a lost open response is never retried on another service', async () => {
+  const mock = twoServices({ loseCodexOpen: true }), result = await viewerClient({ ...suite, profile: 'WORK' }, mock.fetcher)
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'VIEWER_EXECUTION_FAILED')
+  assert.ok(mock.seen.every(s => s[0] === 'codex'))
+})

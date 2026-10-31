@@ -28,21 +28,25 @@ async function jsonRequest(fetcher, service, path, options, timeout) {
 }
 export async function viewerClient(input, fetcher = globalThis.fetch) {
   if (!input || !['probe', 'run'].includes(input.op)) return { ok: false, code: 'VIEWER_INVALID_OPERATION' }
+  // BRAIN_VIEWER_SERVICE pins one service (claude-viewer|codex-viewer); otherwise every connected one is a candidate.
+  const pin = input.service == null || input.service === '' ? null : SERVICES.find(s => s.name === input.service || s.name === input.service + '-viewer')
+  if (input.service != null && input.service !== '' && !pin) return { ok: false, engine: 'viewer', code: 'VIEWER_SERVICE_INVALID', fix: 'Set BRAIN_VIEWER_SERVICE to claude-viewer or codex-viewer, or unset it', fallbackEligible: false }
   let health, service, observed
-  for (const candidate of SERVICES) {
+  const ready = []
+  for (const candidate of pin ? [pin] : SERVICES) {
     let value
     try { value=await jsonRequest(fetcher,candidate.url,'/health',{},1500) } catch { continue }
     if (value?.service!==candidate.name) continue
     const connected=value?.bridge?.connected===true||Number.isInteger(value?.bridge?.connected)&&value.bridge.connected>0
     if (!observed || connected) observed={health:value,service:candidate}
-    if (connected && value?.bridge?.userScripts===true) {health=value;service=candidate;break}
+    if (connected && value?.bridge?.userScripts===true) { ready.push({ health: value, service: candidate }); if (!service) { health = value; service = candidate } }
   }
   if (!service && observed) ({health,service}=observed)
   if (!service) return {ok:true,available:false,engine:'viewer',reason:'service-unavailable',fallbackEligible:true}
   const connected = health?.bridge?.connected === true || Number.isInteger(health?.bridge?.connected) && health.bridge.connected > 0
   const scripts = health?.bridge?.userScripts === true
   const version = typeof health.version === 'string' && /^\d+\.\d+\.\d+(?:[-.][\w]+)*$/.test(health.version) ? health.version : null
-  const projection = { engine: 'viewer', adapter:service.name, serviceVersion: version, connected, userScripts: scripts }
+  let projection = { engine: 'viewer', adapter:service.name, serviceVersion: version, connected, userScripts: scripts }
   if (!connected) return { ok: true, available: false, ...projection, reason: 'extension-not-connected', fallbackEligible: true }
   if (!scripts) return { ok: false, available: false, ...projection, code: 'VIEWER_USER_SCRIPTS_REQUIRED', fallbackEligible: false }
   const profile=input.profile==null?null:typeof input.profile==='string'&&input.profile.length<=128&&!/[\x00-\x1f\x7f]/.test(input.profile)?input.profile:null
@@ -58,7 +62,9 @@ export async function viewerClient(input, fetcher = globalThis.fetch) {
   } catch { return { ok: false, ...projection, code: 'VIEWER_INVALID_LOCAL_SUITE' } }
   const duration = Number.isFinite(input.timeoutMs) ? Math.max(2000, Math.min(180000, input.timeoutMs)) : 60000
   const deadline = Date.now() + duration
-  const session = 'brain-e2e-' + randomUUID(), headers = { 'content-type': 'application/json', [service.header+'-Session']: session, [service.header+'-Label']: 'BRAINLLM E2E' }
+  let headers
+  const useService = next => { service = next; projection = { ...projection, adapter: next.name }; headers = { 'content-type': 'application/json', [next.header+'-Session']: 'brain-e2e-' + randomUUID(), [next.header+'-Label']: 'BRAINLLM E2E' } }
+  useService(service)
   const reports = [], owned = new Set()
   async function call(command, cleanup = false) {
     const end = cleanup ? Date.now() + 5000 : Math.min(deadline, Date.now() + 30000)
@@ -72,6 +78,8 @@ export async function viewerClient(input, fetcher = globalThis.fetch) {
       try { out = await jsonRequest(fetcher, service.url, '/api/bridge/result/' + callId + '?wait=1', { headers }, Math.min(1500, Math.max(1, end - Date.now()))) }
       catch { if (Date.now() < end) await sleep(Math.min(100, end - Date.now())) }
     }
+    // A received { ok:false } is an explicit refusal (nothing was done); a missing answer may have acted.
+    if (out && out.ok === false && !out.pending) throw Error('VIEWER_BRIDGE_REFUSED')
     if (!out?.ok || out.pending) throw Error('VIEWER_BRIDGE_CALL_FAILED')
     return out.result
   }
@@ -81,7 +89,12 @@ export async function viewerClient(input, fetcher = globalThis.fetch) {
   try {
     for (const file of files) {
       stage = 'open'
-      const opened = await call({ action: 'open', url: base + '/@brain/test.html', active: false })
+      let opened
+      // Each connected service has its own browser profiles: an explicit refusal opened nothing, so try the next one.
+      for (let i = ready.findIndex(r => r.service === service); ; i++) {
+        try { opened = await call({ action: 'open', url: base + '/@brain/test.html', active: false }); break }
+        catch (error) { if (error?.message !== 'VIEWER_BRIDGE_REFUSED' || owned.size || reports.length || !ready[i + 1]) throw error; useService(ready[i + 1].service) }
+      }
       if (!Number.isSafeInteger(opened?.id) || opened.id < 1) throw Error('VIEWER_NO_OWNED_TAB')
       const id = opened.id; owned.add(id)
       try {
@@ -114,7 +127,8 @@ export async function viewerClient(input, fetcher = globalThis.fetch) {
       if (cleanupFailed) throw Error('VIEWER_OWNED_TAB_CLEANUP_FAILED')
     }
     return { ok: true, ...projection, reports, capabilities: { scenarios: 'same declared native test API', accessibility: 'DOM-label-heuristic; not Chrome AX tree', forcedGC: false }, cleanup: 'owned-tabs-closed' }
-  } catch {
+  } catch (error) {
+    if (error?.message === 'VIEWER_BRIDGE_REFUSED' && stage === 'open' && !owned.size) return { ok: false, ...projection, code: 'VIEWER_OPEN_REFUSED', stage, completedReports: reports, cleanup: 'none; no tab was opened', fix: 'Every connected Viewer refused to open the test tab. Set BRAIN_VIEWER_PROFILE to a profile connected to that Viewer (and BRAIN_VIEWER_SERVICE=claude-viewer|codex-viewer when both run), and close leftover Viewer tabs if its tab limit is reached', fallbackEligible: false }
     return { ok: false, ...projection, code: cleanupFailed ? 'VIEWER_OWNED_TAB_CLEANUP_FAILED' : 'VIEWER_EXECUTION_FAILED', stage, completedReports: reports, cleanup: owned.size ? 'unknown; owned tab close failed or open result lost' : stage === 'open' ? 'unknown if open response was lost' : 'owned-tabs-closed', fallbackEligible: false }
   }
 }
