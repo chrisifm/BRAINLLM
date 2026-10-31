@@ -12,8 +12,8 @@ pub(crate) const TABLE: &[(&str, &[&str], &[&str])] = &[
     ("fix", &[], &[]),
     ("doctor", &[], &["--fix", "--viewer"]),
     ("build", &["--site", "--ext", "--env"], &["--report"]),
-    ("run", &["--port", "--host", "--base", "--inspect-port", "--env"], &["--mock", "--profile", "--no-inspect"]),
-    ("dev", &["--port", "--host", "--base", "--inspect-port", "--env"], &["--mock", "--profile", "--no-inspect"]),
+    ("run", &["--port", "--host", "--base", "--inspect-port", "--env"], &["--mock", "--profile", "--no-inspect", "--no-trace"]),
+    ("dev", &["--port", "--host", "--base", "--inspect-port", "--env"], &["--mock", "--profile", "--no-inspect", "--no-trace"]),
     ("test", &["--timeout"], &["--heap", "--viewer"]),
     ("e2e", &["--timeout"], &["--heap", "--viewer"]),
     ("explain", &[], &[]),
@@ -46,9 +46,9 @@ pub(crate) const TABLE: &[(&str, &[&str], &[&str])] = &[
         "backend",
         &[
             "--env", "--port", "--origin", "--from", "--to", "--user", "--email", "--provider", "--name", "--scopes", "--expires-days", "--daily",
-            "--monthly", "--status", "--resource", "--before", "--limit", "--days",
+            "--monthly", "--status", "--resource", "--before", "--limit", "--days", "--accept",
         ],
-        &["--apply", "--with-workers"],
+        &["--apply", "--with-workers", "--system"],
     ),
     ("jobs", &["--env", "--payload", "--key", "--priority", "--delay", "--id", "--concurrency"], &["--once"]),
     ("analytics", &["--env", "--since", "--days", "--viewed", "--min-views", "--within", "--not-viewed", "--tracked", "--signed-in", "--limit", "--user"], &["--csv"]),
@@ -88,6 +88,35 @@ mod tests {
 
     fn run(args: &[&str]) -> Result<(), String> {
         check(&args.iter().map(|a| a.to_string()).collect::<Vec<_>>())
+    }
+
+    /// Commands the documentation shows must parse; a flag added to a command but not to `TABLE` stops working silently.
+    #[test]
+    fn every_flag_the_documentation_shows_is_accepted() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut files = vec![root.join("SPEC.md")];
+        for dir in ["crates/brain-cli/guides", "docs/backend"] {
+            for entry in std::fs::read_dir(root.join(dir)).unwrap() {
+                files.push(entry.unwrap().path());
+            }
+        }
+        let mut wrong = vec![];
+        for file in files {
+            let Ok(text) = std::fs::read_to_string(&file) else { continue };
+            for mention in text.split("brain ").skip(1) {
+                let end = mention.find(['`', '\n', '|', ';', '&', '#']).unwrap_or(mention.len());
+                let words: Vec<&str> = mention[..end].split_whitespace().collect();
+                let Some((command, rest)) = words.split_first() else { continue };
+                let Some((_, valued, switches)) = TABLE.iter().find(|(name, ..)| name == command) else { continue };
+                for word in rest.iter().filter(|w| w.starts_with("--")) {
+                    let name = word.split('=').next().unwrap();
+                    if !valued.contains(&name) && !switches.contains(&name) && !GLOBAL.contains(&name) {
+                        wrong.push(format!("{}: brain {command} {name}", file.display()));
+                    }
+                }
+            }
+        }
+        assert!(wrong.is_empty(), "documented flags missing from TABLE:\n{}", wrong.join("\n"));
     }
 
     #[test]
