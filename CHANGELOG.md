@@ -9,6 +9,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+### Added
+- Build-time zstd: `brain build` writes a `.zst` (level 19) next to a text asset when it is smaller than the `.br`;
+  `brain start` and `server.mjs` send the smallest precompressed sibling the client accepts and the emitted Caddy
+  block lists `precompressed zstd br gzip`.
+
 ### Fixed
 - Scoped CSS keeps pseudo-elements (`::backdrop`, `::before`, `:after`, `::-webkit-*`) outside the root anchor's
   `:is()`, so Chrome no longer drops the whole rule list for components that style them at their root.

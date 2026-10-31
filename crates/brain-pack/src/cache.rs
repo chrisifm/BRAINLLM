@@ -630,9 +630,9 @@ pub fn caddy(build_hash: &str, http: bool, csp: &str, pre: &str, ext: crate::Ext
         o.push_str("@jsbrain path *.jsbrain\nheader @jsbrain Content-Type \"text/javascript; charset=utf-8\"\n");
         o.push_str("@cssbrain path *.cssbrain\nheader @cssbrain Content-Type \"text/css; charset=utf-8\"\n");
         o.push_str("@brainpage path *.brain */\nheader @brainpage Content-Type \"text/html; charset=utf-8\"\n");
-        o.push_str("try_files {path} {path}/index.brain {path}.brain\nfile_server {\n    precompressed br gzip\n    index index.brain\n}\n");
+        o.push_str("try_files {path} {path}/index.brain {path}.brain\nfile_server {\n    precompressed zstd br gzip\n    index index.brain\n}\n");
     } else {
-        o.push_str("try_files {path} {path}/index.html {path}.html\nfile_server {\n    precompressed br gzip\n}\n");
+        o.push_str("try_files {path} {path}/index.html {path}.html\nfile_server {\n    precompressed zstd br gzip\n}\n");
     }
     if !pre.is_empty() {
         o.push_str(&format!("# the app lives under {pre}/: serve it with `handle_path {pre}/* {{ … }}` around this block\n"));

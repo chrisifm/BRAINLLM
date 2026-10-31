@@ -1272,7 +1272,11 @@ impossible while developing.
 - Back after logout is verified only in Chrome (2026-10-29: the page is re-fetched and the guard redirects);
   Safari and Firefox are pending. Possible follow-up, not implemented: a `pageshow` (`persisted`) reload on session
   pages, for a browser that still restores one from bfcache.
-- Precompressed `.gz` for every text asset (`.br` planned:#231), `Vary: Accept-Encoding`.
+- Precompressed `.gz` and `.br` for every text asset when smaller than the file, plus `.zst` (zstd level 19) only when
+  it beats Brotli; `Vary: Accept-Encoding`. Servers send the smallest sibling the client accepts (2026-10-31).
+- `dist/server.mjs` compresses per-response bodies (pages carry a per-response nonce): zstd on ties when `node:zlib`
+  has it, then Brotli q5, then gzip; ≥ 1 KiB, never `HEAD`/204/304/`no-transform`; streamed SSR flushes per chunk.
+  `compress: false` / `BRAIN_COMPRESS=off` turns it off (docs/PERFORMANCE.md, 2026-10-31).
 
 **2. Service worker** (RUNTIME writes `runtime/sw/brain-sw.js`; TOOLCHAIN emits `dist/sw.js` with the build manifest)
 - Precache on install: the runtime core, the app shell, every route's entry chunk and CSS, up to `precacheKB`

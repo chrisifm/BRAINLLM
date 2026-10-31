@@ -1,5 +1,5 @@
-//! Static production server for `brain start` (INTERNALS §34): serves `dist/` from Rust, no Node. Precompressed
-//! `.gz` when the client accepts it, everything under brain.json `base` (#148), clean URLs (`/about` → `about/index.html`), `404.html`, the headers of
+//! Static production server for `brain start` (INTERNALS §34): serves `dist/` from Rust, no Node. The smallest
+//! precompressed `.br`/`.zst`/`.gz` the client accepts, everything under brain.json `base` (#148), clean URLs (`/about` → `about/index.html`), `404.html`, the headers of
 //! `dist/_headers` applied exactly as a static host would (`/*` and `/_b/*` are prefix rules), a strong `ETag` equal to
 //! the build signature on HTML (304 on `If-None-Match`) and `GET /_health` → `{"ok":true,"build":"<sig>"}`.
 
@@ -343,15 +343,18 @@ impl Static {
         }
         let variants = [
             ("br", PathBuf::from(format!("{name}.br"))),
+            ("zstd", PathBuf::from(format!("{name}.zst"))),
             ("gzip", PathBuf::from(format!("{name}.gz"))),
         ];
+        // the smallest precompressed sibling the client accepts (docs/PERFORMANCE.md)
         let selected = accepted_encodings(req.header("accept-encoding").unwrap_or(""))
             .into_iter()
-            .find_map(|enc| {
+            .filter_map(|enc| {
                 variants
                     .iter()
                     .find(|(name, path)| *name == enc && regular_output(&self.dist, path))
-            });
+            })
+            .min_by_key(|(_, path)| std::fs::metadata(path).map_or(u64::MAX, |m| m.len()));
         let selected_file = if let Some((encoding, path)) = selected {
             hs.push(("Content-Encoding".into(), (*encoding).into()));
             path
@@ -417,7 +420,7 @@ pub fn accepted_encodings(header: &str) -> Vec<&'static str> {
         }
         explicit.or(wildcard).unwrap_or(0.0)
     };
-    let mut encodings = vec![("br", quality("br")), ("gzip", quality("gzip"))];
+    let mut encodings = vec![("br", quality("br")), ("zstd", quality("zstd")), ("gzip", quality("gzip"))];
     encodings.retain(|(_, q)| *q > 0.0);
     encodings.sort_by(|a, b| b.1.total_cmp(&a.1));
     encodings.into_iter().map(|(name, _)| name).collect()
@@ -923,12 +926,42 @@ mod encoding_tests {
             super::accepted_encodings("br;q=0, gzip;q=0.8"),
             vec!["gzip"]
         );
-        assert_eq!(super::accepted_encodings("br;q=0, *;q=1"), vec!["gzip"]);
+        assert_eq!(super::accepted_encodings("br;q=0, *;q=1"), vec!["zstd", "gzip"]);
+        assert_eq!(super::accepted_encodings("gzip, deflate, br, zstd"), vec!["br", "zstd", "gzip"]);
+        assert_eq!(super::accepted_encodings("zstd"), vec!["zstd"]);
         assert_eq!(
             super::accepted_encodings("gzip;q=1, br;q=0.2"),
             vec!["gzip", "br"]
         );
         assert!(super::accepted_encodings("xgzip, br;q=invalid").is_empty());
+    }
+    #[test]
+    fn static_files_get_the_smallest_accepted_sibling() {
+        use std::io::{Read, Write};
+        let dist = std::env::temp_dir().join(format!("brain-prod-smallest-{}", std::process::id()));
+        std::fs::create_dir_all(dist.join("_b")).unwrap();
+        std::fs::write(dist.join("_b/app.js"), "x".repeat(400)).unwrap();
+        std::fs::write(dist.join("_b/app.js.br"), "b".repeat(30)).unwrap();
+        std::fs::write(dist.join("_b/app.js.zst"), "z".repeat(20)).unwrap();
+        std::fs::write(dist.join("_b/app.js.gz"), "g".repeat(40)).unwrap();
+        let get = |enc: &str| {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let handler = super::Static::load(&dist, "/");
+            let task = std::thread::spawn(move || handler.handle(listener.accept().unwrap().0).unwrap());
+            let mut client = std::net::TcpStream::connect(addr).unwrap();
+            write!(client, "GET /_b/app.js HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: {enc}\r\n\r\n").unwrap();
+            let mut response = String::new();
+            client.read_to_string(&mut response).unwrap();
+            task.join().unwrap();
+            response
+        };
+        let all = get("gzip, br, zstd");
+        assert!(all.contains("Content-Encoding: zstd") && all.ends_with(&"z".repeat(20)), "{all}");
+        let no_zstd = get("gzip, br");
+        assert!(no_zstd.contains("Content-Encoding: br") && no_zstd.contains("Vary: Accept-Encoding"), "{no_zstd}");
+        assert!(get("gzip").ends_with(&"g".repeat(40)));
+        let _ = std::fs::remove_dir_all(&dist);
     }
     #[test]
     fn optional_native_proxy_preserves_static_cache_head_and_base_namespace() {

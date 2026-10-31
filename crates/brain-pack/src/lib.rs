@@ -1850,8 +1850,13 @@ fn build_inner_with_options(
                 let Some((p, c)) = entries.get(i) else { break };
                 let z = cached_bytes(&root, "gz", c, || Ok(gzip::gzip(c, 15))).unwrap_or_else(|_| gzip::gzip(c, 15));
                 let br = cached_bytes(&root, "br-9.1.1-q11-w22", c, || brotli::compress(c));
+                // zstd (Chrome 123+, Firefox 126+): kept only when it beats Brotli, because every client that accepts
+                // zstd also accepts br and servers (Caddy's `precompressed zstd br gzip` included) pick it first
+                let zst = cached_bytes(&root, "zst-0.14-l19", c, || zstd::bulk::compress(c, 19).map_err(|e| format!("zstd: {e}")));
                 let mut r = results.lock().unwrap();
+                let br_len = br.as_ref().map_or(c.len(), |b| b.len().min(c.len()));
                 if let Ok(br) = br { if br.len() < c.len() { r.insert(format!("{p}.br"), br); } }
+                if let Ok(zst) = zst { if zst.len() < br_len { r.insert(format!("{p}.zst"), zst); } }
                 // a .gz that is not smaller is never served (`gzip_static` would pick it anyway)
                 if z.len() < c.len() {
                     r.insert(format!("{p}.gz"), z);

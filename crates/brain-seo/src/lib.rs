@@ -904,7 +904,7 @@ pub fn read_dist(dist: &Path) -> Result<(Vec<Page>, Assets), String> {
     let mut pages = Vec::new();
     let mut assets = Vec::new();
     for (path, size) in all {
-        if path.ends_with(".gz") || path.ends_with(".br") {
+        if path.ends_with(".gz") || path.ends_with(".br") || path.ends_with(".zst") {
             continue;
         }
         if path == "404.html" {

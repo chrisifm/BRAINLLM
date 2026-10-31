@@ -8,7 +8,7 @@ The app-author guide is `brain guide performance`; this file is the contract for
 
 | Response | Encoding | Where |
 |---|---|---|
-| `/_b/*` chunks, CSS, `public/` text files | precompressed at build: `.br` (Brotli q11), `.zst` (zstd level 19), `.gz` (own optimal gzip); a sibling is written only when smaller than the file | brain-pack |
+| `/_b/*` chunks, CSS, `public/` text files | precompressed at build: `.br` (Brotli q11) and `.gz` (own optimal gzip) when smaller than the file, `.zst` (zstd level 19) only when it beats the `.br` | brain-pack |
 | static pages, SSR pages, streamed SSR, JSON, error pages | compressed per response (the page gets a fresh CSP nonce, so a precompressed page cannot be sent as is) | `dist/server.mjs` |
 
 Negotiation follows `Accept-Encoding` weights (`br;q=0` forbids Brotli). For static files the server sends the
@@ -24,6 +24,12 @@ Browser support: gzip everywhere; Brotli in every current browser over HTTPS; zs
 126+ (Safari does not advertise it and gets Brotli). Hosts: Caddy serves the siblings with
 `precompressed zstd br gzip` (the emitted `_brain/Caddyfile` block); nginx needs `gzip_static on` and the third-party
 `brotli_static`/`zstd_static` modules; static hosts that read `_headers` compress on their own.
+
+Why `.zst` is rare: every client that accepts zstd also accepts Brotli, and on the scaffold's 37 `/_b/` files
+zstd level 19 totals 66,469 bytes against 62,497 for Brotli q11 and 66,225 for gzip (raw 102,562), so no `.zst` is
+written there; a `.zst` appears only for the files where it is the smallest, and `brain start`, `server.mjs` and
+Caddy's `precompressed zstd br gzip` then serve it. zstd pays off for per-response bodies, where its fast levels
+matter more than the last bytes.
 
 Opt out (a reverse proxy that already compresses): `createServer({ compress: false })` or `BRAIN_COMPRESS=off`.
 Static precompressed siblings are still served.

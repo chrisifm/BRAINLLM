@@ -225,3 +225,18 @@ fn static_routes_in_mixed_site_use_full_navigation_and_skip_sw_registration() {
     assert!(!ssr.contains("brain-zero-js"));
     assert!(brain_pack::cache::has_executable_scripts(ssr));
 }
+
+#[test]
+fn text_outputs_get_a_zstd_sibling_only_when_it_beats_brotli() {
+    let (_app, output) = build(true, "/");
+    let mut brotli = 0;
+    for (path, text) in &output.files {
+        let br = output.binary.get(&format!("{path}.br")).map_or(text.len(), Vec::len);
+        brotli += usize::from(br < text.len());
+        let Some(zst) = output.binary.get(&format!("{path}.zst")) else { continue };
+        assert!(zst.len() < br && zst.len() < text.len(), "{path}: a .zst is written only when it is the smallest");
+        assert_eq!(zstd::bulk::decompress(zst, text.len()).unwrap(), text.as_bytes(), "{path}");
+    }
+    assert!(brotli > 0, "the chunks and pages are precompressed");
+    assert!(output.binary.keys().all(|k| !k.starts_with("_server/") && k != "server.mjs.zst"), "server code is never precompressed");
+}
