@@ -1,0 +1,1 @@
+export default api('/_brain/auth/me', { get: { cache: 'no' } })

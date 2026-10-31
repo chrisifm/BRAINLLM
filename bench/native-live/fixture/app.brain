@@ -1,0 +1,4 @@
+<html lang="en">
+<head><title>Native live acceptance</title></head>
+<body><slot /></body>
+</html>
