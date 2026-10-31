@@ -1227,9 +1227,14 @@ pub async fn list(
     let total: i64 = q.build_query_scalar().fetch_one(&mut *tx).await?;
 
     let mut aggregates = Map::new();
+    let mut truncated = Vec::new();
     for name in &req.aggregate {
         let a = &r.query.aggregate[name];
-        aggregates.insert(name.clone(), aggregate(&mut tx, &ctx, a).await?);
+        let (value, cut) = aggregate(&mut tx, &ctx, a).await?;
+        aggregates.insert(name.clone(), value);
+        if cut {
+            truncated.push(name.clone());
+        }
     }
     tx.commit().await?;
 
@@ -1242,6 +1247,10 @@ pub async fn list(
     }
     if !aggregates.is_empty() {
         out["aggregates"] = Value::Object(aggregates);
+    }
+    if !truncated.is_empty() {
+        // Named aggregates that hit GROUP_LIMIT: their largest groups are present, the rest are not.
+        out["aggregates_truncated"] = json!(truncated);
     }
     if degraded {
         out["degraded"] = json!(true);
@@ -1317,7 +1326,8 @@ fn relational_read(r: &Resource, viewer: Viewer<'_>) -> Option<Scope> {
     owner_visible.then(|| crate::ownership::relational_read(r, viewer)).flatten()
 }
 
-async fn aggregate(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, a: &Aggregate) -> Result<Value, sqlx::Error> {
+/// One aggregate and whether its groups were cut at [`GROUP_LIMIT`].
+async fn aggregate(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, a: &Aggregate) -> Result<(Value, bool), sqlx::Error> {
     let r = ctx.r;
     let mut columns: Vec<(String, String, String)> = Vec::new();
     for f in &a.sum {
@@ -1354,9 +1364,11 @@ async fn aggregate(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, a: &
     q.push(format!(" FROM _brain_res_{} t WHERE ", r.name));
     ctx.push_where(&mut q);
     if let Some((_, e)) = &group {
-        q.push(format!(" GROUP BY {e} ORDER BY count(*) DESC,{e} NULLS LAST LIMIT {GROUP_LIMIT}"));
+        q.push(format!(" GROUP BY {e} ORDER BY count(*) DESC,{e} NULLS LAST LIMIT {}", GROUP_LIMIT + 1));
     }
-    let rows = q.build().fetch_all(&mut **tx).await?;
+    let mut rows = q.build().fetch_all(&mut **tx).await?;
+    let cut = group.is_some() && rows.len() as i64 > GROUP_LIMIT;
+    rows.truncate(GROUP_LIMIT as usize);
     let render = |row: &sqlx::postgres::PgRow| {
         let mut out = Map::new();
         out.insert("count".into(), json!(row.get::<i64, _>("_n")));
@@ -1372,8 +1384,8 @@ async fn aggregate(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, a: &
         out
     };
     match group {
-        None => Ok(rows.first().map(|row| Value::Object(render(row))).unwrap_or(json!({"count": 0}))),
-        Some((k, _)) => Ok(Value::Array(
+        None => Ok((rows.first().map(|row| Value::Object(render(row))).unwrap_or(json!({"count": 0})), false)),
+        Some((k, _)) => Ok((Value::Array(
             rows.iter()
                 .map(|row| {
                     let mut out = render(row);
@@ -1388,7 +1400,7 @@ async fn aggregate(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, a: &
                     Value::Object(out)
                 })
                 .collect(),
-        )),
+        ), cut)),
     }
 }
 

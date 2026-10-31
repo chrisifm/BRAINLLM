@@ -9,6 +9,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- Lists name aggregates that hit the 100-group cap in `aggregates_truncated`
 - Declared `or` groups in `query.jsbrain` (`?group.field[op]=value`), indexed and bounded, validated by `brain check`
 - `?owner=me` lists the reader's own rows; the id comes from the session, never from the client
 - `?fields=a,b` narrows the `data` of each list item, after policy and visibility; hidden fields answer like undeclared ones

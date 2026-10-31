@@ -283,3 +283,51 @@ fn or_groups_are_validated() {
     assert!(bad(json!({"rank": {"source": ["eq"], "title": ["eq"]}})).contains("own name"));
     assert!(bad(json!({"owner": {"source": ["eq"], "title": ["eq"]}})).contains("own name"));
 }
+
+#[tokio::test]
+#[ignore]
+async fn max_per_group_is_exact_and_the_group_cap_is_reported() {
+    let events = resource("events", vec![("kind", field("str")), ("score", field("int")), ("day", field("date"))], json!(["public"]), json!({
+        "aggregate": {"best": {"group": "kind", "max": ["score", "day"], "min": ["score"]}},
+    }));
+    let a = api("brain_shape_agg", vec![events]).await;
+    let (_, token) = a.user("agg@example.test").await;
+    for (kind, score, day) in [("a", 1, "2026-01-01"), ("a", 9, "2026-03-01"), ("a", 4, "2026-02-01"), ("b", 7, "2026-05-01"), ("b", 2, "2026-06-01")] {
+        a.post("/api/events", &token, json!({"kind": kind, "score": score, "day": day})).await;
+    }
+    let (status, small) = a.get("/api/events?aggregate=best&limit=1").await;
+    assert_eq!(status, 200, "{small}");
+    let groups = small["aggregates"]["best"].as_array().unwrap();
+    assert_eq!(groups[0], json!({"key": "a", "count": 3, "max": {"score": 9, "day": "2026-03-01"}, "min": {"score": 1}}));
+    assert_eq!(groups[1], json!({"key": "b", "count": 2, "max": {"score": 7, "day": "2026-06-01"}, "min": {"score": 2}}));
+    assert!(small.get("aggregates_truncated").is_none());
+
+    sqlx::query("INSERT INTO _brain_res_events(id,owner,data) SELECT gen_random_uuid(),(SELECT id FROM _brain_users LIMIT 1),jsonb_build_object('kind','k'||n,'score',n,'day','2026-01-01') FROM generate_series(1,120) n")
+        .execute(&a.pool).await.unwrap();
+    let (_, large) = a.get("/api/events?aggregate=best&limit=1").await;
+    assert_eq!(large["aggregates"]["best"].as_array().unwrap().len(), 100);
+    assert_eq!(large["aggregates_truncated"], json!(["best"]));
+}
+
+/// `when` runs on the locked row with `$input`, so "this write must change the field" needs no new operator.
+#[tokio::test]
+#[ignore]
+async fn a_guard_can_require_that_the_field_changes() {
+    let items = resource("items", vec![("price", field("int"))], json!(["public"]), json!({}));
+    let a = api("brain_shape_when", vec![items.clone()]).await;
+    let domain: brain_backend::domain::Domain = serde_json::from_value(json!({"resources": {"items": {"actions": {"reprice": {
+        "roles": ["owner"], "input": {"price": "int!"}, "when": {"price": {"ne": "$input.price"}}, "set": {"price": "$input.price"}
+    }}}}})).unwrap();
+    let (http, _) = brain_backend::http::router_with_domain(a.pool.clone(), brain_backend::Config {
+        api_keys: None, roles: Default::default(), mail: None, auth_public_base_url: None, webhooks: None, before_hooks: None, sockets: None, gcs: None, jwt: None, google: None,
+        resources: vec![items], jobs: Vec::new(), uploads: std::env::temp_dir().join(format!("brain-query-shape-{}", Uuid::new_v4().simple())), origins: vec![ORIGIN.into()], production: false,
+    }, domain).await.unwrap();
+    let a = Api { http, auth: Auth::new(a.pool.clone()).await.unwrap(), keys: Keys::new(a.pool.clone(), Default::default()).unwrap(), pool: a.pool };
+    let (_, token) = a.user("guard@example.test").await;
+    let item = id(&a.post("/api/items", &token, json!({"price": 5})).await);
+    let action = format!("/api/items/{item}/actions/reprice");
+    let (status, same) = a.call("POST", &action, Some(&token), None, Some(json!({"price": 5}))).await;
+    assert_eq!(status, 409, "{same}");
+    let (status, moved) = a.call("POST", &action, Some(&token), None, Some(json!({"price": 6}))).await;
+    assert!(status < 300, "{moved}");
+}
