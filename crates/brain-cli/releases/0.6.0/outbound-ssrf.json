@@ -1,0 +1,17 @@
+{
+  "id": "outbound-ssrf",
+  "kind": "fix",
+  "title": "httpCall refuses private targets after DNS and on every redirect hop",
+  "why": "A public hostname that resolves or rebinds to a private, loopback, link-local, CGNAT or metadata address is refused at connect time; redirects are opt-in and each hop is checked again.",
+  "changelog": [
+    "`httpCall` now checks every address a hostname resolves to"
+  ],
+  "guide": "docs/backend/outbound.md",
+  "apis": [
+    "httpCall",
+    "allowPrivate",
+    "redirects",
+    "lookup",
+    "BRAIN_OUTBOUND_ALLOW_PRIVATE"
+  ]
+}

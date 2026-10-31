@@ -239,6 +239,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   the eight most recent.
 - The development server unregisters closed HMR sockets immediately. `brain start` escalates workers that ignore
   SIGTERM to SIGKILL after reloads, memory restarts and health restarts, so an old worker cannot keep the listener.
+- JSON-LD `Article`, `BlogPosting` and `NewsArticle` without `headline` are no longer reported as a warning: Google
+  requires no Article property, so `headline` is now recommended (info, no score penalty) like `image`, `datePublished`
+  and `author`.
 - `brain run` serves `/llms.txt` (and `/<locale>/llms.txt`) like the build, and its dev `/sitemap.xml` now carries
   hreflang alternates with `x-default` for every locale and image entries for a view's literal `<img src>`, generated
   by the same code as `brain build`; a split sitemap answers `/sitemap-N.xml`.

@@ -1,0 +1,16 @@
+{
+  "id": "seo-unlisted-dynamic-routes",
+  "kind": "change",
+  "title": "B1837: public dynamic routes that no sitemap lists",
+  "why": "A public dynamic view without paths() or sitemap() renders per request but crawlers cannot find its pages; the build now names the view, the route and the fix.",
+  "changelog": [
+    "B1837 (warning, `brain build`)"
+  ],
+  "guide": "brain guide seo",
+  "codes": [
+    "B1837"
+  ],
+  "steps": [
+    "Export `async function sitemap({ env })` returning the params of the pages to index, `paths()` to prerender them, or add `<meta seo robots=\"noindex\">`."
+  ]
+}

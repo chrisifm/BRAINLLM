@@ -1,0 +1,10 @@
+{
+  "id": "jsonld-article-headline",
+  "kind": "fix",
+  "title": "JSON-LD Article headline is recommended, not required",
+  "why": "Google requires no Article property, so a missing headline is reported as info without a score penalty.",
+  "changelog": [
+    "JSON-LD `Article`, `BlogPosting` and `NewsArticle` without `headline`"
+  ],
+  "guide": "brain guide seo"
+}
