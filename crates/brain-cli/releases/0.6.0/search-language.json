@@ -1,0 +1,26 @@
+{
+  "id": "search-language",
+  "kind": "capability",
+  "title": "Search language and field weights per resource",
+  "why": "A resource can stem its search in its own language and rank the fields that matter most; changing either reindexes existing rows in place.",
+  "changelog": [
+    "Full-text search takes a language and field weights per resource"
+  ],
+  "guide": "docs/backend/search.md",
+  "apis": [
+    "server/resources/<name>/query.jsbrain search.language",
+    "server/resources/<name>/query.jsbrain search.weights"
+  ],
+  "affects": [
+    "server/resources/**/query.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/posts/query.jsbrain",
+    "snippet": "<meta server>\nexport default { search: { language: 'english', weights: { body: 'A', title: 'B' } } }"
+  },
+  "uses": [
+    {
+      "glob": "server/resources/**/search.jsbrain"
+    }
+  ]
+}

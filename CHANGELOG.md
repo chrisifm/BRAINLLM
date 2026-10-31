@@ -19,6 +19,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Job handlers get `ctx.backend` with the same calls, authenticated by a scoped project API key in
   `BRAIN_JOBS_API_KEY` (removed from `ctx.env`). API keys now also work on the read-only slug redirect route
   `/api/<resource>/redirects/<slug>`. See `docs/backend/job-backend.md`.
+- Full-text search takes a language and field weights per resource: `query.jsbrain`
+  `search: { language, weights }` picks a built-in Postgres configuration (stemming, stop words) and A-D weights.
+  Changing either reindexes rows in place on `brain backend migrate`; resources without it are untouched. See
+  `docs/backend/search.md`.
+- Guide for keeping numeric ids from another backend as a unique, filterable field (`docs/backend/ids.md`).
 - WebMCP imperative tools ship (#106): `<meta tools="add_task: Add a task (text:str!, due:date)">` plus a same-named
   function registers the tool with the browser's model context while the component is mounted and unregisters it on
   unmount. Nothing is registered without WebMCP, during SSR or prerender; arguments are validated against the

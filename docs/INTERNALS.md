@@ -1848,6 +1848,13 @@ non-loopback `BRAIN_BACKEND_URL`, deletes the key from `ctx.env`, and maps netwo
 `http_api_keys::resource_of` accepts `/api/<name>/redirects/<slug>` (read) besides collection and item paths.
 `runtime/test/job-backend.test.js` spawns the real runner against a loopback stub.
 
+Search language and weights (`search_config.rs`, migration 0015) travel as trigger arguments of
+`_brain_search_update`: `=<regconfig>` (always from the `LANGUAGES` allowlist) and `field:W`; a bare field keeps the
+old default weights, so resources without settings keep byte-identical `tgargs` and the drift check does not fire.
+`migrate` compares the previous `tgargs` and, when they changed, rewrites rows with `UPDATE ... SET data=data` (the
+trigger reindexes; `updated_at` is set by application code, not a trigger). Query paths use `regconfig(r)` in
+`websearch_to_tsquery`. pg_trgm remains required.
+
 The same bridge exposes `ctx.backend.login(credentials)` for same-origin POST server functions. It calls only the
 fixed native password endpoint, validates native cookie attributes, returns a sanitized user and relays cookies
 through both RPC and progressive form responses. Login/logout are exclusive within one request; the original

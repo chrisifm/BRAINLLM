@@ -15,5 +15,26 @@ Search combines with declared [filters](filters.md), `total`, [aggregates](aggre
 - With `sort`, results follow that order and can be paged with a [cursor](pagination.md).
 - Fields with restricted [visibility](visibility.md) cannot be searchable.
 
-Not yet configurable: the text-search language (today the language-neutral `simple` configuration, so there is no
-stemming), and a degraded mode for servers without `pg_trgm`. Both are tracked as remaining B-14 work.
+## Language and weights
+
+By default search uses the language-neutral `simple` configuration (no stemming) and fixed weights (`title`/`name` A,
+`summary` B, everything else D). A resource can choose a built-in Postgres text-search configuration and per-field
+weights in `query.jsbrain`:
+
+```js
+<meta server>
+export default {
+  search: { language: 'english', weights: { body: 'A', title: 'B' } },
+}
+```
+
+With `english`, `?search=runs` also finds "running" and stop words such as "the" are not indexed. `language` must be
+one of the configurations Postgres ships (`simple`, `english`, `spanish`, `portuguese`, `french`, `german`, ...); weights
+are `A`-`D` and may only name fields listed for search. Either mistake is a contract error (B0735) in `brain check` and stops `brain backend migrate`.
+
+Changing the language or the weights is a normal `brain backend migrate`: the search trigger is replaced and existing
+rows are reindexed in place, without touching `updated_at`. Resources without a `search` block keep their exact
+trigger, so upgrading does not reindex them. Tested by `crates/brain-backend/tests/data_queries.rs`
+(`search_language_weights_and_legacy_numeric_ids`).
+
+Not yet available: a degraded mode for servers without `pg_trgm` (the extension stays required).

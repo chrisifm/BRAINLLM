@@ -21,6 +21,7 @@ pub mod response;
 pub mod openapi;
 pub mod routes;
 pub mod search;
+pub mod search_config;
 pub mod slugs;
 pub mod types;
 pub mod upload;

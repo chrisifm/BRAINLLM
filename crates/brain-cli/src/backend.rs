@@ -192,7 +192,7 @@ pub fn contracts(root: &Path, kind: &str) -> Result<Vec<Resource>, String> {
         let query_path = e.path().join("query.jsbrain");
         let query = if kind == "resources" && query_path.is_file() {
             serde_json::from_value(read_contract(root, &query_path)?).map_err(|_| {
-                format!("server/{kind}/{name}/query.jsbrain must export {{ filter: {{ field: ['eq', ...] }}, sort: [field | {{ field, nulls }}], default_sort: ['-field'], include: [ref], aggregate: {{ name: {{ group, sum, avg, min, max }} }}, count: {{ name: {{ resource, field, where }} }} }}")
+                format!("server/{kind}/{name}/query.jsbrain must export {{ filter: {{ field: ['eq', ...] }}, sort: [field | {{ field, nulls }}], default_sort: ['-field'], include: [ref], aggregate: {{ name: {{ group, sum, avg, min, max }} }}, count: {{ name: {{ resource, field, where }} }}, search: {{ language, weights: {{ field: 'A' }} }} }}")
             })?
         } else {
             Default::default()

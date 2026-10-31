@@ -29,6 +29,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("data_queries", include_str!("../migrations/0011_data_queries.sql")),
     ("data_queries_slugs", include_str!("../migrations/0012_data_queries_slugs.sql")),
     ("endpoints_platform", include_str!("../migrations/0013_endpoints_platform.sql")),
+    ("search_language", include_str!("../migrations/0015_search_language.sql")),
 ];
 fn checksum(sql: &str) -> String {
     Sha256::digest(sql.as_bytes())
@@ -376,7 +377,7 @@ async fn resource_shape(conn: &mut sqlx::PgConnection, r: &Resource) -> Result<(
     .await?;
     constraint(conn, &table, "p", "id", None, None).await?;
     constraint(conn, &table, "f", "owner", Some("_brain_users"), Some("a")).await?;
-    let valid:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass($1) AND tgname='_brain_search' AND tgenabled='O' AND tgfoid='public._brain_search_update()'::regprocedure AND tgargs=$2)").bind(format!("public.{table}")).bind(r.search.iter().flat_map(|f|f.as_bytes().iter().copied().chain(std::iter::once(0))).collect::<Vec<_>>()).fetch_one(&mut *conn).await.map_err(safe)?;
+    let valid:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass($1) AND tgname='_brain_search' AND tgenabled='O' AND tgfoid='public._brain_search_update()'::regprocedure AND tgargs=$2)").bind(format!("public.{table}")).bind(crate::search_config::trigger_args_bytes(r)).fetch_one(&mut *conn).await.map_err(safe)?;
     if !valid {
         return Err(drift(&format!("{table} search trigger")));
     }
@@ -709,13 +710,18 @@ pub async fn migrate(pool: &PgPool, resources: &[Resource]) -> Result<(), String
             .execute(&mut *tx)
             .await
             .map_err(safe)?;
-        let args = r
-            .search
+        // Arguments are validated identifiers, allowlisted languages and A-D weights (search_config).
+        let args = crate::search_config::trigger_args(r)
             .iter()
-            .map(|f| format!("'{f}'"))
+            .map(|a| format!("'{a}'"))
             .collect::<Vec<_>>()
             .join(",");
+        let previous: Option<Vec<u8>> = sqlx::query_scalar("SELECT tgargs FROM pg_trigger WHERE tgrelid=to_regclass($1) AND tgname='_brain_search'").bind(format!("public.{table}")).fetch_optional(&mut *tx).await.map_err(safe)?;
         sqlx::raw_sql(sqlx::AssertSqlSafe(format!("DROP TRIGGER IF EXISTS _brain_search ON {table}; CREATE TRIGGER _brain_search BEFORE INSERT OR UPDATE OF data ON {table} FOR EACH ROW EXECUTE FUNCTION public._brain_search_update({args});"))).execute(&mut *tx).await.map_err(safe)?;
+        if previous.is_some_and(|p| p != crate::search_config::trigger_args_bytes(r)) {
+            // A changed language or weight rebuilds stored search documents; updated_at is not touched.
+            sqlx::raw_sql(sqlx::AssertSqlSafe(format!("UPDATE {table} SET data=data"))).execute(&mut *tx).await.map_err(safe)?;
+        }
         sqlx::query("INSERT INTO _brain_resource_schemas(name,fields,search_fields) VALUES($1,$2,$3) ON CONFLICT DO NOTHING").bind(&r.name).bind(fields).bind(json!(r.search)).execute(&mut *tx).await.map_err(safe)?;
         install_constraints(&mut tx, r).await?;
         resource_shape(&mut tx, r).await?;

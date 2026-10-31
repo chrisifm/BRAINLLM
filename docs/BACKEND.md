@@ -213,6 +213,7 @@ Calling external APIs from server logic (timeouts, safe retries, idempotency key
 
 Lists, relations and readers: [relations](backend/relations.md) · [filters](backend/filters.md) · [sorting](backend/sorting.md) · [aggregates](backend/aggregates.md) · [pagination](backend/pagination.md) · [search](backend/search.md) · [ownership](backend/ownership.md) · [visibility](backend/visibility.md) · [slug history](backend/slugs.md).
 Server code (`load`, server functions) queries with the same contract through `ctx.backend`: [backend/server-queries.md](backend/server-queries.md).
+Keeping numeric ids from another backend as a unique, filterable field: [backend/ids.md](backend/ids.md).
 
 ## Remaining acceptance work
 
