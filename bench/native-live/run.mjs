@@ -13,6 +13,17 @@ const id=crypto.randomBytes(6).toString('hex'), network='brain-live-'+id, pg='br
 const output=option('--out',path.join(scratch,'report.json')), source=path.dirname(fileURLToPath(import.meta.url))
 let active, timedOut=false
 const ensure=(value,code)=>{if(!value)throw Error(code)}
+const digest=bytes=>crypto.createHash('sha256').update(bytes).digest('hex')
+function fixtureFingerprint() {
+  const hashes=[],pending=['fixture'];let bytes=0
+  while(pending.length){const relative=pending.pop(),full=path.join(source,relative),stat=fs.lstatSync(full)
+    ensure(!stat.isSymbolicLink(),'REGULAR_FIXTURE_SOURCE_REQUIRED')
+    if(stat.isDirectory()){for(const name of fs.readdirSync(full).sort().reverse())pending.push(path.join(relative,name));continue}
+    ensure(stat.isFile()&&stat.size<=262144&&hashes.length<64,'FIXTURE_SOURCE_BOUND')
+    bytes+=stat.size;ensure(bytes<=1048576,'FIXTURE_SOURCE_BOUND');hashes.push([relative.split(path.sep).join('/'),digest(fs.readFileSync(full))])
+  }
+  hashes.sort(([a],[b])=>a.localeCompare(b,'en'));return {sha256:digest(JSON.stringify(hashes)),files:hashes.length,bytes}
+}
 async function command(args,{deadline=30000,allowFailure=false}={}) {
   ensure(!timedOut||allowFailure,'TOTAL_DEADLINE')
   const child=spawn('docker',args,{stdio:['ignore','pipe','pipe']});active=child
@@ -33,6 +44,7 @@ let report={schemaVersion:1,ok:false,sourceSHA,viewer:{used:false,reason:'multip
 try{
   ensure(fs.lstatSync(binary).isFile(),'OWNED_REGULAR_LINUX_BINARY_REQUIRED');const bytes=fs.readFileSync(binary);ensure(bytes.subarray(0,4).equals(Buffer.from([127,69,76,70])),'LINUX_ELF_BINARY_REQUIRED');report.binarySHA256=crypto.createHash('sha256').update(bytes).digest('hex')
   const expected=option('--expect-sha');if(expected)ensure(report.binarySHA256===expected,'BINARY_DIGEST_MISMATCH')
+  report.fixture=fixtureFingerprint();report.gateScripts=Object.fromEntries(['run.mjs','inside.mjs','frame-metadata.mjs'].map(name=>[name,digest(fs.readFileSync(path.join(source,name)))]))
   report.image=(await command(['image','inspect',image,'--format','{{.Id}}'])).out.trim()
   const pgImage=(await command(['image','inspect','postgres:18','--format','{{.Id}}'])).out.trim();report.postgresImage=pgImage
   const database='brain_live_'+id,password=crypto.randomBytes(24).toString('hex')

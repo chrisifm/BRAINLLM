@@ -22,7 +22,9 @@ The owned compiler/browser image defaults to
 official `postgres:18` image before running the gate. The runner records their
 actual image identities, binary digest, PostgreSQL version and browser version.
 The image's Rust version does not establish which compiler built a supplied binary.
-The source pin comes from the caller's verified artifact provenance.
+The source pin comes from the caller's verified artifact provenance. The report separately fingerprints the
+fixture tree and each gate script, so an updated test does not masquerade as the supplied binary source.
+Fixture discovery rejects symlinks and bounds file count, individual size and aggregate bytes.
 
 The fixture schema migration affects only a generated `brain_live_*` database
 inside that owned container. It is **not** a migration of Vacantes or any other
