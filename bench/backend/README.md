@@ -7,6 +7,7 @@ No reference source is copied into this repository.
 
 ```sh
 BRAIN_REFERENCE_API=/absolute/path/to/reference/api \
+BRAIN_REFERENCE_EMAIL=seeded-user@example.test \
 BRAIN_BIN=/absolute/path/to/frozen/brain \
 BRAIN_BENCH_PROFILE=release \
 BRAIN_BENCH_OUTPUT=/absolute/path/to/results.json \

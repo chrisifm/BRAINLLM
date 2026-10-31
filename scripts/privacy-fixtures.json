@@ -100,5 +100,17 @@
     "rule": "credential-url",
     "sha256": "efdb02117ac4b051b600f59766916395055a0fabc53c0117309b3df599b4eab6",
     "reason": "Reviewed historical template literal: the password is interpolated from a per-run random value for the owned throwaway Postgres container; no usable credential."
+  },
+  {
+    "path": "crates/brain-backend/src/boot.rs",
+    "rule": "credential-url",
+    "sha256": "e9306092450bb5e70f561c9d482f063c68c0e62f7e73a9d46e50e82e7685148b",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
+    "path": "runtime/test/outbound.test.js",
+    "rule": "credential-url",
+    "sha256": "f8c7f2987069485166a19282090fd6bfda8b12c5ccf46c99846068ed92369f32",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
   }
 ]

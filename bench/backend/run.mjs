@@ -13,7 +13,8 @@ import {measure} from './measure.mjs'
 const repository=fileURLToPath(new URL('../../',import.meta.url))
 const reference=process.env.BRAIN_REFERENCE_API
 const inputBinary=resolve(process.env.BRAIN_BIN||join(repository,'target/debug/brain'))
-if(!reference||!process.env.BRAIN_BENCH_OUTPUT)throw Error('Set BRAIN_REFERENCE_API and BRAIN_BENCH_OUTPUT explicitly; no existing database or .env is used')
+const referenceEmail=process.env.BRAIN_REFERENCE_EMAIL
+if(!reference||!referenceEmail||!process.env.BRAIN_BENCH_OUTPUT)throw Error('Set BRAIN_REFERENCE_API, BRAIN_REFERENCE_EMAIL and BRAIN_BENCH_OUTPUT explicitly; no existing database or .env is used')
 const profile=process.env.BRAIN_BENCH_PROFILE
 if(!['debug','release'].includes(profile))throw Error('Set BRAIN_BENCH_PROFILE=debug|release to identify the actual supplied binary; a profile is not inferred from its filename')
 const output=resolve(process.env.BRAIN_BENCH_OUTPUT)
@@ -140,10 +141,10 @@ try {
  for(const scenario of ['login','list','upload']) {
   // Fresh limiters per scenario; production limits remain enabled and every status is checked.
   if(scenario!=='login'){await stop(ref.child);await stop(native.child);ref=await server(process.execPath,[fileURLToPath(new URL('reference.mjs',import.meta.url))],dir,refEnv,'ready');native=await startNative()}
-  const refCookie=cookie(await request(ref.url+'/api/v1/auth/login',{method:'POST',body:{email:'candidato@vacantes.local',password}}))
+  const refCookie=cookie(await request(ref.url+'/api/v1/auth/login',{method:'POST',body:{email:referenceEmail,password}}))
   const nativeCookie=cookie(await request(native.url+'/_brain/auth/login',{method:'POST',body:{email:'benchmark@example.test',password}}))
   const operations={
-   reference:()=>scenario==='login'?request(ref.url+'/api/v1/auth/login',{method:'POST',body:{email:'candidato@vacantes.local',password}}):scenario==='list'?request(ref.url+'/api/v1/jobs?pageSize=20'):request(ref.url+'/api/v1/me/cv/file',{method:'PUT',cookie:refCookie,body:{name:'benchmark.pdf',dataBase64:pdf.toString('base64')}}),
+   reference:()=>scenario==='login'?request(ref.url+'/api/v1/auth/login',{method:'POST',body:{email:referenceEmail,password}}):scenario==='list'?request(ref.url+'/api/v1/jobs?pageSize=20'):request(ref.url+'/api/v1/me/cv/file',{method:'PUT',cookie:refCookie,body:{name:'benchmark.pdf',dataBase64:pdf.toString('base64')}}),
    native:()=>{if(scenario==='login')return request(native.url+'/_brain/auth/login',{method:'POST',body:{email:'benchmark@example.test',password}});if(scenario==='list')return request(native.url+'/api/jobs?limit=20');const form=new FormData();form.set('file',new Blob([image],{type:'image/png'}),'benchmark.png');return request(native.url+'/_brain/uploads',{method:'POST',cookie:nativeCookie,body:form})}
   }
   for(const implementation of ['reference','native']){console.log(JSON.stringify({event:'measuring',scenario,implementation}));results.push({scenario,implementation,...await measure(async()=>{const result=await operations[implementation]();return result.bytes})})}

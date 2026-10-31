@@ -265,7 +265,7 @@ test('normal upstream EOF flushes the final queued TCP bytes before both sides c
   client.socket.pause()
   const target=4*1024*1024
   source.end(Buffer.alloc(target,122))
-  const consume=setInterval(()=>client.socket.read(16384),1)
+  const consume=setInterval(()=>{while(client.socket.read()!==null);},1)
   try {await until(client.closed,6000)} finally {clearInterval(consume)}
   assert.equal(client.payloadBytes(),target)
   await until(()=>app.backendSockets.size===0)
