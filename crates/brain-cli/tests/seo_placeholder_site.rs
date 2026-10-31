@@ -48,3 +48,20 @@ fn placeholder_origin_is_no_site_with_b0736() {
     assert!(!t.contains("B0736"), "{t}");
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn fresh_app_passes_doctor_seo_while_b0736_reports_the_placeholder_once() {
+    // 0.6.0 regression: doctor built without the placeholder origin, so every page also lost points for a relative
+    // canonical and og:image and the fresh home page fell below seo.minScore
+    let tmp = std::env::temp_dir().join(format!("bsite-fresh-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    assert!(brain(&tmp, &["new", "app"]).status.success());
+    let dir = tmp.join("app");
+    let o = brain(&dir, &["doctor", "--json"]);
+    let j: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap_or_else(|_| panic!("{}", text(&o)));
+    assert_eq!(j["seo"]["ok"], true, "{}", j["seo"]);
+    let advice = j["advice"].as_array().unwrap();
+    assert_eq!(advice.iter().filter(|a| a["code"] == "B0736").count(), 1, "{advice:?}");
+    let _ = std::fs::remove_dir_all(&tmp);
+}

@@ -1799,8 +1799,11 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
     let app = root.as_deref().map(|p| std::path::absolute(p).unwrap_or(p.to_path_buf())).and_then(|p| scaffold::find_root(&p)).or_else(|| app_root().ok());
     // the production build (§25: done = doctor exit 0 = the app ships): what fails `brain build` fails doctor too —
     // empty production keys (B0720), broken links and anchors (B1819/B1820)… — and SEO then audits that dist/
+    // a placeholder production origin is reported once (B0736 below); the audit still scores the pages as they would
+    // ship with a real domain, so one missing domain does not also fail SEO through relative canonical/og:image URLs
+    let doctor_site = app.as_deref().and_then(|a| env::value(a, "production", "PUBLIC_SITE_URL")).filter(|s| env::placeholder_origin(s));
     let (build_ok, fresh_output, build) = match &app {
-        Some(a) if check.get("errors") == Some(&Json::Num(0.0)) => match run_build_assessed_with(a, None, "production", None) {
+        Some(a) if check.get("errors") == Some(&Json::Num(0.0)) => match run_build_assessed_with(a, doctor_site.clone(), "production", None) {
             Ok(assessment) => (assessment.budget_error.is_none(), true, assessment.doctor_json()),
             Err(e) => (false, false, Json::obj([("ok", Json::Bool(false)), ("freshOutput", Json::Bool(false)), ("error", Json::str(&e))])),
         },

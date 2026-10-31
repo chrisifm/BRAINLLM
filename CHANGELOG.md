@@ -9,6 +9,14 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-31
+
+### Fixed
+
+- `brain doctor` on a newly created app passes again: the placeholder production origin in `.brain_env` is reported
+  once by B0736, and SEO audits the pages as they would ship with a real domain instead of also scoring relative
+  canonical and `og:image` URLs, which pushed the home page below `seo.minScore` (0.6.0 regression).
+
 ## [0.6.0] - 2026-10-31
 
 ### Added

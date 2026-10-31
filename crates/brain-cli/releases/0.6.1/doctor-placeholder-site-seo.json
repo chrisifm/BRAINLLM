@@ -1,0 +1,10 @@
+{
+  "id": "doctor-placeholder-site-seo",
+  "kind": "fix",
+  "title": "A new app passes brain doctor again",
+  "why": "A placeholder production origin is reported once by B0736; doctor no longer also fails SEO through relative canonical and og:image URLs, which pushed the home page of a new app below seo.minScore.",
+  "changelog": [
+    "`brain doctor` on a newly created app"
+  ],
+  "guide": "brain guide start"
+}

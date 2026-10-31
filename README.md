@@ -385,7 +385,7 @@ Never include app secrets, private source or customer data in a contribution.
 
 ## Know what you are adopting
 
-BRAINLLM is **0.6.0** (see [CHANGELOG.md](CHANGELOG.md)). Start with a small app or an isolated route and test the behavior you need. Features marked
+BRAINLLM is **0.6.1** (see [CHANGELOG.md](CHANGELOG.md)). Start with a small app or an isolated route and test the behavior you need. Features marked
 as planned in the source specification are not a supported promise; `brain spec` serves the implemented contract.
 Third-party React, Angular and Vue components do not become BRAINLLM components automatically. Benchmark wins in
 build time do not imply that every runtime workload is faster.
