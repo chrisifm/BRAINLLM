@@ -1,4 +1,7 @@
 use crate::{http, json_str, ws};
+#[path = "dev_threads.rs"]
+mod dev_threads;
+use dev_threads::{Threads, Role, PendingRequest, FailureLog};
 #[path="native_proxy.rs"]
 pub(crate) mod native_proxy;
 use notify::{RecursiveMode, Watcher};
@@ -423,11 +426,22 @@ pub fn start_dev(
 /// An explicit native proxy fixes the HTTP, SSR and socket authority until this managed server is recreated.
 /// The legacy entry point keeps its environment-based HTTP forwarding and does not activate sockets.
 pub fn start_dev_with_native_proxy(
+    opts: Options,
+    compile: CompileFn,
+    watch: bool,
+    on_event: Option<EventFn>,
+    native: Option<native_proxy::NativeProxy>,
+) -> io::Result<Dev> {
+    start_with_threads(opts, compile, watch, on_event, native, Threads::default())
+}
+
+fn start_with_threads(
     mut opts: Options,
     compile: CompileFn,
     watch: bool,
     on_event: Option<EventFn>,
     native: Option<native_proxy::NativeProxy>,
+    threads: Threads,
 ) -> io::Result<Dev> {
     let root = opts.root.canonicalize()?;
     // If the port is taken, try the next 20 (except 0, which the OS assigns).
@@ -481,15 +495,18 @@ pub fn start_dev_with_native_proxy(
     // resolve the environment now: it also sets the PUBLIC_* constants the compiler substitutes, so the very first
     // module served (whatever the first request is) already has them (QA #140)
     let _ = ctx.env_vars();
+    threads.observe(&ctx);
     let watcher = if watch {
-        Some(start_watch(ctx.clone())?)
+        Some(start_watch(ctx.clone(), &threads).map_err(|error| dev_threads::startup_error(&ctx, error))?)
     } else {
         None
     };
     let lctx = ctx.clone();
-    let handle = std::thread::spawn(move || {
+    let dispatch = threads.clone();
+    let handle = threads.spawn(Role::Accept, move || {
         let _watcher = watcher;
         let active = Arc::new(AtomicUsize::new(0));
+        let mut failures = FailureLog::default();
         for stream in listener.incoming() {
             if lctx.stop.load(Ordering::SeqCst) {
                 break;
@@ -508,12 +525,13 @@ pub fn start_dev_with_native_proxy(
                 continue;
             };
             let ctx = lctx.clone();
-            std::thread::spawn(move || {
-                let _permit = permit;
-                let _ = handle(stream, &ctx);
-            });
+            let pending = PendingRequest::new(stream, permit);
+            if dispatch.spawn(Role::Request, move || pending.run(ctx)).is_err() {
+                failures.failed(&lctx);
+            }
         }
-    });
+        failures.finish(&lctx);
+    }).map_err(|error| dev_threads::startup_error(&ctx, error))?;
     Ok(Dev {
         addr,
         ctx,
@@ -2222,7 +2240,7 @@ fn ignored(rel: &Path) -> bool {
     })
 }
 
-fn start_watch(ctx: Arc<Ctx>) -> io::Result<notify::RecommendedWatcher> {
+fn start_watch(ctx: Arc<Ctx>, threads: &Threads) -> io::Result<notify::RecommendedWatcher> {
     let (tx, rx) = std::sync::mpsc::sync_channel(64);
     let overflow = Arc::new(AtomicBool::new(false));
     let overflowed = overflow.clone();
@@ -2237,7 +2255,7 @@ fn start_watch(ctx: Arc<Ctx>) -> io::Result<notify::RecommendedWatcher> {
     .map_err(io::Error::other)?;
     w.watch(&ctx.root, RecursiveMode::Recursive)
         .map_err(io::Error::other)?;
-    std::thread::spawn(move || {
+    threads.spawn(Role::Watch, move || {
         loop {
             // Collapses the burst of events from one save into a single batch.
             let Ok(first) = rx.recv() else { return };
@@ -2278,7 +2296,7 @@ fn start_watch(ctx: Arc<Ctx>) -> io::Result<notify::RecommendedWatcher> {
                 on_change(&ctx, &p);
             }
         }
-    });
+    })?;
     Ok(w)
 }
 
