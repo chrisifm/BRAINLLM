@@ -1121,3 +1121,242 @@ test('prefetch reuse through the router: a click on a link whose prefetch is in 
   r.stop()
   globalThis.fetch = real
 })
+
+const click = el => el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+const until = async f => { for (let i = 0; i < 500 && !f(); i++) await settle() }
+
+test('first click: a click during an in-flight prefetch navigates at once and reuses that request', async () => {
+  hist()
+  const { m } = page()
+  const real = globalThis.fetch, asked = []
+  let finish
+  globalThis.fetch = async (u, o) => {
+    asked.push(new URL(u, 'http://x.test').pathname)
+    await new Promise(r => (finish = r))
+    return real(u, o)
+  }
+  const a = doc.createElement('a')
+  a.setAttribute('href', '/b')
+  doc.body.appendChild(a)
+  const r = router({ parse, hard: u => assert.fail('hard ' + u) })
+  a.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
+  await until(() => asked.length)
+  click(a)
+  assert.equal(m.getAttribute('aria-busy'), 'true') // the click started the navigation before the prefetch ended
+  finish()
+  await until(() => m.textContent === 'Page Bb')
+  assert.equal(m.textContent, 'Page Bb')
+  assert.deepEqual(asked, ['/b'])
+  r.stop()
+  globalThis.fetch = real
+})
+
+test('first click: a failed prefetch is never reused: the click fetches again and navigates', async () => {
+  hist()
+  const { m } = page()
+  const real = globalThis.fetch, asked = []
+  globalThis.fetch = async (u, o) => {
+    asked.push(new URL(u, 'http://x.test').pathname)
+    if (asked.length === 1) throw Error('prefetch failed')
+    return real(u, o)
+  }
+  const a = doc.createElement('a')
+  a.setAttribute('href', '/b')
+  doc.body.appendChild(a)
+  const r = router({ parse, hard: u => assert.fail('hard ' + u) })
+  a.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
+  await until(() => asked.length)
+  await settle()
+  click(a)
+  await until(() => m.textContent === 'Page Bb')
+  assert.equal(m.textContent, 'Page Bb')
+  assert.deepEqual(asked, ['/b', '/b'])
+  r.stop()
+  globalThis.fetch = real
+})
+
+test('first click: a link clicked before the view chunk arrives navigates; it is not held for the mount', async () => {
+  hist()
+  const { m } = page()
+  pages['/ml'] = '<main><a href="/c">C</a><script type="module">const e=document.getElementById(\'brain-view\');e.$d=m(V,e,{})</script></main>'
+  const r = router({ parse, hard: u => assert.fail('hard ' + u) })
+  await r.go('/ml')
+  click(m.querySelector('a')) // the mount script has not run: its chunk is still on its way
+  await until(() => m.textContent === 'Page C')
+  assert.equal(m.textContent, 'Page C')
+  r.stop()
+})
+
+test('first click: a page without a mount script does not inherit the previous page\'s click hold', async () => {
+  hist()
+  const { m } = page()
+  const r = router({ parse, hard: u => assert.fail('hard ' + u) })
+  await r.go('/m')
+  pages['/plain'] = '<main><button type="button">Go</button></main>'
+  await r.go('/plain')
+  const seen = []
+  m.querySelector('button').addEventListener('click', () => seen.push('button'))
+  click(m.querySelector('button'))
+  assert.deepEqual(seen, ['button'])
+  r.stop()
+})
+
+test('first click: a navigation that never answers ends in a full load, never in nothing', async () => {
+  hist()
+  page()
+  const real = globalThis.fetch, st = globalThis.setTimeout, hard = []
+  globalThis.fetch = () => new Promise(() => {})
+  globalThis.setTimeout = (f, ms, ...a) => st(f, ms >= 8000 && ms < 9000 ? 1 : ms, ...a)
+  try {
+    const a = doc.createElement('a')
+    a.setAttribute('href', '/b')
+    doc.body.appendChild(a)
+    const r = router({ parse, prefetch: false, hard: u => hard.push(u) })
+    click(a)
+    await until(() => hard.length)
+    assert.deepEqual(hard, ['http://x.test/b'])
+    r.stop()
+  } finally {
+    globalThis.fetch = real
+    globalThis.setTimeout = st
+  }
+})
+
+test('CSP: recreated scripts keep the page nonce on every navigation, even once fetched head data carries another', async () => {
+  hist()
+  const { m } = page()
+  const ld = doc.createElement('script')
+  ld.setAttribute('type', 'application/ld+json')
+  ld.setAttribute('nonce', 'PAGE-NONCE')
+  doc.head.appendChild(ld)
+  const body = (nonce, x) => `<script type="application/ld+json" nonce="${nonce}">{}</script><main><script type="b/state" nonce="${nonce}">{}</script><script type="module" nonce="${nonce}">${x}()</script></main>`
+  pages['/n1'] = body('N1', 'a')
+  pages['/n2'] = body('N2', 'b')
+  const r = router({ parse, hard: u => assert.fail('hard ' + u) })
+  for (const p of ['/n1', '/n2', '/n1']) {
+    await r.go(p)
+    assert.equal(m.querySelector('script[type=module]').getAttribute('nonce'), 'PAGE-NONCE', p)
+  }
+  for (const s of doc.head.querySelectorAll('script')) s.remove()
+  r.stop()
+})
+
+test('viewport prefetch: visible links only, never fullLoad routes; saveData asks nothing; a failure leaves later clicks alone', async () => {
+  hist()
+  const { m } = page()
+  const io = []
+  globalThis.IntersectionObserver = class {
+    constructor(f) { this.f = f; this.els = []; io.push(this) }
+    observe(el) { this.els.push(el) }
+    unobserve() {}
+    disconnect() {}
+  }
+  globalThis.requestIdleCallback = f => setTimeout(f, 0)
+  const real = globalThis.fetch, asked = []
+  globalThis.fetch = async (u, o) => {
+    asked.push(new URL(u, 'http://x.test').pathname)
+    if (asked.length === 1) throw Error('prefetch failed')
+    return real(u, o)
+  }
+  doc.body.insertAdjacentHTML?.('beforeend', '')
+  for (const h of ['/b', '/c']) {
+    const a = doc.createElement('a')
+    a.setAttribute('href', h)
+    doc.body.appendChild(a)
+  }
+  const r = router({ parse, fullLoad: ['/c'], hard: () => {} })
+  const see = () => io[0].f(io[0].els.map(target => ({ target, isIntersecting: true })))
+  see()
+  await until(() => asked.length)
+  await settle()
+  assert.deepEqual(asked, ['/b'])
+  click(doc.body.querySelector('a[href="/b"]'))
+  await until(() => m.textContent === 'Page Bb')
+  assert.equal(m.textContent, 'Page Bb')
+  r.stop()
+  // saveData: nothing is asked ahead of time
+  const nav0 = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { connection: { saveData: true } } })
+  asked.length = 0
+  io.length = 0
+  page()
+  const a = doc.createElement('a')
+  a.setAttribute('href', '/b')
+  doc.body.appendChild(a)
+  const r2 = router({ parse, hard: () => {} })
+  see()
+  await new Promise(r => setTimeout(r, 20))
+  assert.deepEqual(asked, [])
+  r2.stop()
+  if (nav0) Object.defineProperty(globalThis, 'navigator', nav0)
+  else delete globalThis.navigator
+  globalThis.fetch = real
+  delete globalThis.IntersectionObserver
+  delete globalThis.requestIdleCallback
+})
+
+test('prefetch queue: intent, then main by position, then footer and aside; a link leaving the viewport is dropped; a click never waits', async () => {
+  hist()
+  const { m } = page()
+  const io = []
+  globalThis.IntersectionObserver = class {
+    constructor(f) { this.f = f; io.push(this) }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  let idle
+  globalThis.requestIdleCallback = f => (idle = f, 1)
+  const real = globalThis.fetch, asked = [], open = []
+  globalThis.fetch = async (u, o) => {
+    asked.push(new URL(u, 'http://x.test').pathname)
+    await new Promise(r => open.push(r))
+    return real(u, o)
+  }
+  for (const p of ['/m1', '/m2', '/m3', '/gone', '/foot', '/side', '/hover', '/clicked']) pages[p] = `<main><h1>${p}</h1></main>`
+  const link = (h, top, parent = doc.body) => {
+    const a = doc.createElement('a')
+    a.setAttribute('href', h)
+    a.getBoundingClientRect = () => ({ top })
+    parent.appendChild(a)
+    return a
+  }
+  const foot = doc.createElement('footer'), side = doc.createElement('aside')
+  doc.body.appendChild(foot)
+  doc.body.appendChild(side)
+  const f = link('/foot', 10, foot), s = link('/side', 5, side)
+  const m3 = link('/m3', 300), m1 = link('/m1', 100), m2 = link('/m2', 200), gone = link('/gone', 50), hover = link('/hover', 900), clicked = link('/clicked', 950)
+  const r = router({ parse, hard: u => assert.fail('hard ' + u) })
+  const see = (a, isIntersecting = true) => io[0].f([{ target: a, isIntersecting }])
+  see(f) // the footer intersects first and still runs after the main links
+  see(s)
+  see(m3); see(m1); see(m2); see(gone)
+  see(gone, false)
+  hover.dispatchEvent(new MouseEvent('pointerover', { bubbles: true })) // jumps ahead; takes one of the two slots
+  idle()
+  assert.deepEqual(asked, ['/hover', '/m1'])
+  for (let n = 0; n < 8; n++) { open.splice(0).forEach(f => f()); await settle() }
+  assert.deepEqual(asked.slice(0, 2).sort(), ['/hover', '/m1'])
+  assert.deepEqual(asked.slice(2), ['/m2', '/m3', '/side', '/foot']) // aside at 5 and footer at 10 rank by their position too
+  assert.equal(asked.includes('/gone'), false)
+  // a click never waits on the queue, even with every slot taken
+  asked.length = 0
+  for (const a of [m1, m2, m3]) doc.body.appendChild(a)
+  const busy1 = doc.createElement('a'), busy2 = doc.createElement('a')
+  pages['/busy1'] = pages['/busy2'] = '<main><h1>busy</h1></main>'
+  busy1.setAttribute('href', '/busy1'); busy2.setAttribute('href', '/busy2')
+  doc.body.appendChild(busy1); doc.body.appendChild(busy2)
+  busy1.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
+  busy2.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
+  assert.deepEqual(asked, ['/busy1', '/busy2'])
+  click(clicked)
+  await until(() => asked.length === 3)
+  assert.deepEqual(asked, ['/busy1', '/busy2', '/clicked'])
+  for (let n = 0; n < 8; n++) { open.splice(0).forEach(f => f()); await settle() }
+  await until(() => m.textContent === '/clicked')
+  assert.equal(m.textContent, '/clicked')
+  r.stop()
+  globalThis.fetch = real
+  delete globalThis.IntersectionObserver
+  delete globalThis.requestIdleCallback
+})

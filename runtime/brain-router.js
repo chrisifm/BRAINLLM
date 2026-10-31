@@ -86,12 +86,16 @@ const outcome = v =>
 export function router(o = {}) {
   const region = o.region || 'main'
   const parse = o.parse || (h => new DOMParser().parseFromString(h, 'text/html'))
-  const fullLoad = new Set((o.fullLoad || []).map(p => { try { return new URL(p, location.href).pathname.replace(/\/+$/, '') || '/' } catch { return null } }).filter(Boolean))
+  const fullLoad = new Set((o.fullLoad || []).map(p => new URL(p, location.href).pathname.replace(/\/+$/, '') || '/'))
   let seq = 0, through = null, stale = false
-  const ahead = predict(o, u => same(u, true))
+  const ahead = predict(o, (u, p = true) => same(u, p))
   // Build signature (§35.7): the page's <meta name="brain-build">. A navigation response from another build, or the
   // service worker announcing one, turns client navigation into full loads so old and new code never mix.
   const build = () => document.querySelector('meta[name=brain-build]')?.getAttribute('content')
+  // The page's CSP nonce, read once while the document is still the server's: later, data scripts adopted from fetched
+  // pages (JSON-LD, b/state) carry their own response's nonce and could come first, and a mount script recreated with
+  // that nonce is blocked by the CSP.
+  const own = document.querySelector('script[nonce]'), nonce = own?.nonce || own?.getAttribute('nonce')
   const sw = G.navigator?.serviceWorker
   const onMsg = e => /^brain:build /.test(e.data) && build() && e.data.slice(12) !== build() && (stale = true, ahead.stop())
   sw?.addEventListener?.('message', onMsg)
@@ -128,15 +132,16 @@ export function router(o = {}) {
 
   // Feedback (§19): a navigation marks the region aria-busy and route().navigating at once; past 150 ms it shows
   // #brain-nav: the app's own element with that id (a spinner in app.brain, `<div id="brain-nav" hidden>`) or a native
-  // indeterminate <progress> bar at the top (label "Loading"; styled by accent-color on #brain-nav and --nav-height, no extra
+  // indeterminate <progress> bar at the top (label "Loading"; colored by accent-color on #brain-nav, no extra
   // DOM), so fast ones show nothing. _loading.brain (#235): past 400 ms the nearest loading view of the target route
   // (`loading: [{ rx, view }]`, most specific first, emitted by the build with the `core` URL) replaces the region until
   // the page arrives. Until then the current page stays as it is.
   const loads = o.loading || [], adopt = n => document.adoptNode?.(n) || n
-  const dispose = r => { for (const e of [r, ...r.querySelectorAll('*')]) if (e.$d) e.$d(), (e.$d = null) }
+  // the previous page's click hold ends with it, mounted or not
+  const dispose = r => { r.$hold?.(); for (const e of [r, ...r.querySelectorAll('*')]) if (e.$d) e.$d(), (e.$d = null) }
   const ui = on => {
     let b = document.getElementById('brain-nav')
-    if (!b && on) ((b = document.body.appendChild(document.createElement('progress'))).id = 'brain-nav'), (b.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:var(--nav-height,3px)'), (b.ariaLabel = 'Loading')
+    if (!b && on) ((b = document.body.appendChild(document.createElement('progress'))).id = 'brain-nav'), (b.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:3px'), (b.ariaLabel = 'Loading')
     if (b) b.hidden = !on
   }
   const busy = (my, on) => {
@@ -149,6 +154,7 @@ export function router(o = {}) {
     const path = strip(new URL(url, location.href).pathname), l = loads.find(x => [x.rx].flat().some(rx => new RegExp(rx).test(path)))
     const w = {}, at = (ms, f) => setTimeout(() => my === seq && !w.done && f(), ms)
     at(150, () => ui(1))
+    at(8e3, () => (seq++, hard(url))) // a request that never answers (a hung prefetch included) ends in a full load
     if (l && o.core)
       at(400, () =>
         Promise.all([import(o.core), import(l.view)])
@@ -189,8 +195,6 @@ export function router(o = {}) {
       // DOM, head and active links change in one callback (one frame); a newer navigation that started meanwhile skips it
       const swap = () => {
         if (my !== seq) return
-        // read before the swap: afterwards the fetched page's scripts are in the document too
-        const own = document.querySelector('script[nonce]'), nonce = own?.nonce || own?.getAttribute('nonce')
         dispose(cur)
         cur.replaceChildren(...[...next.childNodes].map(adopt))
         // Scripts parsed by DOMParser never run: the region's own scripts (the view's mount, `e.$d = mount(...)`) are
@@ -365,7 +369,7 @@ export function predict(o = {}, same = () => false) {
   if (o.prefetch === false || (meta && /^(off|false|0)$/i.test(meta.getAttribute('content') || '')) || !G.document || !G.fetch) return off
   const net = G.navigator?.connection
   const thin = () => !!net && (net.saveData || /(^|-)2g$/.test(net.effectiveType || ''))
-  const cache = new Map(), queue = [], pre = new Map(), running = new Map(), pending = new Map(), planned = new Map()
+  const cache = new Map(), rank = new Map(), queue = [], pre = new Map(), running = new Map(), pending = new Map(), planned = new Map()
   let seen = new WeakSet(), busy = 0, count = 0, io = null, idle = 0, epoch = 0, dead = false, bytes = 0, worker = null, serial = 0
   const key = h => {
     try { const u = new URL(h, location.href); u.hash = ''; return u.href } catch { return null }
@@ -376,8 +380,8 @@ export function predict(o = {}, same = () => false) {
     return !NOPE.test(u.pathname) && !FILE.test(u.pathname) && !SECRET.test(u.search)
   }
   const ok = a => {
-    if (!a || !a.getAttribute || !a.getAttribute('href') || a.getAttribute('target') || a.hasAttribute('download')) return null
-    for (let n = a; n && n.getAttribute; n = n.parentNode) if (n.getAttribute('data-prefetch') === 'false') return null
+    if (!a?.getAttribute?.('href') || a.getAttribute('target') || a.hasAttribute('download')) return null
+    for (let n = a; n?.getAttribute; n = n.parentNode) if (n.getAttribute('data-prefetch') === 'false') return null
     const k = key(a.href || a.getAttribute('href'))
     return safe(k) ? k : null
   }
@@ -386,19 +390,17 @@ export function predict(o = {}, same = () => false) {
     let n = 0
     for (const href of list) {
       const u = key(href)
-      if (!u || pre.has(u) || !same(u) || !new URL(u).pathname.includes('/_b/') || ++n > 8) continue
+      if (!u || pre.has(u) || pre.size > 47 || !same(u) || !new URL(u).pathname.includes('/_b/') || ++n > 8) continue
       const l = document.createElement('link')
       l.setAttribute('rel', /\.(js|jsbrain)(\?|$)/.test(u) ? 'modulepreload' : 'prefetch')
       l.setAttribute('href', u)
       l.setAttribute('fetchpriority', 'low')
       document.head.appendChild(l)
       pre.set(u, l)
-      while (pre.size > 48) { const [k, node] = pre.entries().next().value; node.remove(); pre.delete(k) }
     }
   }
   const remove = k => { const c = cache.get(k); if (c) bytes -= c.bytes || 0; cache.delete(k) }
   const prune = () => {
-    for (const [k, c] of cache) if (Date.now() - c.at > FRESH) remove(k)
     while (cache.size > MAX_KEPT || bytes > 4 * 1024 * 1024) remove(cache.keys().next().value)
   }
   const crashed = () => {
@@ -406,13 +408,13 @@ export function predict(o = {}, same = () => false) {
     for (const p of pending.values()) { clearTimeout(p.timer); p.resolve(null) }
     pending.clear()
   }
-  if (G.Worker && typeof o.prefetchWorker === 'string') {
+  if (G.Worker && o.prefetchWorker) {
     try {
       const url = new URL(o.prefetchWorker, location.href)
       if (url.origin === location.origin) {
         worker = new Worker(url.href, { type: 'module' })
         worker.onmessage = e => {
-          const m = e.data, p = m && pending.get(m.id)
+          const m = e.data, p = pending.get(m?.id)
           if (!p) return
           clearTimeout(p.timer); pending.delete(m.id); p.resolve(m.ok ? m : null)
         }
@@ -467,16 +469,19 @@ export function predict(o = {}, same = () => false) {
     }
   }
   const later = f => G.requestIdleCallback ? G.requestIdleCallback(f, { timeout: 2000 }) : setTimeout(f, 200)
-  const cancelIdle = () => { if (idle) { G.cancelIdleCallback ? G.cancelIdleCallback(idle) : clearTimeout(idle); idle = 0 } }
-  const want = (k, now) => {
-    if (!k || dead || cache.has(k) || count >= (now ? MAX_KEPT : MAX_PAGE)) return
+  // The queue is ordered by rank, lower first: intent, then main content by position, the compiler's plan, then footer
+  // and aside. A click never waits here: take() or its own fetch.
+  const want = (k, now, at = 1e6) => {
+    if (!k || dead || cache.has(k) || count >= (now ? MAX_KEPT : MAX_PAGE) || (!now && !same(k, false))) return // only intent warms a full-load route
     const i = queue.indexOf(k)
     if (i >= 0) queue.splice(i, 1); else count++
-    if (now) { queue.unshift(k); pump() }
-    else { queue.push(k); if (!idle) idle = later(() => { idle = 0; pump() }) }
+    rank.set(k, now ? -1 : at)
+    queue.push(k)
+    queue.sort((a, b) => rank.get(a) - rank.get(b))
+    if (now) pump()
+    else if (!idle) idle = later(() => { idle = 0; pump() })
   }
   const intent = e => {
-    if (net?.saveData) return
     let a = e.target
     while (a && a.tagName !== 'A') a = a.parentNode
     want(ok(a), true)
@@ -484,21 +489,23 @@ export function predict(o = {}, same = () => false) {
   const evs = ['pointerover', 'focusin', 'touchstart']
   for (const t of evs) document.addEventListener(t, intent, { passive: true, capture: true })
   const forget = () => {
-    epoch++; cancelIdle(); queue.length = 0; cache.clear(); bytes = 0; count = 0
+    epoch++; queue.length = 0; cache.clear(); bytes = 0; count = 0
     for (const c of running.values()) c.abort()
     running.clear()
   }
   document.addEventListener('submit', forget, { capture: true })
   G.addEventListener?.('brain:write', forget)
-  const visible = () => { if (!document.hidden) pump() }
-  document.addEventListener('visibilitychange', visible)
   if (G.IntersectionObserver) io = new IntersectionObserver(es => {
-    for (const e of es) if (e.isIntersecting) { io.unobserve(e.target); if (!thin()) want(ok(e.target), false) }
+    for (const { target: a, isIntersecting } of es) {
+      const k = ok(a), i = queue.indexOf(k)
+      if (isIntersecting) thin() || want(k, false, (a.closest('footer,aside') ? 1e7 : 0) + a.getBoundingClientRect().top)
+      else if (i >= 0) queue.splice(i, 1) // left the viewport before its turn
+    }
   }, { rootMargin: '200px' })
   return {
     scan() {
       if (dead) return
-      count = 0; cancelIdle(); queue.length = 0; planned.clear(); seen = new WeakSet(); io?.disconnect()
+      count = 0; queue.length = 0; planned.clear(); seen = new WeakSet(); io?.disconnect()
       const anchors = document.querySelectorAll('a[href]'), allowed = new Set()
       for (const a of anchors) { const k = ok(a); if (k) allowed.add(k); if (io && !seen.has(a)) { seen.add(a); io.observe(a) } }
       // Compiler-generated graph, validated against the current DOM: hidden/opted-out links cannot sneak in.
@@ -506,9 +513,9 @@ export function predict(o = {}, same = () => false) {
       if (plan && !thin()) {
         try {
           const map = JSON.parse(plan.textContent)
-          if (map.v === 1 && Array.isArray(map.next)) for (const item of map.next.slice(0, MAX_PAGE)) {
+          if (map.v === 1) for (const item of map.next.slice(0, MAX_PAGE)) {
             const k = key(item.url)
-            if (allowed.has(k) && safe(k)) { if (Array.isArray(item.assets)) planned.set(k, item.assets.slice(0, 16)); want(k, false) }
+            if (allowed.has(k) && safe(k)) { if (item.assets) planned.set(k, item.assets.slice(0, 16)); want(k, false) }
           }
         } catch {}
       }
@@ -518,7 +525,6 @@ export function predict(o = {}, same = () => false) {
       forget(); dead = true; crashed(); io?.disconnect()
       for (const t of evs) document.removeEventListener(t, intent, { capture: true })
       document.removeEventListener('submit', forget, { capture: true })
-      document.removeEventListener('visibilitychange', visible)
       G.removeEventListener?.('brain:write', forget)
       for (const l of pre.values()) l.remove()
       pre.clear()
@@ -538,11 +544,14 @@ export function predict(o = {}, same = () => false) {
 
 const HOLD = ['click', 'submit']
 function hold(el) {
-  el.$hold?.() // a newer navigation drops what the previous page held
   const q = []
   const keep = e => {
     const path = []
-    for (let n = e.target; n && n !== el; n = n.parentNode) path.unshift([].indexOf.call(n.parentNode.childNodes, n))
+    // a link needs no mounted view: it navigates now (a real href; a `#` one waits for its handler like a button)
+    for (let n = e.target; n && n !== el; n = n.parentNode) {
+      if (n.tagName === 'A' && (n.getAttribute('href') || '#')[0] != '#') return
+      path.unshift([].indexOf.call(n.parentNode.childNodes, n))
+    }
     q.push([e, path])
     e.preventDefault()
     e.stopImmediatePropagation()

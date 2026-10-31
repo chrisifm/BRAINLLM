@@ -156,6 +156,14 @@ class Node {
     if (!e.defaultPrevented && e.type === 'click' && this.tagName === 'INPUT' && this.type === 'checkbox') this.checked = !this.checked
     return !e.defaultPrevented
   }
+  closest(sel) {
+    const tests = sel.split(',').map(x => compound(x.trim()))
+    for (let n = this; n && n.getAttribute; n = n.parentNode) if (tests.some(t => t(n))) return n
+    return null
+  }
+  getBoundingClientRect() {
+    return { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 }
+  }
   contains(n) {
     for (; n; n = n.parentNode) if (n === this) return true
     return false

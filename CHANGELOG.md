@@ -17,12 +17,20 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   at once; past 150 ms `#brain-nav` shows (the app's own element in `app.brain`, else a native top `<progress>` bar);
   past 400 ms (was 150 ms) `_loading.brain` replaces the region, so fast pages never flash a skeleton.
   `brain guide views` documents a custom spinner.
+- Prefetch runs from an ordered queue: hover and focus first, then visible links in the main content from the top of
+  the page down, then the compiler's plan, then `footer` and `aside` links. A link that leaves the viewport before its
+  turn is dropped, visible links never warm `fullLoad` routes, and a click never waits on the queue.
 
 ### Fixed
 - Client navigation no longer flickers or swaps a stale page: one navigation token guards every late callback, so a
   superseded navigation never swaps, never runs its View Transition callback, never scrolls or moves focus and never
   mounts its loading view; a fetch, parse or swap that throws becomes a full page load; a click reuses a prefetch
   still in flight (even a no-cache page) instead of fetching the page twice.
+- The first click on an internal link always navigates: links are no longer held until the view's chunk mounts, a page
+  without a mount script no longer inherits the previous page's click hold, a failed prefetch only costs a new request,
+  and a navigation that gets no answer in 8 s becomes a full load.
+- Client navigation no longer breaks the CSP after the first page: the router keeps the nonce the document was served
+  with, instead of reading the first `script[nonce]`, which could be a data script adopted from an earlier response.
 - Stopping the History router now removes its service worker `message` listener, as the Navigation API branch
   already did, so repeated start/stop keeps no listener.
 - Scoped CSS keeps pseudo-elements (`::backdrop`, `::before`, `:after`, `::-webkit-*`) outside the root anchor's
