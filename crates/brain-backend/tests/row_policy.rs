@@ -478,7 +478,9 @@ async fn api_keys_see_the_rows_their_user_sees_and_denials_explain_the_rule_clas
     assert_eq!(ids(&list), vec![f.published.clone()], "{list}");
     assert_eq!(f.http.clone().oneshot(keyed(format!("/api/jobs/{}", f.draft))).await.unwrap().status().as_u16(), 404);
     // POLICY_DENIED names which rules were evaluated, and nothing about the row or its owner.
-    let (status, denied) = call(&f.http, "GET", &format!("/api/shops/{}", f.shop), Some(&f.stranger), None).await;
+    let (status, hidden) = call(&f.http, "GET", &format!("/api/shops/{}", f.shop), Some(&f.stranger), None).await;
+    assert_eq!((status, hidden["error"]["code"].as_str()), (404, Some("NOT_FOUND")), "a row outside the scope reads like a missing one: {hidden}");
+    let (status, denied) = call(&f.http, "PATCH", &format!("/api/jobs/{}", f.published), Some(&f.stranger), Some(json!({"title":"Taken"}))).await;
     assert_eq!(status, 403, "{denied}");
     assert_eq!(denied["error"]["code"], "POLICY_DENIED");
     let fix = denied["error"]["fix"].as_str().unwrap();

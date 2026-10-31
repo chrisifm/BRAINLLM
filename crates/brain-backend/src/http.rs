@@ -1311,6 +1311,10 @@ async fn read(
         }
         names = value.split(',').map(str::to_string).collect();
     }
+    // No read grant for this identity answers the same for every id, before anything looks the id up.
+    if crate::ownership::scope(r, "read", viewer(u.as_ref())).is_none() {
+        return Err(Error::forbidden());
+    }
     let (mut row, revision) = db::timed(db::get_version(&app.pool, r, id))
         .await
         .map_err(|e| Error::database(e))?
@@ -1319,8 +1323,8 @@ async fn read(
         .await
         .map_err(|e| Error::internal(db::safe(e)))?;
     if !allowed {
-        // A row hidden by a condition answers exactly like one that does not exist: no existence oracle.
-        return Err(if r.policy.conditioned() { Error::missing() } else { Error::forbidden() });
+        // A hidden row answers exactly like one that does not exist: no existence oracle.
+        return Err(Error::missing());
     }
     let owns = u.as_ref().is_some_and(|u| row["owner"].as_str() == Some(&u.id.to_string()));
     let general = r.policy.allows("read", u.as_ref().map(|u| u.role.as_str()), owns);
@@ -1344,7 +1348,8 @@ pub(super) async fn reveal(app: &App, r: &Resource, record: &mut Value, u: &User
     let id = record["id"].as_str().and_then(|s| Uuid::parse_str(s).ok());
     let mut through = through;
     let mut visible = r.policy.api || http_api_keys::key_user().is_some();
-    if visible && r.policy.conditioned() {
+    // Holding a write grant says nothing about reading: anything short of an unconditional read grant asks about this row.
+    if visible && (r.policy.conditioned() || !r.policy.allows("read", Some(u.role.as_str()), false)) {
         let Some(id) = id else { return Err(Error::internal("record")) };
         let safe = |e| Error::internal(db::safe(e));
         visible = crate::ownership::row_allowed(&app.pool, r, &app.resources, "read", viewer(Some(u)), id).await.map_err(safe)?;
