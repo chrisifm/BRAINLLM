@@ -127,3 +127,14 @@ fn import_of_a_module_that_does_not_parse_names_its_first_error_not_a_missing_fi
     assert!(d[0].msg.contains("B0110") && d[0].msg.contains(":2"), "{}", d[0].msg);
     assert!(d[0].edits.is_empty(), "the path is right: nothing to rewrite");
 }
+
+#[test]
+fn a_live_resource_with_a_scope_that_is_always_null_is_reported() {
+    let view = |scope: &str| format!("<script>\n  const rows = resource(() => api.get('/posts'))\n  const updates = liveResource(rows, {{ rooms: [{{ resource: 'posts' }}], scope: {scope} }})\n</script>\n<p>{{updates.state}}</p>\n");
+    for never in ["() => null", "null"] {
+        assert!(codes(&view(never)).contains(&"B0775"), "{never}");
+    }
+    for possible in ["() => session.user ? session.user.id : null", "() => 'revision'", "scopeOf"] {
+        assert!(!codes(&view(possible)).contains(&"B0775"), "{possible}");
+    }
+}

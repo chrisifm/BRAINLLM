@@ -131,3 +131,35 @@ test('#94 B0214 (dev): a prerendered island whose HTML differs from the first cl
   assert.equal(warns.filter(m => m.startsWith('B0214')).length, 1, warns.join(' | ')) // only the n=9 one
   assert.match(warns.find(m => m.startsWith('B0214')), /server ".*n=9.*" · client ".*n=4.*"/)
 })
+
+test('a chunk that fails: a real link in the island still goes where it points; a button reports the failure', async () => {
+  const gone = new URL('./fixtures/does-not-exist.js', import.meta.url).href
+  const place = (inner, build) => {
+    doc.body.innerHTML = `<div data-b="${build}">${inner}</div><script type="b/state">{"c":"${gone}","x":"Nope","p":{}}</script>`
+    hydrate()
+    return doc.body.firstChild.firstChild
+  }
+  const loc = globalThis.location, assigned = [], errors = []
+  globalThis.location = { href: 'http://x.test/', assign: href => assigned.push(href), reload() {} }
+  globalThis.reportError = e => errors.push(e)
+  try {
+    const link = place('<a href="/next">next</a>', 'l1nk')
+    link.href = 'http://x.test/next' // the shim does not resolve it
+    click(link)
+    await wait(); await wait()
+    assert.equal(assigned.length, 1)
+    assert.match(String(assigned[0]), /\/next$/)
+    assert.equal(errors.length, 0)
+    assigned.length = 0
+    click(place('<a href="#here">here</a>', 'f4ag'))
+    await wait(); await wait()
+    assert.deepEqual(assigned, [], 'a fragment is not a navigation')
+    click(place('<button>go</button>', 'b7tn'))
+    await wait(); await wait()
+    assert.deepEqual(assigned, [])
+  } finally {
+    globalThis.location = loc
+    delete globalThis.reportError
+  }
+})
+

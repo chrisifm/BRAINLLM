@@ -6,6 +6,7 @@
   import Button from '../ui/button.brain'
 
   export async function load(ctx) {
+    if (ctx.user) throw redirect('/account')
     const native = Boolean(ctx.backend)
     return { configured: native || auth.configured(), native }
   }

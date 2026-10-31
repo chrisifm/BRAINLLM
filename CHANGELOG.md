@@ -44,6 +44,19 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - An idle worker starts a new job within about 50 ms through Postgres `LISTEN/NOTIFY`, with polling as a fallback. Upgrading: run `brain backend migrate` to add the `_brain_workers` table.
 - A restart under a process manager no longer fails with `Address already in use`: `brain start`, `brain backend serve` and the generated `server.mjs` wait up to 10 s for the port, and `brain run` waits 1 s before moving to the next port. Two live servers never share a port, and the error now names the live holder and how to find it.
 - A job or server module with a local variable named like a runtime helper, such as `const key`, no longer fails the build with `imports /@brain/brain-ch.js, which the build did not emit`.
+### Navigation, forms and views
+- After a client navigation focus moves to the page heading (or the URL's fragment target, or the region) and `#brain-announce` reads the new title; a focus the new page set itself is respected and scroll behaviour is unchanged.
+- New apps start with a skip link to `#brain-view` in `app.brain`.
+- A rejected form no longer says "Check the highlighted fields." when nothing is highlighted: a 422 without fields shows the backend's fix or a plain sentence, errors naming no field of the form become `f.error` (`form.rejected` when empty), also without JS, and `<ErrorState>` has `error_state.rejected`.
+- Error pages always say what happened: `_error.brain` and `views/403|404|410|5xx.brain` without a `<meta seo title>` get a default title and `noindex`, in the build, in production and in dev; a view's own values win.
+- A status page opened directly answers its status: `/403`, `/404`, `/410`, `/5xx` and their `.html` return that code instead of 200 when the app has the page, and the new app's `views/403.brain` no longer says "Missing permission: not specified" when no permission was named. Static hosts keep their own rules.
+- `liveResource` no longer looks stuck when the session is gone: a refused connection reads the resource once per outage, and a 401 ends in `auth-required` instead of spending the retries.
+- `liveResource` says why a public page has no socket: rooms with a null scope report `anonymous` instead of `idle`, `scope: () => null` is reported by `brain check` (B0775), and `brain guide sockets` covers who can connect, every state and session changes.
+- `<Input>`, `<Select>` and `<Checkbox>` bound to a form field take its name, as a native field does, so a form without JavaScript sends them too.
+- `/favicon.ico` redirects to `public/favicon.svg` when the app has only the SVG icon, in production and in dev.
+- `brain check` reports a link nothing answers (B0776, one finding per source line) and a view title that repeats what `titleTemplate` adds (B0777); before, the first waited for `brain build` and the second went unnoticed.
+- A link inside an island whose chunk failed still navigates instead of losing the click, and a lazy component in `interaction` mode acts on the key that loaded it and never replays a press from before a failed import.
+- The new app's `/login` sends a signed-in user to `/account`, and `brain guide views` has the recipe for session-dependent navigation.
 
 ### Signature
 - HTML documents now carry `X-Generated-By` with the official site and repository in `brain start`, `_headers`, nginx and Caddy. It replaces `X-Powered-By` and adds nothing visible to the page.

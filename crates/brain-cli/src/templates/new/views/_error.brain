@@ -1,4 +1,5 @@
 <meta props="message:str='' rid:str=''">
+<meta seo title="Something went wrong" description="The page could not be loaded. Try again in a moment." robots="noindex">
 
 <script>
   const retry = () => location.reload()

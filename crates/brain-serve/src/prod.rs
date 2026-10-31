@@ -280,8 +280,14 @@ impl Static {
             let cache = if code == 301 || code == 308 { "public, max-age=3600" } else { "no-store" };
             return write(&mut s, code, &[("Location".into(), loc), ("Cache-Control".into(), cache.into())], b"", head);
         }
-        let (status, file) = match inner.as_deref().and_then(|p| self.resolve(p)) {
-            Some(f) => (200, f),
+        // browsers still ask for /favicon.ico: the app's SVG icon answers it
+        if inner.as_deref() == Some("/favicon.ico") && self.resolve("/favicon.ico").is_none() && self.resolve("/favicon.svg").is_some() {
+            let location = format!("{}/favicon.svg", self.pre);
+            return write(&mut s, 301, &[("Location".into(), location), ("Cache-Control".into(), "public, max-age=86400".into())], b"", head);
+        }
+        let (status, file) = match inner.as_deref().and_then(|p| self.resolve(p).map(|f| (p, f))) {
+            // a status page opened directly answers its status, as server.mjs does
+            Some((p, f)) => (reserved_status(p).unwrap_or(200), f),
             None => match ["404.html", "404.brain"]
                 .iter()
                 .map(|f| self.dist.join(f))
@@ -402,6 +408,12 @@ pub(crate) fn with_analytics(html: &str, pre: &str) -> String {
     } else {
         format!("{html}{tag}")
     }
+}
+
+/// `/403`, `/404.html`, `/503`…: the status of a page named after one (a file is only served when it exists).
+fn reserved_status(path: &str) -> Option<u16> {
+    let code: u16 = path.strip_prefix('/')?.trim_end_matches(".html").parse().ok()?;
+    matches!(code, 403 | 404 | 410 | 500..=599).then_some(code)
 }
 
 /// Accept only complete coding tokens and honor q=0, relative weights and wildcard fallback.
@@ -784,6 +796,40 @@ mod tests {
         let r = get("# brain trailingSlash=always host=https://shop.example\n", "/about", "www.shop.example");
         assert!(r.contains("Location: https://shop.example/about/\r\n"), "{r}");
         assert!(get("# brain trailingSlash=always host=https://shop.example\n", "/about/", "127.0.0.1:8080").ends_with("about-page"));
+        std::fs::remove_dir_all(&dist).unwrap();
+    }
+
+    #[test]
+    fn status_pages_answer_their_status_and_the_svg_icon_answers_favicon_ico() {
+        use std::io::{Read, Write};
+        use std::net::{TcpListener, TcpStream};
+        let dist = std::env::temp_dir().join(format!("brain-prod-status-{}", std::process::id()));
+        std::fs::create_dir_all(&dist).unwrap();
+        for f in ["403.html", "404.html", "503.html", "index.html", "2025.html"] {
+            std::fs::write(dist.join(f), f).unwrap();
+        }
+        let get = |path: &str| {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let handler = Static::load(&dist, "/");
+            let task = std::thread::spawn(move || handler.handle(listener.accept().unwrap().0).unwrap());
+            let mut c = TcpStream::connect(addr).unwrap();
+            write!(c, "GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+            let mut r = String::new();
+            c.read_to_string(&mut r).unwrap();
+            task.join().unwrap();
+            r
+        };
+        for (path, status) in [("/403", "403"), ("/403.html", "403"), ("/404", "404"), ("/503", "503"), ("/2025", "200"), ("/", "200")] {
+            let r = get(path);
+            assert!(r.starts_with(&format!("HTTP/1.1 {status}")), "{path}: {r}");
+        }
+        assert!(get("/favicon.ico").starts_with("HTTP/1.1 404"), "no icon, no redirect");
+        std::fs::write(dist.join("favicon.svg"), "<svg/>").unwrap();
+        let r = get("/favicon.ico");
+        assert!(r.starts_with("HTTP/1.1 301") && r.contains("Location: /favicon.svg\r\n"), "{r}");
+        std::fs::write(dist.join("favicon.ico"), "ico").unwrap();
+        assert!(get("/favicon.ico").starts_with("HTTP/1.1 200"), "a real .ico wins");
         std::fs::remove_dir_all(&dist).unwrap();
     }
 

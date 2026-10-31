@@ -1036,6 +1036,7 @@ fn build_inner_with_options(
     let shell = std::fs::read_to_string(input.root.join("app.brain")).unwrap_or_else(|_| "<html lang=\"en\"><head><meta charset=\"utf-8\"></head><body><slot /></body></html>".into());
     let (shell, _) = take_block(&shell, "script");
     let shell = strip_meta_seo(&shell);
+    let shell = unindent_shell(&shell);
     let (shell, shell_style) = take_block(&shell, "style");
     let (shell, shell_style) = if class_map.is_empty() { (shell, shell_style) } else { (classes::rename_class_attrs(&shell, &class_map), classes::rename_css(&shell_style, &class_map)) };
     struct Plan {
@@ -1381,7 +1382,10 @@ fn build_inner_with_options(
                     String::new()
                 } else {
                     let entries: Vec<_> = with_loading.iter().map(|(route,url)|((*route).clone(),url.clone())).collect();
-                    format!(",core:{},loading:[{}]", prerender_json(&core), navigation::loading(&entries))
+                    // one loading view for every route (views/_loading.brain alone): one pattern instead of one per route
+                    let every = with_loading.len() == views.iter().filter(|(r, _)| r != "*").count() && with_loading.windows(2).all(|w| w[0].1 == w[1].1);
+                    let table = if every { format!("{{rx:\"^/\",view:{}}}", prerender_json(&with_loading[0].1)) } else { navigation::loading(&entries) };
+                    format!(",core:{},loading:[{table}]", prerender_json(&core))
                 };
                 // #283: `guards` = folder route → chunk of its `_guard.jsbrain` (RUNTIME runs them outermost first)
                 let mut guard_dirs: BTreeMap<String, String> = BTreeMap::new();
@@ -1484,7 +1488,7 @@ fn build_inner_with_options(
         .map(|path|if path=="/" {path} else {path.trim_end_matches('/').to_string()}).collect();
     zero_paths.sort();
     let zero_json = format!("[{}]",zero_paths.iter().map(|path|prerender_json(path)).collect::<Vec<_>>().join(","));
-    let router_tag = router_tag.replace("__BRAIN_ZERO_PATHS__",&zero_json);
+    let router_tag = if zero_json == "[]" { router_tag.replace(",fullLoad:__BRAIN_ZERO_PATHS__", "") } else { router_tag.replace("__BRAIN_ZERO_PATHS__", &zero_json) };
     // Nonstatic pages retain hydration across client navigation; static targets use full navigation.
     // hydrate() so islands arriving through the router resume (the core is one cached chunk).
     let hydrate_everywhere = !router_tag.is_empty() && plans.iter().any(|p| p.interactive);
@@ -1508,6 +1512,16 @@ fn build_inner_with_options(
         };
         let static_seo = seo_of(&p.view);
         over(&mut seo, &static_seo);
+        // an error view that names no title still says what happened, and an error page never enters the index
+        if let Some((_, title)) = reserved_view(&p.view) {
+            let has = |k: &str| static_seo.iter().any(|(a, _)| a == k) || r.is_some_and(|r| r.seo.iter().any(|(a, _)| a == k));
+            if !has("title") {
+                over(&mut seo, &[("title".to_string(), title.to_string())]);
+            }
+            if !has("robots") {
+                over(&mut seo, &[("robots".to_string(), "noindex".to_string())]);
+            }
+        }
         if let Some(r) = r {
             // the compiler already applied app.brain's titleTemplate inside seo(props): never twice
             if r.seo.iter().any(|(k, _)| k == "title") {
@@ -2002,6 +2016,31 @@ fn rpc_hash(js: &str, f: &str) -> Option<String> {
     })
 }
 
+/// Indentation in front of a tag is never rendered and is sent on every page. Lines stay, so inline spacing is the same;
+/// a shell with whitespace-sensitive or inline-script content is left as written.
+fn unindent_shell(shell: &str) -> String {
+    if ["<pre", "<textarea", "<script"].iter().any(|t| shell.contains(t)) {
+        return shell.to_string();
+    }
+    shell.lines().map(|l| if l.trim_start().starts_with('<') { l.trim_start() } else { l }).collect::<Vec<_>>().join("\n")
+}
+
+/// The views the framework answers with an error status: `_error.brain` in any folder and `views/403|404|410|5xx.brain`.
+/// Gives the status and the title the page shows when the view names none.
+pub fn reserved_view(view: &str) -> Option<(u16, &'static str)> {
+    if view.ends_with("/_error.brain") {
+        return Some((500, "Something went wrong"));
+    }
+    let code: u16 = view.strip_prefix("views/")?.strip_suffix(".brain")?.parse().ok()?;
+    match code {
+        403 => Some((403, "Access denied")),
+        404 => Some((404, "Page not found")),
+        410 => Some((410, "Page removed")),
+        500..=599 => Some((code, "Something went wrong")),
+        _ => None,
+    }
+}
+
 /// app.brain's `<meta seo …>` holds site defaults (read through `seo_of`); it is not markup of the page.
 pub fn strip_meta_seo(src: &str) -> String {
     let mut out = src.to_string();
@@ -2256,6 +2295,28 @@ fn needs_space(prev: Option<char>, next: char) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_shell_loses_indentation_only_where_it_is_safe() {
+        assert_eq!(super::unindent_shell("<head>\n  <title>x</title>\n</head>\n  text\n"), "<head>\n<title>x</title>\n</head>\n  text");
+        let pre = "<body>\n  <pre>\n  a</pre>\n</body>";
+        assert_eq!(super::unindent_shell(pre), pre);
+        let script = "<head>\n  <script>const t = `\n  <b>`</script>\n</head>";
+        assert_eq!(super::unindent_shell(script), script);
+    }
+
+    #[test]
+    fn reserved_views_are_the_error_views_only() {
+        use super::reserved_view as r;
+        assert_eq!(r("views/_error.brain"), Some((500, "Something went wrong")));
+        assert_eq!(r("views/admin/_error.brain"), Some((500, "Something went wrong")));
+        assert_eq!(r("views/403.brain"), Some((403, "Access denied")));
+        assert_eq!(r("views/410.brain"), Some((410, "Page removed")));
+        assert_eq!(r("views/503.brain"), Some((503, "Something went wrong")));
+        for ordinary in ["views/home.brain", "views/200.brain", "views/600.brain", "views/a/403.brain", "views/_loading.brain"] {
+            assert_eq!(r(ordinary), None, "{ordinary}");
+        }
+    }
+
     use super::*;
 
     #[test]

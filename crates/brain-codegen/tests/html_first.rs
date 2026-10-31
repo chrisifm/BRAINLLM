@@ -87,3 +87,18 @@ fn arrow_submit_carries_the_server_id_to_form() {
     assert!(o.js.contains("name=\\\"_brain\\\""), "{}", o.js);
     assert!(o.server_js.contains("export const $forms = { login:"), "{}", o.server_js);
 }
+
+#[test]
+fn kit_fields_inherit_the_form_field_name_like_native_ones() {
+    let src = |field: &str| format!("<script>\n  const f = form({{ email: 'email!', address: {{ city: 'str' }}, ok: 'bool' }}, {{ submit: async (v) => v }})\n  let plain = sig('')\n</script>\n<form on:submit={{f.submit}}>{field}<button>Go</button></form>\n");
+    let js = |field: &str| brain_codegen::compile(&src(field), Path::new("comp/x.brain")).unwrap_or_else(|d| panic!("{d:#?}")).js;
+    assert!(js("<Input label=\"E\" bind:value={f.v.email} />").contains("name: \"email\""));
+    assert!(js("<Input label=\"C\" bind:value={f.v.address.city} />").contains("name: \"address.city\""));
+    assert!(js("<Select label=\"C\" options={['a']} bind:value={f.v.email} />").contains("name: \"email\""));
+    assert!(js("<Checkbox label=\"O\" bind:checked={f.v.ok} />").contains("name: \"ok\""));
+    // an explicit name wins, a value outside a form has none, and a component of the app decides for itself
+    assert!(!js("<Input label=\"E\" name=\"mail\" bind:value={f.v.email} />").contains("name: \"email\""));
+    assert!(!js("<Input label=\"E\" bind:value={plain} />").contains("name: \""));
+    assert!(!js("<Tabs label=\"T\" tabs={[]} bind:value={f.v.email} />").contains("name: \"email\""));
+}
+

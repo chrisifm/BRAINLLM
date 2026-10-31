@@ -314,3 +314,35 @@ test('f.errors(map) marks server errors on fields after submit (the API the B013
   assert.equal(f.err.age, '')
   assert.equal(f.err.nope, undefined)
 })
+
+test('errors without a field of this form are shown as f.error, never lost; a marked field stays the only signal', async () => {
+  const run = async thrown => {
+    let f
+    const d = mount(() => { f = form({ name: 'str' }, { submit: async () => { throw thrown } }); return doc.createTextNode('') }, doc.body)
+    await f.submit({ preventDefault() {} })
+    const out = [f.error, f.err.name]
+    d()
+    return out
+  }
+  assert.deepEqual(await run({ errors: {} }), ['This could not be saved. Check it and try again.', ''])
+  assert.deepEqual(await run({ errors: { other: 'Already taken' } }), ['Already taken', ''])
+  assert.deepEqual(await run({ errors: { name: 'Too short', other: 'x' } }), ['', 'Too short'])
+  assert.deepEqual(await run({ status: 422, errors: null, message: 'Remove invalid bytes' }), ['Remove invalid bytes', ''])
+})
+
+test('a form posted without JS whose errors name no field still says so; its own message wins', () => {
+  const id = 'h/save', read = st => {
+    globalThis.__brainForms = { [id]: st }
+    let f
+    const submit = async () => {}
+    submit.id = id
+    const d = mount(() => { f = form({ name: 'str' }, { submit }); return doc.createTextNode('') }, doc.body)
+    const out = f.error
+    d()
+    globalThis.__brainForms = null
+    return out
+  }
+  assert.equal(read({ values: {}, errors: {}, error: '' }), 'This could not be saved. Check it and try again.')
+  assert.equal(read({ values: {}, errors: {}, error: 'Busy' }), 'Busy')
+  assert.equal(read({ values: { name: 'a' }, errors: { name: 'Bad' }, error: '' }), '')
+})

@@ -15,6 +15,8 @@ Adding a page, a dynamic route, a section with shared chrome, or protecting page
 | `views/<dir>/_guard.jsbrain` | runs before every view of its folder, on the server and before client navigation |
 | `views/<dir>/_loading.brain` · `_error.brain` | shown while `load` runs · when it fails |
 
+Error views answer with their status, also when opened directly (`/403` is a 403). Without a `<meta seo title>` they get a default title and `noindex`; the server cannot change a static host, so set the same rule there. A streamed page has already sent its head when `load` fails late: its region shows the error, its title stays.
+
 ## Steps
 1. `brain add view users` → `views/users.brain` with `<meta seo>`, `<main><h1>` and an optional `load`.
    Dynamic: `brain add view users/[id]`. Folder chrome: `brain add layout users`. Protection: `brain add guard admin`.
@@ -57,6 +59,23 @@ In code: `let r = route()` → `{r.navigating ? 'Saving draft…' : ''}`.
   page load and the server guard decides. Never mirror auth in a client store to skip the guard.
 - `redirect()` only to same-origin paths or hosts listed in `brain.json` `redirects` (B0710 open redirect).
 - Hosted under a sub-path: set `brain.json` `"base": "/app/"` and keep writing app-absolute paths (`/about`).
+
+## Session-dependent navigation
+`app.brain` is static, so a nav that changes with the session lives in `views/_layout.brain`. The cookie is HttpOnly and
+the store starts empty on every page load: ask the server once, for display only (guards still decide access).
+
+```brain
+<script>
+  import session from '../channels/session.jsbrain'
+  server: async function whoami(ctx) { return ctx.user || null }
+  fx(() => { whoami().then((user) => { session.user = user }, () => {}) })
+</script>
+<nav>{#if session.user}<a href="/account">Account</a>{:else}<a href="/login">Sign in</a>{/if}</nav>
+<slot />
+```
+
+A signed-in user who opens `/login` leaves from its `load`: `if (ctx.user) throw redirect('/account')`. The new app's
+login does this; its layout shows the sign-in link until a view sets the store, so add `whoami` when the nav matters.
 
 ## Verify
 ```bash

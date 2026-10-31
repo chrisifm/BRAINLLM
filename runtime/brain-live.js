@@ -68,14 +68,14 @@ function createBroker() {
   const members = new Set(), joined = new Map(), waiting = [], events = new Map()
   let socket = null, epoch = 0, scope = null, terminal = '', ready = false
   let reconcileQueued = false, retryTimer, readyTimer, heartbeat, pongTimer, flushTimer
-  let attempts = 0, retryStart = 0, lastConnect = 0, healthySince = 0
+  let attempts = 0, retryStart = 0, lastConnect = 0, healthySince = 0, probed = false
 
   const update = () => {
     for (const member of members) {
       const active = [...member.rooms.keys()].some(key => joined.get(key) === 'ready')
       const forbidden = member.rooms.size > 0 && [...member.rooms.keys()].every(key => joined.get(key) === 'forbidden')
       member.up.v = !!(socket && ready && member.scope && member.scope === scope && active)
-      member.state.v = !member.scope || !member.rooms.size ? 'idle' : terminal || (member.refreshState || (forbidden ? 'forbidden' : member.up.v ? 'open' : retryTimer ? 'retrying' : 'connecting'))
+      member.state.v = !member.rooms.size ? 'idle' : !member.scope ? 'anonymous' : terminal || (member.refreshState || (forbidden ? 'forbidden' : member.up.v ? 'open' : retryTimer ? 'retrying' : 'connecting'))
     }
   }
   const clearMember = member => {
@@ -105,6 +105,20 @@ function createBroker() {
     for (const member of members) { clearMember(member); member.up.v = false }
   }
   const reject = state => { stop(); terminal = state; update() }
+  // The browser hides the status of a refused upgrade, so a closed session looks like a network failure. Once per
+  // outage, the resource's own read says which it is: a 401 is final, anything else keeps the retries.
+  const refused = () => {
+    if (probed) return
+    probed = true
+    for (const member of members) if (member.scope) {
+      try { untrack(() => member.node.refetch()) } catch { continue }
+      setTimeout(() => {
+        if (!members.has(member) || terminal || ready) return
+        Promise.resolve(untrack(() => member.node.v)).catch(e => { if (e && e.status === 401 && members.has(member) && !ready) reject('auth-required') })
+      }, 0)
+      return
+    }
+  }
   const send = value => {
     if (!socket || socket.readyState !== 1 || socket.bufferedAmount > BUFFER) return false
     const text = JSON.stringify(value)
@@ -201,15 +215,17 @@ function createBroker() {
     try { address = endpoint() } catch { reject('invalid-config'); return }
     try { socket = new G.WebSocket(address, 'brain.v1') } catch { retry(); return }
     readyTimer = setTimeout(() => { if (epoch === captured) retry() }, READY_MS)
+    let opened = false
     socket.onopen = () => {
       if (epoch !== captured) return
+      opened = true
       if (socket.protocol !== 'brain.v1') reject('protocol-error')
     }
     socket.onerror = () => { /* close or the ready deadline owns retries; arbitrary browser errors are not retained. */ }
     socket.onclose = event => {
       if (epoch !== captured) return
       if (event.code === 1008) reject(event.reason === 'Authentication expired' ? 'auth-required' : 'policy-closed')
-      else retry()
+      else { if (!opened) refused(); retry() }
     }
     socket.onmessage = event => {
       if (epoch !== captured) return
@@ -217,7 +233,7 @@ function createBroker() {
       if (!value) { reject('protocol-error'); return }
       if (value.type === 'ready') {
         if (ready) { reject('protocol-error'); return }
-        clearTimeout(readyTimer); readyTimer = null; ready = true
+        clearTimeout(readyTimer); readyTimer = null; ready = true; probed = false
         syncRooms(desired().rooms)
         heartbeat = setInterval(() => {
           if (!send({ type: 'ping' })) { retry(); return }
@@ -279,7 +295,7 @@ function createBroker() {
     },
     reconnect(member) {
       if (!members.has(member)) return
-      stop(); terminal = ''; attempts = 0; retryStart = 0; queue()
+      stop(); terminal = ''; attempts = 0; retryStart = 0; probed = false; queue()
     },
   }
 }

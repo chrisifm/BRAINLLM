@@ -98,7 +98,8 @@ export function hydrate(r = document, rt) {
         e.stopPropagation()
         ;(el.$b || (el.$b = resume(el, s))).then(
           n => (n = at(n, path)) && n.dispatchEvent(new e.constructor(t, e)),
-          x => I.oops(x, null, 'island') // reported once to the catcher, never an unhandled rejection
+          // a real link still goes where it points (last navigation wins over _cf's reload); the rest is reported once
+          x => { const a = e.target.closest('a[href]'); a && (a.getAttribute('href') || '#')[0] != '#' ? location.assign(a.href) : I.oops(x, null, 'island') }
         )
       },
       true

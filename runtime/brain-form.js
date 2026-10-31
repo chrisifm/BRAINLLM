@@ -174,8 +174,8 @@ function createForm(schema, o, readRule, validateRule, remote) {
   const st = posted(o.submit && o.submit.id)
   const { v, err } = build(schema, '', st ? st.values : o.init)
   if (st) {
-    for (const p in st.errors || {}) if (byPath[p]) (byPath[p].e.v = String(st.errors[p])), (byPath[p].touched = true)
-    error.v = st.error || ''
+    mark(st.errors || {})
+    if (st.error) error.v = st.error
   }
   const now = () => JSON.stringify(F.map(x => x.s.v))
   saved.v = untrack(now)
@@ -190,12 +190,16 @@ function createForm(schema, o, readRule, validateRule, remote) {
     }
     return r
   }
+  // errors with no field on this form never vanish: the first one (or a plain sentence) becomes f.error
   function mark(errors) {
     batch(() => {
+      let hit, left
       for (const p in errors) {
         const x = byPath[p]
-        if (x) (x.e.v = String(errors[p])), (x.touched = true)
+        if (x) (x.e.v = String(errors[p])), (x.touched = hit = true)
+        else left ??= errors[p]
       }
+      if (!hit) error.v = String(left ?? msg('form.rejected', 'This could not be saved. Check it and try again.'))
       shown.v++
     })
   }

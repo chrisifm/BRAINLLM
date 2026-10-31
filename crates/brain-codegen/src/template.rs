@@ -828,6 +828,16 @@ impl Gen<'_> {
                 props.push(format!("urlKey: {}",js_str(&format!("ui.dialog.{}.{}",self.url_namespace,identity))));
             }
         }
+        // The kit's fields carry a form field's name like a native element does, so a JS-less POST sends them too.
+        if matches!(r.name.as_str(), "Input" | "Select" | "Checkbox") && self.scopes.lookup(&r.name).is_none() && !r.attrs.iter().any(|a| a.name == "name" && a.kind != AttrKind::Bind) {
+            let name = r.attrs.iter().find_map(|a| match (&a.kind, &a.value) {
+                (AttrKind::Bind, AttrValue::Expr(x)) if matches!(a.name.as_str(), "value" | "checked") => form_field(x).filter(|(v, _)| self.scopes.lookup(v) == Some(Kind::Form)).map(|(_, p)| p),
+                _ => None,
+            });
+            if let Some(name) = name {
+                props.push(format!("name: {}", js_str(&name)));
+            }
+        }
         for a in &r.attrs {
             match (a.kind, &a.value) {
                 (AttrKind::Plain, AttrValue::Text(t)) => props.push(format!("{}: {}", js_str(&a.name), js_str(t))),

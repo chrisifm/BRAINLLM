@@ -101,7 +101,7 @@ pub const REVALIDATE: &str = "no-cache";
 pub const PUBLIC_SWR: &str = "no-cache";
 
 /// Registration snippet (not part of the core runtime: §35 keeps the 4 KB budget), for an app at the root.
-pub const REGISTER: &str = "<script>if('serviceWorker'in navigator&&(location.protocol=='https:'||/^(localhost|127\\.0\\.0\\.1|\\[::1\\])$/.test(location.hostname)))addEventListener('load',()=>(self.requestIdleCallback||setTimeout)(()=>navigator.serviceWorker.register('/sw.js',{updateViaCache:'none'}).then(r=>r.update())))</script>";
+pub const REGISTER: &str = "<script>if(isSecureContext&&'serviceWorker'in navigator)addEventListener('load',()=>(self.requestIdleCallback||setTimeout)(()=>navigator.serviceWorker.register('/sw.js',{updateViaCache:'none'}).then(r=>r.update())))</script>";
 
 /// The registration for an app hosted under `base` (`/app/`): the worker file and its scope live under it.
 pub fn register(base: &str) -> String {

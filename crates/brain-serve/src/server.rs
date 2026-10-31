@@ -974,6 +974,12 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
         Some(p) if !file.exists() && p.is_file() => p,
         _ => file,
     };
+    // browsers still ask for /favicon.ico: the app's SVG icon answers it, as in production
+    let file = if req.path == "/favicon.ico" && !file.exists() && ctx.root.join("public/favicon.svg").is_file() {
+        ctx.root.join("public/favicon.svg")
+    } else {
+        file
+    };
     // §10 transition: an app that still has tokens.brain.css also answers at /tokens.cssbrain.
     let file = if req.path == "/tokens.cssbrain" && !file.exists() {
         ctx.root.join("tokens.brain.css")
@@ -1538,7 +1544,7 @@ fn app_page(ctx: &Ctx, req: &http::Request) -> (u16, String, Option<String>) {
                     )
                     .replace("</", "<\\/");
                     (
-                        if r.not_found { 404 } else { 200 },
+                        if r.not_found { 404 } else { brain_pack::reserved_view(&r.view).map_or(200, |(status, _)| status) },
                         format!(
                             "<div id=\"brain-view\"></div><script type=\"application/json\" id=\"brain-route\">{data}</script><script type=\"module\">import{{route}}from'/@brain/client.js';route()</script>"
                         ),
@@ -1551,6 +1557,16 @@ fn app_page(ctx: &Ctx, req: &http::Request) -> (u16, String, Option<String>) {
     // dev mirrors production: the SEO tags of seo(props) and the view's <head> block, deduplicated over app.brain's
     // the title comes from the view's evaluated seo(props) (the compiler already applied app.brain's titleTemplate)
     let mut title: Option<String> = None;
+    // an error page from fixed_view has no load(): its own <meta seo>, else the title production gives it
+    if view_seo.is_none() && status >= 400 {
+        if let Some(view) = fixed_view_of(&slot) {
+            view_seo = view_meta(ctx, &view, "{}").filter(|(seo, _)| seo.iter().any(|(k, _)| k == "title"));
+            if view_seo.is_none() {
+                title = brain_pack::reserved_view(&view).map(|(_, t)| titled(&ctx.root, t));
+                head_extra.push_str("<meta name=\"robots\" content=\"noindex\">");
+            }
+        }
+    }
     if let Some((seo, head)) = &view_seo {
         let (t, tags) = brain_pack::prerender::seo_head(seo, None, &req.path, "");
         title = t.or(title);
@@ -1774,6 +1790,19 @@ fn error_view(root: &Path, view: &str) -> String {
 }
 
 /// A specific view (403, _error) mounted with `props`; a plain notice when the app has no such view.
+/// The view a `fixed_view` answer mounts, read back from its route data.
+fn fixed_view_of(slot: &str) -> Option<String> {
+    let (_, rest) = slot.split_once("\"v\":\"/")?;
+    Some(rest.split('"').next()?.to_string())
+}
+
+/// `title` through app.brain's `titleTemplate`, as the build writes it.
+fn titled(root: &Path, title: &str) -> String {
+    let src = std::fs::read_to_string(root.join("app.brain")).unwrap_or_default();
+    let template = brain_parse::parse(&src, Path::new("app.brain")).ok().and_then(|c| c.meta.iter().find(|m| m.name == "titleTemplate").and_then(|m| m.value.clone()));
+    template.map_or(title.to_string(), |t| t.replace("%s", title))
+}
+
 fn fixed_view(ctx: &Ctx, view: &str, props: &str, title: &str, detail: &str) -> String {
     if !ctx.root.join(view).is_file() {
         return format!(
@@ -3038,6 +3067,18 @@ mod admission_tests {
         std::fs::write(root.join("public/robots.txt"), "User-agent: *\nDisallow: /private\n").unwrap();
         assert!(get("/robots.txt").contains("Disallow: /private"));
         drop(dev);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn fixed_views_are_read_back_and_titled_like_the_build() {
+        let root = std::env::temp_dir().join(format!("brain-dev-fixed-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        assert_eq!(super::fixed_view_of("<script>{\"v\":\"/views/_error.brain\",\"l\":[]}</script>").as_deref(), Some("views/_error.brain"));
+        assert_eq!(super::fixed_view_of("<main role=\"alert\"><h1>Not found</h1></main>"), None);
+        assert_eq!(super::titled(&root, "Oops"), "Oops");
+        std::fs::write(root.join("app.brain"), "<meta seo titleTemplate=\"%s · Site\">\n<slot />\n").unwrap();
+        assert_eq!(super::titled(&root, "Oops"), "Oops · Site");
         let _ = std::fs::remove_dir_all(&root);
     }
 
