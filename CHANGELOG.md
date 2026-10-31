@@ -31,6 +31,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Fixed
 
+- `:global(…)` after the first compound of a component selector (`.list :global(a)`) passed `brain check`, but the
+  framework does not support `:global`, so the browser dropped the rule. It is now B0301 wherever it appears.
 - A `load()` exported from `views/_layout.brain` was silently never run, leaving the layout's props empty. `brain check`
   now reports it as B0117 with the fix (load in the view, or read shared state from a channel).
 - Production logs recorded a compiler budget failure (B0910/B0911) thrown by a view `load`, an RPC, a form or SSR as

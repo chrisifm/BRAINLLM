@@ -332,7 +332,7 @@ pub fn global_selectors(sheet: &CssSheet) -> Vec<(String, Span)> {
             for part in selector.split(',') {
                 let first = part.trim().split(|c: char| c.is_whitespace() || c == '>' || c == '+' || c == '~').next().unwrap_or("");
                 let base = first.split([':', '.', '[', '#']).next().unwrap_or("");
-                if first.starts_with(":root") || first.starts_with(":global") || base == "html" || base == "body" || first == "*" {
+                if first.starts_with(":root") || part.contains(":global(") || first.starts_with(":global") || base == "html" || base == "body" || first == "*" {
                     out.push((part.trim().to_string(), *span));
                 }
             }
@@ -619,6 +619,10 @@ mod tests {
         let s = parse_str(":root { --x: 1 } body, .a { margin: 0 } .b { }", "c.css").unwrap();
         let g: Vec<String> = global_selectors(&s).into_iter().map(|g| g.0).collect();
         assert_eq!(g, vec![":root", "body"]);
+        // `:global(…)` is not supported anywhere in a selector; past the first compound the browser dropped the rule
+        let s = parse_str(".x :global(a) { color: red } .y > :global(.z) { } .w { }", "c.css").unwrap();
+        let g: Vec<String> = global_selectors(&s).into_iter().map(|g| g.0).collect();
+        assert_eq!(g, vec![".x :global(a)", ".y > :global(.z)"]);
     }
 
     #[test]
