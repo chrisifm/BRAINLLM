@@ -686,6 +686,10 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
                 Err(message) => vec![message],
             };
             for message in contract_errors {
+                // A handler holding a secret is already B0773, on the same file and with the real fix.
+                if message.contains("detected secret literal") && diags.iter().any(|d| d.code == "B0773" && message.starts_with(&format!("{}:", d.file))) {
+                    continue;
+                }
                 // Contract errors start with the file that names the problem and may end with their own fix.
                 let (text, fix) = message.split_once("; fix: ").unwrap_or((message.as_str(), "inspect `brain backend schema --json`; fix the named literal schema, explicit policy or hook/job contract, then run brain check again"));
                 let file = text.split_once(": ").map(|(at, _)| at).filter(|at| (at.starts_with("server/") || *at == "brain.json") && !at.contains(' ')).unwrap_or("server/");
@@ -700,8 +704,8 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
                 let mut diag = compiler::Diag::new(code, &file, brain_parse::Span::default(), message, fix);
                 diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
             }
-            for message in route_executor::gateway_conflicts(&app) {
-                let mut diag = compiler::Diag::new("B0750", "server/routes/", brain_parse::Span::default(), message,
+            for (file, message) in route_executor::gateway_conflicts(&app) {
+                let mut diag = compiler::Diag::new("B0750", &file, brain_parse::Span::default(), message,
                     "give the route a path nothing else answers (for example /hooks/payments), or move the page or file; brain run and brain start proxy declared routes on the site's own origin");
                 diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
             }

@@ -105,9 +105,9 @@ pub fn gateway_routes(root: &Path) -> Result<Vec<(String, Vec<String>)>, String>
 
 /// B0750: a declared route the same-origin gateway could not serve without hiding something else. The gateway leaves
 /// it out, so the page or file keeps answering as it did before the route could cross the bridge.
-pub fn gateway_conflicts(root: &Path) -> Vec<String> {
+pub fn gateway_conflicts(root: &Path) -> Vec<(String, String)> {
     let Ok(routes) = declared(root) else { return vec![] };
-    conflicts(root, &routes).into_iter().map(|(_, message)| message).collect()
+    conflicts(root, &routes).into_iter().map(|(name, message)| (format!("server/routes/{name}/route.jsbrain"), message)).collect()
 }
 
 fn conflicts(root: &Path, routes: &[Route]) -> Vec<(String, String)> {

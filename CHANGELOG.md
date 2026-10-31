@@ -9,6 +9,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- Fix: `brain check` points B0786 at the exact column, B0750 at the route's `route.jsbrain` instead of `server/routes/`, and a handler holding a secret reports B0773 once, without a second B0735
 - Fix: the `brain upgrade` Markdown report lists the steps and reason of changes with no location in the app, and why a gate did not run; they appeared only in `--json`
 - Fix: a file whose bytes could not be removed is no longer orphaned; `_brain_file_deletions` keeps the delete and `brain backend serve` retries it until the bytes are gone. Run `brain backend migrate`
 - `brain check` warns B0790 when a route or webhook secret is missing or too short, instead of `brain backend serve` failing later; a route without its secret is still documented

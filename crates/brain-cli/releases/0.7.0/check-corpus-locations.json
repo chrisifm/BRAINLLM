@@ -1,0 +1,16 @@
+{
+  "id": "check-corpus-locations",
+  "kind": "fix",
+  "title": "brain check names exact locations for B0786 and B0750",
+  "why": "B0786 always said column 1, B0750 named a folder an editor cannot open, and a handler holding a secret was reported twice with a generic B0735.",
+  "changelog": [
+    "`brain check` points B0786 at the exact column"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "codes": [
+    "B0786",
+    "B0750",
+    "B0773",
+    "B0735"
+  ]
+}

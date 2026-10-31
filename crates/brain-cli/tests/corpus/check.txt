@@ -1,0 +1,537 @@
+# Each case is a small app: `### name`, `@expect <code> <file> <line>:<col>`, `@file <path>` followed by its content.
+# A code `brain check` cannot produce from source files says why with `@unreachable <code> <reason>`.
+@unreachable B0720 an empty key is judged per target by `brain build`, not by `brain check`
+@unreachable B0722 reported by `brain doctor`
+@unreachable B0725 reported by `brain doctor`; needs a git repository
+@unreachable B0726 reported by `brain doctor`
+@unreachable B0727 reported by `brain doctor`
+@unreachable B0728 reported by `brain doctor`
+@unreachable B0729 reported by `brain doctor`
+@unreachable B0732 reported by `brain doctor`
+@unreachable B0733 reported by `brain doctor`
+@unreachable B0734 reported by `brain doctor`
+@unreachable B0736 reported by `brain build` and `brain doctor`
+@unreachable B0740 answered by the running backend
+@unreachable B0741 answered by the production server
+@unreachable B0742 answered by the running backend
+@unreachable B0743 answered by the socket gateway
+@unreachable B0747 reported in the browser at runtime
+@unreachable B0748 reported when the backend starts
+@unreachable B0765 needs a live database
+@unreachable B0766 needs a live database
+@unreachable B0767 needs a live database
+@unreachable B0768 needs a live database
+@unreachable B0771 printed by `brain backend serve`
+@unreachable B0782 printed when the server starts
+@unreachable B0785 reported by `brain backend` commands
+@unreachable B0787 reported by `brain backend migrate` and `serve`
+
+### B0701 server module in client code
+@expect B0701 comp/x.brain 3:17
+@file lib/db.jsbrain
+<meta server>
+export const db = { all() { return [] } }
+@file comp/x.brain
+<script>
+import { db } from '../lib/db.jsbrain'
+const f = () => db.all()
+</script>
+<button on:click={f()}>Load</button>
+
+### B0702 private variable
+@expect B0702 comp/x.brain 2:11
+@file comp/x.brain
+<script>
+const k = process.env.STRIPE_KEY
+</script>
+<p>{k}</p>
+
+### B0703 secret literal
+@expect B0703 comp/x.brain 2:11
+@file comp/x.brain
+<script>
+const k = 'AKIAIOSFODNN7EXAMPLE'
+</script>
+<p>{k}</p>
+
+### B0704 server not async
+@expect B0704 comp/x.brain 2:1
+@file comp/x.brain
+<script>
+server: function save(ctx) { return 1 }
+</script>
+<button on:click={save()}>Save</button>
+
+### B0704 server in lib
+@expect B0704 lib/m.jsbrain 1:1
+@file lib/m.jsbrain
+server: async function g(ctx) { return 1 }
+
+### B0705 collection read in client
+@expect B0705 comp/x.brain 2:20
+@file comp/x.brain
+<script>
+const list = () => entries('blog')
+</script>
+<button on:click={list()}>Load</button>
+
+### B0706 foreign collection reader
+@expect B0706 views/x.brain 4:24
+@file views/x.brain
+<meta seo title="Posts page" description="All posts.">
+<script>
+export async function load() {
+  return { list: await getCollection('blog') }
+}
+</script>
+<main><h1>Posts</h1></main>
+
+### B0707 invalid server setting
+@expect B0707 brain.json 1:1
+@file brain.json
+{ "name": "Corpus", "server": { "maxBodyKB": -1 } }
+
+### B0710 open redirect
+@expect B0710 views/_guard.jsbrain 2:10
+@file views/_guard.jsbrain
+export default function guard(ctx) {
+  return redirect(ctx.query.next)
+}
+
+### B0711 request-built fetch
+@expect B0711 comp/x.brain 3:10
+@file comp/x.brain
+<script>
+server: async function pull(ctx, id) {
+  return fetch(id)
+}
+</script>
+<button on:click={pull('a')}>Pull</button>
+
+### B0713 session cookie
+@expect B0713 comp/x.brain 2:20
+@file comp/x.brain
+<script>
+const f = (t) => { document.cookie = `session=${t}` }
+</script>
+<button on:click={f(1)}>Set</button>
+
+### B0721 undeclared variable
+@expect B0721 .brain_env 2:1
+@file .brain_env
+PUBLIC_A=1
+@file views/x.brain
+<meta seo title="Page title here" description="A description.">
+<script>
+export async function load(ctx) {
+  return { v: ctx.env.NOT_DECLARED }
+}
+</script>
+<main><h1>{props.v}{import.meta.env.PUBLIC_A}</h1></main>
+
+### B0723 secret in a public variable
+@expect B0723 .brain_env 1:1
+@file .brain_env
+PUBLIC_KEY=sk-0123456789abcdefghijklmnop
+
+### B0724 malformed env line
+@expect B0724 .brain_env 2:1
+@file .brain_env
+GOOD=1
+not a valid line
+
+### B0730 client only
+@expect B0730 comp/x.brain 1:7
+@file comp/x.brain
+<meta client width="10px" height="10px">
+<p>x</p>
+
+### B0731 bad client size
+@expect B0730 comp/x.brain 1:7
+@expect B0731 comp/x.brain 1:14
+@file comp/x.brain
+<meta client width="wide">
+<p>x</p>
+
+### B0735 invalid contract
+@expect B0735 server/routes/pay/route.jsbrain 1:1
+@file server/routes/pay/route.jsbrain
+<meta server>
+export default { method: 'NOPE', path: '/pay' }
+@file server/routes/pay/handler.jsbrain
+<meta server>
+export default async function handle(ctx) {
+  return { ok: true }
+}
+
+### B0737 credential in session
+@expect B0737 comp/x.brain 3:3
+@file comp/x.brain
+<script>
+server: async function s(ctx, d) {
+  ctx.session.set({ password: d.password })
+}
+</script>
+<button on:click={s({})}>S</button>
+
+### B0738 grant admits nobody
+@expect B0738 server/auth/roles.jsbrain 1:1
+@file server/auth/roles.jsbrain
+<meta server>
+export default { roles: ['admin', 'member', 'editor'], signup_role: 'member' }
+@file server/resources/notes/schema.jsbrain
+<meta server>
+export default { title: 'str!', status: 'str!' }
+@file server/resources/notes/policy.jsbrain
+<meta server>
+export default { read: ['editor'], create: ['admin'], update: ['admin'], delete: ['admin'] }
+
+### B0739 implicit roles
+@expect B0738 server/auth/roles.jsbrain 1:1
+@expect B0739 server/auth/roles.jsbrain 1:1
+@file server/resources/notes/schema.jsbrain
+<meta server>
+export default { title: 'str!', status: 'str!' }
+@file server/resources/notes/policy.jsbrain
+<meta server>
+export default { read: ['company'], create: ['admin'], update: ['admin'], delete: ['admin'] }
+
+### B0744 origin shape
+@expect B0744 brain.json 1:47
+@file brain.json
+{ "name": "Corpus", "backend": { "origins": ["https://shop.example.org/"] } }
+
+### B0745 socket outside http
+@expect B0745 brain.json 1:108
+@file brain.json
+{ "name": "Corpus", "backend": { "origins": ["https://shop.example.org"], "sockets": { "allowedOrigins": ["https://other.example.org"] } } }
+
+### B0746 plain http call
+@expect B0746 comp/x.brain 2:17
+@file comp/x.brain
+<script>
+const f = () => fetch('http://api.shop.example.org/items')
+</script>
+<button on:click={f()}>Go</button>
+
+### B0749 public read with state
+@expect B0749 server/resources/posts/policy.jsbrain 1:1
+@file server/resources/posts/schema.jsbrain
+<meta server>
+export default { title: 'str!', status: 'str!' }
+@file server/resources/posts/policy.jsbrain
+<meta server>
+export default { read: ['public'], create: ['admin'], update: ['admin'], delete: ['admin'] }
+
+### B0750 route hides a view
+@expect B0750 server/routes/pay/route.jsbrain 1:1
+@file views/pay.brain
+<meta seo title="Payment page title" description="Pay.">
+<main><h1>Pay</h1></main>
+@file server/routes/pay/route.jsbrain
+<meta server>
+export default { method: 'POST', path: '/pay', auth: 'public' }
+@file server/routes/pay/handler.jsbrain
+<meta server>
+export default async function handle(ctx) {
+  return { ok: true }
+}
+
+### B0751 refused setting
+@expect B0751 .brain_env 1:1
+@file server/resources/notes/schema.jsbrain
+<meta server>
+export default { title: 'str!', status: 'str!' }
+@file server/resources/notes/policy.jsbrain
+<meta server>
+export default { read: ['admin'], create: ['admin'], update: ['admin'], delete: ['admin'] }
+@file .brain_env
+GOOGLE_CLIENT_ID=synthetic-client.apps.googleusercontent.com
+
+### B0760 mail without sender
+@expect B0760 .brain_env 1:1
+@file .brain_env
+BRAIN_MAIL_RESEND_KEY=re_0123456789abcdef0123456789
+
+### B0761 bucket without adapter
+@expect B0761 .brain_env 1:1
+@file .brain_env
+BRAIN_GCS_BUCKET=media
+
+### B0762 database url
+@expect B0762 .brain_env 1:1
+@file server/resources/notes/schema.jsbrain
+<meta server>
+export default { title: 'str!', status: 'str!' }
+@file server/resources/notes/policy.jsbrain
+<meta server>
+export default { read: ['admin'], create: ['admin'], update: ['admin'], delete: ['admin'] }
+@file .brain_env
+DATABASE_URL=postgres://corpus@db.shop.example.org/corpus
+
+### B0763 pool
+@expect B0763 .brain_env 1:1
+@file .brain_env
+BRAIN_DB_HTTP_POOL=0
+
+### B0764 public url for mail
+@expect B0764 .brain_env 3:1
+@file .brain_env
+BRAIN_MAIL_RESEND_KEY=re_0123456789abcdef0123456789
+BRAIN_MAIL_FROM=a@shop.example.org
+PUBLIC_SITE_URL=ftp://shop.example.org
+
+### B0770 bucket types
+@expect B0770 server/files/uploads.jsbrain 1:1
+@file server/files/uploads.jsbrain
+<meta server>
+export default { maxBytes: '1mb' }
+
+### B0772 handler default export
+@expect B0772 server/routes/pay/handler.jsbrain 1:1
+@file server/routes/pay/route.jsbrain
+<meta server>
+export default { method: 'POST', path: '/pay', auth: 'public' }
+@file server/routes/pay/handler.jsbrain
+<meta server>
+export const x = 1
+
+### B0773 handler secret
+@expect B0773 server/routes/pay/handler.jsbrain 1:1
+@file server/routes/pay/route.jsbrain
+<meta server>
+export default { method: 'POST', path: '/pay', auth: 'public' }
+@file server/routes/pay/handler.jsbrain
+<meta server>
+export default async function handle(ctx) {
+  return { key: 'AKIAIOSFODNN7EXAMPLE' }
+}
+
+### B0775 live never connects
+@expect B0775 comp/x.brain 3:17
+@file comp/x.brain
+<script>
+const rows = resource(() => api.get('/posts'))
+const updates = liveResource(rows, { rooms: [{ resource: 'posts' }], scope: () => null })
+</script>
+<p>{rows}{updates}</p>
+
+### B0776 dead link
+@expect B0776 views/index.brain 2:1
+@file views/index.brain
+<meta seo title="Home page title here" description="Home.">
+<main><h1>Home</h1><a href="/gone">Gone</a></main>
+
+### B0777 title repeats
+@expect B0777 views/users.brain 1:1
+@file app.brain
+<meta seo titleTemplate="%s | Corpus">
+<html lang="en"><head></head><body><slot /></body></html>
+@file views/users.brain
+<meta seo title="Users | Corpus" description="All users.">
+<main><h1>Users</h1></main>
+
+### B0780 stray brace
+@expect B0780 comp/x.brain 1:5
+@file comp/x.brain
+<p>a}</p>
+
+### B0781 await outside async
+@expect B0781 comp/x.brain 3:10
+@file comp/x.brain
+<script>
+function f() {
+  return await g()
+}
+const g = async () => 1
+</script>
+<button on:click={f()}>Go</button>
+
+### B0783 credential in a log
+@expect B0783 lib/m.jsbrain 2:3
+@file lib/m.jsbrain
+export function f(password) {
+  console.log(password)
+}
+
+### B0784 public trust proxy
+@expect B0784 server/platform.jsbrain 1:1
+@file server/platform.jsbrain
+<meta server>
+export default { trustProxy: ['8.8.8.0/24'] }
+
+### B0786 own session with native backend
+@expect B0786 server/own.jsbrain 3:6
+@file .brain_env
+BRAIN_BACKEND_URL=http://127.0.0.1:5182
+@file server/own.jsbrain
+<meta server>
+export async function f(ctx) {
+  ctx.session.set({ a: 1 })
+}
+
+### B0790 route secret
+@expect B0790 server/routes/pay/route.jsbrain 1:1
+@file server/routes/pay/route.jsbrain
+<meta server>
+export default { method: 'POST', path: '/pay/hook', auth: 'internal', internal: { secret: 'PAY_INTERNAL_SECRET' } }
+@file server/routes/pay/handler.jsbrain
+<meta server>
+export default async function handle(ctx) {
+  return { ok: true }
+}
+
+### B1401 missing key
+@expect B1401 i18n/en.json 3:1
+@expect B1401 i18n/es.json 3:1
+@file brain.json
+{ "name": "Corpus", "i18n": { "default": "en", "locales": ["en", "es"] } }
+@file i18n/en.json
+{
+  "hi": "Hello there"
+}
+@file i18n/es.json
+{
+  "hi": "Hola"
+}
+@file views/home.brain
+<meta seo title={t('hi')} description={t('hi')}>
+<main>
+  <h1>{t('missing')}</h1>
+</main>
+
+### B1401 declared locale without a file
+@expect B1401 i18n/es.json 1:1
+@file brain.json
+{ "name": "Corpus", "i18n": { "default": "en", "locales": ["en", "es"] } }
+@file i18n/en.json
+{
+  "hi": "Hello there"
+}
+
+### B1402 identical value
+@expect B1402 i18n/es.json 2:3
+@file brain.json
+{ "name": "Corpus", "i18n": { "default": "en", "locales": ["en", "es"] } }
+@file i18n/en.json
+{
+  "hi": "Hello there friend"
+}
+@file i18n/es.json
+{
+  "hi": "Hello there friend"
+}
+
+### B1403 fixed text
+@expect B1403 i18n/en.json 3:1
+@expect B1403 i18n/es.json 3:1
+@expect B1403 views/home.brain 3:7
+@file brain.json
+{ "name": "Corpus", "i18n": { "default": "en", "locales": ["en", "es"] } }
+@file i18n/en.json
+{
+  "hi": "Hello there"
+}
+@file i18n/es.json
+{
+  "hi": "Hola"
+}
+@file views/home.brain
+<meta seo title={t('hi')} description={t('hi')}>
+<main>
+  <h1>Fixed words here</h1>
+</main>
+
+### B1404 placeholder mismatch across locales
+@expect B1404 i18n/es.json 2:3
+@file brain.json
+{ "name": "Corpus", "i18n": { "default": "en", "locales": ["en", "es"] } }
+@file i18n/en.json
+{
+  "hi": "Hello {name}"
+}
+@file i18n/es.json
+{
+  "hi": "Hola {user}"
+}
+
+### B1404 placeholder not passed
+@expect B1404 views/home.brain 3:8
+@file brain.json
+{ "name": "Corpus", "i18n": { "default": "en", "locales": ["en", "es"] } }
+@file i18n/en.json
+{
+  "hi": "Hello {name}"
+}
+@file i18n/es.json
+{
+  "hi": "Hola {name}"
+}
+@file views/home.brain
+<meta seo title={t('hi', { name: 'a' })} description={t('hi', { name: 'a' })}>
+<main>
+  <h1>{t('hi')}</h1>
+</main>
+
+### B1405 invalid locale
+@expect B1405 brain.json 1:1
+@file brain.json
+{ "name": "Corpus", "i18n": { "default": "en", "locales": ["en", "english"] } }
+@file i18n/en.json
+{
+  "hi": "Hello there"
+}
+@file i18n/english.json
+{
+  "hi": "Hello"
+}
+
+### B1406 route for an unknown locale
+@expect B1406 views/about.brain 2:31
+@file brain.json
+{ "name": "Corpus", "i18n": { "default": "en", "locales": ["en", "es"] } }
+@file i18n/en.json
+{
+  "hi": "Hello there"
+}
+@file i18n/es.json
+{
+  "hi": "Hola"
+}
+@file views/about.brain
+<meta seo title={t('hi')} description={t('hi')}>
+<meta route es="/es/about-us" fr="/fr/about-us">
+<main><h1>{t('hi')}</h1></main>
+
+### B1407 relative route
+@expect B1407 views/about.brain 2:13
+@file brain.json
+{ "name": "Corpus", "i18n": { "default": "en", "locales": ["en", "es"] } }
+@file i18n/en.json
+{
+  "hi": "Hello there"
+}
+@file i18n/es.json
+{
+  "hi": "Hola"
+}
+@file views/about.brain
+<meta seo title={t('hi')} description={t('hi')}>
+<meta route es="about-us">
+<main><h1>{t('hi')}</h1></main>
+
+### job without workers needs a database to judge
+@file server/jobs/probe/schema.jsbrain
+<meta server>
+export default { x: 'str' }
+@file server/jobs/probe/handler.jsbrain
+<meta server>
+export default async function handle(ctx) {
+  return { ok: true }
+}
+
+### B0769 job without handler
+@expect B0769 server/jobs/probe/ 1:1
+@file server/jobs/probe/schema.jsbrain
+<meta server>
+export default { x: 'str' }
