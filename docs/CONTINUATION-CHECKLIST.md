@@ -173,8 +173,9 @@ Rust 1.99.1 release gate and do not establish cross-platform execution or whole-
   two socket-enabled Rust topologies; query/method/protocol/body rejection and credential projection included.
 - [x] Integrate deployment sources and verify compiler-rendered PM2/nginx configurations against tested templates.
   Node routing preserves its credential projection and bridge lifecycle; it does not rename cookies.
-- [ ] Run actual browser plus native PostgreSQL end-to-end CRUD/live/auth/session-switch/shutdown checks. Prefer an
-  installed connected Viewer as documented; report headless fallback, AX and heap coverage precisely.
+- [x] Run six actual compiled browser/native PostgreSQL cases on verified d0c7daf binary (Rust1.99.1). It used
+  explicit owned headless fallback, preserved user Viewer profiles and did not claim a new AX/whole-heap proof.
+- [ ] Re-run appropriate final binary/deployment acceptance after the separate thread-admission correction.
 - [x] Re-run administrative budget/required/no-JS cases on combined checkpoint 3987d0b. Keep the 30 KiB reference
   gate; fixed edit is 30,720 B exactly. Rerun when subsequent compiler/runtime changes affect emitted output.
 - [ ] Investigate source-map performance before any compiler-speed claim: seven paired diagnostic DEBUG runs showed
@@ -202,9 +203,8 @@ Rust 1.99.1 release gate and do not establish cross-platform execution or whole-
   Token-payload allocations dropped from 48,800 to one and full scanning from 48,813 to 14 for the measured
   571 KiB fixture. Allocation counts are not retained heap or a global timing result; final paired speed measurement
   and the fresh combined native binary remain pending.
-- [ ] Complete the actual compiled-app/PG/browser acceptance. Three owned browser contexts loaded the synthetic
-  app, and its disposable schema/auth/HTTP setup passed; CRUD/live cases stopped at the compile mismatch above.
-  This is not a successful end-to-end run or a migration of the requesting application.
+- [x] Complete actual compiled-app/PG/browser acceptance: six cases passed after the checker/module corrections.
+  This is a synthetic isolated application proof; the requesting application's data/backend were not migrated.
 
 ### Actual browser/native acceptance progress
 
@@ -214,16 +214,17 @@ The fixture and gate scripts have independent fingerprints. Owned headless Chrom
 because multiple Viewer profiles were connected without an assigned profile/tab; user sessions were preserved.
 
 - [x] Case 1: real compiled API SDK, HttpOnly JWT, fixed dev gateway, room join and owner-isolated DOM passed.
-- [ ] Case 2: anonymous HTTP/socket denial without private data. The original 401 test oracle was corrected to
-  the native owner-read policy's exact existing 403; complete rerun remains required.
-- [ ] Case 3: committed create/update/delete refresh and cross-owner metadata isolation.
-- [ ] Case 4: missed-change resynchronization and explicit reconnect generation.
-- [ ] Case 5: principal switching clears private state and closes the old generation.
-- [ ] Case 6: session revocation and actual owner disposal without destroying the browser document.
-- [ ] Resolve the intermittent dev exit during three-context setup. Safe cgroup process/memory evidence is being
-  collected; no application-code defect, memory leak or infrastructure cause is claimed from the exit alone.
+- [x] Case 2: anonymous HTTP/socket denial without private data; exact native owner-read policy 403 proved.
+- [x] Case 3: committed create/update/delete refresh and cross-owner metadata isolation.
+- [x] Case 4: missed-change resynchronization and explicit reconnect generation.
+- [x] Case 5: principal switching clears private state and closes the old generation.
+- [x] Case 6: session revocation and actual owner disposal without destroying the browser document.
+- [x] Attribute the intermittent setup exit: cgroup peak256/max256, two limit hits, OS thread errno11 and zero
+  OOM kills. The successful finite512-PID run reached262 with zero limit hits; CPU/memory/assertions unchanged.
+- [ ] Complete separate graceful thread-admission failure/recovery in the dev server; successful headroom tests
+  do not establish exhaustion recovery. A scoped Builder/503/RAII fix is under implementation.
 - [x] Failed attempts disposed all three owned contexts/children and confirmed removal of owned Docker resources.
-  These are cleanup proofs for those runs, not six successful acceptance cases or a whole-application migration.
+  The final passing run also proved zero remaining app database connections; no requesting application was migrated.
 
 ## Additional measured or explicit gaps
 
@@ -283,3 +284,12 @@ because multiple Viewer profiles were connected without an assigned profile/tab;
 3. Reuse completed evidence. Fix actual publication blockers only until all publication acceptance boxes are checked.
 4. Follow the deferred checklist in isolated, reviewable slices. Bump the next development version before changes.
 5. Never log credentials, expose production traces or publish local-only handoff/proposal material.
+
+## Claude handoff readiness
+
+- [x] Prepare a private full continuation document and send its path to the explicitly requested BRAIN-CLAUDE tab.
+- [x] Claude acknowledged the correct isolated worktree and preservation of the original main/index; it is waiting
+  for an explicit ready message and has not started concurrent edits/jobs.
+- [ ] At the user's two-percent-weekly-remaining threshold, freeze current owned work, update exact commits/jobs/
+  first action and send the ready message through Herdr. The latest visible Codex terminal reading was four percent.
+  Private paths, pane identifiers and the receipt remain outside this public repository.

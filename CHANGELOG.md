@@ -20,7 +20,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   not records or a durable replay log; this is a single-backend-process capability.
 - Development `liveResource(resourceHandle, options)` attaches owner-scoped, coalesced HTTP refresh to those
   metadata events. Public principal changes release the previous connection; unmount releases owned timers and
-  handles. Full browser/native acceptance remains required before exposing the planned author contract.
+  handles. Six actual compiled native/browser cases passed; final release/authoring gates remain required.
 - One `brain.json` declaration feeds native HTTP/socket origins, private build metadata and fixed development,
   static-production and Node gateways. Explicit false overrides disable Node activation. Disabled projects do not
   acquire a socket listener or live runtime asset.

@@ -119,9 +119,11 @@ a separate compatibility/security decision, not an implicit effect of enabling l
 See [MDN connect-src](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/connect-src).
 
 Verification covers the runtime with mock transport and forced GC, actual compiled const/let/derived DOM updates,
-emitted-asset reachability, configuration bounds, build-signature invalidation and CSP sources. Full browser/native
-backend/proxy acceptance is a separate integration gate; these unit proofs do not claim distributed durability or a
-fixed whole-process browser-memory ceiling.
+emitted-asset reachability, configuration bounds, build-signature invalidation and CSP sources. The actual
+[compiled native/browser gate](../bench/native-live/README.md) passed six cases with Chromium156, PostgreSQL18.6
+and a verified Rust1.99.1 binary: committed CRUD, isolation, reconnect/resync, principal changes, revocation and
+owner disposal. It used owned headless contexts because no Viewer profile was assigned. It establishes neither
+distributed durability nor a fixed whole-process browser-memory ceiling; broader release gates remain required.
 
 ## CLI startup authority
 

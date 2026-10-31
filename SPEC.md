@@ -181,7 +181,6 @@ failure shows in `f.error`. Initial values: `form(schema, { init })`; later valu
 `{#await users}…{:then list}…{:catch e}…{/await}` must cover loading, error and empty. Responses are validated.
 `brain run --mock` serves fake data from the schemas. Use GET `cache: 'no'` for an endpoint that must never use the data cache.
 
-<!--planned:#1918-->
 Native live invalidation: `const updates = liveResource(rows, {rooms:[{resource:'posts'}], scope:()=> session.user ? session.user.id : null})`
 passes an existing resource handle; `updates.state` / `updates.connected` are reactive getters. Optional room `id` is a UUID;
 `{room:'user:self'}` subscribes only to the authenticated owner. The server requires explicit brain.json
@@ -192,7 +191,6 @@ and closes on unmount. Scope is a public user/revision key or null, never a toke
 changes are not detected: call `updates.reconnect()` after same-scope login/session rotation and clear scope on logout.
 `updates.close()` stops it. Metadata observers `onInvalidate`/`onResync` are synchronous, coalesced and receive no row
 bodies. Native backend policy remains authoritative; this ephemeral single-process channel is not a durable queue.
-<!--/planned-->
 
 ## Project Design System and agent feedback
 New projects include `design.brain.json`, project-owned tokens and extendible `ui/` basics. Before UI work, inspect
