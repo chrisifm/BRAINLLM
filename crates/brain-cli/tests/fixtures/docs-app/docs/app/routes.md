@@ -18,6 +18,7 @@
 
 - **file**: `views/admin/orders.brain`
 - **title**: `Orders`
+- **description**: `Orders placed in the shop, visible to signed-in staff only.`
 - **robots**: `noindex`
 
 ## `/products/:id`

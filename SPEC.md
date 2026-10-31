@@ -304,6 +304,7 @@ Unified exit codes across all commands: 0 ok · 1 project errors · 2 usage · 3
 <!--/planned-->
 `brain fix` applies every `edits` from `brain check` and re-checks (run it before editing by hand).
 `brain map --json`: whole project graph (routes, components, props, channels, tests); read it instead of opening files.
+`brain docs [--check] [--json] [--out docs/app]`: generated app docs (routes, components, data, backend, env keys, SEO); `brain build` refreshes them when `docs/app/index.md` exists or `brain.json` has `"docs": true`; prose goes in `docs/app/notes/<page>.md`.
 `brain shot <route>` (Unix + Chrome): PNG and accessibility outline for mobile/desktop. Use `--viewport mobile|desktop|both`,
 `--text` for the outline, `--baseline <name>` to compare, and explicitly add `--update-baseline` to approve a new image.
 `--max-diff <0..1>` sets the allowed changed-pixel fraction (default 0). A mismatch or accessibility issue fails the check.

@@ -11,6 +11,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Added
 
+- `brain docs [--json] [--out docs/app] [--check]` and MCP `brain_docs` generate deterministic app documentation from
+  source: routes with SEO metadata and guards, component contracts with usage examples, stores and server functions,
+  every backend contract key, environment key names (never values) and sitemap sources. Hand-written notes in
+  `docs/app/notes/<page>.md` are merged. `brain build` keeps existing docs fresh, new apps opt in with
+  `"docs": true`, and `brain doctor` warns about stale pages.
 - Backend contracts accept exact `int`, `decimal(p,s)`, `date`, `datetime`, `enum(a|b)` and `list<str[,N]>` fields,
   object field options `{type, default, unique}` and declarative checks in `constraints.jsbrain`. Decimals travel and
   are stored as canonical strings with a lossless database CHECK; unique and check violations answer 409/422. Records

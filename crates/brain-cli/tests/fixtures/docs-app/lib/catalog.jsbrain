@@ -3,12 +3,7 @@ const products = [
   { id: '2', name: 'Shirt', price: 20, summary: 'A cotton shirt.' },
 ]
 
-export function all() {
-  return products
+export default {
+  all: () => products,
+  find: (id) => products.find((p) => p.id === id),
 }
-
-export function find(id) {
-  return products.find((p) => p.id === id)
-}
-
-export default { all, find }

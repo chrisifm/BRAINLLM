@@ -109,3 +109,72 @@ fn out_must_stay_inside_the_app() {
     assert!(String::from_utf8_lossy(&o.stdout).contains("--out must be a relative folder"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+fn touch_price(dir: &Path) {
+    let ui = dir.join("ui/price.brain");
+    let src = std::fs::read_to_string(&ui).unwrap().replace("currency:str='USD'", "currency:str='USD' compact:bool?");
+    std::fs::write(&ui, src).unwrap();
+}
+
+#[test]
+fn build_keeps_existing_docs_up_to_date() {
+    let dir = app("build");
+    assert!(brain(&dir, &["docs"]).status.success());
+    touch_price(&dir);
+    let o = brain(&dir, &["build"]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("docs: updated docs/app/components.md"), "{}", String::from_utf8_lossy(&o.stderr));
+    assert!(brain(&dir, &["docs", "--check"]).status.success());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn doctor_warns_when_docs_are_stale() {
+    let dir = app("doctor");
+    assert!(brain(&dir, &["docs"]).status.success());
+    touch_price(&dir);
+    let j = String::from_utf8_lossy(&brain(&dir, &["doctor", "--json"]).stdout).to_string();
+    assert!(j.contains("generated docs are stale: docs/app/components.md") && j.contains("\"level\":\"warning\""), "{j}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn new_apps_opt_in_and_point_agents_at_the_docs() {
+    let dir = std::env::temp_dir().join(format!("brain-docs-new-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    assert!(brain(&dir, &["new", "shop"]).status.success());
+    let bj = std::fs::read_to_string(dir.join("shop/brain.json")).unwrap();
+    assert!(bj.contains("\"docs\": true"), "{bj}");
+    let agents = std::fs::read_to_string(dir.join("shop/AGENTS.md")).unwrap();
+    assert!(agents.contains("docs/app/index.md") && agents.contains("brain docs --check"), "{agents}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn docs_over_mcp() {
+    use std::io::{BufRead, BufReader, Write};
+    let dir = app("mcp");
+    let mut p = Command::new(env!("CARGO_BIN_EXE_brain")).arg("mcp").current_dir(&dir).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn().unwrap();
+    let mut stdin = p.stdin.take().unwrap();
+    let mut out = BufReader::new(p.stdout.take().unwrap());
+    let mut call = |id: u32, method: &str, params: &str| -> String {
+        writeln!(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":{id},\"method\":\"{method}\",\"params\":{params}}}").unwrap();
+        loop {
+            let mut l = String::new();
+            assert!(out.read_line(&mut l).unwrap() > 0, "mcp closed");
+            if l.contains(&format!("\"id\":{id},")) {
+                return l;
+            }
+        }
+    };
+    call(1, "initialize", r#"{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}"#);
+    std::fs::remove_file(dir.join("docs/app/index.md")).unwrap();
+    let stale = call(2, "tools/call", r#"{"name":"brain_docs","arguments":{"check":true}}"#);
+    assert!(stale.contains("docs/app/index.md") && stale.contains("ok\\\":false"), "{stale}");
+    let wrote = call(3, "tools/call", r#"{"name":"brain_docs","arguments":{}}"#);
+    assert!(wrote.contains("docs/app/index.md") && dir.join("docs/app/index.md").is_file(), "{wrote}");
+    drop(stdin);
+    let _ = p.wait();
+    let _ = std::fs::remove_dir_all(&dir);
+}

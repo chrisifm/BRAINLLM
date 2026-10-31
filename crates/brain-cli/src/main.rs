@@ -1345,6 +1345,13 @@ fn cmd_build(args: &[String]) -> Result<(), String> {
         Err(error) => { identity.finish("Build stopped. Resolve the diagnostic and try again."); return Err(error); }
     };
     identity.finish("Build complete. Your intent, compiled.");
+    if docs::enabled(&root) {
+        match docs::write(&root, docs::DEFAULT_OUT) {
+            Ok((_, updated)) if !updated.is_empty() => eprintln!("docs: updated {}", updated.join(", ")),
+            Ok(_) => {}
+            Err(e) => eprintln!("warning: brain docs: {e}"),
+        }
+    }
     if want_json(args) {
         println!("{}", build_json(&rep).stringify());
         return Ok(());
@@ -1766,6 +1773,13 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
                     ("fix", Json::str("set \"minScore\": 80 (or remove it) and fix the findings `brain seo audit` lists")),
                 ]));
             }
+        }
+    }
+    // generated app docs (docs/app) that no longer match the source: a warning, never a failure
+    if let Some(root) = app.as_deref().filter(|r| r.join(docs::DEFAULT_OUT).join("index.md").is_file()) {
+        let stale = docs::stale(root, docs::DEFAULT_OUT);
+        if !stale.is_empty() {
+            advice.push(Json::obj([("code", Json::str("docs")), ("level", Json::str("warning")), ("file", Json::str(docs::DEFAULT_OUT)), ("msg", Json::str(format!("generated docs are stale: {}", stale.join(", ")))), ("fix", Json::str("run `brain docs` (or `brain build`) and commit docs/app"))]));
         }
     }
     let ok = errors.is_empty() && test_ok && build_ok && seo_ok && env_ok && bar_ok;

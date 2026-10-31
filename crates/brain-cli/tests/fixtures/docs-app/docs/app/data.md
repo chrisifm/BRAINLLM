@@ -22,6 +22,4 @@ None.
 
 ## Modules
 
-- `lib/catalog.jsbrain` — exports `all`, `find`, `default`
-  - `all()` (line 6)
-  - `find(id)` (line 10)
+- `lib/catalog.jsbrain` — exports `default`
