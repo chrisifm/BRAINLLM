@@ -136,7 +136,7 @@ try {
   const frontend = child(binary, ['run','--port','4180','--host','127.0.0.1','--no-inspect','--quiet','--json'], {env:frontEnv}); await ready(base + '/', frontend)
   const alice = await actor('alice'), bob = await actor('bob')
   const initialA = await create(alice, 'private-alice-initial'), initialB = await create(bob, 'private-bob-initial')
-  chrome = child('/usr/bin/chromium', ['--headless','--no-sandbox','--disable-dev-shm-usage','--no-first-run','--disable-background-networking','--remote-debugging-port=0','--user-data-dir='+profileRoot,'about:blank'], {env:{PATH:'/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',HOME:profileRoot,TMPDIR:'/tmp',LANG:'C.UTF-8'}})
+  chrome = child(process.env.BRAIN_CHROME || '/usr/bin/chromium', ['--headless','--no-sandbox','--disable-dev-shm-usage','--no-first-run','--disable-background-networking','--remote-debugging-port=0','--user-data-dir='+profileRoot,'about:blank'], {env:{PATH:'/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',HOME:profileRoot,TMPDIR:'/tmp',LANG:'C.UTF-8'}})
   const chromeEnd = Date.now()+12000; let endpoint
   while(Date.now()<chromeEnd){endpoint=chrome.kept.match(/DevTools listening on (ws:\/\/[^\s]+)/)?.[1];if(endpoint)break;await sleep(40)}
   ensure(endpoint,'OWNED_CHROME_DEBUG_ENDPOINT_MISSING')
