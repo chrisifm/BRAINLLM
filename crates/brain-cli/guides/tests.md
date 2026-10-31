@@ -41,7 +41,7 @@ Over MCP: `brain_test`, then `brain_doctor`.
 | component leaks after unmount | B0601 | return a cleanup from `fx`/`mounted` |
 | global listener or timer without cleanup | B0602 · B0906 | create it inside `fx` and return its cleanup |
 | list grows from a timer with no input | B0907 | cap the list or drive it by user input |
-| hitting the real network in a test | — | `provide: [[Api, fakeApi]]`, or `brain run --mock` for manual checks |
+| hitting the real network in a test | — | `stub(target, answer)`, `provide: [[Api, fakeApi]]`, or `brain run --mock` for manual checks |
 | control whose text comes from its `<slot />` mounted without it | B0406 | `mount(Comp, props, { slot: 'Text' })` |
 | testing internals (signal values) | — | assert what the DOM shows |
 | one giant test | — | one behavior per `test()` |

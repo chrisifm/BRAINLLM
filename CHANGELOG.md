@@ -38,6 +38,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - In `*.test.brain`, `#id` finds a component's element on every mount of the file, not only the first.
 - A rejected submit puts focus on the first rejected field, or back on the control `disabled={f.busy}` took it from; it used to fall to the page body.
 - Leaving a form that holds a password field no longer asks to discard changes.
+- `ctx.backend.signup(credentials)` creates a native account from a server function; a refused address is `errors.email` and a bad password `errors.password`.
+- `brain card resource:<name>` lists the response shapes, including when `owner` is present.
+- A view over `budget.viewKB` is reported once, at its largest page, with JS, CSS and HTML broken down.
+- B0736 calls a loopback site URL this machine's own address instead of a placeholder.
+- A build refused by `sockets.allowedOrigins` names its environment and where the site URL came from.
 - A `DATABASE_URL` without a user connects as the system account, as `psql` does; it used to try the role `anonymous`. B0762 connection failures now say the host, database and user tried and why it failed, never the password.
 B0721 and B0722 read `process.env`, `ctx.env` and `import.meta.env` from tokens: a comment, a string, prose or a CSS rule that mentions a key no longer counts as a read, and a guard in a later statement (`const k = ctx.env.K; if (!k) ...`) makes the key optional.
 A session write without `BRAIN_SECRET` fails with B0782 and how to set it.

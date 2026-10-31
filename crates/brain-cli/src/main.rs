@@ -1114,7 +1114,7 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
             .and_then(|m| m.get("routes").and_then(|r| if let brain_mcp::Json::Arr(a) = r { Some(a) } else { None }).map(|a| a.iter().filter(|r| r.get("sitemap") == Some(&brain_mcp::Json::Bool(true))).filter_map(|r| r.get("path").and_then(brain_mcp::Json::as_str).map(str::to_string)).collect()))
             .unwrap_or_default();
         let skipped = if live.is_empty() { String::new() } else { format!("; the sitemap() routes {} are not listed either", live.join(", ")) };
-        rep.warnings.push(format!("B0736 .brain_env:1:1 the {env_name} site URL {p} is a placeholder, so the build publishes no sitemap.xml, no robots.txt Sitemap line and no absolute URL{skipped}; fix: set PUBLIC_SITE_URL in the [{env_name}] section of .brain_env (or `brain build --site https://your-domain`)"));
+        rep.warnings.push(format!("B0736 .brain_env:1:1 the {env_name} site URL {p} is {}, so the build publishes no sitemap.xml, no robots.txt Sitemap line and no absolute URL{skipped}; fix: set PUBLIC_SITE_URL in the [{env_name}] section of .brain_env (or `brain build --site https://your-domain`)", env::no_site_kind(p)));
     }
     let budget_error = budget::enforce(root, &rep.report).err();
     if budget_error.is_none() {
@@ -1455,7 +1455,7 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
             .collect()
     };
     let socket_settings: backend::SocketSettings = backend::socket_settings(root, site, None)?;
-    let mut socket_options = socket_settings.build_options(site)?;
+    let mut socket_options = socket_settings.build_options(site).map_err(|e| format!("{e}. This `{env_name}` build took the site from --site or PUBLIC_SITE_URL in the [{env_name}] section of .brain_env"))?;
     socket_options.native_routes = route_executor::gateway_routes(root)?;
     socket_options.trust_proxy = platform_config::trust_proxy(root);
     let out = brain_pack::build_with_options(&input, &views, &|v| layouts_of(root, v), &seo_of, &socket_options)?;
@@ -2085,7 +2085,7 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
     if let Some(a) = &app
         && let Some(p) = env::value(a, "production", "PUBLIC_SITE_URL").or_else(|| std::fs::read_to_string(a.join("brain.json")).ok().and_then(|s| Json::parse(&s).ok()).and_then(|j| j.get("site").and_then(Json::as_str).map(str::to_string))).filter(|s| env::placeholder_origin(s))
     {
-        advice.push(Json::obj([("code", Json::str("B0736")), ("level", Json::str("warning")), ("file", Json::str(env::FILE)), ("msg", Json::str(&format!("the production site URL {} is a placeholder: production builds publish no sitemap, robots Sitemap line or absolute URL", p.split("://").nth(1).map(|h| h.split('/').next().unwrap_or(h)).unwrap_or(&p)))), ("fix", Json::str("set PUBLIC_SITE_URL in the [production] section of .brain_env to the deployed origin"))]));
+        advice.push(Json::obj([("code", Json::str("B0736")), ("level", Json::str("warning")), ("file", Json::str(env::FILE)), ("msg", Json::str(&format!("the production site URL {} is {}: production builds publish no sitemap, robots Sitemap line or absolute URL", p.split("://").nth(1).map(|h| h.split('/').next().unwrap_or(h)).unwrap_or(&p), env::no_site_kind(&p)))), ("fix", Json::str("set PUBLIC_SITE_URL in the [production] section of .brain_env to the deployed origin"))]));
     }
     if let Some(a) = &app {
         let legacy = std::fs::read_to_string(a.join("brain.json")).ok().and_then(|s| Json::parse(&s).ok()).and_then(|j| j.get("site").and_then(Json::as_str).map(str::to_string));

@@ -51,6 +51,17 @@ pub fn value(root: &Path, env: &str, key: &str) -> Option<String> {
     brain_check::env::parse(&src).resolve(env, &process).get(key).cloned().filter(|v| !v.is_empty())
 }
 
+/// How B0736 names an origin `placeholder_origin` refuses: a loopback address is real, only not a public site.
+pub fn no_site_kind(url: &str) -> &'static str {
+    let rest = url.split_once("://").map_or(url, |(_, r)| r);
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("").rsplit('@').next().unwrap_or("").to_ascii_lowercase();
+    if host.starts_with("127.") || host.starts_with("[::1]") || host.starts_with("0.0.0.0") || host == "localhost" || host.starts_with("localhost:") || host.contains(".localhost") {
+        "this machine's own address, not a public site"
+    } else {
+        "a placeholder"
+    }
+}
+
 /// B0736: an origin nobody can deploy to (RFC 2606/6761 reserved names, loopback). A build from `.brain_env` or
 /// brain.json treats it as "no site", so sitemaps and absolute URLs never advertise it.
 pub fn placeholder_origin(url: &str) -> bool {
@@ -360,5 +371,20 @@ mod set_tests {
         let e = set(&d, "bad-key", "production", "secret-value").unwrap_err();
         assert!(!e.contains("secret-value"), "{e}");
         let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
+#[cfg(test)]
+mod no_site_tests {
+    use super::*;
+    #[test]
+    fn loopback_is_named_as_this_machine_and_only_reserved_names_as_a_placeholder() {
+        for local in ["http://127.0.0.1:5280", "http://localhost:3000", "http://[::1]:3000", "http://app.localhost"] {
+            assert!(placeholder_origin(local), "{local}");
+            assert!(no_site_kind(local).contains("own address"), "{local}");
+        }
+        for reserved in ["https://example.com", "https://shop.test"] {
+            assert_eq!(no_site_kind(reserved), "a placeholder", "{reserved}");
+        }
     }
 }

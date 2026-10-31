@@ -43,3 +43,17 @@ fn build_budget_measures_output_and_fails_when_route_exceeds_it() {
     assert!(run(&app, &["build", "--progress=off"], false).contains("requires browser measurements"));
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn a_site_outside_the_socket_origins_is_named_with_its_environment() {
+    let root = std::env::temp_dir().join(format!("brain-socket-origin-cli-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    run(&root, &["new", "app"], true);
+    let app = root.join("app");
+    let config = std::fs::read_to_string(app.join("brain.json")).unwrap();
+    let config = config.replacen('{', "{\"backend\":{\"origins\":[\"https://listed.dev\"],\"sockets\":{\"allowedOrigins\":[\"https://listed.dev\"]}},", 1);
+    std::fs::write(app.join("brain.json"), config).unwrap();
+    let out = run(&app, &["build", "--site", "https://other.dev", "--progress=off"], false);
+    assert!(out.contains("https://other.dev") && out.contains("https://listed.dev") && out.contains("`production` build"), "{out}");
+}

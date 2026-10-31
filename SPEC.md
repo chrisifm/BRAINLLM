@@ -328,7 +328,7 @@ API keys: add `server/api-keys.jsbrain` `{enabled:true}`; signed-in users manage
 See `docs/AUTH-FLOWS.md`; mail responses deliberately do not disclose account existence or delivery failures.
 In a same-origin POST server function, `await ctx.backend.login({email,password})` establishes native JWT or opaque
 HttpOnly cookies and returns the sanitized user; the backend chooses the configured mode. Never expose signing keys
-or copy tokens into browser storage. `ctx.backend.google.challenge()` and `.login({credential})` do the same for Google. `ctx.session.clear()` revokes native sessions. See `docs/NATIVE-AUTH-SSR.md`.
+or copy tokens into browser storage. `await ctx.backend.signup({email,password})` creates the account without a session; `login` after it in the same function signs in. A refused address is a 422 with `errors.email` (invalid and taken read the same, by design) and a bad password `errors.password`, so `form()` marks the field. `ctx.backend.google.challenge()` and `.login({credential})` do the same for Google. `ctx.session.clear()` revokes native sessions. See `docs/NATIVE-AUTH-SSR.md`.
 With native mode configured, server `load(ctx)` and server functions can use `ctx.backend.resource('posts')`:
 `list({filter:{price:{gte:'10.00'},category:{in:['a','b']}},sort:['-price'],limit,after,include,search})` (same contract
 as `GET /api/<name>`; undeclared filters reject with `error.status 422` and `error.errors`), `get(uuid,{include})`,

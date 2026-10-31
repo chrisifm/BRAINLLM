@@ -816,7 +816,7 @@ pub fn add_with_admin(root: &Path, kind: &str, name: &str, shapes: &str, admin_u
         return Err(e);
     }
     Ok(
-        json!({"schemaVersion":1,"files":files.iter().map(|(p,_)|p).collect::<Vec<_>>(),"experimental":true,"next":if kind=="resource"{"Review policy; run brain backend schema then brain backend migrate"}else{"Implement handler; inspect schema then start brain jobs work"}}),
+        json!({"schemaVersion":1,"files":files.iter().map(|(p,_)|p).collect::<Vec<_>>(),"experimental":true,"next":if kind=="resource"{"Review policy; run brain backend schema, then brain backend migrate, then brain run (it starts the backend too); its API is /api/<name>"}else{"Implement handler; inspect schema then start brain jobs work"}}),
     )
 }
 
@@ -1599,7 +1599,7 @@ pub fn card(root: &Path, name: Option<&str>) -> Result<Value, String> {
                     None
                 };
                 return Ok(
-                    json!({"schemaVersion":1,"kind":kind,"contract":c,"generatedContract":generated_contract,"files":if kind=="resources"{vec![format!("server/resources/{name}/schema.jsbrain"),format!("server/resources/{name}/policy.jsbrain"),format!("server/resources/{name}/hooks.jsbrain")]}else{vec![format!("server/jobs/{name}/schema.jsbrain"),format!("server/jobs/{name}/handler.jsbrain")]}}),
+                    json!({"schemaVersion":1,"kind":kind,"contract":c,"generatedContract":generated_contract,"responses":if kind=="resources"{json!({"row":{"id":"uuid","owner?":"uuid","data":"the schema's fields each reader may see","created_at":"timestamp","updated_at":"timestamp"},"list":{"items":"[row]","limit":"int","offset":"int"},"read":"row","create":"row","update":"row","delete":{"ok":"bool"},"owner":"present only for the owner, relational owners, roles named in the read policy, or everyone with expose_owner: a public list omits it while create returns it to its owner"})}else{json!(null)},"files":if kind=="resources"{vec![format!("server/resources/{name}/schema.jsbrain"),format!("server/resources/{name}/policy.jsbrain"),format!("server/resources/{name}/hooks.jsbrain")]}else{vec![format!("server/jobs/{name}/schema.jsbrain"),format!("server/jobs/{name}/handler.jsbrain")]}}),
                 );
             }
         }
