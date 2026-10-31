@@ -631,6 +631,15 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
             None => http::respond_with(&mut s, 404, "application/json", b"{\"code\":\"BNATIVE_SOCKET_DISABLED\"}", false, &[("Cache-Control", "no-store")]),
         };
     }
+    // zero-config SEO in dev: /robots.txt and /sitemap.xml answer like a production build (static routes, paths() and
+    // sitemap({ env }) of live views) with no build step; a file in public/ still wins
+    if (req.method == "GET" || req.method == "HEAD")
+        && (req.path == "/robots.txt" || req.path == "/sitemap.xml")
+        && !ctx.root.join("public").join(&req.path[1..]).is_file()
+    {
+        let (ctype, body) = dev_seo(ctx, &req);
+        return http::respond_with(&mut s, 200, ctype, body.as_bytes(), req.method == "HEAD", &[("Cache-Control", "no-store")]);
+    }
     if native_proxy::handles(&req.path) {
         match ctx.backend_target(){
             Ok(Some(target))=>return native_proxy::serve(&mut s,&target,&req),
@@ -1015,6 +1024,87 @@ fn server_module(ctx: &Ctx, rel: &str, depth: u32) -> Result<String, String> {
         std::fs::write(&out, &code).map_err(|e| e.to_string())?;
     }
     Ok(crate::load::file_url(&out))
+}
+
+/// Dev `/robots.txt` and `/sitemap.xml` (zero config): the origin is the request's Host, so the files always point at
+/// the server that answers them. Pages: every static route, plus the params a dynamic view's `paths()` or
+/// `sitemap({ env })` returns; views marked `noindex` and the error views are left out.
+fn dev_seo(ctx: &Ctx, req: &http::Request) -> (&'static str, String) {
+    let mut cfg = brain_seo::Config::load(&ctx.root).unwrap_or_default();
+    cfg.site = Some(format!("http://{}", req.header("host").unwrap_or("localhost")));
+    cfg.staging = false;
+    if req.path == "/robots.txt" {
+        return ("text/plain; charset=utf-8", brain_seo::files::robots(&cfg));
+    }
+    let env = format!(
+        "{{\"env\":{{{}}}}}",
+        ctx.env_vars().iter().map(|(k, v)| format!("{}:{}", json_str(k), json_str(v))).collect::<Vec<_>>().join(",")
+    );
+    let mut urls: Vec<(String, Option<String>)> = Vec::new();
+    for r in brain_pack::routes::discover(&ctx.root) {
+        let src = std::fs::read_to_string(ctx.root.join(&r.view)).unwrap_or_default();
+        if r.path == "*" || src.contains("noindex") || ["404", "410", "500"].iter().any(|n| r.view.ends_with(&format!("/{n}.brain"))) {
+            continue;
+        }
+        if !r.path.contains([':', '*']) {
+            urls.push((r.path.clone(), None));
+            continue;
+        }
+        let Ok(c) = compile_cached(ctx, &ctx.root.join(&r.view)) else { continue };
+        let func = ["sitemap", "paths"].into_iter().find(|f| c.server_js.contains(&format!("function {f}(")));
+        let Some(func) = func else { continue };
+        let listed = (|| -> Result<String, String> {
+            let url = server_module(ctx, &r.view, 0)?;
+            let mut sc = sidecar_slot(ctx)?;
+            if sc.is_none() {
+                *sc = Some(crate::load::Sidecar::spawn(&ctx.root, &ctx.env_vars()).map_err(|e| e.to_string())?);
+            }
+            sc.as_mut().unwrap().call(&url, func, &env)
+        })();
+        let list = match listed.as_deref().map(brain_lex::Json::parse) {
+            Ok(Ok(brain_lex::Json::Arr(a))) => a,
+            Err(e) => {
+                ctx.log("warn", format!("[seo] {}: {func}() failed: {}", r.view, e.lines().next().unwrap_or("")));
+                continue;
+            }
+            _ => continue,
+        };
+        for item in list {
+            let mut ok = true;
+            let path = r
+                .path
+                .split('/')
+                .map(|seg| match seg.strip_prefix([':', '*']) {
+                    Some(name) => match item.get(name) {
+                        Some(brain_lex::Json::Str(v)) if !v.is_empty() => brain_seo::files::encode_path(v),
+                        Some(brain_lex::Json::Num(n)) => n.to_string(),
+                        _ => {
+                            ok = false;
+                            String::new()
+                        }
+                    },
+                    None => seg.to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join("/");
+            let lastmod = item.get("lastmod").and_then(brain_lex::Json::as_str).filter(|d| d.len() >= 10).map(|d| d[..10].to_string());
+            if ok {
+                urls.push((path, lastmod));
+            }
+        }
+    }
+    urls.sort();
+    urls.dedup();
+    let mut o = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
+    for (p, d) in urls {
+        o.push_str(&format!("  <url><loc>{}</loc>", brain_seo::files::xml(&cfg.abs(&p))));
+        if let Some(d) = d {
+            o.push_str(&format!("<lastmod>{}</lastmod>", brain_seo::files::xml(&d)));
+        }
+        o.push_str("</url>\n");
+    }
+    o.push_str("</urlset>\n");
+    ("application/xml; charset=utf-8", o)
 }
 
 fn query_json(q: &str) -> String {
@@ -2614,6 +2704,55 @@ mod admission_tests {
         assert!(start.elapsed() < Duration::from_secs(1));
         drop(stream);
         sender.join().unwrap();
+    }
+
+    #[test]
+    fn dev_serves_robots_and_sitemap_with_live_sitemap_urls() {
+        // zero config: no build step, the dev server answers /robots.txt and /sitemap.xml like a production build
+        let root = std::env::temp_dir().join(format!("brain-dev-seo-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for (f, src) in [
+            ("views/home.brain", "<p></p>"),
+            ("views/about.brain", "<p></p>"),
+            ("views/thanks.brain", "<meta seo robots=\"noindex\"><p></p>"),
+            ("views/404.brain", "<p></p>"),
+            ("views/blog/[slug].brain", "export async function sitemap({ env }) { return [{ slug: 'hello world', lastmod: '2026-10-01' }, { slug: 'second' }, {}] }\n"),
+            ("views/users/[id].brain", "export async function load() { return {} }\n"),
+        ] {
+            let p = root.join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, src).unwrap();
+        }
+        let root = root.canonicalize().unwrap();
+        let compiler: CompileFn = Arc::new(|src, _| Ok(Compiled { js: String::new(), css: String::new(), deps: vec![], server_js: src.into() }));
+        let opts = Options {
+            root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: String::new(),
+            runtime: vec![], env: None, base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None,
+        };
+        let dev = start_dev(opts, compiler, false, None).unwrap();
+        let get = |path: &str| {
+            use std::io::{Read, Write};
+            let addr = dev.url().trim_start_matches("http://").trim_end_matches('/').to_string();
+            let mut c = TcpStream::connect(&addr).unwrap();
+            write!(c, "GET {path} HTTP/1.1\r\nHost: shop.local:5180\r\nConnection: close\r\n\r\n").unwrap();
+            let mut out = String::new();
+            c.read_to_string(&mut out).unwrap();
+            out
+        };
+        let robots = get("/robots.txt");
+        assert!(robots.starts_with("HTTP/1.1 200") && robots.contains("Sitemap: http://shop.local:5180/sitemap.xml"), "{robots}");
+        let sm = get("/sitemap.xml");
+        assert!(sm.starts_with("HTTP/1.1 200") && sm.contains("application/xml"), "{sm}");
+        assert!(sm.contains("<loc>http://shop.local:5180/</loc>") && sm.contains("<loc>http://shop.local:5180/about</loc>"), "{sm}");
+        assert!(sm.contains("<loc>http://shop.local:5180/blog/hello%20world</loc><lastmod>2026-10-01</lastmod>"), "{sm}");
+        assert!(sm.contains("<loc>http://shop.local:5180/blog/second</loc>"), "{sm}");
+        assert!(!sm.contains("thanks") && !sm.contains("404") && !sm.contains("/users/"), "{sm}");
+        // a file in public/ still wins
+        std::fs::create_dir_all(root.join("public")).unwrap();
+        std::fs::write(root.join("public/robots.txt"), "User-agent: *\nDisallow: /private\n").unwrap();
+        assert!(get("/robots.txt").contains("Disallow: /private"));
+        drop(dev);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
