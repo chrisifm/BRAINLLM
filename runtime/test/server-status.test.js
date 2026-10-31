@@ -138,3 +138,21 @@ test('a status page opened directly answers its status; a code without a page st
     rmSync(own, { recursive: true, force: true })
   }
 })
+test('/favicon.ico answers with the SVG icon of the app, and stays a 404 without one', async () => {
+  assert.equal((await request('/favicon.ico')).status, 404)
+  const own = mkdtempSync(join(tmpdir(), 'brain-http-icon-'))
+  mkdirSync(join(own, '_server'))
+  writeFileSync(join(own, '_server/manifest.json'), JSON.stringify({ routes: [] }))
+  writeFileSync(join(own, 'favicon.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
+  const icons = createServer({ dist: own, log() {} })
+  await new Promise(resolve => icons.listen(0, '127.0.0.1', resolve))
+  try {
+    const r = await fetch(`http://127.0.0.1:${icons.address().port}/favicon.ico`, { redirect: 'manual' })
+    assert.equal(r.status, 301)
+    assert.equal(r.headers.get('location'), '/favicon.svg')
+  } finally {
+    await new Promise(resolve => { icons.close(resolve); icons.closeAllConnections() })
+    rmSync(own, { recursive: true, force: true })
+  }
+})
+

@@ -37,6 +37,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `liveResource` no longer looks stuck when the session is gone: a refused connection reads the resource once per outage, and a 401 ends in `auth-required` instead of spending the retries.
 - `liveResource` says why a public page has no socket: rooms with a null scope report `anonymous` instead of `idle`, `scope: () => null` is reported by `brain check` (B0775), and `brain guide sockets` covers who can connect, every state and session changes.
 
+- `<Input>`, `<Select>` and `<Checkbox>` bound to a form field take its name, as a native field does, so a form without JavaScript sends them too.
+- `/favicon.ico` redirects to `public/favicon.svg` when the app has only the SVG icon, in production and in dev.
+- `brain check` reports a link nothing answers (B0776, one finding per source line) and a view title that repeats what `titleTemplate` adds (B0777); before, the first waited for `brain build` and the second went unnoticed.
+
 ### Signature
 - HTML documents now carry `X-Generated-By` with the official site and repository in `brain start`, `_headers`, nginx and Caddy. It replaces `X-Powered-By` and adds nothing visible to the page.
 

@@ -83,3 +83,33 @@ fn error_views_without_a_title_still_say_what_happened_and_stay_out_of_the_index
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+#[test]
+fn check_reports_stale_links_by_source_line_and_titles_that_repeat_the_site_name() {
+    let tmp = std::env::temp_dir().join(format!("bbstale-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    assert!(brain(&tmp, &["new", "app"]).status.success());
+    let dir = tmp.join("app");
+    let clean = text(&brain(&dir, &["check"]));
+    assert!(!clean.contains("B0776") && !clean.contains("B0777"), "a new app has neither: {clean}");
+    std::fs::write(dir.join("views/users.brain"), "<meta seo title=\"Users\" description=\"Everyone here.\">\n<main><h1>Users</h1></main>\n").unwrap();
+    std::fs::create_dir_all(dir.join("views/items")).unwrap();
+    std::fs::write(dir.join("views/items/[id].brain"), "<meta seo title=\"Item\" description=\"One item here.\">\n<main><h1>Item</h1></main>\n").unwrap();
+    std::fs::write(dir.join("public/file.pdf"), "x").unwrap();
+    std::fs::write(
+        dir.join("comp/nav.brain"),
+        "<nav>\n  <a href=\"/gone\">A</a> <a href=\"/also-gone\">B</a> <a href=\"/gone\">C</a>\n  <a href=\"/users\">U</a> <a href=\"/users/\">U</a> <a href=\"/items/7?x=1#top\">I</a>\n  <a href=\"/file.pdf\">F</a> <a href=\"/feed.xml\">X</a> <a href=\"https://example.com/gone\">E</a> <a href=\"#here\">H</a> <a href=\"/api/export\">Z</a>\n  <a href=\"/third\">D</a>\n</nav>\n",
+    )
+    .unwrap();
+    let t = text(&brain(&dir, &["check"]));
+    assert_eq!(t.matches("B0776").count(), 2, "one finding per source line: {t}");
+    assert!(t.contains("comp/nav.brain:2:1 warning B0776") && t.contains("`/gone`, `/also-gone`"), "{t}");
+    assert!(t.contains("comp/nav.brain:5:1 warning B0776") && t.contains("`/third`"), "{t}");
+    let app = std::fs::read_to_string(dir.join("app.brain")).unwrap();
+    let suffix = app.split("titleTemplate=\"%s").nth(1).and_then(|r| r.split('"').next()).expect("the new app has a titleTemplate").trim_start_matches([' ', '·', '-', '|']).to_string();
+    std::fs::write(dir.join("views/users.brain"), format!("<meta seo title=\"Users · {suffix}\" description=\"Everyone here.\">\n<main><h1>Users</h1></main>\n")).unwrap();
+    let t = text(&brain(&dir, &["check"]));
+    assert!(t.contains("views/users.brain:1:1 warning B0777"), "{t}");
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+

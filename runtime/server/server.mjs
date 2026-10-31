@@ -1492,6 +1492,8 @@ export function createServer(o = {}) {
       if (post) return send(res, 405, 'Method not allowed', { allow: 'GET, HEAD' })
       if (DYN.length && /^\/sitemap(-static|-dynamic(-\d+)?)?\.xml$/.test(url.pathname) && (await serveSitemap(req, res, url))) return
       if (serveStatic(req, res, url)) return
+      // browsers still ask for /favicon.ico: the app's SVG icon answers it
+      if (url.pathname === '/favicon.ico' && file('favicon.svg')) return send(res, 301, '', { location: withBase('/favicon.svg'), 'cache-control': 'public, max-age=86400' })
       notFound(req, res)
     } catch (e) {
       log('error', 'unhandled', { rid, path: req.url, ...trace(e) })

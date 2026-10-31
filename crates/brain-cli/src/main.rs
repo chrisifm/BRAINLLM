@@ -31,6 +31,7 @@ mod analytics;
 mod api_key_config;
 mod webhook_config;
 mod origin_check;
+mod view_links;
 mod platform_config;
 mod route_executor;
 mod hooks_executor;
@@ -623,6 +624,8 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
                 let mut diag = compiler::Diag::new("B0735", file, brain_parse::Span::default(), text.to_string(), fix.to_string());
                 diag.line=1;diag.col=1;diags.push(diag);
             }
+            // links nothing answers (B0776) and titles that repeat the site name (B0777), before any build
+            diags.extend(view_links::check(&app));
             // declared origins and the origins a page calls (B0744, B0745, B0746)
             diags.extend(origin_check::check(&app));
             for (code, file, message, fix) in backend::role_warnings(&app) {

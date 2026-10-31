@@ -972,6 +972,12 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
         Some(p) if !file.exists() && p.is_file() => p,
         _ => file,
     };
+    // browsers still ask for /favicon.ico: the app's SVG icon answers it, as in production
+    let file = if req.path == "/favicon.ico" && !file.exists() && ctx.root.join("public/favicon.svg").is_file() {
+        ctx.root.join("public/favicon.svg")
+    } else {
+        file
+    };
     // §10 transition: an app that still has tokens.brain.css also answers at /tokens.cssbrain.
     let file = if req.path == "/tokens.cssbrain" && !file.exists() {
         ctx.root.join("tokens.brain.css")
