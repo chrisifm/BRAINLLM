@@ -161,7 +161,7 @@ pub fn load(root: &Path, environment: &str, routes: &[Route]) -> Result<Option<H
         let relative = format!("{ROUTES}/{}/handler.jsbrain", route.name);
         crate::changes::source_path(root, &relative)?;
         crate::map::read_source_limit(root, &relative, 256 * 1024)
-            .map_err(|_| format!("{relative}: handler source must be a regular file within 256 KiB"))?;
+            .map_err(|reason| format!("{relative}: handler source refused: {reason}; run brain check"))?;
         let (scratch, module) = crate::backend::server_module(root, &relative)
             .map_err(|_| format!("{relative}: private handler compilation failed; run brain check for structured source diagnostics"))?;
         modules.insert(route.name.clone(), Arc::new(Compiled { _scratch: scratch, module }));

@@ -14,6 +14,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Fix: plain lists and `created_at`/`updated_at` sorts use their index instead of sorting the whole table on every request
 - Declared sorts get an index for their other direction on the next `brain backend migrate`
 - `?search=` with one or two punctuation characters finds nothing without scanning, like longer punctuation
+- `brain backend serve` warns B0771 when `/_brain/api` is open to anonymous callers, unless you chose `--env development`
+- `brain check` reports a handler with no default export (B0772) or a secret-shaped literal (B0773) that used to fail only at boot
+- `brain jobs work` refuses those two handlers at start, as `brain backend serve` already did for routes
 - Declared `or` groups in `query.jsbrain` (`?group.field[op]=value`), indexed and bounded, validated by `brain check`
 - `?owner=me` lists the reader's own rows; the id comes from the session, never from the client
 - `?fields=a,b` narrows the `data` of each list item, after policy and visibility; hidden fields answer like undeclared ones

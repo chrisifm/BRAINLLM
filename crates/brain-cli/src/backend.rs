@@ -653,6 +653,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let config=brain_backend::Config{api_keys:crate::api_key_config::load(&root)?,sockets:sockets.native_config()?,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,resources,jobs,uploads:root.join(".brain/uploads"),origins:sockets.http_origins,production:environment=="production"};
         brain_backend::analytics::configure(analytics_settings(&root)?)?;
         eprintln!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
+        if let Some((msg,fix))=anonymous_catalog_warning(args,&environment){eprintln!("{}",json!({"schemaVersion":1,"event":"backend-warning","code":"B0771","msg":msg,"fix":fix}));}
         let mut platform=crate::platform_config::load(&root,&config.resources,&config.roles)?;
         for bucket in platform.buckets.iter().filter(|b|b.open_by_omission()){eprintln!("{}",json!({"schemaVersion":1,"event":"backend-warning","code":"B0770","file":format!("server/files/{}.jsbrain",bucket.name),"message":"this bucket accepts every file type because it does not declare types; list them or say types: '*'"}));}
         platform.routes=crate::route_executor::contracts(&root,&environment)?;
@@ -917,8 +918,27 @@ impl Drop for Scratch {
 }
 fn worker_module(root: &Path, name: &str) -> Result<(Scratch, PathBuf), String> {
     let rel = format!("server/jobs/{name}/handler.jsbrain");
-    server_module(root, &rel)
+    // The same refusals as a route handler, before any job is claimed: otherwise every attempt fails and retries.
+    let source = crate::map::read_source_limit(root, &rel, 256 * 1024).map_err(|reason| format!("{rel}: handler source refused: {reason}; run brain check"))?;
+    let exports_default = brain_parse::parse(&source, Path::new(&rel)).is_ok_and(|c| c.script.iter().any(|s| matches!(s, brain_parse::ast::Stmt::ExportDefault { .. })));
+    let module = server_module(root, &rel)?;
+    if !exports_default {
+        return Err(format!("B0772 {rel}: this handler has no default export; fix: add `export default async function handle(ctx) {{ ... }}`"));
+    }
+    Ok(module)
 }
+/// B0771: the API catalog answers anyone unless the process runs with `--env production`. A plain development run says
+/// so through `--env development` and stays quiet; a serve with no `--env`, or any other name, is usually a deployment.
+fn anonymous_catalog_warning(args: &[String], environment: &str) -> Option<(String, String)> {
+    let chosen = args.iter().any(|arg| arg == "--env" || arg.starts_with("--env="));
+    (environment != "production" && (!chosen || environment != "development")).then(|| {
+        (
+            format!("`/_brain/api` lists every resource, field and route to anonymous callers because this process runs with environment `{environment}`"),
+            "start deployed servers with `brain backend serve --env production`, which limits the catalog to admins and turns on the other production defaults".to_string(),
+        )
+    })
+}
+
 pub(crate) fn server_module(root: &Path, rel: &str) -> Result<(Scratch, PathBuf), String> {
     let mut files = BTreeMap::new();
     let mut written = BTreeMap::new();
@@ -2223,6 +2243,14 @@ pub fn media(args: &[String]) -> Result<(), String> {
 
 #[cfg(test)]
 mod failure_log_tests {
+    #[test]
+    fn anonymous_catalog_warns_unless_the_environment_is_chosen_and_local() {
+        let args = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(super::anonymous_catalog_warning(&args(&["serve"]), "development").is_some());
+        assert!(super::anonymous_catalog_warning(&args(&["serve", "--env", "staging"]), "staging").is_some());
+        assert!(super::anonymous_catalog_warning(&args(&["serve", "--env", "development"]), "development").is_none());
+        assert!(super::anonymous_catalog_warning(&args(&["serve", "--env", "production"]), "production").is_none());
+    }
     use super::*;
     #[test]
     fn failure_logs_find_a_request_and_tolerate_a_missing_or_damaged_file() {
