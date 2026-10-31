@@ -322,7 +322,7 @@ requires `sslmode=verify-full` for a remote `DATABASE_URL`. See `docs/backend/pr
 Routes: `server/routes/<name>/route.jsbrain` `export default {method:'POST',path:'/orders/{id}/quote',auth:'user',params:{id:'uuid'},query:{currency:'str!'},bodyLimit:'16kb',timeout:'5s',rate:'20/min per user'}`
 + `handler.jsbrain` `export default async (ctx) => ({status:201,body:{...}})`; throw `{errors:{field:'msg'}}` → 422.
 Signed: add `body:'raw',verify:{scheme:'timestamped'|'hmac',header,secret:'ENV_NAME',tolerance:'5m'}`. See `docs/backend/routes.md`, `docs/backend/webhooks.md`.
-Outbound: `await httpCall(url,{method:'POST',json,idempotencyKey:true,timeout:8000,retries:2})` → `{status,ok,json,text}`; throws `HttpCallError` (`TIMEOUT`, `HTTP_STATUS`, `UNSAFE_URL`…). See `docs/backend/outbound.md`.
+Outbound: `await httpCall(url,{method:'POST',json,idempotencyKey:true,timeout:8000,retries:2})` → `{status,ok,json,text}`; throws `HttpCallError` (`TIMEOUT`, `HTTP_STATUS`, `UNSAFE_URL`, `REDIRECT`…). Every resolved address is checked: private, loopback, link-local, CGNAT and multicast targets are refused unless `allowPrivate` names the host; `redirects:n` follows n hops, each checked again. See `docs/backend/outbound.md`.
 Keep existing production routes until their behavior and policies pass a tested migration slice.
 
 ## Tests (`*.test.brain`)

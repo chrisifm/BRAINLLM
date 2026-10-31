@@ -88,3 +88,71 @@ test('unsafe targets are refused before any request', async () => {
   await assert.rejects(httpCall('https://example.test/', { timeout: 0 }), /timeout/)
   await assert.rejects(httpCall('https://example.test/', { retries: 9 }), /retries/)
 })
+
+const toLocal = (hostname, options, callback) => {
+  const list = [{ address: '127.0.0.1', family: 4 }]
+  return options.all ? callback(null, list) : callback(null, '127.0.0.1', 4)
+}
+
+test('encoded, mapped and translated private literals are refused', async () => {
+  for (const target of ['http://[::ffff:127.0.0.1]/', 'http://[::ffff:a9fe:a9fe]/', 'http://[::7f00:1]/', 'http://[64:ff9b::a00:1]/', 'http://[2002:a9fe:a9fe::]/', 'http://[ff02::1]/', 'http://[fec0::1]/', 'http://[fd00:ec2::254]/', 'http://0.0.0.0/', 'http://100.64.0.1/', 'http://198.18.0.1/', 'http://224.0.0.1/', 'http://0x7f.1/', 'http://metadata.google.internal/']) {
+    const err = await httpCall(target, { retries: 0 }).catch(e => e)
+    assert.equal(err.code, 'UNSAFE_URL', target)
+  }
+})
+
+test('a public name that resolves to a private address is refused before connecting', async () => {
+  let calls = 0
+  const { server, url } = await serve((req, res) => { calls++; res.end('reached') })
+  const port = new URL(url).port
+  const mixed = (h, o, cb) => { const list = [{ address: '93.184.216.34', family: 4 }, { address: '10.0.0.7', family: 4 }]; return o.all ? cb(null, list) : cb(null, list[0].address, 4) }
+  for (const lookup of [toLocal, mixed]) {
+    const err = await httpCall(`http://api.example.test:${port}/v1?key=SECRET`, { retries: 0, lookup }).catch(e => e)
+    assert.ok(err instanceof HttpCallError)
+    assert.equal(err.code, 'UNSAFE_URL')
+    assert.ok(!err.message.includes('SECRET'))
+  }
+  assert.equal(calls, 0)
+  const ok = await httpCall(`http://api.example.test:${port}/v1`, { lookup: toLocal, allowPrivate: ['api.example.test'] })
+  assert.equal(ok.text, 'reached')
+  server.close()
+})
+
+test('the development opt-out is ignored in production', async () => {
+  const { server, url } = await serve((req, res) => res.end('dev'))
+  const before = { allow: process.env.BRAIN_OUTBOUND_ALLOW_PRIVATE, env: process.env.NODE_ENV }
+  process.env.BRAIN_OUTBOUND_ALLOW_PRIVATE = '1'
+  try {
+    process.env.NODE_ENV = 'development'
+    assert.equal((await httpCall(url, { retries: 0 })).text, 'dev')
+    process.env.NODE_ENV = 'production'
+    assert.equal((await httpCall(url, { retries: 0 }).catch(e => e)).code, 'UNSAFE_URL')
+  } finally {
+    for (const [k, v] of [['BRAIN_OUTBOUND_ALLOW_PRIVATE', before.allow], ['NODE_ENV', before.env]]) v === undefined ? delete process.env[k] : (process.env[k] = v)
+    server.close()
+  }
+})
+
+test('redirects are opt-in and every hop is checked again', async () => {
+  const seen = []
+  const { server: target, url: targetUrl } = await serve((req, res) => { seen.push(req.headers.authorization ?? null); res.end(`final ${req.method}`) })
+  const port = new URL(targetUrl).port
+  const { server, url } = await serve((req, res) => {
+    const to = { '/same': '/landing', '/cross': `http://svc.example.test:${port}/in`, '/private': `http://localhost:${port}/in`, '/loop': '/loop', '/down': 'https://x.example.test/' }[req.url.split('?')[0]] ?? null
+    if (req.url === '/landing') return res.end('landed')
+    res.statusCode = req.url === '/cross' ? 303 : 302
+    res.setHeader('location', to)
+    res.end()
+  })
+  const allow = { allowPrivate: ['127.0.0.1', 'svc.example.test'], lookup: toLocal, backoff: 1 }
+  assert.equal((await httpCall(`${url}/same`, allow)).status, 302)
+  assert.equal((await httpCall(`${url}/same`, { ...allow, redirects: 2 })).text, 'landed')
+  const cross = await httpCall(`${url}/cross`, { ...allow, redirects: 2, method: 'POST', json: { a: 1 }, headers: { authorization: 'Bearer SECRET' } })
+  assert.equal(cross.text, 'final GET')
+  assert.deepEqual(seen, [null])
+  assert.equal((await httpCall(`${url}/private`, { ...allow, redirects: 2 }).catch(e => e)).code, 'UNSAFE_URL')
+  assert.equal((await httpCall(`${url}/loop`, { ...allow, redirects: 3 }).catch(e => e)).code, 'REDIRECT')
+  assert.equal(seen.length, 1)
+  server.close()
+  target.close()
+})

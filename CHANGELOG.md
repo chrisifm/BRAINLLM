@@ -237,6 +237,17 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - The development server unregisters closed HMR sockets immediately. `brain start` escalates workers that ignore
   SIGTERM to SIGKILL after reloads, memory restarts and health restarts, so an old worker cannot keep the listener.
 
+### Security
+
+- `httpCall` now checks every address a hostname resolves to, at connect time, and refuses private, loopback,
+  link-local (cloud metadata), CGNAT, benchmark, multicast and reserved IPv4 and IPv6 targets, including IPv4-mapped,
+  IPv4-compatible, NAT64 and 6to4 forms of them; before, a public name that resolved or rebound to such an address was
+  contacted. Connections are not pooled, so a socket opened for an allowed private host is never reused. New options:
+  `allowPrivate: ['billing.internal']` allows only the named hosts, `redirects: n` (default 0, redirects stay
+  unfollowed) follows up to n hops and checks each target again, refuses https→http downgrades and drops credential
+  headers on cross-origin hops, and `lookup` swaps the resolver whose answers are still checked. The development
+  opt-out `BRAIN_OUTBOUND_ALLOW_PRIVATE=1` is ignored when `NODE_ENV` is `production`.
+
 ### Tests
 
 - Pin that a native socket rejected at the handshake stops retrying within its bounded budget.
