@@ -31,6 +31,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Fixed
 
+- Production logs recorded a compiler budget failure (B0910/B0911) thrown by a view `load`, an RPC, a form or SSR as
+  `NODE_INTERNAL_ERROR` with a generic fix. The log entry now keeps its `code`, `budget`, `limit`, `file`,
+  `component`, `line`, `column` and actionable `fix`; the error message is still never logged.
 - Streamed SSR routes (static `<meta seo>` with `load`) answered 200 when `load` redirected, threw `notFound()` from
   an imported helper or threw a deliberate 4xx, because the head went out before `load` settled. The head now waits
   up to 200 ms for `load`; an outcome in that time gets the same 303/404/4xx/500 as a non-streamed route. Slower

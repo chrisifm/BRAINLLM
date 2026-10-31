@@ -415,8 +415,21 @@ export function createServer(o = {}) {
       safe.private = true; safe.valuesCaptured = false
       safe.fix = kind === 'TypeError' ? 'Check nullable values, argument types and the data contract at these source frames' : kind === 'ReferenceError' ? 'Check the missing binding or import at these source frames' : kind === 'RangeError' ? 'Check recursive calls, array sizes and configured resource budgets at these source frames' : kind === 'SyntaxError' ? 'Check module syntax or JSON input parsing at these source frames without logging input values' : 'Inspect these source frames and the request reference; reproduce with synthetic inputs'
     }
+    // a compiler budget failure (brain-budget.js) keeps its own code, limit, source position and fix
+    const b = safe.budgetFailure
+    delete safe.budgetFailure
+    if (b) Object.assign(safe, b)
     if (typeof safe.path === 'string') safe.path = safe.path.split(/[?#]/, 1)[0].slice(0, 2048)
     sink(level, msg, safe)
+  }
+  // log fields for a thrown value: its stack (sanitized by log) plus, for B09xx budget failures, the typed fields only
+  const trace = e => {
+    const out = { stack: String((e && e.stack) || e) }
+    if (e && e.kind === 'budget' && /^B09\d\d$/.test(e.code) && typeof e.budget === 'string' && /^[a-zA-Z]{1,16}$/.test(e.budget)) {
+      const str = (v, n) => typeof v === 'string' ? v.slice(0, n) : null, pos = v => Number.isSafeInteger(v) && v > 0 ? v : null
+      out.budgetFailure = { code: e.code, budget: e.budget, limit: Number.isFinite(e.limit) ? e.limit : null, file: str(e.file, 256), component: str(e.component, 80), line: pos(e.line), column: pos(e.column), fix: str(e.fix, 200) || 'Bound the work or move it to an owned worker.' }
+    }
+    return out
   }
   const mf = readManifest(dist)
   // brain.json `server` (§11.1), written into the manifest by the build; createServer options and env still win
@@ -617,7 +630,7 @@ export function createServer(o = {}) {
         for (const m of route.middleware || []) middleware.push(await load(m))
         r = await runChain({ guards, middleware, ctx })
       } catch (e) {
-        log('error', 'guard failed', { rid, path: url.pathname, stack: String((e && e.stack) || e) })
+        log('error', 'guard failed', { rid, path: url.pathname, ...trace(e) })
         return errorPage(req, res, route, params, url, rid)
       }
       if (r.redirect) return send(res, r.status, '', { location: withBase(redirect(r.redirect, r.status ?? 303).redirect), 'cache-control': 'no-store', ...ctx.session.headers() })
@@ -629,7 +642,7 @@ export function createServer(o = {}) {
       if (e && e.redirect) return send(res, e.status || 303, '', { location: withBase(redirect(e.redirect, e.status ?? 303).redirect), ...ctx.session.headers() })
       if ((e instanceof HttpError && e.status === 404) || (e && e.notFound === true)) return notFound(req, res)
       const status = intendedStatus(e) || 500
-      log('error', 'load failed', { rid, path: url.pathname, status, stack: String((e && e.stack) || e) })
+      log('error', 'load failed', { rid, path: url.pathname, status, ...trace(e) })
       return status === 500 ? errorPage(req, res, route, params, url, rid) : failPage(res, status, rid)
     }
     if (route.stream && route.server && !fixed && !forms && status === 200 && !res.$capture) return streamed(req, res, route, params, url, rid, ctx, keep(extra || {}), loadOutcome)
@@ -647,11 +660,11 @@ export function createServer(o = {}) {
       const at = { path: url.pathname, params: params || {}, query: Object.fromEntries(url.searchParams) } // route() (§41.5)
       ;({ body, seo, failed } = await (queue = queue.then(() => render(route, props, forms, at), () => render(route, props, forms, at))))
     } catch (e) {
-      log('error', 'render failed', { rid, path: url.pathname, stack: String((e && e.stack) || e) })
+      log('error', 'render failed', { rid, path: url.pathname, ...trace(e) })
       return failPage(res, 500, rid)
     }
     // a component that failed shows its fallback inside the page (still 200); the error goes to the log with the rid
-    for (const f of failed || []) log('error', 'component failed during SSR', { rid, path: url.pathname, comp: f.comp, where: f.w, stack: String((f.e && f.e.stack) || f.e) })
+    for (const f of failed || []) log('error', 'component failed during SSR', { rid, path: url.pathname, comp: f.comp, where: f.w, ...trace(f.e) })
     const page = readFileSync(file(route.page), 'utf8')
       .replace('<!--brain:ssr-->', () => body)
       .replace('<!--brain:props-->', () => jsonInHtml(props))
@@ -703,7 +716,7 @@ export function createServer(o = {}) {
         res.write(n(`<!--brain:loading-->${body}<!--/brain:loading-->`))
         clear = `<script>{const s=document.currentScript;let x=0;for(const c of[...s.parentNode.childNodes]){if(c.data=='brain:loading')x=1;if(x)c.remove();if(c.data=='/brain:loading')x=0}s.remove()}</script>`
       } catch (e) {
-        log('error', 'loading view failed (streamed)', { rid, path: url.pathname, stack: String((e && e.stack) || e) })
+        log('error', 'loading view failed (streamed)', { rid, path: url.pathname, ...trace(e) })
       }
     }
     const end = (body, props = {}, b = bottom) => res.end(n(clear + body + b.replace('<!--brain:props-->', () => jsonInHtml(props))))
@@ -726,16 +739,16 @@ export function createServer(o = {}) {
       if (e && e.redirect) return end(`<script>location.replace(${jsonInHtml(withBase(redirect(e.redirect, e.status ?? 303).redirect))})</script>`)
       // a streamed page already sent its 200 head: the region gets the not-found notice and the page is noindex
       if (e && e.notFound === true) return end(`<meta name="robots" content="noindex"><p role="alert" class="brain-fallback">Page not found.</p>`, {}, bottom.replace(/<script type="module">(?:(?!<\/script>)[\s\S])*?brain-view[\s\S]*?<\/script>/g, ''))
-      log('error', 'load failed (streamed)', { rid, path: url.pathname, status: 200, stack: String((e && e.stack) || e) }) // headers already out
+      log('error', 'load failed (streamed)', { rid, path: url.pathname, status: 200, ...trace(e) }) // headers already out
       return fail()
     }
     try {
       const { body, failed } = await (queue = queue.then(() => render(route, props, null, at), () => render(route, props, null, at)))
-      for (const f of failed || []) log('error', 'component failed during SSR', { rid, path: url.pathname, comp: f.comp, where: f.w, stack: String((f.e && f.e.stack) || f.e) })
+      for (const f of failed || []) log('error', 'component failed during SSR', { rid, path: url.pathname, comp: f.comp, where: f.w, ...trace(f.e) })
       const pm = params && Object.keys(params).length ? `<meta name="brain-params" content="${esc(JSON.stringify(params))}">` : ''
       end(pm + body, props)
     } catch (e) {
-      log('error', 'render failed (streamed)', { rid, path: url.pathname, status: 200, stack: String((e && e.stack) || e) })
+      log('error', 'render failed (streamed)', { rid, path: url.pathname, status: 200, ...trace(e) })
       await fail()
     }
   }
@@ -834,11 +847,11 @@ export function createServer(o = {}) {
     try {
       f = (await load(modPath))[fn]
     } catch (e) {
-      log('error', 'rpc module failed to load', { rid, fn: hash + '/' + fn, stack: String((e && e.stack) || e) })
+      log('error', 'rpc module failed to load', { rid, fn: hash + '/' + fn, ...trace(e) })
       return fail(500, 'Internal error', { rid })
     }
     const r = await callRpc({ fn: f, args: raw, ctx, timeout: TIMEOUT })
-    if (r.cause) log('error', r.status === 504 ? 'rpc timeout' : 'rpc failed', { rid, fn: hash + '/' + fn, ms: TIMEOUT, stack: String((r.cause && r.cause.stack) || r.cause) })
+    if (r.cause) log('error', r.status === 504 ? 'rpc timeout' : 'rpc failed', { rid, fn: hash + '/' + fn, ms: TIMEOUT, ...trace(r.cause) })
     const b = r.status >= 500 ? { ...r.body, rid } : r.body
     send(res, r.status, json(b), { 'content-type': MIME['.json'], 'cache-control': 'no-store', ...(r.headers || {}), ...ctx.session.headers() })
   }
@@ -877,11 +890,11 @@ export function createServer(o = {}) {
       module = await load(modPath)
       rules = await load('_server/brain-form.js')
     } catch (e) {
-      log('error', 'form module failed to load', { rid, fn: id, stack: String((e && e.stack) || e) })
+      log('error', 'form module failed to load', { rid, fn: id, ...trace(e) })
       return failPage(res, 500, rid)
     }
     const r = await callForm({ module, raw, ctx, rules, key: ipOf(req) + ' ' + id, limit: LIMIT, timeout: TIMEOUT })
-    if (r.cause) log('error', 'form failed', { rid, fn: id, stack: String((r.cause && r.cause.stack) || r.cause) })
+    if (r.cause) log('error', 'form failed', { rid, fn: id, ...trace(r.cause) })
     if (r.status === 303) return send(res, 303, '', { location: withBase(r.location), 'cache-control': 'no-store', ...ctx.session.headers() })
     if (r.status === 422) return ssr(req, res, route, params, url, rid, r.state, 422)
     plain(r.status, r.body.error, r.headers)
@@ -923,7 +936,7 @@ export function createServer(o = {}) {
           else dropped++
         }
       } catch (e) {
-        log('error', 'sitemap() failed', { view: r.view, stack: String((e && e.stack) || e) })
+        log('error', 'sitemap() failed', { view: r.view, ...trace(e) })
       }
     }
     if (dropped) log('warn', 'sitemap(): more than 50000 URLs, the rest are not listed', { dropped })
@@ -1067,7 +1080,7 @@ export function createServer(o = {}) {
       if (serveStatic(req, res, url)) return
       notFound(req, res)
     } catch (e) {
-      log('error', 'unhandled', { rid, path: req.url, stack: String((e && e.stack) || e) })
+      log('error', 'unhandled', { rid, path: req.url, ...trace(e) })
       if (!res.headersSent) failPage(res, intendedStatus(e) || 500, rid)
       else res.end()
     }
