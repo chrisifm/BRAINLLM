@@ -70,7 +70,7 @@ export function logSummary(bytes) {
 export function publicFailure(error, fallbackPhase='setup') {
  const d=error?.detail||{},phase=typeof d.phase==='string'&&/^[a-z0-9-]{1,80}$/.test(d.phase)?d.phase:fallbackPhase
  const reasons=new Map([
-  ['Exact published version is not visible anonymously','exact-version-unavailable'],['Initializer did not install the exact version','installed-version-mismatch'],['Installed launcher escaped its own app','installed-path-escape'],['Published native compiler version mismatch','native-version-mismatch'],['Published compiler did not emit its actual build','invalid-build-output'],['Published doctor did not pass','doctor-failed'],['Invalid owned dev listener metadata','invalid-dev-metadata'],['Published dev HTTP probe did not become ready','dev-http-not-ready'],['Registry smoke deadline','deadline'],['Registry smoke cancelled or capacity exhausted','cancelled-or-capacity'],['Cannot locate the installed npm CLI JavaScript entry','npm-cli-unavailable'],['Invalid bounded smoke metadata','invalid-metadata'],['Browser selection must be an existing executable file','invalid-browser-executable']])
+  ['Exact published version is not visible anonymously','exact-version-unavailable'],['Initializer did not install the exact version','installed-version-mismatch'],['Installed launcher escaped its own app','installed-path-escape'],['Published native compiler version mismatch','native-version-mismatch'],['Published compiler did not emit its actual build','invalid-build-output'],['Published doctor did not pass','doctor-failed'],['Invalid owned dev listener metadata','invalid-dev-metadata'],['Published dev HTTP probe did not become ready','dev-http-not-ready'],['Registry smoke deadline','deadline'],['Registry smoke cancelled or capacity exhausted','cancelled-or-capacity'],['Cannot locate the installed npm CLI JavaScript entry','npm-cli-unavailable'],['Invalid bounded smoke metadata','invalid-metadata'],['Browser selection must be an existing executable file','invalid-browser-executable'],['Invalid registry smoke arguments','invalid-arguments'],['Use one exact semantic version, without tags, ranges or URLs','invalid-exact-version'],['timeout-ms must be 60000..900000','invalid-deadline']])
  const knownReasons=new Set(['nonzero-exit','spawn','deadline','cancelled','disk-limit','structured-output-limit','exact-version-unavailable','registry-version-response-mismatch','registry-invalid-json'])
  const report={schemaVersion:1,ok:false,code:'REGISTRY_SMOKE_FAILED',phase,reason:knownReasons.has(d.reason)?d.reason:reasons.get(error?.message)||(error instanceof SyntaxError?'invalid-json':'unclassified-failure')}
  for(const key of ['exitCode','checkErrors','failedTests','retryAttempts'])if(Number.isSafeInteger(d[key])&&d[key]>=0&&d[key]<=1000000)report[key]=d[key]
@@ -326,7 +326,7 @@ export async function smoke(config) {
 async function main() {
   let config
   try { config = options(process.argv.slice(2)); if (config.help) { console.log(USAGE); return } }
-  catch { console.error(USAGE); process.exitCode = 2; return }
+  catch (error) { console.error(USAGE); console.error(JSON.stringify(publicFailure(error,'arguments'))); process.exitCode = 2; return }
   try { await smoke(config) }
   catch (error) { console.error(JSON.stringify({ schemaVersion: 1, ok: false, code: 'REGISTRY_SMOKE_FAILED', ...publicFailure(error) })); process.exitCode = 1 }
 }

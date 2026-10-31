@@ -106,6 +106,8 @@ test('browser selection is explicit, executable and never inherited as a compile
  assert.throws(()=>browserExecutable(tmpdir()),/existing executable/)
  assert.throws(()=>browserExecutable('missing-owned-browser-executable'),/existing executable/)
  assert.throws(()=>options(['--version','0.4.0','--browser']),/existing executable/)
+ const invalid=spawnSync(process.execPath,['npm/smoke-registry.mjs','--version','0.4.0','--browser','PRIVATE_INVALID_BROWSER_SENTINEL'],{encoding:'utf8',timeout:10000})
+ assert.equal(invalid.status,2);assert.match(invalid.stderr,/invalid-browser-executable/);assert.ok(!invalid.stderr.includes('PRIVATE_INVALID_BROWSER_SENTINEL'))
  const failure=Error('private failure');failure.detail={phase:'doctor-brainllm',reason:'nonzero-exit',browserConfigured:true}
  const report=publicFailure(failure)
  assert.equal(report.browserConfigured,true);assert.equal(report.browserSelection,'explicit')
