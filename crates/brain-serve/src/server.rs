@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime};
 
-const CLIENT_JS: &str = include_str!("client.js");
+const CLIENT_JS: &str = concat!(include_str!("client.js"), include_str!("origin_help.js"));
 const TEST_HTML: &str = include_str!("test.html");
 const TEST_API_JS: &str = include_str!("test-api.js");
 const CLIENT_TAG: &str = "<script type=\"module\" src=\"/@brain/client.js\"></script><script>navigator.serviceWorker&&navigator.serviceWorker.getRegistrations().then(r=>r.forEach(x=>x.unregister()))</script>";
@@ -1759,6 +1759,21 @@ fn fixed_view(ctx: &Ctx, view: &str, props: &str, title: &str, detail: &str) -> 
     )
 }
 
+/// B0741 in development: the whole reason, in the answer and in the log, because here the reader is the author. Dev runs
+/// on loopback and has no allowlist to reveal; the production server answers only the code.
+fn origin_refusal(ctx: &Ctx, req: &http::Request, message: &str) -> String {
+    let origin = req.header("origin");
+    let host = req.header("host").unwrap_or("");
+    let fix = match origin {
+        Some(origin) => format!("Origin {origin} does not match the host this server sees ({host}). Call it from the page served by this dev server; behind a proxy forward the host (nginx: proxy_set_header Host $host;). There is no allowlist to widen. Run brain explain B0741"),
+        None => "The request has no Origin and no Sec-Fetch-Site, so its site cannot be proven. Send it from a page of this site; a script sets Origin to the site origin. Run brain explain B0741".to_string(),
+    };
+    let seen = origin.map_or("null".to_string(), |o| json_str(&o.chars().take(256).collect::<String>()));
+    let body = format!("{{\"error\":{},\"brainCode\":\"B0741\",\"seenOrigin\":{seen},\"host\":{},\"fix\":{}}}", json_str(message), json_str(host), json_str(&fix));
+    ctx.log("warn", body.clone());
+    body
+}
+
 /// `POST /_r/<hash>/<fn>` in dev, with the same contract as dist/server.mjs (INTERNALS §11.1): same-origin POST with
 /// `X-Brain-RPC: 1`, a JSON array of arguments, `fn(ctx, ...args)` → 200 JSON · thrown `{errors}` → 422
 /// `{error, errors}` (form() marks the fields) · anything else → 500 `{error}` (the stack goes to the log).
@@ -1778,7 +1793,8 @@ fn rpc(ctx: &Ctx, req: &http::Request, id: &str) -> (u16, String, Vec<(String, S
     }
     if let (Some(origin), Some(host)) = (req.header("origin"), req.header("host")) {
         if origin.split("://").nth(1) != Some(host) {
-            return fail(403, "Cross-origin request");
+            let body = origin_refusal(ctx, req, "Cross-origin request");
+            return (403, body, Vec::new());
         }
     }
     let Some((hash, func)) = id.split_once('/') else {
@@ -1908,7 +1924,8 @@ fn form_post(s: &mut TcpStream, ctx: &Ctx, req: &http::Request) -> io::Result<()
         (None, None) => false,
     };
     if !same {
-        return json(s, 403, "Cross-origin form");
+        let body = origin_refusal(ctx, req, "Cross-origin form");
+        return http::respond(s, 403, "application/json", body.as_bytes(), false);
     }
     let limits = ctx.server_limits();
     if req.body.len() > limits.max_body_bytes() {
@@ -2734,6 +2751,37 @@ fn on_change(ctx: &Ctx, path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dev_rpc_and_form_refusals_name_the_seen_origin_host_and_exact_fix() {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!("brain-dev-origin-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir(&root).unwrap();
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+        let _cleanup = Cleanup(root.clone());
+        let opts = Options {
+            root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: String::new(),
+            runtime: vec![], env: None, base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None,
+        };
+        let compile: CompileFn = Arc::new(|_, _| Ok(Compiled { js: String::new(), css: String::new(), deps: vec![], server_js: String::new() }));
+        let mut dev = start_dev(opts, compile, false, None).unwrap();
+        let post = |path: &str, headers: &str| {
+            use std::io::{Read, Write};
+            let mut stream = std::net::TcpStream::connect(dev.addr).unwrap();
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+            write!(stream, "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n{headers}Content-Length: 2\r\nConnection: close\r\n\r\n[]", dev.addr.port()).unwrap();
+            let mut out = String::new();
+            let _ = stream.read_to_string(&mut out);
+            out
+        };
+        let rpc = post("/_r/abc/save", "X-Brain-RPC: 1\r\nOrigin: https://shop.example\r\n");
+        assert!(rpc.starts_with("HTTP/1.1 403"), "{rpc}");
+        for needle in ["Cross-origin request", "\"brainCode\":\"B0741\"", "\"seenOrigin\":\"https://shop.example\"", "\"host\":\"127.0.0.1:", "proxy_set_header Host $host", "brain explain B0741"] {
+            assert!(rpc.contains(needle), "{needle} missing in {rpc}");
+        }
+        dev.stop();
+    }
 
     #[test]
     fn explicit_native_proxy_preserves_an_absent_environment_loader_scope() {

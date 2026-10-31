@@ -207,6 +207,34 @@ fn native_startup_test_address_uses_only_declared_numeric_http_loopback() {
     }
 }
 
+#[test]
+fn native_startup_accepts_a_declared_localhost_origin_and_names_both_sides_otherwise() {
+    let occupied = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = occupied.local_addr().unwrap().port();
+    drop(occupied);
+    let root = Fixture::new("localhost");
+    let origin = format!("http://localhost:{port}");
+    std::fs::write(root.0.join("brain.json"), format!(r#"{{"backend":{{"origins":["{origin}"],"sockets":{{"allowedOrigins":["{origin}"]}}}}}}"#)).unwrap();
+    std::fs::write(root.0.join(".brain_env"), format!("[development]\nPUBLIC_SITE_URL={origin}\nBRAIN_BACKEND_URL=http://127.0.0.1:9\n")).unwrap();
+    for host in ["127.0.0.1", "localhost"] {
+        let mut options = root.options(port);
+        options.host = host.into();
+        let mut dev = start_project_dev(options, compiler(), false, None, "development")
+            .unwrap_or_else(|error| panic!("--host {host} serves a declared localhost origin: {error}"));
+        dev.stop();
+    }
+    assert_eq!(project_test_address(&root.0).unwrap(), ("127.0.0.1".to_string(), port), "the scaffold's localhost site is testable");
+    let mut dev = start_project_dev(root.options(port), compiler(), false, None, "development").unwrap();
+    assert_eq!(browser_url(&root.0, "development", &dev), origin.clone(), "the browser opens the declared origin, computed from the running server");
+    dev.stop();
+    let other = format!("http://localhost:{}", port.wrapping_add(1));
+    std::fs::write(root.0.join("brain.json"), format!(r#"{{"backend":{{"origins":["{other}"],"sockets":{{"allowedOrigins":["{other}"]}}}}}}"#)).unwrap();
+    let error = start_project_dev(root.options(port), compiler(), false, None, "development").err().expect("another port stays refused");
+    assert!(error.contains(&format!("computed=http://127.0.0.1:{port}")), "{error}");
+    assert!(error.contains(&format!("allowed=[\"{other}\"]")), "{error}");
+    assert!(error.contains("B0745"), "{error}");
+}
+
 #[cfg(unix)]
 #[test]
 fn native_startup_static_manifest_rejection_precedes_pid_and_control_files() {

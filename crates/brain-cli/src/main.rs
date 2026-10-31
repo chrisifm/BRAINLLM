@@ -29,6 +29,7 @@ mod resource_admin;
 mod analytics;
 mod api_key_config;
 mod webhook_config;
+mod origin_check;
 mod platform_config;
 mod route_executor;
 mod hooks_executor;
@@ -615,6 +616,8 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
                     "inspect `brain backend schema --json`; fix the named literal schema, explicit policy or hook/job contract, then run brain check again");
                 diag.line=1;diag.col=1;diags.push(diag);
             }
+            // declared origins and the origins a page calls (B0744, B0745, B0746)
+            diags.extend(origin_check::check(&app));
             // brain.json `server` (B0707): body, time and rate limits shared by brain run and the production server
             if let Err(message) = brain_pack::read_server_limits(&app) {
                 let (msg, fix) = message.split_once("; fix: ").unwrap_or((message.as_str(), "set whole numbers in range"));
@@ -1663,8 +1666,11 @@ pub(crate) fn start_project_dev(
     let mut dev = brain_serve::start_dev_with_native_proxy(options, compile, watch, on_event, native)
         .map_err(|error| format!("Cannot start the owned frontend gateway: {error}"))?;
     if settings.enabled() {
-        if let Err(error) = settings.frontend_enabled(&dev.url()) {
-            let port = dev.addr.port();
+        let port = dev.addr.port();
+        let alias = dev.addr.ip().is_loopback().then(|| settings.loopback_alias(&dev.url(), port)).flatten();
+        if let Some(alias) = &alias {
+            eprintln!("Open {alias}: it is the origin listed in brain.json backend.sockets.allowedOrigins, and live sockets from {} would be refused (B0743)", dev.url());
+        } else if let Err(error) = settings.frontend_enabled(&dev.url()) {
             dev.stop();
             return Err(format!("{error}; selected port {port} was stopped; fix: use an allowed --host/--port or update the shared exact-origin declaration"));
         }
@@ -1685,13 +1691,29 @@ fn project_test_address(root: &Path) -> Result<(String, u16), String> {
         return Err(fix.into());
     }
     let host = match url.host_str().unwrap_or("") {
-        "127.0.0.1" => "127.0.0.1".to_string(),
+        // `brain new` writes localhost; the server binds its loopback address and the browser opens `browser_url`.
+        "127.0.0.1" | "localhost" => "127.0.0.1".to_string(),
         "[::1]" | "::1" => "::1".to_string(),
         _ => return Err(fix.into()),
     };
     let port = url.port_or_known_default().filter(|port| *port != 0).ok_or(fix)?;
-    settings.frontend_enabled(&format!("http://{}:{port}", if host.contains(':') { format!("[{host}]") } else { host.clone() }))?;
+    settings.frontend_enabled(&brain_backend::links::origin(&site).ok_or(fix)?)?;
     Ok((host, port))
+}
+
+/// The address a browser must open: the running server's own, or the declared `localhost` spelling of it, because the
+/// handshake compares the exact Origin. The allowlist stays as written.
+pub(crate) fn browser_url(root: &Path, environment: &str, dev: &brain_serve::Dev) -> String {
+    let url = dev.url();
+    if !dev.addr.ip().is_loopback() {
+        return url;
+    }
+    let site = env::value(root, environment, "PUBLIC_SITE_URL");
+    let Ok(settings) = backend::socket_settings(root, site.as_deref(), None) else { return url };
+    match settings.loopback_alias(&url, dev.addr.port()) {
+        Some(alias) => url.replacen(&format!("http://{}", dev.addr), &alias, 1),
+        None => url,
+    }
 }
 
 /// Runs the selected app tests in headless Chrome.
@@ -1718,7 +1740,7 @@ pub(crate) fn run_tests(target: Option<PathBuf>, timeout: u64) -> Result<Vec<tes
     let (host, port) = project_test_address(&root)?;
     let opts = brain_serve::Options { root: root.clone(), host, port, head_prepend: head_prepend(), runtime: runtime_files(), env: Some(env::loader(&root, "development")), base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None };
     let dev = start_project_dev(opts, compile_fn(root.clone(), true), false, None, "development").map_err(|error| format!("could not start the test server: {error}"))?;
-    testrun::run(&dev.url(), &root, &files, std::time::Duration::from_secs(timeout))
+    testrun::run(&browser_url(&root, "development", &dev), &root, &files, std::time::Duration::from_secs(timeout))
 }
 
 #[cfg(unix)]
@@ -2096,7 +2118,7 @@ fn cmd_dev(args: &[String]) -> Result<(), String> {
         println!("{{\"profile\":\"boot\",\"ms\":{:.1}}}", boot.elapsed().as_secs_f64() * 1000.0);
     }
     let addr = dev.addr;
-    let url = if native_enabled { dev.url() } else {
+    let url = if native_enabled { browser_url(&root, &environment, &dev) } else {
         format!("http://{host}:{}{}", addr.port(), dev.url().trim_start_matches(&format!("http://{addr}")))
     };
     // the debugger (§9.1, #269) on :P+1, same origin for its data: it proxies /@brain/metrics and /@brain/problems here

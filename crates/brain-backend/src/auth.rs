@@ -54,6 +54,31 @@ pub fn session_cookie(headers: &axum::http::HeaderMap) -> Option<&str> {
         .split(';')
         .find_map(|s| s.trim().strip_prefix(&format!("{COOKIE}=")))
 }
+/// Why a signup or sign-in did not finish: the request itself, or a server that could not answer it now. Callers must
+/// not report one as the other, and must keep every `Input` answer identical so it never confirms an account.
+#[derive(Debug)]
+pub enum AuthFailure {
+    Input(String),
+    Unavailable(String),
+}
+impl std::fmt::Display for AuthFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Input(message) | Self::Unavailable(message) => f.write_str(message),
+        }
+    }
+}
+impl From<String> for AuthFailure {
+    fn from(message: String) -> Self {
+        Self::Unavailable(message)
+    }
+}
+impl From<&str> for AuthFailure {
+    fn from(message: &str) -> Self {
+        Self::Unavailable(message.into())
+    }
+}
+
 impl Auth {
     pub async fn new(pool: PgPool) -> Result<Self, String> {
         Self::new_with_role(pool, "candidate").await
@@ -112,8 +137,11 @@ impl Auth {
         .await
         .map_err(|_| "Password worker failed")?
     }
-    pub async fn signup(&self, credentials: Credentials) -> Result<User, String> {
-        let email = Self::email(&credentials.email)?;
+    pub async fn signup(&self, credentials: Credentials) -> Result<User, AuthFailure> {
+        let email = Self::email(&credentials.email).map_err(|e| AuthFailure::Input(e.into()))?;
+        if !(12..=1024).contains(&credentials.password.len()) {
+            return Err(AuthFailure::Input("Password must be 12..1024 bytes".into()));
+        }
         let hash = self.hash(credentials.password).await?;
         let id = Uuid::new_v4();
         let mut tx = self.pool.begin().await.map_err(crate::db::safe)?;
@@ -124,7 +152,11 @@ impl Auth {
             .bind(self.signup_role())
             .execute(&mut *tx)
             .await
-            .map_err(|_| "Cannot create account with these details")?;
+            .map_err(|error| match error.as_database_error() {
+                // The same answer as any refused signup, so the response never confirms an account.
+                Some(db) if db.is_unique_violation() => AuthFailure::Input("Cannot create account with these details".into()),
+                _ => AuthFailure::from(crate::db::safe(error)),
+            })?;
         sqlx::query("INSERT INTO _brain_auth_events(user_id,event) VALUES ($1,'signup')")
             .bind(id)
             .execute(&mut *tx)
@@ -138,8 +170,8 @@ impl Auth {
             verified: false,
         })
     }
-    pub async fn login(&self, credentials: Credentials) -> Result<Option<(User, String)>, String> {
-        let email = Self::email(&credentials.email)?;
+    pub async fn login(&self, credentials: Credentials) -> Result<Option<(User, String)>, AuthFailure> {
+        let email = Self::email(&credentials.email).map_err(|e| AuthFailure::Input(e.into()))?;
         if credentials.password.len() > 1024 {
             return Ok(None);
         }

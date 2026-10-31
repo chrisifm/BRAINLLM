@@ -40,18 +40,22 @@ pub struct SocketProxyDiagnostic {
     pub status: u16,
     pub file: &'static str,
     pub line: u32,
+    /// B0743 evidence as a JSON fragment: the refused Origin and the allowed list. Log only, never in the answer.
+    pub origin: Option<String>,
 }
 impl SocketProxyDiagnostic {
     pub fn to_json(&self) -> String {
         format!(
-            "{{\"schemaVersion\":1,\"event\":\"native-socket-proxy-error\",\"rid\":{},\"phase\":{},\"code\":{},\"fix\":{},\"status\":{},\"location\":{{\"file\":{},\"line\":{}}},\"valuesCaptured\":false}}",
+            "{{\"schemaVersion\":1,\"event\":\"native-socket-proxy-error\",\"rid\":{},\"phase\":{},\"code\":{},\"fix\":{},\"status\":{},\"location\":{{\"file\":{},\"line\":{}}}{},\"valuesCaptured\":{}}}",
             crate::json_str(&self.rid),
             crate::json_str(self.phase),
             crate::json_str(self.code),
             crate::json_str(self.fix),
             self.status,
             crate::json_str(self.file),
-            self.line
+            self.line,
+            self.origin.as_deref().unwrap_or(""),
+            self.origin.is_some()
         )
     }
 }
@@ -76,6 +80,9 @@ struct State {
 }
 impl State {
     fn report(&self, rid: &str, failure: Failure) {
+        self.report_origin(rid, failure, None);
+    }
+    fn report_origin(&self, rid: &str, failure: Failure, origin: Option<String>) {
         self.errors.fetch_add(1, Ordering::Relaxed);
         let mut ring = self
             .diagnostics
@@ -93,6 +100,7 @@ impl State {
             status: failure.status,
             file: failure.file,
             line: failure.line,
+            origin,
         });
     }
 }
@@ -232,7 +240,7 @@ fn validate(req: &http::Request) -> Result<Request, Failure> {
             403,
             "request",
             "BNATIVE_SOCKET_ORIGIN",
-            "Send one canonical frontend Origin allowed by the native backend",
+            "B0743: send one canonical frontend Origin allowed by the native backend. Run brain explain B0743",
         )
     })?;
     if !valid_origin(origin) {
@@ -359,6 +367,7 @@ impl NativeSocketProxy {
         stream: &mut TcpStream,
         req: &mut http::Request,
     ) -> io::Result<()> {
+        let mut refused_origin: Option<String> = None;
         let result = (|| {
             if *self.0.stop.borrow() {
                 return Err(Failure::new(
@@ -375,11 +384,14 @@ impl NativeSocketProxy {
                 .as_ref()
                 .is_some_and(|origins| !origins.contains(&request.origin))
             {
+                let allowed = self.0.origins.as_deref().unwrap_or_default();
+                let list = allowed.iter().map(|o| crate::json_str(o)).collect::<Vec<_>>().join(",");
+                refused_origin = Some(format!(",\"brainCode\":\"B0743\",\"seenOrigin\":{},\"allowedOrigins\":[{list}],\"config\":\"brain.json backend.sockets.allowedOrigins\"", crate::json_str(&request.origin.chars().take(256).collect::<String>())));
                 return Err(Failure::new(
                     403,
                     "origin",
                     "BNATIVE_SOCKET_ORIGIN",
-                    "Open the configured site/port or review backend.sockets.allowedOrigins; never widen CORS automatically",
+                    "B0743: open the configured site/port, or add this exact origin to brain.json backend.sockets.allowedOrigins and backend.origins; never a wildcard. Run brain explain B0743",
                 ));
             }
             if stream
@@ -444,7 +456,7 @@ impl NativeSocketProxy {
         })();
         if let Err(failure) = result {
             self.0.state.rejected.fetch_add(1, Ordering::Relaxed);
-            self.0.state.report(&req.id, failure);
+            self.0.state.report_origin(&req.id, failure, refused_origin.take());
             stream.set_write_timeout(Some(Duration::from_secs(1)))?;
             let body = failure.body(&req.id);
             return http::respond_with(

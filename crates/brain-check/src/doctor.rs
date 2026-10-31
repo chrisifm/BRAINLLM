@@ -122,7 +122,7 @@ fn calls<'a>(stmts: &'a [Stmt], name: &str, out: &mut Vec<(&'a Expr, Span)>) {
     }
 }
 
-fn collect<'a>(stmts: &'a [Stmt], out: &mut Vec<&'a Expr>) {
+pub(crate) fn collect<'a>(stmts: &'a [Stmt], out: &mut Vec<&'a Expr>) {
     fn ex<'a>(e: &'a Expr, out: &mut Vec<&'a Expr>) {
         out.push(e);
         match e {

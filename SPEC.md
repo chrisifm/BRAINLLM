@@ -191,7 +191,7 @@ Native live invalidation: `const updates = liveResource(rows, {rooms:[{resource:
 passes an existing resource handle; `updates.state` / `updates.connected` are reactive getters. Optional room `id` is a UUID;
 `{room:'user:self'}` subscribes only to the authenticated owner. The server requires explicit brain.json
 `backend:{origins:['https://app.example.com'],sockets:{allowedOrigins:['https://app.example.com']}}`; socket origins must
-be a subset of HTTP origins (1–8 canonical origins). Absent/false sockets disables it. It connects only to the app's
+be a subset of HTTP origins (1–8 canonical origins; `brain check` reports B0744/B0745). Absent/false sockets disables it. It connects only to the app's
 `<base>/_brain/socket`, sends no credentials in the URL, refetches after JOIN acknowledgement/reconnect/invalidation,
 and closes on unmount. Scope is a public user/revision key or null, never a token; null disconnects. HttpOnly cookie
 changes are not detected: call `updates.reconnect()` after same-scope login/session rotation and clear scope on logout.

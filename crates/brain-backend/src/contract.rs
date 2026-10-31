@@ -609,7 +609,7 @@ fn native_paths(roles: &crate::auth_flows::RolesConfig) -> Map<String, Value> {
     );
     let mut signup = credentials.clone();
     signup["properties"]["password"]["x-brain-minBytes"] = json!(12);
-    let error_schema = json!({"type":"object","description":"Application error or middleware rejection. X-Request-Id is always authoritative; custom JSON fields may vary.","properties":{"schemaVersion":{"type":"integer"},"rid":{"type":["string","null"]},"error":{"oneOf":[{"type":"string"},{"type":"object","properties":{"code":{"type":"string"},"fix":{"type":"string"},"fields":{}}}]}}});
+    let error_schema = json!({"type":"object","description":"Application error or middleware rejection. X-Request-Id is always authoritative; custom JSON fields may vary.","properties":{"schemaVersion":{"type":"integer"},"rid":{"type":["string","null"]},"error":{"oneOf":[{"type":"string"},{"type":"object","properties":{"code":{"type":"string"},"brainCode":{"type":"string"},"fix":{"type":"string"},"fields":{},"origin":{"type":"object","description":"Development only: the refused origin, the allowed origins and the exact fix"}}}]}}});
     let mut add = |path: &str,
                    method: &str,
                    summary: &str,

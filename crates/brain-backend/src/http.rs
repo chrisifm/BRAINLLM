@@ -93,6 +93,10 @@ pub struct Error {
     code: &'static str,
     fix: &'static str,
     fields: Option<Value>,
+    /// Stable catalog code (`brain explain`); safe in production.
+    brain_code: Option<&'static str>,
+    /// Configuration evidence; only set outside production.
+    detail: Option<Value>,
 }
 impl Error {
     fn new(status: StatusCode, code: &'static str, fix: &'static str) -> Self {
@@ -101,7 +105,17 @@ impl Error {
             code,
             fix,
             fields: None,
+            brain_code: None,
+            detail: None,
         }
+    }
+    /// An origin refusal: the code always, the seen and allowed origins only outside production.
+    fn origin_refused(mut self, brain_code: &'static str, origin: Option<&str>, allowed: &[String], production: bool) -> Self {
+        self.brain_code = Some(brain_code);
+        if !production {
+            self.detail = Some(crate::origins::detail(brain_code, origin, allowed));
+        }
+        self
     }
     #[track_caller]
     fn internal(error: impl std::fmt::Display + 'static) -> Self {
@@ -172,12 +186,17 @@ impl Error {
             code: "INVALID_INPUT",
             fix: "Apply the field errors and send only fields declared in schema.jsbrain",
             fields: serde_json::to_value(fields).ok(),
+            brain_code: None,
+            detail: None,
         }
     }
 }
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
-        let mut response=(self.status,Json(json!({"schemaVersion":1,"rid":REQUEST_ID.try_with(Clone::clone).ok(),"error":{"code":self.code,"fix":self.fix,"fields":self.fields}}))).into_response();
+        let mut error=json!({"code":self.code,"fix":self.fix,"fields":self.fields});
+        if let Some(code)=self.brain_code { error["brainCode"]=json!(code); }
+        if let Some(detail)=self.detail { error["origin"]=detail; }
+        let mut response=(self.status,Json(json!({"schemaVersion":1,"rid":REQUEST_ID.try_with(Clone::clone).ok(),"error":error}))).into_response();
         response
             .extensions_mut()
             .insert(crate::response::DefaultError);
@@ -289,12 +308,22 @@ pub async fn router_full(
     let cors_max_age = platform.edge.cors_max_age;
     let (custom_routes, custom_handlers) = (platform.routes.clone(), platform.handlers.clone());
     let socket_origins = config.sockets.as_ref().map(|s| s.allowed().to_vec()).unwrap_or_default();
-    if socket_origins.iter().any(|origin| !config.origins.contains(origin)) {
-        return Err("Socket origins must be an explicit subset of backend HTTP origins".into());
+    if let Some(origin) = socket_origins.iter().find(|origin| !config.origins.contains(origin)) {
+        return Err(format!("B0745: Socket origins must be an explicit subset of backend HTTP origins: {} has {origin:?}, HTTP origins are {:?}; fix: add {origin:?} to {} or remove it from {}", crate::origins::SOCKET_KEY, config.origins, crate::origins::BRAIN_JSON_KEY, crate::origins::SOCKET_KEY));
     }
     let sockets_enabled = !socket_origins.is_empty();
     let mut origins = Vec::new();
     for origin in &config.origins {
+        // Name the file that declares the value: a bad entry otherwise reads as a generic startup failure.
+        let key = if platform.edge.cors_origins.contains(origin) { crate::origins::PLATFORM_KEY } else { crate::origins::BRAIN_JSON_KEY };
+        if let Some(problem) = crate::origins::problem(origin) {
+            let message = crate::origins::declaration_message(origin, key);
+            if problem.fatal {
+                return Err(format!("Backend origins must be explicit http(s) origins without credentials, paths or wildcards. {message}"));
+            }
+            // Accepted so far and harmless (it just never matches): reported, not fatal, for one minor release.
+            eprintln!("{}", json!({"schemaVersion":1,"event":"origin-declaration-ignored","code":"B0744","message":message}));
+        }
         let uri: axum::http::Uri = origin.parse().map_err(|_| "Invalid backend origin")?;
         if !matches!(uri.scheme_str(), Some("http" | "https"))
             || uri.authority().is_none()
@@ -396,11 +425,10 @@ pub async fn router_full(
                 .map(|mail| mail.public_base_url.as_str())
         })
         .unwrap_or(&config.origins[0]);
-    let public_origin = crate::links::origin(auth_base).ok_or("Auth public base URL is invalid")?;
+    let public_origin = crate::links::origin(auth_base)
+        .ok_or_else(|| crate::origins::auth_public_url_message(auth_base, None, &config.origins))?;
     if !config.origins.contains(&public_origin) {
-        return Err(
-            "Auth public base URL must belong to an explicitly allowed frontend origin".into(),
-        );
+        return Err(crate::origins::auth_public_url_message(auth_base, Some(&public_origin), &config.origins));
     }
     let delivery = config
         .mail
@@ -580,6 +608,7 @@ pub async fn router_full(
         .layer(middleware::from_fn_with_state(custom.clone(), request_deadline))
         .layer(CompressionLayer::new())
         .layer(cors)
+        .layer(middleware::from_fn_with_state(app.clone(), origin_watch))
         .layer(middleware::from_fn(response_headers))
         .layer(middleware::from_fn_with_state(app.production, transport_security))
         .with_state(app);
@@ -833,6 +862,30 @@ async fn transport_security(State(production): State<bool>, req: Request, next: 
     }
     response
 }
+/// The CORS layer leaves `Access-Control-Allow-Origin` off a refused origin, and the browser hides why, so this records
+/// the reason for the operator. That layer still adds its credentials, expose, methods, headers and max-age values to
+/// every answer; a refused origin must not receive any of them, so they are removed here. `Vary` stays for shared caches.
+async fn origin_watch(State(app): State<App>, req: Request, next: Next) -> Response {
+    let refused = req.headers().get(header::ORIGIN).is_some_and(|origin| !app.origins.iter().any(|allowed| allowed.as_bytes() == origin.as_bytes()));
+    let reads = matches!(*req.method(), Method::GET | Method::HEAD);
+    let preflight = *req.method() == Method::OPTIONS && req.headers().contains_key(header::ACCESS_CONTROL_REQUEST_METHOD);
+    if reads || preflight {
+        if let Some(origin) = req.headers().get(header::ORIGIN).and_then(|v| v.to_str().ok()) {
+            let socket = reads && req.uri().path() == "/_brain/socket";
+            if !socket && !app.origins.iter().any(|allowed| allowed == origin) {
+                crate::origins::log_refusal("B0740", if preflight { "preflight" } else { "read" }, req.method().as_str(), req.uri().path(), Some(origin), &app.origins);
+            }
+        }
+    }
+    let mut response = next.run(req).await;
+    if refused {
+        let cors: Vec<_> = response.headers().keys().filter(|name| name.as_str().starts_with("access-control-")).cloned().collect();
+        for name in cors {
+            response.headers_mut().remove(name);
+        }
+    }
+    response
+}
 async fn protect(State(app): State<App>, req: Request, next: Next) -> Response {
     // Only this signed, cookie-independent provider route can omit the browser Origin.
     let signed_inbound = req.method() == Method::POST
@@ -850,7 +903,10 @@ async fn protect(State(app): State<App>, req: Request, next: Next) -> Response {
             .get(header::ORIGIN)
             .and_then(|v| v.to_str().ok());
         if !origin.is_some_and(|o| app.origins.iter().any(|allowed| allowed == o)) {
-            return Error::new(StatusCode::FORBIDDEN,"ORIGIN_DENIED","Send the configured site Origin; backend mutations require an explicit allowed origin").into_response();
+            crate::origins::log_refusal("B0740", "mutation", req.method().as_str(), req.uri().path(), origin, &app.origins);
+            return Error::new(StatusCode::FORBIDDEN,"ORIGIN_DENIED","Send the configured site Origin; backend mutations require an explicit allowed origin. Run `brain explain B0740`; the server log names the seen and allowed origins")
+                .origin_refused("B0740", origin, &app.origins, app.production)
+                .into_response();
         }
     }
     next.run(req).await
@@ -886,32 +942,40 @@ async fn signup(State(app): State<App>, Json(c): Json<Credentials>) -> Result<Js
         .signup(c)
         .await
         .map(|u| Json(json!({"user":u})))
-        .map_err(|_| {
-            Error::new(
+        .map_err(|failure| match failure {
+            auth::AuthFailure::Input(_) => Error::new(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "SIGNUP_FAILED",
                 "Use a valid email and a unique account with a password of 12..1024 bytes",
-            )
+            ),
+            auth::AuthFailure::Unavailable(_) => auth_unavailable("SIGNUP_UNAVAILABLE"),
         })
+}
+fn auth_unavailable(code: &'static str) -> Error {
+    Error::new(
+        StatusCode::SERVICE_UNAVAILABLE,
+        code,
+        "Your details were not rejected: the database or the password workers are busy. Retry shortly",
+    )
+}
+fn login_failed() -> Error {
+    Error::new(
+        StatusCode::UNAUTHORIZED,
+        "LOGIN_FAILED",
+        "Check credentials or wait for the 15-minute account lockout to expire",
+    )
 }
 async fn login(State(app): State<App>, Json(c): Json<Credentials>) -> Result<Response> {
     // The backend owns the session mode. A configured JWT authority never falls back to opaque login on failure.
     if app.jwt.is_some() {
         return token_login(State(app), Json(c)).await;
     }
-    let Some((user, token)) = app.auth.login(c).await.map_err(|_| {
-        Error::new(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "LOGIN_UNAVAILABLE",
-            "Check input or retry after the password workers are available",
-        )
+    let Some((user, token)) = app.auth.login(c).await.map_err(|failure| match failure {
+        auth::AuthFailure::Input(_) => login_failed(),
+        auth::AuthFailure::Unavailable(_) => auth_unavailable("LOGIN_UNAVAILABLE"),
     })?
     else {
-        return Err(Error::new(
-            StatusCode::UNAUTHORIZED,
-            "LOGIN_FAILED",
-            "Check credentials or wait for the 15-minute account lockout to expire",
-        ));
+        return Err(login_failed());
     };
     let mut response = Json(json!({"user":user})).into_response();
     response.headers_mut().insert(
@@ -992,7 +1056,10 @@ async fn token_login(
         .auth
         .login(credentials)
         .await
-        .map_err(|_| auth_denied())?
+        .map_err(|failure| match failure {
+            auth::AuthFailure::Input(_) => auth_denied(),
+            auth::AuthFailure::Unavailable(_) => auth_unavailable("LOGIN_UNAVAILABLE"),
+        })?
         .ok_or_else(auth_denied)?;
     let tokens = jwt
         .issue(user, &opaque)

@@ -31,7 +31,7 @@ const withSession = async (S, ctx, secret, preauthenticated = false, nativeRequi
   if (nativeRequired && !configured) throw Object.assign(Error('Native authentication is temporarily unavailable'), { status: 503 })
   if (configured) {
     if (typeof S.nativeAuthBridge !== 'function') throw Object.assign(Error('Native authentication bridge is unavailable in this runtime version'), { status: 503 })
-    if (!nativeBridge || nativeModule !== S || nativeURL !== configured) { nativeBridge?.close(); try { nativeBridge = S.nativeAuthBridge(configured) } catch { throw Object.assign(Error('Native authentication is temporarily unavailable'), { status: 503 }) }; nativeModule = S; nativeURL = configured }
+    if (!nativeBridge || nativeModule !== S || nativeURL !== configured) { nativeBridge?.close(); try { nativeBridge = S.nativeAuthBridge(configured, (code, req, rid) => console.error(JSON.stringify({ event: 'origin-refused', code, rid, seenOrigin: typeof req.headers.origin === 'string' ? req.headers.origin.slice(0, 256) : null, host: req.headers.host, fix: 'Call this server function from the page served by this dev server; ctx.backend needs its same-origin POST. Run brain explain ' + code }))) } catch { throw Object.assign(Error('Native authentication is temporarily unavailable'), { status: 503 }) }; nativeModule = S; nativeURL = configured }
     const req = new EventEmitter(), res = new EventEmitter(), headers = Object.create(null)
     for (const name of ['host', 'cookie', 'origin', 'accept', 'content-type']) { const value = ctx.req?.headers?.[name]; if (typeof value === 'string') headers[name] = value }
     req.headers = headers; req.method = ctx.req?.method || 'GET'; req.url = ctx.url

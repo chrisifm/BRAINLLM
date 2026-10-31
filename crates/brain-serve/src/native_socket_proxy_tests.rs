@@ -649,10 +649,17 @@ fn explicit_socket_origin_selection_fails_locally_without_widening_backend_polic
         .unwrap()
         .unwrap();
     let mut client = client(&proxy, &raw("/_brain/socket"), "");
-    assert!(read_head(&mut client).starts_with("HTTP/1.1 403"));
+    let head = read_head(&mut client);
+    assert!(head.starts_with("HTTP/1.1 403"));
+    assert!(!head.contains("allowed.example.test"), "the answer never carries the allowlist");
     let diagnostics = proxy.drain_diagnostics();
     assert_eq!(diagnostics[0].phase, "origin");
-    assert!(!diagnostics[0].to_json().contains("https://allowed"));
+    // The operator's log is the only place a refused handshake can explain itself: the browser hides the 403.
+    let logged = diagnostics[0].to_json();
+    assert!(logged.contains("\"brainCode\":\"B0743\""), "{logged}");
+    assert!(logged.contains("https://allowed.example.test"), "{logged}");
+    assert!(logged.contains("backend.sockets.allowedOrigins"), "{logged}");
+    assert!(logged.contains("\"seenOrigin\":"), "{logged}");
     assert_eq!(
         listener.accept().err().unwrap().kind(),
         io::ErrorKind::WouldBlock

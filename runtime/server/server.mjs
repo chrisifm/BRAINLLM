@@ -187,8 +187,17 @@ function googleSignInPage(page) {
 }
 
 // One configured loopback authority. No user-controlled target, proxy, redirect, auth cache or pending queue.
-export function nativeAuthBridge(raw) {
+export function nativeAuthBridge(raw, refused) {
   if (!raw) return null
+  // The visitor's cookies only travel for a request from the site itself; the caller's log gets the reason (B0742).
+  const bridgeOrigin = (incoming, rid, message) => {
+    try {
+      const origin = new URL(incoming.headers.origin)
+      if (origin.origin === incoming.headers.origin && origin.host === (incoming.headers['x-forwarded-host'] || incoming.headers.host)) return origin.origin
+    } catch {}
+    if (refused) refused('B0742', incoming, rid, 'native')
+    throw new HttpError(403, 'B0742: ' + message)
+  }
   if (typeof raw !== 'string' || raw.length > 2048) throw Error('BRAIN_BACKEND_URL must be an explicit loopback HTTP origin')
   let target
   try { target = new URL(raw) } catch { throw Error('BRAIN_BACKEND_URL must be an explicit loopback HTTP origin') }
@@ -339,9 +348,7 @@ export function nativeAuthBridge(raw) {
       req.method = method
       req.headers = { cookie: cookies(incoming, false), accept: 'application/json', 'content-type':'application/json', 'content-length':String(bytes.length) }
       if (method !== 'GET') {
-        let origin
-        try { origin = new URL(incoming.headers.origin); if (origin.origin !== incoming.headers.origin || origin.host !== (incoming.headers['x-forwarded-host'] || incoming.headers.host)) throw Error() } catch { throw new HttpError(403, 'Native writes require a same-origin server request') }
-        req.headers.origin = origin.origin
+        req.headers.origin = bridgeOrigin(incoming, rid, 'Native writes require a same-origin server request')
       }
       let value
       try {
@@ -440,18 +447,18 @@ export function nativeAuthBridge(raw) {
     })
   }
   async function login(incoming,response,rid,credentials) {
-    if (incoming.method !== 'POST' || response.headersSent || response.writableEnded || response.destroyed) throw new HttpError(403,'Sign in through a same-origin POST server function')
+    if (incoming.method !== 'POST' || response.headersSent || response.writableEnded || response.destroyed) throw new HttpError(403,'B0742: Sign in through a same-origin POST server function')
     if (incoming.$nativeLoginStarted || incoming.$nativeLogout) throw new HttpError(409,'Use one authentication change per server request')
     if (!credentials || typeof credentials !== 'object' || Array.isArray(credentials) || Object.keys(credentials).some(key=>!['email','password'].includes(key)) || typeof credentials.email !== 'string' || typeof credentials.password !== 'string' || Buffer.byteLength(credentials.email)>254 || Buffer.byteLength(credentials.password)>1024) throw new HttpError(422,'Enter a valid email and password')
-    let origin
-    try { origin=new URL(incoming.headers.origin);if(origin.origin!==incoming.headers.origin || origin.host!==(incoming.headers['x-forwarded-host']||incoming.headers.host))throw Error() }catch{throw new HttpError(403,'Sign in through a same-origin POST server function')}
+    const origin=bridgeOrigin(incoming,rid,'Sign in through a same-origin POST server function')
     incoming.$nativeLoginStarted=true
     const bytes=Buffer.from(JSON.stringify({email:credentials.email,password:credentials.password}))
-    const request=Readable.from([bytes]);request.method='POST';request.headers={origin:origin.origin,accept:'application/json','content-type':'application/json','content-length':String(bytes.length)}
+    const request=Readable.from([bytes]);request.method='POST';request.headers={origin,accept:'application/json','content-type':'application/json','content-length':String(bytes.length)}
     let user
     try {
       await proxy(request,response,new URL('/_brain/auth/login',target),rid,(_res,status,data,headers)=>{
-        if(status!==200)throw new HttpError(status===400||status===401||status===422?401:status===429?429:503,status===429?'Too many attempts. Wait before trying again.':status<500?'Wrong email or password':'Sign-in is temporarily unavailable')
+        if(status===403)throw new HttpError(403,"B0740: the backend refused this site's origin; fix: add the site origin to backend.origins in brain.json. The backend log has the seen and allowed origins. Run brain explain B0740")
+        if(status!==200)throw new HttpError(status===400||status===401||status===422?401:status===429?429:503,status===429?'Too many attempts. Wait before trying again.':status===400||status===401||status===422?'Wrong email or password':'Sign-in is temporarily unavailable')
         let payload
         try {payload=JSON.parse(data.toString('utf8'))}catch{throw unavailable()}
         user=safeUser(payload?.user)
@@ -486,11 +493,10 @@ export function nativeAuthBridge(raw) {
         set() { throw new HttpError(409, 'Use the native authentication API to establish a session') },
         clear() {
           if (req.$nativeLoginStarted) throw new HttpError(409,'Use a separate server request to sign out after signing in')
-          if (req.method !== 'POST' || res.headersSent) throw new HttpError(403, 'Sign out through a same-origin POST request')
-          let origin
-          try { origin = new URL(req.headers.origin); if (origin.origin !== req.headers.origin || origin.host !== (req.headers['x-forwarded-host'] || req.headers.host)) throw Error() } catch { throw new HttpError(403, 'Sign out through a same-origin POST request') }
+          if (req.method !== 'POST' || res.headersSent) throw new HttpError(403, 'B0742: Sign out through a same-origin POST request')
+          const origin = bridgeOrigin(req, rid, 'Sign out through a same-origin POST request')
           if (!req.$nativeLogout) {
-            req.$nativeLogout = call(req, res, '/_brain/auth/logout', 'POST', rid, origin.origin).then(headers => { req.$nativeLogoutDone = true; req.$nativeLogoutHeaders = headers }, error => { req.$nativeLogoutDone = true; req.$nativeLogoutError = true; throw error })
+            req.$nativeLogout = call(req, res, '/_brain/auth/logout', 'POST', rid, origin).then(headers => { req.$nativeLogoutDone = true; req.$nativeLogoutHeaders = headers }, error => { req.$nativeLogoutDone = true; req.$nativeLogoutError = true; throw error })
             req.$nativeLogout.catch(() => {})
           }
           return req.$nativeLogout
@@ -506,7 +512,7 @@ export function nativeAuthBridge(raw) {
 export function createServer(o = {}) {
   const dist = resolve(o.dist || process.cwd())
   const env = Object.freeze({ ...(o.env || ENV) }) // ctx.env: what the supervisor passed, read-only
-  const native = nativeAuthBridge(o.backendURL ?? env.BRAIN_BACKEND_URL)
+  const native = nativeAuthBridge(o.backendURL ?? env.BRAIN_BACKEND_URL, (...why) => originRefused(...why))
   if (o.nativeSockets !== undefined && typeof o.nativeSockets !== 'boolean') throw Error('nativeSockets must be an explicit boolean')
   const SITEMAP_BYTES = +(o.sitemapBytes ?? 50 * 1024 * 1024) // protocol: 50 MB uncompressed per sitemap file
   const secret = o.secret ?? env.BRAIN_SECRET ?? ''
@@ -531,6 +537,20 @@ export function createServer(o = {}) {
     if (b) Object.assign(safe, b)
     if (typeof safe.path === 'string') safe.path = safe.path.split(/[?#]/, 1)[0].slice(0, 2048)
     sink(level, msg, safe)
+  }
+  // An origin refusal (B0741, B0742): the answer stays minimal and the operator's log gets the reason. It is bounded per
+  // minute because anyone can trigger it, and it never names an allowlist: this server only compares against its own host.
+  let originWindow = 0, originLogs = 0
+  const originRefused = (code, req, rid, kind) => {
+    const minute = Math.floor(Date.now() / 60000)
+    if (originWindow !== minute) { originWindow = minute; originLogs = 0 }
+    if (originLogs++ >= 16) return
+    const bound = v => typeof v === 'string' ? v.slice(0, 256) : null
+    const seenOrigin = bound(req.headers.origin), host = bound(req.headers.host), forwardedHost = bound(req.headers['x-forwarded-host'])
+    const fix = seenOrigin
+      ? `Origin ${seenOrigin} does not match the host this server sees (${forwardedHost || host}). Call it from the site itself; behind a proxy forward the host (nginx: proxy_set_header Host $host;). There is no allowlist to widen. Run brain explain ${code}`
+      : `The request has no Origin${code === 'B0741' ? ' and no Sec-Fetch-Site' : ''}, so its site cannot be proven. Send it from the page's own origin in a browser; a script sets Origin to the site origin. Run brain explain ${code}`
+    log('error', 'origin refused', { code, kind, rid, seenOrigin, secFetchSite: bound(req.headers['sec-fetch-site']), host, forwardedHost, fix })
   }
   // log fields for a thrown value: its stack (sanitized by log) plus, for B09xx budget failures, the typed fields only
   const trace = e => {
@@ -987,7 +1007,7 @@ export function createServer(o = {}) {
     const fail = (status, error, { $h, ...extra } = {}) => send(res, status, json({ error, ...extra }), { 'content-type': MIME['.json'], 'cache-control': 'no-store', ...$h })
     if (req.method !== 'POST') return fail(405, 'Use POST', { $h: { allow: 'POST' } })
     if (req.headers['x-brain-rpc'] !== '1') return fail(403, 'Missing X-Brain-RPC header')
-    if (!sameOrigin(req)) return fail(403, 'Cross-origin request')
+    if (!sameOrigin(req)) return originRefused('B0741', req, rid, 'rpc'), fail(403, 'Cross-origin request', { brainCode: 'B0741' })
     const modPath = mf.rpc[hash]
     if (!modPath || !/^[A-Za-z_$][\w$]*$/.test(fn)) return fail(404, 'Unknown function')
     const ra = overLimit(ipOf(req) + ' ' + hash + '/' + fn, LIMIT) // before reading the body
@@ -1030,7 +1050,7 @@ export function createServer(o = {}) {
   // ---------- form posted without JS (§38; transport, the logic is callForm, shared with the dev server) ----------
   async function formPost(req, res, route, params, url, rid) {
     const plain = (status, text, h = {}) => send(res, status, text, { 'content-type': MIME['.txt'], 'cache-control': 'no-store', ...h })
-    if (!sameOrigin(req, true)) return plain(403, 'Cross-origin form post')
+    if (!sameOrigin(req, true)) return originRefused('B0741', req, rid, 'form'), plain(403, 'Cross-origin form post', { 'x-brain-code': 'B0741' })
     if (!/^application\/x-www-form-urlencoded/i.test(req.headers['content-type'] || '')) return plain(415, 'Forms are sent as application/x-www-form-urlencoded')
     let raw
     try {
