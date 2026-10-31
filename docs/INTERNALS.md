@@ -466,7 +466,10 @@ form no longer read, so submit saw empty fields); B0133 catches it at compile ti
 `msg(key, english, vars)` in `brain-schema.js`, which reads `globalThis.__brainDict` directly (no brain-i18n.js
 import): `form.*` keys of the page's locale, then the default locale, then English. brain-pack ships the `form.*`
 keys in the dictionary chunk of every page whose graph reaches `brain-schema.js`, even without a `t()` call.
-Known gap: a form posted without JS is validated by `callForm` outside a locale, so its messages stay English.
+A form posted without JS is validated in the page's locale too: `callForm({ locale })` sets `__brainLocale` only
+around the synchronous validation (concurrent requests in other languages never see it), and the generic
+"Something went wrong" message is `form.error` of that locale. `dist/server.mjs` loads the page's dictionary chunk
+first; `brain run` strips the `/<locale>` prefix before routing the POST and hands the sidecar the dictionaries.
 
 ## 15. Data with contract
 `api(path, methods)` and types in `.jsbrain`. The compiler generates the client (native fetch) and a minimal validator per
@@ -1357,12 +1360,26 @@ language is one command.
 - **Config:** `brain.json` `"i18n": { "default": "en", "locales": ["en", "es", "pt"] }`. One locale means a
   single-language site with no prefixes (the default for `brain new`).
 - **Files:** `i18n/<locale>.json`, flat dotted keys (`"nav.home": "Home"`, `"posts.count": { "one": "{n} post",
-  "other": "{n} posts" }`). `brain new` creates `i18n/en.json` and the scaffold's views already read their text
-  through `t()`, so a new language never means touching views.
+  "other": "{n} posts" }`). `brain new` makes a single-language site with no `i18n/` folder and plain text in its
+  views; the first extra language (`brain add locale`) moves every fixed text to keys (below), so going from one
+  language to two never means editing views by hand.
 - **In code:** `t('key', vars?)` in markup and BrainScript; plurals by `Intl.PluralRules`; `fmt.date(d)`,
   `fmt.number(n)`, `fmt.money(n, 'USD')` and `fmt.relative(d)` over `Intl` for the current locale; `locale()` returns
   it. Text written straight into markup is allowed in single-language sites; with 2+ locales it is B1403 (warning,
   with an edit that moves the text to a new key in every locale file).
+- **What B1403 moves** (2026-10-31): text nodes; a sentence with interpolations as one message with placeholders
+  (`Signed in as {email}` becomes `t('account.signed_in_as_with', { email })`, never two fragments); visible
+  attributes (`placeholder`, `title`, `alt`, `aria-label` and the other `aria-*` texts, `label`, `description`,
+  `help`, `hint`, `caption`, `heading`, `message`, `empty`, and `value` on submit/button/reset inputs);
+  `<meta seo title/description>` (`<scope>.meta_title`, `<scope>.meta_description`); string literals in markup
+  expressions (both branches of `a ? 'x' : 'y'`, the right side of `||`/`??`, `+` concatenations, untagged
+  templates). Not moved: `app.brain` (static shell, B0132: put translatable chrome in `views/_layout.brain`) and
+  literals inside `<script>`.
+- **Key names** (2026-10-31): `<scope>.<first four ASCII words>`. The scope is the view path without `views/` and
+  `index` (`views/account/index.brain` is `account`, `views/posts/[id]/edit.brain` is `posts-id-edit`, `home` for the
+  root) or the component file name. Words are folded to ASCII (accented Latin letters lose the accent); a text with no word
+  gets `text_<hash>`. The same text in the same file reuses its key; a different text with the same name gets `_2`;
+  a key already in the default file with the identical text is reused. Each key appears once in every locale file.
 - **Our own standard, no library** (Chris 2026-10-13): no i18next, FormatJS or ICU runtime. The format above is the
   whole standard (flat JSON, `{var}` placeholders, `one/other/...` plural objects named after `Intl.PluralRules`
   categories), small enough to implement in the compiler and runtime by hand, and the compiler understands it: it
@@ -1381,7 +1398,8 @@ language is one command.
 - **Framework texts:** messages the runtime and the kit write themselves read the app's dictionary by key and fall back
   to English when the key is missing, without loading `brain-i18n.js`: form validation (`form.*`, §14) and
   `<ErrorState>` (`error_state.offline`, `network`, `timeout`, `schema`, `unauthorized`, `forbidden`, `not_found`,
-  `invalid`, `rate_limited` with `{n}`, `server`, `sign_in`, `retry`, `reference` with `{id}`).
+  `invalid`, `rate_limited` with `{n}`, `server`, `sign_in`, `retry`, `reference` with `{id}`). brain-pack ships the
+  `error_state.*` keys in the dictionary chunk of the pages whose graph reaches `<ErrorState>`, like `form.*`.
 - **Switcher:** `<LangSwitch>` in the `brain/ui` kit: links to the same page in each locale (keeps the path, query and
   hash), names each language in itself (`Deutsch`, not `German`), sets `hreflang` on the links; the scaffold puts it in the nav,
   hidden while there is one locale.
@@ -1398,6 +1416,9 @@ language is one command.
   missing in another; error); B1405 unknown locale code in `brain.json`.
 - **Commands:** `brain add locale es` creates `i18n/es.json` with every key, values copied from the default and marked
   untranslated (B1402 lists them), adds the locale to `brain.json`; `brain i18n --missing --json` lists the work left.
+  The first extra language also applies every B1403 edit (so the result has no fixed text left), and when the new
+  locale is `en`/`en-*` and the default is not English, the framework keys (`form.*`, `error_state.*`) are written
+  in English instead of copied. `brain fix` applies identical edits only once (one key per text).
   Machine translation is never automatic: an agent translates the file, `brain check` validates it.
 - **Owners:** COMPILER #149 (`t()` keys, B1401–B1405, B0306, translated-slug meta) · RUNTIME #150 (`t`, plurals,
   `fmt.*`, `locale()`, `<LangSwitch>`, `lang`/`dir` swap on navigation, one-time suggestion) · TOOLCHAIN #151 (config,

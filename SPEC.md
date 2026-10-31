@@ -18,7 +18,9 @@ Before each kind of task run `brain guide <topic>` (`brain guide` lists them): s
 - `_loading.brain` shows while `load` runs. `<meta cache="60">` in a view = rebuild at most every 60 s.
 - Languages: `brain.json` `"i18n": { "default": "en", "locales": ["en", "es"] }`; texts in `i18n/<locale>.json`
   (`"nav.home": "Home"`, plurals `{ "one": "{n} post", "other": "{n} posts" }`); write `t('nav.home')`, never literal
-  text once there are 2+ locales. Add a language with `brain add locale es`, then translate that file.
+  text once there are 2+ locales. Add a language with `brain add locale es`: it moves every fixed text (text, visible
+  attributes, `<meta seo>` title and description, literals in markup expressions) to keys named
+  `<view>.<first_words>`, then translate that file.
   `fmt.date/number/money(v)` format for the current locale; `<LangSwitch>` links to the other languages.
   Content per language: `content/blog/es/*.md`; a missing translation shows the default text and `post.fallback`
   is true, so the template can say so.
