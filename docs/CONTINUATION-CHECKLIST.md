@@ -206,6 +206,25 @@ Rust 1.99.1 release gate and do not establish cross-platform execution or whole-
   app, and its disposable schema/auth/HTTP setup passed; CRUD/live cases stopped at the compile mismatch above.
   This is not a successful end-to-end run or a migration of the requesting application.
 
+### Actual browser/native acceptance progress
+
+Fresh compiler source d0c7daf, Rust 1.99.1, binary SHA-256
+`c08686d7a2ba3f8bd96bb152fdd5acee738f90dc5f3095f9525ffd60a649d978`.
+The fixture and gate scripts have independent fingerprints. Owned headless Chromium is an explicit fallback
+because multiple Viewer profiles were connected without an assigned profile/tab; user sessions were preserved.
+
+- [x] Case 1: real compiled API SDK, HttpOnly JWT, fixed dev gateway, room join and owner-isolated DOM passed.
+- [ ] Case 2: anonymous HTTP/socket denial without private data. The original 401 test oracle was corrected to
+  the native owner-read policy's exact existing 403; complete rerun remains required.
+- [ ] Case 3: committed create/update/delete refresh and cross-owner metadata isolation.
+- [ ] Case 4: missed-change resynchronization and explicit reconnect generation.
+- [ ] Case 5: principal switching clears private state and closes the old generation.
+- [ ] Case 6: session revocation and actual owner disposal without destroying the browser document.
+- [ ] Resolve the intermittent dev exit during three-context setup. Safe cgroup process/memory evidence is being
+  collected; no application-code defect, memory leak or infrastructure cause is claimed from the exit alone.
+- [x] Failed attempts disposed all three owned contexts/children and confirmed removal of owned Docker resources.
+  These are cleanup proofs for those runs, not six successful acceptance cases or a whole-application migration.
+
 ## Additional measured or explicit gaps
 
 - [ ] Linearize repeated DOM sibling paths where ownership permits: a stress fixture with 300 bindings/siblings
