@@ -1,43 +1,56 @@
 // Preventive checkpoints for compiler-owned code. Native/foreign calls cannot be preempted here.
 import { _rt, fx } from './brain.js'
 const I = _rt(), owners = new WeakMap(), active = []
-const LIMITS = Object.freeze({ steps: 1000000, depth: 128, ms: 200, rows: 100000, signals: 100000, resources: 1024, pending: 32, workerMs: 30000 })
+const LIMITS = { steps: 1000000, depth: 128, ms: 200, rows: 100000, signals: 100000, resources: 1024, pending: 32, workerMs: 30000 } // module-private, never mutated
 const now = () => globalThis.performance ? performance.now() : Date.now()
-const metaOf = m => ({ file: typeof m?.file === 'string' ? m.file.slice(0, 256) : null, component: typeof m?.component === 'string' ? m.component.slice(0, 80) : null, line: Number.isSafeInteger(m?.line) && m.line > 0 ? m.line : null, column: Number.isSafeInteger(m?.column) && m.column > 0 ? m.column : null })
+const str = (v, n) => typeof v == 'string' ? v.slice(0, n) : null, pos = v => Number.isSafeInteger(v) && v > 0 ? v : null
+const metaOf = m => ({ file: str(m?.file, 256), component: str(m?.component, 80), line: pos(m?.line), column: pos(m?.column) })
 const limitsOf = options => Object.fromEntries(Object.entries(LIMITS).map(([k, max]) => [k, Number.isFinite(options?.[k]) && options[k] >= 1 ? Math.min(max, options[k]) : max]))
-const failure = (code, kind, limit, meta) => Object.assign(new Error(`${code}: ${kind} budget exceeded`), { code, kind: 'budget', budget: kind, limit, ...metaOf(meta), fix: kind === 'ms' || kind === 'steps' || kind === 'depth' ? 'Bound the work or move it to an owned worker.' : 'Bound the collection and dispose resources with their owner.' })
+const failure = (code, kind, limit, meta) => Object.assign(new Error(`${code}: ${kind} budget exceeded`), { code, kind: 'budget', budget: kind, limit, ...metaOf(meta), fix: code == 'B0910' ? 'Bound the work or move it to an owned worker.' : 'Bound the collection; dispose with its owner.' })
+const start = r => { r.running = true; r.started = now() }
 function charge(root) {
   if (root.running) { const t = now(); root.work += Math.max(0, t - root.started); root.started = t }
 }
+// Elapsed time is wall-clock (browsers expose no CPU clock): a loaded machine inflates it, so an overrun is a
+// diagnostic, not a failure. It is reported once per execution with its source and measured time, without an owner
+// (no error boundary replaces the view), and the page keeps running. Steps and depth are deterministic and always
+// fatal: they stop runaway loops and recursion.
 function enforce(frame, kind, value) {
-  const r = frame.root
+  const r = frame.root, ms = kind == 'ms'
   if (r.error) throw r.error
-  if (value > r.limits[kind]) throw (r.error = failure('B0910', kind, r.limits[kind], frame.meta))
+  if (value > r.limits[kind] && !(ms && r.warned)) {
+    const e = failure('B0910', kind, r.limits[kind], frame.meta)
+    if (!ms) throw (r.error = e)
+    r.warned = e.measured = Math.round(value)
+    e.message = `B0910: ${e.file}:${e.line} ran ${r.warned} ms > ${e.limit} ms (wall clock)`
+    console.warn(e.message)
+    I.oops(e, null, 'budget')
+  }
 }
 export function budgetOwner() { return I.owner() }
 export function budgetEnter(meta, owner = I.owner(), options) {
-  const parent = active[active.length - 1]
+  const parent = active.at(-1)
   const root = parent?.root || { limits: limitsOf(options), steps: 0, work: 0, depth: 0, running: false, started: 0, error: null }
   const f = { root, meta: metaOf(meta), owner, state: 'active' }
   charge(root)
   enforce(f, 'depth', root.depth + 1)
   root.depth++
-  if (!root.running) { root.running = true; root.started = now() }
+  if (!root.running) start(root)
   active.push(f)
   return f
 }
 export function budgetStep(frame, site) {
-  if (!frame || frame.state !== 'active') throw failure('B0910', 'inactive-frame', 0, site)
+  if (!frame || frame.state != 'active') throw failure('B0910', 'inactive-frame', 0, site)
   if (site) frame.meta = metaOf(site)
   const r = frame.root
   // A synchronous throw inside a paused await expression must not leave the clock stopped.
-  if (frame.paused) { frame.paused = 0; r.running = true; r.started = now() }
+  if (frame.paused) frame.paused = 0, start(r)
   charge(r)
   enforce(frame, 'steps', ++r.steps)
   enforce(frame, 'ms', r.work)
 }
 function detach(f) {
-  if (f.state !== 'active') return
+  if (f.state != 'active') return
   const index = active.lastIndexOf(f)
   if (index >= 0) active.splice(index, 1)
   const r = f.root
@@ -45,10 +58,10 @@ function detach(f) {
   r.depth--
   // Native code continuing a paused await expression is not charged.
   const top = active.at(-1)
-  if (top?.root !== r || top.paused) r.running = false
+  if (top?.root != r || top.paused) r.running = false
 }
 export function budgetLeave(frame) {
-  if (!frame || frame.state === 'closed') return
+  if (!frame || frame.state == 'closed') return
   detach(frame)
   frame.state = 'closed'
 }
@@ -56,7 +69,7 @@ export function budgetLeave(frame) {
 // (a fetch's connection setup) is not charged; author functions called inside it restart the clock.
 // The outcome always resolves: the generated resume runs even on a rejected await, preserving catch/finally.
 export function budgetSuspend(frame) {
-  if (frame?.state === 'active' && !frame.paused) { charge(frame.root); frame.root.running = false; frame.paused = 1 }
+  if (frame.state == 'active') charge(frame.root), frame.root.running = false, frame.paused = 1
   return promise => {
     frame.paused = 0
     detach(frame)
@@ -65,9 +78,9 @@ export function budgetSuspend(frame) {
   }
 }
 export function budgetResume(frame, outcome) {
-  if (frame.state !== 'suspended') throw failure('B0910', 'inactive-frame', 0, frame.meta)
+  if (frame.state != 'suspended') throw failure('B0910', 'inactive-frame', 0, frame.meta)
   const r = frame.root
-  if (!r.running) { r.running = true; r.started = now() }
+  if (!r.running) start(r)
   r.depth++
   frame.state = 'active'
   active.push(frame)
@@ -77,8 +90,8 @@ export function budgetResume(frame, outcome) {
   return outcome.value
 }
 function ledger(owner, meta, options) {
-  if (!owner || typeof owner !== 'object') throw failure('B0911', 'missing-owner', 0, meta)
-  if (owner.s === 3) throw failure('B0911', 'disposed-owner', 0, meta)
+  if (!owner || typeof owner != 'object') throw failure('B0911', 'missing-owner', 0, meta)
+  if (owner.s == 3) throw failure('B0911', 'disposed-owner', 0, meta)
   let l = owners.get(owner)
   if (!l) {
     l = { limits: limitsOf(options), counts: Object.create(null), releases: new Set(), disposed: false }
@@ -96,10 +109,10 @@ function ledger(owner, meta, options) {
 export function budgetAllocation(kind, owner, units) {
   if (!owner) return // Module-level shared state has no disposable component owner.
   if (!['rows', 'signals'].includes(kind) || !Number.isSafeInteger(units) || units < 0) throw failure('B0911', 'invalid-allocation', 0, null)
-  const frame = active[active.length - 1]
+  const frame = active.at(-1)
   const meta = frame?.meta
   const l = ledger(owner, meta)
-  const next = kind === 'signals' ? (l.counts.signals || 0) + units : units
+  const next = kind == 'signals' ? (l.counts.signals || 0) + units : units
   if (next > l.limits[kind]) throw failure('B0911', kind, l.limits[kind], meta)
   l.counts[kind] = next
 }

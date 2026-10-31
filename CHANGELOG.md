@@ -25,6 +25,12 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Fixed
 
+- B0910 no longer takes a page down because of native work or a loaded machine. The elapsed-time clock stops before
+  an awaited expression is evaluated, so the synchronous start of a process's first `fetch` (or four parallel reads in
+  `load()`) is not charged; author functions called inside the expression still are. Because that clock is wall-clock
+  time, an overrun of the 200 ms allowance is now a diagnostic: it is logged with `console.warn` and reported once
+  with `measured`, `limit` and its source location, without an owner, so no error boundary replaces the view. Steps
+  and depth stay fatal and still stop runaway loops and recursion.
 - The development compile cache keys each source by modification time, size and (on Unix) inode. A file replaced
   atomically while keeping its timestamp is recompiled instead of serving the previous output until a watch event.
 - Deeply nested BrainScript, markup or CSS reports B0002/B0003 instead of overflowing the compiler stack; one small
