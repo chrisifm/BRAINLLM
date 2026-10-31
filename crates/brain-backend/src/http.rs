@@ -672,6 +672,7 @@ async fn response_headers(req: Request, next: Next) -> Response {
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
     let response = REQUEST_ID.scope(rid.clone(), next.run(req)).await;
+    let log_policy = response.extensions().get::<edge_http::LogPolicy>().copied();
     let mut response = crate::response::finalize(&method, &path, accept.as_deref(), &rid, response);
     let public_cache = (response.status().is_success() || response.status() == StatusCode::NOT_MODIFIED)
         && response.extensions().get::<files_http::PublicCache>().is_some();
@@ -697,10 +698,11 @@ async fn response_headers(req: Request, next: Next) -> Response {
         );
     }
     headers.insert("x-request-id", rid.parse().unwrap());
-    if response.status().is_client_error() || response.status().is_server_error() {
+    // Lines carry the matched route template, never the raw path, query, headers or body.
+    if let Some(event) = edge_http::request_event(log_policy.as_ref(), response.status(), started.elapsed()) {
         eprintln!(
             "{}",
-            json!({"event":"backend-request-failed","rid":rid,"route":route,"method":method.as_str(),"status":response.status().as_u16(),"ms":started.elapsed().as_millis()})
+            json!({"event":event,"rid":rid,"route":route,"method":method.as_str(),"status":response.status().as_u16(),"ms":started.elapsed().as_millis()})
         );
     }
     response

@@ -36,6 +36,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   refusal of private targets and errors that never include query strings or header values.
 - The backend OpenAPI document (`/_brain/docs`, `brain backend inspect`) now covers app-declared routes and file
   bucket upload, download, delete and metadata operations, with a shared error schema.
+- `platform.logging` selects per-request JSON lines (`errors`, `all` or `off`) and a `slow` threshold; lines carry the
+  request id and route template only, never paths, queries, headers, bodies or client addresses.
 
 ### Changed
 

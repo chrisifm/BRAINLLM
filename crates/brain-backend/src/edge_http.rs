@@ -1,7 +1,7 @@
 //! HTTP edge: real client IP behind trusted proxies, in-flight backpressure, pool-saturation
 //! mapping and the split liveness/readiness probes.
 use super::{App, Error};
-use crate::platform::Edge;
+use crate::platform::{Edge, RequestLog};
 use axum::{
     Extension, Json,
     extract::{ConnectInfo, Request, State},
@@ -52,6 +52,28 @@ impl EdgeControl {
 pub(super) struct EdgeState {
     trusted: Arc<Vec<IpNet>>,
     lifecycle: Arc<Lifecycle>,
+    log: LogPolicy,
+}
+
+/// Request logging policy, attached to each response for the outer request-id layer.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct LogPolicy {
+    mode: RequestLog,
+    slow: Option<Duration>,
+    probe: bool,
+}
+
+/// Which line, if any, a finished request produces. Probes never log on success.
+pub(super) fn request_event(policy: Option<&LogPolicy>, status: StatusCode, elapsed: Duration) -> Option<&'static str> {
+    let failed = status.is_client_error() || status.is_server_error();
+    let Some(policy) = policy else { return failed.then_some("backend-request-failed") };
+    match policy.mode {
+        RequestLog::Off => None,
+        _ if failed => Some("backend-request-failed"),
+        _ if policy.slow.is_some_and(|slow| elapsed >= slow) => Some("backend-request-slow"),
+        RequestLog::All if !policy.probe => Some("backend-request"),
+        _ => None,
+    }
 }
 impl EdgeState {
     pub(super) fn new(edge: &Edge) -> (Self, EdgeControl) {
@@ -61,7 +83,11 @@ impl EdgeState {
             max_in_flight: edge.max_in_flight,
         });
         (
-            Self { trusted: Arc::new(edge.trust_proxy.clone()), lifecycle: lifecycle.clone() },
+            Self {
+                trusted: Arc::new(edge.trust_proxy.clone()),
+                lifecycle: lifecycle.clone(),
+                log: LogPolicy { mode: edge.request_log, slow: edge.slow, probe: false },
+            },
             EdgeControl(lifecycle),
         )
     }
@@ -143,7 +169,13 @@ pub(super) async fn edge(State(state): State<EdgeState>, mut req: Request, next:
         req.extensions_mut().insert(ClientIp(client));
     }
     req.extensions_mut().insert(state.lifecycle.clone());
-    if probe(req.uri().path()) {
+    let is_probe = probe(req.uri().path());
+    let mut response = admit(&state, is_probe, req, next).await;
+    response.extensions_mut().insert(LogPolicy { probe: is_probe, ..state.log });
+    response
+}
+async fn admit(state: &EdgeState, is_probe: bool, req: Request, next: Next) -> Response {
+    if is_probe {
         return next.run(req).await;
     }
     let lifecycle = state.lifecycle.clone();
@@ -205,6 +237,22 @@ mod tests {
     }
     fn ip(text: &str) -> IpAddr {
         text.parse().unwrap()
+    }
+
+    #[test]
+    fn request_lines_follow_the_declared_policy() {
+        let ms = Duration::from_millis;
+        let policy = |mode, slow, probe| LogPolicy { mode, slow, probe };
+        assert_eq!(request_event(None, StatusCode::OK, ms(5)), None);
+        assert_eq!(request_event(None, StatusCode::NOT_FOUND, ms(5)), Some("backend-request-failed"));
+        let errors = policy(RequestLog::Errors, Some(ms(500)), false);
+        assert_eq!(request_event(Some(&errors), StatusCode::OK, ms(5)), None);
+        assert_eq!(request_event(Some(&errors), StatusCode::OK, ms(900)), Some("backend-request-slow"));
+        assert_eq!(request_event(Some(&errors), StatusCode::BAD_GATEWAY, ms(5)), Some("backend-request-failed"));
+        let all = policy(RequestLog::All, None, false);
+        assert_eq!(request_event(Some(&all), StatusCode::OK, ms(5)), Some("backend-request"));
+        assert_eq!(request_event(Some(&policy(RequestLog::All, None, true)), StatusCode::OK, ms(5)), None);
+        assert_eq!(request_event(Some(&policy(RequestLog::Off, None, false)), StatusCode::INTERNAL_SERVER_ERROR, ms(5)), None);
     }
 
     #[test]

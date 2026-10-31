@@ -92,6 +92,26 @@ On `SIGTERM` or `Ctrl-C` the backend:
 Set `readyDelay` to at least your load balancer's readiness interval times its failure threshold (for example 2 s × 2
 → `5s`). Without a load balancer leave it at `0`.
 
+## Request logs
+
+Each finished request can produce one JSON line on stderr with `event`, `rid` (also sent as
+`x-request-id`), the matched `route` template, `method`, `status` and `ms`. The raw path, query string,
+headers, cookies, bodies and client address are never logged, so logs carry no tokens or personal data.
+
+```js
+// server/platform.jsbrain
+export default { logging: { requests: 'errors', slow: '1s' } }
+```
+
+| `requests` | Lines |
+|---|---|
+| `errors` (default) | `backend-request-failed` for 4xx and 5xx |
+| `all` | also `backend-request` for every success except health probes |
+| `off` | none; internal error and lifecycle events still log |
+
+With `slow`, a successful request at or above that duration logs `backend-request-slow` in `errors` and
+`all` modes. A client may send its own `x-request-id` (a UUID) to correlate logs across services.
+
 ## Tested example
 
 `crates/brain-backend/tests/edge.rs` holds the only in-flight slot with a request whose body never arrives, checks

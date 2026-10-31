@@ -22,6 +22,18 @@ pub struct Platform {
     pub handlers: Option<crate::routes::Handlers>,
 }
 
+/// Which finished requests the backend logs as structured JSON lines.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RequestLog {
+    /// Only 4xx and 5xx answers (and slow requests when `slow` is set).
+    #[default]
+    Errors,
+    /// Every request except health probes.
+    All,
+    /// No per-request lines; internal error and lifecycle events still log.
+    Off,
+}
+
 /// HTTP edge settings read from the `server/platform.jsbrain` literal.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Edge {
@@ -36,6 +48,9 @@ pub struct Edge {
     pub ready_delay: Duration,
     /// Upper bound for in-flight requests to finish after the listener closes.
     pub drain: Duration,
+    pub request_log: RequestLog,
+    /// Successful requests slower than this are logged as `slow` even in `errors` mode.
+    pub slow: Option<Duration>,
 }
 
 impl Default for Edge {
@@ -47,6 +62,8 @@ impl Default for Edge {
             max_in_flight: DEFAULT_MAX_IN_FLIGHT,
             ready_delay: Duration::ZERO,
             drain: DEFAULT_DRAIN,
+            request_log: RequestLog::Errors,
+            slow: None,
         }
     }
 }
@@ -106,7 +123,7 @@ impl Edge {
     /// Reads the `server/platform.jsbrain` literal. Unknown keys are rejected so typos never
     /// silently fall back to defaults.
     pub fn from_contract(value: &Value) -> Result<Self, String> {
-        let map = object(value, "platform", &["trustProxy", "cors", "limits", "shutdown"])?;
+        let map = object(value, "platform", &["trustProxy", "cors", "limits", "shutdown", "logging"])?;
         let mut edge = Edge::default();
         if let Some(list) = map.get("trustProxy") {
             let list = list.as_array().ok_or("platform.trustProxy must be an array of IPs or CIDR ranges")?;
@@ -157,6 +174,24 @@ impl Edge {
                 return Err("platform.shutdown.drain must be greater than zero".into());
             }
         }
+        if let Some(logging) = map.get("logging") {
+            let logging = object(logging, "platform.logging", &["requests", "slow"])?;
+            if let Some(mode) = logging.get("requests") {
+                edge.request_log = match mode.as_str() {
+                    Some("errors") => RequestLog::Errors,
+                    Some("all") => RequestLog::All,
+                    Some("off") => RequestLog::Off,
+                    _ => return Err("platform.logging.requests must be 'errors', 'all' or 'off'".into()),
+                };
+            }
+            if logging.contains_key("slow") {
+                let slow = bounded(logging.get("slow"), "platform.logging.slow", Duration::from_secs(120), Duration::ZERO)?;
+                if slow.is_zero() {
+                    return Err("platform.logging.slow must be greater than zero".into());
+                }
+                edge.slow = Some(slow);
+            }
+        }
         Ok(edge)
     }
 }
@@ -203,6 +238,8 @@ mod tests {
         assert_eq!(edge.max_in_flight, 64);
         assert_eq!(edge.ready_delay, Duration::from_secs(5));
         assert_eq!(edge.drain, Duration::from_secs(30));
+        let logged = Edge::from_contract(&json!({"logging": {"requests": "all", "slow": "750ms"}})).unwrap();
+        assert_eq!((logged.request_log, logged.slow), (RequestLog::All, Some(Duration::from_millis(750))));
         for bad in [
             json!({"trustProxy": ["0.0.0.0/0"]}),
             json!({"trustProxy": ["::/0"]}),
@@ -213,6 +250,9 @@ mod tests {
             json!({"shutdown": {"drain": "0s"}}),
             json!({"shutdown": {"readyDelay": "2h"}}),
             json!({"trustProxies": []}),
+            json!({"logging": {"requests": "verbose"}}),
+            json!({"logging": {"slow": "0s"}}),
+            json!({"logging": {"bodies": true}}),
         ] {
             assert!(Edge::from_contract(&bad).is_err(), "{bad}");
         }

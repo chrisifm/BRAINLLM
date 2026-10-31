@@ -65,6 +65,8 @@ pub fn metadata(root: &Path, resources: &[Resource], roles: &RolesConfig) -> Res
             "maxInFlight": edge.max_in_flight,
             "readyDelayMs": edge.ready_delay.as_millis() as u64,
             "drainMs": edge.drain.as_millis() as u64,
+            "requestLog": format!("{:?}", edge.request_log).to_lowercase(),
+            "slowMs": edge.slow.map(|d| d.as_millis() as u64),
         },
     }))
 }
@@ -92,6 +94,7 @@ mod tests {
         assert_eq!(meta["edge"]["trustProxy"][0], "127.0.0.1/32");
         assert_eq!(meta["edge"]["corsMaxAge"], 600);
         assert_eq!(meta["edge"]["readyDelayMs"], 5000);
+        assert_eq!(meta["edge"]["requestLog"], "errors");
         fs::write(root.join(EDGE), "<meta server>\nexport default { trustProxy: ['0.0.0.0/0'] }\n").unwrap();
         let error = metadata(&root, &[], &roles).unwrap_err();
         assert!(error.contains("server/platform.jsbrain") && error.contains("every address"), "{error}");
