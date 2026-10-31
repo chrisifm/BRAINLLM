@@ -6,7 +6,7 @@ the map; read it fully before changing anything. Three documents, three audience
 | File | Audience | Content |
 |---|---|---|
 | `SPEC.md` | the LLM that **writes apps** | normative contract; `brain spec` serves it without `planned` blocks |
-| `docs/INTERNALS.md` | the LLM that **changes the framework** | contracts between crates and runtime, numbered §1–§42 with dates |
+| `docs/INTERNALS.md` | the LLM that **changes the framework** | contracts between crates and runtime, numbered §1–§50 with dates |
 | `CONTRIBUTING.md` (this) | the LLM that **changes the framework** | repo map, invariants, recipes, definition of done |
 
 ## Pipeline
@@ -104,8 +104,7 @@ by `node --test bench/agents/runner.test.mjs`; actual model evaluation still req
 `tests/snapshots/` → behaviour in `tests/e2e.rs` → fixture → SPEC line. Measure with bench/llm before and after.
 
 **Release: add a change manifest entry (every feature, fix or breaking PR)**
-Every CHANGELOG bullet is mirrored by one machine-readable entry that `brain upgrade`, `brain guide whats-new`,
-`brain guide migrate`, `brain doctor` and MCP `brain_upgrade` read. Adding one is a single new file:
+Every CHANGELOG bullet is mirrored by one machine-readable entry that `brain upgrade`, `brain doctor` and MCP `brain_upgrade` read. Adding one is a single new file:
 `crates/brain-cli/releases/<next-version>/<id>.json` (the newest folder holds `[Unreleased]`; create the folder for a
 new version). `build.rs` embeds every file, so the npm package ships them inside the binary.
 ```json

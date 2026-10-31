@@ -1,7 +1,7 @@
 //! Versioned change manifests: one JSON file per change under `crates/brain-cli/releases/<version>/`, embedded by
 //! `build.rs` and shipped inside the binary of every npm package. They tell an LLM author what each version added
 //! (capability + smallest adoption snippet + guide), what it deprecated or broke (manual steps, file probes, codes) and
-//! which codemod applies, so `brain upgrade`, `brain guide whats-new`/`migrate`, `brain doctor` and MCP read one source.
+//! which codemod applies, so `brain upgrade`, `brain doctor` and MCP read one source.
 //! Adding an entry is one new file; a test fails when a CHANGELOG bullet has no entry (see CONTRIBUTING "Release").
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
