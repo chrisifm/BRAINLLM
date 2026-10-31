@@ -1,0 +1,10 @@
+{
+  "id": "route-thrown-statuses",
+  "kind": "fix",
+  "title": "A route handler's thrown status is the response",
+  "why": "Thrown statuses and helpers gave a 500 or a 200 holding the helper object.",
+  "changelog": [
+    "a route handler that throws a 4xx `status`"
+  ],
+  "guide": "docs/backend/routes.md"
+}

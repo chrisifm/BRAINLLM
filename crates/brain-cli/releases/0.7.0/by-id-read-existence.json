@@ -1,0 +1,21 @@
+{
+  "id": "by-id-read-existence",
+  "kind": "change",
+  "title": "A row outside the reader's scope answers 404",
+  "why": "Scoped reads and roles without a read grant no longer confirm which ids exist. A client that treated 403 as 'exists but forbidden' sees 404.",
+  "changelog": [
+    "`GET /api/<r>/<id>` of a row outside the reader's scope"
+  ],
+  "guide": "docs/backend/ownership.md",
+  "steps": [
+    "Treat 404 and 403 from by-id reads as 'not available'; do not infer that the row exists."
+  ],
+  "finds": [
+    {
+      "glob": "server/resources/*/policy.jsbrain"
+    }
+  ],
+  "affects": [
+    "server/resources/*/policy.jsbrain"
+  ]
+}

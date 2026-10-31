@@ -4,7 +4,8 @@
   "title": "brain backend logs <rid>",
   "why": "A request id leads to its cause: SQLSTATE, resource, operation and code location, without quoting values in production.",
   "changelog": [
-    "`brain backend logs [rid]`"
+    "`brain backend logs [rid]`",
+    "names the operation and resource of every 5xx"
   ],
   "guide": "docs/BACKEND.md",
   "apis": [

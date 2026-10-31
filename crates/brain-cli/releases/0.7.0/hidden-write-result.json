@@ -1,0 +1,21 @@
+{
+  "id": "hidden-write-result",
+  "kind": "change",
+  "title": "A write returns no row its author cannot read",
+  "why": "A write allowed to an author without read access leaked the row in its response.",
+  "changelog": [
+    "a write whose author may not read the row"
+  ],
+  "guide": "docs/backend/ownership.md",
+  "steps": [
+    "If a client reads fields from a write response, give that role read access or fetch the row separately."
+  ],
+  "finds": [
+    {
+      "glob": "server/resources/*/policy.jsbrain"
+    }
+  ],
+  "affects": [
+    "server/resources/*/policy.jsbrain"
+  ]
+}
