@@ -28,6 +28,27 @@ Adding a page, a dynamic route, a section with shared chrome, or protecting page
    `deny('reason')` renders `views/403.brain` with that reason. `ctx` = `{ params, query, user, session, cookies, url, env }`.
 8. In code: `navigate('/x')` (no reload); `let r = route()` → `r.path`, `r.params.id`, `r.query.q` (reactive).
 
+## Navigation feedback
+A client navigation never leaves the page blank or flickering: the current page stays until the next one is ready.
+At once the region gets `aria-busy="true"` and `route().navigating` is `true`; past 150 ms `#brain-nav` shows; past
+400 ms the nearest `_loading.brain` replaces the region. A failed navigation becomes a full page load.
+
+Without `#brain-nav` in the page the router adds a thin native `<progress>` bar at the top. To show your own spinner,
+put an element with that id in `app.brain`; the router only toggles its `hidden` attribute:
+
+```html
+<div id="brain-nav" class="spinner" role="status" hidden>Loading…</div>
+```
+
+```css
+/* tokens.cssbrain */
+@layer reset {
+  #brain-nav:not([hidden]) { position: fixed; top: 1rem; right: 1rem; }
+}
+```
+
+In code: `let r = route()` → `{r.navigating ? 'Saving draft…' : ''}`.
+
 ## Rules that bite
 - `app.brain` is the static document shell: `<html lang>`, common `<head>`, site `<meta seo titleTemplate=…>`, nav and
   `<slot />`. Expressions, blocks or components there are B0132; put them in `views/_layout.brain`.

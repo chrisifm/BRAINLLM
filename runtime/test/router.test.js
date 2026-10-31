@@ -445,7 +445,7 @@ test('#169 navigate()/route(): app paths through the router (base added, push or
 test('#169 route() while the server renders: from __brainRoute', async () => {
   const { route } = await rt.sibling('brain-env.js')
   globalThis.__brainRoute = { path: '/posts/9', params: { id: '9' }, query: { q: 'y' } }
-  assert.deepEqual({ ...route() }, { path: '/posts/9', params: { id: '9' }, query: { q: 'y' } })
+  assert.deepEqual({ ...route() }, { path: '/posts/9', params: { id: '9' }, query: { q: 'y' }, navigating: false })
   delete globalThis.__brainRoute
 })
 
@@ -526,7 +526,7 @@ test('S04 route-owned head links follow the page: canonical, hreflang/Markdown a
   doc.head.innerHTML = ''
 })
 
-test('#235 _loading: mounted in the region when the next page takes > 150 ms, replaced when it arrives; fast pages never show it', async () => {
+test('#235 _loading: mounted in the region when the next page takes > 400 ms, replaced when it arrives; fast pages never show it', async () => {
   const { writeFileSync, mkdtempSync } = await import('node:fs')
   const { join } = await import('node:path')
   const { tmpdir } = await import('node:os')
@@ -536,11 +536,11 @@ test('#235 _loading: mounted in the region when the next page takes > 150 ms, re
   const st = hist()
   const { m } = page()
   const f0 = globalThis.fetch
-  let delay = 400
+  let delay = 900
   globalThis.fetch = async (u, i) => (await new Promise(r => setTimeout(r, delay)), f0(u, i))
   const r = router({ parse, hard: () => assert.fail('hard'), core: 'file://' + join(d, 'core.mjs'), loading: [{ rx: '^/(b|c)/?$', view: 'file://' + join(d, 'loading.mjs') }] })
   const nav = r.go('/b')
-  await new Promise(res => setTimeout(res, 300))
+  await new Promise(res => setTimeout(res, 700))
   assert.equal(m.textContent, 'Loading…') // slow: the loading view is up
   await nav
   assert.equal(m.textContent, 'Page Bb')
@@ -654,7 +654,7 @@ test('predictive prefetch: visible links load while idle, intent jumps the queue
   assert.equal(await p.take('http://x.test/b'), null) // used once
   // intent: hovering a link that was never visible fetches it at once
   doc.body.innerHTML = '<main><a href="/login"><span>Sign in</span></a></main>'
-  doc.body.querySelector('span').dispatchEvent(Object.assign(new MouseEvent('pointerover', { bubbles: true })))
+  doc.body.querySelector('span').dispatchEvent(Object.assign(new MouseEvent('focusin', { bubbles: true })))
   await new Promise(r => setTimeout(r, 10))
   assert.ok(asked.some(a => a[0] === '/login'))
   p.stop()
@@ -676,7 +676,7 @@ test('predictive prefetch: off by option, by meta, and stale private pages are n
   globalThis.fetch = async () => (hits++, null)
   doc.body.innerHTML = '<main><a href="/b">B</a></main>'
   const q = predict({}, () => true)
-  doc.body.querySelector('a').dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
+  doc.body.querySelector('a').dispatchEvent(new MouseEvent('focusin', { bubbles: true }))
   await new Promise(r => setTimeout(r, 5))
   assert.equal(hits, 0)
   q.stop()
@@ -686,7 +686,7 @@ test('predictive prefetch: off by option, by meta, and stale private pages are n
   globalThis.fetch = async () => ({ ok: true, status: 200, headers: { get: k => (k === 'content-type' ? 'text/html' : k === 'cache-control' ? 'private, no-store' : null) }, text: async () => '<main></main>' })
   doc.body.innerHTML = '<main><a href="/b">B</a></main>'
   const p = predict({}, () => true)
-  doc.body.querySelector('a').dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
+  doc.body.querySelector('a').dispatchEvent(new MouseEvent('focusin', { bubbles: true }))
   await new Promise(r => setTimeout(r, 5))
   const now = Date.now
   Date.now = () => now() + 31000
@@ -714,13 +714,13 @@ test('predictive prefetch: action, file, api and token links are skipped; a writ
     '<main><a href="/unsubscribe">U</a><a href="/report.pdf">P</a><a href="/api/items">A</a><a href="/auth/google">G</a>' +
     '<a href="/logout.html">L</a><a href="/b?token=abc">T</a><a href="/docs/intro.html">D</a><a href="/c?page=2">C</a></main>'
   const p = predict({}, u => new URL(u).origin === 'http://x.test')
-  for (const a of doc.body.querySelectorAll('a')) a.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
+  for (const a of doc.body.querySelectorAll('a')) a.dispatchEvent(new MouseEvent('focusin', { bubbles: true }))
   await new Promise(r => setTimeout(r, 10))
   assert.deepEqual(asked.sort(), ['/c?page=2', '/docs/intro.html'])
   globalThis.dispatchEvent(new Event('brain:write'))
   assert.equal(await p.take('http://x.test/c?page=2'), null) // forgotten: it may show data from before the write
   doc.body.innerHTML = '<main><a href="/b">B</a><form></form></main>'
-  doc.body.querySelector('a').dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
+  doc.body.querySelector('a').dispatchEvent(new MouseEvent('focusin', { bubbles: true }))
   await new Promise(r => setTimeout(r, 10))
   doc.body.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true }))
   assert.equal(await p.take('http://x.test/b'), null)
@@ -764,7 +764,7 @@ test('prefetch write epoch rejects an in-flight response already awaited by navi
   }
   doc.body.innerHTML = '<a href="/b">B</a>'
   const p = predict({}, () => true)
-  doc.body.querySelector('a').dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
+  doc.body.querySelector('a').dispatchEvent(new MouseEvent('focusin', { bubbles: true }))
   const taking = p.take('http://x.test/b')
   globalThis.dispatchEvent(new Event('brain:write'))
   finish()
@@ -789,7 +789,7 @@ test('prefetch uses the dedicated worker bridge and terminates it with the route
   }
   doc.body.innerHTML = '<a href="/b">B</a>'
   const p = predict({ prefetchWorker: '/_b/worker.js' }, () => true)
-  doc.body.querySelector('a').dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
+  doc.body.querySelector('a').dispatchEvent(new MouseEvent('focusin', { bubbles: true }))
   await new Promise(r => setTimeout(r, 5))
   assert.equal(instances[0].url, 'http://x.test/_b/worker.js')
   assert.equal(sent[0].url, 'http://x.test/b')
@@ -808,20 +808,20 @@ test('prefetch keeps static build HTML but revalidates private/dynamic pages and
       globalThis.fetch = async () => ({ ok:true, status:200, headers:new Headers({'content-type':'text/html','cache-control':control}), text:async()=>'<main>Dynamic</main>' })
       doc.body.innerHTML = '<a href="/b">B</a>'
       const p=predict({},()=>true)
-      doc.body.querySelector('a').dispatchEvent(new MouseEvent('pointerover',{bubbles:true}))
+      doc.body.querySelector('a').dispatchEvent(new MouseEvent('focusin',{bubbles:true}))
       await new Promise(r=>setTimeout(r,5))
       assert.equal(await p.take('http://x.test/b'),null,control)
       p.stop()
     }
     globalThis.fetch = async () => ({ok:true,status:200,headers:new Headers({'content-type':'text/html','cache-control':'no-cache','x-brain-static':'1'}),text:async()=>'<main>Static build</main>'})
     const staticPage=predict({},()=>true)
-    doc.body.querySelector('a').dispatchEvent(new MouseEvent('pointerover',{bubbles:true}))
+    doc.body.querySelector('a').dispatchEvent(new MouseEvent('focusin',{bubbles:true}))
     await new Promise(r=>setTimeout(r,5))
     assert.equal(await (await staticPage.take('http://x.test/b')).text(),'<main>Static build</main>')
     staticPage.stop()
     globalThis.fetch = async () => ({ok:true,status:200,headers:new Headers({'content-type':'text/html','cache-control':'public, max-age=1'}),text:async()=>'<main>Public data</main>'})
     const publicPage=predict({},()=>true)
-    doc.body.querySelector('a').dispatchEvent(new MouseEvent('pointerover',{bubbles:true}))
+    doc.body.querySelector('a').dispatchEvent(new MouseEvent('focusin',{bubbles:true}))
     await new Promise(r=>setTimeout(r,5))
     const now=Date.now
     try {Date.now=()=>now()+2000;assert.equal(await publicPage.take('http://x.test/b'),null)} finally {Date.now=now;publicPage.stop()}
@@ -837,7 +837,7 @@ test('zero-JS destinations keep intent prefetch but use full document navigation
   const r = router({ parse, hard: u => hard.push(u), fullLoad: ['/b'] })
   try {
     const a = doc.createElement('a'); a.setAttribute('href', '/b'); doc.querySelector('main').appendChild(a)
-    a.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
+    a.dispatchEvent(new MouseEvent('focusin', { bubbles: true }))
     await new Promise(resolve => setTimeout(resolve, 10))
     assert.ok(asked.some(([path, prefetch]) => path === '/b' && prefetch === '1'))
     const click = new MouseEvent('click', { bubbles: true, cancelable: true }); a.dispatchEvent(click)
@@ -869,11 +869,11 @@ test('loading groups preserve ordered array matches, individual regex and fallba
     ]) {
       hist()
       const { m } = page()
-      globalThis.fetch = async (url, options) => { await new Promise(resolve => setTimeout(resolve, 400)); return originalFetch(url, options) }
+      globalThis.fetch = async (url, options) => { await new Promise(resolve => setTimeout(resolve, 900)); return originalFetch(url, options) }
       const instance = router({ parse, hard: () => assert.fail('unexpected full navigation'), core, loading })
       try {
         const navigation = instance.go('/b')
-        await new Promise(resolve => setTimeout(resolve, 300))
+        await new Promise(resolve => setTimeout(resolve, 700))
         assert.equal(m.textContent, expected)
         await navigation
         assert.equal(m.textContent, 'Page Bb')
@@ -898,4 +898,175 @@ test('navigate rejects raw controls, whitespace and backslashes before URL norma
     navigate('/safe'); navigate('https://example.test/path?q=ok')
     assert.deepEqual(calls, ['/safe', 'https://example.test/path?q=ok'])
   } finally { globalThis.location = old }
+})
+
+// --- client navigation without flicker, races or stuck states (0.6.0) ---
+// A fetch whose responses the test releases by hand: no timing assumptions.
+const gated = () => {
+  const f0 = globalThis.fetch, waiting = new Map(), signals = new Map()
+  globalThis.fetch = (u, o = {}) => {
+    const p = new URL(u, 'http://x.test').pathname
+    signals.set(p, o.signal)
+    return new Promise(res => waiting.set(p, () => res(f0(u, o))))
+  }
+  const until = async p => { for (let i = 0; i < 500 && !waiting.has(p); i++) await new Promise(r => setTimeout(r, 2)) }
+  return {
+    release: async p => (await until(p), waiting.get(p)()),
+    signal: p => signals.get(p),
+    restore: () => (globalThis.fetch = f0),
+  }
+}
+const settle = () => new Promise(r => setTimeout(r, 5))
+
+test('a superseded navigation never swaps, scrolls or moves focus after the newer one (History)', async () => {
+  hist()
+  const scrolls = []
+  globalThis.scrollTo = (x, y) => scrolls.push(y)
+  const { m } = page()
+  const g = gated()
+  const r = router({ parse, hard: u => assert.fail('hard ' + u) })
+  const slow = r.go('/b'), fast = r.go('/c')
+  await g.release('/c')
+  await fast
+  assert.equal(m.textContent, 'Page C')
+  assert.equal(scrolls.length, 1)
+  assert.equal(doc.activeElement, m.firstChild)
+  doc.body.focus && doc.body.focus()
+  await g.release('/b')
+  await slow
+  assert.equal(m.textContent, 'Page C') // the stale response is dropped
+  assert.equal(scrolls.length, 1) // and it does not scroll the newer page back to the top
+  g.restore()
+  r.stop()
+})
+
+test('a swap that throws becomes a full page load: no half-swapped page, no unhandled rejection', async () => {
+  hist()
+  page()
+  const hard = []
+  const r = router({ parse, hard: u => hard.push(u) })
+  const hook = globalThis.__brainRouted
+  globalThis.__brainRouted = on => { if (on === undefined) throw Error('route hook failed') }
+  try {
+    await r.go('/b')
+  } finally {
+    globalThis.__brainRouted = hook
+  }
+  assert.deepEqual(hard, ['/b'])
+  r.stop()
+})
+
+test('a view transition whose navigation was superseded does not swap the old page in (no flash of stale content)', async () => {
+  hist()
+  const { m } = page()
+  const queued = []
+  doc.startViewTransition = f => {
+    let done
+    const p = new Promise(r => (done = r))
+    queued.push(() => (f(), done()))
+    return { ready: Promise.resolve(), updateCallbackDone: p }
+  }
+  const g = gated()
+  const r = router({ parse, hard: u => assert.fail('hard ' + u) })
+  const first = r.go('/b')
+  await g.release('/b')
+  for (let i = 0; i < 200 && !queued.length; i++) await settle()
+  const second = r.go('/c') // starts before the first transition ran its callback
+  queued.shift()()
+  assert.equal(m.textContent, 'Page Aisland') // the superseded callback swapped nothing
+  await g.release('/c')
+  for (let i = 0; i < 200 && !queued.length; i++) await settle()
+  queued.shift()()
+  await Promise.all([first, second])
+  assert.equal(m.textContent, 'Page C')
+  delete doc.startViewTransition
+  g.restore()
+  r.stop()
+})
+
+test('feedback: the region is aria-busy and route().navigating is true while a navigation waits; #brain-nav shows only past the delay', async () => {
+  hist()
+  const { m } = page()
+  const { route } = await rt.sibling('brain-env.js')
+  const rr = route()
+  const own = doc.createElement('div')
+  own.id = 'brain-nav'
+  own.hidden = true
+  doc.body.appendChild(own)
+  const g = gated()
+  const r = router({ parse, hard: u => assert.fail('hard ' + u) })
+  const nav = r.go('/b')
+  assert.equal(m.getAttribute('aria-busy'), 'true')
+  assert.equal(rr.navigating, true)
+  assert.equal(own.hidden, true) // not before the delay
+  for (let i = 0; i < 1000 && own.hidden; i++) await settle()
+  assert.equal(own.hidden, false) // the app's own #brain-nav replaces the built-in bar
+  assert.equal(doc.querySelectorAll('progress').length, 0)
+  await g.release('/b')
+  await nav
+  assert.equal(m.hasAttribute('aria-busy'), false)
+  assert.equal(rr.navigating, false)
+  assert.equal(own.hidden, true)
+  own.remove()
+  // without one, the router adds a fixed <progress id="brain-nav"> the first time a navigation waits
+  const nav2 = r.go('/c')
+  for (let i = 0; i < 1000 && !doc.getElementById('brain-nav'); i++) await settle()
+  const bar = doc.getElementById('brain-nav')
+  assert.equal(bar.tagName, 'PROGRESS')
+  assert.equal(bar.hidden, false)
+  await g.release('/c')
+  await nav2
+  assert.equal(bar.hidden, true)
+  bar.remove()
+  g.restore()
+  r.stop()
+})
+
+test('prefetch: a navigation reuses the request in flight, however slow (never a second fetch)', async () => {
+  globalThis.location = new URL('http://x.test/a')
+  const { predict } = await rt.sibling('brain-router.js')
+  const real = globalThis.fetch, asked = []
+  let finish
+  globalThis.fetch = async (u, o) => {
+    asked.push(new URL(u).pathname)
+    await new Promise(r => (finish = r))
+    return real(u, o)
+  }
+  doc.body.innerHTML = '<a href="/b">B</a>'
+  const a = doc.body.querySelector('a')
+  const p = predict({}, () => true)
+  a.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }))
+  for (let i = 0; i < 500 && !asked.length; i++) await settle()
+  assert.deepEqual(asked, ['/b'])
+  const taking = p.take('http://x.test/b')
+  await new Promise(r => setTimeout(r, 200)) // slower than any old 150 ms cut-off
+  finish()
+  const got = await taking
+  assert.equal(await got.text(), pages['/b'])
+  assert.deepEqual(asked, ['/b'])
+  p.stop()
+  globalThis.fetch = real
+})
+
+test('prefetch: a dynamic (no-cache) page taken while its request is in flight is used, not fetched twice', async () => {
+  globalThis.location = new URL('http://x.test/a')
+  const { predict } = await rt.sibling('brain-router.js')
+  const real = globalThis.fetch, asked = []
+  let finish
+  globalThis.fetch = async u => {
+    asked.push(new URL(u).pathname)
+    await new Promise(r => (finish = r))
+    return { ok: true, status: 200, headers: new Headers({ 'content-type': 'text/html', 'cache-control': 'no-cache' }), text: async () => '<main>Dynamic</main>' }
+  }
+  doc.body.innerHTML = '<a href="/b">B</a>'
+  const p = predict({}, () => true)
+  doc.body.querySelector('a').dispatchEvent(new MouseEvent('focusin', { bubbles: true }))
+  for (let i = 0; i < 500 && !asked.length; i++) await settle()
+  const taking = p.take('http://x.test/b')
+  await settle()
+  finish()
+  assert.equal(await (await taking).text(), '<main>Dynamic</main>')
+  assert.deepEqual(asked, ['/b'])
+  p.stop()
+  globalThis.fetch = real
 })

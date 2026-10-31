@@ -70,7 +70,6 @@ const leave = () => {
 }
 
 // Same shapes as server.mjs, so one _guard.jsbrain works on both sides: { redirect, status } and { deny }
-const R = Symbol('redirect') // older compiled guards
 export function redirect(url, status = 303) {
   throw { redirect: String(url), status }
 }
@@ -78,13 +77,11 @@ export const deny = (reason = 'Forbidden') => ({ deny: String(reason) })
 // guard result → true (go on) · false (cancel) · string (redirect) · null (full load: the server decides, e.g. 403)
 const outcome = v =>
   v && typeof v === 'object'
-    ? R in v
-      ? v[R]
-      : typeof v.redirect === 'string'
-        ? v.redirect
-        : v.deny !== undefined
-          ? null
-          : true
+    ? typeof v.redirect === 'string'
+      ? v.redirect
+      : v.deny !== undefined
+        ? null
+        : true
     : v === false || typeof v === 'string'
       ? v
       : true
@@ -125,7 +122,7 @@ export function router(o = {}) {
         v = await g(ctx)
       } catch (e) {
         if (asked) return null
-        return e && typeof e === 'object' && (R in e || 'redirect' in e) ? outcome(e) : null
+        return e && typeof e === 'object' && 'redirect' in e ? outcome(e) : null
       }
       v = outcome(v)
       if (v !== true) return asked ? null : v
@@ -133,106 +130,128 @@ export function router(o = {}) {
     return true
   }
 
-  // _loading.brain (#235): when the next page takes longer than 150 ms, the nearest loading view of the target route
-  // (`loading: [{ rx: string | string[], view }]`, most specific first, emitted by the build with the `core` URL) is mounted in the
-  // region until the page arrives; fast navigations never show it, so nothing flickers.
-  const loads = o.loading || []
+  // Feedback (§19): a navigation marks the region aria-busy and route().navigating at once; past 150 ms it shows
+  // #brain-nav: the app's own element with that id (a spinner in app.brain, `<div id="brain-nav" hidden>`) or a native
+  // <progress> bar at the top (role progressbar, label "Loading"; --nav-color, --nav-height), so fast ones show nothing. _loading.brain (#235): past 400 ms the nearest loading view of the target route (`loading: [{ rx, view }]`,
+  // most specific first, emitted by the build with the `core` URL) replaces the region until the page arrives. Until then the current page stays as it is.
+  const loads = o.loading || [], adopt = n => (document.adoptNode ? document.adoptNode(n) : n)
+  const ui = on => {
+    let b = document.getElementById('brain-nav')
+    if (!b && on) ((b = document.body.appendChild(document.createElement('progress'))).id = 'brain-nav'), (b.style.cssText = 'position:fixed;inset:0;width:100%')
+    if (b) b.hidden = !on
+  }
+  const busy = (my, on) => {
+    const el = my === seq && document.querySelector(region)
+    if (!el) return
+    on ? el.setAttribute('aria-busy', 'true') : (el.removeAttribute('aria-busy'), ui())
+    G.__brainRouted?.(on)
+  }
   function waiting(url, my) {
-    const path = strip(new URL(url, location.href).pathname), l = loads.find(x => (Array.isArray(x.rx) ? x.rx : [x.rx]).some(rx => new RegExp(rx).test(path)))
-    const w = { done: false, t: 0 }
-    if (!l || !o.core) return w
-    w.t = setTimeout(() => {
-      Promise.all([import(o.core), import(l.view)])
-        .then(([c, v]) => {
-          const el = document.querySelector(region), mount = c.m || c.mount
-          if (w.done || my !== seq || !el || !mount) return // the page arrived first
-          for (const e of [el, ...walkAll(el)]) if (e.$d) e.$d(), (e.$d = null)
-          for (const n of [...el.childNodes]) if (!/^(STYLE|LINK)$/.test(n.nodeName)) n.remove() // the view's CSS stays (BUILD #35)
-          el.$d = mount(v.default, el, {})
-        })
-        .catch(() => {})
-    }, 150)
+    const path = strip(new URL(url, location.href).pathname), l = loads.find(x => [x.rx].flat().some(rx => new RegExp(rx).test(path)))
+    const w = { t: [] }, at = (ms, f) => w.t.push(setTimeout(() => my === seq && !w.done && f(), ms))
+    at(150, () => ui(1))
+    if (l && o.core)
+      at(400, () =>
+        Promise.all([import(o.core), import(l.view)])
+          .then(([c, v]) => {
+            const el = document.querySelector(region), mount = c.m || c.mount
+            if (w.done || my !== seq || !el || !mount) return // the page arrived first
+            for (const e of [el, ...walkAll(el)]) if (e.$d) e.$d(), (e.$d = null)
+            for (const n of [...el.childNodes]) if (!/^(STYLE|LINK)$/.test(n.nodeName)) n.remove() // the view's CSS stays (BUILD #35)
+            el.$d = mount(v.default, el, {})
+          })
+          .catch(() => {}),
+      )
     return w
   }
 
+  // → true when this navigation swapped the region (a newer one, a full load or a failure → falsy)
   async function load(url) {
     const my = ++seq
-    let doc, r
     if (stale) return hard(url)
     const slow = waiting(url, my)
+    busy(my, 1)
     // the previous route's background requests (prefetch) are dropped by brain-data's queue (§41.4)
     try {
-      G.dispatchEvent && G.dispatchEvent(new Event('brain:navigate'))
+      G.dispatchEvent?.(new Event('brain:navigate'))
     } catch {}
     try {
-      r = (await ahead.take(url)) || (await fetch(url, { headers: { 'x-brain-nav': '1' } }))
-      const b = r.headers && r.headers.get && r.headers.get('x-brain-build')
-      if (b && build() && b !== build()) return void (my === seq && hard(url)) // a new deploy: load it whole
-      const ct = (r.headers && r.headers.get && r.headers.get('content-type')) || 'text/html'
+      const r = (await ahead.take(url)) || (await fetch(url, { headers: { 'x-brain-nav': '1' } }))
+      if (my !== seq) return
+      const hd = k => r.headers?.get?.(k), b = hd('x-brain-build')
+      if (b && build() && b !== build()) return hard(url) // a new deploy: load it whole
+      const ct = hd('content-type') || 'text/html'
       if (!r.ok || !/html/.test(ct)) throw Error(r.status)
-      doc = parse(await r.text())
+      const doc = parse(await r.text())
+      if (my !== seq) return // a newer navigation won
+      // another language (§37): a full load brings its own dictionaries, `lang` and `dir`; locales never mix in memory
+      const lang = d => d && d.documentElement && d.documentElement.getAttribute('lang')
+      if (lang(doc) && lang(document) && lang(doc) !== lang(document)) return hard(url)
+      if (r.redirected && r.url && G.history && r.url !== new URL(url, location.href).href) history.replaceState(history.state, '', r.url)
+      const cur = document.querySelector(region), next = doc.querySelector(region)
+      if (!cur || !next) return hard(url)
+      // DOM, head and active links change in one callback (one frame); a newer navigation that started meanwhile skips it
+      const swap = () => {
+        if (my !== seq) return
+        // read before the swap: afterwards the fetched page's scripts are in the document too
+        const own = document.querySelector('script[nonce]'), nonce = own && (own.nonce || own.getAttribute('nonce'))
+        for (const el of [cur, ...walkAll(cur)]) if (el.$d) el.$d(), (el.$d = null)
+        cur.replaceChildren(...[...next.childNodes].map(adopt))
+        // Scripts parsed by DOMParser never run: the region's own scripts (the view's mount, `e.$d = mount(...)`) are
+        // recreated so they execute. Already-imported modules come from the module map: their state survives.
+        // The page's CSP only trusts its own nonce: a recreated script carries the current page's nonce, never the one
+        // that came with the fetched page (each server response has a fresh one).
+        for (const sc of cur.querySelectorAll('script')) {
+          if (sc.type && !/^(module|text\/javascript)$/.test(sc.type)) continue
+          const n = document.createElement('script')
+          for (const a of sc.attributes) if (a.name !== 'nonce') n.setAttribute(a.name, a.value)
+          if (nonce) (n.nonce = nonce), n.setAttribute('nonce', nonce)
+          n.textContent = sc.textContent
+          sc.replaceWith(n)
+        }
+        // QA #291: the view's mount script stores its dispose (`e.$d = mount(...)`) after the swap, since module scripts
+        // run later; until then the region shows the server's HTML with no handlers. Clicks and submits there are held and
+        // replayed on the mounted view, by position, so the first click after a navigation is never lost.
+        if (!cur.$d && [...cur.querySelectorAll('script[type=module]')].some(sc => /\$d\s*=/.test(sc.textContent))) hold(cur)
+        for (const a of next.attributes || []) cur.setAttribute(a.name, a.value)
+        if (doc.title) document.title = doc.title
+        // SEO (§32, S04): the route owns description, og:*, twitter:*, robots, JSON-LD, canonical, hreflang and Markdown
+        // alternates, prev/next and its route params (brain-params, read by route()): the current page's go, the next
+        // page's come (none when it has none). Site links (icons, stylesheets, the RSS feed) and the region's own tags stay.
+        const tags = (r, skip) =>
+          [...((r && r.querySelectorAll && r.querySelectorAll('meta,script,link')) || [])].filter(e => {
+            for (let p = e.parentNode; p; p = p.parentNode) if (p === skip) return false
+            const a = n => e.getAttribute(n) || '', t = e.tagName
+            return t == 'SCRIPT' ? a('type') == 'application/ld+json'
+              : t == 'LINK' ? /^(canonical|prev|next)$/.test(a('rel')) || (a('rel') == 'alternate' && (a('hreflang') || a('type') == 'text/markdown'))
+              : /^(og:|twitter:|robots$|description$|brain-params$)/.test(a('property') || a('name'))
+          })
+        if (document.head) {
+          for (const e of tags(document.head)) e.remove()
+          for (const e of tags(doc.head || doc, next)) document.head.appendChild(adopt(e))
+        }
+        routed()
+        current()
+        const oldPlan = document.getElementById('brain-next'), newPlan = doc.querySelector('#brain-next')
+        if (oldPlan) oldPlan.remove()
+        if (newPlan) document.body.appendChild(adopt(newPlan))
+        ahead.scan()
+      }
+      // View Transition when the browser has it (an app turns it off under prefers-reduced-motion with CSS, §19)
+      if (document.startViewTransition) {
+        const vt = document.startViewTransition(swap)
+        vt.ready.catch(() => {}) // rejects when a faster navigation skips this transition: expected, not an error
+        await vt.updateCallbackDone
+      } else swap()
+      return my === seq
     } catch {
-      return void ((slow.done = true), clearTimeout(slow.t), my === seq && hard(url))
+      // a failed fetch, a parse or swap that threw: never a half-swapped page, the browser loads it whole
+      my === seq && hard(url)
+    } finally {
+      slow.done = 1
+      slow.t.forEach(clearTimeout)
+      busy(my, 0)
     }
-    slow.done = true
-    clearTimeout(slow.t)
-    if (my !== seq) return // a newer navigation won
-    // another language (§37): a full load brings its own dictionaries, `lang` and `dir`; locales never mix in memory
-    const lang = d => d && d.documentElement && d.documentElement.getAttribute('lang')
-    if (lang(doc) && lang(document) && lang(doc) !== lang(document)) return hard(url)
-    if (r.redirected && r.url && G.history && r.url !== new URL(url, location.href).href) history.replaceState(history.state, '', r.url)
-    const cur = document.querySelector(region), next = doc.querySelector(region)
-    if (!cur || !next) return hard(url)
-    const swap = () => {
-      // read before the swap: afterwards the fetched page's scripts are in the document too
-      const own = document.querySelector('script[nonce]'), nonce = own && (own.nonce || own.getAttribute('nonce'))
-      for (const el of [cur, ...walkAll(cur)]) if (el.$d) el.$d(), (el.$d = null)
-      cur.replaceChildren(...[...next.childNodes].map(n => (document.adoptNode ? document.adoptNode(n) : n)))
-      // Scripts parsed by DOMParser never run: the region's own scripts (the view's mount, `e.$d = mount(...)`) are
-      // recreated so they execute. Already-imported modules come from the module map: their state survives.
-      // The page's CSP only trusts its own nonce: a recreated script carries the current page's nonce, never the one
-      // that came with the fetched page (each server response has a fresh one).
-      for (const sc of cur.querySelectorAll('script')) {
-        if (sc.type && !/^(module|text\/javascript)$/.test(sc.type)) continue
-        const n = document.createElement('script')
-        for (const a of sc.attributes) if (a.name !== 'nonce') n.setAttribute(a.name, a.value)
-        if (nonce) (n.nonce = nonce), n.setAttribute('nonce', nonce)
-        n.textContent = sc.textContent
-        sc.replaceWith(n)
-      }
-      // QA #291: the view's mount script stores its dispose (`e.$d = mount(...)`) after the swap, since module scripts
-      // run later; until then the region shows the server's HTML with no handlers. Clicks and submits there are held and
-      // replayed on the mounted view, by position, so the first click after a navigation is never lost.
-      if (!cur.$d && [...cur.querySelectorAll('script[type=module]')].some(sc => /\$d\s*=/.test(sc.textContent))) hold(cur)
-      for (const a of next.attributes || []) cur.setAttribute(a.name, a.value)
-      if (doc.title) document.title = doc.title
-      // SEO (§32, S04): the route owns description, og:*, twitter:*, robots, JSON-LD, canonical, hreflang and Markdown
-      // alternates, prev/next and its route params (brain-params, read by route()): the current page's go, the next
-      // page's come (none when it has none). Site links (icons, stylesheets, the RSS feed) and the region's own tags stay.
-      const tags = (r, skip) =>
-        [...((r && r.querySelectorAll && r.querySelectorAll('meta,script,link')) || [])].filter(e => {
-          for (let p = e.parentNode; p; p = p.parentNode) if (p === skip) return false
-          const a = n => e.getAttribute(n) || '', t = e.tagName
-          return t == 'SCRIPT' ? a('type') == 'application/ld+json'
-            : t == 'LINK' ? /^(canonical|prev|next)$/.test(a('rel')) || (a('rel') == 'alternate' && (a('hreflang') || a('type') == 'text/markdown'))
-            : /^(og:|twitter:|robots$|description$|brain-params$)/.test(a('property') || a('name'))
-        })
-      if (document.head) {
-        for (const e of tags(document.head)) e.remove()
-        for (const e of tags(doc.head || doc, next)) document.head.appendChild(document.adoptNode ? document.adoptNode(e) : e)
-      }
-      routed()
-      current()
-      const oldPlan = document.getElementById('brain-next'), newPlan = doc.querySelector('#brain-next')
-      if (oldPlan) oldPlan.remove()
-      if (newPlan) document.body.appendChild(document.adoptNode ? document.adoptNode(newPlan) : newPlan)
-      ahead.scan()
-    }
-    if (document.startViewTransition) {
-      const vt = document.startViewTransition(swap)
-      vt.ready.catch(() => {}) // rejects when a faster navigation skips this transition: expected, not an error
-      await vt.updateCallbackDone
-    } else swap()
   }
   // a full load must not be intercepted again (Navigation API): `through` lets that one navigation pass
   const hard = url => ((through = new URL(url, location.href).href), (o.hard || (u => location.assign(u)))(url))
@@ -292,7 +311,7 @@ export function router(o = {}) {
     if (g === false) return push || history.pushState(history.state, '', here) // back/forward blocked: stay
     if (g !== true) return go(new URL(app(g), location.href).href, push, hops + 1)
     if (push) save(), history[push === 'replace' ? 'replaceState' : 'pushState']({ y: 0 }, '', u) // push: true | 'replace' | false (back/forward)
-    await load(u)
+    if (!(await load(u))) return // a newer navigation (or a full load) owns scroll and focus now
     here = location.href
     const hash = new URL(u, location.href).hash, t = hash && document.getElementById(hash.slice(1))
     if (t) t.scrollIntoView()
@@ -432,15 +451,17 @@ export function predict(o = {}, same = () => false) {
       const cc = headers.get('cache-control') || '', freshness = /(?:^|,)\s*(?:s-maxage|max-age)=(\d+)/i.exec(cc)
       if (m.assets) warm(m.assets)
       if (planned.has(k)) warm(planned.get(k))
-      // Personalized and dynamically revalidated HTML always goes back through the server on navigation.
+      // Personalized and dynamically revalidated HTML always goes back through the server on navigation, unless that
+      // navigation was already waiting for this very request (taken in flight: as fresh as a new one).
       // Speculation still warms its immutable code/assets; it never reuses another tab's prior session data.
-      if (/private|no-store/i.test(cc) || /no-cache/i.test(cc) && headers.get('x-brain-static') !== '1') { if (cache.get(k) === c) remove(k); return null }
+      if (!c.taken && (/private|no-store/i.test(cc) || /no-cache/i.test(cc) && headers.get('x-brain-static') !== '1')) { if (cache.get(k) === c) remove(k); return null }
       // Transient page memory belongs to this tab and write epoch, never to CacheStorage or the worker.
       c.bytes = m.text.length * 2
       if (cache.get(k) === c) bytes += c.bytes
       prune()
       return { ok: m.ok, status: m.status, redirected: false, url: m.url, headers, text: async () => m.text, ttl: Math.min(FRESH, freshness ? +freshness[1] * 1000 : FRESH) }
     }).catch(() => null).finally(() => { clearTimeout(timer); if (running.get(k) === controller) running.delete(k) })
+    c.t = timer
     cache.set(k, c); prune()
     return c.p
   }
@@ -514,11 +535,10 @@ export function predict(o = {}, same = () => false) {
       const k = key(u), c = k && cache.get(k)
       if (!c) return null
       remove(k)
-      // A click must not inherit a slow speculative request's six-second deadline.
-      let timer
-      const r = await Promise.race([c.p, new Promise(resolve => { timer = setTimeout(() => resolve(null), 150) })])
-      clearTimeout(timer)
-      if (!r) { const controller = running.get(k); controller && controller.abort() }
+      // The navigation reuses the request already on its way (never a second one) and drops its speculative deadline.
+      clearTimeout(c.t)
+      c.taken = 1
+      const r = await c.p
       return r && !dead && c.epoch === epoch && Date.now() - c.at < r.ttl ? r : null
     },
   }
