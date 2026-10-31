@@ -444,6 +444,26 @@ test('a call made from an event handler is cancelled when its component unmounts
   assert.equal(calls[0].init.signal.aborted, true)
 })
 
+test('requests from an event handler leave the component registry once they settle', async () => {
+  const { guard } = await rt.sibling('brain-guard.js')
+  reset({ 'POST /done4': [{ status: 200, body: '{}' }], 'POST /fail4': [{ status: 500, body: '{}' }] })
+  const done = api('/done4', { post: {} }), bad = api('/fail4', { post: {} })
+  const C = guard(() => rt.tpl('<button class="go4">go</button>')())
+  const h = document.body.appendChild(document.createElement('div'))
+  const stop = rt.mount(() => C({}), h)
+  const btn = h.querySelector('.go4')
+  const all = []
+  for (let i = 0; i < 20; i++) {
+    globalThis.event = { target: btn }
+    all.push(done.post({}), bad.post({}).catch(() => {}))
+    delete globalThis.event
+  }
+  await Promise.all(all)
+  await tick()
+  assert.equal(btn.$c.size, 0, 'A long-lived component must not keep finished requests')
+  stop()
+})
+
 test('native backend errors retain actionable codes and fields without rendering object strings or server traces',async()=>{
   http({retry:0})
   reset({

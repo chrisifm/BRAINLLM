@@ -186,8 +186,9 @@ function request(path, M, def, arg, o) {
   // optimistic: () => (list = [...list, item]) — applied now, undone if the request fails
   const undo = o.optimistic ? rec(o.optimistic) : null
   // a call made from an event handler is cancelled when its component unmounts (brain-guard keeps `$c` on its nodes)
+  let reg = null
   if (!CUR && G.event && G.event.target) for (let el = G.event.target; el; el = el.parentNode) if (el.$c) {
-    const c = el.$c
+    const c = (reg = el.$c)
     c.add(ctl)
     ctl.signal.addEventListener('abort', () => c.delete(ctl))
     break
@@ -238,6 +239,8 @@ function request(path, M, def, arg, o) {
     batch(() => { for (let i = undo.length - 2; i >= 0; i -= 2) undo[i].v = undo[i + 1] })
     throw e
   })
+  // a settled request leaves its component's registry: a long-lived view must not keep every finished call
+  if (reg) p.then(() => reg.delete(ctl), () => reg.delete(ctl))
   p.cancel = () => ctl.abort()
   if (file) Object.defineProperty(p, 'progress', { get: () => up.v }) // 0–1, a signal read
   return p
