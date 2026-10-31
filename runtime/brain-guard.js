@@ -24,22 +24,22 @@ const TEXT = 'This section could not load.'
 const BUDGET = { nodes: 200000, rows: 100000, runs: 1000, ms: 200 }
 const STOPPED = 'This part stopped to protect the page.'
 const OWN = new WeakMap() // root owner → instance
-const now = () => (G.performance ? performance.now() : Date.now())
+const now = () => performance.now()
 // work per flush: the time between two effect runs belongs to the earlier one (the hook fires as a run starts); the
 // last run of a flush is settled by a microtask queued at the flush's first run
 let LX = null, LT = 0, inFlush = false
 const touched = new Set()
 // elements under a root, and the most element children any one of them has (the rows of a list)
 const count = (e, c) => {
-  if (e.nodeType !== 1) return
+  if (e.nodeType != 1) return
   c.nodes++
   let k = 0
-  for (const n of e.childNodes) if (n.nodeType === 1) k++, count(n, c)
+  for (const n of e.childNodes) if (n.nodeType == 1) k++, count(n, c)
   if (k > c.rows) c.rows = k
 }
 // elements under a root: native when the DOM has it (the shim walks)
 const elems = r => {
-  if (r.nodeType !== 1) return 0
+  if (r.nodeType != 1) return 0
   if (r.getElementsByTagName) return 1 + r.getElementsByTagName('*').length
   const c = { nodes: 0, rows: 0 }
   count(r, c)
@@ -219,7 +219,7 @@ export function guard(C, fb, budget) {
           report(pending[0], pending[1])
           pending = null
         }
-        for (const n of nodes) if (n.nodeType === 1) (n.$g = handler), (n.$c = reqs)
+        for (const n of nodes) if (n.nodeType == 1) (n.$g = handler), (n.$c = reqs)
       }, own)
     function again() {
       const p = end.parentNode
@@ -232,7 +232,7 @@ export function guard(C, fb, budget) {
     if (own)
       I.root(() => fx(() => () => {
         if (dispose) dispose()
-        for (const n of nodes) if (n.nodeType === 1) (n.$g = null), (n.$c = null) // see brain-dev: no node → instance links
+        for (const n of nodes) if (n.nodeType == 1) (n.$g = null), (n.$c = null) // see brain-dev: no node → instance links
         I.rm(nodes)
       }), own)
     return [...nodes, end]

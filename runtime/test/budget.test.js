@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { install } from '../shim/dom.js'
 install()
 const { sibling } = await import('./rt.js')
-const { _rt } = await sibling('brain.js')
+const { _rt, _err } = await sibling('brain.js')
 const { budgetEnter, budgetStep, budgetLeave, budgetSuspend, budgetResume, budgetClaim, budgetWatchWorker } = await sibling('brain-budget.js')
 const meta = { file: 'comp/Counter.brain', component: 'Counter', line: 7, column: 3 }
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -37,20 +37,97 @@ test('recursion rejects before native stack overflow and ordinary finally restor
 test('await suspension excludes IO delay, preserves rejection identity and closes on throw', async () => {
   const f = budgetEnter(meta, null, { ms: 10 })
   try {
-    assert.equal(budgetResume(f, await budgetSuspend(f, wait(30).then(() => 42))), 42)
+    assert.equal(budgetResume(f, await budgetSuspend(f)(wait(30).then(() => 42))), 42)
     const original = new Error('original')
     assert.throws(() => budgetResume(f, { ok: false, error: original }), { code: 'B0910' })
-    const outcome = await budgetSuspend(f, Promise.reject(original))
+    const outcome = await budgetSuspend(f)(Promise.reject(original))
     assert.throws(() => budgetResume(f, outcome), error => error === original)
+  } finally { budgetLeave(f) }
+})
+
+const spin = ms => { const t = performance.now(); while (performance.now() - t < ms); }
+
+// Wall-clock overruns are reported to the error hook (never thrown); `overruns(run)` collects them.
+const overruns = async run => {
+  const seen = [], warn = console.warn
+  _err(e => seen.push(e))
+  console.warn = () => {}
+  try { await run(seen) } finally { _err(null); console.warn = warn }
+  return seen
+}
+
+test('native work evaluated inside an await is not charged, author functions inside it still are', async () => {
+  const seen = await overruns(async reported => {
+    const f = budgetEnter(meta, null, { ms: 20, steps: 3 })
+    try {
+      const pause = budgetSuspend(f)
+      spin(40) // a slow synchronous fetch start
+      budgetResume(f, await pause(Promise.resolve(1)))
+      assert.equal(reported.length, 0)
+      const again = budgetSuspend(f)
+      const author = budgetEnter(meta) // an author callback called while the awaited expression is evaluated
+      budgetStep(author)
+      spin(40)
+      budgetStep(author)
+      budgetLeave(author)
+      await again(Promise.resolve(2))
+    } finally { budgetLeave(f) }
+  })
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0].budget, 'ms')
+})
+
+test('a synchronous throw inside a paused await expression restarts the clock at the next checkpoint', async () => {
+  const seen = await overruns(() => {
+    const f = budgetEnter(meta, null, { ms: 20 })
+    try {
+      try { budgetSuspend(f); throw new Error('sync') } catch {}
+      budgetStep(f)
+      spin(40)
+      budgetStep(f)
+    } finally { budgetLeave(f) }
+  })
+  assert.equal(seen.length, 1)
+})
+
+test('a wall-clock overrun is reported once with its source and measured time but never stops the page', () => {
+  const seen = [], warned = [], warn = console.warn
+  _err((e, x, w) => seen.push({ e, x, w }))
+  console.warn = m => warned.push(m)
+  const f = budgetEnter(meta, null, { ms: 20 })
+  try {
+    spin(40) // a loaded machine or slow author work: wall-clock, not a correctness property
+    budgetStep(f)
+    spin(40)
+    budgetStep(f)
+  } finally { budgetLeave(f); _err(null); console.warn = warn }
+  assert.equal(seen.length, 1)
+  const { e, x, w } = seen[0]
+  assert.equal(x, null) // no owner: no error boundary replaces the view
+  assert.equal(w, 'budget')
+  assert.deepEqual([e.code, e.budget, e.limit, e.file, e.line], ['B0910', 'ms', 20, meta.file, 7])
+  assert.ok(e.measured >= 40, String(e.measured))
+  assert.match(e.message, /^B0910: ms budget exceeded at comp\/Counter\.brain:7: \d+ ms$/)
+  assert.match(e.fix, /worker/)
+  assert.equal(warned.length, 1)
+  assert.match(warned[0], /B0910: ms budget exceeded at comp\/Counter\.brain:7: \d+ ms/)
+})
+
+test('deterministic guards stay fatal under load', () => {
+  const f = budgetEnter(meta, null, { steps: 2, ms: 1 })
+  try {
+    spin(5)
+    budgetStep(f)
+    assert.throws(() => { budgetStep(f); budgetStep(f) }, { code: 'B0910', budget: 'steps' })
   } finally { budgetLeave(f) }
 })
 
 test('resumed work still shares the total step budget and concurrent suspended frames do not mix roots', async () => {
   const a = budgetEnter(meta, null, { steps: 1 })
   budgetStep(a)
-  const pa = budgetSuspend(a, Promise.resolve('a'))
+  const pa = budgetSuspend(a)(Promise.resolve('a'))
   const b = budgetEnter({ ...meta, file: 'comp/Other.brain' }, null, { steps: 2 })
-  const pb = budgetSuspend(b, Promise.resolve('b'))
+  const pb = budgetSuspend(b)(Promise.resolve('b'))
   try { assert.throws(() => budgetResume(a, { ok: true, value: 'a' }), { code: 'B0910', budget: 'steps' }) }
   finally { budgetLeave(a) }
   assert.equal(budgetResume(b, await pb), 'b')

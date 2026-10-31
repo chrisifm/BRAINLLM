@@ -286,7 +286,8 @@ with a shared eight-request cap and ten-second total deadline; no automatic muta
 Keep existing production routes until their behavior and policies pass a tested migration slice.
 
 ## Tests (`*.test.brain`)
-`test(name, async () => {…})` · `await mount(Comp, props)` · `await click(sel)` · `await type(sel, text)` ·
+`test(name, async () => {…})` · `await mount(Comp, props, { slot, slots, provide }?)` (`slot`: default slot text;
+`slots: { name: text }`: named slots) · `await click(sel)` · `await type(sel, text)` ·
 `text(sel)` `attr(sel, n)` `hasClass(sel, c)` `count(sel)` · `expect(x).toBe(y)|toEqual(y)|toBeTruthy()`.
 
 ## CLI (also MCP: `brain mcp`; every command accepts `--json`)

@@ -154,6 +154,7 @@ Exports: `sig(v, name?)`, `drv(fn)`, `fx(fn)`, `batch(fn)`, `untrack(fn)`, `tpl(
 
 - `sig` and `drv` expose `.v`; codegen rewrites `n` → `n.v` and `n = x` → `n.v = x`. Writing to `drv.v` throws.
 - Writes are batched per microtask; `batch` applies synchronously when it finishes; every `on` handler runs inside `batch`.
+- Owners run first: before a queued effect runs, its owner chain is brought up to date from the top. A `when`/`{#if}` re-evaluates its condition and disposes its block before an effect inside the block runs, so `{#if data.file}{data.file.name}{/if}` never reads `name` of a `file` that became `null`, whatever the subscription order (guard-first scheduling, as in Solid and Svelte).
 - `anchor` = template comment (`<!>` in `tpl`); everything is inserted BEFORE the anchor. Without an anchor, the runtime creates one at the end of `parent`.
 - `fn` of insert/a/b/empty/render may return Node, DocumentFragment, string, number, array or `null`/`false` (empty).
 - `render(item, i)` receives SIGNALS (`item.v`, `i.v`): same key with a new object updates the row in place. `keyFn(item, i)` receives the raw value. Duplicate key = error.
@@ -245,9 +246,11 @@ the check cache).
 runs them in real headless Chrome via CDP, with its own Rust client. The same command audits the
 accessibility tree with `Accessibility.getFullAXTree`. No jsdom or Playwright.
 
-Test API in `*.test.brain`: `test(name, async () => {…})` · `await mount(Comp, props)` · `await click(sel)` ·
+Test API in `*.test.brain`: `test(name, async () => {…})` · `await mount(Comp, props, options?)` · `await click(sel)` ·
 `await type(sel, text)` · synchronous readers `text(sel)`, `attr(sel, name)`, `hasClass(sel, cls)`, `count(sel)` ·
-`expect(x).toBe(y)`, `.toEqual(y)`, `.toBeTruthy()`. Selectors are CSS within the mounted component.
+`expect(x).toBe(y)`, `.toEqual(y)`, `.toBeTruthy()`. Selectors are CSS within the mounted component. `options`:
+`slot` (text of the default `<slot />`), `slots` (`{ name: text }` for `<slot name="…" />`) and `provide` (service
+swaps); slot text is real DOM, so the accessibility audit sees it. Unknown options and non-text slot values fail the test.
 
 **Encapsulated IDs:** every static `id` of a component and its references (`for`, `aria-labelledby`,
 `aria-describedby`, `aria-controls`, `popovertarget`) are rewritten with a per-instance suffix: the first instance keeps

@@ -301,11 +301,12 @@ impl Gen<'_> {
             Expr::Seq { exprs, .. } => self.args(exprs),
             Expr::Spread { arg, .. } => format!("...{}", self.expr(arg)),
             Expr::Await { arg, .. } => {
+                // `suspend(frame)` runs before the awaited expression, so its native work is not charged.
                 let value = self.expr(arg);
                 if let Some(frame) = self.budget_frames.last().cloned() {
                     let suspend = self.budget("budgetSuspend");
                     let resume = self.budget("budgetResume");
-                    format!("{resume}({frame}, await {suspend}({frame}, {value}))")
+                    format!("{resume}({frame}, await {suspend}({frame})({value}))")
                 } else { format!("await {value}") }
             }
             Expr::Paren { expr, .. } => format!("({})", self.expr(expr)),

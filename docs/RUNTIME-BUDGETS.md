@@ -8,7 +8,7 @@ Production and development compiled BrainScript functions have execution checkpo
 | --- | ---: | --- |
 | Execution checkpoints | 1,000,000 | One execution, including resumptions |
 | Active function depth | 128 | One active execution |
-| Synchronous elapsed work | 200 ms | Active phases, checked at checkpoints |
+| Synchronous elapsed work | 200 ms | Active phases, checked at checkpoints; a reported diagnostic, never a failure (see below) |
 | List rows | 100,000 | One list effect |
 | Signal allocations | 100,000 | One disposable owner's lifecycle or effect run |
 | Explicit resources | 1,024 | One disposable owner |
@@ -19,7 +19,11 @@ These are internal finite safety ceilings. Helper options can lower a ceiling; z
 
 ## Await, ownership and disposal
 
-Generated await uses `budgetSuspend(frame, value)` and `budgetResume(frame, await outcome)`. Suspension removes the active frame before waiting. The settled outcome carries either the original value or the original rejection; resume restores execution state before returning or throwing. IO waiting does not consume the synchronous elapsed-work allowance. JavaScript still measures elapsed synchronous phases rather than operating-system CPU time; GC and scheduling can affect that measure. The settled-outcome helper can add a microtask to continuation scheduling.
+Generated await uses `budgetResume(frame, await budgetSuspend(frame)(value))`. `budgetSuspend(frame)` runs before the awaited expression is evaluated: it stops the elapsed-time clock while the frame stays the current execution, so native work started by the expression (the synchronous connection setup of a process's first `fetch`, four parallel reads in `load()`) is not charged. An author function called inside the expression enters its own checkpoint, restarts the clock and still shares the caller's steps, depth and time; when it returns, the clock stops again. Applying the returned function to the value removes the frame before waiting. A synchronous throw inside the expression restarts the clock at the next checkpoint. The settled outcome carries either the original value or the original rejection; resume restores execution state before returning or throwing. IO waiting does not consume the synchronous elapsed-work allowance. The settled-outcome helper can add a microtask to continuation scheduling.
+
+## Wall-clock overruns are diagnostics
+
+Browsers expose no CPU clock, so elapsed work is wall-clock time: GC, a busy tab and a loaded machine inflate it. An overrun of the 200 ms allowance therefore never stops the page, in development or production. It is reported once per execution as a B0910 error object with `budget: 'ms'`, `measured` (ms), `limit`, source `file`/`line`/`column` and a `fix`; its message reads `B0910: ms budget exceeded at views/report.brain:12: 340 ms`. The message is written with `console.warn`, and the error goes to the error hook without an owner: the structured error collector (and its configured report endpoint) records it, the development overlay shows it, and no error boundary replaces the view. Execution continues; later overruns of the same execution are not repeated. Steps and depth are deterministic and stay fatal under any load: they stop a runaway loop or recursion, so an endless owned loop is cut after one million checkpoints rather than after 200 ms.
 
 Component setup captures its actual reactive owner once. Generated callbacks retain this owner even when invoked by delegated event handlers, where the global reactive owner is absent. Modules without a component owner use execution budgets but do not acquire component lifecycle quotas for shared module-level signals. Function parameter default expressions are evaluated by JavaScript before function-entry checkpoints.
 
@@ -29,7 +33,7 @@ Component setup captures its actual reactive owner once. Generated callbacks ret
 
 ## Structured feedback and practical limits
 
-Budget exceptions carry stable `code`, `kind: 'budget'`, `budget`, `limit`, bounded source `file`/`component`, one-based `line`/`column` when a generated checkpoint is active, and a mechanical `fix` direction. B0910 identifies execution/deadline exhaustion; B0911 identifies resource quota exhaustion. An allocation outside any active compiled checkpoint can have unknown source location. Messages contain no application values, payloads, source excerpts or credentials. Existing error boundaries and the structured error collector report the exception; this module adds no console output.
+Budget exceptions carry stable `code`, `kind: 'budget'`, `budget`, `limit`, bounded source `file`/`component`, one-based `line`/`column` when a generated checkpoint is active, and a mechanical `fix` direction. B0910 identifies execution/deadline exhaustion; B0911 identifies resource quota exhaustion. An allocation outside any active compiled checkpoint can have unknown source location. Messages contain no application values, payloads, source excerpts or credentials. Existing error boundaries and the structured error collector report the exception. The only console output of this module is the warning for a wall-clock overrun.
 
 B0912 warns at an explicit foreign `.js`, `.mjs` or `.cjs` browser import: those bodies have no compiler checkpoints. Move untrusted or CPU-heavy work to a bounded owned worker with cancellation, deadline and transferables. Worker modules and `<meta server>` files do not receive a browser-main-thread warning. The diagnostic makes no automatic source edit and does not imply a complete transitive dependency audit.
 
