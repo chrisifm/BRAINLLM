@@ -499,6 +499,8 @@ fn key_of(x: &Token) -> Option<&str> {
 /// The token after which the env object starting at `i` ends (`process.env`, `ctx.env`, `import.meta.env`, or a name
 /// bound to one of them), when `t[i]` starts one.
 fn env_object(t: &[Token], i: usize, names: &[String]) -> Option<usize> {
+    // `const x =` at the end of unfinished source has nothing to read.
+    t.get(i)?;
     let member = |i: usize| t.get(i).is_some_and(|x| x.is_punct(".") || x.is_punct("?."));
     let word = |i: usize, w: &str| t.get(i).is_some_and(|x| x.is_word(w));
     let after_dot = i > 0 && member(i - 1);

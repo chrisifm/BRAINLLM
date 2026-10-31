@@ -215,3 +215,12 @@ fn destructured_env_is_read_with_each_key() {
     assert_eq!(read_keys("const { API_KEY } = config\nconst env = load()\nconst { lower } = process.env"), keys(&[]));
     assert_eq!(read_keys("function f({ env }) { return 1 }\nother.env.API_KEY\nthing.API_URL"), keys(&[]));
 }
+
+#[test]
+fn unfinished_source_never_breaks_the_scan() {
+    let cases = ["let broken =", "const e =", "const { A", "const { A } =", "const { A: ", "const { A = ", "load({ env: {", "{", "}", "const { env } = process", "const { env: { K } } =", "process", "process.", "import.meta", "ctx."];
+    for src in cases {
+        brain_check::env::reads(src);
+        brain_check::env::keys_used(src);
+    }
+}
