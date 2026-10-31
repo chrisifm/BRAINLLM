@@ -1730,7 +1730,11 @@ fn build_inner_with_options(
         if let (Some(t), Some(l), Some(rt), true) = (&links, &p.locale, url_of.get(&Node::Runtime("brain-links.js".into())), p.interactive && script.starts_with("<script type=\"module\">")) {
             let js = format!("import l from\"{rt}\";l({},{},{},{},{});\n", prerender_json(l), prerender_json(&pre), prerender_json(&t.prefix), prerender_json(&t.pattern()), t.slugs_json());
             let key = format!("_b/links-{l}.{}.{}", content_hash(&js), ext.js());
-            script = script.replacen("<script type=\"module\">", &format!("<script type=\"module\">import\"{pre}/{key}\";"), 1);
+            // after the dictionary: the page's first import stays the one its first render needs
+            script = match &p.dict {
+                Some(d) => script.replacen(&format!("import\"{d}\";"), &format!("import\"{d}\";import\"{pre}/{key}\";"), 1),
+                None => script.replacen("<script type=\"module\">", &format!("<script type=\"module\">import\"{pre}/{key}\";"), 1),
+            };
             files.insert(key, js);
         }
         // page scripts go INSIDE the region (the router recreates them after a swap); the router itself stays outside

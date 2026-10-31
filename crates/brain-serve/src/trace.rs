@@ -349,7 +349,7 @@ mod tests {
     #[test]
     fn a_failure_groups_once_and_a_new_module_needs_no_schema() {
         let failed = |module: &str, id: &str| serde_json::json!({ "module": module, "kind": "rpc", "request_id": id, "route": "/_r/a/save", "status": 500, "data": { "method": "POST" } }).to_string();
-        let custom = serde_json::json!({ "module": "payments", "kind": "declined", "level": "error", "request_id": "c1", "title": "Card declined", "code": "PAY-01", "fix": "Ask for another card", "file": "server/pay.jsbrain", "line": 7 });
+        let custom = serde_json::json!({ "module": "payments", "kind": "declined", "level": "error", "request_id": "c1", "title": "Card declined", "code": "B0721", "fix": "Ask for another card", "file": "server/pay.jsbrain", "line": 7 });
         let root = store("issues", "{}", &[failed("browser", "r1"), failed("server", "r1"), failed("browser", "r2"), custom.to_string()]);
         let issues = answer(&root, serde_json::json!({ "json": true, "mode": "issues" }));
         let list = issues["issues"].as_array().unwrap();
@@ -357,7 +357,7 @@ mod tests {
         let request = list.iter().find(|i| i["b_code"] == "B1840").unwrap();
         assert_eq!(request["count"], 2, "two requests, however many layers saw them: {request}");
         let module = list.iter().find(|i| i["module"] == "payments").unwrap();
-        assert_eq!((&module["b_code"], &module["fix"], &module["line"]), (&serde_json::json!("PAY-01"), &serde_json::json!("Ask for another card"), &serde_json::json!(7)));
+        assert_eq!((&module["b_code"], &module["fix"], &module["line"]), (&serde_json::json!("B0721"), &serde_json::json!("Ask for another card"), &serde_json::json!(7)));
         let one = answer(&root, serde_json::json!({ "json": true, "requestId": "r1" }));
         assert_eq!(one["events"].as_array().unwrap().len(), 2);
         assert_eq!(answer(&root, serde_json::json!({ "json": true, "module": "payments" }))["events"][0]["kind"], "declined");

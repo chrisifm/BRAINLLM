@@ -41,6 +41,8 @@ fn dev_serves_everything_under_the_base() {
     let dir = tmp.join("site");
     // the app's HTTP policy (§40): applied in dev as `http({…})`, never left as markup
     let app = std::fs::read_to_string(dir.join("app.brain")).unwrap();
+    // a link in the shell itself: the base rewrite is checked on markup the dev server sends
+    let app = app.replace("<slot />", "<a href=\"/about\">About</a>\n  <slot />");
     std::fs::write(dir.join("app.brain"), format!("<meta http base=\"/api\" timeout=\"5s\" login=\"/login\">\n{app}")).unwrap();
     std::fs::create_dir_all(dir.join("api")).unwrap();
     std::fs::write(dir.join("api/_http.jsbrain"), "http({ headers: { 'x-app': 'site' } })\n").unwrap();
