@@ -1225,6 +1225,8 @@ export function createServer(o = {}) {
       if (ms > 1000) log('warn', 'slow request', { rid, path: req.$brainPath || String(req.url || '').split('?')[0], status: res.statusCode, ms: Math.round(ms) })
     })
     try {
+      // `//` makes new URL throw and `//host/x` would be read as another host
+      if (req.url.startsWith('//')) return notFound(req, res)
       const full = new URL(req.url, 'http://' + (req.headers.host || 'localhost'))
       // /_health stays at the root: the supervisor calls it there whatever the base
       if (full.pathname === '/_health' || full.pathname === BASE + '_health') return send(res, 200, json({ ok: true, build: mf.build || null }), { 'content-type': MIME['.json'], 'cache-control': 'no-store' })

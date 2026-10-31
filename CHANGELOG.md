@@ -18,6 +18,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   block lists `precompressed zstd br gzip`.
 
 ### Fixed
+- `brain start` answers 404 for a request path starting with `//`. It answered 500 for `//`.
 - Service worker caches are scoped to the app: under a base path they are named `brain/app-<sig>` and `brain/app:*`, so
   activating or opting out one app no longer deletes another app's caches on the same origin, and `sw: false` deletes
   only the app's own caches instead of every cache on the origin. An app at the root keeps its cache names.
