@@ -171,7 +171,9 @@ fn main() -> ExitCode {
         },
         Some("quality") => {
             app_root().and_then(|root| {
-                let value=if args.get(1).map(String::as_str)==Some("refresh") {quality::refresh(&root)?} else {quality::query(&root,&serde_json::json!({}))?};
+                let mut value=if args.get(1).map(String::as_str)==Some("refresh") {quality::refresh(&root)?} else {quality::query(&root,&serde_json::json!({}))?};
+                // evidence written by another compiler version is refreshed once so the report matches the installed one
+                if value["freshness"]["frameworkStale"]==true && quality::refresh(&root).is_ok() {value=quality::query(&root,&serde_json::json!({}))?;}
                 println!("{value}");Ok(())
             })
         },
