@@ -15,7 +15,7 @@ import { Button } from 'brain/ui'
 var n = sig(0)
 let items = sig([])
 let active = sig(false)
-const inc = () => { n++; console.warn('n', n) }
+const inc = () => { n++; console.info('n', n) }
 </script>
 <div class={active ? 'on' : ''}>
   {#each items as it}<p class="row {it.done ? 'done' : 'todo'}">{it.name}</p>{/each}
@@ -29,7 +29,7 @@ const inc = () => { n++; console.warn('n', n) }
     let var = o.warnings.iter().find(|d| d.code == "B0103").unwrap();
     assert_eq!((var.line, var.col), (4, 1));
     // The output is the normalized program.
-    assert!(!o.js.contains("console.warn") && o.js.contains("console.log(\x27n\x27, n.v)"), "{}", o.js);
+    assert!(!o.js.contains("console.info") && o.js.contains("console.log(\x27n\x27, n.v)"), "{}", o.js);
     assert!(o.js.contains("from \"/@brain/ui/button.brain\""), "{}", o.js);
     assert!(!o.js.contains("from \"brain\""), "{}", o.js);
     assert!(o.js.contains("cls("), "{}", o.js);
@@ -123,4 +123,13 @@ fn static_t_resolves_at_build_and_runtime_t_is_imported() {
     let o = brain_codegen::compile_with(plural, std::path::Path::new("comp/p.brain"), &opts).unwrap_or_else(|d| panic!("{d:#?}"));
     assert!(o.js.contains("import { t } from \"/@brain/brain-i18n.js\";") && o.js.contains("() => t('posts.count', { n: n.v })"), "{}", o.js);
     assert_eq!(o.i18n_keys, ["posts.count"]);
+}
+
+/// `log` is removed from production builds, so turning an error report into it deletes the report.
+#[test]
+fn console_error_and_warn_stay_in_the_output() {
+    let src = "<script>\nconst save = () => { console.error('save failed'); console.warn('slow') }\n</script>\n<button on:click={save}>Save</button>\n";
+    let o = brain_codegen::compile(src, Path::new("comp/keep.brain")).unwrap_or_else(|d| panic!("{d:#?}"));
+    assert!(o.js.contains("console.error(") && o.js.contains("console.warn("), "{}", o.js);
+    assert!(!o.warnings.iter().any(|d| d.code == "B1308"), "{:#?}", o.warnings);
 }
