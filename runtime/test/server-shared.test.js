@@ -50,6 +50,24 @@ test('callForm: validated with the schema → 303 (PRG or redirect), 422 state w
   assert.equal((await callForm({ module, raw: '_brain=h%2Fnope', ctx, rules })).status, 400)
 })
 
+test('callForm: a form posted without JS is validated in the page locale (§37)', async () => {
+  const before = globalThis.__brainDict
+  // Tagged English stand-ins for a second locale (the repository is English only).
+  globalThis.__brainDict = { es: { 'form.email': 'Bad email [es]', 'form.error': 'Failed [es]' } }
+  try {
+    const module = { $forms: { save: { email: 'email!' } }, save: async () => { throw new Error('db down') } }
+    const bad = await callForm({ module, raw: '_brain=h%2Fsave&email=a%40', ctx, rules, locale: 'es' })
+    assert.equal(bad.state['h/save'].errors.email, 'Bad email [es]')
+    const failed = await callForm({ module, raw: '_brain=h%2Fsave&email=a%40x.dev', ctx, rules, locale: 'es' })
+    assert.equal(failed.state['h/save'].error, 'Failed [es]')
+    assert.equal(globalThis.__brainLocale, undefined, 'the locale does not leak past the call')
+    const en = await callForm({ module, raw: '_brain=h%2Fsave&email=a%40', ctx, rules })
+    assert.equal(en.state['h/save'].errors.email, 'Enter a valid email')
+  } finally {
+    globalThis.__brainDict = before
+  }
+})
+
 test('runChain: guards outer→inner (true/false/redirect/deny, returned or thrown), middleware onion with headers; open redirect refused', async () => {
   const { runChain, deny, redirect, sessionFrom } = await import('../server/server.mjs')
   const seen = []

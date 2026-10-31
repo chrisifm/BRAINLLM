@@ -144,3 +144,59 @@ fn add_locale_en_fills_framework_texts_in_english() {
     assert_eq!(std::fs::read_to_string(dir.join("i18n/es.json")).unwrap(), es, "the default file is untouched");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A form posted without JS to `/<locale>/…` in `brain run` (§37, §38) reaches the view and is validated in that
+/// language: the schema messages come from i18n/<locale>.json, like form() in the browser and dist/server.mjs.
+#[test]
+fn dev_form_without_js_is_validated_in_the_page_locale() {
+    let tmp = std::env::temp_dir().join(format!("bi18n-form-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let bin = env!("CARGO_BIN_EXE_brain");
+    let run = |dir: &std::path::Path, args: &[&str]| Command::new(bin).args(args).current_dir(dir).stdin(Stdio::null()).output().unwrap();
+    assert!(run(&tmp, &["new", "app"]).status.success());
+    let dir = tmp.join("app");
+    std::fs::write(
+        dir.join("views/contact.brain"),
+        "<meta seo title=\"Contact\" description=\"Write to the team.\">\n<script>\n  server: async function save(ctx, v) {\n    return { ok: v.email.length > 0 }\n  }\n  const f = form({ email: 'email!' }, { submit: save })\n</script>\n<form on:submit={f.submit}>\n  <label>Email <input type=\"email\" bind:value={f.v.email}></label>\n  <button>Send</button>\n</form>\n",
+    )
+    .unwrap();
+    let added = run(&dir, &["add", "locale", "es"]);
+    assert!(added.status.success(), "{}{}", String::from_utf8_lossy(&added.stdout), String::from_utf8_lossy(&added.stderr));
+    let es = std::fs::read_to_string(dir.join("i18n/es.json")).unwrap();
+    std::fs::write(dir.join("i18n/es.json"), es.replacen('{', "{\n  \"form.required\": \"Required [es]\",", 1)).unwrap();
+    let mut c = Command::new(bin).args(["run", "--port", "0"]).current_dir(&dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).spawn().unwrap();
+    let mut err = BufReader::new(c.stderr.take().unwrap());
+    let port: u16 = loop {
+        let mut l = String::new();
+        assert!(err.read_line(&mut l).unwrap() > 0, "brain run printed no address");
+        if let Some(p) = l.split("127.0.0.1:").nth(1).and_then(|r| r.split(|ch: char| !ch.is_ascii_digit()).next()).and_then(|p| p.parse().ok()) {
+            break p;
+        }
+    };
+    let ask = |req: String| {
+        let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+        s.write_all(req.as_bytes()).unwrap();
+        let mut b = String::new();
+        let _ = s.read_to_string(&mut b);
+        b
+    };
+    // the form's id (`<hash>/save`) as the compiled view declares it (dev renders the view in the browser)
+    let module = ask("GET /views/contact.brain HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n".into());
+    let id = module.split("save.id = \"").nth(1).and_then(|r| r.split('"').next()).unwrap_or_else(|| panic!("{module}")).to_string();
+    let body = format!("_brain={}&email=", id.replace('/', "%2F"));
+    let post = |path: &str| {
+        ask(format!(
+            "POST {path} HTTP/1.1\r\nHost: x\r\nOrigin: http://x\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ))
+    };
+    let es = post("/es/contact");
+    assert!(es.starts_with("HTTP/1.1 422") && es.contains("Required [es]") && es.contains("lang=\"es\""), "{es}");
+    let en = post("/contact");
+    assert!(en.starts_with("HTTP/1.1 422") && !en.contains("Required [es]"), "{en}");
+    let _ = c.kill();
+    let _ = c.wait();
+    let _ = std::fs::remove_dir_all(&tmp);
+}
