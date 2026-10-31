@@ -6,18 +6,21 @@
 // files (§35.7). A new worker takes over at once and keeps only the previous build's cache, and only for the chunks an
 // open tab still asks for: navigations are answered from the current build alone, so nothing old is shown by mistake.
 // After taking over it tells every tab `brain:build <sig>` (the router then does full loads). Caches that are not per
-// build are named `brain:*`. (`sw: false` is a separate kill worker emitted by the build.)
+// build are named `brain:*`. (`sw: false` is a separate kill worker emitted by the build.) An app under a base path
+// prefixes every name with it (`brain/app-<sig>`, `brain/app:meta`): apps sharing an origin never touch each other's
+// caches, and an app at the root keeps the historical names.
 // `cache.routes` (brain.json) adds declarative data routes: { match, prefix, strategy: cache-first | network-first |
 // stale-while-revalidate | network-only, maxEntries, maxAge (s), timeout (ms) }, each in its own `brain:route:<match>`
 // cache that survives builds, bounded by entries and age; personal responses are never stored. `cache.update:
 // "prompt"` keeps a new worker waiting (while an older one controls tabs) until a page posts `brain:skip-waiting`.
 const B = self.BRAIN_BUILD || { hash: 'dev', precache: [], offline: null }
 const BASE = B.base || '/' // app served under a base path (§23 #148); precache/offline URLs already carry it
-const BUILD = 'brain-' + B.hash, META = 'brain:meta'
+const NS = 'brain' + BASE.replace(/\/$/, '') // `brain` at the root, `brain/app` under /app/
+const BUILD = NS + '-' + B.hash, META = NS + ':meta'
 const NAV_TIMEOUT = 3000
 // responses marked personal or uncacheable are never stored
 const storable = r => r.ok && !/no-store|private/i.test(r.headers.get('cache-control') || '')
-const ROUTES = (B.routes || []).map(r => ({ ...r, cache: 'brain:route:' + r.match + (r.prefix ? '*' : '') }))
+const ROUTES = (B.routes || []).map(r => ({ ...r, cache: NS + ':route:' + r.match + (r.prefix ? '*' : '') }))
 const route = p => ROUTES.find(r => (r.prefix ? p.startsWith(r.match) : p === r.match))
 // identity-bound: an Authorization header, a response that varies by cookie/authorization/*, or one that sets a cookie
 const personal = (req, r) =>
@@ -51,7 +54,7 @@ self.addEventListener('activate', e => {
       const keep = [...gens.filter(g => g !== BUILD).slice(-1), BUILD]
       await meta.put('/__brain_generations', new Response(JSON.stringify(keep)))
       for (const k of await caches.keys())
-        if ((k.startsWith('brain-') && !keep.includes(k)) || (k.startsWith('brain:route:') && !ROUTES.some(r => r.cache === k))) await caches.delete(k)
+        if ((k.startsWith(NS + '-') && !keep.includes(k)) || (k.startsWith(NS + ':route:') && !ROUTES.some(r => r.cache === k))) await caches.delete(k)
       await self.clients.claim()
       for (const c of await self.clients.matchAll({ type: 'window', includeUncontrolled: true })) c.postMessage('brain:build ' + B.hash)
     })()
@@ -69,7 +72,7 @@ self.addEventListener('fetch', e => {
   if (url.origin !== self.location.origin || url.pathname.startsWith(BASE + '_r/') || url.pathname === BASE + 'sw.js') return
   // offline: false (B.offline null) → navigations go straight to the network: no page cache, no offline page
   if (req.mode === 'navigate') return B.offline ? e.respondWith(navigate(e)) : undefined
-  if (url.pathname.startsWith(BASE + '_b/')) return e.respondWith(hashed(req))
+  if (url.pathname.startsWith(BASE + '_b/')) return e.respondWith(hashed(e))
   const rt = route(url.pathname)
   if (rt) return e.respondWith(rt.strategy === 'network-only' ? fetch(req) : data(e, rt))
   // only files the page itself loads (img, style, script, font, manifest…); fetch()/XHR data is never touched (§35:
@@ -77,12 +80,17 @@ self.addEventListener('fetch', e => {
   if (req.destination) e.respondWith(revalidate(e))
 })
 
-// cache-first: any generation may hold it (an old tab asks for old chunks); misses are stored in the current build
-async function hashed(req) {
+// cache-first: any generation may hold it (an old tab asks for old chunks); misses are stored in the current build.
+// Every cache write is handed to waitUntil, so the worker stays alive until it lands; a failed write never fails the response.
+async function hashed(e) {
+  const req = e.request
   const hit = await caches.match(req)
   if (hit) return hit
   const r = await fetch(req)
-  if (storable(r)) (await caches.open(BUILD)).put(req, r.clone())
+  if (storable(r)) {
+    const copy = r.clone()
+    e.waitUntil(caches.open(BUILD).then(c => c.put(req, copy)).catch(() => {}))
+  }
   return r
 }
 
@@ -114,7 +122,7 @@ async function navigate(e) {
 async function revalidate(e) {
   const c = await caches.open(BUILD)
   const hit = await c.match(e.request)
-  const net = fetch(e.request).then(r => (storable(r) && c.put(e.request, r.clone()), r))
+  const net = fetch(e.request).then(r => (storable(r) && e.waitUntil(c.put(e.request, r.clone()).catch(() => {})), r))
   e.waitUntil(net.catch(() => {}))
   return hit || net
 }

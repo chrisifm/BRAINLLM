@@ -15,6 +15,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   block lists `precompressed zstd br gzip`.
 
 ### Fixed
+- Service worker caches are scoped to the app: under a base path they are named `brain/app-<sig>` and `brain/app:*`, so
+  activating or opting out one app no longer deletes another app's caches on the same origin, and `sw: false` deletes
+  only the app's own caches instead of every cache on the origin. An app at the root keeps its cache names.
+- Service worker cache writes for hashed chunks and public files are registered with `waitUntil`, so they finish before
+  the worker can stop; a failed write no longer surfaces as an unhandled rejection.
 - Scoped CSS keeps pseudo-elements (`::backdrop`, `::before`, `:after`, `::-webkit-*`) outside the root anchor's
   `:is()`, so Chrome no longer drops the whole rule list for components that style them at their root.
 - Conditional content passed to a named slot (`{#if}<a slot="footer">…{:else}<span slot="footer">…{/if}`) now

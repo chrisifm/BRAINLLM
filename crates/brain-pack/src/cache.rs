@@ -113,7 +113,12 @@ pub fn register(base: &str) -> String {
 
 /// Service worker for `sw: false` and for `brain run`: deletes every cache, unregisters and reloads open pages so
 /// they stop being controlled.
-pub const KILL_SW: &str = "self.addEventListener('install',()=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(k=>Promise.all(k.map(n=>caches.delete(n)))).then(()=>self.registration.unregister()).then(()=>self.clients.matchAll({type:'window'})).then(c=>c.forEach(w=>w.navigate(w.url)))))\n";
+/// The self-removing worker for `sw: false`: it deletes only this app's caches (`brain-*`/`brain:*` at the root,
+/// `brain/app-*`/`brain/app:*` under `/app/`), never another app's or unrelated caches on the same origin.
+pub fn kill_sw(base: &str) -> String {
+    let ns = format!("brain{}", base.trim_end_matches('/'));
+    format!("self.addEventListener('install',()=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(n=>n.startsWith('{ns}-')||n.startsWith('{ns}:')).map(n=>caches.delete(n)))).then(()=>self.registration.unregister()).then(()=>self.clients.matchAll({{type:'window'}})).then(c=>c.forEach(w=>w.navigate(w.url)))))\n")
+}
 
 /// Minimal built-in offline page (used when the app has no `views/_offline.brain`).
 /// No inline event handler: the CSP allows inline scripts by hash only.
@@ -327,7 +332,7 @@ pub fn apply(root: &Path, cfg: &CacheCfg, pages: &[PageRef], extra_csp: &[(Strin
         }
     } else {
         // opt-out that reaches past visitors: their registered worker fetches this one and removes itself
-        files.insert("sw.js".into(), KILL_SW.into());
+        files.insert("sw.js".into(), kill_sw(&cfg.base));
     }
 
     // 4. the signature in every page (the router and the missing-chunk reload compare it), and the data switch
@@ -1031,7 +1036,8 @@ mod tests {
         // opt-out: a self-removing worker, no registration
         let (mut f3, mut b3) = (built(), BTreeMap::new());
         apply(&root, &CacheCfg { sw: false, ..cfg.clone() }, &pages, &[], &mut f3, &mut b3);
-        assert_eq!(f3["sw.js"], KILL_SW);
+        assert_eq!(f3["sw.js"], kill_sw("/"));
+        assert!(f3["sw.js"].contains("n.startsWith('brain-')||n.startsWith('brain:')") && kill_sw("/app/").contains("n.startsWith('brain/app-')||n.startsWith('brain/app:')"));
         assert!(!f3["index.html"].contains("serviceWorker"));
         // http off: no cache rules, but the security headers and the CSP stay
         let (mut f4, mut b4) = (built(), BTreeMap::new());

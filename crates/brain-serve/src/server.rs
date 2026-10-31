@@ -843,7 +843,7 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
                 &mut s,
                 200,
                 http::mime("x.js"),
-                brain_pack::cache::KILL_SW.as_bytes(),
+                brain_pack::cache::kill_sw("/").as_bytes(),
                 head,
             );
         }

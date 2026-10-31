@@ -11,11 +11,17 @@ const abs = u => new URL(typeof u === 'string' ? u : u.url, ORIGIN).href
 
 // one CacheStorage shared by successive workers (like the browser)
 const storage = new Map() // name → Map(url → { body, headers, status })
+let putDelay = 0, putFails = false // a slow or full storage (B04)
 const cacheOf = name => {
   if (!storage.has(name)) storage.set(name, new Map())
   const m = storage.get(name)
   return {
-    put: async (k, r) => void m.set(abs(k), { body: await r.text(), headers: [...r.headers], status: r.status }),
+    put: async (k, r) => {
+      const body = await r.text()
+      if (putDelay) await new Promise(ok => setTimeout(ok, putDelay))
+      if (putFails) throw new DOMException('Quota exceeded', 'QuotaExceededError')
+      m.set(abs(k), { body, headers: [...r.headers], status: r.status })
+    },
     match: async k => {
       const e = m.get(abs(k))
       return e && new Response(e.body, { status: e.status, headers: e.headers })
@@ -58,7 +64,7 @@ function boot(build) {
     skipWaiting: async () => {},
     addEventListener: (t, f) => (on[t] = f),
   }
-  vm.runInNewContext(SRC, { self, caches, fetch, Response, Request, URL, Promise, setTimeout, JSON, console })
+  vm.runInNewContext(SRC, { self, caches, fetch, Response, Request, URL, Promise, setTimeout, JSON, console, DOMException })
   const life = async t => {
     const waits = []
     on[t]({ waitUntil: p => waits.push(p) })
@@ -190,7 +196,61 @@ test('#216 base path: _b/ cache-first, _r/ and sw.js untouched, all under BRAIN_
   await w.life('install')
   await w.life('activate')
   assert.equal(await (await w.get('/app/_b/x.js')).text(), 'x')
-  assert.ok(storage.get('brain-base0001').has(ORIGIN + '/app/_b/x.js'))
+  assert.ok(storage.get('brain/app-base0001').has(ORIGIN + '/app/_b/x.js')) // namespaced by base (B03)
   assert.equal(await w.get('/app/_r/h/save'), null)
   assert.equal(await w.get('/app/sw.js'), null)
+})
+
+test('B04: every cache write is registered with waitUntil; a failed write never fails the response', async () => {
+  const w = boot({ hash: 'b04b04b0', precache: [], offline: null })
+  await w.life('install')
+  await w.life('activate')
+  net['/_b/slow.js'] = { body: 'slow', type: 'text/javascript' }
+  net['/slow.svg'] = { body: '<svg>s</svg>', type: 'image/svg+xml' }
+  putDelay = 40
+  // get() awaits only what the worker handed to waitUntil: a detached put would still be pending here
+  assert.equal(await (await w.get('/_b/slow.js')).text(), 'slow')
+  assert.ok(storage.get('brain-b04b04b0').has(ORIGIN + '/_b/slow.js'), 'cache-first write outlived its waitUntil')
+  assert.equal(await (await w.get('/slow.svg', { destination: 'image' })).text(), '<svg>s</svg>')
+  assert.ok(storage.get('brain-b04b04b0').has(ORIGIN + '/slow.svg'), 'stale-while-revalidate write outlived its waitUntil')
+  putDelay = 0
+  putFails = true
+  const unhandled = []
+  const onUnhandled = e => unhandled.push(e)
+  process.on('unhandledRejection', onUnhandled)
+  net['/_b/full.js'] = { body: 'full', type: 'text/javascript' }
+  assert.equal(await (await w.get('/_b/full.js')).text(), 'full')
+  assert.equal(await (await w.get('/full.svg', { destination: 'image' })).status, 404)
+  await new Promise(ok => setTimeout(ok, 20))
+  process.off('unhandledRejection', onUnhandled)
+  putFails = false
+  assert.deepEqual(unhandled, [])
+})
+
+test('B03: apps sharing an origin and unrelated caches survive another app\'s activation', async () => {
+  storage.clear()
+  storage.set('unrelated-app-cache', new Map())
+  storage.set('workbox-precache-v2', new Map())
+  const shop = boot({ hash: 'shop0001', base: '/shop/', precache: [], offline: null })
+  await shop.life('install')
+  await shop.life('activate')
+  assert.ok(storage.has('brain/shop-shop0001') && storage.has('brain/shop:meta'))
+  // the root app updates three times: it rotates only its own generations
+  for (const h of ['root0001', 'root0002', 'root0003']) {
+    const root = boot({ hash: h, precache: [], offline: null })
+    await root.life('install')
+    await root.life('activate')
+  }
+  const names = [...storage.keys()].sort()
+  assert.ok(names.includes('brain/shop-shop0001'), names.join(' '))
+  assert.ok(names.includes('unrelated-app-cache') && names.includes('workbox-precache-v2'), names.join(' '))
+  assert.ok(names.includes('brain-root0003') && names.includes('brain-root0002') && !names.includes('brain-root0001'), names.join(' '))
+  // and the app under a base rotates without touching the root app
+  for (const h of ['shop0002', 'shop0003']) {
+    const shop2 = boot({ hash: h, base: '/shop/', precache: [], offline: null })
+    await shop2.life('install')
+    await shop2.life('activate')
+  }
+  const after = [...storage.keys()]
+  assert.ok(after.includes('brain-root0003') && after.includes('brain-root0002') && !after.includes('brain/shop-shop0001'), after.join(' '))
 })
