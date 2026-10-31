@@ -1928,3 +1928,11 @@ code, file, line, column and fix. Durable compiler feedback is recorded before t
 A static named import can still fail at ESM linking before that error executes; persistent compiler feedback is
 then authoritative. No named exports, substitute API methods or production traces are fabricated. A corrected
 module is recompiled and its ordinary development reload event remains available.
+
+## 47. Measured edit risk (2026-10-31)
+
+`brain-cli::risk` scores an edit before it is made from `intelligence::impact` (reverse closure), checker findings and,
+only on request, `impact::measure` against `budget.viewKB`. Factors, points and levels are fixed constants so the same
+sources give the same report; [INTELLIGENCE.md](INTELLIGENCE.md#measured-edit-risk) lists them. `preflight` embeds the
+static score (no build). The score orders review effort and names `requiredChecks`; it never claims runtime safety.
+Atomic changesets, claims and the multi-agent view that consume it are planned for 0.6.1.

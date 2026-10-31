@@ -1139,6 +1139,13 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
         }),
     });
     tools.push(Tool {
+        name: "brain_risk",
+        description: "CALL IT before editing a shared component, route, resource or style token: a deterministic 0..100 risk score with its factors (dependents, routes, public contract, backend schema, covering tests, checker errors, SEO/i18n/a11y surfaces, budget headroom) and the exact checks that prove the edit safe. measure:true builds once to compare affected views with budget.viewKB. Read-only; static evidence, not runtime proof.",
+        input_schema: schema([("target","string","component name, app-relative file, route:/path, resource:name or field:resource.field"),("measure","boolean","build and measure budget headroom of affected views")], &["target"]),
+        output_schema: out([("schemaVersion","number"),("score","number"),("level","string"),("factors","array"),("requiredChecks","array")]),
+        run: Box::new(|a| crate::risk::assess(&crate::app_root()?,&need(a,"target")?,a.get("measure")==Some(&Json::Bool(true))).map(|v|crate::versioned(v).to_string())),
+    });
+    tools.push(Tool {
         name: "brain_recipe",
         description: "List recipes or prepare schema-derived resource-ui/auth-ui/google-signin/password-reset/email-verification file operations. Preview only; acquire leases and pass operations through brain_changes plan/apply to validate and write. Experimental backend must be configured separately.",
         input_schema: schema([("name","string","omit to list; resource-ui, auth-ui, google-signin, password-reset or email-verification"),("params","object","resource and optional view")], &[]),

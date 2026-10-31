@@ -580,8 +580,15 @@ pub fn preflight(root: &Path, target: Option<&str>) -> Result<Value, String> {
         .iter()
         .find(|d| d["severity"] == "error")
         .cloned();
+    // Static risk only (no measurement); `brain risk --measure` adds budget headroom.
+    let errors = diagnostics.iter().filter(|d| d["severity"] == "error").count();
+    let risks: Vec<Value> = target
+        .filter(|_| !matched.is_empty())
+        .and_then(|t| crate::risk::score(root, &crate::risk::Target { graph: t.into(), file: None }, errors, false).ok())
+        .into_iter()
+        .collect();
     Ok(
-        json!({"schemaVersion":1,"analysis":"compiler-checker-and-static-declarations","staticEvidence":true,"runtimeProof":false,"target":target,"firstBlockingDiagnostic":first,"diagnostics":diagnostics,"diagnosticTotal":total,"affected":affected.iter().take(500).collect::<Vec<_>>(),"risks":[],"unknown":g.unknown.iter().take(100).collect::<Vec<_>>(),"truncated":g.truncated || total>100 || affected.len()>500 || g.unknown.len()>100,"qualification":"Compiler findings identify source defects. Runtime execution, private request data and handler side effects are not observed."}),
+        json!({"schemaVersion":1,"analysis":"compiler-checker-and-static-declarations","staticEvidence":true,"runtimeProof":false,"target":target,"firstBlockingDiagnostic":first,"diagnostics":diagnostics,"diagnosticTotal":total,"affected":affected.iter().take(500).collect::<Vec<_>>(),"risks":risks,"unknown":g.unknown.iter().take(100).collect::<Vec<_>>(),"truncated":g.truncated || total>100 || affected.len()>500 || g.unknown.len()>100,"qualification":"Compiler findings identify source defects. Runtime execution, private request data and handler side effects are not observed."}),
     )
 }
 
