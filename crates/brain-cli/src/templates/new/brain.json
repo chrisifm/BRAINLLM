@@ -1,5 +1,6 @@
 {
   "$schema": "./node_modules/@christianirack/brainllm/brain.schema.json",
+  "brainVersion": "{{version}}",
   "name": "{{name}}",
   "docs": true,
   "cache": { "http": true, "sw": true, "offline": true, "precacheKB": 2048 },

@@ -386,7 +386,13 @@ Each file replacement is atomic; a multi-file change is a recoverable logical tr
 `score`, `level` (low/medium/high/critical), `factors` (dependents, routes, public contract, backend schema, covering
 tests, checker errors, SEO/i18n/a11y, styles, budget headroom with `--measure`) and `requiredChecks` to run afterwards.
 MCP full profile: `brain_changes`, `brain_intelligence`, `brain_risk`, `brain_recipe`. See project developer docs for JSON contracts.
-`brain upgrade <exact-version>` previews package pin operations and unresolved migration/install decisions; it does not
+`brain upgrade [--from V] [--to V] [--dry-run|--apply] [--json] [--no-doctor]` (MCP `brain_upgrade`) migrates the app
+from the version its source targets (`brain.json` `"brainVersion"`, written by `brain new`; else the package pin) to the
+installed compiler or `--to`. The dry run (default) writes nothing and reports, from the change manifests in between:
+codemods, manual steps with `file:line`, capabilities not used yet with their adoption snippet and guide, and gates.
+`--apply` runs the safe codemods (package pin, `brainVersion`, `brain fix` for new codes), `brain check` and `brain
+doctor` (skip with `--no-doctor`). Exit 0 = nothing left, 1 = manual steps or a failing gate remain, 2 = cannot run.
+`brain upgrade <exact-version>` only previews package pin operations and unresolved install decisions; it does not
 verify the registry, install packages or run source migrations. Apply reviewed operations with the changes protocol.
 `interop(() => element, adapter, props, {onError})` owns an external SDK/DOM mount during component setup; adapters
 return cleanup or `{update, destroy}` synchronously. Updates are explicit; cleanup runs on unmount. SDKs stay app-owned.

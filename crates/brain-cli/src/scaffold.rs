@@ -37,7 +37,8 @@ pub fn new_app_named(dir: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
         ("app.brain", fill(include_str!("templates/new/app.brain"))),
         (TOKENS_FILE, TOKENS_CSS.into()),
         (crate::design::FILE, format!("{}\n", serde_json::to_string_pretty(&crate::design::baseline(TOKENS_CSS, TOKENS_FILE, None)).map_err(|_| "could not create design baseline")?)),
-        ("brain.json", fill(include_str!("templates/new/brain.json"))),
+        // brainVersion: the version this source targets; `brain upgrade` reads it and `--apply` advances it
+        ("brain.json", fill(include_str!("templates/new/brain.json")).replace("{{version}}", env!("CARGO_PKG_VERSION"))),
         (".brain_env", fill(include_str!("templates/new/brain_env"))),
         (".brain_env.example", include_str!("templates/new/brain_env.example").into()),
         (".gitignore", "dist/\n.brain/\n.brain_env\nnode_modules/\n.DS_Store\n".into()),

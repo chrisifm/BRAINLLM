@@ -39,6 +39,7 @@ mod risk;
 mod recipes;
 mod releases;
 mod upgrade;
+mod migrate;
 mod agent_cli;
 mod libraries;
 mod search;
@@ -89,6 +90,7 @@ granular:
   brain recipe [list|name <json>]    preview generated CRUD/auth flows
   brain find <query> | symbols <file> | refs <name> [--watch]  native AST index
   brain lib list | lib new <name>    discover native functions or create a pure project helper
+  brain upgrade [--from V] [--to V] [--dry-run|--apply] [--no-doctor]  migration report from the app's recorded version to this compiler (--apply runs the safe codemods)
   brain upgrade <exact-version>      preview package pin changes and remaining decisions
   brain add view|comp|ui <name> [--props \"a:num=0 b:str?\"]   (also layout, lib, channel, service, api, type, guard, server, hook, resource, job, collection, locale)
   brain check [path]                 errors and warnings with an exact fix
@@ -195,11 +197,7 @@ fn main() -> ExitCode {
             })
         },
         Some("design") | Some("manifest") => project_metadata(&args),
-        Some("upgrade") => app_root().and_then(|r| {
-            let target=args.get(1).filter(|s|!s.starts_with('-')).ok_or("usage: brain upgrade <exact-version> [--json]; preview only")?;
-            if args.iter().skip(2).any(|a|a!="--json") {return Err("usage: brain upgrade <exact-version> [--json]; preview only".into());}
-            let result=upgrade::preview(&r,target)?; println!("{}",result); Ok(())
-        }),
+        Some("upgrade") => return cmd_upgrade(&args[1..]),
         Some("backend") => backend::run(&args[1..]),
         Some("jobs") => backend::jobs(&args[1..]),
         Some("analytics") => analytics::run(&args[1..]),
@@ -397,6 +395,49 @@ fn main() -> ExitCode {
             }
             ExitCode::from(2)
         }
+    }
+}
+
+const UPGRADE_USAGE: &str = "usage: brain upgrade [--from <version>] [--to <version>] [--dry-run|--apply] [--json] [--no-doctor] | brain upgrade <exact-version> [--json] (package pin preview)";
+
+/// `brain upgrade`: the migration report (migrate.rs), or the package-pin preview when an exact version is the first
+/// argument. Exit 0 = nothing left to do, 1 = manual steps or a failing gate remain, 2 = the command could not run.
+fn cmd_upgrade(args: &[String]) -> ExitCode {
+    let json = want_json(args);
+    let fail = |e: String| {
+        if json { println!("{}", error_json(&e)) } else { eprintln!("error: {e}") }
+        ExitCode::from(2)
+    };
+    if let Some(target) = args.first().filter(|a| !a.starts_with('-')) {
+        if args.iter().skip(1).any(|a| a != "--json") {
+            return fail(UPGRADE_USAGE.into());
+        }
+        return match app_root().and_then(|r| upgrade::preview(&r, target)) {
+            Ok(v) => { println!("{v}"); ExitCode::SUCCESS }
+            Err(e) => fail(e),
+        };
+    }
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--from" | "--to" if args.get(i + 1).is_some_and(|v| !v.starts_with('-')) => i += 1,
+            a if a.starts_with("--from=") || a.starts_with("--to=") => {}
+            "--dry-run" | "--apply" | "--json" | "--no-doctor" => {}
+            _ => return fail(UPGRADE_USAGE.into()),
+        }
+        i += 1;
+    }
+    let apply = args.iter().any(|a| a == "--apply");
+    if apply && args.iter().any(|a| a == "--dry-run") {
+        return fail(format!("--apply and --dry-run exclude each other; {UPGRADE_USAGE}"));
+    }
+    let opts = migrate::Options { from: flag(args, "--from"), to: flag(args, "--to"), apply, doctor: !args.iter().any(|a| a == "--no-doctor") };
+    match app_root().and_then(|r| migrate::run(&r, &opts)) {
+        Ok(report) => {
+            if json { println!("{report}") } else { print!("{}", migrate::markdown(&report)) }
+            if report["ok"] == serde_json::json!(true) { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+        }
+        Err(e) => fail(e),
     }
 }
 

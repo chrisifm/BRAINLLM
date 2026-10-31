@@ -1160,10 +1160,18 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
     });
     tools.push(Tool {
         name: "brain_upgrade",
-        description: "Preview an explicit exact framework package version. Returns revision-checked package.json operations and remaining migration/install decisions without writing, installing or contacting registries. Apply through brain_changes; this is not a completed app upgrade.",
-        input_schema: schema([("version","string","explicit exact SemVer target")], &["version"]),
-        output_schema: out([("schemaVersion","number"),("operations","array")]),
-        run: Box::new(|a|crate::upgrade::preview(&crate::app_root()?,&need(a,"version")?).map(|v|v.to_string())),
+        description: "Upgrade guide for this app. Without `version`: the migration report from the version the app records (brain.json brainVersion, else the package pin) to this compiler (or `to`): codemods, manual steps with file:line, new capabilities to adopt with their snippet, and gates; `apply: true` runs the safe codemods (package pin, brainVersion, brain fix for new codes) and is reversible with brain_undo. With `version`: preview only of the revision-checked package.json operations for that exact version (apply through brain_changes).",
+        input_schema: schema([("version","string","exact SemVer: package pin preview only"),("from","string","exact SemVer the app's source targets (overrides the recorded one)"),("to","string","exact SemVer target (default: this compiler)"),("apply","boolean","run the safe codemods (default false: dry run)"),("doctor","boolean","run brain doctor after applying (default true)")], &[]),
+        output_schema: out([("schemaVersion","number")]),
+        run: Box::new(|a| {
+            let root=crate::app_root()?;
+            if let Some(v)=arg(a,"version") {
+                if ["from","to","apply","doctor"].iter().any(|k|a.get(k).is_some()) {return Err("`version` is the package pin preview; omit it to get the migration report with from/to/apply".into())}
+                return crate::upgrade::preview(&root,&v).map(|v|v.to_string());
+            }
+            let opts=crate::migrate::Options{from:arg(a,"from"),to:arg(a,"to"),apply:a.get("apply")==Some(&Json::Bool(true)),doctor:a.get("doctor")!=Some(&Json::Bool(false))};
+            crate::migrate::run_with(&root,&opts,&mut |p,prev| journal_record(&root,p,Some(prev))).map(|v|v.to_string())
+        }),
     });
     tools.push(Tool {
         name: "brain_lib",

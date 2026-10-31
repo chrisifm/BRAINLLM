@@ -65,6 +65,18 @@ brain docs --check         # exit 1 lists stale pages
 brain docs --json          # the documentation model for an agent
 ```
 
+## Upgrading the compiler
+`brain.json` records `"brainVersion"`, the version this source targets (`brain new` writes it). After installing a newer
+compiler, `brain upgrade` (dry run, writes nothing) prints a checklist from that version to the installed one: codemods,
+manual steps with `file:line`, new capabilities with the snippet that starts each, and the gates. `brain upgrade
+--apply` runs the safe codemods (package pin, `brainVersion`, `brain fix` for the new codes) and `brain check`, then
+`brain doctor` unless `--no-doctor`. Work through the remaining steps until it exits 0. Over MCP: `brain_upgrade
+{from?, to?, apply?}` (reversible with `brain_undo`).
+```bash
+brain upgrade --json           # the report for an agent; exit 1 while manual steps or a failing gate remain
+brain upgrade --apply          # codemods + gates; then `npm install` if the pin changed
+```
+
 ## Other guides
 `views` routing, layouts, guards · `data` load, server functions, resources, channels, caching · `forms` ·
 `server` sessions, errors, env, deploy · `seo` search and AI answers · `a11y` · `webmcp` agent tools · `tests` ·

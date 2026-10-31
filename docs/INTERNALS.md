@@ -714,6 +714,8 @@ Coverage against React/Next, Vue/Nuxt, Angular, Svelte/Kit and Astro; all with a
   reflects `selected` on options and marks the option matching `<select value={x}>`.
 
 ## 23. CLI and distribution with professional standards (fixed 2026-10-13)
+Upgrade update (2026-10-31): `brain upgrade` returns a migration report from the app's recorded `brainVersion`
+and applies the safe codemods with `--apply` (see Support commands below).
 Identity update (2026-10-28): `brand::Session` adds a circuit-brain ASCII mark and task-specific start/completion
 messages to interactive `check`, `build` and `run`. Its duration is measured with `Instant`; no comparative speed
 claim is inferred. Both output streams must be terminals. JSON, profile, quiet/plain/off progress, CI, MCP and dumb
@@ -753,9 +755,22 @@ Patterns from Vite, Next, Biome, Turborepo, Cargo and Deno applied to `brain`:
     `--progress=off|plain|rich` forces a mode.
 - **Support commands:** `brain preview` (serves `dist/` exactly as in production) · `brain explain B0302` (what it is,
   why, correct example) · `brain info` (OS, brain/runtime/spec versions, Node, Chrome; for reporting bugs) ·
-  `brain upgrade` (updates the devDependency and runs `brain migrate`) · `brain completions zsh|bash|fish` ·
+  `brain upgrade` (migration report and safe codemods, below) · `brain completions zsh|bash|fish` ·
   `brain new --template blank|landing|saas` · `brain build --analyze` (weight per view and component) ·
   `brain doctor --fix` (applies the mechanical corrections and checks again) · `brain run --host --open --https`.
+- **`brain upgrade` (2026-10-31):** `migrate.rs` reads the embedded change manifests (`releases.rs`) in `(from, to]`.
+  `from` = `--from`, else brain.json `brainVersion` (the scaffold writes it), else the package.json pin, else
+  package-lock.json; `to` = `--to`, else the installed compiler (a prerelease build targets the newest manifest above
+  it). Downgrades are refused. Codemods (ids in `releases::CODEMODS`): `package-pin` (the revision-checked
+  `upgrade::preview` operations), `record-version` (`with_brain_version` rewrites only the value, or inserts the key
+  first with the file's indentation and newline) and `brain-fix` (`run_fix_only` limited to the manifests' codes).
+  Entries become `manual` (breaking/deprecation/change with steps and `finds` or `codes` matches, each with
+  `file:line`), `adopt` (capabilities whose `uses` probes match nothing), `alreadyUsing` or `changes`. Gates: `check`
+  always; `doctor` only with `--apply`, no check errors and without `--no-doctor`. Dry run writes nothing; `--json`
+  returns the report (`schemaVersion` 1), otherwise a markdown checklist. Exit 0 = `ok` (gates pass, no manual
+  steps), 1 = not ok, 2 = usage or input error. `brain upgrade <exact-version>` stays the package-pin preview. MCP
+  `brain_upgrade` takes `{version}` for that preview or `{from?, to?, apply?, doctor?}` for the report; applied writes
+  go to the MCP journal, so `brain_undo` reverts them.
 - **Reproducible builds:** same source + same version = same bytes and same hashes (no dates or absolute paths
   in the output); QA verifies it by compiling twice.
 - **Versioning:** lockstep semver (binary, runtime and spec with the same version); `CHANGELOG.md` generated from
