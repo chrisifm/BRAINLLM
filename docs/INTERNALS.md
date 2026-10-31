@@ -472,8 +472,11 @@ Known gap: a form posted without JS is validated by `callForm` outside a locale,
 `api(path, methods)` and types in `.jsbrain`. The compiler generates the client (native fetch) and a minimal validator per
 type; a response that does not comply → captured error with the shape diff. `resource(fn)` = reactive `{state, value, error}`;
 B1101 if an `{#await}` on a resource does not cover `{:catch}` or the empty list. B1102 `cache` outside `get` or not
-`<n>s|m|h` in an `api()` schema (edit when the fix is unambiguous, e.g. `10 minutes` → `10m`; §35). `brain run --mock` responds
+`<n>s|m|h` or the explicit `no` opt-out in an `api()` schema (edit when the fix is unambiguous, e.g. `10 minutes` → `10m`; §35). `brain run --mock` responds
 with deterministic synthetic data derived from the schema.
+
+2026-10-30: GET `cache: 'no'` matches the existing runtime contract and remains valid even with application-wide
+data caching disabled. The checker never removes that endpoint privacy intent; writes still reject cache options.
 
 ## 16. Visual verification and budgets (2026-10-28)
 `brain shot <route>` owns a temporary dev server and Chrome session; both close after the operation.

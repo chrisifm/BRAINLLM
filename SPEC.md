@@ -179,7 +179,7 @@ failure shows in `f.error`. Initial values: `form(schema, { init })`; later valu
 `api/*.jsbrain`: `export default api('/users', { get: { out: '[User]' }, post: { in: 'User', out: 'User' } })` and
 `types.jsbrain`: `export const User = { id: 'num!', email: 'email!' }`. Use `let users = resource(usersApi.get)` →
 `{#await users}…{:then list}…{:catch e}…{/await}` must cover loading, error and empty. Responses are validated.
-`brain run --mock` serves fake data from the schemas.
+`brain run --mock` serves fake data from the schemas. Use GET `cache: 'no'` for an endpoint that must never use the data cache.
 
 <!--planned:#1918-->
 Native live invalidation: `const updates = liveResource(rows, {rooms:[{resource:'posts'}], scope:()=> session.user ? session.user.id : null})`

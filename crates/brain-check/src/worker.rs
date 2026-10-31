@@ -1,7 +1,7 @@
 //! INTERNALS §35:
 //! - B0127 DOM or UI state inside a `*.worker.jsbrain` / `*.worker.js` module (it runs in a Web Worker: no
 //!   `document`, `window`, storage, dialogs, signals or components).
-//! - B1102 `cache: '<n>s|m|h'` of an `api()` method: only on `get`, and only in that format (edit when fixable).
+//! - B1102 API cache: GET accepts a duration or explicit `no`; other methods reject cache settings.
 
 use crate::security::{path, walk};
 use crate::Checker;
@@ -93,6 +93,11 @@ impl Checker<'_> {
             }
         });
         for (method, value, span) in fixes {
+            // An endpoint's explicit no-cache contract remains meaningful even
+            // if the current application-wide policy also disables caching.
+            if method == "get" && matches!(value.unparen(), Expr::Str { value, .. } if value == "no") {
+                continue;
+            }
             if self.ctx.cache_data_off {
                 // §35: the app turned data caching off; the option is dead and the edit removes it.
                 let end = self.c.src.get(span.end as usize..).map(|r| if r.trim_start().starts_with(',') { r.find(',').map(|i| i + 1).unwrap_or(0) } else { 0 }).unwrap_or(0);

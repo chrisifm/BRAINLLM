@@ -42,6 +42,18 @@ fn b1102_api_cache() {
 }
 
 #[test]
+fn b1102_explicit_no_cache_preserves_private_endpoint_intent() {
+    let src = "export default api('/account', { get: { out: 'obj', cache: 'no' } })";
+    for cache_data_off in [false, true] {
+        let c = brain_parse::parse(src, Path::new("api/account.jsbrain")).unwrap();
+        let ctx = Ctx { cache_data_off, ..Ctx::default() };
+        assert!(brain_check::check(&c, &ctx).is_empty(), "Explicit no-cache must remain valid without a removing edit");
+    }
+    assert_eq!(codes("api/account.jsbrain", "export default api('/account', { post: { cache: 'no' } })"), ["B1102"]);
+    assert_eq!(codes("api/account.jsbrain", "export default api('/account', { get: { cache: 'NO' } })"), ["B1102"]);
+}
+
+#[test]
 fn store_persist_is_accepted() {
     assert!(codes("channels/cart.jsbrain", "export default store({ items: [] }, { persist: true })").is_empty());
 }
