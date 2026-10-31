@@ -132,7 +132,12 @@ struct Kid {
     ready: Arc<AtomicBool>,
     /// Why the supervisor itself stopped this child (`memory`, `unhealthy`): such exits are not crashes.
     why: Option<&'static str>,
+    /// When SIGTERM was first sent: a child still running `DRAIN` later gets SIGKILL.
+    termed: Option<Instant>,
 }
+
+/// Grace period between SIGTERM and SIGKILL, the same one the stop path gives.
+const DRAIN: Duration = Duration::from_secs(12);
 
 fn spawn_child(root: &Path, fd: i32, vars: &[(String, String)], log: &Arc<Mutex<Log>>) -> std::io::Result<Kid> {
     let node = std::env::var("BRAIN_NODE").unwrap_or_else(|_| "node".into());
@@ -178,13 +183,21 @@ fn spawn_child(root: &Path, fd: i32, vars: &[(String, String)], log: &Arc<Mutex<
             }
         });
     }
-    Ok(Kid { child, started: Instant::now(), ready, why: None })
+    Ok(Kid { child, started: Instant::now(), ready, why: None, termed: None })
 }
 
 fn term(k: &mut Kid) {
+    k.termed.get_or_insert_with(Instant::now);
     // SAFETY: plain kill(2) on our own child
     unsafe {
         libc::kill(k.child.id() as i32, libc::SIGTERM);
+    }
+}
+
+/// SIGKILL a child that ignored SIGTERM for longer than `DRAIN`; it is reaped where its exit is observed.
+fn escalate(k: &mut Kid) {
+    if k.termed.is_some_and(|t| t.elapsed() >= DRAIN) && matches!(k.child.try_wait(), Ok(None)) {
+        let _ = k.child.kill();
     }
 }
 
@@ -417,6 +430,8 @@ fn supervise(root: &Path, o: &Opts, listener: TcpListener, log: &Arc<Mutex<Log>>
     let vars = crate::env::select(root, &o.env);
     status.lock().unwrap().mode = "server".into();
     let mut kids: Vec<Kid> = Vec::new();
+    // instances replaced by a reload, still draining their in-flight requests
+    let mut draining: Vec<Kid> = Vec::new();
     for _ in 0..o.instances.max(1) {
         match spawn_child(root, fd, &vars, log) {
             Ok(k) => kids.push(k),
@@ -451,12 +466,13 @@ fn supervise(root: &Path, o: &Opts, listener: TcpListener, log: &Arc<Mutex<Log>>
             reload.pending.store(true, Ordering::SeqCst);
         }
         if stop.load(Ordering::SeqCst) {
+            kids.append(&mut draining);
             for k in &mut kids {
                 term(k);
             }
             let t = Instant::now();
             for k in &mut kids {
-                while t.elapsed() < Duration::from_secs(12) && matches!(k.child.try_wait(), Ok(None)) {
+                while t.elapsed() < DRAIN && matches!(k.child.try_wait(), Ok(None)) {
                     std::thread::sleep(Duration::from_millis(20));
                 }
                 let _ = k.child.kill();
@@ -471,6 +487,7 @@ fn supervise(root: &Path, o: &Opts, listener: TcpListener, log: &Arc<Mutex<Log>>
         }
         if kids.iter().any(|k| !k.ready.load(Ordering::SeqCst) && k.started.elapsed() > Duration::from_secs(30)) {
             event(log, "never-ready", "");
+            kids.append(&mut draining);
             return give_up(&mut kids, "an instance never printed `brain:ready` in 30 s");
         }
         if reload.pending.swap(false, Ordering::SeqCst) {
@@ -493,11 +510,7 @@ fn supervise(root: &Path, o: &Opts, listener: TcpListener, log: &Arc<Mutex<Log>>
                         term(k);
                     }
                     let old = std::mem::replace(&mut kids, fresh);
-                    std::thread::spawn(move || {
-                        for mut k in old {
-                            let _ = k.child.wait();
-                        }
-                    });
+                    draining.extend(old);
                     status.lock().unwrap().build = brain_serve::prod::signature(&root.join("dist")).unwrap_or_default();
                     event(log, "reloaded", "");
                     reload.finish(Ok(()));
@@ -536,6 +549,7 @@ fn supervise(root: &Path, o: &Opts, listener: TcpListener, log: &Arc<Mutex<Log>>
                 recent.push(Instant::now());
                 if recent.len() >= 10 {
                     event(log, "crash-loop", ",\"crashes\":10,\"windowS\":60");
+                    kids.append(&mut draining);
                     return give_up(&mut kids, "crash loop (10 crashes in 60 s)");
                 }
                 // a child that served (reached ready) earns a fresh backoff; one that never did doubles it
@@ -565,10 +579,16 @@ fn supervise(root: &Path, o: &Opts, listener: TcpListener, log: &Arc<Mutex<Log>>
                 }
                 Err(e) => {
                     event(log, "spawn-failed", &format!(",\"error\":{}", brain_serve::json_str(&e.to_string())));
+                    kids.append(&mut draining);
                     return give_up(&mut kids, &format!("cannot restart node ({e})"));
                 }
             }
         }
+        // a SIGTERM that is ignored (stuck event loop, a handler that never closes) must not keep a worker forever
+        for k in kids.iter_mut().chain(draining.iter_mut()) {
+            escalate(k);
+        }
+        draining.retain_mut(|k| matches!(k.child.try_wait(), Ok(None)));
         // liveness: /_health every health_ms; 3 failures in a row → restart every child
         if last_health.elapsed() >= Duration::from_millis(o.health_ms) && kids.iter().all(|k| k.ready.load(Ordering::SeqCst)) {
             last_health = Instant::now();

@@ -329,6 +329,66 @@ fn workers_exit_when_the_supervisor_is_killed() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A worker that ignores SIGTERM (a stuck event loop, a handler that never closes): the supervisor must escalate.
+const STUBBORN: &str = "process.removeAllListeners('SIGTERM')\nprocess.on('SIGTERM', () => {})\n";
+
+fn pid_of(dir: &std::path::Path) -> i32 {
+    let st = brain(dir, &["status", "--json"]);
+    st.split("\"pid\":").nth(2).and_then(|x| x.split(|ch: char| !ch.is_ascii_digit()).next()).and_then(|x| x.parse().ok()).expect(&st)
+}
+
+fn alive(pid: i32) -> bool {
+    Command::new("kill").args(["-0", &pid.to_string()]).stderr(Stdio::null()).status().unwrap().success()
+}
+
+#[test]
+fn reload_kills_old_workers_that_ignore_sigterm() {
+    if !node() {
+        return;
+    }
+    let dir = app("stubborn-reload", true);
+    std::fs::write(dir.join("dist/server.mjs"), format!("{SERVER}{STUBBORN}")).unwrap();
+    let (mut c, p) = start(&dir, &[]);
+    assert!(wait_up(p));
+    let old = pid_of(&dir);
+    assert!(brain(&dir, &["reload"]).contains("\"ok\":true"));
+    let t = Instant::now();
+    while alive(old) && t.elapsed() < Duration::from_secs(30) {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let lingering = alive(old);
+    brain(&dir, &["stop"]);
+    assert!(c.wait().unwrap().success());
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(!lingering, "old worker {old} still holds the listening socket and serves the previous build after reload");
+}
+
+#[test]
+fn memory_restart_escalates_when_the_worker_ignores_sigterm() {
+    if !node() {
+        return;
+    }
+    let dir = app("stubborn-memory", true);
+    std::fs::write(dir.join("dist/server.mjs"), format!("{SERVER}{STUBBORN}")).unwrap();
+    let (mut c, p) = start(&dir, &[("BRAIN_MAX_MEMORY", "1M"), ("BRAIN_RSS_MS", "200")]);
+    assert!(wait_up(p));
+    let first = pid_of(&dir);
+    let t = Instant::now();
+    let mut st = String::new();
+    while t.elapsed() < Duration::from_secs(30) {
+        st = brain(&dir, &["status", "--json"]);
+        if !st.contains("\"memoryRestarts\":0") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let replaced = !alive(first);
+    brain(&dir, &["stop"]);
+    assert!(c.wait().unwrap().success());
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(replaced && !st.contains("\"memoryRestarts\":0"), "a worker over --max-memory that ignores SIGTERM is never replaced: {st}");
+}
+
 #[test]
 fn help_prints_usage_and_unknown_flags_are_refused() {
     let dir = app("help", false);
