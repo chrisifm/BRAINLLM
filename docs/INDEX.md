@@ -12,7 +12,7 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [Component (blocks in this order, all optional except markup)](../SPEC.md#component-blocks-in-this-order-all-optional-except-markup) | Props: `name:type=default` · `?` optional · neither = required. |
 | [BrainScript (closed JS subset)](../SPEC.md#brainscript-closed-js-subset) | Allowed: let const · arrow/function · if/else · for-of · return · await · try/catch/finally · throw · objects arrays spread destructuring · template strings ·… |
 | [Markup](../SPEC.md#markup) | `{expr}` · `attr={e}` · `class:x={bool}` · `style:prop={v}` · `on:ev={fnRef \| statement}` (`on:submit` prevents default) · `bind:value\|checked\|ref={x}` · `{#if… |
-| [Lifecycle and helpers](../SPEC.md#lifecycle-and-helpers) | `mounted(() => { …; return cleanup })` runs once after the DOM is in the page · `watch(() => q, (now, prev) => …)` runs only when `q` changes · `await tick()`… |
+| [Lifecycle and helpers](../SPEC.md#lifecycle-and-helpers) | `mounted(() => { …; return cleanup })` runs once after the DOM is in the page · `watch(() => q, (now, prev) => …)` runs only when `q` changes (`{ immediate: tr… |
 | [Communication (components are isolated; pick the first that fits)](../SPEC.md#communication-components-are-isolated-pick-the-first-that-fits) | 1 show parent data → props · 2 tell parent → `emit` + `on:` · 3 container → slots. |
 | [CSS](../SPEC.md#css) | Native CSS + nesting + `@mixin n {}` / `@include n;`. |
 | [Accessibility (build fails otherwise)](../SPEC.md#accessibility-build-fails-otherwise) | img has alt · clicks only on button/a · use `<Input label="…">` `<Select label="…">` from the kit (a raw input/select/textarea needs a `<label>`) · no heading… |
@@ -24,7 +24,7 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [Caching (automatic)](../SPEC.md#caching-automatic) | `brain build` caches everything for the repeat visit: immutable hashed assets, a service worker (visited pages work offline; `views/_offline.brain` is optional… |
 | [Errors at runtime](../SPEC.md#errors-at-runtime) | Errors in `fx`, `drv` and handlers are caught: the app stays alive and the error is reported. |
 | [Server and secrets](../SPEC.md#server-and-secrets) | `load` runs only on the server. |
-| [Tests (`*.test.brain`)](../SPEC.md#tests-testbrain) | `test(name, async () => {…})` · `await mount(Comp, props)` · `await click(sel)` · `await type(sel, text)` · `text(sel)` `attr(sel, n)` `hasClass(sel, c)` `coun… |
+| [Tests (`*.test.brain`)](../SPEC.md#tests-testbrain) | `test(name, async () => {…})` · `await mount(Comp, props, { slot, slots, provide }?)` (`slot`: default slot text; `slots: { name: text }`: named slots) · `awai… |
 | [CLI (also MCP: `brain mcp`; every command accepts `--json`)](../SPEC.md#cli-also-mcp-brain-mcp-every-command-accepts---json) | Main: `brain new <app>` · `brain run` (dev server with hot reload, app :5180; views render in the browser, so judge SEO and the no-JS HTML on `brain build` + `… |
 | [Loop](../SPEC.md#loop) | 1 `brain add` · 2 edit · 3 `brain fix` then `brain check --json` → apply each remaining `fix` literally, repeat until `[]` · 4 `brain doctor`. |
 | [Reference component](../SPEC.md#reference-component) | — |
@@ -109,5 +109,28 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [Runtime execution and resource budgets](RUNTIME-BUDGETS.md) | Production and development compiled BrainScript functions have execution checkpoints. |
 | [Public website](SITE.md) | The landing lives in `docs/site/`. |
 | [Upgrade previews](UPGRADING.md) | An upgrade preview prepares an exact `@christianirack/brainllm` package pin change. |
-| [Viewer browser E2E lane](VIEWER-E2E.md) | `brain test` prefers a connected Viewer browser for declared `.test.brain` scenarios. |
+| [Viewer browser E2E lane](VIEWER-E2E.md) | This lane is opt-in. |
 | [Native webhooks](WEBHOOKS.md) | The Rust backend accepts signed inbound work and explicitly enqueues outbound deliveries. |
+
+## docs/backend/
+
+| Document | Summary |
+|---|---|
+| [Totals, aggregates and related counts (B-13)](backend/aggregates.md) | — |
+| [Behavior analytics (experimental backend)](backend/analytics.md) | Every app with a native backend records how visitors use it: which elements they click, where they are and how long they stay. |
+| [Project API keys](backend/api-keys.md) | A project can issue its own API keys so other services, scripts and partners call the resource API without a browser session. |
+| [Atomic updates: guarded increments, compare-and-set and upserts](backend/atomic-updates.md) | Read-modify-write from the client (`GET`, change, `PUT`) loses updates under concurrency. |
+| [Batch writes](backend/batch.md) | `POST /api/<resource>/batch` creates, updates, upserts or deletes many records in ONE transaction. |
+| [Cron schedules (single run per slot)](backend/cron.md) | `server/cron/<name>.jsbrain` enqueues a declared job on a cron schedule. |
+| [Filters (B-11)](backend/filters.md) | List endpoints accept only the filters a resource declares in `query.jsbrain`. |
+| [Ownership through relations (B-09, B-21)](backend/ownership.md) | A policy grant `owner` means "the authenticated user created this row". |
+| [Pagination (B-15)](backend/pagination.md) | Lists support offset pages (`limit` 1–100, default 25; `offset` 0–10000) and keyset cursors for deep or changing data. |
+| [Partial updates (PATCH)](backend/patch.md) | `PATCH /api/<resource>/<uuid>` changes only the fields in the body. |
+| [Queue policies: priorities, retries, dead letters, long jobs and drain](backend/queues.md) | Every job queue (`server/jobs/<name>/`) may declare `queue.jsbrain`. |
+| [Relations (B-01)](backend/relations.md) | A `ref:<resource>` field stores the id of a record of another resource. |
+| [Search (B-14)](backend/search.md) | A resource opts fields into search (see BACKEND.md). |
+| [Slug history](backend/slugs.md) | A resource can mark one unique text field as its slug. |
+| [Sorting (B-12)](backend/sorting.md) | — |
+| [State machines (declared transitions)](backend/state-machines.md) | A resource may declare one `enum` field as its state. |
+| [Multi-resource transactions (operations)](backend/transactions.md) | An operation is a server-side write that spans several records or resources. |
+| [Field visibility (B-20)](backend/visibility.md) | A field can be restricted to some readers with `visible`. |
