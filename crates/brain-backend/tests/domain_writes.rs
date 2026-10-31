@@ -298,7 +298,7 @@ async fn postgres_atomic_actions_and_upserts_are_race_safe_under_concurrent_requ
         .map(|_| {
             let (app, token, product) = (s.app.clone(), s.alice.clone(), p.clone());
             tokio::spawn(async move {
-                call(&app, "POST", "/_brain/operations/place_order", &token, Some(json!({"product_id":product,"quantity":1}))).await
+                call_retrying_busy(&app, "POST", "/_brain/operations/place_order", &token, Some(json!({"product_id":product,"quantity":1}))).await
             })
         })
         .collect();
@@ -325,7 +325,7 @@ async fn postgres_atomic_actions_and_upserts_are_race_safe_under_concurrent_requ
     let tasks: Vec<_> = (0..20)
         .map(|_| {
             let (app, token, uri) = (s.app.clone(), s.admin.clone(), restock.clone());
-            tokio::spawn(async move { call(&app, "POST", &uri, &token, Some(json!({"amount":1}))).await.0 })
+            tokio::spawn(async move { call_retrying_busy(&app, "POST", &uri, &token, Some(json!({"amount":1}))).await.0 })
         })
         .collect();
     for task in tasks {
@@ -335,8 +335,8 @@ async fn postgres_atomic_actions_and_upserts_are_race_safe_under_concurrent_requ
     // Compare-and-set: two clients both read price 0.00; only the first reprice wins.
     let reprice = format!("/api/shop_products/{p}/actions/reprice");
     let (a, b) = tokio::join!(
-        call(&s.app, "POST", &reprice, &s.admin, Some(json!({"expected":"0.00","price":"12.00"}))),
-        call(&s.app, "POST", &reprice, &s.admin, Some(json!({"expected":"0","price":"15.00"})))
+        call_retrying_busy(&s.app, "POST", &reprice, &s.admin, Some(json!({"expected":"0.00","price":"12.00"}))),
+        call_retrying_busy(&s.app, "POST", &reprice, &s.admin, Some(json!({"expected":"0","price":"15.00"})))
     );
     let mut statuses = [a.0, b.0];
     statuses.sort();
@@ -349,7 +349,7 @@ async fn postgres_atomic_actions_and_upserts_are_race_safe_under_concurrent_requ
         .map(|i| {
             let (app, token, code) = (s.app.clone(), s.alice.clone(), code.clone());
             tokio::spawn(async move {
-                call(&app, "POST", "/api/task_items/upsert", &token, Some(json!({"key":["code"],"on_conflict":"ignore","data":{"title":format!("Attempt {i}"),"code":code}}))).await
+                call_retrying_busy(&app, "POST", "/api/task_items/upsert", &token, Some(json!({"key":["code"],"on_conflict":"ignore","data":{"title":format!("Attempt {i}"),"code":code}}))).await
             })
         })
         .collect();
@@ -375,6 +375,17 @@ async fn postgres_atomic_actions_and_upserts_are_race_safe_under_concurrent_requ
 
 async fn batch(s: &Shop, body: Value) -> (u16, Value) {
     call(&s.app, "POST", "/api/task_items/batch", &s.alice, Some(body)).await
+}
+/// A contended row may answer 503 DATABASE_BUSY under load, which promises that nothing changed: a client retries, and
+/// the counts the race test asserts prove the promise. Any other status comes straight back.
+async fn call_retrying_busy(app: &axum::Router, method: &str, uri: &str, token: &str, body: Option<Value>) -> (u16, Value) {
+    loop {
+        let (status, reply) = call(app, method, uri, token, body.clone()).await;
+        if status != 503 || reply["error"]["code"] != "DATABASE_BUSY" {
+            return (status, reply);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
 }
 async fn tasks_with_prefix(s: &Shop, prefix: &str) -> i64 {
     sqlx::query_scalar("SELECT count(*) FROM _brain_res_task_items WHERE data->>'code' LIKE $1")

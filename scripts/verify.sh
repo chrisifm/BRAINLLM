@@ -10,9 +10,9 @@ cargo build --locked -p brain-cli
 cargo test --locked -p brain-cli --bin brain browser::tests::comparison_closes_only_its_temporary_tab_on_success_and_evaluation_failure -- --exact
 cargo test --locked --workspace -- --skip browser::tests::comparison_closes_only_its_temporary_tab_on_success_and_evaluation_failure
 npm test --prefix runtime
-node --test --test-concurrency=2 scripts/test/*.test.mjs
-node --test bench/fixtures-check.test.mjs bench/agents/runner.test.mjs bench/llm/codex.test.mjs bench/llm/check.test.mjs bench/llm/compare.test.mjs
-node --test --test-concurrency=2 npm/test/*.test.mjs
+node --test --test-timeout=900000 --test-concurrency=2 scripts/test/*.test.mjs
+node --test --test-timeout=900000 bench/fixtures-check.test.mjs bench/agents/runner.test.mjs bench/llm/codex.test.mjs bench/llm/check.test.mjs bench/llm/compare.test.mjs
+node --test --test-timeout=900000 --test-concurrency=2 npm/test/*.test.mjs
 node bench/fixtures-check.mjs
 node scripts/source-inputs-check.mjs
 node scripts/privacy-audit.mjs

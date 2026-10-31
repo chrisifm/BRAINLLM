@@ -1,7 +1,7 @@
 // server.mjs as a process under a supervisor (INTERNALS §34): listens on an inherited socket (BRAIN_LISTEN_FD),
 // prints `brain:ready`, drains on SIGTERM (in-flight requests finish, new ones are refused, exit 0; forced after
 // BRAIN_DRAIN_MS). The parent here plays `brain start`: it binds the port and hands the fd to the child.
-import { test } from 'node:test'
+import { after, test as nodeTest } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
@@ -9,6 +9,18 @@ import { createServer as tcp } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+// A server that stops answering must fail this file, never hang it: every test has a deadline and every child dies with it.
+// The bound is a hang detector, not a performance assertion.
+const test = (name, run) => nodeTest(name, { timeout: 60_000 }, run)
+const children = new Set()
+const launch = (...args) => {
+  const child = spawn(...args)
+  children.add(child)
+  child.on('exit', () => children.delete(child))
+  return child
+}
+after(() => { for (const child of children) child.kill('SIGKILL') })
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 const { env: ENV } = process
@@ -25,7 +37,7 @@ async function supervise(env = {}) {
   const sock = tcp()
   await new Promise(r => sock.listen(0, '127.0.0.1', r))
   const port = sock.address().port
-  const child = spawn(process.execPath, [join(dist, 'server.mjs')], {
+  const child = launch(process.execPath, [join(dist, 'server.mjs')], {
     stdio: ['ignore', 'pipe', 'pipe', sock._handle.fd],
     env: { ...ENV, BRAIN_LISTEN_FD: '3', PORT: '1', ...env }, // PORT must be ignored when the fd is set
   })
@@ -90,8 +102,8 @@ test('two children on the same socket: the old one drains, the new one keeps ser
   await new Promise(r => sock.listen(0, '127.0.0.1', r))
   const port = sock.address().port
   const start = () => {
-    const c = spawn(process.execPath, [join(dist, 'server.mjs')], { stdio: ['ignore', 'pipe', 'pipe', sock._handle.fd], env: { ...ENV, BRAIN_LISTEN_FD: '3' } })
-    const ready = new Promise(ok => c.stdout.on('data', d => /brain:ready/.test(d) && ok()))
+    const c = launch(process.execPath, [join(dist, 'server.mjs')], { stdio: ['ignore', 'pipe', 'pipe', sock._handle.fd], env: { ...ENV, BRAIN_LISTEN_FD: '3' } })
+    const ready = new Promise((ok, fail) => { c.stdout.on('data', d => /brain:ready/.test(d) && ok()); c.on('exit', code => fail(new Error('exited before ready: ' + code))) })
     const exited = new Promise(r => c.on('exit', code => r(code)))
     return { c, ready, exited }
   }
@@ -112,10 +124,11 @@ test('without an inherited socket a restart waits for the port, and a live holde
   await new Promise(r => held.listen(0, '127.0.0.1', r))
   const port = held.address().port
   const start = () => {
-    const child = spawn(process.execPath, [join(dist, 'server.mjs')], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...ENV, BRAIN_LISTEN_FD: '', PORT: String(port), HOST: '127.0.0.1' } })
+    const child = launch(process.execPath, [join(dist, 'server.mjs')], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...ENV, BRAIN_LISTEN_FD: '', PORT: String(port), HOST: '127.0.0.1' } })
     let err = ''
     child.stderr.on('data', d => (err += d))
-    const ready = new Promise(ok => child.stdout.on('data', d => /brain:ready/.test(d) && ok(true)))
+    const ready = new Promise((ok, fail) => { child.stdout.on('data', d => /brain:ready/.test(d) && ok(true)); child.on('exit', code => fail(new Error('exited before ready: ' + code))) })
+    ready.catch(() => {}) // the second server in the last test is expected to exit without ever being ready
     const exited = new Promise(r => child.on('exit', code => r(code)))
     return { child, ready, exited, err: () => err }
   }
