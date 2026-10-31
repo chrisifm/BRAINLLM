@@ -39,7 +39,17 @@ pub use sockets::{SocketConfig, SocketControl};
 #[path = "http_api_keys.rs"]
 mod http_api_keys;
 
-tokio::task_local! { static REQUEST_ID: String; }
+tokio::task_local! { static REQUEST_ID: String; static REQUEST_OPERATION: (String, Option<String>); }
+/// The route template and the resource it addresses: finite identifiers, never request values.
+pub(crate) fn request_operation() -> Option<(String, Option<String>)> {
+    REQUEST_OPERATION.try_with(Clone::clone).ok()
+}
+fn operation_of(method: &axum::http::Method, route: &str, path: &str) -> (String, Option<String>) {
+    let resource = path.strip_prefix("/api/").and_then(|rest| rest.split('/').next()).filter(|name| {
+        (1..=64).contains(&name.len()) && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+    });
+    (format!("{method} {route}"), resource.map(str::to_owned))
+}
 pub(crate) fn request_reference() -> Option<String> {
     REQUEST_ID.try_with(Clone::clone).ok()
 }
@@ -170,6 +180,7 @@ impl Error {
         db::diagnostic(&json!({"schemaVersion":1,"event":"backend-internal-error","rid":rid,"code":"BACKEND_INTERNAL","location":{"file":at.file(),"line":at.line(),"column":at.column()},"stackDeferred":reserved,"stackOmitted":!reserved,"queueDepth":0,"private":true,"valuesCaptured":false}));
         if reserved {
             let trace = std::backtrace::Backtrace::force_capture();
+            let operation = request_operation();
             let diagnostic=std::thread::Builder::new().name("brain-diagnostic".into()).spawn(move || {
                 struct Release;
                 impl Drop for Release {fn drop(&mut self){DIAGNOSTIC_BUSY.store(false,std::sync::atomic::Ordering::Release);}}
@@ -182,7 +193,7 @@ impl Error {
                 let mut stack=Bounded{text:String::new(),truncated:false};let _=std::fmt::write(&mut stack,format_args!("{trace}"));
                 // A stripped release binary has no symbols: its frames say nothing, so the event says that instead.
                 let useful=stack_is_symbolized(&stack.text);
-                eprintln!("{}",json!({"schemaVersion":1,"event":"backend-internal-stack","rid":rid,"location":{"file":at.file(),"line":at.line(),"column":at.column()},"stack":useful.then_some(&stack.text),"stackUnavailable":(!useful).then_some("binary has no symbols; use the location"),"truncated":stack.truncated,"queueDepth":0,"private":true,"valuesCaptured":false}));
+                db::diagnostic(&json!({"schemaVersion":1,"event":"backend-internal-stack","operation":operation.as_ref().map(|o|&o.0),"resource":operation.as_ref().and_then(|o|o.1.as_ref()),"rid":rid,"location":{"file":at.file(),"line":at.line(),"column":at.column()},"stack":useful.then_some(&stack.text),"stackUnavailable":(!useful).then_some("binary has no symbols; use the location"),"truncated":stack.truncated,"queueDepth":0,"private":true,"valuesCaptured":false}));
             });
             if diagnostic.is_err() {
                 DIAGNOSTIC_BUSY.store(false, std::sync::atomic::Ordering::Release);
@@ -245,7 +256,7 @@ impl IntoResponse for Error {
 }
 /// Whether a captured backtrace names this crate's code, which a stripped binary cannot do.
 fn stack_is_symbolized(stack: &str) -> bool {
-    stack.contains("brain_backend")
+    stack.contains("brain_backend") && !stack.contains("__mh_execute_header")
 }
 type Result<T> = std::result::Result<T, Error>;
 /// URL parameters; a value of the wrong shape (a record id that is not a UUID) answers with what to send instead.
@@ -874,7 +885,7 @@ async fn response_headers(req: Request, next: Next) -> Response {
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
     let db_time = std::sync::Arc::new(db::DbTime::default());
-    let response = db::with_db_time(db_time.clone(), REQUEST_ID.scope(rid.clone(), next.run(req))).await;
+    let response = db::with_db_time(db_time.clone(), REQUEST_ID.scope(rid.clone(), REQUEST_OPERATION.scope(operation_of(&method, &route, &path), next.run(req)))).await;
     crate::dev_trace::request(&rid, method.as_str(), &route, response.status().as_u16(), started.elapsed().as_secs_f64() * 1000.0);
     let log_policy = response.extensions().get::<edge_http::LogPolicy>().copied();
     let mut response = crate::response::finalize(&method, &path, accept.as_deref(), &rid, response);
@@ -1316,6 +1327,10 @@ async fn read(
         }
         names = value.split(',').map(str::to_string).collect();
     }
+    // No read grant for this identity answers the same for every id, before anything looks the id up.
+    if crate::ownership::scope(r, "read", viewer(u.as_ref())).is_none() {
+        return Err(Error::forbidden());
+    }
     let (mut row, revision) = db::timed(db::get_version(&app.pool, r, id))
         .await
         .map_err(|e| Error::database(e))?
@@ -1324,8 +1339,8 @@ async fn read(
         .await
         .map_err(|e| Error::internal(db::safe(e)))?;
     if !allowed {
-        // A row hidden by a condition answers exactly like one that does not exist: no existence oracle.
-        return Err(if r.policy.conditioned() { Error::missing() } else { Error::forbidden() });
+        // A hidden row answers exactly like one that does not exist: no existence oracle.
+        return Err(Error::missing());
     }
     let owns = u.as_ref().is_some_and(|u| row["owner"].as_str() == Some(&u.id.to_string()));
     let general = r.policy.allows("read", u.as_ref().map(|u| u.role.as_str()), owns);
@@ -1349,7 +1364,8 @@ pub(super) async fn reveal(app: &App, r: &Resource, record: &mut Value, u: &User
     let id = record["id"].as_str().and_then(|s| Uuid::parse_str(s).ok());
     let mut through = through;
     let mut visible = r.policy.api || http_api_keys::key_user().is_some();
-    if visible && r.policy.conditioned() {
+    // Holding a write grant says nothing about reading: anything short of an unconditional read grant asks about this row.
+    if visible && (r.policy.conditioned() || !r.policy.allows("read", Some(u.role.as_str()), false)) {
         let Some(id) = id else { return Err(Error::internal("record")) };
         let safe = |e| Error::internal(db::safe(e));
         visible = crate::ownership::row_allowed(&app.pool, r, &app.resources, "read", viewer(Some(u)), id).await.map_err(safe)?;
@@ -2375,6 +2391,8 @@ mod diagnostic_tests {
     fn stripped_stacks_are_not_logged_as_if_they_helped() {
         assert!(stack_is_symbolized("0: brain_backend::http::list\n"));
         assert!(!stack_is_symbolized("0: <unknown>\n1: __rust_try\n"));
+        assert!(!stack_is_symbolized("0: __mh_execute_header\n1: __mh_execute_header\n"));
+        assert!(!stack_is_symbolized("0: __mh_execute_header\n  at crate brain_backend\n"));
     }
     #[tokio::test]
     async fn internal_errors_return_safe_response_without_waiting_for_stack_symbolization() {

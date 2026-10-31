@@ -8,12 +8,20 @@ import net from 'node:net'
 import { createHmac, randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 const project = fileURLToPath(new URL('../', import.meta.url))
-const targets=['analytics','api_keys','backend','caching','cluster','data_queries','domain_writes','edge','exact_types','files','foundation','jwt_sessions','links','media','native_openapi','routes','auth_flows','auth_http','native_sockets','queues','row_policy']
+const targets=['analytics','api_keys','backend','caching','cluster','data_queries','domain_writes','edge','exact_types','files','foundation','jwt_sessions','links','media','native_openapi','production_shape','query_shape','routes','auth_flows','auth_http','native_sockets','queues','row_policy','security_matrix','system_keys']
+// Release gates that drive the real binary over real sockets (scripts/gates/<name>.mjs); selectable like a test target.
+const gates=['http-truth-table','failure-logs']
+// A module missing from `targets` could not be selected and would silently run in every focused pass of another target.
+const declared=[...readFileSync(join(project,'crates/brain-backend/tests/integration.rs'),'utf8').matchAll(/^mod (\w+);/gm)].map(match=>match[1])
+const unlisted=[...declared.filter(name=>!targets.includes(name)),...targets.filter(name=>!declared.includes(name))]
+if(unlisted.length)throw Error('scripts/backend-check.mjs targets and tests/integration.rs differ: '+unlisted.join(', '))
 const selection=process.argv.indexOf('--only-tests')
 const onlyCLI=process.argv.includes('--only-cli')
 if(onlyCLI&&selection>=0)throw Error('--only-cli and --only-tests cannot be combined')
-const selected=selection<0?targets:(process.argv[selection+1]||'').split(',')
-if(!selected.length||selected.length>targets.length||new Set(selected).size!==selected.length||selected.some(name=>!targets.includes(name)))throw Error('--only-tests requires a comma-separated list of known backend test targets')
+const selected=selection<0?[...targets,...gates]:(process.argv[selection+1]||'').split(',')
+const known=[...targets,...gates]
+if(!selected.length||new Set(selected).size!==selected.length||selected.some(name=>!known.includes(name)))throw Error('--only-tests requires a comma-separated list of known backend test targets: '+known.join(', '))
+const selectedTests=selected.filter(name=>targets.includes(name)),selectedGates=selected.filter(name=>gates.includes(name))
 const dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), 'brain-backend-check-'))
 const pg = process.env.PG_BIN || ''
 const exe = name => pg ? join(pg,name) : name
@@ -96,18 +104,19 @@ try {
   if(!ready) throw Error('Disposable Postgres did not become ready within 10 seconds')
   if(onlyCLI)console.log('Backend integration explicitly skipped: CLI resume only; no Rust test pass is inferred')
   else console.log('Backend integration targets: '+(selection<0?'library + ':'')+selected.join(', ')+(selection<0?'':' (focused; other targets are not rerun)'))
-  const code=onlyCLI?0:await phase('cargo',['test','--locked','-p','brain-backend','--jobs','2',...(selection<0?['--lib']:[]),'--test','integration','--','--include-ignored','--nocapture','--test-threads=2',...targets.filter(name=>!selected.includes(name)).flatMap(name=>['--skip',name+'::'])],
+  const gatesOnly=selection>=0&&!selectedTests.length
+  const code=onlyCLI||gatesOnly?0:await phase('cargo',['test','--locked','-p','brain-backend','--jobs','2',...(selection<0?['--lib']:[]),'--test','integration','--','--include-ignored','--nocapture','--test-threads=2',...targets.filter(name=>!selectedTests.includes(name)).flatMap(name=>['--skip',name+'::'])],
     {...process.env,BRAIN_BACKEND_TEST_URL:`postgres://brain_test@127.0.0.1:${port}/postgres`},15*60*1000,'Backend integration')
   process.exitCode=code
-  if(code===0) {
-    if(!process.env.BRAIN_BIN) {
+  if(code===0&&!process.env.BRAIN_BIN&&(!gatesOnly||selectedGates.length)) {
       // A measured 11m25s cold build and macOS pre-main loader samples justify a finite 20-minute build budget.
       // Integration assertions and their separate deadline stay unchanged.
       const built=await phase('cargo',['build','--locked','-p','brain-cli','--jobs','2'],{...process.env},20*60*1000,'Fresh backend CLI build')
       if(built!==0) throw Error('Fresh backend CLI build failed')
-    }
+  }
+  if(code===0&&!gatesOnly) {
     run(exe('createdb'),['-h','127.0.0.1','-p',String(port),'-U','brain_test','backend_cli'])
-    const binary=process.env.BRAIN_BIN || join(project,'target/debug/brain')
+    const binary=process.env.BRAIN_BIN || join(process.env.CARGO_TARGET_DIR||join(project,'target'),'debug/brain')
     const cliEnv={...process.env,DATABASE_URL:`postgres://brain_test@127.0.0.1:${port}/backend_cli`}
     const brain=(args,cwd)=>{
       const r=spawnSync(binary,args,{cwd,env:cliEnv,encoding:'utf8',timeout:20000,maxBuffer:256*1024})
@@ -279,6 +288,11 @@ try {
       } finally {await terminateOwned(webhookWorker,'SIGINT')}
 
     } finally {await terminateOwned(test,'SIGINT')}
+  }
+  if(process.exitCode===0||process.exitCode===undefined)for(const name of selectedGates) {
+    const binary=process.env.BRAIN_BIN||join(process.env.CARGO_TARGET_DIR||join(project,'target'),'debug/brain')
+    const result=await phase(process.execPath,[join(project,'scripts/gates',name+'.mjs')],{...process.env,BRAIN_BIN:binary,BRAIN_GATE_DATABASE_URL:`postgres://brain_test@127.0.0.1:${port}/postgres`,PG_BIN:pg},12*60*1000,'Release gate '+name)
+    if(result!==0){process.exitCode=result;throw Error('Release gate failed: '+name)}
   }
 } catch(e) {console.error(e.message);process.exitCode=1}
 finally {await stop()}

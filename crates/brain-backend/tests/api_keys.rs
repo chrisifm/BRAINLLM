@@ -127,7 +127,13 @@ async fn create_key(router: &Router, token: &str, body: Value) -> (String, Strin
 async fn api_keys_authenticate_scope_quota_trace_rotate_and_revoke() {
     let url = std::env::var("BRAIN_BACKEND_TEST_URL")
         .expect("Use scripts/backend-check.mjs; no developer database is selected implicitly");
-    let pool = db::connect(&url).await.unwrap();
+    // The cleanup count at the end is global, so this test owns its database: system_keys creates keys in the shared one.
+    let base = db::connect(&url).await.unwrap();
+    let name = format!("brain_api_keys_{}", Uuid::new_v4().simple());
+    sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE {name}"))).execute(&base).await.unwrap();
+    base.close().await;
+    let options: sqlx::postgres::PgConnectOptions = url.parse().unwrap();
+    let pool = db::connect(sqlx::ConnectOptions::to_url_lossy(&options.database(&name)).as_str()).await.unwrap();
     let notes = resource(
         "key_notes",
         Policy {

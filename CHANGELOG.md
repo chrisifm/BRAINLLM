@@ -26,6 +26,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `ctx.signal` in `load()`, guards and server functions aborts when the client disconnects or the deadline passes
 - Fix: a newer client navigation aborts the page request it replaced
 - Fix: `t()`, `fmt` and `locale()` inside `load()`, guards and form handlers read the page's language, in production and in `brain run`
+- Security: `GET /api/<r>/<id>` of a row outside the reader's scope answers 404 like a missing id instead of 403, and a role with no read grant answers 403 for every id, so neither confirms which ids exist
+- Security: a write whose author may not read the row (`update: ['owner']` with `read: ['admin']`) returns the `id` and `data: {}` instead of the row
+- `brain backend logs <rid>` names the operation and resource of every 5xx, and keeps the stack of a `BACKEND_INTERNAL`, which only reached stderr; a binary without symbols says so instead of listing frames
+- Fix: a route handler that throws a 4xx `status`, `notFound()`, `gone()` or `redirect()` answers that status instead of a 500 or a `200` holding the helper object
 - Lists name aggregates that hit the 100-group cap in `aggregates_truncated`
 - Request log lines carry `dbMs` and `dbWaitMs` for resource reads, so database time and pool wait are visible apart from `ms`
 - Fix: plain lists and `created_at`/`updated_at` sorts use their index instead of sorting the whole table on every request

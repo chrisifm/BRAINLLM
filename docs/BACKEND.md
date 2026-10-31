@@ -16,7 +16,8 @@ brain backend logs <rid>
 ```
 
 An error response carries a `rid`. `brain backend logs <rid>` (MCP `brain_backend_logs`) returns its failure events from
-`.brain/backend/failures.jsonl`: SQLSTATE, constraint, resource, operation, branch and code location. Without a rid it
+`.brain/backend/failures.jsonl`: SQLSTATE, constraint, resource, operation (the method and route template), branch and code
+location, plus the stack of a `BACKEND_INTERNAL`, or `stackUnavailable` when the binary has no symbols. Without a rid it
 returns the latest 50. `brain backend serve` writes that file and the same JSON lines to stderr, and the older half moves
 to `failures.jsonl.1` at 5 MB. Only development events add the database message, which can quote values; production
 events never do.

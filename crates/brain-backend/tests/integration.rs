@@ -15,6 +15,8 @@ mod caching;
 mod cluster;
 #[path = "data_queries.rs"]
 mod data_queries;
+#[path = "production_shape.rs"]
+mod production_shape;
 #[path = "query_shape.rs"]
 mod query_shape;
 #[path = "domain_writes.rs"]
@@ -35,6 +37,8 @@ mod links;
 mod media;
 #[path = "row_policy.rs"]
 mod row_policy;
+#[path = "security_matrix.rs"]
+mod security_matrix;
 #[path = "system_keys.rs"]
 mod system_keys;
 #[path = "routes.rs"]

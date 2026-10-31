@@ -852,6 +852,15 @@ pub fn keep_diagnostics(file: std::path::PathBuf) {
 }
 /// Writes one failure event to stderr and to the kept file. A logging failure never affects the request.
 pub(crate) fn diagnostic(event: &Value) {
+    // Every failure inside a request names what was being done; an event that already knows keeps its own words.
+    let mut named = event.clone();
+    if let (Some(object), Some((operation, resource))) = (named.as_object_mut(), crate::http::request_operation()) {
+        object.entry("operation").or_insert(json!(operation));
+        if let Some(resource) = resource {
+            object.entry("resource").or_insert(json!(resource));
+        }
+    }
+    let event = &named;
     eprintln!("{event}");
     let kept = DIAGNOSTICS.lock().unwrap_or_else(|e| e.into_inner());
     let Some(file) = kept.as_ref() else { return };
