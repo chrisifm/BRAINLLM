@@ -42,6 +42,14 @@ GET /api/products?created_at[gte]=now-7d
 `num`, `obj` and fields with restricted [visibility](visibility.md) cannot be filtered. `in` takes 1–50 values,
 `between` exactly two (inclusive). `exists` takes `true` or `false`.
 
+## Choose the fields
+
+`?fields=title,price` keeps only those keys in each item's `data`; `id`, timestamps, `included` and `counts` stay. It
+runs after the read policy and field visibility, so it can only remove what the reader already receives. A field no reader
+receives (`private`, `writeonly`) answers `422` like an undeclared name, and a field limited with `visible` is absent for
+readers who lack the grant. `include` still follows a reference that `fields` drops. Lists only; a single-record read
+keeps its full shape.
+
 ## Values
 
 Values are validated with the field's exact type before they reach SQL: decimals are compared as exact `numeric`,

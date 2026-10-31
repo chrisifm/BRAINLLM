@@ -17,7 +17,7 @@ pub const GROUP_LIMIT: i64 = 100;
 /// Text comparisons and text indexes use the first 256 characters; equality is rechecked on the full value.
 const TEXT_KEY: usize = 256;
 const OPS: &[&str] = &["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "prefix", "iprefix", "exists", "has"];
-const RESERVED: &[&str] = &["search", "limit", "offset", "sort", "include", "cursor", "after", "aggregate", "count"];
+const RESERVED: &[&str] = &["search", "limit", "offset", "sort", "include", "cursor", "after", "aggregate", "count", "fields"];
 const TIMESTAMPS: &[&str] = &["created_at", "updated_at"];
 /// Typo matches kept for one search; reaching it marks `total` approximate.
 const FUZZY_CANDIDATES: i64 = 500;
@@ -398,6 +398,26 @@ pub struct ListRequest {
     pub include: Vec<String>,
     aggregate: Vec<String>,
     count: Vec<String>,
+    /// `?fields=`: the `data` keys each item keeps. Id, timestamps, `included` and `counts` always stay.
+    fields: Option<BTreeSet<String>>,
+}
+impl ListRequest {
+    /// Narrows items to `?fields=`. It runs after projection and includes, so it can only remove what the reader
+    /// already received, and includes may still follow a reference it drops.
+    pub fn keep_fields(&self, items: &mut [Value]) {
+        let Some(fields) = &self.fields else { return };
+        for data in items.iter_mut().filter_map(|item| item.get_mut("data").and_then(Value::as_object_mut)) {
+            data.retain(|name, _| fields.contains(name));
+        }
+    }
+}
+/// Whether `?fields=` may name a field. Fields no reader receives answer like undeclared ones, so a request learns nothing.
+fn selectable(r: &Resource, field: &str) -> bool {
+    r.fields.get(field).is_some_and(|f| match f.access.as_deref() {
+        Some("writeonly") => false,
+        Some("private") => crate::api_keys::system_active(),
+        _ => true,
+    })
 }
 pub type Problems = BTreeMap<String, String>;
 
@@ -528,6 +548,18 @@ pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(Str
                     }
                 }
                 req.include = split(raw).into_iter().map(str::to_string).collect();
+            }
+            // A filter declared on a field of this name keeps working as before.
+            "fields" if !r.query.filter.contains_key("fields") => {
+                let names: BTreeSet<String> = split(raw).into_iter().map(str::to_string).collect();
+                if names.len() > 64 {
+                    bad("fields takes at most 64 names");
+                }
+                if let Some(name) = names.iter().find(|name| !selectable(r, name)) {
+                    let declared: Vec<&str> = r.fields.keys().map(String::as_str).filter(|f| selectable(r, f)).collect();
+                    bad(&format!("`{name}` cannot be selected; declared: {}", declared.join(", ")));
+                }
+                req.fields = Some(names);
             }
             "aggregate" | "count" => {
                 let names: Vec<String> = split(raw).into_iter().map(str::to_string).collect();
@@ -1292,6 +1324,7 @@ pub fn openapi_parameters(r: &Resource) -> Vec<Value> {
         json!({"name":"cursor","in":"query","description":"next_cursor of the previous page (keyset pagination)","schema":{"type":"string"}}),
         json!({"name":"after","in":"query","description":"Alias of cursor","schema":{"type":"string"}}),
         json!({"name":"sort","in":"query","description":format!("Comma-separated, '-' for descending: {}", sort_names(r)),"schema":{"type":"string"}}),
+        json!({"name":"fields","in":"query","description":"Comma-separated data fields each item keeps; id and timestamps always stay","schema":{"type":"string"}}),
     ];
     for (field, ops) in &r.query.filter {
         for op in ops {

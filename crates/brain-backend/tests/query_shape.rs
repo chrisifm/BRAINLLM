@@ -164,3 +164,49 @@ async fn nested_includes_apply_policy_visibility_scopes_and_bounds() {
     assert_eq!(one["included"]["product"]["included"]["shop"]["data"]["name"], "Closed shop");
     let _ = (&s.token, &s.product);
 }
+
+#[tokio::test]
+#[ignore]
+async fn fields_narrow_lists_without_revealing_or_breaking_anything() {
+    let a = api("brain_shape_fld", graph()).await;
+    let s = seed(&a).await;
+    let (status, list) = a.get("/api/products?fields=title,rank&sort=rank").await;
+    assert_eq!(status, 200, "{list}");
+    let one = &list["items"][0];
+    assert_eq!(one["data"], json!({"title": "One", "rank": 1}));
+    assert!(one["id"].is_string() && one["created_at"].is_string());
+    assert_eq!(list["total"], 2);
+
+    // Private fields, undeclared names and an empty name answer the same 422; nothing reveals which exists.
+    let (_, unknown) = a.get("/api/products?fields=nothing").await;
+    let (status, private) = a.get("/api/products?fields=note").await;
+    assert_eq!(status, 422, "{private}");
+    assert_eq!(a.get("/api/products?fields=").await.0, 422);
+    let strip = |v: &Value| v["error"]["fields"]["fields"].to_string().replace("nothing", "X").replace("note", "X");
+    assert_eq!(strip(&unknown), strip(&private));
+    // A field only some readers see stays hidden when named by others, and appears for its owner.
+    let (status, anon) = a.get("/api/products?fields=title,cost").await;
+    assert_eq!(status, 200);
+    assert!(anon["items"][0]["data"].get("cost").is_none(), "{anon}");
+    let (_, own) = a.call("GET", "/api/products?fields=cost&sort=rank", Some(&s.token), None, None).await;
+    assert_eq!(own["items"][0]["data"], json!({"cost": "9"}), "{own}");
+    // The policy still filters rows: fields never widens what the row condition hides.
+    let (_, shops) = a.get("/api/shops?fields=name").await;
+    assert_eq!(shops["total"], 1, "{shops}");
+
+    // Includes follow a reference that `fields` drops; cursors keep paging.
+    let (status, nested) = a.get("/api/products?fields=title&include=shop&sort=rank").await;
+    assert_eq!(status, 200);
+    assert_eq!(nested["items"][0]["data"], json!({"title": "One"}));
+    assert_eq!(nested["items"][0]["included"]["shop"]["data"]["name"], "Open shop");
+    let (_, page) = a.get("/api/products?fields=title&sort=rank&limit=1").await;
+    let cursor = page["next_cursor"].as_str().unwrap();
+    let (_, next) = a.get(&format!("/api/products?fields=title&sort=rank&limit=1&cursor={cursor}")).await;
+    assert_eq!(next["items"][0]["data"], json!({"title": "Two"}));
+
+    // A system key may name a private field within its scope; an ordinary key may not.
+    let system = a.key(s.owner, &["products:read"], true).await;
+    let ordinary = a.key(s.owner, &["products:read"], false).await;
+    assert_eq!(a.call("GET", "/api/products?fields=note", None, Some(&system), None).await.0, 200);
+    assert_eq!(a.call("GET", "/api/products?fields=note", None, Some(&ordinary), None).await.0, 422);
+}

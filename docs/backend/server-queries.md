@@ -44,6 +44,7 @@ await ctx.backend.resource('products').list({
 | `limit`, `offset` | 1–100 (default 25) and 0–10000 |
 | `cursor` (or `after`) | the previous page's `next_cursor`, with the same `sort` and filters |
 | `search` | full-text search, up to 256 bytes |
+| `fields` | array or comma-separated names; narrows `data` ([filters.md](filters.md#choose-the-fields)) |
 | `include`, `aggregate`, `count` | names declared in `query.jsbrain`; `include` accepts dotted paths ([relations.md](relations.md#nested-levels)) |
 
 Only shapes the query string cannot express are rejected locally (400): unknown options, a malformed field name, an

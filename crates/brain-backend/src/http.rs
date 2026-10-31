@@ -1225,6 +1225,7 @@ async fn list(
         })?;
     if let Some(items) = out["items"].as_array_mut() {
         include(&app, r, &req.include, items, viewer).await?;
+        req.keep_fields(items);
     }
     Ok(Json(out))
 }

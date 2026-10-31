@@ -69,7 +69,7 @@ const b64u = b => Buffer.from(b).toString('base64url')
 const tag = s => createHash('sha1').update(s).digest('base64url').slice(0, 22)
 
 // Errors a server function may throw on purpose: { errors: { field: msg } } → 422; { status, message } with 4xx → that
-const LIST_OPTIONS = ['search','limit','offset','filter','sort','cursor','after','include','aggregate','count']
+const LIST_OPTIONS = ['search','limit','offset','filter','sort','cursor','after','include','aggregate','count','fields']
 const FILTER_OPS = ['eq','ne','gt','gte','lt','lte','between','in','exists','prefix','iprefix','has']
 export class HttpError extends Error {
   constructor(status, message, extra) {
@@ -539,7 +539,7 @@ export function nativeAuthBridge(raw, refused, serviceKey) {
       // filters and sorts and answers 422 {errors}; this only rejects shapes the query string cannot express
       list(options = {}) {
         if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).some(key => !LIST_OPTIONS.includes(key))) throw new HttpError(400, 'Invalid native list options')
-        const {search, limit, offset, filter, sort, cursor, after, include, aggregate, count} = options
+        const {search, limit, offset, filter, sort, cursor, after, include, aggregate, count, fields} = options
         if ((search !== undefined && (typeof search !== 'string' || Buffer.byteLength(search) > 256)) || (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 100)) || (offset !== undefined && (!Number.isInteger(offset) || offset < 0 || offset > 10000))) throw new HttpError(400, 'Invalid native list pagination or search')
         const q = new URLSearchParams()
         if (filter !== undefined) {
@@ -581,7 +581,7 @@ export function nativeAuthBridge(raw, refused, serviceKey) {
           if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,2048}$/.test(value)) throw new HttpError(400, 'Invalid native list cursor')
           q.set(key, value)
         }
-        for (const [key, value] of [['include', include], ['aggregate', aggregate], ['count', count]]) if (value !== undefined) q.set(key, names(value, key))
+        for (const [key, value] of [['include', include], ['aggregate', aggregate], ['count', count], ['fields', fields]]) if (value !== undefined) q.set(key, names(value, key))
         const query = q.toString()
         return request('GET', '/api/' + name + (query ? '?' + query : ''))
       },
