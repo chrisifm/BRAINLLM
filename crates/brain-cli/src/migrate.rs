@@ -314,11 +314,18 @@ pub fn markdown(r: &Value) -> String {
     m.push_str("\n## Other changes\n");
     for c in r["changes"].as_array().into_iter().flatten() {
         m.push_str(&format!("- {} ({} {}){}\n", s(&c["title"]), s(&c["kind"]), s(&c["version"]), c["status"].as_str().map(|x| format!(": {x}")).unwrap_or_default()));
+        if let Some(why) = c["why"].as_str().filter(|w| !w.is_empty()) {
+            m.push_str(&format!("  {why}\n"));
+        }
+        for st in c["steps"].as_array().into_iter().flatten() {
+            m.push_str(&format!("  - [ ] {}\n", s(st)));
+        }
     }
     m.push_str("\n## Gates\n");
     for g in r["gates"].as_array().into_iter().flatten() {
         let mark = if g["ok"] == json!(true) { "x" } else { " " };
-        m.push_str(&format!("- [{mark}] `{}` ({})\n", s(&g["command"]), s(&g["status"])));
+        let detail = g["reason"].as_str().or(g["error"].as_str()).map(|x| format!(": {x}")).unwrap_or_default();
+        m.push_str(&format!("- [{mark}] `{}` ({}){detail}\n", s(&g["command"]), s(&g["status"])));
     }
     m
 }
@@ -398,6 +405,26 @@ mod tests {
         let md = markdown(&r);
         assert!(md.contains("`views/_layout.brain:2`") && md.contains("## Adopt") && md.contains("- [ ] "), "{md}");
         let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn markdown_keeps_the_steps_and_reasons_of_entries_without_locations() {
+        let r = json!({
+            "from": "0.6.0", "to": "0.7.0", "mode": "dry-run", "fromSource": "--from", "installed": "0.7.0",
+            "changes": [
+                {"entry": "a", "version": "0.7.0", "kind": "change", "title": "Renamed option", "why": "The old name is gone.", "steps": ["Rename the option", "Re-run the build"]},
+                {"entry": "b", "version": "0.7.0", "kind": "breaking", "title": "Removed API", "status": "not found in this app"}
+            ],
+            "gates": [
+                {"name": "doctor", "command": "brain doctor", "status": "pending", "reason": "check has errors; fix them first"},
+                {"name": "check", "command": "brain check --json", "status": "failed-to-run", "ok": false, "error": "no app here"}
+            ]
+        });
+        let md = markdown(&r);
+        assert!(md.contains("- Renamed option (change 0.7.0)\n  The old name is gone.\n  - [ ] Rename the option\n  - [ ] Re-run the build\n"), "{md}");
+        assert!(md.contains("- Removed API (breaking 0.7.0): not found in this app\n- ") || md.contains("- Removed API (breaking 0.7.0): not found in this app\n\n"), "{md}");
+        assert!(md.contains("`brain doctor` (pending): check has errors; fix them first"), "{md}");
+        assert!(md.contains("`brain check --json` (failed-to-run): no app here"), "{md}");
     }
 
     #[test]

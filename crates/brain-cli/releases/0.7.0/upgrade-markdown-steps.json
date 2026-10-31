@@ -1,0 +1,10 @@
+{
+  "id": "upgrade-markdown-steps",
+  "kind": "fix",
+  "title": "brain upgrade Markdown keeps every step",
+  "why": "A change with steps but no location in the app, and the reason a gate did not run, appeared only in `--json`, so an agent following the checklist skipped them.",
+  "changelog": [
+    "the `brain upgrade` Markdown report lists the steps"
+  ],
+  "guide": "SPEC.md"
+}
