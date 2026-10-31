@@ -615,6 +615,11 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
                     "inspect `brain backend schema --json`; fix the named literal schema, explicit policy or hook/job contract, then run brain check again");
                 diag.line=1;diag.col=1;diags.push(diag);
             }
+            for message in route_executor::gateway_conflicts(&app) {
+                let mut diag = compiler::Diag::new("B0737", "server/routes/", brain_parse::Span::default(), message,
+                    "give the route a path nothing else answers (for example /hooks/payments), or move the page or file; brain run and brain start proxy declared routes on the site's own origin");
+                diag.line=1;diag.col=1;diags.push(diag);
+            }
             // brain.json `server` (B0707): body, time and rate limits shared by brain run and the production server
             if let Err(message) = brain_pack::read_server_limits(&app) {
                 let (msg, fix) = message.split_once("; fix: ").unwrap_or((message.as_str(), "set whole numbers in range"));
@@ -1341,7 +1346,9 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
             .collect()
     };
     let socket_settings: backend::SocketSettings = backend::socket_settings(root, site, None)?;
-    let socket_options = socket_settings.build_options(site)?;
+    let mut socket_options = socket_settings.build_options(site)?;
+    socket_options.native_routes = route_executor::gateway_routes(root)?;
+    socket_options.trust_proxy = platform_config::trust_proxy(root);
     let out = brain_pack::build_with_options(&input, &views, &|v| layouts_of(root, v), &seo_of, &socket_options)?;
     // write only what changed and drop stale hashed chunks: an unchanged rebuild touches no file
     on_phase("write", 0, out.files.len() + out.binary.len());
@@ -1644,7 +1651,10 @@ pub(crate) fn start_project_dev(
     let fixed_backend = env::value(&root, environment, "BRAIN_BACKEND_URL");
     let native = match fixed_backend.as_deref() {
         Some(target) => {
-            let mut proxy = brain_serve::NativeProxy::new(target)?.sockets(settings.enabled());
+            let routes_root = root.clone();
+            let mut proxy = brain_serve::NativeProxy::new(target)?.sockets(settings.enabled()).routes(Arc::new(move || {
+                route_executor::gateway_routes(&routes_root).unwrap_or_default().into_iter().map(|(path, headers)| brain_serve::NativeRoute { path, headers }).collect()
+            }));
             if let Some(origins) = &settings.allowed_origins { proxy = proxy.socket_origins(origins.clone())?; }
             Some(proxy)
         }

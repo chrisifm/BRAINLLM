@@ -3,6 +3,10 @@
 #[derive(Clone, Debug, Default)]
 pub struct BuildOptions {
     pub native_sockets: Option<NativeSocketOptions>,
+    /// `server/routes/*` the gateways may proxy: `(path, request headers the contract reads)`.
+    pub native_routes: Vec<(String, Vec<String>)>,
+    /// `platform.trustProxy`, so the Node gateway resolves a client address the way the backend does.
+    pub trust_proxy: Vec<String>,
 }
 
 #[derive(Clone, Debug)]

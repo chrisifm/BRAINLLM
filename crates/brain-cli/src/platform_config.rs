@@ -21,6 +21,11 @@ fn edge(root: &Path) -> Result<(Edge, Cluster), String> {
     Ok((edge, cluster))
 }
 
+/// `platform.trustProxy` for the build manifest; a broken contract is reported by `brain check`.
+pub fn trust_proxy(root: &Path) -> Vec<String> {
+    edge(root).map(|(edge, _)| edge.trust_proxy.iter().map(ToString::to_string).collect()).unwrap_or_default()
+}
+
 const CACHE: &str = "server/cache.jsbrain";
 
 fn cache(root: &Path, resources: &[Resource]) -> Result<CachePolicy, String> {

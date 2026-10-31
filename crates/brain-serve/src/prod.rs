@@ -163,13 +163,14 @@ impl Static {
     }
     /// Explicit embedding variant; existing load/handle APIs and Static fields remain unchanged.
     pub fn handle_with_backend(&self, s: TcpStream, backend: Option<&str>) -> io::Result<()> {
-        self.handle_native(s, backend, None)
+        self.handle_native(s, backend, None, &Default::default())
     }
     fn handle_native(
         &self,
         mut s: TcpStream,
         backend: Option<&str>,
         sockets: Option<&crate::NativeSocketProxy>,
+        routes: &native_proxy::NativeRoutes,
     ) -> io::Result<()> {
         let target = backend
             .filter(|s| !s.is_empty())
@@ -179,7 +180,11 @@ impl Static {
         let upload = target
             .as_ref()
             .map(|_| format!("{}/_brain/uploads", self.pre));
-        let mut req = match native_proxy::read_request(&s, upload.as_deref()) {
+        let bound = target.is_some();
+        let plan = |path: &str, method: &str| {
+            if bound { native_proxy::plan(path, method, routes, &self.pre) } else { crate::http::BodyPlan::Default }
+        };
+        let mut req = match native_proxy::read_request(&s, upload.as_deref(), &plan) {
             Ok(req) => req,
             Err(error) => {
                 let status = crate::http::request_error_status(&error);
@@ -216,7 +221,15 @@ impl Static {
         if let (Some(target), Some(native_path)) = (target, native_path) {
             if native_proxy::handles(native_path) {
                 req.path = native_path.to_string();
-                return native_proxy::serve(&mut s, &target, &req);
+                return if req.upgrade.stream_body.is_some() {
+                    native_proxy::serve_files(&mut s, &target, &req)
+                } else {
+                    native_proxy::serve(&mut s, &target, &req, None)
+                };
+            }
+            if let Some(route) = routes.find(native_path) {
+                req.path = native_path.to_string();
+                return native_proxy::serve(&mut s, &target, &req, Some(route));
             }
         }
         if req.method != "GET" && req.method != "HEAD" {
@@ -543,6 +556,7 @@ pub struct StaticGateway {
     files: Static,
     backend: Option<String>,
     sockets: Option<crate::NativeSocketProxy>,
+    routes: native_proxy::NativeRoutes,
 }
 impl StaticGateway {
     pub fn load(dist: &Path, base: &str, backend: Option<&str>) -> io::Result<Self> {
@@ -555,6 +569,7 @@ impl StaticGateway {
             })
             .transpose()?;
         let manifest = dist.join("_server/manifest.json");
+        let mut routes = native_proxy::NativeRoutes::default();
         let enabled = if !manifest.try_exists()? {
             None
         } else {
@@ -588,10 +603,13 @@ impl StaticGateway {
                 native_sockets: bool,
                 #[serde(rename = "publicOrigin")]
                 public_origin: Option<String>,
+                #[serde(default, rename = "nativeRoutes")]
+                native_routes: Vec<native_proxy::NativeRoute>,
             }
             let manifest: Manifest = serde_json::from_slice(&bytes).map_err(|_| {
                 io::Error::other("Invalid static socket manifest JSON or field type")
             })?;
+            routes = native_proxy::NativeRoutes::new(manifest.native_routes);
             if manifest.native_sockets {
                 if manifest.v != Some(1) {
                     return Err(io::Error::other(
@@ -624,11 +642,12 @@ impl StaticGateway {
             files: Static::load(dist, base),
             backend,
             sockets,
+            routes,
         })
     }
     pub fn handle(&self, stream: TcpStream) -> io::Result<()> {
         self.files
-            .handle_native(stream, self.backend.as_deref(), self.sockets.as_ref())
+            .handle_native(stream, self.backend.as_deref(), self.sockets.as_ref(), &self.routes)
     }
     pub fn stop(&self) -> io::Result<()> {
         self.sockets.as_ref().map_or(Ok(()), |proxy| proxy.stop())

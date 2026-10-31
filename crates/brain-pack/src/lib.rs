@@ -1767,6 +1767,13 @@ fn build_inner_with_options(
             .or_insert_with(|| "{\"v\":1,\"routes\":[],\"rpc\":{}}\n".into());
         *manifest = manifest.replacen("{\"v\":1,", &format!("{{\"v\":1,\"nativeSockets\":true,\"publicOrigin\":{},", prerender_json(socket.public_origin())), 1);
     }
+    if !options.native_routes.is_empty() || !options.trust_proxy.is_empty() {
+        let strings = |list: &[String]| list.iter().map(|text| prerender_json(text)).collect::<Vec<_>>().join(",");
+        let routes = options.native_routes.iter().map(|(path, headers)| format!("{{\"path\":{},\"headers\":[{}]}}", prerender_json(path), strings(headers))).collect::<Vec<_>>().join(",");
+        let manifest = files.entry("_server/manifest.json".into())
+            .or_insert_with(|| "{\"v\":1,\"routes\":[],\"rpc\":{}}\n".into());
+        *manifest = manifest.replacen("{\"v\":1,", &format!("{{\"v\":1,\"nativeRoutes\":[{routes}],\"trustProxy\":[{}],", strings(&options.trust_proxy)), 1);
+    }
     // A packaged Wasm module is an explicit compile feature; never grant general JavaScript eval.
     if emitted_assets.keys().any(|path|path.ends_with(".wasm")) {post_csp.push(("script-src".into(),"'wasm-unsafe-eval'".into()));}
     // Explicit compiled-page feature opt-in: exact Google SDK sources, never a token-controlled URL.

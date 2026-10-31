@@ -93,7 +93,7 @@ w('_server/manifest.json', JSON.stringify({
 
 const { createServer } = await import('../server/server.mjs')
 const logs = []
-const server = createServer({ dist, timeout: 150, rateLimit: 5, secret: 'test-secret-0123456789', env: { APP_NAME: 'shop', BRAIN_SECRET: 's' }, log: (level, msg, x) => logs.push({ level, msg, ...x }) }) // gitleaks:allow -- local test-only session secret
+const server = createServer({ dist, timeout: 150, rateLimit: 5, trustProxy: ['127.0.0.1', '::1'], secret: 'test-secret-0123456789', env: { APP_NAME: 'shop', BRAIN_SECRET: 's' }, log: (level, msg, x) => logs.push({ level, msg, ...x }) }) // gitleaks:allow -- local test-only session secret
 await new Promise(r => server.listen(0, '127.0.0.1', r))
 const base = `http://127.0.0.1:${server.address().port}`
 after(() => server.close())
@@ -204,6 +204,17 @@ test('RPC: returns JSON; strips __proto__; CSRF header and same origin required;
   assert.equal((await call('missing', [])).status, 404)
   assert.equal((await fetch(`${base}/_r/zzz/save`, { method: 'POST', headers: { 'x-brain-rpc': '1' }, body: '[]' })).status, 404)
   assert.equal((await fetch(`${base}/_r/abc/save`, { headers: { 'x-brain-rpc': '1' } })).status, 405)
+})
+
+test('without trustProxy a browser header cannot choose the rate-limit key, and the shared key is reported once', async () => {
+  const warnings = []
+  const open = createServer({ dist, rateLimit: 2, secret: 'test-secret-0123456789', env: { BRAIN_SECRET: 's' }, log: (level, msg) => { if (msg === 'trust-proxy-not-configured') warnings.push(level) } }) // gitleaks:allow -- local test-only session secret
+  await new Promise(r => open.listen(0, '127.0.0.1', r))
+  const codes = []
+  for (let i = 0; i < 4; i++) codes.push((await fetch(`http://127.0.0.1:${open.address().port}/_r/abc/who`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-brain-rpc': '1', 'x-forwarded-for': `9.9.8.${i}` }, body: '[]' })).status)
+  await new Promise(r => { open.close(r); open.closeAllConnections() })
+  assert.ok(codes.includes(429), `a new forged address per call still hits the limit: ${codes}`)
+  assert.deepEqual(warnings, ['warn'])
 })
 
 test('RPC: 422 with field errors, timeout → 504, unexpected error → generic 500 with request id, rate limit → 429', async () => {

@@ -17,7 +17,7 @@ const unique = (headers, names) => {
   return true
 }
 
-export function installNativeSockets(server, {target, base='/', cookie, log}) {
+export function installNativeSockets(server, {target, base='/', cookie, client, log}) {
   if (installed.has(server)) throw Error('The native socket bridge is already installed')
   if (typeof target !== 'string' || target.length>2048) throw Error('Native sockets require a fixed loopback HTTP backend')
   let origin
@@ -116,7 +116,7 @@ export function installNativeSockets(server, {target, base='/', cookie, log}) {
     try {
       outgoing=request(new URL('/_brain/socket',origin),{
         method:'GET',agent:false,maxHeaderSize:8192,
-        headers:{host:origin.host,origin:site.origin,connection:'Upgrade',upgrade:'websocket','sec-websocket-version':'13','sec-websocket-key':key,'sec-websocket-protocol':PROTOCOL,'x-request-id':rid,...(credentials ? {cookie:credentials} : {}),...(authorization !== undefined ? {authorization} : {})},
+        headers:{host:origin.host,origin:site.origin,connection:'Upgrade',upgrade:'websocket','sec-websocket-version':'13','sec-websocket-key':key,'sec-websocket-protocol':PROTOCOL,'x-request-id':rid,...(credentials ? {cookie:credentials} : {}),...(authorization !== undefined ? {authorization} : {}),...(client?.(incoming) ? {'x-forwarded-for':client(incoming)} : {})},
       })
       outgoing.once('error',()=>finish('NATIVE_SOCKET_UPSTREAM_UNAVAILABLE',502))
       outgoing.once('response',response=>{
