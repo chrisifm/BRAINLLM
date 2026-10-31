@@ -277,6 +277,7 @@ Server limits (dev and production alike): brain.json `"server": { "maxBodyKB": 1
 per IP and function (429). Raise `maxBodyKB` to send a file as base64 in an RPC argument; invalid values are B0707.
 
 ### Experimental Rust/Postgres backend
+`brain backend capabilities` lists what this version supports (field types, filter operators, policy grants, limits), generated from the code.
 First read `brain backend schema --json` (resolved resource/job contracts + resource OpenAPI); inspect one with
 `brain card resource:posts` / `brain card job:notify`. Generate with `brain add resource posts --fields "title:str! body:str"`
 or `brain add job notify --fields "message:str!"`; fields: `str num bool email obj`, `!` required. Resources have explicit

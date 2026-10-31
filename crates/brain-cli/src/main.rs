@@ -123,7 +123,7 @@ granular:
   brain deploy config pm2|nginx       guarded front/backend deployment configuration
   brain media setup-gcs|list|cleanup  private media provisioning/library/owned cleanup
   brain e2e probe|run                 opt-in Claude/Codex Viewer scenarios plus AX/heap gates
-  brain backend <serve|migrate|approve-contract|schema|bootstrap-admin>  experimental Rust/Postgres resource API (loopback); serve --with-workers also runs the queues
+  brain backend <serve|migrate|approve-contract|capabilities|schema|bootstrap-admin>  experimental Rust/Postgres resource API (loopback); serve --with-workers also runs the queues
   brain analytics <report|funnel|segment>  usage reports over the behavior events the backend stores
   brain risk <name> [--measure]       what changing a symbol can break, with its evidence
   brain mcp [--profile full|minimal|backend]  the same commands as MCP tools over stdio

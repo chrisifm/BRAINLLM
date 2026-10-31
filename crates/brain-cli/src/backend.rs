@@ -577,6 +577,10 @@ fn stated_database(args: &[String], root: &Path, environment: &str) -> Result<St
     }
 }
 pub fn run(args: &[String]) -> Result<(), String> {
+    if args.first().is_some_and(|a| a == "capabilities") {
+        println!("{}", brain_backend::capabilities::inventory());
+        return Ok(());
+    }
     let root = crate::app_root()?;
     let environment = crate::env::name(args, "development");
     let operation = args.first().map(String::as_str).unwrap_or("schema");
@@ -592,7 +596,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         operation,
         "schema" | "migrate" | "approve-contract" | "serve" | "bootstrap-admin" | "rename-role" | "users"
     ) {
-        return Err("usage: brain backend schema|migrate|approve-contract [--accept <resource>] [--apply]|serve|bootstrap-admin|rename-role --from <role> --to <role> [--apply]|logs [rid]|users|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182] [--with-workers]".into());
+        return Err("usage: brain backend capabilities|schema|migrate|approve-contract [--accept <resource>] [--apply]|serve|bootstrap-admin|rename-role --from <role> --to <role> [--apply]|logs [rid]|users|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182] [--with-workers]".into());
     }
     let snapshot = inspect(&root)?;
     if operation == "schema" {
