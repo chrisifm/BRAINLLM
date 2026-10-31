@@ -277,6 +277,7 @@ validated file leases and compare-and-swap revisions. Existing files are never o
 routes or controls are created. Native backend policy remains authoritative. Review policy, migrate explicitly,
 then build and doctor the application. The app's default 30 KiB route budget remains unchanged.
 Set `DATABASE_URL`; explicitly `brain backend migrate`, then `brain backend serve` (loopback REST at `/api/<resource>`).
+An error response carries a `rid`; `brain backend logs <rid>` returns its cause (SQLSTATE, resource, operation, code location).
 `PATCH /api/<resource>/<uuid>` changes only the sent fields (`null` clears an optional one); see `docs/backend/patch.md`.
 `server/operations/<name>.jsbrain` declares typed input and steps that `POST /_brain/operations/<name>` runs in one transaction (all or nothing); see `docs/backend/transactions.md`.
 `actions.jsbrain` declares guarded atomic writes (`when`, `set`, `increment`, `decrement`) at `POST /api/<r>/<uuid>/actions/<name>`; `POST /api/<r>/upsert` inserts if absent on a unique key; see `docs/backend/atomic-updates.md`.

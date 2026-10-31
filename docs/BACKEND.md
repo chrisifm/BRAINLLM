@@ -12,7 +12,14 @@ brain add job post_created --fields "resource:str! operation:str! record:obj!"
 brain backend schema --json
 brain backend migrate --env development
 brain backend serve --port 5182 --origin http://127.0.0.1:5182
+brain backend logs <rid>
 ```
+
+An error response carries a `rid`. `brain backend logs <rid>` (MCP `brain_backend_logs`) returns its failure events from
+`.brain/backend/failures.jsonl`: SQLSTATE, constraint, resource, operation, branch and code location. Without a rid it
+returns the latest 50. `brain backend serve` writes that file and the same JSON lines to stderr, and the older half moves
+to `failures.jsonl.1` at 5 MB. Only development events add the database message, which can quote values; production
+events never do.
 
 The resource generator writes only implemented files:
 

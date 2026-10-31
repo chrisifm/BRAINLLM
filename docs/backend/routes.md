@@ -52,8 +52,10 @@ export default async function handle(ctx) {
 `null`), `client` (the resolved client IP), `body`, and for raw or signed routes `rawBody` with
 `rawBodyEncoding` (`utf8` or `base64`) plus `verified` (see [webhooks.md](webhooks.md)).
 
-Return either a plain value (answered as `200` JSON) or `{status, body, headers}`. Response headers are
-limited to `location`, `cache-control`, `etag`, `retry-after`, `link`, `content-language` and `x-*`.
+Return either a plain value (answered as `200` JSON) or `{status, body, headers}`. A returned `status` from 200 to 599
+is answered as written, 5xx included. A number outside that range is a handler bug: it answers
+`500 ROUTE_INVALID_STATUS` and logs a `route-invalid-status` event, never a silent `200`. An object whose only key is a
+non-numeric `status` is plain data. Response headers are limited to `location`, `cache-control`, `etag`, `retry-after`, `link`, `content-language` and `x-*`.
 
 Throwing `{errors: {field: 'message'}}` answers `422 INVALID_INPUT` with those fields. Throwing an error
 with a 4xx `status` answers that status with a generic `ROUTE_REJECTED` code. Any other throw answers

@@ -720,6 +720,10 @@ async fn search_text_never_raises_an_internal_error() {
         (format!("/api/listings?sort=views&cursor={}", forged("not-a-number")), 422),
         ("/api/listings/not-a-uuid".to_string(), 400),
         ("/api/listings/%00".to_string(), 400),
+        ("/api/listings?include=%00".to_string(), 422),
+        ("/api/listings?count=%00".to_string(), 422),
+        ("/api/listings/redirects/%00".to_string(), 404),
+        (format!("/api/listings/redirects/{}", "a".repeat(5000)), 404),
     ] {
         let (s, body) = api.get(&uri, None).await;
         assert_eq!(s, want, "{uri} {body}");

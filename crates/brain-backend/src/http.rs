@@ -2201,6 +2201,11 @@ async fn webhook_status(
 #[cfg(test)]
 mod diagnostic_tests {
     use super::*;
+    #[test]
+    fn stripped_stacks_are_not_logged_as_if_they_helped() {
+        assert!(stack_is_symbolized("0: brain_backend::http::list\n"));
+        assert!(!stack_is_symbolized("0: <unknown>\n1: __rust_try\n"));
+    }
     #[tokio::test]
     async fn internal_errors_return_safe_response_without_waiting_for_stack_symbolization() {
         struct Sensitive;
