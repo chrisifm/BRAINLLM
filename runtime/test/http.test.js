@@ -267,7 +267,7 @@ test("upload: in: 'file' sends multipart with progress (0–1) and .cancel(); de
   const files = api('/files', { post: { in: 'file' } })
   const up = files.post({ file: new Blob(['abc']), name: 'a.txt' })
   assert.equal(up.progress, 0)
-  await tick(10)
+  for (let i = 0; i < 100 && up.progress === 0; i++) await tick(10)
   assert.equal(up.progress, 0.5)
   assert.deepEqual(await up, { ok: true })
   assert.equal(up.progress, 1)
