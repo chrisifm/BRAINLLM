@@ -185,7 +185,14 @@ async fn upload(
         app.platform.storage.remove(&stored.key).await;
         return Err(invalid());
     }
-    let (sniffed, content_type) = files::classify(&stored.head, &declared);
+    let (sniffed, mut content_type) = files::classify(&stored.head, &declared);
+    let sniffed = match app.platform.storage.path(&stored.key) {
+        Some(path) => files::refine(&path, &stored.head, sniffed).await,
+        None => sniffed,
+    };
+    if let Some(sharper) = &sniffed {
+        content_type.clone_from(sharper);
+    }
     if !bucket.accepts(&content_type) {
         app.platform.storage.remove(&stored.key).await;
         let mut e = status(StatusCode::UNSUPPORTED_MEDIA_TYPE, "FILE_TYPE_DENIED", "Upload one of the bucket's declared types; detection uses file content, not the name");

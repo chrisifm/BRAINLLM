@@ -368,6 +368,16 @@ pub fn row_exposure(root: &Path) -> Vec<(String, String, String)> {
         })
         .collect()
 }
+/// B0770: buckets that accept every file only because they never listed their types.
+pub fn bucket_warnings(root: &Path) -> Vec<(String, String, String)> {
+    let (Ok(resources), Ok(roles)) = (contracts(root, "resources"), auth_roles(root)) else { return Vec::new() };
+    let buckets = crate::platform_config::load(root, &resources, &roles).map(|p| p.buckets).unwrap_or_default();
+    buckets.iter().filter(|b| b.open_by_omission()).map(|b| (
+        format!("server/files/{}.jsbrain", b.name),
+        format!("bucket `{}` does not say which types it takes, so it accepts every file, HTML and executables included", b.name),
+        "list what it should hold, for example types: ['application/pdf', 'image/*'], or say types: '*' if any file is meant to be accepted; official MIME names work and matching uses the file's content".to_string(),
+    )).collect()
+}
 pub fn inspect(root: &Path) -> Result<Value, String> {
     let resources = contracts(root, "resources")?;
     let jobs = contracts(root, "jobs")?;
@@ -639,6 +649,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         brain_backend::analytics::configure(analytics_settings(&root)?)?;
         eprintln!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
         let mut platform=crate::platform_config::load(&root,&config.resources,&config.roles)?;
+        for bucket in platform.buckets.iter().filter(|b|b.open_by_omission()){eprintln!("{}",json!({"schemaVersion":1,"event":"backend-warning","code":"B0770","file":format!("server/files/{}.jsbrain",bucket.name),"message":"this bucket accepts every file type because it does not declare types; list them or say types: '*'"}));}
         platform.routes=crate::route_executor::contracts(&root,&environment)?;
         platform.handlers=crate::route_executor::load(&root,&environment,&platform.routes)?;
         // Separate HTTP and worker pools with declared sizes, checked against the server's connection budget.

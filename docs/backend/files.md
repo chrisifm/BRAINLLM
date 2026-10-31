@@ -1,6 +1,6 @@
 # File uploads of any type (native backend)
 
-Declared file buckets accept any content type by default (PDF, Word, spreadsheets, zip, audio, video, images, plain
+Declared file buckets hold the content types they list (PDF, Word, spreadsheets, zip, audio, video, images, plain
 text), stream the body to private disk without buffering it in memory, record metadata in Postgres and serve
 downloads through the bucket's policy with `Range` and `ETag` support. The image pipeline in [MEDIA.md](../MEDIA.md)
 is unchanged and remains the place for responsive renditions.
@@ -15,7 +15,7 @@ One literal file per bucket: `server/files/<name>.jsbrain`. The file name is the
 export default {
   visibility: 'private',          // 'private' (default) or 'public'
   maxBytes: '25mb',               // integer bytes or '512kb' / '25mb' / '1gb'; default 25 MiB, ceiling 2 GiB
-  types: [],                      // MIME patterns; empty (default) accepts any type
+  types: '*',                     // MIME patterns, or '*' for any type; omitting it warns B0770
   create: ['user'],               // roles that may upload (default ['admin'])
   read: ['owner', 'admin'],       // default; also 'related' when a resource is declared
   delete: ['owner', 'admin']      // default
@@ -39,7 +39,7 @@ export default {
 |---|---|
 | `visibility` | `public` downloads need no session and are cached `public, max-age=31536000, immutable` (an id never changes content). `private` downloads require a grant and are `no-store`. |
 | `maxBytes` | Per-bucket limit enforced while streaming; the request is cut at the first byte over the limit (413). |
-| `types` | `application/pdf`, `image/*`, `*/*`. Matching uses the type detected from content (below), never the file name. |
+| `types` | `application/pdf`, `image/*`, or `'*'` for any type. Matching uses the type detected from content (below), never the file name. Omitting it, or `[]`, still accepts any type and warns B0770. |
 | `resource` / `field` | Link files to records of a declared resource. |
 | `read` / `create` / `delete` | Configured role names, `owner` (uploader) and `related` (resource-linked buckets). `create` takes role names only. |
 
@@ -57,6 +57,19 @@ The first 8 KiB are sniffed with magic numbers (`infer` 0.22). The response reco
 - `contentType`: the type used for policy matching and downloads. It is the sniffed type when detected; for
   undetected UTF-8 text it is the declared text type (`text/csv`, `application/json`) or `text/plain`; otherwise
   `application/octet-stream`.
+
+Write the official MIME type; it matches what detection reports:
+
+| In `types` | Accepts |
+|---|---|
+| `application/vnd.openxmlformats-officedocument.wordprocessingml.document` (and the `spreadsheetml.sheet`, `presentationml.presentation` forms) | a zip whose central directory has `[Content_Types].xml` and the format's main part. Any other zip is refused. |
+| `application/msword`, `application/vnd.ms-excel`, `application/vnd.ms-powerpoint` | a compound file with the format's main stream. Other compound files, installers among them, are refused. |
+| `image/heic` | detected `image/heif` |
+| `image/jpg`, `audio/mp3`, `audio/wav`, `audio/mp4`, `application/x-zip-compressed` | detected `image/jpeg`, `audio/mpeg`, `audio/x-wav`, `audio/m4a`, `application/zip` |
+| `application/zip`, `application/x-ole-storage` | the container and every Office format stored in it |
+
+This is identification, not validation: a zip with those names passes without its parts being parsed. Downloads are
+always `nosniff`, with `attachment` unless `?inline=true` on a type that is safe inline.
 
 A PNG sent as `invoice.pdf` with `Content-Type: application/pdf` is therefore stored as `image/png` and rejected by a
 PDF-only bucket with 415 `FILE_TYPE_DENIED`. Unrestricted buckets accept it and record what it really is.
