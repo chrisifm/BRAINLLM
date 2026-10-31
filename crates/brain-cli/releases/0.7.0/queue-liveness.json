@@ -1,0 +1,28 @@
+{
+  "id": "queue-liveness",
+  "kind": "change",
+  "title": "Queues and jobs nothing runs are reported",
+  "why": "Queues failed silently with no worker. Doctor, serve, start and run list them, the server logs `queue-stalled`, and `brain check` warns about a job with no handler. None of these fail doctor.",
+  "changelog": [
+    "now list what nothing is running",
+    "warns B0769 for a job with a schema",
+    "logs a `queue-stalled` line"
+  ],
+  "guide": "docs/backend/queues.md",
+  "codes": [
+    "B0765",
+    "B0766",
+    "B0767",
+    "B0768",
+    "B0769"
+  ],
+  "apis": [
+    "BRAIN_QUEUE_CHECK_SECONDS"
+  ],
+  "affects": [
+    "server/jobs/**"
+  ],
+  "steps": [
+    "For each queue reported, run `brain jobs work <queue>` in production, or `brain backend serve --with-workers`; add the missing `handler.jsbrain` for B0769."
+  ]
+}

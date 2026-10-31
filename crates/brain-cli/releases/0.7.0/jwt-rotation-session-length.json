@@ -1,0 +1,31 @@
+{
+  "id": "jwt-rotation-session-length",
+  "kind": "capability",
+  "title": "JWT key rotation and session length",
+  "why": "The signing key rotates without logging everyone out, and session length fits the app.",
+  "changelog": [
+    "`BRAIN_JWT_SECRET_PREVIOUS` rotates the JWT signing key"
+  ],
+  "guide": "docs/JWT-GOOGLE.md",
+  "apis": [
+    "BRAIN_JWT_SECRET_PREVIOUS",
+    "BRAIN_AUTH_SESSION_SECONDS"
+  ],
+  "affects": [
+    ".brain_env"
+  ],
+  "adopt": {
+    "file": ".brain_env",
+    "snippet": "BRAIN_AUTH_SESSION_SECONDS=1209600"
+  },
+  "uses": [
+    {
+      "glob": ".brain_env",
+      "contains": "BRAIN_JWT_SECRET_PREVIOUS"
+    },
+    {
+      "glob": ".brain_env",
+      "contains": "BRAIN_AUTH_SESSION_SECONDS"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "id": "sw-cache-scope",
+  "kind": "fix",
+  "title": "Service worker caches are scoped to the app",
+  "why": "Apps under a base path no longer delete each other's caches on one origin, and cache writes finish before the worker stops.",
+  "changelog": [
+    "Service worker caches are scoped to the app",
+    "Service worker cache writes for hashed chunks"
+  ],
+  "guide": "brain guide data"
+}

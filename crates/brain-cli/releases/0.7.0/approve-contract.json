@@ -1,0 +1,32 @@
+{
+  "id": "approve-contract",
+  "kind": "capability",
+  "title": "brain backend approve-contract records a changed resource contract",
+  "why": "A changed contract on a registered resource answers `BDB_SCHEMA_DRIFT` and changes nothing; this previews the rows it touches and records it explicitly.",
+  "changelog": [
+    "`brain backend approve-contract` previews"
+  ],
+  "guide": "docs/BACKEND.md",
+  "codes": [
+    "B0787"
+  ],
+  "apis": [
+    "brain backend approve-contract",
+    "--apply",
+    "--accept <resource>"
+  ],
+  "affects": [
+    "server/resources/*/schema.jsbrain"
+  ],
+  "adopt": {
+    "file": "package.json",
+    "command": "brain backend approve-contract",
+    "snippet": "\"scripts\": { \"backend:contract\": \"brain backend approve-contract\" }"
+  },
+  "uses": [
+    {
+      "glob": "{package.json,Makefile,justfile,ecosystem.config.cjs,**/*.sh,**/*.yml,**/*.yaml}",
+      "contains": "approve-contract"
+    }
+  ]
+}

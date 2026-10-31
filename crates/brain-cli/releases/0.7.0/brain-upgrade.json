@@ -1,0 +1,30 @@
+{
+  "id": "brain-upgrade",
+  "kind": "capability",
+  "title": "brain upgrade migrates an app between versions",
+  "why": "Codemods, manual steps with `file:line`, capabilities to adopt and the gates come from one report, in the CLI and in MCP.",
+  "changelog": [
+    "`brain upgrade [--from V] [--to V]"
+  ],
+  "guide": "SPEC.md",
+  "apis": [
+    "brain upgrade",
+    "brain_upgrade",
+    "brainVersion"
+  ],
+  "affects": [
+    "brain.json",
+    "package.json"
+  ],
+  "adopt": {
+    "file": "package.json",
+    "command": "brain upgrade --dry-run",
+    "snippet": "\"scripts\": { \"upgrade\": \"brain upgrade --dry-run\" }"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "brainVersion"
+    }
+  ]
+}

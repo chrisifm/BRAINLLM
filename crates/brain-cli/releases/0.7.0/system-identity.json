@@ -1,0 +1,37 @@
+{
+  "id": "system-identity",
+  "kind": "capability",
+  "title": "System identity for jobs and routes",
+  "why": "Work that acts for nobody can run under an operator-created system key, and routes and jobs can reach resources and file buckets directly.",
+  "changelog": [
+    "System identity for jobs and routes",
+    "`ctx.backend` in route handlers",
+    "`ctx.backend.files(bucket)` in jobs"
+  ],
+  "guide": "docs/backend/job-backend.md",
+  "apis": [
+    "runAs: 'key'|'system'",
+    "brain backend keys create --system",
+    "ctx.backend.files(bucket)",
+    "BRAIN_JOBS_SYSTEM_KEY",
+    "BRAIN_ROUTES_SYSTEM_KEY"
+  ],
+  "affects": [
+    "server/jobs/*/queue.jsbrain",
+    "server/routes/*/route.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/jobs/<queue>/queue.jsbrain",
+    "snippet": "<meta server>\nexport default { runAs: 'system' }"
+  },
+  "uses": [
+    {
+      "glob": "server/**/*.jsbrain",
+      "contains": "runAs:"
+    },
+    {
+      "glob": "server/**/*.jsbrain",
+      "contains": "backend.files("
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "id": "field-pattern",
+  "kind": "capability",
+  "title": "A str field can declare its format",
+  "why": "A format check moves from adapters into the contract and applies on every write, including PATCH.",
+  "changelog": [
+    "A `str` field can declare `pattern`"
+  ],
+  "guide": "docs/BACKEND.md",
+  "apis": [
+    "pattern"
+  ],
+  "affects": [
+    "server/resources/*/schema.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/<name>/schema.jsbrain",
+    "snippet": "code: { type: 'str', pattern: '[A-Z]{3}[0-9]{6}' }"
+  },
+  "uses": [
+    {
+      "glob": "server/resources/*/schema.jsbrain",
+      "contains": "pattern:"
+    }
+  ]
+}

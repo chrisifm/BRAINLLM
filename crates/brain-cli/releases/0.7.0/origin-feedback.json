@@ -1,0 +1,20 @@
+{
+  "id": "origin-feedback",
+  "kind": "fix",
+  "title": "Every origin refusal explains itself",
+  "why": "Logs, the dev console and startup messages name the code, seen and allowed origins, key and fix; production answers carry only the code and never credentials.",
+  "changelog": [
+    "Every origin refusal now names its code",
+    "`brain dev` explains the browser's opaque",
+    "`brain backend serve` names the auth public URL"
+  ],
+  "guide": "docs/backend/proxy-cors.md",
+  "codes": [
+    "B0740",
+    "B0741",
+    "B0742",
+    "B0743",
+    "B0747",
+    "B0748"
+  ]
+}

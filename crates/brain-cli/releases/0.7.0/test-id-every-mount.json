@@ -1,0 +1,10 @@
+{
+  "id": "test-id-every-mount",
+  "kind": "fix",
+  "title": "#id finds an element on every mount of a test file",
+  "why": "A second mount in one file could not find the component's element.",
+  "changelog": [
+    "finds a component's element on every mount"
+  ],
+  "guide": "brain guide tests"
+}

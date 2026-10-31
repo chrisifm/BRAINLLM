@@ -1,0 +1,10 @@
+{
+  "id": "seo-indexnow-sitemaps",
+  "kind": "fix",
+  "title": "brain seo indexnow reads sitemaps fully",
+  "why": "Escaped URLs were sent and truncated children skipped silently; it decodes every entity and fails with a fix.",
+  "changelog": [
+    "`brain seo indexnow` decodes every XML entity"
+  ],
+  "guide": "brain guide seo"
+}

@@ -1,0 +1,32 @@
+{
+  "id": "server-only-resources",
+  "kind": "capability",
+  "title": "Server-only resources",
+  "why": "Internal tables need no public API; trusted server code reaches them with a named key.",
+  "changelog": [
+    "`api: false` declares a server-only resource"
+  ],
+  "guide": "docs/backend/ownership.md",
+  "apis": [
+    "api: false",
+    "ctx.backend.service",
+    "BRAIN_SERVICE_API_KEY"
+  ],
+  "affects": [
+    "server/resources/*/policy.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/<name>/policy.jsbrain",
+    "snippet": "<meta server>\nexport default { api: false }"
+  },
+  "uses": [
+    {
+      "glob": "server/resources/*/policy.jsbrain",
+      "contains": "api: false"
+    },
+    {
+      "glob": "server/**/*.jsbrain",
+      "contains": "backend.service("
+    }
+  ]
+}

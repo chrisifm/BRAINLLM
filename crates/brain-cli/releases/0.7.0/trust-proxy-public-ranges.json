@@ -1,0 +1,31 @@
+{
+  "id": "trust-proxy-public-ranges",
+  "kind": "breaking",
+  "title": "A production backend refuses a public trustProxy range",
+  "why": "Trusting a public range lets a visitor choose their own address. `brain check` and `brain doctor` warn B0784, a production `brain backend serve` refuses it, and `trustPublicProxy` declares a CDN.",
+  "changelog": [
+    "warn on a public `trustProxy` range"
+  ],
+  "guide": "docs/backend/proxy-cors.md",
+  "codes": [
+    "B0784"
+  ],
+  "apis": [
+    "trustProxy",
+    "trustPublicProxy"
+  ],
+  "affects": [
+    "server/platform.jsbrain"
+  ],
+  "finds": [
+    {
+      "glob": "server/platform.jsbrain",
+      "contains": "trustProxy"
+    }
+  ],
+  "steps": [
+    "List only your own proxies in `trustProxy` in `server/platform.jsbrain`.",
+    "Move a CDN to `trustPublicProxy` with its published ranges.",
+    "Behind a proxy with no `trustProxy`, add it: `trustProxy: ['127.0.0.1', '::1']`."
+  ]
+}

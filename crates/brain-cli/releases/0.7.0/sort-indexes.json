@@ -1,0 +1,23 @@
+{
+  "id": "sort-indexes",
+  "kind": "change",
+  "title": "Plain lists and declared sorts use an index",
+  "why": "Lists stop sorting the whole table on every request. Declared sorts get an index for their other direction on the next migration.",
+  "changelog": [
+    "plain lists and `created_at`/`updated_at` sorts use their index",
+    "Declared sorts get an index"
+  ],
+  "guide": "docs/backend/sorting.md",
+  "affects": [
+    "server/resources/*/query.jsbrain"
+  ],
+  "finds": [
+    {
+      "glob": "server/resources/*/query.jsbrain",
+      "contains": "sort"
+    }
+  ],
+  "steps": [
+    "Run `brain backend migrate` once before serving this version. It builds the new sort indexes."
+  ]
+}

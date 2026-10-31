@@ -1,0 +1,14 @@
+{
+  "id": "role-diagnostics",
+  "kind": "fix",
+  "title": "Role errors name the real file; B0738 warns about grants that admit nobody",
+  "why": "Role errors pointed at `server/` line 1 with a generic fix, and a changed signup role failed silently.",
+  "changelog": [
+    "B0735 names the real file"
+  ],
+  "guide": "docs/AUTH-FLOWS.md",
+  "codes": [
+    "B0735",
+    "B0738"
+  ]
+}

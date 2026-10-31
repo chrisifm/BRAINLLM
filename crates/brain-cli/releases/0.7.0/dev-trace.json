@@ -1,0 +1,37 @@
+{
+  "id": "dev-trace",
+  "kind": "capability",
+  "title": "brain trace: a local record of development",
+  "why": "`brain run` records requests, payloads, errors at their `.brain` line, CSP and cross-origin failures, so a failure can be read instead of reproduced blind. It never reaches a production build, redacts credentials, and any module can report in one line.",
+  "changelog": [
+    "`brain run` now records requests",
+    "`brain trace` shows server exceptions",
+    "The capture never reaches a production build",
+    "A new module records with `__brainTrace"
+  ],
+  "guide": "crates/brain-cli/guides/tests.md",
+  "codes": [
+    "B1840",
+    "B1844"
+  ],
+  "apis": [
+    "brain trace",
+    "brain_trace",
+    "__brainTrace",
+    "brain run --no-trace"
+  ],
+  "affects": [
+    "brain.json"
+  ],
+  "adopt": {
+    "file": "views/checkout.brain",
+    "command": "brain trace issues",
+    "snippet": "globalThis.__brainTrace('payments', 'declined', { level: 'error', title: 'Card declined', fix: 'Ask for another card' })"
+  },
+  "uses": [
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "__brainTrace"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "scoped-css-pseudo",
+  "kind": "fix",
+  "title": "Scoped CSS keeps pseudo-elements outside the root anchor",
+  "why": "Chrome dropped the whole rule list for components that style `::backdrop` or `::before` at their root.",
+  "changelog": [
+    "Scoped CSS keeps pseudo-elements"
+  ],
+  "guide": "brain guide views"
+}

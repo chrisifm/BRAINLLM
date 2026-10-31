@@ -1,0 +1,27 @@
+{
+  "id": "roles-cli",
+  "kind": "capability",
+  "title": "brain add roles and brain backend rename-role",
+  "why": "Roles are declared in one file and accounts move explicitly, with a preview, instead of through SQL.",
+  "changelog": [
+    "`brain add roles` declares"
+  ],
+  "guide": "docs/AUTH-FLOWS.md",
+  "apis": [
+    "brain add roles",
+    "brain backend rename-role"
+  ],
+  "affects": [
+    "server/auth/roles.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/auth/roles.jsbrain",
+    "command": "brain add roles",
+    "snippet": "<meta server>\nexport default { roles: ['admin', 'member'], signup_role: 'member' }"
+  },
+  "uses": [
+    {
+      "glob": "server/auth/roles.jsbrain"
+    }
+  ]
+}

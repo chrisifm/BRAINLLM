@@ -1,0 +1,14 @@
+{
+  "id": "scaffold-menu-layout",
+  "kind": "change",
+  "title": "New apps keep the menu in views/_layout.brain",
+  "why": "The scaffolded menu can be translated, and `brain add view` links to the file that holds the menu. A menu in app.brain keeps working.",
+  "changelog": [
+    "puts the menu in `views/_layout.brain`"
+  ],
+  "guide": "brain guide views",
+  "affects": [
+    "app.brain",
+    "views/_layout.brain"
+  ]
+}

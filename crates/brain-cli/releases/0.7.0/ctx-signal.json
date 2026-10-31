@@ -1,0 +1,27 @@
+{
+  "id": "ctx-signal",
+  "kind": "capability",
+  "title": "ctx.signal stops server work when the client leaves",
+  "why": "A `load()`, guard or server function can stop its outbound work on disconnect or deadline instead of finishing for nobody.",
+  "changelog": [
+    "`ctx.signal` in `load()`"
+  ],
+  "guide": "brain guide server",
+  "apis": [
+    "ctx.signal"
+  ],
+  "affects": [
+    "views/**/*.brain",
+    "server/**/*.jsbrain"
+  ],
+  "adopt": {
+    "file": "views/report.brain",
+    "snippet": "export async function load(ctx) {\n  const res = await fetch(ctx.env.REPORT_URL, { signal: ctx.signal })\n  return { report: await res.json() }\n}"
+  },
+  "uses": [
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "ctx.signal"
+    }
+  ]
+}

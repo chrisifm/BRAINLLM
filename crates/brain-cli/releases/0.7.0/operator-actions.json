@@ -1,0 +1,32 @@
+{
+  "id": "operator-actions",
+  "kind": "capability",
+  "title": "Operator actions without SQL",
+  "why": "Support and incident work (disable a user or identity, end sessions, select the first administrator by email) no longer needs direct database access.",
+  "changelog": [
+    "`brain backend bootstrap-admin --email <address>`",
+    "`brain backend users disable|enable|revoke-sessions|disable-identity|enable-identity`"
+  ],
+  "guide": "docs/AUTH-FLOWS.md",
+  "apis": [
+    "brain backend users",
+    "brain backend bootstrap-admin --email",
+    "POST /_brain/auth/users/{id}/disable",
+    "POST /_brain/auth/users/{id}/sessions/revoke"
+  ],
+  "adopt": {
+    "file": "package.json",
+    "command": "brain backend users revoke-sessions --user <uuid>",
+    "snippet": "\"scripts\": { \"backend:revoke\": \"brain backend users revoke-sessions --user <uuid>\" }"
+  },
+  "uses": [
+    {
+      "glob": "{package.json,Makefile,justfile,ecosystem.config.cjs,**/*.sh,**/*.yml,**/*.yaml}",
+      "contains": "brain backend users"
+    },
+    {
+      "glob": "{package.json,Makefile,justfile,ecosystem.config.cjs,**/*.sh,**/*.yml,**/*.yaml}",
+      "contains": "bootstrap-admin --email"
+    }
+  ]
+}

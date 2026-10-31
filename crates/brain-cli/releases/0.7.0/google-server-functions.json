@@ -1,0 +1,27 @@
+{
+  "id": "google-server-functions",
+  "kind": "capability",
+  "title": "Google sign-in over server functions",
+  "why": "Apps that sign in over a server function keep the nonce bound to the browser that asked for it.",
+  "changelog": [
+    "`ctx.backend.google.challenge()` and `.login({credential})`"
+  ],
+  "guide": "docs/JWT-GOOGLE.md",
+  "apis": [
+    "ctx.backend.google.challenge",
+    "ctx.backend.google.login"
+  ],
+  "affects": [
+    "server/**/*.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/auth.jsbrain",
+    "snippet": "export async function google(ctx, values) {\n  return ctx.backend.google.login({ credential: values.credential })\n}"
+  },
+  "uses": [
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "backend.google."
+    }
+  ]
+}

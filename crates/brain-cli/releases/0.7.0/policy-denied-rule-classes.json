@@ -1,0 +1,10 @@
+{
+  "id": "policy-denied-rule-classes",
+  "kind": "fix",
+  "title": "POLICY_DENIED names the evaluated rule classes",
+  "why": "A denial told signed-in users to sign in, whatever rule had applied.",
+  "changelog": [
+    "`POLICY_DENIED` explains which rule classes"
+  ],
+  "guide": "docs/backend/ownership.md"
+}

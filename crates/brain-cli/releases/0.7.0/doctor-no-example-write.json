@@ -1,0 +1,13 @@
+{
+  "id": "doctor-no-example-write",
+  "kind": "fix",
+  "title": "Doctor no longer rewrites .brain_env.example",
+  "why": "It dirtied the versioned tree and could drop keys in use. B0727 reports the pending change; `brain doctor --fix` or `brain fix` writes it.",
+  "changelog": [
+    "`brain doctor` no longer rewrites `.brain_env.example`"
+  ],
+  "guide": "brain guide server",
+  "codes": [
+    "B0727"
+  ]
+}

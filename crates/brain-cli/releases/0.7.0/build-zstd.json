@@ -1,0 +1,13 @@
+{
+  "id": "build-zstd",
+  "kind": "change",
+  "title": "Build-time zstd assets",
+  "why": "`brain build` writes a `.zst` when it beats the `.br`, and `brain start` and `server.mjs` send the smallest sibling the client accepts. A proxy serving the files itself needs the emitted block.",
+  "changelog": [
+    "Build-time zstd"
+  ],
+  "guide": "docs/PERFORMANCE.md",
+  "affects": [
+    "dist/**"
+  ]
+}

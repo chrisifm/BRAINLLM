@@ -1,0 +1,13 @@
+{
+  "id": "console-kept",
+  "kind": "fix",
+  "title": "console.error and console.warn stay in the build",
+  "why": "Errors vanished from production logs because B1308 removed them; only debugging calls are removed now.",
+  "changelog": [
+    "`console.error` and `console.warn` stay in the build"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "codes": [
+    "B1308"
+  ]
+}

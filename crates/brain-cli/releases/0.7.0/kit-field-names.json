@@ -1,0 +1,10 @@
+{
+  "id": "kit-field-names",
+  "kind": "fix",
+  "title": "Kit fields send their value without JavaScript",
+  "why": "`<Input>`, `<Select>` and `<Checkbox>` bound to a form field had no name, so a JS-less POST dropped them.",
+  "changelog": [
+    "bound to a form field take its name"
+  ],
+  "guide": "brain guide forms"
+}

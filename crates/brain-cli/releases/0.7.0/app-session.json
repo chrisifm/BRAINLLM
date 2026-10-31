@@ -1,0 +1,30 @@
+{
+  "id": "app-session",
+  "kind": "capability",
+  "title": "BRAIN_BACKEND_SESSION=app keeps an app's own session",
+  "why": "An app with its own signed session can use the native backend for data. B0786 warns about `ctx.session.set` that would answer 409 otherwise.",
+  "changelog": [
+    "`BRAIN_BACKEND_SESSION=app` keeps"
+  ],
+  "guide": "docs/NATIVE-AUTH-SSR.md",
+  "codes": [
+    "B0786"
+  ],
+  "apis": [
+    "BRAIN_BACKEND_SESSION"
+  ],
+  "affects": [
+    ".brain_env",
+    "**/*.{brain,jsbrain}"
+  ],
+  "adopt": {
+    "file": ".brain_env",
+    "snippet": "BRAIN_BACKEND_SESSION=app"
+  },
+  "uses": [
+    {
+      "glob": ".brain_env",
+      "contains": "BRAIN_BACKEND_SESSION"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "id": "login-redirect-session-nav",
+  "kind": "capability",
+  "title": "Login redirect and session navigation recipe",
+  "why": "Signed-in users saw the login page in new apps, and session-dependent navigation had no recipe.",
+  "changelog": [
+    "The new app's `/login` sends a signed-in user"
+  ],
+  "guide": "brain guide views",
+  "apis": [
+    "throw redirect"
+  ],
+  "affects": [
+    "views/login.brain",
+    "views/_layout.brain"
+  ],
+  "adopt": {
+    "file": "views/login.brain",
+    "snippet": "export async function load(ctx) {\n  if (ctx.user) throw redirect('/account')\n}"
+  },
+  "uses": [
+    {
+      "glob": "views/login.brain",
+      "contains": "ctx.user"
+    }
+  ]
+}

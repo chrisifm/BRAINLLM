@@ -1,0 +1,27 @@
+{
+  "id": "api-key-related-scopes",
+  "kind": "breaking",
+  "title": "A project API key needs a read scope for what it includes",
+  "why": "Includes, related filters and counts used to answer with only the list's scope. A key without the related read scope now gets 403.",
+  "changelog": [
+    "a project API key needs a read scope"
+  ],
+  "guide": "docs/backend/api-keys.md",
+  "affects": [
+    "server/resources/*/query.jsbrain"
+  ],
+  "finds": [
+    {
+      "glob": "server/resources/*/query.jsbrain",
+      "contains": "include"
+    },
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "include="
+    }
+  ],
+  "steps": [
+    "List the resources each project API key reaches through `include`, related filters and `count`.",
+    "Create a key with a read scope for each of them (`brain backend keys create --scopes ...`) and replace the old key."
+  ]
+}

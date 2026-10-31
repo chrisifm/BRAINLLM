@@ -1,0 +1,62 @@
+{
+  "id": "cli-unknown-flags",
+  "kind": "breaking",
+  "title": "Every command refuses a flag it does not know",
+  "why": "A flag nobody read looked like it took effect. Scripts that pass one, including flags that were never implemented, now stop with an error and act on nothing.",
+  "changelog": [
+    "Every command refuses a flag it does not know"
+  ],
+  "guide": "brain guide start",
+  "affects": [
+    "package.json",
+    "**/*.sh",
+    "**/*.yml"
+  ],
+  "finds": [
+    {
+      "glob": "{package.json,Makefile,justfile,ecosystem.config.cjs,**/*.sh,**/*.yml,**/*.yaml}",
+      "contains": "brain run --site"
+    },
+    {
+      "glob": "{package.json,Makefile,justfile,ecosystem.config.cjs,**/*.sh,**/*.yml,**/*.yaml}",
+      "contains": "brain run --coep"
+    },
+    {
+      "glob": "{package.json,Makefile,justfile,ecosystem.config.cjs,**/*.sh,**/*.yml,**/*.yaml}",
+      "contains": "brain run --open"
+    },
+    {
+      "glob": "{package.json,Makefile,justfile,ecosystem.config.cjs,**/*.sh,**/*.yml,**/*.yaml}",
+      "contains": "brain run --https"
+    },
+    {
+      "glob": "{package.json,Makefile,justfile,ecosystem.config.cjs,**/*.sh,**/*.yml,**/*.yaml}",
+      "contains": "--protect"
+    },
+    {
+      "glob": "{package.json,Makefile,justfile,ecosystem.config.cjs,**/*.sh,**/*.yml,**/*.yaml}",
+      "contains": "--analyze"
+    },
+    {
+      "glob": "{package.json,Makefile,justfile,ecosystem.config.cjs,**/*.sh,**/*.yml,**/*.yaml}",
+      "contains": "--template"
+    },
+    {
+      "glob": "{package.json,Makefile,justfile,ecosystem.config.cjs,**/*.sh,**/*.yml,**/*.yaml}",
+      "contains": "--focus"
+    },
+    {
+      "glob": "{package.json,Makefile,justfile,ecosystem.config.cjs,**/*.sh,**/*.yml,**/*.yaml}",
+      "contains": "--external"
+    },
+    {
+      "glob": "{package.json,Makefile,justfile,ecosystem.config.cjs,**/*.sh,**/*.yml,**/*.yaml}",
+      "contains": "brain test --port"
+    }
+  ],
+  "steps": [
+    "Remove each reported flag: `brain run --site`, `--coep`, `--open`, `--https`; `brain build --protect`, `--analyze`; `brain new --template`; `brain map --focus`; `brain seo --external`; `brain test --port`.",
+    "For a site URL under `brain run`, set `PUBLIC_SITE_URL` in `.brain_env`.",
+    "Run `brain <command> --help` for what a command accepts."
+  ]
+}

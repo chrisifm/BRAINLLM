@@ -1,0 +1,10 @@
+{
+  "id": "related-files-share-get-rule",
+  "kind": "fix",
+  "title": "Related file buckets follow the get rule",
+  "why": "A relational owner who could read a row was denied its file.",
+  "changelog": [
+    "`related` file buckets evaluate the same rule"
+  ],
+  "guide": "docs/backend/files.md"
+}

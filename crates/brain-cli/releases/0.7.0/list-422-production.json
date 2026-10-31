@@ -1,0 +1,10 @@
+{
+  "id": "list-422-production",
+  "kind": "fix",
+  "title": "Production 422s hide the query catalog",
+  "why": "An anonymous probe could recover the declared filters and sorts from a refused list query; outside production they still appear.",
+  "changelog": [
+    "no longer lists the declared filters and sorts"
+  ],
+  "guide": "docs/backend/filters.md"
+}

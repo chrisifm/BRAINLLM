@@ -1,0 +1,15 @@
+{
+  "id": "site-url-messages",
+  "kind": "change",
+  "title": "Site URL messages say where the value came from",
+  "why": "The sitemap warning, B0736 and a build refused by `sockets.allowedOrigins` now name the variable to set, the routes skipped, the environment and the source of the URL.",
+  "changelog": [
+    "points at `PUBLIC_SITE_URL`",
+    "B0736 calls a loopback site URL",
+    "names its environment"
+  ],
+  "guide": "brain guide seo",
+  "codes": [
+    "B0736"
+  ]
+}

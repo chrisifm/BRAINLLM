@@ -1,0 +1,26 @@
+{
+  "id": "state-editable",
+  "kind": "capability",
+  "title": "Fields locked by state",
+  "why": "A field can change only in given states, on every write path, without a custom route.",
+  "changelog": [
+    "accepts `editable: { field: [states] }`"
+  ],
+  "guide": "docs/backend/state-machines.md",
+  "apis": [
+    "editable"
+  ],
+  "affects": [
+    "server/resources/*/transitions.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/<name>/transitions.jsbrain",
+    "snippet": "editable: { title: ['draft'] }"
+  },
+  "uses": [
+    {
+      "glob": "server/resources/*/transitions.jsbrain",
+      "contains": "editable:"
+    }
+  ]
+}

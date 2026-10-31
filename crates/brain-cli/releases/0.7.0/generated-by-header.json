@@ -1,0 +1,22 @@
+{
+  "id": "generated-by-header",
+  "kind": "change",
+  "title": "X-Generated-By replaces X-Powered-By",
+  "why": "HTML documents carry the official site and repository in `brain start`, `_headers`, nginx and Caddy. Nothing visible changes.",
+  "changelog": [
+    "now carry `X-Generated-By`"
+  ],
+  "guide": "docs/PERFORMANCE.md",
+  "apis": [
+    "X-Generated-By"
+  ],
+  "finds": [
+    {
+      "glob": "**/*.{brain,jsbrain,sh,yml,yaml,conf}",
+      "contains": "X-Powered-By"
+    }
+  ],
+  "steps": [
+    "Update anything that reads `X-Powered-By`, such as a proxy rule or a monitor, to `X-Generated-By`."
+  ]
+}

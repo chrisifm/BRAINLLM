@@ -1,0 +1,34 @@
+{
+  "id": "client-navigation",
+  "kind": "capability",
+  "title": "Navigation feedback without flicker",
+  "why": "Switching pages shows a loading indicator past 150 ms and never flashes a stale or half-swapped page. An app can bring its own spinner.",
+  "changelog": [
+    "Client navigation always gives feedback",
+    "Client navigation no longer flickers"
+  ],
+  "guide": "crates/brain-cli/guides/views.md",
+  "apis": [
+    "#brain-nav",
+    "route().navigating",
+    "aria-busy"
+  ],
+  "affects": [
+    "app.brain",
+    "views/**/_loading.brain"
+  ],
+  "adopt": {
+    "file": "app.brain",
+    "snippet": "<div id=\"brain-nav\" role=\"status\" hidden>Loading…</div>"
+  },
+  "uses": [
+    {
+      "glob": "app.brain",
+      "contains": "brain-nav"
+    },
+    {
+      "glob": "**/*.brain",
+      "contains": ".navigating"
+    }
+  ]
+}

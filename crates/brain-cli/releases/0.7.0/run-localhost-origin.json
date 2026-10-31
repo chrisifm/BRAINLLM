@@ -1,0 +1,10 @@
+{
+  "id": "run-localhost-origin",
+  "kind": "fix",
+  "title": "Declared localhost works on a loopback bind",
+  "why": "`brain run` stopped on its own port when `localhost` was the allowed origin.",
+  "changelog": [
+    "`brain run` with `localhost` in"
+  ],
+  "guide": "docs/backend/proxy-cors.md"
+}

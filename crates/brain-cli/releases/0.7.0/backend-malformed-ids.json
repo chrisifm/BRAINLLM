@@ -1,0 +1,10 @@
+{
+  "id": "backend-malformed-ids",
+  "kind": "fix",
+  "title": "Malformed ids are 404 or INVALID_ID",
+  "why": "Pages and jobs get a 404 instead of an error view with the raw message, and the API names the UUID format.",
+  "changelog": [
+    "A malformed id through `ctx.backend`"
+  ],
+  "guide": "docs/BACKEND.md"
+}

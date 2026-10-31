@@ -1,0 +1,10 @@
+{
+  "id": "analytics-dev-proxy",
+  "kind": "fix",
+  "title": "/_brain/analytics.js answers in development and under brain start",
+  "why": "The script answered 404 with native sockets and lost the base path.",
+  "changelog": [
+    "`/_brain/analytics.js` answers"
+  ],
+  "guide": "docs/backend/analytics.md"
+}

@@ -1,0 +1,31 @@
+{
+  "id": "backend-error-codes",
+  "kind": "capability",
+  "title": "ctx.backend.resource() failures carry code and fix",
+  "why": "Server code can branch on the backend's code while the message stays generic.",
+  "changelog": [
+    "failures carry the backend's `code` and `fix`"
+  ],
+  "guide": "brain guide server",
+  "apis": [
+    "error.code",
+    "error.fix"
+  ],
+  "affects": [
+    "server/**/*.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/orders.jsbrain",
+    "snippet": "try {\n  await ctx.backend.resource('orders').create(values)\n} catch (e) {\n  if (e.code === 'DATABASE_BUSY') return { retry: true }\n  throw e\n}"
+  },
+  "uses": [
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "e.code ==="
+    },
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "error.code ==="
+    }
+  ]
+}

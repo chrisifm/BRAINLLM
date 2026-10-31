@@ -1,0 +1,28 @@
+{
+  "id": "backend-capabilities",
+  "kind": "capability",
+  "title": "brain backend capabilities lists what the backend accepts",
+  "why": "Field types, filter operators, policy grants and limits come from the code, so an author need not guess them.",
+  "changelog": [
+    "`brain backend capabilities` and the MCP tool"
+  ],
+  "guide": "docs/backend/filters.md",
+  "apis": [
+    "brain backend capabilities",
+    "brain_backend_capabilities"
+  ],
+  "affects": [
+    "server/resources/**"
+  ],
+  "adopt": {
+    "file": "package.json",
+    "command": "brain backend capabilities --json",
+    "snippet": "\"scripts\": { \"backend:capabilities\": \"brain backend capabilities --json\" }"
+  },
+  "uses": [
+    {
+      "glob": "{package.json,Makefile,justfile,ecosystem.config.cjs,**/*.sh,**/*.yml,**/*.yaml}",
+      "contains": "brain backend capabilities"
+    }
+  ]
+}

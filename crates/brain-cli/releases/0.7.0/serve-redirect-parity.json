@@ -1,0 +1,10 @@
+{
+  "id": "serve-redirect-parity",
+  "kind": "fix",
+  "title": "brain dev refuses the redirects production refuses",
+  "why": "Dev answered an invalid status or an off-site location that production turned into a 500.",
+  "changelog": [
+    "`brain dev` refuses the redirects"
+  ],
+  "guide": "brain guide server"
+}

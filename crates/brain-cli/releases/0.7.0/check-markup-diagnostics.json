@@ -1,0 +1,22 @@
+{
+  "id": "check-markup-diagnostics",
+  "kind": "change",
+  "title": "B0780 and B0781 catch markup and await mistakes",
+  "why": "A stray `}` shipped as text and an `await` outside `async` emitted JavaScript that does not parse. Both are reported now, so an app may see new findings.",
+  "changelog": [
+    "B0780 warns on a `}`",
+    "B0781 reports `await`"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "codes": [
+    "B0780",
+    "B0781"
+  ],
+  "affects": [
+    "views/**",
+    "comp/**"
+  ],
+  "steps": [
+    "Run `brain check`; apply the exact edit B0780 gives and make each function B0781 names `async`."
+  ]
+}

@@ -81,9 +81,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - B0736 calls a loopback site URL this machine's own address instead of a placeholder.
 - A build refused by `sockets.allowedOrigins` names its environment and where the site URL came from.
 - A `DATABASE_URL` without a user connects as the system account, as `psql` does; it used to try the role `anonymous`. B0762 connection failures now say the host, database and user tried and why it failed, never the password.
-B0721 and B0722 read `process.env`, `ctx.env` and `import.meta.env` from tokens: a comment, a string, prose or a CSS rule that mentions a key no longer counts as a read, and a guard in a later statement (`const k = ctx.env.K; if (!k) ...`) makes the key optional.
-A session write without `BRAIN_SECRET` fails with B0782 and how to set it.
-`brain dev` refuses the redirects production refuses (an invalid status, an off-site or malformed location), thrown or returned from `load`; it used to answer them and production then failed with a 500.
+- B0721 and B0722 read `process.env`, `ctx.env` and `import.meta.env` from tokens: a comment, a string, prose or a CSS rule that mentions a key no longer counts as a read, and a guard in a later statement (`const k = ctx.env.K; if (!k) ...`) makes the key optional.
+- A session write without `BRAIN_SECRET` fails with B0782 and how to set it.
+- `brain dev` refuses the redirects production refuses (an invalid status, an off-site or malformed location), thrown or returned from `load`; it used to answer them and production then failed with a 500.
 ### Security
 - `brain backend capabilities` and the MCP tool `brain_backend_capabilities` list field types, filter operators, policy grants and limits, generated from the code.
 - `brain backend approve-contract` previews a changed resource contract with the rows it touches and records it on `--apply`; changes that can invalidate stored rows also need `--accept <resource>`.

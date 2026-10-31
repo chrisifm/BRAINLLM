@@ -1,0 +1,22 @@
+{
+  "id": "handler-source-checks",
+  "kind": "change",
+  "title": "Handlers with no default export or a literal secret fail early",
+  "why": "`brain check` reports B0772 and B0773, which used to fail only at boot, and `brain jobs work` now refuses those handlers at start.",
+  "changelog": [
+    "(B0772) or a secret-shaped literal (B0773)",
+    "refuses those two handlers"
+  ],
+  "guide": "docs/backend/routes.md",
+  "codes": [
+    "B0772",
+    "B0773"
+  ],
+  "affects": [
+    "server/routes/**",
+    "server/jobs/**"
+  ],
+  "steps": [
+    "Run `brain check`. Give each reported handler a default export and move each literal secret to `.brain_env`, read through `ctx.env`."
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "id": "backend-route-status",
+  "kind": "change",
+  "title": "Route handlers keep their 5xx status",
+  "why": "A returned 5xx answered 200. It is honored now; a status outside 200-599 answers `500 ROUTE_INVALID_STATUS`, and a lone `{status: 'open'}` is plain data.",
+  "changelog": [
+    "A route handler returning `{status: 5xx, body}`"
+  ],
+  "guide": "docs/backend/routes.md",
+  "affects": [
+    "server/routes/*/handler.jsbrain"
+  ],
+  "finds": [
+    {
+      "glob": "server/routes/*/handler.jsbrain",
+      "contains": "status:"
+    }
+  ],
+  "steps": [
+    "Review handlers that return a `status`: a 5xx is now sent as written."
+  ]
+}

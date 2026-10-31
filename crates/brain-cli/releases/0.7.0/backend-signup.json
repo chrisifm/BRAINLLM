@@ -1,0 +1,31 @@
+{
+  "id": "backend-signup",
+  "kind": "capability",
+  "title": "ctx.backend.signup from a server function",
+  "why": "An app can create native accounts in its own server function; refused values come back as field errors.",
+  "changelog": [
+    "`ctx.backend.signup(credentials)`"
+  ],
+  "guide": "brain guide server",
+  "apis": [
+    "ctx.backend.signup"
+  ],
+  "affects": [
+    "server/**/*.jsbrain",
+    "views/**/*.brain"
+  ],
+  "adopt": {
+    "file": "server/auth.jsbrain",
+    "snippet": "await ctx.backend.signup(values)\nreturn ctx.backend.login(values)"
+  },
+  "uses": [
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "backend.signup("
+    },
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "/_brain/auth/signup"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "job-ends-at-settle",
+  "kind": "change",
+  "title": "A job ends when its handler settles",
+  "why": "An open handle cost about 10 s per job. Work the handler does not await is now cut off 100 ms after it settles.",
+  "changelog": [
+    "A job finishes when its handler settles"
+  ],
+  "guide": "docs/backend/queues.md",
+  "affects": [
+    "server/jobs/*/handler.jsbrain"
+  ],
+  "finds": [
+    {
+      "glob": "server/jobs/*/handler.jsbrain"
+    }
+  ],
+  "steps": [
+    "In each handler, `await` everything it starts: unawaited work stops 100 ms after the handler settles."
+  ]
+}

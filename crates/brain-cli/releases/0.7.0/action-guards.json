@@ -1,0 +1,32 @@
+{
+  "id": "action-guards",
+  "kind": "capability",
+  "title": "when_any guards and owner.<ref> grants",
+  "why": "Actions and transitions can express OR guards and let the owner of a referenced record act, without a custom route.",
+  "changelog": [
+    "accept `when_any`"
+  ],
+  "guide": "docs/backend/atomic-updates.md",
+  "apis": [
+    "when_any",
+    "owner.<ref>[.<ref>]"
+  ],
+  "affects": [
+    "server/resources/*/actions.jsbrain",
+    "server/resources/*/transitions.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/<name>/actions.jsbrain",
+    "snippet": "when_any: [{ ends_on: { exists: false } }, { ends_on: { gte: '$now' } }]"
+  },
+  "uses": [
+    {
+      "glob": "server/resources/*/{actions,transitions}.jsbrain",
+      "contains": "when_any:"
+    },
+    {
+      "glob": "server/resources/*/{actions,transitions}.jsbrain",
+      "contains": "'owner."
+    }
+  ]
+}

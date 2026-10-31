@@ -1,0 +1,23 @@
+{
+  "id": "backend-startup-codes",
+  "kind": "change",
+  "title": "Backend startup errors carry B0760-B0764",
+  "why": "Mail, storage, database, pool and public URL errors lacked a code and a fix and surfaced only at start. `brain check` and `brain doctor` warn first and `brain backend serve` stops on them before connecting.",
+  "changelog": [
+    "carry a code (B0760–B0764)"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "codes": [
+    "B0760",
+    "B0761",
+    "B0762",
+    "B0763",
+    "B0764"
+  ],
+  "affects": [
+    ".brain_env"
+  ],
+  "steps": [
+    "Run `brain check` with the production environment's values and fix each B0760-B0764 it reports."
+  ]
+}

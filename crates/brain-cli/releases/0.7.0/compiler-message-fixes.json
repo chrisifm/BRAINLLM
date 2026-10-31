@@ -1,0 +1,14 @@
+{
+  "id": "compiler-message-fixes",
+  "kind": "fix",
+  "title": "B0119 and B0110 give the real cause",
+  "why": "An imported module that does not parse is reported as such with its first error, and the classic `for` fix shows bounded retries.",
+  "changelog": [
+    "B0119 reports an imported module",
+    "The B0110 fix for a classic `for`"
+  ],
+  "codes": [
+    "B0119",
+    "B0110"
+  ]
+}

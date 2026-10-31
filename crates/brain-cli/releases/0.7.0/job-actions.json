@@ -1,0 +1,31 @@
+{
+  "id": "job-actions",
+  "kind": "capability",
+  "title": "Atomic actions from API keys and jobs",
+  "why": "API keys work on action and transition routes, so a job can update a counter atomically instead of reading and writing.",
+  "changelog": [
+    "gains `.action()` and `.transition()`"
+  ],
+  "guide": "docs/backend/job-backend.md",
+  "apis": [
+    ".action()",
+    ".transition()"
+  ],
+  "affects": [
+    "server/jobs/*/handler.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/jobs/<queue>/handler.jsbrain",
+    "snippet": "await ctx.backend.resource('products').action(product.id, 'reserve', { quantity: 1 })"
+  },
+  "uses": [
+    {
+      "glob": "server/jobs/*/handler.jsbrain",
+      "contains": ".action("
+    },
+    {
+      "glob": "server/jobs/*/handler.jsbrain",
+      "contains": ".transition("
+    }
+  ]
+}

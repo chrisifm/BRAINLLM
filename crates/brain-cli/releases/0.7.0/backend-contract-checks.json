@@ -1,0 +1,24 @@
+{
+  "id": "backend-contract-checks",
+  "kind": "change",
+  "title": "brain check reports backend contract mistakes before start",
+  "why": "A missing route secret, an invalid route contract, bad analytics settings or a missing handler or hook now appear in `brain check` instead of failing at `brain backend serve`, and a non-numeric analytics setting is refused rather than ignored.",
+  "changelog": [
+    "`brain check` warns B0790",
+    "report an invalid route contract as B0735",
+    "reports invalid `brain.json` analytics settings",
+    "a non-numeric `analytics.retentionDays`"
+  ],
+  "guide": "docs/backend/routes.md",
+  "codes": [
+    "B0790",
+    "B0735"
+  ],
+  "affects": [
+    "brain.json",
+    "server/routes/**"
+  ],
+  "steps": [
+    "Run `brain check` and fix each B0735 and B0790 it reports: set the secret, correct the contract, or create the missing handler or hook file."
+  ]
+}

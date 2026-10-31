@@ -1,0 +1,24 @@
+{
+  "id": "i18n-text-diagnostics",
+  "kind": "change",
+  "title": "B1850 and B1403 find more text that is not translated",
+  "why": "New warnings appear for framework messages missing from a non-English default language and for text a person sees in `<script>` literals.",
+  "changelog": [
+    "B1850 warns when a page shows framework messages",
+    "B1403 also reads `<script>` literals"
+  ],
+  "guide": "brain guide i18n",
+  "codes": [
+    "B1850",
+    "B1403"
+  ],
+  "affects": [
+    "i18n/**",
+    "views/**",
+    "comp/**"
+  ],
+  "steps": [
+    "Add the `form.*` and `error_state.*` keys B1850 names to the default language.",
+    "Move each literal B1403 reports into the dictionary and read it with `t()`."
+  ]
+}

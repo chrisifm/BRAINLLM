@@ -1,0 +1,13 @@
+{
+  "id": "backend-db-system-user",
+  "kind": "fix",
+  "title": "A DATABASE_URL without a user connects as the system account",
+  "why": "It tried the role `anonymous`. B0762 now says the host, database and user tried, and why it failed, never the password.",
+  "changelog": [
+    "A `DATABASE_URL` without a user connects"
+  ],
+  "guide": "docs/backend/lifecycle.md",
+  "codes": [
+    "B0762"
+  ]
+}
