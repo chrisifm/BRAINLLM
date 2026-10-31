@@ -933,6 +933,29 @@ async fn before(
     .await
     .map_err(|error| before_error(error, r))
 }
+/// Declared unique/check violations are client errors with field names; everything else stays generic.
+fn write_error(r: &Resource, error: sqlx::Error) -> Error {
+    match db::constraint_fields(r, &error) {
+        Some(("unique", fields)) => {
+            let mut e = Error::new(
+                StatusCode::CONFLICT,
+                "UNIQUE_CONFLICT",
+                "Another record already uses this value; choose a different value for the listed fields",
+            );
+            e.fields = Some(json!(fields
+                .into_iter()
+                .map(|f| (f, "Already used".to_string()))
+                .collect::<BTreeMap<_, _>>()));
+            e
+        }
+        Some(_) => Error::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "CONSTRAINT_VIOLATION",
+            "The record violates a declared type or check constraint; correct the values and retry",
+        ),
+        None => Error::internal(db::safe(error)),
+    }
+}
 fn conflict() -> Error {
     Error::new(
         StatusCode::CONFLICT,
@@ -955,7 +978,7 @@ async fn create(
     let data = r.input(&input).map_err(Error::validation)?;
     let record = db::create(&app.pool, r, u.id, data)
         .await
-        .map_err(|error| Error::internal(db::safe(error)))?;
+        .map_err(|error| write_error(r, error))?;
     app.sockets.changed(&name, "create", &record);
     Ok(Json(record))
 }
@@ -987,7 +1010,7 @@ async fn update(
     let data = r.input(&input).map_err(Error::validation)?;
     let record = db::update_checked(&app.pool, r, id, owner, data, Some(&revision))
         .await
-        .map_err(|error| Error::internal(db::safe(error)))?
+        .map_err(|error| write_error(r, error))?
         .ok_or_else(conflict)?;
     app.sockets.changed(&name, "update", &record);
     Ok(Json(record))

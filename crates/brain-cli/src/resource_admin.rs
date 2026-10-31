@@ -102,7 +102,7 @@ fn resource_editor(r: &Resource, service: &str, create: bool) -> Result<String, 
                     "text"
                 }
             ),
-            _ => return Err("Unsupported generated resource control".into()),
+            other => return Err(format!("--admin-ui does not generate controls for field kind {other}; fix: create the resource without --admin-ui and write the form by hand, or use str, num, bool, email or obj")),
         };
         controls.push_str(&format!("    {control}\n"));
     }

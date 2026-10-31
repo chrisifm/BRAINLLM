@@ -8,7 +8,7 @@ import net from 'node:net'
 import { createHmac, randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 const project = fileURLToPath(new URL('../', import.meta.url))
-const targets=['backend','foundation','jwt_sessions','links','media','native_openapi','auth_flows','auth_http','native_sockets']
+const targets=['backend','exact_types','foundation','jwt_sessions','links','media','native_openapi','auth_flows','auth_http','native_sockets']
 const selection=process.argv.indexOf('--only-tests')
 const onlyCLI=process.argv.includes('--only-cli')
 if(onlyCLI&&selection>=0)throw Error('--only-cli and --only-tests cannot be combined')

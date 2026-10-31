@@ -11,10 +11,11 @@ pub mod links;
 pub mod media;
 pub mod response;
 pub mod search;
+pub mod types;
 pub mod upload;
 pub mod webhooks;
 
-pub use contract::{Field, Policy, Resource};
+pub use contract::{Check, Constraints, Field, Policy, Resource};
 pub use http::{Config, serve};
 
 pub mod before_hooks;

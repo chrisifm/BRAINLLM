@@ -24,10 +24,57 @@ server/jobs/post_created/schema.jsbrain payload shape
 server/jobs/post_created/handler.jsbrain server-only async handler
 ```
 
-Schemas export one literal object (`{ title: 'str!', body: 'str' }`). Types: `str`, `num`, `bool`, `email`, `obj`;
-`!` means required. Unknown fields are rejected. Resource and field identifiers are lowercase letters, digits and
+Schemas export one literal object (`{ title: 'str!', body: 'str' }`). Types: `str`, `num`, `bool`, `email`, `obj`
+and the exact types below; `!` means required. Unknown fields are rejected. Resource and field identifiers are lowercase letters, digits and
 underscores, begin with a letter, and are at most 48 bytes; storage-reserved names are rejected. There are 1–64 fields.
 Strings are at most 16 KB, emails 254 bytes and objects 32 KB. HTTP JSON bodies are at most 64 KB.
+
+### Exact types, constraints and defaults (2026-10-30)
+
+| Type | Accepted JSON | Stored and returned | Database CHECK |
+|---|---|---|---|
+| `int` | integer within ±9007199254740991 (JavaScript-safe) | the same number | integral JSON number within the range |
+| `decimal(p,s)` | **string** such as `"19.5"`; 1 ≤ p ≤ 38, 0 ≤ s ≤ p | canonical string with exactly `s` decimals (`"19.50"`) | pattern that casts losslessly to `numeric(p,s)` |
+| `date` | `YYYY-MM-DD`, years 0001–9999, real calendar day | the same string | pattern |
+| `datetime` | RFC 3339 with `Z` or `±HH:MM` offset | UTC `YYYY-MM-DDTHH:MM:SS.sssZ` | pattern |
+| `enum(a\|b)` | one listed value (`[A-Za-z0-9_.-]`, 1–64 bytes, ≤64 values) | the same string | `IN (...)` |
+| `list<str>` / `list<str,N>` | array of strings, ≤64 items (or N, 1–256), each ≤1024 bytes; required means non-empty | the same array | array of strings and item count |
+
+Decimal transport is a deliberate choice: JSON numbers pass through binary floating point in JavaScript and in
+`serde_json`, so money is never accepted as a number. Extra fractional digits are accepted only when they are zeros;
+nothing is rounded. `-0` is stored as `0`. Legacy `num` keeps its previous JSON semantics.
+
+A field may use the object form to add a default or single-field uniqueness:
+`{ status: { type: 'enum(draft|open)!', default: 'draft' }, slug: { type: 'str!', unique: true } }`.
+Defaults are validated against the type at load time and fill a missing value on create and on PUT (PUT replaces the
+record). A required field with a default is not required in the OpenAPI request schema. Unknown options are rejected.
+
+An optional `constraints.jsbrain` next to the schema declares composite uniqueness and checks:
+
+```js
+<meta server>
+export default {
+  unique: [['title', 'closes_on']],
+  check: [
+    { field: 'openings', min: 1, max: 500 },
+    { compare: ['salary_min', '<=', 'salary_max'] },
+    { together: ['salary_min', 'salary_max', 'currency'] }
+  ]
+}
+```
+
+Composite unique sets have 2–4 fields; single-field uniqueness uses `unique: true`. Ranges apply to `int`, `num`,
+`decimal`, `date` and `datetime`; `compare` (`< <= > >= == !=`) needs two ordered fields of the same type; `together`
+(2–8 fields) means all present or all absent. At most 16 unique indexes and 16 checks per resource. Each rule is
+enforced in the request validator and in Postgres (deterministic `_brain_ck_*` constraints and `_brain_ux_*`
+expression indexes). Migration adds missing objects; if existing rows violate one, the migration rolls back with
+an actionable message. `verify` reports a missing object as `BDB_SCHEMA_DRIFT`. A duplicate returns HTTP 409
+`UNIQUE_CONFLICT` with the field names; a database check violation returns 422 `CONSTRAINT_VIOLATION`.
+Legacy contracts serialize and record exactly as before and receive no new database objects. Byte limits of list
+items are enforced by the application layer only. `--admin-ui` generates controls only for the legacy types.
+
+Every record read (`GET`, list, search, create, update) now includes `created_at` and `updated_at` as UTC RFC 3339
+strings with millisecond precision; they are read-only and documented in OpenAPI.
 
 Policy exports all four operation lists. Default grants are admin-only. Available grants: `admin`, `company`,
 `candidate`, `user`, configured role names, `owner` (existing rows only), and `public` (read only). Empty lists deny everyone. There is no implicit

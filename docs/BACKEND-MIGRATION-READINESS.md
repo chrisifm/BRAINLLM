@@ -35,12 +35,12 @@ even if the source labels it P1 or P2.
 | ID | Priority | General requirement | Current disposition |
 |---|---|---|---|
 | B-01 | P0 | References, real FKs, delete rules, related reads/filters | Open; owner FK is not a relation between application resources. |
-| B-02 | P0 | Exact integers/decimal/money values | Open; retain current JSON semantics while adding exact typed contracts. |
-| B-03 | P0 | Calendar dates, instants and exposed record timestamps | Open; internal timestamps are not typed application fields or public read metadata. |
-| B-04 | P0 | Bounded enums and database constraints | Open. |
-| B-05 | P0 | Typed arrays and element-count bounds | Open; object fields reject arrays. |
-| B-06 | P0 | Field/composite uniqueness and cross-field constraints | Open; native account uniqueness does not provide generic resource constraints. |
-| B-07 | P1 | Declared field defaults | Open. |
+| B-02 | P0 | Exact integers/decimal/money values | Implemented 2026-10-30: `int` (JavaScript-safe range) and `decimal(p,s)` transported as canonical strings with a lossless `numeric(p,s)` CHECK; `num` unchanged. Needs migration evidence on real data. |
+| B-03 | P0 | Calendar dates, instants and exposed record timestamps | Implemented 2026-10-30: `date`, `datetime` (normalized to UTC) and read-only `created_at`/`updated_at` on every record read. |
+| B-04 | P0 | Bounded enums and database constraints | Implemented 2026-10-30: `enum(a\|b)` validated in the schema and by a database CHECK. |
+| B-05 | P0 | Typed arrays and element-count bounds | Partial 2026-10-30: bounded `list<str>`/`list<str,N>`; other element types remain open. Item byte limits are application-enforced only. |
+| B-06 | P0 | Field/composite uniqueness and cross-field constraints | Implemented 2026-10-30: `unique: true`, composite `unique` sets and declarative range/compare/together checks in `constraints.jsbrain`, enforced in the validator and in Postgres (409/422). |
+| B-07 | P1 | Declared field defaults | Implemented 2026-10-30: per-field `default` validated at load and applied on create and PUT. |
 | B-08 | P1 | Legacy bigint identity or indexed external-ID mapping | Open; preserve existing identifiers and URLs without lossy numeric conversion. |
 | B-09 | P1 | Organization ownership and explicit transfer | Open; user ownership and role grants do not establish organization membership. |
 | B-10 | P1 | Bounded arbitrary JSON objects | Covered reference within the existing object-byte contract. |

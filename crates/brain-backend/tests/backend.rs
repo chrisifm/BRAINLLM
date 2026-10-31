@@ -17,10 +17,12 @@ fn resource() -> Resource {
             Field {
                 kind: "str".into(),
                 required: true,
+                ..Default::default()
             },
         )]),
         policy: Policy::default(),
         hooks: Hooks::default(),
+        constraints: Default::default(),
     }
 }
 #[test]
@@ -178,6 +180,7 @@ async fn postgres_auth_policy_crud_transactional_hooks_and_leased_jobs() {
                         Field {
                             kind: "str".into(),
                             required: true,
+                            ..Default::default()
                         },
                     ),
                     (
@@ -185,6 +188,7 @@ async fn postgres_auth_policy_crud_transactional_hooks_and_leased_jobs() {
                         Field {
                             kind: "str".into(),
                             required: true,
+                            ..Default::default()
                         },
                     ),
                     (
@@ -192,11 +196,13 @@ async fn postgres_auth_policy_crud_transactional_hooks_and_leased_jobs() {
                         Field {
                             kind: "obj".into(),
                             required: true,
+                            ..Default::default()
                         },
                     ),
                 ]),
                 policy: Policy::default(),
                 hooks: Hooks::default(),
+                constraints: Default::default(),
             }],
             uploads: std::env::temp_dir().join(format!("brain-upload-test-{}", std::process::id())),
             origins: vec!["http://localhost:5182".into()],

@@ -1003,3 +1003,89 @@ async fn all_native_mutations_enforce_before_hooks_policy_validation_deadlines_a
         .unwrap();
     pool.close().await;
 }
+
+#[tokio::test]
+#[ignore = "Use the explicitly owned disposable Postgres harness; exact types over real HTTP"]
+async fn exact_typed_resources_report_field_errors_unique_conflicts_and_timestamps_over_http() {
+    let pool = database().await;
+    let resource: brain_backend::Resource = serde_json::from_value(json!({"name":"priced","fields":{"sku":{"kind":"str","required":true,"unique":true},"price":{"kind":"decimal(8,2)","required":true},"state":{"kind":"enum(new|sold)","required":true,"default":"new"}},"policy":{"read":["owner"],"create":["candidate"],"update":["owner"],"delete":["owner"]}})).unwrap();
+    db::migrate(&pool, &[resource.clone()]).await.unwrap();
+    let files = std::env::temp_dir().join(format!("brain-typed-http-{}", Uuid::new_v4().simple()));
+    let router = brain_backend::http::router(
+        pool.clone(),
+        brain_backend::Config {
+            resources: vec![resource],
+            jobs: vec![],
+            uploads: files.clone(),
+            origins: vec!["https://app.example.test".into()],
+            production: true,
+            jwt: None,
+            google: None,
+            gcs: None,
+            roles: Default::default(),
+            mail: None,
+            auth_public_base_url: None,
+            webhooks: None,
+            before_hooks: None,
+            sockets: None,
+        },
+    )
+    .await
+    .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown(async {
+            let _ = stopped.await;
+        })
+        .await
+        .unwrap()
+    });
+    let server = Server {
+        url,
+        client: reqwest::Client::builder()
+            .no_proxy()
+            .pool_max_idle_per_host(0)
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap(),
+        task,
+        stop: Some(stop),
+        files,
+    };
+    let auth = Auth::new(pool.clone()).await.unwrap();
+    let email = format!("typed-{}@example.test", Uuid::new_v4().simple());
+    let password = "synthetic-typed-resource-password".to_string();
+    auth.signup(Credentials { email: email.clone(), password: password.clone() }).await.unwrap();
+    let (_, token) = auth.login(Credentials { email, password }).await.unwrap().unwrap();
+    let cookie = format!("{}={token}", auth::COOKIE);
+    let (status, _, created) = server
+        .post("/api/priced", json!({"sku":"A-1","price":"19.5"}), Some(&cookie))
+        .await;
+    assert_eq!(status, 200, "{created}");
+    assert_eq!(created["data"], json!({"sku":"A-1","price":"19.50","state":"new"}));
+    assert!(created["created_at"].as_str().is_some_and(|s| s.ends_with('Z')));
+    let (status, _, invalid) = server
+        .post("/api/priced", json!({"sku":"A-2","price":19.5,"state":"gone"}), Some(&cookie))
+        .await;
+    assert_eq!(status, 422, "{invalid}");
+    assert!(invalid["error"]["fields"]["price"].as_str().unwrap().contains("decimal string"));
+    assert!(invalid["error"]["fields"]["state"].as_str().unwrap().contains("new, sold"));
+    let (status, _, conflict) = server
+        .post("/api/priced", json!({"sku":"A-1","price":"1.00"}), Some(&cookie))
+        .await;
+    assert_eq!(status, 409, "{conflict}");
+    assert_eq!(conflict["error"]["code"], "UNIQUE_CONFLICT");
+    assert_eq!(conflict["error"]["fields"], json!({"sku":"Already used"}));
+    let (status, _, read) = server
+        .get(&format!("/api/priced/{}", created["id"].as_str().unwrap()), Some(&cookie))
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(read["created_at"], created["created_at"]);
+    drop(server);
+}

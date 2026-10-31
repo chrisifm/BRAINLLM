@@ -286,11 +286,98 @@ async fn resource_shape(conn: &mut sqlx::PgConnection, r: &Resource) -> Result<(
     .await?;
     constraint(conn, &table, "p", "id", None, None).await?;
     constraint(conn, &table, "f", "owner", Some("_brain_users"), Some("a")).await?;
-    let valid:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass($1) AND tgname='_brain_search' AND tgenabled='O' AND tgfoid='public._brain_search_update()'::regprocedure AND tgargs=$2)").bind(format!("public.{table}")).bind(r.search.iter().flat_map(|f|f.as_bytes().iter().copied().chain(std::iter::once(0))).collect::<Vec<_>>()).fetch_one(conn).await.map_err(safe)?;
+    let valid:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass($1) AND tgname='_brain_search' AND tgenabled='O' AND tgfoid='public._brain_search_update()'::regprocedure AND tgargs=$2)").bind(format!("public.{table}")).bind(r.search.iter().flat_map(|f|f.as_bytes().iter().copied().chain(std::iter::once(0))).collect::<Vec<_>>()).fetch_one(&mut *conn).await.map_err(safe)?;
     if !valid {
         return Err(drift(&format!("{table} search trigger")));
     }
+    for (name, _) in r.sql_checks() {
+        if !check_exists(conn, &table, &name).await? {
+            return Err(drift(&format!("{table} check constraint {name}")));
+        }
+    }
+    for (name, _) in r.unique_sets() {
+        if !unique_index_exists(conn, &table, &name).await? {
+            return Err(drift(&format!("{table} unique index {name}")));
+        }
+    }
     Ok(())
+}
+async fn check_exists(conn: &mut sqlx::PgConnection, table: &str, name: &str) -> Result<bool, String> {
+    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass($1) AND conname=$2 AND contype='c' AND convalidated)")
+        .bind(format!("public.{table}"))
+        .bind(name)
+        .fetch_one(conn)
+        .await
+        .map_err(safe)
+}
+async fn unique_index_exists(conn: &mut sqlx::PgConnection, table: &str, name: &str) -> Result<bool, String> {
+    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid WHERE i.indrelid=to_regclass($1) AND c.relname=$2 AND i.indisunique AND i.indisvalid AND i.indpred IS NULL)")
+        .bind(format!("public.{table}"))
+        .bind(name)
+        .fetch_one(conn)
+        .await
+        .map_err(safe)
+}
+/// Exact-type CHECK constraints and unique indexes. Legacy-only contracts produce none, so tables migrated
+/// by earlier releases are untouched. Existing rows that violate a new constraint abort the whole migration.
+async fn install_constraints(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    r: &Resource,
+) -> Result<(), String> {
+    let table = table(r);
+    for (name, expr) in r.sql_checks() {
+        if check_exists(tx, &table, &name).await? {
+            continue;
+        }
+        // Audited SQL: identifiers are validated; literals come from restricted canonical alphabets.
+        sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+            "ALTER TABLE {table} ADD CONSTRAINT {name} CHECK ({expr})"
+        )))
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| {
+            safe(error);
+            format!("{}: existing rows violate a declared type or check constraint; review the data before migrating; nothing was changed", r.name)
+        })?;
+    }
+    for (name, fields) in r.unique_sets() {
+        if unique_index_exists(tx, &table, &name).await? {
+            continue;
+        }
+        let columns = fields
+            .iter()
+            .map(|f| format!("(data->>'{f}')"))
+            .collect::<Vec<_>>()
+            .join(",");
+        sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+            "CREATE UNIQUE INDEX {name} ON {table} ({columns})"
+        )))
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| {
+            safe(error);
+            format!("{}: existing rows contain duplicates for a declared unique constraint; review the data before migrating; nothing was changed", r.name)
+        })?;
+    }
+    Ok(())
+}
+/// Field names covered by the declared constraint or unique index named in a database error.
+pub fn constraint_fields(r: &Resource, error: &sqlx::Error) -> Option<(&'static str, Vec<String>)> {
+    let db = error.as_database_error()?;
+    let name = db.constraint()?;
+    match db.code()?.as_ref() {
+        "23505" => r
+            .unique_sets()
+            .into_iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, fields)| ("unique", fields)),
+        "23514" => r
+            .sql_checks()
+            .into_iter()
+            .any(|(n, _)| n == name)
+            .then(|| ("check", Vec::new())),
+        _ => None,
+    }
 }
 async fn foundation(conn: &mut sqlx::PgConnection) -> Result<(), String> {
     for (table, cols) in [
@@ -508,8 +595,7 @@ pub async fn migrate(pool: &PgPool, resources: &[Resource]) -> Result<(), String
             .map_err(safe)?;
     }
     for r in resources {
-        let fields =
-            serde_json::to_value(&r.fields).map_err(|_| "Cannot encode resource schema")?;
+        let fields = r.recorded_fields();
         let old =
             sqlx::query("SELECT fields,search_fields FROM _brain_resource_schemas WHERE name=$1")
                 .bind(&r.name)
@@ -540,6 +626,7 @@ pub async fn migrate(pool: &PgPool, resources: &[Resource]) -> Result<(), String
             .join(",");
         sqlx::raw_sql(sqlx::AssertSqlSafe(format!("DROP TRIGGER IF EXISTS _brain_search ON {table}; CREATE TRIGGER _brain_search BEFORE INSERT OR UPDATE OF data ON {table} FOR EACH ROW EXECUTE FUNCTION public._brain_search_update({args});"))).execute(&mut *tx).await.map_err(safe)?;
         sqlx::query("INSERT INTO _brain_resource_schemas(name,fields,search_fields) VALUES($1,$2,$3) ON CONFLICT DO NOTHING").bind(&r.name).bind(fields).bind(json!(r.search)).execute(&mut *tx).await.map_err(safe)?;
+        install_constraints(&mut tx, r).await?;
         resource_shape(&mut tx, r).await?;
     }
     foundation(&mut tx).await?;
@@ -584,8 +671,17 @@ pub fn safe(error: sqlx::Error) -> String {
     )
 }
 
-fn record(row: sqlx::postgres::PgRow) -> Value {
-    json!({"id":row.get::<Uuid,_>("id"),"owner":row.get::<Uuid,_>("owner"),"data":row.get::<Value,_>("data")})
+/// Public record columns. Timestamps are rendered by Postgres in UTC as `YYYY-MM-DDTHH:MM:SS.sssZ`
+/// (the JavaScript `toISOString` form), so no date library or local time zone enters the response.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! record_columns {
+    () => {
+        "id,owner,data,to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS created_at_utc,to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS updated_at_utc"
+    };
+}
+pub(crate) fn record(row: sqlx::postgres::PgRow) -> Value {
+    json!({"id":row.get::<Uuid,_>("id"),"owner":row.get::<Uuid,_>("owner"),"data":row.get::<Value,_>("data"),"created_at":row.get::<String,_>("created_at_utc"),"updated_at":row.get::<String,_>("updated_at_utc")})
 }
 fn query(
     prefix: &'static str,
@@ -608,7 +704,7 @@ pub async fn list(
     crate::search::list(pool, r, owner, search, limit, offset, None).await
 }
 pub async fn get(pool: &PgPool, r: &Resource, id: Uuid) -> Result<Option<Value>, sqlx::Error> {
-    query("SELECT id,owner,data FROM ", r, " WHERE id=$1")
+    query(concat!("SELECT ", record_columns!(), " FROM "), r, " WHERE id=$1")
         .build()
         .bind(id)
         .fetch_optional(pool)
@@ -640,7 +736,7 @@ pub async fn create(
     let row = query(
         "INSERT INTO ",
         r,
-        "(id,owner,data) VALUES ($1,$2,$3) RETURNING id,owner,data",
+        concat!("(id,owner,data) VALUES ($1,$2,$3) RETURNING ", record_columns!()),
     )
     .build()
     .bind(Uuid::new_v4())
@@ -671,7 +767,7 @@ pub async fn update_checked(
     expected: Option<&str>,
 ) -> Result<Option<Value>, sqlx::Error> {
     let mut tx = pool.begin().await?;
-    let row=query("UPDATE ",r," SET data=$2,updated_at=now() WHERE id=$1 AND ($3::uuid IS NULL OR owner=$3) AND ($4::text IS NULL OR xmin::text=$4) RETURNING id,owner,data").build()
+    let row=query("UPDATE ",r,concat!(" SET data=$2,updated_at=now() WHERE id=$1 AND ($3::uuid IS NULL OR owner=$3) AND ($4::text IS NULL OR xmin::text=$4) RETURNING ",record_columns!())).build()
         .bind(id).bind(data).bind(owner).bind(expected).fetch_optional(&mut *tx).await?.map(record);
     if let Some(row) = &row {
         hook(&mut tx, r, "update", row).await?;
@@ -698,7 +794,7 @@ pub async fn delete_checked(
     let row = query(
         "DELETE FROM ",
         r,
-        " WHERE id=$1 AND ($2::uuid IS NULL OR owner=$2) AND ($3::text IS NULL OR xmin::text=$3) RETURNING id,owner,data",
+        concat!(" WHERE id=$1 AND ($2::uuid IS NULL OR owner=$2) AND ($3::text IS NULL OR xmin::text=$3) RETURNING ", record_columns!()),
     )
     .build()
     .bind(id)
@@ -831,7 +927,7 @@ pub async fn verify(pool: &PgPool, resources: &[Resource]) -> Result<(), String>
                 .await
                 .map_err(safe)?;
         if stored.as_ref().is_none_or(|row| {
-            row.get::<Value, _>("fields") != serde_json::to_value(&r.fields).unwrap_or(Value::Null)
+            row.get::<Value, _>("fields") != r.recorded_fields()
                 || row.get::<Value, _>("search_fields") != json!(r.search)
         }) {
             return Err(format!(
@@ -1015,7 +1111,7 @@ pub async fn get_version(
     id: Uuid,
 ) -> Result<Option<(Value, String)>, sqlx::Error> {
     query(
-        "SELECT id,owner,data,xmin::text AS revision FROM ",
+        concat!("SELECT ", record_columns!(), ",xmin::text AS revision FROM "),
         r,
         " WHERE id=$1",
     )

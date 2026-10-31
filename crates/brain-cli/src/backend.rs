@@ -19,6 +19,8 @@ pub use socket_configuration::{socket_settings, SocketSettings};
 fn literal(expr: &Expr) -> Result<Value, String> {
     match expr.unparen() {
         Expr::Str{value,..}=>Ok(json!(value)), Expr::Bool{value,..}=>Ok(json!(value)), Expr::Null(_)=>Ok(Value::Null),
+        Expr::Num{raw,..}=>number(raw,false),
+        Expr::Unary{op:"-",arg,..}=>match arg.unparen() {Expr::Num{raw,..}=>number(raw,true),_=>Err("Contract numbers must be plain decimal literals".into())},
         Expr::Object{props,..}=>{
             let mut obj=serde_json::Map::new();
             for p in props {
@@ -30,6 +32,14 @@ fn literal(expr: &Expr) -> Result<Value, String> {
         },
         Expr::Array{elems,..}=>elems.iter().map(|e|e.as_ref().ok_or_else(||"Contract arrays cannot have holes".into()).and_then(literal)).collect::<Result<Vec<_>,_>>().map(Value::Array),
         _=>Err("Contract must export one literal object; no function calls, imports or computed values".into()),
+    }
+}
+/// Plain JSON-compatible decimal literals only; integers outside i64 are refused instead of rounded.
+fn number(raw: &str, negative: bool) -> Result<Value, String> {
+    let text = if negative { format!("-{raw}") } else { raw.to_string() };
+    match serde_json::from_str::<Value>(&text) {
+        Ok(Value::Number(n)) if !(n.is_f64() && raw.bytes().all(|c| c.is_ascii_digit())) => Ok(Value::Number(n)),
+        _ => Err(format!("Contract number `{text}` must be a plain decimal literal within the 64-bit integer range; write exact decimals as strings")),
     }
 }
 pub(crate) fn read_contract(root: &Path, path: &Path) -> Result<Value, String> {
@@ -62,12 +72,30 @@ fn fields(value: Value) -> Result<BTreeMap<String, Field>, String> {
         .ok_or("Schema must be an object of field:type pairs")?;
     obj.iter()
         .map(|(name, v)| {
-            let kind = v.as_str().ok_or("Field shape must be a string")?;
+            // `'int!'` or the object form `{ type: 'int!', default: 0, unique: true }`.
+            let (kind, default, unique) = match v {
+                Value::String(kind) => (kind.as_str(), None, false),
+                Value::Object(spec) => {
+                    if let Some(key) = spec.keys().find(|k| !matches!(k.as_str(), "type" | "default" | "unique")) {
+                        return Err(format!("field `{name}`: unknown option `{key}`; fix: use type, default and unique"));
+                    }
+                    let kind = spec.get("type").and_then(Value::as_str).ok_or_else(|| format!("field `{name}` needs type: 'str' (or another kind)"))?;
+                    let unique = match spec.get("unique") {
+                        None => false,
+                        Some(Value::Bool(b)) => *b,
+                        Some(_) => return Err(format!("field `{name}`: unique must be true or false")),
+                    };
+                    (kind, spec.get("default").cloned(), unique)
+                }
+                _ => return Err("Field shape must be a string or { type, default, unique }".into()),
+            };
             Ok((
                 name.clone(),
                 Field {
                     kind: kind.trim_end_matches('!').into(),
                     required: kind.ends_with('!'),
+                    default,
+                    unique,
                 },
             ))
         })
@@ -122,12 +150,21 @@ pub fn contracts(root: &Path, kind: &str) -> Result<Vec<Resource>, String> {
         } else {
             Vec::new()
         };
+        let constraints_path = e.path().join("constraints.jsbrain");
+        let constraints = if kind == "resources" && constraints_path.is_file() {
+            serde_json::from_value(read_contract(root, &constraints_path)?).map_err(|_| {
+                format!("server/{kind}/{name}/constraints.jsbrain must export {{ unique: [[field, field]], check: [{{ field, min, max }} | {{ compare: [a, op, b] }} | {{ together: [a, b] }}] }}")
+            })?
+        } else {
+            Default::default()
+        };
         let r = Resource {
             search,
             name,
             fields,
             policy,
             hooks,
+            constraints,
         };
         r.validate()
             .map_err(|message| format!("server/{kind}/{}: {message}", r.name))?;
@@ -284,6 +321,7 @@ pub fn add_with_admin(root: &Path, kind: &str, name: &str, shapes: &str, admin_u
         fields,
         policy: Policy::default(),
         hooks: Hooks::default(),
+        constraints: Default::default(),
     };
     r.validate()?;
     let dir = if kind == "resource" {
@@ -1247,6 +1285,36 @@ mod tests {
             std::os::unix::fs::symlink(root.0.join("actual"), root.0.join("linked")).unwrap();
             assert!(read_contract(&root.0, &root.0.join("linked/schema.jsbrain")).is_err());
         }
+    }
+    #[test]
+    fn exact_type_contracts_read_object_fields_numbers_and_constraints() {
+        let root = fixture_root("exact-types");
+        let dir = root.0.join("server/resources/vacancies");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("schema.jsbrain"), "<meta server>\nexport default {\n  title: 'str!',\n  status: { type: 'enum(draft|published)!', default: 'draft' },\n  slug: { type: 'str!', unique: true },\n  openings: { type: 'int', default: 1 },\n  salary_min: 'decimal(10,2)',\n  salary_max: 'decimal(10,2)',\n  currency: 'enum(MXN|USD)',\n  closes_on: 'date',\n  tags: 'list<str,10>'\n}\n").unwrap();
+        fs::write(dir.join("policy.jsbrain"), "<meta server>\nexport default { read: ['admin'], create: ['admin'], update: ['admin'], delete: ['admin'] }\n").unwrap();
+        fs::write(dir.join("constraints.jsbrain"), "<meta server>\nexport default {\n  unique: [['title', 'closes_on']],\n  check: [\n    { field: 'openings', min: 1, max: 500 },\n    { compare: ['salary_min', '<=', 'salary_max'] },\n    { together: ['salary_min', 'salary_max', 'currency'] }\n  ]\n}\n").unwrap();
+        let resources = contracts(&root.0, "resources").unwrap();
+        let r = &resources[0];
+        assert_eq!(r.fields["status"].default, Some(json!("draft")));
+        assert!(r.fields["slug"].unique && r.fields["slug"].required);
+        assert_eq!(r.fields["openings"].default, Some(json!(1)));
+        assert_eq!(r.constraints.check.len(), 3);
+        assert_eq!(r.unique_sets().len(), 2);
+        let saved = r.input(&json!({"title":"Engineer","slug":"engineer"})).unwrap();
+        assert_eq!(saved, json!({"title":"Engineer","slug":"engineer","status":"draft","openings":1}));
+        assert!(r.input(&json!({"title":"A","slug":"a","salary_min":"10"})).unwrap_err().contains_key("salary_max"));
+        fs::write(dir.join("schema.jsbrain"), "export default { price: { type: 'int', default: 99999999999999999999 } }\n").unwrap();
+        assert!(contracts(&root.0, "resources").unwrap_err().contains("64-bit integer range"));
+        fs::write(dir.join("schema.jsbrain"), "export default { price: { type: 'int', unknown: true } }\n").unwrap();
+        assert!(contracts(&root.0, "resources").unwrap_err().contains("unknown option"));
+        fs::write(dir.join("schema.jsbrain"), "export default { price: 'money' }\n").unwrap();
+        assert!(contracts(&root.0, "resources").unwrap_err().contains("decimal(p,s)"));
+        fs::write(dir.join("schema.jsbrain"), "export default { a: 'int', b: 'int' }\n").unwrap();
+        fs::write(dir.join("constraints.jsbrain"), "export default { check: [{ field: 'a', min: 1, max: -2 }] }\n").unwrap();
+        assert!(contracts(&root.0, "resources").unwrap_err().contains("min greater than max"));
+        fs::write(dir.join("constraints.jsbrain"), "export default { checks: [] }\n").unwrap();
+        assert!(contracts(&root.0, "resources").unwrap_err().contains("constraints.jsbrain must export"));
     }
     #[test]
     fn contracts_do_not_evaluate_application_code() {

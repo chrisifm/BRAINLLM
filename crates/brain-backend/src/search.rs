@@ -1,7 +1,7 @@
 //! Explicit searchable text fields only. Every candidate branch carries the same authorization scope.
 use crate::Resource;
-use serde_json::{Value, json};
-use sqlx::{PgPool, Row};
+use serde_json::Value;
+use sqlx::PgPool;
 use uuid::Uuid;
 #[derive(Clone, Debug)]
 pub struct Cursor {
@@ -33,7 +33,7 @@ pub async fn list(
     let table = format!("_brain_res_{}", r.name);
     let mut tx = pool.begin().await?;
     sqlx::raw_sql("SET LOCAL statement_timeout='1s'; SET LOCAL lock_timeout='500ms'; SET LOCAL pg_trgm.word_similarity_threshold='0.45';").execute(&mut *tx).await?;
-    let mut q = sqlx::QueryBuilder::<sqlx::Postgres>::new("SELECT id,owner,data FROM ");
+    let mut q = sqlx::QueryBuilder::<sqlx::Postgres>::new(concat!("SELECT ", crate::record_columns!(), " FROM "));
     q.push(&table);
     let owner_predicate = |q: &mut sqlx::QueryBuilder<sqlx::Postgres>| {
         if let Some(owner) = owner {
@@ -83,7 +83,7 @@ pub async fn list(
         .push_bind(offset);
     let rows = q.build().fetch_all(&mut *tx).await?;
     tx.commit().await?;
-    Ok(rows.into_iter().map(|row|json!({"id":row.get::<Uuid,_>("id"),"owner":row.get::<Uuid,_>("owner"),"data":row.get::<Value,_>("data")})).collect())
+    Ok(rows.into_iter().map(crate::db::record).collect())
 }
 fn normalize_prefix(text: &str) -> String {
     let mut s = String::new();

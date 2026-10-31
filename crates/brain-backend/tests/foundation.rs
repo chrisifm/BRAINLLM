@@ -16,6 +16,7 @@ fn resource() -> Resource {
                 Field {
                     kind: "str".into(),
                     required: true,
+                    ..Default::default()
                 },
             ),
             (
@@ -23,12 +24,14 @@ fn resource() -> Resource {
                 Field {
                     kind: "str".into(),
                     required: false,
+                    ..Default::default()
                 },
             ),
         ]),
         search: vec!["title".into()],
         policy: Policy::default(),
         hooks: Hooks::default(),
+        constraints: Default::default(),
     }
 }
 #[test]

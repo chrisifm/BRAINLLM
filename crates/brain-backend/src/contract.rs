@@ -2,14 +2,58 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
+use crate::types::{KIND_HELP, Ty};
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Field {
     pub kind: String,
     #[serde(default)]
     pub required: bool,
+    /// Value stored when the field is omitted or null on create and on full replacement (PUT).
+    /// Omitted from serialization when absent so legacy recorded contracts stay byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<Value>,
+    /// Single-field uniqueness enforced by a Postgres unique index.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unique: bool,
 }
+impl Field {
+    pub fn ty(&self) -> Option<Ty> {
+        crate::types::parse(&self.kind)
+    }
+}
+/// Declarative resource constraints (`constraints.jsbrain`): composite uniqueness and checks.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Constraints {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unique: Vec<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub check: Vec<Check>,
+}
+impl Constraints {
+    pub fn is_empty(&self) -> bool {
+        self.unique.is_empty() && self.check.is_empty()
+    }
+}
+/// Exactly one form: a range (`field` + `min`/`max`), a comparison (`compare: [a, op, b]`)
+/// or an all-or-nothing group (`together: [a, b, ...]`).
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Check {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compare: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub together: Option<Vec<String>>,
+}
+const COMPARE_OPS: &[&str] = &["<", "<=", ">", ">=", "==", "!="];
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Policy {
@@ -87,6 +131,8 @@ pub struct Resource {
     pub policy: Policy,
     #[serde(default)]
     pub hooks: Hooks,
+    #[serde(default, skip_serializing_if = "Constraints::is_empty")]
+    pub constraints: Constraints,
 }
 
 pub fn identifier(s: &str) -> bool {
@@ -116,17 +162,29 @@ impl Resource {
             return Err("a resource needs 1..64 fields".into());
         }
         for (name, field) in &self.fields {
-            if !identifier(name)
-                || !matches!(
-                    field.kind.as_str(),
-                    "str" | "num" | "bool" | "email" | "obj"
-                )
+            let ty = field.ty();
+            if !identifier(name) || ty.is_none() {
+                return Err(format!(
+                    "invalid field `{name}`; fix: use name:{KIND_HELP} with optional !"
+                ));
+            }
+            let ty = ty.unwrap();
+            if let Some(default) = &field.default
+                && (default.is_null() || ty.normalize(default, field.required).is_none())
             {
                 return Err(format!(
-                    "invalid field `{name}`; fix: use name:str|num|bool|email|obj with optional !"
+                    "field `{name}` default does not match {}; fix: {}",
+                    field.kind,
+                    ty.expected()
+                ));
+            }
+            if field.unique && !ty.unique_eligible() {
+                return Err(format!(
+                    "field `{name}` cannot be unique; fix: unique applies to str, email, int, decimal, date, datetime and enum fields"
                 ));
             }
         }
+        self.validate_constraints()?;
         let search_unique: std::collections::HashSet<_> = self.search.iter().collect();
         if self.search.len() > 8
             || search_unique.len() != self.search.len()
@@ -187,34 +245,34 @@ impl Resource {
             }
         }
         for (name, field) in &self.fields {
-            let v = obj.get(name).unwrap_or(&Value::Null);
+            let mut v = obj.get(name).unwrap_or(&Value::Null);
+            if v.is_null()
+                && let Some(default) = &field.default
+            {
+                v = default;
+            }
             if v.is_null() {
                 if field.required {
                     errors.insert(name.clone(), "Required".into());
                 }
                 continue;
             }
-            let valid = match field.kind.as_str() {
-                "str" => v
-                    .as_str()
-                    .is_some_and(|s| s.len() <= 16384 && (!field.required || !s.trim().is_empty())),
-                "email" => v.as_str().is_some_and(|s| {
-                    s.len() <= 254
-                        && !s.chars().any(char::is_whitespace)
-                        && s.split_once('@').is_some_and(|(a, b)| {
-                            !a.is_empty() && b.contains('.') && !b.contains('@')
-                        })
-                }),
-                "num" => v.as_f64().is_some_and(f64::is_finite),
-                "bool" => v.is_boolean(),
-                "obj" => v.is_object() && v.to_string().len() <= 32768,
-                _ => false,
-            };
-            if valid {
-                clean.insert(name.clone(), v.clone());
-            } else {
-                errors.insert(name.clone(), format!("Expected {}", field.kind));
+            match field.ty() {
+                Some(ty) => match ty.normalize(v, field.required) {
+                    Some(value) => {
+                        clean.insert(name.clone(), value);
+                    }
+                    None => {
+                        errors.insert(name.clone(), ty.expected());
+                    }
+                },
+                None => {
+                    errors.insert(name.clone(), format!("Expected {}", field.kind));
+                }
             }
+        }
+        if errors.is_empty() {
+            self.check_values(&clean, &mut errors);
         }
         if errors.is_empty() {
             Ok(Value::Object(clean))
@@ -223,12 +281,194 @@ impl Resource {
         }
     }
     pub fn schema(&self) -> Value {
-        let props: Map<String, Value> = self.fields.iter().map(|(n,f)| (n.clone(), match f.kind.as_str() {
-            "obj" => json!({"type":"object"}), "num" => json!({"type":"number"}), "bool" => json!({"type":"boolean"}),
-            "email" => json!({"type":"string","format":"email","maxLength":254}),
-            _ => json!({"type":"string","maxLength":16384, "minLength": if f.required {1} else {0}}),
-        })).collect();
-        json!({"type":"object","additionalProperties":false,"properties":props,"required":self.fields.iter().filter(|(_,f)| f.required).map(|(n,_)|n).collect::<Vec<_>>()})
+        let props: Map<String, Value> = self
+            .fields
+            .iter()
+            .map(|(n, f)| {
+                let mut schema = f
+                    .ty()
+                    .map(|ty| ty.json_schema(f.required))
+                    .unwrap_or_else(|| json!({}));
+                if let Some(default) = f.ty().zip(f.default.as_ref()).and_then(|(ty, d)| ty.normalize(d, f.required)) {
+                    schema["default"] = default;
+                }
+                if f.unique {
+                    schema["x-brain-unique"] = json!(true);
+                }
+                (n.clone(), schema)
+            })
+            .collect();
+        let mut schema = json!({"type":"object","additionalProperties":false,"properties":props,"required":self.fields.iter().filter(|(_,f)| f.required && f.default.is_none()).map(|(n,_)|n).collect::<Vec<_>>()});
+        if !self.constraints.is_empty() {
+            schema["x-brain-constraints"] = serde_json::to_value(&self.constraints).unwrap_or(Value::Null);
+        }
+        schema
+    }
+    /// Contract value recorded in `_brain_resource_schemas.fields`. Without constraints it is exactly the
+    /// serialized field map, so resources migrated by earlier releases keep matching. Constraints use a key
+    /// that can never be a field identifier.
+    pub fn recorded_fields(&self) -> Value {
+        let mut fields = serde_json::to_value(&self.fields).unwrap_or(Value::Null);
+        if !self.constraints.is_empty()
+            && let Some(map) = fields.as_object_mut()
+        {
+            map.insert(
+                "$constraints".into(),
+                serde_json::to_value(&self.constraints).unwrap_or(Value::Null),
+            );
+        }
+        fields
+    }
+    fn typed(&self, name: &str) -> Result<Ty, String> {
+        self.fields
+            .get(name)
+            .and_then(Field::ty)
+            .ok_or_else(|| format!("constraint references undeclared field `{name}`; fix: declare it in schema.jsbrain"))
+    }
+    fn validate_constraints(&self) -> Result<(), String> {
+        let c = &self.constraints;
+        let mut sets = std::collections::BTreeSet::new();
+        for set in &c.unique {
+            let sorted: std::collections::BTreeSet<_> = set.iter().collect();
+            if !(2..=4).contains(&set.len()) || sorted.len() != set.len() {
+                return Err("each composite unique entry needs 2..4 distinct fields; fix: use unique: true on the field for single-field uniqueness".into());
+            }
+            for name in set {
+                if !self.typed(name)?.unique_eligible() {
+                    return Err(format!("field `{name}` cannot be part of a unique constraint; fix: use str, email, int, decimal, date, datetime or enum fields"));
+                }
+            }
+            if !sets.insert(sorted) {
+                return Err("duplicate composite unique constraint; fix: declare each field set once".into());
+            }
+        }
+        if c.unique.len() + self.fields.values().filter(|f| f.unique).count() > 16 || c.check.len() > 16 {
+            return Err("a resource allows at most 16 unique constraints and 16 checks".into());
+        }
+        for check in &c.check {
+            let forms = [check.field.is_some() || check.min.is_some() || check.max.is_some(), check.compare.is_some(), check.together.is_some()];
+            if forms.iter().filter(|x| **x).count() != 1 {
+                return Err("each check needs exactly one form: { field, min, max } or { compare: [a, op, b] } or { together: [a, b] }".into());
+            }
+            if let Some(field) = &check.field {
+                let ty = self.typed(field)?;
+                if !ty.ordered() || check.min.is_none() && check.max.is_none() {
+                    return Err(format!("range check on `{field}` needs an int, decimal, date or datetime field and min and/or max"));
+                }
+                let mut bounds = Vec::new();
+                for bound in [&check.min, &check.max].into_iter().flatten() {
+                    bounds.push(ty.normalize(bound, false).ok_or_else(|| format!("range bound for `{field}` is invalid; fix: {}", ty.expected()))?);
+                }
+                if bounds.len() == 2 && ty.compare(&bounds[0], &bounds[1]) == Some(std::cmp::Ordering::Greater) {
+                    return Err(format!("range check on `{field}` has min greater than max"));
+                }
+            } else if check.field.is_none() && (check.min.is_some() || check.max.is_some()) {
+                return Err("range checks need field".into());
+            } else if let Some(compare) = &check.compare {
+                let [a, op, b] = compare.as_slice() else {
+                    return Err("compare needs [field, operator, field]".into());
+                };
+                let (ta, tb) = (self.typed(a)?, self.typed(b)?);
+                if a == b || !COMPARE_OPS.contains(&op.as_str()) || !ta.ordered() || std::mem::discriminant(&ta) != std::mem::discriminant(&tb) {
+                    return Err(format!("invalid compare [{a}, {op}, {b}]; fix: compare two different int, decimal, date or datetime fields of the same type with < <= > >= == !="));
+                }
+            } else if let Some(group) = &check.together {
+                let unique: std::collections::BTreeSet<_> = group.iter().collect();
+                if !(2..=8).contains(&group.len()) || unique.len() != group.len() {
+                    return Err("together needs 2..8 distinct fields".into());
+                }
+                for name in group {
+                    self.typed(name)?;
+                }
+            }
+        }
+        Ok(())
+    }
+    /// Application-level enforcement of declared checks on normalized values (the database repeats them).
+    fn check_values(&self, data: &Map<String, Value>, errors: &mut BTreeMap<String, String>) {
+        for check in &self.constraints.check {
+            if let Some(field) = &check.field {
+                let (Some(ty), Some(value)) = (self.fields.get(field).and_then(Field::ty), data.get(field)) else { continue };
+                for (bound, ord, word) in [(&check.min, std::cmp::Ordering::Less, ">="), (&check.max, std::cmp::Ordering::Greater, "<=")] {
+                    if let Some(bound) = bound.as_ref().and_then(|b| ty.normalize(b, false))
+                        && ty.compare(value, &bound) == Some(ord)
+                    {
+                        errors.entry(field.clone()).or_insert(format!("Must be {word} {}", bound.as_str().map(str::to_string).unwrap_or_else(|| bound.to_string())));
+                    }
+                }
+            } else if let Some([a, op, b]) = check.compare.as_deref() {
+                let (Some(ty), Some(va), Some(vb)) = (self.fields.get(a).and_then(Field::ty), data.get(a), data.get(b)) else { continue };
+                let Some(ord) = ty.compare(va, vb) else { continue };
+                let ok = match op.as_str() {
+                    "<" => ord.is_lt(),
+                    "<=" => ord.is_le(),
+                    ">" => ord.is_gt(),
+                    ">=" => ord.is_ge(),
+                    "==" => ord.is_eq(),
+                    _ => ord.is_ne(),
+                };
+                if !ok {
+                    errors.entry(a.clone()).or_insert(format!("Must be {op} {b}"));
+                }
+            } else if let Some(group) = &check.together {
+                let present = group.iter().filter(|f| data.contains_key(*f)).count();
+                if present != 0 && present != group.len() {
+                    for name in group.iter().filter(|f| !data.contains_key(*f)) {
+                        errors.insert(name.clone(), format!("Required together with {}", group.join(", ")));
+                    }
+                }
+            }
+        }
+    }
+    /// Named Postgres CHECK constraints for exact kinds and declared checks. Legacy fields produce none.
+    pub fn sql_checks(&self) -> Vec<(String, String)> {
+        let has = |f: &str| format!("data ? '{f}'");
+        let mut out = Vec::new();
+        for (name, field) in &self.fields {
+            let Some(expr) = field.ty().and_then(|ty| ty.sql_value_check(name)) else { continue };
+            out.push(if field.required {
+                format!("{} AND ({expr})", has(name))
+            } else {
+                format!("NOT ({}) OR ({expr})", has(name))
+            });
+        }
+        for check in &self.constraints.check {
+            if let Some(field) = &check.field {
+                let Some(ty) = self.fields.get(field).and_then(Field::ty) else { continue };
+                let operand = ty.sql_operand(field);
+                let mut parts = Vec::new();
+                for (bound, op) in [(&check.min, ">="), (&check.max, "<=")] {
+                    if let Some(bound) = bound.as_ref().and_then(|b| ty.normalize(b, false)) {
+                        parts.push(format!("{operand}{op}{}", ty.sql_literal(&bound)));
+                    }
+                }
+                out.push(format!("NOT ({}) OR ({})", has(field), parts.join(" AND ")));
+            } else if let Some([a, op, b]) = check.compare.as_deref() {
+                let Some(ty) = self.fields.get(a).and_then(Field::ty) else { continue };
+                let op = match op.as_str() { "==" => "=", "!=" => "<>", other => other };
+                out.push(format!("NOT ({} AND {}) OR ({}{op}{})", has(a), has(b), ty.sql_operand(a), ty.sql_operand(b)));
+            } else if let Some(group) = &check.together {
+                let sum = group.iter().map(|f| format!("({})::int", has(f))).collect::<Vec<_>>().join("+");
+                out.push(format!("({sum}) IN (0,{})", group.len()));
+            }
+        }
+        out.into_iter().map(|expr| (self.object_name("_brain_ck_", &expr), expr)).collect()
+    }
+    /// Unique index field sets: single-field `unique: true` plus composite `constraints.unique`.
+    pub fn unique_sets(&self) -> Vec<(String, Vec<String>)> {
+        self.fields
+            .iter()
+            .filter(|(_, f)| f.unique)
+            .map(|(n, _)| vec![n.clone()])
+            .chain(self.constraints.unique.iter().cloned())
+            .map(|set| (self.object_name("_brain_ux_", &set.join(",")), set))
+            .collect()
+    }
+    /// Deterministic object name: the definition hash changes when the definition changes.
+    fn object_name(&self, prefix: &str, definition: &str) -> String {
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(format!("{}\0{definition}", self.name).as_bytes());
+        format!("{prefix}{}", digest.iter().take(10).map(|b| format!("{b:02x}")).collect::<String>())
     }
 }
 
@@ -240,7 +480,7 @@ pub fn openapi_with_roles(resources: &[Resource], roles: &crate::auth_flows::Rol
     for r in resources {
         let body = json!({"required":true,"content":{"application/json":{"schema":r.schema()}}});
         let error_responses = json!({"400":{"description":"Invalid request"},"401":{"description":"Sign in required"},"403":{"description":"Policy denied"},"404":{"description":"Not found"},"422":{"description":"Validation errors"},"429":{"description":"Rate limited"}});
-        let row = json!({"type":"object","additionalProperties":false,"required":["id","owner","data"],"properties":{"id":{"type":"string","format":"uuid"},"owner":{"type":"string","format":"uuid"},"data":r.schema()}});
+        let row = json!({"type":"object","additionalProperties":false,"required":["id","owner","data","created_at","updated_at"],"properties":{"id":{"type":"string","format":"uuid"},"owner":{"type":"string","format":"uuid"},"data":r.schema(),"created_at":{"type":"string","format":"date-time","readOnly":true},"updated_at":{"type":"string","format":"date-time","readOnly":true}}});
         let op = |name: &str, write: bool| {
             let mut out = json!({"operationId":format!("{}_{}",r.name,name),"security":native_security(),"responses":error_responses});
             let output = if name == "list" {

@@ -191,7 +191,7 @@ pub(crate) fn resource_view(r: &brain_backend::Resource) -> Result<String, Strin
                 encode.push_str(&format!("    values.{key} = row.data.{key} == null ? '' : JSON.stringify(row.data.{key})\n"));
             },
             "str" | "email" | "num" => controls.push_str(&format!("      <Input label=\"{key}\" name=\"{key}\" type=\"{}\" bind:value={{f.v.{key}}} error={{f.err.{key}}} disabled={{f.busy || deleting !== ''}} />\n", if field.kind == "num" { "number" } else if field.kind == "email" { "email" } else { "text" })),
-            other => return Err(format!("Recipe does not support field kind {other}")),
+            other => return Err(format!("Recipe does not support field kind {other}; fix: use str, num, bool, email or obj in this resource, or write the form by hand")),
         }
     }
     let template = r#"<meta seo title="Manage __NAME__" description="Search and manage __NAME__ records." robots="noindex">

@@ -5,6 +5,8 @@ mod auth_flows;
 mod auth_http;
 #[path = "backend.rs"]
 mod backend;
+#[path = "exact_types.rs"]
+mod exact_types;
 #[path = "foundation.rs"]
 mod foundation;
 #[path = "jwt_sessions.rs"]

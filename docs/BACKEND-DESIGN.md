@@ -98,3 +98,13 @@ or preparing a release; this dated observation is not an evergreen freshness gua
 ### Direct dependency freshness audit — 2026-10-30
 
 The crates.io API max_stable_version was checked for every direct third-party Rust dependency (including dev dependencies): argon2 0.6.0, axum 0.8.9, brotli 9.1.1, http-body-util 0.1.5, image 0.25.10, jsonwebtoken 11.1.0, libc 0.2.191, notify 8.2.1, reqwest 0.13.5, serde 1.0.229, serde_json 1.0.154, sha2 0.11.1, slug 0.1.6, sqlx 0.9.0, tokio 1.54.1, tower 0.5.3, tower-http 0.7.1, tower_governor 0.8.0, url 2.5.8 and uuid 1.29.0. All configured direct versions matched the latest stable registry version at this audit. Keep Cargo.lock for reproducibility; future registry releases require a fresh compatibility audit rather than a timeless claim that these pins remain latest.
+
+### Exact resource types — 2026-10-30
+
+Exact types (`int`, `decimal(p,s)`, `date`, `datetime`, `enum`, `list<str>`), defaults and declarative constraints
+added no dependency: parsing, calendar math and canonical decimal handling live in `brain-backend/src/types.rs`.
+Decimals travel as strings because both JavaScript and `serde_json` without `arbitrary_precision` read JSON numbers
+as binary floats; enabling `arbitrary_precision` would change number handling across the whole backend. Records stay
+in the JSONB `data` column; exactness is guaranteed by validated canonical strings plus CHECK constraints that cast
+losslessly to `numeric(p,s)`. Constraints are recorded under a reserved `$constraints` key of the existing schema
+row, so legacy contracts keep a byte-identical recorded value and no migration of `_brain_resource_schemas` is needed.
