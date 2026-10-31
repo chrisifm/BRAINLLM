@@ -255,6 +255,7 @@ Private captured errors (message, stack, recent actions) are listed by `brain_er
 `load` runs only on the server. Client code may only read env vars prefixed `PUBLIC_`.
 Variables live in `.brain_env` (already created): shared `KEY=value` lines, then `[development]` `[staging]`
 `[production]` sections that override them. `brain run` uses development, `brain build` production, `--env x` another.
+An empty key fails the build (B0720); `KEY?=` declares one the app works without: it may stay empty and reads as unset.
 Read them as `process.env.KEY` (server) or `process.env.PUBLIC_KEY` (anywhere). Never create a `.env`.
 `.jsbrain` files starting with `<meta server>` run only on the server and may be used only inside `load` or server
 functions. Server function in a `.brain`: `server: async function save(ctx, data) {…}`; the client calls
@@ -356,7 +357,7 @@ Keep existing production routes until their behavior and policies pass a tested 
 ## CLI (also MCP: `brain mcp`; every command accepts `--json`)
 Main: `brain new <app>` · `brain run` (dev server with hot reload, app :5180; views render in the browser, so judge
 SEO and the no-JS HTML on `brain build` + `brain start`) · `brain build` (production) ·
-`brain doctor` (everything at once: check + tests + over-engineering + leaks; exits non-zero on any error).
+`brain doctor` (everything at once: check + tests + over-engineering + leaks; writes no versioned file; exits non-zero on any error; suspected leak B0601 is a warning unless `doctor.failOnSuspectedLeaks`).
 Production: `brain start` (serves `dist/`, restarts on crash, logs to `logs/app.log`) · `brain reload` (no downtime) ·
 `brain status` · `brain stop`. Optional PM2/nginx configurations: `brain deploy config pm2|nginx --request <JSON>`; see `docs/DEPLOYMENT.md`.
 Hosted under a sub-path: `brain.json` `"base": "/app/"`; keep writing app-absolute links and paths (`<a href="/about">`,
@@ -364,7 +365,7 @@ Hosted under a sub-path: `brain.json` `"base": "/app/"`; keep writing app-absolu
 Granular: `brain add view|comp|ui <name> --props "…"` · `brain check --json` · `brain test` · `brain spec [--topic x]` ·
 `brain guide [topic]`.
 Also: `brain preview` (temporary loopback server for `dist/`, Unix) · `brain explain <code>` ·
-`brain doctor --fix` (apply mechanical fixes, then run the full doctor). Config: `brain.json`.
+`brain doctor --fix` (apply mechanical fixes and update `.brain_env.example`, then run the full doctor). Config: `brain.json`.
 <!--planned:#68-->
 Unified exit codes across all commands: 0 ok · 1 project errors · 2 usage · 3 internal.
 <!--/planned-->
