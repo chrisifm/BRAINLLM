@@ -11,6 +11,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ### Added
 
+- Client navigation replaces every route-owned head tag (§32): description, canonical, hreflang and Markdown
+  alternates, and `prev`/`next` now follow the page; a page without them no longer keeps the previous page's tags.
+  Icons, stylesheets and the RSS feed stay.
 - Crawler-safe answers (§33): `throw gone()` in `load` answers 410; a redirect rule, the trailing-slash policy
   (`brain.json` `seo.trailingSlash`: `never` by default, `always`, `ignore`) and the canonical host
   (`seo.canonicalHost`) are one 301 hop with the query kept, in `brain start` for SSR and static apps. Guard

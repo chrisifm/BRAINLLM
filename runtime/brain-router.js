@@ -206,16 +206,16 @@ export function router(o = {}) {
       if (!cur.$d && [...cur.querySelectorAll('script[type=module]')].some(sc => /\$d\s*=/.test(sc.textContent))) hold(cur)
       for (const a of next.attributes || []) cur.setAttribute(a.name, a.value)
       if (doc.title) document.title = doc.title
-      for (const s of ['meta[name=description]', 'link[rel=canonical]']) {
-        const a = document.head && document.head.querySelector(s), b = doc.querySelector(s)
-        if (a && b) a.replaceWith(document.adoptNode ? document.adoptNode(b) : b)
-      }
-      // SEO (§32): og:*, twitter:*, robots and JSON-LD follow the page; the region's own tags stay where they are
+      // SEO (§32, S04): the route owns description, og:*, twitter:*, robots, JSON-LD, canonical, hreflang and Markdown
+      // alternates and prev/next: the current page's go, the next page's come (none when it has none). Site links
+      // (icons, stylesheets, the RSS feed) and the region's own tags stay where they are.
       const tags = (r, skip) =>
-        [...((r && r.querySelectorAll && r.querySelectorAll('meta,script')) || [])].filter(e => {
+        [...((r && r.querySelectorAll && r.querySelectorAll('meta,script,link')) || [])].filter(e => {
           for (let p = e.parentNode; p; p = p.parentNode) if (p === skip) return false
-          const k = e.getAttribute('property') || e.getAttribute('name') || ''
-          return e.tagName === 'SCRIPT' ? e.getAttribute('type') === 'application/ld+json' : /^(og:|twitter:|robots$)/.test(k)
+          const k = e.getAttribute('property') || e.getAttribute('name') || '', rel = e.getAttribute('rel') || ''
+          return e.tagName === 'SCRIPT' ? e.getAttribute('type') === 'application/ld+json'
+            : e.tagName === 'LINK' ? /^(canonical|prev|next)$/.test(rel) || (rel === 'alternate' && (e.hasAttribute('hreflang') || e.getAttribute('type') === 'text/markdown'))
+            : /^(og:|twitter:|robots$|description$)/.test(k)
         })
       if (document.head) {
         for (const e of tags(document.head)) e.remove()
