@@ -48,6 +48,21 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - B0781 reports `await` with no enclosing `async` function, including nested functions and the top of a component script: that code emitted JavaScript that does not parse.
 - B0737 names every credential in `ctx.session.set` and reads `d.password`; B0783 warns on a credential in `console.*` or browser storage, and on a stored password returned by a server function, `load` or a route handler.
 - `*.test.brain` under `views/` no longer gets B0501 when it is checked on its own: a test file has no route.
+- Every command refuses a flag it does not know, and acts on nothing: `brain test --port 5280` used to read the value as a path and report green.
+- `brain test` fails on a path that does not exist, is not a test file or selects no test, on a file that declares no `test()`, and on more than one path.
+- With native sockets, `brain test` and `brain doctor` run against the app's own `brain run` on the declared port; another process there is named, with how to find it.
+- `brain doctor` no longer says no errors were captured when the tests did not run.
+- `--env=<name>` and `brain seo --since=<date>` take effect; they used to be ignored in that spelling.
+- `/_brain/analytics.js` answers under `brain run` with native sockets and under `brain start`, and its link keeps the base path.
+- `stub()` and `reply()` in `*.test.brain` answer a `server:` function or an endpoint without a server.
+- In `*.test.brain`, `#id` finds a component's element on every mount of the file, not only the first.
+- A rejected submit puts focus on the first rejected field, or back on the control `disabled={f.busy}` took it from; it used to fall to the page body.
+- Leaving a form that holds a password field no longer asks to discard changes.
+- `ctx.backend.signup(credentials)` creates a native account from a server function; a refused address is `errors.email` and a bad password `errors.password`.
+- `brain card resource:<name>` lists the response shapes, including when `owner` is present.
+- A view over `budget.viewKB` is reported once, at its largest page, with JS, CSS and HTML broken down.
+- B0736 calls a loopback site URL this machine's own address instead of a placeholder.
+- A build refused by `sockets.allowedOrigins` names its environment and where the site URL came from.
 - A `DATABASE_URL` without a user connects as the system account, as `psql` does; it used to try the role `anonymous`. B0762 connection failures now say the host, database and user tried and why it failed, never the password.
 B0721 and B0722 read `process.env`, `ctx.env` and `import.meta.env` from tokens: a comment, a string, prose or a CSS rule that mentions a key no longer counts as a read, and a guard in a later statement (`const k = ctx.env.K; if (!k) ...`) makes the key optional.
 A session write without `BRAIN_SECRET` fails with B0782 and how to set it.

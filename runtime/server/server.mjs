@@ -644,6 +644,28 @@ export function nativeAuthBridge(raw, refused, serviceKey) {
     } finally {request.destroy();bytes.fill(0)}
     return {user}
   }
+  // Creates the account and leaves the session alone: `await ctx.backend.signup(v); return ctx.backend.login(v)` signs in
+  // too. A refused address is the email field's error: the same 422 for an invalid one and for one already taken, and no
+  // more than any signup form reveals by succeeding.
+  async function signup(incoming,response,rid,credentials) {
+    if (incoming.method !== 'POST' || response.headersSent || response.writableEnded || response.destroyed) throw new HttpError(403,'B0742: Sign up through a same-origin POST server function')
+    if (!credentials || typeof credentials !== 'object' || Array.isArray(credentials) || Object.keys(credentials).some(key=>!['email','password'].includes(key)) || typeof credentials.email !== 'string' || typeof credentials.password !== 'string' || Buffer.byteLength(credentials.email)>254 || Buffer.byteLength(credentials.password)>1024) throw new HttpError(422,'Enter a valid email and password')
+    if (Buffer.byteLength(credentials.password) < 12 || Buffer.byteLength(credentials.password) > 1024) throw new HttpError(422,'Use a password of 12 to 1024 bytes',{errors:{password:'Use a password of 12 to 1024 bytes'}})
+    const origin=bridgeOrigin(incoming,rid,'Sign up through a same-origin POST server function')
+    const bytes=Buffer.from(JSON.stringify({email:credentials.email,password:credentials.password}))
+    const request=Readable.from([bytes]);request.method='POST';request.$brainForwardedFor=forwardedFor(incoming);request.headers={origin,accept:'application/json','content-type':'application/json','content-length':String(bytes.length)}
+    let user
+    try {
+      await proxy(request,response,new URL('/_brain/auth/signup',target),rid,(_res,status,data)=>{
+        if(status===403)throw new HttpError(403,"B0740: the backend refused this site's origin; fix: add the site origin to backend.origins in brain.json. Run brain explain B0740")
+        if(status===422)throw new HttpError(422,'This email cannot be used',{errors:{email:'This email cannot be used'}})
+        if(status===429)throw new HttpError(429,'Too many attempts. Wait before trying again.')
+        if(status!==200&&status!==201)throw unavailable()
+        try {user=safeUser(JSON.parse(data.toString('utf8'))?.user)}catch{throw unavailable()}
+      },16384)
+    } finally {request.destroy();bytes.fill(0)}
+    return {user}
+  }
   // Google needs its nonce bound to the browser that asked for it, so both steps relay the HttpOnly nonce cookie. The page
   // only ever sees the public client id and nonce it hands to Google.
   const sessionCookie = /^(?:__Host-brain|__Host-brain-access|__Host-brain-refresh|__Host-brain-google)=/
@@ -699,6 +721,7 @@ export function nativeAuthBridge(raw, refused, serviceKey) {
     },
     slugRedirect: (name, slug) => resource(incoming, response, rid, name).slugRedirect(slug),
     login: credentials => login(incoming, response, rid, credentials),
+    signup: credentials => signup(incoming, response, rid, credentials),
     google: Object.freeze({
       challenge: () => googleChallenge(incoming, response, rid),
       login: values => googleLogin(incoming, response, rid, values),

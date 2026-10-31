@@ -10,6 +10,9 @@ already creates the test file; fill it before calling the task done.
 3. Arrange: `await mount(Comp, props)`; swap services with `await mount(Comp, props, { provide: [[Api, fakeApi]] })`
    (`Api` is the key exported from `channels/` or `services/`). Pass slot content as text:
    `await mount(LinkButton, { href: '/next' }, { slot: 'Continue', slots: { hint: 'Opens the next step' } })`.
+   A `server:` function or an endpoint answers from a stub, without a server: `const save = stub('save', { ok: true })`,
+   `stub('GET /api/posts', [{ id: 1 }])`, `stub('save', reply(422, { errors: { email: 'Taken' } }))`; `save.calls` holds
+   what it received. It lasts one test, and one never called fails it.
 4. Act: `await click(sel)`, `await type(sel, text)`.
 5. Assert: `text(sel)`, `attr(sel, name)`, `hasClass(sel, c)`, `count(sel)` with
    `expect(x).toBe(y) | toEqual(y) | toBeTruthy()`.
@@ -53,7 +56,7 @@ Over MCP: `brain_test`, then `brain_doctor`.
 | component leaks after unmount | B0601 | return a cleanup from `fx`/`mounted` |
 | global listener or timer without cleanup | B0602 · B0906 | create it inside `fx` and return its cleanup |
 | list grows from a timer with no input | B0907 | cap the list or drive it by user input |
-| hitting the real network in a test | — | `provide: [[Api, fakeApi]]`, or `brain run --mock` for manual checks |
+| hitting the real network in a test | — | `stub(target, answer)`, `provide: [[Api, fakeApi]]`, or `brain run --mock` for manual checks |
 | control whose text comes from its `<slot />` mounted without it | B0406 | `mount(Comp, props, { slot: 'Text' })` |
 | testing internals (signal values) | — | assert what the DOM shows |
 | one giant test | — | one behavior per `test()` |

@@ -183,7 +183,7 @@ value (or thrown message) is the agent's answer, and invalid arguments never rea
 `<Button>` `<Input>` `<Select>` `<Checkbox>` `<Dialog>` `<Table>` `<Tabs>` `<Toast>` `<Menu>` `<Field>` — accessible,
 token-styled, every state (loading, disabled, error, empty) covered.
 Forms: `let f = form(schema, { submit: async (v) => … })` → `bind:value={f.v.email}`, `f.err.email`, `f.busy`,
-`f.error` (form-level), `on:submit={f.submit}`. Schema: `{ email: 'email!', age: 'num>=18', name: 'str!<=80' }`
+`f.error` (form-level), `on:submit={f.submit}`. A rejected submit puts focus on the first rejected field, or back on the control that held it. Leaving a dirty form asks first, unless it holds a password field. Schema: `{ email: 'email!', age: 'num>=18', name: 'str!<=80' }`
 (`!` required; types `str num bool email url date`, `[T]` list, a nested type object). Server errors: return or
 throw `{ errors: { email: 'Taken' } }` from `submit`, or mark them later with `f.errors({ email: 'Taken' })`; any other
 failure shows in `f.error`. Initial values: `form(schema, { init })`; later values: `f.reset(values)`; never replace
@@ -329,7 +329,7 @@ API keys: add `server/api-keys.jsbrain` `{enabled:true}`; signed-in users manage
 See `docs/AUTH-FLOWS.md`; mail responses deliberately do not disclose account existence or delivery failures.
 In a same-origin POST server function, `await ctx.backend.login({email,password})` establishes native JWT or opaque
 HttpOnly cookies and returns the sanitized user; the backend chooses the configured mode. Never expose signing keys
-or copy tokens into browser storage. `ctx.backend.google.challenge()` and `.login({credential})` do the same for Google. `ctx.session.clear()` revokes native sessions. See `docs/NATIVE-AUTH-SSR.md`.
+or copy tokens into browser storage. `await ctx.backend.signup({email,password})` creates the account without a session; `login` after it in the same function signs in. A refused address is a 422 with `errors.email` (invalid and taken read the same, by design) and a bad password `errors.password`, so `form()` marks the field. `ctx.backend.google.challenge()` and `.login({credential})` do the same for Google. `ctx.session.clear()` revokes native sessions. See `docs/NATIVE-AUTH-SSR.md`.
 With native mode configured, server `load(ctx)` and server functions can use `ctx.backend.resource('posts')`:
 `list({filter:{price:{gte:'10.00'},category:{in:['a','b']}},sort:['-price'],limit,after,include,search})` (same contract
 as `GET /api/<name>`; undeclared filters reject with `error.status 422` and `error.errors`), `get(uuid,{include})`,
@@ -363,6 +363,8 @@ Keep existing production routes until their behavior and policies pass a tested 
 `test(name, async () => {…})` · `await mount(Comp, props, { slot, slots, provide }?)` (`slot`: default slot text;
 `slots: { name: text }`: named slots) · `await click(sel)` · `await type(sel, text)` ·
 `text(sel)` `attr(sel, n)` `hasClass(sel, c)` `count(sel)` · `expect(x).toBe(y)|toEqual(y)|toBeTruthy()`.
+No server is needed: `stub('save', { ok: true })` answers a `server:` function, `stub('GET /api/posts', [{ id: 1 }])` an endpoint (add `?query` to match it exactly). The answer is a value (200), `reply(422, { errors: { email: 'Taken' } })`, or a function of the call's arguments returning either; `stub()` returns `{ calls }`. It lasts one test, and one never called fails it. `mount`, `click` and `type` wait for stubbed answers.
+`brain test` fails on a path that selects no test. It runs beside `brain run`: each uses its own port, and with native sockets, whose port is fixed, tests use the running dev server.
 
 ## CLI (also MCP: `brain mcp`; every command accepts `--json`)
 Main: `brain new <app>` · `brain run` (dev server with hot reload, app :5180; views render in the browser, so judge

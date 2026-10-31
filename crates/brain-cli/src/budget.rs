@@ -30,10 +30,18 @@ fn enforce_config(config: &Json, report: &[(String, [usize; 7])]) -> Result<(), 
     }
     let Some(limit) = limit else { return Ok(()) };
     let mut failures = Vec::new();
+    // A route can have more than one page behind it (a prerendered and a dynamic one, a fallback): the largest answers.
+    let mut largest: Vec<(&str, usize, &[usize; 7])> = Vec::new();
     for (route, bytes) in report {
         let total = bytes[2].checked_add(bytes[4]).and_then(|n| n.checked_add(bytes[6])).ok_or("route byte count overflow")?;
+        match largest.iter_mut().find(|(r, ..)| *r == route.as_str()) {
+            Some(seen) => if total > seen.1 { (seen.1, seen.2) = (total, bytes) },
+            None => largest.push((route, total, bytes)),
+        }
+    }
+    for (route, total, bytes) in largest {
         if total as f64 > limit {
-            failures.push(format!("budget.viewKB exceeded on {route}: {total} bytes ({:.3} KiB) > {:.3} KiB; fix: reduce this route's JS/CSS/HTML or explicitly adjust budget.viewKB", total as f64 / 1024.0, limit / 1024.0));
+            failures.push(format!("budget.viewKB exceeded on {route}: {total} bytes ({:.3} KiB) > {:.3} KiB (JS {} + CSS {} + HTML {}, compressed); fix: reduce this route's JS/CSS/HTML or explicitly adjust budget.viewKB; `brain build --report` lists the assets", total as f64 / 1024.0, limit / 1024.0, bytes[2], bytes[4], bytes[6]));
         }
     }
     if failures.is_empty() { Ok(()) } else { Err(failures.join("\n")) }
@@ -49,6 +57,13 @@ mod tests {
         assert!(enforce_config(&config, &[("/ok".into(), [9999, 9999, 200, 9999, 100, 9999, 212])]).is_ok());
         let error = enforce_config(&config, &[("/large".into(), [0,0,200,0,100,0,213]), ("/other".into(), [0,0,513,0,0,0,0])]).unwrap_err();
         assert!(error.contains("/large: 513 bytes") && error.contains("/other: 513 bytes"));
+    }
+    #[test]
+    fn a_route_with_two_pages_fails_once_at_its_largest_with_the_bytes_broken_down() {
+        let config = cfg(r#"{"budget":{"viewKB":0.5}}"#);
+        let error = enforce_config(&config, &[("/s".into(), [0,0,600,0,10,0,20]), ("/s".into(), [0,0,700,0,10,0,20])]).unwrap_err();
+        assert_eq!(error.matches("exceeded on /s").count(), 1, "{error}");
+        assert!(error.contains("730 bytes") && error.contains("JS 700 + CSS 10 + HTML 20"), "{error}");
     }
     #[test]
     fn malformed_unknown_and_unmeasured_budgets_never_silently_pass() {

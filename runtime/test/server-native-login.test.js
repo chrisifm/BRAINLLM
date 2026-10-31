@@ -14,6 +14,7 @@ const cookies=['__Host-brain-access=synthetic-access; Path=/; Secure; HttpOnly; 
 const backend=http((req,res)=>{
  const chunks=[];req.on('data',chunk=>chunks.push(chunk));req.on('end',()=>{
   seen.push({path:req.url,headers:req.headers,body:Buffer.concat(chunks).toString()})
+  if(mode==='taken'){res.writeHead(422,{'content-type':'application/json'});res.end('{"error":{"code":"SIGNUP_FAILED"}}');return}
   if(mode==='unavailable'){res.writeHead(503,{'content-type':'application/json'});res.end('{"error":"private driver detail"}');return}
   const set=mode==='opaque'?['__Host-brain=synthetic-opaque; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=604800']:mode==='insecure'?['__Host-brain-access=bad; Path=/']:cookies
   res.writeHead(200,{'content-type':'application/json','set-cookie':set})
@@ -21,7 +22,7 @@ const backend=http((req,res)=>{
  })
 })
 await new Promise(resolve=>backend.listen(0,'127.0.0.1',resolve))
-writeFileSync(join(dist,'_server/account.mjs'),`export async function login(ctx,values){return {...await ctx.backend.login(values),redirect:'/account'}};export const $forms={login:{email:'email!',password:'str!'}}`)
+writeFileSync(join(dist,'_server/account.mjs'),`export async function signup(ctx,values){return ctx.backend.signup(values)};export async function join(ctx,values){await ctx.backend.signup(values);return ctx.backend.login(values)};export async function login(ctx,values){return {...await ctx.backend.login(values),redirect:'/account'}};export const $forms={login:{email:'email!',password:'str!'}}`)
 writeFileSync(join(dist,'_server/manifest.json'),JSON.stringify({base:'/app/',routes:[{path:'/login',forms:true}],rpc:{account:'_server/account.mjs'}}))
 const frontend=createServer({dist,backendURL:`http://127.0.0.1:${backend.address().port}`,log(){}})
 await new Promise(resolve=>frontend.listen(0,'127.0.0.1',resolve));frontendBase=`http://127.0.0.1:${frontend.address().port}`
@@ -51,4 +52,22 @@ test('native login fails closed before issuing cookies or exposing provider mess
  }
  const before=seen.length,response=await rpc({origin:'https://foreign.example'})
  assert.equal(response.status,403);assert.equal(seen.length,before)
+})
+
+const call=(fn,body)=>fetch(frontendBase+'/app/_r/account/'+fn,{method:'POST',headers:{origin:frontendBase,'x-brain-rpc':'1','content-type':'application/json'},body:JSON.stringify([body])})
+test('ctx.backend.signup creates the account without a session, and login in the same request signs in',async()=>{
+ mode='jwt'
+ const before=seen.length,created=await call('signup',credentials)
+ assert.equal(created.status,200);assert.deepEqual(await created.json(),{user});assert.equal(created.headers.getSetCookie().length,0)
+ assert.equal(seen[before].path,'/_brain/auth/signup');assert.deepEqual(JSON.parse(seen[before].body),credentials);assert.equal(seen[before].headers.origin,frontendBase)
+ const joined=await call('join',credentials)
+ assert.equal(joined.status,200);assert.equal(joined.headers.getSetCookie().length,2)
+})
+test('ctx.backend.signup names the field: a refused address and a short password never reach a generic error',async()=>{
+ mode='taken'
+ const refused=await call('signup',credentials)
+ assert.equal(refused.status,422);assert.deepEqual((await refused.json()).errors,{email:'This email cannot be used'})
+ const before=seen.length,short=await call('signup',{...credentials,password:'short'})
+ assert.equal(short.status,422);assert.ok((await short.json()).errors.password);assert.equal(seen.length,before)
+ mode='jwt'
 })

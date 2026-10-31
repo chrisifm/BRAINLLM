@@ -28,8 +28,8 @@ const GENERIC = 'Something went wrong. Try again.' // the text callForm (server.
 const go = u => {
   const G = globalThis
   if (G.__brainNavigate) return G.__brainNavigate(u)
-  const m = D && D.querySelector('meta[name=brain-base]'), b = (m && m.getAttribute('content')) || '/'
-  G.location && G.location.assign(b !== '/' && !(u + '/').startsWith(b) ? b + u.slice(1) : u)
+  const m = D?.querySelector('meta[name=brain-base]'), b = m?.getAttribute('content') || '/'
+  G.location?.assign(b !== '/' && !(u + '/').startsWith(b) ? b + u.slice(1) : u)
 }
 // forms with unsaved changes: brain-router asks before a client navigation, the browser before unload. A form being
 // submitted does not ask (#299): the user chose to save, and a submit() that navigates once the server accepted the
@@ -46,10 +46,7 @@ const init0 = r => (r.list ? [] : r.t === 'bool' ? false : '')
 const out = (r, v) => {
   if (r.list) {
     if (!Array.isArray(v)) return []
-    if (r.t !== 'num') return v
-    const numbers = new Array(v.length)
-    for (let i = 0; i < v.length; i++) numbers[i] = Number(v[i])
-    return numbers
+    return r.t === 'num' ? Array.from(v, Number) : v
   }
   return r.t === 'num' ? (empty(v) ? null : Number(v)) : r.t === 'bool' ? !!v : v
 }
@@ -62,12 +59,12 @@ function posted(id) {
   if (g) return g[id] || null
   if (SEEN === undefined)
     try {
-      const el = D && D.getElementById('brain-forms')
+      const el = D?.getElementById('brain-forms')
       SEEN = el ? JSON.parse(el.textContent) : null
     } catch {
       SEEN = null
     }
-  return (SEEN && SEEN[id]) || null
+  return SEEN?.[id] || null
 }
 
 export function form(schema, o = {}) {
@@ -98,12 +95,12 @@ function compiledForm(schema, o, types, validate, remote) {
 }
 // Only public/dynamic or check-configured forms retain this optional capability.
 function remoteCheck(o, x, checking) {
-  const c = o.check && o.check[x.path], v = untrack(() => x.s.v)
+  const c = o.check?.[x.path], v = untrack(() => x.s.v)
   if (!c || untrack(() => x.e.v)) return Promise.resolve(untrack(() => x.e.v))
   checking.v++
   return Promise.resolve()
     .then(() => c(v))
-    .then(m => m || '', e => (e && e.kind === 'aborted' ? '' : (e && e.message) || msg('form.check_failed', 'Could not check this value.')))
+    .then(m => m || '', e => (e?.kind === 'aborted' ? '' : e?.message || msg('form.check_failed', 'Could not check this value.')))
     .then(m => {
       if (untrack(() => x.s.v) === v) x.e.v = m
       return untrack(() => x.e.v)
@@ -123,7 +120,7 @@ function createForm(schema, o, readRule, validateRule, remote) {
     for (const k of Object.keys(sch)) {
       const r = readRule(sch[k], k), path = base ? base + '.' + k : k
       if (r.t === 'obj') {
-        const sub = build(r.s, path, (init && init[k]) || {})
+        const sub = build(r.s, path, init?.[k] || {})
         Object.defineProperty(v, k, { enumerable: true, value: sub.v })
         Object.defineProperty(err, k, { enumerable: true, value: sub.err })
         continue
@@ -136,7 +133,7 @@ function createForm(schema, o, readRule, validateRule, remote) {
         get: () => x.s.v,
         set: val => {
           x.s.v = val
-          track(x, D && D.activeElement)
+          track(x, D?.activeElement)
           if (x.touched) validate(x) // already shown: keep the message live while fixing it
         },
       })
@@ -151,12 +148,14 @@ function createForm(schema, o, readRule, validateRule, remote) {
     if (!el || x.el || el.$ff || !el.isConnected || !/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName || '')) return
     x.el = el
     el.$ff = x
+    // a form holding a password (sign in, sign up) is not work to lose: leaving it never asks
+    if (el.form?.querySelector('[type=password]')) DIRTY.delete(f)
     el.addEventListener('focusout', () => touch(x))
     I.root(() => fx(() => {
       const e = shown.v >= 0 && x.touched && x.e.v // reads shown first: re-runs when the field gets touched
       if (e) el.setAttribute('aria-invalid', 'true')
       else el.removeAttribute('aria-invalid')
-      const d = D && D.getElementById(fid(x.path))
+      const d = D?.getElementById(fid(x.path))
       if (e && d) el.setAttribute('aria-describedby', fid(x.path))
       else if (el.getAttribute('aria-describedby') === fid(x.path)) el.removeAttribute('aria-describedby')
     }), owner)
@@ -171,7 +170,7 @@ function createForm(schema, o, readRule, validateRule, remote) {
 
   // A form posted without JS (§38) comes back from the server with its values and messages: start from them, already
   // shown, both while the server renders the page and when the page hydrates
-  const st = posted(o.submit && o.submit.id)
+  const st = posted(o.submit?.id)
   const { v, err } = build(schema, '', st ? st.values : o.init)
   if (st) {
     mark(st.errors || {})
@@ -185,7 +184,7 @@ function createForm(schema, o, readRule, validateRule, remote) {
     for (const x of F) {
       const ks = x.path.split('.')
       let t = r
-      for (const k of ks.slice(0, -1)) t = t[k] || (t[k] = {})
+      for (const k of ks.slice(0, -1)) t = t[k] ||= {}
       t[ks.at(-1)] = out(x.r, untrack(() => x.s.v))
     }
     return r
@@ -257,9 +256,15 @@ function createForm(schema, o, readRule, validateRule, remote) {
       })
     },
     async submit(e) {
-      if (e && e.preventDefault) e.preventDefault()
+      e?.preventDefault?.()
       if (untrack(() => busy.v)) return // no re-entry: a double click sends once
-      const fm = e && e.target && e.target.elements ? e.target : null
+      const fm = e?.target?.elements ? e.target : null, was = D?.activeElement
+      // the first rejected field, or back to the control the browser took focus from (it fell to <body>, the keyboard too)
+      const aim = () => {
+        const x = F.find(x => x.el && x.touched && untrack(() => x.e.v))
+        if (x) x.el.focus()
+        else if (D?.activeElement == D?.body) was?.focus()
+      }
       let first = null
       batch(() => {
         for (const x of F) {
@@ -275,36 +280,35 @@ function createForm(schema, o, readRule, validateRule, remote) {
         const cross = o.validate(values()) // cross-field rules: { field: msg }
         if (cross && Object.keys(cross).length) {
           mark(cross)
-          first = byPath[Object.keys(cross)[0]] || null
-          if (!first) return
+          return void aim()
         }
       }
-      if (first) return void (first.el && first.el.focus && first.el.focus())
+      if (first) return void aim()
       busy.v = true
       if (fm) fm.setAttribute('aria-busy', 'true') // assistive tech hears the form is working
       try {
         if (remote && o.check) {
           await Promise.all(F.map(x => remote(o, x, checking)))
-          first = F.find(x => untrack(() => x.e.v))
-          if (first) return void (shown.v++, first.el && first.el.focus && first.el.focus())
+          if (F.some(x => untrack(() => x.e.v))) return void shown.v++
         }
         if (!o.submit) return
         const r = await o.submit(values())
-        if (r && r.errors) mark(r.errors)
+        if (r?.errors) mark(r.errors)
         else {
           saved.v = untrack(now) // saved: no longer dirty
           // `return { redirect: '/x' }` from the server function: the same page the 303 reaches without JS (§38)
-          if (r && typeof r.redirect === 'string' && r.redirect[0] === '/' && r.redirect[1] !== '/') go(r.redirect)
+          if (typeof r?.redirect === 'string' && r.redirect[0] === '/' && r.redirect[1] !== '/') go(r.redirect)
         }
         return r
       } catch (x) {
-        if (x && x.errors) mark(x.errors)
+        if (x?.errors) mark(x.errors)
         // a server failure reads the same as without JS: 4xx and the author's own errors keep their message; 5xx and a
         // TypeError (the network dropped, or a bug) get the generic one
-        else if (!(x && x.kind === 'aborted')) error.v = (x && x.message && !(x.status >= 500) && x.name !== 'TypeError' && x.message) || msg('form.error', GENERIC)
+        else if (x?.kind !== 'aborted') error.v = (!(x?.status >= 500) && x?.name !== 'TypeError' && x?.message) || msg('form.error', GENERIC)
       } finally {
         busy.v = false
         if (fm) fm.removeAttribute('aria-busy')
+        queueMicrotask(aim) // after the flush re-enables what `disabled={f.busy}` disabled
       }
     },
   }

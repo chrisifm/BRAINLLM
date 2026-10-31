@@ -2379,7 +2379,7 @@ impl Ctx {
         };
         // behavior analytics: with a native backend the dev page loads the backend-served collector (BRAIN_ANALYTICS=off skips it)
         let html = if self.backend_configured() && !self.env_vars().iter().any(|(k, v)| k == "BRAIN_ANALYTICS" && v == "off") {
-            crate::prod::with_analytics(&html, "")
+            crate::prod::with_analytics(&html, &self.pre)
         } else {
             html
         };

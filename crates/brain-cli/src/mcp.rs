@@ -719,9 +719,13 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
             #[cfg(unix)]
             {
                 crate::testrun::set_viewer(a.get("viewer").is_some_and(|v| matches!(v, Json::Bool(true))));
-                let reports = crate::run_tests(arg(a, "path").map(PathBuf::from), 60);
+                let target = arg(a, "path").map(PathBuf::from);
+                let reports = crate::run_tests(target.clone(), 60);
                 crate::testrun::set_viewer(false);
                 let reports = reports?;
+                if let Some(error) = crate::nothing_ran(target.as_deref(), &reports) {
+                    return Err(error);
+                }
                 let failed = reports.iter().any(crate::testrun::FileReport::failed);
                 let j = wrap("files", &Json::Arr(reports.iter().map(crate::testrun::FileReport::to_json).collect()).stringify());
                 if failed { Err(j) } else { Ok(j) }
@@ -1342,9 +1346,11 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
             }
             #[cfg(unix)] {
                 crate::testrun::set_viewer(true);
-                let reports=crate::run_tests(arg(a,"path").map(PathBuf::from),60);
+                let target=arg(a,"path").map(PathBuf::from);
+                let reports=crate::run_tests(target.clone(),60);
                 crate::testrun::set_viewer(false);
                 let reports=reports?;
+                if let Some(error)=crate::nothing_ran(target.as_deref(),&reports) {return Err(error);}
                 let failed=reports.iter().any(crate::testrun::FileReport::failed);
                 let value=Json::obj([("schemaVersion",Json::Num(1.0)),("files",Json::Arr(reports.iter().map(crate::testrun::FileReport::to_json).collect()))]).stringify();
                 if failed {Err(value)} else {Ok(value)}

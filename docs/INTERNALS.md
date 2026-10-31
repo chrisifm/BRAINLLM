@@ -261,7 +261,7 @@ accessibility tree with `Accessibility.getFullAXTree`. No jsdom or Playwright.
 
 Test API in `*.test.brain`: `test(name, async () => {…})` · `await mount(Comp, props, options?)` · `await click(sel)` ·
 `await type(sel, text)` · synchronous readers `text(sel)`, `attr(sel, name)`, `hasClass(sel, cls)`, `count(sel)` ·
-`expect(x).toBe(y)`, `.toEqual(y)`, `.toBeTruthy()`. Selectors are CSS within the mounted component. `options`:
+`expect(x).toBe(y)`, `.toEqual(y)`, `.toBeTruthy()` · `stub(target, answer)`, `reply(status, body)`: `stub` overrides `fetch` on the test page only (the runtime has no test code), so it covers `server:` functions (`/_r/<hash>/<name>`, by name, the answer function receives the call's arguments) and `api()` endpoints (`'GET /path'`, by method and path, with the query if the target has one), not an XHR upload. It lives for one test, a stub nobody called fails it, and the page turns the data cache off so answers do not leak between tests. Selectors are CSS within the mounted component; `#id` also finds that id's `~N` form, because a component's ids stay unique across the mounts of one file. `options`:
 `slot` (text of the default `<slot />`), `slots` (`{ name: text }` for `<slot name="…" />`) and `provide` (service
 swaps); slot text is real DOM, so the accessibility audit sees it. Unknown options and non-text slot values fail the test.
 
@@ -1718,7 +1718,7 @@ initial value; `persist` and `sync` work for both.
 - `navigate('/x', { replace })`; `let r = route()` with `r.path`, `r.params`, `r.query` as signals (read-only).
 - The compiler adds `aria-current="page"` to `<a href>` that match the current route (and a class hook), so active
   links need no code.
-- Leaving a page with a dirty `form()` asks before discarding (built in; no API).
+- Leaving a page with a dirty `form()` asks before discarding (built in; no API), except a form holding a password field: a half-typed sign in is not work to lose, and the prompt was only noise.
 
 **6. Environment and UI helpers** (each a read-only signal that cleans up after itself)
 - `media('(max-width: 600px)')`, `visible(ref)`, `debounce(value, '300ms')`, `online()` (§40).
@@ -1848,7 +1848,7 @@ when it fell to `body`. `#brain-announce` (`aria-live=polite`, created at `route
 `document.title`. A root `_loading.brain` alone emits one `^/` pattern; an empty `fullLoad` is omitted.
 Past 8 s a navigation becomes a full load. `hold` lets real links through. `predict` orders its queue by rank: intent -1,
 main links by `getBoundingClientRect().top`, plan 1e6, `footer`/`aside` 1e7 + top. Measured on the admin edit route of the
-CRUD fixture (`backend.rs` test): 30704 B of the 30720 B default budget, 30698 B before this work; the shell's tag indentation is not sent (`unindent_shell`).
+CRUD fixture (`backend.rs` test): 30686 B of the 30720 B default budget; the shell's tag indentation is not sent (`unindent_shell`).
 
 
 ## 45. Agent coordination and focused evidence (2026-10-30)
