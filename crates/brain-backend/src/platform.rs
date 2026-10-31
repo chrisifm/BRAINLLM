@@ -245,7 +245,15 @@ impl Edge {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DatabaseLimit {
+    Busy,
+    Deadline,
+    TooLarge,
+}
+
 tokio::task_local! {
+    static DATABASE_LIMIT: Cell<Option<DatabaseLimit>>;
     /// Set when a request's database work waited longer than the pool acquire budget.
     static POOL_SATURATED: Cell<bool>;
 }
@@ -253,10 +261,10 @@ tokio::task_local! {
 /// Runs `work` while recording pool saturation; returns whether the pool timed out during it.
 pub(crate) async fn watch_pool<F: std::future::Future>(work: F) -> (F::Output, bool) {
     POOL_SATURATED
-        .scope(Cell::new(false), async move {
+        .scope(Cell::new(false), DATABASE_LIMIT.scope(Cell::new(None), async move {
             let out = work.await;
             (out, POOL_SATURATED.with(Cell::get))
-        })
+        }))
         .await
 }
 
@@ -265,6 +273,24 @@ pub(crate) fn note_database_error(error: &sqlx::Error) {
     if matches!(error, sqlx::Error::PoolTimedOut) {
         let _ = POOL_SATURATED.try_with(|flag| flag.set(true));
     }
+    if let Some(state) = crate::db::sqlstate(error) {
+        let seen = if crate::db::deadline(&state) {
+            DatabaseLimit::Deadline
+        } else if crate::db::too_large(&state) {
+            DatabaseLimit::TooLarge
+        } else if crate::db::retryable(&state) {
+            DatabaseLimit::Busy
+        } else {
+            return;
+        };
+        let _ = DATABASE_LIMIT.try_with(|limit| limit.set(Some(seen)));
+    }
+}
+
+/// The last time or size limit a database call hit during this request. Errors that became sanitized text on the way up
+/// still answer with what happened instead of BACKEND_INTERNAL.
+pub(crate) fn database_limit() -> Option<DatabaseLimit> {
+    DATABASE_LIMIT.try_with(Cell::get).ok().flatten()
 }
 
 #[cfg(test)]

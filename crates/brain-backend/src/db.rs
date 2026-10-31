@@ -2,8 +2,8 @@
 use crate::Resource;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use sqlx::{Connection, PgConnection, PgPool, Row, postgres::{PgConnectOptions, PgPoolOptions}};
-use std::{str::FromStr, time::Duration};
+use sqlx::{Connection, PgConnection, PgPool, Row, postgres::PgPoolOptions};
+use std::time::Duration;
 use uuid::Uuid;
 
 const MIGRATIONS: &[(&str, &str)] = &[
@@ -771,6 +771,8 @@ fn failure_metadata(error: &sqlx::Error) -> Value {
     let code = sqlstate(error);
     let category = match code.as_deref() {
         Some("57014") => "statement deadline",
+        Some("25P04") => "transaction deadline",
+        Some("25P03") => "idle transaction deadline",
         Some("55P03") => "lock deadline",
         Some("23505") => "unique constraint",
         Some("23503" | "23001") => "reference constraint",
@@ -795,7 +797,15 @@ pub fn safe(error: sqlx::Error) -> String {
 /// SQLSTATEs that say "not now" rather than "this request is wrong": deadlines, lock and serialization conflicts,
 /// exhausted connections and a server going away. The transaction rolled back, so a retry is safe.
 pub(crate) fn retryable(state: &str) -> bool {
-    matches!(state, "57014" | "55P03" | "40001" | "40P01" | "53300" | "57P01" | "57P02" | "57P03") || state.starts_with("08")
+    deadline(state) || matches!(state, "55P03" | "40001" | "40P01" | "57P01" | "57P02" | "57P03" | "57P05") || state.starts_with("08") || state.starts_with("53")
+}
+/// A time budget ended the work: statement, transaction or idle-in-transaction. The same request will need the time again.
+pub(crate) fn deadline(state: &str) -> bool {
+    matches!(state, "57014" | "25P03" | "25P04")
+}
+/// The request itself exceeds a database limit (class 54, such as a value too long for an index): a retry cannot help.
+pub(crate) fn too_large(state: &str) -> bool {
+    state.starts_with("54") || state == "22001"
 }
 static DIAGNOSTICS: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
 const DIAGNOSTICS_MAX_BYTES: u64 = 5 * 1024 * 1024;

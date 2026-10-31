@@ -130,10 +130,16 @@ impl Error {
         if db::sqlstate(error).is_some_and(|state| matches!(state.as_str(), "22P05" | "22021")) {
             return Self::new(StatusCode::UNPROCESSABLE_ENTITY, "INVALID_INPUT", "Remove NUL characters and invalid bytes from the text values");
         }
+        if db::sqlstate(error).is_some_and(|state| db::too_large(&state)) {
+            return Self::value_too_large();
+        }
         if db::sqlstate(error).is_some_and(|state| db::retryable(&state)) {
             return Self::new(StatusCode::SERVICE_UNAVAILABLE, "DATABASE_BUSY", "The database could not finish in time and nothing was changed; retry after the Retry-After delay");
         }
         Self::internal_at(at)
+    }
+    fn value_too_large() -> Self {
+        Self::new(StatusCode::PAYLOAD_TOO_LARGE, "VALUE_TOO_LARGE", "Nothing was written: a value exceeds what the database can store or index, for example long text in a unique or indexed field; shorten it or stop indexing that field")
     }
     #[track_caller]
     fn internal(error: impl std::fmt::Display + 'static) -> Self {
@@ -144,6 +150,12 @@ impl Error {
         Self::internal_at(at)
     }
     fn internal_at(at: &'static std::panic::Location<'static>) -> Self {
+        // The driver error became sanitized text on its way here; the request still knows which limit it hit.
+        match crate::platform::database_limit() {
+            Some(crate::platform::DatabaseLimit::TooLarge) => return Self::value_too_large(),
+            Some(_) => return Self::new(StatusCode::SERVICE_UNAVAILABLE, "DATABASE_BUSY", "The database could not finish in time and the failed step was rolled back; retry after the Retry-After delay"),
+            None => {}
+        }
         let rid = REQUEST_ID.try_with(Clone::clone).ok();
         static DIAGNOSTIC_BUSY: std::sync::atomic::AtomicBool =
             std::sync::atomic::AtomicBool::new(false);

@@ -383,6 +383,48 @@ async fn tasks_with_prefix(s: &Shop, prefix: &str) -> i64 {
 
 #[tokio::test]
 #[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn postgres_time_and_size_limits_answer_actionable_codes_and_never_internal() {
+    let s = shop().await;
+    // A row whose code names a sqlstate fails with it, so each class is exercised without waiting for a real timeout.
+    for statement in [
+        r"CREATE OR REPLACE FUNCTION _test_raise_state() RETURNS trigger LANGUAGE plpgsql AS $f$
+          BEGIN RAISE EXCEPTION 'limit' USING ERRCODE = split_part(NEW.data->>'code', '~', 2); END $f$",
+        "DROP TRIGGER IF EXISTS _test_raise_state ON _brain_res_task_items",
+        "CREATE TRIGGER _test_raise_state BEFORE INSERT ON _brain_res_task_items FOR EACH ROW
+          WHEN (NEW.data->>'code' LIKE 'state~%') EXECUTE FUNCTION _test_raise_state()",
+    ] {
+        sqlx::query(statement).execute(&s.pool).await.unwrap();
+    }
+    let row = |state: &str, n: u32| json!({"title":format!("Task {n}"),"code":format!("state~{state}~{}~{n}", s.run)});
+    let survivors = format!("state~%~{}~%", s.run);
+    for (state, single, in_batch) in [
+        ("25P04", (503, "DATABASE_BUSY"), (503, "BATCH_TOO_SLOW")),
+        ("25P03", (503, "DATABASE_BUSY"), (503, "BATCH_TOO_SLOW")),
+        ("57014", (503, "DATABASE_BUSY"), (503, "BATCH_TOO_SLOW")),
+        ("55P03", (503, "DATABASE_BUSY"), (503, "DATABASE_BUSY")),
+        ("40001", (503, "DATABASE_BUSY"), (503, "DATABASE_BUSY")),
+        ("53300", (503, "DATABASE_BUSY"), (503, "DATABASE_BUSY")),
+        ("53400", (503, "DATABASE_BUSY"), (503, "DATABASE_BUSY")),
+        ("54000", (413, "VALUE_TOO_LARGE"), (413, "VALUE_TOO_LARGE")),
+    ] {
+        let (status, body) = call(&s.app, "POST", "/api/task_items", &s.alice, Some(row(state, 0))).await;
+        assert_eq!((status, body["error"]["code"].as_str().unwrap()), single, "single {state}: {body}");
+        let (status, body) = batch(&s, json!({"op":"create","items":[row(state, 1), row(state, 2)]})).await;
+        assert_eq!((status, body["error"]["code"].as_str().unwrap()), in_batch, "batch {state}: {body}");
+        let fix = body["error"]["fix"].as_str().unwrap();
+        assert!(fix.contains("othing was") || fix.contains("rolled back"), "{state}: {fix}");
+        if in_batch.1 == "BATCH_TOO_SLOW" {
+            assert!(fix.contains("Split"), "{fix}");
+        }
+    }
+    let written: i64 = sqlx::query_scalar("SELECT count(*) FROM _brain_res_task_items WHERE data->>'code' LIKE $1")
+        .bind(survivors).fetch_one(&s.pool).await.unwrap();
+    assert_eq!(written, 0);
+    sqlx::query("DROP TRIGGER _test_raise_state ON _brain_res_task_items").execute(&s.pool).await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
 async fn postgres_batches_are_all_or_nothing_with_per_item_errors() {
     let s = shop().await;
     let pre = format!("B-{}-", s.run);

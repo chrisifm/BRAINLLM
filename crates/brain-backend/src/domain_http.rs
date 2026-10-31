@@ -162,7 +162,13 @@ async fn batch(
     })?;
     let resources = app.resources.clone();
     let r = resources.get(&name).expect("resource exists");
-    let mut out: Value = transactional!(app, user, |engine, tx| engine.batch(&mut tx, r, &request).await)?;
+    let mut out: Value = transactional!(app, user, |engine, tx| engine.batch(&mut tx, r, &request).await).map_err(|mut error: Error| {
+        if error.code == "DATABASE_BUSY" && crate::platform::database_limit() == Some(crate::platform::DatabaseLimit::Deadline) {
+            error.code = "BATCH_TOO_SLOW";
+            error.fix = "Nothing was written: this batch did not finish within the database time limit, and the same batch will need that time again. Split it into smaller batches and send them one at a time".into();
+        }
+        error
+    })?;
     if let Some(items) = out["items"].as_array_mut() {
         for row in items {
             reveal(&app, r, row, &user, false).await?;
