@@ -65,3 +65,17 @@ test('task models: created once per options, call options passed per call', asyn
   delete globalThis.Translator
   delete globalThis.Summarizer
 })
+
+test('Prompt API: base sessions for many distinct system prompts stay bounded and evicted ones are destroyed', async () => {
+  const live = new Set()
+  globalThis.LanguageModel = {
+    create: async o => {
+      const s = { base: true, clone: async () => ({ prompt: async t => `echo:${t}`, destroy() {} }), destroy: () => live.delete(s) }
+      live.add(s)
+      return s
+    },
+  }
+  for (let i = 0; i < 50; i++) assert.equal(await ai.prompt('x', { system: `user ${i} at ${i}:00` }), 'echo:x')
+  assert.ok(live.size <= 8, `At most a few cached base sessions stay alive, got ${live.size}`)
+  delete globalThis.LanguageModel
+})

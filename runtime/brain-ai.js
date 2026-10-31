@@ -55,16 +55,24 @@ async function create(kind, o = {}) {
   return N.create(rest)
 }
 
-// one base session per system prompt; each stateless call works on a clone, so calls never share history
-const bases = new Map()
+// one base session per system prompt; each stateless call works on a clone, so calls never share history. A system
+// prompt built from data (a name, a date) would open a native session per value: keep the 8 most recent, destroy the rest.
+const bases = new Map(), BASES = 8
 async function base(o) {
   const k = o.system || ''
-  if (!bases.has(k)) {
-    const p = create('prompt', { ...(o.system ? { initialPrompts: [{ role: 'system', content: o.system }] } : {}), ...(o.onProgress ? { onProgress: o.onProgress } : {}) })
-    p.catch(() => bases.delete(k))
-    bases.set(k, p)
+  let p = bases.get(k)
+  if (p) bases.delete(k)
+  else {
+    p = create('prompt', { ...(o.system ? { initialPrompts: [{ role: 'system', content: o.system }] } : {}), ...(o.onProgress ? { onProgress: o.onProgress } : {}) })
+    p.catch(() => bases.get(k) === p && bases.delete(k))
+    if (bases.size >= BASES) {
+      const [old, q] = bases.entries().next().value
+      bases.delete(old)
+      q.then(s => s.destroy && s.destroy(), () => {})
+    }
   }
-  return (await bases.get(k)).clone()
+  bases.set(k, p)
+  return (await p).clone()
 }
 const opts = o => ({ ...(o.signal ? { signal: o.signal } : {}), ...(o.schema ? { responseConstraint: o.schema } : {}) })
 
