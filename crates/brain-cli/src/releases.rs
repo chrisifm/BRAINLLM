@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 include!(concat!(env!("OUT_DIR"), "/releases.rs"));
 
 /// Codemods `brain upgrade --apply` can run; a manifest naming another id fails the schema test.
-#[cfg_attr(not(test), allow(dead_code))] // read by `brain upgrade` (0.6.1)
 pub const CODEMODS: &[(&str, &str)] = &[
     ("package-pin", "set the @christianirack/brainllm pin in package.json to the target version (revision-checked)"),
     ("record-version", "record the target version as \"brainVersion\" in brain.json"),
@@ -125,13 +124,11 @@ pub fn cmp(a: &str, b: &str) -> Ordering {
 }
 
 /// Releases in `(from, to]`.
-#[cfg_attr(not(test), allow(dead_code))] // read by `brain upgrade` (0.6.1)
 pub fn between(from: &str, to: &str) -> Result<Vec<Release>, String> {
     Ok(all()?.into_iter().filter(|r| cmp(&r.version, from) == Ordering::Greater && cmp(&r.version, to) != Ordering::Greater).collect())
 }
 
 /// The newest version with a manifest.
-#[allow(dead_code)]
 pub fn latest() -> Option<String> {
     all().ok().and_then(|r| r.last().map(|r| r.version.clone()))
 }
@@ -143,7 +140,6 @@ const MAX_FILES: usize = 5000;
 const MAX_FILE: u64 = 1024 * 1024;
 
 /// App-relative paths (with `/`) of the source files a probe may read, sorted.
-#[allow(dead_code)]
 pub fn app_files(root: &Path) -> Vec<String> {
     let mut out = vec![];
     let mut stack = vec![PathBuf::new()];
@@ -170,7 +166,6 @@ pub fn app_files(root: &Path) -> Vec<String> {
 }
 
 /// `(file, line)` of every match; line 0 = the file itself matched (empty `contains`).
-#[allow(dead_code)]
 pub fn probe(root: &Path, files: &[String], p: &Probe) -> Vec<(String, usize)> {
     let mut hits = vec![];
     for f in files.iter().filter(|f| glob(&p.glob, f)) {

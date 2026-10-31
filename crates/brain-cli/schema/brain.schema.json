@@ -8,6 +8,11 @@
     "$schema": {
       "type": "string"
     },
+    "brainVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$",
+      "description": "Exact BRAINLLM version this app's source targets. Written by `brain new`; `brain upgrade` reports the changes since it and `brain upgrade --apply` advances it."
+    },
     "name": {
       "type": "string",
       "description": "App name (SEO, web manifest)."

@@ -10,6 +10,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 ## [Unreleased]
 
 ### Added
+- `brain upgrade [--from V] [--to V] [--dry-run|--apply] [--json] [--no-doctor]` (MCP `brain_upgrade`) migrates an
+  app between versions: from the recorded `brainVersion` in `brain.json` (now written by `brain new`) to the installed
+  compiler, it reports codemods, manual steps with `file:line`, capabilities to adopt with their snippet and the gates;
+  `--apply` runs the safe codemods and `brain check`/`brain doctor`. `brain upgrade <exact-version>` keeps the
+  package pin preview.
 - Build-time zstd: `brain build` writes a `.zst` (level 19) next to a text asset when it is smaller than the `.br`;
   `brain start` and `server.mjs` send the smallest precompressed sibling the client accepts and the emitted Caddy
   block lists `precompressed zstd br gzip`.
