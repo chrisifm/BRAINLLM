@@ -277,12 +277,12 @@ mod tests {
     /// `(version or "Unreleased", bullet text)` for every bullet an entry must cover.
     fn changelog_bullets() -> Vec<(String, String)> {
         let src = fs::read_to_string(repo().join("CHANGELOG.md")).unwrap();
-        let (mut version, mut exempt) = (String::new(), true);
+        let (mut version, mut exempt) = (String::new(), false);
         let mut out: Vec<(String, String)> = vec![];
         for line in src.lines() {
             if let Some(h) = line.strip_prefix("## [") {
                 version = h.split(']').next().unwrap_or("").to_string();
-                exempt = true;
+                exempt = false;
             } else if let Some(h) = line.strip_prefix("### ") {
                 exempt = matches!(h.trim(), "Tests" | "Internal" | "Upgrading");
             } else if exempt || version.is_empty() {

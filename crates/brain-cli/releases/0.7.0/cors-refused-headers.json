@@ -1,0 +1,10 @@
+{
+  "id": "cors-refused-headers",
+  "kind": "fix",
+  "title": "No CORS headers for a refused origin",
+  "why": "Credentials and methods must not be advertised to a refused origin.",
+  "changelog": [
+    "A refused origin no longer receives"
+  ],
+  "guide": "docs/backend/proxy-cors.md"
+}

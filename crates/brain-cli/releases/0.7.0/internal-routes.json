@@ -1,0 +1,32 @@
+{
+  "id": "internal-routes",
+  "kind": "capability",
+  "title": "Declarative internal routes with a rotatable secret",
+  "why": "Machine endpoints stop hand-rolling secret comparison and loopback checks.",
+  "changelog": [
+    "Declared routes accept `auth: 'internal'`"
+  ],
+  "guide": "docs/backend/routes.md",
+  "codes": [
+    "B0790"
+  ],
+  "apis": [
+    "auth: 'internal'",
+    "internal.secret",
+    "internal.header",
+    "internal.loopback"
+  ],
+  "affects": [
+    "server/routes/*/route.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/routes/<name>/route.jsbrain",
+    "snippet": "<meta server>\nexport default { method: 'POST', path: '/ops/reindex', auth: 'internal', internal: { secret: ['INTERNAL_SECRET', 'INTERNAL_SECRET_OLD'], loopback: true } }"
+  },
+  "uses": [
+    {
+      "glob": "server/routes/*/route.jsbrain",
+      "contains": "auth: 'internal'"
+    }
+  ]
+}

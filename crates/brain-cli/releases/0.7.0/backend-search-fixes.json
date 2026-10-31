@@ -1,0 +1,28 @@
+{
+  "id": "backend-search-fixes",
+  "kind": "change",
+  "title": "Search stays available, with exact totals",
+  "why": "Long text no longer turns a search into a 500, `total` is exact for full text, and punctuation-only queries stop scanning. Typo matches appear only when full text finds nothing, and stop words find nothing.",
+  "changelog": [
+    "one or two punctuation characters",
+    "Backend search over long text no longer answers 500",
+    "Backend search `total` is exact"
+  ],
+  "guide": "docs/backend/search.md",
+  "apis": [
+    "degraded",
+    "total_approximate"
+  ],
+  "affects": [
+    "server/resources/*/query.jsbrain"
+  ],
+  "finds": [
+    {
+      "glob": "server/resources/*/query.jsbrain",
+      "contains": "search"
+    }
+  ],
+  "steps": [
+    "Run `brain backend migrate` once before serving this version. The first run rebuilds long rows in one transaction with no deadline, so plan it for a quiet moment on a large table."
+  ]
+}

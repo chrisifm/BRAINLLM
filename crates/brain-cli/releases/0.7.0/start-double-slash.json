@@ -1,0 +1,10 @@
+{
+  "id": "start-double-slash",
+  "kind": "fix",
+  "title": "brain start answers 404 for paths starting with //",
+  "why": "It answered 500 for `//`.",
+  "changelog": [
+    "for a request path starting with `//`"
+  ],
+  "guide": "docs/backend/lifecycle.md"
+}

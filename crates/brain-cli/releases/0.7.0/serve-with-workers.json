@@ -1,0 +1,28 @@
+{
+  "id": "serve-with-workers",
+  "kind": "capability",
+  "title": "Run workers with the server",
+  "why": "A small deployment can run its workers and scheduler under one supervised command.",
+  "changelog": [
+    "`brain backend serve --with-workers` also runs"
+  ],
+  "guide": "docs/backend/queues.md",
+  "apis": [
+    "brain backend serve --with-workers"
+  ],
+  "affects": [
+    "ecosystem.config.cjs",
+    "server/jobs/**"
+  ],
+  "adopt": {
+    "file": "package.json",
+    "command": "brain backend serve --env production --with-workers",
+    "snippet": "\"scripts\": { \"start:backend\": \"brain backend serve --env production --with-workers\" }"
+  },
+  "uses": [
+    {
+      "glob": "{package.json,Makefile,justfile,ecosystem.config.cjs,**/*.sh,**/*.yml,**/*.yaml}",
+      "contains": "--with-workers"
+    }
+  ]
+}

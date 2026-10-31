@@ -1,0 +1,31 @@
+{
+  "id": "env-optional-keys",
+  "kind": "capability",
+  "title": "Optional variables with KEY?=",
+  "why": "An app that works without a variable can pass the build; B0721 proposes it for reads with a default or a condition.",
+  "changelog": [
+    "Optional variables: `KEY?=`",
+    "B0721 detects reads with a default or a condition"
+  ],
+  "guide": "brain guide server",
+  "codes": [
+    "B0720",
+    "B0721"
+  ],
+  "apis": [
+    "KEY?="
+  ],
+  "affects": [
+    ".brain_env"
+  ],
+  "adopt": {
+    "file": ".brain_env",
+    "snippet": "ANALYTICS_TOKEN?="
+  },
+  "uses": [
+    {
+      "glob": ".brain_env",
+      "contains": "?="
+    }
+  ]
+}

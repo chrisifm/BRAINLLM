@@ -1,0 +1,17 @@
+{
+  "id": "auth-error-codes",
+  "kind": "fix",
+  "title": "Auth errors separate bad input from a busy server",
+  "why": "A busy database looked like a wrong password; it answers 503, and a refused origin says B0740.",
+  "changelog": [
+    "Auth errors tell bad input from a busy server"
+  ],
+  "guide": "docs/AUTH-FLOWS.md",
+  "codes": [
+    "B0740"
+  ],
+  "apis": [
+    "SIGNUP_UNAVAILABLE",
+    "LOGIN_UNAVAILABLE"
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "id": "list-owner-and-fields",
+  "kind": "capability",
+  "title": "?owner=me and ?fields= narrow a list",
+  "why": "A page can list the reader's own rows with an id taken from the session, and ask only for the fields it shows.",
+  "changelog": [
+    "`?owner=me` lists the reader's own rows",
+    "`?fields=a,b` narrows the `data`"
+  ],
+  "guide": "docs/backend/filters.md",
+  "apis": [
+    "?owner=me",
+    "?fields=a,b"
+  ],
+  "affects": [
+    "views/**/*.brain",
+    "comp/**/*.brain"
+  ],
+  "adopt": {
+    "file": "views/mine.brain",
+    "snippet": "export async function load(ctx) {\n  // over HTTP: GET /api/posts?owner=me&fields=title,price\n  return { posts: await ctx.backend.resource('posts').list({ fields: 'title,price' }) }\n}"
+  },
+  "uses": [
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "owner=me"
+    },
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "fields="
+    }
+  ]
+}

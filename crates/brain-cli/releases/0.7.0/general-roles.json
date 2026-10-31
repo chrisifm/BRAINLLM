@@ -1,0 +1,32 @@
+{
+  "id": "general-roles",
+  "kind": "change",
+  "title": "Roles are general: admin and user by default",
+  "why": "The implicit roles came from one kind of app and could deny new signups. Only `admin` is required now; apps with no roles file whose grants name the old roles keep them, with warning B0739.",
+  "changelog": [
+    "Roles are general"
+  ],
+  "guide": "docs/AUTH-FLOWS.md",
+  "codes": [
+    "B0739"
+  ],
+  "affects": [
+    "server/auth/roles.jsbrain",
+    "server/resources/*/policy.jsbrain"
+  ],
+  "finds": [
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "'candidate'"
+    },
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "'company'"
+    }
+  ],
+  "steps": [
+    "Run `brain add roles` to declare the roles the app uses, and remove the names it does not use.",
+    "Run `brain backend migrate` and read `undeclaredRoles`.",
+    "Move accounts with `brain backend rename-role --from <role> --to <role>`, then the same command with `--apply`."
+  ]
+}

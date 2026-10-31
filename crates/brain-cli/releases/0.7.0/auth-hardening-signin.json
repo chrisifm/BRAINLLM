@@ -1,0 +1,11 @@
+{
+  "id": "auth-hardening-signin",
+  "kind": "fix",
+  "title": "Google linking and client-scoped lockout",
+  "why": "A third party can no longer lock out the owner or spend their reset mail, and an unverified squatter loses its credentials when the owner signs in with Google.",
+  "changelog": [
+    "Google sign-in links an existing account",
+    "Failed sign-ins and reset mail are counted per email and client"
+  ],
+  "guide": "docs/AUTH-FLOWS.md"
+}

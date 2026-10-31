@@ -1,0 +1,13 @@
+{
+  "id": "client-navigation-reliability",
+  "kind": "fix",
+  "title": "Client navigation always lands",
+  "why": "The first click always navigates, a newer navigation aborts the request it replaced, the CSP nonce survives after the first page, and stopping the History router removes its listener.",
+  "changelog": [
+    "aborts the page request it replaced",
+    "The first click on an internal link always navigates",
+    "Client navigation no longer breaks the CSP",
+    "Stopping the History router"
+  ],
+  "guide": "crates/brain-cli/guides/views.md"
+}

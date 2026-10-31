@@ -1,0 +1,26 @@
+{
+  "id": "route-file",
+  "kind": "capability",
+  "title": "Route handlers can return a file",
+  "why": "A handler can answer a download it built, always as an attachment with `nosniff` and a sandboxing policy.",
+  "changelog": [
+    "return `{ file: { base64, name, type } }`"
+  ],
+  "guide": "docs/backend/routes.md",
+  "apis": [
+    "{ file: { base64, name, type } }"
+  ],
+  "affects": [
+    "server/routes/*/handler.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/routes/<name>/handler.jsbrain",
+    "snippet": "return { file: { base64: pdf.toString('base64'), name: 'report.pdf', type: 'application/pdf' } }"
+  },
+  "uses": [
+    {
+      "glob": "server/routes/*/handler.jsbrain",
+      "contains": "file: {"
+    }
+  ]
+}

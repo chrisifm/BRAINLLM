@@ -1,0 +1,24 @@
+{
+  "id": "backend-time-size-codes",
+  "kind": "change",
+  "title": "Database time and size limits answer actionable codes",
+  "why": "A batch or write that hits a limit answered 500 `BACKEND_INTERNAL`. It now answers 503 or 413 and says nothing was written, and upserting an existing row uses the unique index.",
+  "changelog": [
+    "`BATCH_TOO_SLOW`"
+  ],
+  "guide": "docs/backend/batch.md",
+  "apis": [
+    "BATCH_TOO_SLOW",
+    "DATABASE_BUSY",
+    "VALUE_TOO_LARGE"
+  ],
+  "finds": [
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "BACKEND_INTERNAL"
+    }
+  ],
+  "steps": [
+    "Where client or server code tests for `BACKEND_INTERNAL` or a 500 on batch and writes, handle 503 `BATCH_TOO_SLOW` or `DATABASE_BUSY` (retry) and 413 `VALUE_TOO_LARGE` (send less)."
+  ]
+}

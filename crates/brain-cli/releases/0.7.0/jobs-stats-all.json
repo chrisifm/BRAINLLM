@@ -1,0 +1,10 @@
+{
+  "id": "jobs-stats-all",
+  "kind": "change",
+  "title": "Jobs commands without a queue list the queues",
+  "why": "`brain jobs stats` returned an invalid queue and hid the oldest wait; it now lists every queue with its wait and live workers.",
+  "changelog": [
+    "`brain jobs stats` with no queue lists"
+  ],
+  "guide": "docs/backend/queues.md"
+}

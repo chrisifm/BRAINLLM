@@ -1,0 +1,18 @@
+{
+  "id": "write-responses-hide-unreadable-rows",
+  "kind": "change",
+  "title": "Write responses hide rows the writer may not read",
+  "why": "A write author could read back a row their read grant hides. Those responses keep the `id` and send `data: {}`.",
+  "changelog": [
+    "Writes no longer return a row their author may not read"
+  ],
+  "guide": "docs/backend/ownership.md",
+  "affects": [
+    "views/**",
+    "comp/**",
+    "server/**"
+  ],
+  "steps": [
+    "Where a client reads `data` from a write response and its read grant may hide the row, handle an empty `data`."
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "id": "backend-settings-diagnostic",
+  "kind": "change",
+  "title": "B0751 names refused backend settings",
+  "why": "A missing or out-of-range setting was a startup message with no code; check and doctor now warn before start.",
+  "changelog": [
+    "B0751: `brain check`, `brain doctor` and `brain backend serve`"
+  ],
+  "guide": "docs/JWT-GOOGLE.md",
+  "codes": [
+    "B0751"
+  ],
+  "affects": [
+    ".brain_env"
+  ],
+  "steps": [
+    "Set or correct each variable B0751 names."
+  ]
+}

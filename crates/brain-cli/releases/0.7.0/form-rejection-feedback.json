@@ -1,0 +1,16 @@
+{
+  "id": "form-rejection-feedback",
+  "kind": "fix",
+  "title": "A rejected form always says and shows what failed",
+  "why": "Focus lands on the first rejected field instead of the page body, and a 422 with no field gives a plain message instead of pointing at nothing.",
+  "changelog": [
+    "A rejected submit puts focus",
+    "A rejected form no longer says"
+  ],
+  "guide": "brain guide forms",
+  "apis": [
+    "f.error",
+    "form.rejected",
+    "error_state.rejected"
+  ]
+}

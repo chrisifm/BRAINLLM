@@ -1,0 +1,10 @@
+{
+  "id": "backend-docs",
+  "kind": "fix",
+  "title": "Backend docs corrected",
+  "why": "Several statements contradicted the code: route `ctx.user`, `ctx.env`, where OpenAPI lives, what migration adds, and what API keys cover.",
+  "changelog": [
+    "Backend docs corrected"
+  ],
+  "guide": "docs/BACKEND.md"
+}

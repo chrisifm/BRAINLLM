@@ -1,0 +1,10 @@
+{
+  "id": "card-responses",
+  "kind": "change",
+  "title": "brain card resource:<name> lists response shapes",
+  "why": "An author sees each response shape, including when `owner` is present, without reading the contract.",
+  "changelog": [
+    "lists the response shapes"
+  ],
+  "guide": "brain guide start"
+}

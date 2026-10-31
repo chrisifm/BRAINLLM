@@ -1,0 +1,35 @@
+{
+  "id": "row-conditioned-read-grants",
+  "kind": "capability",
+  "title": "Row conditions on read grants",
+  "why": "A public read served every row, drafts included; a grant can now cover only matching rows, enforced as bound SQL. B0749 warns on an unconditioned public read of a resource with a state field.",
+  "changelog": [
+    "Read grants accept row conditions",
+    "`brain check` warns B0749"
+  ],
+  "guide": "docs/backend/ownership.md",
+  "codes": [
+    "B0749"
+  ],
+  "apis": [
+    "policy read where",
+    "expose_all_rows"
+  ],
+  "affects": [
+    "server/resources/*/policy.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/<name>/policy.jsbrain",
+    "snippet": "<meta server>\nexport default { read: [{ public: { where: { status: 'published' } } }, 'owner', 'admin'], create: ['admin'], update: ['owner', 'admin'], delete: ['admin'] }"
+  },
+  "uses": [
+    {
+      "glob": "server/resources/*/policy.jsbrain",
+      "contains": "where:"
+    },
+    {
+      "glob": "server/resources/*/policy.jsbrain",
+      "contains": "expose_all_rows"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "id": "openapi-anonymous-warning",
+  "kind": "change",
+  "title": "B0771 warns when /_brain/api is open to anonymous callers",
+  "why": "The backend serve log warns about an API description open to anyone, unless `--env development` was chosen.",
+  "changelog": [
+    "warns B0771"
+  ],
+  "guide": "docs/backend/routes.md",
+  "codes": [
+    "B0771"
+  ]
+}

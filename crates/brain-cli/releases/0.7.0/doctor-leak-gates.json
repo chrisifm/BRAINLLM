@@ -1,0 +1,23 @@
+{
+  "id": "doctor-leak-gates",
+  "kind": "change",
+  "title": "A suspected leak warns in doctor, and leak checks wait for requests",
+  "why": "A suspicion made doctor exit 1 with a misleading summary, and a pending call read as a leak. The summary names the failed gates.",
+  "changelog": [
+    "`brain doctor` no longer fails on suspected leak B0601",
+    "Leak checks wait for in-flight requests"
+  ],
+  "guide": "SPEC.md",
+  "codes": [
+    "B0601"
+  ],
+  "apis": [
+    "doctor.failOnSuspectedLeaks"
+  ],
+  "affects": [
+    "brain.json"
+  ],
+  "steps": [
+    "To keep failing CI on a suspected leak, set `\"doctor\": { \"failOnSuspectedLeaks\": true }` in `brain.json`."
+  ]
+}

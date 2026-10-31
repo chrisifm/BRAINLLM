@@ -1,0 +1,10 @@
+{
+  "id": "listen-restart-wait",
+  "kind": "fix",
+  "title": "A restart waits for the port",
+  "why": "Process-manager restarts failed with `Address already in use` and a misleading fix; the error now names the live holder.",
+  "changelog": [
+    "A restart under a process manager no longer fails"
+  ],
+  "guide": "docs/backend/lifecycle.md"
+}

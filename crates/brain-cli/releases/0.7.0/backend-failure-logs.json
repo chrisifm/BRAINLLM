@@ -1,0 +1,28 @@
+{
+  "id": "backend-failure-logs",
+  "kind": "capability",
+  "title": "brain backend logs <rid>",
+  "why": "A request id leads to its cause: SQLSTATE, resource, operation and code location, without quoting values in production.",
+  "changelog": [
+    "`brain backend logs [rid]`"
+  ],
+  "guide": "docs/BACKEND.md",
+  "apis": [
+    "brain backend logs",
+    "brain_backend_logs"
+  ],
+  "affects": [
+    ".brain/backend/failures.jsonl"
+  ],
+  "adopt": {
+    "file": "package.json",
+    "command": "brain backend logs",
+    "snippet": "\"scripts\": { \"backend:logs\": \"brain backend logs\" }"
+  },
+  "uses": [
+    {
+      "glob": "{package.json,Makefile,justfile,ecosystem.config.cjs,**/*.sh,**/*.yml,**/*.yaml}",
+      "contains": "brain backend logs"
+    }
+  ]
+}

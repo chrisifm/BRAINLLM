@@ -1,0 +1,9 @@
+{
+  "id": "local-named-like-helper",
+  "kind": "fix",
+  "title": "Locals named like runtime helpers build",
+  "why": "A local such as `const key` in a job or server module failed the build with an import the build never emitted.",
+  "changelog": [
+    "A job or server module with a local variable named like a runtime helper"
+  ]
+}

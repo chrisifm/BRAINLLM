@@ -1,0 +1,17 @@
+{
+  "id": "env-read-detection",
+  "kind": "fix",
+  "title": "Environment reads are detected from tokens",
+  "why": "B0721 and B0722 see destructured reads and quoted key names, ignore comments and prose that mention a key, and reading an undeclared `PUBLIC_*` variable gives `undefined` instead of throwing.",
+  "changelog": [
+    "undeclared `PUBLIC_*` variable",
+    "by destructuring `process.env`",
+    "B0721 and B0722 read `process.env`",
+    "B0722 counts keys named as quoted literals"
+  ],
+  "guide": "brain guide server",
+  "codes": [
+    "B0721",
+    "B0722"
+  ]
+}

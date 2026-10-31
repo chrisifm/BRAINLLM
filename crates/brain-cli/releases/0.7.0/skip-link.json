@@ -1,0 +1,26 @@
+{
+  "id": "skip-link",
+  "kind": "capability",
+  "title": "Skip link to #brain-view",
+  "why": "Keyboard users can skip the navigation. New apps have it; existing apps add one line.",
+  "changelog": [
+    "New apps start with a skip link"
+  ],
+  "guide": "brain guide a11y",
+  "apis": [
+    "#brain-view"
+  ],
+  "affects": [
+    "app.brain"
+  ],
+  "adopt": {
+    "file": "app.brain",
+    "snippet": "<a class=\"skip\" href=\"#brain-view\">Skip to content</a>"
+  },
+  "uses": [
+    {
+      "glob": "app.brain",
+      "contains": "#brain-view"
+    }
+  ]
+}

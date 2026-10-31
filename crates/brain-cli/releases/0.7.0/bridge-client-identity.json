@@ -1,0 +1,21 @@
+{
+  "id": "bridge-client-identity",
+  "kind": "fix",
+  "title": "Per-visitor rate limits through the gateways",
+  "why": "All server-rendered traffic shared one bucket and a browser could choose its own. Trust ranges wider than /8 or /16 are refused.",
+  "changelog": [
+    "The same-origin gateways now forward the client address"
+  ],
+  "guide": "docs/backend/proxy-cors.md",
+  "apis": [
+    "trustProxy",
+    "BRAIN_TRUST_PROXY",
+    "ctx.req.ip"
+  ],
+  "affects": [
+    "server/platform.jsbrain"
+  ],
+  "steps": [
+    "Behind nginx or another gateway, set `trustProxy: ['127.0.0.1', '::1']` in `server/platform.jsbrain`."
+  ]
+}

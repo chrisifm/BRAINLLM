@@ -1,0 +1,31 @@
+{
+  "id": "backend-env-required",
+  "kind": "breaking",
+  "title": "brain backend needs --env for a remote or production database",
+  "why": "Commands could reach a production database by accident. Without `--env` they stop with B0785 when the database is remote or `NODE_ENV=production`, and a proxied `/_brain/api` request needs an administrator in every environment.",
+  "changelog": [
+    "stop with B0785"
+  ],
+  "guide": "docs/backend/lifecycle.md",
+  "codes": [
+    "B0785"
+  ],
+  "apis": [
+    "--env"
+  ],
+  "affects": [
+    "package.json",
+    "**/*.sh",
+    "**/*.yml"
+  ],
+  "finds": [
+    {
+      "glob": "{package.json,Makefile,justfile,ecosystem.config.cjs,**/*.sh,**/*.yml,**/*.yaml}",
+      "contains": "brain backend "
+    }
+  ],
+  "steps": [
+    "Add `--env production` (or the environment meant) to every `brain backend` command in scripts, pipelines and process files that reach a remote database.",
+    "Sign in as an administrator to read `/_brain/api` through the app's origin."
+  ]
+}

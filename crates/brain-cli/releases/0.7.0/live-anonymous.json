@@ -1,0 +1,29 @@
+{
+  "id": "live-anonymous",
+  "kind": "capability",
+  "title": "liveResource says why a public page has no socket",
+  "why": "A null scope reports `anonymous` instead of `idle`, so a page can offer sign-in. `brain check` reports `scope: () => null` as B0775.",
+  "changelog": [
+    "`liveResource` says why a public page has no socket"
+  ],
+  "guide": "brain guide sockets",
+  "codes": [
+    "B0775"
+  ],
+  "apis": [
+    "updates.state === 'anonymous'"
+  ],
+  "affects": [
+    "views/**/*.brain"
+  ],
+  "adopt": {
+    "file": "views/feed.brain",
+    "snippet": "{#if updates.state === 'anonymous'}<a href=\"/login\">Sign in</a>{/if}"
+  },
+  "uses": [
+    {
+      "glob": "**/*.brain",
+      "contains": "=== 'anonymous'"
+    }
+  ]
+}

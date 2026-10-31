@@ -1,0 +1,13 @@
+{
+  "id": "live-session-lost",
+  "kind": "fix",
+  "title": "liveResource does not look stuck when the session is gone",
+  "why": "A closed session looked like a network failure; a 401 now ends in `auth-required` instead of spending the retries.",
+  "changelog": [
+    "`liveResource` no longer looks stuck"
+  ],
+  "guide": "brain guide sockets",
+  "apis": [
+    "auth-required"
+  ]
+}

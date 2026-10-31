@@ -1,0 +1,16 @@
+{
+  "id": "denied-write-answers",
+  "kind": "change",
+  "title": "Denied writes answer by what the writer can read",
+  "why": "A non-owner write on a publicly readable row answered a misleading 404; it answers `403 POLICY_DENIED` when the writer may read the row.",
+  "changelog": [
+    "A write the policy does not grant answers"
+  ],
+  "guide": "docs/backend/ownership.md",
+  "apis": [
+    "POLICY_DENIED"
+  ],
+  "steps": [
+    "Where code treats a 404 on a write as not owned, handle `403 POLICY_DENIED` too."
+  ]
+}

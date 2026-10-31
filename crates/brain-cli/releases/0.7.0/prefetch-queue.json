@@ -1,0 +1,10 @@
+{
+  "id": "prefetch-queue",
+  "kind": "change",
+  "title": "Prefetch runs from an ordered queue",
+  "why": "Hover and focus go first, then visible links in the main content; links that left the viewport are dropped and a click never waits.",
+  "changelog": [
+    "Prefetch runs from an ordered queue"
+  ],
+  "guide": "brain guide performance"
+}

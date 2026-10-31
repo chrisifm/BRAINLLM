@@ -1,0 +1,22 @@
+{
+  "id": "check-links-titles",
+  "kind": "change",
+  "title": "brain check reports dead links and doubled titles",
+  "why": "A link nothing answers waited for `brain build`, and a title repeating `titleTemplate` went unnoticed.",
+  "changelog": [
+    "`brain check` reports a link nothing answers"
+  ],
+  "guide": "brain guide views",
+  "codes": [
+    "B0776",
+    "B0777"
+  ],
+  "affects": [
+    "views/**",
+    "comp/**",
+    "app.brain"
+  ],
+  "steps": [
+    "Fix each link B0776 names, and remove from each view title what B0777 says `titleTemplate` adds."
+  ]
+}

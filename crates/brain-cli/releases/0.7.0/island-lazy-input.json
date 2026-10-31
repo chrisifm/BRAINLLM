@@ -1,0 +1,10 @@
+{
+  "id": "island-lazy-input",
+  "kind": "fix",
+  "title": "Input survives a failed island chunk",
+  "why": "A click or key was lost when a chunk failed; a link still navigates, and a lazy component acts on the key that loaded it.",
+  "changelog": [
+    "A link inside an island whose chunk failed still navigates"
+  ],
+  "guide": "brain guide performance"
+}

@@ -1,0 +1,13 @@
+{
+  "id": "cli-arguments",
+  "kind": "fix",
+  "title": "CLI help, closed pipes and --flag=value behave",
+  "why": "`--help` acts on nothing, a closed pipe ends quietly, `brain add` lists its kinds, and `--env=<name>` and `--since=<date>` take effect.",
+  "changelog": [
+    "ends quietly: a closed pipe",
+    "`--help` on any command",
+    "`brain add` without arguments lists",
+    "`--env=<name>` and `brain seo --since=<date>` take effect"
+  ],
+  "guide": "brain guide start"
+}

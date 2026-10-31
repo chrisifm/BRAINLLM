@@ -1,0 +1,21 @@
+{
+  "id": "worker-wake-notify",
+  "kind": "change",
+  "title": "Idle workers wake on commit",
+  "why": "Idle workers waited for the next poll; a new job now starts within about 50 ms. It needs a new table.",
+  "changelog": [
+    "An idle worker starts a new job within about 50 ms"
+  ],
+  "guide": "docs/backend/queues.md",
+  "affects": [
+    "server/jobs/**"
+  ],
+  "finds": [
+    {
+      "glob": "server/jobs/*/handler.jsbrain"
+    }
+  ],
+  "steps": [
+    "Run `brain backend migrate` once before serving this version. It adds `_brain_workers`."
+  ]
+}

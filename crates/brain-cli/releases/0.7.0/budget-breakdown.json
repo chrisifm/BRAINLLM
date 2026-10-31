@@ -1,0 +1,10 @@
+{
+  "id": "budget-breakdown",
+  "kind": "fix",
+  "title": "An over-budget view is reported once with its breakdown",
+  "why": "The finding repeated per page; it now names the largest page with JS, CSS and HTML apart.",
+  "changelog": [
+    "is reported once, at its largest page"
+  ],
+  "guide": "brain guide performance"
+}

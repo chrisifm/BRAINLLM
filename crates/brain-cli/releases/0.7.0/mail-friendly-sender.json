@@ -1,0 +1,10 @@
+{
+  "id": "mail-friendly-sender",
+  "kind": "fix",
+  "title": "BRAIN_MAIL_FROM accepts a friendly name",
+  "why": "The form mail providers document was refused at startup.",
+  "changelog": [
+    "`BRAIN_MAIL_FROM` accepts `Name <sender@domain>`"
+  ],
+  "guide": "brain guide server"
+}

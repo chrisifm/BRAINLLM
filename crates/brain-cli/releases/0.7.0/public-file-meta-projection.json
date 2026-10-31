@@ -1,0 +1,10 @@
+{
+  "id": "public-file-meta-projection",
+  "kind": "fix",
+  "title": "Anonymous public file metadata is projected",
+  "why": "Anonymous readers learned the uploader and linked record of a public file.",
+  "changelog": [
+    "Anonymous `/meta` of a public file bucket"
+  ],
+  "guide": "docs/backend/files.md"
+}

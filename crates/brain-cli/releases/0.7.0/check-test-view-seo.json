@@ -1,0 +1,13 @@
+{
+  "id": "check-test-view-seo",
+  "kind": "fix",
+  "title": "No B0501 on test files under views/",
+  "why": "A test file has no route, so checking one on its own no longer asks for SEO metadata.",
+  "changelog": [
+    "`*.test.brain` under `views/`"
+  ],
+  "guide": "brain guide tests",
+  "codes": [
+    "B0501"
+  ]
+}

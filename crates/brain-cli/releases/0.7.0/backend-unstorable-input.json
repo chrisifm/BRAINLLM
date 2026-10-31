@@ -1,0 +1,10 @@
+{
+  "id": "backend-unstorable-input",
+  "kind": "fix",
+  "title": "Unstorable text and bad cursors are 422",
+  "why": "Invalid input says what to send, and include failures keep their cause.",
+  "changelog": [
+    "Text Postgres cannot store"
+  ],
+  "guide": "docs/backend/search.md"
+}

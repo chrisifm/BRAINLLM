@@ -1,0 +1,9 @@
+{
+  "id": "smoke-registry-failures",
+  "kind": "internal",
+  "title": "Registry smoke reports structured failures",
+  "why": "`npm/smoke-registry.mjs` names invalid arguments, versions and deadlines; it has no effect on an app.",
+  "changelog": [
+    "`npm/smoke-registry.mjs` reports invalid arguments"
+  ]
+}

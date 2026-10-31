@@ -1,0 +1,22 @@
+{
+  "id": "origin-static-check",
+  "kind": "change",
+  "title": "Origin mistakes are caught before running",
+  "why": "A bad origin failed only at runtime. `brain check` and `brain doctor` report it with the exact replacement.",
+  "changelog": [
+    "`brain check` and `brain doctor` catch origin mistakes"
+  ],
+  "guide": "docs/backend/proxy-cors.md",
+  "codes": [
+    "B0744",
+    "B0745",
+    "B0746"
+  ],
+  "affects": [
+    "brain.json",
+    "views/**"
+  ],
+  "steps": [
+    "Run `brain check` and apply the replacement each B0744, B0745 and B0746 gives."
+  ]
+}

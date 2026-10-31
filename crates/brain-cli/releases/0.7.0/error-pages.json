@@ -1,0 +1,11 @@
+{
+  "id": "error-pages",
+  "kind": "fix",
+  "title": "Error and status pages say what happened and answer their status",
+  "why": "Error tabs showed only the site name and could be indexed, and `/403` answered 200 when opened directly.",
+  "changelog": [
+    "Error pages always say what happened",
+    "A status page opened directly answers its status"
+  ],
+  "guide": "brain guide views"
+}

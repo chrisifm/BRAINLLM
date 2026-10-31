@@ -1,0 +1,10 @@
+{
+  "id": "favicon-ico",
+  "kind": "fix",
+  "title": "/favicon.ico redirects to the SVG icon",
+  "why": "Apps with only an SVG icon logged 404 noise.",
+  "changelog": [
+    "`/favicon.ico` redirects to `public/favicon.svg`"
+  ],
+  "guide": "brain guide seo"
+}

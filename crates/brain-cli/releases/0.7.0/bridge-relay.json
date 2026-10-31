@@ -1,0 +1,19 @@
+{
+  "id": "bridge-relay",
+  "kind": "fix",
+  "title": "Files, declared routes, cache headers and API keys cross the gateways",
+  "why": "Downloads over 20 MiB and uploads over 64 KiB failed, webhooks could not arrive through the public origin, validators were dropped and valid keys got 403. B0750 warns about a route the gateway will not proxy.",
+  "changelog": [
+    "`/_brain/files` now streams",
+    "Routes declared in `server/routes` are now reachable",
+    "The gateways now relay `ETag`",
+    "API keys now cross the gateways"
+  ],
+  "guide": "docs/backend/routes.md",
+  "codes": [
+    "B0750"
+  ],
+  "affects": [
+    "server/routes/*/route.jsbrain"
+  ]
+}

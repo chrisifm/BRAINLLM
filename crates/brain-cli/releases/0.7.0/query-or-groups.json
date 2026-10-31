@@ -1,0 +1,31 @@
+{
+  "id": "query-or-groups",
+  "kind": "capability",
+  "title": "Declared or groups in list queries",
+  "why": "A list can match one of several conditions with an indexed, bounded filter instead of a custom route.",
+  "changelog": [
+    "Declared `or` groups in `query.jsbrain`"
+  ],
+  "guide": "docs/backend/filters.md",
+  "apis": [
+    "query.jsbrain or",
+    "?group.field[op]=value"
+  ],
+  "affects": [
+    "server/resources/*/query.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/<name>/query.jsbrain",
+    "snippet": "<meta server>\nexport default { or: { live: { expires_on: ['gte', 'exists'], source: ['eq'] } } }"
+  },
+  "uses": [
+    {
+      "glob": "server/resources/*/query.jsbrain",
+      "contains": " or: "
+    },
+    {
+      "glob": "server/resources/*/query.jsbrain",
+      "contains": "or: {"
+    }
+  ]
+}

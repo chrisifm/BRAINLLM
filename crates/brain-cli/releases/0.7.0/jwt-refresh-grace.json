@@ -1,0 +1,27 @@
+{
+  "id": "jwt-refresh-grace",
+  "kind": "capability",
+  "title": "Refresh grace window for concurrent tabs",
+  "why": "Concurrent refreshes no longer revoke the family, so tabs and prefetches keep their session, and SSR renews an expired access cookie. The window is configurable and reuse detection stays on.",
+  "changelog": [
+    "Concurrent JWT refresh inside a 10-second grace",
+    "The refresh grace window is configurable"
+  ],
+  "guide": "docs/JWT-GOOGLE.md",
+  "apis": [
+    "BRAIN_AUTH_REFRESH_GRACE_SECONDS"
+  ],
+  "affects": [
+    ".brain_env"
+  ],
+  "adopt": {
+    "file": ".brain_env",
+    "snippet": "BRAIN_AUTH_REFRESH_GRACE_SECONDS=10"
+  },
+  "uses": [
+    {
+      "glob": ".brain_env",
+      "contains": "BRAIN_AUTH_REFRESH_GRACE_SECONDS"
+    }
+  ]
+}

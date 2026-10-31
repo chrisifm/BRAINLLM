@@ -1,0 +1,13 @@
+{
+  "id": "aggregates-truncated",
+  "kind": "change",
+  "title": "Lists name aggregates that hit the group cap",
+  "why": "A list response says which aggregates were cut at 100 groups, so a partial chart can be told apart from a complete one.",
+  "changelog": [
+    "hit the 100-group cap"
+  ],
+  "guide": "docs/backend/aggregates.md",
+  "apis": [
+    "aggregates_truncated"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "id": "bucket-types",
+  "kind": "change",
+  "title": "A bucket states its types; Office files are told apart",
+  "why": "A bucket with no `types` accepts HTML and executables and now warns. Office formats are told apart from plain ZIP and OLE containers, and common aliases match.",
+  "changelog": [
+    "A bucket can state `types: '*'`"
+  ],
+  "guide": "docs/backend/files.md",
+  "codes": [
+    "B0770"
+  ],
+  "affects": [
+    "server/files/*.jsbrain"
+  ],
+  "steps": [
+    "For each bucket B0770 reports, list the types it should hold, or write `types: '*'` if any file is intended."
+  ]
+}

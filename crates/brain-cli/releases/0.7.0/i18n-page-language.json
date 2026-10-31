@@ -1,0 +1,13 @@
+{
+  "id": "i18n-page-language",
+  "kind": "fix",
+  "title": "Pages outside the default language stay in that language",
+  "why": "Links, forms, navigation and redirects keep the language, server code reads the page's language, and single-language apps load their dictionary under `brain run`.",
+  "changelog": [
+    "internal links, forms, `navigate()` and `redirect()`",
+    "no longer fails the build with B1819",
+    "loads the dictionary of a single-language app",
+    "inside `load()`, guards and form handlers read the page's language"
+  ],
+  "guide": "brain guide i18n"
+}

@@ -1,0 +1,26 @@
+{
+  "id": "nested-includes",
+  "kind": "capability",
+  "title": "Includes follow references up to three levels",
+  "why": "One request can read a record with its nested references; each level is declared and applies its own read policy.",
+  "changelog": [
+    "`?include=a.b.c` follows references"
+  ],
+  "guide": "docs/backend/relations.md",
+  "apis": [
+    "?include=a.b.c"
+  ],
+  "affects": [
+    "server/resources/*/query.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/<name>/query.jsbrain",
+    "snippet": "<meta server>\nexport default { include: ['product', 'product.shop'] }"
+  },
+  "uses": [
+    {
+      "glob": "server/resources/*/query.jsbrain",
+      "contains": "include: ['"
+    }
+  ]
+}

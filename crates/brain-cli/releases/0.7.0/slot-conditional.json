@@ -1,0 +1,10 @@
+{
+  "id": "slot-conditional",
+  "kind": "fix",
+  "title": "Conditional content reaches its named slot",
+  "why": "`{#if}` content with `slot=\"footer\"` rendered in the default slot and leaked the attribute to the DOM.",
+  "changelog": [
+    "Conditional content passed to a named slot"
+  ],
+  "guide": "brain guide views"
+}

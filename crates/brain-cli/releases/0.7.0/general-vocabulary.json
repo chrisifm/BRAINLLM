@@ -1,0 +1,9 @@
+{
+  "id": "general-vocabulary",
+  "kind": "internal",
+  "title": "One app's vocabulary removed from what the framework ships",
+  "why": "Defaults, messages, docs and examples stay general; `scripts/check-general.sh` keeps it that way.",
+  "changelog": [
+    "Domain vocabulary from one app removed"
+  ]
+}

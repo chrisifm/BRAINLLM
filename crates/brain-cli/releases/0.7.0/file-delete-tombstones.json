@@ -1,0 +1,21 @@
+{
+  "id": "file-delete-tombstones",
+  "kind": "change",
+  "title": "A failed file delete is retried until the bytes are gone",
+  "why": "Deleting a file whose bytes could not be removed no longer leaves an orphan; the backend keeps retrying. It needs a new table.",
+  "changelog": [
+    "`_brain_file_deletions` keeps the delete"
+  ],
+  "guide": "docs/backend/files.md",
+  "steps": [
+    "Run `brain backend migrate` once before serving this version."
+  ],
+  "finds": [
+    {
+      "glob": "server/files/*.jsbrain"
+    }
+  ],
+  "affects": [
+    "server/files/*.jsbrain"
+  ]
+}

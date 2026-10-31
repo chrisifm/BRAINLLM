@@ -1,0 +1,13 @@
+{
+  "id": "nav-focus-announce",
+  "kind": "fix",
+  "title": "Focus and announcement after client navigation",
+  "why": "Keyboard and screen-reader users lost their place; focus moves to the heading and `#brain-announce` reads the new title.",
+  "changelog": [
+    "After a client navigation focus moves to the page heading"
+  ],
+  "guide": "brain guide a11y",
+  "apis": [
+    "#brain-announce"
+  ]
+}

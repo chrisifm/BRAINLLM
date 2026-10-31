@@ -1,0 +1,14 @@
+{
+  "id": "request-log-db-timing",
+  "kind": "change",
+  "title": "Request logs separate database time and pool wait",
+  "why": "Log lines for resource reads carry `dbMs` and `dbWaitMs`, so slow queries and an exhausted pool can be told apart from `ms`.",
+  "changelog": [
+    "Request log lines carry `dbMs`"
+  ],
+  "guide": "docs/backend/lifecycle.md",
+  "apis": [
+    "dbMs",
+    "dbWaitMs"
+  ]
+}

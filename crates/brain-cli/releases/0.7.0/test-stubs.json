@@ -1,0 +1,31 @@
+{
+  "id": "test-stubs",
+  "kind": "capability",
+  "title": "stub() and reply() in tests",
+  "why": "A test can answer a `server:` function or an endpoint and its error shapes without running a server.",
+  "changelog": [
+    "`stub()` and `reply()` in"
+  ],
+  "guide": "brain guide tests",
+  "apis": [
+    "stub",
+    "reply"
+  ],
+  "affects": [
+    "**/*.test.brain"
+  ],
+  "adopt": {
+    "file": "comp/signup.test.brain",
+    "snippet": "stub('save', reply(422, { errors: { email: 'Taken' } }))"
+  },
+  "uses": [
+    {
+      "glob": "**/*.test.brain",
+      "contains": "stub("
+    },
+    {
+      "glob": "**/*.test.brain",
+      "contains": "reply("
+    }
+  ]
+}

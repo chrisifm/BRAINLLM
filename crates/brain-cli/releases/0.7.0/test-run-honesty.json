@@ -1,0 +1,19 @@
+{
+  "id": "test-run-honesty",
+  "kind": "change",
+  "title": "brain test fails when nothing ran",
+  "why": "A wrong path or a file with no `test()` used to report green. With native sockets it runs against the app's own `brain run`, and doctor no longer claims a clean run when tests did not run.",
+  "changelog": [
+    "fails on a path that does not exist",
+    "run against the app's own",
+    "no longer says no errors were captured"
+  ],
+  "guide": "brain guide tests",
+  "affects": [
+    "package.json",
+    "**/*.test.brain"
+  ],
+  "steps": [
+    "Pass `brain test` one existing test file, or no path; a file that declares no `test()` now fails."
+  ]
+}
