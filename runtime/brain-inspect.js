@@ -261,6 +261,9 @@ const watched = []
 // No deref(): reading a WeakRef keeps the target alive for the job (KeepDuringJob) and, checking every
 // second, the inspector would cause the leak it measures. The FinalizationRegistry marks the record on collection.
 const fin = G.FinalizationRegistry ? new FinalizationRegistry(w => (w.dead = 1)) : null
+// Where a pending request went, without origin or query: evidence for a fix, never a value.
+const pendingUrls = () => [...inflight.values()].slice(0, 3).map(r => `${r.m} ${r.url.replace(/^[a-z]+:\/\/[^/]+/i, '').split(/[?#]/)[0]}`)
+const SETTLE_MS = 60000
 function watch(d) {
   if (!fin) return
   // its first DOM node: an app that keeps a detached node (a module array, a cache) is the leak to catch. The browser
@@ -268,7 +271,7 @@ function watch(d) {
   // collecting. Unmounted nodes no longer point at their instance (brain-dev, brain-guard), so a kept node is small.
   const target = (d.n && d.n.find(x => x.nodeType === 1)) || d.r
   if (!target) return
-  const w = { dead: 0, h: d.h, name: nameOf(d), file: (d.C && d.C.f) || null, at: gcs, fx: (d.r && b602ByInst.get(d.r)) || [] }
+  const w = { dead: 0, h: d.h, name: nameOf(d), file: (d.C && d.C.f) || null, at: gcs, fx: (d.r && b602ByInst.get(d.r)) || [], since: now(), net: [...inflight.keys()], urls: pendingUrls() }
   fin.register(target, w)
   watched.push(w)
 }
@@ -276,28 +279,37 @@ function checkLeaks() {
   for (let j = watched.length - 1; j >= 0; j--) {
     const w = watched[j]
     if (w.dead) watched.splice(j, 1)
+    // A request from before the unmount may be what holds it: judge after it settles (bounded, for a long poll).
+    else if (w.net.some(id => inflight.has(id)) && now() - w.since < SETTLE_MS) w.at = gcs
     else if (gcs - w.at >= 2) {
       watched.splice(j, 1)
-      leak({ code: 'B0601', h: w.h, name: w.name, file: w.file, msg: `unmounted ${w.name} instance still alive after 2 GC cycles`, fix: w.fx.length ? 'add cleanup to the listed fx: they retain the instance' : 'look for external references to its nodes or signals (global listeners, caches, module closures)', fx: w.fx })
+      const waited = w.urls.length ? `${w.urls.length > 2 ? 'several requests' : w.urls.join(', ')} ${w.urls.length > 1 ? 'were' : 'was'} in flight when it unmounted; ` : ''
+      leak({ code: 'B0601', h: w.h, name: w.name, file: w.file, msg: `unmounted ${w.name} instance still alive after 2 GC cycles`, fix: w.fx.length ? 'add cleanup to the listed fx: they retain the instance' : `${waited}look for what still references its nodes or signals: an in-flight promise (a pending server call, \`.then\` or \`await\`) or timer that writes to the component, global listeners, caches, module closures`, fx: w.fx })
     }
   }
 }
 
 // ---------- network: fetch and XHR ----------
 let rid = 1
+// Requests without an answer yet, id → { m, url, stop }: a `.then` or `await` waiting on one keeps what it closes over
+// alive, so an instance unmounted meanwhile is not a verdict yet (B0601). `stop` is absent when the caller holds its own signal.
+const inflight = new Map()
 function patchNet() {
   if (O.fetch && !G.fetch.$bi) {
     G.fetch = function (input, init) {
       const c = ctx(), s = site(), t0 = pnow()
       const r = { k: 'net', id: rid++, kind: 'fetch', m: (init && init.method) || (input && input.method) || 'GET', url: String((input && input.url) || input), own: own(c), line: s.line, foreign: s.foreign, at: now(), st: null, ms: null, b: null }
       push(r)
-      return O.fetch.call(this, input, init).then(
+      const ac = G.AbortController && !(init && init.signal) && !(input && input.signal) ? new AbortController() : null
+      inflight.set(r.id, { m: r.m, url: r.url, stop: ac && (() => ac.abort()) })
+      return O.fetch.call(this, input, ac ? { ...init, signal: ac.signal } : init).then(
         res => {
+          inflight.delete(r.id)
           const len = res.headers && res.headers.get && res.headers.get('content-length')
           push({ k: 'net', id: r.id, st: res.status, ms: +(pnow() - t0).toFixed(1), b: len == null ? null : +len })
           return res
         },
-        err => (push({ k: 'net', id: r.id, st: 0, ms: +(pnow() - t0).toFixed(1), err: String(err) }), Promise.reject(err))
+        err => (inflight.delete(r.id), push({ k: 'net', id: r.id, st: 0, ms: +(pnow() - t0).toFixed(1), err: String(err) }), Promise.reject(err))
       )
     }
     G.fetch.$bi = 1
@@ -313,7 +325,8 @@ function patchNet() {
     X.send = function (body) {
       const c = ctx(), s = site(), t0 = pnow(), r = { k: 'net', id: rid++, kind: 'xhr', ...(this.$r || {}), own: own(c), line: s.line, foreign: s.foreign, at: now(), st: null, ms: null, b: null }
       push(r)
-      this.addEventListener('loadend', () => push({ k: 'net', id: r.id, st: this.status, ms: +(pnow() - t0).toFixed(1), b: typeof this.responseText === 'string' ? this.responseText.length : null }))
+      inflight.set(r.id, { m: r.m, url: r.url, stop: () => this.abort() })
+      this.addEventListener('loadend', () => (inflight.delete(r.id), push({ k: 'net', id: r.id, st: this.status, ms: +(pnow() - t0).toFixed(1), b: typeof this.responseText === 'string' ? this.responseText.length : null })))
       return send.call(this, body)
     }
   }
@@ -695,7 +708,7 @@ export function inspect(o) {
     G.document.addEventListener.call(G.document, 'keydown', e => e.altKey && e.shiftKey && e.code === 'KeyB' && toggle())
   return api
 }
-const api = { tick, drain, comps, onLoaf, onEvents, leaks: () => leaks.slice(), timers: () => [...timers.values()], toggle: () => toggle() }
+const api = { tick, drain, comps, onLoaf, onEvents, leaks: () => leaks.slice(), timers: () => [...timers.values()], toggle: () => toggle(), inflight: () => [...inflight.values()].map(r => `${r.m} ${r.url}`), abortInflight: () => { for (const r of inflight.values()) if (r.stop) r.stop() } }
 
 // ---------- mini panel (Alt+Shift+B): heap, leaks and link to the full debugger (§9.1) ----------
 let panel = null

@@ -4,7 +4,8 @@ import { install, MouseEvent } from '../shim/dom.js'
 
 const doc = install()
 let fakeStatus = 200
-globalThis.fetch = async () => ({ status: fakeStatus, headers: { get: k => (k === 'content-length' ? '42' : null) } })
+let fakeHold = null
+globalThis.fetch = async (_, init) => (fakeHold && (await Promise.race([fakeHold, new Promise((_r, no) => init && init.signal && init.signal.addEventListener('abort', () => no(new Error('aborted'))))])), { status: fakeStatus, headers: { get: k => (k === 'content-length' ? '42' : null) } })
 const rt = await import('./rt.js')
 const { sig, drv, fx, tpl, insert, on, mount, batch } = rt
 const { dev } = await rt.sibling('brain-dev.js')
@@ -185,4 +186,52 @@ test('TOOLCHAIN #24: the real component name (not the guard/dev wrapper W); unmo
   assert.equal(c.name, 'Counter')
   stop()
   assert.deepEqual([p.$i, p.$g, p.$c], [null, null, null]) // a node a browser keeps does not keep the instance
+})
+
+test('B0601 waits for a request in flight at the unmount, then names it in the fix', { skip: !globalThis.gc && 'requires --expose-gc' }, async () => {
+  let answer
+  fakeHold = new Promise(r => (answer = r))
+  const held = []
+  function Waiting() {
+    const r = tpl('<u>w</u>')()
+    held.push(r)
+    return r
+  }
+  Waiting.h = 'waiting'
+  const call = globalThis.fetch('https://api.example.test/slow?secret=1', {})
+  assert.equal(api.inflight().length, 1)
+  mount(dev(Waiting), doc.createElement('div'), {})()
+  const collect = async () => {
+    for (let k = 0; k < 4; k++) {
+      gc()
+      await wait(20)
+      api.tick()
+    }
+  }
+  const waiting = () => api.leaks().find(x => x.code === 'B0601' && x.h === 'waiting')
+  await collect()
+  assert.equal(waiting(), undefined, 'no verdict while the request is pending')
+  answer()
+  await call
+  fakeHold = null
+  assert.deepEqual(api.inflight(), [])
+  await collect()
+  const found = waiting()
+  assert.ok(found, 'still retained after it settled: reported')
+  assert.ok(found.fix.includes('in-flight') && found.fix.includes('/slow') && !found.fix.includes('secret'), found.fix)
+})
+
+test('abortInflight stops only the requests the inspector owns the signal of', async () => {
+  let answer
+  fakeHold = new Promise(r => (answer = r))
+  const mine = new AbortController()
+  const owned = globalThis.fetch('/owned', {}).then(() => 'answered', () => 'aborted')
+  const theirs = globalThis.fetch('/theirs', { signal: mine.signal }).then(() => 'answered', () => 'aborted')
+  assert.equal(api.inflight().length, 2)
+  api.abortInflight()
+  assert.equal(await owned, 'aborted')
+  answer()
+  assert.equal(await theirs, 'answered')
+  fakeHold = null
+  assert.deepEqual(api.inflight(), [])
 })
