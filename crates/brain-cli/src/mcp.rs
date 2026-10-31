@@ -696,13 +696,16 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
     });
     tools.push(Tool {
         name: "brain_test",
-        description: "Runs declared *.test.brain scenarios in a detected connected Claude Viewer/Codex Viewer first, with a complementary owned headless Chrome lane for the full accessibility/heap gates. Returns explicit engine/coverage/fallback evidence; a connected Viewer failure cannot become a headless success.",
-        input_schema: schema([("path", "string", ".test.brain file or folder; defaults to the current app")], &[]),
+        description: "Runs declared *.test.brain scenarios in owned headless Chrome with the full accessibility/heap gates. Set viewer=true only when the user asks for a connected Claude Viewer/Codex Viewer run; an opted-in Viewer failure cannot become a headless success",
+        input_schema: schema([("path", "string", ".test.brain file or folder; defaults to the current app"),("viewer","boolean","opt in to a connected Claude Viewer/Codex Viewer lane; only when the user asks")], &[]),
         output_schema: out([("files", "array")]),
         run: Box::new(|a| {
             #[cfg(unix)]
             {
-                let reports = crate::run_tests(arg(a, "path").map(PathBuf::from), 60)?;
+                crate::testrun::set_viewer(a.get("viewer").is_some_and(|v| matches!(v, Json::Bool(true))));
+                let reports = crate::run_tests(arg(a, "path").map(PathBuf::from), 60);
+                crate::testrun::set_viewer(false);
+                let reports = reports?;
                 let failed = reports.iter().any(crate::testrun::FileReport::failed);
                 let j = wrap("files", &Json::Arr(reports.iter().map(crate::testrun::FileReport::to_json).collect()).stringify());
                 if failed { Err(j) } else { Ok(j) }
@@ -1242,7 +1245,7 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
     });
     tools.push(Tool {
         name: "brain_e2e",
-        description: "Probe the local browser extension connection and invocation contract, or run declared app E2E scenarios. Install Claude Viewer/Codex Viewer in the browser and enable its scripting bridge. Only newly owned test tabs are touched; reports preserve actual lane evidence.",
+        description: "Opt-in browser-extension lane, only when the user asks for it: probe a connected Claude Viewer/Codex Viewer, or run declared app E2E scenarios in it. Only newly owned test tabs are touched; reports preserve actual lane evidence. Plain brain_test runs headless without any extension",
         input_schema: schema([("operation","string","probe (default) or run"),("path","string","optional declared .test.brain file or folder")], &[]),
         output_schema: out([("schemaVersion","number")]),
         run: Box::new(|a| {
@@ -1252,7 +1255,10 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
                 _ => return Err("E2E operation must be probe or run".into()),
             }
             #[cfg(unix)] {
-                let reports=crate::run_tests(arg(a,"path").map(PathBuf::from),60)?;
+                crate::testrun::set_viewer(true);
+                let reports=crate::run_tests(arg(a,"path").map(PathBuf::from),60);
+                crate::testrun::set_viewer(false);
+                let reports=reports?;
                 let failed=reports.iter().any(crate::testrun::FileReport::failed);
                 let value=Json::obj([("schemaVersion",Json::Num(1.0)),("files",Json::Arr(reports.iter().map(crate::testrun::FileReport::to_json).collect()))]).stringify();
                 if failed {Err(value)} else {Ok(value)}
