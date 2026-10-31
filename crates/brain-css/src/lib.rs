@@ -332,12 +332,35 @@ pub fn global_selectors(sheet: &CssSheet) -> Vec<(String, Span)> {
             for part in selector.split(',') {
                 let first = part.trim().split(|c: char| c.is_whitespace() || c == '>' || c == '+' || c == '~').next().unwrap_or("");
                 let base = first.split([':', '.', '[', '#']).next().unwrap_or("");
-                if first.starts_with(":root") || first.starts_with(":global") || base == "html" || base == "body" || first == "*" {
+                if first.starts_with(":root") || part.contains(":global(") || first.starts_with(":global") || base == "html" || base == "body" || first == "*" {
                     out.push((part.trim().to_string(), *span));
                 }
             }
         }
     }
+    out
+}
+
+/// B0309: style rules outside every `@layer` that set real properties (custom properties and `color-scheme` are fine). In the token file
+/// such a rule beats every layered rule (`@layer view`, components) whatever its specificity. Returns (selector, span).
+pub fn unlayered_rules(sheet: &CssSheet) -> Vec<(String, Span)> {
+    fn walk(items: &[CssItem], out: &mut Vec<(String, Span)>) {
+        for it in items {
+            match it {
+                CssItem::At { name, .. } if name == "layer" => {}
+                CssItem::At { block: Some(b), .. } => walk(b, out),
+                CssItem::Rule { selector, items, span } => {
+                    if items.iter().any(|d| matches!(d, CssItem::Decl { name, .. } if !name.starts_with("--") && name != "color-scheme")) {
+                        out.push((selector.trim().to_string(), *span));
+                    }
+                    walk(items, out);
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&sheet.items, &mut out);
     out
 }
 
@@ -619,6 +642,10 @@ mod tests {
         let s = parse_str(":root { --x: 1 } body, .a { margin: 0 } .b { }", "c.css").unwrap();
         let g: Vec<String> = global_selectors(&s).into_iter().map(|g| g.0).collect();
         assert_eq!(g, vec![":root", "body"]);
+        // `:global(…)` is not supported anywhere in a selector; past the first compound the browser dropped the rule
+        let s = parse_str(".x :global(a) { color: red } .y > :global(.z) { } .w { }", "c.css").unwrap();
+        let g: Vec<String> = global_selectors(&s).into_iter().map(|g| g.0).collect();
+        assert_eq!(g, vec![".x :global(a)", ".y > :global(.z)"]);
     }
 
     #[test]

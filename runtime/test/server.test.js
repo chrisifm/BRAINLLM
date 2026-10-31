@@ -173,7 +173,7 @@ test('static: clean URLs, index, gzip when accepted, immutable /_b/, 404 page, s
   assert.equal((await get('/about')).headers.get('x-brain-build'), 'b7c1') // every HTML response carries it
 })
 
-test('RPC: returns JSON; strips __proto__; CSRF header and same origin required; 64 KB; bad JSON', async () => {
+test('RPC: returns JSON; strips __proto__; CSRF header and same origin required; 1 MB by default; bad JSON', async () => {
   const ok = await call('save', [{ name: 'Ada', __proto__: { polluted: true } }])
   assert.equal(ok.status, 200)
   assert.deepEqual(await ok.json(), { saved: 'Ada', n: true })
@@ -181,7 +181,14 @@ test('RPC: returns JSON; strips __proto__; CSRF header and same origin required;
   assert.equal(noHeader.status, 403)
   assert.equal((await call('save', [{}], { origin: 'https://evil.test' })).status, 403)
   assert.equal((await call('save', [{}], { 'sec-fetch-site': 'cross-site' })).status, 403)
-  assert.equal((await call('save', 'x'.repeat(70 * 1024))).status, 413)
+  // the default body limit is 1 MB (brain.json server.maxBodyKB): a 200 KB argument (a small file as base64) goes through
+  const big = await call('save', [{ name: 'x'.repeat(200 * 1024) }])
+  assert.equal(big.status, 200)
+  assert.equal((await big.json()).saved.length, 200 * 1024)
+  const over = await call('save', [{ name: 'x'.repeat(1100 * 1024) }])
+  assert.equal(over.status, 413)
+  assert.match((await over.json()).error, /1024 KB.*brain\.json server\.maxBodyKB/) // names the setting to raise
+  assert.ok(logs.some(l => l.level === 'warn' && l.msg === 'body too large' && l.limitKB === 1024 && /server\.maxBodyKB/.test(l.fix)), JSON.stringify(logs.at(-1)))
   assert.equal((await call('save', '{nope')).status, 400)
   assert.equal((await call('save', '{"a":1}')).status, 400) // must be an array
   assert.equal((await call('missing', [])).status, 404)

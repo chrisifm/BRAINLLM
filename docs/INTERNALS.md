@@ -113,7 +113,7 @@ COMPILER assigns the next free code there in the same change that emits it, then
   B0208 on: without handler · B0209 repeated attribute · B0210 raw HTML without `sanitize` · B0211 `unload` listener ·
   B0212 (info) ternary in `class=` → `class:x`. · B0216 unknown `transition:` kind (edit) · B0217 `<component>`
   without `is` · B0218 slot props mixed with other content.
-- B03xx CSS: B0301 global selector · B0302 nonexistent token (`--space-0` and its synonyms normalize to `0`, info) · B0303 nonexistent mixin. · B0307 dead CSS that `@scope` cancels (html/body/:root not first, `:scope ~`/`+`, a tag the component never writes; warning)
+- B03xx CSS: B0301 global selector · B0302 nonexistent token (`--space-0` and its synonyms normalize to `0`, info) · B0303 nonexistent mixin. · B0307 dead CSS that `@scope` cancels (html/body/:root not first, `:scope ~`/`+`, a tag the component never writes; warning) · B0309 style rule outside `@layer` in tokens.cssbrain (beats every layered rule; warning)
 - B04xx accessibility and B05xx SEO: §8.
 - B1010 component over 150 lines or 20 KB (warning; the fix is the exact `brain split` command or the repeated block, §43).
 - B16xx source SEO and B17xx WebMCP: §32. B18xx built output, `brain seo audit` (§33; `brain_seo::CATALOG` holds
@@ -140,7 +140,7 @@ COMPILER assigns the next free code there in the same change that emits it, then
   code but missing (warning, edit adds `KEY=`) · B0722 key never used (info) · B0723 `PUBLIC_*` value shaped like a
   secret (error) · B0724 malformed line or section (error). Values never appear in any diagnostic.
 - B0734 missing local MCP registration (doctor warning; configuration only) · B0735 invalid backend resource/job contract (error; schema, policy or hook reference).
-- B07xx server and secrets (§11.1): B0701 server module used outside load/server: · B0702 env without `PUBLIC_` on the client · B0703 literal shaped like a key · B0704 `server:` function badly declared (not async, nested, in .jsbrain) or reading component state.
+- B07xx server and secrets (§11.1): B0701 server module used outside load/server: · B0702 env without `PUBLIC_` on the client · B0703 literal shaped like a key · B0704 `server:` function badly declared (not async, nested, in .jsbrain) or reading component state · B0707 invalid brain.json `server` setting (error; unknown key or a value outside its range).
 
 ## 6. Runtime (CODEGEN → RUNTIME contract), module `runtime/brain.js`
 
@@ -623,12 +623,22 @@ be turned off.
   in brain-pack.
 - `Output` gains `server_js: String` (ESM with `load` + server functions + their imports) and `server_fns: Vec<String>`.
 - **RPC contract:** `POST /_r/<hash>/<name>`, JSON body = array of arguments, JSON response. Default defenses:
-  same origin only (`Origin` + header `X-Brain-RPC: 1`, rejects CSRF), 64 KB body limit, rate limit per IP
-  (60/min per function, configurable in `brain.json`), unexpected error → generic 500 to the client and full log on the
+  same origin only (`Origin` + header `X-Brain-RPC: 1`, rejects CSRF), body limit (`server.maxBodyKB`), rate limit per IP
+  and function (`server.rpcPerMinute`), call deadline, unexpected error → generic 500 to the client and full log on the
   server. Public failures (2026-10-31, `publicError` in server.mjs): a plain `{ message }` without `status` → 400
   `{error: message}`, an Error subclass outside the built-ins with an integer 4xx `status` → that status and message
   (≤500 characters). `callRpc` and `callForm` share it, so `f.error` reads the same with and without JS. Plain
   `{ status, message }`, bare `Error` and built-in errors keep the message private. The runtime exports `rpc(id, args)` (RUNTIME); brain-serve mounts the endpoint in dev (TOOLCHAIN).
+- **Server limits (2026-10-30):** brain.json `"server": { "maxBodyKB", "timeoutMs", "rpcPerMinute" }` (defaults 1024,
+  10000, 60; read by `brain_pack::read_server_limits`). The build writes the resolved object into
+  `_server/manifest.json` as `server`; server.mjs applies it after `createServer` options and `BRAIN_MAX_BODY_KB` /
+  `BRAIN_TIMEOUT_MS` / `BRAIN_RPC_LIMIT`. `brain run` reads brain.json per request with the same overrides, sizes the
+  request reader, the sidecar request frame (6× the body for JSON escaping) and the sidecar deadline from it, and
+  passes the deadline and rate to `callRpc`/`callForm`. `maxBodyKB` is capped at 65536, the dev server's global
+  in-flight body reservation. Both servers read bodies bounded (never buffering past the limit); a 413 names
+  `brain.json server.maxBodyKB`, and server.mjs logs `body too large` with the limit and the fix. The dev server
+  answers `Expect: 100-continue` with `100 Continue` once the declared length fits and with 413 otherwise; other
+  expectations get 417. An invalid value is B0707 in `brain check`; the build warns and keeps the defaults.
 - **Production server:** if the app has `load` or `server:` functions, `brain build` emits `dist/server.mjs`
   (Node, zero dependencies, `node:http`): SSR of the views with `load`, RPC at `/_r/`, and leaves the rest static. The
   nginx snippet does `proxy_pass` only for those routes and `/_r/`. Without `load` or `server:`, the output is 100 %
@@ -692,7 +702,10 @@ Coverage against React/Next, Vue/Nuxt, Angular, Svelte/Kit and Astro; all with a
   the session. Guards that never read `user` keep deciding on the client.
 - `notFound()` (codegen intrinsic → `{ notFound: true, status: 404 }`, server code only) thrown or returned from `load`:
   server.mjs answers 404 with the app's 404 page; the dev sidecar answers `OK {"notFound":true…}` and brain-serve
-  renders `views/404.brain` with 404. A streamed route already sent its 200 head: it ends with a noindex notice.
+  renders `views/404.brain` with 404. A streamed route holds its head up to 200 ms (`createServer({ streamHoldMs })`)
+  for `load()`: a redirect, `notFound()` (also from an imported helper), deliberate 4xx or failure in that time gets
+  the same 303/404/4xx/500 as a non-streamed route (2026-10-30, real app: they answered 200). A slower `load()` has
+  its 200 head out already: a redirect becomes `location.replace`, not found a noindex notice.
 - server.mjs `head(page, seo, path)`: an SSR template's canonical/og:url carry the route pattern (`/jobs/:slug`);
   they are rewritten to the request path, og:url follows a `seo(props).canonical` unless the view sets `og:url`, and a
   tag in the view's `<head>` block replaces the generated tag with the same `name`/`property` (or canonical).
@@ -1001,7 +1014,7 @@ specified elsewhere; ➕ = new in this section.
 | Prototype pollution | `api()` validators and `store` `sync` drop `__proto__`, `constructor`, `prototype` keys from untrusted JSON | RUNTIME | ➕ |
 | Open redirect | `redirect(url)` in guards/RPC only to same origin unless the host is listed in `brain.json` `"redirects"` (B0710) | COMPILER + TOOLCHAIN | ➕ |
 | SSRF | server `fetch` whose URL is built from `ctx.params`/`ctx.query`/RPC args without an allowlist: warning B0711 | COMPILER | ➕ |
-| CSRF / abuse | RPC same-origin + header, 64 KB body, rate limit | §11.1 | ✓ |
+| CSRF / abuse | RPC same-origin + header, body limit (brain.json `server.maxBodyKB`, 1 MB default), rate limit | §11.1 | ✓ |
 | Secrets | env and key-shaped literals never reach the client | §11 | ✓ |
 | Cookies | session cookie forced `HttpOnly; Secure; SameSite=Lax`; `document.cookie` writes of names starting with `__Host-`/`session` are a build error | TOOLCHAIN + COMPILER | ➕ |
 | Headers | CSP with nonce, SRI, plus `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `frame-ancestors 'none'` (clickjacking), `Permissions-Policy` minimal | TOOLCHAIN (server config + server.mjs) | ➕ (CSP/SRI ✓) |

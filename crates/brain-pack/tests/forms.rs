@@ -16,6 +16,8 @@ fn app() -> PathBuf {
     let d = std::env::temp_dir().join(format!("brain-pack-forms-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(d.join("views")).unwrap();
+    // brain.json `server` (§11.1) reaches the manifest; a 2 KB body limit makes the form 413 easy to reach
+    std::fs::write(d.join("brain.json"), "{\"name\":\"forms\",\"server\":{\"maxBodyKB\":2,\"timeoutMs\":5000,\"rpcPerMinute\":60}}").unwrap();
     std::fs::write(d.join("app.brain"), "<html lang=\"en\"><head><meta charset=\"utf-8\"><title>App</title></head><body><slot /></body></html>").unwrap();
     std::fs::write(d.join("views/home.brain"), "<meta seo title=\"Home\" description=\"Static home\">\n<main><h1>Home</h1></main>").unwrap();
     std::fs::write(d.join("views/contact.brain"), CONTACT).unwrap();
@@ -85,6 +87,7 @@ fn form_pages_are_static_for_get_and_served_for_post() {
     assert!(out.files["contact/index.html"].contains("<h1>Contact</h1>"), "prerendered for GET");
     let mf = &out.files["_server/manifest.json"];
     assert!(mf.contains("\"path\":\"/contact\"") && mf.contains("\"forms\":true"), "{mf}");
+    assert!(mf.contains("\"server\":{\"maxBodyKB\":2,\"timeoutMs\":5000,\"rpcPerMinute\":60}"), "{mf}");
     assert_eq!(out.files["_headers"].matches("\n/contact\n").count(), 1, "one header rule per path: {}", out.files["_headers"]);
 
     let dist = root.join("dist");
@@ -118,6 +121,7 @@ fn form_pages_are_static_for_get_and_served_for_post() {
     let (cross, _) = post("Origin: https://evil.example\r\n", form, &format!("_brain={hash}/save&name=ada"));
     let (json, _) = post(&same, "application/json", "{}");
     let (unknown, _) = post(&same, form, "_brain=nope/save&name=ada");
+    let (big, big_body) = post(&same, form, &format!("_brain={hash}/save&name={}", "a".repeat(3 * 1024)));
     let _ = child.kill();
     let _ = child.wait();
     let _ = std::fs::remove_dir_all(&root);
@@ -133,4 +137,5 @@ fn form_pages_are_static_for_get_and_served_for_post() {
     assert_eq!(cross, 403);
     assert_eq!(json, 415);
     assert_eq!(unknown, 400);
+    assert_eq!(big, 413, "{big_body}");
 }

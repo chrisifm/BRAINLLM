@@ -132,7 +132,8 @@ fn guarded_routes_run_on_the_server() {
     assert_eq!(shop, 500, "{shop_b}");
     assert!(shop_b.contains("Shop failed: Something went wrong."), "{shop_b}");
     assert_eq!(home, 200);
-    // a streamed route (static head): headers already left with 200, the folder's _error renders inside the region
-    assert_eq!(live, 200, "{live_b}");
+    // a streamed route (static head) whose load() fails within the head hold answers its real status with the folder's
+    // _error (F7b); only a load that fails after the head left renders _error inside the region with 200
+    assert_eq!(live, 500, "{live_b}");
     assert!(live_b.contains("Shop failed:"), "{live_b}");
 }

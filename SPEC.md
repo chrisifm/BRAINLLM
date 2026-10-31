@@ -251,6 +251,9 @@ the status with a generic public message. Arbitrary exception messages remain pr
 Sessions: `ctx.session.set(user)` in a server function, `ctx.user` on later requests, `ctx.session.clear()` logs out
 (signed cookie, not encrypted: ids and display data only; setup in `brain guide server`).
 `load` belongs to views: in `_layout.brain` it is not run.
+Server limits (dev and production alike): brain.json `"server": { "maxBodyKB": 1024, "timeoutMs": 10000,
+"rpcPerMinute": 60 }` bounds RPC/form bodies (413 past it, at most 65536), function calls and `load` (504) and calls
+per IP and function (429). Raise `maxBodyKB` to send a file as base64 in an RPC argument; invalid values are B0707.
 
 ### Experimental Rust/Postgres backend
 First read `brain backend schema --json` (resolved resource/job contracts + resource OpenAPI); inspect one with

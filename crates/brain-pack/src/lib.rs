@@ -148,6 +148,60 @@ pub fn read_base(root: &Path) -> String {
     }
 }
 
+/// brain.json `"server"` (INTERNALS §11.1): the RPC/form body limit, the RPC/load deadline and the per-IP+function rate.
+/// The build writes it into `_server/manifest.json` for server.mjs, and `brain run` reads it per request, so the dev
+/// and production servers enforce the same values. `BRAIN_MAX_BODY_KB`, `BRAIN_TIMEOUT_MS` and `BRAIN_RPC_LIMIT` still win.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ServerLimits {
+    pub max_body_kb: u64,
+    pub timeout_ms: u64,
+    pub rpc_per_minute: u64,
+}
+
+impl Default for ServerLimits {
+    fn default() -> Self {
+        ServerLimits { max_body_kb: 1024, timeout_ms: 10_000, rpc_per_minute: 60 }
+    }
+}
+
+/// The largest `server.maxBodyKB`: the dev server's global in-flight body cap (64 MB).
+pub const MAX_BODY_KB_CAP: u64 = 65_536;
+
+impl ServerLimits {
+    pub fn max_body_bytes(&self) -> usize {
+        (self.max_body_kb * 1024) as usize
+    }
+    /// The manifest's `"server"` object, read by server.mjs.
+    pub fn to_json(&self) -> String {
+        format!("{{\"maxBodyKB\":{},\"timeoutMs\":{},\"rpcPerMinute\":{}}}", self.max_body_kb, self.timeout_ms, self.rpc_per_minute)
+    }
+}
+
+/// brain.json `"server"`: absent → the defaults; present → every key must be a known integer in range. The error
+/// is a full sentence ending in `; fix: …` (brain check shows it as B0707; the build warns and keeps the defaults).
+pub fn read_server_limits(root: &Path) -> Result<ServerLimits, String> {
+    let mut limits = ServerLimits::default();
+    let Ok(src) = std::fs::read_to_string(root.join("brain.json")) else { return Ok(limits) };
+    let Ok(json) = brain_mcp::Json::parse(&src) else { return Ok(limits) }; // malformed brain.json is reported elsewhere
+    let Some(server) = json.get("server") else { return Ok(limits) };
+    let brain_mcp::Json::Obj(entries) = server else {
+        return Err("brain.json `server` must be an object; fix: write \"server\": { \"maxBodyKB\": 1024, \"timeoutMs\": 10000, \"rpcPerMinute\": 60 }".into());
+    };
+    for (key, value) in entries {
+        let (slot, min, max, unit) = match key.as_str() {
+            "maxBodyKB" => (&mut limits.max_body_kb, 1, MAX_BODY_KB_CAP, "KB"),
+            "timeoutMs" => (&mut limits.timeout_ms, 100, 600_000, "ms"),
+            "rpcPerMinute" => (&mut limits.rpc_per_minute, 1, 100_000, "calls per minute"),
+            other => return Err(format!("brain.json `server.{other}` is not a server setting; fix: use maxBodyKB (RPC and form body limit in KB), timeoutMs (RPC and load deadline) or rpcPerMinute (calls per IP and function)")),
+        };
+        match value {
+            brain_mcp::Json::Num(n) if n.fract() == 0.0 && *n >= min as f64 && *n <= max as f64 => *slot = *n as u64,
+            _ => return Err(format!("brain.json `server.{key}` must be an integer from {min} to {max} ({unit}); fix: set a whole number in that range")),
+        }
+    }
+    Ok(limits)
+}
+
 /// brain.json `"ext"` (#26): `"brain"` publishes `.brain`/`.jsbrain`/`.cssbrain`; anything else is `web`.
 pub fn read_ext(root: &Path) -> Ext {
     if read_json_str(root, "ext").as_deref() == Some("brain") { Ext::Brain } else { Ext::Web }
@@ -1748,6 +1802,9 @@ fn build_inner_with_options(
         let policy = prerender_json(&cache::csp(&[], &post_csp));
         // `base` (#148): server.mjs strips it before routing; routes stay as the app writes them
         m = m.replacen("{\"v\":1,", &format!("{{\"v\":1,\"build\":\"{signature}\",\"base\":{},\"csp\":{policy},", prerender_json(&base)), 1);
+        // `server` (§11.1): brain.json body/time/rate limits; an invalid value keeps the defaults (brain check: B0707)
+        let limits = read_server_limits(&input.root).unwrap_or_else(|e| { warnings.push(e); ServerLimits::default() });
+        m = m.replacen("{\"v\":1,", &format!("{{\"v\":1,\"server\":{},", limits.to_json()), 1);
         // redirects.json for server.mjs (#219): the table brain-seo builds (`redirects::server_json`), in the manifest
         if let Some(r) = files.remove("_server/redirects.json") {
             m = m.replacen("{\"v\":1,", &format!("{{\"v\":1,\"redirects\":{},", r.trim()), 1);
@@ -2229,6 +2286,35 @@ mod tests {
         assert_eq!(tag_end("<a title=\"x>y\">", 0), Some(15));
         let (rest, css) = take_block("<style data-x={1 > 0}>b{}</style><p>", "style");
         assert_eq!((rest.as_str(), css.as_str()), ("<p>", "b{}"));
+    }
+
+    #[test]
+    fn server_limits_from_brain_json() {
+        let d = std::env::temp_dir().join(format!("brain-server-limits-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        // absent file or key: the defaults (1 MB bodies, 10 s, 60 calls per minute)
+        assert_eq!(read_server_limits(&d), Ok(ServerLimits::default()));
+        assert_eq!(ServerLimits::default(), ServerLimits { max_body_kb: 1024, timeout_ms: 10_000, rpc_per_minute: 60 });
+        std::fs::write(d.join("brain.json"), r#"{"name":"x","server":{"maxBodyKB":8192,"timeoutMs":30000,"rpcPerMinute":600}}"#).unwrap();
+        assert_eq!(read_server_limits(&d), Ok(ServerLimits { max_body_kb: 8192, timeout_ms: 30_000, rpc_per_minute: 600 }));
+        assert_eq!(read_server_limits(&d).unwrap().max_body_bytes(), 8192 * 1024);
+        std::fs::write(d.join("brain.json"), r#"{"server":{"maxBodyKB":2048}}"#).unwrap();
+        assert_eq!(read_server_limits(&d), Ok(ServerLimits { max_body_kb: 2048, ..ServerLimits::default() }));
+        for (json, key) in [
+            (r#"{"server":{"maxBodyKB":65537}}"#, "server.maxBodyKB"),
+            (r#"{"server":{"maxBodyKB":0}}"#, "server.maxBodyKB"),
+            (r#"{"server":{"maxBodyKB":1.5}}"#, "server.maxBodyKB"),
+            (r#"{"server":{"maxBodyKB":"8MB"}}"#, "server.maxBodyKB"),
+            (r#"{"server":{"timeoutMs":50}}"#, "server.timeoutMs"),
+            (r#"{"server":{"rpcPerMinute":0}}"#, "server.rpcPerMinute"),
+            (r#"{"server":{"maxBodyMB":8}}"#, "server.maxBodyMB"),
+            (r#"{"server":true}"#, "server"),
+        ] {
+            std::fs::write(d.join("brain.json"), json).unwrap();
+            let e = read_server_limits(&d).unwrap_err();
+            assert!(e.contains(key) && e.contains("fix:"), "{json}: {e}");
+        }
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

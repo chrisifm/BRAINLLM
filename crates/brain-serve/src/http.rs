@@ -97,6 +97,17 @@ pub fn read_request_with_uploads<R: Read>(
     reader: R,
     upload_path: Option<&str>,
 ) -> io::Result<Request> {
+    read_request_with(reader, upload_path, 65536, None)
+}
+/// `max_body`: the body limit outside the upload route (the dev server passes brain.json `server.maxBodyKB`).
+/// `on_continue` answers `Expect: 100-continue` once the length is known to fit (it writes the interim response);
+/// without it every expectation is refused with 417.
+pub fn read_request_with<R: Read>(
+    reader: R,
+    upload_path: Option<&str>,
+    max_body: usize,
+    on_continue: Option<&mut dyn FnMut() -> io::Result<()>>,
+) -> io::Result<Request> {
     const HEADERS: usize = 32768;
     let mut reader = BufReader::with_capacity(8192, reader);
     let mut used = 0usize;
@@ -184,11 +195,6 @@ pub fn read_request_with_uploads<R: Read>(
             "HTTP400 transfer encoding is unsupported; send an exact Content-Length",
         ));
     }
-    if header("expect").is_some() {
-        return Err(io::Error::other(
-            "HTTP417 expectations are unsupported; send the bounded body directly",
-        ));
-    }
     let length = match header("content-length") {
         None => 0,
         Some(value) if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) => {
@@ -198,15 +204,24 @@ pub fn read_request_with_uploads<R: Read>(
             .parse::<usize>()
             .map_err(|_| io::Error::other("HTTP413 request body exceeds its budget"))?,
     };
-    let limit = if upload_path == Some(path.as_str()) && parts[0] == "POST" {
-        5 * 1024 * 1024 + 65536
-    } else {
-        65536
-    };
+    let upload = upload_path == Some(path.as_str()) && parts[0] == "POST";
+    let limit = if upload { 5 * 1024 * 1024 + 65536 } else { max_body };
     if length > limit {
-        return Err(io::Error::other(
-            "HTTP413 request body exceeds its route budget",
-        ));
+        return Err(io::Error::other(if upload {
+            "HTTP413 upload body exceeds 5 MB".to_string()
+        } else {
+            format!("HTTP413 Body larger than {} KB; raise brain.json server.maxBodyKB", max_body / 1024)
+        }));
+    }
+    // checked after the length: a body past the limit gets its 413 before the client sends it
+    match (header("expect"), on_continue) {
+        (None, _) => {}
+        (Some(value), Some(send)) if value.eq_ignore_ascii_case("100-continue") => send()?,
+        (Some(_), _) => {
+            return Err(io::Error::other(
+                "HTTP417 only Expect: 100-continue is supported",
+            ));
+        }
     }
     let body_budget = reserve_body(length)?;
     let mut body = Vec::new();
@@ -499,6 +514,35 @@ mod tests {
             .err()
             .unwrap();
         assert_eq!(request_error_status(&error), 413);
+    }
+    fn post(len: usize, extra: &str) -> Vec<u8> {
+        let mut request = format!("POST /_r/h1/save HTTP/1.1\r\nHost: localhost\r\n{extra}Content-Length: {len}\r\n\r\n").into_bytes();
+        request.extend(std::iter::repeat_n(b'x', len));
+        request
+    }
+    #[test]
+    fn body_limit_comes_from_the_caller_and_the_413_names_the_setting() {
+        let request = post(200 * 1024, "");
+        assert_eq!(read_request_with(&request[..], None, 1024 * 1024, None).unwrap().body.len(), 200 * 1024);
+        let error = read_request_with(&request[..], None, 100 * 1024, None).err().unwrap();
+        assert_eq!(request_error_status(&error), 413);
+        assert!(error.to_string().contains("100 KB") && error.to_string().contains("brain.json server.maxBodyKB"), "{error}");
+    }
+    #[test]
+    fn expect_100_continue_is_answered_within_the_limit_and_refused_past_it() {
+        let mut sent = 0;
+        let mut send = || -> io::Result<()> { sent += 1; Ok(()) };
+        let request = post(2048, "Expect: 100-continue\r\n");
+        assert_eq!(read_request_with(&request[..], None, 4096, Some(&mut send)).unwrap().body.len(), 2048);
+        assert_eq!(sent, 1, "100 Continue is sent once, before the body is read");
+        let mut send = || -> io::Result<()> { panic!("no 100 Continue past the limit") };
+        let error = read_request_with(&request[..], None, 1024, Some(&mut send)).err().unwrap();
+        assert_eq!(request_error_status(&error), 413);
+        let mut send = || -> io::Result<()> { Ok(()) };
+        let other = post(10, "Expect: something-else\r\n");
+        assert_eq!(request_error_status(&read_request_with(&other[..], None, 4096, Some(&mut send)).err().unwrap()), 417);
+        // a reader with no way to answer (the native proxy) keeps refusing expectations
+        assert_eq!(request_error_status(&read_request_with(&request[..], None, 4096, None).err().unwrap()), 417);
     }
     #[test]
     fn enabled_exact_upload_route_accepts_larger_bodies_and_generates_local_request_identity() {

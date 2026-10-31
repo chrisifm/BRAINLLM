@@ -51,6 +51,9 @@ fn row37_export_only_in_modules() {
     assert_eq!(d[0].edits.len(), 1, "the edit removes `export `");
     // `load` outside a view is B0117's case.
     assert_eq!(codes("comp/x.brain", "<script>export async function load(ctx) { return {} }</script><p>x</p>"), ["B0117"]);
+    // a layout's `load` never runs (only the route's view loads): B0117 instead of a silently empty prop.
+    assert_eq!(codes("views/_layout.brain", "<script>export async function load(ctx) { return {} }</script><slot />"), ["B0117"]);
+    assert_eq!(codes("views/admin/_layout.brain", "<script>export async function load(ctx) { return {} }</script><slot />"), ["B0117"]);
     // `load` in a view is the one allowed export.
     assert!(!codes("views/x.brain", "<meta seo title=\"T\" description=\"D\" canonical=\"/x\"><script>export async function load(ctx) { return {} }</script><main><h1>x</h1></main>").contains(&"B0120"));
 }

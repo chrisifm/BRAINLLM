@@ -70,7 +70,7 @@ const contextHeaders = async ctx => {
 const finishContext = ctx => { const native = nativeContexts.get(ctx); if (native) { native.res.writableEnded = true; native.res.emit('finish'); native.res.emit('close'); nativeContexts.delete(ctx) } }
 process.once('exit', () => nativeBridge?.close())
 for await (const line of createInterface({ input: process.stdin })) {
-  const { id, file, fn, ctx, args, probe, rpc, raw, key, form, rules, chain, guards, middleware, secret, contextServer, preauthenticated, nativeRequired, locale, dict } = JSON.parse(line)
+  const { id, file, fn, ctx, args, probe, rpc, raw, key, form, rules, chain, guards, middleware, secret, contextServer, preauthenticated, nativeRequired, locale, dict, timeout, limit } = JSON.parse(line)
   if (chain) {
     // _guard/_middleware of the route through server.mjs's runChain, with ctx.user from the signed session cookie
     try {
@@ -99,7 +99,7 @@ for await (const line of createInterface({ input: process.stdin })) {
       try {
         // the page's language (§37): its dictionary is what form() in the browser validates with
         if (dict) { const G = globalThis, D = (G.__brainDict ||= {}); for (const l in dict) D[l] = dict[l] }
-        const r = await S.callForm({ module: m, raw, ctx: c, rules: R, key, locale: locale || undefined })
+        const r = await S.callForm({ module: m, raw, ctx: c, rules: R, key, locale: locale || undefined, timeout, limit })
         if (r.cause) console.error(String(r.cause?.stack ?? r.cause))
         out(`FRM ${id} ${JSON.stringify({ status: r.status, location: r.location || '', state: JSON.stringify(r.state || null), body: JSON.stringify(r.body || null), headers: flat({ ...(r.headers || {}), ...await contextHeaders(c) }) })}\n`)
       } finally { finishContext(c) }
@@ -116,7 +116,7 @@ for await (const line of createInterface({ input: process.stdin })) {
       const m = await import(file)
       const c = await withSession(S, ctx, secret, false, nativeRequired)
       try {
-        const r = await S.callRpc({ fn: m[fn], args: raw, ctx: c, key })
+        const r = await S.callRpc({ fn: m[fn], args: raw, ctx: c, key, timeout, limit })
         if (r.cause) console.error(String(r.cause?.stack ?? r.cause))
         out(`RES ${id} ${JSON.stringify({ status: r.status, body: JSON.stringify(r.body ?? null), headers: flat({ ...(r.headers || {}), ...await contextHeaders(c) }) })}\n`)
       } finally { finishContext(c) }
@@ -154,6 +154,11 @@ pub struct Sidecar {
     write_thread: Option<std::thread::JoinHandle<()>>,
     read_thread: Option<std::thread::JoinHandle<()>>,
     frame_limit: usize,
+    /// Request frames may be larger than responses: an RPC/form body up to brain.json `server.maxBodyKB`, escaped.
+    request_limit: usize,
+    /// brain.json `server.timeoutMs` and `server.rpcPerMinute`, passed to callRpc/callForm (same as production).
+    call_timeout_ms: u64,
+    per_minute: u64,
     stop_reader: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Lines from Node's stdout, read on a thread so a hung `load()` can time out instead of blocking forever.
     lines: std::sync::mpsc::Receiver<String>,
@@ -286,6 +291,9 @@ impl Sidecar {
             write_thread: Some(write_thread),
             read_thread: Some(read_thread),
             frame_limit,
+            request_limit: frame_limit,
+            call_timeout_ms: 10_000,
+            per_minute: 60,
             stop_reader,
             lines,
             next: 0,
@@ -312,9 +320,18 @@ impl Sidecar {
             let _ = self.child.wait();
         }
     }
+    /// brain.json `server` (§11.1) for the next rpc/form calls: the call deadline and rate go to server.mjs; the
+    /// request frame grows to fit a body of `max_body` bytes once JSON-escaped (≤ 6×), and the sidecar's own deadline
+    /// stays longer than the call's so server.mjs answers the 504 itself. Neither ever shrinks below its default.
+    pub fn limits(&mut self, timeout_ms: u64, per_minute: u64, max_body: usize) {
+        self.call_timeout_ms = timeout_ms;
+        self.per_minute = per_minute;
+        self.request_limit = self.frame_limit.max(max_body.saturating_mul(6).saturating_add(65536));
+        self.timeout = self.timeout.max(std::time::Duration::from_millis(timeout_ms.saturating_add(5000)));
+    }
     fn send(&mut self, request: String, deadline: std::time::Instant) -> Result<(), (u16, String)> {
         let (ack, done) = std::sync::mpsc::sync_channel(1);
-        let outcome = if request.len() > self.frame_limit {
+        let outcome = if request.len() > self.request_limit {
             false
         } else {
             self.input
@@ -373,14 +390,16 @@ impl Sidecar {
         self.next += 1;
         let id = self.next;
         let req = format!(
-            "{{\"id\":{id},\"file\":{},\"fn\":{},\"ctx\":{ctx_json},\"rpc\":{},\"raw\":{},\"key\":{},\"secret\":{},\"nativeRequired\":{}}}\n",
+            "{{\"id\":{id},\"file\":{},\"fn\":{},\"ctx\":{ctx_json},\"rpc\":{},\"raw\":{},\"key\":{},\"secret\":{},\"nativeRequired\":{},\"timeout\":{},\"limit\":{}}}\n",
             crate::json_str(file),
             crate::json_str(func),
             crate::json_str(server),
             crate::json_str(raw),
             crate::json_str(key),
             crate::json_str(secret),
-            self.native_required
+            self.native_required,
+            self.call_timeout_ms,
+            self.per_minute
         );
         let deadline = std::time::Instant::now() + self.timeout;
         self.send(req, deadline).map_err(|(_, message)| message)?;
@@ -476,7 +495,7 @@ impl Sidecar {
         self.next += 1;
         let id = self.next;
         let req = format!(
-            "{{\"id\":{id},\"file\":{},\"ctx\":{ctx_json},\"form\":{},\"rules\":{},\"raw\":{},\"key\":{},\"secret\":{},\"nativeRequired\":{},\"locale\":{},\"dict\":{dict_json}}}\n",
+            "{{\"id\":{id},\"file\":{},\"ctx\":{ctx_json},\"form\":{},\"rules\":{},\"raw\":{},\"key\":{},\"secret\":{},\"nativeRequired\":{},\"locale\":{},\"dict\":{dict_json},\"timeout\":{},\"limit\":{}}}\n",
             crate::json_str(file),
             crate::json_str(server),
             crate::json_str(rules),
@@ -484,7 +503,9 @@ impl Sidecar {
             crate::json_str(key),
             crate::json_str(secret),
             self.native_required,
-            crate::json_str(locale)
+            crate::json_str(locale),
+            self.call_timeout_ms,
+            self.per_minute
         );
         let deadline = std::time::Instant::now() + self.timeout;
         self.send(req, deadline).map_err(|(_, message)| message)?;
@@ -998,6 +1019,25 @@ mod tests {
             504
         );
         assert!(start.elapsed() < std::time::Duration::from_secs(3));
+        drop(sc);
+        std::fs::remove_dir_all(d).unwrap();
+    }
+    #[test]
+    fn rpc_uses_the_configured_deadline_and_carries_bodies_past_the_default_frame() {
+        let d = std::env::temp_dir().join(format!("brain-sidecar-limits-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("items.mjs");
+        std::fs::write(&f, "export async function wait() { await new Promise(r => setTimeout(r, 400)); return 1 }\nexport async function size(ctx, s) { return s.length }\n").unwrap();
+        let server = file_url(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime/server/server.mjs"));
+        let mut sc = Sidecar::spawn(&d, &[]).unwrap();
+        let call = |sc: &mut Sidecar, func: &str, raw: &str| sc.rpc(&file_url(&f), func, "{\"headers\":{}}", raw, &server, "127.0.0.1 h/f", "test-secret-0123456789").unwrap();
+        sc.limits(100, 60, 1024 * 1024);
+        assert_eq!(call(&mut sc, "wait", "[]").0, 504, "server.timeoutMs reaches callRpc");
+        // 9 MB of backslashes is an 18 MB frame once escaped: past the 16 MB default, within a 10 MB body limit
+        sc.limits(10_000, 60, 10 * 1024 * 1024);
+        let raw = format!("[\"{}\"]", "\\\\".repeat(9 * 512 * 1024));
+        let (status, body, _) = call(&mut sc, "size", &raw);
+        assert_eq!((status, body), (200, (9 * 512 * 1024).to_string()));
         drop(sc);
         std::fs::remove_dir_all(d).unwrap();
     }

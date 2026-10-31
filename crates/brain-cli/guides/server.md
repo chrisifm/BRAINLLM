@@ -23,6 +23,14 @@ Mandatory before-write validation uses `brain add hook <identifier>` and `before
 in resource hooks. Return `ctx.payload`; native schema revalidation and row-conflict checks remain authoritative.
 After-write jobs commit with their mutation. See `docs/BEFORE-HOOKS.md` and `docs/BACKEND.md` for limits.
 
+## Limits
+RPC and form bodies, call deadlines and the call rate come from brain.json, the same in `brain run` and production:
+`"server": { "maxBodyKB": 1024, "timeoutMs": 10000, "rpcPerMinute": 60 }` (the defaults). A body past `maxBodyKB`
+gets 413 naming the setting; a file sent as base64 grows by a third, so a 5 MB file needs about `"maxBodyKB": 7000`
+(at most 65536). `timeoutMs` bounds each server function and `load()` (504), `rpcPerMinute` the calls per client IP
+and function (429). `BRAIN_MAX_BODY_KB`, `BRAIN_TIMEOUT_MS` and `BRAIN_RPC_LIMIT` in `.brain_env` override them per
+environment. `brain check` reports an invalid value as B0707.
+
 ## Sessions
 1. Set `BRAIN_SECRET` in `.brain_env` (MCP: `brain_env_set { key, section, value }`).
 2. In a `server:` function: `ctx.session.set({ id, email })` signs it into the `__Host-session` cookie (HttpOnly,

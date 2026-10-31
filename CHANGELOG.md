@@ -17,6 +17,15 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   declared types before the function runs; a name another mounted instance holds is skipped instead of breaking the
   page. `brain check` no longer reports B0128 for `<meta tools>`, and the new B1704 reports a function that
   destructures other parameters than its tool declares. Only components with tools load `brain-mcp.js`.
+- B0309 (warning): a style rule outside any `@layer` in `tokens.cssbrain` beats every view and component rule whatever
+  its specificity; `brain check` now reports it with the fix (wrap it in `@layer reset`). Custom properties and
+  `color-scheme` stay unlayered.
+- brain.json `"server": { "maxBodyKB", "timeoutMs", "rpcPerMinute" }` sets the RPC/form body limit, the call and
+  `load` deadline and the per-IP, per-function call rate, with the same values in `brain run` and the production
+  server (the build writes them into the server manifest). `BRAIN_MAX_BODY_KB`, `BRAIN_TIMEOUT_MS` and
+  `BRAIN_RPC_LIMIT` still override them. The schema documents the keys and `brain check` reports an invalid value as
+  B0707.
+
 - Backend contracts accept exact `int`, `decimal(p,s)`, `date`, `datetime`, `enum(a|b)` and `list<str[,N]>` fields,
   object field options `{type, default, unique}` and declarative checks in `constraints.jsbrain`. Decimals travel and
   are stored as canonical strings with a lossless database CHECK; unique and check violations answer 409/422. Records
@@ -71,6 +80,24 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `brain build` no longer reports "Production removed unused bindings" for constants and imports of a `.brain` view
   that only its `server:` functions use; such facts are marked `serverOnly` and skipped by `brain quality`. The
   warning now needs a verified app-source removal, so runtime tree-shaking and generated helpers do not raise it.
+- `:global(…)` after the first compound of a component selector (`.list :global(a)`) passed `brain check`, but the
+  framework does not support `:global`, so the browser dropped the rule. It is now B0301 wherever it appears.
+- A `load()` exported from `views/_layout.brain` was silently never run, leaving the layout's props empty. `brain check`
+  now reports it as B0117 with the fix (load in the view, or read shared state from a channel).
+- Production logs recorded a compiler budget failure (B0910/B0911) thrown by a view `load`, an RPC, a form or SSR as
+  `NODE_INTERNAL_ERROR` with a generic fix. The log entry now keeps its `code`, `budget`, `limit`, `file`,
+  `component`, `line`, `column` and actionable `fix`; the error message is still never logged.
+- Streamed SSR routes (static `<meta seo>` with `load`) answered 200 when `load` redirected, threw `notFound()` from
+  an imported helper or threw a deliberate 4xx, because the head went out before `load` settled. The head now waits
+  up to 200 ms for `load`; an outcome in that time gets the same 303/404/4xx/500 as a non-streamed route. Slower
+  loads keep streaming and handle the outcome inline.
+
+- RPC and form bodies were capped at 64 KB with no setting, so an app sending a small file (for example base64 in an
+  RPC argument) failed with 413. The default is now 1 MB, configurable up to 64 MB with `server.maxBodyKB`; the 413
+  text names that setting and the production server logs it with the limit. Bodies are still read bounded. The dev
+  server answers `Expect: 100-continue` (100 within the limit, 413 past it) instead of 417, and its sidecar now honors
+  the configured deadline and rate and carries bodies past its former 16 MB request frame.
+
 - The development compile cache keys each source by modification time, size and (on Unix) inode. A file replaced
   atomically while keeping its timestamp is recompiled instead of serving the previous output until a watch event.
 - Deeply nested BrainScript, markup or CSS reports B0002/B0003 instead of overflowing the compiler stack; one small
