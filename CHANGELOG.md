@@ -33,6 +33,7 @@ B0721 and B0722 read `process.env`, `ctx.env` and `import.meta.env` from tokens:
 A session write without `BRAIN_SECRET` fails with B0782 and how to set it.
 `brain dev` refuses the redirects production refuses (an invalid status, an off-site or malformed location), thrown or returned from `load`; it used to answer them and production then failed with a 500.
 ### Security
+- `ctx.backend.resource()` failures carry the backend's `code` and `fix` for server code to branch on; the message stays generic.
 - `BRAIN_BACKEND_SESSION=app` keeps an app's own signed session beside the native backend; `ctx.session.set` that would answer 409 now warns B0786.
 - A batch or write that hits a database time or size limit answers an actionable code (503 `BATCH_TOO_SLOW` or `DATABASE_BUSY`, 413 `VALUE_TOO_LARGE`) that says nothing was written, never `BACKEND_INTERNAL`; upserting an existing row uses the unique index instead of scanning the table.
 - `brain backend` commands stop with B0785 when no `--env` was given and the database is remote or `NODE_ENV=production`, `users` actions honor production TLS, and a proxied `/_brain/api` request needs an administrator in every environment.

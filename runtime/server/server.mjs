@@ -478,7 +478,14 @@ export function nativeAuthBridge(raw, refused, serviceKey) {
             throw new HttpError(422, 'Invalid input', { errors })
           }
           if (status === 404 && notFound) { value = notFound(); return }
-          if (status < 200 || status >= 300) throw new HttpError(status >= 400 && status < 500 ? status : 503, 'Native resource request failed')
+          if (status < 200 || status >= 300) {
+            // the message stays generic; the backend's own code and fix (never driver text) let server code branch on it
+            let answer
+            try { answer = JSON.parse(data.toString('utf8'))?.error } catch {}
+            const code = typeof answer?.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(answer.code) ? answer.code : undefined
+            const fix = code && typeof answer.fix === 'string' ? answer.fix.slice(0, 512) : undefined
+            throw new HttpError(status >= 400 && status < 500 ? status : 503, 'Native resource request failed', { code, fix })
+          }
           if (status === 204) { value = null; return }
           if (!String(headers['content-type'] || '').startsWith('application/json')) throw new HttpError(502, 'Native resource response must be JSON')
           try { value = JSON.parse(data.toString('utf8')) } catch { throw new HttpError(502, 'Native resource response is invalid') }
