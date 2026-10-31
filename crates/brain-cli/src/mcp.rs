@@ -817,7 +817,7 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
                     };
                     n.log(level, j);
                 });
-                let d = brain_serve::start_dev(opts, crate::compile_fn(root.clone(), true), true, Some(on_event)).map_err(|e| e.to_string())?;
+                let d = crate::start_project_dev(opts, crate::compile_fn(root.clone(), true), true, Some(on_event), "development")?;
                 let info = Json::obj([("url", Json::str(d.url())), ("port", Json::Num(d.addr.port() as f64))]);
                 let _ = std::fs::create_dir_all(root.join(".brain"));
                 let _ = std::fs::write(crate::dev_json_path(&root), format!("{{\"port\":{},\"pid\":{},\"url\":{}}}", d.addr.port(), std::process::id(), brain_serve::json_str(&d.url())));

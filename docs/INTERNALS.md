@@ -1729,8 +1729,10 @@ B2201 is a migration-safe warning enabled only for projects with a bounded regul
 
 ### Native server resource facade (2026-10-30)
 
-Internal Node socket bridge (0.4.1 development, 2026-10-30): `createServer({nativeSockets:true})` requires a fixed
-native loopback backend and installs only `GET <base>/_brain/socket`; the default has no Upgrade listener. Rust
+Internal Node socket bridge (0.4.1 development, 2026-10-30): a strict private manifest `nativeSockets: true`
+or an explicit `createServer({nativeSockets:true})` override requires a fixed native loopback backend and installs
+only `GET <base>/_brain/socket`. An explicit false override disables it; absent flags leave no Upgrade listener.
+Malformed manifest flags are rejected even when overridden. Rust
 still requires its own explicit socket configuration and owns authentication, origin allowlists, frame parsing,
 heartbeat and row policy. The bridge preserves one canonical Origin and one `brain.v1` protocol, rejects queries
 and duplicate credential headers, filters native identity cookies and forwards Bearer headers without fallback.
@@ -1745,7 +1747,9 @@ heap. Other Upgrade listeners retain their endpoints; unknown requests are rejec
 listener. `closeAllConnections` closes current upgraded sockets but preserves new admission; `close`, explicit
 stop and the process drain stop admission permanently. Production
 places the helper under private `_server/`; the development sidecar copies its companion before importing the
-server. Public project opt-in configuration, browser subscriptions and the Rust Upgrade proxy are separate work.
+server. Public opt-in settings feed the compiler manifest and fixed Rust development/static gateways. CLI and
+MCP project development share the same startup validation; an automatically selected port outside the explicit
+Origin allowlist is stopped before readiness. Full browser/native integration acceptance remains separate.
 
 `nativeAuthBridge.resource` exposes a request-scoped repository via `ctx.backend.resource(name)` in both production
 SSR/RPC and the development sidecar. It shares the fixed loopback authority, connection budget, cancellation and
