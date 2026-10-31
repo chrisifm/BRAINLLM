@@ -150,3 +150,10 @@
 ### B1836 title does not name the topic
 @expect B1836 /pricing
 @replace /pricing <h1>Pricing of the planner</h1> => <h1>Wildebeest migration routes</h1>
+
+### B1855 meta refresh redirect
+@expect B1855 /pricing
+@replace /pricing <title>Pricing for the Acme offline task planner</title> => <title>Pricing for the Acme offline task planner</title><META HTTP-EQUIV="Refresh" content="0; URL=/">
+
+### a refresh that only reloads the page is not a redirect
+@replace /pricing <title>Pricing for the Acme offline task planner</title> => <title>Pricing for the Acme offline task planner</title><meta http-equiv="refresh" content="300">
