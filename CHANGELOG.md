@@ -9,6 +9,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- Fix: reading an undeclared `PUBLIC_*` variable in the browser gives `undefined` instead of throwing
 - Fix: B0721 and B0722 see keys read by destructuring `process.env` or `ctx.env`
 - `ctx.signal` in `load()`, guards and server functions aborts when the client disconnects or the deadline passes
 - Fix: a newer client navigation aborts the page request it replaced

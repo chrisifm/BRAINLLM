@@ -259,7 +259,7 @@ Private captured errors (message, stack, recent actions) are listed by `brain_er
 Variables live in `.brain_env` (already created): shared `KEY=value` lines, then `[development]` `[staging]`
 `[production]` sections that override them. `brain run` uses development, `brain build` production, `--env x` another.
 An empty key fails the build (B0720); `KEY?=` declares one the app works without: it may stay empty and reads as unset.
-Read them as `process.env.KEY` (server) or `process.env.PUBLIC_KEY` (anywhere). Never create a `.env`.
+Read them as `process.env.KEY` (server) or `process.env.PUBLIC_KEY` (anywhere; an undeclared one reads as `undefined`). Never create a `.env`.
 `.jsbrain` files starting with `<meta server>` run only on the server and may be used only inside `load` or server
 functions. Server function in a `.brain`: `server: async function save(ctx, data) {…}`; the client calls
 `await save(data)` (no `ctx`). Validate `data` inside. `throw { message: 'Title already used' }` (400) or an Error

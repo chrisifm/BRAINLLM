@@ -95,13 +95,31 @@ impl Gen<'_> {
         }
     }
 
-    /// Value of `import.meta.env.KEY` / `process.env.KEY` from the build's `.brain_env` (§36).
-    fn public_env(&self, obj: &Expr, key: &str) -> Option<String> {
+    /// What `import.meta.env.KEY` / `process.env.KEY` compiles to, or `None` to print it as written (§36). A public key
+    /// is the build's value from `.brain_env`. In code that reaches the browser, where neither object exists, one with no
+    /// value is `undefined` (B0721 reports it), like an absent key on the server. Server code reads `process.env`.
+    fn env_read(&self, obj: &Expr, prop: &MemberProp) -> Option<String> {
+        let key = match prop {
+            MemberProp::Name(k) => k.name.as_str(),
+            MemberProp::Computed(k) => match k.unparen() {
+                Expr::Str { value, .. } => value.as_str(),
+                _ => return None,
+            },
+        };
         let root = brain_parse::dump::expr(obj);
-        if root != "import.meta.env" && root != "process.env" {
+        if !matches!(root.as_str(), "import.meta.env" | "process.env" | "globalThis.process.env") {
             return None;
         }
-        self.opts.public_env.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
+        if key.starts_with("PUBLIC_") {
+            // An optional key with no value (brain_check::env::UNSET) is absent, like on the server.
+            match self.opts.public_env.iter().find(|(k, _)| k == key) {
+                Some((_, v)) if v == "\0" => return Some("undefined".into()),
+                Some((_, v)) => return Some(js_str(v)),
+                None if !self.server_code => return Some("undefined".into()),
+                None => {}
+            }
+        }
+        (self.server_code && root == "import.meta.env").then(|| format!("process.env[{}]", js_str(key)))
     }
 
     /// The text of `t('key')` / `t('key', { a, b: x })` for the locale being built, or `None` to keep the call.
@@ -272,13 +290,7 @@ impl Gen<'_> {
                 let c = self.expr(callee);
                 format!("new {c}({})", self.args(args))
             }
-            Expr::Member { prop: MemberProp::Name(k), obj, .. } if k.name.starts_with("PUBLIC_") && self.public_env(obj, &k.name).is_some() => {
-                // An optional key with no value (brain_check::env::UNSET) is absent, like on the server.
-                match self.public_env(obj, &k.name).unwrap_or_default() {
-                    v if v == "\0" => "undefined".to_string(),
-                    v => js_str(&v),
-                }
-            }
+            Expr::Member { prop, obj, .. } if self.env_read(obj, prop).is_some() => self.env_read(obj, prop).unwrap_or_default(),
             // `wide.v` written by the author (B0130) is the same single read as `wide`.
             Expr::Member { obj, prop: MemberProp::Name(n), .. }
                 if n.name == "v" && matches!(obj.unparen(), Expr::Ident(i) if matches!(self.scopes.lookup(&i.name), Some(Kind::Sig | Kind::Drv | Kind::Ref))) =>

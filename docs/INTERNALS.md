@@ -1446,6 +1446,10 @@ DATABASE_URL=            # empty: must come from the host's real environment
 - **Client vs server:** only `PUBLIC_*` keys reach the browser; `brain build` substitutes them as constants (dead
   branches removed, §13). Every other key exists only on the server (`load`, `server:` functions, `ctx.env.X`). The
   supervisor (`brain start`, §34) passes the resolved environment to `server.mjs`; Node never reads the file itself.
+  A `PUBLIC_*` key no environment declares compiles to `undefined` outside server code (every read form: dotted,
+  computed, optional, `globalThis.process.env`, `import.meta.env`), so a browser never meets a missing `process`. Server
+  code (`load`, `server:`, `<meta server>`) keeps reading the real environment; `import.meta.env.X` there becomes
+  `process.env["X"]` (2026-10-31).
 - **The compiler understands it** (COMPILER): `brain check` reads the keys (never the values into diagnostics) and
   - B0702 (existing) private key in client code;
   - B0721 key used in code but missing from `.brain_env` (warning, with an edit that adds `KEY=` to the shared block);

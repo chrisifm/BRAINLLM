@@ -369,6 +369,8 @@ pub const RUNTIME_NAMES: &[&str] = &["sig", "drv", "fx", "batch", "untrack", "tp
 
 pub(crate) struct Gen<'a> {
     pub(crate) opts: &'a Options,
+    /// Printing `load`/`server:` bodies or a `<meta server>` module: `process.env` exists there.
+    pub(crate) server_code: bool,
     /// Top-level `resource()`/`stream()` locals: their node methods (`refetch`, `more`…) are read without `.v`.
     pub(crate) node_vars: HashSet<String>,
     /// `let f = form(schema, { submit: save })` with `save` a `server:` function: `f` → `save` (§38, real POST forms).
@@ -1213,6 +1215,7 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
     }
     let mut g = Gen {
         opts,
+        server_code: false,
         forms: server_forms(c).into_iter().map(|(v, f, _)| (v, f)).collect(),
         lazy_src: {
             let dir = opts.runtime.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
@@ -1282,13 +1285,16 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
         },
     };
     if g.module {
+        g.server_code = c.meta.iter().any(|m| m.name == "server");
         let js = generate_module(&mut g, c, opts);
         if c.meta.iter().any(|m| m.name == "server") {
             return Ok((String::new(), String::new(), js, Vec::new(), g.i18n_keys.into_iter().collect()));
         }
         return Ok((js, String::new(), String::new(), Vec::new(), g.i18n_keys.into_iter().collect()));
     }
+    g.server_code = true;
     let (server_js, server_fns) = generate_server(&mut g, c, opts);
+    g.server_code = false;
     // Private server checkpoints are imported by server_js itself, never leaked into the browser module.
     g.budget_used.clear();
     g.static_form = false;
