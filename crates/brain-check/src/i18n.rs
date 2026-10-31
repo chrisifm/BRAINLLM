@@ -433,17 +433,77 @@ pub fn translatable(s: &str) -> bool {
     s.chars().filter(|c| c.is_alphabetic()).count() >= 2
 }
 
-/// `<file stem>.<first words>` key for a fixed text (B1403).
+/// Key scope of a source file (B1403): the view's route path for views (`views/posts/index.brain` → `posts`,
+/// `views/blog/[slug].brain` → `blog-slug`, `views/index.brain` → `home`, `views/_layout.brain` → `layout`), the file
+/// stem for anything else (`comp/card.brain` → `card`). Two views never share a scope, so their keys never collide.
+pub fn key_scope(file: &str) -> String {
+    let rel = file.replace('\\', "/");
+    let rel = rel.strip_suffix(".brain").unwrap_or(&rel);
+    let segs: Vec<String> = match rel.strip_prefix("views/") {
+        Some(v) => v.split('/').filter(|s| *s != "index").map(clean_segment).filter(|s| !s.is_empty()).collect(),
+        None => Path::new(rel).file_name().map(|s| vec![clean_segment(&s.to_string_lossy())]).unwrap_or_default(),
+    };
+    let scope = segs.join("-");
+    if scope.is_empty() { "home".into() } else { scope }
+}
+
+fn clean_segment(s: &str) -> String {
+    let s = s.trim_start_matches('_').replace(['[', ']', '.'], "").replace("...", "");
+    ascii_fold(&s).chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c.to_ascii_lowercase() } else { '-' }).collect::<String>().trim_matches('-').to_string()
+}
+
+/// Latin letters with diacritics to their base letter (`\u{e7}` → `c`); other non-ASCII characters are dropped.
+pub fn ascii_fold(s: &str) -> String {
+    // U+00C0..=U+00FF, one ASCII replacement per code point (`_` = drop).
+    const LATIN1: &[u8; 64] = b"AAAAAAACEEEEIIIIDNOOOOO_OUUUUYTsaaaaaaaceeeeiiiidnooooo_ouuuuyty";
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c as u32 {
+            0..=0x7f => out.push(c),
+            n @ 0xc0..=0xff => {
+                let r = LATIN1[(n - 0xc0) as usize];
+                if r == b's' && n == 0xdf {
+                    out.push_str("ss");
+                } else if r != b'_' {
+                    out.push(r as char);
+                }
+            }
+            // Latin Extended-A pairs upper/lower case of the same base letter.
+            n @ 0x100..=0x17f => {
+                const EXT_A: &[u8; 128] = b"AaAaAaCcCcCcCcDdDdEeEeEeEeEeGgGgGgGgHhHhIiIiIiIiIiJjJjKkkLlLlLlLlLlNnNnNnnNnOoOoOoOoRrRrRrSsSsSsSsTtTtTtUuUuUuUuUuUuWwYyYZzZzZzs";
+                out.push(EXT_A[(n - 0x100) as usize] as char);
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The first `n` words of a text as an ASCII key part (`Your posts` → `your_posts`); placeholders `{x}` are skipped.
+pub fn key_words(text: &str, n: usize) -> String {
+    let mut plain = String::new();
+    let mut depth = 0;
+    for c in text.chars() {
+        match c {
+            '{' => depth += 1,
+            '}' if depth > 0 => depth -= 1,
+            _ if depth == 0 => plain.push(c),
+            _ => {}
+        }
+    }
+    let words: Vec<String> = ascii_fold(&plain).split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| !w.is_empty()).take(n).map(|w| w.to_ascii_lowercase()).collect();
+    if words.is_empty() {
+        // A text in a non-Latin script: a stable short hash of it.
+        let h = text.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
+        format!("text_{:06x}", h & 0xff_ffff)
+    } else {
+        words.join("_")
+    }
+}
+
+/// `<scope>.<first words>` key for a fixed text (B1403).
 pub fn key_for(file: &str, text: &str) -> String {
-    let stem = Path::new(file).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-    let stem = stem.trim_start_matches('[').trim_end_matches(']').trim_start_matches('_').replace(['[', ']'], "");
-    let words: Vec<String> = text
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .take(4)
-        .map(|w| w.to_lowercase())
-        .collect();
-    format!("{}.{}", stem.replace('.', "-"), words.join("_"))
+    format!("{}.{}", key_scope(file), key_words(text, 4))
 }
 
 /// Physical → logical CSS property (B0306).

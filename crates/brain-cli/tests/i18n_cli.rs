@@ -77,3 +77,39 @@ fn add_locale_missing_and_dev_routes() {
     let _ = c.wait();
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// 1 → 2 languages is `brain add locale` alone: afterwards no fixed text is left (B1403), every key appears once in
+/// each locale file, keys are scoped by view, and the `<meta seo>` texts are keys too.
+#[test]
+fn add_locale_moves_every_text_once() {
+    let tmp = std::env::temp_dir().join(format!("bi18n-once-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let bin = env!("CARGO_BIN_EXE_brain");
+    let run = |dir: &std::path::Path, args: &[&str]| Command::new(bin).args(args).current_dir(dir).stdin(Stdio::null()).output().unwrap();
+    assert!(run(&tmp, &["new", "app"]).status.success());
+    let dir = tmp.join("app");
+    // Two components whose keys share a scope (`tag`): the same text must be inserted once, not twice.
+    for d in ["comp", "widgets"] {
+        std::fs::create_dir_all(dir.join(d)).unwrap();
+        std::fs::write(dir.join(d).join("tag.brain"), "<a href=\"/posts\" title=\"Open the list\">Read more</a>\n").unwrap();
+    }
+    let added = run(&dir, &["add", "locale", "es"]);
+    assert!(added.status.success(), "{}{}", String::from_utf8_lossy(&added.stdout), String::from_utf8_lossy(&added.stderr));
+    let chk = String::from_utf8_lossy(&run(&dir, &["check", "--json"]).stdout).to_string();
+    assert!(!chk.contains("\"level\":\"error\"") && !chk.contains("B1403"), "{chk}");
+    let en = std::fs::read_to_string(dir.join("i18n/en.json")).unwrap();
+    let keys: Vec<&str> = en.lines().filter_map(|l| l.trim_start().strip_prefix('"').and_then(|r| r.split('"').next())).collect();
+    let mut uniq = keys.clone();
+    uniq.sort();
+    uniq.dedup();
+    assert_eq!(keys.len(), uniq.len(), "duplicate keys in en.json:\n{en}");
+    assert!(keys.iter().all(|k| k.is_ascii()), "{en}");
+    assert!(keys.contains(&"tag.read_more") && keys.contains(&"tag.open_the_list"), "{en}");
+    assert!(!keys.iter().any(|k| k.starts_with("index.")), "views/*/index.brain keys are scoped by their folder: {en}");
+    assert!(keys.iter().any(|k| k.starts_with("account.")) && keys.iter().any(|k| k.starts_with("posts.")), "{en}");
+    let about = std::fs::read_to_string(dir.join("views/about.brain")).unwrap();
+    assert!(about.contains("title={t('about.meta_title')}") && about.contains("description={t('about.meta_description')}"), "{about}");
+    assert_eq!(std::fs::read_to_string(dir.join("i18n/es.json")).unwrap(), en);
+    let _ = std::fs::remove_dir_all(&tmp);
+}
