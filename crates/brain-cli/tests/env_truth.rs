@@ -142,3 +142,17 @@ fn doctor_waits_for_in_flight_calls_and_a_suspicion_only_fails_when_opted_in() {
     let (ok, text) = brain(&a.0, &["doctor"]);
     assert!(!ok && text.contains("✗ failed:") && text.contains("leaks"), "{text}");
 }
+
+#[test]
+fn a_session_set_the_backend_would_refuse_warns_until_the_app_owns_the_session() {
+    let app = app("own-session");
+    fs::write(app.0.join("server/own.jsbrain"), "export function enter(ctx) { ctx.session.set({ name: 'a' }) }\n").unwrap();
+    let declared = fs::read_to_string(app.0.join(".brain_env")).unwrap();
+    fs::write(app.0.join(".brain_env"), format!("{declared}\nBRAIN_BACKEND_URL=http://127.0.0.1:4100\n")).unwrap();
+    let (_, out) = brain(&app.0, &["check", "--json"]);
+    assert!(out.contains("B0786") && out.contains("server/own.jsbrain"), "{out}");
+    assert!(!out.contains("server/auth.jsbrain\",\"code\":\"B0786"), "the generated login branches on the backend: {out}");
+    fs::write(app.0.join(".brain_env"), format!("{declared}\nBRAIN_BACKEND_URL=http://127.0.0.1:4100\nBRAIN_BACKEND_SESSION=app\n")).unwrap();
+    let (_, out) = brain(&app.0, &["check", "--json"]);
+    assert!(!out.contains("B0786"), "{out}");
+}

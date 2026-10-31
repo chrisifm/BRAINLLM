@@ -662,7 +662,7 @@ export function nativeAuthBridge(raw, refused, serviceKey) {
     session(req, res, rid) {
       return {
         user: req.$nativeUser,
-        set() { throw new HttpError(409, 'With BRAIN_BACKEND_URL the backend owns the session: sign in with ctx.backend.login(credentials), and keep a server-only value with ctx.session.setSecret(value)') },
+        set() { throw new HttpError(409, 'With BRAIN_BACKEND_URL the backend owns the session: sign in with ctx.backend.login(credentials), or set BRAIN_BACKEND_SESSION=app so this app keeps its own signed session, and keep a server-only value with ctx.session.setSecret(value)') },
         clear() {
           if (req.$nativeLoginStarted) throw new HttpError(409,'Use a separate server request to sign out after signing in')
           if (req.method !== 'POST' || res.headersSent) throw new HttpError(403, 'B0742: Sign out through a same-origin POST request')
@@ -689,6 +689,10 @@ export function createServer(o = {}) {
   const { BRAIN_SERVICE_API_KEY: serviceKey, ...visibleEnv } = o.env || ENV
   const env = Object.freeze(visibleEnv)
   const native = nativeAuthBridge(o.backendURL ?? env.BRAIN_BACKEND_URL, (...why) => originRefused(...why), serviceKey)
+  // Using the native backend does not have to mean it owns the visitor's session: `app` keeps the signed cookie.
+  const backendSession = o.backendSession ?? env.BRAIN_BACKEND_SESSION
+  if (backendSession && backendSession !== 'app') throw Error("BRAIN_BACKEND_SESSION must be app, or unset for the backend's own session")
+  const nativeSession = native && backendSession !== 'app'
   if (o.nativeSockets !== undefined && typeof o.nativeSockets !== 'boolean') throw Error('nativeSockets must be an explicit boolean')
   const SITEMAP_BYTES = +(o.sitemapBytes ?? 50 * 1024 * 1024) // protocol: 50 MB uncompressed per sitemap file
   const secret = o.secret ?? env.BRAIN_SECRET ?? ''
@@ -914,7 +918,7 @@ export function createServer(o = {}) {
 
   const context = (req, res, url, extra) => {
     const cookies = parseCookies(req.headers.cookie)
-    const { user, session: ses } = native ? { user: req.$nativeUser ?? null, session: sessionSecrets(native.session(req, res, res.getHeader('x-request-id')), cookies, secret) } : sessionFrom(cookies, secret)
+    const { user, session: ses } = nativeSession ? { user: req.$nativeUser ?? null, session: sessionSecrets(native.session(req, res, res.getHeader('x-request-id')), cookies, secret) } : sessionFrom(cookies, secret)
     return {
       url, query: Object.fromEntries(url.searchParams), cookies, user, session: ses, env,
       ...(native ? { backend: native.backend(req, res, res.getHeader('x-request-id')) } : {}),

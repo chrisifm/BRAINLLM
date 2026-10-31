@@ -33,6 +33,7 @@ const withSession = async (S, ctx, secret, preauthenticated = false, nativeRequi
   const c = { ...ctx, url: new URL(ctx.url, 'http://localhost'), env: process.env }
   const configured = process.env.BRAIN_BACKEND_URL
   if (nativeRequired && !configured) throw Object.assign(Error('Native authentication is temporarily unavailable'), { status: 503 })
+  const ownSession = process.env.BRAIN_BACKEND_SESSION === 'app'
   if (configured) {
     if (typeof S.nativeAuthBridge !== 'function') throw Object.assign(Error('Native authentication bridge is unavailable in this runtime version'), { status: 503 })
     if (!nativeBridge || nativeModule !== S || nativeURL !== configured) { nativeBridge?.close(); try { nativeBridge = S.nativeAuthBridge(configured, (code, req, rid) => console.error(JSON.stringify({ event: 'origin-refused', code, rid, seenOrigin: typeof req.headers.origin === 'string' ? req.headers.origin.slice(0, 256) : null, host: req.headers.host, fix: 'Call this server function from the page served by this dev server; ctx.backend needs its same-origin POST. Run brain explain ' + code }))) } catch { throw Object.assign(Error('Native authentication is temporarily unavailable'), { status: 503 }) }; nativeModule = S; nativeURL = configured }
@@ -52,6 +53,12 @@ const withSession = async (S, ctx, secret, preauthenticated = false, nativeRequi
         req.$nativeAuth = Promise.resolve()
       }
       else await nativeBridge.prepare(req, res, rid)
+      if (ownSession) {
+        const own = S.sessionFrom(ctx.cookies || {}, secret || '')
+        c.user = own.user; c.session = own.session
+        c.backend = typeof nativeBridge.backend === 'function' ? nativeBridge.backend(req, res, rid) : Object.freeze({resource: name => nativeBridge.resource(req, res, rid, name)})
+        return c
+      }
       const session = typeof S.sessionSecrets === 'function' ? S.sessionSecrets(nativeBridge.session(req, res, rid), ctx.cookies || {}, secret || '') : nativeBridge.session(req, res, rid)
       c.user = session.user; c.session = session
       c.backend = typeof nativeBridge.backend === 'function' ? nativeBridge.backend(req, res, rid) : Object.freeze({resource: name => nativeBridge.resource(req, res, rid, name),login:credentials=>nativeBridge.login(req,res,rid,credentials)})

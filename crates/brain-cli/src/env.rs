@@ -71,10 +71,54 @@ pub fn check(root: &Path) -> Vec<crate::compiler::Diag> {
         Ok(src) => {
             let mut diags = brain_check::env::check_file(&src, FILE);
             diags.extend(startup(root, &src));
+            diags.extend(own_session(root, &src));
             diags
         }
         Err(_) => Vec::new(),
     }
+}
+
+/// B0786: `ctx.session.set` answers 409 where the native backend owns the session. A file that also names
+/// `BRAIN_BACKEND_URL` or `ctx.backend` already branches on it (the generated login does), so it is left alone.
+fn own_session(root: &Path, src: &str) -> Vec<crate::compiler::Diag> {
+    let f = brain_check::env::parse(src);
+    let mut envs = f.environments();
+    envs.push("production".into());
+    let affected = envs.iter().any(|env| {
+        let vars = f.resolve(env, &process);
+        vars.get("BRAIN_BACKEND_URL").is_some_and(|v| !v.trim().is_empty()) && vars.get("BRAIN_BACKEND_SESSION").is_none_or(|v| v.trim() != "app")
+    });
+    if !affected {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || matches!(name.as_str(), "node_modules" | "dist" | "target") {
+                continue;
+            }
+            if path.is_dir() {
+                stack.push(path);
+            } else if (name.ends_with(".brain") || name.ends_with(".jsbrain"))
+                && let Ok(text) = std::fs::read_to_string(&path)
+                && let Some(at) = text.find(".session.set(")
+                && !text.contains("BRAIN_BACKEND_URL")
+                && !text.contains("ctx.backend")
+            {
+                let file = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().to_string();
+                let mut diag = crate::compiler::Diag::new("B0786", &file, brain_parse::Span::default(), "`ctx.session.set` answers 409 here: `BRAIN_BACKEND_URL` makes the backend own the session".to_string(), "sign in with `ctx.backend.login(credentials)`, or set `BRAIN_BACKEND_SESSION=app` to keep this app's signed session".to_string());
+                diag.line = text[..at].lines().count().max(1) as u32;
+                diag.col = 1;
+                out.push(diag);
+            }
+        }
+    }
+    out.sort_by(|a, b| a.file.cmp(&b.file));
+    out
 }
 
 /// Backend settings that cannot start, per environment the file declares, as warnings (B0760–B0764): `brain backend
