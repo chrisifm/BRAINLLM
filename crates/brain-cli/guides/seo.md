@@ -65,7 +65,8 @@ page text, not after.
 
 ## 4. What is automatic (never hand-write it)
 `brain build` writes robots.txt, sitemap.xml, llms.txt, llms-full.txt, a Markdown twin of every indexable page
-(`/pricing.md`, `seo.markdown`), the manifest, missing Open Graph/Twitter tags from `brain.json` `social`, BreadcrumbList,
+(`/pricing.md`, `seo.markdown`), the manifest, the page icon and apple-touch-icon from `public/` (`favicon.svg`,
+`icon-*.png`, `apple-touch-icon*.png`; a page's own `<link rel="icon">` wins), missing Open Graph/Twitter tags from `brain.json` `social`, BreadcrumbList,
 `hreflang` for every locale, and Google tags from `brain.json` `"google"`. AI crawler policy:
 `brain.json` `"seo": { "ai": "allow" | "search-only" | "block" }` (`search-only` = AI search and answers yes, training no).
 Non-production builds force `noindex` (B1822).

@@ -350,6 +350,18 @@ pub fn finish_with_og(
             ));
         }
     }
+    // zero config: the icon the app declares in public/ (favicon.svg or an icon SVG, else an icon PNG) is the page icon,
+    // and an icon PNG doubles as the apple-touch-icon; a page that links its own keeps it
+    let declared = public_icons(root);
+    let svg = declared.iter().map(|(p, _)| p).find(|p| p.eq_ignore_ascii_case("favicon.svg")).or_else(|| declared.iter().map(|(p, _)| p).find(|p| p.to_ascii_lowercase().ends_with(".svg")));
+    let png = declared.iter().map(|(p, _)| p).find(|p| p.to_ascii_lowercase().starts_with("apple-touch-icon") && p.to_ascii_lowercase().ends_with(".png"))
+        .or_else(|| declared.iter().map(|(p, _)| p).find(|p| p.to_ascii_lowercase().ends_with(".png")));
+    let icon_tag = match (svg, png) {
+        (Some(s), _) => format!("<link rel=\"icon\" href=\"/{}\" type=\"image/svg+xml\">", files::encode_path(s)),
+        (None, Some(p)) => format!("<link rel=\"icon\" href=\"/{}\" type=\"image/png\">", files::encode_path(p)),
+        _ => String::new(),
+    };
+    let touch_tag = png.map(|p| format!("<link rel=\"apple-touch-icon\" href=\"/{}\">", files::encode_path(p))).unwrap_or_default();
     let end = if cfg.staging {
         "<meta name=\"robots\" content=\"noindex, nofollow\">"
     } else {
@@ -488,8 +500,16 @@ pub fn finish_with_og(
                 tags.push_str(&format!("<link rel=\"alternate\" type=\"application/rss+xml\" title=\"{}\" href=\"/{base}/rss.xml\">", files::xml(&c.name)));
             }
         }
+        let head_of = p.html.split("</head>").next().unwrap_or("").to_ascii_lowercase();
+        let mut icons = String::new();
+        if !head_of.contains("rel=\"icon\"") && !head_of.contains("rel=\"shortcut icon\"") && !head_of.contains("rel=icon") {
+            icons.push_str(&icon_tag);
+        }
+        if !head_of.contains("apple-touch-icon") {
+            icons.push_str(&touch_tag);
+        }
         p.html = dedupe_head(&inject_head(
-            &inject_head(&p.html, &start, false),
+            &inject_head(&p.html, &format!("{start}{icons}"), false),
             &format!("{tags}{end}"),
             true,
         ));

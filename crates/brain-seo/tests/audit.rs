@@ -1986,3 +1986,26 @@ fn indexnow_traverses_a_sitemap_index() {
     assert!(out.contains("other.example") && out.contains("fix:"), "{out}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn declared_icon_in_public_becomes_the_page_icon() {
+    // zero config: public/favicon.svg (or an icon PNG) is linked as the page icon when the page links none
+    let dir = fresh_dir("icon-default");
+    std::fs::create_dir_all(dir.join("public")).unwrap();
+    std::fs::write(dir.join("public/favicon.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1 1\"/>").unwrap();
+    std::fs::write(dir.join("public/icon-192.png"), [0x89u8, b'P', b'N', b'G']).unwrap();
+    let mut pages = good_site();
+    pages[1].html = pages[1].html.replace("</head>", "<link rel=\"icon\" href=\"/own.png\"></head>");
+    finish(&cfg(), &dir, &mut pages, &[], &[]).unwrap();
+    assert!(pages[0].html.contains("<link rel=\"icon\" href=\"/favicon.svg\" type=\"image/svg+xml\">"), "{}", pages[0].html);
+    assert!(pages[0].html.contains("<link rel=\"apple-touch-icon\" href=\"/icon-192.png\">"), "{}", pages[0].html);
+    assert_eq!(pages[1].html.matches("rel=\"icon\"").count(), 1, "a page's own icon wins: {}", pages[1].html);
+    assert!(pages[1].html.contains("/own.png"));
+    // nothing declared, nothing linked
+    let bare = fresh_dir("icon-none");
+    let mut pages = good_site();
+    finish(&cfg(), &bare, &mut pages, &[], &[]).unwrap();
+    assert!(!pages[0].html.contains("rel=\"icon\""));
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&bare);
+}
