@@ -15,6 +15,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   object field options `{type, default, unique}` and declarative checks in `constraints.jsbrain`. Decimals travel and
   are stored as canonical strings with a lossless database CHECK; unique and check violations answer 409/422. Records
   expose `created_at`/`updated_at`. Existing contracts record byte-identically and gain no database objects.
+- Native file buckets (`server/files/<name>.jsbrain`) accept uploads of any type by default, streamed to private
+  disk with a per-bucket size limit (default 25 MiB), magic-byte type detection, optional type allowlists,
+  private/public visibility, owner/role/related-record download policy and `Range`/`ETag` downloads.
 
 ### Changed
 

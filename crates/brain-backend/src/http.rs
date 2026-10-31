@@ -24,6 +24,8 @@ use uuid::Uuid;
 
 #[path = "sockets.rs"]
 mod sockets;
+#[path = "files_http.rs"]
+mod files_http;
 pub use sockets::{SocketConfig, SocketControl};
 
 tokio::task_local! { static REQUEST_ID: String; }
@@ -66,6 +68,7 @@ pub struct App {
     media: crate::media::Store,
     production: bool,
     origins: Arc<Vec<String>>,
+    platform: Arc<files_http::State>,
 }
 #[derive(Debug)]
 pub struct Error {
@@ -215,6 +218,14 @@ pub async fn router_with_socket_control(
     pool: PgPool,
     config: Config,
 ) -> std::result::Result<(Router, SocketControl), String> {
+    router_with_platform(pool, config, Default::default()).await
+}
+/// Same as [`router_with_socket_control`] with application-declared platform settings (files, routes, limits).
+pub async fn router_with_platform(
+    pool: PgPool,
+    config: Config,
+    platform: crate::platform::Platform,
+) -> std::result::Result<(Router, SocketControl), String> {
     let socket_origins = config.sockets.as_ref().map(|s| s.allowed().to_vec()).unwrap_or_default();
     if socket_origins.iter().any(|origin| !config.origins.contains(origin)) {
         return Err("Socket origins must be an explicit subset of backend HTTP origins".into());
@@ -278,6 +289,12 @@ pub async fn router_with_socket_control(
         &jobs.values().cloned().collect::<Vec<_>>(),
     )?;
     db::verify(&pool, &resources.values().cloned().collect::<Vec<_>>()).await?;
+    let platform = Arc::new(files_http::State::new(
+        &platform,
+        &resources.values().cloned().collect::<Vec<_>>(),
+        &config.roles.roles,
+        &config.uploads,
+    )?);
     let jwt = config
         .jwt
         .map(|config| crate::jwt::Jwt::new(pool.clone(), config));
@@ -343,6 +360,7 @@ pub async fn router_with_socket_control(
         .transpose()?;
     let sockets = Arc::new(sockets::Broker::new(socket_origins));
     let app = App {
+        platform: platform.clone(),
         sockets: sockets.clone(),
         webhooks,
         before_hooks: config.before_hooks,
@@ -444,6 +462,7 @@ pub async fn router_with_socket_control(
         )
         .route("/_brain/media/{id}/variants", post(media_variants))
         .route("/_brain/media/{id}/v/{version}/{preset}", get(media_asset))
+        .merge(files_http::routes(&platform))
         .fallback(|| async { Error::missing() })
         .layer(DefaultBodyLimit::max(65536))
         .layer(middleware::from_fn_with_state(app.clone(), protect))
@@ -472,6 +491,15 @@ pub async fn serve(
     pool: PgPool,
     config: Config,
 ) -> std::result::Result<(), String> {
+    serve_with_platform(listener, pool, config, Default::default()).await
+}
+/// [`serve`] with application-declared platform settings.
+pub async fn serve_with_platform(
+    listener: tokio::net::TcpListener,
+    pool: PgPool,
+    config: Config,
+    platform: crate::platform::Platform,
+) -> std::result::Result<(), String> {
     let address = listener
         .local_addr()
         .map_err(|_| "Cannot inspect backend address")?
@@ -482,7 +510,7 @@ pub async fn serve(
         .filter(|cfg| cfg.has_outbound())
         .map(|cfg| crate::webhooks::Webhooks::new(pool.clone(), cfg, &config.jobs))
         .transpose()?;
-    let (app, sockets) = router_with_socket_control(pool.clone(), config).await?;
+    let (app, sockets) = router_with_platform(pool.clone(), config, platform).await?;
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
     let mut http_stop = stop_rx.clone();
     let worker_failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -537,6 +565,13 @@ pub async fn serve(
 }
 async fn request_deadline(req: Request, next: Next) -> Response {
     let path = req.uri().path();
+    if path.starts_with("/_brain/files/") {
+        let budget = files_http::deadline(&req);
+        return match tokio::time::timeout(budget, next.run(req)).await {
+            Ok(response) => response,
+            Err(_) => StatusCode::GATEWAY_TIMEOUT.into_response(),
+        };
+    }
     let media = path == "/_brain/media"
         || path.starts_with("/_brain/media/")
         || path == "/_brain/uploads"
@@ -574,6 +609,8 @@ async fn response_headers(req: Request, next: Next) -> Response {
         .map(str::to_owned);
     let response = REQUEST_ID.scope(rid.clone(), next.run(req)).await;
     let mut response = crate::response::finalize(&method, &path, accept.as_deref(), &rid, response);
+    let public_cache = (response.status().is_success() || response.status() == StatusCode::NOT_MODIFIED)
+        && response.extensions().get::<files_http::PublicCache>().is_some();
     let headers = response.headers_mut();
     for (name, value) in [
         ("x-content-type-options", "nosniff"),
@@ -586,6 +623,10 @@ async fn response_headers(req: Request, next: Next) -> Response {
             "default-src 'none'; frame-ancestors 'none'",
         ),
     ] {
+        // Public immutable files keep their declared cache policy; everything else stays no-store.
+        if name == "cache-control" && public_cache {
+            continue;
+        }
         headers.insert(
             header::HeaderName::from_static(name),
             HeaderValue::from_static(value),

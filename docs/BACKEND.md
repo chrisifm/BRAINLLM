@@ -189,6 +189,7 @@ ownership metadata. Image work, input/output bytes, dimensions and decoding memo
 The media library supports metadata pagination, guarded edits, private downloads and leased deletion cleanup.
 See [MEDIA.md](MEDIA.md) for the exact current routes, limits and optional private Google Cloud Storage adapter.
 General active-content/file formats are not implicitly treated as safe images.
+Files of any type (documents, archives, audio, video) use declared buckets: [backend/files.md](backend/files.md).
 
 ## Remaining acceptance work
 

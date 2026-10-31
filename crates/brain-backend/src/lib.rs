@@ -13,6 +13,8 @@ pub mod response;
 pub mod search;
 pub mod types;
 pub mod upload;
+pub mod files;
+pub mod platform;
 pub mod webhooks;
 
 pub use contract::{Check, Constraints, Field, Policy, Resource};

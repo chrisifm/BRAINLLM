@@ -7,6 +7,8 @@ mod auth_http;
 mod backend;
 #[path = "exact_types.rs"]
 mod exact_types;
+#[path = "files.rs"]
+mod files;
 #[path = "foundation.rs"]
 mod foundation;
 #[path = "jwt_sessions.rs"]

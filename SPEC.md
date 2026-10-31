@@ -281,6 +281,9 @@ Reads and writes run through the same native schemas, policies and authenticated
 Writes require a same-origin POST server function; they are rejected from GET/load. Put domain logic in server-only
 service/repository `.jsbrain` modules and pass `ctx` explicitly. Request JSON is limited to 64 KiB, responses to 2 MiB,
 with a shared eight-request cap and ten-second total deadline; no automatic mutation retries.
+Files of any type: `server/files/invoices.jsbrain` `export default {types:['application/pdf'],maxBytes:'10mb',create:['user']}`
+→ multipart `POST /_brain/files/invoices` (field `file`), `GET /_brain/files/invoices/<id>` (Range, ETag). Type comes
+from content, not the name; empty `types` accepts any type. See `docs/backend/files.md`.
 Keep existing production routes until their behavior and policies pass a tested migration slice.
 
 ## Tests (`*.test.brain`)

@@ -76,7 +76,7 @@ async fn postgres_migrations_search_scope_session_serialization_and_storage_outb
             .fetch_one(&pool)
             .await
             .unwrap(),
-        7
+        8
     );
     assert_eq!(
         sqlx::query_as::<_, (i32, String)>(
@@ -92,7 +92,8 @@ async fn postgres_migrations_search_scope_session_serialization_and_storage_outb
             (4, "links".into()),
             (5, "auth_flows".into()),
             (6, "webhooks".into()),
-            (7, "search_empty_fields".into())
+            (7, "search_empty_fields".into()),
+            (8, "endpoints_platform".into())
         ]
     );
     assert_eq!(
