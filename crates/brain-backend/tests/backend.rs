@@ -271,7 +271,7 @@ async fn postgres_auth_policy_crud_transactional_hooks_and_leased_jobs() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO _brain_jobs(id,queue,payload,max_attempts) SELECT gen_random_uuid(),'full','{}',1 FROM generate_series(1,10000)").execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO _brain_jobs(id,queue,payload,max_attempts) SELECT gen_random_uuid(),'article_created','{}',1 FROM generate_series(1,10000)").execute(&pool).await.unwrap();
     assert!(
         db::create(&pool, &r, user.id, json!({"title":"Must roll back"}))
             .await

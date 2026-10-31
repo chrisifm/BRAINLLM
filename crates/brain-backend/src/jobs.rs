@@ -123,6 +123,9 @@ impl Queue {
     }
 }
 
+/// Maximum pending or running jobs per queue.
+pub const QUEUE_CAPACITY: i64 = 10000;
+
 /// Transactional outbox used by resource hooks: the row and its job commit or roll back together.
 pub async fn enqueue_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -138,8 +141,10 @@ pub async fn enqueue_tx(
     {
         return Err("invalid job; queue must be an identifier, payload <=64 KB, key 1..128 bytes, attempts 1..10".into());
     }
-    // Serialize capacity checks across producers without retaining an unbounded in-memory queue.
-    sqlx::query("SELECT pg_advisory_xact_lock(728196411)")
+    // Serialize the capacity check per queue only (two-int key space): producers on different queues never wait
+    // for each other, and the transaction-level lock is released on commit or rollback.
+    sqlx::query("SELECT pg_advisory_xact_lock(728196411, hashtext($1))")
+        .bind(queue)
         .execute(&mut **tx)
         .await
         .map_err(crate::db::safe)?;
@@ -155,13 +160,17 @@ pub async fn enqueue_tx(
             return Ok(id);
         }
     }
-    let pending: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM _brain_jobs WHERE state IN ('pending','running')")
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(crate::db::safe)?;
-    if pending >= 10000 {
-        return Err("job queue is full (10000 active jobs); drain workers before retrying".into());
+    // Bounded count: stops at the cap instead of scanning every active job (partial indexes on queue+state).
+    let pending: i64 = sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM (SELECT 1 FROM _brain_jobs WHERE queue=$1 AND state IN ('pending','running') LIMIT $2) bounded",
+    )
+    .bind(queue)
+    .bind(QUEUE_CAPACITY)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(crate::db::safe)?;
+    if pending >= QUEUE_CAPACITY {
+        return Err(format!("job queue `{queue}` is full ({QUEUE_CAPACITY} active jobs); drain workers before retrying"));
     }
     let id = Uuid::new_v4();
     sqlx::query("INSERT INTO _brain_jobs(id,queue,payload,max_attempts,idempotency_key) VALUES ($1,$2,$3,$4,$5)").bind(id).bind(queue).bind(payload).bind(max_attempts).bind(key).execute(&mut **tx).await.map_err(crate::db::safe)?;
