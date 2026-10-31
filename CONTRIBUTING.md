@@ -43,6 +43,7 @@ npm test --prefix runtime              # runtime (Node 22+)
 node bench/fixtures-check.mjs          # every invalid fixture yields exactly its expected Diag
 node bench/llm/gate.mjs                # first-pass rate must not drop vs bench/llm/baseline.json
 scripts/check-english.sh               # no Spanish anywhere (accents or common Spanish words)
+node scripts/gen-docs-index.mjs        # regenerate docs/INDEX.md after adding or retitling a doc (--check in scripts/test)
 target/debug/brain doctor              # inside any app
 ```
 
