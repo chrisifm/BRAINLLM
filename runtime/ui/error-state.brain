@@ -9,7 +9,7 @@
   // Keys: error_state.offline network timeout schema unauthorized forbidden not_found invalid rate_limited ({n}) server
   // sign_in retry reference ({id}).
   const say = (key, en, vars) => {
-    const D = globalThis.__brainDict, h = globalThis.document && document.documentElement
+    const D = globalThis.__brainDict, G = globalThis, h = G.document && G.document.documentElement
     const loc = globalThis.__brainLocale || (h && h.getAttribute('lang')) || 'en'
     const def = (h && h.getAttribute('data-default-lang')) || 'en'
     const m = D && ((D[loc] && D[loc]['error_state.' + key]) ?? (D[def] && D[def]['error_state.' + key]))
