@@ -171,7 +171,9 @@ fn main() -> ExitCode {
         },
         Some("quality") => {
             app_root().and_then(|root| {
-                let value=if args.get(1).map(String::as_str)==Some("refresh") {quality::refresh(&root)?} else {quality::query(&root,&serde_json::json!({}))?};
+                let mut value=if args.get(1).map(String::as_str)==Some("refresh") {quality::refresh(&root)?} else {quality::query(&root,&serde_json::json!({}))?};
+                // evidence written by another compiler version is refreshed once so the report matches the installed one
+                if value["freshness"]["frameworkStale"]==true && quality::refresh(&root).is_ok() {value=quality::query(&root,&serde_json::json!({}))?;}
                 println!("{value}");Ok(())
             })
         },
@@ -1277,6 +1279,9 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
         .collect();
     rep.ledger = out.ledger.iter().map(|page|brain_mcp::Json::parse(&page.to_json())).collect::<Result<Vec<_>,_>>()?;
     rep.build_cache=brain_mcp::Json::parse(&out.build_cache.to_json())?;
+    // warn only for removals at verified app-source declarations the author can clean (not runtime tree-shaking,
+    // generated helpers or bindings that server: functions keep in the server bundle)
+    let mut cleanup = false;
     for item in &out.optimizations {
         let mut detail:serde_json::Value=serde_json::from_str(&item.detail).map_err(|_|"optimizer returned invalid structured feedback")?;
         detail["sourceFile"]=serde_json::json!(item.source);
@@ -1284,10 +1289,11 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
         detail["originalSourceHash"]=serde_json::json!(item.original_source_hash);
         if item.stage=="module-minify" && detail["facts"].is_array() {
             optimization_feedback::annotate(root,&item.source,&mut detail)?;
+            cleanup |= optimization_feedback::actionable(&detail);
         }
         rep.optimizations.push(brain_mcp::Json::parse(&detail.to_string())?);
     }
-    if rep.optimizations.iter().any(|v|v.get("removedBindings").is_some_and(|n|n!=&brain_mcp::Json::Num(0.0))) {
+    if cleanup {
         rep.warnings.push("Production removed unused bindings; inspect optimizations in brain build --json and clean the original source using the reported verified locations".into());
     }
     if out.build_cache.corrupt>0 || out.build_cache.unsafe_paths>0 {rep.warnings.push("Build cache entries were recomputed or bypassed; inspect buildCache for corruption, unsafe paths or skipped writes".into());}

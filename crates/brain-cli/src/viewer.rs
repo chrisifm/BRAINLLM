@@ -85,7 +85,7 @@ fn invoke(input: &Value, timeout: Duration) -> Result<Value, String> {
 }
 /// Probe projects only service version, connected state and userScripts capability; never profiles or tabs.
 pub fn probe() -> Result<Value, String> {
-    match invoke(&json!({"op":"probe","profile":std::env::var("BRAIN_VIEWER_PROFILE").ok()}), Duration::from_secs(5)) {
+    match invoke(&json!({"op":"probe","profile":std::env::var("BRAIN_VIEWER_PROFILE").ok(),"service":std::env::var("BRAIN_VIEWER_SERVICE").ok()}), Duration::from_secs(5)) {
         Err(error) if error == "Viewer runner needs Node.js with fetch support" => Ok(
             json!({"ok":true,"available":false,"engine":"viewer","reason":"node-runner-unavailable","fallbackEligible":true}),
         ),
@@ -112,7 +112,7 @@ pub fn run(base: &str, root: &Path, files: &[PathBuf], timeout: Duration) -> Res
     }
     let ms = timeout.as_millis().clamp(2000, 180000) as u64;
     invoke(
-        &json!({"op":"run","base":base,"files":relative,"timeoutMs":ms,"profile":std::env::var("BRAIN_VIEWER_PROFILE").ok()}),
+        &json!({"op":"run","base":base,"files":relative,"timeoutMs":ms,"profile":std::env::var("BRAIN_VIEWER_PROFILE").ok(),"service":std::env::var("BRAIN_VIEWER_SERVICE").ok()}),
         Duration::from_millis(ms + 7000),
     )
 }

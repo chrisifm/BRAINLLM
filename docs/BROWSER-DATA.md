@@ -6,6 +6,24 @@ Use small public URL state for navigation, IndexedDB for structured cache record
 
 `urlState('overview', { key: 'tab' })` creates a signal restored from the URL. Compiler-generated bindings connect public top-level selected signals used by native select, Select and Tabs. Repeated components should supply distinct stable keys. `data-url-state="off"` opts a native selection out of automatic public navigation. A signal with an explicit urlState is not bound twice.
 
+Restrict a value to an allowed set with `values`: a stale or hand-edited link falls back to the first allowed value
+(no history entry is written), while a missing query parameter keeps the declared initial value. `<Tabs>` selects its
+first tab when its bound value matches no tab.
+
+```html
+<script>
+  let tab = urlState('overview', { key: 'tab', values: ['overview', 'details', 'reviews'] })
+  let opened = sig([])
+  watch(() => tab, (now) => (opened = [...opened, now]), { immediate: true }) // runs once now, then on every change
+</script>
+<p>Opened: {opened.join(', ')}</p>
+<Tabs label="Product" tabs={[{ id: 'overview', label: 'Overview' }, { id: 'details', label: 'Details' }, { id: 'reviews', label: 'Reviews' }]} bind:value={tab}>
+  {#if tab === 'details'}<p>Details</p>{:else if tab === 'reviews'}<p>Reviews</p>{:else}<p>Overview</p>{/if}
+</Tabs>
+```
+
+`/shop?tab=bogus` renders Overview; `/shop?tab=reviews` renders Reviews, on the server and in the browser.
+
 Native Dialog receives an opaque path-hash namespace and a ref/id identity when available, otherwise a dialog ordinal. Formatting or CSS hash shortening does not change this default key. Supply an explicit urlKey to preserve links across dialog insertion/removal or component renames. Its DOM adapter tracks open/close, restores direct links and browser back/forward, and disposes its observer/listeners with the component. Secret-like keys, email values, unsupported objects and oversized values are excluded. Unknown query parameters and existing history state survive. Default changes push history; explicit `history: 'replace'` supports high-frequency public state. Private forms, passwords, JWTs and transient loading state must never be URL state.
 
 ## Structured cache

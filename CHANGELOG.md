@@ -22,6 +22,12 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   are stored as canonical strings with a lossless database CHECK; unique and check violations answer 409/422. Records
   expose `created_at`/`updated_at`. Existing contracts record byte-identically and gain no database objects.
 
+- `urlState(initial, { key, values })`: a query value outside `values` falls back to the first allowed value (also
+  on the server and on back/forward) without writing history; `<Tabs>` selects its first tab for an unknown bound
+  value; `watch(src, cb, { immediate: true })` also runs once with the initial value.
+- A `server:` function that throws `{ message }` (400) or an Error subclass with a 4xx `status` reaches the calling
+  form's `f.error` through RPC and through a form posted without JS; other exceptions stay private.
+
 ### Changed
 
 - `brain test`, `brain doctor` and MCP `brain_test` run in owned headless Chrome by default and never probe or open a
@@ -57,6 +63,14 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   time, an overrun of the 200 ms allowance is now a diagnostic: it is logged with `console.warn` and reported once
   with `measured`, `limit` and its source location, without an owner, so no error boundary replaces the view. Steps
   and depth stay fatal and still stop runaway loops and recursion.
+- The opt-in Viewer lane no longer fails "at open" when Claude Viewer and Codex Viewer are both connected and
+  `BRAIN_VIEWER_PROFILE` names a profile of the second one: an explicit open refusal (nothing opened) moves to the next
+  connected Viewer, `BRAIN_VIEWER_SERVICE=claude-viewer|codex-viewer` pins one, and Viewer failures now carry the
+  adapter code and fix (`VIEWER_OPEN_REFUSED`, `VIEWER_PROFILE_REQUIRED`) instead of a bare stage.
+
+- `brain build` no longer reports "Production removed unused bindings" for constants and imports of a `.brain` view
+  that only its `server:` functions use; such facts are marked `serverOnly` and skipped by `brain quality`. The
+  warning now needs a verified app-source removal, so runtime tree-shaking and generated helpers do not raise it.
 - The development compile cache keys each source by modification time, size and (on Unix) inode. A file replaced
   atomically while keeping its timestamp is recompiled instead of serving the previous output until a watch event.
 - Deeply nested BrainScript, markup or CSS reports B0002/B0003 instead of overflowing the compiler stack; one small

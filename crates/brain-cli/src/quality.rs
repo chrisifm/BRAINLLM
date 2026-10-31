@@ -306,6 +306,10 @@ pub fn record_build(root: &Path, build: &Value) -> Result<Value> {
                 .contains(s)
             });
             let Some(action) = action else { continue };
+            // kept in the server bundle by a server: function: not a source cleanup item
+            if fact["serverOnly"] == true {
+                continue;
+            }
             count += 1;
             visited += 1;
             if visited > 8192 {
@@ -700,7 +704,14 @@ pub fn query(root: &Path, options: &Value) -> Result<Value> {
     snapshot["items"] = json!(selected);
     snapshot["revision"] = revision;
     snapshot["nextCursor"] = json!(next);
-    snapshot["freshness"] = json!({"staleSourceFiles":stale,"unknownSourceFiles":unknown,"pendingRecovery":dir.join("pending.json").try_exists().unwrap_or(true),"checked":"recorded source revisions only; newly added files require refresh"});
+    // A snapshot written by another compiler version reflects that version's rules; say so instead of
+    // presenting it as current (`frameworkVersion` keeps the version that produced the evidence).
+    let installed = env!("CARGO_PKG_VERSION");
+    let framework_stale = snapshot["frameworkVersion"].as_str() != Some(installed);
+    snapshot["freshness"] = json!({"staleSourceFiles":stale,"unknownSourceFiles":unknown,"pendingRecovery":dir.join("pending.json").try_exists().unwrap_or(true),"frameworkStale":framework_stale,"installedFrameworkVersion":installed,"checked":"recorded source revisions only; newly added files require refresh"});
+    if framework_stale || stale > 0 {
+        snapshot["next"] = json!("brain quality refresh");
+    }
     snapshot["paths"] = json!({"json":".brain/quality/improvements.json","markdown":".brain/quality/IMPROVEMENTS.md","panel":".brain/quality/panel.html","private":true});
     Ok(snapshot)
 }
@@ -776,17 +787,36 @@ mod tests {
         fs::write(app.0.join("comp/example.brain"), "<p>Updated</p>").unwrap();
         let result = query(&app.0, &json!({})).unwrap();
         assert_eq!(result["freshness"]["staleSourceFiles"], 1);
+        assert_eq!(result["freshness"]["frameworkStale"], false);
+        assert_eq!(result["next"], "brain quality refresh");
         let markdown = app.0.join(".brain/quality/IMPROVEMENTS.md");
         fs::write(&markdown, "editor-owned-note").unwrap();
         assert!(refresh(&app.0).unwrap_err().contains("edited"));
         assert_eq!(fs::read_to_string(markdown).unwrap(), "editor-owned-note");
     }
     #[test]
+    fn snapshot_from_another_framework_version_is_reported_stale() {
+        let app = App::new();
+        refresh(&app.0).unwrap();
+        let path = app.0.join(".brain/quality/improvements.json");
+        let mut old: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        old["frameworkVersion"] = json!("0.0.1");
+        fs::write(&path, serde_json::to_string(&old).unwrap()).unwrap();
+        let result = query(&app.0, &json!({})).unwrap();
+        assert_eq!(result["freshness"]["frameworkStale"], true);
+        assert_eq!(result["freshness"]["installedFrameworkVersion"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(result["next"], "brain quality refresh");
+        refresh(&app.0).unwrap();
+        let fresh = query(&app.0, &json!({})).unwrap();
+        assert_eq!(fresh["frameworkVersion"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(fresh["freshness"]["frameworkStale"], false);
+    }
+    #[test]
     fn build_feedback_keeps_selected_counts_locations_and_no_arbitrary_body_or_warning() {
         let app = App::new();
         let source = fs::read(app.0.join("comp/example.brain")).unwrap();
         let hash = crate::manifests::hash(&source);
-        record_build(&app.0,&json!({"schemaVersion":1,"build":"abc123","warnings":["private-warning-value"],"payload":"private-payload-value","report":[{"jsMin":20,"css":5}],"optimizations":[{"sourceFile":"comp/example.brain","originalSourceHash":hash,"stage":"module-minify","removedBindings":1,"facts":[{"action":"removed","originalLine":1,"originalColumn":1,"line":17,"body":"private-literal-value"}]}]})).unwrap();
+        record_build(&app.0,&json!({"schemaVersion":1,"build":"abc123","warnings":["private-warning-value"],"payload":"private-payload-value","report":[{"jsMin":20,"css":5}],"optimizations":[{"sourceFile":"comp/example.brain","originalSourceHash":hash,"stage":"module-minify","removedBindings":1,"facts":[{"action":"removed","originalLine":1,"originalColumn":1,"line":17,"body":"private-literal-value"},{"action":"removed","originalLine":2,"originalColumn":1,"line":18,"serverOnly":true}]}]})).unwrap();
         let stored = fs::read_to_string(app.0.join(".brain/quality/build.json")).unwrap();
         for value in [
             "private-warning-value",
@@ -803,6 +833,14 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|i| i["code"] == "QCLEANUP" && i["location"]["line"] == 1)
+        );
+        // a binding kept for a server: function is not a cleanup item
+        assert!(
+            !result["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|i| i["code"] == "QCLEANUP" && i["location"]["line"] == 2)
         );
         fs::write(app.0.join("comp/example.brain"), "<p>Changed</p>").unwrap();
         let result = refresh(&app.0).unwrap();

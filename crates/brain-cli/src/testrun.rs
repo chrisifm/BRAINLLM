@@ -250,6 +250,14 @@ static VIEWER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::ne
 pub fn set_viewer(on: bool) {
     VIEWER.store(on, std::sync::atomic::Ordering::SeqCst);
 }
+/// The adapter's own code and fix (fixed English strings, never browser data) so a Viewer failure is actionable.
+fn viewer_hint(v: &serde_json::Value) -> String {
+    match (v["code"].as_str(), v["fix"].as_str()) {
+        (Some(code), Some(fix)) => format!(" ({code}: {fix})"),
+        (Some(code), None) => format!(" ({code})"),
+        _ => String::new(),
+    }
+}
 /// `--viewer` on the command line, or `BRAIN_VIEWER=1|true|yes` in the process environment.
 pub fn viewer_requested(args: &[String], env: Option<&str>) -> bool {
     args.iter().any(|a| a == "--viewer")
@@ -279,17 +287,18 @@ pub fn run(
     }
     let available = crate::viewer::probe()?;
     if available["ok"] != true {
-        return Err(
-            "Connected Viewer capability probe failed; no silent headless fallback was attempted"
-                .into(),
-        );
+        return Err(format!(
+            "Connected Viewer capability probe failed{}; no silent headless fallback was attempted",
+            viewer_hint(&available)
+        ));
     }
     if available["available"] == true {
         let response = crate::viewer::run(base, root, files, timeout)?;
         if response["ok"] != true {
             return Err(format!(
-                "Connected Viewer E2E failed at {}; owned-tab cleanup status: {}; no silent headless fallback was attempted",
+                "Connected Viewer E2E failed at {}{}; owned-tab cleanup status: {}; no silent headless fallback was attempted",
                 response["stage"].as_str().unwrap_or("bridge"),
+                viewer_hint(&response),
                 response["cleanup"].as_str().unwrap_or("unknown")
             ));
         }
@@ -621,6 +630,20 @@ mod tests {
         let guide = crate::scaffold::AGENTS_MD;
         assert!(guide.contains("no browser extension is required"));
         assert!(!guide.contains("MUST probe"));
+    }
+
+    #[test]
+    fn viewer_failures_carry_the_adapter_code_and_fix() {
+        let refused = serde_json::json!({"ok":false,"code":"VIEWER_OPEN_REFUSED","fix":"Set BRAIN_VIEWER_PROFILE"});
+        assert_eq!(
+            super::viewer_hint(&refused),
+            " (VIEWER_OPEN_REFUSED: Set BRAIN_VIEWER_PROFILE)"
+        );
+        assert_eq!(
+            super::viewer_hint(&serde_json::json!({"code":"VIEWER_EXECUTION_FAILED"})),
+            " (VIEWER_EXECUTION_FAILED)"
+        );
+        assert_eq!(super::viewer_hint(&serde_json::json!({"ok":false})), "");
     }
 
     use super::*;

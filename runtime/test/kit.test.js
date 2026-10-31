@@ -80,6 +80,10 @@ test('kit Tabs and Table: tab switch with arrows, 300 rows virtualized, sort wit
   assert.equal(panel(), 'Details panel')
   assert.equal(tabs[1].getAttribute('aria-selected'), 'true')
   assert.equal(doc.activeElement, tabs[1])
+  // an unknown bound value (a removed tab, a stale link) selects the first tab and stays keyboard-reachable
+  const stale = host.querySelectorAll('[role=tablist]')[1].querySelectorAll('[role=tab]')
+  assert.deepEqual(stale.map(t => t.getAttribute('aria-selected')), ['true', 'false'])
+  assert.deepEqual(stale.map(t => t.getAttribute('tabindex')), ['0', '-1'])
   const rows = () => host.querySelectorAll('tbody tr').filter(r => !r.classList.contains('pad'))
   assert.ok(rows().length < 60, `virtualized: ${rows().length} rows in the DOM for 300`)
   assert.equal(host.querySelector('table').getAttribute('aria-rowcount'), '301')

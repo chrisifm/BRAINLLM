@@ -95,6 +95,31 @@ The engine bounds input to 8 MiB, 200,000 tokens, 8,192 scopes, 256 delimiter de
 when analysis cannot finish safely. It does not fall back to deleting unproven
 code to meet a byte target.
 
+## Bindings used by server functions
+
+A `.brain` view's client module keeps its top-level declarations, but the bodies of its `server:` functions move
+to the server bundle. A constant or import read only by a `server:` function is therefore unreferenced in the
+client module and the minifier drops it there; the server bundle still uses it. Source mapping marks such a fact
+`"serverOnly": true` with a "no source change is needed" fix, counts it in `sourceMapping.serverOnly`, and
+neither `brain build`'s cleanup warning nor `brain quality` (QCLEANUP) treats it as cleanup. Names that the server
+function declares itself (parameters, locals) do not count as server use of a top-level binding.
+
+```html
+<script>
+  import { slugify } from '../lib/slug.jsbrain'
+  const LIMIT = 80                        // serverOnly: true, no warning
+  const forgotten = 3                     // unused everywhere: reported, and the build warns
+  server: async function save(ctx, v) {
+    if (String(v.title).length > LIMIT) throw { message: 'Title too long' }
+    return { slug: slugify(v.title) }
+  }
+  let f = form({ title: 'str!' }, { submit: async (v) => { await save(v) } })
+</script>
+```
+
+The build warning ("Production removed unused bindings…") is raised only when a removal maps to a verified app
+source declaration that is not server-only; runtime tree-shaking and generated helpers never raise it.
+
 ## Verification
 
 ```sh

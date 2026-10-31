@@ -625,7 +625,10 @@ be turned off.
 - **RPC contract:** `POST /_r/<hash>/<name>`, JSON body = array of arguments, JSON response. Default defenses:
   same origin only (`Origin` + header `X-Brain-RPC: 1`, rejects CSRF), 64 KB body limit, rate limit per IP
   (60/min per function, configurable in `brain.json`), unexpected error → generic 500 to the client and full log on the
-  server. The runtime exports `rpc(id, args)` (RUNTIME); brain-serve mounts the endpoint in dev (TOOLCHAIN).
+  server. Public failures (2026-10-31, `publicError` in server.mjs): a plain `{ message }` without `status` → 400
+  `{error: message}`, an Error subclass outside the built-ins with an integer 4xx `status` → that status and message
+  (≤500 characters). `callRpc` and `callForm` share it, so `f.error` reads the same with and without JS. Plain
+  `{ status, message }`, bare `Error` and built-in errors keep the message private. The runtime exports `rpc(id, args)` (RUNTIME); brain-serve mounts the endpoint in dev (TOOLCHAIN).
 - **Production server:** if the app has `load` or `server:` functions, `brain build` emits `dist/server.mjs`
   (Node, zero dependencies, `node:http`): SSR of the views with `load`, RPC at `/_r/`, and leaves the rest static. The
   nginx snippet does `proxy_pass` only for those routes and `/_r/`. Without `load` or `server:`, the output is 100 %

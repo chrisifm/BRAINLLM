@@ -4,6 +4,33 @@ This lane is opt-in. `brain test` and `brain doctor` run in owned headless Chrom
 
 The optional integration detects Codex Viewer at `127.0.0.1:4315` (X-XV session headers) and Claude Viewer at `127.0.0.1:4313` (X-CV session headers), selecting a connected scripting-capable service with the expected identity. Probe output projects only service version, connected state, user-script capability and supported test operations. It does not inventory tabs, windows, accounts, cookies or profiles. With multiple connected browser profiles, set private `BRAIN_VIEWER_PROFILE` explicitly for the intended extension profile. The transport never silently claims another session window; it opens an isolated owned test window. Probe reports requiresProfile without exposing profile identities. No personal installation path is embedded in the framework. Node.js with fetch support is needed for this transport; a missing runner/service/extension yields an explicitly reported unavailable-Viewer headless fallback.
 
+## Choose the profile and the service
+
+Each Viewer has its own connected browser profiles; a profile name means something only to the Viewer it belongs to.
+Two private environment variables select where the test tab opens. Neither is printed in any report.
+
+| Variable | Value | When |
+|---|---|---|
+| `BRAIN_VIEWER_PROFILE` | the profile name, id or account name that the Viewer shows for one connected browser | more than one browser profile is connected (otherwise the run stops with `VIEWER_PROFILE_REQUIRED`) |
+| `BRAIN_VIEWER_SERVICE` | `claude-viewer` or `codex-viewer` (also `claude` / `codex`) | both Viewers run and you want one of them; any other value fails with `VIEWER_SERVICE_INVALID` |
+
+Without `BRAIN_VIEWER_SERVICE`, the adapter tries Codex Viewer and then Claude Viewer. A Viewer that answers the open
+with an explicit refusal (for example, that profile is not one of its browsers, or its tab limit is reached) opened
+nothing, so the adapter moves on to the next connected Viewer with a fresh session. A lost open response is never
+retried anywhere. When every Viewer refuses, the run fails with `VIEWER_OPEN_REFUSED`, cleanup `none; no tab was
+opened` and a fix in the error message. Claiming a window in the Viewer CLI is not needed: the test always opens its
+own window in the selected profile and closes its own tab.
+
+Run a shop app's declared tests in the browser profile named `WORK` of Claude Viewer:
+
+```bash
+npm create @christianirack/brainllm@latest shop && cd shop
+brain e2e probe --json                          # available, requiresProfile
+BRAIN_VIEWER_PROFILE=WORK BRAIN_VIEWER_SERVICE=claude-viewer brain test comp/counter.test.brain --viewer --json
+```
+
+Each file report then lists the `viewer` lane and the `headless-cdp` replay lane with their test counts.
+
 A connected extension with disabled user scripts, broken bridge API, timeout, failed scenario or failed owned-tab cleanup does not become a successful fallback. The CLI/MCP caller must inspect scenario results as well as transport `ok`: a successful transport can contain a failing test assertion. A failed connected Viewer lane fails the combined test run even if a separate headless lane would pass.
 
 ## Scope and cleanup

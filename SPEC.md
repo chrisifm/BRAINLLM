@@ -102,7 +102,7 @@ Raw HTML only as `{@html sanitize(x)}`.
 
 ## Lifecycle and helpers
 `mounted(() => { …; return cleanup })` runs once after the DOM is in the page · `watch(() => q, (now, prev) => …)`
-runs only when `q` changes · `await tick()` after DOM updates · `every('30s', fn)` timer stopped on unmount ·
+runs only when `q` changes (`{ immediate: true }` as third argument also runs it once with the initial value) · `await tick()` after DOM updates · `every('30s', fn)` timer stopped on unmount ·
 `media('(max-width: 600px)')` `visible(ref)` `debounce(v, '300ms')` `online()` are read-only signals, read like any other ·
 `<component is={C}>` · `<Portal>` · `transition:fade` on elements inside `{#if}`/`{#each}` ·
 `ai` is Chrome's on-device model when present (`brain guide ai`).
@@ -215,6 +215,8 @@ Keep data across visits: `api('/posts', { get: { out: '[Post]', cache: '10m' } }
 `store(init, { persist: true })`. Heavy work off the main thread: name the module `*.worker.jsbrain`; its exports
 become async functions. Their native bridge bounds pending work, deadlines, bytes and cancellation.
 Public navigable state: `urlState('overview', {key:'tab'})`; selections and native Dialog integrate with query history.
+`{key:'tab', values:['overview','details']}` limits it: an unknown query value reads as the first allowed value; `<Tabs>`
+with an unknown value selects its first tab.
 Preserve unrelated query parameters; never serialize credentials or private form input. Use distinct keys in repeated UI.
 Structured local cache: `database('navigation', {namespace:'my-app',build:'v1'})` supports get/put/batch/scan/prune/close
 with native IndexedDB, quotas, expiry and atomic batches. `storage()` and `cookie()` are small public preferences.
@@ -242,7 +244,8 @@ Variables live in `.brain_env` (already created): shared `KEY=value` lines, then
 Read them as `process.env.KEY` (server) or `process.env.PUBLIC_KEY` (anywhere). Never create a `.env`.
 `.jsbrain` files starting with `<meta server>` run only on the server and may be used only inside `load` or server
 functions. Server function in a `.brain`: `server: async function save(ctx, data) {…}`; the client calls
-`await save(data)` (no `ctx`). Validate `data` inside.
+`await save(data)` (no `ctx`). Validate `data` inside. `throw { message: 'Title already used' }` (400) or an Error
+subclass with a 4xx `status` reaches the calling form's `f.error` as is; other exceptions stay private.
 Server-only modules may signal a deliberate client failure with `throw {status:403}` (standard 4xx only); RPC returns
 the status with a generic public message. Arbitrary exception messages remain private and are excluded from server logs too.
 Sessions: `ctx.session.set(user)` in a server function, `ctx.user` on later requests, `ctx.session.clear()` logs out
@@ -356,7 +359,7 @@ with no tests, downloads or auto-fixes. `brain mcp --profile minimal` exposes sp
 focused resource/job contract tools. Default is `full`.
 `brain test` and `brain doctor` run declared scenarios in owned headless Chrome; no browser extension is required.
 A connected Claude Viewer/Codex Viewer is opt-in, only when the user asks: `brain e2e probe --json`, then `brain test
---viewer` (or `BRAIN_VIEWER=1`, or `brain e2e run`); with several connected profiles set private BRAIN_VIEWER_PROFILE. The
+--viewer` (or `BRAIN_VIEWER=1`, or `brain e2e run`); with several connected profiles set private BRAIN_VIEWER_PROFILE, and BRAIN_VIEWER_SERVICE=claude-viewer|codex-viewer to pin one Viewer (an explicit open refusal moves to the next connected Viewer; docs/VIEWER-E2E.md). The
 opted-in lane keeps the separate full Chrome AX/optional heap replay, an opted-in Viewer failure fails the run, and an
 unavailable one falls back explicitly. Follow `docs/VIEWER-E2E.md` to author complete disposable-data E2E scenarios. `doctor` warning B0734 checks local registration, not connectivity.
 
