@@ -13,8 +13,12 @@ mod backend;
 mod data_queries;
 #[path = "domain_writes.rs"]
 mod domain_writes;
+#[path = "edge.rs"]
+mod edge;
 #[path = "exact_types.rs"]
 mod exact_types;
+#[path = "files.rs"]
+mod files;
 #[path = "foundation.rs"]
 mod foundation;
 #[path = "jwt_sessions.rs"]
@@ -23,6 +27,8 @@ mod jwt_sessions;
 mod links;
 #[path = "media.rs"]
 mod media;
+#[path = "routes.rs"]
+mod routes;
 #[path = "native_openapi.rs"]
 mod native_openapi;
 #[path = "native_sockets.rs"]

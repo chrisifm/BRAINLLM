@@ -79,6 +79,30 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   value; `watch(src, cb, { immediate: true })` also runs once with the initial value.
 - A `server:` function that throws `{ message }` (400) or an Error subclass with a 4xx `status` reaches the calling
   form's `f.error` through RPC and through a form posted without JS; other exceptions stay private.
+- Native file buckets (`server/files/<name>.jsbrain`) accept uploads of any type by default, streamed to private
+  disk with a per-bucket size limit (default 25 MiB), magic-byte type detection, optional type allowlists,
+  private/public visibility, owner/role/related-record download policy and `Range`/`ETag` downloads.
+- Native backend `trustProxy` takes a list of trusted proxy IPs/CIDR ranges and resolves the real client from
+  `X-Forwarded-For`, so rate limiting works per visitor behind nginx; `cors.origins` adds origins and `cors.maxAge`
+  caches preflights.
+- Native backend health is split into `GET /health/live` and `GET /health/ready`; overload (in-flight cap or a 2 s
+  database pool wait) answers `503 OVERLOADED` with `Retry-After`, and shutdown fails readiness first, then drains
+  open requests within a bound.
+- Production refuses a remote `DATABASE_URL` without `sslmode=verify-full` (`BDB_TLS_UNVERIFIED`); `serve` and
+  `jobs work` retry the boot connection with full-jitter backoff for up to 60 s.
+- Native backend routes (`server/routes/<name>/route.jsbrain` + `handler.jsbrain`) declare method, path, typed
+  path/query parameters, forwarded headers, raw or JSON body, and per-route body limit (≤ 1 MiB), timeout, rate
+  limit and auth; JSON keys that reach prototypes are refused.
+- Signed webhook routes verify HMAC-SHA256 signatures (`t=…,v1=…` with timestamp tolerance, or `sha256=…` in hex
+  or base64) over the exact raw body, with constant-time comparison and secret rotation from environment variables.
+- `httpCall(url, options)` is auto-imported in server code for outbound API calls: per-attempt timeout, jittered
+  retries only for idempotent requests or those with an `Idempotency-Key`, `Retry-After`, a response size cap,
+  refusal of private targets and errors that never include query strings or header values.
+- The backend OpenAPI document (`/_brain/docs`, `brain backend inspect`) now covers app-declared routes and file
+  bucket upload, download, delete and metadata operations, with a shared error schema.
+- `platform.logging` selects per-request JSON lines (`errors`, `all` or `off`) and a `slow` threshold; lines carry the
+  request id and route template only, never paths, queries, headers, bodies or client addresses.
+- Production backend answers send `Strict-Transport-Security` (one year, subdomains included).
 
 ### Changed
 

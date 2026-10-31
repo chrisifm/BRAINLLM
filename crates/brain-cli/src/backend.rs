@@ -258,13 +258,17 @@ pub fn inspect(root: &Path) -> Result<Value, String> {
     let domain = domain::checked(root, &resources, &roles)?;
     let mut openapi = contract::openapi_with_roles(&resources, &roles);
     brain_backend::domain::openapi(&domain, &resources, &mut openapi);
+    // Routes need their signing secrets to load; inspection without them documents buckets only.
+    let routes = crate::route_executor::contracts(root, "development").unwrap_or_default();
+    let buckets = crate::platform_config::load(root, &resources, &roles).map(|p| p.buckets).unwrap_or_default();
+    brain_backend::openapi::extend(&mut openapi, &routes, &buckets);
     let queues: serde_json::Map<String, Value> = jobs
         .iter()
         .map(|j| Ok((j.name.clone(), json!(domain::queue_policy(root, &j.name)?))))
         .collect::<Result<_, String>>()?;
     let cron: serde_json::Map<String, Value> = domain::cron(root, &jobs)?.into_iter().map(|(n, s)| (n, json!(s))).collect();
     Ok(
-        json!({"schemaVersion":1,"experimental":true,"resources":resources,"jobs":jobs,"queues":queues,"cron":cron,"roles":roles,"domain":domain,"webhooks":crate::webhook_config::metadata(root)?,"apiKeys":crate::api_key_config::metadata(root)?,"openapi":openapi,"limits":{"activeJobs":10000,"workers":8,"jobSeconds":60,"leaseSeconds":90},"delivery":"at-least-once; handlers must be idempotent"}),
+        json!({"schemaVersion":1,"experimental":true,"resources":resources,"jobs":jobs,"queues":queues,"cron":cron,"roles":roles,"domain":domain,"webhooks":crate::webhook_config::metadata(root)?,"apiKeys":crate::api_key_config::metadata(root)?,"platform":crate::platform_config::metadata(root,&resources,&roles)?,"openapi":openapi,"limits":{"activeJobs":10000,"workers":8,"jobSeconds":60,"leaseSeconds":90},"delivery":"at-least-once; handlers must be idempotent"}),
     )
 }
 pub(crate) fn database_url(root: &Path, environment: &str) -> Result<String, String> {
@@ -356,7 +360,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let jobs = contracts(&root, "jobs")?;
     let domain = domain::checked(&root, &resources, &roles)?;
     runtime()?.block_on(async{
-        let pool=brain_backend::db::connect_as(&url,&pg_name(&root,match operation{"serve"=>"http","migrate"=>"migrate",_=>"cli"})).await?;
+        let production=environment=="production";
+        let boot=if operation=="serve" {brain_backend::boot::Boot::server(production)} else {brain_backend::boot::Boot::command(production)};
+        let pool=brain_backend::boot::connect(&url,&boot).await?;
         if operation=="migrate"{
             brain_backend::db::migrate(&pool,&resources).await?;
             roles.register(&pool).await?;
@@ -391,6 +397,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let config=brain_backend::Config{api_keys:crate::api_key_config::load(&root)?,sockets:sockets.native_config()?,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,resources,jobs,uploads:root.join(".brain/uploads"),origins:sockets.http_origins,production:environment=="production"};
         brain_backend::analytics::configure(analytics_settings(&root)?)?;
         eprintln!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
+        let mut platform=crate::platform_config::load(&root,&config.resources,&config.roles)?;
+        platform.routes=crate::route_executor::contracts(&root,&environment)?;
+        platform.handlers=crate::route_executor::load(&root,&environment,&platform.routes)?;
         // Separate HTTP and worker pools with declared sizes, checked against the server's connection budget.
         pool.close().await;
         let size=|key:&str,default:u32|setting(key).map(|v|v.parse::<u32>().ok().filter(|n|(1..=64).contains(n)).ok_or(format!("{key} must be 1..64"))).transpose().map(|v|v.unwrap_or(default));
@@ -399,7 +408,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let http_pool=brain_backend::db::connect_named(&url,brain_backend::db::Workload::Http,http_size,&pg_name(&root,"http")).await?;
         brain_backend::db::check_connection_budget(&http_pool,(http_size+worker_size)*processes).await?;
         let worker_pool=brain_backend::db::connect_named(&url,brain_backend::db::Workload::Worker,worker_size,&pg_name(&root,"worker")).await?;
-        brain_backend::http::serve_pools_with_domain(listener,http_pool,worker_pool,config,domain).await
+        brain_backend::http::serve_full(listener,http_pool,worker_pool,config,domain,platform).await
     })
 }
 /// All generated files are reserved with create_new; roll back only files created by this invocation.
@@ -633,7 +642,7 @@ pub(crate) fn server_module(root: &Path, rel: &str) -> Result<(Scratch, PathBuf)
         .filter(|(name, _)| {
             matches!(
                 name.as_str(),
-                "brain.js" | "brain-budget.js" | "brain-time.js" | "brain-hash.js"
+                "brain.js" | "brain-budget.js" | "brain-time.js" | "brain-hash.js" | "brain-outbound.js"
             )
         })
         .collect();
@@ -741,8 +750,9 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
     let env: Vec<_> = crate::env::select(&root, &environment);
     let _ = snapshot;
     runtime()?.block_on(async {
-        let role = if op == "work" { format!("worker:{name}") } else { "cli".into() };
-        let pool = brain_backend::db::connect_as(&url, &pg_name(&root, &role)).await?;
+        let production = environment == "production";
+        let boot = if op == "work" { brain_backend::boot::Boot::server(production) } else { brain_backend::boot::Boot::command(production) };
+        let pool = brain_backend::boot::connect(&url, &boot).await?;
         brain_backend::db::verify(&pool, &contracts(&root, "resources")?).await?;
         let queue = brain_backend::jobs::Queue::new(pool.clone());
         let webhooks = if op == "work" {
@@ -1555,7 +1565,7 @@ pub fn media(args: &[String]) -> Result<(), String> {
         return Err(format!("media limit must be 1..{max}"));
     }
     runtime()?.block_on(async {
-        let pool = brain_backend::db::connect_as(&url, &pg_name(&root, "cli")).await?;
+        let pool = brain_backend::boot::connect(&url, &brain_backend::boot::Boot::command(environment == "production")).await?;
         let result = if operation == "list" {
             let owner = crate::flag(args, "--owner")
                 .ok_or("media list requires an explicit owner UUID")?

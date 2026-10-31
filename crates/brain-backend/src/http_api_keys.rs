@@ -103,10 +103,12 @@ pub(super) async fn gate(State(app): State<App>, req: Request, next: Next) -> Re
         .get(header::USER_AGENT)
         .and_then(|v| v.to_str().ok())
         .map(|ua| ua.chars().take(200).collect::<String>());
+    // The edge layer resolves the client through trusted proxies; the socket peer is the fallback.
     let client_ip = req
         .extensions()
-        .get::<ConnectInfo<SocketAddr>>()
-        .map(|c| c.0.ip().to_string());
+        .get::<crate::http::ClientIp>()
+        .map(|c| c.0.to_string())
+        .or_else(|| req.extensions().get::<ConnectInfo<SocketAddr>>().map(|c| c.0.ip().to_string()));
     let trace = |key_id: Uuid, status: StatusCode, bytes: Option<i64>| api_keys::Event {
         key_id,
         rid: super::request_reference(),

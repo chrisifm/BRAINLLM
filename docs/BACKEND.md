@@ -203,6 +203,12 @@ The media library supports metadata pagination, guarded edits, private downloads
 See [MEDIA.md](MEDIA.md) for the exact current routes, limits and optional private Google Cloud Storage adapter.
 Behavior analytics (collector, privacy, `brain analytics report`) is described in [backend/analytics.md](backend/analytics.md).
 General active-content/file formats are not implicitly treated as safe images.
+Files of any type (documents, archives, audio, video) use declared buckets: [backend/files.md](backend/files.md).
+Running behind a proxy, extra CORS origins and preflight caching: [backend/proxy-cors.md](backend/proxy-cors.md).
+Database TLS and boot retry, health probes, backpressure and graceful shutdown: [backend/lifecycle.md](backend/lifecycle.md).
+App-declared routes with typed path, query and headers, per-route limits and auth: [backend/routes.md](backend/routes.md).
+Signed webhook routes for payment and shipping providers (HMAC, timestamp tolerance, raw body): [backend/webhooks.md](backend/webhooks.md).
+Calling external APIs from server logic (timeouts, safe retries, idempotency keys, redacted errors): [backend/outbound.md](backend/outbound.md).
 
 Lists, relations and readers: [relations](backend/relations.md) · [filters](backend/filters.md) · [sorting](backend/sorting.md) · [aggregates](backend/aggregates.md) · [pagination](backend/pagination.md) · [search](backend/search.md) · [ownership](backend/ownership.md) · [visibility](backend/visibility.md) · [slug history](backend/slugs.md).
 

@@ -36,7 +36,7 @@ impl Kind {
 }
 
 /// Framework primitives (SPEC §2) — the only framework globals. None needs an import.
-pub const PRIMITIVES: &[&str] = &["sig", "drv", "fx", "emit", "ref", "log", "form", "resource", "api", "provide", "use", "key", "store", "bus", "sanitize", "t", "locale", "fmt", "alternates", "suggest", "dismiss", "navigate", "route", "mounted", "watch", "tick", "every", "media", "visible", "debounce", "stream", "liveResource", "online", "http", "ApiError", "ai", "interop", "dateParse", "dateAdd", "dateDiff", "dateRange", "dateZone", "hashText", "shortHash", "database", "storageInfo", "persistStorage", "urlState", "storage", "cookie", "sqlite", "urlDialog", "sharedWorker", "threadCapabilities", "loadWorklet", "messageChannel", "offscreen", "sharedMemory", "transfer"];
+pub const PRIMITIVES: &[&str] = &["sig", "drv", "fx", "emit", "ref", "log", "form", "resource", "api", "provide", "use", "key", "store", "bus", "sanitize", "t", "locale", "fmt", "alternates", "suggest", "dismiss", "navigate", "route", "mounted", "watch", "tick", "every", "media", "visible", "debounce", "stream", "liveResource", "online", "http", "ApiError", "ai", "interop", "dateParse", "dateAdd", "dateDiff", "dateRange", "dateZone", "hashText", "shortHash", "httpCall", "database", "storageInfo", "persistStorage", "urlState", "storage", "cookie", "sqlite", "urlDialog", "sharedWorker", "threadCapabilities", "loadWorklet", "messageChannel", "offscreen", "sharedMemory", "transfer"];
 
 /// Primitives that live outside the runtime core, and the module (next to `brain.js`) that exports them.
 /// Codegen imports them automatically when used (SPEC: "all primitives need no import").
@@ -58,6 +58,7 @@ pub const EXT_PRIMITIVES: &[(&str, &str)] = &[
     ("dateZone", "brain-time.js"),
     ("hashText", "brain-hash.js"),
     ("shortHash", "brain-hash.js"),
+    ("httpCall", "brain-outbound.js"),
     ("transfer", "brain-worker.js"),
     ("sharedWorker", "brain-worker.js"),
     ("threadCapabilities", "brain-threads.js"),

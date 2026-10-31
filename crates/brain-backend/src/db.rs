@@ -28,6 +28,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("api_keys", include_str!("../migrations/0010_api_keys.sql")),
     ("data_queries", include_str!("../migrations/0011_data_queries.sql")),
     ("data_queries_slugs", include_str!("../migrations/0012_data_queries_slugs.sql")),
+    ("endpoints_platform", include_str!("../migrations/0013_endpoints_platform.sql")),
 ];
 fn checksum(sql: &str) -> String {
     Sha256::digest(sql.as_bytes())
@@ -758,6 +759,7 @@ fn failure_metadata(error: &sqlx::Error) -> Value {
     json!({"schemaVersion":1,"event":"database-operation-failed","rid":crate::http::request_reference(),"sqlstate":code,"category":category,"private":true,"valuesCaptured":false})
 }
 pub fn safe(error: sqlx::Error) -> String {
+    crate::platform::note_database_error(&error);
     let metadata = failure_metadata(&error);
     eprintln!("{metadata}");
     format!(

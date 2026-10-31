@@ -14,6 +14,7 @@ They run in browser modules and Node server modules. Web Crypto requires a secur
 | `dateZone(value, timeZone)` | Read-only projection through Intl into an explicit IANA timezone, including its actual offset at that instant. It does not reinterpret a local wall-clock input as an instant. Formatter cache holds at most 16 zones; failed lookups do not evict valid entries. Numeric offset identifiers are rejected. |
 | `hashText(text, algorithm='SHA-256')` | Async lowercase hex SHA-256, SHA-384 or SHA-512 using Web Crypto. UTF-8 input is limited to 8 MiB; no cryptographic algorithm is reimplemented and no Unicode normalization is applied. |
 | `shortHash(text, length=32)` | Async SHA-256 prefix, 8–64 hex characters. Truncation increases collision risk; this is a content identifier, not password hashing or a signature. Backend passwords continue using Argon2id. |
+| `httpCall(url, options)` | Async outbound HTTP for server code: per-attempt timeout, bounded retries only for idempotent requests, `Idempotency-Key`, response size cap, private-target refusal and redacted `HttpCallError`. See `docs/backend/outbound.md`. |
 
 `fmt.relative` already exists for relative display. These helpers do not select the user's timezone, add date
 annotations or fetch browser data during a build. Unsupported timezone identifiers and missing Web Crypto fail clearly.
