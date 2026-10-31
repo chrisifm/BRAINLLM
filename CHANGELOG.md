@@ -9,6 +9,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- `brain new` puts the menu in `views/_layout.brain`, so it can be translated; `brain add view` links there, or in `app.brain` for apps that keep it there
 - B1403 also reads `<script>` literals a person sees: variables markup only displays, `alert`, `confirm`, `prompt`, `toast.send` and `.textContent`
 - The sitemap warning without a site URL points at `PUBLIC_SITE_URL` and lists the `sitemap()` routes it skips
 - Fix: reading an undeclared `PUBLIC_*` variable in the browser gives `undefined` instead of throwing

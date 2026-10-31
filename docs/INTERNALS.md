@@ -965,7 +965,7 @@ component edit, ≤ 20 ms to the browser (excluding the OS file-event latency), 
 - **Initial structure (`brain new`, Chris 2026-10-13: "the organization the framework expects, adopted by default"):**
   every project starts with the full layout, so the model never invents folders and every generator has its place:
   ```
-  app.brain            root layout: <head>, site <meta seo>, nav
+  app.brain            static document shell: <head>, site <meta seo>, skip link
   tokens.cssbrain      design tokens (white glass theme)
   brain.json           name, site URL, cache, seo.minScore, budgets
   .brain_env           variables per environment (§36), gitignored · .brain_env.example committed
@@ -981,7 +981,7 @@ component edit, ≤ 20 ms to the browser (excluding the OS file-event latency), 
   feature once, the way the framework expects it, so the model copies a correct example instead of inventing one:
   | Feature | Files | What it shows |
   |---|---|---|
-  | Routing | `home`, `about`, nav in `app.brain` | static routes, active link, View Transitions |
+  | Routing | `home`, `about`, nav in `views/_layout.brain` | static routes, active link, View Transitions |
   | Dynamic route | `posts/[id].brain` + `lib/posts.jsbrain` | `paths()` + `load(ctx)` with `ctx.params`, SEO per page |
   | Not found | `404.brain` | returned for unknown URLs (status 404), link back home |
   | Permission denied | `403.brain` | a guard's `deny('reason')` renders it with status 403 and names the missing permission; never a blank page |

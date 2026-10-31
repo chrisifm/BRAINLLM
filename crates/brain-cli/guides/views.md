@@ -22,7 +22,7 @@ Error views answer with their status, also when opened directly (`/403` is a 403
    Dynamic: `brain add view users/[id]`. Folder chrome: `brain add layout users`. Protection: `brain add guard admin`.
 2. Fill `<meta seo title="…" description="…">` (B0501/B1601 without it; `brain guide seo`).
 3. Exactly one `<main>` and one `<h1>` per view (B0405). Headings never skip a level (B0404).
-4. Link the view from the navigation in `app.brain` with a real `<a href="/users">` (works before JS loads).
+4. Link the view from the navigation in `views/_layout.brain` with a real `<a href="/users">` (works before JS loads).
 5. Dynamic data: `export async function load(ctx)` in the view (server only; `brain guide data`).
    `throw notFound()` → 404 with `views/404.brain`; `throw redirect('/x')` → 303.
 6. `[id]` views that should be prerendered list their pages: `export async function paths() { return [{ id: '1' }] }`.
@@ -52,7 +52,7 @@ put an element with that id in `app.brain`; the router only toggles its `hidden`
 In code: `let r = route()` → `{r.navigating ? 'Saving draft…' : ''}`.
 
 ## Rules that bite
-- `app.brain` is the static document shell: `<html lang>`, common `<head>`, site `<meta seo titleTemplate=…>`, nav and
+- `app.brain` is the static document shell: `<html lang>`, common `<head>`, site `<meta seo titleTemplate=…>` and
   `<slot />`. Expressions, blocks or components there are B0132; put them in `views/_layout.brain`.
 - `load` runs only in views; `brain check` rejects a `load` in `_layout.brain` (B0117) because it is never run.
 - In the browser there is no `ctx.user` (the session cookie is HttpOnly): a guard that would stop on it makes a full
