@@ -1251,7 +1251,11 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
     } else {
         None
     };
-    let env: Vec<_> = crate::env::select(&root, &environment);
+    let mut env: Vec<_> = crate::env::select(&root, &environment);
+    env.retain(|(name, _)| name != "BRAIN_JOB_RUN_AS");
+    if policy.as_ref().is_some_and(|p| p.run_as.as_deref() == Some("system")) {
+        env.push(("BRAIN_JOB_RUN_AS".to_string(), "system".to_string()));
+    }
     let _ = snapshot;
     runtime()?.block_on(async {
         let production = environment == "production";
@@ -1444,7 +1448,7 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
                             .unwrap_or_default();
                         let job_id = job.id.to_string();
                         let queue_name = job.queue.clone();
-                        let runner = include_str!("templates/job-runner.mjs");
+                        let runner = concat!(include_str!("templates/job-runner.mjs"), "\n", include_str!("../../brain-serve/src/key-backend.js"));
                         let mut cmd = tokio::process::Command::new("node");
                         cmd.args([
                             "--enable-source-maps",

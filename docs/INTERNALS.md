@@ -2036,3 +2036,13 @@ only on request, `impact::measure` against `budget.viewKB`. Factors, points and 
 sources give the same report; [INTELLIGENCE.md](INTELLIGENCE.md#measured-edit-risk) lists them. `preflight` embeds the
 static score (no build). The score orders review effort and names `requiredChecks`; it never claims runtime safety.
 Atomic changesets, claims and the multi-agent view that consume it are planned for 0.6.1.
+
+## 48. System identity and key-backed files (2026-10-31)
+
+A system key is a row flag (`_brain_api_keys.system`, migration 0019) settable only through `api_keys::create_system`,
+which the CLI reaches. `http_api_keys` runs the request inside the `api_keys::as_system` task-local; the bypass reads
+`system_active()` at the four central checks (`Policy::allows`, `ownership::scope`, `visibility`, `domain` roles plus
+`files::role_allows`), so no handler can forget it and work spawned on another task (socket fan-out) does not inherit
+it. Runtime hooks run in another process, so they see no bypass. Scopes remain the boundary: wildcard resources are
+refused at creation. `crates/brain-serve/src/key-backend.js` is the single key client, concatenated into both the job
+runner and the route sidecar, which delete every key variable from `process.env` before importing user code.

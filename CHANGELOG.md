@@ -9,6 +9,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- System identity for jobs and routes: `keys create --system` (CLI only), `runAs: 'system'` in `queue.jsbrain` and route contracts; each request is marked `system` in the key's events
+- `ctx.backend` in route handlers with `runAs: 'key'|'system'` in the contract
+- `ctx.backend.files(bucket)` in jobs, routes and server code; `/_brain/files` accepts keys with a `files.<bucket>` scope
 - Roles are general: only `admin` is required, a new app has `admin` and `user`, and people who sign up get `user`, so `create: ['user']` admits them. Apps with no roles file whose grants still name `company` or `candidate` keep the old implicit roles and signup role, with warning B0739.
 - `brain add roles` declares the roles an app already has; `brain backend rename-role --from <role> --to <role> [--apply]` moves accounts explicitly, and `brain backend migrate` reports accounts whose role is not declared.
 - B0735 names the real file and a concrete fix for role errors. B0738 warns when a grant names an undeclared role in field visibility or a route, or when no grant names the signup role.

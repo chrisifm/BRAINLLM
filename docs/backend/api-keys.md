@@ -149,6 +149,10 @@ brain backend keys summary 3f9a1c0b7d2e --days 30
 Each command accepts a key id or its public prefix, uses `DATABASE_URL`, and prints JSON. `create` and `rotate`
 print the secret once.
 
+A system key (`keys create --system`, CLI only) bypasses policy, owner scope and `private`/`readonly` fields within its
+scopes; see [job-backend.md](job-backend.md#system-identity). A `files.<bucket>:read|write|*` scope opens `/_brain/files`
+for that bucket; wildcard scopes never do.
+
 ## Row conditions and server-only resources
 
 A key sees the rows its owner sees: row conditions apply to it as they do to the owner's session. A resource declared

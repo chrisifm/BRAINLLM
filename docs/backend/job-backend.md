@@ -26,6 +26,35 @@ BRAIN_JOBS_API_KEY=bk_live_3f9a1c0b7d2e_9c1e…
 handler that logs its environment does not print it. Without both variables, any `ctx.backend.resource(...)` call
 throws `Set BRAIN_BACKEND_URL and BRAIN_JOBS_API_KEY ...`, which fails the attempt and retries per the queue policy.
 
+## Stored files: `ctx.backend.files(bucket)`
+
+`files(bucket)` offers `list({limit, offset, record})`, `meta(id)`, `read(id, {maxBytes})` (returns `{bytes, contentType, etag}`, 16 MiB by default),
+`upload({filename, contentType, data, record})` and `remove(id)`. The key needs a `files.<bucket>` scope, for example `files.reports:read` or `files.reports:*`. Wildcard
+scopes never open a bucket: `*:*` answers `403 API_KEY_SCOPE_DENIED`. The bucket's size, type and quota rules still apply.
+
+## System identity
+
+Some jobs act for nobody: a nightly cleanup, a reconciliation, a job that reads rows of every owner. Give that queue
+`runAs: 'system'` in `queue.jsbrain` and a system key created by the operator:
+
+```sh
+brain backend keys create --system --user <uuid> --name "Nightly jobs" --scopes orders:*,files.reports:read
+```
+
+Set the secret as `BRAIN_JOBS_SYSTEM_KEY` for the worker. A `runAs: 'system'` queue reads only that variable and never
+falls back to `BRAIN_JOBS_API_KEY`; other queues never see it. A route handler gets the same choice with
+[`runAs`](routes.md#calling-resources-from-a-handler).
+
+| A system key | |
+|---|---|
+| Bypasses | resource policy and action roles, owner scope, `private` and `readonly` fields, bucket roles |
+| Still applies | its scopes (no wildcard resources), `writeonly` fields stay hidden, validation, constraints, state machines, `domain.protect`, before-hooks, quotas, rate limits, revocation, expiry |
+| Is traced as | `system: true` on each row of `/_brain/keys/:id/events` and on the request log line |
+
+Only `brain backend keys create --system` can make one: `POST /_brain/keys` has no such field, and a session cannot
+rotate a system key (`404`), only revoke it. `brain backend keys rotate` keeps the flag. Its scopes are the whole
+boundary, so name the resources and actions the job needs.
+
 ## Example: mark an order paid and decrement stock
 
 `server/resources/orders/hooks.jsbrain`:

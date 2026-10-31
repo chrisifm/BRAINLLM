@@ -188,6 +188,47 @@ function googleSignInPage(page) {
 }
 
 // One configured loopback authority. No user-controlled target, proxy, redirect, auth cache or pending queue.
+// ctx.backend.files(bucket): the same file calls as job and route handlers (docs/backend/files.md).
+function bucketClient(target, key, bucket) {
+  const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
+  if (typeof bucket !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(bucket)) throw new HttpError(400, 'Invalid native bucket name')
+  const base = '/_brain/files/' + bucket
+  const idPath = id => { if (typeof id !== 'string' || !UUID.test(id)) throw new HttpError(404, 'No file has this id; file ids are UUIDs'); return base + '/' + id }
+  const send = async (method, path, body, timeout) => {
+    let response
+    try { response = await fetch(new URL(path, target), { method, redirect: 'error', signal: AbortSignal.timeout(timeout), headers: { 'x-api-key': key }, body }) } catch { throw new HttpError(503, 'Native backend is unavailable') }
+    if (response.ok) return response
+    await response.body?.cancel()
+    throw new HttpError(response.status >= 400 && response.status < 500 ? response.status : 503, 'Native file request failed')
+  }
+  const json = async response => { try { return await response.json() } catch { throw new HttpError(502, 'Native file response is invalid') } }
+  return Object.freeze({
+    async list(options = {}) {
+      if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).some(k => !['limit', 'offset', 'record'].includes(k))) throw new HttpError(400, 'Invalid native file list options')
+      const { limit, offset, record } = options
+      if ((limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 100)) || (offset !== undefined && (!Number.isInteger(offset) || offset < 0 || offset > 10000)) || (record !== undefined && !UUID.test(String(record)))) throw new HttpError(400, 'Invalid native file list options')
+      const q = new URLSearchParams(Object.entries({ limit, offset, record }).filter(([, v]) => v !== undefined))
+      return json(await send('GET', base + (q.size ? '?' + q : ''), undefined, 10000))
+    },
+    async meta(id) { return json(await send('GET', idPath(id) + '/meta', undefined, 10000)) },
+    async read(id, { maxBytes = 16 * 1024 * 1024 } = {}) {
+      if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > 64 * 1024 * 1024) throw new HttpError(400, 'Invalid native file read limit')
+      const response = await send('GET', idPath(id), undefined, 30000)
+      if (Number(response.headers.get('content-length')) > maxBytes) { await response.body?.cancel(); throw new HttpError(413, 'The file exceeds the read limit; raise maxBytes up to 64 MiB') }
+      const bytes = Buffer.from(await response.arrayBuffer())
+      if (bytes.length > maxBytes) throw new HttpError(413, 'The file exceeds the read limit; raise maxBytes up to 64 MiB')
+      return { bytes, contentType: response.headers.get('content-type'), etag: response.headers.get('etag') }
+    },
+    async upload({ filename, contentType = 'application/octet-stream', data, record } = {}) {
+      if (typeof filename !== 'string' || !filename || Buffer.byteLength(filename) > 255 || typeof contentType !== 'string' || (record !== undefined && !UUID.test(String(record)))) throw new HttpError(400, 'Invalid native file upload')
+      if (typeof data !== 'string' && !(data instanceof Uint8Array)) throw new HttpError(400, 'File data must be a string, Buffer or Uint8Array')
+      const form = new FormData()
+      form.set('file', new Blob([data], { type: contentType }), filename)
+      return json(await send('POST', base + (record === undefined ? '' : '?record=' + record), form, 60000))
+    },
+    async remove(id) { await send('DELETE', idPath(id), undefined, 10000); return null },
+  })
+}
 export function nativeAuthBridge(raw, refused, serviceKey) {
   if (!raw) return null
   // The visitor's cookies only travel for a request from the site itself; the caller's log gets the reason (B0742).
@@ -639,6 +680,11 @@ export function nativeAuthBridge(raw, refused, serviceKey) {
       if (!serviceKey) throw new HttpError(503, 'ctx.backend.service needs BRAIN_SERVICE_API_KEY: create an API key with a scope naming the resource')
       return resource(incoming, response, rid, name, serviceKey)
     },
+    // A declared file bucket from trusted server code, with BRAIN_SERVICE_API_KEY and its files.<bucket> scope
+    files: bucket => {
+      if (!serviceKey) throw new HttpError(503, 'ctx.backend.files needs BRAIN_SERVICE_API_KEY: create an API key with a files.<bucket> scope')
+      return bucketClient(target, serviceKey, bucket)
+    },
     slugRedirect: (name, slug) => resource(incoming, response, rid, name).slugRedirect(slug),
     login: credentials => login(incoming, response, rid, credentials),
     google: Object.freeze({
@@ -686,7 +732,7 @@ export function nativeAuthBridge(raw, refused, serviceKey) {
 export function createServer(o = {}) {
   const dist = resolve(o.dist || process.cwd())
   // ctx.env: what the supervisor passed, read-only; the service key stays with ctx.backend.service
-  const { BRAIN_SERVICE_API_KEY: serviceKey, ...visibleEnv } = o.env || ENV
+  const { BRAIN_SERVICE_API_KEY: serviceKey, BRAIN_JOBS_API_KEY: _jobs, BRAIN_JOBS_SYSTEM_KEY: _jobsSystem, BRAIN_ROUTES_API_KEY: _routes, BRAIN_ROUTES_SYSTEM_KEY: _routesSystem, ...visibleEnv } = o.env || ENV
   const env = Object.freeze(visibleEnv)
   const native = nativeAuthBridge(o.backendURL ?? env.BRAIN_BACKEND_URL, (...why) => originRefused(...why), serviceKey)
   if (o.nativeSockets !== undefined && typeof o.nativeSockets !== 'boolean') throw Error('nativeSockets must be an explicit boolean')

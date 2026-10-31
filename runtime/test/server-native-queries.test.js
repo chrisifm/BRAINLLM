@@ -10,7 +10,7 @@ const backend=createServer((req,res)=>{
   const chunks=[]
   req.on('data',chunk=>chunks.push(chunk))
   req.on('end',()=>{
-    seen.push({method:req.method,path:req.url,body:Buffer.concat(chunks).toString(),authorization:req.headers.authorization,cookie:req.headers.cookie})
+    seen.push({method:req.method,path:req.url,body:Buffer.concat(chunks).toString(),authorization:req.headers.authorization,cookie:req.headers.cookie,key:req.headers['x-api-key']})
     const json=(status,value)=>{res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(value))}
     if(req.url.startsWith('/api/articles/redirects/old-title'))return json(200,{slug:'new-title'})
     if(req.url.startsWith('/api/articles/redirects/'))return json(404,{schemaVersion:1,error:{code:'NOT_FOUND',fix:'',fields:null}})
@@ -89,8 +89,19 @@ test('ctx.backend.service acts with the service key and never forwards the visit
     await keyed.backend(req,res,id).resource('products').list()
     assert.equal(seen.at(-1).authorization,undefined,'visitor calls never carry the service key')
     assert.equal(seen.at(-1).cookie,'__Host-brain-access=visitor')
+    const reports=keyed.backend(req,res,id).files('reports')
+    await reports.list({limit:5})
+    assert.equal(seen.at(-1).path,'/_brain/files/reports?limit=5')
+    assert.equal(seen.at(-1).key,'bk_live_synthetic_service_key')
+    assert.equal(seen.at(-1).cookie,undefined,'a file call never carries the visitor session')
+    await reports.upload({filename:'a.txt',contentType:'text/plain',data:'hello'})
+    assert.equal(seen.at(-1).method,'POST')
+    assert.match(seen.at(-1).body,/name="file"; filename="a\.txt"/)
+    assert.throws(()=>keyed.backend(req,res,id).files('../keys'),error=>error.status===400)
+    await assert.rejects(reports.meta('nope'),error=>error.status===404)
   }finally{keyed.close()}
   assert.throws(()=>context('GET').service('ledgers'),error=>error.status===503&&/BRAIN_SERVICE_API_KEY/.test(error.message))
+  assert.throws(()=>context('GET').files('reports'),error=>error.status===503&&/files\.<bucket>/.test(error.message))
 })
 test('anonymous get through the bridge answers a hidden row exactly like a missing one',async()=>{
   const hiddenId='00000000-0000-4000-8000-00000000000a',missingId='00000000-0000-4000-8000-00000000000b'

@@ -336,6 +336,7 @@ weights A-D on searchable fields; `docs/backend/search.md`). Record ids are UUID
 (`docs/backend/ids.md`).
 Job handlers get the same `ctx.backend` when the worker has `BRAIN_BACKEND_URL` and `BRAIN_JOBS_API_KEY` (a scoped
 project API key; it acts as its owner under each policy). See `docs/backend/job-backend.md`.
+Queues and routes may declare `runAs: 'system'` to use an operator-created system key (`keys create --system`), which bypasses policy, owner scope and `private`/`readonly` fields within its scopes. Routes get `ctx.backend` only with `runAs`. `ctx.backend.files(bucket)` works from jobs, routes and server code with a `files.<bucket>` scope.
 Reads and writes run through the same native schemas, policies and authenticated cookies, not a second database client.
 Writes require a same-origin POST server function; they are rejected from GET/load. Put domain logic in server-only
 service/repository `.jsbrain` modules and pass `ctx` explicitly. Request JSON is limited to 64 KiB, responses to 2 MiB,

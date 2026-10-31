@@ -69,6 +69,9 @@ pub fn server_set(field: &Field) -> bool {
 
 /// Client input naming server-set fields is rejected before any hook runs.
 pub fn reject_server_fields(r: &Resource, input: &Value) -> Result<(), std::collections::BTreeMap<String, String>> {
+    if crate::api_keys::system_active() {
+        return Ok(());
+    }
     let errors: std::collections::BTreeMap<String, String> = r
         .fields
         .iter()
@@ -98,6 +101,17 @@ pub fn keep_stored(r: &Resource, input: &mut Value, stored: &Value) {
 /// The `owner` id is shown only to the owner, relational owners and roles named in the read policy, unless the
 /// resource declares `expose_owner: true` in `query.jsbrain` (OWASP API3: no undeclared data on public reads).
 pub fn project(r: &Resource, row: &mut Value, viewer: Viewer<'_>, relational_owner: bool) {
+    // A system key reads private fields and the owner; `writeonly` stays unreadable by every identity.
+    if crate::api_keys::system_active() {
+        if let Some(data) = row.get_mut("data").and_then(Value::as_object_mut) {
+            for (name, field) in &r.fields {
+                if field.access.as_deref() == Some("writeonly") {
+                    data.remove(name);
+                }
+            }
+        }
+        return;
+    }
     let owns = relational_owner
         || viewer
             .id

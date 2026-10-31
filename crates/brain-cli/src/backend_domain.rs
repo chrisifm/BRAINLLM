@@ -58,7 +58,7 @@ pub fn queue_policy(root: &Path, name: &str) -> Result<brain_backend::jobs::Queu
     if !path.is_file() {
         return Ok(Default::default());
     }
-    let policy: brain_backend::jobs::QueuePolicy = parse(root, &path, "{ priority?, attempts?, backoff?: { type: 'fixed'|'exponential', delay, max }, timeout?, lease?, drain?, concurrency? }")?;
+    let policy: brain_backend::jobs::QueuePolicy = parse(root, &path, "{ priority?, attempts?, backoff?: { type: 'fixed'|'exponential', delay, max }, timeout?, lease?, drain?, concurrency?, runAs?: 'key'|'system' }")?;
     policy.validate().map_err(|e| format!("server/jobs/{name}/queue.jsbrain: {e}"))?;
     Ok(policy)
 }

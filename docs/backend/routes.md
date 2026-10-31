@@ -71,6 +71,22 @@ To answer a file built by the handler, return `{ file: { base64, name, type } }`
 attachment with `nosniff` and a `default-src 'none'` policy, as a stored file is; `Content-Disposition` cannot be set
 any other way. Invalid base64, a missing `name` or a non-2xx status answers `500 ROUTE_INVALID_STATUS`.
 
+## Calling resources from a handler
+
+Declare `runAs` in the contract to give the handler `ctx.backend`, with `resource(name)`, `files(bucket)` and
+`slugRedirect(name, slug)` as in [job handlers](job-backend.md):
+
+| `runAs` | Key read from the backend's environment |
+|---|---|
+| absent | none: `ctx.backend` is not present |
+| `'key'` | `BRAIN_ROUTES_API_KEY` |
+| `'system'` | `BRAIN_ROUTES_SYSTEM_KEY` ([system identity](job-backend.md#system-identity); no fallback) |
+
+The call acts as the key, not as `ctx.user`: check the caller yourself before reading on their behalf, above all with
+`runAs: 'system'`. Neither variable appears in `ctx.env`.
+
+## Source rules
+
 Handlers follow the same source rules as the rest of `server/` (one default export; no `for`, `do` or `class`).
 `brain check`, `brain build` and `brain doctor` report them; run one before starting the backend or a worker.
 

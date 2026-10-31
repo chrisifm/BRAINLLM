@@ -33,6 +33,8 @@ mod links;
 mod media;
 #[path = "row_policy.rs"]
 mod row_policy;
+#[path = "system_keys.rs"]
+mod system_keys;
 #[path = "routes.rs"]
 mod routes;
 #[path = "native_openapi.rs"]

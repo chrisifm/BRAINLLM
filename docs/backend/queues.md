@@ -27,6 +27,7 @@ export default {
 | `lease` | 90 | 10..600 s | visibility timeout; the worker renews it every third of the lease while the handler runs |
 | `drain` | 0 | 0..600 s | on shutdown, stop claiming and let in-flight jobs finish for this long |
 | `concurrency` | 2 | 1..8 | workers per process (`--concurrency` overrides) |
+| `runAs` | `key` | `key` or `system` | identity of `ctx.backend`: `key` uses `BRAIN_JOBS_API_KEY`, `system` uses `BRAIN_JOBS_SYSTEM_KEY` ([job-backend.md](job-backend.md#system-identity)) |
 
 Invalid values fail `brain backend schema` with the file name and the rule, for example
 `server/jobs/mail/queue.jsbrain: invalid queue policy; fix: lease: 10..600 seconds`. The policy is projected under
