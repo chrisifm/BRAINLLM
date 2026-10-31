@@ -262,6 +262,7 @@ then build and doctor the application. The app's default 30 KiB route budget rem
 Set `DATABASE_URL`; explicitly `brain backend migrate`, then `brain backend serve` (loopback REST at `/api/<resource>`).
 `PATCH /api/<resource>/<uuid>` changes only the sent fields (`null` clears an optional one); see `docs/backend/patch.md`.
 `server/operations/<name>.jsbrain` declares typed input and steps that `POST /_brain/operations/<name>` runs in one transaction (all or nothing); see `docs/backend/transactions.md`.
+`actions.jsbrain` declares guarded atomic writes (`when`, `set`, `increment`, `decrement`) at `POST /api/<r>/<uuid>/actions/<name>`; `POST /api/<r>/upsert` inserts if absent on a unique key; see `docs/backend/atomic-updates.md`.
 `brain jobs enqueue|status|work|prune` manages persistent, at-least-once work. Handlers must be idempotent by `ctx.jobId`.
 After-write hooks commit `{resource,operation,record}` with their mutation. `brain add hook validate_order` creates
 `server/hooks/validate_order.jsbrain`; reference it as `before_create`, `before_update` or `before_delete` in a resource's

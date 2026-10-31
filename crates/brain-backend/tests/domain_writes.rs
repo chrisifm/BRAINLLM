@@ -9,6 +9,7 @@ use brain_backend::{
 };
 use axum::http::Request;
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tower::ServiceExt;
 
@@ -284,4 +285,89 @@ async fn postgres_operations_commit_every_step_or_roll_all_of_them_back() {
     let (status, _) = call(&s.app, "POST", "/_brain/operations/place_order", "not-a-session", Some(json!({"product_id":p,"quantity":1}))).await;
     assert_eq!(status, 401);
     assert_eq!(stock(&s, &p).await, 98);
+}
+
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn postgres_atomic_actions_and_upserts_are_race_safe_under_concurrent_requests() {
+    let s = shop().await;
+    // Guarded decrement: 30 concurrent orders of 1 against a stock of 10 → exactly 10 succeed, stock never negative.
+    let p = id(&product(&s, "race", json!({"stock":10,"status":"active"})).await);
+    let tasks: Vec<_> = (0..30)
+        .map(|_| {
+            let (app, token, product) = (s.app.clone(), s.alice.clone(), p.clone());
+            tokio::spawn(async move {
+                call(&app, "POST", "/_brain/operations/place_order", &token, Some(json!({"product_id":product,"quantity":1}))).await
+            })
+        })
+        .collect();
+    let mut outcomes = BTreeMap::new();
+    for task in tasks {
+        let (status, body) = task.await.unwrap();
+        assert!(status == 200 || status == 409 && body["error"]["code"] == "GUARD_FAILED", "{status} {body}");
+        *outcomes.entry(status).or_insert(0) += 1;
+    }
+    assert_eq!(outcomes, BTreeMap::from([(200, 10), (409, 20)]));
+    assert_eq!(stock(&s, &p).await, 0);
+    assert_eq!(orders_for(&s, &p).await, 10);
+    // Guarded increment through the action route, with typed input and role check.
+    let restock = format!("/api/shop_products/{p}/actions/restock");
+    let (status, body) = call(&s.app, "POST", &restock, &s.admin, Some(json!({"amount":7}))).await;
+    assert_eq!((status, &body["data"]["stock"]), (200, &json!(7)), "{body}");
+    let (status, _) = call(&s.app, "POST", &restock, &s.alice, Some(json!({"amount":7}))).await;
+    assert_eq!(status, 403, "action roles apply");
+    let (status, body) = call(&s.app, "POST", &restock, &s.admin, Some(json!({"amount":-8}))).await;
+    assert_eq!((status, body["error"]["fields"]["stock"].as_str()), (422, Some("Must be >= 0")), "{body}");
+    let (status, _) = call(&s.app, "POST", &format!("/api/shop_products/{p}/actions/explode"), &s.admin, Some(json!({}))).await;
+    assert_eq!(status, 404);
+    // Concurrent increments never lose an update.
+    let tasks: Vec<_> = (0..20)
+        .map(|_| {
+            let (app, token, uri) = (s.app.clone(), s.admin.clone(), restock.clone());
+            tokio::spawn(async move { call(&app, "POST", &uri, &token, Some(json!({"amount":1}))).await.0 })
+        })
+        .collect();
+    for task in tasks {
+        assert_eq!(task.await.unwrap(), 200);
+    }
+    assert_eq!(stock(&s, &p).await, 27);
+    // Compare-and-set: two clients both read price 0.00; only the first reprice wins.
+    let reprice = format!("/api/shop_products/{p}/actions/reprice");
+    let (a, b) = tokio::join!(
+        call(&s.app, "POST", &reprice, &s.admin, Some(json!({"expected":"0.00","price":"12.00"}))),
+        call(&s.app, "POST", &reprice, &s.admin, Some(json!({"expected":"0","price":"15.00"})))
+    );
+    let mut statuses = [a.0, b.0];
+    statuses.sort();
+    assert_eq!(statuses, [200, 409], "{a:?} {b:?}");
+    let loser = if a.0 == 409 { &a.1 } else { &b.1 };
+    assert_eq!(loser["error"]["fields"]["price"], "Must equal 0.00");
+    // Insert-if-absent: 12 concurrent upserts of one key create exactly one row.
+    let code = format!("T-{}", s.run);
+    let tasks: Vec<_> = (0..12)
+        .map(|i| {
+            let (app, token, code) = (s.app.clone(), s.alice.clone(), code.clone());
+            tokio::spawn(async move {
+                call(&app, "POST", "/api/task_items/upsert", &token, Some(json!({"key":["code"],"on_conflict":"ignore","data":{"title":format!("Attempt {i}"),"code":code}}))).await
+            })
+        })
+        .collect();
+    let mut created = 0;
+    let mut ids = std::collections::BTreeSet::new();
+    for task in tasks {
+        let (status, body) = task.await.unwrap();
+        assert_eq!(status, 200, "{body}");
+        created += usize::from(body["created"] == true);
+        ids.insert(id(&body["record"]));
+    }
+    assert_eq!((created, ids.len()), (1, 1));
+    // on_conflict update merges only the sent fields into the existing row (fields not sent keep their values).
+    let (status, body) = call(&s.app, "POST", "/api/task_items/upsert", &s.alice, Some(json!({"key":["code"],"data":{"title":"Renamed","code":code,"done":true}}))).await;
+    assert_eq!((status, &body["created"], &body["record"]["data"]["done"]), (200, &json!(false), &json!(true)), "{body}");
+    assert_eq!(body["record"]["data"]["points"], 0);
+    // Another user's row is not updatable through upsert.
+    let (status, _) = call(&s.app, "POST", "/api/task_items/upsert", &s.bob, Some(json!({"key":["code"],"data":{"title":"Hijack","code":code}}))).await;
+    assert_eq!(status, 403);
+    let (status, body) = call(&s.app, "POST", "/api/task_items/upsert", &s.alice, Some(json!({"key":["title"],"data":{"title":"x","code":"y"}}))).await;
+    assert_eq!((status, body["error"]["fields"]["key"].is_string()), (422, true));
 }

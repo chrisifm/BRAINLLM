@@ -20,6 +20,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Declarative operations (`server/operations/<name>.jsbrain`, `POST /_brain/operations/<name>`) run read, create,
   update, upsert, delete, action and transition steps in one Postgres transaction and roll all of them back on any
   failure, with step-prefixed errors (`docs/backend/transactions.md`).
+- Atomic actions (`server/resources/<r>/actions.jsbrain`, `POST /api/<r>/<uuid>/actions/<name>`) lock the row and
+  apply guarded `set`, `increment` and `decrement` (compare-and-set via `when`), and `POST /api/<r>/upsert` inserts
+  if absent on a declared unique key; both are race-safe under concurrent requests (`docs/backend/atomic-updates.md`).
 
 ### Changed
 
