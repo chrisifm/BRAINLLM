@@ -60,3 +60,17 @@ test('a budget failure in an RPC is logged the same way; other errors keep the g
   assert.equal(plain.budget, undefined)
   assert.doesNotMatch(JSON.stringify(plain), /secret value/)
 })
+
+test('an unhandled request failure logs the path without its query string', async () => {
+  // A request that reaches the outer catch: the manifest route module is replaced by one whose getter throws.
+  const before = logs.length
+  const original = server.listeners('request')[0]
+  const secret = 'query-token-value'
+  const req = { url: '/posts?token=' + secret, method: 'GET', headers: { get host() { throw new Error('boom') } }, socket: {}, on() {}, once() {}, removeListener() {} }
+  const res = { req, setHeader() {}, getHeader() {}, on() {}, once() {}, removeListener() {}, end() {}, writeHead() {}, write() {}, headersSent: false }
+  await original(req, res)
+  const entry = logs.slice(before).find(l => l.msg === 'unhandled')
+  assert.ok(entry, 'logged')
+  assert.equal(entry.path, '/posts')
+  assert.doesNotMatch(JSON.stringify(logs.slice(before)), new RegExp(secret))
+})
