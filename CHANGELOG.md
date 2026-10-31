@@ -9,6 +9,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-31
+
 ### Added
 
 - Versioned change manifests ship inside every binary (`crates/brain-cli/releases/<version>/<id>.json`): for each

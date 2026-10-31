@@ -31,6 +31,22 @@ code generation, bundling and minification. The agent can operate it through the
 a confusing diagnostic. The agent can turn that finding into a tested proposal and, when configured, push it
 automatically to a review branch. Maintainers decide what merges.
 
+## Built for agents that change code safely
+
+BRAINLLM is not another React, Next or Node. It is a compiler whose first user is an LLM, and it is designed to
+improve itself: when an agent hits a compiler gap, `scripts/evolve.mjs` turns it into an isolated, tested proposal
+for human review. The tools other stacks sell as advanced analysis are the baseline here:
+
+- **Locate without reading.** `brain map`, `brain card`, `brain graph`, `brain context` and symbol search give an
+  agent the contract and the exact location of what it must touch, never a 2,000-line file.
+- **Measured risk before every edit.** `brain risk <target>` returns a deterministic score, the factors behind it
+  (dependents, routes, public contracts, backend schema, covering tests, SEO/i18n/a11y, budget headroom) and the
+  checks that will prove the edit safe.
+- **Atomic changes.** Leased, revision-checked changesets validate the whole app on a private snapshot before
+  writing and recover cleanly; a stale revision is rejected instead of overwriting another agent's work.
+- **Real-time evidence while developing.** Compiler feedback, impact per save (diagnostics and bytes per view),
+  runtime errors mapped to `.brain` lines, memory and leak inspection, over CLI and MCP.
+
 **[Visit the site](https://chrisifm.github.io/BRAINLLM/)** · **[Build your first app](#give-your-agent-its-first-task)** · **[Read the spec](SPEC.md)** · **[See the benchmarks](#show-me-the-numbers)** · **[Contribute](#build-the-tool-your-agent-needs)**
 
 ## A frontend language with the model in mind
@@ -369,7 +385,7 @@ Never include app secrets, private source or customer data in a contribution.
 
 ## Know what you are adopting
 
-BRAINLLM is **0.5.0** (see [CHANGELOG.md](CHANGELOG.md)). Start with a small app or an isolated route and test the behavior you need. Features marked
+BRAINLLM is **0.6.0** (see [CHANGELOG.md](CHANGELOG.md)). Start with a small app or an isolated route and test the behavior you need. Features marked
 as planned in the source specification are not a supported promise; `brain spec` serves the implemented contract.
 Third-party React, Angular and Vue components do not become BRAINLLM components automatically. Benchmark wins in
 build time do not imply that every runtime workload is faster.

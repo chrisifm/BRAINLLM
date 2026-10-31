@@ -122,16 +122,27 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [Project API keys](backend/api-keys.md) | A project can issue its own API keys so other services, scripts and partners call the resource API without a browser session. |
 | [Atomic updates: guarded increments, compare-and-set and upserts](backend/atomic-updates.md) | Read-modify-write from the client (`GET`, change, `PUT`) loses updates under concurrency. |
 | [Batch writes](backend/batch.md) | `POST /api/<resource>/batch` creates, updates, upserts or deletes many records in ONE transaction. |
+| [HTTP caching and conditional requests](backend/caching.md) | Every successful `GET /api/...` response carries an `ETag`. |
+| [Running several backend processes](backend/cluster.md) | One `brain backend serve` process keeps two kinds of state in its own memory: rate-limit windows and the socket event fan-out. |
 | [Cron schedules (single run per slot)](backend/cron.md) | `server/cron/<name>.jsbrain` enqueues a declared job on a cron schedule. |
+| [File uploads of any type (native backend)](backend/files.md) | Declared file buckets accept any content type by default (PDF, Word, spreadsheets, zip, audio, video, images, plain text), stream the body to private disk with… |
 | [Filters (B-11)](backend/filters.md) | List endpoints accept only the filters a resource declares in `query.jsbrain`. |
+| [Record ids and keeping existing numeric ids (B-08)](backend/ids.md) | Every native record gets a server-generated UUID (`id`). |
+| [Reading and writing resources from job handlers](backend/job-backend.md) | A job handler (`server/jobs/<name>/handler.jsbrain`) gets `ctx.backend` with the same calls as server `load()` and server functions (server-queries.md): `resou… |
+| [Startup, health, load and shutdown](backend/lifecycle.md) | This page covers how the native backend connects to Postgres, how it reports health, how it behaves under load and how it stops. |
+| [Outbound calls from server logic](backend/outbound.md) | Route handlers, jobs and server modules call external APIs (payment providers, shipping rates, mail services) with `httpCall`. |
 | [Ownership through relations (B-09, B-21)](backend/ownership.md) | A policy grant `owner` means "the authenticated user created this row". |
 | [Pagination (B-15)](backend/pagination.md) | Lists support offset pages (`limit` 1–100, default 25; `offset` 0–10000) and keyset cursors for deep or changing data. |
 | [Partial updates (PATCH)](backend/patch.md) | `PATCH /api/<resource>/<uuid>` changes only the fields in the body. |
+| [Proxies and CORS](backend/proxy-cors.md) | The native backend binds to loopback and is meant to sit behind a reverse proxy such as nginx. |
 | [Queue policies: priorities, retries, dead letters, long jobs and drain](backend/queues.md) | Every job queue (`server/jobs/<name>/`) may declare `queue.jsbrain`. |
 | [Relations (B-01)](backend/relations.md) | A `ref:<resource>` field stores the id of a record of another resource. |
+| [Application routes](backend/routes.md) | Resources cover CRUD. |
 | [Search (B-14)](backend/search.md) | A resource opts fields into search (see BACKEND.md). |
+| [Querying resources from server code (`ctx.backend`)](backend/server-queries.md) | Server `load(ctx)`, server functions, actions and the development sidecar get `ctx.backend` when the app is connected to the native backend (`BRAIN_BACKEND_URL… |
 | [Slug history](backend/slugs.md) | A resource can mark one unique text field as its slug. |
 | [Sorting (B-12)](backend/sorting.md) | — |
 | [State machines (declared transitions)](backend/state-machines.md) | A resource may declare one `enum` field as its state. |
 | [Multi-resource transactions (operations)](backend/transactions.md) | An operation is a server-side write that spans several records or resources. |
 | [Field visibility (B-20)](backend/visibility.md) | A field can be restricted to some readers with `visible`. |
+| [Signed webhook routes](backend/webhooks.md) | Payment and shipping providers call your backend and sign the exact request bytes. |
