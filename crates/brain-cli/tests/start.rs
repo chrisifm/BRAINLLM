@@ -140,8 +140,11 @@ fn killed_child_is_back_within_a_second_and_reload_drops_nothing() {
     // the real production server (RUNTIME's server.mjs) on a minimal dist: its drain is what reload relies on
     let real = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime/server/server.mjs");
     if let Ok(src) = std::fs::read_to_string(&real) {
-        std::fs::write(dir.join("dist/server.mjs"), src).unwrap();
+        // lay out the server exactly as brain-pack emits it: helper under _server/ and the import rewritten to it
+        let helper = real.with_file_name("native-sockets.mjs");
+        std::fs::write(dir.join("dist/server.mjs"), src.replace("from './native-sockets.mjs'", "from './_server/native-sockets.mjs'")).unwrap();
         std::fs::create_dir_all(dir.join("dist/_server")).unwrap();
+        std::fs::copy(helper, dir.join("dist/_server/native-sockets.mjs")).unwrap();
         std::fs::write(dir.join("dist/_server/manifest.json"), "{\"v\":1,\"build\":\"sig12345\",\"routes\":[],\"rpc\":{}}").unwrap();
     }
     let (mut c, p) = start(&dir, &[]);
