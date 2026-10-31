@@ -117,6 +117,16 @@ pub fn metadata(root: &Path) -> Result<Value, String> {
         json!({"configuredSource":true,"runtimeReadiness":"unverified","sourceFile":SOURCE,"environmentReferences":names(&config),"inbound":config.inbound.iter().map(|(name,h)|json!({"name":name,"queue":h.queue})).collect::<Vec<_>>(),"outbound":config.outbound.iter().map(|(name,h)|json!({"name":name,"allowedOrigins":h.allowed_origins})).collect::<Vec<_>>(),"automaticResourceSubscription":false}),
     )
 }
+/// B0790: why `load` would refuse the keys of this environment: every missing reference at once, then the first key or
+/// URL that does not parse. Never a value. A contract that does not parse is B0735's and yields nothing here.
+pub fn secret_problem(root: &Path, environment: &str) -> Option<(String, String)> {
+    let names = references(root).ok()?;
+    let missing: Vec<String> = names.into_iter().filter(|name| crate::env::value(root, environment, name).is_none()).collect();
+    if !missing.is_empty() {
+        return Some((SOURCE.to_string(), format!("{SOURCE}: set {} in the environment or .brain_env", missing.join(", "))));
+    }
+    load(root, environment).err().map(|message| (SOURCE.to_string(), message))
+}
 fn value(root: &Path, environment: &str, name: &str) -> Result<String, String> {
     crate::env::value(root, environment, name).ok_or_else(|| {
         format!(

@@ -482,9 +482,12 @@ impl Storage {
         let sha256 = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
         Ok(Stored { id, key, bytes, sha256, head })
     }
-    pub async fn remove(&self, key: &str) {
-        if let Some(path) = self.path(key) {
-            let _ = tokio::fs::remove_file(path).await;
+    /// Removes stored bytes. Bytes already gone are a finished removal; a key outside storage is refused, never followed.
+    pub async fn remove(&self, key: &str) -> std::io::Result<()> {
+        let path = self.path(key).ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+        match tokio::fs::remove_file(path).await {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
+            _ => Ok(()),
         }
     }
 }
@@ -611,12 +614,70 @@ pub async fn list(
         .await
         .map(|rows| rows.into_iter().map(row).collect())
 }
+/// Removes the row; a trigger records its bytes in `_brain_file_deletions` in the same transaction, so the delete
+/// survives a storage failure or a crash. Call `finish` for a prompt removal; `sweep` retries whatever remains.
 pub async fn delete(pool: &PgPool, bucket: &str, id: Uuid) -> Result<Option<String>, sqlx::Error> {
     sqlx::query_scalar("DELETE FROM public._brain_files WHERE bucket=$1 AND id=$2 RETURNING storage_key")
         .bind(bucket)
         .bind(id)
         .fetch_optional(pool)
         .await
+}
+/// Removes the bytes and clears their tombstone; `false` leaves the tombstone for the next sweep.
+pub async fn finish(pool: &PgPool, storage: &Storage, key: &str) -> bool {
+    if storage.remove(key).await.is_err() {
+        return false;
+    }
+    // A tombstone left behind only repeats a removal that already succeeded.
+    let _ = sqlx::query("DELETE FROM public._brain_file_deletions WHERE storage_key=$1").bind(key).execute(pool).await;
+    true
+}
+/// Drops the bytes of an upload that never got a row; if storage refuses, they are recorded like a deleted file's.
+pub async fn discard(pool: &PgPool, storage: &Storage, key: &str) {
+    if storage.remove(key).await.is_ok() {
+        let _ = sqlx::query("DELETE FROM public._brain_file_deletions WHERE storage_key=$1").bind(key).execute(pool).await;
+        return;
+    }
+    if let Err(error) = sqlx::query("INSERT INTO public._brain_file_deletions(storage_key) VALUES($1) ON CONFLICT DO NOTHING").bind(key).execute(pool).await {
+        eprintln!("{}", json!({"schemaVersion":1,"event":"file-deletion-unrecorded","code":"FILE_DELETION_UNRECORDED","fix":"Inspect file storage permissions and database availability","error":crate::db::safe(error)}));
+    }
+}
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Sweep {
+    pub removed: u64,
+    pub failed: u64,
+}
+/// Retries up to `limit` due tombstones. Claiming pushes each one's next attempt forward (1 minute doubling to 1 hour),
+/// so concurrent processes skip it and a failure cannot spin.
+pub async fn sweep(pool: &PgPool, storage: &Storage, limit: i64) -> Result<Sweep, sqlx::Error> {
+    let keys: Vec<String> = sqlx::query_scalar(
+        "UPDATE public._brain_file_deletions SET attempts=attempts+1,updated_at=now(),next_attempt_at=now()+LEAST(interval '1 hour',interval '1 minute'*power(2,LEAST(attempts,6))) \
+         WHERE storage_key IN (SELECT storage_key FROM public._brain_file_deletions WHERE next_attempt_at<=now() ORDER BY next_attempt_at LIMIT $1 FOR UPDATE SKIP LOCKED) RETURNING storage_key",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    let mut outcome = Sweep::default();
+    for key in keys {
+        if finish(pool, storage, &key).await {
+            outcome.removed += 1;
+        } else {
+            outcome.failed += 1;
+        }
+    }
+    Ok(outcome)
+}
+/// Sweep loop for a serving backend: at boot, so a crash mid-delete recovers, and then every minute.
+pub async fn sweep_loop(pool: PgPool, storage: Storage) {
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));
+    loop {
+        tick.tick().await;
+        if let Ok(Sweep { removed, failed }) = sweep(&pool, &storage, 500).await
+            && failed > 0
+        {
+            eprintln!("{}", json!({"schemaVersion":1,"event":"file-deletion-failed","code":"FILE_DELETION_FAILED","removed":removed,"failed":failed,"fix":"Inspect permissions and free space of the uploads directory; rows in _brain_file_deletions retry on their own"}));
+        }
+    }
 }
 
 #[cfg(test)]

@@ -45,11 +45,48 @@ pub fn contracts(root: &Path, environment: &str) -> Result<Vec<Route>, String> {
     read_routes(root, &lookup)
 }
 
+/// Reads every route contract without its secrets: validation and documentation hold whether or not this machine has
+/// them, and the stand-in never leaves this process.
+pub fn declared(root: &Path) -> Result<Vec<Route>, String> {
+    read_routes(root, &|_: &str| Some("0".repeat(32)))
+}
+
+/// B0790: routes whose declared secret this environment does not hold, or holds too short: `(file, message)`.
+/// Each message names the variable and never its value. An invalid contract is B0735's and is skipped here.
+pub fn secret_problems(root: &Path, environment: &str) -> Vec<(String, String)> {
+    let lookup = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty()).or_else(|| crate::env::value(root, environment, key));
+    let names = route_folders(root).unwrap_or_default();
+    let mut out = Vec::new();
+    for name in names {
+        let relative = format!("{ROUTES}/{name}/route.jsbrain");
+        let Ok(value) = crate::backend::read_contract(root, &root.join(&relative)) else { continue };
+        if Route::from_contract(&name, &value, &|_: &str| Some("0".repeat(32))).is_err() {
+            continue;
+        }
+        if let Err(message) = Route::from_contract(&name, &value, &lookup) {
+            out.push((relative, message));
+        }
+    }
+    out
+}
+
+/// What a route needs at startup besides its contract: a readable handler source. Compile errors are reported on the
+/// handler file itself by the check that compiles every source.
+pub fn handler_problems(root: &Path, routes: &[Route]) -> Vec<String> {
+    routes
+        .iter()
+        .filter_map(|route| {
+            let relative = format!("{ROUTES}/{}/handler.jsbrain", route.name);
+            let fix = "add `<meta server>` and `export default async function handle(ctx) { ... }` there";
+            crate::backend::source_problem(root, &relative, 256 * 1024, fix)
+        })
+        .collect()
+}
+
 /// What a gateway needs to proxy each route: its path and the headers its contract reads. Signing secrets are not
 /// needed here and never reach the build, so a stand-in satisfies the contract's secret check.
 pub fn gateway_routes(root: &Path) -> Result<Vec<(String, Vec<String>)>, String> {
-    let stand_in = |_: &str| Some("0".repeat(32));
-    let routes = read_routes(root, &stand_in)?;
+    let routes = declared(root)?;
     let hidden: Vec<String> = conflicts(root, &routes).into_iter().map(|(name, _)| name).collect();
     Ok(routes
         .into_iter()
@@ -69,7 +106,7 @@ pub fn gateway_routes(root: &Path) -> Result<Vec<(String, Vec<String>)>, String>
 /// B0750: a declared route the same-origin gateway could not serve without hiding something else. The gateway leaves
 /// it out, so the page or file keeps answering as it did before the route could cross the bridge.
 pub fn gateway_conflicts(root: &Path) -> Vec<String> {
-    let Ok(routes) = read_routes(root, &|_: &str| Some("0".repeat(32))) else { return vec![] };
+    let Ok(routes) = declared(root) else { return vec![] };
     conflicts(root, &routes).into_iter().map(|(_, message)| message).collect()
 }
 
@@ -121,7 +158,7 @@ fn overlaps(route: &[&str], view: &str) -> bool {
     shape.len() == route.len()
 }
 
-fn read_routes(root: &Path, lookup: &dyn Fn(&str) -> Option<String>) -> Result<Vec<Route>, String> {
+fn route_folders(root: &Path) -> Result<Vec<String>, String> {
     let dir = root.join(ROUTES);
     if !dir.is_dir() {
         return Ok(vec![]);
@@ -136,8 +173,12 @@ fn read_routes(root: &Path, lookup: &dyn Fn(&str) -> Option<String>) -> Result<V
     if names.len() > brain_backend::routes::MAX_ROUTES {
         return Err(format!("{ROUTES}: declare at most {} routes", brain_backend::routes::MAX_ROUTES));
     }
+    Ok(names)
+}
+
+fn read_routes(root: &Path, lookup: &dyn Fn(&str) -> Option<String>) -> Result<Vec<Route>, String> {
     let mut routes = Vec::new();
-    for name in names {
+    for name in route_folders(root)? {
         let relative = format!("{ROUTES}/{name}/route.jsbrain");
         let path = root.join(&relative);
         if !path.is_file() {

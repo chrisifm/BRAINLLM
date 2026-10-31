@@ -218,6 +218,13 @@ async fn declared_buckets_stream_any_type_enforce_policy_and_serve_ranges() {
     assert_eq!(response.headers()["cache-control"], "public, max-age=31536000, immutable");
     assert_eq!(response.headers()["content-type"], "image/png");
 
+    // A malformed id is the caller's mistake on every file route.
+    for (method, path) in [("GET", "/_brain/files/invoices/not-a-uuid"), ("GET", "/_brain/files/invoices/not-a-uuid/meta"), ("DELETE", "/_brain/files/invoices/not-a-uuid")] {
+        let response = client.send(method, path, Some(owner_session), &[], vec![]).await;
+        assert_eq!(response.status(), 400, "{method} {path}");
+        assert_eq!(json_body(response).await["error"]["code"], "INVALID_ID", "{method} {path}");
+    }
+
     // Deletion follows the delete grants and removes the stored bytes.
     assert_eq!(client.send("DELETE", &location, Some(stranger_session), &[], vec![]).await.status(), 403);
     assert_eq!(client.send("DELETE", &location, Some(owner_session), &[], vec![]).await.status(), 204);
@@ -226,6 +233,135 @@ async fn declared_buckets_stream_any_type_enforce_policy_and_serve_ranges() {
     assert_eq!(left, 0);
     let stored: usize = walk(&root.0.join("files/invoices"));
     assert_eq!(stored, 0, "deleted bytes are removed from private storage");
+}
+/// Bytes survive a failed delete only as a recorded, retried obligation: the row goes, the tombstone stays until the bytes do.
+#[tokio::test]
+#[ignore = "Use scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn a_failed_file_delete_leaves_a_tombstone_the_sweep_finishes() {
+    use std::os::unix::fs::PermissionsExt;
+    use brain_backend::files::{self, Storage};
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Disposable Postgres only; no developer database is selected");
+    let pool = brain_backend::db::connect(&url).await.unwrap();
+    brain_backend::db::migrate(&pool, &[]).await.unwrap();
+    let roles = brain_backend::auth_flows::RolesConfig { roles: ["admin", "user"].map(String::from).to_vec(), signup_role: "user".into() };
+    roles.register(&pool).await.unwrap();
+    let auth = Auth::new(pool.clone()).await.unwrap();
+    let email = format!("files-{}@example.test", Uuid::new_v4().simple());
+    let password = "synthetic-files-account-password";
+    let owner = auth.signup(Credentials { email: email.clone(), password: password.into() }).await.unwrap();
+    let (_, session) = auth.login(Credentials { email, password: password.into() }).await.unwrap().unwrap();
+    let docs = Bucket::from_contract("sweepdocs", json!({"create": ["user"], "types": "*"})).unwrap();
+    let root = Scratch(std::env::temp_dir().join(format!("brain-files-sweep-{}", Uuid::new_v4())));
+    let (http, _) = brain_backend::http::router_with_platform(
+        pool.clone(),
+        brain_backend::Config {
+            api_keys: None,
+            roles,
+            mail: None,
+            auth_public_base_url: None,
+            webhooks: None,
+            before_hooks: None,
+            sockets: None,
+            resources: vec![],
+            jobs: vec![],
+            uploads: root.0.clone(),
+            origins: vec![ORIGIN.into()],
+            production: true,
+            jwt: None,
+            google: None,
+            gcs: None,
+        },
+        Platform { buckets: vec![docs], ..Default::default() },
+    )
+    .await
+    .unwrap();
+    let client = Client { http };
+    let storage = Storage::new(&root.0);
+    let pending = |key: String| {
+        let pool = pool.clone();
+        async move { sqlx::query_scalar::<_, i64>("SELECT count(*) FROM _brain_file_deletions WHERE storage_key=$1").bind(key).fetch_one(&pool).await.unwrap() }
+    };
+    let make_due = || {
+        let pool = pool.clone();
+        async move { sqlx::query("UPDATE _brain_file_deletions SET next_attempt_at=now()").execute(&pool).await.unwrap() }
+    };
+
+    // Storage refuses: the file is gone for readers, the bytes are still there and the tombstone holds the obligation.
+    let response = client.upload("/_brain/files/sweepdocs", &session, "a.txt", "text/plain", b"held bytes").await;
+    assert_eq!(response.status(), 201);
+    let id: Uuid = json_body(response).await["id"].as_str().unwrap().parse().unwrap();
+    let record = files::get(&pool, "sweepdocs", id).await.unwrap().unwrap();
+    let path = storage.path(&record.storage_key).unwrap();
+    let dir = path.parent().unwrap().to_path_buf();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let location = format!("/_brain/files/sweepdocs/{id}");
+    assert_eq!(client.send("DELETE", &location, Some(&session), &[], vec![]).await.status(), 204);
+    assert_eq!(client.send("GET", &location, Some(&session), &[], vec![]).await.status(), 404);
+    assert!(path.exists(), "the refused removal leaves the bytes");
+    assert_eq!(pending(record.storage_key.clone()).await, 1, "the failed removal is recorded");
+
+    // A retry that still fails backs off instead of spinning, and is not due again at once.
+    make_due().await;
+    let sweep = files::sweep(&pool, &storage, 100).await.unwrap();
+    assert!(sweep.failed >= 1 && path.exists(), "{sweep:?}");
+    assert_eq!(pending(record.storage_key.clone()).await, 1);
+    let attempts: i32 = sqlx::query_scalar("SELECT attempts FROM _brain_file_deletions WHERE storage_key=$1").bind(&record.storage_key).fetch_one(&pool).await.unwrap();
+    assert!(attempts >= 1);
+    let waiting: bool = sqlx::query_scalar("SELECT next_attempt_at>now() FROM _brain_file_deletions WHERE storage_key=$1").bind(&record.storage_key).fetch_one(&pool).await.unwrap();
+    assert!(waiting, "a failed removal waits before its next try");
+
+    // Storage recovers: the next due sweep removes the bytes and clears the tombstone.
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    make_due().await;
+    files::sweep(&pool, &storage, 100).await.unwrap();
+    assert!(!path.exists(), "the sweep finished the delete");
+    assert_eq!(pending(record.storage_key.clone()).await, 0);
+
+    // A crash after the row went: the tombstone alone is enough, whatever removed the row.
+    let response = client.upload("/_brain/files/sweepdocs", &session, "b.txt", "text/plain", b"crash bytes").await;
+    let id: Uuid = json_body(response).await["id"].as_str().unwrap().parse().unwrap();
+    let record = files::get(&pool, "sweepdocs", id).await.unwrap().unwrap();
+    let path = storage.path(&record.storage_key).unwrap();
+    sqlx::query("DELETE FROM _brain_files WHERE id=$1").bind(id).execute(&pool).await.unwrap();
+    assert_eq!(pending(record.storage_key.clone()).await, 1, "any removal of the row records its bytes");
+    files::sweep(&pool, &storage, 100).await.unwrap();
+    assert!(!path.exists());
+    assert_eq!(pending(record.storage_key.clone()).await, 0);
+
+    // Bytes already gone are a finished delete, not a failure that retries forever.
+    sqlx::query("INSERT INTO _brain_file_deletions(storage_key) VALUES('sweepdocs/aa/00000000000000000000000000000000')").execute(&pool).await.unwrap();
+    files::sweep(&pool, &storage, 100).await.unwrap();
+    assert_eq!(pending("sweepdocs/aa/00000000000000000000000000000000".into()).await, 0);
+
+    // A key that leaves storage is never followed and never lost.
+    sqlx::query("INSERT INTO _brain_file_deletions(storage_key) VALUES('../../outside')").execute(&pool).await.unwrap();
+    let sweep = files::sweep(&pool, &storage, 100).await.unwrap();
+    assert!(sweep.failed >= 1, "{sweep:?}");
+    assert_eq!(pending("../../outside".into()).await, 1);
+    sqlx::query("DELETE FROM _brain_file_deletions WHERE storage_key='../../outside'").execute(&pool).await.unwrap();
+
+    // Bytes of a rejected upload that storage refuses to drop are recorded the same way.
+    let response = client.upload("/_brain/files/sweepdocs", &session, "c.txt", "text/plain", b"rejected bytes").await;
+    let id: Uuid = json_body(response).await["id"].as_str().unwrap().parse().unwrap();
+    let record = files::get(&pool, "sweepdocs", id).await.unwrap().unwrap();
+    sqlx::query("DELETE FROM _brain_file_deletions").execute(&pool).await.unwrap();
+    let path = storage.path(&record.storage_key).unwrap();
+    let dir = path.parent().unwrap().to_path_buf();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    files::discard(&pool, &storage, &record.storage_key).await;
+    assert_eq!(pending(record.storage_key.clone()).await, 1);
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    files::discard(&pool, &storage, &record.storage_key).await;
+    assert!(!path.exists());
+
+    // Deleting a user does not cascade to files: the account with files is refused, so neither rows nor bytes are orphaned.
+    let response = client.upload("/_brain/files/sweepdocs", &session, "d.txt", "text/plain", b"owned bytes").await;
+    let id: Uuid = json_body(response).await["id"].as_str().unwrap().parse().unwrap();
+    let record = files::get(&pool, "sweepdocs", id).await.unwrap().unwrap();
+    assert!(sqlx::query("DELETE FROM _brain_users WHERE id=$1").bind(owner.id).execute(&pool).await.is_err(), "ON DELETE RESTRICT");
+    assert!(files::get(&pool, "sweepdocs", id).await.unwrap().is_some());
+    assert!(storage.path(&record.storage_key).unwrap().exists());
+    pool.close().await;
 }
 fn walk(dir: &std::path::Path) -> usize {
     std::fs::read_dir(dir)

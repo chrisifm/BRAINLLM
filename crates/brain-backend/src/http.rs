@@ -742,6 +742,7 @@ pub async fn serve_full(
         .transpose()?;
     let ready_delay = platform.edge.ready_delay;
     let drain_budget = platform.edge.drain;
+    let file_storage = crate::files::Storage::new(&config.uploads);
     let (app, sockets, edge) = router_full(pool.clone(), config, domain, platform).await?;
     let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
     let mut http_stop = stop_rx.clone();
@@ -762,6 +763,7 @@ pub async fn serve_full(
         "{}",
         json!({"schemaVersion":1,"event":"backend-ready","address":address,"experimental":true})
     );
+    let file_sweep = tokio::spawn(crate::files::sweep_loop(pool.clone(), file_storage));
     let retention = crate::analytics::settings()
         .map(|cfg| tokio::spawn(crate::analytics::retention_loop(pool.clone(), cfg.retention_days)));
     let socket_stop = sockets.clone();
@@ -795,6 +797,7 @@ pub async fn serve_full(
             Ok(())
         }
     };
+    file_sweep.abort();
     if let Some(retention) = retention {
         retention.abort();
     }

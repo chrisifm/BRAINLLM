@@ -287,8 +287,12 @@ async fn api_keys_authenticate_scope_quota_trace_rotate_and_revoke() {
     // Retention purge is bounded and owner deletion cascades keys, counters and trace.
     assert_eq!(brain_backend::api_keys::purge(&pool, 1).await.unwrap(), 0);
     sqlx::query("DELETE FROM _brain_res_key_notes WHERE owner=$1").bind(owner).execute(&pool).await.unwrap();
+    // Scoped to this owner: other test binaries create keys in the same database at the same time.
+    let owned_keys: Vec<uuid::Uuid> = sqlx::query_scalar("SELECT id FROM _brain_api_keys WHERE user_id=$1").bind(owner).fetch_all(&pool).await.unwrap();
+    assert!(!owned_keys.is_empty());
     sqlx::query("DELETE FROM _brain_users WHERE id=$1").bind(owner).execute(&pool).await.unwrap();
-    let left: i64 = sqlx::query_scalar("SELECT (SELECT count(*) FROM _brain_api_keys)+(SELECT count(*) FROM _brain_api_key_usage)+(SELECT count(*) FROM _brain_api_key_events)")
+    let left: i64 = sqlx::query_scalar("SELECT (SELECT count(*) FROM _brain_api_keys WHERE id=ANY($1))+(SELECT count(*) FROM _brain_api_key_usage WHERE key_id=ANY($1))+(SELECT count(*) FROM _brain_api_key_events WHERE key_id=ANY($1))")
+        .bind(&owned_keys)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -297,7 +301,7 @@ async fn api_keys_authenticate_scope_quota_trace_rotate_and_revoke() {
 }
 
 /// Job handlers reach slug history and partial updates with a key (docs/backend/job-backend.md). Runs inside the
-/// main test so the global cleanup count below stays exact.
+/// main test so their keys fall under the same cleanup count.
 /// A job's counter goes through a declared action: the key needs write scope and the action's roles still decide.
 async fn atomic_actions_with_key(pool: &sqlx::PgPool, auth: &Auth) {
     let mut counters = resource(

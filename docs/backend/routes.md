@@ -132,7 +132,7 @@ export default {
 ```
 
 `secret` names one environment variable, or up to 4 for rotation, each at least 32 bytes: a missing or short value stops
-startup. `header` defaults to `x-internal-secret` and cannot be `cookie` or `authorization`. The comparison is HMAC
+startup, and `brain check` warns about it first (B0790). `header` defaults to `x-internal-secret` and cannot be `cookie` or `authorization`. The comparison is HMAC
 verification under a per-process random key, so its time does not depend on where the bytes differ. A wrong secret
 answers 403, and a session is never accepted in its place. No browser Origin is required, and `rate ... per user` is
 rejected because there is no user.

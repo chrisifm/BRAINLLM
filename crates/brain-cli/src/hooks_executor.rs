@@ -32,19 +32,34 @@ fn spawn(root: &Path, vars: &[(String, String)], production: bool) -> Result<Sid
         }
     })
 }
-pub fn load(
-    root: &Path,
-    environment: &str,
-    resources: &[Resource],
-) -> Result<Option<Executor>, String> {
-    let names: BTreeSet<String> = resources
+fn declared(resources: &[Resource]) -> BTreeSet<String> {
+    resources
         .iter()
         .flat_map(|r| {
             ["create", "update", "delete"]
                 .into_iter()
                 .filter_map(|op| r.hooks.before(op).map(str::to_owned))
         })
-        .collect();
+        .collect()
+}
+/// What a declared before-hook needs at startup: a readable source. Compile errors are reported on the hook file itself
+/// by the check that compiles every source.
+pub fn source_problems(root: &Path, resources: &[Resource]) -> Vec<String> {
+    declared(resources)
+        .into_iter()
+        .filter_map(|name| {
+            let relative = format!("server/hooks/{name}.jsbrain");
+            let fix = format!("run `brain add hook {name}`, or remove it from the resource's hooks.jsbrain");
+            crate::backend::source_problem(root, &relative, 65536, &fix)
+        })
+        .collect()
+}
+pub fn load(
+    root: &Path,
+    environment: &str,
+    resources: &[Resource],
+) -> Result<Option<Executor>, String> {
+    let names = declared(resources);
     if names.is_empty() {
         return Ok(None);
     }

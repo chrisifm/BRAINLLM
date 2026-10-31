@@ -182,7 +182,7 @@ async fn upload(
     drop(field);
     let extra = multipart.next_field().await;
     if !matches!(extra, Ok(None)) {
-        app.platform.storage.remove(&stored.key).await;
+        files::discard(&app.pool, &app.platform.storage, &stored.key).await;
         return Err(invalid());
     }
     let (sniffed, mut content_type) = files::classify(&stored.head, &declared);
@@ -194,7 +194,7 @@ async fn upload(
         content_type.clone_from(sharper);
     }
     if !bucket.accepts(&content_type) {
-        app.platform.storage.remove(&stored.key).await;
+        files::discard(&app.pool, &app.platform.storage, &stored.key).await;
         let mut e = status(StatusCode::UNSUPPORTED_MEDIA_TYPE, "FILE_TYPE_DENIED", "Upload one of the bucket's declared types; detection uses file content, not the name");
         e.fields = Some(json!({"file":{"detected":content_type,"accepted":bucket.types}}));
         return Err(e);
@@ -216,7 +216,7 @@ async fn upload(
     let created = match created {
         Ok(created) => created,
         Err(error) => {
-            app.platform.storage.remove(&stored.key).await;
+            files::discard(&app.pool, &app.platform.storage, &stored.key).await;
             return Err(Error::database(error));
         }
     };
@@ -280,7 +280,7 @@ async fn meta(Extract(app): Extract<App>, Path((name, id)): Path<(String, Uuid)>
 async fn remove(Extract(app): Extract<App>, Path((name, id)): Path<(String, Uuid)>, h: HeaderMap) -> Result<Response> {
     let (bucket, _) = record(&app, &name, id, &h, "delete").await?;
     if let Some(key) = files::delete(&app.pool, &bucket.name, id).await.map_err(Error::internal)? {
-        app.platform.storage.remove(&key).await;
+        files::finish(&app.pool, &app.platform.storage, &key).await;
     }
     Ok(StatusCode::NO_CONTENT.into_response())
 }
