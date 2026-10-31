@@ -1,4 +1,6 @@
-//! `brain test`: prefers a connected Viewer for owned declared scenarios; absent capability falls back explicitly.
+//! `brain test`: headless Chrome by default. A connected Viewer (Claude Viewer or Codex Viewer) runs the declared
+//! scenarios only when the user opts in (`--viewer` or `BRAIN_VIEWER=1`); an opted-in Viewer failure never becomes a
+//! headless success, and an unavailable opted-in Viewer falls back explicitly.
 //! Headless CDP retains full AX-tree/forced-GC support; Viewer reports its DOM-label-only audit separately.
 
 use crate::cdp::Chrome;
@@ -243,6 +245,17 @@ pub fn set_heap(on: bool) {
     HEAP.store(on, std::sync::atomic::Ordering::SeqCst);
 }
 
+/// The Viewer lane is opt-in: never probed or opened unless the user asked for it.
+static VIEWER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn set_viewer(on: bool) {
+    VIEWER.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+/// `--viewer` on the command line, or `BRAIN_VIEWER=1|true|yes` in the process environment.
+pub fn viewer_requested(args: &[String], env: Option<&str>) -> bool {
+    args.iter().any(|a| a == "--viewer")
+        || env.is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+}
+
 pub fn run(
     base: &str,
     root: &Path,
@@ -251,6 +264,18 @@ pub fn run(
 ) -> Result<Vec<FileReport>, String> {
     if files.is_empty() {
         return Ok(Vec::new());
+    }
+    if !VIEWER.load(std::sync::atomic::Ordering::SeqCst)
+        && !viewer_requested(&[], std::env::var("BRAIN_VIEWER").ok().as_deref())
+    {
+        let mut reports = run_headless(base, root, files, timeout)?;
+        for report in &mut reports {
+            report.lanes = vec![Json::obj([
+                ("engine", Json::str("headless-cdp")),
+                ("role", Json::str("default; a Viewer lane runs only with --viewer or BRAIN_VIEWER=1")),
+            ])];
+        }
+        return Ok(reports);
     }
     let available = crate::viewer::probe()?;
     if available["ok"] != true {
@@ -360,7 +385,7 @@ pub fn run(
         report.fallback = Some(reason.into());
         report.lanes = vec![Json::obj([
             ("engine", Json::str("headless-cdp")),
-            ("role", Json::str("explicit unavailable-Viewer fallback")),
+            ("role", Json::str("explicit fallback: Viewer requested but unavailable")),
             ("reason", Json::str(reason)),
         ])];
     }
@@ -583,6 +608,21 @@ fn run_headless(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn viewer_lane_is_opt_in_only() {
+        let none: Vec<String> = vec![];
+        assert!(!super::viewer_requested(&none, None));
+        assert!(!super::viewer_requested(&["--heap".to_string()], Some("0")));
+        assert!(!super::viewer_requested(&none, Some("")));
+        assert!(super::viewer_requested(&["--viewer".to_string()], None));
+        assert!(super::viewer_requested(&none, Some("1")));
+        assert!(super::viewer_requested(&none, Some(" TRUE ")));
+        // The scaffold's agent guide must not make an extension mandatory.
+        let guide = crate::scaffold::AGENTS_MD;
+        assert!(guide.contains("no browser extension is required"));
+        assert!(!guide.contains("MUST probe"));
+    }
+
     use super::*;
 
     #[test]
