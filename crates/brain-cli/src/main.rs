@@ -48,6 +48,7 @@ mod libraries;
 mod search;
 mod optimization_feedback;
 mod feedback;
+mod flags;
 mod design;
 mod manifests;
 mod history;
@@ -146,6 +147,10 @@ fn main() -> ExitCode {
     }
     if let Some(code) = command_help(&args) {
         return code;
+    }
+    if let Err(error) = flags::check(&args) {
+        if want_json(&args) { println!("{}", error_json(&error)) } else { eprintln!("error: {error}") }
+        return ExitCode::from(2);
     }
     let res = match args.first().map(String::as_str) {
         Some("--version") | Some("-V") | Some("version") => {
@@ -1783,7 +1788,7 @@ pub(crate) fn start_project_dev(
             eprintln!("Open {alias}: it is the origin listed in brain.json backend.sockets.allowedOrigins, and live sockets from {} would be refused (B0743)", dev.url());
         } else if let Err(error) = settings.frontend_enabled(&dev.url()) {
             dev.stop();
-            return Err(format!("{error}; selected port {port} was stopped; fix: use an allowed --host/--port or update the shared exact-origin declaration"));
+            return Err(format!("{error}; selected port {port} was stopped; fix: declare this origin in brain.json backend.sockets.allowedOrigins, or start `brain run` with an allowed --host/--port"));
         }
     }
     Ok(dev)
@@ -1827,11 +1832,50 @@ pub(crate) fn browser_url(root: &Path, environment: &str, dev: &brain_serve::Dev
     }
 }
 
+/// A run that executed no test proves nothing: a path that selects no file (the whole app having none is fine), or
+/// files that declare no `test()`.
+#[cfg(unix)]
+pub(crate) fn nothing_ran(target: Option<&Path>, reports: &[testrun::FileReport]) -> Option<String> {
+    if reports.is_empty() {
+        return target.map(|t| format!("no *.test.brain files under `{}`; fix: pass a folder that holds tests, or nothing to run every test", t.display()));
+    }
+    let declared = reports.iter().any(|r| r.load_error.is_some() || !r.tests.is_empty());
+    (!declared).then(|| format!("no test ran: {} declares no `test()`; fix: add `test('name', async () => {{ … }})` to it", reports.iter().map(|r| r.file.as_str()).collect::<Vec<_>>().join(", ")))
+}
+
+/// The origin of this app's live `brain run` on `port` (`.brain/dev.json`), when it can host the test page: it answers
+/// the dev ping at the root, which a server under a base path does not. The address is the declared one, because the
+/// socket handshake compares the exact Origin.
+#[cfg(unix)]
+fn running_dev(root: &Path, host: &str, port: u16) -> Option<String> {
+    use std::io::{Read, Write};
+    let info = brain_mcp::Json::parse(&std::fs::read_to_string(dev_json_path(root)).ok()?).ok()?;
+    if !matches!(info.get("port"), Some(brain_mcp::Json::Num(p)) if *p == f64::from(port)) {
+        return None;
+    }
+    let site = env::value(root, "development", "PUBLIC_SITE_URL")?;
+    let origin = brain_backend::links::origin(&site)?;
+    let mut socket = std::net::TcpStream::connect((host, port)).ok()?;
+    socket.set_read_timeout(Some(std::time::Duration::from_secs(2))).ok()?;
+    write!(socket, "GET /@brain/ping HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n").ok()?;
+    let mut answer = String::new();
+    socket.read_to_string(&mut answer).ok()?;
+    (answer.starts_with("HTTP/1.1 200") && answer.ends_with("\r\n\r\nok")).then_some(origin)
+}
+
 /// Runs the selected app tests in headless Chrome.
 #[cfg(unix)]
 pub(crate) fn run_tests(target: Option<PathBuf>, timeout: u64) -> Result<Vec<testrun::FileReport>, String> {
     // Absolute: with a relative path, find_root would return "" as the root.
     let target = target.map(|t| std::path::absolute(&t).unwrap_or(t));
+    if let Some(t) = &target {
+        if !t.exists() {
+            return Err(format!("`{}` does not exist; fix: pass a *.test.brain file or a folder that holds them, or nothing to run every test", t.display()));
+        }
+        if t.is_file() && !t.to_string_lossy().ends_with(".test.brain") {
+            return Err(format!("`{}` is not a test file; fix: pass its *.test.brain file (`brain add test <name>` creates one)", t.display()));
+        }
+    }
     let root = target
         .as_deref()
         .map(scaffold::find_root)
@@ -1849,6 +1893,14 @@ pub(crate) fn run_tests(target: Option<PathBuf>, timeout: u64) -> Result<Vec<tes
         return Ok(vec![]);
     }
     let (host, port) = project_test_address(&root)?;
+    // native sockets fix the port, so the app's own `brain run` may already hold it: test against that server
+    if port != 0 && std::net::TcpStream::connect((host.as_str(), port)).is_ok() {
+        let Some(base) = running_dev(&root, &host, port) else {
+            return Err(format!("port {port}, the one PUBLIC_SITE_URL declares for native socket tests, is held by another process; fix: find it with `lsof -nP -iTCP:{port} -sTCP:LISTEN` and stop it. A running `brain run` of this app is reused on its own, unless it serves under a base path"));
+        };
+        eprintln!("brain test: using the running `brain run` of this app at {base}");
+        return testrun::run(&base, &root, &files, std::time::Duration::from_secs(timeout));
+    }
     let opts = brain_serve::Options { root: root.clone(), host, port, head_prepend: head_prepend(), runtime: runtime_files(), env: Some(env::loader(&root, "development")), base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None };
     let dev = start_project_dev(opts, compile_fn(root.clone(), true), false, None, "development").map_err(|error| format!("could not start the test server: {error}"))?;
     testrun::run(&browser_url(&root, "development", &dev), &root, &files, std::time::Duration::from_secs(timeout))
@@ -1857,18 +1909,31 @@ pub(crate) fn run_tests(target: Option<PathBuf>, timeout: u64) -> Result<Vec<tes
 #[cfg(unix)]
 fn cmd_test(args: &[String]) -> ExitCode {
     let json = want_json(args);
-    let timeout = flag(args, "--timeout").and_then(|t| t.parse().ok()).unwrap_or(60u64);
+    let refuse = |e: String| {
+        if json { println!("{}", error_json(&e)) } else { eprintln!("error: {e}") }
+        ExitCode::from(2)
+    };
+    let timeout = match flag(args, "--timeout").map(|t| t.parse::<u64>()) {
+        Some(Ok(seconds)) => seconds,
+        None => 60,
+        Some(Err(_)) => return refuse("--timeout must be a number of seconds; fix: e.g. `--timeout 60`".into()),
+    };
+    let paths = positional(args, &["--timeout"]);
+    if paths.len() > 1 {
+        return refuse(format!("brain test takes one path, got {}; fix: run it once per path, or pass their folder", paths.len()));
+    }
+    let target = paths.first().map(PathBuf::from);
     let t0 = std::time::Instant::now();
     // --heap: an instance alive after its test unmounted, or an fx timer/listener without cleanup, fails the file (§9)
     testrun::set_heap(args.iter().any(|a| a == "--heap"));
     testrun::set_viewer(testrun::viewer_requested(args, std::env::var("BRAIN_VIEWER").ok().as_deref()));
-    let reports = match run_tests(positional(args, &["--timeout"]).first().map(PathBuf::from), timeout) {
+    let reports = match run_tests(target.clone(), timeout) {
         Ok(r) => r,
-        Err(e) => {
-            if json { println!("{}", error_json(&e)) } else { eprintln!("error: {e}") }
-            return ExitCode::from(2);
-        }
+        Err(e) => return refuse(e),
     };
+    if let Some(e) = nothing_ran(target.as_deref(), &reports) {
+        return refuse(e);
+    }
     let failed = reports.iter().any(testrun::FileReport::failed);
     if json {
         println!("{}", brain_mcp::Json::Arr(reports.iter().map(testrun::FileReport::to_json).collect()).stringify());
@@ -2170,7 +2235,7 @@ fn cmd_doctor(args: &[String]) -> ExitCode {
                     Some(b) => format!("ok · build {}", b.get("signature").and_then(brain_mcp::Json::as_str).unwrap_or("")),
                     None => String::new(),
                 };
-                let errors_line = if captured.is_empty() { "none captured while the tests ran".to_string() } else { format!("{} captured while the tests ran:\n{}", captured.len(), captured.join("\n")) };
+                let errors_line = if test_err.is_some() { "not measured: the tests did not run".to_string() } else if captured.is_empty() { "none captured while the tests ran".to_string() } else { format!("{} captured while the tests ran:\n{}", captured.len(), captured.join("\n")) };
                 println!(
                     "\ncheck   {} file(s) · {} error(s) · {} warning(s)\ntests   {}\nerrors  {errors_line}\nbuild   {build_line}\nseo     {seo_line}\nleaks   {leaks_line}\n{}",
                     n("check", "files"),

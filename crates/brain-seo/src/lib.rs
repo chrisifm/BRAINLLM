@@ -977,10 +977,14 @@ pub fn cli(root: &Path, args: &[String]) -> (i32, String) {
 pub fn cli_with(root: &Path, args: &[String], keyword: &dyn Fn(&str) -> Option<String>) -> (i32, String) {
     let json = args.iter().any(|a| a == "--json");
     let flag = |name: &str| {
-        args.iter()
-            .position(|a| a == name)
-            .and_then(|i| args.get(i + 1))
-            .map(String::as_str)
+        let inline = format!("{name}=");
+        args.iter().enumerate().find_map(|(i, a)| {
+            if a == name {
+                args.get(i + 1).map(String::as_str)
+            } else {
+                a.strip_prefix(&inline)
+            }
+        })
     };
     let since = flag("--since");
     let env = flag("--env").unwrap_or("production");

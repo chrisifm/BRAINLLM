@@ -19,7 +19,7 @@ pub fn public() -> Vec<(String, String)> {
 
 /// `--env <name>` or the command's default (`run` → development; `build`/`start` → production).
 pub fn name(args: &[String], default: &str) -> String {
-    args.iter().position(|a| a == "--env").and_then(|i| args.get(i + 1)).cloned().unwrap_or_else(|| default.to_string())
+    crate::flag(args, "--env").unwrap_or_else(|| default.to_string())
 }
 
 fn process(k: &str) -> Option<String> {

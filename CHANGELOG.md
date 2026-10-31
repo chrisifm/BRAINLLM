@@ -28,6 +28,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - B0781 reports `await` with no enclosing `async` function, including nested functions and the top of a component script: that code emitted JavaScript that does not parse.
 - B0737 names every credential in `ctx.session.set` and reads `d.password`; B0783 warns on a credential in `console.*` or browser storage, and on a stored password returned by a server function, `load` or a route handler.
 - `*.test.brain` under `views/` no longer gets B0501 when it is checked on its own: a test file has no route.
+- Every command refuses a flag it does not know, and acts on nothing: `brain test --port 5280` used to read the value as a path and report green.
+- `brain test` fails on a path that does not exist, is not a test file or selects no test, on a file that declares no `test()`, and on more than one path.
+- With native sockets, `brain test` and `brain doctor` run against the app's own `brain run` on the declared port; another process there is named, with how to find it.
+- `brain doctor` no longer says no errors were captured when the tests did not run.
+- `--env=<name>` and `brain seo --since=<date>` take effect; they used to be ignored in that spelling.
 - A `DATABASE_URL` without a user connects as the system account, as `psql` does; it used to try the role `anonymous`. B0762 connection failures now say the host, database and user tried and why it failed, never the password.
 B0721 and B0722 read `process.env`, `ctx.env` and `import.meta.env` from tokens: a comment, a string, prose or a CSS rule that mentions a key no longer counts as a read, and a guard in a later statement (`const k = ctx.env.K; if (!k) ...`) makes the key optional.
 A session write without `BRAIN_SECRET` fails with B0782 and how to set it.
