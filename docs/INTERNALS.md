@@ -1760,6 +1760,15 @@ requests, preventing late responses from reappearing after logout. Build changes
 workers/listeners/idle jobs. Static assets retain one-year immutable HTTP caching and cache-first service-worker reuse;
 data/private HTML remains separate. Browser/benchmark acceptance is tracked in GAPS.md.
 
+Multi-process and caching (2026-10-31): `cluster.rs` moves route `rate` and API-key per-minute windows to
+`_brain_rate_windows` (one atomic upsert, digest subjects) and relays socket events with `pg_notify` +
+`PgListener` when `Platform.cluster.shared`; the global per-address governor stays per process. `http/cache_http.rs`
+is the innermost layer for `GET /api/...`: it hashes bodies up to 2 MiB into weak ETags (handlers may set a strong one;
+`read` uses id + xmin + visible keys), answers 304, and marks anonymous reads of `server/cache.jsbrain` resources with
+a `Declared` extension that `response_headers` turns into `Cache-Control` instead of `no-store`. `If-Match` is checked
+in `precondition` against the same xmin the write CAS uses. See [backend/cluster.md](backend/cluster.md) and
+[backend/caching.md](backend/caching.md).
+
 
 ## 45. Agent coordination and focused evidence (2026-10-30)
 

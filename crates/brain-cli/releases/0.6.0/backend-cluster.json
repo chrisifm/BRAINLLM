@@ -2,13 +2,13 @@
   "id": "backend-cluster",
   "kind": "capability",
   "title": "Shared rate windows and socket fan-out across backend processes",
-  "why": "Running the native backend in several processes keeps route rate limits, API-key quotas and live socket updates correct across all of them.",
+  "why": "With several backend processes, route and API-key rate limits count one budget for the whole deployment and a write on one process reaches sockets on every process.",
   "changelog": [
-    "Native backend multi-process mode: `cluster: { shared: true }`"
+    "Native backend multi-process mode"
   ],
   "guide": "docs/backend/cluster.md",
   "apis": [
-    "cluster.shared",
+    "server/platform.jsbrain cluster.shared",
     "BRAIN_BACKEND_PROCESSES"
   ],
   "affects": [

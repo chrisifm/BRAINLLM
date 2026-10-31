@@ -32,6 +32,8 @@ mod files_http;
 mod edge_http;
 #[path = "routes_http.rs"]
 mod routes_http;
+#[path = "cache_http.rs"]
+pub mod cache_http;
 pub use edge_http::{ClientIp, EdgeControl, resolve_client};
 pub use sockets::{SocketConfig, SocketControl};
 #[path = "http_api_keys.rs"]
@@ -283,6 +285,7 @@ pub async fn router_full(
     }
     let (edge_state, edge_control) = edge_http::EdgeState::new(&platform.edge);
     let shared = platform.cluster.shared;
+    let cache_policy = Arc::new(platform.cache.clone());
     let cors_max_age = platform.edge.cors_max_age;
     let (custom_routes, custom_handlers) = (platform.routes.clone(), platform.handlers.clone());
     let socket_origins = config.sockets.as_ref().map(|s| s.allowed().to_vec()).unwrap_or_default();
@@ -468,8 +471,10 @@ pub async fn router_full(
             header::CONTENT_TYPE,
             header::AUTHORIZATION,
             header::HeaderName::from_static("x-brain-rpc"),
+            header::IF_MATCH,
+            header::IF_NONE_MATCH,
         ]);
-    let cors = cors.expose_headers([header::HeaderName::from_static("x-request-id")]);
+    let cors = cors.expose_headers([header::HeaderName::from_static("x-request-id"), header::ETAG]);
     let cors = match cors_max_age {
         Some(age) => cors.max_age(age),
         None => cors,
@@ -556,6 +561,7 @@ pub async fn router_full(
         .merge(files_http::routes(&platform))
         .merge(routes_http::routes(&custom))
         .fallback(|| async { Error::missing() })
+        .layer(middleware::from_fn_with_state(cache_policy, cache_http::conditional))
         .layer(DefaultBodyLimit::max(65536))
         .layer(middleware::from_fn_with_state(app.clone(), http_api_keys::gate))
         .layer(middleware::from_fn_with_state(app.clone(), protect))
@@ -778,8 +784,10 @@ async fn response_headers(req: Request, next: Next) -> Response {
     let response = REQUEST_ID.scope(rid.clone(), next.run(req)).await;
     let log_policy = response.extensions().get::<edge_http::LogPolicy>().copied();
     let mut response = crate::response::finalize(&method, &path, accept.as_deref(), &rid, response);
-    let public_cache = (response.status().is_success() || response.status() == StatusCode::NOT_MODIFIED)
-        && response.extensions().get::<files_http::PublicCache>().is_some();
+    let cacheable = response.status().is_success() || response.status() == StatusCode::NOT_MODIFIED;
+    let declared = response.extensions().get::<cache_http::Declared>().filter(|_| cacheable).map(|d| d.0.clone());
+    let public_cache = cacheable
+        && (declared.is_some() || response.extensions().get::<files_http::PublicCache>().is_some());
     let headers = response.headers_mut();
     for (name, value) in [
         ("x-content-type-options", "nosniff"),
@@ -800,6 +808,9 @@ async fn response_headers(req: Request, next: Next) -> Response {
             header::HeaderName::from_static(name),
             HeaderValue::from_static(value),
         );
+    }
+    if let Some(declared) = declared {
+        headers.insert(header::CACHE_CONTROL, declared);
     }
     headers.insert("x-request-id", rid.parse().unwrap());
     // Lines carry the matched route template, never the raw path, query, headers or body.
@@ -1059,6 +1070,15 @@ async fn google_login(
 async fn me(State(app): State<App>, h: HeaderMap) -> Result<Json<Value>> {
     Ok(Json(json!({"user":app.required(&h).await?})))
 }
+/// `If-Match` against the record as this writer would read it; the revision CAS in the write closes the race.
+fn precondition(r: &Resource, h: &HeaderMap, existing: &Value, revision: &str, u: &User, through: bool) -> Result<()> {
+    if !h.contains_key(header::IF_MATCH) {
+        return Ok(());
+    }
+    let mut seen = existing.clone();
+    crate::visibility::project(r, &mut seen, viewer(Some(u)), through);
+    cache_http::if_match(h, &cache_http::record_etag(&seen, revision))
+}
 fn viewer(u: Option<&User>) -> crate::visibility::Viewer<'_> {
     crate::visibility::Viewer { id: u.map(|u| u.id), role: u.map(|u| u.role.as_str()) }
 }
@@ -1141,7 +1161,7 @@ async fn read(
     Path((name, id)): Path<(String, Uuid)>,
     h: HeaderMap,
     Query(pairs): Query<Vec<(String, String)>>,
-) -> Result<Json<Value>> {
+) -> Result<Response> {
     let r = app.resource(&name)?;
     let u = app.user(&h).await?;
     let mut names = Vec::new();
@@ -1151,9 +1171,9 @@ async fn read(
         }
         names = value.split(',').map(str::to_string).collect();
     }
-    let mut row = db::get(&app.pool, r, id)
+    let (mut row, revision) = db::get_version(&app.pool, r, id)
         .await
-        .map_err(|e| Error::internal(e))?
+        .map_err(|e| Error::internal(db::safe(e)))?
         .ok_or_else(Error::missing)?;
     let owns = u
         .as_ref()
@@ -1177,8 +1197,14 @@ async fn read(
         through = owns_through(&app, r, "read", u, id).await?;
     }
     crate::visibility::project(r, &mut row, viewer(u.as_ref()), through);
+    // A record without includes carries a strong revision validator usable in If-Match.
+    let etag = names.is_empty().then(|| cache_http::record_etag(&row, &revision));
     include(&app, r, &names, std::slice::from_mut(&mut row), viewer(u.as_ref())).await?;
-    Ok(Json(row))
+    let mut response = Json(row).into_response();
+    if let Some(etag) = etag.and_then(|e| HeaderValue::from_str(&e).ok()) {
+        response.headers_mut().insert(header::ETAG, etag);
+    }
+    Ok(response)
 }
 fn before_error(error: crate::before_hooks::HookFailure, r: &Resource) -> Error {
     match error {
@@ -1334,6 +1360,7 @@ async fn update(
         .map_err(|error| Error::internal(db::safe(error)))?
         .ok_or_else(Error::missing)?;
     let (owner, through) = scoped_owner(&app, r, "update", &u, &existing, id).await?;
+    precondition(r, &h, &existing, &revision, &u, through)?;
     crate::visibility::reject_server_fields(r, &input).map_err(Error::validation)?;
     let mut input = input;
     crate::visibility::keep_stored(r, &mut input, &existing["data"]);
@@ -1369,6 +1396,7 @@ async fn patch(
         .map_err(|error| Error::internal(db::safe(error)))?
         .ok_or_else(Error::missing)?;
     let (owner, through) = scoped_owner(&app, r, "update", &u, &existing, id).await?;
+    precondition(r, &h, &existing, &revision, &u, through)?;
     crate::visibility::reject_server_fields(r, &input).map_err(Error::validation)?;
     let mut merged = crate::domain::merge_patch(r, &existing["data"], &input).map_err(Error::validation)?;
     crate::visibility::keep_stored(r, &mut merged, &existing["data"]);
@@ -1401,7 +1429,8 @@ async fn delete(
         .await
         .map_err(|error| Error::internal(db::safe(error)))?
         .ok_or_else(Error::missing)?;
-    let (owner, _) = scoped_owner(&app, r, "delete", &u, &existing, id).await?;
+    let (owner, through) = scoped_owner(&app, r, "delete", &u, &existing, id).await?;
+    precondition(r, &h, &existing, &revision, &u, through)?;
     // Retain only fixed authority metadata before handing the row to application code.
     let deleted = json!({"id": existing["id"], "owner": existing["owner"]});
     let output = before(

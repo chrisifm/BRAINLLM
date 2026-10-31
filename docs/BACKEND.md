@@ -207,6 +207,7 @@ Files of any type (documents, archives, audio, video) use declared buckets: [bac
 Running behind a proxy, extra CORS origins and preflight caching: [backend/proxy-cors.md](backend/proxy-cors.md).
 Database TLS and boot retry, health probes, backpressure and graceful shutdown: [backend/lifecycle.md](backend/lifecycle.md).
 Several processes or machines (shared rate windows, socket fan-out through LISTEN/NOTIFY): [backend/cluster.md](backend/cluster.md).
+ETag and 304 on API reads, public cache lifetimes for anonymous reads, If-Match on writes: [backend/caching.md](backend/caching.md).
 App-declared routes with typed path, query and headers, per-route limits and auth: [backend/routes.md](backend/routes.md).
 Signed webhook routes for payment and shipping providers (HMAC, timestamp tolerance, raw body): [backend/webhooks.md](backend/webhooks.md).
 Calling external APIs from server logic (timeouts, safe retries, idempotency keys, redacted errors): [backend/outbound.md](backend/outbound.md).

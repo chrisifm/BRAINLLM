@@ -326,6 +326,7 @@ Edge: `server/platform.jsbrain` `export default {trustProxy:['127.0.0.1'],cors:{
 Probes `GET /health/live` and `GET /health/ready`; overload answers `503 OVERLOADED` + `Retry-After`. Production
 requires `sslmode=verify-full` for a remote `DATABASE_URL`. See `docs/backend/proxy-cors.md`, `docs/backend/lifecycle.md`.
 Several processes: `cluster:{shared:true}` in `server/platform.jsbrain` (automatic when `BRAIN_BACKEND_PROCESSES>1`) keeps route/API-key rate windows in Postgres and relays socket events between processes. See `docs/backend/cluster.md`.
+Caching: API GETs send `ETag` (304 on `If-None-Match`); `server/cache.jsbrain` `export default {products:{maxAge:'1m',staleWhileRevalidate:'10m'}}` sets a public `Cache-Control` for anonymous reads of public-read resources; `If-Match` on PUT/PATCH/DELETE → 412 `PRECONDITION_FAILED` when stale. See `docs/backend/caching.md`.
 Routes: `server/routes/<name>/route.jsbrain` `export default {method:'POST',path:'/orders/{id}/quote',auth:'user',params:{id:'uuid'},query:{currency:'str!'},bodyLimit:'16kb',timeout:'5s',rate:'20/min per user'}`
 + `handler.jsbrain` `export default async (ctx) => ({status:201,body:{...}})`; throw `{errors:{field:'msg'}}` → 422.
 Signed: add `body:'raw',verify:{scheme:'timestamped'|'hmac',header,secret:'ENV_NAME',tolerance:'5m'}`. See `docs/backend/routes.md`, `docs/backend/webhooks.md`.

@@ -29,6 +29,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
   `Vary: Accept-Encoding`; static files get the smallest precompressed sibling the client accepts. Before, every HTML
   document left `server.mjs` uncompressed; the scaffold home page drops from 10,492 to 3,741 bytes with Brotli. Opt
   out with `createServer({ compress: false })` or `BRAIN_COMPRESS=off` (docs/PERFORMANCE.md).
+- Native backend HTTP caching: every successful `GET /api/...` sends an `ETag` and answers `If-None-Match` with 304;
+  `server/cache.jsbrain` declares `maxAge`, `staleWhileRevalidate` and `staleIfError` for anonymous reads of
+  public-read resources; `PUT`/`PATCH`/`DELETE` honor `If-Match` and answer 412 `PRECONDITION_FAILED` on a stale
+  record. See `docs/backend/caching.md`.
 - WebMCP imperative tools ship (#106): `<meta tools="add_task: Add a task (text:str!, due:date)">` plus a same-named
   function registers the tool with the browser's model context while the component is mounted and unregisters it on
   unmount. Nothing is registered without WebMCP, during SSR or prerender; arguments are validated against the
