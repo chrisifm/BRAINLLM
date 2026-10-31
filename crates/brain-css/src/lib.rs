@@ -551,8 +551,11 @@ fn root_anchor(it: CssItem) -> CssItem {
                     if part.starts_with('&') || part.starts_with(":scope") || part.is_empty() {
                         return vec![part];
                     }
-                    let (first, rest) = first_compound(&part);
-                    vec![format!(":where(:scope):is({first}){rest}"), part]
+                    let (compound, rest) = first_compound(&part);
+                    // A pseudo-element is invalid inside `:is()` (Chrome drops the whole list): keep it outside.
+                    let (first, pseudo) = compound.split_at(pseudo_element_start(compound));
+                    let anchor = if first.is_empty() { String::new() } else { format!(":is({first})") };
+                    vec![format!(":where(:scope){anchor}{pseudo}{rest}"), part]
                 })
                 .collect();
             CssItem::Rule { selector: parts.join(", "), items, span }
@@ -601,6 +604,29 @@ fn first_compound(s: &str) -> (&str, &str) {
         }
     }
     (s, "")
+}
+
+/// Byte offset of the compound's pseudo-element (`::x` or legacy `:before`/`:after`/`:first-line`/`:first-letter`)
+/// outside parentheses, brackets and strings; the compound's length when it has none.
+fn pseudo_element_start(s: &str) -> usize {
+    let (mut depth, mut quote) = (0i32, None::<char>);
+    for (i, c) in s.char_indices() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(c),
+            (None, '(' | '[') => depth += 1,
+            (None, ')' | ']') => depth -= 1,
+            (None, ':') if depth == 0 => {
+                let tail = s[i..].to_ascii_lowercase();
+                if tail.starts_with("::") || [":before", ":after", ":first-line", ":first-letter"].iter().any(|p| tail.starts_with(p) && !tail[p.len()..].starts_with(|c: char| c.is_ascii_alphanumeric() || c == '-')) {
+                    return i;
+                }
+            }
+            _ => {}
+        }
+    }
+    s.len()
 }
 
 /// Order of the cascade layers every build declares first.
@@ -662,5 +688,20 @@ mod tests {
         let out = scoped(&s, "h", "comp");
         assert!(out.contains(":where(:scope):is(.todo) li, .todo li, :where(:scope):is(button.on) > span:is(.a, .b), button.on > span:is(.a, .b), & .x {"), "{out}");
         assert!(out.contains(":where(:scope):is(p), p {"), "{out}");
+    }
+
+    #[test]
+    fn root_anchoring_keeps_pseudo_elements_outside_is() {
+        let s = parse_str("dialog::backdrop { color: red } .or::before, .or:after { content: '' } input::-webkit-search-cancel-button { display: none } ::selection { color: blue } .a:is(.b)::before { color: red }", "c.css").unwrap();
+        let out = scoped(&s, "h", "comp");
+        assert!(out.contains(":where(:scope):is(dialog)::backdrop, dialog::backdrop {"), "{out}");
+        assert!(out.contains(":where(:scope):is(.or)::before, .or::before, :where(:scope):is(.or):after, .or:after {"), "{out}");
+        assert!(out.contains(":where(:scope):is(input)::-webkit-search-cancel-button, input::-webkit-search-cancel-button {"), "{out}");
+        assert!(out.contains(":where(:scope)::selection, ::selection {"), "{out}");
+        assert!(out.contains(":where(:scope):is(.a:is(.b))::before, .a:is(.b)::before {"), "{out}");
+        for anchored in out.split(":is(").skip(1) {
+            let inner: String = anchored.chars().take_while(|c| *c != ')').collect();
+            assert!(!inner.contains("::") && !inner.contains(":before") && !inner.contains(":after"), "pseudo-element inside :is(): {out}");
+        }
     }
 }

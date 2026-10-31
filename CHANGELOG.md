@@ -9,6 +9,14 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+### Fixed
+- Scoped CSS keeps pseudo-elements (`::backdrop`, `::before`, `:after`, `::-webkit-*`) outside the root anchor's
+  `:is()`, so Chrome no longer drops the whole rule list for components that style them at their root.
+- Conditional content passed to a named slot (`{#if}<a slot="footer">…{:else}<span slot="footer">…{/if}`) now
+  renders in that named slot instead of the default one, and the `slot` attribute no longer reaches the DOM.
+- `npm/smoke-registry.mjs` reports invalid arguments, versions and deadlines as structured `invalid-arguments`,
+  `invalid-exact-version` and `invalid-deadline` failures instead of only printing the usage text.
+
 ## [0.6.1] - 2026-10-31
 
 ### Fixed
