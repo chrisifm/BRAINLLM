@@ -678,6 +678,9 @@ impl<'a> Checker<'a> {
                 {
                     if c.level != Level::View {
                         self.push("B0117", *span, "`load()` only exists in `views/`", "move the data loading to the view and pass the result as a prop");
+                    } else if c.file.rsplit('/').next() == Some("_layout.brain") {
+                        // the server runs only the route view's load(); a layout's would leave its props empty
+                        self.push("B0117", *span, "`load()` in a layout never runs; only the route's view loads data", "load the data in each view that needs it, or read shared state from a channel (session.user) in the layout");
                     } else if !f.is_async {
                         self.push("B0117", *span, "`load()` must be `async`", "write `export async function load(ctx) { … }`");
                     }

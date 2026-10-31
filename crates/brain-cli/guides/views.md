@@ -31,7 +31,7 @@ Adding a page, a dynamic route, a section with shared chrome, or protecting page
 ## Rules that bite
 - `app.brain` is the static document shell: `<html lang>`, common `<head>`, site `<meta seo titleTemplate=…>`, nav and
   `<slot />`. Expressions, blocks or components there are B0132; put them in `views/_layout.brain`.
-- `load` runs only in views; in `_layout.brain` it is not run (B0117 for an invalid `load`).
+- `load` runs only in views; `brain check` rejects a `load` in `_layout.brain` (B0117) because it is never run.
 - In the browser there is no `ctx.user` (the session cookie is HttpOnly): a guard that would stop on it makes a full
   page load and the server guard decides. Never mirror auth in a client store to skip the guard.
 - `redirect()` only to same-origin paths or hosts listed in `brain.json` `redirects` (B0710 open redirect).
