@@ -1350,6 +1350,23 @@ registration snippet, `_headers` and nginx snippet, dev unregister, `brain.json`
 `brain-persist.js`, `brain-worker.js`) · COMPILER #123 (`*.worker.*` modules: worker chunk, async exports, DOM-in-worker
 error; `cache:` accepted in `api()` schemas) · QA #124 (repeat-visit bench and the tests above).
 
+### 35.8 Declarative data routes and user-controlled updates (2026-10-31)
+`brain.json` `cache.routes` lists same-origin data paths for the service worker: `match` (`/api/products/*`, trailing
+`*` = prefix, never `/_b/`, `/_r/` or `/sw.js`), `strategy` (`cache-first`, `network-first`, `stale-while-revalidate`,
+`network-only`), `maxEntries` (1-1000, default 64), `maxAge` (`30s`…`1y`, default none) and `timeout` (network-first,
+1-60 s, default 3 s). The first match wins; unlisted data stays untouched as before. The build validates entries
+(`cache::sw_route`) and writes them, base path included, into `self.BRAIN_BUILD.routes` only when declared, so a
+worker without routes is byte-identical. Each route owns a `brain:route:<match>` cache that survives builds and is
+deleted on activate when the route is removed. Entries carry `x-brain-at`; older than `maxAge` they are never served.
+Eviction is oldest-first by insertion. Only `200` responses that are not `private`/`no-store`, carry no `Set-Cookie`,
+do not vary by `Cookie`/`Authorization`/`*` and whose request has no `Authorization` header are stored. Same-origin
+cookies are invisible to the worker: personal endpoints must be `network-only` (or return `private`).
+`cache.update: "prompt"` keeps a new worker in `waiting` while an older one controls tabs (the first install still
+activates at once). `updateReady()` / `applyUpdate()` (`brain-update.js`, auto-imported only by views that use them,
+0 bytes elsewhere) expose the waiting worker as a signal and post `brain:skip-waiting`; the page reloads once on
+`controllerchange`. Tests: `runtime/test/sw-routes.test.js`, `runtime/test/update.test.js`,
+`brain-pack` `worker_routes_and_update_prompt`, `brain-cli/tests/sw_routes.rs`.
+
 ## 36. Environment file `.brain_env` (fixed 2026-10-13, Chris: "loaded by default, understood by the compiler")
 
 One file at the project root holds every variable for every environment. It is loaded by default; there is no other

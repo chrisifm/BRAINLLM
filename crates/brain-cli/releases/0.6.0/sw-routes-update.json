@@ -1,0 +1,31 @@
+{
+  "id": "sw-routes-update",
+  "kind": "capability",
+  "title": "Service worker data routes and user-controlled updates",
+  "why": "Public API data can be answered offline with a declared caching strategy and limits, and a new build can wait for the user to accept it instead of taking over at once.",
+  "changelog": [
+    "Service worker data routes",
+    "User-controlled app updates"
+  ],
+  "guide": "docs/BROWSER-DATA.md",
+  "codes": [],
+  "apis": [
+    "brain.json cache.routes",
+    "brain.json cache.update",
+    "updateReady",
+    "applyUpdate"
+  ],
+  "affects": [
+    "brain.json"
+  ],
+  "adopt": {
+    "file": "brain.json",
+    "snippet": "\"cache\": { \"update\": \"prompt\", \"routes\": [{ \"match\": \"/api/products/*\", \"strategy\": \"stale-while-revalidate\", \"maxEntries\": 50, \"maxAge\": \"1h\" }] }"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "\"routes\""
+    }
+  ]
+}

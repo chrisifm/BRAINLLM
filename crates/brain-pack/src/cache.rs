@@ -29,11 +29,69 @@ pub struct CacheCfg {
     pub base: String,
     /// `brain build --ext web|brain` (#26); empty = brain.json `"ext"`, else `web`.
     pub ext: String,
+    /// `"update": "prompt"`: a new worker waits until the page calls `applyUpdate()` (§35.8); default takes over at once.
+    pub update_prompt: bool,
+    /// `"routes": [...]`: declarative service worker strategies for same-origin data (§35.8).
+    pub routes: Vec<SwRoute>,
+}
+
+/// One `cache.routes` entry, validated by [`sw_route`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct SwRoute {
+    /// Path relative to the app (`/api/products/`); `prefix` when the author wrote a trailing `*`.
+    pub path: String,
+    pub prefix: bool,
+    pub strategy: &'static str,
+    pub max_entries: u32,
+    /// Seconds; 0 = no age limit.
+    pub max_age: u64,
+    /// Network-first deadline in milliseconds.
+    pub timeout_ms: u64,
+}
+
+pub const SW_STRATEGIES: &[&str] = &["cache-first", "network-first", "stale-while-revalidate", "network-only"];
+
+/// `30s`, `10m`, `1h`, `7d` or a number of seconds.
+pub fn duration_secs(v: &str) -> Option<u64> {
+    let v = v.trim();
+    let (n, unit) = v.split_at(v.find(|c: char| !c.is_ascii_digit()).unwrap_or(v.len()));
+    let n: u64 = n.parse().ok()?;
+    Some(n * match unit { "" | "s" => 1, "m" => 60, "h" => 3600, "d" => 86400, _ => return None })
+}
+
+/// Validates one route: `match` starts with `/`, may end in `*`, never covers framework paths; bounded limits.
+pub fn sw_route(pattern: &str, strategy: &str, max_entries: Option<f64>, max_age: Option<&str>, timeout: Option<&str>) -> Result<SwRoute, String> {
+    let fix = "fix: e.g. { \"match\": \"/api/products/*\", \"strategy\": \"stale-while-revalidate\", \"maxEntries\": 50, \"maxAge\": \"1h\" }";
+    let prefix = pattern.ends_with('*');
+    let path = pattern.trim_end_matches('*');
+    if !path.starts_with('/') || path.len() > 256 || path.contains('*') || path.chars().any(|c| c.is_whitespace() || c == '?' || c == '#') {
+        return Err(format!("brain.json: cache.routes match `{pattern}` must be a path starting with / with an optional trailing *; {fix}"));
+    }
+    if ["/_b/", "/_r/", "/sw.js"].iter().any(|f| path.starts_with(f) || (prefix && f.starts_with(path))) {
+        return Err(format!("brain.json: cache.routes match `{pattern}` overlaps framework files (/_b/, /_r/, /sw.js); match only your data paths such as /api/…"));
+    }
+    let Some(strategy) = SW_STRATEGIES.iter().copied().find(|s| *s == strategy) else {
+        return Err(format!("brain.json: cache.routes strategy `{strategy}` must be one of {}", SW_STRATEGIES.join(", ")));
+    };
+    let max_entries = match max_entries {
+        None => 64,
+        Some(n) if n >= 1.0 && n <= 1000.0 && n.fract() == 0.0 => n as u32,
+        Some(_) => return Err("brain.json: cache.routes maxEntries must be a whole number from 1 to 1000 (default 64)".into()),
+    };
+    let max_age = match max_age {
+        None => 0,
+        Some(v) => duration_secs(v).filter(|s| *s <= 31_536_000).ok_or("brain.json: cache.routes maxAge must be a duration such as \"10m\", \"1h\" or \"7d\" (at most one year)")?,
+    };
+    let timeout_ms = match timeout {
+        None => 3000,
+        Some(v) => duration_secs(v).filter(|s| (1..=60).contains(s)).ok_or("brain.json: cache.routes timeout must be a duration from \"1s\" to \"60s\" (default 3s)")? * 1000,
+    };
+    Ok(SwRoute { path: path.into(), prefix, strategy, max_entries, max_age, timeout_ms })
 }
 
 impl Default for CacheCfg {
     fn default() -> Self {
-        CacheCfg { http: true, sw: true, offline: true, precache_kb: 2048, data: true, sw_template: None, base: "/".into(), ext: String::new() }
+        CacheCfg { http: true, sw: true, offline: true, precache_kb: 2048, data: true, sw_template: None, base: "/".into(), ext: String::new(), update_prompt: false, routes: Vec::new() }
     }
 }
 
@@ -236,8 +294,17 @@ pub fn apply(root: &Path, cfg: &CacheCfg, pages: &[PageRef], extra_csp: &[(Strin
                     files.insert(offline_file.clone(), OFFLINE_HTML.into());
                 }
                 let list = precache_ext(pages, files, binary, cfg.precache_kb * 1024, pre, ext);
+                // routes/update only when declared: the default worker stays byte-identical
+                let mut extra = String::new();
+                if !cfg.routes.is_empty() {
+                    let r: Vec<String> = cfg.routes.iter().map(|r| format!("{{match:{},prefix:{},strategy:{},maxEntries:{},maxAge:{},timeout:{}}}", js(&format!("{pre}{}", r.path)), r.prefix, js(r.strategy), r.max_entries, r.max_age, r.timeout_ms)).collect();
+                    extra.push_str(&format!(",routes:[{}]", r.join(",")));
+                }
+                if cfg.update_prompt {
+                    extra.push_str(",update:\"prompt\"");
+                }
                 let manifest = format!(
-                    "self.BRAIN_BUILD={{hash:{},base:{},precache:[{}],offline:{}}};\n",
+                    "self.BRAIN_BUILD={{hash:{},base:{},precache:[{}],offline:{}{extra}}};\n",
                     js(&build_hash),
                     js(&cfg.base),
                     list.iter().map(|u| js(u)).collect::<Vec<_>>().join(","),
@@ -908,6 +975,32 @@ mod tests {
         dedup.dedup();
         assert_eq!(paths, dedup, "{h}");
         assert!(nginx("abc", true, "default-src 'self'").contains("location /_b/") && nginx("abc", true, "default-src 'self'").contains("immutable"));
+    }
+
+    #[test]
+    fn worker_routes_and_update_prompt() {
+        assert_eq!(duration_secs("90"), Some(90));
+        assert_eq!(duration_secs("10m"), Some(600));
+        assert_eq!(duration_secs("2x"), None);
+        let r = sw_route("/api/products/*", "stale-while-revalidate", Some(50.0), Some("1h"), None).unwrap();
+        assert_eq!((r.path.as_str(), r.prefix, r.max_entries, r.max_age, r.timeout_ms), ("/api/products/", true, 50, 3600, 3000));
+        for bad in ["api", "/_b/*", "/*", "/a*b", "/api?x"] {
+            assert!(sw_route(bad, "cache-first", None, None, None).is_err(), "{bad}");
+        }
+        assert!(sw_route("/api", "fastest", None, None, None).unwrap_err().contains("network-first"));
+        assert!(sw_route("/api", "cache-first", Some(0.0), None, None).is_err());
+        assert!(sw_route("/api", "network-first", None, None, Some("2m")).is_err());
+        let root = tmp("swroutes");
+        let pages = [PageRef { route: "/", file: "index.html" }];
+        let cfg = CacheCfg { sw_template: Some("/*T*/".into()), base: "/app/".into(), update_prompt: true, routes: vec![r], ..Default::default() };
+        let (mut files, mut bin) = (built(), BTreeMap::new());
+        apply(&root, &cfg, &pages, &[], &mut files, &mut bin);
+        let sw = &files["sw.js"];
+        assert!(sw.contains(",routes:[{match:\"/app/api/products/\",prefix:true,strategy:\"stale-while-revalidate\",maxEntries:50,maxAge:3600,timeout:3000}],update:\"prompt\"};"), "{sw}");
+        let plain = CacheCfg { sw_template: Some("/*T*/".into()), ..Default::default() };
+        let (mut f2, mut b2) = (built(), BTreeMap::new());
+        apply(&root, &plain, &pages, &[], &mut f2, &mut b2);
+        assert!(!f2["sw.js"].contains("routes") && !f2["sw.js"].contains("update:"));
     }
 
     #[test]
