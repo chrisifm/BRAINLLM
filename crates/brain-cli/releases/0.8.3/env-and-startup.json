@@ -1,0 +1,12 @@
+{
+  "id": "env-and-startup",
+  "kind": "change",
+  "title": "Startup failures name the real cause",
+  "why": "Postgres login failures read alike, and a route with an absent secret stopped the whole server.",
+  "changelog": [
+    "Postgres login failures name the cause and the file the URL came from",
+    "a route or webhook whose secret is absent starts disabled with 503 and Retry-After (B0790); a secret that is too short still stops the server",
+    "`BRAIN_ENV_ONLY=file`, `BRAIN_ENV_KEEP`, and `envSource` with a recreate recipe in the PM2 preview"
+  ],
+  "guide": "brain guide server"
+}

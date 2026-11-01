@@ -1,0 +1,13 @@
+{
+  "id": "seo-live-probes",
+  "kind": "change",
+  "title": "The live audit shows redirects and compares declared with observed",
+  "why": "Following redirects hid listed URLs that move, and declared caching could differ from what was served.",
+  "changelog": [
+    "`brain seo audit --url` no longer follows redirects: B1867 listed URL redirects, B1868 canonical against sitemap, B1869 URL variants, B1870 declared against observed",
+    "`seo-urls.txt` and `brain seo urls [--write]` keep a register of published URLs (B1879)",
+    "static checks B1871-B1878",
+    "JSON-LD rules for DiscussionForumPosting, QAPage and ProfilePage"
+  ],
+  "guide": "brain guide seo"
+}

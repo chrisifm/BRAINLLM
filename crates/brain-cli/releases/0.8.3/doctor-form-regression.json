@@ -1,0 +1,11 @@
+{
+  "id": "doctor-form-regression",
+  "kind": "fix",
+  "title": "A form no longer fails doctor",
+  "why": "Since 0.8.2 the unsaved-changes listener was registered inside an effect and read as a leak.",
+  "changelog": [
+    "B0602 no longer fires for the `beforeunload` guard of `form`",
+    "reserved pages (`_error`, 404, 500) are not asked for a description (B1601)"
+  ],
+  "guide": "brain guide tests"
+}

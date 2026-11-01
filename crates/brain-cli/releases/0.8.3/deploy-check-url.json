@@ -1,0 +1,22 @@
+{
+  "id": "deploy-check-url",
+  "kind": "capability",
+  "title": "Check a deployed origin",
+  "why": "Duplicate headers and a wide proxy trust only show on the real deployment.",
+  "changelog": [
+    "`brain deploy check --url <origin>` (B1857, B1891-B1893); a wide `trustProxy` warns (B0784)",
+    "the build reads `dist` back (B1895-B1899)"
+  ],
+  "guide": "brain guide server",
+  "adopt": {
+    "file": "package.json",
+    "command": "brain deploy check --url <origin>",
+    "snippet": "\"scripts\": { \"deploy:check\": \"brain deploy check --url https://www.example.com\" }"
+  },
+  "uses": [
+    {
+      "glob": "{package.json,Makefile,justfile,ecosystem.config.cjs,**/*.sh,**/*.yml,**/*.yaml}",
+      "contains": "deploy check"
+    }
+  ]
+}

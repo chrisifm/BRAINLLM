@@ -1,0 +1,13 @@
+{
+  "id": "url-forms",
+  "kind": "change",
+  "title": "One URL per page",
+  "why": "Repeated slashes, `/index.html` and `?page=1` published the same page twice.",
+  "changelog": [
+    "`<meta seo query=\"page\">`: `?page=1` redirects to the base and a non-page value is a 404",
+    "`//route`, `/a//b` and `/route/index.html` get one 301 in `brain start`; the static server collapses `/a//b` and `/route/index.html` and answers 400 to a leading `//`",
+    "Markdown twins send `Link: <url>; rel=\"canonical\"`",
+    "no response repeats a `Vary` token"
+  ],
+  "guide": "brain guide seo"
+}

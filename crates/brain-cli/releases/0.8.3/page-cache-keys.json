@@ -1,0 +1,12 @@
+{
+  "id": "page-cache-keys",
+  "kind": "change",
+  "title": "The page cache survives tracking links and failed revalidations",
+  "why": "Tracking parameters split the cache, and a failed revalidation dropped a good copy.",
+  "changelog": [
+    "`<meta cache>` pages can read the native backend",
+    "tracking parameters are ignored and the remaining ones sorted",
+    "`stale-if-error` and the copy is kept on a failed revalidation"
+  ],
+  "guide": "brain guide server"
+}

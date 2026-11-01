@@ -1,0 +1,21 @@
+{
+  "id": "release-check",
+  "kind": "capability",
+  "title": "One command before a release",
+  "why": "The checks for a release were spread over several commands.",
+  "changelog": [
+    "`brain release-check [--env production] [--url <origin>] [--json]`"
+  ],
+  "guide": "brain guide server",
+  "adopt": {
+    "file": "package.json",
+    "command": "brain release-check",
+    "snippet": "\"scripts\": { \"release:check\": \"brain release-check --env production\" }"
+  },
+  "uses": [
+    {
+      "glob": "{package.json,Makefile,justfile,ecosystem.config.cjs,**/*.sh,**/*.yml,**/*.yaml}",
+      "contains": "release-check"
+    }
+  ]
+}

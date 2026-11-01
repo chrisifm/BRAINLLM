@@ -1,0 +1,11 @@
+{
+  "id": "server-error-cause",
+  "kind": "change",
+  "title": "Every server error says why",
+  "why": "A 500 from `brain start` gave no cause, and a page rendered after a failed backend read could be stored in the page cache.",
+  "changelog": [
+    "every 5xx from `brain start` logs its cause and a request id",
+    "a page rendered after `load` caught a failed backend read logs a warning and is not stored"
+  ],
+  "guide": "brain guide server"
+}

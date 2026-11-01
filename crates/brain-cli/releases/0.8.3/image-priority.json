@@ -1,0 +1,12 @@
+{
+  "id": "image-priority",
+  "kind": "change",
+  "title": "Image loading follows the likely main image",
+  "why": "Lazy loading on the largest image slows the page.",
+  "changelog": [
+    "`<Img>` sets fetchpriority on the first image of at least 50000 square pixels or unknown size",
+    "in `{#each}` only the first iteration gets priority and the first 3 are not lazy; `{#if}` branches own their priority",
+    "Markdown images get `decoding=\"async\"`, the same loading rule and their size from `public/`"
+  ],
+  "guide": "brain guide seo"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "webmcp-lint",
+  "kind": "change",
+  "title": "WebMCP tools are linted",
+  "why": "A tool runs with the permissions of the page and an agent can call it.",
+  "changelog": [
+    "B1705-B1709 check WebMCP tools; B1705 is a warning because it reads names and text"
+  ],
+  "guide": "brain guide webmcp"
+}

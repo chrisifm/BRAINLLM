@@ -1,0 +1,20 @@
+{
+  "id": "seo-focus",
+  "kind": "capability",
+  "title": "Where your main terms live",
+  "why": "Up to three terms can be reported across titles, the home page, one main page and links. It is an editorial report, not a ranking factor, and promises no position.",
+  "changelog": [
+    "`seo.focus` (B1861-B1866)"
+  ],
+  "guide": "docs/SEO-SITE.md",
+  "adopt": {
+    "file": "brain.json",
+    "snippet": "{ \"seo\": { \"focus\": [\"offline planner\", \"field reports\"] } }"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "\"focus\""
+    }
+  ]
+}

@@ -68,6 +68,12 @@ Policy grants: `public` `owner` `owner.<ref>` `org` `org.<role>` `org.own` `<rol
 
 ## Added by release
 
+### 0.8.3
+
+- Check a deployed origin (`brain guide server`)
+- One command before a release (`brain guide server`)
+- Where your main terms live (`docs/SEO-SITE.md`)
+
 ### 0.8.2
 
 - `brain lighthouse` checks scores against minimums (`brain guide seo`)

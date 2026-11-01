@@ -7,6 +7,37 @@ diagnostics that reject code an earlier version accepted.
 Every npm package (`@christianirack/brainllm`, its seven native platform packages, `brainllm-runtime`,
 `create-brainllm` and `create-brainll`) ships the same version as `[workspace.package]` in `Cargo.toml`.
 
+## [0.8.3] - 2026-11-01
+
+Upgrade with `npm install -D @christianirack/brainllm@0.8.3 --save-exact`. New diagnostics may report code that passed before; B1872 and a removed URL in `seo-urls.txt` (B1879) are errors.
+
+- every 5xx from `brain start` logs its cause and a request id
+- a page rendered after `load` caught a failed backend read logs a warning and is not stored
+- `<meta cache>` pages can read the native backend
+- tracking parameters are ignored and the remaining ones sorted
+- `stale-if-error` and the copy is kept on a failed revalidation
+- `<meta seo query="page">`: `?page=1` redirects to the base and a non-page value is a 404
+- `//route`, `/a//b` and `/route/index.html` get one 301 in `brain start`; the static server collapses `/a//b` and `/route/index.html` and answers 400 to a leading `//`
+- Markdown twins send `Link: <url>; rel="canonical"`
+- no response repeats a `Vary` token
+- `<Img>` sets fetchpriority on the first image of at least 50000 square pixels or unknown size
+- in `{#each}` only the first iteration gets priority and the first 3 are not lazy; `{#if}` branches own their priority
+- Markdown images get `decoding="async"`, the same loading rule and their size from `public/`
+- Postgres login failures name the cause and the file the URL came from
+- a route or webhook whose secret is absent starts disabled with 503 and Retry-After (B0790); a secret that is too short still stops the server
+- `BRAIN_ENV_ONLY=file`, `BRAIN_ENV_KEEP`, and `envSource` with a recreate recipe in the PM2 preview
+- `brain deploy check --url <origin>` (B1857, B1891-B1893); a wide `trustProxy` warns (B0784)
+- the build reads `dist` back (B1895-B1899)
+- `brain release-check [--env production] [--url <origin>] [--json]`
+- B1705-B1709 check WebMCP tools; B1705 is a warning because it reads names and text
+- `seo.focus` (B1861-B1866)
+- `brain seo audit --url` no longer follows redirects: B1867 listed URL redirects, B1868 canonical against sitemap, B1869 URL variants, B1870 declared against observed
+- `seo-urls.txt` and `brain seo urls [--write]` keep a register of published URLs (B1879)
+- static checks B1871-B1878
+- JSON-LD rules for DiscussionForumPosting, QAPage and ProfilePage
+- B0602 no longer fires for the `beforeunload` guard of `form`
+- reserved pages (`_error`, 404, 500) are not asked for a description (B1601)
+
 ## [0.8.2] - 2026-11-01
 
 Upgrade with `npm install -D @christianirack/brainllm@0.8.2 --save-exact`. SEO scores may change because the weights changed; check `brain seo audit`, and give each `[id]` view a title from its data if B0504 appears.
