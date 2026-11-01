@@ -101,7 +101,9 @@ async fn long_text_tables_search_without_errors_and_list_through_their_index() {
     let (status, found) = get(&http, "/api/items?search=react").await;
     assert_eq!((status, found["total"].clone()), (200, json!(self::rows() / 5)), "control: full-text search reads the long field to its end {found}");
 
-    let mut admin = pool.acquire().await.unwrap().detach();
+    // A connection that never ran the searches above: a pooled one still holds their counters and publishes them at its
+    // next transaction once its statistics interval passes, inside whichever window is open by then.
+    let mut admin = pool.connect_options().connect().await.unwrap();
     // Plain lists: the first page never walks the table, whatever its size.
     for (uri, page) in [("/api/items", 25), ("/api/items?limit=20&sort=-created_at", 20), ("/api/items?limit=20&sort=created_at", 20), ("/api/items?limit=20&sort=rank", 20)] {
         let before = settled(&mut admin).await;
