@@ -23,7 +23,7 @@ A page feels slow, a build reports a budget, a list is long, or before shipping 
 3. **Defer heavy components.** `<Chart lazy />` loads when visible · `lazy="idle"` · `lazy="interaction"` (renders an
    accessible load button). Only a component that cannot render on the server gets `<meta client>` with a sized
    placeholder: `<meta client height="320px">` or `<meta client width="100%" aspect="16/9">`.
-4. **Images.** `<Img src alt width height>`: lazy, `decoding="async"`, the LCP image gets priority from the compiler.
+4. **Images.** `<Img src alt width height>`: `decoding="async"`; the compiler gives `fetchpriority="high"` to the first image of a view with `width*height >= 50000`, keeps small images before it eager, and makes the rest lazy. In `{#each}` only the first iteration takes the priority and the first 3 stay eager. In a component the first large image is not lazy: write `loading="lazy"` if that component repeats in a list. Markdown images under `public/` get the same rule and their real dimensions.
    Keep the main image under 200 KB (AVIF/WebP); always give its intrinsic size (B0221 without it).
 5. **Long lists.** Paginate with `resource(posts.get, { page: true })` + `posts.more()`, or render rows with the kit
    `<Table rows={rows} columns={…} caption="…" />`, which virtualizes (more than 200 rows: only the visible window). A legitimate large list raises its render budget explicitly:

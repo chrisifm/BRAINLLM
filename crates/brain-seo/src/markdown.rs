@@ -993,6 +993,51 @@ fn close_delim(s: &str, from: usize, c: u8, w: usize) -> Option<usize> {
     None
 }
 
+/// Below this area (`width * height`) an image is an icon or a thumbnail, not the LCP candidate. Same rule as `<Img>`.
+const LARGE_AREA: u64 = 50_000;
+/// Images that may load eagerly before the LCP candidate.
+const EAGER: usize = 3;
+
+/// Dimensions, `decoding` and the `<Img>` loading rule for every `<img>` of rendered Markdown. `size` answers for a local
+/// address. An attribute already written in raw HTML is kept; a size that cannot be known is not invented.
+pub fn optimize_images(html: &str, size: &dyn Fn(&str) -> Option<(u32, u32)>) -> String {
+    let mut out = String::with_capacity(html.len());
+    let (mut rest, mut open, mut eager) = (html, true, 0);
+    while let Some(at) = rest.find("<img ") {
+        let Some(len) = rest[at..].find('>') else { break };
+        let (before, tag) = (&rest[..at], &rest[at..at + len]);
+        out.push_str(before);
+        out.push_str(tag.trim_end_matches('/').trim_end());
+        let value = |name: &str| tag.split(&format!(" {name}=\"")).nth(1)?.split('"').next().map(str::to_string);
+        let mut dims = value("width").zip(value("height")).and_then(|(w, h)| Some((w.parse::<u64>().ok()?, h.parse::<u64>().ok()?)));
+        if dims.is_none() && value("width").is_none() && value("height").is_none() {
+            let found = value("src").and_then(|src| size(&src.replace("&amp;", "&")));
+            if let Some((w, h)) = found {
+                out.push_str(&format!(" width=\"{w}\" height=\"{h}\""));
+                dims = Some((u64::from(w), u64::from(h)));
+            }
+        }
+        if value("decoding").is_none() {
+            out.push_str(" decoding=\"async\"");
+        }
+        let large = dims.is_some_and(|(w, h)| w.saturating_mul(h) >= LARGE_AREA);
+        if open && large {
+            if value("fetchpriority").is_none() && value("loading").is_none() {
+                out.push_str(" fetchpriority=\"high\"");
+            }
+            open = false;
+        } else if open && eager < EAGER {
+            eager += 1;
+        } else if value("loading").is_none() {
+            out.push_str(" loading=\"lazy\"");
+        }
+        out.push('>');
+        rest = &rest[at + len + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

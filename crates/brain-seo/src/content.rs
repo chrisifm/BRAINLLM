@@ -393,6 +393,19 @@ pub fn parse_entry_at(
     (Some(entry), probs)
 }
 
+/// Width and height of an image served from `public/`; a remote address or an unreadable file has no known size.
+fn public_image_size(root: &Path, src: &str) -> Option<(u32, u32)> {
+    let path = src.split(['?', '#']).next()?.strip_prefix('/')?;
+    if path.starts_with('/') || path.split('/').any(|part| part == ".." || part.is_empty()) {
+        return None;
+    }
+    let file = root.join("public").join(path);
+    if std::fs::symlink_metadata(&file).ok()?.file_type().is_symlink() {
+        return None;
+    }
+    crate::social::image_size(&std::fs::read(file).ok()?)
+}
+
 /// Entries of one folder (`content/blog` or `content/blog/es`), sorted newest first, duplicates reported.
 fn read_dir_entries(
     root: &Path,
@@ -422,6 +435,7 @@ fn read_dir_entries(
         probs.extend(p);
         if let Some(mut e) = e {
             e.locale = sub.map(str::to_string);
+            e.html = markdown::optimize_images(&e.html, &|src| public_image_size(root, src));
             if let Some(other) = entries.iter().find(|o| o.slug == e.slug) {
                 probs.push(Problem {
                     code: "B1824",
@@ -841,6 +855,42 @@ fn absolutize(html: &str, site: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn markdown_images_read_their_size_from_public_and_only_a_large_one_takes_the_priority() {
+        let root = std::env::temp_dir().join(format!("brain-md-images-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("content/notes")).unwrap();
+        std::fs::create_dir_all(root.join("public/img")).unwrap();
+        let png = |w: u32, h: u32| {
+            let mut b = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+            b.extend(w.to_be_bytes());
+            b.extend(h.to_be_bytes());
+            b
+        };
+        std::fs::write(root.join("public/img/icon.png"), png(32, 32)).unwrap();
+        std::fs::write(root.join("public/img/wide.png"), png(1200, 630)).unwrap();
+        std::fs::write(root.join("public/img/next.png"), png(800, 600)).unwrap();
+        let md = "---\ntitle: Images\ndescription: Images in a note.\ndate: 2026-01-01\n---\n\n![a](/img/icon.png)\n\n![b](/img/wide.png?v=1)\n\n![c](/img/next.png)\n\n![d](https://cdn.example/x.png)\n\n![e](/../secret.png)\n";
+        std::fs::write(root.join("content/notes/images.md"), md).unwrap();
+        let (cols, _) = load(&root, false);
+        let html = &cols[0].entries[0].html;
+        let tag = |src: &str| {
+            let at = html.find(&format!("src=\"{src}\"")).unwrap_or_else(|| panic!("{src}: {html}"));
+            html[at..at + html[at..].find('>').unwrap()].to_string()
+        };
+        let icon = tag("/img/icon.png");
+        assert!(icon.contains("width=\"32\" height=\"32\"") && icon.contains("decoding=\"async\""), "{icon}");
+        assert!(!icon.contains("loading") && !icon.contains("fetchpriority"), "{icon}");
+        let wide = tag("/img/wide.png?v=1");
+        assert!(wide.contains("width=\"1200\" height=\"630\"") && wide.contains("fetchpriority=\"high\"") && !wide.contains("loading"), "{wide}");
+        let next = tag("/img/next.png");
+        assert!(next.contains("loading=\"lazy\"") && !next.contains("fetchpriority"), "{next}");
+        let remote = tag("https://cdn.example/x.png");
+        assert!(!remote.contains("width=") && remote.contains("decoding=\"async\"") && remote.contains("loading=\"lazy\""), "{remote}");
+        assert!(!tag("/../secret.png").contains("width="), "a path outside public/ is never read");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
     use super::*;
 
     const POST: &str = "---\ntitle: \"Offline: first\"\ndescription: Why the planner works without network.\ndate: 2026-10-01\ntags: [sync, Offline]\nauthor: Ada\nseries: basics\n---\n# Offline first\n\nThe planner keeps working. ![Cover](/c.png)\n";

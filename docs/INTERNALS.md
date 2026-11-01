@@ -611,7 +611,7 @@ The `.brain` author writes nothing different: the compiler or the runtime applie
 | `contain-intrinsic-size` | Broad Baseline | COMPILER | avoids layout shifts with content-visibility |
 | `@starting-style` | Baseline 2024: Chrome 117+, Firefox 129+, Safari 17.5+ | COMPILER | entry animations without JS |
 | Scroll-driven animations | Chrome 115+, Safari 26+; Firefox no | COMPILER | scroll animations without JS; feature detection |
-| `fetchpriority` / `loading="lazy"` / `decoding="async"` | Baseline | COMPILER | the LCP image of each view is detected at build |
+| `fetchpriority` / `loading="lazy"` / `decoding="async"` | Baseline | COMPILER | the LCP candidate of each view is decided at build: first image with `width*height >= 50000` or an unknown size (§22) |
 | Long Animation Frames API | Chrome 123+; Firefox and Safari no | RUNTIME inspector | "Jank" view: which component and script caused each long frame |
 | Event Timing | Baseline 2025: Chrome 76+, Firefox 89+, Safari 26.2+ | RUNTIME inspector | INP per component |
 | bfcache | all | COMPILER | `unload` forbidden (B0211); no `no-store` on public pages (session pages are `no-store`, §35) |
@@ -725,7 +725,7 @@ Coverage against React/Next, Vue/Nuxt, Angular, Svelte/Kit and Astro; all with a
 | Forms and actions | `form()` + `server:` functions (RPC) | #38 #51 |
 | Real time | `store(init, {sync:'ws', url})` over WebSocket with reconnection | #31 |
 | i18n | §37: `i18n/<locale>.json`, `t(key, vars)`, prefix routing for non-default locales, `brain add locale` | #149–#153 |
-| Images | `<Img>`: `width/height` required (no CLS), lazy, `fetchpriority` on the LCP; responsive variants only if a system tool is available | #66 |
+| Images | `<Img>`: `width/height` required (no CLS). 2026-11-01: `fetchpriority="high"` goes to the first image of a view with `width*height >= 50000` or an unknown size; smaller images before it stay eager (up to 3), the rest get `lazy`. `{#if}` branches and `{#await}` states are alternatives with one budget each. In `{#each}` the decision is per iteration through the index: priority for the first, the first 3 eager; a nested list and any list after the candidate are lazy. A component cannot see its page: its first image with large literal dimensions is not lazy and takes no priority; `loading="lazy"` on it restores lazy for a card repeated in a list. Markdown images (`markdown::optimize_images`) follow the same rule and take `width`/`height` from `public/`; a remote or unreadable image gets no invented size. Responsive variants only if a system tool is available | #66 |
 | Head per view | `<meta seo>` | done |
 | Transitions | View Transitions (§19) | #43 |
 | Offline/PWA | on by default, opt-out in `brain.json` (§35) | #121–#124 |
