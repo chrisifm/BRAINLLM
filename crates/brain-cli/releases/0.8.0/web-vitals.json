@@ -6,7 +6,7 @@
   "changelog": [
     "Core Web Vitals reporting"
   ],
-  "guide": "brain spec",
+  "guide": "SPEC.md",
   "codes": [],
   "apis": [
     "vitals",

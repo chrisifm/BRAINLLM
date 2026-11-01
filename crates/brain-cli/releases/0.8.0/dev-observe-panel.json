@@ -6,7 +6,7 @@
   "changelog": [
     "Dev observability panel"
   ],
-  "guide": "brain spec",
+  "guide": "SPEC.md",
   "codes": [],
   "apis": [
     "__brainObserve.snapshot"

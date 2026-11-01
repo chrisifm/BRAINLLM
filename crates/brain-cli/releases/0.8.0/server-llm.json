@@ -6,7 +6,7 @@
   "changelog": [
     "Server LLM module"
   ],
-  "guide": "brain guide server",
+  "guide": "brain guide llm",
   "codes": [
     "B0920",
     "B0921",

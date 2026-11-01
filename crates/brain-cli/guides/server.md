@@ -51,27 +51,11 @@ environment. `brain check` reports an invalid value as B0707. Pass `ctx.signal` 
 4. Protect a folder: `brain add guard account` → `export default (ctx) => ctx.user ? true : redirect('/login')`.
 5. Never set the session cookie from browser code (B0713); never keep the signed-in user in `store(…, { sync: 'storage' })` (not machine-checked).
 
-## Server-only code
+## Server-only code (hosted models: `brain guide llm`)
 - `load` and `server:` functions run only on the server. Modules that touch a database or secrets start with
   `<meta server>` (`brain add server users-db`) and are imported only by `load` or server functions (B0701).
 - The client never calls `fetch()` to your own server: use `server:` functions or `api()` (`brain guide data`).
 - Do not build server fetch URLs from request data (B0711); redirect only to same-origin paths (B0710).
-
-## Model calls (`ctx.llm`, server only)
-`ctx.llm` is on every server `ctx`: `load`, `server:` functions, route and job handlers. It speaks to Anthropic (Messages API)
-and OpenAI (Responses API) directly, with no SDK. Text input and output only: tools, images and structured output are not in this module.
-```js
-server: async function ask(ctx, q) {
-  const r = await ctx.llm.complete({ system: 'Answer briefly.', prompt: q, maxTokens: 300 })
-  return r.text // also: stopReason ('end' | 'length' | 'filter' | 'other'), usage { inputTokens, outputTokens }, model, provider, requestId
-}
-```
-- Configuration: `ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL`, or `OPENAI_API_KEY` and `OPENAI_MODEL`. No model is built in: pass `{ model }` or set the variable, or the call fails B0921. With both keys, pass `{ provider }` or set `BRAIN_LLM_PROVIDER`. `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` point at a gateway or a local test provider (https, or http on loopback only).
-- Input: `prompt` or `messages: [{ role: 'user' | 'assistant', content: 'text' }]`; `system` is separate. `maxTokens` defaults to 1024. There are no sampling options: the current Anthropic API version rejects them.
-- Time: `timeoutMs` defaults to 60000 (at most 600000) and `ctx.signal` also cancels the call. A `server:` function or `load` still ends at brain.json `server.timeoutMs` (default 10000): raise it, or the deadline stops the call first.
-- Streaming: `const s = ctx.llm.stream(o); for await (const text of s) { … }; const r = await s.result`. It streams to server code only. An RPC answers one JSON value and BRAINLLM has no server route that emits events, so **streaming to the browser is not available**: return the final text, or publish parts through a native socket you already run.
-- Failures: `err.code` B0921 (configuration or bad options, also a key the provider refuses) or B0922 (provider failure); `err.status` is 400, 429, 499, 502, 503 or 504. A 429 reaches the client with a safe message; 5xx stay generic. `err.detail` holds the provider's text with the key removed; keep it on the server. No automatic retries: a repeated call can cost money.
-- Browser code: `ctx.llm` or `PUBLIC_ANTHROPIC_API_KEY`/`PUBLIC_OPENAI_API_KEY` is B0920, and `process.env.ANTHROPIC_API_KEY` is B0702. `brain check` warns B0923 when `ctx.llm` is used and no key is declared.
 
 ## Environment (`.brain_env`, already created; never a `.env`)
 ```

@@ -38,6 +38,7 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [data](../crates/brain-cli/guides/data.md) | load, server functions, resources, channels, caching |
 | [forms](../crates/brain-cli/guides/forms.md) | validation, submit, server errors, edit forms |
 | [i18n](../crates/brain-cli/guides/i18n.md) | a site in several languages |
+| [llm](../crates/brain-cli/guides/llm.md) | call Anthropic or OpenAI from server code with `ctx.llm` |
 | [performance](../crates/brain-cli/guides/performance.md) | fast first load, smooth updates, small pages |
 | [seo](../crates/brain-cli/guides/seo.md) | classic search and AI answers (GEO) |
 | [server](../crates/brain-cli/guides/server.md) | sessions, errors, environment, deploy with brain start |
