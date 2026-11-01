@@ -170,5 +170,11 @@ function keyBackend(env, keyName, kind) {
       async remove(id) { await send('DELETE', idPath(id), undefined, 10000); return null },
     })
   }
-  return Object.freeze({ resource, files, slugRedirect: (name, slug) => resource(name).slugRedirect(slug) })
+  // A declared operation (docs/backend/transactions.md): every step in one transaction, under the operation's roles.
+  const operation = (name, input = {}) => {
+    if (problem) throw fail(503, problem)
+    if (typeof name !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(name)) throw fail(400, 'Invalid operation name')
+    return request('POST', '/_brain/operations/' + name, input)
+  }
+  return Object.freeze({ resource, files, operation, slugRedirect: (name, slug) => resource(name).slugRedirect(slug) })
 }

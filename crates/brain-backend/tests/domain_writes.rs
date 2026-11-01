@@ -27,7 +27,14 @@ fn products() -> Resource {
     resource("shop_products")
 }
 fn shop_domain() -> Domain {
-    serde_json::from_value(fixture()["domain"].clone()).unwrap()
+    let mut domain = fixture()["domain"].clone();
+    // A paid order: the debit runs first, so a later step that fails must also take the charge back.
+    let mut paid = domain["operations"]["place_order"].clone();
+    paid["input"]["request_id"] = json!("str!");
+    paid["steps"].as_array_mut().unwrap().insert(0, json!({"as":"charge","debit":{"subject":"$user.id","amount":3,"reason":"order","key":"$input.request_id"}}));
+    paid["result"].as_array_mut().map(|result| result.push(json!("charge")));
+    domain["operations"]["paid_order"] = paid;
+    serde_json::from_value(domain).unwrap()
 }
 
 #[test]
@@ -712,4 +719,61 @@ async fn migrate_counts_the_stored_fields_that_left_the_schema() {
         .await
         .unwrap();
     assert_eq!(db::undeclared_fields(&pool, &all).await.unwrap(), vec![(r.name.clone(), "retired".to_string(), 1)]);
+}
+
+
+#[tokio::test]
+#[ignore]
+async fn a_debit_step_charges_with_the_operation_or_not_at_all() {
+    let s = shop().await;
+    let p = product(&s, "debit", json!({"stock": 2, "status": "active"})).await;
+    let p = id(&p);
+    let who: uuid::Uuid = sqlx::query_scalar("SELECT id FROM _brain_users WHERE email LIKE $1").bind(format!("alice-{}%", s.run)).fetch_one(&s.pool).await.unwrap();
+    let paid = |quantity: i64, key: &str| {
+        let body = json!({"product_id": p, "quantity": quantity, "request_id": key});
+        let (app, alice) = (s.app.clone(), s.alice.clone());
+        async move { call(&app, "POST", "/_brain/operations/paid_order", &alice, Some(body)).await }
+    };
+    let balance = || async { call(&s.app, "GET", &format!("/_brain/credits/{who}"), &s.alice, None).await.1["balance"].as_i64().unwrap() };
+
+    let (status, body) = paid(1, "no-credit").await;
+    assert_eq!((status, body["error"]["code"].as_str()), (409, Some("CREDITS_INSUFFICIENT")), "{body}");
+    assert_eq!(stock(&s, &p).await, 2, "no step ran");
+
+    let (status, body) = call(&s.app, "POST", &format!("/_brain/credits/{who}"), &s.admin, Some(json!({"delta": 10, "reason": "grant", "idempotency_key": "g1"}))).await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = paid(1, "first").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["result"]["charge"]["balance"], 7, "{body}");
+    assert_eq!(stock(&s, &p).await, 1);
+
+    // A later step fails: the charge goes back with it and its key stays free.
+    let (status, body) = paid(50, "too-many").await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(balance().await, 7, "{body}");
+    let entries: i64 = sqlx::query_scalar("SELECT count(*) FROM _brain_credit_ledger WHERE idempotency_key='too-many'").fetch_one(&s.pool).await.unwrap();
+    assert_eq!(entries, 0);
+
+    // The same key does not charge twice.
+    let (status, body) = paid(1, "first").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["result"]["charge"]["replayed"], true, "{body}");
+    assert_eq!(balance().await, 7);
+}
+
+#[test]
+fn a_debit_step_is_checked_when_the_app_loads() {
+    let refused = |debit: Value| {
+        let mut domain = fixture()["domain"].clone();
+        domain["operations"]["paid"] = json!({"roles": ["user"], "input": {"k": "str!"}, "steps": [debit]});
+        let domain: Domain = serde_json::from_value(domain).unwrap();
+        domain.validate(&resources()).unwrap_err()
+    };
+    let good = json!({"subject": "$user.id", "amount": 3, "reason": "r", "key": "$input.k"});
+    let with = |field: &str, value: Value| { let mut debit = good.clone(); debit[field] = value; json!({"as": "c", "debit": debit}) };
+    assert!(refused(with("amount", json!(0))).contains("debit needs"));
+    assert!(refused(with("amount", json!(-1))).contains("debit needs"));
+    assert!(refused(with("key", json!("fixed"))).contains("debit needs"));
+    assert!(refused(with("reason", json!(" "))).contains("debit needs"));
+    assert!(refused(json!({"as": "c", "debit": good, "read": "shop_products", "id": "$input.k"})).contains("a step of its own"));
 }

@@ -267,3 +267,38 @@ async fn self_service_off_closes_the_key_routes_and_keeps_operator_keys_working(
     assert!(api["paths"].get("/_brain/keys").is_none(), "the description leaves the closed routes out");
     assert!(api["components"]["securitySchemes"].get("apiKey").is_some(), "keys remain a way in");
 }
+
+
+#[tokio::test]
+#[ignore]
+async fn an_operation_takes_a_named_scope_and_the_system_key_passes_its_roles() {
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Use a disposable database");
+    let pool = db::connect(&url).await.unwrap();
+    let mut notes = sealed();
+    notes.name = "op_notes".into();
+    db::migrate(&pool, std::slice::from_ref(&notes)).await.unwrap();
+    let auth = Auth::new(pool.clone()).await.unwrap();
+    let domain: brain_backend::domain::Domain = serde_json::from_value(json!({"operations":{"stamp":{"roles":["admin"],"steps":[{"as":"made","create":"op_notes","data":{"title":"made"}}]}}})).unwrap();
+    let (router, _) = brain_backend::http::router_with_domain(pool.clone(), config(vec![notes]), domain).await.unwrap();
+    let keys = Keys::new(pool.clone(), Default::default()).unwrap();
+    let (member, _) = user(&auth, &pool, "user").await;
+    let (operator, _) = user(&auth, &pool, "user").await;
+    let path = "/_brain/operations/stamp";
+    let scope = ["operations.stamp:write"];
+
+    let (_, plain) = keys.create(member, new_key(&scope)).await.unwrap().unwrap();
+    let denied = call(&router, keyed("POST", path, &plain, Some(json!({})))).await;
+    assert_eq!(denied.0, StatusCode::FORBIDDEN, "the owner's role still has to fit: {}", denied.1);
+
+    let (_, wild) = keys.create_system(operator, new_key(&["op_notes:*"])).await.unwrap().unwrap();
+    let denied = call(&router, keyed("POST", path, &wild, Some(json!({})))).await;
+    assert_eq!(denied.1["error"]["code"], "API_KEY_SCOPE_DENIED", "a resource scope does not open an operation: {}", denied.1);
+
+    let (_, system) = keys.create_system(operator, new_key(&scope)).await.unwrap().unwrap();
+    let done = call(&router, keyed("POST", path, &system, Some(json!({})))).await;
+    assert_eq!(done.0, StatusCode::OK, "{}", done.1);
+    assert_eq!(done.1["operation"], "stamp");
+    assert_eq!(done.1["result"]["made"]["data"]["title"], "made", "{}", done.1);
+    let other = call(&router, keyed("POST", "/_brain/operations/other", &system, Some(json!({})))).await;
+    assert_eq!(other.0, StatusCode::FORBIDDEN, "{}", other.1);
+}

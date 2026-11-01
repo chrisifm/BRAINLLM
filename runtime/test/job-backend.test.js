@@ -118,3 +118,13 @@ test('a job reads and writes a declared bucket through ctx.backend.files',async(
   assert.match(calls[2].headers['content-type'],/^multipart\/form-data/)
   assert.match(calls[2].body,/name="file"; filename="a\.pdf"/)
 })
+
+test('a handler runs a declared operation with its key, in one call',async()=>{
+  const system='bk_live_aaaaaaaaaaaa_'+'d'.repeat(64)
+  const r=await run(`await ctx.backend.operation('place_order',{quantity:1});try{ctx.backend.operation('../keys')}catch(e){return e.status}`,{BRAIN_BACKEND_URL:url,BRAIN_JOBS_SYSTEM_KEY:system,BRAIN_JOB_RUN_AS:'system'})
+  assert.equal(r.value??r,400)
+  const call=seen.at(-1)
+  assert.equal(call.method+' '+call.path,'POST /_brain/operations/place_order')
+  assert.equal(call.headers['x-api-key'],system)
+  assert.deepEqual(JSON.parse(call.body),{quantity:1})
+})

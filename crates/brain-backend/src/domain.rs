@@ -213,6 +213,20 @@ pub struct Step {
     pub owned: bool,
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub input: Map<String, Value>,
+    /// Charges a credit balance in the operation's transaction, instead of naming a resource.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debit: Option<Debit>,
+}
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Debit {
+    /// `$user.id`, `$input.<field>` or `$<step>.<field>`: the user or organization charged.
+    pub subject: String,
+    /// A positive whole number, or a `$` reference to one.
+    pub amount: Value,
+    pub reason: String,
+    /// A `$` reference: the same value never charges twice.
+    pub key: String,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Kind {
@@ -529,6 +543,21 @@ impl Domain {
                 if !crate::contract::identifier(&step.name) || seen.contains(&step.name) {
                     return Err(format!("{slabel}: `as` must be a unique identifier"));
                 }
+                if let Some(debit) = &step.debit {
+                    if step.kind().is_ok() {
+                        return Err(format!("{slabel}: debit is a step of its own; fix: remove the other form or move it to another step"));
+                    }
+                    let is_reference = |text: &str| matches!(reference(text), Some(Ok(_)));
+                    let amount = match &debit.amount {
+                        Value::String(text) => is_reference(text),
+                        value => value.as_i64().is_some_and(|n| n > 0 && n <= crate::credits::MAX_DELTA),
+                    };
+                    if !is_reference(&debit.subject) || !amount || debit.reason.trim().is_empty() || debit.reason.len() > 128 || !is_reference(&debit.key) {
+                        return Err(format!("{slabel}: debit needs subject (for example $user.id), amount (a positive whole number or a reference), reason (1 to 128 bytes) and key (a reference such as $input.request_id)"));
+                    }
+                    seen.push(step.name.clone());
+                    continue;
+                }
                 let (kind, target) = step.kind()?;
                 let (resource, member) = match kind {
                     Kind::Action | Kind::Transition => {
@@ -677,6 +706,8 @@ pub enum Failure {
     Invalid(BTreeMap<String, String>),
     /// 409 GUARD_FAILED: the locked current record does not satisfy a declared condition.
     Guard(BTreeMap<String, String>),
+    /// A debit step the balance or its key refused.
+    Credits(crate::credits::Refusal),
     /// Database failure on `resource`; declared unique/check names are reported with the label prefix.
     Database { resource: String, label: Option<String>, error: sqlx::Error },
 }
@@ -1199,6 +1230,18 @@ impl<'a> Engine<'a> {
         let clock = self.clock(tx).await?;
         let mut steps: BTreeMap<String, Value> = BTreeMap::new();
         for step in &op.steps {
+            if let Some(debit) = &step.debit {
+                let scope = Scope { input: &input, user: self.user, steps: &steps, clock };
+                let bad = |field: &str, message: &str| Failure::Invalid(BTreeMap::from([(format!("{}.{field}", step.name), message.to_string())]));
+                let subject = scope.resolve(&Value::String(debit.subject.clone()), None);
+                let subject = subject.as_str().and_then(|s| Uuid::parse_str(s).ok()).ok_or_else(|| bad("subject", "Expected a user or organization id"))?;
+                let amount = scope.resolve(&debit.amount, None).as_i64().filter(|n| *n > 0).ok_or_else(|| bad("amount", "Expected a positive whole number"))?;
+                let key = scope.resolve(&Value::String(debit.key.clone()), None);
+                let key = key.as_str().ok_or_else(|| bad("key", "Expected a text key"))?;
+                let entry = crate::credits::apply_in(&mut **tx, subject, -amount, &debit.reason, key, Some(self.user.id)).await.map_err(Failure::Credits)?;
+                steps.insert(step.name.clone(), json!({"delta": entry.delta, "balance": entry.balance, "replayed": entry.replayed}));
+                continue;
+            }
             let (kind, target) = step.kind().map_err(|m| Failure::Invalid(BTreeMap::from([(step.name.clone(), m)])))?;
             let label = step.name.as_str();
             let resource_name = target.split('.').next().unwrap_or(target);
@@ -1523,6 +1566,10 @@ pub fn openapi(domain: &Domain, resources: &[Resource], api: &mut Value) {
         let mut result = Map::new();
         for step in &op.steps {
             if !op.result.is_empty() && !op.result.contains(&step.name) {
+                continue;
+            }
+            if step.debit.is_some() {
+                result.insert(step.name.clone(), json!({"type":"object","required":["delta","balance","replayed"],"properties":{"delta":{"type":"integer"},"balance":{"type":"integer"},"replayed":{"type":"boolean"}}}));
                 continue;
             }
             let target = step.kind().map(|(_, t)| t.split('.').next().unwrap_or(t).to_string()).unwrap_or_default();

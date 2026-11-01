@@ -531,6 +531,8 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
       } catch { outgoing?.destroy(); finish(true) }
     })
   }
+  // Reaches the request helper of a resource client without adding a method anyone can see on it.
+  const OPERATION_CALL = Symbol('operation')
   const resource = (incoming, response, rid, name, serviceKey) => {
     if (typeof name !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(name)) throw new HttpError(400, 'Invalid native resource name')
     const idPath = id => {
@@ -613,6 +615,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
       return list.join(',')
     }
     return Object.freeze({
+      [OPERATION_CALL]: (operation, input) => request('POST', '/_brain/operations/' + operation, input),
       // the HTTP list contract (docs/backend/filters.md, sorting.md, pagination.md): the backend validates declared
       // filters and sorts and answers 422 {errors}; this only rejects shapes the query string cannot express
       list(options = {}) {
@@ -791,6 +794,11 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
       return bucketClient(target, serviceKey, bucket)
     },
     slugRedirect: (name, slug) => resource(incoming, response, rid, name).slugRedirect(slug),
+    // A declared operation, as this visitor (docs/backend/transactions.md).
+    operation: (name, input = {}) => {
+      if (typeof name !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(name)) throw new HttpError(400, 'Invalid operation name')
+      return resource(incoming, response, rid, 'operations')[OPERATION_CALL](name, input)
+    },
     login: credentials => login(incoming, response, rid, credentials),
     signup: credentials => signup(incoming, response, rid, credentials),
     google: Object.freeze({

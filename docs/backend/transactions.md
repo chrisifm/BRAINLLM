@@ -93,3 +93,22 @@ declared steps (`x-brain-steps`). `brain backend schema --json` includes the loa
 Tested by `crates/brain-backend/tests/domain_writes.rs` (`postgres_operations_commit_every_step_or_roll_all_of_them_back`),
 which loads this example through `crates/brain-backend/tests/shop_contracts.json`; a brain-cli test keeps that file
 equal to what the CLI loads from `docs/backend/examples/shop`.
+
+## Charging credits
+
+A step can debit a [credit balance](credits.md) in the same transaction, so the charge and the work commit together:
+
+```js
+{ as: 'charge', debit: { subject: '$user.id', amount: 3, reason: 'order', key: '$input.request_id' } }
+```
+
+A balance that does not fit answers 409 `CREDITS_INSUFFICIENT` and no step applies; a later step that fails takes the
+charge back. The same `key` value does not charge twice, while the other steps do run again, so pair it with a step that
+is safe to repeat. Its result is `{ delta, balance, replayed }`.
+
+## From server code
+
+`await ctx.backend.operation('place_order', { product_id, quantity })` runs it as the signed-in visitor from `load` and
+server functions. In job and route handlers it uses their key: the key needs the named scope `operations.<name>:write`
+(no wildcard opens it) and its owner's role must be in `roles`; a `runAs: 'system'` key skips `roles`.
+

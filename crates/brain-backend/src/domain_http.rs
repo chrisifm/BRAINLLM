@@ -51,6 +51,7 @@ pub(super) fn validate(
 async fn failure(app: &App, user: &crate::auth::User, error: Failure) -> Error {
     match error {
         Failure::Forbidden => Error::forbidden(),
+        Failure::Credits(refusal) => super::credits_http::refused(refusal),
         Failure::Missing(label) => {
             let mut e = Error::missing();
             e.fields = Some(json!({ label: "Not found" }));
