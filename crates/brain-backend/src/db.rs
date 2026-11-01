@@ -837,6 +837,7 @@ fn failure_metadata(error: &sqlx::Error) -> Value {
         Some("23503" | "23001") => "reference constraint",
         Some("23514") => "check constraint",
         Some("42501") => "database privilege",
+        Some("28000" | "28P01") => "database refused the connection",
         _ => "database operation",
     };
     json!({"schemaVersion":1,"event":"database-operation-failed","rid":crate::http::request_reference(),"sqlstate":code,"category":category,"private":true,"valuesCaptured":false})
@@ -867,6 +868,12 @@ pub fn write_line(line: &str) {
 /// exhausted connections and a server going away. The transaction rolled back, so a retry is safe.
 pub(crate) fn retryable(state: &str) -> bool {
     deadline(state) || matches!(state, "55P03" | "40001" | "40P01" | "57P01" | "57P02" | "57P03" | "57P05") || state.starts_with("08") || state.starts_with("53")
+}
+/// The server refused a new connection for this role (`pg_hba.conf`, a role change, a rotated password): nothing the request
+/// did. It lasts until an operator acts, so it answers "come back" while the log keeps the SQLSTATE; at boot it stops the
+/// server instead (`boot.rs`).
+pub(crate) fn refused(state: &str) -> bool {
+    matches!(state, "28000" | "28P01")
 }
 /// A time budget ended the work: statement, transaction or idle-in-transaction. The same request will need the time again.
 pub(crate) fn deadline(state: &str) -> bool {

@@ -271,6 +271,7 @@ pub(crate) enum DatabaseLimit {
     Busy,
     Deadline,
     TooLarge,
+    Refused,
 }
 
 tokio::task_local! {
@@ -299,6 +300,8 @@ pub(crate) fn note_database_error(error: &sqlx::Error) {
             DatabaseLimit::Deadline
         } else if crate::db::too_large(&state) {
             DatabaseLimit::TooLarge
+        } else if crate::db::refused(&state) {
+            DatabaseLimit::Refused
         } else if crate::db::retryable(&state) {
             DatabaseLimit::Busy
         } else {

@@ -58,6 +58,16 @@ pub(crate) fn request_reference() -> Option<String> {
     REQUEST_ID.try_with(Clone::clone).ok()
 }
 
+/// What a captured stack leaves in the log. A stripped release binary has no symbols, so its frames say nothing: there is
+/// no stack event, only one note per process saying why, and each `backend-internal-error` still carries its location.
+fn stack_event(text: &str, truncated: bool, first_unsymbolized: impl FnOnce() -> bool, operation: Option<String>, resource: Option<String>, rid: Option<&str>, at: &std::panic::Location<'_>) -> Option<Value> {
+    let location = json!({"file":at.file(),"line":at.line(),"column":at.column()});
+    if stack_is_symbolized(text) {
+        return Some(json!({"schemaVersion":1,"event":"backend-internal-stack","operation":operation,"resource":resource,"rid":rid,"location":location,"stack":text,"truncated":truncated,"queueDepth":0,"private":true,"valuesCaptured":false}));
+    }
+    first_unsymbolized().then(|| json!({"schemaVersion":1,"event":"backend-stack-unavailable","reason":"binary has no symbols; use the location of backend-internal-error","rid":rid,"location":location,"queueDepth":0,"private":true,"valuesCaptured":false}))
+}
+
 /// True once per process: a binary without symbols stays so, and each `backend-internal-error` already carries its location.
 fn first_unsymbolized_stack() -> bool {
     static NOTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -156,10 +166,16 @@ impl Error {
         if db::sqlstate(error).is_some_and(|state| db::too_large(&state)) {
             return Self::value_too_large();
         }
+        if db::sqlstate(error).is_some_and(|state| db::refused(&state)) {
+            return Self::database_unavailable();
+        }
         if db::sqlstate(error).is_some_and(|state| db::retryable(&state)) {
             return Self::new(StatusCode::SERVICE_UNAVAILABLE, "DATABASE_BUSY", "The database could not finish in time and nothing was changed; retry after the Retry-After delay");
         }
         Self::internal_at(at)
+    }
+    fn database_unavailable() -> Self {
+        Self::new(StatusCode::SERVICE_UNAVAILABLE, "DATABASE_UNAVAILABLE", "The database refused this server's connection and nothing was changed; retry after the Retry-After delay")
     }
     fn value_too_large() -> Self {
         Self::new(StatusCode::PAYLOAD_TOO_LARGE, "VALUE_TOO_LARGE", "Nothing was written: a value exceeds what the database can store or index, for example long text in a unique or indexed field; shorten it or stop indexing that field")
@@ -176,6 +192,7 @@ impl Error {
         // The driver error became sanitized text on its way here; the request still knows which limit it hit.
         match crate::platform::database_limit() {
             Some(crate::platform::DatabaseLimit::TooLarge) => return Self::value_too_large(),
+            Some(crate::platform::DatabaseLimit::Refused) => return Self::database_unavailable(),
             Some(_) => return Self::new(StatusCode::SERVICE_UNAVAILABLE, "DATABASE_BUSY", "The database could not finish in time and the failed step was rolled back; retry after the Retry-After delay"),
             None => {}
         }
@@ -204,10 +221,7 @@ impl Error {
                     if n<value.len(){self.truncated=true;Err(std::fmt::Error)}else{Ok(())}
                 }}
                 let mut stack=Bounded{text:String::new(),truncated:false};let _=std::fmt::write(&mut stack,format_args!("{trace}"));
-                // A stripped release binary has no symbols: its frames say nothing, so the event says that instead.
-                let useful=stack_is_symbolized(&stack.text);
-                if !useful && !first_unsymbolized_stack() {return;}
-                db::diagnostic(&json!({"schemaVersion":1,"event":"backend-internal-stack","operation":operation.as_ref().map(|o|&o.0),"resource":operation.as_ref().and_then(|o|o.1.as_ref()),"rid":rid,"location":{"file":at.file(),"line":at.line(),"column":at.column()},"stack":useful.then_some(&stack.text),"stackUnavailable":(!useful).then_some("binary has no symbols; use the location"),"truncated":stack.truncated,"queueDepth":0,"private":true,"valuesCaptured":false}));
+                if let Some(event)=stack_event(&stack.text,stack.truncated,first_unsymbolized_stack,operation.as_ref().map(|o|o.0.clone()),operation.as_ref().and_then(|o|o.1.clone()),rid.as_deref(),at){db::diagnostic(&event);}
             });
             if diagnostic.is_err() {
                 DIAGNOSTIC_BUSY.store(false, std::sync::atomic::Ordering::Release);
@@ -259,6 +273,9 @@ impl IntoResponse for Error {
             .insert(crate::response::DefaultError);
         if self.code == "DATABASE_BUSY" {
             response.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
+        }
+        if self.code == "DATABASE_UNAVAILABLE" {
+            response.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from_static("5"));
         }
         if self.code == "AUTH_DENIED" {
             response
@@ -2567,6 +2584,17 @@ mod diagnostic_tests {
 
 #[cfg(test)]
 mod stack_note_tests {
+    #[test]
+    fn a_stack_event_always_holds_a_stack() {
+        let at = std::panic::Location::caller();
+        let useful = super::stack_event("0: brain_backend::http::list\n", false, || panic!("not a stripped binary"), None, None, Some("r1"), at).unwrap();
+        assert_eq!((useful["event"].as_str(), useful["stack"].as_str()), (Some("backend-internal-stack"), Some("0: brain_backend::http::list\n")));
+        let stripped = "0: <unknown>\n";
+        let note = super::stack_event(stripped, false, || true, None, None, Some("r1"), at).unwrap();
+        assert_eq!(note["event"], "backend-stack-unavailable", "{note}");
+        assert!(note.get("stack").is_none() && note["reason"].as_str().unwrap().contains("no symbols") && note["location"]["line"].is_u64(), "{note}");
+        assert!(super::stack_event(stripped, false, || false, None, None, Some("r1"), at).is_none(), "the note is once per process");
+    }
     #[test]
     fn the_note_about_a_binary_without_symbols_is_kept_once_per_process() {
         assert!(super::first_unsymbolized_stack());
