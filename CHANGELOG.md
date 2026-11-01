@@ -17,7 +17,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - The SEO audit compares a page only with the topics it can mention; 4000 pages went from about 23 s to about 2 s of CPU with the same findings
 - Prerendering inserts fragments and walks siblings in linear time
 - Fix: a build that fails on a file `brain check` does not reach names its location and real fix; `brain build --json` and `brain_build` report `phase` and `diagnostics` with the fields of `brain check`, marking locations outside the app as `generated`
-- Fix: a page rendered per request carries the site's head and its social card (`og:title`, `og:description`, an absolute `og:image`, `twitter:card`, the robots hint, theme color, manifest and feed links) like a prerendered page; a page behind a guard answers `x-robots-tag: noindex`
+- Fix: a page rendered per request carries the site's head and its social card (`og:title`, `og:description`, an absolute `og:image`, `twitter:card`, the robots hint, theme color, manifest and feed links) like a prerendered page; a page behind a guard answers `x-robots-tag: noindex` and stays without the site's search and social tags
 - `<meta seo query="page">` keeps the listed request parameters in the canonical of a page rendered per request; every other parameter stays out, and a contradictory declaration warns B0503
 
 ## [0.7.0] - 2026-10-31

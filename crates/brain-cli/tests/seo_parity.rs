@@ -57,7 +57,7 @@ fn a_view_says_the_same_to_crawlers_with_or_without_a_server() {
     assert!(lines.any(|l| l.is_ok_and(|l| l.contains("listening") || l.contains("brain:ready"))));
     let (_, fixed) = get(port, "/fixed/a", "");
     let (live_headers, live) = get(port, "/live/a", "");
-    let (member_headers, _) = get(port, "/members/a", "");
+    let (member_headers, member) = get(port, "/members/a", "");
     let _ = server.kill();
     let _ = server.wait();
     let _ = std::fs::remove_dir_all(&root);
@@ -75,6 +75,7 @@ fn a_view_says_the_same_to_crawlers_with_or_without_a_server() {
     }
     assert!(!live_headers.contains("x-robots-tag"), "{live_headers}");
     assert!(member_headers.contains("x-robots-tag: noindex"), "a guarded page stays out of the index: {member_headers}");
+    assert!(!member.contains("og:site_name"), "a guarded page carries no site head: {member}");
 }
 
 #[test]

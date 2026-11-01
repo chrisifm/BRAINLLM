@@ -1464,7 +1464,9 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
                 p.html = s.html.clone();
             }
         }
-        for p in pages.iter_mut().filter(|p| p.file.starts_with("_server/")) {
+        // a page behind a guard is out of the index (x-robots-tag): search and social tags would only add weight
+        let guarded = |view: &str| Path::new(view).ancestors().skip(1).any(|dir| root.join(dir).join("_guard.jsbrain").is_file());
+        for p in pages.iter_mut().filter(|p| p.file.starts_with("_server/") && !guarded(&p.view)) {
             p.html = built.server_head.apply(&seo_cfg, &p.route, &p.html);
         }
         let scores: Vec<u32> = built.report.pages.iter().filter_map(|p| p.score).collect();
