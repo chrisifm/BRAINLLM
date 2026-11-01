@@ -2142,3 +2142,14 @@ Browser streaming is absent on purpose: RPC is one JSON answer and no server rou
 B0920 is in `brain-check` (`llm_client`, `env_access`, `env::check_file`), B0923 in `crates/brain-cli/src/env.rs`, and B0921 and
 B0922 only at runtime. Tests: `runtime/test/llm.test.js` (wire contracts against a fake provider) and
 `crates/brain-cli/tests/llm.rs` (built app through RPC, no key material in client files).
+
+## 52. Dev observability panel and Web Vitals (2026-10-31)
+
+`runtime/brain-observe.js` is loaded by the dev client (`crates/brain-serve/src/client.js`) and excluded from builds by the
+same lists as the other dev modules (`main.rs`, `impact.rs`). It stays closed until Alt+Shift+O or `?brain-observe`, so
+screenshots and tests see an unchanged page; `sessionStorage` keeps it open across reloads. It reads `brain:net`,
+`brain:hmr`, `brain-err`, Long Animation Frames and the `live` registry of `brain-dev.js`; Pick uses the `$i` mark on root
+elements. It sends nothing over the socket: `brain-inspect` remains the recorder and this is the on-page view.
+`runtime/brain-vitals.js` is a normal opt-in primitive module (`scope.rs`) and costs 1116 B gzip when imported. INP follows
+the metric definition (slowest interaction, one in 50 discarded), and Event Timing is observed from 40 ms, so a faster
+interaction reports nothing. Browser test: `scripts/test/dev-observe.test.mjs`.

@@ -371,7 +371,8 @@ pub fn measure(root: &Path) -> Result<brain_pack::impact::Measure, String> {
                 && n != "brain-trace.js"
                 && n != "brain-why.js"
                 && n != "brain-mock.js"
-                && n != "brain-overlay.js")
+                && n != "brain-overlay.js"
+                && n != "brain-observe.js")
                 || (n.starts_with("ui/") && n.ends_with(".brain"))
         })
         .collect();

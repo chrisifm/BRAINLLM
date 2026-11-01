@@ -238,6 +238,7 @@ Preserve unrelated query parameters; never serialize credentials or private form
 Structured local cache: `database('navigation', {namespace:'my-app',build:'v1'})` supports get/put/batch/scan/prune/close
 with native IndexedDB, quotas, expiry and atomic batches. `storage()` and `cookie()` are small public preferences.
 `storageInfo()` reports capabilities; `persistStorage()` requests persistence from a user action. Storage remains evictable.
+Web Vitals (opt-in, 0 bytes unused): `vitals(m => …)` gives `{ name, value, rating }` for LCP, CLS, INP, FCP and TTFB where the browser has them; `reportVitals('/api/vitals')` sends `{ path, metrics }` by beacon when the page is hidden. Write that route yourself.
 Optional `sqlite(officialInitializer, options)` runs official SQLite Wasm in an owned OPFS worker; it is not a core dependency.
 `threadCapabilities`, `sharedWorker`, `messageChannel`, `transfer`, `offscreen`, `sharedMemory` and `loadWorklet` expose
 bounded native thread operations and explicit unsupported-capability errors. See `docs/BROWSER-DATA.md` for contracts.
@@ -252,6 +253,7 @@ A component that keeps growing (DOM nodes, list rows, effect runs) or loops is s
 `brain build` mounts every view with fake timers and fails (B0907) if anything grows with no user input. Never append
 to a list from a timer, interval, bus or `fx` without a limit; create timers only inside `fx` and return their cleanup.
 Public production messages contain safe references, never raw traces, arbitrary exception text or internal paths.
+Dev panel (`brain run` only, never in builds): Alt+Shift+O or `?brain-observe` shows vitals, requests, long frames, errors and live components; Pick names an element's component file. `__brainObserve.snapshot()` returns it as JSON.
 Private captured errors (message, stack, recent actions) are listed by `brain_errors` (MCP) and `brain doctor`.
 
 ## Server and secrets

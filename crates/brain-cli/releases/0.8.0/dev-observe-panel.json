@@ -1,0 +1,25 @@
+{
+  "id": "dev-observe-panel",
+  "kind": "capability",
+  "title": "Dev observability panel",
+  "why": "While developing, a closed-by-default panel shows what the page does and which file renders an element. Builds contain none of it.",
+  "changelog": [
+    "Dev observability panel"
+  ],
+  "guide": "brain spec",
+  "codes": [],
+  "apis": [
+    "__brainObserve.snapshot"
+  ],
+  "affects": [],
+  "adopt": {
+    "file": "browser",
+    "snippet": "Press Alt+Shift+O in brain run"
+  },
+  "uses": [
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "__brainObserve"
+    }
+  ]
+}
