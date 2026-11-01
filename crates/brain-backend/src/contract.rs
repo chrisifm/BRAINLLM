@@ -25,14 +25,16 @@ pub struct Field {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible: Option<Vec<String>>,
     /// Who writes and who reads the field: `private` (server only: never accepted from clients, never serialized),
-    /// `readonly` (serialized, set only by defaults and before-write hooks) or `writeonly` (accepted, never
-    /// serialized, e.g. a secret). None: clients read and write it. Serialization-only, like `visible`.
+    /// `readonly` (serialized, set only by defaults and before-write hooks), `writeonly` (accepted, never
+    /// serialized, e.g. a secret) or `{ write: [roles] }` (serialized, sent only by those roles). None: clients read
+    /// and write it. Serialization-only, like `visible`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub access: Option<String>,
+    pub access: Option<FieldAccess>,
     /// The resource's slug: previous values keep resolving for permanent redirects (see `slugs.rs`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub slug: bool,
-    /// Regular expression a `str` value must match as a whole, on every write path. Application-level, like
+    /// Regular expression a `str` value, each `list<str>` element or each `obj` key must match as a whole, on every
+    /// write path. Application-level, like
     /// list byte limits: not recorded, so adding one needs no migration and never rejects stored rows until rewritten.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern: Option<String>,
@@ -40,6 +42,40 @@ pub struct Field {
 impl Field {
     pub fn ty(&self) -> Option<Ty> {
         crate::types::parse(&self.kind)
+    }
+    /// The named access mode; `roles` stands for `{ write: [...] }`.
+    pub fn access_mode(&self) -> Option<&str> {
+        match self.access.as_ref()? {
+            FieldAccess::Mode(mode) => Some(mode),
+            FieldAccess::Roles(_) => Some("roles"),
+        }
+    }
+    /// Whether a value sent by a client satisfies `pattern`, whichever part of the value it governs.
+    fn matches_pattern(&self, value: &Value) -> bool {
+        let Some(re) = self.pattern.as_deref().and_then(whole_value) else { return self.pattern.is_none() };
+        match value {
+            Value::String(text) => re.is_match(text),
+            Value::Array(items) => items.iter().all(|item| item.as_str().is_some_and(|text| re.is_match(text))),
+            Value::Object(entries) => entries.keys().all(|key| re.is_match(key)),
+            _ => true,
+        }
+    }
+}
+/// Field access: a named mode, or the roles that may send the field.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(untagged)]
+pub enum FieldAccess {
+    Mode(String),
+    Roles(WriteRoles),
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct WriteRoles {
+    pub write: Vec<String>,
+}
+impl From<&str> for FieldAccess {
+    fn from(mode: &str) -> Self {
+        FieldAccess::Mode(mode.to_string())
     }
 }
 /// Declarative resource constraints (`constraints.jsbrain`): composite uniqueness and checks.
@@ -355,8 +391,8 @@ impl Resource {
         }
         for (name, field) in &self.fields {
             if let Some(pattern) = &field.pattern {
-                if !matches!(field.ty(), Some(crate::types::Ty::Str)) {
-                    return Err(format!("{}.{name}: pattern applies only to a str field", self.name));
+                if !matches!(field.ty(), Some(crate::types::Ty::Str | crate::types::Ty::ListStr { .. } | crate::types::Ty::Obj)) {
+                    return Err(format!("{}.{name}: pattern applies only to a str, list<str> or obj field", self.name));
                 }
                 if pattern.len() > 256 || whole_value(pattern).is_none() {
                     return Err(format!("{}.{name}: pattern must be a valid regular expression of at most 256 bytes", self.name));
@@ -431,9 +467,7 @@ impl Resource {
             match field.ty() {
                 Some(ty) => match ty.normalize(v, field.required) {
                     Some(value) => {
-                        if let (Some(pattern), Some(text)) = (&field.pattern, value.as_str())
-                            && !whole_value(pattern).is_some_and(|re| re.is_match(text))
-                        {
+                        if !field.matches_pattern(&value) {
                             errors.insert(name.clone(), "Invalid format".into());
                             continue;
                         }
@@ -472,7 +506,10 @@ impl Resource {
                 if f.unique {
                     schema["x-brain-unique"] = json!(true);
                 }
-                match f.access.as_deref() {
+                if let Some(FieldAccess::Roles(roles)) = &f.access {
+                    schema["x-brain-write-roles"] = json!(roles.write);
+                }
+                match f.access_mode() {
                     Some("readonly") => schema["readOnly"] = json!(true),
                     Some("writeonly") => schema["writeOnly"] = json!(true),
                     Some("private") => schema["x-brain-private"] = json!(true),

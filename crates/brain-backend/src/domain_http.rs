@@ -163,6 +163,11 @@ async fn batch(
         "update" => &["update"],
         _ => &["delete"],
     })?;
+    for (i, item) in request.items.iter().enumerate() {
+        let sent = if request.op == "update" { &item["data"] } else { item };
+        crate::visibility::reject_server_fields(&r, sent, Some(&user.role))
+            .map_err(|fields| Error::validation(fields.into_iter().map(|(field, message)| (format!("items.{i}.{field}"), message)).collect::<std::collections::BTreeMap<_, _>>()))?;
+    }
     let resources = app.resources.clone();
     let r = resources.get(&name).expect("resource exists");
     let mut out: Value = transactional!(app, user, |engine, tx| engine.batch(&mut tx, r, &request).await).map_err(|mut error: Error| {
@@ -190,6 +195,7 @@ async fn upsert(
     let r = resources.get(&name).ok_or_else(Error::missing)?;
     let user = app.required(&h).await?;
     hooked(r, &["create", "update"])?;
+    crate::visibility::reject_server_fields(r, &request.data, Some(&user.role)).map_err(Error::validation)?;
     let mut out: Value = transactional!(app, user, |engine, tx| engine
         .upsert_request(&mut tx, r, &request)
         .await

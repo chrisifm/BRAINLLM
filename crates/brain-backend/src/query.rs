@@ -519,7 +519,7 @@ impl ListRequest {
 }
 /// Whether `?fields=` may name a field. Fields no reader receives answer like undeclared ones, so a request learns nothing.
 fn selectable(r: &Resource, field: &str) -> bool {
-    r.fields.get(field).is_some_and(|f| match f.access.as_deref() {
+    r.fields.get(field).is_some_and(|f| match f.access_mode() {
         Some("writeonly") => false,
         Some("private") => crate::api_keys::system_active(),
         _ => true,

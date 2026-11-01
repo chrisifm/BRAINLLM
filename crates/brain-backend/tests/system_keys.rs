@@ -19,7 +19,7 @@ use uuid::Uuid;
 const ORIGIN: &str = "https://app.example.test";
 
 fn sealed() -> Resource {
-    let field = |kind: &str, access: Option<&str>| Field { kind: kind.into(), access: access.map(str::to_string), ..Default::default() };
+    let field = |kind: &str, access: Option<&str>| Field { kind: kind.into(), access: access.map(Into::into), ..Default::default() };
     Resource {
         name: "sys_notes".into(),
         search: vec![],

@@ -4,7 +4,7 @@
 //! of the record), `owner` (the authenticated owner of that row, or a relational owner, see `ownership.rs`) or a role
 //! name. There is no implicit administrator bypass: list `admin` explicitly. Restricted fields cannot be filtered,
 //! sorted, searched or aggregated, so a reader cannot infer hidden values through the query surface.
-use crate::{Field, Resource};
+use crate::{Field, Resource, contract::FieldAccess};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -16,10 +16,14 @@ pub struct Viewer<'a> {
 }
 
 pub fn validate_field(name: &str, field: &Field) -> Result<(), String> {
-    if let Some(access) = &field.access
-        && !matches!(access.as_str(), "private" | "readonly" | "writeonly")
-    {
-        return Err(format!("field `{name}` access `{access}` is invalid; fix: use private, readonly or writeonly"));
+    match &field.access {
+        Some(FieldAccess::Mode(mode)) if !matches!(mode.as_str(), "private" | "readonly" | "writeonly") => {
+            return Err(format!("field `{name}` access `{mode}` is invalid; fix: use private, readonly, writeonly or {{ write: ['admin'] }}"));
+        }
+        Some(FieldAccess::Roles(roles)) if roles.write.is_empty() || roles.write.len() > 16 || roles.write.iter().any(|role| !crate::auth_flows::role_name(role)) => {
+            return Err(format!("field `{name}` access write needs 1..16 configured role names; fix: {{ write: ['admin'] }}, or readonly when only the server sets it"));
+        }
+        _ => {}
     }
     let Some(grants) = &field.visible else {
         return Ok(());
@@ -60,24 +64,35 @@ fn sees(field: &Field, viewer: Viewer<'_>, owns: bool) -> bool {
 
 /// Never serialized to any reader (`private` and `writeonly`).
 pub fn hidden(field: &Field) -> bool {
-    matches!(field.access.as_deref(), Some("private" | "writeonly"))
+    matches!(field.access_mode(), Some("private" | "writeonly"))
 }
 /// Clients may not send it (`private` and `readonly`): only defaults and before-write hooks set it.
 pub fn server_set(field: &Field) -> bool {
-    matches!(field.access.as_deref(), Some("private" | "readonly"))
+    matches!(field.access_mode(), Some("private" | "readonly"))
+}
+/// Whether a client with `role` may send the field.
+fn writable_by(field: &Field, role: Option<&str>) -> bool {
+    match &field.access {
+        Some(FieldAccess::Roles(roles)) => role.is_some_and(|role| roles.write.iter().any(|allowed| allowed == role)),
+        _ => !server_set(field),
+    }
 }
 
 /// Client input naming server-set fields is rejected before any hook runs.
-pub fn reject_server_fields(r: &Resource, input: &Value) -> Result<(), std::collections::BTreeMap<String, String>> {
+pub fn reject_server_fields(r: &Resource, input: &Value, role: Option<&str>) -> Result<(), std::collections::BTreeMap<String, String>> {
     if crate::api_keys::system_active() {
         return Ok(());
     }
     let errors: std::collections::BTreeMap<String, String> = r
         .fields
         .iter()
-        .filter(|(name, field)| server_set(field) && input.get(name.as_str()).is_some())
+        .filter(|(name, field)| !writable_by(field, role) && input.get(name.as_str()).is_some())
         .map(|(name, field)| {
-            (name.clone(), format!("Field is {}; it is set by the server, remove it from the request", field.access.as_deref().unwrap_or_default()))
+            let message = match &field.access {
+                Some(FieldAccess::Roles(roles)) => format!("Only {} may set this field; remove it from the request", roles.write.join(", ")),
+                _ => format!("Field is {}; it is set by the server, remove it from the request", field.access_mode().unwrap_or_default()),
+            };
+            (name.clone(), message)
         })
         .collect();
     if errors.is_empty() { Ok(()) } else { Err(errors) }
@@ -105,7 +120,7 @@ pub fn project(r: &Resource, row: &mut Value, viewer: Viewer<'_>, relational_own
     if crate::api_keys::system_active() {
         if let Some(data) = row.get_mut("data").and_then(Value::as_object_mut) {
             for (name, field) in &r.fields {
-                if field.access.as_deref() == Some("writeonly") {
+                if field.access_mode() == Some("writeonly") {
                     data.remove(name);
                 }
             }

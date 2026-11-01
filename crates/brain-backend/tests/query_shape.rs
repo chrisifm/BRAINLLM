@@ -70,6 +70,12 @@ impl Api {
         let (_, token) = self.auth.login(credentials()).await.unwrap().unwrap();
         (user.id, token)
     }
+    /// A new session, which carries the role the account holds now.
+    async fn user_login(&self, email: &str) -> (Uuid, String) {
+        let credentials = Credentials { email: email.into(), password: "correct horse battery".into() };
+        let (user, token) = self.auth.login(credentials).await.unwrap().unwrap();
+        (user.id, token)
+    }
     async fn key(&self, owner: Uuid, scopes: &[&str], system: bool) -> String {
         let new = NewKey { name: "shape".into(), scopes: scopes.iter().map(|s| s.to_string()).collect(), expires_in_days: None, daily_quota: None, monthly_quota: None };
         let created = if system { self.keys.create_system(owner, new).await } else { self.keys.create(owner, new).await };
@@ -426,4 +432,100 @@ async fn counts_over_large_documents_agree_with_their_filters() {
     let (status, found) = a.get(&format!("/api/posts?status={exact}&rank[gte]=0")).await;
     assert_eq!((status, found["total"].as_i64()), (200, Some(1)), "{found}");
     assert_eq!(found["items"][0]["data"]["status"], exact.as_str());
+}
+
+/// Every client write path keeps server-set fields out: the single-record routes always did, batch and upsert did not.
+#[tokio::test]
+#[ignore]
+async fn field_write_access_holds_on_single_batch_and_upsert_writes() {
+    let mut tier = field("str");
+    tier.access = Some(serde_json::from_value(json!({"write": ["admin"]})).unwrap());
+    let locked = Field { access: Some("readonly".into()), ..field("str") };
+    let hidden = Field { access: Some("private".into()), ..field("str") };
+    let code = Field { unique: true, ..field("str") };
+    let mut items = resource("items", vec![("code", code), ("title", field("str")), ("tier", tier), ("state", locked), ("note", hidden)], json!(["public"]), json!({}));
+    items.policy.create = vec!["user".into(), "admin".into()];
+    items.policy.update = vec!["owner".into(), "admin".into()];
+    let a = api("brain_shape_write", vec![items]).await;
+    let (member, member_token) = a.user("member@example.test").await;
+    let (boss, boss_token) = a.user("boss@example.test").await;
+    sqlx::query("UPDATE _brain_users SET role='admin' WHERE id=$1").bind(boss).execute(&a.pool).await.unwrap();
+    let (_, boss_token) = { let _ = boss_token; a.user_login("boss@example.test").await };
+    let sends = |status: u16, body: &Value, path: &str, what: &str| {
+        assert_eq!(status, 422, "{what}: {body}");
+        assert!(body.pointer(path).is_some(), "{what}: {body}");
+    };
+
+    // A client never sets readonly or private, by any route and with any role.
+    for (sender, token) in [("member", &member_token), ("admin", &boss_token)] {
+        for (name, value) in [("state", "open"), ("note", "x")] {
+            let (status, body) = a.call("POST", "/api/items", Some(token), None, Some(json!({"code": "a", name: value}))).await;
+            sends(status, &body, &format!("/error/fields/{name}"), &format!("{sender} create {name}"));
+            let (status, body) = a.call("POST", "/api/items/batch", Some(token), None, Some(json!({"op": "create", "items": [{"code": "a", name: value}]}))).await;
+            sends(status, &body, &format!("/error/fields/items.0.{name}"), &format!("{sender} batch create {name}"));
+            let (status, body) = a.call("POST", "/api/items/batch", Some(token), None, Some(json!({"op": "upsert", "key": ["code"], "items": [{"code": "a", name: value}]}))).await;
+            sends(status, &body, &format!("/error/fields/items.0.{name}"), &format!("{sender} batch upsert {name}"));
+            let (status, body) = a.call("POST", "/api/items/upsert", Some(token), None, Some(json!({"key": ["code"], "data": {"code": "a", name: value}}))).await;
+            sends(status, &body, &format!("/error/fields/{name}"), &format!("{sender} upsert {name}"));
+        }
+    }
+    let (_, count) = a.get("/api/items").await;
+    assert_eq!(count["total"], 0, "nothing was written: {count}");
+
+    // `{ write: [roles] }`: those roles send it on every route, other clients on none.
+    let (status, body) = a.call("POST", "/api/items/batch", Some(&member_token), None, Some(json!({"op": "create", "items": [{"code": "m", "tier": "gold"}]}))).await;
+    sends(status, &body, "/error/fields/items.0.tier", "member batch tier");
+    let (status, body) = a.call("POST", "/api/items", Some(&member_token), None, Some(json!({"code": "m", "tier": "gold"}))).await;
+    sends(status, &body, "/error/fields/tier", "member create tier");
+    let mine = a.post("/api/items", &member_token, json!({"code": "m", "title": "Mine"})).await;
+    let uri = format!("/api/items/{}", id(&mine));
+    let (status, body) = a.call("PATCH", &uri, Some(&member_token), None, Some(json!({"tier": "gold"}))).await;
+    sends(status, &body, "/error/fields/tier", "member patch tier");
+    let (status, body) = a.call("POST", "/api/items/batch", Some(&member_token), None, Some(json!({"op": "update", "items": [{"id": id(&mine), "data": {"tier": "gold"}}]}))).await;
+    sends(status, &body, "/error/fields/items.0.tier", "member batch update tier");
+    let (status, body) = a.call("POST", "/api/items/batch", Some(&boss_token), None, Some(json!({"op": "update", "items": [{"id": id(&mine), "data": {"tier": "gold"}}]}))).await;
+    assert_eq!((status, &body["items"][0]["data"]["tier"]), (200, &json!("gold")), "{body}");
+    let (status, body) = a.call("POST", "/api/items/upsert", Some(&boss_token), None, Some(json!({"key": ["code"], "data": {"code": "b", "tier": "silver"}}))).await;
+    assert_eq!((status, &body["record"]["data"]["tier"]), (200, &json!("silver")), "{body}");
+    // The owner edits the rest and the value stays; every reader sees it.
+    let (status, body) = a.call("PATCH", &uri, Some(&member_token), None, Some(json!({"title": "Renamed"}))).await;
+    assert_eq!((status, &body["data"]["tier"]), (200, &json!("gold")), "{body}");
+    let (_, read) = a.get(&uri).await;
+    assert_eq!(read["data"]["tier"], "gold");
+
+    // A system key stays the way to set server fields in bulk.
+    let system = a.key(member, &["items:write", "items:read"], true).await;
+    let (status, body) = a.call("POST", "/api/items/batch", None, Some(&system), Some(json!({"op": "create", "items": [{"code": "s", "state": "open", "note": "kept"}]}))).await;
+    assert_eq!(status, 200, "{body}");
+}
+#[test]
+fn field_write_roles_are_validated() {
+    let with = |access: Value| {
+        let mut tier = field("str");
+        tier.access = Some(serde_json::from_value(access).unwrap());
+        resource("items", vec![("tier", tier)], json!(["public"]), json!({})).validate()
+    };
+    assert!(with(json!({"write": ["admin"]})).is_ok());
+    assert!(with(json!({"write": []})).unwrap_err().contains("write needs"));
+    assert!(with(json!("nope")).unwrap_err().contains("is invalid"));
+}
+/// `pattern` governs each element of a list and each key of an object, on the write paths that validate a value.
+#[tokio::test]
+#[ignore]
+async fn patterns_govern_list_elements_and_object_keys() {
+    let tags = Field { pattern: Some("[a-z]+".into()), ..field("list<str>") };
+    let meta = Field { pattern: Some("[a-z_]+".into()), ..field("obj") };
+    let a = api("brain_shape_pattern", vec![resource("notes", vec![("tags", tags), ("meta", meta)], json!(["public"]), json!({}))]).await;
+    let (_, token) = a.user("pattern@example.test").await;
+    let (status, body) = a.call("POST", "/api/notes", Some(&token), None, Some(json!({"tags": ["ok", "Not OK"]}))).await;
+    assert_eq!((status, &body["error"]["fields"]["tags"]), (422, &json!("Invalid format")), "{body}");
+    let (status, body) = a.call("POST", "/api/notes", Some(&token), None, Some(json!({"meta": {"good_key": 1, "Bad-Key": 2}}))).await;
+    assert_eq!((status, &body["error"]["fields"]["meta"]), (422, &json!("Invalid format")), "{body}");
+    let (status, body) = a.call("POST", "/api/notes/batch", Some(&token), None, Some(json!({"op": "create", "items": [{"tags": ["NOPE"]}]}))).await;
+    assert_eq!(status, 422, "{body}");
+    let note = a.post("/api/notes", &token, json!({"tags": ["ok", "fine"], "meta": {"good_key": {"Any": "nested"}}})).await;
+    let (status, body) = a.call("PATCH", &format!("/api/notes/{}", id(&note)), Some(&token), None, Some(json!({"tags": ["NOPE"]}))).await;
+    assert_eq!(status, 422, "{body}");
+    let bad = Field { pattern: Some("x".into()), ..field("int") };
+    assert!(resource("n", vec![("rank", bad)], json!(["public"]), json!({})).validate().unwrap_err().contains("only to a str, list<str> or obj"));
 }

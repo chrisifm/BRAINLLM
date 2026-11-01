@@ -1651,7 +1651,7 @@ async fn create(
     if through && !relational(r, "create") || tenant && crate::ownership::scope(r, "create", viewer(Some(&u))).is_none() {
         return Err(Error::forbidden());
     }
-    crate::visibility::reject_server_fields(r, &input).map_err(Error::validation)?;
+    crate::visibility::reject_server_fields(r, &input, Some(&u.role)).map_err(Error::validation)?;
     let input = before(&app, r, "create", input, None, &u).await?;
     let data = r.input(&input).map_err(Error::validation)?;
     if through && !owns_data(&app, r, "create", &u, &data).await? {
@@ -1690,7 +1690,7 @@ async fn update(
         .ok_or_else(Error::missing)?;
     let (owner, through) = scoped_owner(&app, r, "update", &u, &existing, id).await?;
     precondition(r, &h, &existing, &revision, &u, through)?;
-    crate::visibility::reject_server_fields(r, &input).map_err(Error::validation)?;
+    crate::visibility::reject_server_fields(r, &input, Some(&u.role)).map_err(Error::validation)?;
     let mut input = input;
     crate::visibility::keep_stored(r, &mut input, &existing["data"]);
     let previous = existing["data"].clone();
@@ -1727,7 +1727,7 @@ async fn patch(
         .ok_or_else(Error::missing)?;
     let (owner, through) = scoped_owner(&app, r, "update", &u, &existing, id).await?;
     precondition(r, &h, &existing, &revision, &u, through)?;
-    crate::visibility::reject_server_fields(r, &input).map_err(Error::validation)?;
+    crate::visibility::reject_server_fields(r, &input, Some(&u.role)).map_err(Error::validation)?;
     let mut merged = crate::domain::merge_patch(r, &existing["data"], &input).map_err(Error::validation)?;
     crate::visibility::keep_stored(r, &mut merged, &existing["data"]);
     let previous = existing["data"].clone();

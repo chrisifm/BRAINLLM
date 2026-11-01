@@ -84,7 +84,7 @@ fn fields(value: Value) -> Result<BTreeMap<String, Field>, String> {
                 // `'str! private'`: an optional access modifier after the type.
                 Value::String(kind) => match kind.rsplit_once(' ').filter(|(_, m)| matches!(*m, "private" | "readonly" | "writeonly")) {
                     Some((kind, modifier)) => {
-                        access = Some(modifier.to_string());
+                        access = Some(brain_backend::contract::FieldAccess::Mode(modifier.to_string()));
                         (kind.trim_end(), None, false)
                     }
                     None => (kind.as_str(), None, false),
@@ -111,7 +111,7 @@ fn fields(value: Value) -> Result<BTreeMap<String, Field>, String> {
                         pattern = Some(text.as_str().ok_or_else(|| format!("field `{name}`: pattern must be a regular expression string"))?.to_string());
                     }
                     if let Some(mode) = spec.get("access") {
-                        access = Some(mode.as_str().ok_or_else(|| format!("field `{name}`: access must be 'private', 'readonly' or 'writeonly'"))?.to_string());
+                        access = Some(serde_json::from_value(mode.clone()).map_err(|_| format!("field `{name}`: access must be 'private', 'readonly', 'writeonly' or {{ write: ['admin'] }}"))?);
                     }
                     if let Some(grants) = spec.get("visible") {
                         visible = Some(serde_json::from_value(grants.clone()).map_err(|_| format!("field `{name}`: visible must be a list such as ['owner', 'admin']"))?);
@@ -386,7 +386,7 @@ pub fn public_field_warnings(root: &Path) -> Vec<(String, String, String)> {
     let mut out = Vec::new();
     for r in resources.iter().filter(|r| r.policy.api) {
         for (name, field) in &r.fields {
-            let hidden = matches!(field.access.as_deref(), Some("private" | "writeonly"));
+            let hidden = matches!(field.access_mode(), Some("private" | "writeonly"));
             if !hidden && field.visible.is_none() && internal_looking(name) {
                 out.push((
                     format!("server/resources/{}/schema.jsbrain", r.name),
@@ -2532,9 +2532,9 @@ mod tests {
     #[test]
     fn field_access_modifiers_parse_in_string_and_object_forms() {
         let parsed = fields(json!({"title":"str!","secret":"str writeonly","state":"enum(draft|live)! readonly","score":{"type":"int","access":"private"},"price":"decimal(10,2)"})).unwrap();
-        assert_eq!((parsed["secret"].kind.as_str(), parsed["secret"].access.as_deref()), ("str", Some("writeonly")));
-        assert_eq!((parsed["state"].kind.as_str(), parsed["state"].required, parsed["state"].access.as_deref()), ("enum(draft|live)", true, Some("readonly")));
-        assert_eq!(parsed["score"].access.as_deref(), Some("private"));
+        assert_eq!((parsed["secret"].kind.as_str(), parsed["secret"].access_mode()), ("str", Some("writeonly")));
+        assert_eq!((parsed["state"].kind.as_str(), parsed["state"].required, parsed["state"].access_mode()), ("enum(draft|live)", true, Some("readonly")));
+        assert_eq!(parsed["score"].access_mode(), Some("private"));
         assert_eq!(parsed["title"].access, None);
         assert_eq!(parsed["price"].access, None);
         assert!(fields(json!({"x":{"type":"str","access":1}})).is_err());
