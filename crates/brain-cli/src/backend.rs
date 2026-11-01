@@ -398,6 +398,22 @@ pub fn public_field_warnings(root: &Path) -> Vec<(String, String, String)> {
     }
     out
 }
+/// B0794: unique fields any signed-in user can write, so the first writer takes the value from everybody else.
+/// An explicit `access` states who may; grants limited to admins or named roles are not "any user".
+pub fn claimable_unique_warnings(root: &Path) -> Vec<(String, String, String)> {
+    let resources = contracts(root, "resources").unwrap_or_default();
+    let mut out = Vec::new();
+    for r in resources.iter().filter(|r| r.policy.api && r.policy.create.iter().chain(&r.policy.update).any(|grant| grant == "user" || grant == "public")) {
+        for (name, field) in r.fields.iter().filter(|(_, f)| f.unique && f.access_mode().is_none()) {
+            out.push((
+                format!("server/resources/{}/schema.jsbrain", r.name),
+                format!("any signed-in user can write `{name}` on `{}`, and it is unique: whoever writes a value first takes it from everybody else", r.name),
+                format!("restrict it with {{ type: '{}', unique: true, access: {{ write: ['admin'] }} }}, or state that it is meant with access: {{ write: ['user'] }}", field.kind),
+            ));
+        }
+    }
+    out
+}
 /// B0790: secrets a declared route or webhook needs and the development environment does not hold: `(file, message, fix)`.
 /// Absent, serve starts with that route disabled; too short, it refuses to start. Names only, never values.
 pub fn secret_warnings(root: &Path) -> Vec<(String, String, String)> {

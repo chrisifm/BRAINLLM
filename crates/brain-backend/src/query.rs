@@ -442,6 +442,18 @@ pub(crate) fn indexes(r: &Resource) -> Vec<(String, String)> {
     out.into_iter().collect()
 }
 pub(crate) async fn install_indexes(tx: &mut sqlx::Transaction<'_, Postgres>, r: &Resource) -> Result<(), String> {
+    // A filter or sort that is gone leaves an index every write still pays for; only generated names are touched.
+    let mut declared: Vec<String> = indexes(r).into_iter().map(|(name, _)| name).collect();
+    declared.extend(crate::relations::refs(r).iter().map(|x| crate::relations::index_name(r, x.field)));
+    let stored: Vec<String> = sqlx::query_scalar("SELECT indexname::text FROM pg_indexes WHERE schemaname='public' AND tablename=$1 AND indexname LIKE '\\_brain\\_ix\\_%'")
+        .bind(format!("_brain_res_{}", r.name))
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(crate::db::safe)?;
+    for name in stored.iter().filter(|name| !declared.contains(name)) {
+        // Audited SQL: the name was read from the catalog.
+        sqlx::raw_sql(sqlx::AssertSqlSafe(format!("DROP INDEX public.{name}"))).execute(&mut **tx).await.map_err(crate::db::safe)?;
+    }
     for (name, definition) in indexes(r) {
         // Audited SQL: the name is a hash and the expression is built from validated identifiers only.
         sqlx::raw_sql(sqlx::AssertSqlSafe(format!("CREATE INDEX IF NOT EXISTS {name} ON _brain_res_{} {definition}", r.name)))

@@ -39,6 +39,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("organizations", include_str!("../migrations/0021_organizations.sql")),
     ("audit_log", include_str!("../migrations/0022_audit_log.sql")),
     ("credits", include_str!("../migrations/0023_credits.sql")),
+    ("per_owner", include_str!("../migrations/0025_per_owner.sql")),
 ];
 fn checksum(sql: &str) -> String {
     Sha256::digest(sql.as_bytes())
@@ -402,6 +403,17 @@ async fn resource_shape(conn: &mut sqlx::PgConnection, r: &Resource) -> Result<(
             return Err(drift(&format!("{table} unique index {name}")));
         }
     }
+    if let Some(args) = per_owner_args(r) {
+        let present: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass($1) AND tgname='_brain_per_owner' AND tgenabled='O' AND tgargs=$2)")
+            .bind(format!("public.{table}"))
+            .bind(trigger_arg_bytes(&args))
+            .fetch_one(conn)
+            .await
+            .map_err(safe)?;
+        if !present {
+            return Err(drift(&format!("{table} one-record-per-owner trigger")));
+        }
+    }
     Ok(())
 }
 async fn check_exists(conn: &mut sqlx::PgConnection, table: &str, name: &str) -> Result<bool, String> {
@@ -448,7 +460,7 @@ async fn install_constraints(
         }
         let columns = fields
             .iter()
-            .map(|f| format!("(data->>'{f}')"))
+            .map(|f| if f == crate::contract::OWNER_KEY { "owner".to_string() } else { format!("(data->>'{f}')") })
             .collect::<Vec<_>>()
             .join(",");
         sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
@@ -461,6 +473,36 @@ async fn install_constraints(
             format!("{}: existing rows contain duplicates for a declared unique constraint; review the data before migrating; nothing was changed", r.name)
         })?;
     }
+    install_per_owner(tx, r).await
+}
+fn per_owner_args(r: &Resource) -> Option<Vec<String>> {
+    let per_owner = r.constraints.per_owner.as_ref()?;
+    let tenant = crate::organizations::tenant(r).unwrap_or("").to_string();
+    Some([r.per_owner_name(), tenant].into_iter().chain(per_owner.except.iter().cloned()).collect())
+}
+fn trigger_arg_bytes(args: &[String]) -> Vec<u8> {
+    args.iter().flat_map(|a| a.bytes().chain(std::iter::once(0))).collect()
+}
+/// Arguments are a hash, a validated field and validated role names. Rows already over the limit refuse the migration.
+async fn install_per_owner(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, r: &Resource) -> Result<(), String> {
+    let table = table(r);
+    let Some(args) = per_owner_args(r) else {
+        sqlx::raw_sql(sqlx::AssertSqlSafe(format!("DROP TRIGGER IF EXISTS _brain_per_owner ON {table}"))).execute(&mut **tx).await.map_err(safe)?;
+        return Ok(());
+    };
+    let group = if args[1].is_empty() { "t.owner".to_string() } else { format!("t.owner,t.data->>'{}'", args[1]) };
+    let over: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT EXISTS(SELECT 1 FROM {table} t JOIN _brain_users u ON u.id=t.owner WHERE NOT u.role::text=ANY($1) GROUP BY {group} HAVING count(*)>1)"
+    )))
+    .bind(&args[2..])
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(safe)?;
+    if over {
+        return Err(format!("{}: an owner already has more than one record; review the data before migrating; nothing was changed", r.name));
+    }
+    let quoted = args.iter().map(|a| format!("'{a}'")).collect::<Vec<_>>().join(",");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!("DROP TRIGGER IF EXISTS _brain_per_owner ON {table}; CREATE TRIGGER _brain_per_owner BEFORE INSERT OR UPDATE ON {table} FOR EACH ROW EXECUTE FUNCTION public._brain_per_owner({quoted});"))).execute(&mut **tx).await.map_err(safe)?;
     Ok(())
 }
 /// Removes generated checks and unique indexes the approved contract no longer declares: a type that now allows more
@@ -480,18 +522,22 @@ async fn drop_retired_constraints(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>
     for name in stored.iter().filter(|name| !uniques.contains(name)) {
         sqlx::raw_sql(sqlx::AssertSqlSafe(format!("DROP INDEX public.{name}"))).execute(&mut **tx).await.map_err(safe)?;
     }
-    Ok(())
+    crate::relations::retire(tx, r).await
 }
 /// Field names covered by the declared constraint or unique index named in a database error.
 pub fn constraint_fields(r: &Resource, error: &sqlx::Error) -> Option<(&'static str, Vec<String>)> {
     let db = error.as_database_error()?;
     let name = db.constraint()?;
     match db.code()?.as_ref() {
+        "23505" if name == r.per_owner_name() => Some(("unique", vec!["owner".to_string()])),
         "23505" => r
             .unique_sets()
             .into_iter()
             .find(|(n, _)| n == name)
-            .map(|(_, fields)| ("unique", fields.into_iter().filter(|f| Some(f.as_str()) != crate::organizations::tenant(r)).collect())),
+            .map(|(_, fields)| {
+                let reported = fields.into_iter().filter(|f| Some(f.as_str()) != crate::organizations::tenant(r));
+                ("unique", reported.map(|f| if f == crate::contract::OWNER_KEY { "owner".to_string() } else { f }).collect())
+            }),
         "23514" => r
             .sql_checks()
             .into_iter()

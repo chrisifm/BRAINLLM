@@ -86,12 +86,22 @@ pub struct Constraints {
     pub unique: Vec<Vec<String>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub check: Vec<Check>,
+    /// One record per owner, except owners holding one of these roles.
+    #[serde(default, rename = "perOwner", skip_serializing_if = "Option::is_none")]
+    pub per_owner: Option<PerOwner>,
 }
 impl Constraints {
     pub fn is_empty(&self) -> bool {
-        self.unique.is_empty() && self.check.is_empty()
+        self.unique.is_empty() && self.check.is_empty() && self.per_owner.is_none()
     }
 }
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PerOwner {
+    pub except: Vec<String>,
+}
+/// In `constraints.unique`, the record's owner: `[['$owner']]` is one record per owner.
+pub const OWNER_KEY: &str = "$owner";
 /// Exactly one form: a range (`field` + `min`/`max`), a comparison (`compare: [a, op, b]`)
 /// or an all-or-nothing group (`together: [a, b, ...]`).
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -561,16 +571,25 @@ impl Resource {
         let mut sets = std::collections::BTreeSet::new();
         for set in &c.unique {
             let sorted: std::collections::BTreeSet<_> = set.iter().collect();
-            if !(2..=4).contains(&set.len()) || sorted.len() != set.len() {
-                return Err("each composite unique entry needs 2..4 distinct fields; fix: use unique: true on the field for single-field uniqueness".into());
+            let owner_alone = set.len() == 1 && set[0] == OWNER_KEY;
+            if !owner_alone && (!(2..=4).contains(&set.len()) || sorted.len() != set.len()) {
+                return Err("each composite unique entry needs 2..4 distinct fields; fix: use unique: true on the field for single-field uniqueness, or ['$owner'] for one record per owner".into());
             }
-            for name in set {
+            for name in set.iter().filter(|name| *name != OWNER_KEY) {
                 if !self.typed(name)?.unique_eligible() {
                     return Err(format!("field `{name}` cannot be part of a unique constraint; fix: use str, email, int, decimal, date, datetime or enum fields"));
                 }
             }
             if !sets.insert(sorted) {
                 return Err("duplicate composite unique constraint; fix: declare each field set once".into());
+            }
+        }
+        if let Some(per_owner) = &c.per_owner {
+            if per_owner.except.is_empty() || !per_owner.except.iter().all(|role| identifier(role)) {
+                return Err("perOwner.except needs at least one role name; fix: perOwner: { except: ['admin'] }, or unique: [['$owner']] when no role is exempt".into());
+            }
+            if c.unique.iter().any(|set| set.len() == 1 && set[0] == OWNER_KEY) {
+                return Err("declare one record per owner once; fix: keep perOwner for a role exception, or unique: [['$owner']] without one".into());
             }
         }
         if c.unique.len() + self.fields.values().filter(|f| f.unique).count() > 16 || c.check.len() > 16 {
@@ -703,6 +722,14 @@ impl Resource {
             })
             .map(|set| (self.object_name("_brain_ux_", &set.join(",")), set))
             .collect()
+    }
+    /// The unique sets a client may name as an upsert key: its values come from the record, not from who writes it.
+    pub fn upsert_keys(&self) -> Vec<Vec<String>> {
+        self.unique_sets().into_iter().map(|(_, set)| set).filter(|set| !set.iter().any(|f| f == OWNER_KEY)).collect()
+    }
+    /// Constraint name a `perOwner` trigger reports, so its conflict reads like a unique index's.
+    pub fn per_owner_name(&self) -> String {
+        self.object_name("_brain_ux_", "$owner:except")
     }
     /// Deterministic object name: the definition hash changes when the definition changes.
     pub(crate) fn object_name(&self, prefix: &str, definition: &str) -> String {

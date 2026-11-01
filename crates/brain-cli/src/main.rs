@@ -787,6 +787,11 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
                 let mut diag = compiler::Diag::new("B0749", &file, brain_parse::Span::default(), message, fix);
                 diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
             }
+            // B0794: a unique value the first signed-in writer takes from everybody else; advisory
+            for (file, message, fix) in backend::claimable_unique_warnings(&app) {
+                let mut diag = compiler::Diag::new("B0794", &file, brain_parse::Span::default(), message, fix);
+                diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
+            }
             // B0797: a field named like an internal that every reader receives; advisory, the name is only a hint
             for (file, message, fix) in backend::public_field_warnings(&app) {
                 let mut diag = compiler::Diag::new("B0797", &file, brain_parse::Span::default(), message, fix);

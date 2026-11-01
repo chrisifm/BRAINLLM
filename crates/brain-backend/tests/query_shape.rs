@@ -529,3 +529,82 @@ async fn patterns_govern_list_elements_and_object_keys() {
     let bad = Field { pattern: Some("x".into()), ..field("int") };
     assert!(resource("n", vec![("rank", bad)], json!(["public"]), json!({})).validate().unwrap_err().contains("only to a str, list<str> or obj"));
 }
+
+#[tokio::test]
+#[ignore]
+async fn one_record_per_owner_holds_on_every_write_and_with_a_role_exception() {
+    let writable = |name: &str| {
+        let mut r = resource(name, vec![("title", field("str"))], json!(["public"]), json!({}));
+        r.policy.create = vec!["user".into(), "admin".into()];
+        r.policy.update = vec!["owner".into(), "admin".into()];
+        r
+    };
+    let mut strict = writable("profiles");
+    strict.constraints.unique = vec![vec!["$owner".into()]];
+    let mut lenient = writable("companies");
+    lenient.constraints.per_owner = Some(brain_backend::contract::PerOwner { except: vec!["admin".into()] });
+    let mut scoped = writable("slots");
+    scoped.constraints.unique = vec![vec!["$owner".into(), "title".into()]];
+    let a = api("brain_shape_owner", vec![strict, lenient, scoped]).await;
+    let (_, member) = a.user("member@example.test").await;
+    let (boss, _) = a.user("boss@example.test").await;
+    sqlx::query("UPDATE _brain_users SET role='admin' WHERE id=$1").bind(boss).execute(&a.pool).await.unwrap();
+    let (_, boss_token) = a.user_login("boss@example.test").await;
+    let (_, other) = a.user("other@example.test").await;
+    let post = |uri: &'static str, token: String, body: Value| {
+        let a = &a;
+        async move { a.call("POST", uri, Some(&token), None, Some(body)).await }
+    };
+
+    for uri in ["/api/profiles", "/api/companies"] {
+        let (status, body) = post(uri, member.clone(), json!({"title": "first"})).await;
+        assert_eq!(status, 200, "{uri}: {body}");
+        let (status, body) = post(uri, member.clone(), json!({"title": "second"})).await;
+        assert_eq!(status, 409, "{uri}: {body}");
+        assert_eq!(body["error"]["code"], "UNIQUE_CONFLICT", "{uri}: {body}");
+        assert!(body["error"]["fields"].get("owner").is_some(), "{uri}: {body}");
+        let (status, body) = post(uri, other.clone(), json!({"title": "first"})).await;
+        assert_eq!(status, 200, "another owner is free: {uri}: {body}");
+    }
+    let batch = |uri: &'static str| format!("{uri}/batch");
+    for uri in ["/api/profiles", "/api/companies"] {
+        let (_, fresh) = a.user(&format!("fresh{}@example.test", uri.len())).await;
+        let (status, body) = a.call("POST", &batch(uri), Some(&fresh), None, Some(json!({"op": "create", "items": [{"title": "a"}, {"title": "b"}]}))).await;
+        assert_eq!(status, 409, "a batch cannot go around it: {uri}: {body}");
+    }
+
+    // The exception is the owner's role, and only where it was declared.
+    for title in ["a", "b"] {
+        let (status, body) = post("/api/companies", boss_token.clone(), json!({"title": title})).await;
+        assert_eq!(status, 200, "{body}");
+    }
+    let (status, _) = post("/api/profiles", boss_token.clone(), json!({"title": "a"})).await;
+    assert_eq!(status, 200);
+    let (status, body) = post("/api/profiles", boss_token.clone(), json!({"title": "b"})).await;
+    assert_eq!(status, 409, "{body}");
+
+    // With other fields, the set is per owner: another title is free, the same title is not.
+    let (status, _) = post("/api/slots", member.clone(), json!({"title": "a"})).await;
+    assert_eq!(status, 200);
+    let (status, _) = post("/api/slots", member.clone(), json!({"title": "b"})).await;
+    assert_eq!(status, 200);
+    let (status, body) = post("/api/slots", member.clone(), json!({"title": "a"})).await;
+    assert_eq!(status, 409, "{body}");
+    let (status, _) = post("/api/slots", other.clone(), json!({"title": "a"})).await;
+    assert_eq!(status, 200);
+
+    // The owner is not a value a client can name as an upsert key.
+    let (status, body) = a.call("POST", "/api/profiles/upsert", Some(&other), None, Some(json!({"key": ["$owner"], "data": {"title": "x"}}))).await;
+    assert_eq!(status, 422, "{body}");
+
+    // Updating an existing record is not a second record.
+    let (_, fresh) = a.user("updater@example.test").await;
+    let (_, created) = post("/api/companies", fresh.clone(), json!({"title": "one"})).await;
+    let (status, body) = a.call("PATCH", &format!("/api/companies/{}", id(&created)), Some(&fresh), None, Some(json!({"title": "two"}))).await;
+    assert_eq!(status, 200, "{body}");
+
+    // Rows already over the limit refuse the migration.
+    let over: Vec<Resource> = { let mut p = writable("slots"); p.constraints.per_owner = Some(brain_backend::contract::PerOwner { except: vec!["admin".into()] }); vec![p] };
+    let refused = brain_backend::db::migrate_approving(&a.pool, &over, &["slots".to_string()]).await.unwrap_err();
+    assert!(refused.contains("more than one record"), "{refused}");
+}

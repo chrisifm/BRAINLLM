@@ -71,6 +71,7 @@ fn listings() -> Resource {
                     ..Default::default()
                 },
             ],
+            per_owner: None,
         },
     }
 }

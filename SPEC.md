@@ -333,7 +333,7 @@ A field of kind `org` makes a resource tenant data, with grants `org`, `org.<rol
 Read grants take row conditions (`{ public: { where: { status: 'published' } } }`, OR-ed; hidden rows answer 404 on every read channel; B0749 warns on an unconditioned public read with a state field, `expose_all_rows: true` declares it); `api: false` makes a resource server-only (`ctx.backend.service(name)`).
 Policy grants `owner.<ref>[.<ref>]` scope rows through relations; field option `visible: ['owner','admin']` hides
 a field from other readers and from the query surface. Modifiers `'str writeonly'`, `readonly`, `private` control
-client writes and reads. `owner` is returned only to owners and named read roles unless `expose_owner: true`.
+client writes and reads; `access: { write: ['admin'] }` limits writes by role. Constraint `unique: [['$owner']]` allows one record per owner. `owner` is returned only to owners and named read roles unless `expose_owner: true`.
 See `docs/backend/*.md`.
 Set `BRAIN_BACKEND_URL` to the fixed loopback native backend URL to connect native API requests and SSR session verification.
 Native JWT accounts use short-lived access and rotating refresh cookies, persisted revocation, configured roles and Google Sign-In.

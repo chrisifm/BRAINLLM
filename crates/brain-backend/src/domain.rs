@@ -567,7 +567,7 @@ impl Domain {
                 if kind == Kind::Upsert {
                     let mut wanted = step.key.clone();
                     wanted.sort();
-                    if !r.unique_sets().iter().any(|(_, set)| {
+                    if !r.upsert_keys().iter().any(|set| {
                         let mut set = set.clone();
                         set.sort();
                         set == wanted
@@ -1304,9 +1304,8 @@ pub struct UpsertRequest {
 pub fn upsert_key(r: &Resource, key: &[String]) -> Result<Vec<String>, BTreeMap<String, String>> {
     let mut wanted = key.to_vec();
     wanted.sort();
-    r.unique_sets()
+    r.upsert_keys()
         .into_iter()
-        .map(|(_, set)| set)
         .find(|set| {
             let mut sorted = set.clone();
             sorted.sort();
@@ -1506,7 +1505,7 @@ pub fn openapi(domain: &Domain, resources: &[Resource], api: &mut Value) {
             "key":{"type":"array","items":{"type":"string"},"description":"upsert only: a declared unique field set"},
             "on_conflict":{"enum":["update","ignore"],"default":"update"}}});
         paths.insert(format!("/api/{}/batch", r.name), json!({"post": post(format!("{}_batch", r.name), "All-or-nothing batch in one transaction. Every item is validated first; errors are keyed items.<index>.<field>. Not available when the resource declares a before-hook for the operation.", batch_body, json!({"type":"object","required":["op","count","items"],"properties":{"op":{"type":"string"},"count":{"type":"integer"},"items":{"type":"array","items":row},"created":{"type":"array","items":{"type":"boolean"}}}}), json!({"x-brain-batch-max":max,"x-brain-policy":serde_json::to_value(&r.policy).unwrap_or_default()}))}));
-        let keys: Vec<Vec<String>> = r.unique_sets().into_iter().map(|(_, set)| set).collect();
+        let keys = r.upsert_keys();
         if !keys.is_empty() {
             paths.insert(format!("/api/{}/upsert", r.name), json!({"post": post(format!("{}_upsert", r.name), "Insert, or on a duplicate key update the sent fields (on_conflict: update) or return the existing record (ignore). Race-safe through the unique index.", json!({"type":"object","additionalProperties":false,"required":["key","data"],"properties":{"key":{"enum":keys},"data":r.schema(),"on_conflict":{"enum":["update","ignore"],"default":"update"}}}), json!({"type":"object","required":["record","created"],"properties":{"record":row,"created":{"type":"boolean"}}}), json!({}))}));
         }
