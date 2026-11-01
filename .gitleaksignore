@@ -3,3 +3,6 @@
 ce0e0d0959d69263a5770e531f8931314b3c774e:docs/backend/api-keys.md:curl-auth-header:47
 ce0e0d0959d69263a5770e531f8931314b3c774e:docs/backend/api-keys.md:generic-api-key:48
 ce0e0d0959d69263a5770e531f8931314b3c774e:docs/backend/api-keys.md:generic-api-key:97
+97794f26fab351d919d1875873ef7839f73f711f:crates/brain-cli/tests/corpus/check.txt:generic-api-key:254
+97794f26fab351d919d1875873ef7839f73f711f:crates/brain-cli/tests/corpus/check.txt:generic-api-key:280
+41a34bd4e9ee13f03333a4d3644d4df9e546c097:crates/brain-cli/tests/handler_rules.rs:generic-api-key:36
