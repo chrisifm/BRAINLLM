@@ -13,6 +13,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Fix: page responses carry the route preloads in a `Link` header, so hosts can still produce early hints
 - Fix: with `NODE_ENV=production` and no `--env`, `brain jobs`, `brain backend`, `brain media` and `brain analytics` stop with B0785 instead of B0762 about a variable set under `[production]`; `brain analytics` used to skip the check, and `--env=production` counts as stating it
 - B0762 names `[production]` when `DATABASE_URL` is only set there
+- Fix: a missing or short route or webhook secret stops `brain backend serve` and `brain jobs work` once, before any database connection, with B0790 and exit status 78; the generated PM2 file and `--with-workers` do not restart that status
 - Fix: `brain start` answers `/health`, `/health/live` and `/health/ready`, reserved by B0735, on its own port: forwarded to the native backend, or a plain healthy response without one
 
 ## [0.7.0] - 2026-10-31

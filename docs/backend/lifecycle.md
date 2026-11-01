@@ -47,6 +47,8 @@ points at another machine or `NODE_ENV=production`, because the default is devel
 open API description and no HSTS. Even in development, `/_brain/api` needs an administrator for a request that came
 through a proxy.
 
+**Configuration errors stop once.** A problem a restart cannot fix (a route or webhook secret missing or too short, B0790, and the settings the environment alone reveals) stops `brain backend serve`, `brain jobs work` and `brain jobs cron` with exit status 78 (`EX_CONFIG`), before the first database connection where the environment alone shows it. The generated PM2 file lists 78 in `stop_exit_codes` and `--with-workers` does not restart a worker that returns it. With a custom supervisor, do the same (systemd: `RestartPreventExitStatus=78`). An unreachable database or a busy port stays exit status 2, since those recover.
+
 **Boot retry.** `brain backend serve` and `brain jobs work` start even if Postgres is still coming up. A refused
 connection, a server that is starting (`57P03`) or full connection slots (`53300`) are retried with full-jitter
 backoff: a random delay up to 250 ms, doubling per attempt up to 5 s, for at most 60 s. Each retry logs

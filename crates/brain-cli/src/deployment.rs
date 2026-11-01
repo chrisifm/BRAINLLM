@@ -200,7 +200,7 @@ pub fn preview(root: &Path, target: &str, options: &Value) -> Result<Value, Stri
                         && !s.contains(['\n', '\r'])
                 })
                 .ok_or("brainBinary must be one literal executable path, not a shell command")?;
-            let common = |app_name: String, args: Vec<String>| json!({"name":app_name,"cwd":root.to_string_lossy(),"script":binary,"args":args,"interpreter":"none","instances":1,"exec_mode":"fork","watch":false,"autorestart":true,"min_uptime":10000,"max_restarts":10,"exp_backoff_restart_delay":1000,"kill_timeout":20000,"listen_timeout":30000,"wait_ready":false,"max_memory_restart":format!("{memory}M"),"time":true,"merge_logs":true});
+            let common = |app_name: String, args: Vec<String>| json!({"name":app_name,"cwd":root.to_string_lossy(),"script":binary,"args":args,"interpreter":"none","instances":1,"exec_mode":"fork","watch":false,"autorestart":true,"stop_exit_codes":[crate::backend::CONFIG_EXIT],"min_uptime":10000,"max_restarts":10,"exp_backoff_restart_delay":1000,"kill_timeout":20000,"listen_timeout":30000,"wait_ready":false,"max_memory_restart":format!("{memory}M"),"time":true,"merge_logs":true});
             let mut apps = vec![common(
                 name.to_owned(),
                 vec![
@@ -407,6 +407,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(value["apps"].as_array().unwrap().len(), 2);
+        for app in value["apps"].as_array().unwrap() {
+            assert_eq!(app["stop_exit_codes"], json!([78]), "a configuration exit must not restart");
+        }
         assert_eq!(value["apps"][0]["instances"], 1);
         assert_eq!(value["apps"][0]["script"], "/tmp/brain'quoted");
         assert_eq!(

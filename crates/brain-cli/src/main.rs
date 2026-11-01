@@ -413,7 +413,7 @@ fn main() -> ExitCode {
             } else {
                 eprintln!("error: {e}");
             }
-            ExitCode::from(2)
+            ExitCode::from(if backend::failed_on_configuration() { backend::CONFIG_EXIT } else { 2 })
         }
     }
 }

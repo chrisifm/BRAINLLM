@@ -191,3 +191,34 @@ fn a_database_url_in_another_section_is_named_and_an_equals_env_counts_as_stated
     let (_, text) = with_node_env(&a.0, &["jobs", "stats"], None);
     assert!(text.contains("B0762") && !text.contains("[production]"), "{text}");
 }
+
+fn with_stripe_route(a: &App, env: &str) {
+    let dir = a.0.join("server/routes/payments");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("route.jsbrain"), "<meta server>\nexport default { method: 'POST', path: '/hooks/payments', verify: { scheme: 'timestamped', header: 'X-Signature', secret: 'PAYMENTS_WEBHOOK_SECRET' } }\n").unwrap();
+    fs::write(dir.join("handler.jsbrain"), "<meta server>\nexport default async function handle(ctx) { return { ok: true } }\n").unwrap();
+    fs::write(a.0.join(".brain_env"), env).unwrap();
+}
+
+// A supervisor restarts a process that exits with a failure: a missing secret would loop forever, each time looking like a
+// crash. It stops before the first connection, with its code, and with the exit status supervisors are told not to restart.
+#[test]
+fn a_missing_route_secret_stops_serve_once_with_its_code_and_a_no_restart_status() {
+    let a = app("config-exit");
+    for secret in ["", "PAYMENTS_WEBHOOK_SECRET=\n", "PAYMENTS_WEBHOOK_SECRET?=\n", "PAYMENTS_WEBHOOK_SECRET=short-value\n"] {
+        // nothing listens on this port: reaching the database would take a minute and report it instead
+        with_stripe_route(&a, &format!("DATABASE_URL=postgres://u@127.0.0.1:1/none\n{secret}"));
+        let started = std::time::Instant::now();
+        let o = Command::new(bin()).args(["backend", "serve", "--env", "development", "--port", "0"]).current_dir(&a.0).env("NO_COLOR", "1").env_remove("DATABASE_URL").env_remove("NODE_ENV").env_remove("PAYMENTS_WEBHOOK_SECRET").stdin(Stdio::null()).output().unwrap();
+        let text = String::from_utf8_lossy(&o.stderr).to_string();
+        assert_eq!(o.status.code(), Some(78), "{secret:?}: {text}");
+        assert!(text.contains("B0790") && text.contains("PAYMENTS_WEBHOOK_SECRET") && text.contains("fix:") && !text.contains("short-value"), "{text}");
+        assert!(started.elapsed().as_secs() < 20, "it must not wait for the database: {text}");
+    }
+    // a one-shot command keeps the ordinary failure status
+    with_stripe_route(&a, "DATABASE_URL=not-a-url\n");
+    let (ok, out) = brain(&a.0, &["backend", "migrate", "--env", "development"]);
+    assert!(!ok && out.contains("B0762"), "{out}");
+    let o = Command::new(bin()).args(["backend", "migrate", "--env", "development"]).current_dir(&a.0).stdin(Stdio::null()).output().unwrap();
+    assert_eq!(o.status.code(), Some(2));
+}
