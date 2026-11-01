@@ -1,5 +1,11 @@
 //! `brain`: the single BRAINLLM CLI. Arguments are parsed by hand (no dependencies).
 
+// Every stderr line of this crate is one write (`brain_lex::write_stderr_line`); this shadows the standard macro.
+macro_rules! eprintln {
+    () => { brain_lex::write_stderr_line("") };
+    ($($arg:tt)*) => { brain_lex::write_stderr_line(&format!($($arg)*)) };
+}
+
 #[cfg(unix)]
 mod browser;
 mod trace;
