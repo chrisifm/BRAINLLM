@@ -88,6 +88,8 @@ pub struct Policy {
     pub api: bool,
     /// Declares that an unconditioned public read of a resource with state-like fields is intentional (B0749).
     pub expose_all_rows: bool,
+    /// Records every mutation of this resource in the audit log.
+    pub audit: bool,
 }
 impl Default for Policy {
     fn default() -> Self {
@@ -100,6 +102,7 @@ impl Default for Policy {
             read_where: BTreeMap::new(),
             api: true,
             expose_all_rows: false,
+            audit: false,
         }
     }
 }
@@ -119,12 +122,14 @@ struct RawPolicy {
     api: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     expose_all_rows: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    audit: Option<bool>,
 }
 impl TryFrom<RawPolicy> for Policy {
     type Error = String;
     fn try_from(raw: RawPolicy) -> Result<Self, String> {
         let api = raw.api.unwrap_or(true);
-        let mut policy = Policy { api, expose_all_rows: raw.expose_all_rows.unwrap_or(false), ..Policy::default() };
+        let mut policy = Policy { api, expose_all_rows: raw.expose_all_rows.unwrap_or(false), audit: raw.audit.unwrap_or(false), ..Policy::default() };
         let mut read_where = BTreeMap::new();
         for (op, list) in [("read", raw.read), ("create", raw.create), ("update", raw.update), ("delete", raw.delete)] {
             // A server-only resource may omit its lists: they stay admin-only.
@@ -187,6 +192,7 @@ impl From<Policy> for RawPolicy {
             delete: names(p.delete),
             api: (!p.api).then_some(false),
             expose_all_rows: p.expose_all_rows.then_some(true),
+            audit: p.audit.then_some(true),
         }
     }
 }

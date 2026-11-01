@@ -4,7 +4,7 @@ use super::{App, Error, Path, Result};
 use crate::{auth, http::User};
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Query, State},
     http::{HeaderMap, StatusCode},
     routing::{get, patch, post},
 };
@@ -20,6 +20,8 @@ pub(super) fn routes() -> Router<App> {
         .route("/_brain/orgs/{id}/members", get(members))
         .route("/_brain/orgs/{id}/members/{user}", patch(change_role).delete(remove))
         .route("/_brain/orgs/{id}/invites", post(invite))
+        .route("/_brain/orgs/{id}/audit", get(org_audit))
+        .route("/_brain/audit", get(global_audit))
 }
 fn db_error(error: sqlx::Error) -> Error {
     Error::database(error)
@@ -77,6 +79,7 @@ async fn create(State(app): State<App>, h: HeaderMap, Json(input): Json<NewOrg>)
     let mut tx = app.pool.begin().await.map_err(db_error)?;
     sqlx::query("INSERT INTO _brain_orgs(id,name,created_by) VALUES($1,$2,$3)").bind(id).bind(name).bind(u.id).execute(&mut *tx).await.map_err(db_error)?;
     sqlx::query("INSERT INTO _brain_org_members(org_id,user_id,role) VALUES($1,$2,$3)").bind(id).bind(u.id).bind(&role).execute(&mut *tx).await.map_err(db_error)?;
+    crate::audit::organization_event(&mut tx, u.id, id, "org_created", Some(id), &[]).await.map_err(db_error)?;
     tx.commit().await.map_err(db_error)?;
     Ok(Json(json!({"id": id, "name": name, "role": role})))
 }
@@ -121,6 +124,8 @@ async fn change(app: &App, org: Uuid, target: Uuid, next: Option<&str>, actor: &
         Some(role) => sqlx::query("UPDATE _brain_org_members SET role=$3 WHERE org_id=$1 AND user_id=$2").bind(org).bind(target).bind(role).execute(&mut *tx).await.map_err(db_error)?,
         None => sqlx::query("DELETE FROM _brain_org_members WHERE org_id=$1 AND user_id=$2").bind(org).bind(target).execute(&mut *tx).await.map_err(db_error)?,
     };
+    let event = if next.is_some() { "member_role_changed" } else { "member_removed" };
+    crate::audit::organization_event(&mut tx, actor.id, org, event, Some(target), &["role"]).await.map_err(db_error)?;
     tx.commit().await.map_err(db_error)
 }
 async fn change_role(State(app): State<App>, Path((org, target)): Path<(Uuid, Uuid)>, h: HeaderMap, Json(input): Json<RoleBody>) -> Result<Json<Value>> {
@@ -144,9 +149,12 @@ async fn invite(State(app): State<App>, Path(org): Path<Uuid>, h: HeaderMap, Jso
         return Err(outranked());
     }
     let token = auth::token();
+    let mut tx = app.pool.begin().await.map_err(db_error)?;
+    crate::audit::organization_event(&mut tx, u.id, org, "invite_created", None, &["role"]).await.map_err(db_error)?;
     let expires: String = sqlx::query_scalar("INSERT INTO _brain_org_invites(token_hash,org_id,role,created_by,expires_at) VALUES($1,$2,$3,$4,now()+make_interval(days=>$5)) RETURNING to_jsonb(expires_at)#>>'{}'")
         .bind(auth::digest(&token)).bind(org).bind(&input.role).bind(u.id).bind(crate::organizations::INVITE_DAYS)
-        .fetch_one(&app.pool).await.map_err(db_error)?;
+        .fetch_one(&mut *tx).await.map_err(db_error)?;
+    tx.commit().await.map_err(db_error)?;
     Ok(Json(json!({"token": token, "role": input.role, "expires_at": expires})))
 }
 async fn accept(State(app): State<App>, h: HeaderMap, Json(input): Json<AcceptBody>) -> Result<Json<Value>> {
@@ -158,7 +166,44 @@ async fn accept(State(app): State<App>, h: HeaderMap, Json(input): Json<AcceptBo
     let (org, role): (Uuid, String) = (row.get("org_id"), row.get("role"));
     // An existing member keeps their role: an invitation never changes it, up or down.
     sqlx::query("INSERT INTO _brain_org_members(org_id,user_id,role) VALUES($1,$2,$3) ON CONFLICT (org_id,user_id) DO NOTHING").bind(org).bind(u.id).bind(&role).execute(&mut *tx).await.map_err(db_error)?;
+    crate::audit::organization_event(&mut tx, u.id, org, "member_added", Some(u.id), &["role"]).await.map_err(db_error)?;
     let held: String = sqlx::query_scalar("SELECT role FROM _brain_org_members WHERE org_id=$1 AND user_id=$2").bind(org).bind(u.id).fetch_one(&mut *tx).await.map_err(db_error)?;
     tx.commit().await.map_err(db_error)?;
     Ok(Json(json!({"id": org, "role": held})))
+}
+struct AuditQuery {
+    resource: Option<String>,
+    before: Option<i64>,
+    limit: i64,
+}
+fn audit_query(pairs: &[(String, String)]) -> Result<AuditQuery> {
+    let mut out = AuditQuery { resource: None, before: None, limit: 50 };
+    for (key, value) in pairs {
+        let bad = || Error::validation(json!({key.as_str(): "Use resource, before (an entry id) or limit from 1 to 100"}));
+        match key.as_str() {
+            "resource" if value.len() <= 64 => out.resource = Some(value.clone()),
+            "before" => out.before = Some(value.parse().map_err(|_| bad())?),
+            "limit" => {
+                out.limit = value.parse().map_err(|_| bad())?;
+                if !(1..=crate::audit::MAX_PAGE).contains(&out.limit) {
+                    return Err(bad());
+                }
+            }
+            _ => return Err(bad()),
+        }
+    }
+    Ok(out)
+}
+/// Managers read their own organization's log; everyone else gets the answer for a missing organization or a denial.
+async fn org_audit(State(app): State<App>, Path(org): Path<Uuid>, h: HeaderMap, Query(pairs): Query<Vec<(String, String)>>) -> Result<Json<Value>> {
+    let u = app.required(&h).await?;
+    manager(&app, org, &u).await?;
+    let q = audit_query(&pairs)?;
+    crate::audit::page(&app.pool, Some(org), q.resource.as_deref(), q.before, q.limit).await.map(Json).map_err(db_error)
+}
+/// Administrators read entries outside any organization; tenant entries stay with their organization.
+async fn global_audit(State(app): State<App>, h: HeaderMap, Query(pairs): Query<Vec<(String, String)>>) -> Result<Json<Value>> {
+    app.admin(&h).await?;
+    let q = audit_query(&pairs)?;
+    crate::audit::page(&app.pool, None, q.resource.as_deref(), q.before, q.limit).await.map(Json).map_err(db_error)
 }

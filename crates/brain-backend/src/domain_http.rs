@@ -105,6 +105,9 @@ fn hooked(r: &crate::Resource, ops: &[&str]) -> Result<()> {
 macro_rules! transactional {
     ($app:expr, $user:expr, |$engine:ident, $tx:ident| $body:expr) => {{
         let mut $tx = $app.pool.begin().await.map_err(|e| Error::database(e))?;
+        if $app.resources.values().any(|r| r.policy.audit) {
+            crate::audit::mark(&mut $tx).await.map_err(|e| Error::database(e))?;
+        }
         let mut $engine = Engine::new(&$app.domain, &$app.resources, &$user);
         let outcome = $body;
         match outcome {

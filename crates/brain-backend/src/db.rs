@@ -37,6 +37,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("system_keys", include_str!("../migrations/0019_system_keys.sql")),
     ("file_deletions", include_str!("../migrations/0020_file_deletions.sql")),
     ("organizations", include_str!("../migrations/0021_organizations.sql")),
+    ("audit_log", include_str!("../migrations/0022_audit_log.sql")),
 ];
 fn checksum(sql: &str) -> String {
     Sha256::digest(sql.as_bytes())
@@ -776,10 +777,12 @@ pub async fn migrate_approving(pool: &PgPool, resources: &[Resource], approved: 
     for r in resources {
         crate::relations::install(&mut tx, r).await?;
         crate::organizations::install(&mut tx, r, resources).await?;
+        crate::audit::install(&mut tx, r).await?;
         crate::query::install_indexes(&mut tx, r).await?;
         crate::slugs::install(&mut tx, r).await?;
         crate::relations::verify(&mut tx, r).await?;
         crate::organizations::verify(&mut tx, r, resources).await?;
+        crate::audit::verify(&mut tx, r).await?;
     }
     foundation(&mut tx).await?;
     tx.commit().await.map_err(safe)
@@ -973,6 +976,9 @@ pub async fn create(
     data: Value,
 ) -> Result<Value, sqlx::Error> {
     let mut tx = pool.begin().await?;
+    if r.policy.audit {
+        crate::audit::mark(&mut tx).await?;
+    }
     let row = query(
         "INSERT INTO ",
         r,
@@ -1007,6 +1013,9 @@ pub async fn update_checked(
     expected: Option<&str>,
 ) -> Result<Option<Value>, sqlx::Error> {
     let mut tx = pool.begin().await?;
+    if r.policy.audit {
+        crate::audit::mark(&mut tx).await?;
+    }
     let row=query("UPDATE ",r,concat!(" SET data=$2,updated_at=now() WHERE id=$1 AND ($3::uuid IS NULL OR owner=$3) AND ($4::text IS NULL OR xmin::text=$4) RETURNING ",record_columns!())).build()
         .bind(id).bind(data).bind(owner).bind(expected).fetch_optional(&mut *tx).await?.map(record);
     if let Some(row) = &row {
@@ -1031,6 +1040,9 @@ pub async fn delete_checked(
     expected: Option<&str>,
 ) -> Result<bool, sqlx::Error> {
     let mut tx = pool.begin().await?;
+    if r.policy.audit {
+        crate::audit::mark(&mut tx).await?;
+    }
     let row = query(
         "DELETE FROM ",
         r,
@@ -1162,6 +1174,7 @@ pub async fn verify(pool: &PgPool, resources: &[Resource]) -> Result<(), String>
         resource_shape(&mut conn, r).await?;
         crate::relations::verify(&mut conn, r).await?;
         crate::organizations::verify(&mut conn, r, resources).await?;
+        crate::audit::verify(&mut conn, r).await?;
         let stored =
             sqlx::query("SELECT fields,search_fields FROM _brain_resource_schemas WHERE name=$1")
                 .bind(&r.name)

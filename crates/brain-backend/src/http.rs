@@ -275,6 +275,13 @@ impl<S: Send + Sync, T: serde::de::DeserializeOwned + Send> FromRequestParts<S> 
 }
 impl App {
     async fn user(&self, h: &HeaderMap) -> Result<Option<User>> {
+        let user = self.identify(h).await?;
+        if let Some(user) = &user {
+            crate::audit::identified(user.id);
+        }
+        Ok(user)
+    }
+    async fn identify(&self, h: &HeaderMap) -> Result<Option<User>> {
         if let Some(user) = http_api_keys::key_user() {
             return Ok(Some(user));
         }
@@ -893,7 +900,7 @@ async fn response_headers(req: Request, next: Next) -> Response {
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
     let db_time = std::sync::Arc::new(db::DbTime::default());
-    let response = db::with_db_time(db_time.clone(), REQUEST_ID.scope(rid.clone(), REQUEST_OPERATION.scope(operation_of(&method, &route, &path), next.run(req)))).await;
+    let response = db::with_db_time(db_time.clone(), REQUEST_ID.scope(rid.clone(), REQUEST_OPERATION.scope(operation_of(&method, &route, &path), crate::audit::scope(next.run(req))))).await;
     crate::dev_trace::request(&rid, method.as_str(), &route, response.status().as_u16(), started.elapsed().as_secs_f64() * 1000.0);
     let log_policy = response.extensions().get::<edge_http::LogPolicy>().copied();
     let mut response = crate::response::finalize(&method, &path, accept.as_deref(), &rid, response);

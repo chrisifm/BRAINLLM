@@ -331,3 +331,124 @@ async fn serving_refuses_a_tenant_table_without_its_trigger() {
     let error = db::verify(&f.pool, &resources()).await.unwrap_err();
     assert!(error.contains("organization trigger"), "{error}");
 }
+
+fn audited() -> Vec<Resource> {
+    let tenant = json!({"read":["org"],"create":["org"],"update":["org"],"delete":["org"],"audit":true});
+    let shared = json!({"read":["admin"],"create":["admin"],"update":["admin"],"delete":["admin"],"audit":true});
+    let list: Vec<Value> = serde_json::from_value(json!([
+        {"name":"cases","fields":{"org":{"kind":"org","required":true},"title":{"kind":"str","required":true},"secret":{"kind":"str","access":"private"},"pin":{"kind":"str","access":"writeonly"}},"policy":tenant},
+        {"name":"settings","fields":{"name":{"kind":"str","required":true}},"policy":shared},
+        {"name":"quiet","fields":{"name":{"kind":"str","required":true}},"policy":{"read":["admin"],"create":["admin"],"update":["admin"],"delete":["admin"]}}
+    ])).unwrap();
+    list.into_iter().map(|v| serde_json::from_value(v).unwrap()).collect()
+}
+
+#[tokio::test]
+#[ignore = "Use scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn audit_log_records_mutations_without_values_and_cannot_be_rewritten() {
+    let pool = database().await;
+    let all = audited();
+    db::migrate(&pool, &all).await.unwrap();
+    roles().register(&pool).await.unwrap();
+    let (alice, bob, admin) = (actor(&pool, "user").await, actor(&pool, "user").await, actor(&pool, "admin").await);
+    let (http, _) = brain_backend::http::router_with_platform(pool.clone(), config(all.clone()), Platform::default()).await.unwrap();
+    let org_a = call(&http, "POST", "/_brain/orgs", Some(&alice), Some(json!({"name":"A"}))).await.1["id"].as_str().unwrap().to_string();
+    let org_b = call(&http, "POST", "/_brain/orgs", Some(&bob), Some(json!({"name":"B"}))).await.1["id"].as_str().unwrap().to_string();
+    // A row carrying a private and a write-only value, set by a server path, then changed over HTTP.
+    let (s, made) = call(&http, "POST", "/api/cases", Some(&alice), Some(json!({"org":org_a,"title":"Public-title-marker","pin":"writeonly-value-marker"}))).await;
+    assert_eq!(s, 200, "{made}");
+    let id = made["id"].as_str().unwrap().to_string();
+    assert_eq!(call(&http, "PATCH", &format!("/api/cases/{id}"), Some(&alice), Some(json!({"title":"Second-title-marker"}))).await.0, 200);
+    let mut rewrite = sqlx::query("UPDATE _brain_res_cases SET data=data||'{\"secret\":\"private-value-marker\"}' WHERE id=$1::uuid").bind(&id).execute(&pool).await;
+    assert!(rewrite.is_ok());
+    rewrite = sqlx::query("UPDATE _brain_res_cases SET data=data WHERE id=$1::uuid").bind(&id).execute(&pool).await;
+    assert!(rewrite.is_ok());
+    assert_eq!(call(&http, "DELETE", &format!("/api/cases/{id}"), Some(&alice), None).await.0, 200);
+    // A refused mutation leaves no entry.
+    assert_eq!(call(&http, "PATCH", &format!("/api/cases/{id}"), Some(&bob), Some(json!({"title":"x"}))).await.0, 404);
+
+    let (s, log) = call(&http, "GET", &format!("/_brain/orgs/{org_a}/audit?resource=cases"), Some(&alice), None).await;
+    assert_eq!(s, 200, "{log}");
+    let items = log["items"].as_array().unwrap();
+    let ops: Vec<&str> = items.iter().map(|i| i["operation"].as_str().unwrap()).collect();
+    assert_eq!(ops, ["delete", "update", "update", "insert"], "{log}");
+    assert_eq!(items[2]["fields"], json!(["title"]));
+    assert_eq!(items[2]["actor"], alice.id.to_string());
+    assert_eq!(items[2]["actor_kind"], "user");
+    assert!(items[2]["request"].as_str().is_some_and(|r| !r.is_empty()));
+    assert_eq!(items[1]["actor_kind"], "server", "a write outside a request is recorded as such");
+    assert_eq!(items[0]["actor"], alice.id.to_string());
+    // No value is stored anywhere in the log, whatever the field's access.
+    let dump: String = sqlx::query_scalar("SELECT coalesce(string_agg(to_jsonb(l)::text,' '),'') FROM _brain_audit_log l").fetch_one(&pool).await.unwrap();
+    for marker in ["marker", "Public-title", "writeonly-value", "private-value"] {
+        assert!(!dump.contains(marker), "`{marker}` reached the audit log: {dump}");
+    }
+    // Isolation: another organization's manager and a plain non-member cannot read it; each sees their own.
+    assert_eq!(call(&http, "GET", &format!("/_brain/orgs/{org_a}/audit"), Some(&bob), None).await.0, 404);
+    assert_eq!(call(&http, "GET", &format!("/_brain/orgs/{org_a}/audit"), Some(&admin), None).await.0, 404);
+    let theirs = call(&http, "GET", &format!("/_brain/orgs/{org_b}/audit"), Some(&bob), None).await.1;
+    assert!(theirs["items"].as_array().unwrap().iter().all(|i| i["org"] == org_b.as_str()), "{theirs}");
+    // A plain member is refused; membership events are recorded.
+    let carol = actor(&pool, "user").await;
+    let (_, inv) = call(&http, "POST", &format!("/_brain/orgs/{org_a}/invites"), Some(&alice), Some(json!({"role":"member"}))).await;
+    assert_eq!(call(&http, "POST", "/_brain/orgs/invites/accept", Some(&carol), Some(json!({"token":inv["token"]}))).await.0, 200);
+    assert_eq!(call(&http, "GET", &format!("/_brain/orgs/{org_a}/audit"), Some(&carol), None).await.0, 403);
+    assert_eq!(call(&http, "PATCH", &format!("/_brain/orgs/{org_a}/members/{}", carol.id), Some(&alice), Some(json!({"role":"admin"}))).await.0, 200);
+    assert_eq!(call(&http, "DELETE", &format!("/_brain/orgs/{org_a}/members/{}", carol.id), Some(&alice), None).await.0, 200);
+    let org_log = call(&http, "GET", &format!("/_brain/orgs/{org_a}/audit?resource=organization"), Some(&alice), None).await.1;
+    let events: Vec<&str> = org_log["items"].as_array().unwrap().iter().map(|i| i["operation"].as_str().unwrap()).collect();
+    assert_eq!(events, ["member_removed", "member_role_changed", "member_added", "invite_created", "org_created"]);
+    assert!(!org_log.to_string().contains(inv["token"].as_str().unwrap()));
+    // Shared resources: administrators only, and a resource without `audit` records nothing.
+    assert_eq!(call(&http, "POST", "/api/settings", Some(&admin), Some(json!({"name":"one"}))).await.0, 200);
+    assert_eq!(call(&http, "POST", "/api/quiet", Some(&admin), Some(json!({"name":"two"}))).await.0, 200);
+    let global = call(&http, "GET", "/_brain/audit", Some(&admin), None).await.1;
+    let resources: Vec<&str> = global["items"].as_array().unwrap().iter().map(|i| i["resource"].as_str().unwrap()).collect();
+    assert_eq!(resources, ["settings"], "{global}");
+    assert_eq!(call(&http, "GET", "/_brain/audit", Some(&alice), None).await.0, 403);
+    assert_eq!(call(&http, "GET", "/_brain/audit?limit=0", Some(&admin), None).await.0, 422);
+    assert_eq!(call(&http, "GET", "/_brain/audit?unknown=1", Some(&admin), None).await.0, 422);
+    // Paging walks every entry once.
+    let first = call(&http, "GET", &format!("/_brain/orgs/{org_a}/audit?limit=2"), Some(&alice), None).await.1;
+    let next = first["next"].as_i64().unwrap();
+    let second = call(&http, "GET", &format!("/_brain/orgs/{org_a}/audit?limit=2&before={next}"), Some(&alice), None).await.1;
+    assert!(second["items"][0]["id"].as_i64().unwrap() < next);
+    // Append-only against the application role itself.
+    for statement in ["UPDATE _brain_audit_log SET actor=NULL", "DELETE FROM _brain_audit_log", "TRUNCATE _brain_audit_log"] {
+        let error = sqlx::raw_sql(sqlx::AssertSqlSafe(statement)).execute(&pool).await.unwrap_err();
+        assert!(error.to_string().contains("append-only"), "{statement}: {error}");
+    }
+    // Serving refuses an audited table whose trigger was removed.
+    sqlx::raw_sql("DROP TRIGGER _brain_audit ON _brain_res_settings").execute(&pool).await.unwrap();
+    assert!(db::verify(&pool, &all).await.unwrap_err().contains("audit trigger"));
+}
+
+#[tokio::test]
+#[ignore = "Use scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn audit_log_attributes_domain_actions_and_keeps_a_refused_write_out() {
+    let pool = database().await;
+    let list: Vec<Resource> = serde_json::from_value(json!([{
+        "name":"counters",
+        "fields":{"name":{"kind":"str","required":true},"total":{"kind":"int","required":true},"note":{"kind":"str","access":"private"}},
+        "policy":{"read":["admin"],"create":["admin"],"update":["admin"],"delete":["admin"],"audit":true}
+    }])).unwrap();
+    db::migrate(&pool, &list).await.unwrap();
+    roles().register(&pool).await.unwrap();
+    let admin = actor(&pool, "admin").await;
+    let domain: brain_backend::domain::Domain = serde_json::from_value(json!({"resources":{"counters":{"actions":{
+        "bump":{"roles":["admin"],"input":{"amount":"int!"},"increment":{"total":"$input.amount"},"when":{"total":{"lt":100}}}
+    }}}})).unwrap();
+    let (http, _) = brain_backend::http::router_with_domain(pool.clone(), config(list), domain).await.unwrap();
+    let id = call(&http, "POST", "/api/counters", Some(&admin), Some(json!({"name":"one","total":1}))).await.1["id"].as_str().unwrap().to_string();
+    assert_eq!(call(&http, "POST", &format!("/api/counters/{id}/actions/bump"), Some(&admin), Some(json!({"amount":2}))).await.0, 200);
+    assert_eq!(call(&http, "POST", &format!("/api/counters/{id}/actions/bump"), Some(&admin), Some(json!({"amount":200}))).await.0, 200);
+    let refused = call(&http, "POST", &format!("/api/counters/{id}/actions/bump"), Some(&admin), Some(json!({"amount":1}))).await.0;
+    assert_ne!(refused, 200, "the precondition no longer holds");
+    let log = call(&http, "GET", "/_brain/audit?resource=counters", Some(&admin), None).await.1;
+    let items = log["items"].as_array().unwrap();
+    assert_eq!(items.len(), 3, "a refused action records nothing: {log}");
+    assert_eq!(items[0]["fields"], json!(["total"]));
+    assert_eq!(items[0]["operation"], "update");
+    assert_eq!(items[0]["actor"], admin.id.to_string());
+    assert_eq!(items[0]["actor_kind"], "user");
+}
