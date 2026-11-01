@@ -1423,7 +1423,7 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
     let _ = snapshot;
     runtime()?.block_on(async {
         let production = environment == "production";
-        let boot = if op == "work" { brain_backend::boot::Boot::server(production) } else { brain_backend::boot::Boot::command(production) };
+        let boot = if matches!(op, "work" | "cron") { brain_backend::boot::Boot::server(production) } else { brain_backend::boot::Boot::command(production) };
         config_phase(false);
         let pool = brain_backend::boot::connect(&url, &boot).await?;
         brain_backend::db::verify(&pool, &contracts(&root, "resources")?).await?;
