@@ -7,7 +7,45 @@ diagnostics that reject code an earlier version accepted.
 Every npm package (`@christianirack/brainllm`, its seven native platform packages, `brainllm-runtime`,
 `create-brainllm` and `create-brainll`) ships the same version as `[workspace.package]` in `Cargo.toml`.
 
-## [0.8.0] - Unreleased
+## [0.8.0] - 2026-11-01
+
+Upgrade with `npm install -D @christianirack/brainllm@0.8.0 --save-exact`, then run `brain upgrade`, which measures the
+changes against your app. `brain guide whats-new` lists every change with how to start using it, and `brain guide migrate`
+is the full upgrade playbook.
+
+### Act on these before upgrading
+
+- **`ne` includes records without a value.** `field[ne]=x` now returns rows where `field` is empty. Nothing fails, so review every use; add `field[exists]=true` for the old result.
+- **A file bucket must declare `types`.** Without them, `brain check` reports B0770 and `brain backend serve` refuses to start. Write the accepted types, or `types: '*'` to keep accepting any file.
+- **103 Early Hints are off by default.** Set `server.earlyHints` or `BRAIN_EARLY_HINTS=1` to turn them on. Page responses still carry the `Link` header, so a host can produce them.
+
+### What is new and how to use it
+
+| Goal | Start with | Read |
+|---|---|---|
+| Accounts in an existing or new app | `brain add auth`, `brain new <app> --backend` | `brain guide backend` |
+| Frontend and backend from one command | `brain run --backend` | `brain guide backend` |
+| Tenant data isolated by the server | a field of kind `org` | `brain guide docs/backend/organizations.md` |
+| Who changed which fields | `audit: true` in a policy | `brain guide docs/backend/audit.md` |
+| Counts, radius and box filters | `facets`, a `geo` field | `brain guide docs/backend/geo.md` |
+| Bot defense on public writes | `server/auth/captcha.jsbrain` | `brain guide docs/backend/captcha.md` |
+| Usage balances that cannot overdraw | `/_brain/credits/{subject}` | `brain guide docs/backend/credits.md` |
+| Move data from another system | `brain backend import` | `brain guide docs/backend/import.md` |
+| Model calls from server code | `ctx.llm.complete`, `ctx.llm.stream` | `brain guide llm` |
+| Limit where pages can send data | `csp.connectSrc` in `brain.json` | `SPEC.md` |
+| Measure real pages | `vitals()`, `reportVitals(path)`, Alt+Shift+O in `brain run` | `SPEC.md` |
+| See what already exists before building it | `brain capabilities`, `brain recipe <id> --apply` | `brain guide docs/CAPABILITIES.md` |
+
+### Known limits
+
+- Organizations reject actions and batch writes, and an organization cannot be deleted yet.
+- Credits are administered by an admin only.
+- Captcha does not cover email verification or Google sign-in.
+- `ctx.llm` does not stream to the browser or call tools, and a call ends at `server.timeoutMs`, 10 seconds by default.
+- Speculation Rules apply only to full document navigations.
+- Auth emails go out in one language, the default locale.
+
+### All changes
 
 - Fix: `onclick={f}` on a native element compiles to `on:click` (B0223)
 - `brain check` warns B0224 on `onclick="..."`, which the Content-Security-Policy blocks

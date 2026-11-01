@@ -46,6 +46,18 @@ stale preview must be regenerated. The changes protocol provides validation and
 conditional recovery for the source edit. It does not perform dependency
 installation or certify the behavior of the requested framework version.
 
+## Breaking in 0.8.0: a file bucket must declare `types`
+
+A bucket without `types`, or with `types: []`, is error B0770 in `brain check`, and `brain backend serve` refuses to start.
+Write the types it holds, for example `types: ['application/pdf']`, or `types: '*'` to keep accepting any file. Stored files
+stay as they are; only new uploads are matched.
+
+## Changed in 0.8.0: 103 Early Hints are opt-in
+
+The Node server no longer sends 103 responses by default, because nginx below 1.29 breaks on them. Set `"earlyHints": true` under
+`server` in `brain.json` or `BRAIN_EARLY_HINTS=1` to turn them on, and test through your real proxy first. They are never sent to
+HTTP/1.0 clients. Page responses keep the route preloads in a `Link` header.
+
 ## What is preserved
 
 The preview updates installable declarations in `dependencies`,
