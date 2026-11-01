@@ -331,6 +331,17 @@ async fn relations_filters_sort_totals_aggregates_cursors_ownership_and_visibili
     assert_eq!(s, 422, "a cursor is bound to its sort");
     let (s, _) = api.get(&format!("/api/products?sort=price&limit=2&offset=2&cursor={cursor}"), None).await;
     assert_eq!(s, 422);
+    // `total=false` skips only the count: same items and the same cursor.
+    let (s, plain) = api.get(&format!("/api/products?sort=price&limit=2&cursor={cursor}"), None).await;
+    assert_eq!(s, 200);
+    assert!(plain["total"].is_i64());
+    let (s, uncounted) = api.get(&format!("/api/products?sort=price&limit=2&cursor={cursor}&total=false"), None).await;
+    assert_eq!(s, 200);
+    assert!(uncounted.get("total").is_none(), "{uncounted}");
+    assert_eq!(ids(&uncounted), ids(&plain));
+    assert_eq!(uncounted["next_cursor"], plain["next_cursor"]);
+    let (s, _) = api.get("/api/products?total=true", None).await;
+    assert_eq!(s, 422, "only `false` is accepted");
     // `after` is an alias of `cursor`; the default order (newest first) pages without a declared sort.
     let (_, all) = api.get("/api/products?limit=100", None).await;
     let mut seen = Vec::new();

@@ -23,6 +23,9 @@ GET /api/products?sort=price&limit=2&after=7b2273223a…
 The last page has no `next_cursor`. A walk visits every row exactly once even when sort keys tie or are null, and rows
 inserted meanwhile do not shift later pages. `total` keeps counting the whole filtered set.
 
+Counting costs a scan of that set on every page. A walk that does not show the count sends `total=false`: the response
+leaves `total` out and everything else stays the same. A filter declared on a field named `total` keeps working as a filter.
+
 ## Rules
 
 | Request | Result |

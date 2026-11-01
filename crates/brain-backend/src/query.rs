@@ -495,6 +495,8 @@ pub struct ListRequest {
     alternatives: BTreeMap<String, Vec<Filter>>,
     /// `?owner=me`: limit to the reader's own rows. The id always comes from the authenticated session.
     owner_me: bool,
+    /// `?total=false`: skip the count; a walk over every page does not need it on each one.
+    no_total: bool,
 }
 impl ListRequest {
     /// Narrows items to `?fields=`. It runs after projection and includes, so it can only remove what the reader
@@ -661,6 +663,10 @@ pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(Str
             // A filter declared on a field of this name keeps working as before.
             "owner" if !r.query.filter.contains_key("owner") => {
                 if raw == "me" { req.owner_me = true } else { bad("owner accepts only `me`; the server resolves it from the session") }
+            }
+            // A filter declared on a field of this name keeps working as before.
+            "total" if !r.query.filter.contains_key("total") => {
+                if raw == "false" { req.no_total = true } else { bad("total accepts only `false`; leave it out to get the count") }
             }
             // A filter declared on a field of this name keeps working as before.
             "facets" if !r.query.filter.contains_key("facets") => {
@@ -1386,9 +1392,13 @@ pub async fn list(
     }
 
     // Total over the same WHERE (without the cursor).
-    let mut q = QueryBuilder::<Postgres>::new(format!("SELECT count(*) FROM _brain_res_{} t WHERE ", r.name));
-    ctx.push_where(&mut q);
-    let total: i64 = q.build_query_scalar().fetch_one(&mut *tx).await?;
+    let total: Option<i64> = if req.no_total {
+        None
+    } else {
+        let mut q = QueryBuilder::<Postgres>::new(format!("SELECT count(*) FROM _brain_res_{} t WHERE ", r.name));
+        ctx.push_where(&mut q);
+        Some(q.build_query_scalar().fetch_one(&mut *tx).await?)
+    };
 
     let mut aggregates = Map::new();
     let mut truncated = Vec::new();
@@ -1413,7 +1423,10 @@ pub async fn list(
     ctx.facet = None;
     tx.commit().await?;
 
-    let mut out = json!({"items": items, "limit": req.limit, "offset": req.offset, "total": total});
+    let mut out = json!({"items": items, "limit": req.limit, "offset": req.offset});
+    if let Some(total) = total {
+        out["total"] = json!(total);
+    }
     if !ranked
         && items_len(&out) as i64 == req.limit
         && let Some((values, Some(id))) = last_keys
@@ -1437,7 +1450,7 @@ pub async fn list(
     if degraded {
         out["degraded"] = json!(true);
     }
-    if approximate {
+    if approximate && total.is_some() {
         out["total_approximate"] = json!(true);
     }
     Ok(out)
@@ -1622,6 +1635,7 @@ pub fn openapi_parameters(r: &Resource) -> Vec<Value> {
         json!({"name":"offset","in":"query","schema":{"type":"integer","minimum":0,"maximum":10000,"default":0}}),
         json!({"name":"cursor","in":"query","description":"next_cursor of the previous page (keyset pagination)","schema":{"type":"string"}}),
         json!({"name":"after","in":"query","description":"Alias of cursor","schema":{"type":"string"}}),
+        json!({"name":"total","in":"query","description":"`false` skips the count and leaves `total` out of the response","schema":{"type":"string","enum":["false"]}}),
         json!({"name":"sort","in":"query","description":format!("Comma-separated, '-' for descending: {}", sort_names(r)),"schema":{"type":"string"}}),
         json!({"name":"fields","in":"query","description":"Comma-separated data fields each item keeps; id and timestamps always stay","schema":{"type":"string"}}),
     ];

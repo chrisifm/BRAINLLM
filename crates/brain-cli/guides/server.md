@@ -91,7 +91,7 @@ brain reload                      # zero-downtime: new instances ready before th
 brain stop
 brain start --install             # writes a systemd unit (Linux) or launchd plist (macOS) and prints the enable command
 ```
-An npm-created app pins the compiler in devDependencies, which `NODE_ENV=production` skips: install with `npm ci --include=dev` or `npm run build` stops with `brain: command not found`, and do not prune it afterwards (`brain start` is the same package). Logs go to `logs/app.log` (rotated). Hosted under a sub-path: `brain.json` `"base": "/app/"`. `brain preview` serves `dist/` on a temporary loopback port to look before deploying.
+An npm-created app pins the compiler in devDependencies, which `NODE_ENV=production` skips: install with `npm ci --include=dev` or `npm run build` stops with `brain: command not found`, and do not prune it afterwards (`brain start` is the same package). Logs go to `logs/app.log` (rotated). Hosted under a sub-path: `brain.json` `"base": "/app/"`. `brain preview` serves `dist/` on a temporary loopback port to look before deploying. Backend deploys run `brain backend migrate` before serving. It does not run backwards, so back up first. A contract change that removes fields stops it with B0787 until `brain backend approve-contract --accept <resource> --apply` records the review: an unattended deploy stops there on purpose. Under PM2, `pm2 restart` keeps the saved `args` and environment: after changing `node_args`, `stop_exit_codes` or `NODE_OPTIONS`, run `pm2 delete <name>` and start it again.
 
 ## Verify
 ```bash

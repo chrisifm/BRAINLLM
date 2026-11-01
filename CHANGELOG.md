@@ -7,6 +7,13 @@ diagnostics that reject code an earlier version accepted.
 Every npm package (`@christianirack/brainllm`, its seven native platform packages, `brainllm-runtime`,
 `create-brainllm` and `create-brainll`) ships the same version as `[workspace.package]` in `Cargo.toml`.
 
+## [Unreleased]
+
+- List requests accept `total=false`, which skips the count and leaves `total` out, for walks over many pages.
+- An older binary on a newer database names both migration versions and how to return, instead of only `migration version`.
+- `brain upgrade` no longer lists every file bucket as a manual step: B0770 reports the ones without `types`.
+- The upgrade and deploy guides state that migrations do not run backwards, the `approve-contract` step and what `pm2 restart` keeps.
+
 ## [0.8.0] - 2026-11-01
 
 Upgrade with `npm install -D @christianirack/brainllm@0.8.0 --save-exact`, then run `brain upgrade`, which measures the

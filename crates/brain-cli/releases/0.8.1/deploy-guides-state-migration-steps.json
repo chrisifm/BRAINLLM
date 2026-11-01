@@ -1,0 +1,9 @@
+{
+  "id": "deploy-guides-state-migration-steps",
+  "kind": "fix",
+  "title": "The deploy guide states the contract review step and what pm2 restart keeps",
+  "why": "A contract change that removes fields stops `brain backend migrate` with B0787 until it is reviewed, which an unattended deploy met without warning.",
+  "changelog": ["The upgrade and deploy guides state that migrations do not run backwards"],
+  "guide": "docs/UPGRADING.md",
+  "codes": ["B0787"]
+}

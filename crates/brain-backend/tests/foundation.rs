@@ -279,6 +279,16 @@ async fn postgres_migrations_search_scope_session_serialization_and_storage_outb
         .execute(&pool)
         .await
         .unwrap();
+    // A database migrated by a newer binary names both versions and that migrations do not run backwards.
+    let known: i32 = sqlx::query_scalar("SELECT max(version) FROM _brain_migrations").fetch_one(&pool).await.unwrap();
+    sqlx::query("INSERT INTO _brain_migrations(version,name,checksum) VALUES($1,'from_a_newer_binary','x')")
+        .bind(known + 1)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let newer = db::migrate(&pool, &[]).await.unwrap_err();
+    assert!(newer.contains(&format!("migration {}", known + 1)) && newer.contains(&format!("up to {known}")) && newer.contains("backwards"), "{newer}");
+    sqlx::query("DELETE FROM _brain_migrations WHERE version=$1").bind(known + 1).execute(&pool).await.unwrap();
     // Legacy two-migration baseline is adopted only after structural checks and retains fixture rows.
     let legacy = database(&base, &url).await;
     sqlx::raw_sql(include_str!("../migrations/0001_backend.sql"))

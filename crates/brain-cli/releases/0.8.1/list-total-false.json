@@ -1,0 +1,8 @@
+{
+  "id": "list-total-false",
+  "kind": "fix",
+  "title": "A list can skip its count with total=false",
+  "why": "Every list page counted the whole filtered set, which dominated long walks such as a sitemap. Nothing changes unless a request sends the parameter.",
+  "changelog": ["List requests accept `total=false`"],
+  "guide": "docs/backend/pagination.md"
+}

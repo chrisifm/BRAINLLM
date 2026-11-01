@@ -1,0 +1,8 @@
+{
+  "id": "migrations-do-not-run-backwards",
+  "kind": "fix",
+  "title": "Migrations do not run backwards: back up before migrating",
+  "why": "An older binary on a migrated database reported only `migration version`, which left a rollback without a next step. It now names both versions, and the upgrade report says to take a backup first.",
+  "changelog": ["An older binary on a newer database names both migration versions"],
+  "guide": "docs/UPGRADING.md"
+}

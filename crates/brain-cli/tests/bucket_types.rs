@@ -46,3 +46,17 @@ fn a_bucket_without_types_is_an_error_until_it_lists_them_or_says_any() {
     assert!(wrong.contains("B0735") && wrong.contains("server/files/uploads.jsbrain"), "{wrong}");
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn upgrade_does_not_list_a_bucket_that_already_declares_its_types() {
+    let tmp = std::env::temp_dir().join(format!("brain-bucket-upgrade-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    assert!(brain(&tmp, &["new", "app"]).status.success());
+    let dir = tmp.join("app");
+    std::fs::create_dir_all(dir.join("server/files")).unwrap();
+    std::fs::write(dir.join("server/files/cvs.jsbrain"), "export default { types: ['application/pdf'] }\n").unwrap();
+    let report = text(&brain(&dir, &["upgrade", "--from", "0.7.0", "--to", "0.8.0", "--dry-run", "--no-doctor"]));
+    assert!(report.contains("A file bucket must state its types (breaking 0.8.0): not found in this app"), "{report}");
+    let _ = std::fs::remove_dir_all(&tmp);
+}

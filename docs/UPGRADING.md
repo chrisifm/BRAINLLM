@@ -58,6 +58,15 @@ The Node server no longer sends 103 responses by default, because nginx below 1.
 `server` in `brain.json` or `BRAIN_EARLY_HINTS=1` to turn them on, and test through your real proxy first. They are never sent to
 HTTP/1.0 clients. Page responses keep the route preloads in a `Link` header.
 
+## Before you migrate the database
+
+`brain backend migrate` does not run backwards. Once a newer version has applied its migrations, an older binary stops
+with `BDB_SCHEMA_DRIFT` and names both versions, so rolling back the code alone does not roll back the app: take a backup
+first, and restore it if you return to the previous version.
+
+A contract change that removes fields stops `migrate` with B0787 until it is reviewed. Automate it in the deploy only
+after you have read it: `brain backend approve-contract --accept <resource> --apply`, then `brain backend migrate`.
+
 ## What is preserved
 
 The preview updates installable declarations in `dependencies`,

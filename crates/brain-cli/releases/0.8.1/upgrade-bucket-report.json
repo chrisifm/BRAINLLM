@@ -1,0 +1,8 @@
+{
+  "id": "upgrade-bucket-report",
+  "kind": "fix",
+  "title": "brain upgrade lists only the buckets B0770 reports",
+  "why": "The 0.8.0 report matched every bucket file, including those that already declared `types`.",
+  "changelog": ["`brain upgrade` no longer lists every file bucket as a manual step"],
+  "codes": ["B0770"]
+}

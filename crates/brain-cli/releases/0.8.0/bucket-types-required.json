@@ -14,11 +14,6 @@
   "affects": [
     "server/files/*.jsbrain"
   ],
-  "finds": [
-    {
-      "glob": "server/files/*.jsbrain"
-    }
-  ],
   "steps": [
     "For each bucket B0770 reports, add the types it should hold, for example `types: ['application/pdf']`. Stored files stay as they are; only new uploads are matched.",
     "To keep today's behaviour exactly, add `types: '*'`: it accepts any file, as the omission did, and states it."

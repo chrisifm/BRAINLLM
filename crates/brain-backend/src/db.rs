@@ -667,7 +667,14 @@ async fn ledger(conn: &mut sqlx::PgConnection) -> Result<Vec<i32>, String> {
     let mut installed = Vec::new();
     for (i, row) in rows.iter().enumerate() {
         let version: i32 = row.get("version");
-        if version != (i + 1) as i32 || version as usize > MIGRATIONS.len() {
+        if version as usize > MIGRATIONS.len() {
+            let newest: i32 = rows.iter().map(|r| r.get::<i32, _>("version")).max().unwrap_or(version);
+            return Err(format!(
+                "BDB_SCHEMA_DRIFT: the database is at migration {newest} and this brain knows up to {}; migrations do not run backwards, no rows were removed; fix: deploy the version that applied them, or restore the backup taken before `brain backend migrate`",
+                MIGRATIONS.len()
+            ));
+        }
+        if version != (i + 1) as i32 {
             return Err(drift("migration version"));
         }
         let (name, sql) = MIGRATIONS[i];
