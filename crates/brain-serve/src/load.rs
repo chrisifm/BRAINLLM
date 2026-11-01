@@ -62,7 +62,7 @@ const withSession = async (S, ctx, secret, preauthenticated = false, nativeRequi
   const ownSession = process.env.BRAIN_BACKEND_SESSION === 'app'
   if (configured) {
     if (typeof S.nativeAuthBridge !== 'function') throw Object.assign(Error('Native authentication bridge is unavailable in this runtime version'), { status: 503 })
-    if (!nativeBridge || nativeModule !== S || nativeURL !== configured) { nativeBridge?.close(); try { nativeBridge = S.nativeAuthBridge(configured, (code, req, rid) => console.error(JSON.stringify({ event: 'origin-refused', code, rid, seenOrigin: typeof req.headers.origin === 'string' ? req.headers.origin.slice(0, 256) : null, host: req.headers.host, fix: 'Call this server function from the page served by this dev server; ctx.backend needs its same-origin POST. Run brain explain ' + code }))) } catch { throw Object.assign(Error('Native authentication is temporarily unavailable'), { status: 503 }) }; nativeModule = S; nativeURL = configured }
+    if (!nativeBridge || nativeModule !== S || nativeURL !== configured) { nativeBridge?.close(); try { nativeBridge = S.nativeAuthBridge(configured, (code, req, rid) => console.error(JSON.stringify({ event: 'origin-refused', code, rid, seenOrigin: typeof req.headers.origin === 'string' ? req.headers.origin.slice(0, 256) : null, host: req.headers.host, fix: 'Call this server function from the page served by this dev server; ctx.backend needs its same-origin POST. Run brain explain ' + code })), process.env.BRAIN_SERVICE_API_KEY, undefined, ownSession) } catch { throw Object.assign(Error('Native authentication is temporarily unavailable'), { status: 503 }) }; nativeModule = S; nativeURL = configured }
     const req = new EventEmitter(), res = new EventEmitter(), headers = Object.create(null)
     for (const name of ['host', 'cookie', 'origin', 'accept', 'content-type']) { const value = ctx.req?.headers?.[name]; if (typeof value === 'string') headers[name] = value }
     req.headers = headers; req.method = ctx.req?.method || 'GET'; req.url = ctx.url
@@ -72,7 +72,8 @@ const withSession = async (S, ctx, secret, preauthenticated = false, nativeRequi
     res.setHeader = (name, value) => responseHeaders.set(String(name).toLowerCase(), value)
     const rid = typeof ctx.rid === 'string' && /^[a-f0-9-]{36}$/i.test(ctx.rid) ? ctx.rid : '00000000-0000-4000-8000-000000000000'
     try {
-      if (preauthenticated) {
+      // With BRAIN_BACKEND_SESSION=app the signed session is the identity, whatever fields the app keeps in it (as server.mjs).
+      if (preauthenticated && !ownSession) {
         const user = ctx.user ?? null
         if (user !== null && (typeof user.id !== 'string' || !/^[a-f0-9-]{36}$/i.test(user.id) || typeof user.email !== 'string' || user.email.length > 254 || typeof user.role !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(user.role) || ['public','owner'].includes(user.role) || typeof user.verified !== 'boolean')) throw Object.assign(Error('Native authentication context is invalid'), {status:503})
         req.$nativeUser = user === null ? null : Object.freeze({ id:user.id, email:user.email, role:user.role, verified:user.verified })
@@ -197,7 +198,7 @@ for await (const line of createInterface({ input: process.stdin })) {
     else if (e && typeof e.redirect === 'string') { const bad = redirectProblem(e); out(bad ? `ERR ${id} ${JSON.stringify(bad)}\n` : `OK ${id} ${JSON.stringify({ redirect: e.redirect, status: e.status ?? 303 })}\n`) } // `throw redirect(url, s)`: as server.mjs
     else if (e && e.errors && typeof e.errors === 'object') out(`BAD ${id} ${JSON.stringify({ error: e.message || 'Invalid input', errors: e.errors })}\n`)
     else if (contextServer && e?.status === 404 && e?.constructor?.name === 'HttpError') out(`OK ${id} {"notFound":true,"status":404}\n`) // as server.mjs: the 404 page
-    else if (contextServer && e?.status === 503) out(`STATUS ${id} ${JSON.stringify({status:503,message:'Native authentication is temporarily unavailable'})}\n`)
+    else if (contextServer && e?.status === 503) out(`STATUS ${id} ${JSON.stringify({status:503,message:String(e.message || 'Native authentication is temporarily unavailable')})}\n`) // the visitor reads a fixed message; the log keeps the cause
     else if (contextServer && e?.constructor?.name === 'HttpError' && Number.isInteger(e.status) && e.status >= 400 && e.status < 600) out(`STATUS ${id} ${JSON.stringify({status:e.status,message:'The request could not complete'})}\n`) // as server.mjs: a deliberate status never shows its message
     else { trace('exception', 'error', { title: `${e?.name || 'Error'}: ${e?.message ?? e}`, data: { stack: String(e?.stack ?? e), where: fn } })
     out(`ERR ${id} ${JSON.stringify(String(e?.stack ?? (e && typeof e === 'object' ? JSON.stringify(e) : e)))}\n`) }
