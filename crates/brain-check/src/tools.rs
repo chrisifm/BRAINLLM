@@ -6,6 +6,11 @@
 //! - B1703 a parameter without a type.
 //! - B1704 the function destructures other parameters than the tool declares (#106): an undeclared one never
 //!   arrives (agents send only what the schema lists) and a declared one the function ignores misleads the agent.
+//! - B1705 a tool that deletes, pays or administers, in a file with no confirmation step.
+//! - B1706 a warning: a public form with a real action (search, filter, apply, subscribe) and no `tool=`.
+//! - B1707 a warning: a tool description too short to choose by, or missing on a form.
+//!
+//! WebMCP is a proposal, not on the W3C Standards Track, so authors write `tool=` and the compiler owns emitted names.
 
 use crate::Checker;
 use brain_parse::ast::*;
@@ -61,35 +66,89 @@ pub fn is_snake(n: &str) -> bool {
     !n.is_empty() && n.starts_with(|c: char| c.is_ascii_lowercase()) && n.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') && !n.contains("__") && !n.ends_with('_')
 }
 
-fn form_tools(nodes: &[Node], out: &mut Vec<(String, brain_parse::Span)>) {
-    for n in nodes {
-        match n {
-            Node::Element(e) => {
-                if e.tag == "form"
-                    && let Some(a) = e.attrs.iter().find(|a| a.kind == AttrKind::Plain && a.name == "tool")
-                {
-                    let name = match &a.value {
-                        AttrValue::Text(t) => t.clone(),
-                        _ => String::new(),
-                    };
-                    out.push((name, a.span));
+fn plain<'a>(e: &'a Element, name: &str) -> Option<&'a Attr> {
+    e.attrs.iter().find(|a| a.kind == AttrKind::Plain && a.name == name)
+}
+fn text_of(a: &Attr) -> Option<&str> {
+    match &a.value {
+        AttrValue::Text(t) => Some(t),
+        _ => None,
+    }
+}
+/// Every `<form>` of a template, through control flow and component children.
+pub(crate) fn forms(nodes: &[Node]) -> Vec<&Element> {
+    fn walk<'a>(nodes: &'a [Node], out: &mut Vec<&'a Element>) {
+        for n in nodes {
+            match n {
+                Node::Element(e) => {
+                    if e.tag == "form" {
+                        out.push(e);
+                    }
+                    walk(&e.children, out);
                 }
-                form_tools(&e.children, out);
+                Node::ComponentRef(r) => walk(&r.children, out),
+                Node::If(b) => {
+                    for br in &b.branches {
+                        walk(&br.body, out);
+                    }
+                    if let Some(o) = &b.otherwise {
+                        walk(o, out);
+                    }
+                }
+                Node::Each(b) => walk(&b.body, out),
+                Node::SlotScope(b) => walk(&b.body, out),
+                _ => {}
             }
-            Node::ComponentRef(r) => form_tools(&r.children, out),
-            Node::If(b) => {
-                for br in &b.branches {
-                    form_tools(&br.body, out);
-                }
-                if let Some(o) = &b.otherwise {
-                    form_tools(o, out);
-                }
-            }
-            Node::Each(b) => form_tools(&b.body, out),
-            Node::SlotScope(b) => form_tools(&b.body, out),
-            _ => {}
         }
     }
+    let mut out = Vec::new();
+    walk(nodes, &mut out);
+    out
+}
+/// The tool names a component registers: `<meta tools>` entries and `<form tool>`.
+pub(crate) fn names(c: &Component) -> Vec<String> {
+    let declared = c.meta.iter().filter(|m| m.name == "tools").flat_map(|m| parse_tools(m.value.as_deref().unwrap_or(""))).map(|t| t.name);
+    declared.chain(forms(&c.template).into_iter().filter_map(|e| plain(e, "tool").and_then(text_of)).map(str::to_string)).collect()
+}
+/// The real action a form performs, read from `role="search"`, a search field or its submit label. A login, a contact
+/// form or a form of unknown purpose answers `None`: exposing those is the author's call.
+fn public_action(e: &Element) -> Option<&'static str> {
+    const WORDS: &[&str] = &["search", "filter", "apply", "subscribe"];
+    if plain(e, "role").and_then(text_of) == Some("search") {
+        return Some("search");
+    }
+    fn walk(nodes: &[Node], inside_button: bool) -> Option<&'static str> {
+        nodes.iter().find_map(|n| match n {
+            Node::Element(e) if e.tag == "input" && plain(e, "type").and_then(text_of) == Some("search") => Some("search"),
+            Node::Element(e) => walk(&e.children, inside_button || e.tag == "button"),
+            Node::ComponentRef(r) if r.attrs.iter().any(|a| a.name == "type" && text_of(a) == Some("search")) => Some("search"),
+            Node::ComponentRef(r) => walk(&r.children, inside_button || r.name == "Button"),
+            Node::Text(t) if inside_button => {
+                let first = t.value.split_whitespace().next()?.to_ascii_lowercase();
+                WORDS.iter().find(|w| first == **w).copied()
+            }
+            _ => None,
+        })
+    }
+    walk(&e.children, false)
+}
+/// A form behind a login has no outside agent to serve, so B1706 stays out of it.
+fn private_area(file: &str) -> bool {
+    ["admin", "account", "dashboard", "settings"].iter().any(|word| file.split(['/', '\\']).any(|part| part == *word))
+}
+/// First word of the name says the tool deletes, pays or administers, or the file sits under an admin folder.
+fn consequential(name: &str, file: &str) -> bool {
+    const VERBS: &[&str] = &["delete", "remove", "destroy", "purge", "wipe", "pay", "charge", "refund", "checkout", "purchase", "admin"];
+    VERBS.contains(&name.split('_').next().unwrap_or("")) || file.split(['/', '\\']).any(|part| part == "admin")
+}
+/// Why a description cannot help an agent choose, if it cannot: too short, or only the tool's own name again.
+fn weak_description(name: &str, description: &str) -> Option<&'static str> {
+    let words: Vec<String> = description.split_whitespace().map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_ascii_lowercase()).filter(|w| !w.is_empty()).collect();
+    let own: Vec<&str> = name.split('_').collect();
+    if words.iter().all(|w| own.contains(&w.as_str()) || w == "tool") {
+        return Some("only repeats its name");
+    }
+    (words.len() < 3).then_some("is too short")
 }
 
 impl Checker<'_> {
@@ -112,7 +171,10 @@ impl Checker<'_> {
                 }
                 if t.description.is_empty() {
                     self.push("B1703", m.span, format!("tool `{}` has no description", t.name), format!("write `{}: what it does (params)` — agents choose tools by their description", t.name));
+                } else if let Some(why) = weak_description(&t.name, &t.description) {
+                    self.warn("B1707", m.span, format!("the description of tool `{}` {why}", t.name), "say what it does, what it needs and what it returns or changes, in one sentence");
                 }
+                self.needs_confirmation(&t.name, m.span);
                 if let Some((read, span)) = fns.contains(&t.name).then(|| read_params(c, &t.name)).flatten() {
                     for (p, at) in read.iter().filter(|(p, _)| !t.params.iter().any(|d| d.name == *p)) {
                         self.push("B1704", *at, format!("function `{}` reads `{p}`, which tool `{0}` does not declare (agents never send it)", t.name), format!("declare it in <meta tools> (`{p}:str`; types: {}) or remove it from the function's parameters", PARAM_TYPES.join(" ")));
@@ -123,14 +185,43 @@ impl Checker<'_> {
                 }
             }
         }
-        let mut forms = Vec::new();
-        form_tools(&c.template, &mut forms);
-        for (name, span) in forms {
+        for e in forms(&c.template) {
+            let Some(a) = plain(e, "tool") else {
+                if let Some(action) = public_action(e).filter(|_| !private_area(&c.file)) {
+                    self.warn("B1706", e.span, format!("this public form performs `{action}` and agents cannot call it"), format!("add `tool=\"{action}_...\"` and `tool-description=\"...\"`, naming what it acts on (`brain guide webmcp`)"));
+                }
+                continue;
+            };
+            let name = text_of(a).unwrap_or("").to_string();
+            let span = a.span;
             if !is_snake(&name) {
                 self.push("B1702", span, format!("tool name `{name}` is not snake_case"), format!("write `tool=\"{}\"`", snake(&name)));
             } else if !seen.insert(name.clone()) {
                 self.push("B1702", span, format!("tool `{name}` is declared twice"), "give each tool a unique name on the page");
             }
+            match plain(e, "tool-description").and_then(text_of) {
+                None => self.warn("B1707", span, format!("tool `{name}` has no `tool-description`"), "add one sentence: what it does, what it needs and what it returns or changes"),
+                Some(text) => {
+                    if let Some(why) = weak_description(&name, text) {
+                        self.warn("B1707", span, format!("the description of tool `{name}` {why}"), "say what it does, what it needs and what it returns or changes, in one sentence");
+                    }
+                }
+            }
+            self.needs_confirmation(&name, span);
+        }
+    }
+    fn warn(&mut self, code: &'static str, span: brain_parse::Span, msg: impl Into<String>, fix: impl Into<String>) {
+        self.push(code, span, msg, fix);
+        if let Some(last) = self.diags.last_mut() {
+            last.level = brain_parse::Severity::Warning;
+        }
+    }
+    /// A tool runs with the page's permissions, so a consequential one needs a person in the loop. The file is searched
+    /// for any sign of one (`confirm(`, a `<dialog>`, a Confirm component, a description that says it asks).
+    fn needs_confirmation(&mut self, name: &str, span: brain_parse::Span) {
+        let src = self.c.src.to_ascii_lowercase();
+        if consequential(name, &self.c.file) && !src.contains("confirm") && !src.contains("<dialog") {
+            self.push("B1705", span, format!("tool `{name}` can delete, pay or administer, and this file has no confirmation step"), "ask before acting (`confirm(...)` or a `<dialog>`) and say so in the description, or do not expose this action to agents");
         }
     }
 }

@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1705",
+    "level": "error",
+    "file": "invalid/comp/b1705-tool-no-confirmation.brain",
+    "line": 1,
+    "col": 7,
+    "msg": "tool `delete_task` can delete, pay or administer, and this file has no confirmation step",
+    "fix": "ask before acting (`confirm(...)` or a `<dialog>`) and say so in the description, or do not expose this action to agents"
+  }
+]

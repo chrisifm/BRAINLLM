@@ -16,6 +16,7 @@ mod security;
 mod remote_imports;
 pub mod seo;
 pub mod tools;
+pub mod webmcp;
 pub mod worker;
 mod quality;
 pub mod doctor;

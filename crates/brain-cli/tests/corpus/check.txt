@@ -638,3 +638,25 @@ export default { method: 'POST', path: '/pay', auth: 'public' }
 <meta server>
 import pg from 'pg'
 export default async function handle(ctx) { return { ok: Boolean(pg) } }
+
+### B1709 tool on two files of one page
+@expect B1709 comp/two.brain 1:1
+@file comp/one.brain
+<meta tools="add_task: Add a task to the list (text:str!)">
+<script>
+  const add_task = ({ text }) => text
+</script>
+<p>One</p>
+@file comp/two.brain
+<meta tools="add_task: Add a task to the list (text:str!)">
+<script>
+  const add_task = ({ text }) => text
+</script>
+<p>Two</p>
+@file views/both.brain
+<script>
+  import One from '../comp/one.brain'
+  import Two from '../comp/two.brain'
+</script>
+<One />
+<Two />

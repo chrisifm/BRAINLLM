@@ -117,7 +117,7 @@ COMPILER assigns the next free code there in the same change that emits it, then
 - B03xx CSS: B0301 global selector · B0302 nonexistent token (`--space-0` and its synonyms normalize to `0`, info) · B0303 nonexistent mixin. · B0307 dead CSS that `@scope` cancels (html/body/:root not first, `:scope ~`/`+`, a tag the component never writes; warning) · B0309 style rule outside `@layer` in tokens.cssbrain (beats every layered rule; warning)
 - B04xx accessibility and B05xx SEO: §8.
 - B1010 component over 150 lines or 20 KB (warning; the fix is the exact `brain split` command or the repeated block, §43).
-- B16xx source SEO and B17xx WebMCP: §32. B18xx built output, `brain seo audit` (§33; `brain_seo::CATALOG` holds
+- B16xx source SEO and B17xx WebMCP: §32 (B1705 consequential tool without confirmation, an error by owner decision; B1706 and B1707 warnings; B1708 doctor advice; B1709 cross-file duplicate on one page, `crates/brain-check/src/webmcp.rs`, 2026-11-01). B18xx built output, `brain seo audit` (§33; `brain_seo::CATALOG` holds
   each code's title, why and example): B1801 no title (error) · B1802 title wider than 600 px · B1803 no description ·
   B1804 description wider than 920 px / 70 chars on mobile · B1805 H1 count · B1806 skipped heading level ·
   B1807 img without alt · B1808 thin content (< 300 words) · B1809 canonical missing or relative · B1810 no lang ·

@@ -1,0 +1,3 @@
+<form tool="search_catalog">
+  <input aria-label="Search text" />
+</form>

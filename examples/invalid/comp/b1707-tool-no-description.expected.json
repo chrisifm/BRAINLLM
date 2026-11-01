@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1707",
+    "file": "invalid/comp/b1707-tool-no-description.brain",
+    "line": 1,
+    "col": 7,
+    "msg": "tool `search_catalog` has no `tool-description`",
+    "fix": "add one sentence: what it does, what it needs and what it returns or changes",
+    "level": "warning"
+  }
+]

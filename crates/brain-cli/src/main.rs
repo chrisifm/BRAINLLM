@@ -779,6 +779,11 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
                 let mut diag = compiler::Diag::new("B0797", &file, brain_parse::Span::default(), message, fix);
                 diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
             }
+            // B1709: one page's files registering the same tool, which no single file can see
+            for (file, tool, other, view) in brain_check::webmcp::duplicates(&app) {
+                let mut diag = compiler::Diag::new("B1709", &file, brain_parse::Span::default(), format!("tool `{tool}` is also registered by {other}, and {view} loads both, so the browser refuses the second"), "give each tool a name unique on the page, or render one of the two components");
+                diag.line=1;diag.col=1;diags.push(diag);
+            }
             // B0790: a route or webhook secret serve disables or refuses without; names only, never values
             for (file, message, fix) in backend::secret_warnings(&app) {
                 let mut diag = compiler::Diag::new("B0790", &file, brain_parse::Span::default(), message, fix);
@@ -2275,6 +2280,10 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
         advice.push(Json::obj([("code", Json::str("B0751")), ("level", Json::str("warning")), ("file", Json::str(env::FILE)), ("msg", Json::str(msg)), ("fix", Json::str(fix))]));
     }
     if let Some(a) = &app {
+        let covered: Vec<String> = brain_check::webmcp::coverage(a).into_iter().map(|(view, exposed, actions)| format!("{view} {exposed} of {actions}")).collect();
+        if !covered.is_empty() {
+            advice.push(Json::obj([("code", Json::str("B1708")), ("level", Json::str("info")), ("file", Json::str("views/")), ("msg", Json::str(&format!("actions exposed to agents per route: {}", covered.join(", ")))), ("fix", Json::str("expose what an agent acting for the user would otherwise have to guess; not every form should be a tool (`brain guide webmcp`)"))]));
+        }
         for (msg, fix, _) in platform_config::proxy_findings(a, env::value(a, "production", "PUBLIC_SITE_URL").as_deref()) {
             advice.push(Json::obj([("code", Json::str("B0784")), ("level", Json::str("warning")), ("file", Json::str("server/platform.jsbrain")), ("msg", Json::str(msg)), ("fix", Json::str(fix))]));
         }

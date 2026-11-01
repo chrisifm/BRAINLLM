@@ -98,9 +98,36 @@ fn b17xx_tools() {
     assert!(codes_in("comp/t.brain", &comp("add_task: Add a task (text:str!)", "const add_task = ({ text }) => text"), &ctx).is_empty());
     assert_eq!(codes_in("comp/t.brain", &comp("add_task: Add a task (text:str!)", "const other = 1"), &ctx), ["B1701"]);
     assert_eq!(codes_in("comp/t.brain", &comp("addTask: Add a task (text:str!)", "const addTask = ({ text }) => 1"), &ctx), ["B1702"]);
-    assert_eq!(codes_in("comp/t.brain", &comp("add_task: Add (text)", "const add_task = ({ text }) => 1"), &ctx), ["B1703"]);
-    assert_eq!(codes_in("comp/t.brain", &comp("a: A; a: B", "const a = () => 1"), &ctx), ["B1702"]);
-    assert_eq!(codes_in("comp/t.brain", "<form tool=\"Search\"><input aria-label=\"q\" /></form>", &ctx), ["B1702"]);
+    assert_eq!(codes_in("comp/t.brain", &comp("add_task: Add a task (text)", "const add_task = ({ text }) => 1"), &ctx), ["B1703"]);
+    assert_eq!(codes_in("comp/t.brain", &comp("a: Does one thing; a: Does another thing", "const a = () => 1"), &ctx), ["B1702"]);
+    assert_eq!(codes_in("comp/t.brain", "<form tool=\"Search\" tool-description=\"Search the catalog by text.\"><input aria-label=\"q\" /></form>", &ctx), ["B1702"]);
+}
+
+#[test]
+fn b1705_to_b1707_read_what_a_tool_can_do_and_say() {
+    let ctx = Ctx::default();
+    let meta = |tools: &str, script: &str| format!("<meta tools=\"{tools}\">\n<script>{script}</script>\n<p>x</p>");
+    let form = |attrs: &str, inner: &str| format!("<form {attrs}>{inner}</form>");
+    let field = "<input aria-label=\"q\" />";
+    let described = "tool-description=\"Search the catalog by text and list matches.\"";
+    // A consequential tool needs a person in the loop; any sign of one in the file is enough.
+    assert_eq!(codes_in("comp/t.brain", &meta("delete_task: Delete a task forever (id:str!)", "const delete_task = ({ id }) => id"), &ctx), ["B1705"]);
+    assert!(codes_in("comp/t.brain", &meta("delete_task: Delete a task forever (id:str!)", "const delete_task = ({ id }) => confirm(id)"), &ctx).is_empty());
+    assert!(codes_in("comp/t.brain", &meta("delete_task: Asks to confirm before deleting (id:str!)", "const delete_task = ({ id }) => id"), &ctx).is_empty());
+    assert_eq!(codes_in("views/t.brain", &form(&format!("tool=\"pay_order\" tool-description=\"Pay the open order in full.\""), field), &ctx), ["B1705"]);
+    assert_eq!(codes_in("views/admin/t.brain", &meta("list_users: List every user account (q:str)", "const list_users = ({ q }) => q"), &ctx), ["B1705"]);
+    assert!(codes_in("comp/t.brain", &meta("removed_count: Count the removed tasks", "const removed_count = () => 1"), &ctx).is_empty(), "only the first word says what it does");
+    // A public action without a tool is a warning; a form of unknown purpose or a private one is not.
+    assert_eq!(codes_in("views/t.brain", &form("role=\"search\"", field), &ctx), ["B1706"]);
+    assert_eq!(codes_in("views/t.brain", &form("", "<input type=\"search\" aria-label=\"q\" />"), &ctx), ["B1706"]);
+    assert_eq!(codes_in("views/t.brain", &form("", &format!("{field}<button>Subscribe now</button>")), &ctx), ["B1706"]);
+    assert!(codes_in("views/t.brain", &form("", &format!("{field}<button>Sign in</button>")), &ctx).is_empty());
+    assert!(codes_in("views/account/t.brain", &form("role=\"search\"", field), &ctx).is_empty());
+    assert!(codes_in("views/t.brain", &form(&format!("role=\"search\" tool=\"search_catalog\" {described}"), field), &ctx).is_empty());
+    // Descriptions an agent cannot choose by.
+    assert_eq!(codes_in("views/t.brain", &form("tool=\"search_catalog\"", field), &ctx), ["B1707"]);
+    assert_eq!(codes_in("views/t.brain", &form("tool=\"search_catalog\" tool-description=\"Search catalog tool\"", field), &ctx), ["B1707"]);
+    assert_eq!(codes_in("comp/t.brain", &meta("add_task: Adds it (text:str!)", "const add_task = ({ text }) => text"), &ctx), ["B1707"]);
 }
 
 #[test]

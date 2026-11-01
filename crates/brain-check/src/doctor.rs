@@ -76,6 +76,32 @@ pub(crate) fn load_files(root: &Path) -> Vec<(String, Component)> {
     load(root).into_iter().map(|f| (f.rel, f.c)).collect()
 }
 
+/// What each view loads with it: `(view, its layouts, app.brain and every component it reaches)`, and the components.
+pub(crate) fn pages(root: &Path) -> (Vec<(String, Vec<String>)>, HashMap<String, Component>) {
+    let files = load(root);
+    let by_rel: HashMap<&str, &File> = files.iter().map(|f| (f.rel.as_str(), f)).collect();
+    let mut out = Vec::new();
+    for view in files.iter().filter(|f| f.rel.starts_with("views/") && f.c.kind != FileKind::Module && !Path::new(&f.rel).file_name().is_some_and(|n| n.to_string_lossy().starts_with('_'))) {
+        let mut stack = vec![view.rel.clone(), "app.brain".to_string()];
+        let mut dir = Path::new(&view.rel).parent();
+        while let Some(d) = dir {
+            stack.push(d.join("_layout.brain").to_string_lossy().replace('\\', "/"));
+            dir = d.parent();
+        }
+        let mut seen: Vec<String> = Vec::new();
+        while let Some(rel) = stack.pop() {
+            let Some(file) = by_rel.get(rel.as_str()).filter(|_| !seen.contains(&rel)) else { continue };
+            let mut rs = Vec::new();
+            refs(&file.c.template, &mut rs);
+            stack.extend(rs.iter().filter_map(|r| file.imports.get(&r.name).cloned()));
+            seen.push(rel);
+        }
+        seen.sort();
+        out.push((view.rel.clone(), seen));
+    }
+    (out, files.into_iter().map(|f| (f.rel, f.c)).collect())
+}
+
 fn refs<'a>(nodes: &'a [Node], out: &mut Vec<&'a ComponentRef>) {
     for n in nodes {
         match n {
