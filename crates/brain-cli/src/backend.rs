@@ -680,7 +680,7 @@ fn secret_refusal(root: &Path, environment: &str) -> Option<String> {
 fn warn_disabled(root: &Path, environment: &str) {
     for (file, message, _) in secret_findings(root, environment).into_iter().filter(|f| f.2) {
         let message = message.strip_prefix(&format!("{file}: ")).unwrap_or(&message).to_string();
-        eprintln!("{}", json!({"event":"route-disabled","code":"B0790","file":file,"msg":format!("disabled, answers 503 and runs no handler: {message}"),"fix":"set the secret in the process environment or .brain_env and restart"}));
+        brain_backend::log_line!("{}", json!({"event":"route-disabled","code":"B0790","file":file,"msg":format!("disabled, answers 503 and runs no handler: {message}"),"fix":"set the secret in the process environment or .brain_env and restart"}));
     }
 }
 /// The environment is checked before the lookup: without `--env` the lookup reads the development section, so a deployed
