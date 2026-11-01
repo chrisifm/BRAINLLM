@@ -251,3 +251,25 @@ fn a_missing_database_url_names_the_file_it_read_and_how_to_pass_the_environment
     let (_, text) = with_node_env(&a.0, &["jobs", "stats"], None);
     assert!(text.contains("does not exist") && text.contains(".brain_env"), "the wrong folder shows: {text}");
 }
+
+// A command that only reads must leave a committed app exactly as it found it, not just `doctor`.
+#[test]
+fn read_only_commands_leave_a_committed_app_clean() {
+    let a = app("read-only-sweep");
+    git(&a.0, &["init", "-q"]);
+    fs::write(a.0.join(".gitignore"), "dist/\n.brain/\n.brain_env\nnode_modules/\n_brain/\n").unwrap();
+    git(&a.0, &["add", "-A"]);
+    git(&a.0, &["commit", "-q", "-m", "app"]);
+    // A secret added locally is the case that used to rewrite the example.
+    let env = fs::read_to_string(a.0.join(".brain_env")).unwrap();
+    fs::write(a.0.join(".brain_env"), format!("{env}\nNEW_SECRET=synthetic\n")).unwrap();
+    let sweep: &[&[&str]] = &[
+        &["check"], &["check", "--json"], &["doctor"], &["doctor", "--json"], &["map"], &["status"], &["explain", "B0720"], &["spec"], &["guide"], &["guide", "webmcp"],
+        &["capabilities"], &["schema"], &["quality"], &["seo", "audit"], &["deploy", "config", "pm2"], &["backend", "check"], &["env", "list"], &["env", "doctor"],
+    ];
+    for args in sweep {
+        let _ = brain(&a.0, args);
+        let dirty = git(&a.0, &["status", "--porcelain"]);
+        assert!(dirty.trim().is_empty(), "`brain {}` changed the app:\n{dirty}", args.join(" "));
+    }
+}
