@@ -75,6 +75,10 @@ impl Captcha {
     pub fn enabled(&self) -> bool {
         self.verify_url.is_some()
     }
+    /// The variable a protected action needs and this environment does not hold; its name, never a value.
+    pub fn missing_secret(&self) -> Option<&str> {
+        (self.enabled() && self.secret.is_none()).then_some(self.secret_env.as_str())
+    }
     pub fn protects(&self, action: &str) -> bool {
         self.protect.contains(action)
     }

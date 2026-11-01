@@ -58,6 +58,19 @@ impl Drop for App {
 }
 
 #[test]
+fn a_captcha_secret_is_reported_until_the_env_file_holds_it() {
+    let app = App::new();
+    let contract = app.dir().join("server/auth/captcha.jsbrain");
+    std::fs::create_dir_all(contract.parent().unwrap()).unwrap();
+    std::fs::write(&contract, "<meta server>\nexport default { verify_url: 'https://challenges.example.com/verify', secret_env: 'CAPTCHA_CHECK_SECRET', protect: ['signup'] }\n").unwrap();
+    let (ok, out) = app.check();
+    assert!(ok && out.contains("B0790") && out.contains("CAPTCHA_CHECK_SECRET"), "{out}");
+    app.env("CAPTCHA_CHECK_SECRET", "private-captcha-value");
+    let (ok, out) = app.check();
+    assert!(ok && !out.contains("CAPTCHA_CHECK_SECRET") && !out.contains("private-captcha-value"), "{out}");
+}
+
+#[test]
 fn an_undefined_route_secret_is_reported_with_its_name_and_never_its_value() {
     let app = App::new();
     app.route("{ method: 'POST', path: '/pay/hook', auth: 'internal', internal: { secret: 'PAY_INTERNAL_SECRET' } }");

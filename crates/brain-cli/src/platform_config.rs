@@ -106,24 +106,31 @@ fn organizations(root: &Path) -> Result<brain_backend::organizations::Organizati
     Organizations::from_contract(&value)
 }
 
-fn captcha(root: &Path) -> Result<brain_backend::captcha::Captcha, String> {
+fn captcha(root: &Path, environment: &str) -> Result<brain_backend::captcha::Captcha, String> {
     use brain_backend::captcha::{CONTRACT, Captcha};
     let path = root.join(CONTRACT);
     if !path.exists() {
         return Ok(Captcha::default());
     }
     let value = crate::backend::read_contract(root, &path).map_err(|e| format!("{CONTRACT}: {e}"))?;
-    Captcha::from_contract(&value, |name| std::env::var(name).ok())
+    Captcha::from_contract(&value, |name| crate::env::value(root, environment, name))
 }
 
-pub fn load(root: &Path, resources: &[Resource], roles: &RolesConfig) -> Result<Platform, String> {
+/// B0790: the captcha secret an environment does not hold. A development server answers 503 without it; production refuses to start.
+pub(crate) fn captcha_secret_problem(root: &Path, environment: &str) -> Option<(String, String, bool)> {
+    use brain_backend::captcha::CONTRACT;
+    let name = captcha(root, environment).ok()?.missing_secret()?.to_string();
+    Some((CONTRACT.to_string(), format!("{CONTRACT}: {name} is not set, so every protected action fails while the captcha cannot be verified"), environment != "production"))
+}
+
+pub fn load(root: &Path, environment: &str, resources: &[Resource], roles: &RolesConfig) -> Result<Platform, String> {
     let (edge, cluster) = edge(root)?;
-    Ok(Platform { buckets: buckets(root, resources, roles)?, edge, cluster, cache: cache(root, resources)?, organizations: organizations(root)?, captcha: captcha(root)?, ..Default::default() })
+    Ok(Platform { buckets: buckets(root, resources, roles)?, edge, cluster, cache: cache(root, resources)?, organizations: organizations(root)?, captcha: captcha(root, environment)?, ..Default::default() })
 }
 
 /// Projection for `brain backend schema --json`; contains no environment values.
 pub fn metadata(root: &Path, resources: &[Resource], roles: &RolesConfig) -> Result<Value, String> {
-    let platform = load(root, resources, roles)?;
+    let platform = load(root, "development", resources, roles)?;
     let edge = &platform.edge;
     Ok(json!({
         "files": platform.buckets.iter().map(Bucket::schema).collect::<Vec<_>>(),
@@ -146,6 +153,20 @@ pub fn metadata(root: &Path, resources: &[Resource], roles: &RolesConfig) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_captcha_secret_resolves_like_every_other_backend_setting() {
+        let root = std::env::temp_dir().join(format!("brain-platform-captcha-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let contract = root.join(brain_backend::captcha::CONTRACT);
+        fs::create_dir_all(contract.parent().unwrap()).unwrap();
+        fs::write(&contract, "<meta server>\nexport default { verify_url: 'https://challenges.example.com/verify', secret_env: 'BRAIN_TEST_CAPTCHA_FILE_ONLY', protect: ['signup'] }\n").unwrap();
+        let (file, message, disables) = captcha_secret_problem(&root, "development").expect("no secret anywhere");
+        assert!(file.ends_with("jsbrain") && message.contains("BRAIN_TEST_CAPTCHA_FILE_ONLY") && disables, "{message}");
+        assert!(!captcha_secret_problem(&root, "production").unwrap().2);
+        fs::write(root.join(crate::env::FILE), "BRAIN_TEST_CAPTCHA_FILE_ONLY=from-the-file\n").unwrap();
+        assert_eq!(captcha_secret_problem(&root, "development"), None);
+        let _ = fs::remove_dir_all(&root);
+    }
     #[test]
     fn buckets_load_from_literal_contracts_and_fail_with_the_file_name() {
         let root = std::env::temp_dir().join(format!("brain-platform-config-{}", std::process::id()));

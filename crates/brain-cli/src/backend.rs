@@ -429,7 +429,7 @@ pub fn secret_warnings(root: &Path) -> Vec<(String, String, String)> {
 }
 /// Every route and webhook secret problem of an environment: `(file, message, disables)`.
 pub(crate) fn secret_findings(root: &Path, environment: &str) -> Vec<(String, String, bool)> {
-    crate::route_executor::secret_problems(root, environment).into_iter().map(|p| (p.file, p.message, p.disables)).chain(crate::webhook_config::secret_problem(root, environment)).collect()
+    crate::route_executor::secret_problems(root, environment).into_iter().map(|p| (p.file, p.message, p.disables)).chain(crate::webhook_config::secret_problem(root, environment)).chain(crate::platform_config::captcha_secret_problem(root, environment)).collect()
 }
 /// Why a source a contract names cannot start, with its own `; fix:`. `None` when it can be read and fits its limit.
 pub(crate) fn source_problem(root: &Path, relative: &str, limit: usize, fix: &str) -> Option<String> {
@@ -450,7 +450,7 @@ const BUCKET_TYPES_FIX: &str = "list what it should hold, for example types: ['a
 /// B0770: buckets that never listed their types (`check` reports them, `serve` refuses to start).
 pub fn bucket_type_errors(root: &Path) -> Vec<(String, String, String)> {
     let (Ok(resources), Ok(roles)) = (contracts(root, "resources"), auth_roles(root)) else { return Vec::new() };
-    let buckets = crate::platform_config::load(root, &resources, &roles).map(|p| p.buckets).unwrap_or_default();
+    let buckets = crate::platform_config::load(root, "development", &resources, &roles).map(|p| p.buckets).unwrap_or_default();
     buckets.iter().filter(|b| b.open_by_omission()).map(|b| (
         format!("server/files/{}.jsbrain", b.name),
         format!("bucket `{}` does not say which types it takes; since 0.8.0 an unstated list is refused, because it would accept every file, HTML and executables included", b.name),
@@ -468,7 +468,7 @@ pub fn inspect(root: &Path) -> Result<Value, String> {
     brain_backend::domain::openapi(&domain, &resources, &mut openapi);
     // The contract documents a route whether or not this machine holds its secret (B0790 reports that); an invalid one is B0735.
     let routes = crate::route_executor::declared(root)?;
-    let buckets = crate::platform_config::load(root, &resources, &roles).map(|p| p.buckets).unwrap_or_default();
+    let buckets = crate::platform_config::load(root, "development", &resources, &roles).map(|p| p.buckets).unwrap_or_default();
     brain_backend::openapi::extend(&mut openapi, &routes, &buckets);
     let queues: serde_json::Map<String, Value> = jobs
         .iter()
@@ -1003,7 +1003,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
         brain_backend::analytics::configure(analytics_settings(&root)?)?;
         brain_backend::log_line!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
         if let Some((msg,fix))=anonymous_catalog_warning(args,&environment){brain_backend::log_line!("{}",json!({"schemaVersion":1,"event":"backend-warning","code":"B0771","msg":msg,"fix":fix}));}
-        let mut platform=crate::platform_config::load(&root,&config.resources,&config.roles)?;
+        let mut platform=crate::platform_config::load(&root,&environment,&config.resources,&config.roles)?;
+        if let Some((_,msg,true))=crate::platform_config::captcha_secret_problem(&root,&environment){brain_backend::log_line!("{}",json!({"schemaVersion":1,"event":"backend-warning","code":"B0790","msg":msg,"fix":"set it in .brain_env or the host environment"}));}
         platform.routes=crate::route_executor::contracts(&root,&environment)?;
         platform.disabled_webhooks=crate::webhook_config::disabled_inbound(&root,&environment);
         platform.handlers=crate::route_executor::load(&root,&environment,&platform.routes)?;
