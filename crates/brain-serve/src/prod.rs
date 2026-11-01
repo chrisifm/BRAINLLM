@@ -444,7 +444,8 @@ pub(crate) fn with_analytics(html: &str, pre: &str) -> String {
 
 /// The one clean path of a variant (`/a//b`, `/about/index.html`), or None when the path already is it.
 fn url_variant(path: &str, pre: &str) -> Option<String> {
-    if !path.contains("//") && !path.ends_with("/index.html") {
+    let inside = pre.is_empty() || path.starts_with(&format!("{pre}/"));
+    if !inside || (!path.contains("//") && !path.ends_with("/index.html")) {
         return None;
     }
     let mut clean = String::with_capacity(path.len());

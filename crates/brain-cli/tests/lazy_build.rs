@@ -19,7 +19,7 @@ fn lazy_interaction_and_img_survive_production_packaging() {
     std::fs::write(app.join("comp/chart.brain"), "<p>Lazy chart payload</p><style>p { font-style: italic; }</style>").unwrap();
     let page = std::fs::read_to_string(app.join("views/about.brain")).unwrap()
         .replace("<main", "<script>\nimport Chart from '../comp/chart.brain'\n</script>\n<main")
-        .replace("</main>", "<Chart lazy=\"interaction\" /><Img src=\"/favicon.svg\" alt=\"Application symbol\" width=\"64\" height=\"64\" /></main>");
+        .replace("</main>", "<Chart lazy=\"interaction\" /><Img src=\"/favicon.svg\" alt=\"Application symbol\" width=\"640\" height=\"640\" /></main>");
     std::fs::write(app.join("views/about.brain"), page).unwrap();
     brain(&app, &["build", "--progress=off"]);
     let html = std::fs::read_to_string(app.join("dist/about/index.html")).unwrap();
