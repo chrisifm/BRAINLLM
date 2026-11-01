@@ -26,6 +26,7 @@ Upgrade with `npm install -D @christianirack/brainllm@0.8.6 --save-exact`. The d
 - a visitor who leaves during `load` is logged as info; each stderr line is written in a single call; a failed service worker check stays quiet
 - `brain edge plan` and the MCP tool `brain_edge_plan` print a read-only cache plan for a CDN
 - a tokens sheet of up to 8192 bytes goes inline in `<head>`
+- a page leaves sitemap.xml and llms.txt only for `robots` in its `<meta seo>`, no longer for the word noindex anywhere in the file
 - B0505 warns when `keyword` or `canonical` sits on a page its folder guard keeps out of search; a public page that redirects some visitors does it in `load()`; `brain add view` omits both under a guard
 - the credit line and the shared tokens sheet do not spend `budget.viewKB`
 - B0111 says how a handler receives the event

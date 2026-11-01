@@ -2210,7 +2210,7 @@ fn build_inner_with_options(
             css_gz,
             html: p.html.len(),
             html_gz: transfer_size(p.html.as_bytes(), binary.get(&format!("{}.gz", p.file)).map(Vec::as_slice)),
-            html_shared: shared_html_size(&p.html, &tokens_head, binary.get(&format!("{}.gz", p.file)).map(Vec::as_slice)),
+            html_shared: shared_html_size(&p.html, binary.get(&format!("{}.gz", p.file)).map(Vec::as_slice)),
         });
     }
     optimizations.sort_by(|a,b|(&a.source,a.stage).cmp(&(&b.source,b.stage)));
@@ -2224,19 +2224,29 @@ fn transfer_size(raw: &[u8], gzip: Option<&[u8]>) -> usize {
 
 /// The bytes of a page a view does not answer for: the framework's optional credit line and the tokens every route
 /// shares, whether the sheet travels in the head or as its own file.
-fn shared_html_size(html: &str, tokens_head: &str, gzip: Option<&[u8]>) -> usize {
+fn shared_html_size(html: &str, gzip: Option<&[u8]>) -> usize {
     let mut rest = html.to_string();
     if let Some((a, b)) = rest.find("<p data-brain-credit").and_then(|a| Some((a, a + rest[a..].find("</p>")? + 4))) {
         rest.replace_range(a..b, "");
     }
-    if tokens_head.starts_with("<style>") {
-        rest = rest.replacen(tokens_head, "", 1);
+    // found by its layer: asset URLs inside the sheet are rewritten after it enters the page
+    if let Some((a, b)) = rest.find("<style>@layer tokens{").and_then(|a| Some((a, a + rest[a..].find("</style>")? + 8))) {
+        rest.replace_range(a..b, "");
     }
     if rest.len() == html.len() {
         return 0;
     }
     let whole = transfer_size(html.as_bytes(), gzip);
     whole.saturating_sub(transfer_size(rest.as_bytes(), gzip.map(|_| gzip::gzip(rest.as_bytes(), 15)).as_deref()))
+}
+
+#[test]
+fn shared_page_bytes_are_the_credit_and_the_tokens_sheet() {
+    let tokens = "<style>@layer tokens{@font-face{src:url(\"/_b/a.woff2\")}}</style>";
+    let credit = "<p data-brain-credit>By</p>";
+    let page = format!("<head>{tokens}</head><body><main>view</main>{credit}</body>");
+    assert_eq!(shared_html_size(&page, None), tokens.len() + credit.len());
+    assert_eq!(shared_html_size("<head><style>a{}</style></head><body></body>", None), 0);
 }
 
 #[test]

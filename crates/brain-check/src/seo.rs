@@ -43,6 +43,11 @@ pub struct ViewSeo {
 }
 
 /// [`ViewSeo`] of a parsed view.
+/// What `<meta seo robots>` says. The word elsewhere in a file (a comment, a sentence on the page) means nothing.
+pub fn declares_noindex(c: &Component) -> bool {
+    view_info(c).attrs.iter().any(|(name, value)| name == "robots" && matches!(value, SeoValue::Text(v) | SeoValue::Expr(v) if v.to_ascii_lowercase().contains("noindex")))
+}
+
 pub fn view_info(c: &Component) -> ViewSeo {
     let mut v = ViewSeo::default();
     for m in c.meta.iter().skip_while(|m| m.name != "seo").skip(1) {

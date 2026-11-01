@@ -15,7 +15,7 @@ pub fn unlisted(root: &Path) -> Vec<(String, String)> {
             continue;
         }
         let Ok(src) = std::fs::read_to_string(root.join(&r.view)) else { continue };
-        if src.contains("noindex") || src.contains("function paths(") || src.contains("function sitemap(") {
+        if declares_noindex(&src, &r.view) || src.contains("function paths(") || src.contains("function sitemap(") {
             continue;
         }
         out.push((r.path, r.view));
@@ -30,7 +30,12 @@ pub fn listable(root: &Path, route: &str, view: &str) -> bool {
     if route.starts_with('!') || route.contains([':', '*']) || name.starts_with('_') || ["404.brain", "410.brain", "500.brain"].contains(&name) {
         return false;
     }
-    std::fs::read_to_string(root.join(view)).is_ok_and(|src| !src.contains("noindex"))
+    std::fs::read_to_string(root.join(view)).is_ok_and(|src| !declares_noindex(&src, view))
+}
+
+/// A source that does not parse keeps the cautious reading.
+fn declares_noindex(src: &str, view: &str) -> bool {
+    brain_parse::parse(src, Path::new(view)).map_or_else(|_| src.contains("noindex"), |c| brain_check::seo::declares_noindex(&c))
 }
 
 /// B1900: a published sitemap.xml with no URL, and no view that adds any at request time.

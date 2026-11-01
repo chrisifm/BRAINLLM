@@ -139,3 +139,19 @@ fn the_credit_line_does_not_spend_the_view_budget() {
     assert_eq!(total(true), total(false));
     let _ = std::fs::remove_dir_all(dir.parent().unwrap());
 }
+
+#[test]
+fn the_word_noindex_outside_robots_keeps_a_page_listed() {
+    let dir = app("bsmword");
+    let said = view("Said", "", "").replace("<script server>\n", "<script server>\n  // this page used to be noindex\n");
+    assert!(said.contains("noindex"));
+    write(&dir, &[
+        ("views/index.brain", view("Home", "", "")),
+        ("views/said/index.brain", said),
+        ("views/hidden/index.brain", view("Hidden", "robots=\"noindex\"", "")),
+    ]);
+    let t = text(&brain(&dir, &["build", "--site", "https://shop.acme.dev"]));
+    let sm = std::fs::read_to_string(dir.join("dist/sitemap.xml")).unwrap_or_else(|_| panic!("{t}"));
+    assert!(sm.contains("/said") && !sm.contains("/hidden"), "{sm}");
+    let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+}

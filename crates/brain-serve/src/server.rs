@@ -1134,7 +1134,8 @@ fn dev_seo(ctx: &Ctx, req: &http::Request) -> Option<(&'static str, String)> {
     let mut urls: Vec<(String, Option<String>, String)> = Vec::new();
     for r in brain_pack::routes::discover(&ctx.root) {
         let src = std::fs::read_to_string(ctx.root.join(&r.view)).unwrap_or_default();
-        if r.path == "*" || src.contains("noindex") || ["404", "410", "500"].iter().any(|n| r.view.ends_with(&format!("/{n}.brain"))) {
+        let noindex = brain_parse::parse(&src, std::path::Path::new(&r.view)).map_or_else(|_| src.contains("noindex"), |c| brain_check::seo::declares_noindex(&c));
+        if r.path == "*" || noindex || ["404", "410", "500"].iter().any(|n| r.view.ends_with(&format!("/{n}.brain"))) {
             continue;
         }
         if !r.path.contains([':', '*']) {
