@@ -689,3 +689,27 @@ async fn postgres_patterns_state_locks_and_relational_actions_hold_on_every_writ
     assert_eq!(call(&app, "PUT", &uri, &s.bob, Some(replacement)).await.0, 422, "PUT is locked as well");
     assert_eq!(call(&app, "PATCH", &uri, &s.bob, Some(json!({"body": "second", "rank": 9}))).await.0, 200, "an unchanged locked field and a free field pass");
 }
+
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn migrate_counts_the_stored_fields_that_left_the_schema() {
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Use scripts/backend-check.mjs; no developer database is selected implicitly");
+    let base = db::connect(&url).await.unwrap();
+    let name = format!("brain_stale_fields_{}", uuid::Uuid::new_v4().simple());
+    sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE {name}"))).execute(&base).await.unwrap();
+    let options: sqlx::postgres::PgConnectOptions = url.parse().unwrap();
+    let pool = db::connect(sqlx::ConnectOptions::to_url_lossy(&options.database(&name)).as_str()).await.unwrap();
+    let all = resources();
+    db::migrate(&pool, &all).await.unwrap();
+    assert!(db::undeclared_fields(&pool, &all).await.unwrap().is_empty());
+    let user = Auth::new(pool.clone()).await.unwrap().signup(Credentials { email: "stale@example.test".into(), password: "a long test password".into() }).await.unwrap();
+    let r = products();
+    sqlx::query(sqlx::AssertSqlSafe(format!("INSERT INTO _brain_res_{} (id, owner, data) VALUES ($1, $2, $3)", r.name)))
+        .bind(uuid::Uuid::new_v4())
+        .bind(user.id)
+        .bind(json!({"name":"Mug","sku":"S-1","stock":1,"price":"1.00","status":"active","retired":"old"}))
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(db::undeclared_fields(&pool, &all).await.unwrap(), vec![(r.name.clone(), "retired".to_string(), 1)]);
+}

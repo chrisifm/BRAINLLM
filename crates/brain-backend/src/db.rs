@@ -690,6 +690,18 @@ async fn ledger(conn: &mut sqlx::PgConnection) -> Result<Vec<i32>, String> {
 pub async fn migrate(pool: &PgPool, resources: &[Resource]) -> Result<(), String> {
     migrate_approving(pool, resources, &[]).await
 }
+/// Stored fields the schema no longer declares, as `(resource, field, rows)`. Nothing is changed here: each one leaves its
+/// row the next time that row is written, so `brain backend migrate` reports them while the data still exists.
+pub async fn undeclared_fields(pool: &PgPool, resources: &[Resource]) -> Result<Vec<(String, String, i64)>, String> {
+    let mut found = Vec::new();
+    for r in resources {
+        let declared: Vec<String> = r.fields.keys().cloned().collect();
+        let sql = format!("SELECT k, count(*) FROM {} t, jsonb_object_keys(t.data) k WHERE k <> ALL() GROUP BY k ORDER BY k", table(r));
+        let rows: Vec<(String, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(sql)).bind(&declared).fetch_all(pool).await.map_err(|e| format!("{}: {e}", r.name))?;
+        found.extend(rows.into_iter().map(|(field, count)| (r.name.clone(), field, count)));
+    }
+    Ok(found)
+}
 /// `migrate`, recording the new contract of the named resources (see `contract_review`). Everything stays one
 /// transaction: a stored row that violates the new contract rolls all of it back.
 pub async fn migrate_approving(pool: &PgPool, resources: &[Resource], approved: &[String]) -> Result<(), String> {

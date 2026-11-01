@@ -4,7 +4,7 @@
   "title": "A field removed from the schema no longer blocks writes",
   "why": "Every action on an old row answered 422 for a field the request never sent.",
   "changelog": [
-    "a write no longer fails with `Unknown field` on a stored field that left the schema; that field is dropped from the row when the row is next written"
+    "a write no longer fails with `Unknown field` on a stored field that left the schema; that field is dropped from the row when the row is next written; `brain backend migrate` lists those fields and their row counts as `undeclaredFields`"
   ],
   "guide": "brain guide backend"
 }

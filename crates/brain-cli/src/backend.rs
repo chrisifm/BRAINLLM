@@ -848,8 +848,13 @@ pub fn run(args: &[String]) -> Result<(), String> {
             brain_backend::db::migrate(&pool,&resources).await?;
             roles.register(&pool).await?;
             let undeclared=brain_backend::auth_flows::undeclared_accounts(&pool,&roles).await?;
+            let stale=brain_backend::db::undeclared_fields(&pool,&resources).await?;
             pool.close().await;
             let mut report=json!({"schemaVersion":1,"ok":true,"resources":resources.len()});
+            if !stale.is_empty() {
+                report["undeclaredFields"]=json!(stale.iter().map(|(resource,field,rows)|json!({"resource":resource,"field":field,"rows":rows})).collect::<Vec<_>>());
+                report["undeclaredFieldsNote"]=json!("These stored fields left the schema; each one is dropped from its row when that row is next written. Copy the data first if you still need it, or declare the field again.");
+            }
             if !undeclared.is_empty() {
                 // Nothing is rewritten: those accounts keep their role and owner grants, but no role grant reaches them.
                 report["undeclaredRoles"]=json!(undeclared.iter().map(|(role,accounts)|json!({"role":role,"accounts":accounts})).collect::<Vec<_>>());

@@ -38,7 +38,7 @@ Upgrade with `npm install -D @christianirack/brainllm@0.8.3 --save-exact`. New d
 - B0602 no longer fires for the `beforeunload` guard of `form`
 - reserved pages (`_error`, 404, 500) are not asked for a description (B1601)
 - `brain build` stops when a page listed by `paths()` throws or renders nothing, instead of publishing an empty 200
-- a write no longer fails with `Unknown field` on a stored field that left the schema; that field is dropped from the row when the row is next written
+- a write no longer fails with `Unknown field` on a stored field that left the schema; that field is dropped from the row when the row is next written; `brain backend migrate` lists those fields and their row counts as `undeclaredFields`
 
 ## [0.8.2] - 2026-11-01
 
