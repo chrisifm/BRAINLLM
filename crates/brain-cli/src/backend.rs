@@ -783,6 +783,12 @@ pub fn run(args: &[String]) -> Result<(), String> {
         };
         let public_base=setting("PUBLIC_SITE_URL").unwrap_or_else(||origin.clone());
         let mail=setting("BRAIN_MAIL_RESEND_KEY").map(|key|brain_backend::auth_flows::MailConfig::resend(key,setting("BRAIN_MAIL_FROM").ok_or("B0760: BRAIN_MAIL_RESEND_KEY is set without BRAIN_MAIL_FROM; fix: set BRAIN_MAIL_FROM to a verified sender, as `sender@your-domain` or `Name <sender@your-domain>`")?,public_base.clone())).transpose()?;
+        let mail=mail.map(|mut mail|{
+            if let Some([verify,reset,notice])=brain_check::i18n::load(&root).as_ref().and_then(brain_check::i18n::auth_email_text){
+                mail.text=brain_backend::auth_flows::EmailText{verify,reset,notice};
+            }
+            mail
+        });
         let config=brain_backend::Config{api_keys:crate::api_key_config::load(&root)?,sockets:sockets.native_config()?,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,resources,jobs,uploads:root.join(".brain/uploads"),origins:sockets.http_origins,production:environment=="production"};
         brain_backend::analytics::configure(analytics_settings(&root)?)?;
         eprintln!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));

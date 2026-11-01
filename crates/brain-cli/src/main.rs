@@ -2135,6 +2135,21 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
             advice.push(Json::obj([("code", Json::str("B0729")), ("level", Json::str("info")), ("file", Json::str(env::FILE)), ("msg", Json::str("behavior analytics records nothing: it needs the native backend (DATABASE_URL and BRAIN_BACKEND_URL)")), ("fix", Json::str("set DATABASE_URL and BRAIN_BACKEND_URL in .brain_env, run `brain backend migrate` and `brain backend serve`; or set \"analytics\": false in brain.json"))]));
         }
     }
+    // account emails left in framework English in an app that declares another language
+    if let Some(a) = app.as_ref().filter(|a| a.join("server").is_dir()) {
+        if let Some(i18n) = brain_check::i18n::load(a) {
+            let other = i18n.locales.iter().any(|l| l.split('-').next() != Some("en"));
+            if other && brain_check::i18n::auth_email_text(&i18n).is_none() {
+                advice.push(Json::obj([
+                    ("code", Json::str("B0941")),
+                    ("level", Json::str("warning")),
+                    ("file", Json::str(format!("i18n/{}.json", i18n.default))),
+                    ("msg", Json::str("this app declares a non-English locale, but its verification and password emails go out in the framework's English".to_string())),
+                    ("fix", Json::str(format!("add `auth.email.verify`, `auth.email.reset` and `auth.email.notice` to i18n/{}.json; the emails go out in the default locale", i18n.default))),
+                ]));
+            }
+        }
+    }
     // a quality bar lowered below its default does not count as passing: an agent must fix the pages, not the bar
     // (QA #153: a model reached doctor 0 by setting seo.minScore to 60)
     let mut bar_ok = true;

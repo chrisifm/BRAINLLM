@@ -14,6 +14,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Fix: with `NODE_ENV=production` and no `--env`, `brain jobs`, `brain backend`, `brain media` and `brain analytics` stop with B0785 instead of B0762 about a variable set under `[production]`; `brain analytics` used to skip the check, and `--env=production` counts as stating it
 - B0762 names `[production]` when `DATABASE_URL` is only set there
 - Fix: a missing or short route or webhook secret stops `brain backend serve` and `brain jobs work` once, before any database connection, with B0790 and exit status 78; the generated PM2 file and `--with-workers` do not restart that status
+- Verification and password emails take their words from `auth.email.*` in the default locale, and `brain doctor` reports B0941 when an app with a non-English locale leaves them in English
 - `brain backend serve`, `brain jobs work` and `brain jobs cron` wait up to 60 s on a refused role or missing database, instead of a restart storm under a process manager
 - B0940 warns when `app.brain` has no `<head>`, where a build or the server silently dropped every title and head tag
 - A JSON body of the wrong shape answers 422 `INVALID_INPUT` naming the key in `error.fields`, on signup and on every other fixed-shape endpoint

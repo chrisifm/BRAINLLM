@@ -328,6 +328,17 @@ pub fn load(root: &Path) -> Option<I18n> {
     Some(I18n { default, locales, files, missing })
 }
 
+/// The account email words from the default locale, `[verify, reset, notice]`: all three or none, so an email is never
+/// half translated. A value is one plain line, since the subject comes from it.
+pub fn auth_email_text(i18n: &I18n) -> Option<[String; 3]> {
+    let file = i18n.default_file()?;
+    let get = |key: &str| {
+        let text = file.entries.get(key)?.0.as_plain()?.trim();
+        (!text.is_empty() && text.len() <= 500 && !text.chars().any(char::is_control)).then(|| text.to_string())
+    };
+    Some([get("auth.email.verify")?, get("auth.email.reset")?, get("auth.email.notice")?])
+}
+
 fn span(src: &str, at: usize, line: u32) -> Span {
     let line_start = src[..at.min(src.len())].rfind('\n').map(|i| i + 1).unwrap_or(0);
     Span { start: at as u32, end: at as u32, line, col: (src[line_start..at.min(src.len())].chars().count() + 1) as u32 }
