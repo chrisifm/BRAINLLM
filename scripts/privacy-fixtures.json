@@ -12,33 +12,45 @@
     "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
   },
   {
+    "path": "bench/native-live/run.mjs",
+    "rule": "credential-url",
+    "sha256": "efdb02117ac4b051b600f59766916395055a0fabc53c0117309b3df599b4eab6",
+    "reason": "Reviewed historical template literal: the password is interpolated from a per-run random value for the owned throwaway Postgres container; no usable credential."
+  },
+  {
     "path": "bench/start/run.mjs",
     "rule": "credential",
     "sha256": "a860374a395e85d36d25fa5fdf2591b8af1ae68e2d99ae2ecf3342ad96fb07f7",
     "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
   },
   {
-    "path": "crates/brain-cli/src/env.rs",
+    "path": "crates/brain-backend/src/boot.rs",
     "rule": "credential-url",
-    "sha256": "950c41a821615abb8554473910fabc7f6face0d8c066e5c631d60ebdf00e8d3c",
+    "sha256": "c44a51bff265ab2df4f92be180bf0c3364d289575a662beda28c0b0f3b441ff9",
     "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
   },
   {
-    "path": "crates/brain-check/tests/server.rs",
-    "rule": "private-key",
-    "sha256": "3021d90eb9437b2d8f30e8363695c4418b5e5f1870801b5c317e9398ee0f572d",
+    "path": "crates/brain-backend/src/boot.rs",
+    "rule": "credential-url",
+    "sha256": "c4e9548c7fa9d4172231acffb8f4b023eb7744f6b93d3e197867cd6d61d07e91",
     "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
   },
   {
-    "path": "crates/brain-check/tests/server.rs",
-    "rule": "credential",
-    "sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3",
+    "path": "crates/brain-backend/src/boot.rs",
+    "rule": "credential-url",
+    "sha256": "e9306092450bb5e70f561c9d482f063c68c0e62f7e73a9d46e50e82e7685148b",
     "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
   },
   {
-    "path": "examples/invalid/comp/b0703-secret-literal.brain",
-    "rule": "credential",
-    "sha256": "949a0eca02907f675812d79d696689f6ef9bc0742afcbc06fef6493158669911",
+    "path": "crates/brain-backend/src/boot.rs",
+    "rule": "credential-url",
+    "sha256": "f0292c0b5dcb85b5ab5729ca68d3af1a37800929b129084e90e6b9c575b63884",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
+    "path": "crates/brain-backend/src/db.rs",
+    "rule": "credential-url",
+    "sha256": "c44a51bff265ab2df4f92be180bf0c3364d289575a662beda28c0b0f3b441ff9",
     "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
   },
   {
@@ -60,22 +72,16 @@
     "reason": "Reviewed rejection fixture verifies that URLs containing synthetic user:password credentials are refused."
   },
   {
-    "path": "crates/brain-serve/src/native_proxy.rs",
+    "path": "crates/brain-backend/src/origins.rs",
     "rule": "credential-url",
-    "sha256": "f8c7f2987069485166a19282090fd6bfda8b12c5ccf46c99846068ed92369f32",
-    "reason": "Reviewed rejection fixture verifies that synthetic user:pass loopback target URLs are refused."
+    "sha256": "288a54939d6ba40b4826b0549aa6a2067e121a9d442ab22486ea3611af155091",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
   },
   {
-    "path": "runtime/test/server-native-auth.test.js",
+    "path": "crates/brain-backend/src/origins.rs",
     "rule": "credential-url",
-    "sha256": "a28b8176f57374f4f478f28ad1530d57fff8e37cdb58a74e5146350154124e29",
-    "reason": "Reviewed rejection fixture verifies that synthetic user:password loopback backend URLs are refused."
-  },
-  {
-    "path": "crates/brain-backend/tests/auth_flows.rs",
-    "rule": "credential-url",
-    "sha256": "fbddae166ead16d1dd67736b19403ab1ac0095e344f663573848af911a7ce273",
-    "reason": "Reviewed rejection fixture: account mail callback URLs containing synthetic user:pass credentials at a reserved .test host must be refused."
+    "sha256": "936541b0dd1bc76dd5ef70ee989987de6436f759cd23b9abbd9bbe17d140c0ba",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
   },
   {
     "path": "crates/brain-backend/src/webhooks.rs",
@@ -84,10 +90,64 @@
     "reason": "Reviewed outbound webhook rejection fixture: synthetic user:pass credentials at a reserved .test host are refused before transport."
   },
   {
+    "path": "crates/brain-backend/tests/auth_flows.rs",
+    "rule": "credential-url",
+    "sha256": "fbddae166ead16d1dd67736b19403ab1ac0095e344f663573848af911a7ce273",
+    "reason": "Reviewed rejection fixture: account mail callback URLs containing synthetic user:pass credentials at a reserved .test host must be refused."
+  },
+  {
+    "path": "crates/brain-check/src/origins.rs",
+    "rule": "credential-url",
+    "sha256": "fbddae166ead16d1dd67736b19403ab1ac0095e344f663573848af911a7ce273",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
+    "path": "crates/brain-check/tests/server.rs",
+    "rule": "credential",
+    "sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
+    "path": "crates/brain-check/tests/server.rs",
+    "rule": "private-key",
+    "sha256": "3021d90eb9437b2d8f30e8363695c4418b5e5f1870801b5c317e9398ee0f572d",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
+    "path": "crates/brain-cli/src/env.rs",
+    "rule": "credential-url",
+    "sha256": "950c41a821615abb8554473910fabc7f6face0d8c066e5c631d60ebdf00e8d3c",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
     "path": "crates/brain-cli/src/socket_settings.rs",
     "rule": "credential-url",
     "sha256": "936541b0dd1bc76dd5ef70ee989987de6436f759cd23b9abbd9bbe17d140c0ba",
     "reason": "Reviewed rejection-only fixture uses synthetic credentials at the reserved app.example.test host. Configuration must reject the URL without transport or echoing its credentials."
+  },
+  {
+    "path": "crates/brain-cli/src/startup_config.rs",
+    "rule": "credential-url",
+    "sha256": "950c41a821615abb8554473910fabc7f6face0d8c066e5c631d60ebdf00e8d3c",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
+    "path": "crates/brain-cli/tests/corpus/check.txt",
+    "rule": "credential",
+    "sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
+    "path": "crates/brain-cli/tests/env_truth.rs",
+    "rule": "credential-url",
+    "sha256": "950c41a821615abb8554473910fabc7f6face0d8c066e5c631d60ebdf00e8d3c",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
+    "path": "crates/brain-lex/src/codes.rs",
+    "rule": "credential-url",
+    "sha256": "c44a51bff265ab2df4f92be180bf0c3364d289575a662beda28c0b0f3b441ff9",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
   },
   {
     "path": "crates/brain-pack/src/socket_options.rs",
@@ -96,15 +156,27 @@
     "reason": "Reviewed rejection-only fixture uses synthetic credentials at the reserved app.example.test host. Configuration must reject the URL without transport or echoing its credentials."
   },
   {
-    "path": "bench/native-live/run.mjs",
+    "path": "crates/brain-serve/src/native_proxy.rs",
     "rule": "credential-url",
-    "sha256": "efdb02117ac4b051b600f59766916395055a0fabc53c0117309b3df599b4eab6",
-    "reason": "Reviewed historical template literal: the password is interpolated from a per-run random value for the owned throwaway Postgres container; no usable credential."
+    "sha256": "f8c7f2987069485166a19282090fd6bfda8b12c5ccf46c99846068ed92369f32",
+    "reason": "Reviewed rejection fixture verifies that synthetic user:pass loopback target URLs are refused."
   },
   {
-    "path": "crates/brain-backend/src/boot.rs",
-    "rule": "credential-url",
-    "sha256": "e9306092450bb5e70f561c9d482f063c68c0e62f7e73a9d46e50e82e7685148b",
+    "path": "crates/brain-serve/src/trace.rs",
+    "rule": "credential",
+    "sha256": "457643f44d19aed85fd756aa50cc0cd6b57376d4e8f5a72f9f85972a522002a3",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
+    "path": "crates/brain-serve/src/trace.rs",
+    "rule": "credential",
+    "sha256": "e079c4bf14542148b45a91dbe08e781dfba8e9690eedd71f22476251dd03ab1e",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
+    "path": "examples/invalid/comp/b0703-secret-literal.brain",
+    "rule": "credential",
+    "sha256": "949a0eca02907f675812d79d696689f6ef9bc0742afcbc06fef6493158669911",
     "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
   },
   {
@@ -112,5 +184,11 @@
     "rule": "credential-url",
     "sha256": "f8c7f2987069485166a19282090fd6bfda8b12c5ccf46c99846068ed92369f32",
     "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
+    "path": "runtime/test/server-native-auth.test.js",
+    "rule": "credential-url",
+    "sha256": "a28b8176f57374f4f478f28ad1530d57fff8e37cdb58a74e5146350154124e29",
+    "reason": "Reviewed rejection fixture verifies that synthetic user:password loopback backend URLs are refused."
   }
 ]
