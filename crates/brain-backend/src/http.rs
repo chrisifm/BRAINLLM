@@ -1934,7 +1934,7 @@ async fn media_variants(
     Json(body): Json<MediaPresets>,
 ) -> Result<Json<Value>> {
     let user = app.required(&headers).await?;
-    crate::media::validate_presets(&body.presets).map_err(|_|Error::validation(json!({"presets":"Use at most six uniquely named PNG/JPEG/WebP presets with dimensions 1..4096; JPEG quality 1..100"})))?;
+    crate::media::validate_presets(&body.presets).map_err(|_|Error::validation(json!({"presets":"Use at most six uniquely named PNG/JPEG/WebP/AVIF presets with dimensions 1..4096 (AVIF 1..2048 and always with a PNG, JPEG or WebP fallback); JPEG and AVIF quality 1..100"})))?;
     let owner: Option<Uuid> =
         sqlx::query_scalar("SELECT user_id FROM _brain_uploads WHERE id=$1 AND (user_id=$2 OR $3)")
             .bind(id)

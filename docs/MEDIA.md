@@ -6,7 +6,17 @@ The experimental Rust backend keeps a validated original and generates versioned
 
 Uploads accept one multipart field named `file`, containing PNG, JPEG or WebP. Client filenames and declared MIME types never choose paths or encoders. Input is limited to 5 MiB, 4,096 by 4,096 pixels and a 96 MiB decoded buffer. EXIF orientation is applied to derived images. The original validated bytes remain unchanged in private storage, including their original metadata; originals download as attachments. Derived images are re-encoded from pixels and do not copy source metadata or trailing content.
 
-The default plan contains full/thumbnail plus 320/640/1280-width JPEG and WebP variants, with no upscaling. At most six named custom presets can accompany full/thumbnail. Presets select dimensions, proportional fit or centered crop, and png/jpeg/webp. JPEG exposes an actual quality setting from 1 through 100; alpha is composited on white. The current WebP encoder is lossless, so no lossy quality/compression claim is made. AVIF is not enabled.
+The default plan contains full/thumbnail plus 320/640/1280-width JPEG and WebP variants, with no upscaling. At most six named custom presets can accompany full/thumbnail. Presets select dimensions, proportional fit or centered crop, and png/jpeg/webp/avif. JPEG exposes an actual quality setting from 1 through 100; alpha is composited on white. The current WebP encoder is lossless, so no lossy quality/compression claim is made. AVIF is not enabled.
+
+AVIF is opt-in per preset, because AV1 encoding is much slower than the other formats: `{"name":"avif-1280","width":1280,"height":2048,"format":"avif","quality":60}` (quality 1 through 100, default 60; `width` and `height` at most 2,048). The default plan has none, and a preset list with AVIF must include a PNG, JPEG or WebP preset as the fallback. Measured with two encoder threads and a loaded machine on 2026-10-31: 0.5 s for 640 px, 2.2 s for 1280 px and 5.5 s for 2048 px, so several large AVIF presets can approach the 30-second deadline. The library's `srcset` is per format, so render AVIF first and let the browser choose:
+
+```html
+<picture>
+  <source type="image/avif" srcset={item.srcset.avif}>
+  <source type="image/webp" srcset={item.srcset.webp}>
+  <img src={item.url} alt={item.alt} width={item.width} height={item.height}>
+</picture>
+```
 
 Each output is limited to 20 MiB and the complete preparation to 64 MiB. Two image workers are shared by upload and rebuild operations; their permits remain with blocking encoders after request cancellation. Two independent GCS worker slots have no pending process queue. General HTTP requests retain a ten-second deadline; media requests allow thirty seconds, including the bounded SDK operation.
 

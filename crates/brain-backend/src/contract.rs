@@ -1048,7 +1048,7 @@ fn native_paths(roles: &crate::auth_flows::RolesConfig) -> Map<String, Value> {
         &[400, 401, 403, 404, 429, 500, 504],
     );
     let preset = object(
-        json!({"name":{"type":"string","maxLength":48,"pattern":"^[a-z0-9_-]+$","not":{"enum":["original","full","thumbnail"]}},"width":{"type":"integer","minimum":1,"maximum":4096},"height":{"type":"integer","minimum":1,"maximum":4096},"crop":{"type":"boolean","default":false},"format":{"type":"string","enum":["png","jpeg","webp"]},"quality":{"type":["integer","null"],"minimum":1,"maximum":100,"description":"Only valid for JPEG; WebP is lossless"}}),
+        json!({"name":{"type":"string","maxLength":48,"pattern":"^[a-z0-9_-]+$","not":{"enum":["original","full","thumbnail"]}},"width":{"type":"integer","minimum":1,"maximum":4096},"height":{"type":"integer","minimum":1,"maximum":4096},"crop":{"type":"boolean","default":false},"format":{"type":"string","enum":["png","jpeg","webp","avif"]},"quality":{"type":["integer","null"],"minimum":1,"maximum":100,"description":"Only valid for JPEG; WebP is lossless"}}),
         &["name", "width", "height", "format"],
         true,
     );
@@ -1304,7 +1304,7 @@ fn native_paths(roles: &crate::auth_flows::RolesConfig) -> Map<String, Value> {
         "/_brain/uploads/{id}",
         "/_brain/media/{id}/v/{version}/{preset}",
     ] {
-        paths.get_mut(path).unwrap()["get"]["responses"]["200"]["content"] = json!({"image/png":{"schema":{"type":"string","format":"binary"}},"image/jpeg":{"schema":{"type":"string","format":"binary"}},"image/webp":{"schema":{"type":"string","format":"binary"}}});
+        paths.get_mut(path).unwrap()["get"]["responses"]["200"]["content"] = json!({"image/png":{"schema":{"type":"string","format":"binary"}},"image/jpeg":{"schema":{"type":"string","format":"binary"}},"image/webp":{"schema":{"type":"string","format":"binary"}},"image/avif":{"schema":{"type":"string","format":"binary"}}});
     }
     for path in [
         "/_brain/jobs/{queue}",
