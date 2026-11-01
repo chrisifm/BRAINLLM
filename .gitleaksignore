@@ -16,3 +16,4 @@ f5907292eed479172999b14d50893ae4f876700e:crates/brain-cli/tests/env_truth.rs:gen
 4627bd045f40d73217e21d4592182f0f506fe922:runtime/test/server-origin.test.js:generic-api-key:103
 bdb13222e9717bbfa31781d11e26ecb1bd1f156c:crates/brain-serve/tests/native_bridge.rs:generic-api-key:293
 bdb13222e9717bbfa31781d11e26ecb1bd1f156c:runtime/test/server-native-bridge.test.js:generic-api-key:148
+07bc4b5b236a83d0a51172159d1377291239fad5:crates/brain-cli/tests/mcp_localhost.rs:generic-api-key:19
