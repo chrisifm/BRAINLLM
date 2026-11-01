@@ -254,3 +254,35 @@ test('a form guarding unsaved changes is not a leak: its one listener lives as l
     stop()
   } finally { globalThis.addEventListener = own }
 })
+
+// A listener another module registered while the fx ran is not the component's: the report names where it comes from.
+test('B0602 names the real origin of a listener registered by foreign code', async () => {
+  const listener = () => {}
+  const Own = () => { fx(() => { globalThis.window.addEventListener('blur', listener) }); return tpl('<p></p>')() }
+  Own.h = 'ownb602'; Own.f = 'comp/own-b602.brain'
+  const stopOwn = mount(dev(Own), doc.body, {})
+  await wait()
+  const own = I.inspect().leaks().find(x => x.code === 'B0602' && x.h === 'ownb602')
+  assert.equal(own.file, 'comp/own-b602.brain', 'code of the app itself keeps the component as its file')
+  assert.ok(!own.msg.includes('registered by'), own.msg)
+  stopOwn()
+
+  const Foreign = () => { fx(() => { globalThis.window.addEventListener('focus', listener) }); return tpl('<p></p>')() }
+  Foreign.h = 'frnb602'; Foreign.f = 'comp/foreign-b602.brain'
+  // On an http page a file: frame is not the app's, which is what a third-party script looks like to site().
+  const had = Object.getOwnPropertyDescriptor(globalThis, 'location')
+  Object.defineProperty(globalThis, 'location', { configurable: true, value: { href: 'https://app.example/', origin: 'https://app.example', pathname: '/', search: '', hash: '' } })
+  try {
+    const stop = mount(dev(Foreign), doc.body, {})
+    await wait()
+    const leak = I.inspect().leaks().find(x => x.code === 'B0602' && x.h === 'frnb602')
+    assert.equal(leak.name, 'Foreign')
+    assert.match(leak.file, /inspect\.test\.js$/, 'the file is the origin, without its line')
+    assert.notEqual(leak.file, 'comp/foreign-b602.brain')
+    assert.match(leak.msg, /of Foreign, registered by .*inspect\.test\.js:\d+,/)
+    stop()
+  } finally {
+    if (had) Object.defineProperty(globalThis, 'location', had)
+    else delete globalThis.location
+  }
+})
