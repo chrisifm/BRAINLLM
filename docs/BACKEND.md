@@ -232,7 +232,7 @@ Signed webhook routes for payment and shipping providers (HMAC, timestamp tolera
 Calling external APIs from server logic (timeouts, safe retries, idempotency keys, redacted errors): [backend/outbound.md](backend/outbound.md).
 
 Lists, relations and readers: [relations](backend/relations.md) · [filters](backend/filters.md) · [sorting](backend/sorting.md) · [aggregates](backend/aggregates.md) · [pagination](backend/pagination.md) · [search](backend/search.md) · [ownership](backend/ownership.md) · [visibility](backend/visibility.md) · [slug history](backend/slugs.md) · [facets](backend/facets.md) · [geo](backend/geo.md).
-SaaS building blocks: [organizations](backend/organizations.md) · [audit log](backend/audit.md) · [captcha](backend/captcha.md) · [credits](backend/credits.md).
+SaaS building blocks: [organizations](backend/organizations.md) · [audit log](backend/audit.md) · [captcha](backend/captcha.md) · [sessions](backend/sessions.md) · [credits](backend/credits.md).
 Server code (`load`, server functions) queries with the same contract through `ctx.backend`: [backend/server-queries.md](backend/server-queries.md).
 Keeping numeric ids from another backend as a unique, filterable field: [backend/ids.md](backend/ids.md).
 
