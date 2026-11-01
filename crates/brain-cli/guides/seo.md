@@ -80,9 +80,14 @@ from the request's host: every static route plus what `paths()` and `sitemap({ e
 hreflang alternates and image entries for literal `<img src>` like the build (a file in `public/` still wins). Try it:
 `curl localhost:5180/sitemap.xml` and `curl localhost:5180/llms.txt`.
 
+`seo.focus` (site focus report, B1861-B1866; editorial, not a ranking factor) and `seo-urls.txt` (published URLs, B1879, from
+`brain seo urls --write`) are optional: `brain guide docs/SEO-SITE.md`.
+
 ## Common mistakes — do NOT
 - Stuff the keyword or repeat it beyond a natural density (B1816 reports over 3 %); use synonyms.
 - Hand-write `og:*` defaults, robots.txt, llms.txt, sitemap.xml or a Google tag snippet (not machine-checked).
+- Point the canonical of `?page=2` at page 1 (B1872, error), write "click here" links (B1873), let visible dates and
+  `dateModified` differ (B1874), or mark up what the page does not show (B1875).
 - Give two pages the same title or description (B1814, B1815) or the same keyword (B1817).
 - Hide the answer below a long intro, a carousel or an image.
 - Lower `seo.minScore` to pass the build (B0733); fix the findings instead.
@@ -100,7 +105,8 @@ brain lighthouse https://beta.example.com/ --preset mobile   # scores and Core W
 `brain seo audit` and `brain build` fail under `seo.minScore`. Audit dynamic routes with `--url`: the build cannot see them.
 It also reports what only a live response shows: a listed page that answers an error or 200 + noindex (B1856), a
 security header sent twice (B1857), a site-wide noindex (B1858), a soft 404 (B1859), the same link text for different
-pages (B1860). On staging pass `--expect-noindex` or set `seo.staging`: pages stay `noindex` and crawlable, because
+pages (B1860), a listed URL that redirects (B1867), a canonical other than the sitemap's (B1868), a URL variant answering 200
+(B1869), declared against observed caching and encoding (B1870), a blocked `noindex` (B1871). On staging pass `--expect-noindex` or set `seo.staging`: pages stay `noindex` and crawlable, because
 `Disallow` would hide that `noindex`. Titles are never shortened for you: a long one is reported, and keeping it is your
 decision. Pixel widths (B1802, B1804) are display widths, not Google limits. Each `[id]` page needs its own title (B0504).
 `brain explain B1830` (or any B18xx) prints why and a correct example. GEO hints (B1830-B1835) are info: they never

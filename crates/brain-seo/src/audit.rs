@@ -47,6 +47,8 @@ pub struct Report {
     pub pages: Vec<PageReport>,
     pub site: Vec<Finding>,
     pub min_score: u32,
+    /// `seo.focus`, term by term.
+    pub focus: Vec<crate::focus::Term>,
 }
 
 /// `(code, title, why, example_ok)` — same shape as `brain_check::CATALOG`, for `brain explain` and MCP.
@@ -338,6 +340,120 @@ pub const CATALOG: &[(&str, &str, &str, &str)] = &[
         "Redirect by meta refresh",
         "A meta refresh answers 200 with the old URL, so crawlers may keep it indexed and lose the permanent signal. A server redirect moves the page in one hop.",
         "[{ \"from\": \"/old-pricing\", \"to\": \"/pricing\", \"status\": 301 }] in redirects.json",
+    ),
+    (
+        "B1861",
+        "Too many focus terms",
+        "Attention spread over many terms rarely shows on any of them. More than three is a warning; every term is still audited.",
+        "\"seo\": { \"focus\": [\"offline task planner\", \"team calendar\"] }",
+    ),
+    (
+        "B1862",
+        "Focus term missing from the home page",
+        "The home title and h1 say what the site is about, to a reader and to a crawler.",
+        "<h1>Offline task planner for small teams</h1>",
+    ),
+    (
+        "B1863",
+        "Focus term without a hub",
+        "No indexable page carries the term in its URL, title and h1, so nothing on the site is the page to link to for it.",
+        "views/offline-task-planner.brain with title and h1 naming the term",
+    ),
+    (
+        "B1864",
+        "Focus term with several hubs",
+        "Two pages carrying the same term in URL, title and h1 split clicks and links; give each page its own keyword or merge them.",
+        "[{ \"from\": \"/task-planner-offline\", \"to\": \"/offline-task-planner\", \"status\": 301 }]",
+    ),
+    (
+        "B1865",
+        "Links to a focus hub",
+        "Google documents crawlable links and descriptive anchors. This reports how pages that mention the term link to its hub; a warning only when no page links to it.",
+        "<a href=\"/offline-task-planner\">offline task planner</a>",
+    ),
+    (
+        "B1866",
+        "Focus term overused",
+        "Google's spam policies name keyword stuffing. A term filling a page, or the title of nearly every page, is reported; the thresholds are a heuristic, not a published limit.",
+        "<title>Team calendar — Acme</title>",
+    ),
+    (
+        "B1867",
+        "Sitemap URL redirects (live audit)",
+        "A sitemap lists final addresses; a listed URL that redirects spends a hop and sends a mixed signal about which address is canonical.",
+        "<loc>https://acme.dev/pricing</loc> (the address that answers 200)",
+    ),
+    (
+        "B1868",
+        "Canonical differs from the sitemap URL (live audit)",
+        "The sitemap and the canonical both name the preferred address; when they differ, a search engine has to choose.",
+        "<link rel=\"canonical\" href=\"https://acme.dev/pricing\"> on the URL the sitemap lists",
+    ),
+    (
+        "B1869",
+        "URL variant without a canonical (live audit)",
+        "`//route`, `/ROUTE`, `/route/index.html` or a tracking parameter that answer 200 with no canonical to the clean URL become duplicate pages.",
+        "<link rel=\"canonical\" href=\"https://acme.dev/pricing\">, or a redirect to it",
+    ),
+    (
+        "B1870",
+        "Declared and observed differ (live audit)",
+        "What a response declares and what happens must agree: cacheable pages the CDN does not cache, a cookie on a cacheable response, `immutable` on a name whose content can change, text assets sent uncompressed.",
+        "Cache-Control: public, max-age=31536000, immutable on /assets/app.3f2a1b9c.js",
+    ),
+    (
+        "B1871",
+        "noindex blocked by robots.txt",
+        "A crawler that may not read a page never sees its noindex, and may keep listing the URL.",
+        "Remove the Disallow for that path and keep <meta name=\"robots\" content=\"noindex\">",
+    ),
+    (
+        "B1872",
+        "Later page canonical to page 1",
+        "Google asks each page of a listing to keep its own canonical and not to use the first page as the canonical.",
+        "/blog/page/2 → <link rel=\"canonical\" href=\"https://acme.dev/blog/page/2\">",
+    ),
+    (
+        "B1873",
+        "Generic link text",
+        "Google reads link text to understand the target; `click here` and `read more` say nothing about it.",
+        "<a href=\"/pricing\">team pricing</a>",
+    ),
+    (
+        "B1874",
+        "Visible date differs from structured date",
+        "Google compares the date a reader sees with the one the JSON-LD declares.",
+        "<time datetime=\"2026-10-01\">October 1, 2026</time> and \"datePublished\": \"2026-10-01\"",
+    ),
+    (
+        "B1875",
+        "Structured data not on the page",
+        "Google's structured data guidelines ask markup to describe what the reader can see.",
+        "<h1>Offline sync explained</h1> and \"headline\": \"Offline sync explained\"",
+    ),
+    (
+        "B1876",
+        "HTML near the 2 MB limit",
+        "Googlebot reads the first 2 MB of an uncompressed HTML file; what comes after is not seen.",
+        "Move inline data and styles to their own files",
+    ),
+    (
+        "B1877",
+        "URL form",
+        "Google suggests hyphens between words; URLs are case-sensitive, and a session parameter makes a new address per visitor.",
+        "/offline-task-planner",
+    ),
+    (
+        "B1878",
+        "Listing with little of its own",
+        "An internal search view or a listing with one entry offers a search engine nothing of its own.",
+        "<meta seo title=\"Search\" robots=\"noindex\">",
+    ),
+    (
+        "B1879",
+        "Registered URL gone without a redirect",
+        "`seo-urls.txt` lists the published URLs in git, so the comparison survives a clean clone. A listed URL that no longer exists needs a redirect, or its line removed on purpose.",
+        "[{ \"from\": \"/old\", \"to\": \"/new\" }] in redirects.json",
     ),
 ];
 
@@ -1200,6 +1316,7 @@ pub fn audit(site: &Site) -> Report {
                     .collect()
             })
     };
+    let (focus, focus_site, focus_pages) = crate::focus::analyze(site, &docs, &idx, &paired);
     // pass 2: one score per page
     let mut pages = Vec::new();
     for (i, (p, doc)) in site.pages.iter().zip(&docs).enumerate() {
@@ -1275,6 +1392,8 @@ pub fn audit(site: &Site) -> Report {
                 );
             }
         }
+        s.findings.extend(focus_pages[i].iter().cloned());
+        s.findings.extend(crate::checks::page(cfg, p, doc, idx[i], !p.ssr));
         if let Some(c) = doc
             .link("canonical")
             .filter(|c| !c.contains("://") && !c.starts_with('/'))
@@ -1407,10 +1526,12 @@ pub fn audit(site: &Site) -> Report {
             fix: "build with `--env production` to publish".into(),
         });
     }
+    site_f.extend(focus_site);
     Report {
         pages,
         site: site_f,
         min_score: cfg.min_score,
+        focus,
     }
 }
 
@@ -1448,8 +1569,20 @@ impl Report {
                 ("fix", Json::str(&f.fix)),
             ])
         };
+        let focus = self.focus.iter().map(|t| {
+            Json::obj([
+                ("term", Json::str(&t.term)),
+                ("mentions", Json::Num(t.mentions as f64)),
+                ("hubs", Json::Arr(t.hubs.iter().map(|h| Json::str(h)).collect())),
+                ("inboundPages", Json::Num(t.inbound as f64)),
+                ("inboundLinks", Json::Num(t.inbound_anchors as f64)),
+                ("linksWithTerm", Json::Num(t.anchors_with_term as f64)),
+                ("mentionsWithoutLink", Json::Arr(t.unlinked.iter().map(|r| Json::str(r)).collect())),
+            ])
+        });
         Json::obj([
             ("ok", Json::Bool(self.ok())),
+            ("focus", Json::Arr(focus.collect())),
             ("minScore", Json::Num(f64::from(self.min_score))),
             (
                 "pages",
@@ -1491,6 +1624,13 @@ impl Report {
                 f.code,
                 f.msg,
                 f.fix
+            ));
+        }
+        for t in &self.focus {
+            let hub = if t.hubs.is_empty() { "no hub".to_string() } else { t.hubs.join(", ") };
+            o.push_str(&format!(
+                "  focus \"{}\": {} page(s) mention it · hub: {hub} · {} page(s) link to it, {} of {} link(s) name it\n",
+                t.term, t.mentions, t.inbound, t.anchors_with_term, t.inbound_anchors
             ));
         }
         for p in order {

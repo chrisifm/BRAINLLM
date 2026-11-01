@@ -14,6 +14,7 @@
 //! `seo.ai` sets the AI crawler policy: `"allow"` (default: training, AI answers and search), `"search-only"` (AI
 //! search and answers yes, training no) or `"block"` (no AI crawler; classic search engines still allowed).
 //! `seo.markdown` (default true) publishes a Markdown copy of every indexable page for LLMs (`/pricing.md`).
+//! `seo.focus` lists up to three terms for the site focus report (`crate::focus`); an editorial check, no ranking promise.
 //! `seo.search` is still accepted and adds nothing: Google retired the sitelinks search box in 2024.
 
 use brain_lex::Json;
@@ -128,6 +129,8 @@ pub struct Config {
     pub sections: bool,
     /// `seo.trailingSlash` and `seo.canonicalHost` (§33): folded into the servers' single redirect hop.
     pub redirect_policy: crate::redirects::Policy,
+    /// `seo.focus`: the terms the site wants to be known for, most relevant first.
+    pub focus: Vec<String>,
 }
 
 impl Default for Config {
@@ -163,6 +166,7 @@ impl Default for Config {
             feed: true,
             sections: true,
             redirect_policy: crate::redirects::Policy::default(),
+            focus: Vec::new(),
         }
     }
 }
@@ -259,6 +263,13 @@ impl Config {
             c.markdown = b(seo, "markdown", true)?;
             c.feed = b(seo, "feed", true)?;
             c.sections = b(seo, "sections", true)?;
+            match seo.get("focus") {
+                None => {}
+                Some(Json::Arr(a)) if a.iter().all(|t| t.as_str().is_some_and(|t| !t.trim().is_empty())) => {
+                    c.focus = a.iter().filter_map(Json::as_str).map(|t| t.trim().to_string()).collect();
+                }
+                Some(_) => return Err("brain.json: `seo.focus` must be a list of terms, most relevant first; fix: \"focus\": [\"offline task planner\"]".into()),
+            }
             if let Some(n) = seo.get("news") {
                 let Some(name) = s(n, "name") else {
                     return Err("brain.json: `seo.news` needs a `name` (the publication name Google News shows); fix: \"news\": { \"name\": \"Acme News\", \"collections\": [\"news\"] }".into());

@@ -1,5 +1,6 @@
 # Each case edits a clean three-page site: `### name`, `@replace <route|*> <old> => <new>`, `@keyword <route> <words>`,
-# `@redirect <rule line>`, `@staging`, `@expect <code> <route>`.
+# `@redirect <rule line>`, `@staging`, `@focus <term>`, `@robots <text with \n>`, `@pad <route> <bytes>`,
+# `@page <route> | <title> | <h1>`, `@expect <code> <route>`.
 @unreachable B1823 frontmatter of a content file; `brain check` reports it, see the check corpus
 @unreachable B1824 frontmatter of a content file; `brain check` reports it, see the check corpus
 @unreachable B1826 compares with the previous build
@@ -11,6 +12,11 @@
 @unreachable B1828 needs a multilingual site; tests/audit.rs covers it
 @unreachable B1829 reported by the build for an untranslated content entry
 @unreachable B1837 read from view sources by `brain seo audit`; tests in brain-cli/tests/seo_unlisted_routes.rs
+@unreachable B1867 needs a running site; the tests of `brain seo audit --url` cover it
+@unreachable B1868 needs a running site; the tests of `brain seo audit --url` cover it
+@unreachable B1869 needs a running site; the tests of `brain seo audit --url` cover it
+@unreachable B1870 needs a running site; the tests of `brain seo audit --url` cover it
+@unreachable B1879 compares with the committed seo-urls.txt; tests/audit.rs covers it
 @unreachable B1840 reported by `brain trace`
 @unreachable B1841 reported by `brain trace`
 @unreachable B1842 reported by `brain trace`
@@ -165,3 +171,133 @@
 
 ### a refresh that only reloads the page is not a redirect
 @replace /pricing <title>Pricing for the Acme offline task planner</title> => <title>Pricing for the Acme offline task planner</title><meta http-equiv="refresh" content="300">
+
+### a focus term with a hub every link names is clean: no other page has to mention it
+@focus small teams
+@page /small-teams | Small teams planning guide | Small teams
+@replace /guide <a href="/guide">Guide</a> => <a href="/small-teams">small teams</a>
+@expect B1808 /small-teams
+@expect B1812 /small-teams
+
+### B1861 more than three focus terms is a warning, and every term is still audited
+@focus Acme
+@focus offline
+@focus planner
+@focus small teams
+@expect B1861 *
+@expect B1863 *
+@expect B1866 /
+@expect B1866 /guide
+@expect B1866 /pricing
+
+### B1862 focus term missing from the home title and h1
+@focus wildebeest migration
+@page /wildebeest-migration | Wildebeest migration atlas | Wildebeest migration
+@replace /pricing <p>A short opening.</p> => <p>See <a href="/wildebeest-migration">wildebeest migration</a>.</p>
+@expect B1862 *
+@expect B1808 /wildebeest-migration
+@expect B1812 /wildebeest-migration
+
+### B1863 focus term without a hub
+@focus small teams
+@expect B1863 *
+
+### B1864 two hubs for one focus term
+@focus small teams
+@page /small-teams | Small teams planning guide | Small teams
+@page /small-teams-plans | Small teams and their plans | Plans for small teams
+@expect B1864 *
+@expect B1808 /small-teams
+@expect B1808 /small-teams-plans
+@expect B1812 /small-teams
+@expect B1812 /small-teams-plans
+@expect B1813 /small-teams
+@expect B1813 /small-teams-plans
+
+### B1865 no page links to the hub
+@focus small teams
+@page /small-teams | Small teams planning guide | Small teams
+@expect B1865 *
+@expect B1808 /small-teams
+@expect B1812 /small-teams
+@expect B1813 /small-teams
+
+### B1865 a mention without a link and an anchor without the term are reported as a share
+@focus small teams
+@page /small-teams | Small teams planning guide | Small teams
+@replace /pricing <p>A short opening.</p> => <p><a href="/small-teams">this guide</a></p>
+@replace /guide <p>A short opening.</p> => <p>Written for small teams.</p>
+@expect B1865 *
+@expect B1808 /small-teams
+@expect B1812 /small-teams
+
+### B1866 a term that fills the pages
+@focus offline task planner
+@expect B1863 *
+@expect B1866 /
+@expect B1866 /guide
+@expect B1866 /pricing
+
+### B1871 noindex on a path robots.txt blocks
+@replace /pricing <meta charset="utf-8"> => <meta charset="utf-8"><meta name="robots" content="noindex">
+@robots User-agent: *\nDisallow: /pricing\n
+@expect B1871 /pricing
+
+### noindex on a crawlable path is what it should be
+@replace /pricing <meta charset="utf-8"> => <meta charset="utf-8"><meta name="robots" content="noindex">
+@robots User-agent: *\nDisallow: /private\n
+
+### B1872 later page of a listing with its canonical at page 1
+@page /blog/page/2 | Blog entries, second page | Blog entries
+@replace /blog/page/2 href="https://acme.dev/blog/page/2" => href="https://acme.dev/blog"
+@expect B1872 /blog/page/2
+
+### a later page with its own canonical is right
+@page /blog/page/2 | Blog entries, second page | Blog entries
+@expect B1808 /blog/page/2
+@expect B1812 /blog/page/2
+@expect B1813 /blog/page/2
+
+### B1873 generic link text in English and Spanish
+@replace /pricing >guide</a> => >read more</a>
+@replace /guide >prices</a> => >leer mas</a>
+@expect B1873 /guide
+@expect B1873 /pricing
+
+### B1874 visible date differs from the structured date
+@replace /pricing </main> => <p><time datetime="2026-09-01">September</time></p><script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Pricing of the planner","image":"https://acme.dev/og.png","author":{"@type":"Person","name":"Ada","url":"https://acme.dev/ada"},"datePublished":"2026-10-01","dateModified":"2026-10-01"}</script></main>
+@expect B1874 /pricing
+
+### the same date in both places is fine
+@replace /pricing </main> => <p><time datetime="2026-10-01T10:00:00Z">October</time></p><script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Pricing of the planner","image":"https://acme.dev/og.png","author":{"@type":"Person","name":"Ada","url":"https://acme.dev/ada"},"datePublished":"2026-10-01","dateModified":"2026-10-01"}</script></main>
+
+### B1875 structured data the page does not show
+@replace /pricing </main> => <script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Does wildebeest migration work?","acceptedAnswer":{"@type":"Answer","text":"Yes"}}]}</script></main>
+@expect B1875 /pricing
+
+### B1876 html close to what Googlebot reads
+@pad /pricing 1700000
+@expect B1876 /pricing
+
+### B1877 underscore, uppercase and session parameter
+@page /Small_Teams | Small teams planning guide | Small teams
+@replace /pricing <a href="/guide">guide</a> => <a href="/guide?sid=abc">guide</a>
+@expect B1808 /Small_Teams
+@expect B1812 /Small_Teams
+@expect B1813 /Small_Teams
+@expect B1877 /Small_Teams
+@expect B1877 /pricing
+
+### B1878 internal search view that can be indexed
+@page /search | Search the planner guides | Search the planner guides
+@expect B1808 /search
+@expect B1812 /search
+@expect B1813 /search
+@expect B1878 /search
+
+### B1878 a tag listing with one entry
+@page /blog/tag/planning | Entries about planning | Entries about planning
+@replace /blog/tag/planning <p>A short opening.</p> => <p><a href="/guide">The guide</a></p>
+@expect B1808 /blog/tag/planning
+@expect B1813 /blog/tag/planning
+@expect B1878 /blog/tag/planning

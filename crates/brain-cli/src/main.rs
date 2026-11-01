@@ -88,6 +88,7 @@ pub(crate) const USAGE: &str = "brain — the BRAINLLM toolchain (every command 
 main:
   brain --version                    prints the version (also -V, --json)
   brain seo <audit|links|preview R>  SEO audit of the built site (score per page, B18xx findings)
+  brain seo urls [--write]           the committed list of published URLs: a listed one that disappears fails the build
   brain seo audit --url <origin>     the same audit over a running site, with its sitemap, status codes and headers
   brain lighthouse <url>             Lighthouse scores and Core Web Vitals, checked against lighthouse.minScores
   brain new <app> [--backend]        creates the app (app.brain, tokens.cssbrain, views/, comp/, ui/, AGENTS.md); --backend adds accounts on the native backend

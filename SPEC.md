@@ -161,6 +161,8 @@ the view (merged, deduplicated by name/property). `[id]` views list their pages 
 Live `[slug]` views (SSR, no `paths()`) export `sitemap({ env })` instead, returning `[{ slug, lastmod? }]` (key = the
 bracket name; `lastmod` a `YYYY-MM-DD` string or Date; an item without the key is skipped). `brain guide seo`; never both, B0117.
 A public dynamic view (no guard, not `noindex`) with neither export is listed nowhere: `brain build` warns B1837 with the route.
+`brain.json` `"seo": { "focus": ["term"] }` (up to 3): an editorial report of where each term lives and links, not a ranking
+factor. `seo-urls.txt` (opt-in, `brain seo urls --write`): a listed URL that disappears with no redirect fails the build (B1879).
 Sitemaps need the deployed origin (`PUBLIC_SITE_URL` in `.brain_env`): with none, or a placeholder (example.com, `*.test`,
 localhost), the build publishes no sitemap and warns B0736.
 Sitemap date: `<meta seo lastmod="2026-10-13">` or the collection's frontmatter `date`; without one it is omitted.

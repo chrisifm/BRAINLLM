@@ -198,6 +198,11 @@
           "maximum": 100,
           "default": 80
         },
+        "focus": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Terms the site wants to be known for, most relevant first. `brain seo audit` reports where each one lives and how pages link to it; more than 3 is a warning, and nothing here blocks a build"
+        },
         "sitemap": {
           "type": "boolean",
           "default": true

@@ -138,6 +138,7 @@ COMPILER assigns the next free code there in the same change that emits it, then
   build, through `brain_seo::cli_with`) · B1837 public dynamic route (no guard, not `noindex`) without `paths()` or
   `sitemap()`: rendered per request but listed nowhere (warning from `brain build`, named with the fix). Collections (`content/<name>/*.md`, §33): server-only `entries` `entry` `tags` `tagged` `pages`
   `page` from `brain:content`, `content.perPage` (default 10), drafts only with `--env staging`.
+- B1861–B1866 site focus (§33, `seo.focus`; editorial, never in the score's wording about positions): B1861 more than 3 terms · B1862 missing from the home page · B1863 no main page · B1864 several main pages · B1865 mentions without a link to the main page (info) · B1866 in nearly every title. B1867–B1871 `brain seo audit --url`: B1867 listed URL redirects · B1868 canonical differs from the sitemap · B1869 URL variant answers 200 without the clean canonical · B1870 declared against observed (CDN, cookie, immutable, encoding) · B1871 `noindex` blocked in robots.txt (also static). B1872 later listing page canonical to page 1 (error) · B1873 generic link text · B1874 visible date against `dateModified` · B1875 structured data not on the page · B1876 HTML near Googlebot's 2 MB limit · B1877 URL form · B1878 search view or thin listing marked indexable · B1879 `seo-urls.txt`: registered URL gone with no redirect (error), new page not registered (warning).
 - B1850 framework messages left in English (warning, 2026-10-31): a component calling `form()` or `api()` with a schema, or using `<ErrorState>`, in an app whose default language is not English, while that language's file lacks `form.*` or `error_state.*` keys. It names the keys; no edit, because the text must be written in that language. Only the keys the file has reach the page dictionary, so nothing is added to bundles.
 - B072x environment file `.brain_env` (§36): B0720 empty value in the build environment (error) · B0721 key used in
   code but missing (warning, edit adds `KEY=`, or `KEY?=` when the file reads it with a default or a condition) · B0722 key never used (info); both see `const { KEY = d, B: alias } = process.env`, aliases of the object (`const e = process.env`, `const { env } = process`) and destructured `ctx.env` (2026-10-31) · B0723 `PUBLIC_*` value shaped like a
@@ -1245,6 +1246,28 @@ to appear in LLMs, traditional search and social networks"; implemented in brain
   `"off"`, cached by hash in `.brain/cache/og/`, rendered with TOOLCHAIN's screenshot closure (#126 → SEO #127).
   `"missing"` (the default) renders nothing while brain.json has no `site`: the card's og:image could only be relative,
   which social networks ignore (B1827), and the browser launch cost 2–4 s on every cold build (#282).
+
+### Site focus, live probes and the URL register (2026-11-01)
+
+`seo.focus` (B1861-B1866, `focus.rs`) is an editorial consistency report, deliberately not a score input and with no
+wording about positions: Google documents crawlable links, descriptive anchors and keyword stuffing as spam, and documents
+no such focus scheme. Its numbers (a limit of 3 terms, "nearly every title") are heuristics, so over-limit and overuse only
+warn. Matching folds case and marks for Latin-1, Extended-A and combining marks; other scripts match as written.
+
+`checks.rs` holds rules with a documented basis only (B1871-B1878). URL depth, word minimums, intro position, byte position
+and a unique H1 as a rule stay out: nothing documents them. B1872 is an error although new diagnostics start as warnings:
+Google states that later pages of a listing must not declare page 1 as canonical, and the request was explicit. B1876 uses
+Googlebot's documented 2 MB fetch limit. B1878 joins internal search views and thin tag listings to stay in range.
+
+`seo_live.rs` no longer follows redirects, so a 301 in the sitemap stays visible; only the sitemap files are followed by
+hand. `Probes` separates what was requested from the checks, which are fed responses in tests. One page stands for the
+variants and only the first page's assets are requested, so the probe costs a handful of requests, each after `--delay-ms`.
+The client has no decoder, so `Accept-Encoding` is sent only to responses judged by their headers. Focus and B1863-B1865
+need every page and are dropped when the audit is a sample.
+
+`seo-urls.txt` (B1879) exists because B1826 compares with the previous `dist/`, which a clean clone or CI does not have. It
+is opt-in by the file's existence. The build only reads it (generators never write to the source tree without being asked);
+`brain seo urls --write` only adds, sorted, so the diff shows what was published.
 
 ## 34. Production process manager: `brain start` (fixed 2026-10-13, Chris: our own manager, not PM2)
 
