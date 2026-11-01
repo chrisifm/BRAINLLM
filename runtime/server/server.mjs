@@ -266,7 +266,7 @@ function bucketClient(target, key, bucket) {
     async remove(id) { await send('DELETE', idPath(id), undefined, 10000); return null },
   })
 }
-export function nativeAuthBridge(raw, refused, serviceKey, report) {
+export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
   // How to fix the configuration is for the operator: a visitor of a production app reads a generic message.
   const configuration = (status, detail, rid, shown = 'This service is not available right now') => {
     if (process.env.NODE_ENV !== 'production') return new HttpError(status, detail)
@@ -550,7 +550,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report) {
       req.method = method
       req.$brainForwardedFor = forwardedFor(incoming)
       // A service call acts as the key's owner, never as the visitor: it sends no session.
-      req.headers = { ...(serviceKey ? { authorization: 'Bearer ' + serviceKey } : { cookie: cookies(incoming, false) }), accept: 'application/json', 'content-type':'application/json', 'content-length':String(bytes.length) }
+      req.headers = { ...(serviceKey ? { authorization: 'Bearer ' + serviceKey } : ownSession ? {} : { cookie: cookies(incoming, false) }), accept: 'application/json', 'content-type':'application/json', 'content-length':String(bytes.length) }
       if (method !== 'GET') {
         req.headers.origin = bridgeOrigin(incoming, rid, 'Native writes require a same-origin server request')
       }
@@ -824,10 +824,10 @@ export function createServer(o = {}) {
   // ctx.env: what the supervisor passed, read-only; the service key stays with ctx.backend.service
   const { BRAIN_SERVICE_API_KEY: serviceKey, BRAIN_JOBS_API_KEY: _jobs, BRAIN_JOBS_SYSTEM_KEY: _jobsSystem, BRAIN_ROUTES_API_KEY: _routes, BRAIN_ROUTES_SYSTEM_KEY: _routesSystem, ...visibleEnv } = o.env || ENV
   const env = Object.freeze(visibleEnv)
-  const native = nativeAuthBridge(o.backendURL ?? env.BRAIN_BACKEND_URL, (...why) => originRefused(...why), serviceKey, (...entry) => log(...entry))
-  // Using the native backend does not have to mean it owns the visitor's session: `app` keeps the signed cookie.
   const backendSession = o.backendSession ?? env.BRAIN_BACKEND_SESSION
   if (backendSession && backendSession !== 'app') throw Error("BRAIN_BACKEND_SESSION must be app, or unset for the backend's own session")
+  const native = nativeAuthBridge(o.backendURL ?? env.BRAIN_BACKEND_URL, (...why) => originRefused(...why), serviceKey, (...entry) => log(...entry), backendSession === 'app')
+  // Using the native backend does not have to mean it owns the visitor's session: `app` keeps the signed cookie.
   const nativeSession = native && backendSession !== 'app'
   if (o.nativeSockets !== undefined && typeof o.nativeSockets !== 'boolean') throw Error('nativeSockets must be an explicit boolean')
   const SITEMAP_BYTES = +(o.sitemapBytes ?? 50 * 1024 * 1024) // protocol: 50 MB uncompressed per sitemap file

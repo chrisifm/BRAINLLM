@@ -112,7 +112,7 @@ function remoteCheck(o, x, checking) {
 }
 function createForm(schema, o, readRule, validateRule, remote) {
   const id = 'f' + ++seq, owner = I.owner() // aria effects are created later (in handlers) but live with the component
-  const busy = sig(false), error = sig(''), shown = sig(0) // shown: bumped when touched set changes
+  const busy = sig(false), error = sig(''), status = sig(0), shown = sig(0) // shown: bumped when touched set changes
   const checking = sig(0), saved = sig('') // async checks running · JSON of the last saved values
   const F = [] // flat fields: { path, r, s (value sig), e (error sig), el, touched }
   const byPath = {}
@@ -230,6 +230,9 @@ function createForm(schema, o, readRule, validateRule, remote) {
     get error() {
       return error.v
     },
+    get status() {
+      return status.v
+    },
     get dirty() {
       return now() !== saved.v
     },
@@ -277,6 +280,7 @@ function createForm(schema, o, readRule, validateRule, remote) {
           if (!first && x.e.v) first = x
         }
         error.v = ''
+        status.v = 0
         shown.v++
       })
       if (o.validate && !first) {
@@ -305,6 +309,7 @@ function createForm(schema, o, readRule, validateRule, remote) {
         }
         return r
       } catch (x) {
+        status.v = x?.status || 0
         if (x?.errors) mark(x.errors)
         // a server failure reads the same as without JS: 4xx and the author's own errors keep their message; 5xx and a
         // TypeError (the network dropped, or a bug) get the generic one; the runtime's own English sentence (`plain`) gives

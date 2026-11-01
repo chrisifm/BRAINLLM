@@ -719,6 +719,13 @@ fn backend_ready(address: &std::net::SocketAddr) -> bool {
     stream.read(&mut head).is_ok_and(|n| head[..n].starts_with(b"HTTP/1.1 200"))
 }
 
+/// A backend URL that does not point at this machine.
+fn is_remote_backend(url: &str) -> bool {
+    let host = url.split_once("://").map_or("", |(_, rest)| rest).split('/').next().unwrap_or("");
+    let host = if host.starts_with('[') { host.split(']').next().unwrap_or("").trim_start_matches('[') } else { host.split(':').next().unwrap_or("") };
+    !host.is_empty() && !matches!(host, "127.0.0.1" | "localhost" | "::1")
+}
+
 /// The port of a fixed loopback backend URL.
 fn loopback_port(url: &str) -> Option<u16> {
     let rest = url.strip_prefix("http://")?.trim_end_matches('/');
@@ -1404,6 +1411,11 @@ pub(crate) fn queue_findings(root: &Path, environment: &str) -> Vec<Finding> {
         return vec![];
     }
     let Ok(url) = database(root, environment) else {
+        // A front-only process: its backend, and the queues with it, run on another host.
+        let backend = std::env::var("BRAIN_BACKEND_URL").ok().or_else(|| crate::env::value(root, environment, "BRAIN_BACKEND_URL"));
+        if backend.as_deref().is_some_and(is_remote_backend) {
+            return vec![];
+        }
         return unknown("queue workers were not checked: no DATABASE_URL, so jobs can be neither stored nor run here", "set DATABASE_URL in .brain_env and run `brain backend migrate`");
     };
     let Ok(rt) = runtime() else { return vec![] };
@@ -2624,6 +2636,14 @@ pub fn media(args: &[String]) -> Result<(), String> {
 
 #[cfg(test)]
 mod failure_log_tests {
+    #[test]
+    fn only_a_backend_on_another_host_excuses_a_process_without_a_database() {
+        assert!(is_remote_backend("https://api.example.com"));
+        assert!(is_remote_backend("http://10.0.0.5:8787"));
+        for here in ["http://127.0.0.1:8787", "http://localhost:8787/", "http://[::1]:8787", "http://localhost", ""] {
+            assert!(!is_remote_backend(here), "{here}");
+        }
+    }
     #[test]
     fn anonymous_catalog_warns_unless_the_environment_is_chosen_and_local() {
         let args = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
