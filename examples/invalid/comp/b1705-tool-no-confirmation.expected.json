@@ -1,7 +1,7 @@
 [
   {
     "code": "B1705",
-    "level": "error",
+    "level": "warning",
     "file": "invalid/comp/b1705-tool-no-confirmation.brain",
     "line": 1,
     "col": 7,
