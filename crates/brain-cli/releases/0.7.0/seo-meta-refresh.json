@@ -1,0 +1,13 @@
+{
+  "id": "seo-meta-refresh",
+  "kind": "change",
+  "title": "brain seo audit warns about redirects by meta refresh",
+  "why": "A meta refresh answers 200 with the old URL, so crawlers may keep it indexed; the guide forbade it with nothing to catch it.",
+  "changelog": [
+    "`brain seo audit` warns B1855 on a redirect by meta refresh"
+  ],
+  "guide": "crates/brain-cli/guides/seo.md",
+  "codes": [
+    "B1855"
+  ]
+}

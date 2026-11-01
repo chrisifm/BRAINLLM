@@ -40,10 +40,10 @@ page text, not after.
 - Keep each attribute value on one line (newlines are kept in the output). Values may be expressions from `load` props: `title={props.user.name}`.
 - Site defaults once in `app.brain`: `<meta seo titleTemplate="%s · Acme" og:image="/og.png" twitter="@acme">`.
 - Status codes from `load`: `throw notFound()` → 404, `throw gone()` → 410 (deleted for good), a renamed record
-  `throw redirect('/posts/' + post.slug, 301)`. Never render an empty page with 200 (a soft 404).
+  `throw redirect('/posts/' + post.slug, 301)`. Never render an empty page with 200 (a soft 404; not machine-checked, it depends on the data).
 - URLs: `/about/` answers one 301 to `/about` (`brain.json` `"seo": { "trailingSlash": "never" | "always" |
   "ignore" }`); `"canonicalHost": true` sends `www.` or old domains to `site` in the same hop. Moved pages go in
-  `redirects.json` (`[{ "from": "/old", "to": "/new", "status": 301 }]`), never a meta refresh or a script.
+  `redirects.json` (`[{ "from": "/old", "to": "/new", "status": 301 }]`), never a meta refresh (B1855) or a script (`location.*`: B0129).
 - `robots="noindex"` for pages that must not be indexed (403, thank-you pages). Other head tags: a `<head>` block in the view.
 - `[id]` views: `export async function paths()` (prerendered, in the sitemap) or, for live pages,
   `export async function sitemap({ env })`. Never both (B0117). It returns one object per page keyed by the bracket name;
@@ -79,7 +79,7 @@ hreflang alternates and image entries for literal `<img src>` like the build (a 
 
 ## Common mistakes — do NOT
 - Stuff the keyword or repeat it beyond a natural density (B1816 reports over 3 %); use synonyms.
-- Hand-write `og:*` defaults, robots.txt, llms.txt, sitemap.xml or a Google tag snippet.
+- Hand-write `og:*` defaults, robots.txt, llms.txt, sitemap.xml or a Google tag snippet (not machine-checked).
 - Give two pages the same title or description (B1814, B1815) or the same keyword (B1817).
 - Hide the answer below a long intro, a carousel or an image.
 - Lower `seo.minScore` to pass the build (B0733); fix the findings instead.

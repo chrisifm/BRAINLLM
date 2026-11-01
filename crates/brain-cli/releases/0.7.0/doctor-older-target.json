@@ -1,0 +1,10 @@
+{
+  "id": "doctor-older-target",
+  "kind": "change",
+  "title": "brain doctor warns when the app targets an older version",
+  "why": "An app could run on a newer compiler for months without anyone reading what changed; the warning points at the migration report.",
+  "changelog": [
+    "`brain doctor` warns when the app targets a version older than the installed compiler"
+  ],
+  "guide": "CONTRIBUTING.md"
+}

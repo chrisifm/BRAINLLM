@@ -115,6 +115,11 @@ pub fn run(root: &Path, opts: &Options) -> Result<Value, String> {
 
 /// [`run`] with a hook called before each file write with the path and its previous content (MCP journals it so
 /// `brain_undo` can revert an applied upgrade).
+/// `brain doctor`: the version the app targets when the installed compiler is newer, and where it was read.
+pub fn behind(root: &Path) -> Option<(String, &'static str)> {
+    recorded(root).filter(|(v, _)| releases::cmp(v, installed()) == Ordering::Less)
+}
+
 pub fn run_with(root: &Path, opts: &Options, before_write: &mut dyn FnMut(&Path, &str)) -> Result<Value, String> {
     let root = root.canonicalize().map_err(|_| "app root is unavailable")?;
     let (from, from_source) = match &opts.from {
@@ -314,11 +319,18 @@ pub fn markdown(r: &Value) -> String {
     m.push_str("\n## Other changes\n");
     for c in r["changes"].as_array().into_iter().flatten() {
         m.push_str(&format!("- {} ({} {}){}\n", s(&c["title"]), s(&c["kind"]), s(&c["version"]), c["status"].as_str().map(|x| format!(": {x}")).unwrap_or_default()));
+        if let Some(why) = c["why"].as_str().filter(|w| !w.is_empty()) {
+            m.push_str(&format!("  {why}\n"));
+        }
+        for st in c["steps"].as_array().into_iter().flatten() {
+            m.push_str(&format!("  - [ ] {}\n", s(st)));
+        }
     }
     m.push_str("\n## Gates\n");
     for g in r["gates"].as_array().into_iter().flatten() {
         let mark = if g["ok"] == json!(true) { "x" } else { " " };
-        m.push_str(&format!("- [{mark}] `{}` ({})\n", s(&g["command"]), s(&g["status"])));
+        let detail = g["reason"].as_str().or(g["error"].as_str()).map(|x| format!(": {x}")).unwrap_or_default();
+        m.push_str(&format!("- [{mark}] `{}` ({}){detail}\n", s(&g["command"]), s(&g["status"])));
     }
     m
 }
@@ -372,6 +384,19 @@ mod tests {
     }
 
     #[test]
+    fn doctor_warns_only_about_an_app_behind_the_installed_version() {
+        let d = app("behind", "0.0.1");
+        assert_eq!(behind(&d).unwrap(), ("0.0.1".to_string(), "package.json pin"));
+        fs::write(d.join("package.json"), format!("{{\"devDependencies\":{{\"{PACKAGE}\":\"{}\"}}}}", installed())).unwrap();
+        assert_eq!(behind(&d), None);
+        fs::write(d.join("package.json"), format!("{{\"devDependencies\":{{\"{PACKAGE}\":\"99.0.0\"}}}}")).unwrap();
+        assert_eq!(behind(&d), None, "an app ahead of the compiler is not behind");
+        fs::remove_file(d.join("package.json")).unwrap();
+        assert_eq!(behind(&d), None, "an app that records no version is not guessed");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
     fn recorded_version_prefers_brain_json_then_the_pin() {
         let d = app("recorded", "^0.5.0");
         assert_eq!(recorded(&d).unwrap(), ("0.5.0".to_string(), "package.json pin"));
@@ -398,6 +423,26 @@ mod tests {
         let md = markdown(&r);
         assert!(md.contains("`views/_layout.brain:2`") && md.contains("## Adopt") && md.contains("- [ ] "), "{md}");
         let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn markdown_keeps_the_steps_and_reasons_of_entries_without_locations() {
+        let r = json!({
+            "from": "0.6.0", "to": "0.7.0", "mode": "dry-run", "fromSource": "--from", "installed": "0.7.0",
+            "changes": [
+                {"entry": "a", "version": "0.7.0", "kind": "change", "title": "Renamed option", "why": "The old name is gone.", "steps": ["Rename the option", "Re-run the build"]},
+                {"entry": "b", "version": "0.7.0", "kind": "breaking", "title": "Removed API", "status": "not found in this app"}
+            ],
+            "gates": [
+                {"name": "doctor", "command": "brain doctor", "status": "pending", "reason": "check has errors; fix them first"},
+                {"name": "check", "command": "brain check --json", "status": "failed-to-run", "ok": false, "error": "no app here"}
+            ]
+        });
+        let md = markdown(&r);
+        assert!(md.contains("- Renamed option (change 0.7.0)\n  The old name is gone.\n  - [ ] Rename the option\n  - [ ] Re-run the build\n"), "{md}");
+        assert!(md.contains("- Removed API (breaking 0.7.0): not found in this app\n- ") || md.contains("- Removed API (breaking 0.7.0): not found in this app\n\n"), "{md}");
+        assert!(md.contains("`brain doctor` (pending): check has errors; fix them first"), "{md}");
+        assert!(md.contains("`brain check --json` (failed-to-run): no app here"), "{md}");
     }
 
     #[test]

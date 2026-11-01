@@ -56,7 +56,7 @@ In code: `let r = route()` → `{r.navigating ? 'Saving draft…' : ''}`.
   `<slot />`. Expressions, blocks or components there are B0132; put them in `views/_layout.brain`.
 - `load` runs only in views; `brain check` rejects a `load` in `_layout.brain` (B0117) because it is never run.
 - In the browser there is no `ctx.user` (the session cookie is HttpOnly): a guard that would stop on it makes a full
-  page load and the server guard decides. Never mirror auth in a client store to skip the guard.
+  page load and the server guard decides. Never mirror auth in a client store to skip the guard (not machine-checked).
 - `redirect()` only to same-origin paths or hosts listed in `brain.json` `redirects` (B0710 open redirect).
 - Hosted under a sub-path: set `brain.json` `"base": "/app/"` and keep writing app-absolute paths (`/about`).
 

@@ -303,6 +303,12 @@ pub const CATALOG: &[(&str, &str, &str, &str)] = &[
         "A WebSocket closed without a clean close frame. Check that its endpoint is running and allows this origin; the trace shows the close code and the message counts.",
         "brain trace --module browser --since 5m",
     ),
+    (
+        "B1855",
+        "Redirect by meta refresh",
+        "A meta refresh answers 200 with the old URL, so crawlers may keep it indexed and lose the permanent signal. A server redirect moves the page in one hop.",
+        "[{ \"from\": \"/old-pricing\", \"to\": \"/pricing\", \"status\": 301 }] in redirects.json",
+    ),
 ];
 
 /// Arial advance widths in 1/1000 em for ASCII 32..=126 (what search results use to cut titles and snippets).
@@ -765,6 +771,19 @@ fn page_checks(
         s.check(4, problem.is_none(), "B1827", Level::Warning, || {
             problem.clone().unwrap_or_default()
         });
+    }
+    // a redirect only a browser follows; a refresh with no target just reloads the page
+    let refreshes = doc.metas.iter().any(|m| {
+        crate::html::attr(m, "http-equiv").is_some_and(|v| v.eq_ignore_ascii_case("refresh"))
+            && crate::html::attr(m, "content").is_some_and(|c| c.to_ascii_lowercase().contains("url="))
+    });
+    if refreshes {
+        s.note(
+            "B1855",
+            Level::Warning,
+            "this page redirects with a meta refresh".into(),
+            "remove it and add the rule to redirects.json: `[{ \"from\": \"/old\", \"to\": \"/new\", \"status\": 301 }]`".into(),
+        );
     }
     // structured data
     if !doc.jsonld.is_empty() {

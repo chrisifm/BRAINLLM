@@ -122,8 +122,9 @@ fn own_session(root: &Path, src: &str) -> Vec<crate::compiler::Diag> {
             {
                 let file = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().to_string();
                 let mut diag = crate::compiler::Diag::new("B0786", &file, brain_parse::Span::default(), "`ctx.session.set` answers 409 here: `BRAIN_BACKEND_URL` makes the backend own the session".to_string(), "sign in with `ctx.backend.login(credentials)`, or set `BRAIN_BACKEND_SESSION=app` to keep this app's signed session".to_string());
-                diag.line = text[..at].lines().count().max(1) as u32;
-                diag.col = 1;
+                let before = &text[..at];
+                diag.line = before.matches('\n').count() as u32 + 1;
+                diag.col = before.rsplit('\n').next().unwrap_or("").chars().count() as u32 + 1;
                 out.push(diag);
             }
         }

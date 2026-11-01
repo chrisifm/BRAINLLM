@@ -1,0 +1,159 @@
+# Each case edits a clean three-page site: `### name`, `@replace <route|*> <old> => <new>`, `@keyword <route> <words>`,
+# `@redirect <rule line>`, `@staging`, `@expect <code> <route>`.
+@unreachable B1823 frontmatter of a content file; `brain check` reports it, see the check corpus
+@unreachable B1824 frontmatter of a content file; `brain check` reports it, see the check corpus
+@unreachable B1826 compares with the previous build
+@unreachable B1828 needs a multilingual site; tests/audit.rs covers it
+@unreachable B1829 reported by the build for an untranslated content entry
+@unreachable B1837 read from view sources by `brain seo audit`; tests in brain-cli/tests/seo_unlisted_routes.rs
+@unreachable B1840 reported by `brain trace`
+@unreachable B1841 reported by `brain trace`
+@unreachable B1842 reported by `brain trace`
+@unreachable B1843 reported by `brain trace`
+@unreachable B1844 reported by `brain trace`
+
+### clean site has no findings
+
+### B1801 no title
+@expect B1801 /pricing
+@replace /pricing <title>Pricing for the Acme offline task planner</title> =>
+
+### B1802 long title
+@expect B1802 /pricing
+@replace /pricing <title>Pricing for the Acme offline task planner</title> => <title>Pricing of the planner and a very long tail of words that keeps going past what a result shows on screen</title>
+
+### B1802 short title
+@expect B1802 /pricing
+@expect B1836 /pricing
+@replace /pricing <title>Pricing for the Acme offline task planner</title> => <title>Pricing</title>
+
+### B1803 no description
+@expect B1803 /pricing
+@replace /pricing <meta name="description" content="Simple pricing for the offline task planner: free for small teams, one flat price for larger ones."> =>
+
+### B1804 short description
+@expect B1804 /pricing
+@replace /pricing content="Simple pricing for the offline task planner: free for small teams, one flat price for larger ones." => content="Planner pricing."
+
+### B1805 two h1
+@expect B1805 /pricing
+@replace /pricing <h1>Pricing of the planner</h1> => <h1>Pricing of the planner</h1><h1>Second heading</h1>
+
+### B1806 heading skip
+@expect B1806 /pricing
+@replace /pricing <h1>Pricing of the planner</h1> => <h1>Pricing of the planner</h1><h3>Plans</h3>
+
+### B1807 image without alt
+@expect B1807 /pricing
+@replace /pricing <p>A short opening.</p> => <p>A short opening.</p><img src="/a.png" width="10" height="10">
+
+### B1808 thin content
+@expect B1808 /pricing
+@replace /pricing Teams plan their week with this offline task planner. =>
+
+### B1809 relative canonical
+@expect B1809 /pricing
+@replace /pricing href="https://acme.dev/pricing" => href="/pricing"
+
+### B1810 no lang
+@expect B1810 /pricing
+@replace /pricing <html lang="en"> => <html>
+
+### B1811 no social image
+@expect B1811 /pricing
+@replace /pricing <meta property="og:image" content="https://acme.dev/og.png"> =>
+
+### B1812 nofollow internal link
+@expect B1812 /pricing
+@replace /pricing <a href="/guide">guide</a> => <a href="/guide" rel="nofollow">guide</a>
+
+### B1813 orphan page
+@expect B1812 /pricing
+@expect B1813 /guide
+@replace * <a href="/guide">Guide</a> =>
+@replace /pricing <a href="/guide">guide</a> => guide
+
+### B1814 same title
+@expect B1814 /guide
+@expect B1814 /pricing
+@expect B1836 /pricing
+@replace /pricing <title>Pricing for the Acme offline task planner</title> => <title>Guide to planning with an offline task planner</title>
+
+### B1815 same description
+@expect B1815 /guide
+@expect B1815 /pricing
+@expect B1836 /pricing
+@replace /pricing Simple pricing for the offline task planner: free for small teams, one flat price for larger ones. => A guide to offline planning: why it beats a web-only tool when the network drops, with a setup checklist.
+
+### B1816 keyword absent
+@expect B1816 /pricing
+@keyword /pricing wildebeest migration
+
+### B1817 same keyword
+@expect B1816 /guide
+@expect B1816 /pricing
+@expect B1817 /guide
+@expect B1817 /pricing
+@keyword /pricing offline task planner
+@keyword /guide offline task planner
+
+### B1818 invalid json-ld
+@expect B1818 /pricing
+@replace /pricing </main> => <script type="application/ld+json">{"@context":"https://schema.org","@type":"Product"}</script></main>
+
+### B1819 dead link
+@expect B1819 /pricing
+@replace /pricing <p>A short opening.</p> => <p>A short <a href="/nope">opening</a>.</p>
+
+### B1820 dead anchor
+@expect B1820 /pricing
+@replace /pricing <p>A short opening.</p> => <p>A short <a href="/guide#missing">opening</a>.</p>
+
+### B1821 main image without size
+@expect B1821 /pricing
+@replace /pricing <p>A short opening.</p> => <img src="/hero.png" alt="Hero"><p>A short opening.</p>
+
+### B1822 staging
+@expect B1822 *
+@staging
+
+### B1825 link through a redirect
+@expect B1825 /pricing
+@replace /pricing <p>A short opening.</p> => <p>A short <a href="/old">opening</a>.</p>
+@redirect [{ "from": "/old", "to": "/guide" }]
+
+### B1827 relative social image
+@expect B1827 /pricing
+@replace /pricing content="https://acme.dev/og.png" => content="/og.png"
+
+### B1830 long first paragraph
+@expect B1830 /pricing
+@replace /pricing <p>A short opening.</p> =>
+
+### B1831 question headings
+@expect B1831 /pricing
+@replace /pricing <p>A short opening.</p> => <p>A short opening.</p><h2>Is it free?</h2><h2>Is it offline?</h2>
+
+### B1832 B1833 article without date or author
+@expect B1832 /pricing
+@expect B1833 /pricing
+@replace /pricing <meta charset="utf-8"> => <meta charset="utf-8"><meta property="og:type" content="article">
+
+### B1834 no outside link
+@expect B1834 /pricing
+@replace /pricing <a href="https://www.w3.org/standards/">standards</a> => standards
+
+### B1835 video without poster
+@expect B1835 /pricing
+@replace /pricing </main> => <video src="/a.mp4" controls></video></main>
+
+### B1836 title does not name the topic
+@expect B1836 /pricing
+@replace /pricing <h1>Pricing of the planner</h1> => <h1>Wildebeest migration routes</h1>
+
+### B1855 meta refresh redirect
+@expect B1855 /pricing
+@replace /pricing <title>Pricing for the Acme offline task planner</title> => <title>Pricing for the Acme offline task planner</title><META HTTP-EQUIV="Refresh" content="0; URL=/">
+
+### a refresh that only reloads the page is not a redirect
+@replace /pricing <title>Pricing for the Acme offline task planner</title> => <title>Pricing for the Acme offline task planner</title><meta http-equiv="refresh" content="300">
