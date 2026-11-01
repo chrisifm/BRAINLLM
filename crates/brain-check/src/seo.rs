@@ -210,7 +210,9 @@ impl Checker<'_> {
                 self.push("B0503", meta.span, "`query` and `canonical` both decide this page's canonical URL", "keep `query` to build it from the request, or `canonical` to fix it");
             }
         }
-        if !info.attrs.iter().any(|(n, _)| n == "description") {
+        // reserved pages are never a search result, so they are not asked for a snippet; a dynamic route still is
+        let reserved = file_name.starts_with('_') || ["404.brain", "500.brain", "error.brain"].contains(&file_name);
+        if !reserved && !info.attrs.iter().any(|(n, _)| n == "description") {
             self.push("B1601", seo_span, "the view has no `description`", "add `description=\"…\"` (one sentence, ≤ 160 characters) or `description={props.…}` to `<meta seo>`");
         }
         for (name, max) in [("title", 60usize), ("description", 160)] {

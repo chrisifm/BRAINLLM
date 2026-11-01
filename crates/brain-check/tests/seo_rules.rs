@@ -165,3 +165,13 @@ fn view_info_for_the_seo_module() {
     assert_eq!((v.images[0].0.as_str(), v.images[0].1.as_deref()), ("/a.png", Some("A")));
     assert_eq!(v.links.iter().map(|l| (l.0.as_str(), l.2)).collect::<Vec<_>>(), [("https://x.dev", true), ("/in", false)]);
 }
+
+#[test]
+fn a_reserved_page_with_a_title_is_not_asked_for_a_description() {
+    let source = "<meta seo title=\"Something went wrong\" />\n<template><main><h1>Oops</h1></main></template>\n";
+    let ctx = Ctx::default();
+    for file in ["views/_error.brain", "views/404.brain", "views/500.brain"] {
+        assert!(!codes_in(file, source, &ctx).contains(&"B1601"), "{file}");
+    }
+    assert!(codes_in("views/about.brain", source, &ctx).contains(&"B1601"));
+}
