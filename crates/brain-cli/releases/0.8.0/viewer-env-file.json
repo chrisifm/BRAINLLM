@@ -1,0 +1,13 @@
+{
+  "id": "viewer-env-file",
+  "kind": "fix",
+  "title": "Viewer profile and service from .brain_env",
+  "why": "The opt-in Viewer lane read its profile only from the process environment, so the private env file every other setting uses had no effect.",
+  "changelog": [
+    "`BRAIN_VIEWER_PROFILE` and `BRAIN_VIEWER_SERVICE`"
+  ],
+  "guide": "brain guide tests",
+  "affects": [
+    ".brain_env"
+  ]
+}

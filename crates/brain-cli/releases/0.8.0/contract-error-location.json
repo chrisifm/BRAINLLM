@@ -1,0 +1,13 @@
+{
+  "id": "contract-error-location",
+  "kind": "fix",
+  "title": "B0735 names the file that is wrong",
+  "why": "A wrong policy or roles file was reported at `server/`, so an author had to guess which file to open.",
+  "changelog": [
+    "B0735 now points"
+  ],
+  "guide": "brain guide backend",
+  "affects": [
+    "server/**/*.jsbrain"
+  ]
+}

@@ -9,7 +9,9 @@ a server function instead (`brain guide data`). The backend is experimental; it 
    views, the auth configuration and the environment keys; `brain add auth` never overwrites a file.
 2. Add a resource: `brain add resource posts --fields "title:str! body:str status:enum(draft|published)"`.
    `brain backend capabilities` lists every field type, filter and policy grant with examples.
-3. Review `server/resources/posts/policy.jsbrain` before serving. Grants: `public`, `owner`, `owner.<ref>`, a role name.
+3. Review `server/resources/posts/policy.jsbrain` before serving. A new resource starts admin-only, so a signed-in account
+   gets `403 POLICY_DENIED`; `--policy owner` (each account its own rows) or `--policy public-read` starts open.
+   Grants: `public`, `owner`, `owner.<ref>`, a role name.
    A role grant admits only that role. New accounts get role `user`; `brain add roles` writes your own names.
 4. Set `DATABASE_URL` and a fixed loopback `BRAIN_BACKEND_URL` in `.brain_env`.
 5. `brain backend migrate` applies the generated migrations; it never runs on its own. `--create-db` creates a
@@ -23,6 +25,7 @@ a server function instead (`brain guide data`). The backend is experimental; it 
    its cause.
 9. Grow the contract with the file that names the feature: `query.jsbrain` (filters, sort, include, search, aggregates),
    `actions.jsbrain` (guarded atomic writes), `transitions.jsbrain` (state machines), `batch.jsbrain`.
+   A field is optional unless it ends in `!`, `enum(draft|published)` included: a record without it stores no value.
 10. The first administrator is explicit: `brain backend bootstrap-admin --email <address>`. Signup never grants it.
 
 ## Reference
@@ -52,7 +55,7 @@ brain doctor                       # exit 0
 ## Minimal correct example
 ```bash
 brain new notes --backend && cd notes
-brain add resource notes --fields "title:str! body:str"
+brain add resource notes --fields "title:str! body:str" --policy owner
 brain backend migrate --create-db
 brain run --backend
 ```

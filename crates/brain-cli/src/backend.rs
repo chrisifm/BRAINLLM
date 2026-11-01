@@ -164,7 +164,7 @@ pub fn contracts(root: &Path, kind: &str) -> Result<Vec<Resource>, String> {
             .map_err(|message| format!("server/{kind}/{name}/schema.jsbrain: {message}"))?;
         let policy = if kind == "resources" {
             serde_json::from_value(read_contract(root, &e.path().join("policy.jsbrain"))?).map_err(
-                |error| format!("{name}: {error}"),
+                |error| format!("server/{kind}/{name}/policy.jsbrain: {error}"),
             )?
         } else {
             Policy::default()
@@ -883,6 +883,25 @@ pub fn add(root: &Path, kind: &str, name: &str, shapes: &str) -> Result<Value, S
 }
 /// Opt-in project-owned administrative views committed with the generated backend contract.
 pub fn add_with_admin(root: &Path, kind: &str, name: &str, shapes: &str, admin_ui: bool) -> Result<Value, String> {
+    add_with_policy(root, kind, name, shapes, admin_ui, None)
+}
+
+/// The starting policies `brain add resource --policy` offers; the file stays the place to change them.
+fn policy_preset(preset: &str) -> Result<Policy, String> {
+    let grants = match preset {
+        "admin" => json!({"read":["admin"],"create":["admin"],"update":["admin"],"delete":["admin"]}),
+        "owner" => json!({"read":["owner","admin"],"create":["user","admin"],"update":["owner","admin"],"delete":["owner","admin"]}),
+        "public-read" => json!({"read":["public"],"create":["admin"],"update":["admin"],"delete":["admin"]}),
+        other => return Err(format!("unknown --policy `{other}`; fix: use admin (the default), owner or public-read")),
+    };
+    serde_json::from_value(grants).map_err(|e| e.to_string())
+}
+
+pub fn add_with_policy(root: &Path, kind: &str, name: &str, shapes: &str, admin_ui: bool, preset: Option<&str>) -> Result<Value, String> {
+    if preset.is_some() && kind != "resource" {
+        return Err("--policy is only supported for resources".into());
+    }
+    let policy = preset.map(policy_preset).transpose()?.unwrap_or_default();
     if admin_ui && kind != "resource" {
         return Err("--admin-ui is only supported for resources".into());
     }
@@ -906,7 +925,7 @@ pub fn add_with_admin(root: &Path, kind: &str, name: &str, shapes: &str, admin_u
         search: Vec::new(),
         name: name.into(),
         fields,
-        policy: Policy::default(),
+        policy,
         hooks: Hooks::default(),
         constraints: Default::default(),
         query: Default::default(),

@@ -69,9 +69,11 @@ Policy grants: `public` `owner` `owner.<ref>` `<role>`.
 
 - brain add auth and brain new --backend (`brain guide backend`)
 - brain capabilities and docs/CAPABILITIES.md (`docs/CAPABILITIES.md`)
+- tel and file form rules (`docs/FORM-VALIDATION.md`)
 - brain guide whats-new, migrate and docs (`brain guide migrate`)
 - Backend and analytics guides (`brain guide backend`)
 - brain recipe --apply (`brain guide backend`)
+- brain add resource --policy (`brain guide backend`)
 - brain run --backend and migrate --create-db (`brain guide backend`)
 
 ### 0.7.0

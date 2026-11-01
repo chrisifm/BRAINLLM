@@ -40,7 +40,7 @@ GET /api/products?created_at[gte]=now-7d
 | `list` | `has exists` |
 
 `brain backend capabilities` prints this table from the code of the installed version. `num`, `obj` and fields with restricted [visibility](visibility.md) cannot be filtered. `in` takes 1–50 values,
-`between` exactly two (inclusive). `exists` takes `true` or `false`.
+`between` exactly two (inclusive). `exists` takes `true` or `false`; a stored `null` and a missing value both count as not existing. `ne` only matches rows that have a value: `note[ne]=keep` leaves out a row with no `note`. To include them, offer an `or` alternative with `exists`.
 
 ## Alternatives: `or`
 

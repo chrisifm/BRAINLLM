@@ -620,7 +620,7 @@ fn cmd_edit(args: &[String]) -> Result<(), String> {
 }
 
 fn cmd_add(args: &[String]) -> Result<(), String> {
-    let pos = positional(args, &["--props", "--store", "--get", "--post", "--fields"]);
+    let pos = positional(args, &["--props", "--store", "--get", "--post", "--fields", "--policy"]);
     if pos.len() == 1 && scaffold::add_route(&pos[0]) == Some(scaffold::AddRoute::NoName) {
         if pos[0] == "auth" {
             let report = auth_setup::add(&app_root()?)?;
@@ -633,8 +633,8 @@ fn cmd_add(args: &[String]) -> Result<(), String> {
     let [kind, name] = <[String; 2]>::try_from(pos).map_err(|_| scaffold::add_usage())?;
     let root = app_root()?;
     if scaffold::add_route(&kind) == Some(scaffold::AddRoute::Backend) {
-        if args.iter().any(|a|a.starts_with("--") && !matches!(a.as_str(),"--fields"|"--json"|"--admin-ui") && !a.starts_with("--fields=")) {return Err("resource/job accepts only --fields, --admin-ui and --json".into())}
-        let report = backend::add_with_admin(&root, &kind, &name, &flag(args,"--fields").unwrap_or_default(), args.iter().any(|a| a == "--admin-ui"))?;
+        if args.iter().any(|a|a.starts_with("--") && !matches!(a.as_str(),"--fields"|"--policy"|"--json"|"--admin-ui") && !a.starts_with("--fields=") && !a.starts_with("--policy=")) {return Err("resource/job accepts only --fields, --admin-ui and --json".into())}
+        let report = backend::add_with_policy(&root, &kind, &name, &flag(args,"--fields").unwrap_or_default(), args.iter().any(|a| a == "--admin-ui"), flag(args,"--policy").as_deref())?;
         println!("{report}"); return Ok(());
     }
     let options = scaffold::AddOptions {
@@ -713,7 +713,7 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
                 }
                 // Contract errors start with the file that names the problem and may end with their own fix.
                 let (text, fix) = message.split_once("; fix: ").unwrap_or((message.as_str(), "inspect `brain backend schema --json`; fix the named literal schema, explicit policy or hook/job contract, then run brain check again"));
-                let file = text.split_once(": ").map(|(at, _)| at).filter(|at| (at.starts_with("server/") || *at == "brain.json") && !at.contains(' ')).unwrap_or("server/");
+                let file = text.split_whitespace().next().map(|at| at.trim_end_matches(':')).filter(|at| at.starts_with("server/") || *at == "brain.json").unwrap_or("server/");
                 let mut diag = compiler::Diag::new("B0735", file, brain_parse::Span::default(), text.to_string(), fix.to_string());
                 diag.line=1;diag.col=1;diags.push(diag);
             }

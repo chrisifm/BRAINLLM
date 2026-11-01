@@ -281,7 +281,7 @@ per IP and function (429). Raise `maxBodyKB` to send a file as base64 in an RPC 
 `brain backend capabilities` lists what this version supports (field types, filter operators, policy grants, limits), generated from the code.
 First read `brain backend schema --json` (resolved resource/job contracts + resource OpenAPI); inspect one with
 `brain card resource:posts` / `brain card job:notify`. Generate with `brain add resource posts --fields "title:str! body:str"`
-or `brain add job notify --fields "message:str!"`; fields: `str num bool email obj`, `!` required. Resources have explicit
+or `brain add job notify --fields "message:str!"` (a resource starts admin-only; `--policy owner|public-read` starts open); fields: `str num bool email obj`, `!` required. Resources have explicit
 `schema/policy/hooks.jsbrain`; jobs have `schema/handler.jsbrain` under `server/resources/` and `server/jobs/`.
 Resource generation also creates collection/detail clients under `api/`, an executable native repository and
 server service, and `client-contract.json` pointing to the canonical schema revision. Add `--admin-ui` when creating

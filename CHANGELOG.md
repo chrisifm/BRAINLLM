@@ -11,6 +11,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [0.8.0] - Unreleased
 
+- `brain add resource --policy owner|public-read` starts a resource with a common policy instead of admin-only.
+- B0735 now points at the policy or roles file that is wrong instead of `server/`.
+- `BRAIN_VIEWER_PROFILE` and `BRAIN_VIEWER_SERVICE` can live in `.brain_env`; the process environment still wins.
+- The server guide no longer forbids PM2 while `brain deploy config pm2` generates its file.
 - Form rules gain `tel` and `file`: a phone shape, `file(image/*,.pdf)!<=5000000` for accepted types and size in bytes, with `form.tel` and `form.file*` messages.
 - A cross-field `validate` that returns an empty message no longer blocks the submit with no visible error; the option is now documented.
 - `brain capabilities` prints the catalog of playbooks, generators, recipes and backend types from the compiler's own tables; `docs/CAPABILITIES.md` is its output, a test fails on drift, and a new app's `AGENTS.md` lists a summary.

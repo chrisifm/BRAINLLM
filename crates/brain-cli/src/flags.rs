@@ -7,7 +7,7 @@ const GLOBAL: &[&str] = &["--json", "--quiet", "-q", "--progress"];
 /// `(command, flags that take a value, switches)`.
 pub(crate) const TABLE: &[(&str, &[&str], &[&str])] = &[
     ("new", &[], &["--backend"]),
-    ("add", &["--props", "--store", "--get", "--post", "--fields"], &["--bus", "--key", "--admin-ui"]),
+    ("add", &["--props", "--store", "--get", "--post", "--fields", "--policy"], &["--bus", "--key", "--admin-ui"]),
     ("check", &[], &[]),
     ("fix", &[], &[]),
     ("doctor", &[], &["--fix", "--viewer"]),

@@ -68,3 +68,27 @@ fn run_backend_refuses_a_port_another_process_answers() {
     assert!(text(&run).contains("B0763"), "{}", text(&run));
     let _ = std::fs::remove_dir_all(&base);
 }
+
+#[test]
+fn contract_errors_name_the_wrong_file_and_presets_write_their_policy() {
+    let base = workspace("contract");
+    assert!(brain(&base, &["new", "demo", "--backend"]).status.success());
+    let app = base.join("demo");
+    let added = brain(&app, &["add", "resource", "notes", "--fields", "title:str!", "--policy", "owner"]);
+    assert!(added.status.success(), "{}", text(&added));
+    let policy = std::fs::read_to_string(app.join("server/resources/notes/policy.jsbrain")).unwrap();
+    assert!(policy.contains("\"owner\"") && policy.contains("\"user\""), "{policy}");
+    let refused = brain(&app, &["add", "resource", "other", "--fields", "title:str!", "--policy", "everyone"]);
+    assert!(!refused.status.success() && text(&refused).contains("unknown --policy"), "{}", text(&refused));
+    assert!(!app.join("server/resources/other").exists(), "a refused preset writes nothing");
+
+    std::fs::write(app.join("server/resources/notes/policy.jsbrain"), "<meta server>\nexport default { read: 3 }\n").unwrap();
+    let out = String::from_utf8_lossy(&brain(&app, &["check", "--json"]).stdout).into_owned();
+    assert!(out.contains("\"file\":\"server/resources/notes/policy.jsbrain\""), "{out}");
+    std::fs::write(app.join("server/resources/notes/policy.jsbrain"), policy).unwrap();
+    std::fs::create_dir_all(app.join("server/auth")).unwrap();
+    std::fs::write(app.join("server/auth/roles.jsbrain"), "<meta server>\nexport default { roles: ['user'] }\n").unwrap();
+    let out = String::from_utf8_lossy(&brain(&app, &["check", "--json"]).stdout).into_owned();
+    assert!(out.contains("\"file\":\"server/auth/roles.jsbrain\""), "{out}");
+    let _ = std::fs::remove_dir_all(&base);
+}
