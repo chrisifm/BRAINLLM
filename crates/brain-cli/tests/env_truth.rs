@@ -222,3 +222,17 @@ fn a_missing_route_secret_stops_serve_once_with_its_code_and_a_no_restart_status
     let o = Command::new(bin()).args(["backend", "migrate", "--env", "development"]).current_dir(&a.0).stdin(Stdio::null()).output().unwrap();
     assert_eq!(o.status.code(), Some(2));
 }
+
+// An intentionally empty key has one way out, and it has to be named everywhere the author may look, with its limit.
+#[test]
+fn the_empty_key_guidance_names_the_optional_form_and_what_it_does_not_cover() {
+    let a = app("optional-guidance");
+    let (_, explained) = brain(&a.0, &["explain", "B0720"]);
+    assert!(explained.contains("?="), "{explained}");
+    fs::write(a.0.join(".brain_env"), "EMPTY_KEY=\n").unwrap();
+    let (ok, out) = brain(&a.0, &["build", "--progress=off"]);
+    assert!(!ok && out.contains("EMPTY_KEY?=") && out.contains("B0790"), "{out}");
+    with_stripe_route(&a, "DATABASE_URL=postgres://u@127.0.0.1:1/none\nPAYMENTS_WEBHOOK_SECRET?=\n");
+    let (ok, out) = brain(&a.0, &["backend", "serve", "--env", "development", "--port", "0"]);
+    assert!(!ok && out.contains("B0790") && out.contains("?="), "`KEY?=` does not disable the route: {out}");
+}

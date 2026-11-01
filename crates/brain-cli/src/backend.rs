@@ -630,7 +630,7 @@ fn secret_refusal(root: &Path, environment: &str) -> Option<String> {
         .chain(crate::webhook_config::secret_problem(root, environment))
         .map(|(file, message)| format!("{file}: {message}"))
         .collect();
-    (!found.is_empty()).then(|| format!("B0790: {}; fix: set the secret in the process environment or .brain_env (`brain check` lists them), or remove the route or webhook this environment does not use", found.join(" | ")))
+    (!found.is_empty()).then(|| format!("B0790: {}; fix: set the secret in the process environment or .brain_env (`brain check` lists them), or remove the route or webhook this environment does not use; `KEY?=` only lets the build pass, it does not disable a declared route", found.join(" | ")))
 }
 /// The environment is checked before the lookup: without `--env` the lookup reads the development section, so a deployed
 /// shell would otherwise hear B0762 about a variable it did set, under [production].
