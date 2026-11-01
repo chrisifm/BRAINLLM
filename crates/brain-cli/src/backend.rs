@@ -373,6 +373,31 @@ pub fn row_exposure(root: &Path) -> Vec<(String, String, String)> {
         })
         .collect()
 }
+/// True when a field name reads as internal. Whole `_`-separated words only, so `tokens` or `hashtag` stay out.
+fn internal_looking(name: &str) -> bool {
+    let words: Vec<&str> = name.split('_').collect();
+    let pair = |a: &str, b: &str| words.windows(2).any(|w| w[0] == a && w[1] == b);
+    words.iter().any(|w| ["password", "passwd", "pwd", "secret", "token", "salt", "hash", "otp", "internal", "legacy", "apikey"].contains(w))
+        || pair("api", "key") || pair("private", "key") || pair("ip", "address") || pair("external", "id")
+}
+/// B0797: fields named like internals that every reader of the record receives, because nothing says otherwise.
+pub fn public_field_warnings(root: &Path) -> Vec<(String, String, String)> {
+    let resources = contracts(root, "resources").unwrap_or_default();
+    let mut out = Vec::new();
+    for r in resources.iter().filter(|r| r.policy.api) {
+        for (name, field) in &r.fields {
+            let hidden = matches!(field.access.as_deref(), Some("private" | "writeonly"));
+            if !hidden && field.visible.is_none() && internal_looking(name) {
+                out.push((
+                    format!("server/resources/{}/schema.jsbrain", r.name),
+                    format!("`{name}` reads as an internal field, and every reader of `{}` receives it because nothing limits it", r.name),
+                    format!("write `{name}: 'str private'` (server only), 'str writeonly' (accepted, never returned) or {{ type: 'str', visible: ['owner', 'admin'] }}; if it is meant to be public, say visible: ['public']"),
+                ));
+            }
+        }
+    }
+    out
+}
 /// B0790: secrets a declared route or webhook needs and the development environment does not hold: `(file, message, fix)`.
 /// `brain backend serve` refuses to start without them; names only, never values.
 pub fn secret_warnings(root: &Path) -> Vec<(String, String, String)> {

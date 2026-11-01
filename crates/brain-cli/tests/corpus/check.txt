@@ -297,6 +297,15 @@ export default { maxBytes: '1mb' }
 @file brain.json
 { "name": "Corpus", "csp": { "connectSrc": ["https:"] } }
 
+### B0797 internal field returned to readers
+@expect B0797 server/resources/items/schema.jsbrain 1:1
+@file server/resources/items/schema.jsbrain
+<meta server>
+export default { title: 'str!', password_hash: 'str' }
+@file server/resources/items/policy.jsbrain
+<meta server>
+export default { read: ['admin'], create: ['admin'], update: ['admin'], delete: ['admin'] }
+
 ### B0772 handler default export
 @expect B0772 server/routes/pay/handler.jsbrain 1:1
 @file server/routes/pay/route.jsbrain

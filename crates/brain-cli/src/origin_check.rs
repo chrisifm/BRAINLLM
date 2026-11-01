@@ -120,9 +120,19 @@ mod tests {
     }
     fn run(files: &[(&str, &str)]) -> Vec<Diag> {
         let root = app(files);
-        let found = check(&root);
+        let mut found = check(&root);
         fs::remove_dir_all(&root).ok();
+        found.retain(|d| d.code != "B0795"); // its own test below; these cases are about origins
         found
+    }
+
+    #[test]
+    fn only_an_app_that_declares_no_list_gets_b0795() {
+        let root = app(&[("brain.json", "{}")]);
+        assert!(check(&root).iter().any(|d| d.code == "B0795" && d.level == Severity::Warning));
+        fs::write(root.join("brain.json"), r#"{"csp":{"connectSrc":[]}}"#).unwrap();
+        assert!(check(&root).iter().all(|d| d.code != "B0795"));
+        fs::remove_dir_all(&root).ok();
     }
 
     #[test]

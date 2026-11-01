@@ -1,0 +1,19 @@
+{
+  "id": "public-field-warning",
+  "kind": "change",
+  "title": "B0797 warns on internal-looking fields every reader receives",
+  "why": "A field is returned to every reader unless it says otherwise, so a `password_hash` or `api_key` written as plain `str` leaks without any error. The warning asks the app to state the exposure.",
+  "changelog": [
+    "`brain check` warns B0797"
+  ],
+  "guide": "docs/backend/visibility.md",
+  "codes": [
+    "B0797"
+  ],
+  "affects": [
+    "server/resources/*/schema.jsbrain"
+  ],
+  "steps": [
+    "For each field B0797 reports, write `private`, `writeonly` or `visible: [...]`; use `visible: ['public']` when it is meant to be public."
+  ]
+}
