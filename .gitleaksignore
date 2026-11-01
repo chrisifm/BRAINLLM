@@ -6,3 +6,13 @@ ce0e0d0959d69263a5770e531f8931314b3c774e:docs/backend/api-keys.md:generic-api-ke
 97794f26fab351d919d1875873ef7839f73f711f:crates/brain-cli/tests/corpus/check.txt:generic-api-key:254
 97794f26fab351d919d1875873ef7839f73f711f:crates/brain-cli/tests/corpus/check.txt:generic-api-key:280
 41a34bd4e9ee13f03333a4d3644d4df9e546c097:crates/brain-cli/tests/handler_rules.rs:generic-api-key:36
+28353c667f179d3af23e3c5136949f3a2060479f:crates/brain-serve/src/trace.rs:jwt:293
+28353c667f179d3af23e3c5136949f3a2060479f:crates/brain-serve/src/trace.rs:aws-access-token:301
+f5907292eed479172999b14d50893ae4f876700e:crates/brain-cli/tests/env_truth.rs:generic-api-key:96
+f5907292eed479172999b14d50893ae4f876700e:crates/brain-cli/tests/env_truth.rs:generic-api-key:103
+f5907292eed479172999b14d50893ae4f876700e:crates/brain-cli/tests/env_truth.rs:generic-api-key:106
+0352306efd426c3793a84e20fede63ad95b33e00:crates/brain-backend/tests/routes.rs:generic-api-key:231
+13f771b333e46bb6c5767409e0d92c70e9b09648:crates/brain-backend/tests/jwt_sessions.rs:generic-api-key:138
+4627bd045f40d73217e21d4592182f0f506fe922:runtime/test/server-origin.test.js:generic-api-key:103
+bdb13222e9717bbfa31781d11e26ecb1bd1f156c:crates/brain-serve/tests/native_bridge.rs:generic-api-key:293
+bdb13222e9717bbfa31781d11e26ecb1bd1f156c:runtime/test/server-native-bridge.test.js:generic-api-key:148
