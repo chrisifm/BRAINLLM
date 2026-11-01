@@ -236,3 +236,18 @@ fn the_empty_key_guidance_names_the_optional_form_and_what_it_does_not_cover() {
     let (ok, out) = brain(&a.0, &["backend", "serve", "--env", "development", "--port", "0"]);
     assert!(!ok && out.contains("B0790") && out.contains("?="), "`KEY?=` does not disable the route: {out}");
 }
+
+// The worker a deploy starts by hand: the message has to say which file it read and how to pass the environment.
+#[test]
+fn a_missing_database_url_names_the_file_it_read_and_how_to_pass_the_environment() {
+    let a = app("names-the-file");
+    fs::write(a.0.join(".brain_env"), "PUBLIC_SITE_NAME=app\n").unwrap();
+    let (_, text) = with_node_env(&a.0, &["jobs", "work", "mail"], None);
+    assert!(text.contains("B0762") && text.contains(".brain_env") && text.contains("--env"), "{text}");
+    fs::write(a.0.join(".brain_env"), "[staging]\nDATABASE_URL=postgres://synthetic-password@127.0.0.1:1/x\n").unwrap();
+    let (_, text) = with_node_env(&a.0, &["jobs", "stats"], None);
+    assert!(text.contains("[staging]") && text.contains("--env staging") && !text.contains("synthetic-password"), "any section is named: {text}");
+    fs::remove_file(a.0.join(".brain_env")).unwrap();
+    let (_, text) = with_node_env(&a.0, &["jobs", "stats"], None);
+    assert!(text.contains("does not exist") && text.contains(".brain_env"), "the wrong folder shows: {text}");
+}

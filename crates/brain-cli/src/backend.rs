@@ -467,12 +467,30 @@ fn database(root: &Path, environment: &str) -> Result<String, String> {
         .ok()
         .or_else(|| crate::env::value(root, environment, "DATABASE_URL"))
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            if environment != "production" && crate::env::value(root, "production", "DATABASE_URL").is_some_and(|v| !v.is_empty()) {
-                return format!("B0762: DATABASE_URL is not set for the {environment} environment, but .brain_env has it under [production]; fix: pass --env production on a deployed machine, or set it under [{environment}]");
-            }
-            "B0762: DATABASE_URL is not set and the native backend requires Postgres; fix: set it in .brain_env or the process environment".into()
-        })
+        .ok_or_else(|| missing_database(root, environment))
+}
+/// B0762 when no source holds `DATABASE_URL`: which file was read, which section, and the sections that do have it.
+fn missing_database(root: &Path, environment: &str) -> String {
+    let file = root.join(crate::env::FILE);
+    let Ok(source) = std::fs::read_to_string(&file) else {
+        return format!("B0762: DATABASE_URL is not set: it is not in the process environment and {} does not exist; fix: create that file, run from the app folder, or set DATABASE_URL in the process environment", file.display());
+    };
+    let parsed = brain_check::env::parse(&source);
+    let holding: Vec<String> = parsed.environments().into_iter().filter(|name| name != environment && crate::env::value(root, name, "DATABASE_URL").is_some_and(|v| !v.is_empty())).collect();
+    match holding.first() {
+        Some(section) => format!("B0762: DATABASE_URL is not set for the {environment} environment, but {} has it under [{section}]; fix: pass --env {section} on a deployed machine, or set it under [{environment}]", file.display()),
+        None => format!("B0762: DATABASE_URL is not set: it is not in the process environment and {} has no value for it in the {environment} environment; fix: set it in that file or the process environment, or pass --env <name> for the section that holds it", file.display()),
+    }
+}
+/// Where `DATABASE_URL` comes from for this environment; never its value. Named when Postgres refuses the login.
+pub(crate) fn database_source(root: &Path, environment: &str) -> String {
+    if std::env::var("DATABASE_URL").is_ok_and(|v| !v.is_empty()) {
+        return "the process environment".into();
+    }
+    let file = root.join(crate::env::FILE);
+    let parsed = std::fs::read_to_string(&file).map(|source| brain_check::env::parse(&source));
+    let in_section = parsed.as_ref().is_ok_and(|p| p.sections.iter().any(|(name, entries)| name == environment && entries.iter().any(|e| e.key == "DATABASE_URL")));
+    if in_section { format!("{} section [{environment}]", file.display()) } else { format!("{} shared block", file.display()) }
 }
 /// `application_name` for this app's Postgres sessions: `brain:<brain.json name>:<role>`.
 pub(crate) fn pg_name(root: &Path, role: &str) -> String {
@@ -814,7 +832,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
             if production {return Err("--create-db is for local development; fix: create the production database with your provider".into());}
             if let Some(name)=brain_backend::boot::create_local_database(&url).await? {eprintln!("created database {name}");}
         }
-        let boot=if operation=="serve" {brain_backend::boot::Boot::server(production)} else {brain_backend::boot::Boot::command(production)};
+        let boot=if operation=="serve" {brain_backend::boot::Boot::server(production)} else {brain_backend::boot::Boot::command(production)}.from_source(database_source(&root,&environment));
         config_phase(false);
         let pool=brain_backend::boot::connect(&url,&boot).await?;
         config_phase(operation=="serve");
@@ -1591,7 +1609,7 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
     let _ = snapshot;
     runtime()?.block_on(async {
         let production = environment == "production";
-        let boot = if matches!(op, "work" | "cron") { brain_backend::boot::Boot::server(production) } else { brain_backend::boot::Boot::command(production) };
+        let boot = if matches!(op, "work" | "cron") { brain_backend::boot::Boot::server(production) } else { brain_backend::boot::Boot::command(production) }.from_source(database_source(&root, &environment));
         config_phase(false);
         let pool = brain_backend::boot::connect(&url, &boot).await?;
         brain_backend::db::verify(&pool, &contracts(&root, "resources")?).await?;

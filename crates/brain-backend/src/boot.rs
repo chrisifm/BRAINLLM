@@ -20,6 +20,8 @@ pub struct Boot {
     pub wait_out_refusal: bool,
     /// How long a request waits for a pooled connection before it is treated as overload.
     pub acquire: Duration,
+    /// Where `DATABASE_URL` came from (no value), named when the server refuses it.
+    pub source: Option<String>,
 }
 
 impl Boot {
@@ -32,11 +34,17 @@ impl Boot {
             give_up: Duration::from_secs(60),
             wait_out_refusal: true,
             acquire: Duration::from_secs(2),
+            source: None,
         }
     }
     /// One-shot command (migrate, bootstrap): no retry, the historical 5 s acquire budget.
     pub fn command(production: bool) -> Self {
         Self { give_up: Duration::ZERO, wait_out_refusal: false, acquire: Duration::from_secs(5), ..Self::server(production) }
+    }
+    /// Names where `DATABASE_URL` was read from in connection failures.
+    pub fn from_source(mut self, source: String) -> Self {
+        self.source = Some(source);
+        self
     }
     /// Full jitter: a uniform delay in `0..=min(cap, base * 2^attempt)`. `unit` is in `0.0..1.0`.
     pub fn delay(&self, attempt: u32, unit: f64) -> Duration {
@@ -134,19 +142,45 @@ pub async fn create_local_database(url: &str) -> Result<Option<String>, String> 
 /// Why a connection failed, naming what was tried: the host, the database and the user, which libpq and sqlx take from
 /// `PGUSER` or the system account when the URL has none. The password never appears.
 pub fn connect_failure(options: &PgConnectOptions, error: &sqlx::Error) -> String {
+    connect_failure_from(options, error, None)
+}
+
+/// `connect_failure` that also says where `DATABASE_URL` came from: the wrong file is a common cause of a refused login.
+pub fn connect_failure_from(options: &PgConnectOptions, error: &sqlx::Error, source: Option<&str>) -> String {
     let user = options.get_username();
     let database = options.get_database().unwrap_or(user);
     let tried = format!("{}:{} database `{database}` as user `{user}`", options.get_host(), options.get_port());
     let (reason, fix) = match error {
-        sqlx::Error::Database(db) => match db.code().as_deref() {
-            Some("28P01" | "28000") => ("the server refused this user", format!("create the role (`createuser {user}`) or name another one: postgres://user:password@host:5432/{database}")),
-            Some("3D000") => ("this database does not exist", format!("create it: `createdb {database}`, or `brain backend migrate --create-db` for a local URL")),
-            _ => ("the server refused the connection", "check DATABASE_URL and the server log".to_string()),
-        },
-        sqlx::Error::Io(_) | sqlx::Error::PoolTimedOut => ("nothing answered there", "start Postgres or correct the host and port in DATABASE_URL".to_string()),
-        _ => ("the connection failed", "check DATABASE_URL".to_string()),
+        sqlx::Error::Database(db) => refusal(db.code().as_deref(), db.message(), user, database),
+        sqlx::Error::Io(_) | sqlx::Error::PoolTimedOut => ("nothing answered there".to_string(), "start Postgres or correct the host and port in DATABASE_URL".to_string()),
+        _ => ("the connection failed".to_string(), "check DATABASE_URL".to_string()),
     };
-    format!("Cannot connect to Postgres at {tried}: {reason} (B0762); fix: {fix} (credentials are not logged)")
+    let from = source.map(|s| format!("; DATABASE_URL read from {s}")).unwrap_or_default();
+    format!("Cannot connect to Postgres at {tried}: {reason} (B0762){from}; fix: {fix} (credentials are not logged)")
+}
+
+/// Why the server refused, from its SQLSTATE and message. `28000` is not one cause: `pg_hba.conf` answers it before any
+/// role or password is looked at, so "create the role" sends the reader the wrong way. The server's text holds no password.
+fn refusal(code: Option<&str>, message: &str, user: &str, database: &str) -> (String, String) {
+    let quoted = |what: &str| format!("{what} (sqlstate {}: {message})", code.unwrap_or("unknown"));
+    let lower = message.to_ascii_lowercase();
+    match code {
+        Some("28000") if lower.contains("pg_hba") => (
+            quoted("pg_hba.conf has no line that admits this client, so the role and password were not checked"),
+            format!("add a line for user `{user}`, database `{database}` and this client's address to the server's pg_hba.conf and reload Postgres, or connect from an address it admits; the role itself may be fine"),
+        ),
+        Some("28000") if lower.contains("does not exist") => (quoted("this role does not exist"), format!("create the role (`createuser {user}`) or name another one: postgres://user:password@host:5432/{database}")),
+        Some("28000") => (
+            quoted("the authentication method pg_hba.conf selects refused this user"),
+            format!("for peer or ident, run as the matching system account or give user `{user}` a password method in pg_hba.conf and reload Postgres"),
+        ),
+        Some("28P01") => (
+            quoted("the server refused this user's password"),
+            format!("correct the password in DATABASE_URL (`ALTER ROLE {user} PASSWORD ...` changes it on the server); with password authentication a role that does not exist answers the same, so check `\\du` if it is new"),
+        ),
+        Some("3D000") => ("this database does not exist".to_string(), format!("create it: `createdb {database}`, or `brain backend migrate --create-db` for a local URL")),
+        _ => (quoted("the server refused the connection"), "check DATABASE_URL and the server log".to_string()),
+    }
 }
 
 fn retryable(error: &sqlx::Error) -> bool {
@@ -209,10 +243,10 @@ pub async fn connect(url: &str, boot: &Boot) -> Result<PgPool, String> {
         let elapsed = started.elapsed();
         let waits_out = boot.wait_out_refusal && refused(&error);
         if waits_out && elapsed >= boot.give_up {
-            return Err(format!("{}; gave up after {}s over {} attempts", connect_failure(&options, &error), elapsed.as_secs(), attempt + 1));
+            return Err(format!("{}; gave up after {}s over {} attempts", connect_failure_from(&options, &error, boot.source.as_deref()), elapsed.as_secs(), attempt + 1));
         }
         if waits_out && attempt == 0 {
-            eprintln!("{}", serde_json::json!({"schemaVersion":1,"event":"database-connect-refused","code":"B0762","msg":connect_failure(&options, &error),"retrySeconds":boot.give_up.as_secs()}));
+            eprintln!("{}", serde_json::json!({"schemaVersion":1,"event":"database-connect-refused","code":"B0762","msg":connect_failure_from(&options, &error, boot.source.as_deref()),"retrySeconds":boot.give_up.as_secs()}));
         }
         if !(waits_out || retryable(&error)) || elapsed >= boot.give_up {
             return Err(if retryable(&error) && !boot.give_up.is_zero() {
@@ -220,7 +254,7 @@ pub async fn connect(url: &str, boot: &Boot) -> Result<PgPool, String> {
             } else if matches!(error, sqlx::Error::Tls(_)) {
                 "Cannot establish verified TLS with Postgres (B0762); fix: check sslrootcert and that the certificate names the DATABASE_URL host".into()
             } else {
-                connect_failure(&options, &error)
+                connect_failure_from(&options, &error, boot.source.as_deref())
             });
         }
         let delay = boot.delay(attempt, unit_random()).min(boot.give_up - elapsed);
@@ -233,6 +267,19 @@ pub async fn connect(url: &str, boot: &Boot) -> Result<PgPool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refused_login_names_its_real_cause_and_never_sends_pg_hba_to_create_the_role() {
+        let hba = refusal(Some("28000"), "no pg_hba.conf entry for host \"203.0.113.9\", user \"app\", database \"app\", SSL off", "app", "app");
+        assert!(hba.0.contains("pg_hba.conf") && hba.0.contains("28000") && hba.1.contains("reload Postgres") && !hba.1.contains("createuser"), "{hba:?}");
+        let role = refusal(Some("28000"), "role \"app\" does not exist", "app", "app");
+        assert!(role.0.contains("does not exist") && role.1.contains("createuser app"), "{role:?}");
+        let peer = refusal(Some("28000"), "Peer authentication failed for user \"app\"", "app", "app");
+        assert!(peer.1.contains("peer") && !peer.1.contains("createuser"), "{peer:?}");
+        let password = refusal(Some("28P01"), "password authentication failed for user \"app\"", "app", "app");
+        assert!(password.0.contains("password") && password.0.contains("28P01") && password.1.contains("ALTER ROLE app"), "{password:?}");
+        assert!(refusal(Some("3D000"), "database \"app\" does not exist", "app", "app").1.contains("createdb app"));
+    }
 
     #[test]
     fn production_requires_verify_full_for_remote_hosts_only() {
