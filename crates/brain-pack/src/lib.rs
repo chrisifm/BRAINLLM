@@ -156,11 +156,13 @@ pub struct ServerLimits {
     pub max_body_kb: u64,
     pub timeout_ms: u64,
     pub rpc_per_minute: u64,
+    /// Send 103 Early Hints from the Node server. Off by default: nginx below 1.29 takes a 103 as the final response.
+    pub early_hints: bool,
 }
 
 impl Default for ServerLimits {
     fn default() -> Self {
-        ServerLimits { max_body_kb: 1024, timeout_ms: 10_000, rpc_per_minute: 60 }
+        ServerLimits { max_body_kb: 1024, timeout_ms: 10_000, rpc_per_minute: 60, early_hints: false }
     }
 }
 
@@ -173,7 +175,8 @@ impl ServerLimits {
     }
     /// The manifest's `"server"` object, read by server.mjs.
     pub fn to_json(&self) -> String {
-        format!("{{\"maxBodyKB\":{},\"timeoutMs\":{},\"rpcPerMinute\":{}}}", self.max_body_kb, self.timeout_ms, self.rpc_per_minute)
+        let hints = if self.early_hints { ",\"earlyHints\":true" } else { "" };
+        format!("{{\"maxBodyKB\":{},\"timeoutMs\":{},\"rpcPerMinute\":{}{hints}}}", self.max_body_kb, self.timeout_ms, self.rpc_per_minute)
     }
 }
 
@@ -188,6 +191,13 @@ pub fn read_server_limits(root: &Path) -> Result<ServerLimits, String> {
         return Err("brain.json `server` must be an object; fix: write \"server\": { \"maxBodyKB\": 1024, \"timeoutMs\": 10000, \"rpcPerMinute\": 60 }".into());
     };
     for (key, value) in entries {
+        if key == "earlyHints" {
+            let brain_mcp::Json::Bool(on) = value else {
+                return Err("brain.json `server.earlyHints` must be true or false; fix: leave it out unless every proxy in front of the server handles 103 (nginx 1.29 or later)".into());
+            };
+            limits.early_hints = *on;
+            continue;
+        }
         let (slot, min, max, unit) = match key.as_str() {
             "maxBodyKB" => (&mut limits.max_body_kb, 1, MAX_BODY_KB_CAP, "KB"),
             "timeoutMs" => (&mut limits.timeout_ms, 100, 600_000, "ms"),
@@ -2544,9 +2554,9 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         // absent file or key: the defaults (1 MB bodies, 10 s, 60 calls per minute)
         assert_eq!(read_server_limits(&d), Ok(ServerLimits::default()));
-        assert_eq!(ServerLimits::default(), ServerLimits { max_body_kb: 1024, timeout_ms: 10_000, rpc_per_minute: 60 });
+        assert_eq!(ServerLimits::default(), ServerLimits { max_body_kb: 1024, timeout_ms: 10_000, rpc_per_minute: 60, early_hints: false });
         std::fs::write(d.join("brain.json"), r#"{"name":"x","server":{"maxBodyKB":8192,"timeoutMs":30000,"rpcPerMinute":600}}"#).unwrap();
-        assert_eq!(read_server_limits(&d), Ok(ServerLimits { max_body_kb: 8192, timeout_ms: 30_000, rpc_per_minute: 600 }));
+        assert_eq!(read_server_limits(&d), Ok(ServerLimits { max_body_kb: 8192, timeout_ms: 30_000, rpc_per_minute: 600, early_hints: false }));
         assert_eq!(read_server_limits(&d).unwrap().max_body_bytes(), 8192 * 1024);
         std::fs::write(d.join("brain.json"), r#"{"server":{"maxBodyKB":2048}}"#).unwrap();
         assert_eq!(read_server_limits(&d), Ok(ServerLimits { max_body_kb: 2048, ..ServerLimits::default() }));
@@ -2558,6 +2568,7 @@ mod tests {
             (r#"{"server":{"timeoutMs":50}}"#, "server.timeoutMs"),
             (r#"{"server":{"rpcPerMinute":0}}"#, "server.rpcPerMinute"),
             (r#"{"server":{"maxBodyMB":8}}"#, "server.maxBodyMB"),
+            (r#"{"server":{"earlyHints":1}}"#, "server.earlyHints"),
             (r#"{"server":true}"#, "server"),
         ] {
             std::fs::write(d.join("brain.json"), json).unwrap();

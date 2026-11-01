@@ -25,7 +25,7 @@ After-write jobs commit with their mutation. See `docs/BEFORE-HOOKS.md` and `doc
 
 ## Limits
 RPC and form bodies, call deadlines and the call rate come from brain.json, the same in `brain run` and production:
-`"server": { "maxBodyKB": 1024, "timeoutMs": 10000, "rpcPerMinute": 60 }` (the defaults). A body past `maxBodyKB`
+`"server": { "maxBodyKB": 1024, "timeoutMs": 10000, "rpcPerMinute": 60 }` (the defaults). `"earlyHints": true` adds 103 responses; keep it off behind nginx below 1.29. A body past `maxBodyKB`
 gets 413 naming the setting; a file sent as base64 grows by a third, so a 5 MB file needs about `"maxBodyKB": 7000`
 (at most 65536). `timeoutMs` bounds each server function and `load()` (504), `rpcPerMinute` the calls per client IP
 and function (429). `BRAIN_MAX_BODY_KB`, `BRAIN_TIMEOUT_MS` and `BRAIN_RPC_LIMIT` in `.brain_env` override them per

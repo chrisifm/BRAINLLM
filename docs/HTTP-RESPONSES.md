@@ -8,7 +8,7 @@ API namespaces (`/api`, `/_brain`, `/_r`) remain JSON, including ambiguous `Acce
 
 The Node server preserves the configured 404 page, the existing forbidden/error component contracts, and status-specific static pages such as `410.html`. Optional manifest `errors` entries can name a status page. These files pass the same dist containment and symlink checks as ordinary static assets. Explicit application JSON is preserved; this feature does not overwrite RPC validation payloads. It does not create dozens of physical error-page files.
 
-HEAD returns the status and headers with no body. Informational responses, 204, 205 and 304 never receive an error document or entity body. Early Hints remain an independent informational response. A failure after streaming headers have been sent keeps the established inline error fallback; HTTP cannot replace the already-sent status at that point.
+HEAD returns the status and headers with no body. Informational responses, 204, 205 and 304 never receive an error document or entity body. Page responses carry the route preloads in a `Link` header, which hosts such as Cloudflare turn into early hints. The server sends its own 103 only with `server.earlyHints: true` or `BRAIN_EARLY_HINTS=1`, never to HTTP/1.0. Leave it off behind nginx below 1.29: that nginx takes the 103 as the final response, so the real response loses the edge headers (HSTS, CSP, X-Robots-Tag) and only ends when the keep-alive expires. A failure after streaming headers have been sent keeps the established inline error fallback; HTTP cannot replace the already-sent status at that point.
 
 ## Typed Rust helpers
 

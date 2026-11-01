@@ -852,6 +852,8 @@ export function createServer(o = {}) {
   const SL = mf.server || {}
   const TIMEOUT = +(o.timeout ?? env.BRAIN_TIMEOUT_MS ?? SL.timeoutMs ?? 10000)
   const LIMIT = +(o.rateLimit ?? env.BRAIN_RPC_LIMIT ?? SL.rpcPerMinute ?? 60) // per IP + function, per minute
+  // Off by default: nginx below 1.29 takes a 103 as the final response, and the real one reaches the client as body bytes.
+  const EARLY_HINTS = o.earlyHints ?? (env.BRAIN_EARLY_HINTS ? env.BRAIN_EARLY_HINTS === '1' : SL.earlyHints === true)
   const BODY_KB = +(o.maxBodyKB ?? env.BRAIN_MAX_BODY_KB ?? SL.maxBodyKB ?? 1024)
   if (!Number.isInteger(BODY_KB) || BODY_KB < 1 || BODY_KB > 65536) throw Error('brain.json server.maxBodyKB must be an integer from 1 to 65536 (KB)')
   const MAX_BODY = BODY_KB * 1024 // RPC and form bodies; bounded reads never buffer more
@@ -1084,12 +1086,17 @@ export function createServer(o = {}) {
   const anonymous = req => req.method === 'GET' && !req.headers.authorization && !req.headers.cookie
 
   async function ssr(req, res, route, params, url, rid, forms = null, status = 200, fixed = null, nocache = false) {
-    // 103 Early Hints (#232): the route's preloads (the same Link values as _headers) before any work, once
-    if (route.links && route.links.length && res.writeEarlyHints && !res.$capture && !res.$hinted) {
+    // the route's preloads (the same Link values as _headers): on the response, where hosts turn them into early hints,
+    // capped so a long list cannot trip a proxy's header buffer. A 103 (#232) only when opted in, and never to HTTP/1.0.
+    if (route.links && route.links.length && !res.$capture && !res.$hinted) {
       res.$hinted = true
-      try {
-        res.writeEarlyHints({ link: route.links })
-      } catch {}
+      const link = route.links.join(', ')
+      if (link.length <= 2048 && !res.headersSent) res.setHeader('link', link)
+      if (EARLY_HINTS && res.writeEarlyHints && req.httpVersion !== '1.0') {
+        try {
+          res.writeEarlyHints({ link: route.links })
+        } catch {}
+      }
     }
     if (!nocache && route.cache > 0 && !forms && !fixed && status === 200 && anonymous(req)) return cached(req, res, route, params, url, rid)
     if (native) await native.prepare(req, res, rid)

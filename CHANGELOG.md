@@ -9,6 +9,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- Fix: the Node server no longer sends 103 Early Hints by default; set `server.earlyHints` or `BRAIN_EARLY_HINTS=1` to opt in, never for HTTP/1.0
+- Fix: page responses carry the route preloads in a `Link` header, so hosts can still produce early hints
+
 ## [0.7.0] - 2026-10-31
 
 - `brain dev` recompiles the component when a CSS edit changes its scope identity (a customized copy of a kit file); it used to keep the old script with the new `data-b` CSS.
