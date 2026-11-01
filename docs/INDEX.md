@@ -114,6 +114,7 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [Product-flow recipes](RECIPES.md) | `brain recipe` prepares files for review. |
 | [Native resource generation](RESOURCE-GENERATION.md) | `brain add resource posts --fields 'title:str! body:str' --json` creates native backend contracts and executable client/server helpers offline. |
 | [Runtime execution and resource budgets](RUNTIME-BUDGETS.md) | Production and development compiled BrainScript functions have execution checkpoints. |
+| [Site-level SEO: focus terms and published URLs](SEO-SITE.md) | Both are optional; without them nothing changes. |
 | [Public website](SITE.md) | The landing lives in `docs/site/`. |
 | [Upgrading](UPGRADING.md) | What breaks between versions and how to preview a package pin change; `brain upgrade` measures it against your app. |
 | [Viewer browser E2E lane](VIEWER-E2E.md) | This lane is opt-in. |
