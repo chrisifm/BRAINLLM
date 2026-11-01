@@ -1,0 +1,10 @@
+{
+  "id": "form-status",
+  "kind": "change",
+  "title": "Forms expose the failure status",
+  "why": "An app could not tell a rate limit from a rejection or a lost connection.",
+  "changelog": [
+    "`f.status` holds the HTTP status of the last failed submit, 0 with no response"
+  ],
+  "guide": "brain guide forms"
+}

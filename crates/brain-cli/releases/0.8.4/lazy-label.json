@@ -1,0 +1,10 @@
+{
+  "id": "lazy-label",
+  "kind": "change",
+  "title": "The lazy placeholder uses the app's words",
+  "why": "Every lazy component showed English text in apps of any language.",
+  "changelog": [
+    "`lazyLabel` sets the words of a `lazy` placeholder; the visible and idle placeholders show no text by default"
+  ],
+  "guide": "brain guide performance"
+}

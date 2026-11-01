@@ -1,0 +1,10 @@
+{
+  "id": "rate-limit-answer",
+  "kind": "fix",
+  "title": "A rate limit names itself",
+  "why": "The 429 said `Retry-After: 0` and told the caller to check the request.",
+  "changelog": [
+    "429 answers `RATE_LIMITED` and `Retry-After` of at least 1 second"
+  ],
+  "guide": "brain guide backend"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "app-session-anonymous",
+  "kind": "fix",
+  "title": "App sessions stay anonymous on the backend",
+  "why": "With `BRAIN_BACKEND_SESSION=app` a leftover backend cookie made `ctx.backend` act as someone else.",
+  "changelog": [
+    "`ctx.backend` sends no backend cookie with `BRAIN_BACKEND_SESSION=app`"
+  ],
+  "guide": "brain guide backend"
+}

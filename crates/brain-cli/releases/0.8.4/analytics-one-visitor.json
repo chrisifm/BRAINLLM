@@ -1,0 +1,10 @@
+{
+  "id": "analytics-one-visitor",
+  "kind": "fix",
+  "title": "Analytics sessions stay with one visitor",
+  "why": "With storage blocked each batch carried a new visitor id, so the backend refused the session with 409 on every later batch.",
+  "changelog": [
+    "the analytics collector keeps one visitor id for the page without storage and starts a new session when the stored one belongs to another visitor"
+  ],
+  "guide": "brain guide analytics"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "remote-backend-queues",
+  "kind": "fix",
+  "title": "No queue warning on a front-only process",
+  "why": "A process with a remote `BRAIN_BACKEND_URL` and no database was told its workers were unchecked.",
+  "changelog": [
+    "B0766 stays quiet when the backend runs on another host"
+  ],
+  "guide": "brain guide backend"
+}

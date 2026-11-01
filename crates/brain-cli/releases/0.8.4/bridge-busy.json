@@ -1,0 +1,10 @@
+{
+  "id": "bridge-busy",
+  "kind": "change",
+  "title": "A saturated bridge says when to retry",
+  "why": "The bridge answered 503 with no code and no delay, so a client could only guess.",
+  "changelog": [
+    "503 `BRIDGE_BUSY` with `Retry-After` and `fix` when the backend bridge is at capacity; it logs a warning instead of an unhandled error"
+  ],
+  "guide": "brain guide backend"
+}

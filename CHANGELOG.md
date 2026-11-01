@@ -7,7 +7,25 @@ diagnostics that reject code an earlier version accepted.
 Every npm package (`@christianirack/brainllm`, its seven native platform packages, `brainllm-runtime`,
 `create-brainllm` and `create-brainll`) ships the same version as `[workspace.package]` in `Cargo.toml`.
 
+## [0.8.4] - 2026-11-01
+
+Upgrade with `npm install -D @christianirack/brainllm@0.8.4 --save-exact`. This release also carries everything listed under 0.8.3.
+
+- the server keeps answering when its log pipes close (EPIPE)
+- 503 `BRIDGE_BUSY` with `Retry-After` and `fix` when the backend bridge is at capacity; it logs a warning instead of an unhandled error
+- 429 answers `RATE_LIMITED` and `Retry-After` of at least 1 second
+- `ctx.backend` sends no backend cookie with `BRAIN_BACKEND_SESSION=app`
+- B0766 stays quiet when the backend runs on another host
+- `f.status` holds the HTTP status of the last failed submit, 0 with no response
+- the analytics collector keeps one visitor id for the page without storage and starts a new session when the stored one belongs to another visitor
+- `lazyLabel` sets the words of a `lazy` placeholder; the visible and idle placeholders show no text by default
+- a `lazy` component in a page opened in a hidden tab loads without waiting to be shown
+- `brain seo audit --url` reports `private` or `no-store` pages with a cache HIT and `Speculation-Rules` injected by a CDN (B1870)
+
 ## [0.8.3] - 2026-11-01
+
+Tagged but never published to npm: a test failed on Linux in the release checks. Its changes ship in 0.8.4.
+
 
 Upgrade with `npm install -D @christianirack/brainllm@0.8.3 --save-exact`. New diagnostics may report code that passed before; B1872 and a removed URL in `seo-urls.txt` (B1879) are errors.
 

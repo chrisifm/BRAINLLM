@@ -1,0 +1,10 @@
+{
+  "id": "seo-live-cdn",
+  "kind": "change",
+  "title": "The live audit reads more CDN contradictions",
+  "why": "A private page served from a CDN cache and rules a CDN injects only show on the deployment.",
+  "changelog": [
+    "`brain seo audit --url` reports `private` or `no-store` pages with a cache HIT and `Speculation-Rules` injected by a CDN (B1870)"
+  ],
+  "guide": "brain guide seo"
+}

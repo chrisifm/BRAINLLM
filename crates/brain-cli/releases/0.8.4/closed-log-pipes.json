@@ -1,0 +1,10 @@
+{
+  "id": "closed-log-pipes",
+  "kind": "fix",
+  "title": "A closed log pipe no longer stops the server",
+  "why": "A log line written after stdout or stderr closed took the process down.",
+  "changelog": [
+    "the server keeps answering when its log pipes close (EPIPE)"
+  ],
+  "guide": "brain guide server"
+}

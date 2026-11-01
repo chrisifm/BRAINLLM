@@ -1,0 +1,10 @@
+{
+  "id": "lazy-hidden-tab",
+  "kind": "fix",
+  "title": "Lazy content loads in a hidden tab",
+  "why": "A page opened in the background waited for an observer that does not run there.",
+  "changelog": [
+    "a `lazy` component in a page opened in a hidden tab loads without waiting to be shown"
+  ],
+  "guide": "brain guide performance"
+}
