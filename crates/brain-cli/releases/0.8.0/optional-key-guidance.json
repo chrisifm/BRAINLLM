@@ -1,0 +1,13 @@
+{
+  "id": "optional-key-guidance",
+  "kind": "fix",
+  "title": "B0720 names the optional form and its limit",
+  "why": "The explanation only said to set the value, and `KEY?=` silenced the build for a secret a route still requires.",
+  "changelog": [
+    "`brain explain B0720` names `KEY?=`, and B0720 and B0790 say that it does not make a route or webhook secret optional"
+  ],
+  "codes": [
+    "B0720",
+    "B0790"
+  ]
+}

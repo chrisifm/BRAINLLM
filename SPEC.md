@@ -265,7 +265,7 @@ Private captured errors (message, stack, recent actions) are listed by `brain_er
 `load` runs only on the server. Client code may only read env vars prefixed `PUBLIC_`.
 Variables live in `.brain_env` (already created): shared `KEY=value` lines, then `[development]` `[staging]`
 `[production]` sections that override them. `brain run` uses development, `brain build` production, `--env x` another.
-An empty key fails the build (B0720); `KEY?=` declares one the app works without: it may stay empty and reads as unset.
+An empty key fails the build (B0720); `KEY?=` declares one the app works without: it may stay empty and reads as unset (a secret a route or webhook names stays required, B0790).
 Read them as `process.env.KEY` (server) or `process.env.PUBLIC_KEY` (anywhere; an undeclared one reads as `undefined`). Never create a `.env`.
 `.jsbrain` files starting with `<meta server>` run only on the server and may be used only inside `load` or server
 functions. Server function in a `.brain`: `server: async function save(ctx, data) {…}`; the client calls
@@ -284,7 +284,7 @@ Model calls: `await ctx.llm.complete({ prompt, system, messages, model, provider
 `ANTHROPIC_API_KEY` + `ANTHROPIC_MODEL` or `OPENAI_API_KEY` + `OPENAI_MODEL`; `ctx.llm` in browser code or a `PUBLIC_` provider key is B0920 (`brain guide llm`).
 Server limits (dev and production alike): brain.json `"server": { "maxBodyKB": 1024, "timeoutMs": 10000,
 "rpcPerMinute": 60 }` bounds RPC/form bodies (413 past it, at most 65536), function calls and `load` (504) and calls
-per IP and function (429). Raise `maxBodyKB` to send a file as base64 in an RPC argument; invalid values are B0707.
+per IP and function (429). Raise `maxBodyKB` to send a file as base64 in an RPC argument; invalid values are B0707. `"earlyHints": true` sends 103 responses (default off: nginx below 1.29 breaks on them; `Link` headers are always sent).
 
 ### Experimental Rust/Postgres backend
 `brain backend capabilities` lists what this version supports (field types, filter operators, policy grants, limits), generated from the code.
@@ -334,7 +334,7 @@ Set `BRAIN_BACKEND_URL` to the fixed loopback native backend URL to connect nati
 Native JWT accounts use short-lived access and rotating refresh cookies, persisted revocation, configured roles and Google Sign-In.
 Roles: `admin` and `user` by default, signup role `user`; `brain add roles` writes `server/auth/roles.jsbrain` for your own names (only `admin` is required). A role grant admits only that role; route `auth: 'user'` means any signed-in account.
 `brain recipe auth-ui|password-reset|email-verification|google-signin` prepares project-owned account UI;
-mail needs private `BRAIN_MAIL_RESEND_KEY`, `BRAIN_MAIL_FROM` and `PUBLIC_SITE_URL` (HTTPS, optional hosting prefix).
+mail needs private `BRAIN_MAIL_RESEND_KEY`, `BRAIN_MAIL_FROM` and `PUBLIC_SITE_URL` (HTTPS, optional hosting prefix). The emails are in English unless the default locale defines `auth.email.verify`, `auth.email.reset` and `auth.email.notice` (B0941).
 `brain backend bootstrap-admin --user <existing-uuid>` (or `--email <address>`) explicitly assigns the first administrator; signup never grants it.
 API keys: add `server/api-keys.jsbrain` `{enabled:true}`; signed-in users manage keys at `/_brain/keys` (secret shown once), callers send `X-API-Key: bk_live_...` to `/api/<resource>` only; scopes `posts:read|write|*` never exceed the owner. See `docs/backend/api-keys.md`.
 `brain backend users disable|enable|revoke-sessions|disable-identity|enable-identity` and their administrator routes act without SQL; a route with `auth:'internal'` takes a rotatable secret in a header (`docs/backend/routes.md`).
@@ -361,7 +361,7 @@ Files of any type: `server/files/invoices.jsbrain` `export default {types:['appl
 → multipart `POST /_brain/files/invoices` (field `file`), `GET /_brain/files/invoices/<id>` (Range, ETag). Type comes
 from content, not the name; empty `types` accepts any type. See `docs/backend/files.md`.
 Edge: `server/platform.jsbrain` `export default {trustProxy:['127.0.0.1'],cors:{origins:[...],maxAge:600},limits:{maxInFlight:256},shutdown:{readyDelay:'5s',drain:'25s'},logging:{requests:'errors'|'all'|'off',slow:'1s'}}`.
-Probes `GET /health/live` and `GET /health/ready`; overload answers `503 OVERLOADED` + `Retry-After`. Production
+Probes `GET /health/live` and `GET /health/ready`, also answered on the `brain start` port; overload answers `503 OVERLOADED` + `Retry-After`. Production
 requires `sslmode=verify-full` for a remote `DATABASE_URL`. See `docs/backend/proxy-cors.md`, `docs/backend/lifecycle.md`.
 Several processes: `cluster:{shared:true}` in `server/platform.jsbrain` (automatic when `BRAIN_BACKEND_PROCESSES>1`) keeps route/API-key rate windows in Postgres and relays socket events between processes. See `docs/backend/cluster.md`.
 Caching: API GETs send `ETag` (304 on `If-None-Match`); `server/cache.jsbrain` `export default {products:{maxAge:'1m',staleWhileRevalidate:'10m'}}` sets a public `Cache-Control` for anonymous reads of public-read resources; `If-Match` on PUT/PATCH/DELETE → 412 `PRECONDITION_FAILED` when stale. See `docs/backend/caching.md`.

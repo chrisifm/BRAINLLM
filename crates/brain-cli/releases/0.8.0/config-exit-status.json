@@ -1,0 +1,13 @@
+{
+  "id": "config-exit-status",
+  "kind": "fix",
+  "title": "A configuration error stops once with exit status 78",
+  "why": "An empty route secret exited like a crash, after connecting to the database, so a supervisor kept restarting it. Regenerate the PM2 file, or add 78 to `stop_exit_codes` by hand, so it stays stopped.",
+  "changelog": [
+    "a missing or short route or webhook secret stops `brain backend serve` and `brain jobs work` once"
+  ],
+  "guide": "docs/backend/lifecycle.md",
+  "codes": [
+    "B0790"
+  ]
+}

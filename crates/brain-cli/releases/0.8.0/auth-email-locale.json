@@ -1,0 +1,13 @@
+{
+  "id": "auth-email-locale",
+  "kind": "fix",
+  "title": "Auth emails in the app's language",
+  "why": "A site in another language sent its verification email in English with no way to change it.",
+  "changelog": [
+    "Verification and password emails take their words from `auth.email.*` in the default locale, and `brain doctor` reports B0941 when an app with a non-English locale leaves them in English"
+  ],
+  "guide": "docs/AUTH-FLOWS.md",
+  "codes": [
+    "B0941"
+  ]
+}

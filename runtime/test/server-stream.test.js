@@ -37,7 +37,7 @@ w('_server/manifest.json', JSON.stringify({
 
 const { createServer } = await import('../server/server.mjs')
 const logs = []
-const server = createServer({ dist, log: (lvl, msg, f) => logs.push(msg) })
+const server = createServer({ dist, earlyHints: true, log: (lvl, msg, f) => logs.push(msg) })
 await new Promise(r => server.listen(0, '127.0.0.1', r))
 const port = server.address().port
 after(() => server.close())

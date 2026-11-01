@@ -187,7 +187,7 @@ fn a_child_that_always_fails_ends_in_exit_1() {
     let dir = app("crash", true);
     // the first child must become ready, then every restart fails: a crash loop after start
     std::fs::write(dir.join("dist/server.mjs"), SERVER.replace("if (process.env.FAIL) process.exit(3)", "import { existsSync, writeFileSync } from 'node:fs'\nif (existsSync('booted')) process.exit(3)\nwriteFileSync('booted', '1')\nsetTimeout(() => process.exit(3), 300)")).unwrap();
-    let (mut c, p) = start(&dir, &[]);
+    let (mut c, _p) = start(&dir, &[]);
     let t = Instant::now();
     let code = loop {
         if let Some(s) = c.try_wait().unwrap() {
@@ -210,7 +210,7 @@ fn a_child_that_dies_before_ready_backs_off_and_explains_on_stderr() {
     }
     let dir = app("early", true);
     std::fs::write(dir.join("dist/server.mjs"), SERVER.replace("if (process.env.FAIL) process.exit(3)", "console.error('boom before ready')\nprocess.exit(3)")).unwrap();
-    let (mut c, p) = start(&dir, &[]);
+    let (mut c, _p) = start(&dir, &[]);
     let t = Instant::now();
     let code = loop {
         if let Some(s) = c.try_wait().unwrap() {

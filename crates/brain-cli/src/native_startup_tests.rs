@@ -62,6 +62,13 @@ fn compiler() -> brain_serve::CompileFn {
     })
 }
 
+/// A closed listener can stay unbindable for milliseconds on a busy host with no process holding it, so the proof is a
+/// bounded wait: a listener the server leaked would keep the port past it.
+fn assert_released(port: u16, message: &str) {
+    let bound = brain_serve::listen::bind_waiting("127.0.0.1", port, Duration::from_secs(5));
+    assert!(bound.is_ok(), "{message}: {bound:?}");
+}
+
 #[test]
 fn native_startup_disabled_keeps_ephemeral_server_and_stops_owned_listener() {
     let root = Fixture::new("disabled");
@@ -70,10 +77,7 @@ fn native_startup_disabled_keeps_ephemeral_server_and_stops_owned_listener() {
     let addr = dev.addr;
     assert_ne!(addr.port(), 0);
     dev.stop();
-    assert!(
-        TcpListener::bind(addr).is_ok(),
-        "owned listener must be released"
-    );
+    assert_released(addr.port(), "owned listener must be released");
 }
 
 #[test]
@@ -101,10 +105,7 @@ fn native_startup_rejects_missing_authority_and_stops_disallowed_auto_port() {
         .parse()
         .unwrap();
     assert_ne!(selected, port);
-    assert!(
-        TcpListener::bind(("127.0.0.1", selected)).is_ok(),
-        "rejected auto-selected listener must be released"
-    );
+    assert_released(selected, "rejected auto-selected listener must be released");
     // The next available port was created by this operation and must be reaped.
     // Existing occupied listeners are not touched.
     assert!(TcpListener::bind(("127.0.0.1", port)).is_err());

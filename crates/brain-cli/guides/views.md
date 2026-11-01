@@ -91,6 +91,7 @@ brain shot /users --text    # outline: one main, one h1, links reachable
 | two `<h1>` or no `<main>` | B0405 | one of each per view |
 | `location.href = '/x'` | B0129 | `navigate('/x')` or an `<a href>` |
 | dynamic markup in `app.brain` | B0132 | move it to `views/_layout.brain` |
+| `app.brain` without `<head>` | B0940 | add it: every title and head tag is written there |
 | `redirect(ctx.query.next)` unchecked | B0710 | accept only paths starting with a single `/` |
 | `paths()` and `sitemap()` in one view | B0117 | prerender with `paths()` or list live pages with `sitemap()` |
 

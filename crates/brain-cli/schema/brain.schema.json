@@ -52,6 +52,7 @@
       "properties": {
         "maxBodyKB": { "type": "integer", "minimum": 1, "maximum": 65536, "default": 1024, "description": "Largest RPC or form body in KiB (1024 bytes); a larger body is answered with 413. Raise it for files sent as base64 in RPC arguments." },
         "timeoutMs": { "type": "integer", "minimum": 100, "maximum": 600000, "default": 10000, "description": "Deadline for a server function call and for load(); past it the server answers 504." },
+        "earlyHints": { "type": "boolean", "default": false, "description": "Send 103 Early Hints from the Node server. Leave off behind nginx below 1.29, which takes a 103 as the final response. Link headers are always sent. BRAIN_EARLY_HINTS=1 or 0 overrides it." },
         "rpcPerMinute": { "type": "integer", "minimum": 1, "maximum": 100000, "default": 60, "description": "Calls per client IP and function per minute; past it the server answers 429 with Retry-After." }
       }
     },

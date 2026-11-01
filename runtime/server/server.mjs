@@ -6,6 +6,7 @@
 //
 // It serves, in this order:
 //   GET  /_health                → 200 {"ok":true,"build":"<sig>"}
+//   GET  /health[/live|/ready]   → forwarded to the native backend, or 200 {"ok":true} without one
 //   POST /_r/<hash>/<fn>         → RPC to a `server:` function (same origin + X-Brain-RPC; body, rate and time limits from brain.json `server`)
 //   GET  routes in the manifest  → SSR: load(ctx) → render the view on the DOM shim → page with props and SEO head
 //   GET  files in dist/          → static (the smallest accepted .zst/.br/.gz sibling; /_b/* immutable), clean URLs
@@ -853,6 +854,8 @@ export function createServer(o = {}) {
   const SL = mf.server || {}
   const TIMEOUT = +(o.timeout ?? env.BRAIN_TIMEOUT_MS ?? SL.timeoutMs ?? 10000)
   const LIMIT = +(o.rateLimit ?? env.BRAIN_RPC_LIMIT ?? SL.rpcPerMinute ?? 60) // per IP + function, per minute
+  // Off by default: nginx below 1.29 takes a 103 as the final response, and the real one reaches the client as body bytes.
+  const EARLY_HINTS = o.earlyHints ?? (env.BRAIN_EARLY_HINTS ? env.BRAIN_EARLY_HINTS === '1' : SL.earlyHints === true)
   const BODY_KB = +(o.maxBodyKB ?? env.BRAIN_MAX_BODY_KB ?? SL.maxBodyKB ?? 1024)
   if (!Number.isInteger(BODY_KB) || BODY_KB < 1 || BODY_KB > 65536) throw Error('brain.json server.maxBodyKB must be an integer from 1 to 65536 (KB)')
   const MAX_BODY = BODY_KB * 1024 // RPC and form bodies; bounded reads never buffer more
@@ -1086,12 +1089,17 @@ export function createServer(o = {}) {
   const anonymous = req => req.method === 'GET' && !req.headers.authorization && !req.headers.cookie
 
   async function ssr(req, res, route, params, url, rid, forms = null, status = 200, fixed = null, nocache = false) {
-    // 103 Early Hints (#232): the route's preloads (the same Link values as _headers) before any work, once
-    if (route.links && route.links.length && res.writeEarlyHints && !res.$capture && !res.$hinted) {
+    // the route's preloads (the same Link values as _headers): on the response, where hosts turn them into early hints,
+    // capped so a long list cannot trip a proxy's header buffer. A 103 (#232) only when opted in, and never to HTTP/1.0.
+    if (route.links && route.links.length && !res.$capture && !res.$hinted) {
       res.$hinted = true
-      try {
-        res.writeEarlyHints({ link: route.links })
-      } catch {}
+      const link = route.links.join(', ')
+      if (link.length <= 2048 && !res.headersSent) res.setHeader('link', link)
+      if (EARLY_HINTS && res.writeEarlyHints && req.httpVersion !== '1.0') {
+        try {
+          res.writeEarlyHints({ link: route.links })
+        } catch {}
+      }
     }
     if (!nocache && route.cache > 0 && !forms && !fixed && status === 200 && anonymous(req)) return cached(req, res, route, params, url, rid)
     if (native) await native.prepare(req, res, rid)
@@ -1552,6 +1560,17 @@ export function createServer(o = {}) {
     return false
   }
 
+  // /health is reserved for the backend (B0735), so an app cannot declare it and deploy gates ask this port for it. An app
+  // page at that path still wins: this only runs where the answer would have been a 404. Nothing here names the backend.
+  const isProbe = path => path === '/health' || path === '/health/live' || path === '/health/ready'
+  const answerProbe = async (req, res, url, rid) => {
+    const headers = { 'content-type': MIME['.json'], 'cache-control': 'no-store' }
+    if (req.method !== 'GET' && req.method !== 'HEAD') return notFound(req, res)
+    if (!native) return send(res, 200, json({ ok: true }), headers)
+    try { await native.proxy(req, res, new URL(url.pathname, url), rid, send) }
+    catch { if (!res.headersSent) send(res, 503, json({ ok: false }), headers) }
+  }
+
   // ---------- dispatch ----------
   const server = http(async (req, res) => {
     // Only a file upload may outlast the 30-second body budget; the dispatcher lifts this guard for that path alone.
@@ -1580,7 +1599,7 @@ export function createServer(o = {}) {
       let url = full
       if (BASE !== '/') {
         if (full.pathname === BASE.slice(0, -1)) return send(res, 301, '', { location: BASE + full.search })
-        if (!full.pathname.startsWith(BASE)) return notFound(req, res)
+        if (!full.pathname.startsWith(BASE)) return isProbe(full.pathname) ? await answerProbe(req, res, full, rid) : notFound(req, res)
         url = new URL('/' + full.pathname.slice(BASE.length) + full.search, full) // the app path
       }
       req.$brainPath = url.pathname
@@ -1615,6 +1634,7 @@ export function createServer(o = {}) {
       if (serveStatic(req, res, url)) return
       // browsers still ask for /favicon.ico: the app's SVG icon answers it
       if (url.pathname === '/favicon.ico' && file('favicon.svg')) return send(res, 301, '', { location: withBase('/favicon.svg'), 'cache-control': 'public, max-age=86400' })
+      if (isProbe(url.pathname)) return await answerProbe(req, res, url, rid)
       notFound(req, res)
     } catch (e) {
       log('error', 'unhandled', { rid, path: req.url, ...trace(e) })

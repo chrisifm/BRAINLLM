@@ -80,6 +80,32 @@ impl RolesConfig {
     }
 }
 
+/// The words of the account emails. They go out in one language, since signup carries no language of its own.
+#[derive(Clone)]
+pub struct EmailText {
+    pub verify: String,
+    pub reset: String,
+    pub notice: String,
+}
+impl Default for EmailText {
+    fn default() -> Self {
+        Self {
+            verify: "Verify your email address".into(),
+            reset: "Reset your password".into(),
+            notice: "If you did not request this email, ignore it. The link expires and can be used once.".into(),
+        }
+    }
+}
+impl EmailText {
+    fn parts(&self, message: &Message) -> (&str, String) {
+        let subject = match message.purpose {
+            Purpose::Verify => &self.verify,
+            Purpose::Reset => &self.reset,
+        };
+        (subject, format!("{subject}\n\n{}\n\n{}", message.link, self.notice))
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum Purpose {
     Reset,
@@ -96,12 +122,6 @@ impl Purpose {
         match self {
             Self::Reset => "/reset-password",
             Self::Verify => "/verify-email",
-        }
-    }
-    fn subject(self) -> &'static str {
-        match self {
-            Self::Reset => "Reset your password",
-            Self::Verify => "Verify your email address",
         }
     }
     fn seconds(self) -> i32 {
@@ -129,6 +149,7 @@ pub struct MailConfig {
     key: Arc<str>,
     from: String,
     pub public_base_url: String,
+    pub text: EmailText,
 }
 fn email(input: &str) -> Option<String> {
     let input = input.trim();
@@ -262,6 +283,7 @@ impl MailConfig {
             key: key.into(),
             from,
             public_base_url: base_url(&public_base_url)?,
+            text: EmailText::default(),
         })
     }
     pub fn delivery(&self) -> Result<Arc<dyn Delivery>, String> {
@@ -293,14 +315,10 @@ impl Delivery for Resend {
             if email(&message.recipient).is_none() || message.link.len() > 1024 {
                 return Err(());
             }
-            let text = format!(
-                "{}\n\n{}\n\nIf you did not request this email, ignore it. The link expires and can be used once.",
-                message.purpose.subject(),
-                message.link
-            );
+            let (subject, text) = self.config.text.parts(&message);
             let mut response=self.client.post("https://api.resend.com/emails").bearer_auth(self.config.key.as_ref())
                 .header("Idempotency-Key",Uuid::new_v4().to_string())
-                .json(&json!({"from":self.config.from,"to":[message.recipient],"subject":message.purpose.subject(),"text":text}))
+                .json(&json!({"from":self.config.from,"to":[message.recipient],"subject":subject,"text":text}))
                 .send().await.map_err(|_|())?;
             if !response.status().is_success()
                 || response.content_length().is_some_and(|n| n > 16384)
@@ -811,5 +829,22 @@ mod sender_tests {
         for bad in ["Shop\r\nBcc: x@evil.example <hello@shop.example>", "Shop, x@evil.example <hello@shop.example>", "Shop <not-an-address>", "Shop <hello@shop.example"] {
             assert_eq!(sender(bad), None, "{bad}");
         }
+    }
+}
+
+#[cfg(test)]
+mod email_text_tests {
+    use super::*;
+    #[test]
+    fn the_words_are_the_apps_and_english_is_the_default() {
+        let message = |purpose| Message { recipient: "a@example.com".into(), link: "https://x.example/v".into(), purpose };
+        let (verify, reset, english) = (message(Purpose::Verify), message(Purpose::Reset), EmailText::default());
+        let (subject, body) = english.parts(&verify);
+        assert_eq!(subject, "Verify your email address");
+        assert!(body.contains("https://x.example/v"));
+        let own = EmailText { verify: "V".into(), reset: "R".into(), notice: "N".into() };
+        let (subject, body) = own.parts(&reset);
+        assert_eq!(subject, "R");
+        assert_eq!(body, "R\n\nhttps://x.example/v\n\nN");
     }
 }

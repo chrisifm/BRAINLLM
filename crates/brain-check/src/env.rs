@@ -290,7 +290,7 @@ pub fn empty_keys(src: &str, file: &str, env: &str, process: &dyn Fn(&str) -> Op
         if v.trim().is_empty() && !f.optional_in(env, k) {
             let decl = f.sections.iter().find(|(n, _)| n == env).and_then(|(_, es)| es.iter().find(|e| &e.key == k)).or_else(|| f.shared.iter().find(|e| &e.key == k));
             let span = decl.map(|e| span_at(src, e.line, e.offset)).unwrap_or(Span { start: 0, end: 0, line: 1, col: 1 });
-            out.push(Diag::new("B0720", file, span, format!("variable `{k}` has no value in `{env}`"), format!("set `{k}=…` under `[{env}]` in .brain_env or in the host's environment; if the app works without it, declare it optional with `{k}?=`")));
+            out.push(Diag::new("B0720", file, span, format!("variable `{k}` has no value in `{env}`"), format!("set `{k}=…` under `[{env}]` in .brain_env or in the host's environment; if the app works without it, declare it optional with `{k}?=` (a secret a route or webhook declares stays required, B0790)")));
         }
     }
     out

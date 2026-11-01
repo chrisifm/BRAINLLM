@@ -1,6 +1,6 @@
 //! HTTP entry points for declared domain writes. Child of `http`: the fixed lifecycle (limits, origin, auth,
 //! rate limit, deadline) applies unchanged; every request runs in one Postgres transaction.
-use super::{App, Error, Result, reveal, write_error};
+use super::{App, Error, Result, Strict, reveal, write_error};
 use crate::domain::{BatchRequest, Change, Domain, Engine, Failure, UpsertRequest};
 use super::Path;
 use axum::{
@@ -153,7 +153,7 @@ async fn batch(
     State(app): State<App>,
     Path(name): Path<String>,
     h: HeaderMap,
-    Json(request): Json<BatchRequest>,
+    Strict(request): Strict<BatchRequest>,
 ) -> Result<Json<Value>> {
     let r = app.resource(&name)?.clone();
     let user = app.required(&h).await?;
@@ -183,7 +183,7 @@ async fn upsert(
     State(app): State<App>,
     Path(name): Path<String>,
     h: HeaderMap,
-    Json(request): Json<UpsertRequest>,
+    Strict(request): Strict<UpsertRequest>,
 ) -> Result<Json<Value>> {
     app.resource(&name)?;
     let resources = app.resources.clone();

@@ -107,10 +107,23 @@ fn tests_run_against_the_apps_own_dev_server_on_the_declared_port() {
     assert!(!report.contains("cannot listen") && !report.contains("could not start the test server"), "{report}");
 }
 
+/// The port was just released by `socket_app`; under a loaded suite it can stay unbindable for a moment.
+fn hold(port: u16) -> std::net::TcpListener {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match std::net::TcpListener::bind(("127.0.0.1", port)) {
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(5))
+            }
+            bound => return bound.unwrap(),
+        }
+    }
+}
+
 #[test]
 fn another_process_on_the_declared_port_is_named_without_suggesting_a_flag_test_lacks() {
     let (dir, port) = socket_app("foreign");
-    let _held = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+    let _held = hold(port);
     let out = brain(&dir, &["test"]);
     assert_eq!(out.status.code(), Some(2));
     let text = stderr(&out);
@@ -121,7 +134,7 @@ fn another_process_on_the_declared_port_is_named_without_suggesting_a_flag_test_
 #[test]
 fn a_doctor_whose_tests_did_not_run_does_not_claim_no_errors() {
     let (dir, port) = socket_app("contradiction");
-    let _held = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+    let _held = hold(port);
     let out = brain(&dir, &["doctor"]);
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     assert!(text.contains("did not run"), "{text}");

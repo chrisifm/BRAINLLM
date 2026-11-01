@@ -1,0 +1,10 @@
+{
+  "id": "deploy-install-dev",
+  "kind": "fix",
+  "title": "Deploy docs name the production install",
+  "why": "With NODE_ENV=production, npm ci skips the devDependency that provides brain, so the build cannot find the command.",
+  "guide": "docs/DEPLOYMENT.md",
+  "changelog": [
+    "The deploy guide and docs/DEPLOYMENT.md state that a server with `NODE_ENV=production` installs with `npm ci --include=dev`"
+  ]
+}

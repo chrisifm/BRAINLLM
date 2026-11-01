@@ -1,0 +1,16 @@
+{
+  "id": "shell-without-head",
+  "kind": "fix",
+  "title": "A shell without <head> is reported",
+  "why": "The build and the server write titles and tags before </head>; without it they vanished from every page with no error.",
+  "changelog": [
+    "B0940 warns when `app.brain` has no `<head>`, where a build or the server silently dropped every title and head tag"
+  ],
+  "guide": "brain guide views",
+  "codes": [
+    "B0940"
+  ],
+  "affects": [
+    "app.brain"
+  ]
+}

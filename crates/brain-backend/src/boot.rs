@@ -16,6 +16,8 @@ pub struct Boot {
     pub cap: Duration,
     /// Total time spent retrying before giving up. Zero disables retries.
     pub give_up: Duration,
+    /// Treat a refused role or missing database as passing: a cluster upgrade or a failover answers that for a while.
+    pub wait_out_refusal: bool,
     /// How long a request waits for a pooled connection before it is treated as overload.
     pub acquire: Duration,
 }
@@ -28,12 +30,13 @@ impl Boot {
             base: Duration::from_millis(250),
             cap: Duration::from_secs(5),
             give_up: Duration::from_secs(60),
+            wait_out_refusal: true,
             acquire: Duration::from_secs(2),
         }
     }
     /// One-shot command (migrate, bootstrap): no retry, the historical 5 s acquire budget.
     pub fn command(production: bool) -> Self {
-        Self { give_up: Duration::ZERO, acquire: Duration::from_secs(5), ..Self::server(production) }
+        Self { give_up: Duration::ZERO, wait_out_refusal: false, acquire: Duration::from_secs(5), ..Self::server(production) }
     }
     /// Full jitter: a uniform delay in `0..=min(cap, base * 2^attempt)`. `unit` is in `0.0..1.0`.
     pub fn delay(&self, attempt: u32, unit: f64) -> Duration {
@@ -155,6 +158,10 @@ fn retryable(error: &sqlx::Error) -> bool {
     }
 }
 
+fn refused(error: &sqlx::Error) -> bool {
+    matches!(error, sqlx::Error::Database(db) if matches!(db.code().as_deref(), Some("28P01" | "28000" | "3D000")))
+}
+
 fn unit_random() -> f64 {
     use ring::rand::SecureRandom;
     let mut bytes = [0u8; 4];
@@ -164,8 +171,9 @@ fn unit_random() -> f64 {
     f64::from(u32::from_le_bytes(bytes)) / (f64::from(u32::MAX) + 1.0)
 }
 
-/// Connects with the boot policy. Retries only transient failures (refused connection, server
-/// starting up, connection slots full); bad credentials or TLS failures stop immediately.
+/// Connects with the boot policy. Retries transient failures (refused connection, server starting up, connection slots
+/// full) and, for a long-lived process, a refused role or missing database, naming the cause on the first refusal; a
+/// one-shot command fails on those at once, and TLS failures always stop immediately.
 pub async fn connect(url: &str, boot: &Boot) -> Result<PgPool, String> {
     let options = require_verified_tls(url, boot.production)?;
     let started = tokio::time::Instant::now();
@@ -199,7 +207,14 @@ pub async fn connect(url: &str, boot: &Boot) -> Result<PgPool, String> {
             Err(error) => error,
         };
         let elapsed = started.elapsed();
-        if !retryable(&error) || elapsed >= boot.give_up {
+        let waits_out = boot.wait_out_refusal && refused(&error);
+        if waits_out && elapsed >= boot.give_up {
+            return Err(format!("{}; gave up after {}s over {} attempts", connect_failure(&options, &error), elapsed.as_secs(), attempt + 1));
+        }
+        if waits_out && attempt == 0 {
+            eprintln!("{}", serde_json::json!({"schemaVersion":1,"event":"database-connect-refused","code":"B0762","msg":connect_failure(&options, &error),"retrySeconds":boot.give_up.as_secs()}));
+        }
+        if !(waits_out || retryable(&error)) || elapsed >= boot.give_up {
             return Err(if retryable(&error) && !boot.give_up.is_zero() {
                 format!("BDB_CONNECT_TIMEOUT (B0762): Postgres stayed unreachable for {}s over {} attempts; fix: check that it is running and DATABASE_URL is correct (credentials are not logged)", elapsed.as_secs(), attempt + 1)
             } else if matches!(error, sqlx::Error::Tls(_)) {
@@ -276,4 +291,44 @@ mod tests {
         assert!(err.starts_with("Cannot connect to Postgres"), "{err}");
         assert!(err.contains("as user `alice`") && err.contains("127.0.0.1:1") && err.contains("database `shop`") && !err.contains("s3cret"), "{err}");
     }
+
+    /// A server that answers every connection with the given Postgres error, counting the attempts.
+    async fn refusing(code: &'static str) -> (String, std::sync::Arc<std::sync::atomic::AtomicU32>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("postgres://someone@{}/db?sslmode=disable", listener.local_addr().unwrap());
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let seen = count.clone();
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let mut startup = [0u8; 512];
+                let _ = socket.read(&mut startup).await;
+                let fields = format!("SFATAL\0C{code}\0Mrefused\0\0");
+                let mut reply = vec![b'E'];
+                reply.extend_from_slice(&(fields.len() as u32 + 4).to_be_bytes());
+                reply.extend_from_slice(fields.as_bytes());
+                let _ = socket.write_all(&reply).await;
+            }
+        });
+        (url, count)
+    }
+
+    #[tokio::test]
+    async fn a_long_lived_process_waits_out_a_refused_role_and_a_command_does_not() {
+        for code in ["28P01", "28000", "3D000"] {
+            let (url, count) = refusing(code).await;
+            let quick = Boot { base: Duration::from_millis(5), cap: Duration::from_millis(20), give_up: Duration::from_millis(300), ..Boot::server(false) };
+            let error = connect(&url, &quick).await.unwrap_err();
+            let attempts = count.load(std::sync::atomic::Ordering::SeqCst);
+            assert!(attempts > 2, "{code}: {attempts} attempts");
+            assert!(error.contains("B0762") && error.contains("attempts"), "{error}");
+            let (url, count) = refusing(code).await;
+            let error = connect(&url, &Boot::command(false)).await.unwrap_err();
+            assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1, "{code}: a command fails fast");
+            assert!(error.contains("B0762"), "{error}");
+        }
+    }
+
 }

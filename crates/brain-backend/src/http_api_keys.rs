@@ -1,5 +1,5 @@
 //! HTTP glue for project API keys: the request gate for `/api` resource routes and the session-only key routes.
-use super::{App, Error, Result};
+use super::{App, Error, Result, Strict};
 use crate::api_keys::{self, Admission, Denied, EventFilter, NewKey, Principal, QuotaState};
 use crate::auth::User;
 use super::Path;
@@ -260,7 +260,7 @@ struct ListKeys {
 struct Summary {
     days: Option<i64>,
 }
-async fn create(State(app): State<App>, h: HeaderMap, Json(body): Json<CreateKey>) -> Result<Json<Value>> {
+async fn create(State(app): State<App>, h: HeaderMap, Strict(body): Strict<CreateKey>) -> Result<Json<Value>> {
     let keys = keys(&app)?;
     let user = app.required(&h).await?;
     match keys

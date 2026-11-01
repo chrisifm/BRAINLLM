@@ -247,3 +247,28 @@ fn internal_links_keep_the_page_language() {
     assert!(account.to_lowercase().contains("location: /es/login"), "{account}");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+// The account emails go out in one language; an app in another one is told how to set it.
+#[test]
+fn doctor_reports_auth_emails_left_in_english() {
+    let tmp = std::env::temp_dir().join(format!("bi18n-mail-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let bin = env!("CARGO_BIN_EXE_brain");
+    let run = |dir: &std::path::Path, args: &[&str]| {
+        let out = Command::new(bin).args(args).current_dir(dir).stdin(Stdio::null()).output().unwrap();
+        format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+    };
+    run(&tmp, &["new", "app"]);
+    let dir = tmp.join("app");
+    assert!(!run(&dir, &["doctor", "--json"]).contains("B0941"), "an English-only app has nothing to set");
+    run(&dir, &["add", "locale", "es"]);
+    assert!(dir.join("i18n/es.json").exists());
+    assert!(run(&dir, &["doctor", "--json"]).contains("B0941"));
+    let default = dir.join("i18n/en.json");
+    let text = std::fs::read_to_string(&default).unwrap();
+    let keys = r#"{"auth.email.verify":"Verify","auth.email.reset":"Reset","auth.email.notice":"Ignore it","#;
+    std::fs::write(&default, text.replacen('{', keys, 1)).unwrap();
+    assert!(!run(&dir, &["doctor", "--json"]).contains("B0941"));
+    let _ = std::fs::remove_dir_all(&tmp);
+}

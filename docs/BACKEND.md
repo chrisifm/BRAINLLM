@@ -152,7 +152,7 @@ are connection startup options, not a session `SET`: `statement_timeout` 5 s, `i
 and CLI commands are not capped). A transaction-mode pooler must forward the `options` startup parameter; otherwise
 set the same values with `ALTER ROLE <app role> SET …`.
 
-- `POST /_brain/auth/signup` accepts `{ email, password }`, creates an account with the configured signup role, and never accepts a role.
+- `POST /_brain/auth/signup` accepts `{ email, password }`, creates an account with the configured signup role, and never accepts a role. Any other key answers 422 `INVALID_INPUT` with that key in `error.fields`; the answer depends only on the keys sent, so it says nothing about whether an account exists.
 - `POST /_brain/auth/login` accepts the same input and sets an opaque `__Host-brain` cookie: HttpOnly, Secure,
   SameSite=Lax, seven days. The token is hashed in Postgres; roles are loaded from the users table on every request.
 - `GET /_brain/auth/me` returns the authenticated user. `POST /_brain/auth/logout` revokes that session.

@@ -1541,6 +1541,20 @@ impl<'a> Checker<'a> {
         if self.c.kind != FileKind::App {
             return;
         }
+        fn has_head(nodes: &[Node]) -> bool {
+            nodes.iter().any(|n| match n {
+                Node::Element(e) => e.tag.eq_ignore_ascii_case("head") || has_head(&e.children),
+                _ => false,
+            })
+        }
+        if !has_head(&self.c.template) {
+            self.push(
+                "B0940",
+                Span { start: 0, end: 0, line: 1, col: 1 },
+                "`app.brain` has no `<head>`, so the build and the server drop every page's `<title>` and tags, and the charset and viewport with them",
+                "add `<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"></head>` before `<body>`",
+            );
+        }
         let mut hits = Vec::new();
         go(&self.c.template, &mut hits);
         for (span, what) in hits {

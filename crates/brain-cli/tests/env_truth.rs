@@ -156,3 +156,83 @@ fn a_session_set_the_backend_would_refuse_warns_until_the_app_owns_the_session()
     let (_, out) = brain(&app.0, &["check", "--json"]);
     assert!(!out.contains("B0786"), "{out}");
 }
+
+fn with_node_env(root: &Path, args: &[&str], node_env: Option<&str>) -> (bool, String) {
+    let mut command = Command::new(bin());
+    command.args(args).current_dir(root).env("NO_COLOR", "1").env_remove("DATABASE_URL").env_remove("NODE_ENV").stdin(Stdio::null());
+    if let Some(value) = node_env { command.env("NODE_ENV", value); }
+    let o = command.output().unwrap();
+    (o.status.success(), format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)))
+}
+const PRODUCTION_ONLY_DB: &str = "[production]\nDATABASE_URL=postgres://u:synthetic-password@127.0.0.1:1/app\n";
+
+// A deployed shell that forgot --env must learn that, not that the database is missing from a section it never asked for.
+#[test]
+fn a_production_shell_without_env_is_told_about_env_on_every_database_command() {
+    let a = app("node-env");
+    fs::write(a.0.join(".brain_env"), PRODUCTION_ONLY_DB).unwrap();
+    for args in [&["jobs", "work", "mail"][..], &["jobs", "stats"], &["backend", "migrate"], &["backend", "serve"], &["analytics", "report"], &["media", "list", "--owner", "x"]] {
+        let (ok, text) = with_node_env(&a.0, args, Some("production"));
+        assert!(!ok && text.contains("B0785") && text.contains("--env production") && !text.contains("B0762"), "{args:?}: {text}");
+        assert!(!text.contains("synthetic-password"), "{text}");
+    }
+}
+
+#[test]
+fn a_database_url_in_another_section_is_named_and_an_equals_env_counts_as_stated() {
+    let a = app("other-section");
+    fs::write(a.0.join(".brain_env"), PRODUCTION_ONLY_DB).unwrap();
+    let (_, text) = with_node_env(&a.0, &["jobs", "stats"], None);
+    assert!(text.contains("B0762") && text.contains("[production]") && text.contains("--env production") && !text.contains("synthetic-password"), "{text}");
+    let (_, text) = with_node_env(&a.0, &["jobs", "stats", "--env=production"], Some("production"));
+    assert!(!text.contains("B0785"), "--env=production states the environment: {text}");
+    // negative: nothing to point at when no section has it
+    fs::write(a.0.join(".brain_env"), "PUBLIC_SITE_NAME=app\n").unwrap();
+    let (_, text) = with_node_env(&a.0, &["jobs", "stats"], None);
+    assert!(text.contains("B0762") && !text.contains("[production]"), "{text}");
+}
+
+fn with_stripe_route(a: &App, env: &str) {
+    let dir = a.0.join("server/routes/payments");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("route.jsbrain"), "<meta server>\nexport default { method: 'POST', path: '/hooks/payments', verify: { scheme: 'timestamped', header: 'X-Signature', secret: 'PAYMENTS_WEBHOOK_SECRET' } }\n").unwrap();
+    fs::write(dir.join("handler.jsbrain"), "<meta server>\nexport default async function handle(ctx) { return { ok: true } }\n").unwrap();
+    fs::write(a.0.join(".brain_env"), env).unwrap();
+}
+
+// A supervisor restarts a process that exits with a failure: a missing secret would loop forever, each time looking like a
+// crash. It stops before the first connection, with its code, and with the exit status supervisors are told not to restart.
+#[test]
+fn a_missing_route_secret_stops_serve_once_with_its_code_and_a_no_restart_status() {
+    let a = app("config-exit");
+    for secret in ["", "PAYMENTS_WEBHOOK_SECRET=\n", "PAYMENTS_WEBHOOK_SECRET?=\n", "PAYMENTS_WEBHOOK_SECRET=short-value\n"] {
+        // nothing listens on this port: reaching the database would take a minute and report it instead
+        with_stripe_route(&a, &format!("DATABASE_URL=postgres://u@127.0.0.1:1/none\n{secret}"));
+        let started = std::time::Instant::now();
+        let o = Command::new(bin()).args(["backend", "serve", "--env", "development", "--port", "0"]).current_dir(&a.0).env("NO_COLOR", "1").env_remove("DATABASE_URL").env_remove("NODE_ENV").env_remove("PAYMENTS_WEBHOOK_SECRET").stdin(Stdio::null()).output().unwrap();
+        let text = String::from_utf8_lossy(&o.stderr).to_string();
+        assert_eq!(o.status.code(), Some(78), "{secret:?}: {text}");
+        assert!(text.contains("B0790") && text.contains("PAYMENTS_WEBHOOK_SECRET") && text.contains("fix:") && !text.contains("short-value"), "{text}");
+        assert!(started.elapsed().as_secs() < 20, "it must not wait for the database: {text}");
+    }
+    // a one-shot command keeps the ordinary failure status
+    with_stripe_route(&a, "DATABASE_URL=not-a-url\n");
+    let (ok, out) = brain(&a.0, &["backend", "migrate", "--env", "development"]);
+    assert!(!ok && out.contains("B0762"), "{out}");
+    let o = Command::new(bin()).args(["backend", "migrate", "--env", "development"]).current_dir(&a.0).stdin(Stdio::null()).output().unwrap();
+    assert_eq!(o.status.code(), Some(2));
+}
+
+// An intentionally empty key has one way out, and it has to be named everywhere the author may look, with its limit.
+#[test]
+fn the_empty_key_guidance_names_the_optional_form_and_what_it_does_not_cover() {
+    let a = app("optional-guidance");
+    let (_, explained) = brain(&a.0, &["explain", "B0720"]);
+    assert!(explained.contains("?="), "{explained}");
+    fs::write(a.0.join(".brain_env"), "EMPTY_KEY=\n").unwrap();
+    let (ok, out) = brain(&a.0, &["build", "--progress=off"]);
+    assert!(!ok && out.contains("EMPTY_KEY?=") && out.contains("B0790"), "{out}");
+    with_stripe_route(&a, "DATABASE_URL=postgres://u@127.0.0.1:1/none\nPAYMENTS_WEBHOOK_SECRET?=\n");
+    let (ok, out) = brain(&a.0, &["backend", "serve", "--env", "development", "--port", "0"]);
+    assert!(!ok && out.contains("B0790") && out.contains("?="), "`KEY?=` does not disable the route: {out}");
+}

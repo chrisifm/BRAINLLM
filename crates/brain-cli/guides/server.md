@@ -25,7 +25,7 @@ After-write jobs commit with their mutation. See `docs/BEFORE-HOOKS.md` and `doc
 
 ## Limits
 RPC and form bodies, call deadlines and the call rate come from brain.json, the same in `brain run` and production:
-`"server": { "maxBodyKB": 1024, "timeoutMs": 10000, "rpcPerMinute": 60 }` (the defaults). A body past `maxBodyKB`
+`"server": { "maxBodyKB": 1024, "timeoutMs": 10000, "rpcPerMinute": 60 }` (the defaults). `"earlyHints": true` adds 103 responses; keep it off behind nginx below 1.29. A body past `maxBodyKB`
 gets 413 naming the setting; a file sent as base64 grows by a third, so a 5 MB file needs about `"maxBodyKB": 7000`
 (at most 65536). `timeoutMs` bounds each server function and `load()` (504), `rpcPerMinute` the calls per client IP
 and function (429). `BRAIN_MAX_BODY_KB`, `BRAIN_TIMEOUT_MS` and `BRAIN_RPC_LIMIT` in `.brain_env` override them per
@@ -70,7 +70,7 @@ In production set `BRAIN_SECRET` (32+ random bytes) in the `[production]` sectio
   `brain run` uses development, `brain build` production, `--env staging` another.
 - Server: `process.env.KEY`. Client: only `process.env.PUBLIC_KEY` (B0702 otherwise; a secret in a `PUBLIC_` key is B0723).
 - `.brain_env` is never committed (B0725); `.brain_env.example` lists its keys and the keys the code reads (B0727 when out of sync; `brain doctor --fix` writes it).
-- An empty key in the build environment fails the build (B0720). A variable the app works without is declared `KEY?=`: it may stay empty, and the program sees it as unset. The line that wins for an environment decides, so `[production]` can require what the shared block leaves optional. MCP `brain_env_keys` lists keys, never values.
+- An empty key in the build environment fails the build (B0720). A variable the app works without is declared `KEY?=`: it may stay empty, and the program sees it as unset. A secret a route or webhook contract names stays required: remove that route in environments without it (B0790). The line that wins for an environment decides, so `[production]` can require what the shared block leaves optional. MCP `brain_env_keys` lists keys, never values.
 
 ## Errors
 - `throw notFound()` in `load` → 404 with `views/404.brain`; `throw redirect('/x')` → 303; `deny('reason')` in a
@@ -91,7 +91,7 @@ brain reload                      # zero-downtime: new instances ready before th
 brain stop
 brain start --install             # writes a systemd unit (Linux) or launchd plist (macOS) and prints the enable command
 ```
-Logs go to `logs/app.log` (rotated). Hosted under a sub-path: `brain.json` `"base": "/app/"`. `brain preview` serves `dist/` on a temporary loopback port to look before deploying.
+An npm-created app pins the compiler in devDependencies, which `NODE_ENV=production` skips: install with `npm ci --include=dev` or `npm run build` stops with `brain: command not found`, and do not prune it afterwards (`brain start` is the same package). Logs go to `logs/app.log` (rotated). Hosted under a sub-path: `brain.json` `"base": "/app/"`. `brain preview` serves `dist/` on a temporary loopback port to look before deploying.
 
 ## Verify
 ```bash

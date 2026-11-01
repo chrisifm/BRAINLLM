@@ -192,3 +192,7 @@ creates two accounts through its actual server, explicitly bootstraps one admini
 checks old-session revocation and assigns a custom role through HTTP. Test credentials stay in request bodies;
 no password or token enters command arguments. The compiled default-login regression executes both native login
 modes against a fetch fixture, verifies safe navigation and no demo fallback, and rejects persistent auth storage.
+
+## Language of the emails
+
+The emails are in English by default. To send them in another language, define all three keys in the dictionary of the default locale: `auth.email.verify` (subject and heading of the verification email), `auth.email.reset` (the same for password recovery) and `auth.email.notice` (the closing line). A partial set falls back to English, so an email is never half translated, and `brain doctor` reports B0941 for an app with a non-English locale until they are set. All accounts receive the same language: signup carries no language of its own.

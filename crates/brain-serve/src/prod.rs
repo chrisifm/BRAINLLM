@@ -218,6 +218,7 @@ impl Static {
             };
         }
         let analytics = target.is_some() && std::env::var("BRAIN_ANALYTICS").as_deref() != Ok("off");
+        let probe_target = target.clone();
         if let (Some(target), Some(native_path)) = (target, native_path) {
             if native_proxy::handles(native_path) {
                 req.path = native_path.to_string();
@@ -284,6 +285,16 @@ impl Static {
         if inner.as_deref() == Some("/favicon.ico") && self.resolve("/favicon.ico").is_none() && self.resolve("/favicon.svg").is_some() {
             let location = format!("{}/favicon.svg", self.pre);
             return write(&mut s, 301, &[("Location".into(), location), ("Cache-Control".into(), "public, max-age=86400".into())], b"", head);
+        }
+        // `/health` is reserved for the backend (B0735), as in server.mjs: an app file at that path wins, otherwise the
+        // backend answers, or a plain healthy response without one. It also answers at the root under a base.
+        let probe_path = inner.as_deref().unwrap_or(&path);
+        if native_proxy::is_probe(probe_path) && inner.as_deref().is_none_or(|p| self.resolve(p).is_none()) {
+            let Some(target) = probe_target else {
+                return write(&mut s, 200, &[("Content-Type".into(), "application/json".into()), ("Cache-Control".into(), "no-store".into())], b"{\"ok\":true}", head);
+            };
+            req.path = probe_path.to_string();
+            return native_proxy::serve(&mut s, &target, &req, None);
         }
         let (status, file) = match inner.as_deref().and_then(|p| self.resolve(p).map(|f| (p, f))) {
             // a status page opened directly answers its status, as server.mjs does
@@ -1111,6 +1122,48 @@ mod encoding_tests {
         );
         assert!(head.ends_with("\r\n\r\n"));
         assert!(request("GET", "/s/short").starts_with("HTTP/1.1 404"));
+        std::fs::remove_dir_all(dist).unwrap();
+    }
+
+    #[test]
+    fn health_answers_on_the_frontend_port_and_an_app_file_wins() {
+        use super::Static;
+        use std::{io::{Read, Write}, net::{TcpListener, TcpStream}};
+        let dist = std::env::temp_dir().join(format!("brain-prod-health-{}", std::process::id()));
+        std::fs::create_dir_all(&dist).unwrap();
+        std::fs::write(dist.join("index.html"), "<h1>Home</h1>").unwrap();
+        let ask = |pre: &str, backend: Option<String>, path: &str| {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let handler = Static::load(&dist, pre);
+            let task = std::thread::spawn(move || handler.handle_with_backend(listener.accept().unwrap().0, backend.as_deref()).unwrap());
+            let mut client = TcpStream::connect(address).unwrap();
+            write!(client, "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").unwrap();
+            let mut response = String::new();
+            client.read_to_string(&mut response).unwrap();
+            task.join().unwrap();
+            response
+        };
+        for path in ["/health", "/health/live", "/health/ready"] {
+            let plain = ask("", None, path);
+            assert!(plain.starts_with("HTTP/1.1 200") && plain.ends_with("{\"ok\":true}") && plain.contains("no-store"), "{plain}");
+        }
+        assert!(ask("/app", None, "/health").starts_with("HTTP/1.1 200"));
+        assert!(ask("", None, "/health/other").starts_with("HTTP/1.1 404"));
+        let authority = TcpListener::bind("127.0.0.1:0").unwrap();
+        let target = format!("http://{}", authority.local_addr().unwrap());
+        let backend = std::thread::spawn(move || {
+            let (mut socket, _) = authority.accept().unwrap();
+            let req = crate::http::read_request(socket.try_clone().unwrap()).unwrap();
+            assert_eq!(req.path, "/health/ready");
+            crate::http::respond_with(&mut socket, 503, "application/json", b"{\"code\":\"DRAINING\"}", false, &[]).unwrap();
+        });
+        let forwarded = ask("", Some(target), "/health/ready");
+        assert!(forwarded.starts_with("HTTP/1.1 503") && forwarded.contains("DRAINING"), "{forwarded}");
+        backend.join().unwrap();
+        std::fs::create_dir_all(dist.join("health")).unwrap();
+        std::fs::write(dist.join("health/index.html"), "<h1>status board</h1>").unwrap();
+        assert!(ask("", None, "/health").contains("status board"));
         std::fs::remove_dir_all(dist).unwrap();
     }
 }

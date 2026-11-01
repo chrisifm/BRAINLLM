@@ -467,10 +467,12 @@ fn database(root: &Path, environment: &str) -> Result<String, String> {
         .ok()
         .or_else(|| crate::env::value(root, environment, "DATABASE_URL"))
         .filter(|s| !s.is_empty())
-        .ok_or(
-            "B0762: DATABASE_URL is not set and the native backend requires Postgres; fix: set it in .brain_env or the process environment"
-                .into(),
-        )
+        .ok_or_else(|| {
+            if environment != "production" && crate::env::value(root, "production", "DATABASE_URL").is_some_and(|v| !v.is_empty()) {
+                return format!("B0762: DATABASE_URL is not set for the {environment} environment, but .brain_env has it under [production]; fix: pass --env production on a deployed machine, or set it under [{environment}]");
+            }
+            "B0762: DATABASE_URL is not set and the native backend requires Postgres; fix: set it in .brain_env or the process environment".into()
+        })
 }
 /// `application_name` for this app's Postgres sessions: `brain:<brain.json name>:<role>`.
 pub(crate) fn pg_name(root: &Path, role: &str) -> String {
@@ -618,7 +620,7 @@ fn operator(args: &[String], url: &str, production: bool) -> Result<(), String> 
 /// B0785: without `--env`, `serve` runs as development: no TLS check on the database, open API description, no HSTS.
 /// That default is only right on a developer's machine, so anything that looks deployed has to say what it is.
 fn unstated_environment(args: &[String], database: Option<&str>, node_env: Option<&str>) -> Option<String> {
-    if args.iter().any(|a| a == "--env") {
+    if args.iter().any(|a| a == "--env" || a.starts_with("--env=")) {
         return None;
     }
     let why = if node_env == Some("production") {
@@ -630,9 +632,41 @@ fn unstated_environment(args: &[String], database: Option<&str>, node_env: Optio
     };
     Some(format!("B0785: {why} and no --env was given, so this would run with development defaults; fix: pass --env production (or --env development if this really is a development machine)"))
 }
-fn stated_database(args: &[String], root: &Path, environment: &str) -> Result<String, String> {
+/// Exit status of a long-running command stopped by its configuration (`EX_CONFIG`): a restart cannot fix it, so the
+/// generated PM2 file lists it in `stop_exit_codes` and `--with-workers` does not restart a worker that returns it.
+pub(crate) const CONFIG_EXIT: u8 = 78;
+static CONFIG_PHASE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Marks whether a failure right now is the configuration's. Off around what can recover alone: connecting to Postgres,
+/// binding the port, serving.
+fn config_phase(on: bool) {
+    CONFIG_PHASE.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+pub(crate) fn failed_on_configuration() -> bool {
+    CONFIG_PHASE.load(std::sync::atomic::Ordering::SeqCst)
+}
+/// The exit that must not count as a crash: what a supervisor of workers does with it.
+fn restart_worker(code: Option<i32>) -> bool {
+    code != Some(CONFIG_EXIT as i32)
+}
+/// B0790: a declared route or webhook without its secret. The environment alone reveals it, so it stops before any
+/// connection, once, instead of after one on every restart.
+fn secret_refusal(root: &Path, environment: &str) -> Option<String> {
+    let found: Vec<String> = crate::route_executor::secret_problems(root, environment)
+        .into_iter()
+        .chain(crate::webhook_config::secret_problem(root, environment))
+        .map(|(file, message)| format!("{file}: {message}"))
+        .collect();
+    (!found.is_empty()).then(|| format!("B0790: {}; fix: set the secret in the process environment or .brain_env (`brain check` lists them), or remove the route or webhook this environment does not use; `KEY?=` only lets the build pass, it does not disable a declared route", found.join(" | ")))
+}
+/// The environment is checked before the lookup: without `--env` the lookup reads the development section, so a deployed
+/// shell would otherwise hear B0762 about a variable it did set, under [production].
+pub(crate) fn stated_database(args: &[String], root: &Path, environment: &str) -> Result<String, String> {
+    let node_env = std::env::var("NODE_ENV").ok();
+    if let Some(refusal) = unstated_environment(args, None, node_env.as_deref()) {
+        return Err(refusal);
+    }
     let url = database(root, environment)?;
-    match unstated_environment(args, Some(&url), std::env::var("NODE_ENV").ok().as_deref()) {
+    match unstated_environment(args, Some(&url), node_env.as_deref()) {
         Some(refusal) => Err(refusal),
         None => Ok(url),
     }
@@ -740,6 +774,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         return Ok(());
     }
     if operation == "serve" {
+        config_phase(true);
         // Before any connection, so a wrong setting is never reported as a database or port problem.
         let problems = config_problems(&|key| std::env::var(key).ok().filter(|v| !v.is_empty()).or_else(|| crate::env::value(&root, &environment, key)));
         if !problems.is_empty() {
@@ -760,6 +795,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
         if let Some(found) = crate::startup_config::findings(&get, environment == "production").into_iter().find(|f| f.fatal) {
             return Err(found.message);
         }
+        if let Some(refusal) = secret_refusal(&root, &environment) {
+            return Err(refusal);
+        }
     }
     if operation == "serve" && environment == "production"
         && let Some((message, fix, _)) = crate::platform_config::proxy_findings(&root, None).into_iter().find(|f| f.2)
@@ -777,7 +815,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
             if let Some(name)=brain_backend::boot::create_local_database(&url).await? {eprintln!("created database {name}");}
         }
         let boot=if operation=="serve" {brain_backend::boot::Boot::server(production)} else {brain_backend::boot::Boot::command(production)};
+        config_phase(false);
         let pool=brain_backend::boot::connect(&url,&boot).await?;
+        config_phase(operation=="serve");
         if operation=="migrate"{
             brain_backend::db::migrate(&pool,&resources).await?;
             roles.register(&pool).await?;
@@ -848,7 +888,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
         brain_backend::db::keep_diagnostics(failure_log(&root));
         if !production && brain_serve::trace::settings(&root).enabled {brain_backend::dev_trace::install(&root);}
         let port=crate::flag(args,"--port").unwrap_or("5182".into()).parse::<u16>().map_err(|_|"B0763: --port is not a port number; fix: pass 0 to 65535")?;
+        config_phase(false);
         let listener=brain_serve::listen::bind_waiting("127.0.0.1",port,brain_serve::listen::RESTART_WAIT).and_then(|l|{l.set_nonblocking(true)?;tokio::net::TcpListener::from_std(l)}).map_err(|e|format!("B0763: cannot listen on 127.0.0.1:{port} ({e}); fix: stop what uses that port or pass another with --port"))?;
+        config_phase(true);
         let addr=listener.local_addr().map_err(|e|e.to_string())?;
         let public_site=crate::env::value(&root,&environment,"PUBLIC_SITE_URL").unwrap_or_else(||format!("http://{addr}"));
         let sockets=socket_settings(&root,Some(&public_site),crate::flag(args,"--origin").as_deref())?;
@@ -867,6 +909,12 @@ pub fn run(args: &[String]) -> Result<(), String> {
         };
         let public_base=setting("PUBLIC_SITE_URL").unwrap_or_else(||origin.clone());
         let mail=setting("BRAIN_MAIL_RESEND_KEY").map(|key|brain_backend::auth_flows::MailConfig::resend(key,setting("BRAIN_MAIL_FROM").ok_or("B0760: BRAIN_MAIL_RESEND_KEY is set without BRAIN_MAIL_FROM; fix: set BRAIN_MAIL_FROM to a verified sender, as `sender@your-domain` or `Name <sender@your-domain>`")?,public_base.clone())).transpose()?;
+        let mail=mail.map(|mut mail|{
+            if let Some([verify,reset,notice])=brain_check::i18n::load(&root).as_ref().and_then(brain_check::i18n::auth_email_text){
+                mail.text=brain_backend::auth_flows::EmailText{verify,reset,notice};
+            }
+            mail
+        });
         let config=brain_backend::Config{api_keys:crate::api_key_config::load(&root)?,sockets:sockets.native_config()?,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,resources,jobs,uploads:root.join(".brain/uploads"),origins:sockets.http_origins,production:environment=="production"};
         brain_backend::analytics::configure(analytics_settings(&root)?)?;
         eprintln!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
@@ -881,6 +929,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let processes=size("BRAIN_BACKEND_PROCESSES",1)?;
         // More than one process: rate windows and socket fan-out must live in Postgres, not in one process's memory.
         if processes>1 {platform.cluster.shared=true;}
+        config_phase(false);
         let http_pool=brain_backend::db::connect_named(&url,brain_backend::db::Workload::Http,http_size,&pg_name(&root,"http")).await?;
         brain_backend::db::check_connection_budget(&http_pool,(http_size+worker_size)*processes).await?;
         let worker_pool=brain_backend::db::connect_named(&url,brain_backend::db::Workload::Worker,worker_size,&pg_name(&root,"worker")).await?;
@@ -1452,7 +1501,12 @@ fn own_workers(root: &Path, environment: &str, backend: &str, queues: &[String],
                 tokio::select! {
                     status = child.wait() => {
                         if started.elapsed().as_secs() > 60 { backoff = 1; }
-                        eprintln!("{}", json!({"schemaVersion":1,"event":"worker-exited","command":command,"code":status.ok().and_then(|s|s.code()),"restartSeconds":backoff,"valuesCaptured":false}));
+                        let code = status.ok().and_then(|s| s.code());
+                        if !restart_worker(code) {
+                            eprintln!("{}", json!({"schemaVersion":1,"event":"worker-stopped","command":command,"code":code,"reason":"its configuration stops it and a restart cannot fix that; the reason is logged above","fix":"correct the setting and restart the server"}));
+                            return;
+                        }
+                        eprintln!("{}", json!({"schemaVersion":1,"event":"worker-exited","command":command,"code":code,"restartSeconds":backoff,"valuesCaptured":false}));
                     }
                     _ = recv.changed() => {
                         #[cfg(unix)]
@@ -1500,7 +1554,12 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
         return Err("usage: brain jobs enqueue <queue> --payload '<json>' [--key K] [--priority N] [--delay S] | status <id> | work <queue> [--concurrency 2] | dead <queue> | retry <queue> [--id <uuid>] | stats [queue] | cron [--once] | prune".into());
     }
     let snapshot = inspect(&root)?;
+    let long_running = matches!(op, "work" | "cron");
+    config_phase(long_running);
     let url = stated_database(args, &root, &environment)?;
+    if long_running && let Some(refusal) = crate::webhook_config::secret_problem(&root, &environment).map(|(file, message)| format!("B0790: {file}: {message}; fix: set the secret in the process environment or .brain_env")) {
+        return Err(refusal);
+    }
     let name = args.get(1).filter(|a| !a.starts_with("--")).cloned().unwrap_or_default();
     let declared: Vec<String> = contracts(&root, "jobs")?.into_iter().map(|job| job.name).collect();
     if name.is_empty() && matches!(op, "enqueue" | "work" | "dead" | "retry") {
@@ -1532,7 +1591,8 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
     let _ = snapshot;
     runtime()?.block_on(async {
         let production = environment == "production";
-        let boot = if op == "work" { brain_backend::boot::Boot::server(production) } else { brain_backend::boot::Boot::command(production) };
+        let boot = if matches!(op, "work" | "cron") { brain_backend::boot::Boot::server(production) } else { brain_backend::boot::Boot::command(production) };
+        config_phase(false);
         let pool = brain_backend::boot::connect(&url, &boot).await?;
         brain_backend::db::verify(&pool, &contracts(&root, "resources")?).await?;
         let queue = brain_backend::jobs::Queue::new(pool.clone());
@@ -1912,6 +1972,11 @@ impl Drop for HandlerGroup {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_configuration_exit_is_the_one_a_worker_supervisor_does_not_restart() {
+        assert!(!super::restart_worker(Some(i32::from(super::CONFIG_EXIT))));
+        assert!(super::restart_worker(Some(1)) && super::restart_worker(Some(2)) && super::restart_worker(None));
+    }
     #[test]
     fn unstated_environment_stops_what_looks_deployed() {
         let args = |list: &[&str]| list.iter().map(ToString::to_string).collect::<Vec<_>>();

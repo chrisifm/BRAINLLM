@@ -307,6 +307,19 @@ async fn real_http_account_handlers_enforce_identity_replay_revocation_custom_ro
             .0,
         422
     );
+    // An extra field is named, and the answer is the same whether or not the address has an account.
+    let mut extra = Vec::new();
+    for email in [address.as_str(), "nobody-here@example.test"] {
+        let (status, _, mut body) = server
+            .post("/_brain/auth/signup", json!({"email":email,"password":password,"name":"Ana"}), None)
+            .await;
+        assert_eq!(status, 422);
+        assert!(body["error"]["fields"]["name"].is_string(), "{body}");
+        assert!(!body.to_string().contains(password) && !body.to_string().contains(email), "{body}");
+        body["rid"] = Value::Null;
+        extra.push(body);
+    }
+    assert_eq!(extra[0], extra[1]);
     let (status, headers, logged_in) = server
         .post(
             "/_brain/auth/login",

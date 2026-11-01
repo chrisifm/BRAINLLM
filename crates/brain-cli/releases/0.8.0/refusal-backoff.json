@@ -1,0 +1,13 @@
+{
+  "id": "refusal-backoff",
+  "kind": "fix",
+  "title": "Long-lived processes wait out a refused role",
+  "why": "A cluster upgrade refused the role for minutes; a worker that exited at once was restarted thousands of times.",
+  "changelog": [
+    "`brain backend serve`, `brain jobs work` and `brain jobs cron` wait up to 60 s on a refused role or missing database, instead of a restart storm under a process manager"
+  ],
+  "guide": "docs/DEPLOYMENT.md",
+  "codes": [
+    "B0762"
+  ]
+}

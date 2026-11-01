@@ -48,6 +48,7 @@ What an app author can use, generated from the tables the compiler dispatches on
 | `bool` | `bool` | `eq` `exists` | yes |
 | `email` | `email` | `eq` `ne` `in` `prefix` `iprefix` `exists` | yes |
 | `obj` | `obj` |  | no |
+| `geo` | `geo` | `near` `bbox` `exists` | no |
 | `int` | `int` | `eq` `ne` `gt` `gte` `lt` `lte` `between` `in` `exists` | yes |
 | `decimal(p,s)` | `decimal(10,2)` | `eq` `ne` `gt` `gte` `lt` `lte` `between` `in` `exists` | yes |
 | `date` | `date` | `eq` `ne` `gt` `gte` `lt` `lte` `between` `in` `exists` | yes |
@@ -55,27 +56,34 @@ What an app author can use, generated from the tables the compiler dispatches on
 | `enum(a|b)` | `enum(a\|b)` | `eq` `ne` `in` `prefix` `iprefix` `exists` | yes |
 | `list<str>` | `list<str>` | `has` `exists` | no |
 | `ref:<resource>` | `ref:posts` | `eq` `ne` `in` `exists` | no |
+| `org` | `org` | `eq` `ne` `in` `exists` | no |
 
 Field options: `required` `default` `unique` `on_delete` `visible` `access` `slug` `pattern`.
 
-Filter operators: `eq` `ne` `gt` `gte` `lt` `lte` `between` `in` `prefix` `iprefix` `exists` `has`.
+Filter operators: `eq` `ne` `gt` `gte` `lt` `lte` `between` `in` `prefix` `iprefix` `exists` `has` `near` `bbox`.
 
 Policy operations: `read` `create` `update` `delete`.
 
-Policy grants: `public` `owner` `owner.<ref>` `<role>`.
+Policy grants: `public` `owner` `owner.<ref>` `org` `org.<role>` `org.own` `<role>`.
 
 ## Added by release
 
 ### 0.8.0
 
 - brain add auth and brain new --backend (`brain guide backend`)
+- Append-only audit log (`docs/backend/audit.md`)
 - brain capabilities and docs/CAPABILITIES.md (`docs/CAPABILITIES.md`)
+- Captcha verification on public writes (`docs/backend/captcha.md`)
 - brain.json csp.connectSrc narrows where pages can send data (`SPEC.md`)
+- Credits ledger (`docs/backend/credits.md`)
 - Dev observability panel (`SPEC.md`)
 - tel and file form rules (`docs/FORM-VALIDATION.md`)
+- Geo field with radius and box filters (`docs/backend/geo.md`)
 - brain guide whats-new, migrate and docs (`brain guide migrate`)
 - Backend and analytics guides (`brain guide backend`)
+- Facets on lists (`docs/backend/facets.md`)
 - AVIF media renditions (`docs/MEDIA.md`)
+- Organizations and memberships (`docs/backend/organizations.md`)
 - brain recipe --apply (`brain guide backend`)
 - brain add resource --policy (`brain guide backend`)
 - brain run --backend and migrate --create-db (`brain guide backend`)
