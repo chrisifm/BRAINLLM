@@ -516,24 +516,55 @@ fn contains_ci(hay: &str, needle: &str) -> bool {
 }
 
 /// Occurrences of `kw` in `text` as whole words (case-insensitive).
-fn count_phrase(text: &str, kw: &str) -> usize {
-    let words: Vec<String> = text
-        .split(|c: char| !c.is_alphanumeric())
+fn words_of(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_alphanumeric())
         .filter(|w| !w.is_empty())
         .map(str::to_lowercase)
-        .collect();
-    let k: Vec<String> = kw
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .map(str::to_lowercase)
-        .collect();
+        .collect()
+}
+
+fn count_words(words: &[String], k: &[String]) -> usize {
     if k.is_empty() || words.len() < k.len() {
         return 0;
     }
-    words
-        .windows(k.len())
-        .filter(|w| *w == k.as_slice())
-        .count()
+    words.windows(k.len()).filter(|w| *w == k).count()
+}
+
+fn count_phrase(text: &str, kw: &str) -> usize {
+    count_words(&words_of(text), &words_of(kw))
+}
+
+/// Internal links suggested per page.
+const SUGGESTED_LINKS: usize = 3;
+
+/// One page's text, tokenized once: comparing it with every other page's topic must not tokenize it per pair.
+struct PageWords {
+    words: Vec<String>,
+    distinct: std::collections::HashSet<String>,
+}
+
+impl PageWords {
+    fn new(text: &str) -> Self {
+        let words = words_of(text);
+        Self { distinct: words.iter().cloned().collect(), words }
+    }
+
+    /// The same answer as `mentions`: a phrase with a word absent from the page cannot occur, so most pairs end here.
+    fn mentions(&self, terms: &[String], tokenized: &[Vec<String>]) -> Option<String> {
+        let hits: Vec<&String> = terms
+            .iter()
+            .zip(tokenized)
+            .filter(|(_, k)| {
+                k.iter().all(|w| self.distinct.contains(w)) && {
+                    brain_metrics::count(brain_metrics::Counter::SeoMentionScans, 1);
+                    count_words(&self.words, k) > 0
+                }
+            })
+            .map(|(t, _)| t)
+            .collect();
+        let need = if terms.len() == 1 { 1 } else { 2 };
+        (!terms.is_empty() && hits.len() >= need).then(|| hits.iter().map(|h| h.as_str()).collect::<Vec<_>>().join(" "))
+    }
 }
 
 /// Common English words that never name a topic.
@@ -1075,17 +1106,47 @@ pub fn audit(site: &Site) -> Report {
                 .collect()
         })
         .collect();
-    let mut suggest: Vec<(usize, usize, String)> = Vec::new();
+    // Each page reports its first SUGGESTED_LINKS outgoing and incoming suggestions, in page order. A topic can only
+    // match a page holding the first word of one of its terms, so pages meet only the topics that share such a word,
+    // and a pair whose two lists are already full is settled.
+    let tokenized: Vec<Vec<Vec<String>>> = topics.iter().map(|t| t.iter().map(|term| words_of(term)).collect()).collect();
+    let routes: Vec<String> = site.pages.iter().map(|p| norm(&p.route)).collect();
+    let mut by_first_word: std::collections::HashMap<&str, Vec<usize>> = std::collections::HashMap::new();
+    for (to, terms) in tokenized.iter().enumerate().filter(|(j, _)| idx[*j]) {
+        for first in terms.iter().filter_map(|k| k.first()) {
+            let list = by_first_word.entry(first.as_str()).or_default();
+            if list.last() != Some(&to) {
+                list.push(to);
+            }
+        }
+    }
+    let mut outgoing: Vec<Vec<(usize, String)>> = vec![Vec::new(); docs.len()];
+    let mut incoming: Vec<Vec<(usize, String)>> = vec![Vec::new(); docs.len()];
     for (from, d) in docs.iter().enumerate().filter(|(i, _)| idx[*i]) {
-        for (to, t) in topics
+        let page = PageWords::new(&d.text);
+        let mut candidates: Vec<usize> = page
+            .distinct
             .iter()
-            .enumerate()
-            .filter(|(j, _)| idx[*j] && *j != from)
-        {
-            if !links[from].contains(&norm(&site.pages[to].route))
-                && let Some(term) = mentions(&d.text, t)
-            {
-                suggest.push((from, to, term));
+            .filter_map(|w| by_first_word.get(w.as_str()))
+            .flatten()
+            .copied()
+            .filter(|to| *to != from)
+            .collect();
+        candidates.sort_unstable();
+        candidates.dedup();
+        for to in candidates {
+            let settled = outgoing[from].len() == SUGGESTED_LINKS && incoming[to].len() == SUGGESTED_LINKS;
+            if settled || links[from].contains(&routes[to]) {
+                continue;
+            }
+            brain_metrics::count(brain_metrics::Counter::SeoMentionPairs, 1);
+            if let Some(term) = page.mentions(&topics[to], &tokenized[to]) {
+                if outgoing[from].len() < SUGGESTED_LINKS {
+                    outgoing[from].push((to, term.clone()));
+                }
+                if incoming[to].len() < SUGGESTED_LINKS {
+                    incoming[to].push((from, term));
+                }
             }
         }
     }
@@ -1121,11 +1182,9 @@ pub fn audit(site: &Site) -> Report {
             findings: Vec::new(),
         };
         if idx[i] {
-            let out: Vec<(String, String)> = suggest
+            let out: Vec<(String, String)> = outgoing[i]
                 .iter()
-                .filter(|(f, _, _)| *f == i)
-                .take(3)
-                .map(|(_, t, term)| (site.pages[*t].route.clone(), term.clone()))
+                .map(|(t, term)| (site.pages[*t].route.clone(), term.clone()))
                 .collect();
             page_checks(
                 cfg,
@@ -1153,11 +1212,9 @@ pub fn audit(site: &Site) -> Report {
                     .get(&p.route)
                     .is_some_and(|v| v.iter().any(|(_, r)| linked(r)));
             s.check(6, !orphan, "B1813", Level::Warning, || {
-                let from: Vec<String> = suggest
+                let from: Vec<String> = incoming[i]
                     .iter()
-                    .filter(|(_, t, _)| *t == i)
-                    .take(3)
-                    .map(|(f, _, term)| format!("{} (mentions \"{term}\")", site.pages[*f].route))
+                    .map(|(f, term)| format!("{} (mentions \"{term}\")", site.pages[*f].route))
                     .collect();
                 let fix = if from.is_empty() {
                     "link it from a related page or the navigation".to_string()
@@ -1465,5 +1522,24 @@ mod anchor_fix_tests {
         assert!(none.contains("assigned by the compiler") && !none.contains("add id"), "{none}");
         assert!(anchor_fix("pricing", ["intro"].into_iter()).contains("add id=\"pricing\""));
         assert!(anchor_fix("a~b", ["a"].into_iter()).contains("add id=\"a~b\""));
+    }
+}
+
+#[cfg(test)]
+mod mention_tests {
+    use super::{PageWords, mentions, words_of};
+
+    #[test]
+    fn tokenized_pages_answer_like_the_plain_mention_scan() {
+        let texts = ["", "Solar panels for homes", "panels solar", "solar-panels, for homes!", "SOLAR PANELS solar panels", "café solar"];
+        let topics: [&[&str]; 7] = [&[], &["solar panels"], &["solar", "homes"], &["solar", "café"], &["!!!"], &["panels solar", "for"], &["homes"]];
+        for text in texts {
+            let page = PageWords::new(text);
+            for terms in topics {
+                let terms: Vec<String> = terms.iter().map(|t| t.to_string()).collect();
+                let tokenized: Vec<Vec<String>> = terms.iter().map(|t| words_of(t)).collect();
+                assert_eq!(page.mentions(&terms, &tokenized), mentions(text, &terms), "{text:?} against {terms:?}");
+            }
+        }
     }
 }

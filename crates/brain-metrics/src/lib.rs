@@ -44,7 +44,8 @@ counters! {
     PrerenderedPages => "prerenderedPages",
     SeoViewParses => "seoViewParses",
     SeoViewParsesReused => "seoViewParsesReused",
-    SeoHtmlParses => "seoHtmlParses",
+    SeoMentionPairs => "seoMentionPairs",
+    SeoMentionScans => "seoMentionScans",
 }
 
 #[derive(Default)]

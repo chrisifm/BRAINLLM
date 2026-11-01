@@ -1281,6 +1281,19 @@ pub(crate) fn cache_cfg(root: &Path) -> Result<brain_pack::cache::CacheCfg, Stri
     Ok(c)
 }
 
+/// The SEO attributes of a view, read once per source revision: many generated pages share one view.
+fn seo_view_info(root: &Path, view: &str) -> Option<std::sync::Arc<brain_check::seo::ViewSeo>> {
+    let src = std::fs::read_to_string(root.join(view)).ok()?;
+    let reused = std::cell::Cell::new(true);
+    let fact = brain_metrics::memo(format!("seo-view:{view}"), |known: &(String, Option<std::sync::Arc<brain_check::seo::ViewSeo>>)| known.0 == src, || {
+        reused.set(false);
+        let info = brain_parse::parse(&src, Path::new(view)).ok().map(|c| std::sync::Arc::new(brain_check::seo::view_info(&c)));
+        (src.clone(), info)
+    });
+    brain_metrics::count(if reused.get() { brain_metrics::Counter::SeoViewParsesReused } else { brain_metrics::Counter::SeoViewParses }, 1);
+    fact.1.clone()
+}
+
 /// Returns (route, HTML) of every built page.
 fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mut BuildReport, progress: Option<&term::Progress>) -> Result<Vec<(String, String)>, String> {
     let on_phase = |phase: &str, done: usize, total: usize| {
@@ -1402,7 +1415,7 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
             .iter()
             .filter(|p| !p.file.starts_with("_server/"))
             .map(|p| {
-                let info = std::fs::read_to_string(root.join(&p.view)).ok().and_then(|src| brain_parse::parse(&src, Path::new(&p.view)).ok()).map(|c| brain_check::seo::view_info(&c));
+                let info = seo_view_info(root, &p.view);
                 let text = |k: &str| {
                     info.as_ref()?.attrs.iter().find(|(a, _)| a == k).and_then(|(_, v)| match v {
                         brain_check::seo::SeoValue::Text(t) => Some(t.clone()),
@@ -1483,12 +1496,11 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
         .collect();
     // static `<meta seo>` text values (the fallback when a view has no evaluated seo(props)), read by the parser
     let seo_of = |v: &str| -> Vec<(String, String)> {
-        let Some(c) = std::fs::read_to_string(root.join(v)).ok().and_then(|src| brain_parse::parse(&src, Path::new(v)).ok()) else { return Vec::new() };
-        brain_check::seo::view_info(&c)
-            .attrs
-            .into_iter()
+        let Some(info) = seo_view_info(root, v) else { return Vec::new() };
+        info.attrs
+            .iter()
             .filter_map(|(k, val)| match val {
-                brain_check::seo::SeoValue::Text(t) => Some((k, t)),
+                brain_check::seo::SeoValue::Text(t) => Some((k.clone(), t.clone())),
                 brain_check::seo::SeoValue::Expr(_) => None,
             })
             .collect()
