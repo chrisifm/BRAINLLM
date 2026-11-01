@@ -441,6 +441,9 @@ impl Domain {
         let find = |name: &str| resources.iter().find(|r| r.name == name);
         for (name, domain) in &self.resources {
             let r = find(name).ok_or_else(|| format!("server/resources/{name}: domain files name an undeclared resource"))?;
+            if crate::organizations::tenant(r).is_some() && (!domain.actions.is_empty() || domain.transitions.is_some() || domain.batch.is_some()) {
+                return Err(format!("server/resources/{name}: actions, transitions and batch cannot target tenant data yet, because their grants are global; fix: use the resource's update and delete routes, or a declared route with its own membership check"));
+            }
             let hooked = ["create", "update", "delete"].iter().any(|op| r.hooks.before(op).is_some());
             if hooked && (!domain.actions.is_empty() || domain.transitions.is_some()) {
                 return Err(format!("server/resources/{name}: actions and transitions cannot target a resource with a mandatory before-hook; express the rule as a guard, a constraint or move it into the hook"));
@@ -533,6 +536,9 @@ impl Domain {
                     _ => (target, None),
                 };
                 let r = find(resource).ok_or_else(|| format!("{slabel}: unknown resource `{resource}`"))?;
+                if crate::organizations::tenant(r).is_some() {
+                    return Err(format!("{slabel}: operations cannot target tenant data yet, because their grants are global; fix: use a declared route with its own membership check"));
+                }
                 let op_kind = match kind {
                     Kind::Create => Some("create"),
                     Kind::Update | Kind::Action | Kind::Transition => Some("update"),

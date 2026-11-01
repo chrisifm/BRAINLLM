@@ -86,9 +86,19 @@ fn buckets(root: &Path, resources: &[Resource], roles: &RolesConfig) -> Result<V
     Ok(out)
 }
 
+fn organizations(root: &Path) -> Result<brain_backend::organizations::Organizations, String> {
+    use brain_backend::organizations::{CONTRACT, Organizations};
+    let path = root.join(CONTRACT);
+    if !path.exists() {
+        return Ok(Organizations::default());
+    }
+    let value = crate::backend::read_contract(root, &path).map_err(|e| format!("{CONTRACT}: {e}"))?;
+    Organizations::from_contract(&value)
+}
+
 pub fn load(root: &Path, resources: &[Resource], roles: &RolesConfig) -> Result<Platform, String> {
     let (edge, cluster) = edge(root)?;
-    Ok(Platform { buckets: buckets(root, resources, roles)?, edge, cluster, cache: cache(root, resources)?, ..Default::default() })
+    Ok(Platform { buckets: buckets(root, resources, roles)?, edge, cluster, cache: cache(root, resources)?, organizations: organizations(root)?, ..Default::default() })
 }
 
 /// Projection for `brain backend schema --json`; contains no environment values.

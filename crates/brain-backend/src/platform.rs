@@ -24,6 +24,8 @@ pub struct Platform {
     pub cluster: crate::cluster::Cluster,
     /// Declared public caching of anonymous resource reads (`server/cache.jsbrain`).
     pub cache: crate::http::cache_http::CachePolicy,
+    /// Membership roles of tenant resources (`server/auth/organizations.jsbrain`).
+    pub organizations: crate::organizations::Organizations,
 }
 
 /// Which finished requests the backend logs as structured JSON lines.

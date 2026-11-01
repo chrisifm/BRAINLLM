@@ -144,7 +144,7 @@ impl Kind {
             Ty::DateTime => Kind::DateTime,
             Ty::Str | Ty::Email | Ty::Enum(_) => Kind::Text,
             Ty::Bool => Kind::Bool,
-            Ty::Ref(_) => Kind::Ref,
+            Ty::Ref(_) | Ty::Org => Kind::Ref,
             Ty::ListStr { .. } => Kind::List,
             Ty::Num | Ty::Obj => return None,
         })

@@ -155,7 +155,7 @@ impl TryFrom<RawPolicy> for Policy {
                         read_where.insert(name.clone(), conditions.into_iter().collect());
                         name
                     }
-                    _ => return Err(format!("{op} policy entries must be grant names; fix: use 'public', 'owner', 'owner.<ref>' or a role name")),
+                    _ => return Err(format!("{op} policy entries must be grant names; fix: use 'public', 'owner', 'owner.<ref>', 'org', 'org.<role>' or a role name")),
                 };
                 if names.contains(&name) {
                     return Err(format!("{op} policy lists `{name}` twice; fix: keep one entry, an unconditioned grant would make its row condition pointless"));
@@ -367,6 +367,13 @@ impl Resource {
                 if crate::ownership::path(role).is_some() {
                     continue;
                 }
+                if crate::organizations::tenant(self).is_some() {
+                    // The membership rules below decide every grant of tenant data.
+                    continue;
+                }
+                if role.starts_with("org.") {
+                    continue;
+                }
                 if !(matches!(role.as_str(), "owner" | "public")
                     || crate::auth_flows::role_name(role))
                     || role == "public" && op != "read"
@@ -378,6 +385,7 @@ impl Resource {
                 }
             }
         }
+        crate::organizations::validate_resource(self)?;
         crate::query::validate_read_where(self)?;
         if !self.policy.api && self.policy.read.iter().any(|g| g == "public") {
             return Err(format!("{}: a server-only resource (api: false) cannot grant public read; fix: remove public or drop api: false", self.name));
@@ -641,6 +649,15 @@ impl Resource {
             .filter(|(_, f)| f.unique)
             .map(|(n, _)| vec![n.clone()])
             .chain(self.constraints.unique.iter().cloned())
+            // Tenant values are unique per organization: a shared index would reveal another organization's value.
+            .map(|mut set| {
+                if let Some(org) = crate::organizations::tenant(self)
+                    && !set.iter().any(|f| f == org)
+                {
+                    set.insert(0, org.to_string());
+                }
+                set
+            })
             .map(|set| (self.object_name("_brain_ux_", &set.join(",")), set))
             .collect()
     }

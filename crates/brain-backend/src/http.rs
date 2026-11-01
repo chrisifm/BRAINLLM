@@ -26,6 +26,8 @@ use uuid::Uuid;
 mod sockets;
 #[path = "domain_http.rs"]
 mod domain_http;
+#[path = "organizations_http.rs"]
+mod organizations_http;
 #[path = "files_http.rs"]
 mod files_http;
 #[path = "edge_http.rs"]
@@ -96,6 +98,7 @@ pub struct App {
     platform: Arc<files_http::State>,
     routes: Arc<routes_http::State>,
     cluster: crate::cluster::Cluster,
+    organizations: Arc<crate::organizations::Organizations>,
 }
 #[derive(Debug)]
 pub struct Error {
@@ -213,7 +216,7 @@ impl Error {
         Self::new(
             StatusCode::FORBIDDEN,
             "POLICY_DENIED",
-            "The declared policy does not grant this operation to this identity (rules evaluated: role, owner, owner.<ref> and row conditions); sign in if anonymous, otherwise use an account those rules allow",
+            "The declared policy does not grant this operation to this identity (rules evaluated: role, owner, owner.<ref>, organization membership and row conditions); sign in if anonymous, otherwise use an account those rules allow",
         )
     }
     fn missing() -> Self {
@@ -370,6 +373,7 @@ pub async fn router_full(
     }
     let (edge_state, edge_control) = edge_http::EdgeState::new(&platform.edge);
     let shared = platform.cluster.shared;
+    let platform_organizations = platform.organizations.clone();
     let cache_policy = Arc::new(platform.cache.clone());
     let cors_max_age = platform.edge.cors_max_age;
     let (custom_routes, custom_handlers) = (platform.routes.clone(), platform.handlers.clone());
@@ -421,6 +425,7 @@ pub async fn router_full(
             if grants.iter().any(|role| {
                 !matches!(role.as_str(), "public" | "owner")
                     && crate::ownership::path(role).is_none()
+                    && !(crate::organizations::tenant(&r).is_some() && crate::organizations::grant(role).is_some())
                     && !config.roles.roles.contains(role)
             }) {
                 return Err(
@@ -443,6 +448,7 @@ pub async fn router_full(
             return Err("Duplicate job".into());
         }
     }
+    crate::organizations::validate_roles(&resources.values().collect::<Vec<_>>(), &platform.organizations, &config.roles.roles)?;
     contract::validate_graph(
         &resources.values().cloned().collect::<Vec<_>>(),
         &jobs.values().cloned().collect::<Vec<_>>(),
@@ -529,6 +535,7 @@ pub async fn router_full(
         .map(|cfg| crate::api_keys::Keys::new(pool.clone(), cfg).map(|keys| keys.shared(shared)))
         .transpose()?;
     let app = App {
+        organizations: Arc::new(platform_organizations),
         cluster: crate::cluster::Cluster { shared },
         platform: platform.clone(),
         routes: custom.clone(),
@@ -656,6 +663,7 @@ pub async fn router_full(
         )
         .route("/_brain/media/{id}/variants", post(media_variants))
         .route("/_brain/media/{id}/v/{version}/{preset}", get(media_asset))
+        .merge(organizations_http::routes())
         .merge(http_api_keys::routes())
         .merge(files_http::routes(&platform))
         .merge(routes_http::routes(&custom))
@@ -1467,6 +1475,13 @@ async fn scoped_owner(
     existing: &Value,
     id: Uuid,
 ) -> Result<(Option<Uuid>, bool)> {
+    if crate::organizations::enforced(r) {
+        let allowed = crate::ownership::row_allowed(&app.pool, r, &app.resources, operation, viewer(Some(u)), id).await.map_err(|e| Error::internal(db::safe(e)))?;
+        if allowed {
+            return Ok((None, false));
+        }
+        return Err(write_denied(&app.pool, &app.resources, r, u, id, Error::missing()).await);
+    }
     if r.policy.allows(operation, Some(&u.role), false) {
         return Ok((None, false));
     }
@@ -1517,8 +1532,9 @@ async fn create(
 ) -> Result<Json<Value>> {
     let r = app.resource(&name)?;
     let u = app.required(&h).await?;
-    let through = !r.policy.allows("create", Some(&u.role), false);
-    if through && !relational(r, "create") {
+    let tenant = crate::organizations::enforced(r);
+    let through = !tenant && !r.policy.allows("create", Some(&u.role), false);
+    if through && !relational(r, "create") || tenant && crate::ownership::scope(r, "create", viewer(Some(&u))).is_none() {
         return Err(Error::forbidden());
     }
     crate::visibility::reject_server_fields(r, &input).map_err(Error::validation)?;
@@ -1526,6 +1542,13 @@ async fn create(
     let data = r.input(&input).map_err(Error::validation)?;
     if through && !owns_data(&app, r, "create", &u, &data).await? {
         return Err(Error::forbidden());
+    }
+    // After the hook and validation: the organization that is written is the one checked.
+    if tenant {
+        let org = crate::organizations::org_of(r, &data).ok_or_else(Error::forbidden)?;
+        if !crate::organizations::may_create(&app.pool, r, u.id, org).await.map_err(|error| Error::database(error))? {
+            return Err(Error::forbidden());
+        }
     }
     app.domain.protect(r, None, &data).map_err(Error::validation)?;
     let mut record = db::create(&app.pool, r, u.id, data)
@@ -1543,7 +1566,7 @@ async fn update(
 ) -> Result<Json<Value>> {
     let r = app.resource(&name)?;
     let u = app.required(&h).await?;
-    if !r.policy.allows("update", Some(&u.role), true) && !relational(r, "update") {
+    if !r.policy.allows("update", Some(&u.role), true) && !relational(r, "update") && !crate::organizations::enforced(r) {
         return Err(Error::forbidden());
     }
     // Capture a real row before application code; policy never relies on client-supplied existing data.
@@ -1559,6 +1582,7 @@ async fn update(
     let previous = existing["data"].clone();
     let input = before(&app, r, "update", input, Some(existing), &u).await?;
     let data = r.input(&input).map_err(Error::validation)?;
+    crate::organizations::unchanged(r, &previous, &data).map_err(Error::validation)?;
     if through && !owns_data(&app, r, "update", &u, &data).await? {
         return Err(Error::forbidden());
     }
@@ -1580,7 +1604,7 @@ async fn patch(
 ) -> Result<Json<Value>> {
     let r = app.resource(&name)?;
     let u = app.required(&h).await?;
-    if !r.policy.allows("update", Some(&u.role), true) && !relational(r, "update") {
+    if !r.policy.allows("update", Some(&u.role), true) && !relational(r, "update") && !crate::organizations::enforced(r) {
         return Err(Error::forbidden());
     }
     let (existing, revision) = db::get_version(&app.pool, r, id)
@@ -1595,6 +1619,7 @@ async fn patch(
     let previous = existing["data"].clone();
     let merged = before(&app, r, "update", merged, Some(existing), &u).await?;
     let data = r.input(&merged).map_err(Error::validation)?;
+    crate::organizations::unchanged(r, &previous, &data).map_err(Error::validation)?;
     if through && !owns_data(&app, r, "update", &u, &data).await? {
         return Err(Error::forbidden());
     }
@@ -1614,7 +1639,7 @@ async fn delete(
 ) -> Result<Json<Value>> {
     let r = app.resource(&name)?;
     let u = app.required(&h).await?;
-    if !r.policy.allows("delete", Some(&u.role), true) && !relational(r, "delete") {
+    if !r.policy.allows("delete", Some(&u.role), true) && !relational(r, "delete") && !crate::organizations::enforced(r) {
         return Err(Error::forbidden());
     }
     let (existing, revision) = db::get_version(&app.pool, r, id)

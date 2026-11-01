@@ -37,6 +37,8 @@ mod jwt_sessions;
 mod links;
 #[path = "media.rs"]
 mod media;
+#[path = "organizations.rs"]
+mod organizations;
 #[path = "row_policy.rs"]
 mod row_policy;
 #[path = "security_matrix.rs"]

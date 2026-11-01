@@ -20,6 +20,7 @@ pub mod links;
 pub mod query;
 pub mod relations;
 pub mod media;
+pub mod organizations;
 pub mod origins;
 pub mod ownership;
 pub mod response;

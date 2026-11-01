@@ -31,6 +31,8 @@ pub enum Ty {
     /// Reference to another resource's record id (`ref:<resource>`), stored as a canonical lowercase UUID string
     /// and mirrored into a real `ref_<field> uuid` column with a foreign key (see `relations.rs`).
     Ref(String),
+    /// The organization that owns a tenant row (see `organizations.rs`), stored like a reference and keyed to `_brain_orgs`.
+    Org,
 }
 
 fn enum_value(s: &str) -> bool {
@@ -51,6 +53,7 @@ pub fn parse(kind: &str) -> Option<Ty> {
         "int" => Ty::Int,
         "date" => Ty::Date,
         "datetime" => Ty::DateTime,
+        "org" => Ty::Org,
         "list<str>" => Ty::ListStr {
             max: LIST_DEFAULT_ITEMS,
         },
@@ -110,7 +113,7 @@ fn canonical_small(s: &str) -> Option<u8> {
     s.parse::<u16>().ok().filter(|n| *n <= 255).map(|n| n as u8)
 }
 
-pub const KIND_HELP: &str = "str|num|bool|email|obj|int|decimal(p,s)|date|datetime|enum(a|b)|list<str>|list<str,N>|ref:<resource>";
+pub const KIND_HELP: &str = "str|num|bool|email|obj|int|decimal(p,s)|date|datetime|enum(a|b)|list<str>|list<str,N>|ref:<resource>|org";
 
 impl Ty {
     /// Kinds that existed before exact types; they keep legacy validation and never get database checks.
@@ -121,7 +124,7 @@ impl Ty {
     pub fn unique_eligible(&self) -> bool {
         matches!(
             self,
-            Ty::Str | Ty::Email | Ty::Int | Ty::Decimal { .. } | Ty::Date | Ty::DateTime | Ty::Enum(_) | Ty::Ref(_)
+            Ty::Str | Ty::Email | Ty::Int | Ty::Decimal { .. } | Ty::Date | Ty::DateTime | Ty::Enum(_) | Ty::Ref(_) | Ty::Org
         )
     }
     /// Kinds with a total order supported by `check` ranges and comparisons.
@@ -148,6 +151,7 @@ impl Ty {
                 "Expected an array of at most {max} strings, each at most {LIST_ITEM_BYTES} bytes"
             ),
             Ty::Ref(target) => format!("Expected the UUID string of an existing {target} record"),
+            Ty::Org => "Expected the UUID string of an organization you belong to".into(),
         }
     }
     /// Validates and returns the canonical stored value. `required` matters only for non-empty text/list rules.
@@ -197,7 +201,7 @@ impl Ty {
                     .all(|item| item.as_str().is_some_and(|s| s.len() <= LIST_ITEM_BYTES))
                     .then(|| v.clone())
             }
-            Ty::Ref(_) => v
+            Ty::Ref(_) | Ty::Org => v
                 .as_str()
                 .filter(|s| s.len() == 36)
                 .and_then(|s| uuid::Uuid::parse_str(s).ok())
@@ -234,6 +238,7 @@ impl Ty {
                 "items":{"type":"string","x-brain-maxBytes":LIST_ITEM_BYTES}
             }),
             Ty::Ref(target) => json!({"type":"string","format":"uuid","x-brain-ref":target}),
+            Ty::Org => json!({"type":"string","format":"uuid","x-brain-org":true}),
         }
     }
     /// Postgres boolean expression for one present value at `data->'<field>'`, or None for legacy kinds.
@@ -264,7 +269,7 @@ impl Ty {
                     .collect::<Vec<_>>()
                     .join(",")
             ),
-            Ty::Ref(_) => format!(
+            Ty::Ref(_) | Ty::Org => format!(
                 "jsonb_typeof({j})='string' AND ({t}) ~ '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$'"
             ),
             Ty::ListStr { max } => format!(

@@ -54,7 +54,7 @@ pub fn digest(s: &str) -> String {
     }
     hex
 }
-fn token() -> String {
+pub(crate) fn token() -> String {
     format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
 }
 pub fn cookie(token: &str, age: u32) -> String {

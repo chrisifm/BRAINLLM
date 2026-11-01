@@ -18,10 +18,11 @@ const FIELD_TYPES: &[(&str, &str)] = &[
     ("enum(a|b)", "enum(a|b)"),
     ("list<str>", "list<str>"),
     ("ref:<resource>", "ref:posts"),
+    ("org", "org"),
 ];
 const FIELD_OPTIONS: &[&str] = &["required", "default", "unique", "on_delete", "visible", "access", "slug", "pattern"];
 const POLICY_OPERATIONS: &[&str] = &["read", "create", "update", "delete"];
-const POLICY_GRANTS: &[&str] = &["public", "owner", "owner.<ref>", "<role>"];
+const POLICY_GRANTS: &[&str] = &["public", "owner", "owner.<ref>", "org", "org.<role>", "org.own", "<role>"];
 
 pub fn inventory() -> Value {
     let field_types: Vec<Value> = FIELD_TYPES

@@ -16,11 +16,13 @@ pub fn column(field: &str) -> String {
     debug_assert!(crate::contract::identifier(field));
     format!("ref_{field}")
 }
-fn table(name: &str) -> String {
+pub(crate) fn table(name: &str) -> String {
     assert!(crate::contract::identifier(name));
     format!("_brain_res_{name}")
 }
 
+/// Name a tenant field reports as its target; not a resource.
+const ORG_TARGET: &str = "organization";
 /// One declared reference of a resource.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Ref<'a> {
@@ -28,6 +30,8 @@ pub struct Ref<'a> {
     pub target: String,
     pub action: &'a str,
     pub required: bool,
+    /// The organization field: keyed to `_brain_orgs`, never to a resource.
+    pub org: bool,
 }
 pub fn refs(r: &Resource) -> Vec<Ref<'_>> {
     r.fields
@@ -38,7 +42,9 @@ pub fn refs(r: &Resource) -> Vec<Ref<'_>> {
                 target,
                 action: f.on_delete.as_deref().unwrap_or("restrict"),
                 required: f.required,
+                org: false,
             }),
+            Some(Ty::Org) => Some(Ref { field: name, target: ORG_TARGET.to_string(), action: "restrict", required: true, org: true }),
             _ => None,
         })
         .collect()
@@ -73,7 +79,7 @@ pub fn validate_field(name: &str, field: &Field, ty: &Ty) -> Result<(), String> 
 pub fn validate_graph(resources: &[Resource]) -> Result<(), String> {
     let names: std::collections::BTreeSet<&str> = resources.iter().map(|r| r.name.as_str()).collect();
     for r in resources {
-        for reference in refs(r) {
+        for reference in refs(r).into_iter().filter(|x| !x.org) {
             if !names.contains(reference.target.as_str()) {
                 return Err(format!(
                     "{}: field `{}` references unknown resource `{}`; fix: create server/resources/{}/ or correct ref:<resource>",
@@ -83,6 +89,7 @@ pub fn validate_graph(resources: &[Resource]) -> Result<(), String> {
         }
         crate::query::validate_graph(r, resources)?;
     }
+    crate::organizations::validate_graph(resources)?;
     Ok(())
 }
 
@@ -91,6 +98,9 @@ pub fn fk_name(r: &Resource, reference: &Ref<'_>) -> String {
 }
 pub fn index_name(r: &Resource, field: &str) -> String {
     r.object_name("_brain_ix_", &format!("ref:{field}"))
+}
+fn target_table(reference: &Ref<'_>) -> String {
+    if reference.org { "_brain_orgs".to_string() } else { table(&reference.target) }
 }
 fn action_sql(action: &str) -> (&'static str, &'static str) {
     match action {
@@ -138,11 +148,11 @@ pub(crate) async fn install(
             format!("{}: existing `{field}` values are not record ids; review the data before migrating; nothing was changed", r.name)
         })?;
         let name = fk_name(r, reference);
-        if !fk_exists(tx, &table, &name, &col, &reference.target, reference.action).await? {
+        if !fk_exists(tx, &table, &name, &col, &target_table(reference), reference.action).await? {
             let (action, _) = action_sql(reference.action);
             sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
                 "ALTER TABLE {table} ADD CONSTRAINT {name} FOREIGN KEY ({col}) REFERENCES {}(id) ON DELETE {action}",
-                self::table(&reference.target)
+                target_table(reference)
             )))
             .execute(&mut **tx)
             .await
@@ -174,7 +184,7 @@ async fn fk_exists(
         .bind(format!("public.{table}"))
         .bind(name)
         .bind(column)
-        .bind(format!("public.{}", self::table(target)))
+        .bind(format!("public.{target}"))
         .bind(action_sql(action).1)
         .fetch_one(conn)
         .await
@@ -200,7 +210,7 @@ pub(crate) async fn verify(conn: &mut sqlx::PgConnection, r: &Resource) -> Resul
     }
     for reference in &refs {
         let col = column(reference.field);
-        if !fk_exists(conn, &table, &fk_name(r, reference), &col, &reference.target, reference.action).await? {
+        if !fk_exists(conn, &table, &fk_name(r, reference), &col, &target_table(reference), reference.action).await? {
             return Err(drift(format!("foreign key for `{}`", reference.field)));
         }
         let indexed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid WHERE i.indrelid=to_regclass($1) AND c.relname=$2 AND i.indisvalid)")
