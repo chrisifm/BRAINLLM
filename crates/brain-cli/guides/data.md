@@ -38,6 +38,7 @@ state. Pick the first row that fits:
 - Keep a GET across visits: `api('/posts', { get: { out: '[Post]', cache: '10m' } })` — GET only, never for personal
   data (not machine-checked; a malformed `cache` is B1102).
 - Server pages: `<meta cache="60">` in a view rebuilds it at most every 60 s (stale-while-revalidate).
+  Tracking parameters (`utm_*` and similar) share one copy, and other parameters are sorted first: a `load` must not echo a tracking value. A page rendered after a failed backend read is never stored.
 - Keep client state across visits: `store(init, { persist: true })`. Never `sync: 'storage'` for the signed-in user (not machine-checked).
 - Heavy computation off the main thread: name the module `*.worker.jsbrain`; its exports become async functions.
 

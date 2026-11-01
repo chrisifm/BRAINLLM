@@ -1237,6 +1237,7 @@ to appear in LLMs, traditional search and social networks"; implemented in brain
   SSR route) and the Rust static server (`brain-serve` `prod.rs`) answer the page URL with its twin when `Accept` ranks
   `text/markdown` above `text/html` (equal weight: the one listed first; an explicit type beats `*/*`, so browsers keep
   HTML), and both representations carry `Vary: Accept`. No twin (`seo.markdown=false`, noindex pages) → HTML as before.
+  2026-11-01: a twin sends `Link: <url>; rel="canonical"` when its page declares an absolute canonical without a route pattern, never an invented one, and no `noindex`. Google documents this header for non-HTML documents such as PDF, for web search; Markdown is not named, so its effect on Markdown is unverified.
 - **Large previews:** indexable pages without their own robots meta get
   `max-image-preview:large, max-snippet:-1, max-video-preview:-1`.
 - **IndexNow** (opt-in, existing) also reaches Bing, which feeds Copilot and ChatGPT search.
@@ -1297,6 +1298,13 @@ one way for the model, `brain build` then `brain start`.
 - `Access::Internal` (`routes.rs`): `InternalAuth` keeps HMAC tags under a per-process key; `Debug` shows only the count. `signed()` in `routes_http.rs` exempts it from the Origin check. The site proxy has a header allowlist that omits the secret header on purpose.
 - B0751 (`backend.rs` `config_problems`): JWT, Google and session length, while `startup_config.rs` owns mail, storage, database and pools (B0760–B0764); single source for startup, `brain check` and `brain doctor`, runs before the database connection and reports names, never values. Check and doctor read the development section only, and only when the app has `server/resources`, `server/jobs`, `server/routes` or `BRAIN_BACKEND_URL`. Not covered, because each validates files or needs the listener: `socket_settings`, `api_key_config`, `hooks_executor`, `platform_config`, route contracts, the database URL and the connection budget. A route whose internal or webhook secret is unset passes `brain check` and stops startup with the variable name and no code.
 - `ctx.backend.google` (server.mjs `googleStep`): the bridge reads the nonce cookie and sends it alone; the dev sidecar gets it through `nativeBridge.backend`.
+
+### 34.1 Answers with a cause (2026-11-01)
+
+- **Every 5xx leaves a line.** `server.mjs` registers each request in `liveRequests` and logs `server error answered` (rid, path, status, cause) from `res.once('close')`, whichever path answered: `errorPage`, `failPage`, a relayed backend 5xx, the health probe, sign-out, a stream failure. `trace()` adds `cause` only for the exact messages in `OWN_CAUSES`, plus `transport` (the system code such as `ECONNREFUSED`) and `backendCode`: an application message can carry values, so it stays out. A status page opened directly logs at info level, at most 16 per minute.
+- **A swallowed read is visible.** A native read that fails during a page render marks the request (`$brainFailedReads`). A page that still renders logs `page rendered after a failed backend read` with its `fix`, and answers `cache-control: no-store`, so the page cache never keeps it. `bucketClient` goes through `fetch` and is not covered.
+- **One URL per page.** `urlVariant` answers one 301 for `//route`, `/a//b` and `/route/index.html` (GET and HEAD, backend paths exempt). `prod.rs` does the same for `/a//b` and `/route/index.html`; its parser answers 400 to a leading `//`, which is also one answer and no duplicate page. `/route.html` is not redirected: a verification file may legitimately be HTML at the root.
+- **Log lines.** `brain_backend::log_line!` formats first and writes once. A pipe write is atomic only up to `PIPE_BUF` (512 bytes on macOS, 4096 on Linux); a longer line (a stack event, up to 32 KB) is one call but can still interleave on a pipe shared by several processes. `crates/brain-backend/tests/log_lines.rs` proves short lines and forbids the standard print macros in the crate.
 
 ## 35. Caching and the repeat visit: on by default (fixed 2026-10-13, Chris: "the second visit must be faster")
 Cache audit (2026-10-28): anonymous SSR caching bypasses every cookie-bearing request and Authorization. Captured
@@ -1439,6 +1447,10 @@ activates at once). `updateReady()` / `applyUpdate()` (`brain-update.js`, auto-i
 0 bytes elsewhere) expose the waiting worker as a signal and post `brain:skip-waiting`; the page reloads once on
 `controllerchange`. Tests: `runtime/test/sw-routes.test.js`, `runtime/test/update.test.js`,
 `brain-pack` `worker_routes_and_update_prompt`, `brain-cli/tests/sw_routes.rs`.
+
+### 35.1 The page cache key (2026-11-01)
+
+`cacheSearch(url)` drops tracking parameters (`TRACKING`, the same list as `brain-seo`) and sorts the rest, so `?utm_source=x` shares the entry of the bare URL. A `load` that echoes such a parameter shares that copy too. Answers from the cache send `stale-if-error=<n>`, and a failed revalidation keeps the copy until `2n` rather than dropping it. The render captured for the cache now has the request surface a native read needs (`once`, `removeListener`, `getHeader`): before, a `<meta cache>` page reading `ctx.backend` rendered its fallback or was never stored.
 
 ## 36. Environment file `.brain_env` (fixed 2026-10-13, Chris: "loaded by default, understood by the compiler")
 

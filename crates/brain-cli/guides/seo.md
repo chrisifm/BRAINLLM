@@ -14,6 +14,7 @@ page text, not after.
    Without a keyword, a title or description off the H1's topic is B1836.
    A view rendered per request keeps real pagination with `query="page"`: `/list?page=2` is its own canonical, while
    `?dialog=size` or `?utm_source=mail` keep the canonical of `/list` (B0503 reports a contradictory list).
+   `/list?page=1` answers 301 to `/list`, `?page=abc` answers 404. `//list` and `/list/index.html` answer one 301.
 5. Put it in: `title` (≤ 60 chars), `<h1>`, the first sentence, `description` (≤ 160 chars), and the route name
    (`brain add view split-a-bill-offline`). Lengths over the limits are B1602.
 

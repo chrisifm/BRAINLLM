@@ -152,6 +152,7 @@ indexable view without it is B0502 (guarded, `robots="noindex"`, `_x`, `[id]` an
 A page rendered per request can list the parameters that make a different page, such as real pagination: `query="page"`
 keeps them in the canonical. Any other parameter (a dialog, `urlState`, a tracking tag) stays out, so it restores the UI
 without a new page for search. It must be literal, and it has no effect on a prerendered page (B0503).
+A parameter named `page` in that list is checked: `?page=1` answers 301 to the base URL, and a value that is not a page number answers 404. A page past the last one stays your `load`'s `notFound`.
 Values may be expressions from `load` props: `<meta seo title={props.user.name} description={props.user.bio}
 jsonld={{ '@type': 'Person', name: props.user.name }}>`. Site defaults live in `app.brain`:
 `<meta seo titleTemplate="%s · Nimbus" og:image="/og.png" twitter="@nimbus">`. Any other tag goes in a `<head>` block of
