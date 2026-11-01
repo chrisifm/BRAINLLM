@@ -35,6 +35,8 @@ mod api_key_config;
 mod webhook_config;
 mod origin_check;
 mod lighthouse;
+mod asset_check;
+mod release_check;
 mod deploy_check;
 mod seo_live;
 mod view_links;
@@ -132,6 +134,8 @@ granular:
   brain integration list|add|update   reviewed official SDK adapters (preview)
   brain deps analyze|preview|fetch    dependency evidence and explicit pinned CDN acquisition
   brain deploy config pm2|nginx       guarded front/backend deployment configuration
+  brain deploy check --url <origin>   what only the live server shows: doubled headers, proxy, /health
+  brain release-check [--env production] [--url <origin>] [--json]  one gate before a release: doctor, secrets, build output, SEO and the live checks
   brain media setup-gcs|list|cleanup  private media provisioning/library/owned cleanup
   brain e2e probe|run                 opt-in Claude/Codex Viewer scenarios plus AX/heap gates
   brain backend <serve|migrate|approve-contract|capabilities|schema|bootstrap-admin>  experimental Rust/Postgres resource API (loopback); serve --with-workers also runs the queues
@@ -234,6 +238,14 @@ fn main() -> ExitCode {
                 println!("{value}");Ok(())
             })
         },
+        Some("release-check") => {
+            let (code, out) = match app_root() {
+                Ok(root) => release_check::run(&root, &args[1..]),
+                Err(error) => (2, format!("error: {error}")),
+            };
+            println!("{out}");
+            return ExitCode::from(code.clamp(0, 255) as u8);
+        }
         Some("deploy") if args.get(1).map(String::as_str) == Some("check") => {
             let (code, out) = deploy_check::run(app_root().ok().as_deref(), &args[2..]);
             println!("{out}");
@@ -1197,6 +1209,7 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
     std::fs::create_dir_all(&dist).map_err(|e| e.to_string())?;
     // robots.txt, sitemap.xml, llms.txt, manifest and the head rewrite come from brain-seo's finish (inside bundle)
     bundle(root, &dist, site.as_deref(), env_name, &mut rep, progress)?;
+    rep.warnings.extend(asset_check::check(&dist));
     for (route, view) in seo_routes::unlisted(root) {
         // a static host already reports the route as left out of dist/
         if !rep.warnings.iter().any(|w| w.starts_with(&format!("{view}: dynamic route"))) {

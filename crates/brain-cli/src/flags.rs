@@ -42,6 +42,7 @@ pub(crate) const TABLE: &[(&str, &[&str], &[&str])] = &[
     ("feedback", &["--request"], &[]),
     ("quality", &[], &[]),
     ("deploy", &["--request", "--url"], &[]),
+    ("release-check", &["--env", "--url"], &[]),
     ("design", &["--request"], &[]),
     ("manifest", &["--request"], &[]),
     (

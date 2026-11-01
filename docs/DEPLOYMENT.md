@@ -28,6 +28,14 @@ Each process listens or works alone: `brain start`, `brain backend serve` and `b
 
 Applying a backend contract change in CI has no prompt: `brain backend approve-contract [--accept <resource>] --apply` records the approval (B0787) and exits non-zero if it cannot.
 
+## Checking the build output
+
+Every `brain build` reads `dist` back and warns about text of 1400 bytes or more with no `.br` or `.gz` (B1895), a compressed copy of an already compressed format (B1896), a `_headers` cache policy that does not match the file name (B1897), a wrong `Content-Type` or missing charset (B1898), and a page asking for more than 40 files as it loads (B1899). A clean build has none; they usually mean another step changed `dist` afterwards.
+
+## One gate before a release
+
+`brain release-check --env production` runs `brain doctor`, checks that environment's secrets (a route B0790 would disable fails it), runs `brain build --env <env>`, reads the result back and runs `brain seo audit`. With `--url <origin>` it adds `brain deploy check` and `brain seo --url`. It exits 0 only if all of them pass, 1 if one fails and 2 on a usage error; `--json` lists each step (`schemaVersion: 1`). It leaves that build in `dist/`, so what passed is what you ship; warnings about the files are reported and do not fail it.
+
 ## Checking a live server
 
 `brain deploy check --url https://your-domain [--json]` reads `/` and `/health` from the origin the public reaches and changes nothing. It reports a security header sent twice (B1857), `server.earlyHints` behind nginx below 1.29 (B1891), a CDN the backend's `trustPublicProxy` does not list (B1892) and a `/health` that does not answer 200 (B1893, exit status 1). The nginx file `brain deploy config nginx` generates sets no security headers, so they come from the app alone; the `_brain/nginx.conf` a static build emits does set them, for hosting with no app behind it. 103 Early Hints are off unless `brain.json` sets `server.earlyHints: true`. `brain doctor` also warns about a `trustProxy` private range wider than /16 (B0784).

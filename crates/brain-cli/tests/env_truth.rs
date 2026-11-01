@@ -311,6 +311,34 @@ fn env_only_file_ignores_the_supervisors_environment_except_what_it_was_told_to_
 }
 
 // The whole command, against a server that repeats a header the way a proxy in front of an app does.
+// The single gate before a release: one exit code, and each step says why it failed.
+#[test]
+fn release_check_fails_on_each_gate_and_says_which() {
+    let a = app("release-check");
+    let run = |extra: &[&str]| {
+        let o = Command::new(bin()).args(["release-check", "--env", "development", "--json"]).args(extra).current_dir(&a.0).env("NO_COLOR", "1").stdin(Stdio::null()).output().unwrap();
+        let text = String::from_utf8_lossy(&o.stdout).to_string();
+        let v: serde_json::Value = serde_json::from_str(text.trim()).unwrap_or_else(|_| panic!("{text}"));
+        let failed: Vec<String> = v["steps"].as_array().unwrap().iter().filter(|s| s["ok"] == false).map(|s| s["name"].as_str().unwrap().to_string()).collect();
+        (o.status.code(), v, failed)
+    };
+    fs::remove_dir_all(a.0.join("dist")).ok();
+    let (code, v, failed) = run(&[]);
+    assert_eq!(v["schemaVersion"], 1);
+    assert!(code == Some(0) && failed.is_empty(), "a clean app passes: {v}");
+    assert!(a.0.join("dist/index.html").exists(), "the gate builds what it checks");
+    fs::write(a.0.join("views/broken.brain"), "<div>\n").unwrap();
+    let (code, v, failed) = run(&[]);
+    assert!(code == Some(1) && failed.contains(&"doctor".to_string()) && failed.contains(&"build".to_string()), "{v}");
+    assert!(v.to_string().contains("broken.brain"), "a failed step says why: {v}");
+    fs::remove_file(a.0.join("views/broken.brain")).unwrap();
+    with_stripe_route(&a, "DATABASE_URL=postgres://u@127.0.0.1:1/none\n");
+    let (code, v, failed) = run(&[]);
+    assert!(code == Some(1) && failed.contains(&"secrets".to_string()) && v.to_string().contains("B0790"), "{v}");
+    let (ok, usage) = brain(&a.0, &["release-check", "--url", "nope"]);
+    assert!(!ok && usage.contains("--url"), "{usage}");
+}
+
 #[test]
 fn deploy_check_reads_a_live_origin_and_fails_only_on_a_dead_health_endpoint() {
     use std::io::{Read, Write};
