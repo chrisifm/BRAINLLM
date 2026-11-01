@@ -95,7 +95,7 @@ Signals are plain variables: `n++`, `items = [...items, x]`. Never mutate in pla
 | `store(init, {sync?:'tab'\|'storage'})` · `bus('name')` | only in `channels/*.jsbrain`; never `sync: 'storage'` for the signed-in user (another tab's copy brings a logged-out user back): read the user from `load` |
 
 ## Markup
-`{expr}` · `attr={e}` · `class:x={bool}` · `style:prop={v}` · `on:ev={fnRef | statement}` (`on:submit` prevents default)
+`{expr}` · `attr={e}` · `class:x={bool}` · `style:prop={v}` · `on:ev={fnRef | (e) => … | statement}` (`on:submit` prevents default)
 · `bind:value|checked|ref={x}` · `{#if c}…{:else if d}…{:else}…{/if}` · `{#each list as it (it.id)}…{:empty}…{/each}`
 (key required; list of primitives → key by value: `{#each perks as perk (perk)}`) · `{#await p}…{:then v}…{:catch e}…{/await}`
 · `<slot />` `<slot name="x" />` · `<Comp a={b} on:ev={f} />`.

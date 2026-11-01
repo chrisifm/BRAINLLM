@@ -11,7 +11,7 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [Architecture (generate, don't hand-create files)](../SPEC.md#architecture-generate-dont-hand-create-files) | Every file kind has one folder, one naming rule and one generator. |
 | [Component (blocks in this order, all optional except markup)](../SPEC.md#component-blocks-in-this-order-all-optional-except-markup) | Props: `name:type=default` · `?` optional · neither = required. |
 | [BrainScript (closed JS subset)](../SPEC.md#brainscript-closed-js-subset) | Allowed: let const · arrow/function · if/else · for-of · return · await · try/catch/finally · throw · objects arrays spread destructuring · template strings ·… |
-| [Markup](../SPEC.md#markup) | `{expr}` · `attr={e}` · `class:x={bool}` · `style:prop={v}` · `on:ev={fnRef \| statement}` (`on:submit` prevents default) · `bind:value\|checked\|ref={x}` · `{#if… |
+| [Markup](../SPEC.md#markup) | `{expr}` · `attr={e}` · `class:x={bool}` · `style:prop={v}` · `on:ev={fnRef \| (e) => … \| statement}` (`on:submit` prevents default) · `bind:value\|checked\|ref={… |
 | [Lifecycle and helpers](../SPEC.md#lifecycle-and-helpers) | `mounted(() => { …; return cleanup })` runs once after the DOM is in the page · `watch(() => q, (now, prev) => …)` runs only when `q` changes (`{ immediate: tr… |
 | [Communication (components are isolated; pick the first that fits)](../SPEC.md#communication-components-are-isolated-pick-the-first-that-fits) | 1 show parent data → props · 2 tell parent → `emit` + `on:` · 3 container → slots. |
 | [CSS](../SPEC.md#css) | Native CSS + nesting + `@mixin n {}` / `@include n;`. |

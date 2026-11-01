@@ -440,7 +440,7 @@ pub fn check(c: &Component, ctx: &Ctx) -> Vec<Diag> {
     let server_ctx = c.kind == FileKind::Module && c.meta.iter().any(|m| m.name == "server");
     let mut api_vars = HashMap::new();
     collect_api_vars(c, ctx, &c.template, &mut api_vars);
-    let mut ck = Checker { c, ctx, diags: Vec::new(), scopes: Scopes::new(scope::top_bindings(c)), fn_depth: 0, server_names, server_ctx, server_fns, api_vars, scoped_stores: HashSet::new(), shared: servershare::shared(c), can_await: c.kind == FileKind::Module || c.file.ends_with(".test.brain"), enclosing_fn: None, outer_fn: None, literal_text: 0 };
+    let mut ck = Checker { c, ctx, diags: Vec::new(), scopes: Scopes::new(scope::top_bindings(c)), fn_depth: 0, server_names, server_ctx, server_fns, api_vars, scoped_stores: HashSet::new(), shared: servershare::shared(c), can_await: c.kind == FileKind::Module || c.file.ends_with(".test.brain"), enclosing_fn: None, outer_fn: None, literal_text: 0, handler_of: None };
     ck.structure();
     ck.runaway();
     ck.security();
@@ -507,6 +507,8 @@ struct Checker<'a> {
     server_names: HashSet<String>,
     /// Inside `load()`, a `server:` function or a `<meta server>` module: env and server imports allowed.
     server_ctx: bool,
+    /// The event whose `on:` handler is being checked: an undeclared `$event` or `event` there has its own fix.
+    handler_of: Option<String>,
     /// `load` and the `server:` functions of this component: the only top-level names server code sees.
     server_fns: HashSet<String>,
     /// `<Child bind:api={m} />` → `m` → what the child exposes (B0804).
@@ -1037,6 +1039,13 @@ impl<'a> Checker<'a> {
         }
         if name == "eval" {
             self.push("B0105", id.span, "`eval` does not exist in BrainScript", "write the code directly or use `JSON.parse` for data");
+            return;
+        }
+        // Other frameworks hand the event over under a magic name (`$event`); here a handler is a function that takes it.
+        if matches!(name, "$event" | "event" | "evt") && (name == "$event" || self.handler_of.is_some()) {
+            let ev = self.handler_of.clone().unwrap_or_else(|| "click".to_string());
+            let fix = format!("no name holds the event: a handler receives it as a parameter, so write `on:{ev}={{(e) => …}}` and read `e.target`, or pass a function, `on:{ev}={{handle}}`, whose first parameter is the event");
+            self.push("B0111", id.span, format!("`{name}` is not declared"), fix);
             return;
         }
         let names = self.scopes.all_names();
@@ -1808,7 +1817,11 @@ impl<'a> Checker<'a> {
             }
             match (&a.kind, &a.value) {
                 (AttrKind::Bind, v) => self.bind(a, v, tag),
-                (AttrKind::On, AttrValue::Expr(e)) => self.expr(e),
+                (AttrKind::On, AttrValue::Expr(e)) => {
+                    self.handler_of = Some(a.name.clone());
+                    self.expr(e);
+                    self.handler_of = None;
+                }
                 (AttrKind::On, _) => self.push("B0208", a.span, format!("`on:{}` needs a handler in braces", a.name), format!("write `on:{}={{handler}}` or `on:{}={{n++}}`", a.name, a.name)),
                 (_, AttrValue::Expr(e)) => self.expr(e),
                 (_, AttrValue::Mixed(parts)) => {
