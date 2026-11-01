@@ -4,7 +4,8 @@
   "title": "Captcha verification on public writes",
   "why": "Signup and public write routes had no built-in defense against automated abuse beyond rate limits.",
   "changelog": [
-    "`server/auth/captcha.jsbrain` requires a verified token"
+    "`server/auth/captcha.jsbrain` requires a verified token",
+    "Captcha does not cover"
   ],
   "guide": "docs/backend/captcha.md",
   "codes": [],

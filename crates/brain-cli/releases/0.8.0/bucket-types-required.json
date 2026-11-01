@@ -4,7 +4,8 @@
   "title": "A file bucket must state its types",
   "why": "A bucket that omitted `types` accepted every file, HTML and executables included, only by omission. It now fails `brain check` and `brain backend serve` refuses to start, so no app stays open by accident.",
   "changelog": [
-    "a file bucket without `types`"
+    "a file bucket without `types`",
+    "A file bucket must declare `types`"
   ],
   "guide": "docs/backend/files.md",
   "codes": [

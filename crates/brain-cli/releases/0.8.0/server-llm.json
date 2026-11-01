@@ -4,7 +4,8 @@
   "title": "Server LLM module: ctx.llm",
   "why": "Server code can call Anthropic or OpenAI without an SDK. Keys stay in the server environment, and using the module from browser code is a compile error.",
   "changelog": [
-    "Server LLM module"
+    "Server LLM module",
+    "`ctx.llm` does not stream"
   ],
   "guide": "brain guide llm",
   "codes": [

@@ -4,7 +4,8 @@
   "title": "Credits ledger",
   "why": "Usage balances were hand-written and easy to overdraw under concurrent requests.",
   "changelog": [
-    "A credits ledger debits atomically"
+    "A credits ledger debits atomically",
+    "Credits are administered by an admin"
   ],
   "guide": "docs/backend/credits.md",
   "codes": [],

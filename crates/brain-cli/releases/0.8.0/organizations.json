@@ -4,7 +4,8 @@
   "title": "Organizations and memberships",
   "why": "Rows could belong to a user but not to a team; tenant isolation had to be written by hand per application.",
   "changelog": [
-    "Organizations and memberships"
+    "Organizations and memberships",
+    "Organizations reject actions"
   ],
   "guide": "docs/backend/organizations.md",
   "codes": [],

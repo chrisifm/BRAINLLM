@@ -4,7 +4,8 @@
   "title": "The ne filter keeps records without a value",
   "why": "`field[ne]=x` silently dropped every record with no value through SQL NULL logic, while action guards on the same field counted those records as different.",
   "changelog": [
-    "the `ne` list filter now keeps records"
+    "the `ne` list filter now keeps records",
+    "`ne` includes records without a value"
   ],
   "guide": "docs/backend/filters.md",
   "codes": [],

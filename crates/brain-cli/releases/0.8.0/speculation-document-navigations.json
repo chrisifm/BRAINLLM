@@ -4,7 +4,8 @@
   "title": "Speculation Rules return for document navigations",
   "why": "A click that loads a full document can use a hover prefetch. Client-side navigations keep using the router's own prediction, so nothing is requested twice.",
   "changelog": [
-    "Speculation Rules for document navigations"
+    "Speculation Rules for document navigations",
+    "Speculation Rules apply only"
   ],
   "guide": "docs/INTERNALS.md",
   "codes": [],
