@@ -83,7 +83,7 @@ await gate('failure-logs', 4 * 60 * 1000, async directory => {
     if (!body.rid) { failures.push(`${seen} (no rid)`); continue }
     // The stack is written after the response, by its own thread; everything else is written before it.
     let kept = logs(body.rid).events
-    for (let i = 0; want.stack && i < 100 && !kept.some(e => e.event === 'backend-internal-stack'); i++) { await sleep(100); kept = logs(body.rid).events }
+    for (let i = 0; want.stack && i < 100 && !kept.some(e => e.event === 'backend-internal-stack' || e.event === 'backend-stack-unavailable'); i++) { await sleep(100); kept = logs(body.rid).events }
     const event = kept.find(e => e.event === want.event)
     if (!event) { failures.push(`${seen} (no ${want.event} kept for its rid: ${JSON.stringify(kept).slice(0, 400)})`); continue }
     if (want.sqlstate && event.sqlstate !== want.sqlstate) failures.push(`${want.name}: sqlstate ${event.sqlstate}`)
@@ -93,10 +93,10 @@ await gate('failure-logs', 4 * 60 * 1000, async directory => {
     if (want.sqlstate && !event.location?.file) failures.push(`${want.name}: no code location in ${JSON.stringify(event)}`)
     if (kept.some(e => e.valuesCaptured === false && JSON.stringify(e).includes('private detail'))) failures.push(`${want.name}: a private message reached an event that says it captures no values`)
     if (want.stack) {
-      const stack = kept.find(e => e.event === 'backend-internal-stack')
+      const stack = kept.find(e => e.event === 'backend-internal-stack') || kept.find(e => e.event === 'backend-stack-unavailable')
       if (!stack) failures.push(`${want.name}: no stack kept for its rid`)
       else if (/__mh_execute_header/.test(stack.stack || '')) failures.push(`${want.name}: the stack is a frame list without symbols`)
-      else if (!stack.stack && !stack.stackUnavailable) failures.push(`${want.name}: neither a stack nor why it is unavailable`)
+      else if (!stack.stack && !stack.reason) failures.push(`${want.name}: neither a stack nor why it is unavailable`)
     }
     const agent = await mcp(app, env, body.rid)
     try { assert.deepEqual(agent.events.map(e => e.event), kept.map(e => e.event)) } catch { failures.push(`${want.name}: MCP and CLI differ: ${JSON.stringify(agent).slice(0, 300)}`) }

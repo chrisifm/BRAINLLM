@@ -335,6 +335,7 @@ async fn a_production_list_refusal_names_the_parameter_without_the_declared_cata
 // A server that stops admitting this role (pg_hba edit, role change, failover) is an operator's problem that clears: clients
 // get a 503 to come back to, and the log keeps the SQLSTATE. A password that changed is the same case.
 #[tokio::test]
+#[ignore = "Use scripts/backend-check.mjs against its disposable Postgres cluster"]
 async fn a_database_that_refuses_the_connection_answers_503_with_retry_after() {
     let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Disposable Postgres only; no developer database is selected");
     let setup = brain_backend::db::connect(&url).await.unwrap();
@@ -369,4 +370,40 @@ async fn a_database_that_refuses_the_connection_answers_503_with_retry_after() {
     let events = std::fs::read_to_string(&kept).unwrap();
     std::fs::remove_file(kept).unwrap();
     assert!(events.lines().any(|l| l.contains("\"sqlstate\":\"28000\"") && l.contains("refused the connection")), "the cause stays in the log: {events}");
+}
+
+// The default limit has to carry a crawler from one address; a page spends one token per backend read.
+#[test]
+fn the_default_rate_limit_carries_a_crawler_at_two_reads_per_page() {
+    let edge = Platform::default().edge;
+    assert!(edge.requests_per_second >= 10 && edge.burst >= 300, "{} / {}", edge.requests_per_second, edge.burst);
+}
+
+#[tokio::test]
+#[ignore = "Use scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn head_answers_the_validator_of_get_and_honours_if_none_match() {
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Disposable Postgres only; no developer database is selected");
+    let pool = brain_backend::db::connect(&url).await.unwrap();
+    let suffix = Uuid::new_v4().simple().to_string()[..8].to_string();
+    let notes: Resource = serde_json::from_value(json!({
+        "name": format!("head_{suffix}"),
+        "fields": {"title": {"kind": "str", "required": true}},
+        "policy": {"read": ["public"], "create": ["user"], "update": ["owner"], "delete": ["owner"]}
+    }))
+    .unwrap();
+    brain_backend::db::migrate(&pool, std::slice::from_ref(&notes)).await.unwrap();
+    let (http, _) = brain_backend::http::router_with_platform(pool.clone(), config(vec![notes.clone()]), Platform::default()).await.map_err(|e| e.to_string()).unwrap();
+    let path = format!("/api/{}", notes.name);
+    let get = send(&http, "GET", &path, &[]).await;
+    let etag = get.headers()["etag"].to_str().unwrap().to_string();
+    let head = send(&http, "HEAD", &path, &[]).await;
+    assert_eq!(head.status(), 200);
+    assert_eq!(head.headers().get("etag").map(|v| v.to_str().unwrap()), Some(etag.as_str()));
+    assert!(to_bytes(head.into_body(), 64).await.unwrap().is_empty());
+    let unchanged = send(&http, "HEAD", &path, &[("if-none-match", &etag)]).await;
+    assert_eq!(unchanged.status(), 304);
+    let missing = send(&http, "HEAD", "/api/no_such_resource", &[]).await;
+    assert_eq!(missing.status(), 404);
+    assert!(to_bytes(missing.into_body(), 64).await.unwrap().is_empty());
+    pool.close().await;
 }

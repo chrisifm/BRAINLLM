@@ -162,7 +162,7 @@ set the same values with `ALTER ROLE <app role> SET …`.
 Browser writes require an exact configured Origin. Forwarded headers are not trusted. The CLI binds only loopback;
 use an HTTPS reverse proxy for a deployed experiment (the session cookie is always Secure). `GET /health` checks
 Postgres. Request ids, no-store responses, nosniff, frame denial, CSP and a ten-second request timeout are enabled.
-The server uses peer-IP rate limiting (120 burst, one replenished request/second); a proxy currently shares that quota.
+The server uses peer-IP rate limiting (300 burst, 10 replenished requests/second); a proxy currently shares that quota.
 
 Native sessions populate the verified `ctx.user` in Node SSR and the development sidecar through the fixed loopback
 bridge; legacy signed sessions never act as a fallback in native mode. JWT uses five-minute access tokens and

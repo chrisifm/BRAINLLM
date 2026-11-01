@@ -9,7 +9,7 @@ export default {
   limits: {
     // Requests inside the application at once before new ones get 503 OVERLOADED (default 512).
     maxInFlight: 256,
-    // What one client address recovers per second, and can spend at once (defaults 1 and 120). Every server-rendered
+    // What one client address recovers per second, and can spend at once (defaults 10 and 300). Every server-rendered
     // page spends its reads here, so a crawler from one address needs roughly pages per second x reads per page.
     requestsPerSecond: 10,
     burst: 300,
