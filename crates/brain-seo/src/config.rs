@@ -14,7 +14,7 @@
 //! `seo.ai` sets the AI crawler policy: `"allow"` (default: training, AI answers and search), `"search-only"` (AI
 //! search and answers yes, training no) or `"block"` (no AI crawler; classic search engines still allowed).
 //! `seo.markdown` (default true) publishes a Markdown copy of every indexable page for LLMs (`/pricing.md`).
-//! `seo.search` (`"/search?q={query}"`) adds a `SearchAction` to the home page's `WebSite` JSON-LD.
+//! `seo.search` is still accepted and adds nothing: Google retired the sitelinks search box in 2024.
 
 use brain_lex::Json;
 
@@ -84,7 +84,7 @@ pub struct Config {
     pub name: Option<String>,
     pub description: Option<String>,
     pub lang: Option<String>,
-    /// `--env staging` (or any non-production env): every page `noindex`, robots `Disallow: /`, no sitemap.
+    /// `--env staging` (or any non-production env): every page `noindex` (crawlable, so that crawlers can read it), no sitemap.
     pub staging: bool,
     /// `brain doctor` fails when a page scores below this (0 = never).
     pub min_score: u32,

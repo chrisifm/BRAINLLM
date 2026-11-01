@@ -35,7 +35,10 @@ const go = u => {
 // submitted does not ask (#299): the user chose to save, and a submit() that navigates once the server accepted the
 // data (`navigate('/products/' + p.id)`) leaves before submit() returns and marks the values saved.
 const DIRTY = (globalThis.__brainDirty ||= new Set())
-if (globalThis.addEventListener && !globalThis.__brainDirtyHook) {
+// registered with the first edit, not at load: a `beforeunload` listener can keep a page out of the back/forward cache,
+// and most pages that load this file are never edited
+const guardUnload = () => {
+  if (!globalThis.addEventListener || globalThis.__brainDirtyHook) return
   globalThis.__brainDirtyHook = 1
   globalThis.addEventListener('beforeunload', e => {
     for (const f of DIRTY) if (f.dirty && !f.busy) return void (e.preventDefault(), (e.returnValue = ''))
@@ -315,6 +318,8 @@ function createForm(schema, o, readRule, validateRule, remote) {
     },
   }
   DIRTY.add(f)
+  const watch = () => fx(() => void (f.dirty && guardUnload()))
+  owner ? I.root(watch, owner) : watch()
   if (owner) I.root(() => fx(() => () => DIRTY.delete(f)), owner)
   return f
 }

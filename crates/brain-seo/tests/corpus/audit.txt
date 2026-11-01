@@ -3,6 +3,11 @@
 @unreachable B1823 frontmatter of a content file; `brain check` reports it, see the check corpus
 @unreachable B1824 frontmatter of a content file; `brain check` reports it, see the check corpus
 @unreachable B1826 compares with the previous build
+@unreachable B1856 needs a running site; the tests of `brain seo audit --url` cover it
+@unreachable B1857 needs a running site; the tests of `brain seo audit --url` cover it
+@unreachable B1858 needs a running site; the tests of `brain seo audit --url` cover it
+@unreachable B1859 needs a running site; the tests of `brain seo audit --url` cover it
+@unreachable B1860 needs a running site; the tests of `brain seo audit --url` cover it
 @unreachable B1828 needs a multilingual site; tests/audit.rs covers it
 @unreachable B1829 reported by the build for an untranslated content entry
 @unreachable B1837 read from view sources by `brain seo audit`; tests in brain-cli/tests/seo_unlisted_routes.rs
@@ -31,8 +36,11 @@
 @expect B1803 /pricing
 @replace /pricing <meta name="description" content="Simple pricing for the offline task planner: free for small teams, one flat price for larger ones."> =>
 
-### B1804 short description
+### B1804 description wider than the snippet
 @expect B1804 /pricing
+@replace /pricing content="Simple pricing for the offline task planner: free for small teams, one flat price for larger ones." => content="Simple pricing for the offline task planner: free for small teams, one flat price for larger ones, and the same offline planner with every feature for each team that plans its week with it, and the same offline planner with every feature for each team that plans its week with it, and the same offline planner with every feature for each team that plans its week with it,"
+
+### a short description is not a finding: Google has no minimum
 @replace /pricing content="Simple pricing for the offline task planner: free for small teams, one flat price for larger ones." => content="Planner pricing."
 
 ### B1805 two h1

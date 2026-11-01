@@ -1,0 +1,10 @@
+{
+  "id": "structured-data-current",
+  "kind": "change",
+  "title": "Structured data drops retired features",
+  "why": "Google retired the sitelinks search box, and FAQ and HowTo results. Job postings gain the checks Google documents.",
+  "changelog": [
+    "JobPosting checks: description, expired `validThrough`, remote location"
+  ],
+  "guide": "brain guide seo"
+}

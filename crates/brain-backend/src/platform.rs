@@ -54,6 +54,9 @@ pub struct Edge {
     /// `Access-Control-Max-Age` for preflight responses.
     pub cors_max_age: Option<Duration>,
     pub max_in_flight: usize,
+    /// Requests per second one client recovers, and how many it can spend at once.
+    pub requests_per_second: u32,
+    pub burst: u32,
     /// Time readiness reports `DRAINING` before the listener stops accepting connections.
     pub ready_delay: Duration,
     /// Upper bound for in-flight requests to finish after the listener closes.
@@ -71,6 +74,8 @@ impl Default for Edge {
             cors_origins: Vec::new(),
             cors_max_age: None,
             max_in_flight: DEFAULT_MAX_IN_FLIGHT,
+            requests_per_second: 1,
+            burst: 120,
             ready_delay: Duration::ZERO,
             drain: DEFAULT_DRAIN,
             request_log: RequestLog::Errors,
@@ -211,7 +216,13 @@ impl Edge {
             }
         }
         if let Some(limits) = map.get("limits") {
-            let limits = object(limits, "platform.limits", &["maxInFlight"])?;
+            let limits = object(limits, "platform.limits", &["maxInFlight", "requestsPerSecond", "burst"])?;
+            if let Some(rate) = limits.get("requestsPerSecond") {
+                edge.requests_per_second = rate.as_u64().filter(|n| (1..=1000).contains(n)).ok_or("platform.limits.requestsPerSecond must be an integer in 1..1000")? as u32;
+            }
+            if let Some(burst) = limits.get("burst") {
+                edge.burst = burst.as_u64().filter(|n| (1..=100_000).contains(n)).ok_or("platform.limits.burst must be an integer in 1..100000")? as u32;
+            }
             if let Some(cap) = limits.get("maxInFlight") {
                 edge.max_in_flight = cap
                     .as_u64()

@@ -1,0 +1,10 @@
+{
+  "id": "dynamic-title-warning",
+  "kind": "change",
+  "title": "A fixed title on a dynamic route is warned",
+  "why": "Every record of a `[id]` view got the same title, and search engines treat those pages as duplicates. Long titles are still reported and never shortened.",
+  "changelog": [
+    "B0504: a `[id]` view with a literal `title` or `description`"
+  ],
+  "guide": "brain guide seo"
+}

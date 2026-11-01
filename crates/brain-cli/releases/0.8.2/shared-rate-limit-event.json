@@ -1,0 +1,10 @@
+{
+  "id": "shared-rate-limit-event",
+  "kind": "change",
+  "title": "A shared rate-limit bucket is logged",
+  "why": "Calls from the page server without the visitor's address spend one limit for everyone, and pages fail with an unexplained error.",
+  "changelog": [
+    "`shared-rate-limit-bucket`"
+  ],
+  "guide": "brain guide server"
+}

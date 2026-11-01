@@ -34,6 +34,8 @@ mod analytics;
 mod api_key_config;
 mod webhook_config;
 mod origin_check;
+mod lighthouse;
+mod seo_live;
 mod view_links;
 mod platform_config;
 mod route_executor;
@@ -83,6 +85,8 @@ pub(crate) const USAGE: &str = "brain — the BRAINLLM toolchain (every command 
 main:
   brain --version                    prints the version (also -V, --json)
   brain seo <audit|links|preview R>  SEO audit of the built site (score per page, B18xx findings)
+  brain seo audit --url <origin>     the same audit over a running site, with its sitemap, status codes and headers
+  brain lighthouse <url>             Lighthouse scores and Core Web Vitals, checked against lighthouse.minScores
   brain new <app> [--backend]        creates the app (app.brain, tokens.cssbrain, views/, comp/, ui/, AGENTS.md); --backend adds accounts on the native backend
   brain run [--port 5180] [--backend] [--base /app/] [--mock[=seed]] [--profile] [--no-trace] [--inspect-port N | --no-inspect]  dev server with hot reload; the debugger on port+1; --backend also runs `brain backend serve`
   brain build [--site https://…] [--report] [--strict] [--ext web|brain]   production (--report: bytes per page before/after each pass; --strict: a page shipped without its content or a route left out fails the build)
@@ -353,6 +357,16 @@ fn main() -> ExitCode {
                     ExitCode::from(1)
                 }
             };
+        }
+        Some("lighthouse") => {
+            let (code, out) = lighthouse::run(app_root().ok().as_deref(), &args[1..]);
+            println!("{out}");
+            return ExitCode::from(code.clamp(0, 255) as u8);
+        }
+        Some("seo") if args[1..].iter().any(|a| a == "--url" || a.starts_with("--url=")) => {
+            let (code, out) = seo_live::run(app_root().ok().as_deref(), &args[1..]);
+            println!("{out}");
+            return ExitCode::from(code.clamp(0, 255) as u8);
         }
         Some("seo") => {
             // brain seo <audit|links|preview <route>|indexnow> [--json]: brain-seo over dist/

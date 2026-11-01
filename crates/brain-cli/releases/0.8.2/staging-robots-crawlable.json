@@ -1,0 +1,10 @@
+{
+  "id": "staging-robots-crawlable",
+  "kind": "fix",
+  "title": "Staging builds stay crawlable",
+  "why": "`Disallow: /` hid the `noindex`, so a blocked staging URL could stay listed through links.",
+  "changelog": [
+    "Staging `robots.txt` no longer disallows everything"
+  ],
+  "guide": "brain guide seo"
+}

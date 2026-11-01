@@ -8,7 +8,7 @@ use crate::config::{Ai, Config};
 use crate::html::Doc;
 use crate::jsonld::Article;
 
-// AI crawler tokens change often: re-check every 30 days (last verified 2026-10-13) against the operators' pages:
+// AI crawler tokens change often: re-check every 30 days (last verified 2026-11-01) against the operators' pages:
 //   OpenAI      https://platform.openai.com/docs/bots
 //   Anthropic   https://support.anthropic.com/en/articles/8896518 (ClaudeBot, Claude-SearchBot, Claude-User)
 //   Perplexity  https://docs.perplexity.ai/guides/bots
@@ -22,7 +22,6 @@ use crate::jsonld::Article;
 pub const AI_TRAINING: &[&str] = &[
     "GPTBot",
     "ClaudeBot",
-    "anthropic-ai",
     "Google-Extended",
     "Applebot-Extended",
     "CCBot",
@@ -30,7 +29,7 @@ pub const AI_TRAINING: &[&str] = &[
     "Meta-ExternalAgent",
 ];
 /// AI search indexes and answer engines (they cite and link the page).
-pub const AI_SEARCH: &[&str] = &["OAI-SearchBot", "Claude-SearchBot", "PerplexityBot"];
+pub const AI_SEARCH: &[&str] = &["OAI-SearchBot", "OAI-AdsBot", "Claude-SearchBot", "PerplexityBot"];
 /// Fetchers acting on a user's request in a chat (several ignore robots.txt by design).
 pub const AI_USER: &[&str] = &["ChatGPT-User", "Claude-User", "Perplexity-User"];
 

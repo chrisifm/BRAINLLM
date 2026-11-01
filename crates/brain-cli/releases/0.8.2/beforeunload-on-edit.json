@@ -1,0 +1,10 @@
+{
+  "id": "beforeunload-on-edit",
+  "kind": "fix",
+  "title": "Forms no longer block the back/forward cache until edited",
+  "why": "The `beforeunload` listener was installed when the form script loaded, on pages nobody had edited.",
+  "changelog": [
+    "`beforeunload` is registered on the first edit"
+  ],
+  "guide": "brain guide forms"
+}

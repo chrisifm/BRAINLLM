@@ -460,6 +460,7 @@ pub async fn router_full(
         }
     }
     let (edge_state, edge_control) = edge_http::EdgeState::new(&platform.edge);
+    let (rate_limit, rate_burst) = (platform.edge.requests_per_second, platform.edge.burst);
     let shared = platform.cluster.shared;
     let platform_organizations = platform.organizations.clone();
     let platform_captcha = platform.captcha.clone().ready(&platform.routes, config.production)?;
@@ -673,8 +674,8 @@ pub async fn router_full(
     };
     let governor = GovernorConfigBuilder::default()
         .key_extractor(edge_http::ClientKey)
-        .per_second(1)
-        .burst_size(120)
+        .per_millisecond(1000 / u64::from(rate_limit))
+        .burst_size(rate_burst)
         .finish()
         .ok_or("Invalid rate limit")?;
     let limiter = governor.limiter().clone();

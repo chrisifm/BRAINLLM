@@ -1,0 +1,10 @@
+{
+  "id": "load-temporary-503",
+  "kind": "fix",
+  "title": "A temporary failure in `load` answers 503",
+  "why": "A saturated backend made pages answer 500, which tells crawlers the page is broken. Now it answers 503 with `Retry-After`, through the `_error.brain` view.",
+  "changelog": [
+    "`load` that fails with status 429 or 503 answers 503 with `Retry-After`"
+  ],
+  "guide": "brain guide server"
+}

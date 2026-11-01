@@ -706,7 +706,7 @@ export const page = (name, n) => {{ const c = col(name); const k = Number(n) || 
 }
 
 /// Days since 1970-01-01 of a `YYYY-MM-DD` date (days_from_civil).
-fn days(d: &str) -> Option<i64> {
+pub(crate) fn days(d: &str) -> Option<i64> {
     let (y, m, dd): (i64, i64, i64) = (
         d.get(..4)?.parse().ok()?,
         d.get(5..7)?.parse().ok()?,

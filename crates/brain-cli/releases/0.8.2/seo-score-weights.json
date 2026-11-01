@@ -1,0 +1,10 @@
+{
+  "id": "seo-score-weights",
+  "kind": "change",
+  "title": "The SEO score follows what search engines document",
+  "why": "Word count, a minimum description length and keyword density are not ranking rules. Pixel widths remain as display warnings. Scores may change.",
+  "changelog": [
+    "SEO score no longer depends on word count"
+  ],
+  "guide": "brain guide seo"
+}

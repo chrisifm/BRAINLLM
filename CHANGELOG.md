@@ -7,6 +7,22 @@ diagnostics that reject code an earlier version accepted.
 Every npm package (`@christianirack/brainllm`, its seven native platform packages, `brainllm-runtime`,
 `create-brainllm` and `create-brainll`) ships the same version as `[workspace.package]` in `Cargo.toml`.
 
+## [0.8.2] - 2026-11-01
+
+Upgrade with `npm install -D @christianirack/brainllm@0.8.2 --save-exact`. SEO scores may change because the weights changed; check `brain seo audit`, and give each `[id]` view a title from its data if B0504 appears.
+
+- `brain seo audit --url <origin>` audits a running site: dynamic routes through the sitemap, B1856 a listed page that answers an error or 200 with noindex, B1857 a security header sent twice, B1858 a site-wide noindex, B1859 a soft 404, B1860 the same link text for different pages
+- `brain lighthouse <url>` runs a pinned Lighthouse and checks `lighthouse.minScores` in brain.json; on staging the deliberate noindex is left out of the SEO score
+- B0504: a `[id]` view with a literal `title` or `description` gives every page the same one. B1814 and B1815 now say what to do when the content differs. Titles are reported, never shortened
+- SEO score no longer depends on word count (B1808), a minimum description length, low keyword density or the keyword in the URL; pixel widths (B1802, B1804) and headings weigh less, and say they are display widths
+- Fix: Staging `robots.txt` no longer disallows everything, which hid the `noindex` of its pages
+- Structured data: `SearchAction` is no longer emitted and `seo.search` adds nothing; JobPosting checks: description, expired `validThrough`, remote location, heading tags
+- AI crawlers: `anthropic-ai` removed and `OAI-AdsBot` added to `seo.ai`
+- Fix: `beforeunload` is registered on the first edit, so unedited pages with a form stay eligible for the back/forward cache
+- `limits.requestsPerSecond` and `limits.burst` in server/platform.jsbrain size the per-address rate limit; the defaults stay 1 and 120
+- Fix: `load` that fails with status 429 or 503 answers 503 with `Retry-After` instead of 500, through the `_error.brain` view
+- The backend logs event `shared-rate-limit-bucket` once when a local caller without the visitor's address reaches the rate limit
+
 ## [0.8.1] - 2026-11-01
 
 Upgrade with `npm install -D @christianirack/brainllm@0.8.1 --save-exact`. Nothing here needs a change in your app. Send `total=false` on long list walks that do not show the count, and take a backup before `brain backend migrate`. A project that only uses operator-created keys can add `selfService: false` to `server/api-keys.jsbrain`.

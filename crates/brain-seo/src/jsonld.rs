@@ -1,4 +1,4 @@
-//! Structured data (INTERNALS §33): one automatic JSON-LD `@graph` per page (`WebSite` + `SearchAction` and
+//! Structured data (INTERNALS §33): one automatic JSON-LD `@graph` per page (`WebSite` and
 //! `Organization` on every page, `WebPage`, `BreadcrumbList` from the route tree, `FAQPage` from `<details>` groups
 //! marked `faq`, `BlogPosting` for content collections, linked by `@id`) and validation of every block against the properties search engines need per type.
 
@@ -107,29 +107,12 @@ pub fn website(cfg: &Config, name: &str) -> Option<Json> {
     if !url.contains("://") {
         return None;
     }
-    let mut kv = vec![
+    let kv = vec![
         ("@context".to_string(), s(CONTEXT)),
         ("@type".into(), s("WebSite")),
         ("name".into(), s(name)),
         ("url".into(), s(&url)),
     ];
-    if let Some(q) = &cfg.search {
-        let target = Json::obj([
-            ("@type", s("EntryPoint")),
-            (
-                "urlTemplate",
-                s(&cfg.abs(&q.replace("{query}", "{search_term_string}"))),
-            ),
-        ]);
-        kv.push((
-            "potentialAction".into(),
-            Json::obj([
-                ("@type", s("SearchAction")),
-                ("target", target),
-                ("query-input", s("required name=search_term_string")),
-            ]),
-        ));
-    }
     Some(Json::Obj(kv))
 }
 
@@ -545,6 +528,10 @@ fn has(n: &Json, alts: &str) -> bool {
     })
 }
 
+fn today() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| (d.as_secs() / 86_400) as i64)
+}
+
 /// Google rich-result rules that look inside a property (Search Central, fetched 2026-10-31, pages last updated
 /// 2026-09-08): Product/SoftwareApplication offers, JobPosting location and enums, Event location.
 fn google_rules(t: &str, n: &Json, out: &mut Vec<Issue>) {
@@ -570,6 +557,19 @@ fn google_rules(t: &str, n: &Json, out: &mut Vec<Issue>) {
             }
         }
         "JobPosting" => {
+            let description = str_of(n.get("description")).unwrap_or_default();
+            if !description.is_empty() && description.trim() == str_of(n.get("title")).unwrap_or_default().trim() {
+                warn("JobPosting description is the same as its title".into(), "write the full description: responsibilities, qualifications, skills, hours, education and experience".into());
+            }
+            if (1..=6).any(|h| description.to_ascii_lowercase().contains(&format!("<h{h}"))) {
+                warn("JobPosting description uses heading tags".into(), "use <p>, <ul> and <li>: those are the tags Google recognizes in a job description".into());
+            }
+            if str_of(n.get("validThrough")).and_then(|d| crate::content::days(&d)).is_some_and(|d| d < today()) {
+                warn("JobPosting validThrough has passed: the job has expired".into(), "update the date, or remove the posting from the page and the sitemap".into());
+            }
+            if str_of(n.get("jobLocationType")).as_deref() == Some("TELECOMMUTE") && !has(n, "applicantLocationRequirements") {
+                warn("remote JobPosting has no `applicantLocationRequirements`".into(), "add the countries it accepts: `applicantLocationRequirements: { \"@type\": \"Country\", \"name\": \"Mexico\" }`".into());
+            }
             for l in list("jobLocation") {
                 if !l.get("address").is_some_and(|a| has(a, "addressCountry")) {
                     warn("JobPosting jobLocation has no `address.addressCountry`".into(), "add `address: { \"@type\": \"PostalAddress\", \"addressCountry\": \"US\" }` (ISO 3166-1 alpha-2) to jobLocation".into());
@@ -779,7 +779,7 @@ mod tests {
         let g = graph(&blocks);
         let site = node(&g, "WebSite").stringify();
         assert!(site.starts_with(r#"{"@id":"https://acme.dev/#website","@type":"WebSite""#), "{site}");
-        assert!(site.contains(r#""urlTemplate":"https://acme.dev/search?q={search_term_string}""#));
+        assert!(!site.contains("SearchAction"), "Google retired the sitelinks search box");
         let org = node(&g, "Organization").stringify();
         assert!(
             org.contains(r#""@id":"https://acme.dev/#organization""#)
@@ -947,5 +947,27 @@ mod tests {
             web_app.iter().all(|i| i.level == Level::Info),
             "rich-result extras for apps are only recommended"
         );
+    }
+
+    #[test]
+    fn job_posting_rules_read_the_description_dates_and_remote_location() {
+        let check = |extra: &str| {
+            let node = Json::parse(&format!(r#"{{"title":"Engineer","description":"<p>Build things</p>","datePosted":"2026-01-01"{extra}}}"#)).unwrap();
+            let mut out = Vec::new();
+            google_rules("JobPosting", &node, &mut out);
+            out.iter().map(|i| i.msg.clone()).collect::<Vec<_>>().join(" | ")
+        };
+        assert_eq!(check(""), "");
+        assert!(check(r#","validThrough":"2020-01-01""#).contains("expired"));
+        assert_eq!(check(r#","validThrough":"2999-01-01T00:00""#), "");
+        assert!(check(r#","jobLocationType":"TELECOMMUTE""#).contains("applicantLocationRequirements"));
+        assert_eq!(check(r#","jobLocationType":"TELECOMMUTE","applicantLocationRequirements":{"@type":"Country","name":"Mexico"}"#), "");
+        let same = Json::parse(r#"{"title":"Engineer","description":"Engineer"}"#).unwrap();
+        let heading = Json::parse(r#"{"title":"Engineer","description":"<h2>Role</h2><p>Build</p>"}"#).unwrap();
+        for (node, expected) in [(same, "same as its title"), (heading, "heading tags")] {
+            let mut out = Vec::new();
+            google_rules("JobPosting", &node, &mut out);
+            assert!(out.iter().any(|i| i.msg.contains(expected)), "{expected}");
+        }
     }
 }

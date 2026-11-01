@@ -114,7 +114,8 @@ fn missing_basics_lower_the_score() {
         codes.contains(&"B1801") && codes.contains(&"B1805") && codes.contains(&"B1806"),
         "{codes:?}"
     );
-    assert!(p.score.unwrap() < 80);
+    let score = p.score.unwrap();
+    assert!(score < 85, "{score}");
     assert!(!r.ok(), "B1801 is an error");
     assert!(r.text().contains("B1801"));
 }
@@ -205,8 +206,8 @@ fn keyword_placement() {
         .collect();
     assert_eq!(
         kw.len(),
-        6,
-        "title, h1, first paragraph, description, URL and density: {kw:?}"
+        5,
+        "title, h1, first paragraph, description and URL: {kw:?}"
     );
     // the description is the snippet: a keyword missing only there is reported, with an exact fix
     let mut pages = good_site();
@@ -430,7 +431,7 @@ fn finish_rewrites_heads_and_generates_files() {
             .contains("<meta name=\"robots\" content=\"noindex, nofollow\">")
             && p.html.matches("name=\"robots\"").count() == 1
     }));
-    assert_eq!(built.files[0].1, "User-agent: *\nDisallow: /\n");
+    assert_eq!(built.files[0].1, "User-agent: *\nAllow: /\n");
     assert!(!built.files.iter().any(|(p, _)| p == "sitemap.xml"));
     assert!(built.report.pages.iter().all(|p| p.score.is_none()));
     let _ = std::fs::remove_dir_all(&dir);

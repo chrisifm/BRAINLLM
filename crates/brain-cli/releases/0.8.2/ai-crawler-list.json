@@ -1,0 +1,10 @@
+{
+  "id": "ai-crawler-list",
+  "kind": "change",
+  "title": "The AI crawler list follows the operators' pages",
+  "why": "`anthropic-ai` is no longer listed by Anthropic, and OpenAI added a crawler.",
+  "changelog": [
+    "`anthropic-ai` removed and `OAI-AdsBot` added"
+  ],
+  "guide": "brain guide seo"
+}

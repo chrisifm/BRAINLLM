@@ -274,6 +274,36 @@ pub const CATALOG: &[(&str, &str, &str, &str)] = &[
         "[{ \"from\": \"/old\", \"to\": \"/new\" }]",
     ),
     (
+        "B1856",
+        "Listed page answers an error (live audit)",
+        "A page in the sitemap that answers an error, or 200 with noindex, tells search engines it is gone.",
+        "if (!r.data) throw new Error('temporary') // 5xx instead of a 200 error page",
+    ),
+    (
+        "B1857",
+        "Security header sent twice (live audit)",
+        "The proxy and the app both set a header that takes one value: browsers ignore one, or discard the policy.",
+        "Set X-Frame-Options, Permissions-Policy and the like in one place",
+    ),
+    (
+        "B1858",
+        "Whole site answers noindex (live audit)",
+        "A staging noindex copied to production removes the site from search. Declare staging with `seo.staging`.",
+        "\"seo\": { \"staging\": true }",
+    ),
+    (
+        "B1859",
+        "Missing page answers 200 (live audit)",
+        "An address that does not exist must answer 404; with 200 search engines record a soft 404.",
+        "if (!r.data) throw notFound()",
+    ),
+    (
+        "B1860",
+        "Same link text, different pages (live audit)",
+        "Links that read the same should lead to the same place. Reported only: it depends on the data.",
+        "<a href={item.href}>{item.name} in {item.city}</a>",
+    ),
+    (
         "B1840",
         "Failed request (brain trace)",
         "`brain trace` saw a request answer 4xx or 5xx, or never get an answer. The same id links the browser payload, the server handling and the backend queries.",
@@ -632,12 +662,13 @@ fn page_checks(
     if !title.is_empty() {
         let w = px(title, 20.0);
         let chars = title.chars().count();
-        s.check(5, w <= TITLE_PX, "B1802", Level::Warning, || {
+        // display width, not a ranking limit: Google publishes no title length and may rewrite any title
+        s.check(3, w <= TITLE_PX, "B1802", Level::Warning, || {
             (
                 format!(
-                    "title is {w:.0} px wide ({chars} chars); results cut it at {TITLE_PX:.0} px"
+                    "title is {w:.0} px wide ({chars} chars); results may show only the first {TITLE_PX:.0} px (a display width, not a Google limit)"
                 ),
-                "shorten the title to about 55 characters, main words first".into(),
+                "put the words that matter first; shorten it if the rest adds nothing. Never cut it automatically: a title in a URL or in search history may be worth keeping".into(),
             )
         });
         s.check(3, chars >= TITLE_MIN, "B1802", Level::Warning, || {
@@ -649,18 +680,14 @@ fn page_checks(
     s.check(10, !desc.is_empty(), "B1803", Level::Warning, || {
         (
             "page has no meta description".into(),
-            "add `description=\"…\"` (70–155 characters) to the view's <meta seo>".into(),
+            "add `description=\"…\"`: one or two sentences on what the page offers".into(),
         )
     });
     if !desc.is_empty() {
         let w = px(desc, 14.0);
         let chars = desc.chars().count();
-        s.check(5, w <= DESC_PX && chars >= 70, "B1804", Level::Warning, || {
-            if w > DESC_PX {
-                (format!("description is {w:.0} px wide ({chars} chars); snippets cut at {DESC_PX:.0} px"), "keep it under about 155 characters".into())
-            } else {
-                (format!("description has {chars} chars"), "write 70–155 characters that say what the page offers".into())
-            }
+        s.check(3, w <= DESC_PX, "B1804", Level::Warning, || {
+            (format!("description is {w:.0} px wide ({chars} chars); snippets may show only the first {DESC_PX:.0} px (a display width, not a Google limit)"), "say what the page offers in the first sentence".into())
         });
     }
     let h1: Vec<&String> = doc
@@ -672,7 +699,7 @@ fn page_checks(
     let words = doc.words();
     if body {
         // headings
-        s.check(10, h1.len() == 1, "B1805", Level::Warning, || {
+        s.check(4, h1.len() == 1, "B1805", Level::Warning, || {
             if h1.is_empty() {
                 (
                     "page has no <h1>".into(),
@@ -686,7 +713,7 @@ fn page_checks(
             }
         });
         let skip = doc.headings.windows(2).find(|w| w[1].0 > w[0].0 + 1);
-        s.check(3, skip.is_none(), "B1806", Level::Info, || {
+        s.check(1, skip.is_none(), "B1806", Level::Info, || {
             let w = skip.unwrap();
             (
                 format!(
@@ -714,12 +741,11 @@ fn page_checks(
             )
         });
         // content
-        s.check(5, words >= THIN_WORDS, "B1808", Level::Info, || {
+        // no weight: Google has no preferred word count, so a short page that answers its question loses nothing
+        s.check(0, words >= THIN_WORDS, "B1808", Level::Info, || {
             (
                 format!("main content has {words} words"),
-                format!(
-                    "write at least {THIN_WORDS} words, or mark app screens robots=\"noindex\""
-                ),
+                "check that the page says what a reader came for; if it is an app screen, mark it robots=\"noindex\"".into(),
             )
         });
     }
@@ -874,7 +900,7 @@ fn page_checks(
             ("first paragraph", contains_ci(&doc.first_paragraph, kw), 2, "first sentence of the first <p> in <main>"),
             ("description", contains_ci(desc, kw), 2, "`description=` of <meta seo>"),
             // the home page carries the brand, not the query, in its URL
-            ("URL", route == "/" || route.to_lowercase().contains(&slug), 1, "route (file name under views/)"),
+            ("URL", route == "/" || route.to_lowercase().contains(&slug), 0, "route (file name under views/)"),
         ];
         for (place, ok, w, where_) in places {
             s.check(w, ok, "B1816", Level::Warning, || {
@@ -890,12 +916,13 @@ fn page_checks(
         } else {
             hits as f32 * kw.split_whitespace().count() as f32 * 100.0 / words as f32
         };
-        if words >= 100 && !(0.5..=3.0).contains(&density) {
+        // no lower bound: no search engine asks for a keyword density, only repetition reads as spam
+        if words >= 100 && density > 3.0 {
             s.note(
                 "B1816",
                 Level::Info,
                 format!("focus keyword \"{kw}\" density is {density:.1} % ({hits} uses in {words} words)"),
-                if density > 3.0 { "use synonyms instead of repeating the keyword".into() } else { format!("mention \"{kw}\" naturally a few more times") },
+                "use synonyms instead of repeating the keyword".into(),
             );
         }
     } else if body && let Some((_, h1)) = doc.headings.iter().find(|(l, _)| *l == 1) {
@@ -967,7 +994,7 @@ fn geo_checks(cfg: &Config, route: &str, doc: &Doc, s: &mut Scorer) {
             "B1831",
             Level::Info,
             format!("{} question headings (\"{}\", …) are not marked as an FAQ", questions.len(), questions[0]),
-            "group them as <section faq><details><summary>Question?</summary>Answer</details></section> (FAQPage JSON-LD is automatic)".into(),
+            "if the page answers them, <section faq><details><summary>Question?</summary>Answer</details></section> gives the answers a clear structure for readers and LLMs; Google no longer shows FAQ results".into(),
         );
     }
     let article_types = ["Article", "BlogPosting", "NewsArticle"];
@@ -1227,14 +1254,14 @@ pub fn audit(site: &Site) -> Report {
             s.check(6, dt.is_empty(), "B1814", Level::Warning, || {
                 (
                     format!("same title as {}", dt.join(", ")),
-                    "write a title unique to this page".into(),
+                    "name what makes this page different, using the data that sets it apart (company, place, date). If the pages are the same thing, keep one and point the others to it with `canonical`".into(),
                 )
             });
             let dd = others(&groups[1], doc.meta("description"), i);
             s.check(4, dd.is_empty(), "B1815", Level::Warning, || {
                 (
                     format!("same description as {}", dd.join(", ")),
-                    "write a description unique to this page".into(),
+                    "say what only this page offers; if the pages are the same thing, keep one and point the others to it with `canonical`".into(),
                 )
             });
             let dk = others(&groups[2], p.keyword.as_deref(), i);
@@ -1376,7 +1403,7 @@ pub fn audit(site: &Site) -> Report {
         site_f.push(Finding {
             code: "B1822",
             level: Level::Info,
-            msg: "staging build: every page is noindex and robots.txt disallows everything".into(),
+            msg: "staging build: every page is noindex, and robots.txt lets crawlers read it".into(),
             fix: "build with `--env production` to publish".into(),
         });
     }

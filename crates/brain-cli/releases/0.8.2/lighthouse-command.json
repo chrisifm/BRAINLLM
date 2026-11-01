@@ -1,0 +1,21 @@
+{
+  "id": "lighthouse-command",
+  "kind": "capability",
+  "title": "`brain lighthouse` checks scores against minimums",
+  "why": "Scores were run by hand with whichever Lighthouse was installed. The command pins the version and treats a deliberate staging noindex as such.",
+  "changelog": [
+    "`brain lighthouse <url>`"
+  ],
+  "guide": "brain guide seo",
+  "adopt": {
+    "file": "brain.json",
+    "command": "brain lighthouse https://your-site.example/",
+    "snippet": "\"lighthouse\": { \"minScores\": { \"performance\": 90, \"accessibility\": 100 } }"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "\"lighthouse\""
+    }
+  ]
+}

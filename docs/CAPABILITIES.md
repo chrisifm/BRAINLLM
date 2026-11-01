@@ -68,6 +68,12 @@ Policy grants: `public` `owner` `owner.<ref>` `org` `org.<role>` `org.own` `<rol
 
 ## Added by release
 
+### 0.8.2
+
+- `brain lighthouse` checks scores against minimums (`brain guide seo`)
+- The rate limit can be sized (`docs/backend/lifecycle.md`)
+- `brain seo audit --url` audits a running site (`brain guide seo`)
+
 ### 0.8.0
 
 - brain add auth and brain new --backend (`brain guide backend`)

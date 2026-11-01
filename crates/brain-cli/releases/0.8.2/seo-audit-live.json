@@ -1,0 +1,21 @@
+{
+  "id": "seo-audit-live",
+  "kind": "capability",
+  "title": "`brain seo audit --url` audits a running site",
+  "why": "The build cannot see pages rendered per request. The new mode samples the sitemap and runs the same rules over real responses, plus what only a response shows.",
+  "changelog": [
+    "`brain seo audit --url <origin>`"
+  ],
+  "guide": "brain guide seo",
+  "adopt": {
+    "file": "package.json",
+    "command": "brain seo audit --url http://127.0.0.1:4173 --sample 10 --delay-ms 200",
+    "snippet": "\"scripts\": { \"seo:live\": \"brain seo audit --url https://your-site.example --sample 30\" }"
+  },
+  "uses": [
+    {
+      "glob": "package.json",
+      "contains": "seo audit --url"
+    }
+  ]
+}

@@ -1129,8 +1129,17 @@ export function createServer(o = {}) {
     const loadOutcome = e => {
       if (e && e.redirect) return send(res, e.status || 303, '', { location: withBase(linkTo(route, redirect(e.redirect, e.status ?? 303).redirect)), ...ctx.session.headers() })
       if ((e instanceof HttpError && e.status === 404) || (e && e.notFound === true)) return missing(req, res, e) // `notFound()` 404 / `gone()` 410
+      // the backend or another service said "not now": a temporary 503 tells crawlers to come back, a 500 tells them it broke
+      // a status the page chose itself (`new HttpError(429)`) stays as it is, with the same hint to come back
+      if (e && (e.status === 429 || e.status === 503) && !(e instanceof HttpError) && !res.headersSent) {
+        log('warn', 'load temporarily unavailable', { rid, path: url.pathname, status: 503, ...trace(e) })
+        res.setHeader('retry-after', String(Math.min(Math.ceil(e.retryAfter) || 5, 3600)))
+        res.setHeader('cache-control', 'no-store')
+        return errorPage(req, res, route, params, url, rid, 503)
+      }
       const status = intendedStatus(e) || 500
       log('error', 'load failed', { rid, path: url.pathname, status, ...trace(e) })
+      if ((status === 429 || status === 503) && !res.headersSent) res.setHeader('retry-after', String(Math.min(Math.ceil(e.retryAfter) || 5, 3600)))
       return status === 500 ? errorPage(req, res, route, params, url, rid) : failPage(res, status, rid)
     }
     if (route.stream && route.server && !fixed && !forms && status === 200 && !res.$capture) return streamed(req, res, route, params, url, rid, ctx, keep(extra || {}), loadOutcome)
@@ -1272,9 +1281,9 @@ export function createServer(o = {}) {
     return failPage(res, 403, rid)
   }
   // a failing load or guard → the folder's _error.brain (route `error`, props { message, rid }), else the generic page
-  function errorPage(req, res, route, params, url, rid) {
-    if (wantsHtml(req) && route.error) return ssr(req, res, route.error, params, url, rid, null, 500, { message: 'Something went wrong.', rid })
-    return failPage(res, 500, rid)
+  function errorPage(req, res, route, params, url, rid, status = 500) {
+    if (wantsHtml(req) && route.error) return ssr(req, res, route.error, params, url, rid, null, status, { message: 'Something went wrong.', rid })
+    return failPage(res, status, rid)
   }
   async function render(route, props, forms, at = null) {
     const { install } = await load('_server/dom.js')

@@ -53,10 +53,11 @@ pub fn xml(s: &str) -> String {
 }
 
 /// robots.txt. A `noindex` page stays crawlable on purpose: blocking it here would hide its `noindex` from crawlers
-/// (Google keeps listing blocked URLs it finds through links). Staging builds block everything.
+/// (Google keeps listing blocked URLs it finds through links). For the same reason a staging build, whose pages are all
+/// `noindex`, stays crawlable.
 pub fn robots(cfg: &Config) -> String {
     if cfg.staging {
-        return "User-agent: *\nDisallow: /\n".into();
+        return "User-agent: *\nAllow: /\n".into();
     }
     let mut o = String::from("User-agent: *\nAllow: /\n");
     o.push_str(&crate::social::ai_robots(cfg));
@@ -686,7 +687,7 @@ mod tests {
             staging: true,
             ..cfg.clone()
         };
-        assert_eq!(robots(&staging), "User-agent: *\nDisallow: /\n");
+        assert_eq!(robots(&staging), "User-agent: *\nAllow: /\n");
         assert!(sitemaps(&staging, &e).is_empty());
         assert!(sitemaps(&Config::default(), &e).is_empty());
     }

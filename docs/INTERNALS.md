@@ -1384,7 +1384,7 @@ impossible while developing.
 **6. Loading extras that also help the first visit** (mostly in place: §13, §19, §32)
 - Exact `modulepreload` per view, critical CSS inline, `103 Early Hints`, the router's predictive prefetch of the
   next route, bfcache-safe pages (B0211), `<link rel="preconnect">` for every third-party origin in the CSP,
-  `font-display: swap` plus a `preload` of the fonts the first screen uses, `fetchpriority="high"` on the LCP image,
+  `font-display: swap`, `fetchpriority="high"` on the LCP image,
   lazy images with dimensions (B1821).
 
 **7. Build signature: a new build always replaces the old one** (Chris 2026-10-13: "every build must come out with a

@@ -4,6 +4,7 @@
 //! - B1603 `jsonld={{…}}` object without `@type`.
 //! - B1604 the same static `canonical` in two views.
 //! - B0502 (warning) indexable view without `keyword` (the search query the page targets).
+//! - B0504 (warning) dynamic route with a literal `title` or `description`.
 
 use crate::Checker;
 use brain_parse::ast::*;
@@ -218,6 +219,15 @@ impl Checker<'_> {
             {
                 let span = attr(name).map(|m| m.span).unwrap_or(seo_span);
                 self.push("B1602", span, format!("`{name}` has {} characters; search results cut it after {max}", t.chars().count()), format!("shorten the {name} to {max} characters or fewer"));
+            }
+        }
+        // B0504: `[id].brain` renders many pages; a literal title or description gives them all the same one
+        if c.file.contains('[') && !noindex && !self.ctx.guarded {
+            for name in ["title", "description"] {
+                if let Some((_, SeoValue::Text(text))) = info.attrs.iter().find(|(n, _)| n == name) {
+                    let span = attr(name).map(|m| m.span).unwrap_or(seo_span);
+                    self.push("B0504", span, format!("every page of this dynamic route gets the same {name}: \"{text}\""), format!("build it from the page's data: `{name}={{props.item.{name}}}`, or from the fields that tell the pages apart. A shared title gets them grouped as duplicates in search"));
+                }
             }
         }
         if let Some(m) = attr("jsonld")

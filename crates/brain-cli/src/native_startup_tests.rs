@@ -134,6 +134,9 @@ fn native_startup_pins_selected_authority_across_environment_edits() {
         loop {
             match backend.accept() {
                 Ok((mut stream, _)) => {
+                    // on BSD and macOS an accepted socket inherits the listener's non-blocking mode, and a read
+                    // that beats the request then fails at once instead of waiting
+                    stream.set_nonblocking(false).unwrap();
                     stream
                         .set_read_timeout(Some(Duration::from_secs(2)))
                         .unwrap();

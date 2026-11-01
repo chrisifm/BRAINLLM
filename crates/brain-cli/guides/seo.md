@@ -19,7 +19,7 @@ page text, not after.
 
 ## 2. Write for answer engines
 - **Answer first:** the first paragraph answers the query directly in ≤ 300 characters, then expands (B1830).
-- **Questions as FAQ:** two or more question headings → group them; FAQPage JSON-LD is generated:
+- **Questions as FAQ:** clear for readers and LLMs, though Google no longer shows FAQ results; FAQPage JSON-LD is generated:
   `<section faq><details><summary>Is it free?</summary>Yes, for up to ten people.</details></section>` (B1831).
 - **How-to:** numbered steps under question or "How to …" headings; one action per step.
 - **Entities:** name things exactly (product, place, standard) and link 1-3 authoritative sources where you state
@@ -29,12 +29,12 @@ page text, not after.
   The site's own profiles: `"organization": { "name", "logo", "sameAs": [...] }` and `"social": { "x": "@acme", … }`.
 - **Freshness:** show the date in the text `<time datetime="2026-10-01">October 1, 2026</time>`; collections set
   `date:` and `updated:` in the frontmatter (→ `dateModified`, B1832); views set `<meta seo lastmod="2026-10-13">`.
-- **Depth:** thin pages score lower (B1808); internal links in and out (B1812 no links out, B1813 orphan page).
+- **Depth:** no word count is required (B1808 only points at near-empty pages); internal links in and out (B1812 no links out, B1813 orphan page).
   A link to a page the build does not produce fails `brain build` (B1819).
 
 ## 3. Declare the page
 ```html
-<meta seo title="Split a bill offline" keyword="split a bill offline" canonical="/split-a-bill-offline" schema="HowTo"
+<meta seo title="Split a bill offline" keyword="split a bill offline" canonical="/split-a-bill-offline" schema="Article"
   description="Split a restaurant bill between friends without network: …">
 ```
 - `schema="Type"` writes JSON-LD with that `@type` plus name, description and url. A full object:
@@ -93,13 +93,21 @@ brain build                        # SEO is judged on the built HTML (not on `br
 brain seo audit                    # score 0-100 per page + B18xx findings with fix; fails under seo.minScore (80)
 brain seo preview /split-a-bill-offline   # search snippet, social card, JSON-LD as text
 brain seo links                    # broken internal links and anchors (B1819, B1820)
+brain seo audit --url https://beta.example.com --sample 30   # the same rules over the running site
+brain lighthouse https://beta.example.com/ --preset mobile   # scores and Core Web Vitals, against lighthouse.minScores
 ```
+`brain seo audit` and `brain build` fail under `seo.minScore`. Audit dynamic routes with `--url`: the build cannot see them.
+It also reports what only a live response shows: a listed page that answers an error or 200 + noindex (B1856), a
+security header sent twice (B1857), a site-wide noindex (B1858), a soft 404 (B1859), the same link text for different
+pages (B1860). On staging pass `--expect-noindex` or set `seo.staging`: pages stay `noindex` and crawlable, because
+`Disallow` would hide that `noindex`. Titles are never shortened for you: a long one is reported, and keeping it is your
+decision. Pixel widths (B1802, B1804) are display widths, not Google limits. Each `[id]` page needs its own title (B0504).
 `brain explain B1830` (or any B18xx) prints why and a correct example. GEO hints (B1830-B1835) are info: they never
 change the score but they decide whether an AI answer quotes the page.
 
 ## Minimal correct example
 ```html
-<meta seo title="Split a bill offline" keyword="split a bill offline" schema="HowTo"
+<meta seo title="Split a bill offline" keyword="split a bill offline" schema="Article"
   description="Split a restaurant bill between friends with no network: add the items, tap who had what, done.">
 <main class="page">
   <h1>Split a bill offline</h1>

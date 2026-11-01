@@ -1,0 +1,20 @@
+{
+  "id": "rate-limit-configurable",
+  "kind": "capability",
+  "title": "The rate limit can be sized",
+  "why": "Each server-rendered page spends its reads against 1 request per second per address, so a crawler from one address got errors. The default does not change.",
+  "changelog": [
+    "`limits.requestsPerSecond` and `limits.burst`"
+  ],
+  "guide": "docs/backend/lifecycle.md",
+  "adopt": {
+    "file": "server/platform.jsbrain",
+    "snippet": "limits: { requestsPerSecond: 10, burst: 300 }"
+  },
+  "uses": [
+    {
+      "glob": "server/platform.jsbrain",
+      "contains": "requestsPerSecond"
+    }
+  ]
+}

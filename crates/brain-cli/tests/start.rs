@@ -444,3 +444,35 @@ fn native_sockets_without_a_backend_refuse_before_publishing_a_url() {
     assert!(err.contains("BRAIN_BACKEND_URL") && err.contains("fix:"), "{err}");
     let _ = std::fs::remove_dir_all(&d);
 }
+
+// a load that fails because something upstream says "not now" answers 503 with Retry-After, so a crawler comes back;
+// any other failure stays a 500
+#[test]
+fn a_temporary_load_failure_is_a_503_with_retry_after() {
+    if Command::new("node").arg("--version").output().is_err() {
+        return;
+    }
+    let tmp = std::env::temp_dir().join(format!("bload503-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let bin = env!("CARGO_BIN_EXE_brain");
+    assert!(Command::new(bin).args(["new", "site"]).current_dir(&tmp).stdout(Stdio::null()).status().unwrap().success());
+    let dir = tmp.join("site");
+    std::fs::create_dir_all(dir.join("views/items")).unwrap();
+    std::fs::write(
+        dir.join("views/items/[id].brain"),
+        "<meta seo title={props.id} description={props.id}>\n<script>\nexport async function load(ctx) {\n  if (ctx.params.id === 'busy') throw Object.assign(new Error('later'), { status: 429, retryAfter: 7 })\n  if (ctx.params.id === 'broken') throw new Error('broken')\n  return { id: ctx.params.id }\n}\n</script>\n<main><h1>{props.id}</h1></main>\n",
+    )
+    .unwrap();
+    assert!(Command::new(bin).args(["build", "--site", "https://example.com"]).current_dir(&dir).stdout(Stdio::null()).stderr(Stdio::null()).status().unwrap().success());
+    let (_server, port) = start(&dir, &[]);
+    assert!(wait_up(port));
+    let html = "Accept: text/html\r\n";
+    let busy = get(port, "/items/busy", html).unwrap();
+    assert!(busy.starts_with("HTTP/1.1 503") && busy.to_lowercase().contains("retry-after: 7"), "{busy}");
+    assert!(busy.contains("<!") && !busy.contains("later"), "the error view answers, without the error's text: {busy}");
+    let broken = get(port, "/items/broken", html).unwrap();
+    assert!(broken.starts_with("HTTP/1.1 500") && !broken.to_lowercase().contains("retry-after"), "{broken}");
+    assert!(get(port, "/items/ok", html).unwrap().starts_with("HTTP/1.1 200"));
+    let _ = std::fs::remove_dir_all(&tmp);
+}

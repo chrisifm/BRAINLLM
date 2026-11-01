@@ -128,6 +128,7 @@ pub fn resolve_client(peer: IpAddr, headers: &HeaderMap, trusted: &[IpNet]) -> I
 }
 
 static TRUST_WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static SHARED_BUCKET_WARNED: AtomicBool = AtomicBool::new(false);
 /// A local gateway or proxy is sending client addresses, and nothing is configured to read them.
 fn forwarding_unconfigured(peer: IpAddr, headers: &HeaderMap, trusted: &[IpNet]) -> bool {
     trusted.is_empty() && peer.to_canonical().is_loopback() && headers.contains_key("x-forwarded-for")
@@ -170,7 +171,9 @@ impl Drop for Slot {
 }
 
 pub(super) async fn edge(State(state): State<EdgeState>, mut req: Request, next: Next) -> Response {
+    let mut shared_bucket = false;
     if let Some(peer) = req.extensions().get::<ConnectInfo<SocketAddr>>().map(|c| c.0.ip()) {
+        shared_bucket = peer.is_loopback() && !req.headers().contains_key("x-forwarded-for");
         let client = resolve_client(peer, req.headers(), &state.trusted);
         if forwarding_unconfigured(peer, req.headers(), &state.trusted) && !TRUST_WARNED.swap(true, Ordering::Relaxed) {
             eprintln!(
@@ -183,6 +186,12 @@ pub(super) async fn edge(State(state): State<EdgeState>, mut req: Request, next:
     req.extensions_mut().insert(state.lifecycle.clone());
     let is_probe = probe(req.uri().path());
     let mut response = admit(&state, is_probe, req, next).await;
+    if shared_bucket && response.status() == StatusCode::TOO_MANY_REQUESTS && !SHARED_BUCKET_WARNED.swap(true, Ordering::Relaxed) {
+        eprintln!(
+            "{}",
+            serde_json::json!({"schemaVersion":1,"event":"shared-rate-limit-bucket","message":"a local caller reached the rate limit without naming its client, so everyone it serves shares one bucket and pages can fail for all of them","fix":"pass the request context to server-side calls so the visitor's address travels with them","valuesCaptured":false})
+        );
+    }
     response.extensions_mut().insert(LogPolicy { probe: is_probe, ..state.log });
     response
 }
