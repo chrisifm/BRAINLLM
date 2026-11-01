@@ -31,7 +31,7 @@ fn rules_cover_public_static_targets_of_document_navigations_only() {
     assert!(about.contains("brain-zero-js"), "control: this page has no router, so its links are document navigations");
     let list = targets(&about).expect("a zero-JS page lists its targets");
     assert!(list.contains("\"/\"") && !list.contains("/about"), "public pages, not itself: {list}");
-    assert!(!list.contains("/account") && !list.contains("/_"), "a guarded or internal route is never fetched ahead: {list}");
+    assert!(!list.contains("/account") && !list.contains("/_") && !list.contains("/403") && !list.contains("/404"), "a guarded, internal or status route is never fetched ahead: {list}");
 
     let counter = page(&app, "counter");
     assert!(!counter.contains("brain-zero-js"), "control: this page has the router");

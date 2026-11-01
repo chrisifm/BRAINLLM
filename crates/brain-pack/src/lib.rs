@@ -1625,7 +1625,9 @@ fn build_inner_with_options(
     let router_tag = if zero_json == "[]" { router_tag.replace(",fullLoad:__BRAIN_ZERO_PATHS__", "") } else { router_tag.replace("__BRAIN_ZERO_PATHS__", &zero_json) };
     // Public static pages can be fetched ahead of a click: no server code runs for them and no guard decides on them.
     let speculation_on = speculation_enabled(&input.root);
-    let mut public_paths: Vec<String> = plans.iter().filter(|p| !p.ssr && p.prerender && !protected(&p.view) && !p.route.starts_with('!') && !p.route.starts_with("/_") && p.route != "*" && !routes::is_dynamic(&p.route))
+    let mut public_paths: Vec<String> = plans.iter().filter(|p| !p.ssr && p.prerender && !protected(&p.view) && !p.route.starts_with('!') && !p.route.starts_with("/_") && p.route != "*" && !routes::is_dynamic(&p.route)
+        // a status page (/403, /404) is not a place anyone navigates to on purpose
+        && !(p.route.len() == 4 && p.route[1..].bytes().all(|b| b.is_ascii_digit())))
         .map(|p|format!("{}{}",pre,if p.route=="/" {"/"} else {p.route.trim_end_matches('/')})).collect();
     public_paths.sort();
     public_paths.dedup();
@@ -1745,7 +1747,7 @@ fn build_inner_with_options(
         // page scripts go INSIDE the region (the router recreates them after a swap); the router itself stays outside
         let page_router = if zero_js { "" } else { router_tag.as_str() };
         let speculation = if speculation_on {
-            speculation_rules(if zero_js { &public_paths } else { &zero_paths }, &format!("{pre}{}", if p.route == "/" { "/" } else { p.route.trim_end_matches('/') }))
+            speculation_rules(&public_paths, zero_js, &zero_paths, &format!("{pre}{}", if p.route == "/" { "/" } else { p.route.trim_end_matches('/') }))
         } else {
             String::new()
         };
@@ -2476,8 +2478,9 @@ fn speculation_enabled(root: &Path) -> bool {
 const SPECULATION_TARGETS: usize = 64;
 /// A same-origin prefetch on hover, never a prerender, so a page's scripts do not run ahead of the visit.
 /// `data-prefetch="false"` on a link or an ancestor is the router's own opt-out and works here too.
-fn speculation_rules(paths: &[String], current: &str) -> String {
-    let list: Vec<String> = paths.iter().filter(|path| path.as_str() != current).take(SPECULATION_TARGETS).map(|path| prerender_json(path)).collect();
+fn speculation_rules(public: &[String], zero_js: bool, zero_paths: &[String], current: &str) -> String {
+    // A page with the router loads only zero-JS targets as documents; a page without it loads every target that way.
+    let list: Vec<String> = public.iter().filter(|path| path.as_str() != current && (zero_js || zero_paths.contains(path))).take(SPECULATION_TARGETS).map(|path| prerender_json(path)).collect();
     if list.is_empty() {
         return String::new();
     }
