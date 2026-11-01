@@ -8,7 +8,8 @@ book, subscribe, create a record. Do not expose:
 - the same action twice under different names.
 
 Support is feature-detected (`document.modelContext`, or Chrome's origin-trial `navigator.modelContext`); where the
-browser has none, nothing is registered and nothing breaks. WebMCP is not a standard yet.
+browser has none, nothing is registered and nothing breaks. WebMCP is a proposal, not on the W3C Standards Track: you
+write `tool=` and `<meta tools>`, and the compiler owns the names it emits, so a change in the draft is a compiler change.
 
 ## Steps (declarative: a form people already use)
 1. Start from a real `<form>` that already works for people (`brain guide forms`).
@@ -45,6 +46,7 @@ cart) or needs typed values a form does not hold.
 ## Verify
 ```bash
 brain check --json                # []
+brain doctor                      # B1708: actions exposed X of Y, per route (advice; not every form should be a tool)
 brain build && brain preview      # inspect the built <form>: toolname / tooldescription attributes present
 brain shot /shop --text           # every field has a name in the accessibility outline (that is what agents read)
 ```
@@ -53,9 +55,11 @@ brain shot /shop --text           # every field has a name in the accessibility 
 | Mistake | Code | Fix |
 |---|---|---|
 | field without a label (no parameter description) | B0403 | `<Input label="Search text" …>` |
-| CamelCase or duplicated tool name | — | snake_case, unique per page (SPEC rule; not machine-checked on `<form tool>`) |
-| description that repeats the name ("Search tool") | — | say what it does, needs and returns |
-| exposing delete/pay without a confirmation | — | keep the confirmation step in the UI |
+| CamelCase or duplicated tool name in a file | B1702 | snake_case, unique per page |
+| the same tool in two files of one page | B1709 | rename one, or render one of the two components |
+| exposing delete/pay/admin without a confirmation | B1705 | `confirm(…)` or a `<dialog>` in that file, and say so in the description |
+| public search, filter, apply or subscribe form without `tool=` (not in a reusable `ui/` component) | B1706 (warning) | add `tool=` and `tool-description=` |
+| missing description, very short, or repeating the name ("Search tool") | B1707 (warning) | say what it does, needs and returns |
 | `<meta tools>` entry without a function of that name | B1701 | write `const add_task = async ({ text }) => …` |
 | tool parameter without a type | B1703 | `text:str` (types `str num bool list obj email url date any`) |
 | function destructures other parameters than the tool declares | B1704 | make `(text:str!, due:date)` and `({ text, due })` list the same names |

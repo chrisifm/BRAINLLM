@@ -1,0 +1,5 @@
+<meta tools="delete_task: Delete a task forever (id:str!)">
+<script>
+  const delete_task = ({ id }) => id
+</script>
+<p>Tasks</p>

@@ -266,7 +266,7 @@ Private captured errors (message, stack, recent actions) are listed by `brain_er
 `load` runs only on the server. Client code may only read env vars prefixed `PUBLIC_`.
 Variables live in `.brain_env` (already created): shared `KEY=value` lines, then `[development]` `[staging]`
 `[production]` sections that override them. `brain run` uses development, `brain build` production, `--env x` another.
-An empty key fails the build (B0720); `KEY?=` declares one the app works without: it may stay empty and reads as unset (a secret a route or webhook names stays required, B0790).
+An empty key fails the build (B0720); `KEY?=` declares one the app works without: it may stay empty and reads as unset (a route or webhook whose secret is absent answers 503 until it is set, B0790).
 Read them as `process.env.KEY` (server) or `process.env.PUBLIC_KEY` (anywhere; an undeclared one reads as `undefined`). Never create a `.env`.
 `.jsbrain` files starting with `<meta server>` run only on the server and may be used only inside `load` or server
 functions. Server function in a `.brain`: `server: async function save(ctx, data) {…}`; the client calls
@@ -384,7 +384,7 @@ Main: `brain new <app>` · `brain run` (dev server with hot reload, app :5180; v
 SEO and the no-JS HTML on `brain build` + `brain start`) · `brain build` (production) ·
 `brain doctor` (everything at once: check + tests + over-engineering + leaks; writes no versioned file; exits non-zero on any error; suspected leak B0601 is a warning unless `doctor.failOnSuspectedLeaks`).
 Production: `brain start` (serves `dist/`, restarts on crash, logs to `logs/app.log`) · `brain reload` (no downtime) ·
-`brain status` · `brain stop`. Optional PM2/nginx configurations: `brain deploy config pm2|nginx --request <JSON>`; see `docs/DEPLOYMENT.md`.
+`brain status` · `brain stop`. Optional PM2/nginx configurations: `brain deploy config pm2|nginx --request <JSON>`, and `brain deploy check --url <origin>` for what only the live server shows (headers sent twice, proxy, `/health`); see `docs/DEPLOYMENT.md`. `brain release-check [--env production] [--url <origin>] [--json]` is the one gate before a release: it runs `brain doctor`, the secrets of that environment (a route left disabled by B0790 fails it), `brain build --env <env>` and `brain seo audit`, plus the live checks with `--url`, and exits non-zero if any fails.
 Hosted under a sub-path: `brain.json` `"base": "/app/"`; keep writing app-absolute links and paths (`<a href="/about">`,
 `redirect('/login')`); the build adds the base everywhere.
 Granular: `brain add view|comp|ui <name> --props "…"` · `brain check --json` · `brain test` · `brain spec [--topic x]` ·

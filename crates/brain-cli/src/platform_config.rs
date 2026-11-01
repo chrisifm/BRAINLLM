@@ -35,12 +35,22 @@ pub fn proxy_findings(root: &Path, site: Option<&str>) -> Vec<(String, String, b
         out.push((format!("{EDGE}: trustProxy entry `{net}` reaches public addresses, so whoever holds one can choose a client's rate-limit key; a production start refuses it"),
             "list only your own proxies; a CDN in front of the backend goes in `trustPublicProxy` with its published ranges".to_string(), true));
     }
+    // A private range holds machines you do not run as a proxy: any of them could then choose a client's address.
+    for net in edge.wide_private_proxies() {
+        out.push((format!("{EDGE}: trustProxy entry `{net}` is wider than a proxy needs, so any machine in it can choose a client's rate-limit key"),
+            "list the proxy's own address or smallest subnet".to_string(), false));
+    }
     let public_site = site.is_some_and(|site| site.starts_with("https://"));
     if edge.trust_proxy.is_empty() && public_site && (root.join("server/resources").is_dir() || root.join("server/auth").is_dir()) {
         out.push((format!("{EDGE}: no trustProxy, and the native backend listens only on loopback, so behind a proxy every visitor shares one rate-limit and lockout key"),
             "declare the proxy that reaches the backend: `export default { trustProxy: ['127.0.0.1', '::1'] }`".to_string(), false));
     }
     out
+}
+
+/// How many public proxy ranges the app declares (`trustPublicProxy`).
+pub fn public_proxies(root: &Path) -> usize {
+    edge(root).map(|(edge, _)| edge.public_proxy.len()).unwrap_or(0)
 }
 
 const CACHE: &str = "server/cache.jsbrain";

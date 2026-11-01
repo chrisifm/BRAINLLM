@@ -100,6 +100,7 @@ pub fn preview(root: &Path, target: &str, options: &Value) -> Result<Value, Stri
                 "certificateKey",
                 "brainBinary",
                 "memoryMb",
+                "envSource",
                 "expectedRevision",
             ]
             .contains(&k.as_str())
@@ -187,6 +188,7 @@ pub fn preview(root: &Path, target: &str, options: &Value) -> Result<Value, Stri
         None
     };
     let mut warnings=vec!["Preview only: review the topology, secret-store setup, release artifact, host permissions and process manager before activation.".to_string()];
+    let mut recipe: Vec<String> = Vec::new();
     let (path, content) = match target {
         "pm2" => {
             let memory = bounded(options, "memoryMb", 512, 64, 4096)?;
@@ -258,11 +260,30 @@ pub fn preview(root: &Path, target: &str, options: &Value) -> Result<Value, Stri
                     ],
                 ));
             }
+            // PM2 hands every app its daemon's environment, secrets of other apps and stale NODE_OPTIONS included, and
+            // `filter_env` would drop PATH too. So brain drops what it was not told to keep before it reads anything.
+            let source = options.get("envSource").map_or(Some("file"), Value::as_str).filter(|s| matches!(*s, "file" | "host")).ok_or("envSource must be file or host")?;
+            if source == "file" {
+                for app in &mut apps {
+                    let mut keep: Vec<String> = app.get("env").and_then(Value::as_object).map(|e| e.keys().cloned().collect()).unwrap_or_default();
+                    keep.sort();
+                    if !app.get("env").is_some_and(Value::is_object) {
+                        app["env"] = json!({});
+                    }
+                    app["env"]["BRAIN_ENV_ONLY"] = json!("file");
+                    if !keep.is_empty() {
+                        app["env"]["BRAIN_ENV_KEEP"] = json!(keep.join(","));
+                    }
+                }
+            }
+            let names: Vec<String> = apps.iter().filter_map(|app| app["name"].as_str().map(str::to_string)).collect();
+            recipe = vec!["npm ci --include=dev".to_string(), format!("{binary} build"), format!("pm2 delete {} 2>/dev/null || true", names.join(" ")), "pm2 start deploy/ecosystem.brain.config.cjs".to_string(), "pm2 save".to_string()];
+            warnings.push("Activate by deleting and starting the processes (see recipe): `pm2 restart` keeps the environment the process was first started with.".into());
             warnings.push("PM2 supervises one foreground brain start process; brain start retains its own Node-child drain, RSS sampling and reload behavior. PM2 memory polling is not a hard whole-tree quota.".into());
             (
                 "deploy/ecosystem.brain.config.cjs",
                 format!(
-                    "// Optional PM2 wrapper; secrets remain in the host/private environment.\nmodule.exports = {};\n",
+                    "// Optional PM2 wrapper; secrets remain in the private .brain_env (envSource: \"host\" uses the host environment).\n// Apply with `pm2 delete` and `pm2 start`: `pm2 restart` keeps the environment of the first start.\nmodule.exports = {};\n",
                     serde_json::to_string_pretty(&json!({"apps":apps}))
                         .map_err(|_| "cannot serialize ecosystem preview")?
                 ),
@@ -368,7 +389,7 @@ pub fn preview(root: &Path, target: &str, options: &Value) -> Result<Value, Stri
         vec![]
     };
     Ok(
-        json!({"schemaVersion":1,"dryRun":true,"target":target,"topology":topology,"nativeSockets":{"enabled":native_sockets,"endpoint":endpoint,"upgradeUpstream":if native_sockets{Some(if topology=="rust-node"{"frontend Node bridge"}else{"native Rust backend through nginx; Rust static gateway with PM2 directly"})}else{None}},"operations":operations,"existingRevision":existing["revision"],"preservedExisting":!existing["revision"].is_null(),"proposed":if !existing["revision"].is_null(){Some(json!({"path":path,"content":content}))}else{None},"services":{"frontend":{"address":"127.0.0.1","port":port,"runtime":if matches!(topology,"static"|"rust-static"){"Rust static handler; build must contain no server runtime"}else{"brain supervisor with Node SSR when dist/server.mjs exists"},"instances":1},"resourceBackend":if native_backend{Some(json!({"address":"127.0.0.1","port":backend,"runtime":"Rust resource backend/PostgreSQL","instances":1}))}else{None}},"environmentKeys":environment_keys,"workers":workers.iter().map(|(queue,count)|json!({"queue":queue,"concurrency":count,"instances":1,"manager":"pm2"})).collect::<Vec<_>>(),"compression":{"upstreamPrecompressedAssets":"preserved","nginxBrotli":"not assumed; verify installed optional module and generated .br assets before adding directives","dynamicCompression":"not enabled by this preview"},"activation":{"installed":false,"started":false,"published":false,"next":["Review the generated source and exact service topology","Apply reviewed CAS operations with the change planner","Build and inspect the release artifact; install production dependencies if Node SDKs are used","Configure private environment keys outside public deployment files","Validate PM2 config or nginx -t locally before explicitly activating through the host's verified service manager","Verify graceful stop, HTTPS health, cache/Vary behavior and per-process resource limits"]},"warnings":warnings}),
+        json!({"schemaVersion":1,"dryRun":true,"target":target,"topology":topology,"nativeSockets":{"enabled":native_sockets,"endpoint":endpoint,"upgradeUpstream":if native_sockets{Some(if topology=="rust-node"{"frontend Node bridge"}else{"native Rust backend through nginx; Rust static gateway with PM2 directly"})}else{None}},"operations":operations,"recipe":recipe,"existingRevision":existing["revision"],"preservedExisting":!existing["revision"].is_null(),"proposed":if !existing["revision"].is_null(){Some(json!({"path":path,"content":content}))}else{None},"services":{"frontend":{"address":"127.0.0.1","port":port,"runtime":if matches!(topology,"static"|"rust-static"){"Rust static handler; build must contain no server runtime"}else{"brain supervisor with Node SSR when dist/server.mjs exists"},"instances":1},"resourceBackend":if native_backend{Some(json!({"address":"127.0.0.1","port":backend,"runtime":"Rust resource backend/PostgreSQL","instances":1}))}else{None}},"environmentKeys":environment_keys,"workers":workers.iter().map(|(queue,count)|json!({"queue":queue,"concurrency":count,"instances":1,"manager":"pm2"})).collect::<Vec<_>>(),"compression":{"upstreamPrecompressedAssets":"preserved","nginxBrotli":"not assumed; verify installed optional module and generated .br assets before adding directives","dynamicCompression":"not enabled by this preview"},"activation":{"installed":false,"started":false,"published":false,"next":["Review the generated source and exact service topology","Apply reviewed CAS operations with the change planner","Build and inspect the release artifact; install production dependencies if Node SDKs are used","Configure private environment keys outside public deployment files","Validate PM2 config or nginx -t locally before explicitly activating through the host's verified service manager","Verify graceful stop, HTTPS health, cache/Vary behavior and per-process resource limits"]},"warnings":warnings}),
     )
 }
 #[cfg(test)]
@@ -414,9 +435,11 @@ mod tests {
         assert_eq!(value["apps"][0]["script"], "/tmp/brain'quoted");
         assert_eq!(
             value["apps"][0]["env"],
-            json!({"BRAIN_TRUST_PROXY":"127.0.0.1,::1","BRAIN_BACKEND_URL":"http://127.0.0.1:5182"})
+            json!({"BRAIN_TRUST_PROXY":"127.0.0.1,::1","BRAIN_BACKEND_URL":"http://127.0.0.1:5182","BRAIN_ENV_ONLY":"file","BRAIN_ENV_KEEP":"BRAIN_BACKEND_URL,BRAIN_TRUST_PROXY"})
         );
-        assert!(value["apps"][1].get("env").is_none());
+        assert_eq!(value["apps"][1]["env"], json!({"BRAIN_ENV_ONLY":"file"}), "the daemon's environment does not reach any process");
+        let recipe = p["recipe"].to_string();
+        assert!(recipe.contains("npm ci --include=dev") && recipe.contains("pm2 delete") && recipe.contains("pm2 start") && !recipe.contains("pm2 restart"), "{recipe}");
         assert!(!app.0.join("deploy").exists());
         std::fs::create_dir(app.0.join("deploy")).unwrap();
         std::fs::write(app.0.join("deploy/ecosystem.brain.config.cjs"), "custom").unwrap();
@@ -512,6 +535,7 @@ mod tests {
         assert!(c.contains("proxy_cache off"));
         assert!(c.contains("127.0.0.1:5182"));
         assert!(c.contains("location ^~ /s/"));
+        assert!(!c.contains("add_header"), "security headers come from the app alone, or the proxy would send them twice (B1857)");
         assert!(c.contains("location = /_brain"));
         assert!(
             preview(
@@ -623,11 +647,11 @@ mod tests {
             .unwrap();
             assert_eq!(
                 ecosystem["apps"][0]["env"],
-                json!({"BRAIN_TRUST_PROXY":"127.0.0.1,::1","BRAIN_BACKEND_URL":"http://127.0.0.1:5200"})
+                json!({"BRAIN_TRUST_PROXY":"127.0.0.1,::1","BRAIN_BACKEND_URL":"http://127.0.0.1:5200","BRAIN_ENV_ONLY":"file","BRAIN_ENV_KEEP":"BRAIN_BACKEND_URL,BRAIN_TRUST_PROXY"})
             );
             assert_eq!(
                 ecosystem["apps"][1]["env"],
-                json!({"PUBLIC_SITE_URL":"https://example.test"})
+                json!({"PUBLIC_SITE_URL":"https://example.test","BRAIN_ENV_ONLY":"file","BRAIN_ENV_KEEP":"PUBLIC_SITE_URL"})
             );
             assert!(
                 !ecosystem["apps"][1]["args"]

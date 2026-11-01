@@ -23,7 +23,7 @@ const INTERNAL: &str = "synthetic-internal-route-secret-32-bytes";
 struct Echo;
 impl RouteHandlers for Echo {
     fn names(&self) -> Vec<String> {
-        ["payment_events", "order_quote", "admin_report", "slow", "internal_open", "internal_local"].map(String::from).to_vec()
+        ["payment_events", "order_quote", "admin_report", "slow", "internal_open", "internal_local", "disabled_hook"].map(String::from).to_vec()
     }
     fn run(&self, name: &str, ctx: Value, _: Duration) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RouteFailure>> + Send + '_>> {
         let name = name.to_string();
@@ -58,6 +58,7 @@ fn routes() -> Vec<Route> {
     ]
     .iter()
     .map(|(name, contract)| Route::from_contract(name, contract, &env).unwrap())
+    .chain([Route { disabled: true, ..Route::from_contract("disabled_hook", &json!({"method": "POST", "path": "/payments/off", "auth": "public", "body": "raw", "verify": {"scheme": "timestamped", "header": "x-payment-signature", "secret": "PAYMENTS_WEBHOOK_SECRET", "tolerance": "5m"}}), &env).unwrap() }])
     .collect()
 }
 
@@ -116,10 +117,21 @@ async fn declared_routes_verify_signatures_type_input_and_shape_responses() {
             google: None,
             gcs: None,
         },
-        Platform { routes: routes(), handlers: Some(Arc::new(Echo)), ..Default::default() },
+        Platform { routes: routes(), handlers: Some(Arc::new(Echo)), disabled_webhooks: vec!["orders".into()], ..Default::default() },
     )
     .await
     .unwrap();
+
+    // A disabled route answers 503 to anyone, a correct signature included, and its handler never runs.
+    let t = now();
+    let signature = sign(b"{}", t);
+    let off = send(&http, "POST", "/payments/off", &[("x-payment-signature", signature.as_str())], b"{}").await;
+    assert_eq!(off.status(), 503);
+    assert_eq!(off.headers()["retry-after"], "300");
+    assert_eq!(json_body(off).await["error"]["code"], "ROUTE_DISABLED");
+    let hook = send(&http, "POST", "/_brain/webhooks/in/orders", &[("content-type", "application/json")], b"{}").await;
+    assert_eq!(hook.status(), 503, "an endpoint without its signing key asks the sender to retry");
+    assert_eq!(hook.headers()["retry-after"], "300");
 
     // Internal routes: a secret instead of a browser Origin or a session; loopback refuses anything forwarded.
     let secret = ("x-internal-secret", INTERNAL);

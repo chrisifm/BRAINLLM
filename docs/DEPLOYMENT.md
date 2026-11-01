@@ -8,6 +8,38 @@ Options include topology (static/node/rust-node/rust-static), name, frontend por
 
 An app created with npm pins `@christianirack/brainllm` in `devDependencies`. With `NODE_ENV=production` in the shell, `npm ci` skips those packages and `npm run build` then stops with `brain: command not found`. Install with `npm ci --include=dev`. `brain start`, `brain backend serve` and `brain jobs work` come from the same package, so do not run `npm prune --omit=dev` afterwards. A source installation with `cargo install` has no such step.
 
+## Starting, stopping and the environment
+
+The generated PM2 file runs one process per service and passes `BRAIN_ENV_ONLY=file`: `brain` drops everything the daemon handed it except system variables and `BRAIN_ENV_KEEP`, so another app's secrets or a stale `NODE_OPTIONS` never reach it and `.brain_env` decides. Preview option `envSource: "host"` keeps the host environment instead. Process environment still wins over `.brain_env` for what is kept.
+
+Apply a change by recreating the processes, as the preview's `recipe` lists: `npm ci --include=dev`, `brain build`, `pm2 delete <names>`, `pm2 start deploy/ecosystem.brain.config.cjs`, `pm2 save`. `pm2 restart` keeps the environment of the first start.
+
+| Exit status | Meaning | Supervisor |
+|---|---|---|
+| 0 | Clean stop | Do not restart |
+| 1 | A check or build found errors | Report it |
+| 2 | A command failed; for a long-running process, something that recovers: database unreachable, port busy | Restart with backoff |
+| 3 | Internal error, with its location | Restart with backoff and report it |
+| 78 | Configuration a restart cannot fix (`EX_CONFIG`) | Do not restart (`stop_exit_codes`, systemd `RestartPreventExitStatus=78`) |
+
+Each process listens or works alone: `brain start`, `brain backend serve` and `brain jobs work <queue> --concurrency N` take one PM2 instance each. Scale a queue with `--concurrency` or a preview `workers` entry; several backend processes need `cluster: { shared: true }` in `server/platform.jsbrain` so rate windows and socket fan-out are shared.
+
+`/health`, `/health/live` and `/health/ready` belong to the framework: a route declared on them is refused (B0735). Point the load balancer at `/health/ready`.
+
+Applying a backend contract change in CI has no prompt: `brain backend approve-contract [--accept <resource>] --apply` records the approval (B0787) and exits non-zero if it cannot.
+
+## Checking the build output
+
+Every `brain build` reads `dist` back and warns about text of 1400 bytes or more with no `.br` or `.gz` (B1895), a compressed copy of an already compressed format (B1896), a `_headers` cache policy that does not match the file name (B1897), a wrong `Content-Type` or missing charset (B1898), and a page asking for more than 40 files as it loads (B1899). A clean build has none; they usually mean another step changed `dist` afterwards.
+
+## One gate before a release
+
+`brain release-check --env production` runs `brain doctor`, checks that environment's secrets (a route B0790 would disable fails it), runs `brain build --env <env>`, reads the result back and runs `brain seo audit`. With `--url <origin>` it adds `brain deploy check` and `brain seo --url`. It exits 0 only if all of them pass, 1 if one fails and 2 on a usage error; `--json` lists each step (`schemaVersion: 1`). It leaves that build in `dist/`, so what passed is what you ship; warnings about the files are reported and do not fail it.
+
+## Checking a live server
+
+`brain deploy check --url https://your-domain [--json]` reads `/` and `/health` from the origin the public reaches and changes nothing. It reports a security header sent twice (B1857), `server.earlyHints` behind nginx below 1.29 (B1891), a CDN the backend's `trustPublicProxy` does not list (B1892) and a `/health` that does not answer 200 (B1893, exit status 1). The nginx file `brain deploy config nginx` generates sets no security headers, so they come from the app alone; the `_brain/nginx.conf` a static build emits does set them, for hosting with no app behind it. 103 Early Hints are off unless `brain.json` sets `server.earlyHints: true`. `brain doctor` also warns about a `trustProxy` private range wider than /16 (B0784).
+
 ## Explicit topology
 
 - Static uses the native Rust static handler through brain start. Inspect the build artifact: the topology label does not disable or remove a server runtime from an existing dist directory.
@@ -26,7 +58,7 @@ The nginx preview requires explicit existing certificate and private-key paths. 
 
 Native backend topologies route /api, /_brain, /s/ and /health to the backend; other requests reach the frontend. `brain start` also answers `/health`, `/health/live` and `/health/ready` on its own port, under any `base`, so a deploy gate can ask the frontend: it forwards them to the native backend and keeps the status, answers `503 {"ok":false}` when the backend is unreachable, and `200 {"ok":true}` when the app has no backend. An app page at that path wins; `/_health` remains the supervisor's liveness check of the frontend alone. No development WebSocket/HMR forwarding is enabled. App statuses, CSP, content negotiation, Vary and versioned asset Cache-Control headers stay upstream-owned. No blanket immutable policy applies to HTML, API responses or session data. The upstream already serves precompressed assets where supported. Optional nginx Brotli directives are omitted until its installed module and actual precompressed assets are verified; [gzip is also an explicit nginx module](https://nginx.org/en/docs/http/ngx_http_gzip_module.html), not an assumed server capability. The preview does not globally enable dynamic compression of authenticated responses.
 
-`brain backend serve`, `brain jobs work` and `brain jobs cron` wait up to 60 s with bounded backoff when Postgres refuses the role or does not have the database, as during a cluster upgrade: the first refusal is logged with its cause and the process then exits with a final B0762 naming the attempts. One-shot commands fail at once.
+`brain backend serve`, `brain jobs work` and `brain jobs cron` wait up to 60 s with bounded backoff when Postgres refuses the login or does not have the database, as during a cluster upgrade: the first refusal is logged with its cause and the process then exits with a final B0762 naming the attempts. One-shot commands fail at once.
 
 A backend or worker stopped by its configuration exits with status 78, which the generated PM2 file does not restart: the process shows as stopped with the B-code in its log, so read that log instead of waiting for it to recover. See [the backend lifecycle](backend/lifecycle.md).
 

@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B1706",
+    "file": "invalid/comp/b1706-public-action-no-tool.brain",
+    "line": 1,
+    "col": 1,
+    "msg": "this public form performs `search` and agents cannot call it",
+    "fix": "add `tool=\"search_...\"` and `tool-description=\"...\"`, naming what it acts on (`brain guide webmcp`)",
+    "level": "warning"
+  }
+]

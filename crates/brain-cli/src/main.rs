@@ -35,6 +35,9 @@ mod api_key_config;
 mod webhook_config;
 mod origin_check;
 mod lighthouse;
+mod asset_check;
+mod release_check;
+mod deploy_check;
 mod seo_live;
 mod view_links;
 mod platform_config;
@@ -131,6 +134,8 @@ granular:
   brain integration list|add|update   reviewed official SDK adapters (preview)
   brain deps analyze|preview|fetch    dependency evidence and explicit pinned CDN acquisition
   brain deploy config pm2|nginx       guarded front/backend deployment configuration
+  brain deploy check --url <origin>   what only the live server shows: doubled headers, proxy, /health
+  brain release-check [--env production] [--url <origin>] [--json]  one gate before a release: doctor, secrets, build output, SEO and the live checks
   brain media setup-gcs|list|cleanup  private media provisioning/library/owned cleanup
   brain e2e probe|run                 opt-in Claude/Codex Viewer scenarios plus AX/heap gates
   brain backend <serve|migrate|approve-contract|capabilities|schema|bootstrap-admin>  experimental Rust/Postgres resource API (loopback); serve --with-workers also runs the queues
@@ -142,7 +147,24 @@ granular:
 mod auth_setup;
 mod capabilities;
 
+/// `BRAIN_ENV_ONLY=file` (generated PM2 file): a supervisor's environment holds other apps' secrets and stale settings
+/// such as `NODE_OPTIONS`. Only the system's own variables and `BRAIN_ENV_KEEP` survive, so `.brain_env` decides the rest.
+fn apply_env_policy() {
+    if std::env::var("BRAIN_ENV_ONLY").as_deref() != Ok("file") {
+        return;
+    }
+    let keep = std::env::var("BRAIN_ENV_KEEP").unwrap_or_default();
+    let kept = |key: &str| matches!(key, "PATH" | "HOME" | "USER" | "LOGNAME" | "SHELL" | "LANG" | "TZ" | "TMPDIR" | "NODE_ENV" | "BRAIN_ENV_ONLY" | "BRAIN_ENV_KEEP") || key.starts_with("LC_") || keep.split(',').any(|k| k == key);
+    for (key, _) in std::env::vars_os() {
+        if !key.to_str().is_some_and(kept) {
+            // SAFETY: first statement of `main`, before any thread exists.
+            unsafe { std::env::remove_var(&key) };
+        }
+    }
+}
+
 fn main() -> ExitCode {
+    apply_env_policy();
     let args: Vec<String> = std::env::args().skip(1).collect();
     // INTERNALS §25: a crash is a diagnosis too. Outside the MCP server (which must outlive a failing tool), an
     // internal panic prints where it happened and the next command to run, and exits with code 3.
@@ -216,9 +238,22 @@ fn main() -> ExitCode {
                 println!("{value}");Ok(())
             })
         },
+        Some("release-check") => {
+            let (code, out) = match app_root() {
+                Ok(root) => release_check::run(&root, &args[1..]),
+                Err(error) => (2, format!("error: {error}")),
+            };
+            println!("{out}");
+            return ExitCode::from(code.clamp(0, 255) as u8);
+        }
+        Some("deploy") if args.get(1).map(String::as_str) == Some("check") => {
+            let (code, out) = deploy_check::run(app_root().ok().as_deref(), &args[2..]);
+            println!("{out}");
+            return ExitCode::from(code.clamp(0, 255) as u8);
+        }
         Some("deploy") => {
             app_root().and_then(|root| {
-                if args.get(1).map(String::as_str)!=Some("config") {return Err("usage: brain deploy config pm2|nginx --request '<json>'; preview only".into());}
+                if args.get(1).map(String::as_str)!=Some("config") {return Err("usage: brain deploy config pm2|nginx --request '<json>' (preview only) | brain deploy check --url <origin>".into());}
                 let target=args.get(2).ok_or("deployment target is required")?;
                 let request=serde_json::from_str(&flag(&args,"--request").unwrap_or_else(||"{}".into())).map_err(|_|"deployment request must be JSON")?;
                 println!("{}",deployment::preview(&root,target,&request)?);Ok(())
@@ -756,7 +791,12 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
                 let mut diag = compiler::Diag::new("B0797", &file, brain_parse::Span::default(), message, fix);
                 diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
             }
-            // B0790: a route or webhook secret serve would refuse to start without; names only, never values
+            // B1709: one page's files registering the same tool, which no single file can see
+            for (file, tool, other, view) in brain_check::webmcp::duplicates(&app) {
+                let mut diag = compiler::Diag::new("B1709", &file, brain_parse::Span::default(), format!("tool `{tool}` is also registered by {other}, and {view} loads both, so the browser refuses the second"), "give each tool a name unique on the page, or render one of the two components");
+                diag.line=1;diag.col=1;diags.push(diag);
+            }
+            // B0790: a route or webhook secret serve disables or refuses without; names only, never values
             for (file, message, fix) in backend::secret_warnings(&app) {
                 let mut diag = compiler::Diag::new("B0790", &file, brain_parse::Span::default(), message, fix);
                 diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
@@ -1169,6 +1209,7 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
     std::fs::create_dir_all(&dist).map_err(|e| e.to_string())?;
     // robots.txt, sitemap.xml, llms.txt, manifest and the head rewrite come from brain-seo's finish (inside bundle)
     bundle(root, &dist, site.as_deref(), env_name, &mut rep, progress)?;
+    rep.warnings.extend(asset_check::check(&dist));
     for (route, view) in seo_routes::unlisted(root) {
         // a static host already reports the route as left out of dist/
         if !rep.warnings.iter().any(|w| w.starts_with(&format!("{view}: dynamic route"))) {
@@ -2252,6 +2293,10 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
         advice.push(Json::obj([("code", Json::str("B0751")), ("level", Json::str("warning")), ("file", Json::str(env::FILE)), ("msg", Json::str(msg)), ("fix", Json::str(fix))]));
     }
     if let Some(a) = &app {
+        let covered: Vec<String> = brain_check::webmcp::coverage(a).into_iter().map(|(view, exposed, actions)| format!("{view} {exposed} of {actions}")).collect();
+        if !covered.is_empty() {
+            advice.push(Json::obj([("code", Json::str("B1708")), ("level", Json::str("info")), ("file", Json::str("views/")), ("msg", Json::str(&format!("actions exposed to agents per route: {}", covered.join(", ")))), ("fix", Json::str("expose what an agent acting for the user would otherwise have to guess; not every form should be a tool (`brain guide webmcp`)"))]));
+        }
         for (msg, fix, _) in platform_config::proxy_findings(a, env::value(a, "production", "PUBLIC_SITE_URL").as_deref()) {
             advice.push(Json::obj([("code", Json::str("B0784")), ("level", Json::str("warning")), ("file", Json::str("server/platform.jsbrain")), ("msg", Json::str(msg)), ("fix", Json::str(fix))]));
         }

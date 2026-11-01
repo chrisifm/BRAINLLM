@@ -399,17 +399,21 @@ pub fn public_field_warnings(root: &Path) -> Vec<(String, String, String)> {
     out
 }
 /// B0790: secrets a declared route or webhook needs and the development environment does not hold: `(file, message, fix)`.
-/// `brain backend serve` refuses to start without them; names only, never values.
+/// Absent, serve starts with that route disabled; too short, it refuses to start. Names only, never values.
 pub fn secret_warnings(root: &Path) -> Vec<(String, String, String)> {
     let fix = "set it to a generated value in .brain_env or the host environment; a secret held only on the deployed host may keep this warning on other machines";
-    crate::route_executor::secret_problems(root, "development")
+    secret_findings(root, "development")
         .into_iter()
-        .chain(crate::webhook_config::secret_problem(root, "development"))
-        .map(|(file, message)| {
+        .map(|(file, message, disables)| {
             let message = message.strip_prefix(&format!("{file}: ")).unwrap_or(&message).to_string();
-            (file, format!("`brain backend serve` refuses to start: {message}"), fix.to_string())
+            let effect = if disables { "`brain backend serve` starts with this disabled (503, no handler runs)" } else { "`brain backend serve` refuses to start" };
+            (file, format!("{effect}: {message}"), fix.to_string())
         })
         .collect()
+}
+/// Every route and webhook secret problem of an environment: `(file, message, disables)`.
+pub(crate) fn secret_findings(root: &Path, environment: &str) -> Vec<(String, String, bool)> {
+    crate::route_executor::secret_problems(root, environment).into_iter().map(|p| (p.file, p.message, p.disables)).chain(crate::webhook_config::secret_problem(root, environment)).collect()
 }
 /// Why a source a contract names cannot start, with its own `; fix:`. `None` when it can be read and fits its limit.
 pub(crate) fn source_problem(root: &Path, relative: &str, limit: usize, fix: &str) -> Option<String> {
@@ -467,12 +471,30 @@ fn database(root: &Path, environment: &str) -> Result<String, String> {
         .ok()
         .or_else(|| crate::env::value(root, environment, "DATABASE_URL"))
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            if environment != "production" && crate::env::value(root, "production", "DATABASE_URL").is_some_and(|v| !v.is_empty()) {
-                return format!("B0762: DATABASE_URL is not set for the {environment} environment, but .brain_env has it under [production]; fix: pass --env production on a deployed machine, or set it under [{environment}]");
-            }
-            "B0762: DATABASE_URL is not set and the native backend requires Postgres; fix: set it in .brain_env or the process environment".into()
-        })
+        .ok_or_else(|| missing_database(root, environment))
+}
+/// B0762 when no source holds `DATABASE_URL`: which file was read, which section, and the sections that do have it.
+fn missing_database(root: &Path, environment: &str) -> String {
+    let file = root.join(crate::env::FILE);
+    let Ok(source) = std::fs::read_to_string(&file) else {
+        return format!("B0762: DATABASE_URL is not set: it is not in the process environment and {} does not exist; fix: create that file, run from the app folder, or set DATABASE_URL in the process environment", file.display());
+    };
+    let parsed = brain_check::env::parse(&source);
+    let holding: Vec<String> = parsed.environments().into_iter().filter(|name| name != environment && crate::env::value(root, name, "DATABASE_URL").is_some_and(|v| !v.is_empty())).collect();
+    match holding.first() {
+        Some(section) => format!("B0762: DATABASE_URL is not set for the {environment} environment, but {} has it under [{section}]; fix: pass --env {section} on a deployed machine, or set it under [{environment}]", file.display()),
+        None => format!("B0762: DATABASE_URL is not set: it is not in the process environment and {} has no value for it in the {environment} environment; fix: set it in that file or the process environment, or pass --env <name> for the section that holds it", file.display()),
+    }
+}
+/// Where `DATABASE_URL` comes from for this environment; never its value. Named when Postgres refuses the login.
+pub(crate) fn database_source(root: &Path, environment: &str) -> String {
+    if std::env::var("DATABASE_URL").is_ok_and(|v| !v.is_empty()) {
+        return "the process environment".into();
+    }
+    let file = root.join(crate::env::FILE);
+    let parsed = std::fs::read_to_string(&file).map(|source| brain_check::env::parse(&source));
+    let in_section = parsed.as_ref().is_ok_and(|p| p.sections.iter().any(|(name, entries)| name == environment && entries.iter().any(|e| e.key == "DATABASE_URL")));
+    if in_section { format!("{} section [{environment}]", file.display()) } else { format!("{} shared block", file.display()) }
 }
 /// `application_name` for this app's Postgres sessions: `brain:<brain.json name>:<role>`.
 pub(crate) fn pg_name(root: &Path, role: &str) -> String {
@@ -648,15 +670,18 @@ pub(crate) fn failed_on_configuration() -> bool {
 fn restart_worker(code: Option<i32>) -> bool {
     code != Some(CONFIG_EXIT as i32)
 }
-/// B0790: a declared route or webhook without its secret. The environment alone reveals it, so it stops before any
-/// connection, once, instead of after one on every restart.
+/// B0790: a secret held too short, or endpoints left without their encryption key. The environment alone reveals it, so
+/// it stops before any connection, once, instead of after one on every restart. An absent secret only disables its route.
 fn secret_refusal(root: &Path, environment: &str) -> Option<String> {
-    let found: Vec<String> = crate::route_executor::secret_problems(root, environment)
-        .into_iter()
-        .chain(crate::webhook_config::secret_problem(root, environment))
-        .map(|(file, message)| format!("{file}: {message}"))
-        .collect();
-    (!found.is_empty()).then(|| format!("B0790: {}; fix: set the secret in the process environment or .brain_env (`brain check` lists them), or remove the route or webhook this environment does not use; `KEY?=` only lets the build pass, it does not disable a declared route", found.join(" | ")))
+    let found: Vec<String> = secret_findings(root, environment).into_iter().filter(|f| !f.2).map(|(file, message, _)| format!("{file}: {message}")).collect();
+    (!found.is_empty()).then(|| format!("B0790: {}; fix: set a long enough generated secret in the process environment or .brain_env (`brain check` lists them); a weak or unprotected secret is refused rather than disabled because it would let forged requests in", found.join(" | ")))
+}
+/// One start warning per disabled route or endpoint, as an event a log reader can match. Names only.
+fn warn_disabled(root: &Path, environment: &str) {
+    for (file, message, _) in secret_findings(root, environment).into_iter().filter(|f| f.2) {
+        let message = message.strip_prefix(&format!("{file}: ")).unwrap_or(&message).to_string();
+        eprintln!("{}", json!({"event":"route-disabled","code":"B0790","file":file,"msg":format!("disabled, answers 503 and runs no handler: {message}"),"fix":"set the secret in the process environment or .brain_env and restart"}));
+    }
 }
 /// The environment is checked before the lookup: without `--env` the lookup reads the development section, so a deployed
 /// shell would otherwise hear B0762 about a variable it did set, under [production].
@@ -798,6 +823,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         if let Some(refusal) = secret_refusal(&root, &environment) {
             return Err(refusal);
         }
+        warn_disabled(&root, &environment);
     }
     if operation == "serve" && environment == "production"
         && let Some((message, fix, _)) = crate::platform_config::proxy_findings(&root, None).into_iter().find(|f| f.2)
@@ -814,7 +840,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
             if production {return Err("--create-db is for local development; fix: create the production database with your provider".into());}
             if let Some(name)=brain_backend::boot::create_local_database(&url).await? {brain_backend::log_line!("created database {name}");}
         }
-        let boot=if operation=="serve" {brain_backend::boot::Boot::server(production)} else {brain_backend::boot::Boot::command(production)};
+        let boot=if operation=="serve" {brain_backend::boot::Boot::server(production)} else {brain_backend::boot::Boot::command(production)}.from_source(database_source(&root,&environment));
         config_phase(false);
         let pool=brain_backend::boot::connect(&url,&boot).await?;
         config_phase(operation=="serve");
@@ -921,6 +947,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         if let Some((msg,fix))=anonymous_catalog_warning(args,&environment){brain_backend::log_line!("{}",json!({"schemaVersion":1,"event":"backend-warning","code":"B0771","msg":msg,"fix":fix}));}
         let mut platform=crate::platform_config::load(&root,&config.resources,&config.roles)?;
         platform.routes=crate::route_executor::contracts(&root,&environment)?;
+        platform.disabled_webhooks=crate::webhook_config::disabled_inbound(&root,&environment);
         platform.handlers=crate::route_executor::load(&root,&environment,&platform.routes)?;
         // Separate HTTP and worker pools with declared sizes, checked against the server's connection budget.
         pool.close().await;
@@ -1557,7 +1584,7 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
     let long_running = matches!(op, "work" | "cron");
     config_phase(long_running);
     let url = stated_database(args, &root, &environment)?;
-    if long_running && let Some(refusal) = crate::webhook_config::secret_problem(&root, &environment).map(|(file, message)| format!("B0790: {file}: {message}; fix: set the secret in the process environment or .brain_env")) {
+    if long_running && let Some(refusal) = crate::webhook_config::secret_problem(&root, &environment).filter(|p| !p.2).map(|(file, message, _)| format!("B0790: {file}: {message}; fix: set the secret in the process environment or .brain_env")) {
         return Err(refusal);
     }
     let name = args.get(1).filter(|a| !a.starts_with("--")).cloned().unwrap_or_default();
@@ -1591,7 +1618,7 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
     let _ = snapshot;
     runtime()?.block_on(async {
         let production = environment == "production";
-        let boot = if matches!(op, "work" | "cron") { brain_backend::boot::Boot::server(production) } else { brain_backend::boot::Boot::command(production) };
+        let boot = if matches!(op, "work" | "cron") { brain_backend::boot::Boot::server(production) } else { brain_backend::boot::Boot::command(production) }.from_source(database_source(&root, &environment));
         config_phase(false);
         let pool = brain_backend::boot::connect(&url, &boot).await?;
         brain_backend::db::verify(&pool, &contracts(&root, "resources")?).await?;

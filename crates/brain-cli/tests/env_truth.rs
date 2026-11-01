@@ -205,7 +205,7 @@ fn with_stripe_route(a: &App, env: &str) {
 #[test]
 fn a_missing_route_secret_stops_serve_once_with_its_code_and_a_no_restart_status() {
     let a = app("config-exit");
-    for secret in ["", "PAYMENTS_WEBHOOK_SECRET=\n", "PAYMENTS_WEBHOOK_SECRET?=\n", "PAYMENTS_WEBHOOK_SECRET=short-value\n"] {
+    for secret in ["PAYMENTS_WEBHOOK_SECRET=short-value\n"] {
         // nothing listens on this port: reaching the database would take a minute and report it instead
         with_stripe_route(&a, &format!("DATABASE_URL=postgres://u@127.0.0.1:1/none\n{secret}"));
         let started = std::time::Instant::now();
@@ -232,7 +232,135 @@ fn the_empty_key_guidance_names_the_optional_form_and_what_it_does_not_cover() {
     fs::write(a.0.join(".brain_env"), "EMPTY_KEY=\n").unwrap();
     let (ok, out) = brain(&a.0, &["build", "--progress=off"]);
     assert!(!ok && out.contains("EMPTY_KEY?=") && out.contains("B0790"), "{out}");
-    with_stripe_route(&a, "DATABASE_URL=postgres://u@127.0.0.1:1/none\nPAYMENTS_WEBHOOK_SECRET?=\n");
-    let (ok, out) = brain(&a.0, &["backend", "serve", "--env", "development", "--port", "0"]);
-    assert!(!ok && out.contains("B0790") && out.contains("?="), "`KEY?=` does not disable the route: {out}");
+}
+
+// A missing secret costs that route, not the whole server, and says so at start instead of looping under a supervisor.
+#[test]
+fn an_absent_route_secret_starts_with_the_route_disabled_and_warns() {
+    use std::io::BufRead;
+    let a = app("disabled-route");
+    for secret in ["", "PAYMENTS_WEBHOOK_SECRET=\n", "PAYMENTS_WEBHOOK_SECRET?=\n"] {
+        with_stripe_route(&a, &format!("DATABASE_URL=postgres://u@127.0.0.1:1/none\n{secret}"));
+        let mut child = Command::new(bin()).args(["backend", "serve", "--env", "development", "--port", "0"]).current_dir(&a.0).env("NO_COLOR", "1").env_remove("DATABASE_URL").env_remove("NODE_ENV").env_remove("PAYMENTS_WEBHOOK_SECRET").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).spawn().unwrap();
+        let mut seen = String::new();
+        for line in std::io::BufReader::new(child.stderr.take().unwrap()).lines().map_while(Result::ok) {
+            seen.push_str(&line);
+            seen.push('\n');
+            if line.contains("route-disabled") || seen.lines().count() > 8 { break; }
+        }
+        child.kill().ok();
+        child.wait().ok();
+        assert!(seen.contains("route-disabled") && seen.contains("B0790") && seen.contains("PAYMENTS_WEBHOOK_SECRET") && seen.contains("503"), "{secret:?}: {seen}");
+    }
+    let (_, out) = brain(&a.0, &["check"]);
+    assert!(out.contains("B0790") && out.contains("503"), "`brain check` says what start will do: {out}");
+}
+
+// The worker a deploy starts by hand: the message has to say which file it read and how to pass the environment.
+#[test]
+fn a_missing_database_url_names_the_file_it_read_and_how_to_pass_the_environment() {
+    let a = app("names-the-file");
+    fs::write(a.0.join(".brain_env"), "PUBLIC_SITE_NAME=app\n").unwrap();
+    let (_, text) = with_node_env(&a.0, &["jobs", "work", "mail"], None);
+    assert!(text.contains("B0762") && text.contains(".brain_env") && text.contains("--env"), "{text}");
+    fs::write(a.0.join(".brain_env"), "[staging]\nDATABASE_URL=postgres://synthetic-password@127.0.0.1:1/x\n").unwrap();
+    let (_, text) = with_node_env(&a.0, &["jobs", "stats"], None);
+    assert!(text.contains("[staging]") && text.contains("--env staging") && !text.contains("synthetic-password"), "any section is named: {text}");
+    fs::remove_file(a.0.join(".brain_env")).unwrap();
+    let (_, text) = with_node_env(&a.0, &["jobs", "stats"], None);
+    assert!(text.contains("does not exist") && text.contains(".brain_env"), "the wrong folder shows: {text}");
+}
+
+// A command that only reads must leave a committed app exactly as it found it, not just `doctor`.
+#[test]
+fn read_only_commands_leave_a_committed_app_clean() {
+    let a = app("read-only-sweep");
+    git(&a.0, &["init", "-q"]);
+    fs::write(a.0.join(".gitignore"), "dist/\n.brain/\n.brain_env\nnode_modules/\n_brain/\n").unwrap();
+    git(&a.0, &["add", "-A"]);
+    git(&a.0, &["commit", "-q", "-m", "app"]);
+    // A secret added locally is the case that used to rewrite the example.
+    let env = fs::read_to_string(a.0.join(".brain_env")).unwrap();
+    fs::write(a.0.join(".brain_env"), format!("{env}\nNEW_SECRET=synthetic\n")).unwrap();
+    let sweep: &[&[&str]] = &[
+        &["check"], &["check", "--json"], &["doctor"], &["doctor", "--json"], &["map"], &["status"], &["explain", "B0720"], &["spec"], &["guide"], &["guide", "webmcp"],
+        &["capabilities"], &["schema"], &["quality"], &["seo", "audit"], &["deploy", "config", "pm2"], &["backend", "check"], &["env", "list"], &["env", "doctor"],
+    ];
+    for args in sweep {
+        let _ = brain(&a.0, args);
+        let dirty = git(&a.0, &["status", "--porcelain"]);
+        assert!(dirty.trim().is_empty(), "`brain {}` changed the app:\n{dirty}", args.join(" "));
+    }
+}
+
+// What a process manager's daemon holds must not decide what the app runs with.
+#[test]
+fn env_only_file_ignores_the_supervisors_environment_except_what_it_was_told_to_keep() {
+    let a = app("env-only");
+    fs::write(a.0.join(".brain_env"), "PUBLIC_SITE_NAME=app\n").unwrap();
+    let run = |only: bool, keep: &str| {
+        let mut c = Command::new(bin());
+        c.args(["jobs", "stats", "--env", "production"]).current_dir(&a.0).env("NO_COLOR", "1").env("DATABASE_URL", "not-a-url").stdin(Stdio::null());
+        if only { c.env("BRAIN_ENV_ONLY", "file").env("BRAIN_ENV_KEEP", keep); }
+        let o = c.output().unwrap();
+        format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))
+    };
+    assert!(!run(false, "").contains("is not set"), "without the policy the process environment wins");
+    assert!(run(true, "").contains("DATABASE_URL is not set"), "the daemon's variable is gone");
+    assert!(!run(true, "DATABASE_URL").contains("is not set"), "a kept variable stays");
+}
+
+// The whole command, against a server that repeats a header the way a proxy in front of an app does.
+// The single gate before a release: one exit code, and each step says why it failed.
+#[test]
+fn release_check_fails_on_each_gate_and_says_which() {
+    let a = app("release-check");
+    let run = |extra: &[&str]| {
+        let o = Command::new(bin()).args(["release-check", "--env", "development", "--json"]).args(extra).current_dir(&a.0).env("NO_COLOR", "1").stdin(Stdio::null()).output().unwrap();
+        let text = String::from_utf8_lossy(&o.stdout).to_string();
+        let v: serde_json::Value = serde_json::from_str(text.trim()).unwrap_or_else(|_| panic!("{text}"));
+        let failed: Vec<String> = v["steps"].as_array().unwrap().iter().filter(|s| s["ok"] == false).map(|s| s["name"].as_str().unwrap().to_string()).collect();
+        (o.status.code(), v, failed)
+    };
+    fs::remove_dir_all(a.0.join("dist")).ok();
+    let (code, v, failed) = run(&[]);
+    assert_eq!(v["schemaVersion"], 1);
+    assert!(code == Some(0) && failed.is_empty(), "a clean app passes: {v}");
+    assert!(a.0.join("dist/index.html").exists(), "the gate builds what it checks");
+    fs::write(a.0.join("views/broken.brain"), "<div>\n").unwrap();
+    let (code, v, failed) = run(&[]);
+    assert!(code == Some(1) && failed.contains(&"doctor".to_string()) && failed.contains(&"build".to_string()), "{v}");
+    assert!(v.to_string().contains("broken.brain"), "a failed step says why: {v}");
+    fs::remove_file(a.0.join("views/broken.brain")).unwrap();
+    with_stripe_route(&a, "DATABASE_URL=postgres://u@127.0.0.1:1/none\n");
+    let (code, v, failed) = run(&[]);
+    assert!(code == Some(1) && failed.contains(&"secrets".to_string()) && v.to_string().contains("B0790"), "{v}");
+    let (ok, usage) = brain(&a.0, &["release-check", "--url", "nope"]);
+    assert!(!ok && usage.contains("--url"), "{usage}");
+}
+
+#[test]
+fn deploy_check_reads_a_live_origin_and_fails_only_on_a_dead_health_endpoint() {
+    use std::io::{Read, Write};
+    let a = app("deploy-check");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut buf = [0; 2048];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let status = if String::from_utf8_lossy(&buf[..n]).starts_with("GET /health") { "502 Bad Gateway" } else { "200 OK" };
+            let _ = write!(stream, "HTTP/1.1 {status}\r\nX-Frame-Options: DENY\r\nX-Frame-Options: SAMEORIGIN\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        }
+    });
+    let o = Command::new(bin()).args(["deploy", "check", "--url", &format!("http://127.0.0.1:{port}"), "--json"]).current_dir(&a.0).stdin(Stdio::null()).output().unwrap();
+    let text = String::from_utf8_lossy(&o.stdout).to_string();
+    assert_eq!(o.status.code(), Some(1), "{text}");
+    let v: serde_json::Value = serde_json::from_str(text.trim()).unwrap();
+    assert_eq!(v["schemaVersion"], 1);
+    let codes: Vec<&str> = v["findings"].as_array().unwrap().iter().map(|f| f["code"].as_str().unwrap()).collect();
+    assert_eq!(codes, ["B1857", "B1893"], "{text}");
+    let (ok, usage) = brain(&a.0, &["deploy", "check"]);
+    assert!(!ok && usage.contains("--url"), "{usage}");
 }

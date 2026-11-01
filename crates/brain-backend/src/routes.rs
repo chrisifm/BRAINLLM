@@ -237,6 +237,8 @@ pub struct Route {
     pub timeout: Duration,
     pub rate: Option<Rate>,
     pub verify: Option<Verifier>,
+    /// B0790: this environment does not hold a secret the route needs, so it answers 503 and its handler never runs.
+    pub disabled: bool,
     pub params: BTreeMap<String, Kind>,
     pub query: BTreeMap<String, Param>,
     pub headers: Vec<String>,
@@ -398,7 +400,7 @@ impl Route {
             Some(Value::String(who)) if matches!(who.as_str(), "key" | "system") => Some(who.clone()),
             Some(_) => return Err(format!("{at}: runAs must be 'key' or 'system'; fix: it picks the API key of ctx.backend, and without it the handler has no ctx.backend")),
         };
-        Ok(Route { name: name.into(), method, path: path.into(), access, raw_body, body_limit, timeout, rate, verify, params, query, headers, run_as })
+        Ok(Route { name: name.into(), method, path: path.into(), access, raw_body, body_limit, timeout, rate, verify, disabled: false, params, query, headers, run_as })
     }
     pub fn schema(&self) -> Value {
         json!({
