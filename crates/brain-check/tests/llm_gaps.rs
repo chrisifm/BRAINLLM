@@ -138,3 +138,16 @@ fn a_live_resource_with_a_scope_that_is_always_null_is_reported() {
         assert!(!codes(&view(possible)).contains(&"B0775"), "{possible}");
     }
 }
+
+#[test]
+fn a_query_policy_that_contradicts_itself_warns() {
+    let warned = |attrs: &str| {
+        let src = format!("<meta seo title=\"A title long enough\" keyword=\"a title\" description=\"A description of the page.\" {attrs}>\n\n<h1>A title</h1>\n");
+        diags("views/index.brain", &src, &Ctx::default()).iter().filter(|d| d.code == "B0503").count()
+    };
+    assert_eq!(warned("query=\"page\""), 0);
+    assert_eq!(warned("query=\"utm_source\""), 1);
+    assert_eq!(warned("query={props.keys}"), 1);
+    assert_eq!(warned("query=\"page\" robots=\"noindex\""), 1);
+    assert_eq!(warned("query=\"page\" canonical=\"/x\""), 1);
+}

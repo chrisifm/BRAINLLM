@@ -34,6 +34,11 @@ export class MouseEvent extends Event {}
 
 // Minimal MutationObserver: only records for nodes connected to the document, plus takeRecords() (used by brain-inspect).
 const MOS = new Set()
+// A node's position in its parent, from a hint the walk keeps: `_at` may be stale after any mutation, so it is checked.
+const indexIn = (parent, node) => {
+  if (parent.childNodes[node._at] === node) return node._at
+  return (node._at = parent.childNodes.indexOf(node))
+}
 const rec = (type, target) => {
   if (MOS.size && target.isConnected) for (const o of MOS) o._q.push({ type, target })
 }
@@ -62,6 +67,7 @@ class Node {
     this.ownerDocument = doc
     this.parentNode = null
     this.childNodes = []
+    this._at = 0
     this._l = { cap: {}, bub: {} }
   }
   get firstChild() {
@@ -72,11 +78,19 @@ class Node {
   }
   get nextSibling() {
     const p = this.parentNode
-    return p ? p.childNodes[p.childNodes.indexOf(this) + 1] || null : null
+    if (!p) return null
+    const i = indexIn(p, this) + 1
+    const s = p.childNodes[i]
+    if (s) s._at = i
+    return s || null
   }
   get previousSibling() {
     const p = this.parentNode
-    return p ? p.childNodes[p.childNodes.indexOf(this) - 1] || null : null
+    if (!p) return null
+    const i = indexIn(p, this) - 1
+    const s = p.childNodes[i]
+    if (s) s._at = i
+    return s || null
   }
   get isConnected() {
     let n = this
@@ -85,14 +99,26 @@ class Node {
   }
   insertBefore(n, ref) {
     if (n.nodeType === 11) {
-      for (const c of [...n.childNodes]) this.insertBefore(c, ref)
+      const moved = n.childNodes
+      if (!moved.length) return n
+      const at = ref ? indexIn(this, ref) : this.childNodes.length
+      if (at < 0) throw Error('ref is not a child')
+      const kids = this.childNodes
+      const tail = kids.splice(at)
+      for (const c of moved) kids.push(c)
+      for (const c of tail) kids.push(c)
+      for (const c of moved) {
+        c.parentNode = this
+        rec('childList', this)
+      }
+      moved.length = 0
       return n
     }
     if (n.parentNode) {
       if (n.isConnected) stats.moves++
       n.parentNode.removeChild(n)
     }
-    const i = ref ? this.childNodes.indexOf(ref) : -1
+    const i = ref ? indexIn(this, ref) : -1
     if (ref && i < 0) throw Error('ref is not a child')
     i < 0 ? this.childNodes.push(n) : this.childNodes.splice(i, 0, n)
     n.parentNode = this
@@ -103,7 +129,7 @@ class Node {
     return this.insertBefore(n, null)
   }
   removeChild(n) {
-    const i = this.childNodes.indexOf(n)
+    const i = indexIn(this, n)
     if (i < 0) throw Error('not a child')
     this.childNodes.splice(i, 1)
     n.parentNode = null

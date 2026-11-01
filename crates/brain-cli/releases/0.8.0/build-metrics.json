@@ -1,0 +1,9 @@
+{
+  "id": "build-metrics",
+  "kind": "internal",
+  "title": "Per-stage metrics in the build report",
+  "why": "Agents can see which build stage is expensive instead of guessing or raising a budget.",
+  "changelog": [
+    "report each stage"
+  ]
+}

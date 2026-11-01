@@ -420,6 +420,7 @@ mod tests {
                 unchanged: 0,
                 signature: String::new(),
                 seo: None,
+                metrics: brain_metrics::Report::default(),
             };
             // Observe emitted bytes before enforcing the same public gate; never alter the budget to inspect it.
             crate::bundle(

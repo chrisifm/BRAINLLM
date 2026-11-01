@@ -7,6 +7,7 @@ authors.workspace = true
 description = "BRAINLLM SEO module: audit with score, generated SEO files and head tags from the prerendered pages (INTERNALS §32-§33)"
 
 [dependencies]
+brain-metrics = { path = "../brain-metrics" }
 # Hand-written JSON (brain.json, JSON-LD, MCP output), shared by the whole workspace.
 brain-lex = { path = "../brain-lex" }
 # `.brain_env` resolution (INTERNALS §36) for server-side keys such as INDEXNOW_KEY.

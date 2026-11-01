@@ -505,6 +505,15 @@ with deterministic synthetic data derived from the schema.
 2026-10-30: GET `cache: 'no'` matches the existing runtime contract and remains valid even with application-wide
 data caching disabled. The checker never removes that endpoint privacy intent; writes still reject cache options.
 
+## 15b. One SEO story with or without a server (2026-10-31)
+`brain_seo::Built.server_head` writes the site's request-independent head into the templates of pages rendered per request,
+through the same `social::head` and `inject_head` as prerendered pages. `head()` in server.mjs binds only request values:
+title-derived `og:*`, the absolute `og:image` and the card type. Not covered yet: the WebSite/WebPage JSON-LD graph, hreflang
+and image dimensions of a per-request page. A route with folder guards answers `x-robots-tag: noindex` even when it renders, and its template skips the site head: it is never indexed and the tags would only spend its view budget.
+`query` is read by the build (`brain-query` marker in the template, removed per request). Canonical stays path-only unless a
+parameter is listed; `tests/seo_parity.rs` holds the parity and identity contract. A failed build is typed by
+`build_error.rs`: `phase` and `diagnostics` with `brain check` fields, `generated` on locations outside the app, no edits there.
+
 ## 16. Visual verification and budgets (2026-10-28)
 `brain shot <route>` owns a temporary dev server and Chrome session; both close after the operation.
 Static preview/start reject symlinks in requested files, directories, gzip variants, headers and fallback pages.
@@ -914,6 +923,14 @@ All of it is exposed by MCP (`brain_gen`, `brain_apply`, `brain_read {outline}`,
 `brain_diff`) with input/output schemas.
 
 ## 28. Incremental compilation: near-instant dev (fixed 2026-10-13)
+Build work audit (2026-10-31): `brain-metrics` holds one `Build` per run, attached to each worker thread, so concurrent
+builds never mix. It reports wall time, the CPU of that build's threads (child processes excluded) and executed-work
+counters, in quiet mode too. It also memoizes facts per source revision: dependency hashes are keyed by a stamp of length,
+mtime, ctime and inode, and a final snapshot warns when a source changed during the build. `cache_budget.rs` amortizes
+maintenance: an entry reservation only scans the directory when the budget runs out, the budget halves against the real
+free space (O(log N) scans), and eviction goes to a 7/8 low-water mark while protecting entries the running build used.
+Reads verify SHA-256, so writes no longer fsync. A parsed-AST memo was measured and rejected: cloning cost what parsing
+cost. An `.nextSibling` chain helper too: at most -0.08 % gzip and +0.2 % Brotli on a new app.
 Cache audit (2026-10-28): persistent lookup now hashes exact source bytes directly; it does not parse an AST just
 to look for cached output. HMR still uses parsed block/contract classification. Both key APIs include adoption,
 lint, root, runtime imports, locale and public environment options with unambiguous field boundaries. Compiler

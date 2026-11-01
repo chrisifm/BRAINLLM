@@ -23,6 +23,7 @@ the map; read it fully before changing anything. Three documents, three audience
 | `crates/brain-codegen` | `compile`/`compile_with` → `Output {js, css, server_js, server_fns, deps, names, warnings}` | `tests/snapshots.rs`, `e2e.rs` (real runtime), `server.rs`, `normalize.rs`, `llm_gaps.rs` |
 | `crates/brain-css` | scoping (`@scope … to ([data-b])`), tokens, mixins, layers | in workspace tests |
 | `crates/brain-min` | own JS lexer, ASI-safe printer, scope mangling, `RUNTIME_MAP` | `cargo test -p brain-min` + runtime suite with `BRAIN_RUNTIME=<min>` |
+| `crates/brain-metrics` | per-build stage timings, work counters and per-revision facts shared by threads | `cargo test -p brain-metrics` + `crates/brain-cli/tests/build_metrics.rs` |
 | `crates/brain-pack` | bundler, prerender/SSG, server manifest, cache + service worker, build signature, SEO step, CSP/SRI | `cargo test -p brain-pack` (`tests/seo_paths.rs`, `tests/ssr.rs`, `cache::tests`) |
 | `crates/brain-seo` | SEO module: head rewrite, sitemaps, feeds, llms.txt, Markdown copies, audit B18xx, collections (`content::`) | `cargo test -p brain-seo` |
 | `crates/brain-serve` | dev server: HTTP/WS by hand, router (`route.rs`), `load` sidecar (`load.rs`), managed `Dev` handle (stop/logs/errors/load), HMR client, `/@brain/ui` kit, test page | `cargo test -p brain-serve` |

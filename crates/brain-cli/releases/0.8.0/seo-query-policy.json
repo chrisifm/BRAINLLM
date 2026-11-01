@@ -1,0 +1,29 @@
+{
+  "id": "seo-query-policy",
+  "kind": "capability",
+  "title": "Query parameters that identify a page",
+  "why": "Real pagination can keep its own canonical while a dialog or tracking parameter never creates a new page.",
+  "changelog": [
+    "`<meta seo query=\"page\">`"
+  ],
+  "guide": "brain guide seo",
+  "apis": [
+    "query"
+  ],
+  "codes": [
+    "B0503"
+  ],
+  "affects": [
+    "views/**/*.brain"
+  ],
+  "adopt": {
+    "file": "views/list/[kind].brain",
+    "snippet": "<meta seo query=\"page\" title={props.title} description={props.summary}>"
+  },
+  "uses": [
+    {
+      "glob": "views/**/*.brain",
+      "contains": "<meta seo query="
+    }
+  ]
+}

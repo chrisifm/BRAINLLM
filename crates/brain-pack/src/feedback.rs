@@ -32,6 +32,7 @@ pub(crate) fn minify(root: &Path, source: &str) -> Result<(String, String), Stri
     Ok((code, report))
 }
 pub(crate) fn shake(source: &str, keep: &std::collections::HashSet<String>) -> Result<(String, String), String> {
+    brain_metrics::count(brain_metrics::Counter::ExportShakes, 1);
     let result = brain_min::tree_shake_with_report(source, keep).map_err(|e| e.to_json())?;
     Ok((result.code, bounded(result.report)))
 }

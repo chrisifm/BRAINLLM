@@ -1,0 +1,9 @@
+{
+  "id": "build-typed-errors",
+  "kind": "fix",
+  "title": "Typed diagnostics for a failed build",
+  "why": "A file only the bundle reaches failed as one flattened string that told the author to run `brain check`, which passed.",
+  "changelog": [
+    "Fix: a build that fails on a file"
+  ]
+}

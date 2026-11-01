@@ -1,0 +1,9 @@
+{
+  "id": "build-cache-maintenance",
+  "kind": "internal",
+  "title": "Amortized build cache maintenance",
+  "why": "A build over a thousand components stopped scanning the cache on every write and evicting what it had just written.",
+  "changelog": [
+    "The build cache scans its directory"
+  ]
+}

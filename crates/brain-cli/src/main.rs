@@ -12,6 +12,8 @@ mod brand;
 mod edit;
 mod budget;
 mod build_assessment;
+mod build_error;
+use build_error::BuildError;
 #[cfg(unix)]
 mod preview;
 mod impact;
@@ -396,7 +398,7 @@ fn main() -> ExitCode {
             }
             Ok(())
         }),
-        Some("build") => cmd_build(&args[1..]),
+        Some("build") => return build_exit(&args[1..]),
         Some("-h") | Some("--help") | Some("help") | None => {
             print!("{USAGE}");
             Ok(())
@@ -1073,28 +1075,33 @@ pub(crate) struct BuildReport {
     pub signature: String,
     /// lowest and highest SEO score of the indexable pages
     pub seo: Option<(u32, u32)>,
+    /// observations of this build only; never part of `dist/` or of the signature
+    pub metrics: brain_metrics::Report,
 }
 
 /// `brain build` (today: sitemap.xml + robots.txt; bundling, minification and prerender arrive with #9/#26).
-pub(crate) fn run_build(root: &Path, site: Option<String>) -> Result<BuildReport, String> {
+pub(crate) fn run_build(root: &Path, site: Option<String>) -> Result<BuildReport, BuildError> {
     run_build_with(root, site, "production", None)
 }
 
 /// `run_build` reporting its phases to the terminal view (`brain build`; MCP and tests pass None).
-pub(crate) fn run_build_with(root: &Path, site: Option<String>, env_name: &str, progress: Option<&term::Progress>) -> Result<BuildReport, String> {
-    run_build_assessed_with(root, site, env_name, progress)?.into_report()
+pub(crate) fn run_build_with(root: &Path, site: Option<String>, env_name: &str, progress: Option<&term::Progress>) -> Result<BuildReport, BuildError> {
+    Ok(run_build_assessed_with(root, site, env_name, progress)?.into_report()?)
 }
 
 // An assessment retains fresh output and measured payloads when only the budget fails. Normal builds still
 // require into_report(); doctor can audit that exact output while keeping its build gate red.
-fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, progress: Option<&term::Progress>) -> Result<build_assessment::Assessment, String> {
+fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, progress: Option<&term::Progress>) -> Result<build_assessment::Assessment, BuildError> {
+    let metrics = brain_metrics::Build::new();
+    let _observed = brain_metrics::attach(&metrics);
     // environment (§36): PUBLIC_* become constants; a key with no value in it stops the build (B0720)
     env::select(root, env_name);
     // any error in the file stops the build too (B0724 malformed line, B0723 secret-shaped PUBLIC_*)
     let mut empty: Vec<compiler::Diag> = env::check(root).into_iter().filter(|d| !d.is_warning()).collect();
     empty.extend(env::empty(root, env_name));
     if !empty.is_empty() {
-        return Err(empty.iter().map(|d| format!("{} {}:{}:{} {}; fix: {}", d.code, d.file, d.line, d.col, d.msg, d.fix)).collect::<Vec<_>>().join("\n"));
+        let message = empty.iter().map(build_error::line).collect::<Vec<_>>().join("\n");
+        return Err(BuildError { message, phase: "env", diagnostics: empty });
     }
     // the site URL: --site > PUBLIC_SITE_URL of the environment > brain.json "site" (legacy)
     let explicit = site.is_some();
@@ -1102,26 +1109,27 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
     if let Some(s) = &site
         && !(s.starts_with("https://") || s.starts_with("http://"))
     {
-        return Err(format!("`--site {s}` must be absolute; fix: `--site https://{s}`"));
+        return Err(format!("`--site {s}` must be absolute; fix: `--site https://{s}`").into());
     }
     // B0736: a placeholder origin from .brain_env/brain.json is "no site" outside development (an explicit --site is
     // the author's intent): no sitemap, no robots Sitemap line, no absolute URL pointing at it
     let placeholder = site.clone().filter(|s| !explicit && env_name != "development" && env::placeholder_origin(s));
     let site = if placeholder.is_some() { None } else { site };
-    let mut rep = BuildReport { files: vec![], warnings: vec![], ledger: vec![], build_cache:brain_mcp::Json::Null, optimizations:vec![], report: vec![], written: 0, unchanged: 0, signature: String::new(), seo: None };
+    let mut rep = BuildReport { files: vec![], warnings: vec![], ledger: vec![], build_cache:brain_mcp::Json::Null, optimizations:vec![], report: vec![], written: 0, unchanged: 0, signature: String::new(), seo: None, metrics: brain_metrics::Report::default() };
     // the native linter (INTERNALS §20): the same diagnostics as `brain check`; errors stop the build with a summary,
     // warnings are listed with their count (info stays in `brain check`)
     if let Some(p) = progress {
         p.event("check", 0, 0)
     }
+    brain_metrics::phase("check", 0);
     let (_, diags, _) = run_check_base(Some(root.to_path_buf()))?;
-    let line = |d: &compiler::Diag| format!("{} {}:{}:{} {}; fix: {}", d.code, d.file, d.line, d.col, d.msg, d.fix);
-    let errors: Vec<String> = diags.iter().filter(|d| !d.is_warning()).map(line).collect();
+    let failed = diags.iter().filter(|d| !d.is_warning()).count();
     let warns = diags.iter().filter(|d| d.level == brain_parse::Severity::Warning).count();
-    if !errors.is_empty() {
-        return Err(format!("{}\nbuild stopped: {} error(s), {warns} warning(s); fix them (`brain check` lists the same) and build again", errors.join("\n"), errors.len()));
+    if failed > 0 {
+        let errors: Vec<compiler::Diag> = diags.into_iter().filter(|d| !d.is_warning()).collect();
+        return Err(BuildError::with("check", errors, &format!("build stopped: {failed} error(s), {warns} warning(s); fix them (`brain check` lists the same) and build again")));
     }
-    rep.warnings.extend(diags.iter().filter(|d| d.level == brain_parse::Severity::Warning).map(line));
+    rep.warnings.extend(diags.iter().filter(|d| d.level == brain_parse::Severity::Warning).map(build_error::line));
     let dist = root.join("dist");
     std::fs::create_dir_all(&dist).map_err(|e| e.to_string())?;
     // robots.txt, sitemap.xml, llms.txt, manifest and the head rewrite come from brain-seo's finish (inside bundle)
@@ -1139,9 +1147,14 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
         let skipped = if live.is_empty() { String::new() } else { format!("; the sitemap() routes {} are not listed either", live.join(", ")) };
         rep.warnings.push(format!("B0736 .brain_env:1:1 the {env_name} site URL {p} is {}, so the build publishes no sitemap.xml, no robots.txt Sitemap line and no absolute URL{skipped}; fix: set PUBLIC_SITE_URL in the [{env_name}] section of .brain_env (or `brain build --site https://your-domain`)", env::no_site_kind(p)));
     }
+    let edited = compiler::changed_during_build();
+    if !edited.is_empty() {
+        rep.warnings.push(format!("{} changed while this build ran, so the output may mix revisions; fix: build again", edited.join(", ")));
+    }
+    rep.metrics = metrics.finish();
     let budget_error = budget::enforce(root, &rep.report).err();
     if budget_error.is_none() {
-        let feedback:serde_json::Value=serde_json::from_str(&build_json(&rep).stringify()).map_err(|_|"build feedback serialization failed")?;
+        let feedback:serde_json::Value=serde_json::from_str(&build_json(&rep).stringify()).map_err(|_| "build feedback serialization failed".to_string())?;
         if quality::record_build(root,&feedback).is_err() {rep.warnings.push("Build succeeded but private quality feedback could not be stored; inspect brain quality refresh".into());}
     }
     Ok(build_assessment::Assessment { report: rep, budget_error })
@@ -1197,13 +1210,17 @@ fn prewarm(root: &Path, lens: &HashMap<String, usize>) {
         .collect();
     let workers = std::thread::available_parallelism().map_or(4, |n| n.get()).min(jobs.len().max(1));
     let next = std::sync::atomic::AtomicUsize::new(0);
+    let metrics = brain_metrics::current();
     std::thread::scope(|sc| {
         for _ in 0..workers {
-            sc.spawn(|| loop {
-                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let Some((f, rel, len)) = jobs.get(i) else { break };
-                if let Ok(src) = std::fs::read_to_string(f) {
-                    let _ = compiler::compile_hash(&src, Path::new(rel), root, false, *len);
+            sc.spawn(|| {
+                let _observed = metrics.as_ref().map(brain_metrics::worker);
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some((f, rel, len)) = jobs.get(i) else { break };
+                    if let Ok(src) = std::fs::read_to_string(f) {
+                        let _ = compiler::compile_hash(&src, Path::new(rel), root, false, *len);
+                    }
                 }
             });
         }
@@ -1269,7 +1286,19 @@ pub(crate) fn cache_cfg(root: &Path) -> Result<brain_pack::cache::CacheCfg, Stri
     Ok(c)
 }
 
-/// Returns (route, HTML) of every built page.
+/// The SEO attributes of a view, read once per source revision: many generated pages share one view.
+fn seo_view_info(root: &Path, view: &str) -> Option<std::sync::Arc<brain_check::seo::ViewSeo>> {
+    let src = std::fs::read_to_string(root.join(view)).ok()?;
+    let reused = std::cell::Cell::new(true);
+    let fact = brain_metrics::memo(format!("seo-view:{view}"), |known: &(String, Option<std::sync::Arc<brain_check::seo::ViewSeo>>)| known.0 == src, || {
+        reused.set(false);
+        let info = brain_parse::parse(&src, Path::new(view)).ok().map(|c| std::sync::Arc::new(brain_check::seo::view_info(&c)));
+        (src.clone(), info)
+    });
+    brain_metrics::count(if reused.get() { brain_metrics::Counter::SeoViewParsesReused } else { brain_metrics::Counter::SeoViewParses }, 1);
+    fact.1.clone()
+}
+
 /// The environment's site URL: PUBLIC_SITE_URL of that environment, else brain.json "site" (legacy).
 fn declared_site(root: &Path, env_name: &str) -> Option<String> {
     env::value(root, env_name, "PUBLIC_SITE_URL").or_else(|| {
@@ -1278,8 +1307,23 @@ fn declared_site(root: &Path, env_name: &str) -> Option<String> {
     })
 }
 
-fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mut BuildReport, progress: Option<&term::Progress>) -> Result<Vec<(String, String)>, String> {
+/// Returns (route, HTML) of every built page.
+fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mut BuildReport, progress: Option<&term::Progress>) -> Result<Vec<(String, String)>, BuildError> {
+    let failed = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    bundle_files(root, dist, site, env_name, rep, progress, failed.clone()).map_err(|message| {
+        let mut diagnostics: Vec<compiler::Diag> = std::mem::take(&mut *failed.lock().unwrap_or_else(|e| e.into_inner()));
+        if diagnostics.is_empty() {
+            return BuildError::from(message);
+        }
+        diagnostics.sort_by(|a, b| (&a.file, a.line, a.col, a.code).cmp(&(&b.file, b.line, b.col, b.code)));
+        diagnostics.dedup();
+        BuildError::with("compile", diagnostics, "build stopped: `brain check` does not reach these files; fix them and build again")
+    })
+}
+
+fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mut BuildReport, progress: Option<&term::Progress>, failed: std::sync::Arc<std::sync::Mutex<Vec<compiler::Diag>>>) -> Result<Vec<(String, String)>, String> {
     let on_phase = |phase: &str, done: usize, total: usize| {
+        brain_metrics::phase(phase, total.max(done));
         if let Some(p) = progress {
             p.event(phase, done, total)
         }
@@ -1297,12 +1341,14 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
     on_phase("check", 0, 0);
     let lens = hash_lengths(root)?;
     let _ = analytics::write_map(root); // .brain/analytics/elements.json: element ids → file:line, never deployed
+    brain_metrics::phase("compile", 0);
     prewarm(root, &lens);
     let r2 = root.to_path_buf();
     let compile = move |src: &str, rel: &Path| -> Result<brain_pack::Unit, String> {
         let key = rel.to_string_lossy().replace('\\', "/");
         let len = lens.get(&key).copied().unwrap_or(4);
         let o = compiler::compile_hash(src, rel, &r2, false, len).map_err(|ds| {
+            failed.lock().unwrap_or_else(|e| e.into_inner()).extend(ds.iter().cloned());
             format!("{key} does not compile: {}; fix: run `brain check`", ds.iter().map(|d| format!("{} {}", d.code, d.msg)).collect::<Vec<_>>().join("; "))
         })?;
         Ok(brain_pack::Unit { js: o.js, css: o.css, server_js: o.server_js, server_fns: o.server_fns })
@@ -1396,7 +1442,7 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
             .iter()
             .filter(|p| !p.file.starts_with("_server/"))
             .map(|p| {
-                let info = std::fs::read_to_string(root.join(&p.view)).ok().and_then(|src| brain_parse::parse(&src, Path::new(&p.view)).ok()).map(|c| brain_check::seo::view_info(&c));
+                let info = seo_view_info(root, &p.view);
                 let text = |k: &str| {
                     info.as_ref()?.attrs.iter().find(|(a, _)| a == k).and_then(|(_, v)| match v {
                         brain_check::seo::SeoValue::Text(t) => Some(t.clone()),
@@ -1427,6 +1473,11 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
             if let Some(p) = pages.iter_mut().find(|p| p.file == s.file) {
                 p.html = s.html.clone();
             }
+        }
+        // a page behind a guard is out of the index (x-robots-tag): search and social tags would only add weight
+        let guarded = |view: &str| Path::new(view).ancestors().skip(1).any(|dir| root.join(dir).join("_guard.jsbrain").is_file());
+        for p in pages.iter_mut().filter(|p| p.file.starts_with("_server/") && !guarded(&p.view)) {
+            p.html = built.server_head.apply(&seo_cfg, &p.route, &p.html);
         }
         let scores: Vec<u32> = built.report.pages.iter().filter_map(|p| p.score).collect();
         seo_range.set(scores.iter().min().zip(scores.iter().max()).map(|(a, b)| (*a, *b)));
@@ -1477,12 +1528,11 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
         .collect();
     // static `<meta seo>` text values (the fallback when a view has no evaluated seo(props)), read by the parser
     let seo_of = |v: &str| -> Vec<(String, String)> {
-        let Some(c) = std::fs::read_to_string(root.join(v)).ok().and_then(|src| brain_parse::parse(&src, Path::new(v)).ok()) else { return Vec::new() };
-        brain_check::seo::view_info(&c)
-            .attrs
-            .into_iter()
+        let Some(info) = seo_view_info(root, v) else { return Vec::new() };
+        info.attrs
+            .iter()
             .filter_map(|(k, val)| match val {
-                brain_check::seo::SeoValue::Text(t) => Some((k, t)),
+                brain_check::seo::SeoValue::Text(t) => Some((k.clone(), t.clone())),
                 brain_check::seo::SeoValue::Expr(_) => None,
             })
             .collect()
@@ -1567,6 +1617,21 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
     Ok(out.pages.into_iter().map(|p| (p.route, p.html)).collect())
 }
 
+/// Timings vary per run and stay out of everything hashed or written to `dist/`; the counters are the executed work.
+fn metrics_json(m: &brain_metrics::Report) -> brain_mcp::Json {
+    use brain_mcp::Json;
+    let rounded = |ms: f64| Json::Num((ms * 100.0).round() / 100.0);
+    Json::obj([
+        ("scope", Json::str("this build only; cpuMs covers threads of this process, not child processes such as the prerender runtime or a headless browser")),
+        ("wallMs", rounded(m.wall_ms)),
+        (
+            "stages",
+            Json::Arr(m.stages.iter().map(|s| Json::obj([("name", Json::str(s.name)), ("wallMs", rounded(s.wall_ms)), ("cpuMs", rounded(s.cpu_ms)), ("items", Json::Num(s.items as f64))])).collect()),
+        ),
+        ("counters", Json::Obj(m.counters.iter().map(|(k, v)| (k.to_string(), Json::Num(*v as f64))).collect())),
+    ])
+}
+
 pub(crate) fn build_json(r: &BuildReport) -> brain_mcp::Json {
     use brain_mcp::Json;
     let keys = ["jsRaw", "jsMin", "jsGz", "css", "cssGz", "html", "htmlGz"];
@@ -1578,6 +1643,7 @@ pub(crate) fn build_json(r: &BuildReport) -> brain_mcp::Json {
         ("ledger", Json::Arr(r.ledger.clone())),
         ("buildCache",r.build_cache.clone()),
         ("optimizations",Json::Arr(r.optimizations.clone())),
+        ("metrics", metrics_json(&r.metrics)),
         (
             "report",
             Json::Arr(
@@ -1597,11 +1663,27 @@ pub(crate) fn build_json(r: &BuildReport) -> brain_mcp::Json {
 /// `brain build --ext web|brain` (#26): the published file names; flag > `BRAIN_EXT` > brain.json `"ext"` > `web`.
 static BUILD_EXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
-fn cmd_build(args: &[String]) -> Result<(), String> {
+/// `brain build`: a failure with `--json` reports the phase and the typed diagnostics that stopped it.
+fn build_exit(args: &[String]) -> ExitCode {
+    match cmd_build(args) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) if closed_pipe(&e.message) => ExitCode::SUCCESS,
+        Err(e) => {
+            if want_json(args) {
+                println!("{}", e.json(app_root().ok().as_deref()));
+            } else {
+                eprintln!("error: {}", e.message);
+            }
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn cmd_build(args: &[String]) -> Result<(), BuildError> {
     let identity = brand::Session::start(args, "Turning your frontend into browser-ready output.");
     if let Some(e) = flag(args, "--ext").or_else(|| std::env::var("BRAIN_EXT").ok().filter(|v| !v.is_empty())) {
         if e != "web" && e != "brain" {
-            return Err(format!("invalid --ext `{e}`; fix: `--ext web` (.html/.js/.css, the default) or `--ext brain` (.brain/.jsbrain/.cssbrain)"));
+            return Err(format!("invalid --ext `{e}`; fix: `--ext web` (.html/.js/.css, the default) or `--ext brain` (.brain/.jsbrain/.cssbrain)").into());
         }
         let _ = BUILD_EXT.set(e);
     }
@@ -1625,7 +1707,7 @@ fn cmd_build(args: &[String]) -> Result<(), String> {
             Err(e) => eprintln!("warning: brain docs: {e}"),
         }
     }
-    let strict = strict_build_failure(args, &rep.warnings);
+    let strict = strict_build_failure(args, &rep.warnings).map_err(BuildError::from);
     if want_json(args) {
         println!("{}", build_json(&rep).stringify());
         return strict;
@@ -2102,7 +2184,7 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
     let (build_ok, fresh_output, build) = match &app {
         Some(a) if check.get("errors") == Some(&Json::Num(0.0)) => match run_build_assessed_with(a, doctor_site.clone(), "production", None) {
             Ok(assessment) => (assessment.budget_error.is_none(), true, assessment.doctor_json()),
-            Err(e) => (false, false, Json::obj([("ok", Json::Bool(false)), ("freshOutput", Json::Bool(false)), ("error", Json::str(&e))])),
+            Err(e) => (false, false, Json::obj([("ok", Json::Bool(false)), ("freshOutput", Json::Bool(false)), ("error", Json::str(&e.message))])),
         },
         Some(_) => (true, false, Json::obj([("freshOutput", Json::Bool(false)), ("skipped", Json::str("check has errors; fix them first"))])),
         None => (true, false, Json::obj([("freshOutput", Json::Bool(false)), ("skipped", Json::str("no app"))])),

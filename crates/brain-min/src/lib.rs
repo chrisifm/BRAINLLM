@@ -154,18 +154,41 @@ pub fn tree_shake_with_report(src: &str, keep: &HashSet<String>) -> Result<Minif
 
 /// Names imported (`import { a, b as c }` → `a`, `b`) from specifiers that satisfy `from`.
 pub fn imported_names(src: &str, from: &dyn Fn(&str) -> bool) -> Result<Vec<String>, String> {
+    Ok(module_imports(src)?.names_from(from))
+}
+
+/// What one module imports, read once: liveness over a whole graph asks it per target without lexing again.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ModuleImports {
+    /// `import { … } from 'spec'`, in source order, with the imported (not the local) names
+    pub named: Vec<(String, Vec<String>)>,
+    /// `import('spec')` with a literal specifier
+    pub dynamic: Vec<String>,
+}
+
+impl ModuleImports {
+    pub fn names_from(&self, from: &dyn Fn(&str) -> bool) -> Vec<String> {
+        self.named.iter().filter(|(spec, _)| from(spec)).flat_map(|(_, names)| names.iter().cloned()).collect()
+    }
+}
+
+pub fn module_imports(src: &str) -> Result<ModuleImports, String> {
     let t = lex::lex(src)?;
-    let mut out = Vec::new();
+    let mut out = ModuleImports::default();
     let mut i = 0;
     while i < t.len() {
+        if t[i].ident("import") && t.get(i + 1).is_some_and(|x| x.punct("(")) && t.get(i + 2).is_some_and(|x| x.kind == lex::Kind::Str) {
+            out.dynamic.push(t[i + 2].text[1..t[i + 2].text.len() - 1].to_string());
+        }
         if t[i].ident("import") && t.get(i + 1).is_some_and(|x| x.punct("{")) {
             let close = (i + 1..t.len()).find(|&j| t[j].punct("}")).ok_or("unterminated import list")?;
             let spec = t.get(close + 2).filter(|_| t.get(close + 1).is_some_and(|x| x.ident("from")));
-            if let Some(s) = spec.filter(|s| s.kind == lex::Kind::Str && from(&s.text[1..s.text.len() - 1])) {
+            if let Some(s) = spec.filter(|s| s.kind == lex::Kind::Str) {
+                let mut names = Vec::new();
                 let mut j = i + 2;
                 while j < close {
                     if t[j].kind == lex::Kind::Ident {
-                        out.push(t[j].text.clone());
+                        names.push(t[j].text.clone());
                         // skip `as local`
                         if t.get(j + 1).is_some_and(|x| x.ident("as")) {
                             j += 2;
@@ -173,7 +196,7 @@ pub fn imported_names(src: &str, from: &dyn Fn(&str) -> bool) -> Result<Vec<Stri
                     }
                     j += 1;
                 }
-                let _ = s;
+                out.named.push((s.text[1..s.text.len() - 1].to_string(), names));
             }
             i = close;
         }

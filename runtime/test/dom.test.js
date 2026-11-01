@@ -371,3 +371,39 @@ test('delegation: many on() calls for one type add one document listener, so a c
   click(b)
   assert.deepEqual(log, ['a2', 'b'])
 })
+
+test('a fragment inserts its children in order, once, before the reference', () => {
+  const ul = document.createElement('ul')
+  const [a, b] = [document.createElement('li'), document.createElement('li')]
+  ul.append?.call(ul)
+  ul.appendChild(a)
+  ul.appendChild(b)
+  const f = document.createDocumentFragment()
+  const kids = Array.from({ length: 3 }, () => f.appendChild(document.createElement('li')))
+  assert.equal(ul.insertBefore(f, b), f)
+  assert.deepEqual(ul.childNodes, [a, ...kids, b])
+  assert.equal(f.childNodes.length, 0)
+  assert.ok(kids.every(k => k.parentNode === ul))
+  assert.throws(() => ul.insertBefore(fragmentOf(document.createElement('li')), document.createElement('li')), /ref is not a child/)
+})
+
+test('sibling walks stay correct after the list changes under a remembered position', () => {
+  const ul = document.createElement('ul')
+  const items = Array.from({ length: 5 }, () => ul.appendChild(document.createElement('li')))
+  const walk = () => { const out = []; for (let n = ul.firstChild; n; n = n.nextSibling) out.push(n); return out }
+  assert.deepEqual(walk(), items)
+  ul.removeChild(items[1])
+  assert.equal(items[0].nextSibling, items[2])
+  assert.equal(items[3].previousSibling, items[2])
+  ul.insertBefore(items[1], items[4])
+  assert.deepEqual(walk(), [items[0], items[2], items[3], items[1], items[4]])
+  assert.equal(items[4].previousSibling, items[1])
+  assert.equal(items[0].previousSibling, null)
+  assert.equal(items[4].nextSibling, null)
+})
+
+function fragmentOf(node) {
+  const f = document.createDocumentFragment()
+  f.appendChild(node)
+  return f
+}

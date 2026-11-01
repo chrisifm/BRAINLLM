@@ -1,0 +1,9 @@
+[package]
+name = "brain-metrics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+libc = "0.2.191"

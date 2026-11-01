@@ -1147,7 +1147,9 @@ export function createServer(o = {}) {
     const page = readFileSync(file(route.page), 'utf8')
       .replace('<!--brain:ssr-->', () => body)
       .replace('<!--brain:props-->', () => jsonInHtml(props))
-    let out = head(page, seo, url.pathname)
+    // a page behind a guard passes it only for its visitor: it stays out of the index even when it renders (§33)
+    if (route.guards && route.guards.length) res.setHeader('x-robots-tag', NOINDEX)
+    let out = head(page, seo, url.pathname, url.search)
     // route params for route() in the browser (the client has no route table)
     if (params && Object.keys(params).length) out = out.replace('</head>', () => `<meta name="brain-params" content="${esc(JSON.stringify(params))}"></head>`)
     if (forms) out = out.replace('</body>', () => `<script type="application/json" id="brain-forms">${jsonInHtml(forms)}</script></body>`)
@@ -1191,7 +1193,7 @@ export function createServer(o = {}) {
       globalThis.__brainLocale = null
     }
     const at = { path: url.pathname, params: params || {}, query: Object.fromEntries(url.searchParams) }
-    write(n(head(top, seo0, url.pathname)))
+    write(n(head(top, seo0, url.pathname, url.search)))
     // QA #253: the folder's _loading.brain goes in the region with the first chunk (SPEC: shows while load runs),
     // between two marker comments; the last chunk starts with a script that removes them and what is between
     let clear = ''
@@ -2072,17 +2074,25 @@ export function prefersMarkdown(accept) {
 // SEO head from View.seo(props): title, description, canonical, og:*/twitter:*, JSON-LD and the view's <head> block
 // F5: the build writes an SSR route's canonical/og:url from its pattern (/posts/:slug); the request has the real path.
 // A view's own <head> tags replace the generated ones with the same name/property (one tag per key, SPEC «SEO»).
-function head(page, seo, path) {
+function head(page, seo, path, search = '') {
   let h = page
+  // `<meta seo query="page">`: these parameters make a different page; any other (a dialog, a tracking tag) does not
+  let identity = ''
+  h = h.replace(/<meta name="brain-query" content="([^"]*)">/, (_, keys) => {
+    const given = new URLSearchParams(search), kept = new URLSearchParams()
+    for (const key of keys.split(/[\s,]+/)) for (const value of key ? given.getAll(key) : []) kept.append(key, value)
+    if (kept.size) identity = esc('?' + kept)
+    return ''
+  })
   if (path) {
     // the attribute is already escaped HTML: only the request path that replaces a pattern is escaped
-    const real = v => v.replace(/^(https?:\/\/[^/]+)?(\/[^"]*)$/, (m, o = '', p) => (/\/[:*]/.test(p) ? o + esc(path) : m))
+    const real = v => v.replace(/^(https?:\/\/[^/]+)?(\/[^"]*)$/, (m, o = '', p) => (/\/[:*]/.test(p) ? o + esc(path) : m)) + identity
     h = h.replace(/(<link[^>]*rel=["']canonical["'][^>]*href=")([^"]*)(")/i, (m, a, v, b) => a + real(v) + b)
     h = h.replace(/(<meta[^>]*property=["']og:url["'][^>]*content=")([^"]*)(")/i, (m, a, v, b) => a + real(v) + b)
   }
   if (!seo) return h
-  const meta = (attr, key, val) => {
-    const tag = `<meta ${attr}="${esc(key)}" content="${esc(val)}">`
+  const meta = (attr, key, val, escaped) => {
+    const tag = `<meta ${attr}="${esc(key)}" content="${escaped ? val.replace(/"/g, '&quot;') : esc(val)}">`
     const rx = new RegExp(`<meta[^>]*\\b${attr}=["']${key.replace(/[.*+?^${}()|[\]\\:]/g, '\\$&')}["'][^>]*>`, 'i')
     h = rx.test(h) ? h.replace(rx, () => tag) : h.replace('</head>', () => tag + '</head>')
   }
@@ -2097,6 +2107,17 @@ function head(page, seo, path) {
     } else if (k === 'jsonld') h = h.replace('</head>', () => `<script type="application/ld+json">${jsonInHtml(v)}</script></head>`)
     else if (/^(og|twitter|article):/.test(k)) meta('property', k, v)
     else if (typeof v === 'string') meta('name', k, v)
+  }
+  // What the build writes for a prerendered page and can only be known here: the social card of this request's values
+  // (brain-seo social::head, prerender seo_head). The view's own value always wins.
+  const shared = /<title>([\s\S]*?)<\/title>/i.exec(h)?.[1]
+  const origin = /<link[^>]*rel=["']canonical["'][^>]*href="(https?:\/\/[^/"]+)/i.exec(h)?.[1]
+  if (typeof seo['og:image'] === 'string' && origin && /^\/(?!\/)/.test(seo['og:image'])) meta('property', 'og:image', encodeURI(origin + seo['og:image']))
+  if (seo.title != null && seo['og:title'] == null) meta('property', 'og:title', shared, true)
+  if (seo.description != null && seo['og:description'] == null) meta('property', 'og:description', seo.description)
+  if (seo['og:image'] != null) {
+    if (seo['og:image:alt'] == null) meta('property', 'og:image:alt', seo['og:title'] ?? shared, seo['og:title'] == null)
+    if (seo['twitter:card'] == null) meta('name', 'twitter:card', 'summary_large_image')
   }
   // `<meta seo schema="Article">` without `jsonld` (§32): one node with this request's values. It replaces the node
   // the build wrote into the template from the static attributes (same @type), so the page carries exactly one.

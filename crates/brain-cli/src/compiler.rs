@@ -89,8 +89,11 @@ pub fn compile_hash(
     // `-2`: entry format with server_fns (older entries lack it and are recomputed)
     let entry = root.join(".brain/cache").join(format!("{key}-2.json"));
     if let Some(o) = read_cache(&entry) {
+        brain_metrics::count(brain_metrics::Counter::CompileCacheHits, 1);
         return Ok(o);
     }
+    brain_metrics::count(brain_metrics::Counter::CompileCacheMisses, 1);
+    brain_metrics::count(brain_metrics::Counter::CompileRuns, 1);
     let o = brain_codegen::compile_with(src, rel, &opts)?;
     let out = Output {
         js: o.js,
@@ -103,8 +106,62 @@ pub fn compile_hash(
     Ok(out)
 }
 
-/// FNV-1a 64 of a file's bytes (`None` = unreadable/missing).
+/// Identity of a path on disk: an in-place edit changes the change time even when length and mtime are restored.
+#[derive(PartialEq, Eq, Clone)]
+struct Stamp {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    changed: (i64, i64),
+    inode: u64,
+}
+
+fn stamp(p: &Path) -> Option<Stamp> {
+    let meta = std::fs::symlink_metadata(p).ok()?;
+    #[cfg(unix)]
+    let (changed, inode) = {
+        use std::os::unix::fs::MetadataExt;
+        ((meta.ctime(), meta.ctime_nsec()), meta.ino())
+    };
+    #[cfg(not(unix))]
+    let (changed, inode) = ((0, 0), 0);
+    Some(Stamp { len: meta.len(), modified: meta.modified().ok(), changed, inode })
+}
+
+const HASH_FACT: &str = "dep-hash:";
+
+/// `file_hash` once per file revision within a build: thousands of cache entries share the same tokens and directory
+/// listings, and rereading them for each entry made validation quadratic in the number of components.
 fn file_hash(p: &Path) -> Option<String> {
+    let key = format!("{HASH_FACT}{}", p.display());
+    let now = stamp(p);
+    let reused = std::cell::Cell::new(true);
+    let fact = brain_metrics::memo(
+        key,
+        |known: &(Option<Stamp>, Option<String>)| known.0.is_some() && known.0 == now,
+        || {
+            reused.set(false);
+            (now.clone(), hash_from_disk(p))
+        },
+    );
+    brain_metrics::count(if reused.get() { brain_metrics::Counter::DependencyHashesReused } else { brain_metrics::Counter::DependencyHashes }, 1);
+    fact.1.clone()
+}
+
+/// Final snapshot validation of a build: the dependency files whose content differs from the revision the build used.
+pub(crate) fn changed_during_build() -> Vec<String> {
+    let mut changed: Vec<String> = brain_metrics::facts::<(Option<Stamp>, Option<String>)>(HASH_FACT)
+        .into_iter()
+        .filter_map(|(key, fact)| {
+            let path = key.strip_prefix(HASH_FACT)?;
+            (hash_from_disk(Path::new(path)) != fact.1).then(|| path.to_string())
+        })
+        .collect();
+    changed.sort();
+    changed
+}
+
+/// FNV-1a 64 of a file's bytes (`None` = unreadable/missing).
+fn hash_from_disk(p: &Path) -> Option<String> {
     let meta = match std::fs::symlink_metadata(p) {
         Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some("missing".into()),
@@ -199,13 +256,14 @@ fn read_cache(entry: &Path) -> Option<Output> {
         return None;
     }
     let mut text = String::new();
-    file.take(CACHE_ENTRY_BYTES + 1)
+    (&file).take(CACHE_ENTRY_BYTES + 1)
         .read_to_string(&mut text)
         .ok()?;
     if text.len() as u64 > CACHE_ENTRY_BYTES {
         return None;
     }
     let j = Json::parse(&text).ok()?;
+    let used = file.metadata().ok().and_then(|m| m.modified().ok());
     let s = |k: &str| j.get(k).and_then(Json::as_str).map(str::to_string);
     let mut deps = Vec::new();
     if let Some(Json::Arr(ds)) = j.get("deps") {
@@ -230,6 +288,7 @@ fn read_cache(entry: &Path) -> Option<Output> {
                 .collect()
         })
         .unwrap_or_default();
+    brain_pack::cache_budget::touch(entry, used);
     Some(Output {
         js: s("js")?,
         css: s("css")?,
@@ -268,19 +327,22 @@ fn write_cache(entry: &Path, o: &Output) {
     if bytes.len() as u64 > CACHE_ENTRY_BYTES {
         return;
     }
+    let size = bytes.len() as u64;
+    let fits = entry.parent().is_none_or(|dir| brain_pack::cache_budget::reserve(dir, size, CACHE_ENTRIES, CACHE_BYTES, || Some(prune_for(dir, CACHE_BYTES, CACHE_ENTRIES, 1, size))));
+    if !fits {
+        return;
+    }
     if std::fs::write(&tmp, bytes).is_ok() {
         let _ = std::fs::rename(&tmp, entry);
     }
     let _ = std::fs::remove_file(&tmp);
-    if let Some(dir) = entry.parent() {
-        prune_cache(dir, CACHE_BYTES, CACHE_ENTRIES);
-    }
 }
 
-/// Oldest-write eviction; only complete entries in this project's compiler cache are eligible.
-fn prune_cache(dir: &Path, max_bytes: u64, max_entries: usize) {
+/// Least-recently-used eviction; only complete entries in this project's compiler cache are eligible. Returns what is left.
+fn prune_for(dir: &Path, max_bytes: u64, max_entries: usize, slots: usize, size: u64) -> (usize, u64) {
+    brain_metrics::count(brain_metrics::Counter::CacheDirectoryScans, 1);
     let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
+        return (0, 0);
     };
     let mut files = Vec::new();
     let mut bytes = 0u64;
@@ -292,6 +354,7 @@ fn prune_cache(dir: &Path, max_bytes: u64, max_entries: usize) {
         {
             continue;
         }
+        brain_metrics::count(brain_metrics::Counter::CacheMetadataReads, 1);
         let Ok(meta) = entry.file_type().and_then(|kind| {
             if kind.is_file() {
                 entry.metadata()
@@ -302,26 +365,9 @@ fn prune_cache(dir: &Path, max_bytes: u64, max_entries: usize) {
             continue;
         };
         bytes = bytes.saturating_add(meta.len());
-        files.push((
-            meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH),
-            path,
-            meta.len(),
-        ));
+        files.push((meta.modified().ok(), path, meta.len()));
     }
-    if bytes <= max_bytes && files.len() <= max_entries {
-        return;
-    }
-    files.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-    let mut count = files.len();
-    for (_, path, size) in files {
-        if bytes <= max_bytes && count <= max_entries {
-            break;
-        }
-        if std::fs::remove_file(path).is_ok() {
-            bytes = bytes.saturating_sub(size);
-            count -= 1;
-        }
-    }
+    brain_pack::cache_budget::evict(files, bytes, slots, size, max_entries, max_bytes)
 }
 
 #[cfg(test)]
@@ -423,6 +469,33 @@ mod tests {
         assert!(compile(src, p, Path::new("/nonexistent"), true).is_err());
     }
     #[test]
+    fn dependency_hashes_are_shared_until_the_file_changes() {
+        let dir = std::env::temp_dir().join(format!("brain-dep-hash-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("tokens.cssbrain");
+        std::fs::write(&file, "aaaa").unwrap();
+        let build = brain_metrics::Build::new();
+        let _observed = brain_metrics::attach(&build);
+        let first = file_hash(&file);
+        assert_eq!(file_hash(&file), first);
+        assert_eq!(build.get(brain_metrics::Counter::DependencyHashes), 1);
+        assert_eq!(build.get(brain_metrics::Counter::DependencyHashesReused), 1);
+        assert!(changed_during_build().is_empty());
+        // same length: only the stamp reveals the edit
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        std::fs::write(&file, "bbbb").unwrap();
+        assert_eq!(changed_during_build(), [file.display().to_string()], "the final validation sees the edit");
+        assert_ne!(file_hash(&file), first, "an edit during the build is a new revision");
+        // absent files: creating one invalidates
+        let absent = dir.join("absent.brain");
+        assert_eq!(file_hash(&absent).as_deref(), Some("missing"));
+        std::fs::write(&absent, "x").unwrap();
+        assert_ne!(file_hash(&absent).as_deref(), Some("missing"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn cache_budget_evicts_only_complete_owned_entries() {
         let dir = std::env::temp_dir().join(format!("brain-cache-budget-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -432,7 +505,7 @@ mod tests {
         }
         std::fs::write(dir.join("other.json"), b"preserve").unwrap();
         std::fs::write(dir.join("active.tmp1-1"), b"preserve").unwrap();
-        prune_cache(&dir, 16, 2);
+        prune_for(&dir, 16, 2, 0, 0);
         let kept = std::fs::read_dir(&dir)
             .unwrap()
             .flatten()

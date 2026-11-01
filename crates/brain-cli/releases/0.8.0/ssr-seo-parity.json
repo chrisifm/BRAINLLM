@@ -1,0 +1,9 @@
+{
+  "id": "ssr-seo-parity",
+  "kind": "fix",
+  "title": "Same head with or without a server",
+  "why": "A view told crawlers one thing prerendered and less when rendered per request.",
+  "changelog": [
+    "Fix: a page rendered per request"
+  ]
+}

@@ -7,5 +7,6 @@ authors.workspace = true
 description = ".brain parser: markup + BrainScript + CSS into a single AST with spans"
 
 [dependencies]
+brain-metrics = { path = "../brain-metrics" }
 brain-lex = { path = "../brain-lex" }
 brain-css = { path = "../brain-css" }
