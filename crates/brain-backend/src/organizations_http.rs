@@ -49,7 +49,7 @@ async fn member(app: &App, org: Uuid, u: &User) -> Result<String> {
     role_of(app, org, u.id).await?.ok_or_else(Error::missing)
 }
 /// A manager's role; a plain member learns it exists (they already do) and is refused.
-async fn manager(app: &App, org: Uuid, u: &User) -> Result<String> {
+pub(super) async fn manager(app: &App, org: Uuid, u: &User) -> Result<String> {
     let role = member(app, org, u).await?;
     if !app.organizations.manages(&role) {
         return Err(Error::forbidden());

@@ -684,3 +684,97 @@ async fn captcha_admits_only_a_token_the_provider_confirmed() {
     let missing = Captcha::from_contract(&json!({"verify_url":"https://example.test/x","secret_env":"S","protect":["route:nothing"]}), |_| Some("x".into())).unwrap();
     assert!(brain_backend::http::router_with_platform(pool.clone(), config(Vec::new()), Platform { captcha: missing, ..Default::default() }).await.is_err());
 }
+
+#[tokio::test]
+#[ignore = "Use scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn credits_never_go_negative_and_charge_once_under_real_concurrency() {
+    use brain_backend::credits::{self, Refusal};
+    let pool = database().await;
+    db::migrate(&pool, &[]).await.unwrap();
+    roles().register(&pool).await.unwrap();
+    let (alice, bob, admin) = (actor(&pool, "user").await, actor(&pool, "user").await, actor(&pool, "admin").await);
+    let subject = alice.id;
+    credits::apply(&pool, subject, 100, "grant", "start", None).await.unwrap();
+
+    // Each debit is its own transaction on its own connection, all started together.
+    let gate = std::sync::Arc::new(tokio::sync::Barrier::new(60));
+    let mut tasks = Vec::new();
+    for i in 0..60 {
+        let (pool, gate) = (pool.clone(), gate.clone());
+        tasks.push(tokio::spawn(async move {
+            gate.wait().await;
+            credits::apply(&pool, subject, -3, "debit", &format!("debit-{i}"), None).await
+        }));
+    }
+    let (mut won, mut refused) = (0, 0);
+    for task in tasks {
+        match task.await.unwrap() {
+            Ok(entry) => { assert!(entry.balance >= 0); won += 1 }
+            Err(Refusal::Insufficient) => refused += 1,
+            Err(other) => panic!("{other:?}"),
+        }
+    }
+    assert_eq!((won, refused), (33, 27));
+    let balance = async || sqlx::query_scalar::<_, i64>("SELECT balance FROM _brain_credit_balances WHERE subject=$1").bind(subject).fetch_one(&pool).await.unwrap();
+    let ledger = async || sqlx::query_scalar::<_, i64>("SELECT sum(delta)::bigint FROM _brain_credit_ledger WHERE subject=$1").bind(subject).fetch_one(&pool).await.unwrap();
+    assert_eq!(balance().await, 1);
+    assert_eq!(ledger().await, 1, "the ledger explains the balance");
+
+    // The same key, concurrently, charges once and every caller gets the same result.
+    credits::apply(&pool, subject, 50, "grant", "more", None).await.unwrap();
+    let gate = std::sync::Arc::new(tokio::sync::Barrier::new(20));
+    let mut tasks = Vec::new();
+    for _ in 0..20 {
+        let (pool, gate) = (pool.clone(), gate.clone());
+        tasks.push(tokio::spawn(async move {
+            gate.wait().await;
+            credits::apply(&pool, subject, -7, "once", "the-key", None).await.unwrap()
+        }));
+    }
+    let mut results = Vec::new();
+    for task in tasks {
+        results.push(task.await.unwrap());
+    }
+    assert_eq!(results.iter().filter(|e| !e.replayed).count(), 1);
+    assert!(results.iter().all(|e| e.balance == 44 && e.id == results[0].id));
+    assert_eq!(balance().await, 44);
+    assert_eq!(ledger().await, 44);
+    // A brand new subject created by racing first grants ends with all of them.
+    let gate = std::sync::Arc::new(tokio::sync::Barrier::new(10));
+    let mut tasks = Vec::new();
+    for i in 0..10 {
+        let (pool, gate, who) = (pool.clone(), gate.clone(), bob.id);
+        tasks.push(tokio::spawn(async move { gate.wait().await; credits::apply(&pool, who, 5, "grant", &format!("g{i}"), None).await.unwrap() }));
+    }
+    for task in tasks { task.await.unwrap(); }
+    assert_eq!(credits::statement(&pool, bob.id, None, 1).await.unwrap()["balance"], 50);
+
+    // Over HTTP: only an administrator changes a balance; a reader sees only what is theirs.
+    let (http, _) = brain_backend::http::router_with_platform(pool.clone(), config(Vec::new()), Platform::default()).await.unwrap();
+    let path = format!("/_brain/credits/{subject}");
+    let debit = |delta: i64, key: &str| json!({"delta":delta,"reason":"http","idempotency_key":key});
+    assert_eq!(call(&http, "POST", &path, Some(&alice), Some(debit(1000, "self-grant"))).await.0, 403);
+    assert_eq!(call(&http, "POST", &path, None, Some(debit(1000, "anon"))).await.0, 401);
+    let (s, out) = call(&http, "POST", &path, Some(&admin), Some(debit(-4, "h1"))).await;
+    assert_eq!((s.as_u16(), &out["balance"], &out["replayed"]), (200, &json!(40), &json!(false)), "{out}");
+    assert_eq!(call(&http, "POST", &path, Some(&admin), Some(debit(-4, "h1"))).await.1["replayed"], true);
+    assert_eq!(call(&http, "POST", &path, Some(&admin), Some(debit(-5, "h1"))).await.1["error"]["code"], "CREDITS_KEY_REUSED");
+    let (s, out) = call(&http, "POST", &path, Some(&admin), Some(debit(-1000, "h2"))).await;
+    assert_eq!((s.as_u16(), out["error"]["code"].as_str()), (409, Some("CREDITS_INSUFFICIENT")));
+    assert_eq!(call(&http, "POST", &path, Some(&admin), Some(debit(0, "h3"))).await.0, 422);
+    assert_eq!(call(&http, "POST", &path, Some(&admin), Some(debit(i64::MAX, "h4"))).await.0, 422);
+    assert_eq!(call(&http, "POST", &format!("/_brain/credits/{}", Uuid::new_v4()), Some(&admin), Some(debit(1, "h5"))).await.0, 404);
+    assert_eq!(call(&http, "GET", &path, Some(&alice), None).await.1["balance"], 40);
+    assert_ne!(call(&http, "GET", &path, Some(&bob), None).await.0, 200);
+    // An organization's balance: managers read it, a plain member and an outsider do not.
+    let org = call(&http, "POST", "/_brain/orgs", Some(&alice), Some(json!({"name":"A"}))).await.1["id"].as_str().unwrap().to_string();
+    let org_path = format!("/_brain/credits/{org}");
+    assert_eq!(call(&http, "POST", &org_path, Some(&admin), Some(debit(9, "o1"))).await.1["balance"], 9);
+    assert_eq!(call(&http, "GET", &org_path, Some(&alice), None).await.1["balance"], 9);
+    assert_ne!(call(&http, "GET", &org_path, Some(&bob), None).await.0, 200);
+    // Neither the database role nor a bug can rewrite history, or hold a negative balance.
+    for statement in ["UPDATE _brain_credit_ledger SET delta=1", "DELETE FROM _brain_credit_ledger", "TRUNCATE _brain_credit_ledger"] {
+        assert!(sqlx::raw_sql(sqlx::AssertSqlSafe(statement)).execute(&pool).await.unwrap_err().to_string().contains("append-only"), "{statement}");
+    }
+    assert!(sqlx::query("UPDATE _brain_credit_balances SET balance=-1").execute(&pool).await.is_err());
+}

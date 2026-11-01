@@ -28,6 +28,8 @@ mod sockets;
 mod domain_http;
 #[path = "organizations_http.rs"]
 mod organizations_http;
+#[path = "credits_http.rs"]
+mod credits_http;
 #[path = "files_http.rs"]
 mod files_http;
 #[path = "edge_http.rs"]
@@ -687,6 +689,7 @@ pub async fn router_full(
         .route("/_brain/media/{id}/variants", post(media_variants))
         .route("/_brain/media/{id}/v/{version}/{preset}", get(media_asset))
         .merge(organizations_http::routes())
+        .merge(credits_http::routes())
         .merge(http_api_keys::routes())
         .merge(files_http::routes(&platform))
         .merge(routes_http::routes(&custom))

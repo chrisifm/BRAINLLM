@@ -10,6 +10,7 @@ pub mod capabilities;
 pub mod cluster;
 pub mod contract;
 pub mod contract_review;
+pub mod credits;
 pub mod db;
 pub mod dev_trace;
 pub mod domain;
