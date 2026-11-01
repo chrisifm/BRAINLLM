@@ -1,0 +1,9 @@
+{
+  "id": "seo-audit-scale",
+  "kind": "internal",
+  "title": "SEO audit scales with what pages share",
+  "why": "Link suggestions compared every page with every topic, taking 23 s of CPU on 4000 pages.",
+  "changelog": [
+    "The SEO audit compares"
+  ]
+}

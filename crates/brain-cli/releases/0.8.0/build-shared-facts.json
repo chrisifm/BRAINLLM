@@ -1,0 +1,9 @@
+{
+  "id": "build-shared-facts",
+  "kind": "internal",
+  "title": "One read per source revision in a build",
+  "why": "Dependency hashes and import summaries were recomputed for every module that asked.",
+  "changelog": [
+    "A build reads each file"
+  ]
+}

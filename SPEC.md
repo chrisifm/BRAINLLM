@@ -148,6 +148,9 @@ has `title` · no tabindex > 0. Warnings: generic link text ("click here", "read
 Every view: `<meta seo keyword="…" title="…" description="…" canonical? og:image? schema? robots?>`.
 Pick the query first; put it in the title, H1, first sentence and description. `keyword` is never rendered; an
 indexable view without it is B0502 (guarded, `robots="noindex"`, `_x`, `[id]` and error views are exempt).
+A page rendered per request can list the parameters that make a different page, such as real pagination: `query="page"`
+keeps them in the canonical. Any other parameter (a dialog, `urlState`, a tracking tag) stays out, so it restores the UI
+without a new page for search. It must be literal, and it has no effect on a prerendered page (B0503).
 Values may be expressions from `load` props: `<meta seo title={props.user.name} description={props.user.bio}
 jsonld={{ '@type': 'Person', name: props.user.name }}>`. Site defaults live in `app.brain`:
 `<meta seo titleTemplate="%s · Nimbus" og:image="/og.png" twitter="@nimbus">`. Any other tag goes in a `<head>` block of

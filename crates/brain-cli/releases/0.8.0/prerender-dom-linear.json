@@ -1,0 +1,9 @@
+{
+  "id": "prerender-dom-linear",
+  "kind": "internal",
+  "title": "Linear DOM work in prerender",
+  "why": "Large lists cost quadratic time in the build-time DOM.",
+  "changelog": [
+    "Prerendering inserts"
+  ]
+}

@@ -1531,8 +1531,8 @@ mod mention_tests {
 
     #[test]
     fn tokenized_pages_answer_like_the_plain_mention_scan() {
-        let texts = ["", "Solar panels for homes", "panels solar", "solar-panels, for homes!", "SOLAR PANELS solar panels", "café solar"];
-        let topics: [&[&str]; 7] = [&[], &["solar panels"], &["solar", "homes"], &["solar", "café"], &["!!!"], &["panels solar", "for"], &["homes"]];
+        let texts = ["", "Solar panels for homes", "panels solar", "solar-panels, for homes!", "SOLAR PANELS solar panels", "日本 solar"];
+        let topics: [&[&str]; 7] = [&[], &["solar panels"], &["solar", "homes"], &["solar", "日本"], &["!!!"], &["panels solar", "for"], &["homes"]];
         for text in texts {
             let page = PageWords::new(text);
             for terms in topics {

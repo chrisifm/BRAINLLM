@@ -9,6 +9,17 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.8.0] - Unreleased
+
+- `brain build --json` and the `brain_build` MCP tool report each stage's wall and CPU time and the work it executed, with or without terminal progress
+- The build cache scans its directory a logarithmic number of times per build and keeps the entries the running build uses; a warm build of 1000 components went from about 22 s to about 4 s
+- A build reads each file's dependency hash and import summary once per source revision, and warns when a source changes while it runs
+- The SEO audit compares a page only with the topics it can mention; 4000 pages went from about 23 s to about 2 s of CPU with the same findings
+- Prerendering inserts fragments and walks siblings in linear time
+- Fix: a build that fails on a file `brain check` does not reach names its location and real fix; `brain build --json` and `brain_build` report `phase` and `diagnostics` with the fields of `brain check`, marking locations outside the app as `generated`
+- Fix: a page rendered per request carries the site's head and its social card (`og:title`, `og:description`, an absolute `og:image`, `twitter:card`, the robots hint, theme color, manifest and feed links) like a prerendered page; a page behind a guard answers `x-robots-tag: noindex`
+- `<meta seo query="page">` keeps the listed request parameters in the canonical of a page rendered per request; every other parameter stays out, and a contradictory declaration warns B0503
+
 ## [0.7.0] - 2026-10-31
 
 - `brain dev` recompiles the component when a CSS edit changes its scope identity (a customized copy of a kit file); it used to keep the old script with the new `data-b` CSS.

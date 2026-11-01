@@ -12,6 +12,8 @@ page text, not after.
 4. Declare it: `<meta seo keyword="split a bill offline">` on every indexable view (missing = B0502). The audit
    checks it in the title, the description, the H1, the first paragraph and the URL, at a natural density (B1816).
    Without a keyword, a title or description off the H1's topic is B1836.
+   A view rendered per request keeps real pagination with `query="page"`: `/list?page=2` is its own canonical, while
+   `?dialog=size` or `?utm_source=mail` keep the canonical of `/list` (B0503 reports a contradictory list).
 5. Put it in: `title` (≤ 60 chars), `<h1>`, the first sentence, `description` (≤ 160 chars), and the route name
    (`brain add view split-a-bill-offline`). Lengths over the limits are B1602.
 
