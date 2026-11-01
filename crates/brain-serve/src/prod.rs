@@ -946,7 +946,8 @@ mod tests {
             let addr = listener.local_addr().unwrap();
             let task = std::thread::spawn(move || handler.handle_with_backend(listener.accept().unwrap().0, None).unwrap());
             let mut c = TcpStream::connect(addr).unwrap();
-            write!(c, "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: {accept}\r\n\r\n").unwrap();
+            // One write: a refusal after a partial read closes on unread bytes, and the peer gets a reset instead of the answer.
+            c.write_all(format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: {accept}\r\n\r\n").as_bytes()).unwrap();
             let mut r = String::new();
             c.read_to_string(&mut r).unwrap();
             task.join().unwrap();
