@@ -2049,3 +2049,89 @@ fn declared_icon_in_public_becomes_the_page_icon() {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&bare);
 }
+
+fn focus_page(route: &str, title: &str, h1: &str, body: &str) -> Page {
+    Page {
+        route: route.into(),
+        file: format!("{}/index.html", route.trim_matches('/')),
+        html: format!("<!doctype html><html lang=\"en\"><head><title>{title}</title></head><body><main><h1>{h1}</h1>{body}</main></body></html>"),
+        ..Page::default()
+    }
+}
+
+fn focus_report(terms: &[&str], pages: &[Page]) -> brain_seo::audit::Report {
+    let cfg = Config { site: Some("https://acme.dev".into()), focus: terms.iter().map(|t| t.to_string()).collect(), ..Config::default() };
+    audit(&Site { cfg: &cfg, pages, routes: &[], assets: &[], redirects: &[], images: &[], i18n: None })
+}
+
+#[test]
+fn focus_terms_match_across_case_and_accents_and_report_their_numbers() {
+    let pages = [
+        focus_page("/", "Dise\u{f1}o gr\u{e1}fico para equipos", "Inicio", "<p><a href=\"/diseno-grafico\">dise\u{f1}o gr\u{e1}fico</a></p>"),
+        focus_page("/diseno-grafico", "DISENO GRAFICO, la gu\u{ed}a", "Dise\u{f1}o Gr\u{e1}fico", "<p>Una gu\u{ed}a.</p>"),
+        focus_page("/elsewhere", "Something else entirely", "Something else", "<p>About dise\u{f1}o gr\u{e1}fico.</p>"),
+        focus_page("/detalle", "Un detalle sin relacion", "Detalle", "<p>Nada del tema.</p>"),
+    ];
+    let r = focus_report(&["Dise\u{f1}o Gr\u{e1}fico"], &pages);
+    let t = &r.focus[0];
+    assert_eq!(t.hubs, ["/diseno-grafico"]);
+    assert_eq!((t.mentions, t.inbound, t.anchors_with_term), (3, 1, 1));
+    assert_eq!(t.unlinked, ["/elsewhere"], "/detalle does not mention the term and owes it nothing");
+    let codes: Vec<&str> = r.site.iter().map(|f| f.code).collect();
+    assert_eq!(codes, ["B1865"]);
+    assert_eq!(r.site[0].level, brain_seo::Level::Info);
+    assert!(r.errors().next().is_none(), "focus findings never block");
+    assert!(r.text().contains("focus \"Dise") && r.to_json().stringify().contains("mentionsWithoutLink"));
+    assert_eq!(focus_report(&[], &pages).focus, []);
+}
+
+#[test]
+fn no_focus_message_promises_ranking() {
+    for (code, title, why, _) in brain_seo::audit::CATALOG.iter().filter(|c| ("B1861".."B1867").contains(&c.0)) {
+        let all = format!("{code} {title} {why}").to_lowercase();
+        assert!(!all.contains("rank") || all.contains("not "), "{all}");
+    }
+}
+
+#[test]
+fn a_term_in_nearly_every_title_is_braked_and_never_an_error() {
+    let body = "<p>Text.</p>";
+    let pages: Vec<Page> = ["/", "/a", "/b", "/c", "/d"].iter().map(|r| focus_page(r, &format!("Task planner {r}"), "Page", body)).collect();
+    let r = focus_report(&["task planner"], &pages);
+    assert!(r.site.iter().any(|f| f.code == "B1866" && f.msg.contains("5 of 5")), "{:?}", r.site);
+    assert!(r.errors().next().is_none());
+}
+
+#[test]
+fn a_server_template_can_be_a_hub_because_its_h1_is_unknown() {
+    let mut hub = focus_page("/small-teams", "Small teams guide", "x", "");
+    hub.html = "<!doctype html><html lang=\"en\"><head><title>Small teams guide</title></head><body></body></html>".into();
+    hub.ssr = true;
+    let r = focus_report(&["small teams"], &[focus_page("/", "Small teams home", "Home", ""), hub]);
+    assert_eq!(r.focus[0].hubs, ["/small-teams"]);
+}
+
+#[test]
+fn seo_focus_reads_a_list_and_rejects_anything_else() {
+    let read = |s: &str| Config::from_json(&brain_lex::Json::parse(s).unwrap());
+    assert_eq!(read(r#"{"seo":{"focus":["a b","c"]}}"#).unwrap().focus, ["a b", "c"]);
+    assert!(read(r#"{"seo":{"focus":["a","b","c","d"]}}"#).is_ok(), "over the limit is a finding, not a config error");
+    assert!(read(r#"{"seo":{"focus":"a"}}"#).unwrap_err().contains("seo.focus"));
+    assert!(read(r#"{"seo":{"focus":[""]}}"#).is_err());
+}
+
+#[test]
+fn the_url_register_names_what_disappeared_and_what_is_new() {
+    let dir = std::env::temp_dir().join(format!("brain-seo-register-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    assert_eq!(brain_seo::register_read(&dir), None, "no file, no register: it is opt-in");
+    std::fs::write(dir.join(brain_seo::REGISTER), "# comment\n/a\n\n/old\n/moved\n").unwrap();
+    let list = brain_seo::register_read(&dir).unwrap();
+    assert_eq!(list, ["/a", "/old", "/moved"]);
+    let rules = brain_seo::redirects::parse(r#"[{ "from": "/moved", "to": "/a" }]"#).unwrap();
+    assert_eq!(brain_seo::register_gone(&list, &|p| p == "/a", &rules), ["/old"], "a redirect keeps the URL working");
+    let cfg = Config::default();
+    let pages = [focus_page("/a", "Page a", "A", ""), focus_page("/b", "Page b", "B", "")];
+    assert_eq!(brain_seo::register_new(&cfg, &pages, &list), ["/b"]);
+    std::fs::remove_dir_all(&dir).unwrap();
+}

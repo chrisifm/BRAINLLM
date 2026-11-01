@@ -35,6 +35,10 @@ struct Case {
     keywords: Vec<(String, String)>,
     redirects: Vec<String>,
     staging: bool,
+    focus: Vec<String>,
+    robots: Option<String>,
+    pad: Vec<(String, usize)>,
+    add: Vec<String>,
     expect: Vec<String>,
 }
 
@@ -58,6 +62,15 @@ fn parse(src: &str) -> (Vec<Case>, Vec<String>) {
                 case.keywords.push((route.into(), kw.into()));
             } else if let Some(rest) = line.strip_prefix("@redirect ") {
                 case.redirects.push(rest.to_string());
+            } else if let Some(rest) = line.strip_prefix("@focus ") {
+                case.focus.push(rest.to_string());
+            } else if let Some(rest) = line.strip_prefix("@robots ") {
+                case.robots = Some(rest.replace("\\n", "\n"));
+            } else if let Some(rest) = line.strip_prefix("@pad ") {
+                let (route, bytes) = rest.split_once(' ').unwrap();
+                case.pad.push((route.into(), bytes.parse().unwrap()));
+            } else if let Some(rest) = line.strip_prefix("@page ") {
+                case.add.push(rest.to_string());
             } else if line == "@staging" {
                 case.staging = true;
             }
@@ -68,6 +81,12 @@ fn parse(src: &str) -> (Vec<Case>, Vec<String>) {
 
 fn run(case: &Case) -> Vec<String> {
     let mut pages = clean();
+    // `@page <route> | <title> | <h1>`: one more page, linked from the navigation of no other
+    for add in &case.add {
+        let parts: Vec<&str> = add.split(" | ").collect();
+        let desc = format!("{}: what this page offers, in a sentence long enough to read as a real result.", parts[2]);
+        pages.push(page(parts[0], parts[1], &desc, &format!("<h1>{}</h1><p>A short opening.</p>", parts[2])));
+    }
     for (route, old, new) in &case.edits {
         let mut hit = false;
         for p in pages.iter_mut().filter(|p| route == "*" || p.route == *route) {
@@ -76,14 +95,21 @@ fn run(case: &Case) -> Vec<String> {
         }
         assert!(hit, "{}: `{old}` matches nothing", case.name);
     }
+    for (route, bytes) in &case.pad {
+        let p = pages.iter_mut().find(|p| p.route == *route).unwrap();
+        p.html = p.html.replace("</main>", &format!("<!--{}--></main>", "x".repeat(*bytes)));
+    }
     for (route, kw) in &case.keywords {
         pages.iter_mut().find(|p| p.route == *route).unwrap().keyword = Some(kw.clone());
     }
-    let cfg = Config { site: Some("https://acme.dev".into()), name: Some("Acme".into()), staging: case.staging, ..Config::default() };
+    let cfg = Config { site: Some("https://acme.dev".into()), name: Some("Acme".into()), staging: case.staging, focus: case.focus.clone(), ..Config::default() };
     let rules = if case.redirects.is_empty() { vec![] } else { redirects::parse(&case.redirects.join("\n")).unwrap() };
     let report = audit(&Site { cfg: &cfg, pages: &pages, routes: &[], assets: &[], redirects: &rules, images: &[], i18n: None });
     let mut got: Vec<String> = report.pages.iter().flat_map(|p| p.findings.iter().map(move |f| format!("{} {}", f.code, p.route))).collect();
     got.extend(report.site.iter().map(|f| format!("{} *", f.code)));
+    if let Some(robots) = &case.robots {
+        got.extend(brain_seo::checks::robots_conflicts(&pages, robots).into_iter().map(|(r, f)| format!("{} {r}", f.code)));
+    }
     for p in &report.pages {
         for f in &p.findings {
             assert!(!f.msg.is_empty() && !f.fix.is_empty(), "{}: {} has no msg or fix", case.name, f.code);

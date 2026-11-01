@@ -51,7 +51,7 @@ fn nodes(j: &Json) -> Vec<&Json> {
     }
 }
 
-fn types(n: &Json) -> Vec<String> {
+pub(crate) fn types(n: &Json) -> Vec<String> {
     match n.get("@type") {
         Some(Json::Str(t)) => vec![t.clone()],
         Some(Json::Arr(a)) => a
@@ -477,8 +477,10 @@ const REQUIRED: &[(&str, &[&str])] = &[
     ),
     ("Answer", &["text"]),
     ("BreadcrumbList", &["itemListElement"]),
+    ("Comment", &["author", "datePublished", "text|image|video"]),
     ("Course", &["name", "description"]),
     ("Dataset", &["name", "description"]),
+    ("DiscussionForumPosting", &["author", "datePublished", "text|image|video|url"]),
     ("Event", &["name", "startDate", "location"]),
     ("FAQPage", &["mainEntity"]),
     (
@@ -493,10 +495,12 @@ const REQUIRED: &[(&str, &[&str])] = &[
     ),
     ("ListItem", &["position", "name"]),
     ("LocalBusiness", &["name", "address"]),
-    ("Organization", &["name"]),
-    ("Person", &["name"]),
+    ("Organization", &["name|alternateName"]),
+    ("Person", &["name|alternateName"]),
     ("Product", &["name", "offers|review|aggregateRating"]),
-    ("Question", &["name", "acceptedAnswer"]),
+    ("ProfilePage", &["mainEntity"]),
+    ("QAPage", &["mainEntity"]),
+    ("Question", &["name"]),
     ("Recipe", &["name", "image"]),
     ("SoftwareApplication", &["name", "aggregateRating|review"]),
     ("VideoObject", &["name", "thumbnailUrl", "uploadDate"]),
@@ -532,8 +536,9 @@ fn today() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| (d.as_secs() / 86_400) as i64)
 }
 
-/// Google rich-result rules that look inside a property (Search Central, fetched 2026-10-31, pages last updated
-/// 2026-09-08): Product/SoftwareApplication offers, JobPosting location and enums, Event location.
+/// Google rich-result rules that look inside a property (Search Central, fetched 2026-10-31 and 2026-11-01, pages last
+/// updated 2026-09-08): Product/SoftwareApplication offers, JobPosting location and enums, Event location, forum, Q&A and
+/// profile pages.
 fn google_rules(t: &str, n: &Json, out: &mut Vec<Issue>) {
     let list = |k: &str| -> Vec<&Json> {
         match n.get(k) {
@@ -587,6 +592,33 @@ fn google_rules(t: &str, n: &Json, out: &mut Vec<Issue>) {
                 let unit = str_of(s.get("value").and_then(|v| v.get("unitText"))).or_else(|| str_of(s.get("unitText")));
                 if let Some(u) = unit.filter(|u| !["HOUR", "DAY", "WEEK", "MONTH", "YEAR"].contains(&u.as_str())) {
                     warn(format!("JobPosting baseSalary unitText `{u}` is not HOUR, DAY, WEEK, MONTH or YEAR"), "set baseSalary.value.unitText to HOUR, DAY, WEEK, MONTH or YEAR".into());
+                }
+            }
+        }
+        "DiscussionForumPosting" => {
+            if list("author").iter().any(|a| !has(a, "name")) {
+                warn("DiscussionForumPosting author has no `name`".into(), "add the author's `name` (Google requires it for the forum result)".into());
+            }
+        }
+        "QAPage" => {
+            for q in list("mainEntity") {
+                if q.get("answerCount").is_none() {
+                    warn("QAPage question has no `answerCount`".into(), "add `answerCount`, the total number of answers (0 is valid)".into());
+                }
+                if !has(q, "acceptedAnswer|suggestedAnswer") {
+                    warn("Question has no `acceptedAnswer` or `suggestedAnswer`".into(), "add one: Google needs at least one answer for the Q&A result".into());
+                }
+            }
+        }
+        "FAQPage" => {
+            if list("mainEntity").iter().any(|q| !has(q, "acceptedAnswer")) {
+                warn("Question has no `acceptedAnswer`".into(), "add `acceptedAnswer` to the FAQPage question".into());
+            }
+        }
+        "ProfilePage" => {
+            for e in list("mainEntity") {
+                if !types(e).iter().any(|x| x == "Person" || x == "Organization") {
+                    warn("ProfilePage mainEntity is not a Person or Organization".into(), "set its @type to Person or Organization".into());
                 }
             }
         }
@@ -913,6 +945,25 @@ mod tests {
     }
 
     #[test]
+    fn forum_question_and_profile_rules_follow_google() {
+        let c = r#""@context":"https://schema.org""#;
+        let msgs = |b: &str| validate(b).into_iter().map(|i| i.msg).collect::<Vec<_>>().join(" | ");
+        let forum = format!(r#"{{{c},"@type":"DiscussionForumPosting","author":{{"@type":"Person","url":"https://a.dev"}},"datePublished":"2026-10-01"}}"#);
+        let m = msgs(&forum);
+        assert!(m.contains("text|image|video|url") || m.contains("text"), "{m}");
+        assert!(m.contains("author has no `name`"), "{m}");
+        assert_eq!(msgs(&format!(r#"{{{c},"@type":"DiscussionForumPosting","author":{{"@type":"Person","name":"Ada"}},"datePublished":"2026-10-01","image":"https://a.dev/x.png"}}"#)), "");
+        let m = msgs(&format!(r#"{{{c},"@type":"QAPage","mainEntity":{{"@type":"Question","name":"Why?"}}}}"#));
+        assert!(m.contains("answerCount") && m.contains("acceptedAnswer"), "{m}");
+        assert_eq!(msgs(&format!(r#"{{{c},"@type":"QAPage","mainEntity":{{"@type":"Question","name":"Why?","answerCount":1,"suggestedAnswer":{{"@type":"Answer","text":"Because"}}}}}}"#)), "");
+        assert!(msgs(&format!(r#"{{{c},"@type":"QAPage"}}"#)).contains("mainEntity"));
+        let m = msgs(&format!(r#"{{{c},"@type":"ProfilePage","mainEntity":{{"@type":"Thing"}}}}"#));
+        assert!(m.contains("not a Person"), "{m}");
+        assert!(msgs(&format!(r#"{{{c},"@type":"ProfilePage","mainEntity":{{"@type":"Person"}}}}"#)).contains("`name` or `alternateName`"));
+        assert_eq!(msgs(&format!(r#"{{{c},"@type":"ProfilePage","mainEntity":{{"@type":"Person","alternateName":"ada"}}}}"#)), "");
+    }
+
+    #[test]
     fn validation() {
         assert_eq!(validate("{not json").len(), 1);
         assert_eq!(
@@ -938,7 +989,7 @@ mod tests {
         );
         assert_eq!(
             g.iter().map(|i| i.msg.as_str()).collect::<Vec<_>>(),
-            vec!["Person has no `name`"]
+            vec!["Person has no `name` or `alternateName`"]
         );
         let web_app = validate(
             r#"{"@context":"https://schema.org","@type":"WebApplication","name":"Tasks"}"#,

@@ -10,6 +10,8 @@
 //! - [`CATALOG`]: `brain explain B18xx`.
 
 pub mod audit;
+pub mod checks;
+pub mod focus;
 pub mod config;
 pub mod content;
 pub mod files;
@@ -879,6 +881,16 @@ pub fn finish_with_og(
             warnings.push(format!("B1826 `{old}` was published by the previous build and is gone; fix: add {suggestion} to redirects.json"));
         }
     }
+    if let (Some(list), false) = (register_read(root), cfg.staging) {
+        let gone = register_gone(&list, &exists, &rules);
+        if !gone.is_empty() {
+            return Err(register_gone_text(&gone));
+        }
+        let new = register_new(cfg, pages, &list);
+        if !new.is_empty() {
+            warnings.push(format!("B1879 {} new page(s) are not in {REGISTER}: {}; fix: run `brain seo urls --write` and commit it", new.len(), new.join(", ")));
+        }
+    }
     let report = audit::audit(&Site {
         cfg,
         pages,
@@ -1016,6 +1028,36 @@ pub fn read_dist(dist: &Path) -> Result<(Vec<Page>, Assets), String> {
 
 /// `brain seo <audit|links|preview <route>> [--json]`, run in the app root. Returns `(exit code, stdout)`: 0 ok,
 /// 1 findings that fail, 2 usage.
+/// The committed list of published URLs (`seo-urls.txt`, opt-in): unlike the previous `dist/sitemap.xml`, it survives a
+/// clean clone. The build only reads it; `brain seo urls --write` updates it.
+pub const REGISTER: &str = "seo-urls.txt";
+
+/// Routes in the register, without comments or blank lines; `None` when the app has no register.
+pub fn register_read(root: &Path) -> Option<Vec<String>> {
+    let text = std::fs::read_to_string(root.join(REGISTER)).ok()?;
+    Some(text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).map(str::to_string).collect())
+}
+
+/// Registered URLs that no longer exist and that no redirect rule covers.
+pub fn register_gone(list: &[String], exists: &dyn Fn(&str) -> bool, rules: &[redirects::Rule]) -> Vec<String> {
+    list.iter().filter(|u| {
+        let path = audit::norm(u);
+        !exists(&path) && !rules.iter().any(|r| redirects::apply(r, &path).is_some())
+    }).cloned().collect()
+}
+
+/// Indexable pages of this build that the register does not list yet.
+pub fn register_new(cfg: &Config, pages: &[Page], list: &[String]) -> Vec<String> {
+    pages.iter()
+        .filter(|p| !list.iter().any(|u| audit::norm(u) == audit::norm(&p.route)) && audit::indexable(cfg, &p.route, &html::parse(&p.html)))
+        .map(|p| p.route.clone())
+        .collect()
+}
+
+fn register_gone_text(gone: &[String]) -> String {
+    format!("B1879 {REGISTER} lists {} URL(s) that no longer exist: {}; fix: add a redirect to redirects.json, or remove the line if the page is gone on purpose", gone.len(), gone.join(", "))
+}
+
 pub fn cli(root: &Path, args: &[String]) -> (i32, String) {
     cli_with(root, args, &|_| None)
 }
@@ -1046,10 +1088,10 @@ pub fn cli_with(root: &Path, args: &[String], keyword: &dyn Fn(&str) -> Option<S
         .map(|(_, a)| a.as_str())
         .collect();
     let sub = words.first().copied().unwrap_or("audit");
-    let usage = "usage: brain seo <audit|links|preview <route>|og|redirects|indexnow [--dry-run] [--since YYYY-MM-DD] [--env production]> [--json]\n  audit      score 0-100 and B18xx findings per page of dist/\n  links      broken links, broken anchors and orphan pages only\n  preview    search result, social card, structured data and findings of one page\n  og         social image of every page: set, generated from views/_og.brain, or missing\n  redirects  validate redirects.json against dist/ and print the rules for nginx, Caddy and _redirects\n  indexnow   send the sitemap URLs to IndexNow (deploy step; seo.indexnow + INDEXNOW_KEY in .brain_env)";
+    let usage = "usage: brain seo <audit|links|preview <route>|og|redirects|urls [--write]|indexnow [--dry-run] [--since YYYY-MM-DD] [--env production]> [--json]\n  audit      score 0-100 and B18xx findings per page of dist/\n  links      broken links, broken anchors and orphan pages only\n  preview    search result, social card, structured data and findings of one page\n  og         social image of every page: set, generated from views/_og.brain, or missing\n  redirects  validate redirects.json against dist/ and print the rules for nginx, Caddy and _redirects\n  indexnow   send the sitemap URLs to IndexNow (deploy step; seo.indexnow + INDEXNOW_KEY in .brain_env)";
     if !matches!(
         sub,
-        "audit" | "links" | "preview" | "og" | "redirects" | "indexnow"
+        "audit" | "links" | "preview" | "og" | "redirects" | "indexnow" | "urls"
     ) {
         return (2, format!("unknown subcommand `{sub}`\n{usage}"));
     }
@@ -1096,6 +1138,25 @@ pub fn cli_with(root: &Path, args: &[String], keyword: &dyn Fn(&str) -> Option<S
             images: &images,
             i18n: i18n.as_ref(),
         });
+        let mut report = report;
+        // robots.txt is what the build published (or what the app put in public/)
+        if let Ok(robots) = std::fs::read_to_string(root.join("dist/robots.txt")) {
+            for (route, finding) in checks::robots_conflicts(&pages, &robots) {
+                if let Some(page) = report.pages.iter_mut().find(|p| p.route == route) {
+                    page.findings.push(finding);
+                }
+            }
+        }
+        if let Some(list) = register_read(root).filter(|_| !cfg.staging) {
+            let ssr: Vec<String> = routes.clone();
+            let exists = |p: &str| pages.iter().any(|q| audit::norm(&q.route) == p) || ssr.iter().any(|r| audit::matches_pattern(r, p)) || assets.iter().any(|(a, _)| format!("/{a}") == p);
+            let gone = register_gone(&list, &exists, &rules);
+            if !gone.is_empty() {
+                let text = register_gone_text(&gone);
+                let (msg, fix) = text.split_once("; fix: ").unwrap_or((&text, ""));
+                report.site.push(audit::Finding { code: "B1879", level: Level::Error, msg: msg.trim_start_matches("B1879 ").to_string(), fix: fix.to_string() });
+            }
+        }
         Ok((cfg, pages, report))
     };
     if sub == "indexnow" {
@@ -1292,7 +1353,30 @@ pub fn cli_with(root: &Path, args: &[String], keyword: &dyn Fn(&str) -> Option<S
         }
         return (if ok { 0 } else { 1 }, o);
     }
+    if sub == "urls" {
+        let mut list = register_read(root).unwrap_or_default();
+        let new = register_new(&cfg, &pages, &list);
+        let write = args.iter().any(|a| a == "--write");
+        if write {
+            list.extend(new.iter().cloned());
+            list.sort();
+            list.dedup();
+            let body = format!("# Published URLs: `brain build` fails when one disappears with no redirect. Update: brain seo urls --write\n{}\n", list.join("\n"));
+            if let Err(e) = std::fs::write(root.join(REGISTER), body) {
+                return fail(format!("{REGISTER}: {e}"));
+            }
+        }
+        let value = Json::obj([
+            ("ok", Json::Bool(true)),
+            ("registered", Json::Num(list.len() as f64)),
+            ("new", Json::Arr(new.iter().map(|u| Json::str(u)).collect())),
+            ("written", Json::Bool(write)),
+        ]);
+        let text = format!("{REGISTER}: {} URL(s){}; {} new{}", list.len(), if write { " written" } else { "" }, new.len(), if write || new.is_empty() { "" } else { "; run `brain seo urls --write` to add them" });
+        return (0, if json { value.stringify() } else { text });
+    }
     if sub == "links" {
+        r.focus.clear();
         for p in &mut r.pages {
             p.findings
                 .retain(|f| matches!(f.code, "B1813" | "B1819" | "B1820" | "B1825"));
