@@ -56,7 +56,7 @@ function binary() {
   try {
     return join(dirname(require.resolve(`${pkg}/package.json`, { paths: [here] })), 'bin', exe)
   } catch {
-    fail(`${pkg} is not installed (it is an optional dependency of ${SCOPE}/brainllm); fix: if you ran it with npx right after a release, npm may not have served this package yet and npx keeps the failed install: delete that folder under `npm config get cache`/_npx and retry in a few minutes; otherwise reinstall without --no-optional / --omit=optional, e.g. \`npm install ${SCOPE}/brainllm\``)
+    fail(`${pkg} is not installed (it is an optional dependency of ${SCOPE}/brainllm); fix: if you ran it with npx right after a release, npm may not have served this package yet and npx keeps the failed install: delete that folder under \`npm config get cache\`/_npx and retry in a few minutes; otherwise reinstall without --no-optional / --omit=optional, e.g. \`npm install ${SCOPE}/brainllm\``)
   }
 }
 
