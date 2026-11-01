@@ -452,3 +452,59 @@ async fn audit_log_attributes_domain_actions_and_keeps_a_refused_write_out() {
     assert_eq!(items[0]["actor"], admin.id.to_string());
     assert_eq!(items[0]["actor_kind"], "user");
 }
+
+#[tokio::test]
+#[ignore = "Use scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn facets_count_only_rows_the_reader_may_list() {
+    let pool = database().await;
+    let list: Vec<Resource> = serde_json::from_value(json!([
+        {"name":"tickets","fields":{"org":{"kind":"org","required":true},"status":{"kind":"str","required":true},"tags":{"kind":"list<str>"},"rank":{"kind":"int"},"open":{"kind":"bool"}},
+         "policy":{"read":["org"],"create":["org"],"update":["org"],"delete":["org"]},
+         "query":{"filter":{"status":["eq"],"rank":["gte"]},"facets":["status","tags","rank","open"]}},
+        {"name":"notes","fields":{"state":{"kind":"str","required":true},"body":{"kind":"str"}},"search":["body"],
+         "policy":{"read":["owner"],"create":["user"],"update":["owner"],"delete":["owner"]},
+         "query":{"filter":{"state":["eq"]},"facets":["state"]}}
+    ])).unwrap();
+    db::migrate(&pool, &list).await.unwrap();
+    roles().register(&pool).await.unwrap();
+    let (alice, bob) = (actor(&pool, "user").await, actor(&pool, "user").await);
+    let (http, _) = brain_backend::http::router_with_platform(pool.clone(), config(list), Platform::default()).await.unwrap();
+    let org_a = call(&http, "POST", "/_brain/orgs", Some(&alice), Some(json!({"name":"A"}))).await.1["id"].as_str().unwrap().to_string();
+    let org_b = call(&http, "POST", "/_brain/orgs", Some(&bob), Some(json!({"name":"B"}))).await.1["id"].as_str().unwrap().to_string();
+    for (who, org, status, tags, rank, open) in [
+        (&alice, &org_a, "new", json!(["x","y"]), 1, true),
+        (&alice, &org_a, "new", json!(["x","x"]), 1, true),
+        (&alice, &org_a, "done", json!([]), 2, false),
+        (&bob, &org_b, "foreign", json!(["foreign"]), 9, false),
+        (&bob, &org_b, "new", json!(["x"]), 9, false),
+    ] {
+        let (s, body) = call(&http, "POST", "/api/tickets", Some(who), Some(json!({"org":org,"status":status,"tags":tags,"rank":rank,"open":open}))).await;
+        assert_eq!(s, 200, "{body}");
+    }
+    let (s, out) = call(&http, "GET", "/api/tickets?facets=status,tags,rank,open", Some(&alice), None).await;
+    assert_eq!(s, 200, "{out}");
+    assert_eq!(out["facets"]["status"], json!([{"key":"new","count":2},{"key":"done","count":1}]), "{out}");
+    assert_eq!(out["facets"]["tags"], json!([{"key":"x","count":2},{"key":"y","count":1}]), "a row counts once per distinct element");
+    assert_eq!(out["facets"]["rank"], json!([{"key":1,"count":2},{"key":2,"count":1}]));
+    assert_eq!(out["facets"]["open"], json!([{"key":true,"count":2},{"key":false,"count":1}]));
+    assert!(!out.to_string().contains("foreign"), "another organization's values leaked: {out}");
+    // A field's own filter does not narrow its facet; other filters do. The scope stays even so.
+    let out = call(&http, "GET", "/api/tickets?status=done&facets=status,rank", Some(&alice), None).await.1;
+    assert_eq!(out["total"], 1);
+    assert_eq!(out["facets"]["status"], json!([{"key":"new","count":2},{"key":"done","count":1}]));
+    assert_eq!(out["facets"]["rank"], json!([{"key":2,"count":1}]));
+    let out = call(&http, "GET", "/api/tickets?status=foreign&facets=status", Some(&alice), None).await.1;
+    assert_eq!(out["total"], 0);
+    assert!(!out.to_string().contains("foreign\",\"count"), "{out}");
+    assert_eq!(out["facets"]["status"].as_array().unwrap().len(), 2);
+    // An owner-scoped resource counts only the reader's rows, including with search.
+    for (who, state, body) in [(&alice, "mine", "shared words"), (&bob, "theirs", "shared words"), (&bob, "theirs", "shared words")] {
+        assert_eq!(call(&http, "POST", "/api/notes", Some(who), Some(json!({"state":state,"body":body}))).await.0, 200);
+    }
+    let out = call(&http, "GET", "/api/notes?search=shared&facets=state", Some(&alice), None).await.1;
+    assert_eq!(out["facets"]["state"], json!([{"key":"mine","count":1}]), "{out}");
+    // Only declared facets; a restricted field cannot be declared.
+    assert_eq!(call(&http, "GET", "/api/notes?facets=body", Some(&alice), None).await.0, 422);
+    let restricted: Result<Resource, _> = serde_json::from_value(json!({"name":"bad","fields":{"code":{"kind":"str","access":"private"}},"policy":{"read":["admin"]},"query":{"facets":["code"]}}));
+    assert!(restricted.is_err() || brain_backend::query::validate(&restricted.unwrap()).unwrap_err().contains("facet `code`"));
+}

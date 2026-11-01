@@ -51,6 +51,9 @@ pub struct QueryContract {
     /// Named aggregates over the filtered set (`?aggregate=<name>`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub aggregate: BTreeMap<String, Aggregate>,
+    /// Fields whose values can be counted over the listed set (`?facets=<field>,...`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub facets: Vec<String>,
     /// Named per-record counts of related records (`?count=<name>`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub count: BTreeMap<String, Count>,
@@ -293,6 +296,18 @@ pub fn validate(r: &Resource) -> Result<(), String> {
             return Err(at(format!("include `{name}` must be a ref:<resource> field")));
         }
     }
+    if q.facets.len() > 8 {
+        return Err(at("declares too many facets; fix: at most 8".to_string()));
+    }
+    let mut seen_facets = BTreeSet::new();
+    for field in &q.facets {
+        if !seen_facets.insert(field) {
+            return Err(at(format!("facet `{field}` is declared twice")));
+        }
+        if !matches!(kind(r, field), Some(Kind::Text | Kind::Bool | Kind::Ref | Kind::Date | Kind::Int | Kind::List)) || restricted(r, field) {
+            return Err(at(format!("facet `{field}` must be a public str, enum, bool, ref, date, int or list<str> field")));
+        }
+    }
     for (name, aggregate) in &q.aggregate {
         if !crate::contract::identifier(name) {
             return Err(at(format!("aggregate name `{name}` must be an identifier")));
@@ -461,6 +476,7 @@ pub struct ListRequest {
     pub include: Vec<String>,
     aggregate: Vec<String>,
     count: Vec<String>,
+    facets: Vec<String>,
     /// `?fields=`: the `data` keys each item keeps. Id, timestamps, `included` and `counts` always stay.
     fields: Option<BTreeSet<String>>,
     /// Sent branches of each declared `or` group.
@@ -631,6 +647,14 @@ pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(Str
             // A filter declared on a field of this name keeps working as before.
             "owner" if !r.query.filter.contains_key("owner") => {
                 if raw == "me" { req.owner_me = true } else { bad("owner accepts only `me`; the server resolves it from the session") }
+            }
+            // A filter declared on a field of this name keeps working as before.
+            "facets" if !r.query.filter.contains_key("facets") => {
+                let names: Vec<String> = split(raw).into_iter().map(str::to_string).collect();
+                if let Some(name) = names.iter().find(|n| !r.query.facets.contains(n)) {
+                    bad(&format!("`{name}` is not a declared facet"));
+                }
+                req.facets = names;
             }
             "aggregate" | "count" => {
                 let names: Vec<String> = split(raw).into_iter().map(str::to_string).collect();
@@ -1004,6 +1028,8 @@ struct Ctx<'a> {
     matches: Matches,
     /// The session's user when the request says `owner=me`.
     owner: Option<Uuid>,
+    /// Field whose own filters do not apply, so a facet still offers its other values. The scope always applies.
+    facet: Option<&'a str>,
 }
 impl Ctx<'_> {
     /// Authorization scope and declared filters over the alias-free columns of the current table.
@@ -1023,6 +1049,9 @@ impl Ctx<'_> {
             q.push(")");
         }
         for f in &self.req.filters {
+            if f.via.is_none() && self.facet == Some(f.field.as_str()) {
+                continue;
+            }
             q.push(" AND ");
             match &f.via {
                 None => push_predicate(q, f),
@@ -1164,7 +1193,7 @@ pub async fn list(
         return Err(ListError::SignInRequired);
     }
     let owner = if req.owner_me { viewer.id } else { None };
-    let mut ctx = Ctx { r, resources, scope: &scope, related, req, matches: Matches::All, owner };
+    let mut ctx = Ctx { r, resources, scope: &scope, related, req, matches: Matches::All, owner, facet: None };
     let keys = keys(r, req);
     let sig = signature(&keys);
     let ranked = req.sort.is_none() && search_ranked(r, req);
@@ -1176,7 +1205,7 @@ pub async fn list(
     if !text.is_empty() {
         (degraded, approximate) = resolve_search(&mut tx, &mut ctx, &text).await?;
     }
-    let ctx = ctx;
+    let mut ctx = ctx;
 
     // Page.
     let mut q = QueryBuilder::<Postgres>::new(concat!("SELECT ", crate::record_columns!()));
@@ -1273,6 +1302,17 @@ pub async fn list(
             truncated.push(name.clone());
         }
     }
+    let mut facets = Map::new();
+    let mut facets_cut = Vec::new();
+    for field in &req.facets {
+        ctx.facet = Some(field);
+        let (value, cut) = facet(&mut tx, &ctx, field).await?;
+        facets.insert(field.clone(), value);
+        if cut {
+            facets_cut.push(field.clone());
+        }
+    }
+    ctx.facet = None;
     tx.commit().await?;
 
     let mut out = json!({"items": items, "limit": req.limit, "offset": req.offset, "total": total});
@@ -1288,6 +1328,13 @@ pub async fn list(
     if !truncated.is_empty() {
         // Named aggregates that hit GROUP_LIMIT: their largest groups are present, the rest are not.
         out["aggregates_truncated"] = json!(truncated);
+    }
+    if !facets.is_empty() {
+        out["facets"] = Value::Object(facets);
+    }
+    if !facets_cut.is_empty() {
+        // Facets that hit GROUP_LIMIT: their most frequent values are present, the rest are not.
+        out["facets_truncated"] = json!(facets_cut);
     }
     if degraded {
         out["degraded"] = json!(true);
@@ -1363,6 +1410,41 @@ fn relational_read(r: &Resource, viewer: Viewer<'_>) -> Option<Scope> {
     owner_visible.then(|| crate::ownership::relational_read(r, viewer)).flatten()
 }
 
+fn group_key(k: Kind, key: Option<String>) -> Value {
+    match (k, key) {
+        (_, None) => Value::Null,
+        (Kind::Int, Some(t)) => t.parse::<i64>().map(|n| json!(n)).unwrap_or(json!(t)),
+        (Kind::Bool, Some(t)) => json!(t == "true"),
+        (_, Some(t)) => json!(t),
+    }
+}
+/// Counts of one field's values over the rows the reader may list, and whether they were cut at [`GROUP_LIMIT`].
+/// Rows without a value count under a null key; a `list<str>` counts each row once per distinct element.
+async fn facet(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, field: &str) -> Result<(Value, bool), sqlx::Error> {
+    let r = ctx.r;
+    let k = kind(r, field).unwrap_or(Kind::Text);
+    let mut q = match k {
+        Kind::List => QueryBuilder::<Postgres>::new(format!(
+            "SELECT _element AS _g,count(DISTINCT id) AS _n FROM _brain_res_{} t CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(data->'{field}')='array' THEN data->'{field}' ELSE '[]'::jsonb END) AS _e(_element) WHERE ",
+            r.name
+        )),
+        _ => {
+            let e = match k {
+                Kind::Ref => format!("{}::text", crate::relations::column(field)),
+                Kind::Text => format!("(data->>'{field}')"),
+                _ => format!("({})::text", expr(k, field)),
+            };
+            QueryBuilder::<Postgres>::new(format!("SELECT {e} AS _g,count(*) AS _n FROM _brain_res_{} t WHERE ", r.name))
+        }
+    };
+    ctx.push_where(&mut q);
+    q.push(format!(" GROUP BY _g ORDER BY _n DESC,_g NULLS LAST LIMIT {}", GROUP_LIMIT + 1));
+    let mut rows = q.build().fetch_all(&mut **tx).await?;
+    let cut = rows.len() as i64 > GROUP_LIMIT;
+    rows.truncate(GROUP_LIMIT as usize);
+    let values = rows.iter().map(|row| json!({"key": group_key(k, row.get("_g")), "count": row.get::<i64, _>("_n")})).collect();
+    Ok((Value::Array(values), cut))
+}
 /// One aggregate and whether its groups were cut at [`GROUP_LIMIT`].
 async fn aggregate(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, a: &Aggregate) -> Result<(Value, bool), sqlx::Error> {
     let r = ctx.r;
@@ -1426,14 +1508,7 @@ async fn aggregate(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, a: &
             rows.iter()
                 .map(|row| {
                     let mut out = render(row);
-                    let key: Option<String> = row.get("_g");
-                    let key = match (k, key) {
-                        (_, None) => Value::Null,
-                        (Kind::Int, Some(t)) => t.parse::<i64>().map(|n| json!(n)).unwrap_or(json!(t)),
-                        (Kind::Bool, Some(t)) => json!(t == "true"),
-                        (_, Some(t)) => json!(t),
-                    };
-                    out.insert("key".into(), key);
+                    out.insert("key".into(), group_key(k, row.get("_g")));
                     Value::Object(out)
                 })
                 .collect(),
@@ -1471,6 +1546,9 @@ pub fn openapi_parameters(r: &Resource) -> Vec<Value> {
         if !list.is_empty() {
             params.push(json!({"name": key, "in":"query", "description": if key == "include" { format!("Comma-separated: {}. Dotted paths follow references up to {} levels", list.join(", "), crate::relations::MAX_INCLUDE_DEPTH) } else { format!("Comma-separated: {}", list.join(", ")) }, "schema":{"type":"string"}}));
         }
+    }
+    if !r.query.facets.is_empty() {
+        params.push(json!({"name":"facets","in":"query","description":format!("Comma-separated: {}. Adds `facets` with the count of each value over the rows you may list, ignoring this field's own filters", r.query.facets.join(", ")),"schema":{"type":"string"}}));
     }
     params
 }
