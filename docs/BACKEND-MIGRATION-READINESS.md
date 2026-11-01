@@ -64,7 +64,7 @@ even if the source labels it P1 or P2.
 | B-29 | P0 | Safe bidirectional verified-provider account linking | Open: an already-linked provider subject can sign in; the first link to an existing email is deliberately refused. Any new linking policy must prevent pre-hijacking. |
 | B-30 | P1 | Redirect/code identity flow versus browser GIS | Explicit application decision; existing GIS support is not authorization-code support. |
 | B-31 | P1 | Bounded code verification and permitted signup role selection | Open: bounded numeric code login and signup role selection need a product decision; signup never grants a privileged role from input. |
-| B-32 | P1 | Multiple memberships and active application space | Open; one assigned role is not the same model. |
+| B-32 | P1 | Multiple memberships and active application space | Native: `docs/backend/organizations.md`. Organization deletion is still open. |
 | B-33 | P1 | Password-policy compatibility | Explicit decision; retain strong defaults and handle legacy accounts separately, without silently lowering signup policy. |
 | B-34 | P1 | User administration, activation and session revocation | Partial native primitives; a complete authorized administration API remains open. |
 | B-35 | P2 | Signup disposable-domain policy hook | Open. |

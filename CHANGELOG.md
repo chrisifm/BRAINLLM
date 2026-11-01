@@ -9,6 +9,12 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- Organizations and memberships: a field of kind `org` makes a resource tenant data, isolated by the server on every read and write, with `org`, `org.<role>` and `org.own` grants and invitations.
+- An append-only audit log: `audit: true` in a policy records who changed which fields of a row, never their values; organization changes are always recorded.
+- Lists count declared `facets` (`?facets=status,tags`) over the rows the reader may list.
+- A `geo` field filters by radius and box (`near`, `bbox`) on a built-in index, with no database extension.
+- `server/auth/captcha.jsbrain` requires a verified token on signup, login, password reset requests and declared public write routes, and fails closed.
+- A credits ledger debits atomically with idempotency keys at `/_brain/credits/{subject}`, and a balance cannot go negative.
 - `brain backend import` brings accounts and records from another system, keeping ids, owners, references and dates, with a rollback preview and whole-file refusal (B0798); imported scrypt hashes verify at login and become Argon2.
 - **Breaking:** the `ne` list filter now keeps records without a value, matching action guards; add `[exists]=true` to exclude them.
 - `brain build --strict` fails when a page ships with a component fallback or a route is left out of `dist/`; the output stays on disk and the JSON report still prints.

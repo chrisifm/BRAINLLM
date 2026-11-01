@@ -1,0 +1,28 @@
+{
+  "id": "captcha-verification",
+  "kind": "capability",
+  "title": "Captcha verification on public writes",
+  "why": "Signup and public write routes had no built-in defense against automated abuse beyond rate limits.",
+  "changelog": [
+    "`server/auth/captcha.jsbrain` requires a verified token"
+  ],
+  "guide": "docs/backend/captcha.md",
+  "codes": [],
+  "apis": [
+    "server/auth/captcha.jsbrain",
+    "X-Brain-Captcha"
+  ],
+  "affects": [
+    "server/auth/*.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/auth/captcha.jsbrain",
+    "snippet": "<meta server>\nexport default { verify_url: 'https://challenges.cloudflare.com/turnstile/v0/siteverify', secret_env: 'CAPTCHA_SECRET', protect: ['signup'] }"
+  },
+  "uses": [
+    {
+      "glob": "server/auth/captcha.jsbrain",
+      "contains": "verify_url"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "id": "credits-ledger",
+  "kind": "capability",
+  "title": "Credits ledger",
+  "why": "Usage balances were hand-written and easy to overdraw under concurrent requests.",
+  "changelog": [
+    "A credits ledger debits atomically"
+  ],
+  "guide": "docs/backend/credits.md",
+  "codes": [],
+  "apis": [
+    "/_brain/credits"
+  ],
+  "affects": [
+    "server/**"
+  ],
+  "adopt": {
+    "file": "an administrator's HTTP client",
+    "snippet": "POST /_brain/credits/<subject> {\"delta\": -3, \"reason\": \"usage\", \"idempotency_key\": \"<unique>\"}"
+  },
+  "uses": [
+    {
+      "glob": "server/**",
+      "contains": "_brain/credits"
+    }
+  ]
+}

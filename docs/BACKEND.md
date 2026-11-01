@@ -230,7 +230,8 @@ App-declared routes with typed path, query and headers, per-route limits and aut
 Signed webhook routes for payment and shipping providers (HMAC, timestamp tolerance, raw body): [backend/webhooks.md](backend/webhooks.md).
 Calling external APIs from server logic (timeouts, safe retries, idempotency keys, redacted errors): [backend/outbound.md](backend/outbound.md).
 
-Lists, relations and readers: [relations](backend/relations.md) · [filters](backend/filters.md) · [sorting](backend/sorting.md) · [aggregates](backend/aggregates.md) · [pagination](backend/pagination.md) · [search](backend/search.md) · [ownership](backend/ownership.md) · [visibility](backend/visibility.md) · [slug history](backend/slugs.md).
+Lists, relations and readers: [relations](backend/relations.md) · [filters](backend/filters.md) · [sorting](backend/sorting.md) · [aggregates](backend/aggregates.md) · [pagination](backend/pagination.md) · [search](backend/search.md) · [ownership](backend/ownership.md) · [visibility](backend/visibility.md) · [slug history](backend/slugs.md) · [facets](backend/facets.md) · [geo](backend/geo.md).
+SaaS building blocks: [organizations](backend/organizations.md) · [audit log](backend/audit.md) · [captcha](backend/captcha.md) · [credits](backend/credits.md).
 Server code (`load`, server functions) queries with the same contract through `ctx.backend`: [backend/server-queries.md](backend/server-queries.md).
 Keeping numeric ids from another backend as a unique, filterable field: [backend/ids.md](backend/ids.md).
 

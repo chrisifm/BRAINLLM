@@ -1,0 +1,28 @@
+{
+  "id": "list-facets",
+  "kind": "capability",
+  "title": "Facets on lists",
+  "why": "Filter counts took one aggregate per field, and those narrow themselves when their own filter is applied.",
+  "changelog": [
+    "Lists count declared `facets`"
+  ],
+  "guide": "docs/backend/facets.md",
+  "codes": [],
+  "apis": [
+    "query facets",
+    "?facets="
+  ],
+  "affects": [
+    "server/resources/*/query.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/<name>/query.jsbrain",
+    "snippet": "<meta server>\nexport default { filter: { status: ['eq'] }, facets: ['status'] }"
+  },
+  "uses": [
+    {
+      "glob": "server/resources/*/query.jsbrain",
+      "contains": "facets:"
+    }
+  ]
+}

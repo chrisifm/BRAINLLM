@@ -38,6 +38,7 @@ GET /api/products?created_at[gte]=now-7d
 | `bool` | `eq exists` |
 | `ref:<resource>` | `eq ne in exists` |
 | `list` | `has exists` |
+| `geo` ([details](geo.md)) | `near bbox exists` |
 
 `brain backend capabilities` prints this table from the code of the installed version. `num`, `obj` and fields with restricted [visibility](visibility.md) cannot be filtered. `in` takes 1–50 values,
 `between` exactly two (inclusive). `exists` takes `true` or `false`. `ne` keeps records without a value, as action guards

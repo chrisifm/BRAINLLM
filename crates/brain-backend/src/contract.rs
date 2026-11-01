@@ -835,6 +835,21 @@ fn native_paths(roles: &crate::auth_flows::RolesConfig) -> Map<String, Value> {
         None,
         &[401, 403, 429, 500, 504],
     );
+    for (path, method, summary, success_body, codes) in [
+        ("/_brain/orgs", "post", "Create an organization with the caller as its first role (docs/backend/organizations.md)", true, &[401u16, 422, 429][..]),
+        ("/_brain/orgs", "get", "List the caller's organizations", false, &[401, 429]),
+        ("/_brain/orgs/{id}/members", "get", "List an organization's members", false, &[401, 404, 429]),
+        ("/_brain/orgs/{id}/members/{user}", "patch", "Change a member's role; an organization keeps at least one owner", true, &[401, 403, 404, 409, 422, 429]),
+        ("/_brain/orgs/{id}/members/{user}", "delete", "Remove a member; an organization keeps at least one owner", false, &[401, 403, 404, 409, 429]),
+        ("/_brain/orgs/{id}/invites", "post", "Create a single-use invitation token", true, &[401, 403, 404, 422, 429]),
+        ("/_brain/orgs/invites/accept", "post", "Join an organization with an invitation token", true, &[401, 403, 422, 429]),
+        ("/_brain/orgs/{id}/audit", "get", "Read an organization's audit log (docs/backend/audit.md)", false, &[401, 403, 404, 422, 429]),
+        ("/_brain/audit", "get", "Read audit entries outside any organization", false, &[401, 403, 422, 429]),
+        ("/_brain/credits/{subject}", "post", "Apply a signed credit change with an idempotency key (docs/backend/credits.md)", true, &[401, 403, 404, 409, 422, 429]),
+        ("/_brain/credits/{subject}", "get", "Read a balance and its ledger", false, &[401, 403, 404, 422, 429]),
+    ] {
+        add(path, method, summary, auth.clone(), 200, Some(json!({"type":"object"})), success_body.then(|| json!({"required":true,"content":{"application/json":{"schema":{"type":"object"}}}})), codes);
+    }
     add(
         "/_brain/auth/signup",
         "post",
