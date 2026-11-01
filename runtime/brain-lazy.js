@@ -75,6 +75,8 @@ export function lazy(el, imp, mode, props = {}) {
     stop = () => {
       for (const t of ACT) el.removeEventListener(t, f, t === 'click')
     }
+  } else if (G.document && document.visibilityState === 'hidden') {
+    go() // a hidden tab runs no observer: without this the content is missing until the tab is shown
   } else if (G.IntersectionObserver) {
     const io = new IntersectionObserver(es => es.some(e => e.isIntersecting) && go(), { rootMargin: '200px' })
     io.observe(el)

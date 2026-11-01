@@ -224,3 +224,19 @@ test('interaction: the key that loaded the component activates it; a failed atte
   delete globalThis.reportError
 })
 
+
+test('a page opened in a hidden tab does not wait for an observer that will not run', async () => {
+  const before = ios.length
+  doc.visibilityState = 'hidden'
+  try {
+    let loads = 0
+    const el = doc.createElement('div')
+    doc.body.appendChild(el)
+    mount(() => (lazy(el, () => (loads++, Promise.resolve({ default: () => [] })), 'visible'), []), doc.createElement('main'))
+    await tick()
+    assert.equal(loads, 1)
+    assert.equal(ios.length, before)
+  } finally {
+    doc.visibilityState = 'visible'
+  }
+})

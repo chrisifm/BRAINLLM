@@ -159,3 +159,22 @@ assert.ok(later.every(i => i.getAttribute('loading') === 'lazy' && i.getAttribut
     assert!(result.status.success(), "{}\n{}", String::from_utf8_lossy(&result.stderr), out.js);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn placeholder_text_is_the_apps_own_words() {
+    let chart = "<p>Loaded chart</p>";
+    let compile = |attrs: &str| {
+        let page = format!("<script>\nimport Chart from './chart.brain'\nconst label = 'Ver gr\u{e1}fica'\n</script>\n<section><Chart {attrs} /></section>");
+        let root = app(&[("comp/chart.brain", chart), ("comp/page.brain", &page), ("tokens.cssbrain", "@tokens { --fg: #111111; --bg: #ffffff; }")]);
+        let opts = brain_codegen::Options { root: Some(root.clone()), ..Default::default() };
+        brain_codegen::compile_with(&page, &root.join("comp/page.brain"), &opts).unwrap_or_else(|d| panic!("{d:?}")).js
+    };
+    let silent = compile("lazy");
+    assert!(!silent.contains("Loading component"), "no fixed English text in the visible placeholder: {silent}");
+    let literal = compile("lazy lazyLabel=\"Cargando\"");
+    assert!(literal.contains("textContent = \"Cargando\""), "{literal}");
+    assert!(!literal.contains("lazyLabel"), "the label is not a prop of the child: {literal}");
+    let button = compile("lazy=\"interaction\" lazyLabel={label}");
+    assert!(button.contains("textContent = label") || button.contains("textContent = (label)") , "{button}");
+    assert!(!button.contains("Load component"), "{button}");
+}

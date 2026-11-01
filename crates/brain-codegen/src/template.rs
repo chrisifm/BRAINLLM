@@ -558,13 +558,23 @@ impl Gen<'_> {
                     _ => "visible".to_string(),
                 };
                 let src = self.lazy_src[&r.name].clone();
-                let rest = ComponentRef { name: String::new(), attrs: r.attrs.iter().filter(|a| a.name != "lazy").cloned().collect(), children: r.children.clone(), span: r.span };
+                let rest = ComponentRef { name: String::new(), attrs: r.attrs.iter().filter(|a| a.name != "lazy" && a.name != "lazyLabel").cloned().collect(), children: r.children.clone(), span: r.span };
                 let props = self.component_call(&rest);
                 let el = self.fresh("l");
                 let tag = if mode == "interaction" { "button" } else { "div" };
+                // The words on the placeholder are the app's (`lazyLabel`): the framework has no language of its own to show.
+                let label = r.attrs.iter().find(|a| a.kind == AttrKind::Plain && a.name == "lazyLabel").and_then(|a| match &a.value {
+                    AttrValue::Text(t) => Some(js_str(t)),
+                    AttrValue::Expr(x) => Some(self.expr(x)),
+                    _ => None,
+                });
                 let setup = if mode == "interaction" {
-                    format!("{el}.setAttribute(\"type\", \"button\"); {el}.textContent = {};", js_str("Load component"))
-                } else { format!("{el}.setAttribute(\"role\", \"status\"); {el}.textContent = \"Loading component…\";") };
+                    let label = label.unwrap_or_else(|| js_str("Load component"));
+                    format!("{el}.setAttribute(\"type\", \"button\"); {el}.textContent = {label};")
+                } else {
+                    let text = label.map(|l| format!(" {el}.textContent = {l};")).unwrap_or_default();
+                    format!("{el}.setAttribute(\"role\", \"status\");{text}")
+                };
                 format!(
                     "const {el} = document.createElement(\"{tag}\"); {el}.setAttribute(\"data-lazy\", \"\"); {setup} {}(null, {el}, {anchor}); lazy({el}, () => import({}), {}, {});",
                     self.rt("insert"),

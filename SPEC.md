@@ -99,7 +99,7 @@ Signals are plain variables: `n++`, `items = [...items, x]`. Never mutate in pla
 · `bind:value|checked|ref={x}` · `{#if c}…{:else if d}…{:else}…{/if}` · `{#each list as it (it.id)}…{:empty}…{/each}`
 (key required; list of primitives → key by value: `{#each perks as perk (perk)}`) · `{#await p}…{:then v}…{:catch e}…{/await}`
 · `<slot />` `<slot name="x" />` · `<Comp a={b} on:ev={f} />`.
-Lazy components: `<Chart lazy />` loads when visible · `lazy="idle"` · `lazy="interaction"`. Images: `<Img src alt width height>`
+Lazy components: `<Chart lazy />` loads when visible · `lazy="idle"` · `lazy="interaction"`; `lazyLabel="…"` or `lazyLabel={text}` sets the placeholder's words (none by default, the button says "Load component"). Images: `<Img src alt width height>`
 (lazy, decoding async, LCP priority set by the compiler). Interaction mode renders an accessible load button;
 CSS remains eager to preserve styles when the deferred component appears.
 Text interpolation is escaped. `id`s in `comp/` and `ui/`, static or computed (`id={'faq-' + it.id}`), keep their name

@@ -618,7 +618,7 @@ fn run_headless(
                 let _ = chrome.call(Some(&session), d, Json::Obj(vec![]));
             }
             let _ = chrome.call(Some(&session), "HeapProfiler.enable", Json::Obj(vec![]));
-            let mut collect = |chrome: &mut Chrome| {
+            let collect = |chrome: &mut Chrome| {
                 let _ = chrome.call(
                     Some(&session),
                     "HeapProfiler.collectGarbage",

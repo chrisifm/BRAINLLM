@@ -70,13 +70,17 @@ export function start(config = {}, env = globalThis) {
         )
 
   // ── identity: anonymous first-party visitor (localStorage) and a session that ends after 30 idle minutes
+  // A session belongs to one visitor (the server refuses it from another), so without storage the visitor id lives in
+  // memory for the page, and a stored session whose visitor is gone or different starts over.
   let session = null
+  let visitor = null
   const ids = () => {
     const t = Date.now()
     let vid = get(VISITOR)
-    if (typeof vid !== 'string') put(VISITOR, (vid = uuid()))
+    if (typeof vid === 'string') visitor = vid
+    else put(VISITOR, (vid = visitor = visitor || uuid()))
     if (!session) session = get(SESSION)
-    if (!session || typeof session.id !== 'string' || t - session.last > IDLE_MS) session = { id: uuid(), last: t, pv: 0, ctx: 0 }
+    if (!session || typeof session.id !== 'string' || session.vid !== vid || t - session.last > IDLE_MS) session = { id: uuid(), vid, last: t, pv: 0, ctx: 0 }
     session.last = t
     put(SESSION, session)
     return vid

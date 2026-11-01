@@ -282,3 +282,33 @@ test('batches stay small: at most 64 events per request', () => {
   assert.ok(sent.every(s => s.body.ev.length <= 64))
   assert.equal(sent.reduce((n, s) => n + s.body.ev.length, 0), 151)
 })
+
+test('a visitor keeps one id without storage, so every batch of a session belongs to the same visitor', () => {
+  const { env, sent, flush, api } = setup()
+  env.localStorage.getItem = () => null
+  env.localStorage.setItem = () => { throw new Error('blocked') }
+  api.stop()
+  const blocked = start({ base: '/' }, env)
+  flush()
+  const before = sent.length
+  blocked.track('one')
+  blocked.send()
+  blocked.track('two')
+  blocked.send()
+  const own = sent.slice(before)
+  assert.ok(own.length >= 2, 'two batches were sent')
+  assert.equal(new Set(own.map(s => s.body.vid)).size, 1)
+  assert.equal(new Set(own.map(s => s.body.sid)).size, 1)
+  blocked.stop()
+})
+
+test('a stored session of another visitor is not reused: the server would refuse its batches', () => {
+  const sid = randomUUID()
+  const session = JSON.stringify({ id: sid, last: Date.now(), pv: 0, ctx: 0, vid: randomUUID() })
+  const { sent, flush } = setup({ storage: { 'brain:sid': session, 'brain:vid': JSON.stringify(randomUUID()) } })
+  flush()
+  assert.notEqual(sent[0].body.sid, sid)
+  const orphan = setup({ storage: { 'brain:sid': JSON.stringify({ id: sid, last: Date.now(), pv: 0, ctx: 0 }) } })
+  orphan.flush()
+  assert.notEqual(orphan.sent[0].body.sid, sid, 'a session whose visitor id was cleared starts over')
+})

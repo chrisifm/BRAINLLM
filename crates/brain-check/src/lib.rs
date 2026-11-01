@@ -1978,7 +1978,7 @@ impl<'a> Checker<'a> {
         let props = props.clone();
         for a in &r.attrs {
             // `lazy` is a loading directive of the framework, not a prop of the child (§22).
-            if a.kind != AttrKind::Plain || a.name == "lazy" {
+            if a.kind != AttrKind::Plain || a.name == "lazy" || a.name == "lazyLabel" {
                 continue;
             }
             if !props.iter().any(|p| p.name == a.name) {
