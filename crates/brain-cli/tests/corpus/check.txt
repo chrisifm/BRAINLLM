@@ -370,6 +370,17 @@ export async function f(ctx) {
   ctx.session.set({ a: 1 })
 }
 
+### B0789 stays on routes: a job handler may import pg
+@file server/jobs/sync/handler.jsbrain
+<meta server>
+import pg from 'pg'
+export default async function handle(ctx) {
+  return { driver: typeof pg }
+}
+@file server/jobs/sync/schema.jsbrain
+<meta server>
+export default { x: 'str' }
+
 ### B0790 route secret
 @expect B0790 server/routes/pay/route.jsbrain 1:1
 @file server/routes/pay/route.jsbrain

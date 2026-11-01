@@ -9,8 +9,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
-## [0.7.1] - Unreleased
+## [0.8.0] - Unreleased
 
+- Fix: `onclick={f}` on a native element compiles to `on:click` (B0223)
+- `brain check` warns B0224 on `onclick="..."`, which the Content-Security-Policy blocks
+- Fix: `brain start` refuses a native-socket build without BRAIN_BACKEND_URL before printing a URL
 - Fix: `brain build` and `brain doctor` agree on native sockets when the site is loopback or a placeholder
 - Fix: `brain run` moves focus and announces the new title after a client navigation, and `navigate()` no longer reloads the page
 - Fix: `brain upgrade` after `npm install` reads the previous pin from the last commit

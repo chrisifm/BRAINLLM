@@ -1,0 +1,10 @@
+{
+  "id": "start-sockets-preflight",
+  "kind": "fix",
+  "title": "`brain start` refuses native sockets without a backend before printing a URL",
+  "why": "It published the URL, then crash-looped, so visitors got a refused connection and the error named no setting.",
+  "changelog": [
+    "Fix: `brain start` refuses a native-socket build without BRAIN_BACKEND_URL before printing a URL"
+  ],
+  "guide": "CONTRIBUTING.md"
+}
