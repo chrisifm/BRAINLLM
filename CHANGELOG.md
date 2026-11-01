@@ -27,7 +27,7 @@ Upgrade with `npm install -D @christianirack/brainllm@0.8.6 --save-exact`. The d
 - `brain edge plan` and the MCP tool `brain_edge_plan` print a read-only cache plan for a CDN
 - a tokens sheet of up to 8192 bytes goes inline in `<head>`
 - B0505 warns when `keyword` or `canonical` sits on a page its folder guard keeps out of search; a public page that redirects some visitors does it in `load()`; `brain add view` omits both under a guard
-- the credit line and the shared tokens sheet are left out of the measured view size
+- the credit line and the shared tokens sheet do not spend `budget.viewKB`
 - B0111 says how a handler receives the event
 
 ## [0.8.5] - 2026-11-01

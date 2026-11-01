@@ -1159,7 +1159,7 @@ pub(crate) struct BuildReport {
     pub build_cache: brain_mcp::Json,
     pub optimizations: Vec<brain_mcp::Json>,
     /// route → [js raw, js min, js gz, css, css gz, html, html gz]
-    pub report: Vec<(String, [usize; 7])>,
+    pub report: Vec<(String, [usize; 8])>,
     /// dist files written by this build / left untouched because their bytes did not change
     pub written: usize,
     pub unchanged: usize,
@@ -1697,7 +1697,7 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
     rep.report = out
         .report
         .iter()
-        .map(|r| (r.route.clone(), [r.js_raw, r.js_min, r.js_gz, r.css, r.css_gz, r.html, r.html_gz]))
+        .map(|r| (r.route.clone(), [r.js_raw, r.js_min, r.js_gz, r.css, r.css_gz, r.html, r.html_gz, r.html_shared]))
         .collect();
     rep.ledger = out.ledger.iter().map(|page|brain_mcp::Json::parse(&page.to_json())).collect::<Result<Vec<_>,_>>()?;
     rep.build_cache=brain_mcp::Json::parse(&out.build_cache.to_json())?;
@@ -1830,7 +1830,7 @@ fn cmd_build(args: &[String]) -> Result<(), BuildError> {
         eprintln!("{}", pr.paint().warn(&format!("warning: {w}")));
     }
     if mode != term::Mode::Off {
-        let views: Vec<term::ViewSize> = rep.report.iter().map(|(r, n)| term::ViewSize { route: r.clone(), js_gz: n[2], css_gz: n[4], html_gz: n[6] }).collect();
+        let views: Vec<term::ViewSize> = rep.report.iter().map(|(r, n)| term::ViewSize { route: r.clone(), js_gz: n[2], css_gz: n[4], html_gz: n[6].saturating_sub(n[7]) }).collect();
         let budget = budget_view_kb(&root).map(|kb| kb * 1024);
         let s = term::Summary { views: &views, budget, written: rep.written, unchanged: rep.unchanged, signature: Some(&rep.signature).filter(|s| !s.is_empty()).map(String::as_str), seo: rep.seo, took: pr.elapsed(), warnings: rep.warnings.len() };
         print!("{}", term::summary(pr.paint(), &s));
