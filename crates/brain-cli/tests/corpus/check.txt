@@ -19,6 +19,7 @@
 @unreachable B0748 reported when the backend starts
 @unreachable B0765 needs a live database
 @unreachable B0766 needs a live database
+@unreachable B0778 needs a live database
 @unreachable B0767 needs a live database
 @unreachable B0768 needs a live database
 @unreachable B0771 printed by `brain backend serve`
