@@ -11,6 +11,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [0.8.0] - Unreleased
 
+- Form rules gain `tel` and `file`: a phone shape, `file(image/*,.pdf)!<=5000000` for accepted types and size in bytes, with `form.tel` and `form.file*` messages.
+- A cross-field `validate` that returns an empty message no longer blocks the submit with no visible error; the option is now documented.
 - `brain capabilities` prints the catalog of playbooks, generators, recipes and backend types from the compiler's own tables; `docs/CAPABILITIES.md` is its output, a test fails on drift, and a new app's `AGENTS.md` lists a summary.
 - `brain guide whats-new` prints what changed from the release manifests, `brain guide migrate` is the upgrade playbook, and `brain guide docs/<path>` serves every public reference page from the binary, so npm installs read them too.
 - `brain guide backend` and `brain guide analytics` are new playbooks with steps, verification and common mistakes.

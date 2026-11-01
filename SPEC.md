@@ -185,7 +185,7 @@ value (or thrown message) is the agent's answer, and invalid arguments never rea
 token-styled, every state (loading, disabled, error, empty) covered.
 Forms: `let f = form(schema, { submit: async (v) => … })` → `bind:value={f.v.email}`, `f.err.email`, `f.busy`,
 `f.error` (form-level), `on:submit={f.submit}`. A rejected submit puts focus on the first rejected field, or back on the control that held it. Leaving a dirty form asks first, unless it holds a password field. Schema: `{ email: 'email!', age: 'num>=18', name: 'str!<=80' }`
-(`!` required; types `str num bool email url date`, `[T]` list, a nested type object). Server errors: return or
+(`!` required; types `str num bool email url date tel file`, `file(image/*,.pdf)!<=5000000` bytes and accepted types, `[T]` list, a nested type object). Cross-field: option `validate: v => ({ field: message })`, an empty message is valid; `docs/FORM-VALIDATION.md`. Server errors: return or
 throw `{ errors: { email: 'Taken' } }` from `submit`, or mark them later with `f.errors({ email: 'Taken' })`; any other
 failure shows in `f.error`. Initial values: `form(schema, { init })`; later values: `f.reset(values)`; never replace
 `f.v` or `f.err` (B0133). Translated messages, edit forms and server errors: `brain guide forms`.

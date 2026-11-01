@@ -82,7 +82,7 @@ fn rule(value: &str) -> Ty {
         .next()
         .unwrap_or("")
     {
-        "str" | "email" | "url" | "date" => Ty::Str,
+        "str" | "email" | "url" | "date" | "tel" => Ty::Str,
         "num" => Ty::Num,
         "bool" => Ty::Bool,
         "obj" => Ty::Record,
