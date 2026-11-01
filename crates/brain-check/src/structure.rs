@@ -115,6 +115,10 @@ fn is_handler(file: &str) -> bool {
     }
 }
 
+fn imports_raw_pg(src: &str) -> bool {
+    src.lines().map(str::trim_start).filter(|l| !l.starts_with("//")).any(|l| ["'pg'", "\"pg\"", "`pg`"].iter().any(|q| [format!("from {q}"), format!("import({q}"), format!("require({q}"), format!("import {q}")].iter().any(|form| l.contains(form.as_str()))))
+}
+
 impl Checker<'_> {
     pub(crate) fn structure(&mut self) {
         let c = self.c;
@@ -148,6 +152,14 @@ impl Checker<'_> {
                         start,
                         "this handler has no default export, so `brain backend serve` and `brain jobs work` refuse to start",
                         "add `export default async function handle(ctx) { ... }`",
+                    );
+                }
+                if c.file.starts_with("server/routes/") && imports_raw_pg(&c.src) {
+                    self.push(
+                        "B0789",
+                        start,
+                        "this route handler imports `pg`, which skips the backend's policies, audit and connection pool",
+                        "use `ctx.backend` with `runAs: 'key'` or `runAs: 'system'` in the route contract",
                     );
                 }
                 if !crate::scan_secrets(&c.src).is_empty() {

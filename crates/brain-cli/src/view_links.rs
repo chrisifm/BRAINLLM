@@ -28,7 +28,7 @@ fn internal(href: &str) -> Option<&str> {
 
 /// `Pricing · Acme` or `Acme` under `%s · Acme`; `About Acme` reads as a sentence and is left alone.
 fn repeats(title: &str, suffix: &str) -> bool {
-    title == suffix || title.strip_suffix(suffix).is_some_and(|rest| rest.trim_end().ends_with(['·', '-', '|', '–', '—', ':']))
+    title == suffix || title.strip_suffix(suffix).is_some_and(|rest| rest.ends_with(char::is_whitespace) || rest.trim_end().ends_with(['·', '-', '|', '–', '—', ':']))
 }
 
 fn warning(code: &'static str, file: &str, line: u32, message: String, fix: &str) -> Diag {
@@ -77,6 +77,19 @@ pub fn check(app: &Path) -> Vec<Diag> {
         for (line, hrefs) in by_line {
             let list = hrefs.iter().map(|h| format!("`{h}`")).collect::<Vec<_>>().join(", ");
             out.push(warning("B0776", &rel, line, format!("no view answers {list}"), "fix the href, create the view, or add a redirect in redirects.json"));
+        }
+        // B0788: a key() channel is a token for provide()/use(); a member read on it is always undefined
+        for line in src.lines().filter(|l| l.trim_start().starts_with("import ") && l.contains("channels/")) {
+            let name = line.trim_start().trim_start_matches("import ").split_whitespace().next().unwrap_or("");
+            let file = line.split("channels/").nth(1).and_then(|r| r.split(['\'', '"']).next()).unwrap_or("");
+            let is_key = !file.contains("..") && std::fs::read_to_string(app.join("channels").join(file)).is_ok_and(|c| c.lines().any(|l| l.trim_start().starts_with("export default key(")));
+            if !is_key || name.is_empty() {
+                continue;
+            }
+            let reads = |l: &str| l.match_indices(&format!("{name}.")).any(|(at, _)| !l[..at].ends_with(|c: char| c.is_alphanumeric() || c == '_' || c == '$' || c == '.'));
+            if let Some(n) = src.lines().position(|l| !l.trim_start().starts_with("import ") && !l.trim_start().starts_with("//") && reads(l)) {
+                out.push(warning("B0788", &rel, n as u32 + 1, format!("`{name}` is a `key()` channel, so reading a member of it gives undefined"), "declare the channel as a store (`export default store({ user: null })`) to read its fields, or read the provided value with `use(key)`"));
+            }
         }
         if rel.starts_with("views/")
             && let Some(suffix) = &suffix

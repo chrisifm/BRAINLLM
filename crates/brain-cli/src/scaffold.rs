@@ -198,7 +198,10 @@ pub fn add_with_options(root: &Path, kind: &str, name: &str, o: &AddOptions) -> 
                 validate_store(value)?;
                 format!("store({value})")
             } else if o.bus { format!("bus('{}')", stem) } else { format!("key('{}')", stem) };
-            (format!("channels/{stem}.jsbrain"), format!("export default {expr}\n"))
+            // `session` is the framework's own channel: the guides and the new-app views read `session.user` from a store
+            let plain = o.store.is_none() && !o.bus && !o.key;
+            let body = if stem == "session" && plain { include_str!("templates/new/channels/session.jsbrain").to_string() } else { format!("export default {expr}\n") };
+            (format!("channels/{stem}.jsbrain"), body)
         }
         "service" => (format!("services/{stem}.jsbrain"), format!("// Import this key, provide its implementation in app.brain, then use it in components.\nexport default key('{stem}')\n")),
         "server" => (format!("server/{stem}.jsbrain"), "<meta server>\n// Server-only helpers. Add functions to this object.\nexport default {}\n".into()),

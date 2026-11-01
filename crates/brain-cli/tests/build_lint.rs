@@ -141,3 +141,20 @@ fn native_sockets_use_the_declared_site_even_when_it_is_a_placeholder_for_seo() 
     assert!(!t.contains("require PUBLIC_SITE_URL"), "the value is set: {t}");
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn add_channel_session_matches_the_session_store_the_guides_use() {
+    let tmp = std::env::temp_dir().join(format!("bchansession-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    assert!(brain(&tmp, &["new", "app"]).status.success());
+    let dir = tmp.join("app");
+    std::fs::remove_file(dir.join("channels/session.jsbrain")).unwrap();
+    assert!(brain(&dir, &["add", "channel", "session"]).status.success());
+    let made = std::fs::read_to_string(dir.join("channels/session.jsbrain")).unwrap();
+    assert!(made.contains("store({ user: null })"), "{made}");
+    // any other name, and an explicit flag, keep their meaning
+    assert!(brain(&dir, &["add", "channel", "theme"]).status.success());
+    assert!(std::fs::read_to_string(dir.join("channels/theme.jsbrain")).unwrap().contains("key('theme')"));
+    let _ = std::fs::remove_dir_all(&tmp);
+}
