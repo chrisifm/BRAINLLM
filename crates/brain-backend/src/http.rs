@@ -58,6 +58,12 @@ pub(crate) fn request_reference() -> Option<String> {
     REQUEST_ID.try_with(Clone::clone).ok()
 }
 
+/// True once per process: a binary without symbols stays so, and each `backend-internal-error` already carries its location.
+fn first_unsymbolized_stack() -> bool {
+    static NOTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    !NOTED.swap(true, std::sync::atomic::Ordering::Relaxed)
+}
+
 pub struct Config {
     pub resources: Vec<Resource>,
     pub jobs: Vec<Resource>,
@@ -199,11 +205,12 @@ impl Error {
                 let mut stack=Bounded{text:String::new(),truncated:false};let _=std::fmt::write(&mut stack,format_args!("{trace}"));
                 // A stripped release binary has no symbols: its frames say nothing, so the event says that instead.
                 let useful=stack_is_symbolized(&stack.text);
+                if !useful && !first_unsymbolized_stack() {return;}
                 db::diagnostic(&json!({"schemaVersion":1,"event":"backend-internal-stack","operation":operation.as_ref().map(|o|&o.0),"resource":operation.as_ref().and_then(|o|o.1.as_ref()),"rid":rid,"location":{"file":at.file(),"line":at.line(),"column":at.column()},"stack":useful.then_some(&stack.text),"stackUnavailable":(!useful).then_some("binary has no symbols; use the location"),"truncated":stack.truncated,"queueDepth":0,"private":true,"valuesCaptured":false}));
             });
             if diagnostic.is_err() {
                 DIAGNOSTIC_BUSY.store(false, std::sync::atomic::Ordering::Release);
-                eprintln!(
+                crate::log_line!(
                     "{}",
                     json!({"schemaVersion":1,"event":"backend-diagnostic-unavailable","code":"DIAGNOSTIC_THREAD_UNAVAILABLE","stackOmitted":true,"queueDepth":0,"private":true,"valuesCaptured":false})
                 );
@@ -482,7 +489,7 @@ pub async fn router_full(
                 return Err(format!("Backend origins must be explicit http(s) origins without credentials, paths or wildcards. {message}"));
             }
             // Accepted so far and harmless (it just never matches): reported, not fatal, for one minor release.
-            eprintln!("{}", json!({"schemaVersion":1,"event":"origin-declaration-ignored","code":"B0744","message":message}));
+            crate::log_line!("{}", json!({"schemaVersion":1,"event":"origin-declaration-ignored","code":"B0744","message":message}));
         }
         let uri: axum::http::Uri = origin.parse().map_err(|_| "Invalid backend origin")?;
         if !matches!(uri.scheme_str(), Some("http" | "https"))
@@ -865,13 +872,13 @@ pub async fn serve_full(
             let result=worker.work(stop_rx).await;
             if result.is_err() {
                 failed.store(true,std::sync::atomic::Ordering::Relaxed);
-                eprintln!("{}",json!({"schemaVersion":1,"event":"webhook-worker-stopped","code":"WEBHOOK_WORKER_UNAVAILABLE","fix":"Inspect private database availability and restart the owned backend","valuesCaptured":false}));
+                crate::log_line!("{}",json!({"schemaVersion":1,"event":"webhook-worker-stopped","code":"WEBHOOK_WORKER_UNAVAILABLE","fix":"Inspect private database availability and restart the owned backend","valuesCaptured":false}));
                 let _=stop.send(true);
             }
             result
         })
     });
-    eprintln!(
+    crate::log_line!(
         "{}",
         json!({"schemaVersion":1,"event":"backend-ready","address":address,"experimental":true})
     );
@@ -889,7 +896,7 @@ pub async fn serve_full(
         tokio::select! {_=wait_shutdown()=>{},_=http_stop.changed()=>{}}
         // Readiness fails first so load balancers stop routing here, then the listener closes.
         draining.drain();
-        eprintln!("{}", json!({"schemaVersion":1,"event":"backend-draining","readyDelayMs":ready_delay.as_millis() as u64,"drainMs":drain_budget.as_millis() as u64}));
+        crate::log_line!("{}", json!({"schemaVersion":1,"event":"backend-draining","readyDelayMs":ready_delay.as_millis() as u64,"drainMs":drain_budget.as_millis() as u64}));
         let _ = signalled_tx.send(());
         tokio::time::sleep(ready_delay).await;
         socket_stop.shutdown();
@@ -905,7 +912,7 @@ pub async fn serve_full(
                 std::future::pending::<()>().await;
             }
         } => {
-            eprintln!("{}", json!({"schemaVersion":1,"event":"drain-timeout","code":"DRAIN_TIMEOUT","inFlight":edge.in_flight(),"fix":"Raise platform.shutdown.drain or shorten slow requests"}));
+            crate::log_line!("{}", json!({"schemaVersion":1,"event":"drain-timeout","code":"DRAIN_TIMEOUT","inFlight":edge.in_flight(),"fix":"Raise platform.shutdown.drain or shorten slow requests"}));
             Ok(())
         }
     };
@@ -916,7 +923,7 @@ pub async fn serve_full(
     sockets.shutdown();
     let sockets_closed = sockets.closed().await;
     if sockets_closed.is_err() {
-        eprintln!("{}", json!({"schemaVersion":1,"event":"socket-shutdown-incomplete","code":"SOCKET_SHUTDOWN_TIMEOUT","valuesCaptured":false}));
+        crate::log_line!("{}", json!({"schemaVersion":1,"event":"socket-shutdown-incomplete","code":"SOCKET_SHUTDOWN_TIMEOUT","valuesCaptured":false}));
     }
     let _ = stop_tx.send(true);
     if let Some(ref mut worker) = worker {
@@ -1026,7 +1033,7 @@ async fn response_headers(req: Request, next: Next) -> Response {
             line["dbMs"] = json!(db_ms);
             line["dbWaitMs"] = json!(wait_ms);
         }
-        eprintln!("{line}");
+        crate::log_line!("{line}");
     }
     response
 }
@@ -2542,5 +2549,14 @@ mod diagnostic_tests {
         let body: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(body["error"]["code"], "BACKEND_INTERNAL");
         assert!(!String::from_utf8_lossy(&bytes).contains("Sensitive"));
+    }
+}
+
+#[cfg(test)]
+mod stack_note_tests {
+    #[test]
+    fn the_note_about_a_binary_without_symbols_is_kept_once_per_process() {
+        assert!(super::first_unsymbolized_stack());
+        assert!(!super::first_unsymbolized_stack());
     }
 }

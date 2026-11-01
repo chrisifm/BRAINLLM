@@ -1,4 +1,11 @@
 //! Experimental backend. The compiler owns source syntax; this crate consumes only validated resource contracts.
+/// One log line on stderr in one write. The standard print macros write a formatted value piece by piece, and processes sharing the pipe
+/// (`brain start`, workers) interleave those pieces, which breaks every line parser.
+#[macro_export]
+macro_rules! log_line {
+    ($($arg:tt)*) => { $crate::db::write_line(&format!($($arg)*)) };
+}
+
 pub mod analytics;
 pub mod api_keys;
 pub mod audit;

@@ -43,5 +43,9 @@ tower = { version = "0.5.3", features = ["util"] }
 http-body-util = "0.1.5"
 
 [[test]]
+name = "log_lines"
+path = "tests/log_lines.rs"
+
+[[test]]
 name = "integration"
 path = "tests/integration.rs"

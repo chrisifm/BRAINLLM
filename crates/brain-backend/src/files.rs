@@ -638,7 +638,7 @@ pub async fn discard(pool: &PgPool, storage: &Storage, key: &str) {
         return;
     }
     if let Err(error) = sqlx::query("INSERT INTO public._brain_file_deletions(storage_key) VALUES($1) ON CONFLICT DO NOTHING").bind(key).execute(pool).await {
-        eprintln!("{}", json!({"schemaVersion":1,"event":"file-deletion-unrecorded","code":"FILE_DELETION_UNRECORDED","fix":"Inspect file storage permissions and database availability","error":crate::db::safe(error)}));
+        crate::log_line!("{}", json!({"schemaVersion":1,"event":"file-deletion-unrecorded","code":"FILE_DELETION_UNRECORDED","fix":"Inspect file storage permissions and database availability","error":crate::db::safe(error)}));
     }
 }
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -674,7 +674,7 @@ pub async fn sweep_loop(pool: PgPool, storage: Storage) {
         if let Ok(Sweep { removed, failed }) = sweep(&pool, &storage, 500).await
             && failed > 0
         {
-            eprintln!("{}", json!({"schemaVersion":1,"event":"file-deletion-failed","code":"FILE_DELETION_FAILED","removed":removed,"failed":failed,"fix":"Inspect permissions and free space of the uploads directory; rows in _brain_file_deletions retry on their own"}));
+            crate::log_line!("{}", json!({"schemaVersion":1,"event":"file-deletion-failed","code":"FILE_DELETION_FAILED","removed":removed,"failed":failed,"fix":"Inspect permissions and free space of the uploads directory; rows in _brain_file_deletions retry on their own"}));
         }
     }
 }

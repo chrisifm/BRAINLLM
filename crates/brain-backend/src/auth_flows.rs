@@ -380,7 +380,7 @@ fn database(_: String) -> Error {
     Error::Database
 }
 fn diagnostic(code: &'static str, fix: &'static str) {
-    eprintln!(
+    crate::log_line!(
         "{}",
         json!({"schemaVersion":1,"event":"auth-flow-diagnostic","private":true,"code":code,"rid":crate::http::request_reference(),"fix":fix,"valuesCaptured":false})
     );

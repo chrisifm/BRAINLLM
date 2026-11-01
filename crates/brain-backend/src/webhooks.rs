@@ -522,7 +522,7 @@ fn clock() -> Result<u64, Error> {
 #[track_caller]
 fn private_failure(error: Error) {
     let at = std::panic::Location::caller();
-    eprintln!(
+    crate::log_line!(
         "{}",
         json!({"schemaVersion":1,"event":"webhook-delivery-failed","private":true,"code":error.code(),"fix":error.fix(),"location":{"file":at.file(),"line":at.line(),"column":at.column()},"valuesCaptured":false})
     );

@@ -212,7 +212,7 @@ pub async fn connect(url: &str, boot: &Boot) -> Result<PgPool, String> {
             return Err(format!("{}; gave up after {}s over {} attempts", connect_failure(&options, &error), elapsed.as_secs(), attempt + 1));
         }
         if waits_out && attempt == 0 {
-            eprintln!("{}", serde_json::json!({"schemaVersion":1,"event":"database-connect-refused","code":"B0762","msg":connect_failure(&options, &error),"retrySeconds":boot.give_up.as_secs()}));
+            crate::log_line!("{}", serde_json::json!({"schemaVersion":1,"event":"database-connect-refused","code":"B0762","msg":connect_failure(&options, &error),"retrySeconds":boot.give_up.as_secs()}));
         }
         if !(waits_out || retryable(&error)) || elapsed >= boot.give_up {
             return Err(if retryable(&error) && !boot.give_up.is_zero() {
@@ -224,7 +224,7 @@ pub async fn connect(url: &str, boot: &Boot) -> Result<PgPool, String> {
             });
         }
         let delay = boot.delay(attempt, unit_random()).min(boot.give_up - elapsed);
-        eprintln!("{}", serde_json::json!({"schemaVersion":1,"event":"database-connect-retry","attempt":attempt + 1,"delayMs":delay.as_millis() as u64,"valuesCaptured":false}));
+        crate::log_line!("{}", serde_json::json!({"schemaVersion":1,"event":"database-connect-retry","attempt":attempt + 1,"delayMs":delay.as_millis() as u64,"valuesCaptured":false}));
         tokio::time::sleep(delay).await;
         attempt += 1;
     }

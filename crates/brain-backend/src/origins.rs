@@ -146,7 +146,7 @@ pub(crate) fn log_refusal(code: &str, phase: &str, method: &str, path: &str, ori
     if !budget() {
         return;
     }
-    eprintln!(
+    crate::log_line!(
         "{}",
         serde_json::json!({
             "schemaVersion": 1,

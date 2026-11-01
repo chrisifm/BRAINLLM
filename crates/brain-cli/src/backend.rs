@@ -812,7 +812,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let production=environment=="production";
         if operation=="migrate" && args.iter().any(|a|a=="--create-db") {
             if production {return Err("--create-db is for local development; fix: create the production database with your provider".into());}
-            if let Some(name)=brain_backend::boot::create_local_database(&url).await? {eprintln!("created database {name}");}
+            if let Some(name)=brain_backend::boot::create_local_database(&url).await? {brain_backend::log_line!("created database {name}");}
         }
         let boot=if operation=="serve" {brain_backend::boot::Boot::server(production)} else {brain_backend::boot::Boot::command(production)};
         config_phase(false);
@@ -917,8 +917,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
         });
         let config=brain_backend::Config{api_keys:crate::api_key_config::load(&root)?,sockets:sockets.native_config()?,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,resources,jobs,uploads:root.join(".brain/uploads"),origins:sockets.http_origins,production:environment=="production"};
         brain_backend::analytics::configure(analytics_settings(&root)?)?;
-        eprintln!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
-        if let Some((msg,fix))=anonymous_catalog_warning(args,&environment){eprintln!("{}",json!({"schemaVersion":1,"event":"backend-warning","code":"B0771","msg":msg,"fix":fix}));}
+        brain_backend::log_line!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
+        if let Some((msg,fix))=anonymous_catalog_warning(args,&environment){brain_backend::log_line!("{}",json!({"schemaVersion":1,"event":"backend-warning","code":"B0771","msg":msg,"fix":fix}));}
         let mut platform=crate::platform_config::load(&root,&config.resources,&config.roles)?;
         platform.routes=crate::route_executor::contracts(&root,&environment)?;
         platform.handlers=crate::route_executor::load(&root,&environment,&platform.routes)?;
@@ -1349,7 +1349,7 @@ fn liveness_findings(rows: &[Value], schedules: &[String], schedulers: i64) -> V
         } else if row["workers"].as_i64().unwrap_or(0) == 0 {
             let backlog = if pending > 0 { format!("{pending} job(s) due, the oldest waiting {oldest} s") } else { "nothing due yet, but new jobs will wait".to_string() };
             out.push(("B0765", format!("server/jobs/{name}/"),
-                format!("queue `{name}` has no running worker: {backlog}; `brain backend serve` and `brain start` do not process queues"),
+                format!("queue `{name}` has no worker reporting to this database in the last 45 s: {backlog}; a worker in another process counts once it reports here, and one on another database or environment never does; `brain backend serve` and `brain start` do not process queues"),
                 format!("run `brain jobs work {name}` as its own process, or `brain backend serve --with-workers` for a small deployment")));
         }
     }
@@ -1404,7 +1404,7 @@ pub(crate) fn warn_queues_in_background(root: &Path, environment: &str) {
             findings = queue_findings(&root, &environment);
         }
         for (code, file, message, fix) in findings {
-            eprintln!("{}", json!({"schemaVersion":1,"event":"queue-warning","code":code,"file":file,"msg":message,"fix":fix,"valuesCaptured":false}));
+            brain_backend::log_line!("{}", json!({"schemaVersion":1,"event":"queue-warning","code":code,"file":file,"msg":message,"fix":fix,"valuesCaptured":false}));
         }
     });
 }
@@ -1451,9 +1451,9 @@ async fn monitor_queues(queue: brain_backend::jobs::Queue, queues: Vec<String>, 
                 }
                 if first {
                     let list: Vec<Value> = rows.iter().map(|row| json!({"queue":row["queue"],"pending":row["pending"],"oldestWaitSeconds":row["oldestWaitSeconds"],"workers":row["workers"]})).collect();
-                    eprintln!("{}", json!({"schemaVersion":1,"event":"queue-workers","queues":list,"schedules":schedules,"schedulers":schedulers,"valuesCaptured":false}));
+                    brain_backend::log_line!("{}", json!({"schemaVersion":1,"event":"queue-workers","queues":list,"schedules":schedules,"schedulers":schedulers,"valuesCaptured":false}));
                     for (code, file, message, fix) in liveness_findings(&rows, &schedules, schedulers) {
-                        eprintln!("{}", json!({"schemaVersion":1,"event":"queue-warning","code":code,"file":file,"msg":message,"fix":fix,"valuesCaptured":false}));
+                        brain_backend::log_line!("{}", json!({"schemaVersion":1,"event":"queue-warning","code":code,"file":file,"msg":message,"fix":fix,"valuesCaptured":false}));
                     }
                     first = false;
                 }
@@ -1461,13 +1461,13 @@ async fn monitor_queues(queue: brain_backend::jobs::Queue, queues: Vec<String>, 
                     let (pending, oldest, workers) = (row["pending"].as_i64().unwrap_or(0), row["oldestWaitSeconds"].as_i64().unwrap_or(0), row["workers"].as_i64().unwrap_or(0));
                     if pending > 0 && (workers == 0 || oldest >= BEHIND_SECONDS) {
                         let name = row["queue"].as_str().unwrap_or("");
-                        eprintln!("{}", json!({"schemaVersion":1,"event":"queue-stalled","code":"B0765","queue":name,"pending":pending,"oldestWaitSeconds":oldest,"workers":workers,"fix":format!("run `brain jobs work {name}`; `brain jobs stats` shows every queue"),"valuesCaptured":false}));
+                        brain_backend::log_line!("{}", json!({"schemaVersion":1,"event":"queue-stalled","code":"B0765","queue":name,"pending":pending,"oldestWaitSeconds":oldest,"workers":workers,"fix":format!("run `brain jobs work {name}`; `brain jobs stats` shows every queue"),"valuesCaptured":false}));
                     }
                 }
             }
             Err(_) if !unknown => {
                 unknown = true;
-                eprintln!("{}", json!({"schemaVersion":1,"event":"queue-liveness-unknown","code":"B0766","fix":"Postgres is not answering: stored jobs wait, and this check resumes when it returns","valuesCaptured":false}));
+                brain_backend::log_line!("{}", json!({"schemaVersion":1,"event":"queue-liveness-unknown","code":"B0766","fix":"Postgres is not answering: stored jobs wait, and this check resumes when it returns","valuesCaptured":false}));
             }
             Err(_) => {}
         }
@@ -1503,10 +1503,10 @@ fn own_workers(root: &Path, environment: &str, backend: &str, queues: &[String],
                         if started.elapsed().as_secs() > 60 { backoff = 1; }
                         let code = status.ok().and_then(|s| s.code());
                         if !restart_worker(code) {
-                            eprintln!("{}", json!({"schemaVersion":1,"event":"worker-stopped","command":command,"code":code,"reason":"its configuration stops it and a restart cannot fix that; the reason is logged above","fix":"correct the setting and restart the server"}));
+                            brain_backend::log_line!("{}", json!({"schemaVersion":1,"event":"worker-stopped","command":command,"code":code,"reason":"its configuration stops it and a restart cannot fix that; the reason is logged above","fix":"correct the setting and restart the server"}));
                             return;
                         }
-                        eprintln!("{}", json!({"schemaVersion":1,"event":"worker-exited","command":command,"code":code,"restartSeconds":backoff,"valuesCaptured":false}));
+                        brain_backend::log_line!("{}", json!({"schemaVersion":1,"event":"worker-exited","command":command,"code":code,"restartSeconds":backoff,"valuesCaptured":false}));
                     }
                     _ = recv.changed() => {
                         #[cfg(unix)]
@@ -1650,7 +1650,7 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
                     }
                 } else {
                     let (send, recv) = tokio::sync::watch::channel(false);
-                    eprintln!("{}", json!({"schemaVersion":1,"event":"cron-ready","schedules":schedules.len()}));
+                    brain_backend::log_line!("{}", json!({"schemaVersion":1,"event":"cron-ready","schedules":schedules.len()}));
                     let runner = brain_backend::schedules::run(queue.clone(), schedules, recv, print);
                     tokio::pin!(runner);
                     tokio::select! {
@@ -1688,7 +1688,7 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
                 let module = module.as_ref().unwrap().1.clone();
                 let contract = job_contract.clone().unwrap();
                 let (send, recv) = tokio::sync::watch::channel(false);
-                eprintln!(
+                brain_backend::log_line!(
                     "{}",
                     json!({"schemaVersion":1,"event":"worker-ready","queue":name,"concurrency":n})
                 );
@@ -1880,7 +1880,7 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
                                 trace = json!({"schemaVersion":1,"location":group["location"],"frames":group["frames"],"causes":causes,"truncated":truncated});
                                 break;
                             }
-                            eprintln!(
+                            brain_backend::log_line!(
                                 "{}",
                                 json!({"schemaVersion":1,"event":"job-failed","jobId":job_id,"queue":queue_name,
                             "trace":trace,"stderrBytes":stderr_bytes,"stderrTruncated":stderr_bytes>65536})
@@ -2026,6 +2026,7 @@ mod tests {
         let stuck = liveness_findings(&[row("mail", 78, 0, true)], &[], 0);
         assert_eq!(stuck[0].0, "B0765");
         assert!(stuck[0].2.contains("`mail`") && stuck[0].2.contains("78 job(s)") && stuck[0].2.contains("90 s") && stuck[0].3.contains("brain jobs work mail"), "{stuck:?}");
+        assert!(stuck[0].2.contains("reporting to this database") && stuck[0].2.contains("another process"), "the check reads the database, not the machine: {stuck:?}");
         assert_eq!(codes(&[row("idle", 0, 0, true)], &[], 0), ["B0765"], "a queue with nothing due still has no worker");
         assert_eq!(codes(&[row("old", 3, 0, false)], &[], 0), ["B0768"]);
         let daily = ["daily".to_string()];

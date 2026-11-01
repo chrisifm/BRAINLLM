@@ -156,7 +156,7 @@ impl BeforeHooks for Hooks {
                     Err(_)=> (Err(HookFailure::Unavailable),false),
                 };
                 if reusable {if let Ok(mut slots)=pool.lock(){slots.push(sidecar)}} else {drop(sidecar);if let Ok(sidecar)=spawn(&root,&vars,production){if let Ok(mut slots)=pool.lock(){slots.push(sidecar)}}}
-                if result.is_err() {eprintln!("{}",json!({"schemaVersion":1,"event":"before-hook-failed","code":"BEFORE_HOOK_FAILED","fix":"Inspect the project-owned before-hook and its bounded input/output contract","rid":rid,"location":{"file":format!("server/hooks/{name}.jsbrain"),"line":Value::Null,"precision":"module-only"},"valuesCaptured":false}));}
+                if result.is_err() {brain_backend::log_line!("{}",json!({"schemaVersion":1,"event":"before-hook-failed","code":"BEFORE_HOOK_FAILED","fix":"Inspect the project-owned before-hook and its bounded input/output contract","rid":rid,"location":{"file":format!("server/hooks/{name}.jsbrain"),"line":Value::Null,"precision":"module-only"},"valuesCaptured":false}));}
                 result
             }).await.map_err(|_|HookFailure::Unavailable)?
         })

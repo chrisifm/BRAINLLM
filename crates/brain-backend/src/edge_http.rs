@@ -176,7 +176,7 @@ pub(super) async fn edge(State(state): State<EdgeState>, mut req: Request, next:
         shared_bucket = peer.is_loopback() && !req.headers().contains_key("x-forwarded-for");
         let client = resolve_client(peer, req.headers(), &state.trusted);
         if forwarding_unconfigured(peer, req.headers(), &state.trusted) && !TRUST_WARNED.swap(true, Ordering::Relaxed) {
-            eprintln!(
+            crate::log_line!(
                 "{}",
                 serde_json::json!({"schemaVersion":1,"event":"trust-proxy-not-configured","message":"a local proxy forwards client addresses that are ignored, so all clients share one rate-limit bucket","fix":"set platform.trustProxy to ['127.0.0.1', '::1']","valuesCaptured":false})
             );
@@ -187,7 +187,7 @@ pub(super) async fn edge(State(state): State<EdgeState>, mut req: Request, next:
     let is_probe = probe(req.uri().path());
     let mut response = admit(&state, is_probe, req, next).await;
     if shared_bucket && response.status() == StatusCode::TOO_MANY_REQUESTS && !SHARED_BUCKET_WARNED.swap(true, Ordering::Relaxed) {
-        eprintln!(
+        crate::log_line!(
             "{}",
             serde_json::json!({"schemaVersion":1,"event":"shared-rate-limit-bucket","message":"a local caller reached the rate limit without naming its client, so everyone it serves shares one bucket and pages can fail for all of them","fix":"pass the request context to server-side calls so the visitor's address travels with them","valuesCaptured":false})
         );

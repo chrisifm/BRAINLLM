@@ -69,7 +69,7 @@ process; until one runs, jobs wait in Postgres. To make that visible:
 
 | Where | What it says |
 |---|---|
-| `brain doctor` | B0765 per queue with no live worker, B0767 for schedules with no scheduler, B0768 for active jobs in a queue with no declaration. Warnings: a queue may be worked on another machine |
+| `brain doctor` | B0765 per queue with no worker reporting to this database in the last 45 s (a worker in another process counts; one on another database does not, and `brain doctor` checks the development database), B0767 for schedules with no scheduler, B0768 for active jobs in a queue with no declaration. Warnings: a queue may be worked on another machine |
 | `brain backend serve` | a `queue-workers` line at startup listing each queue, then `queue-stalled` every 60 s (`BRAIN_QUEUE_CHECK_SECONDS`, 5 to 3600) for a queue with due jobs and no worker, or with a job waiting 5 minutes or more. Counts and ages only, never a payload value |
 | `brain start`, `brain run` | the same warnings once at startup, on a background thread. The interactive `brain run` board omits them; `brain doctor` covers that case |
 | `brain jobs stats` | `pending`, `oldestWaitSeconds`, `workers`, `declared` |

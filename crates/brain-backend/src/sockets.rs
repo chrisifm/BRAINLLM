@@ -332,7 +332,7 @@ pub(super) async fn upgrade(
         .max_frame_size(FRAME)
         .max_message_size(FRAME)
         .on_failed_upgrade(move |_| {
-            eprintln!("{}", json!({"schemaVersion":1,"event":"socket-upgrade-failed","code":"SOCKET_UPGRADE_FAILED","rid":failed_rid,"location":{"file":file!(),"line":line!()},"fix":"Check the native session and allowed origin, reconnect with bounded backoff and resynchronize HTTP state","private":true,"valuesCaptured":false}));
+            crate::log_line!("{}", json!({"schemaVersion":1,"event":"socket-upgrade-failed","code":"SOCKET_UPGRADE_FAILED","rid":failed_rid,"location":{"file":file!(),"line":line!()},"fix":"Check the native session and allowed origin, reconnect with bounded backoff and resynchronize HTTP state","private":true,"valuesCaptured":false}));
         })
         .on_upgrade(move |socket| {
             super::REQUEST_ID.scope(rid, async move {

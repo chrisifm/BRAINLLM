@@ -203,7 +203,7 @@ async fn serve(app: App, state: Arc<State>, route: Arc<Route>, req: Request) -> 
         match verifier.verify(header, &raw, unix_now()) {
             Ok(timestamp) => verified = json!({"header": verifier.header, "timestamp": timestamp}),
             Err(rejection) => {
-                eprintln!("{}", json!({"schemaVersion":1,"event":"route-signature-rejected","route":route.name,"reason":format!("{rejection:?}").to_lowercase(),"rid":rid,"valuesCaptured":false}));
+                crate::log_line!("{}", json!({"schemaVersion":1,"event":"route-signature-rejected","route":route.name,"reason":format!("{rejection:?}").to_lowercase(),"rid":rid,"valuesCaptured":false}));
                 return Err(match rejection {
                     Rejection::Expired => error(StatusCode::UNAUTHORIZED, "SIGNATURE_EXPIRED", "The signature timestamp is outside the accepted tolerance; resend a fresh event"),
                     _ => error(StatusCode::UNAUTHORIZED, "SIGNATURE_INVALID", "Sign the exact raw body with the shared secret in the declared header"),

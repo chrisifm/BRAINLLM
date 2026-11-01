@@ -572,7 +572,7 @@ async fn write_events(pool: PgPool, mut receiver: mpsc::Receiver<Event>) {
             .execute(&pool)
             .await;
         if result.is_err() {
-            eprintln!(
+            crate::log_line!(
                 "{}",
                 json!({"event":"api-key-trace-write-failed","dropped":batch.len(),"private":true,"valuesCaptured":false})
             );

@@ -95,7 +95,8 @@ impl Log {
             self.rotate();
         }
         if let Some(f) = &mut self.file {
-            let _ = writeln!(f, "{s}");
+            // One write per line: another process appending to the same file cannot split it.
+            let _ = f.write_all(format!("{s}\n").as_bytes());
         }
         if self.tty {
             eprintln!("{s}");

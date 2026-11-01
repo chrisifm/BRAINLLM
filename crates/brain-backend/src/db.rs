@@ -841,6 +841,16 @@ pub fn safe(error: sqlx::Error) -> String {
     )
 }
 
+/// Writes `line` and its newline to stderr in a single call. The operating system keeps a pipe write atomic up to `PIPE_BUF`
+/// (512 bytes on macOS, 4096 on Linux); a longer line is still one call, but only a file or a terminal keeps it whole.
+pub fn write_line(line: &str) {
+    use std::io::Write;
+    let mut text = String::with_capacity(line.len() + 1);
+    text.push_str(line);
+    text.push('\n');
+    let _ = std::io::stderr().lock().write_all(text.as_bytes());
+}
+
 /// SQLSTATEs that say "not now" rather than "this request is wrong": deadlines, lock and serialization conflicts,
 /// exhausted connections and a server going away. The transaction rolled back, so a retry is safe.
 pub(crate) fn retryable(state: &str) -> bool {
@@ -875,7 +885,7 @@ pub(crate) fn diagnostic(event: &Value) {
         }
     }
     let event = &named;
-    eprintln!("{event}");
+    crate::log_line!("{event}");
     let kept = DIAGNOSTICS.lock().unwrap_or_else(|e| e.into_inner());
     let Some(file) = kept.as_ref() else { return };
     if std::fs::metadata(file).is_ok_and(|m| m.len() > DIAGNOSTICS_MAX_BYTES) {

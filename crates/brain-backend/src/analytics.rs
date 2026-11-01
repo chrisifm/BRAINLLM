@@ -510,7 +510,7 @@ pub async fn retention_loop(pool: PgPool, days: u32) {
         if locked.unwrap_or(false) {
             if let Ok(p) = purge(&pool, days).await {
                 if p.events + p.sessions + p.visitors > 0 {
-                    eprintln!("{}", json!({"schemaVersion":1,"event":"analytics-retention","days":days,"purged":p}));
+                    crate::log_line!("{}", json!({"schemaVersion":1,"event":"analytics-retention","days":days,"purged":p}));
                 }
             }
             let _ = sqlx::query("SELECT pg_advisory_unlock(728196411)").execute(&pool).await;
