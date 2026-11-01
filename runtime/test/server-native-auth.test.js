@@ -55,6 +55,11 @@ test('native mode never accepts a valid legacy signed session and cannot establi
   const who=await rpc('who',legacy);assert.deepEqual(await who.json(),{user:null,sessionUser:null})
   const guarded=await fetch(base+'/guarded',{headers:{cookie:legacy},redirect:'manual'});assert.equal(guarded.status,403)
   const set=await rpc('set');assert.equal(set.status,409);assert.equal(set.headers.get('set-cookie'),null)
+  const environment=process.env.NODE_ENV;process.env.NODE_ENV='production'
+  try {
+    const hidden=await rpc('set');assert.equal(hidden.status,409)
+    assert.doesNotMatch(await hidden.text(),/BRAIN_BACKEND|ctx\.|setSecret/,'a visitor never reads operator configuration')
+  } finally {if (environment===undefined) delete process.env.NODE_ENV;else process.env.NODE_ENV=environment}
 })
 test('BRAIN_BACKEND_SESSION=app keeps the signed session beside the native proxy; nothing else opens it', async () => {
   assert.throws(() => createServer({dist,backendURL,backendSession:'both',secret:'synthetic-own-session-secret'}),/BRAIN_BACKEND_SESSION must be app/)

@@ -215,7 +215,7 @@ pub fn load(root: &Path, environment: &str, routes: &[Route]) -> Result<Option<H
     for (name, compiled) in &modules {
         pool[0]
             .probe(&brain_serve::load::file_url(&compiled.module), "default")
-            .map_err(|_| format!("{ROUTES}/{name}/handler.jsbrain: export default must be a callable handler(ctx)"))?;
+            .map_err(|(_, detail)| format!("{ROUTES}/{name}/handler.jsbrain: export default must be a callable handler(ctx): {}", brain_serve::load::failure_reason(&detail)))?;
     }
     Ok(Some(Arc::new(Executor {
         root: root.to_path_buf(),
@@ -292,6 +292,21 @@ mod tests {
         assert!(matches!(rejection(422, r#"{"errors":{"total":"must be positive"}}"#), Some(RouteFailure::Status(422, body)) if body["error"]["fields"]["total"] == "must be positive"));
         assert!(matches!(rejection(409, r#"{"error":"private detail"}"#), Some(RouteFailure::Status(409, body)) if !body.to_string().contains("private")));
         assert!(rejection(500, "{}").is_none());
+    }
+
+    #[test]
+    fn a_failing_import_is_named_at_startup() {
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("brain-route-import-{}-{stamp}", std::process::id()));
+        crate::scaffold::new_app(&root).unwrap();
+        let dir = root.join(ROUTES).join("broken");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("route.jsbrain"), "<meta server>\nexport default { path: '/broken', auth: 'public' }\n").unwrap();
+        fs::write(dir.join("handler.jsbrain"), "<meta server>\nimport missing from 'brain-absent-package'\nexport default function handle() { return missing }\n").unwrap();
+        let routes = contracts(&root, "development").unwrap();
+        let failure = load(&root, "development", &routes).err().expect("a missing dependency stops startup");
+        let _ = fs::remove_dir_all(&root);
+        assert!(failure.contains("brain-absent-package"), "{failure}");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

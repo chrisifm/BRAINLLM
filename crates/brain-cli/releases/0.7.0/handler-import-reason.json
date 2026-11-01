@@ -1,0 +1,9 @@
+{
+  "id": "handler-import-reason",
+  "kind": "fix",
+  "title": "Startup errors name the import that failed",
+  "why": "A missing dependency reported only that the export must be callable, pointing at a valid handler.",
+  "changelog": [
+    "names the import failure"
+  ]
+}

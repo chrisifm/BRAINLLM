@@ -248,7 +248,13 @@ function bucketClient(target, key, bucket) {
     async remove(id) { await send('DELETE', idPath(id), undefined, 10000); return null },
   })
 }
-export function nativeAuthBridge(raw, refused, serviceKey) {
+export function nativeAuthBridge(raw, refused, serviceKey, report) {
+  // How to fix the configuration is for the operator: a visitor of a production app reads a generic message.
+  const configuration = (status, detail, rid, shown = 'This service is not available right now') => {
+    if (process.env.NODE_ENV !== 'production') return new HttpError(status, detail)
+    report?.('error', 'native backend configuration', { rid, fix: detail })
+    return new HttpError(status, shown)
+  }
   if (!raw) return null
   // The visitor's cookies only travel for a request from the site itself; the caller's log gets the reason (B0742).
   const bridgeOrigin = (incoming, rid, message) => {
@@ -730,12 +736,12 @@ export function nativeAuthBridge(raw, refused, serviceKey) {
     resource: name => resource(incoming, response, rid, name),
     // A server-only resource (`api: false`) from trusted server code, with BRAIN_SERVICE_API_KEY
     service: name => {
-      if (!serviceKey) throw new HttpError(503, 'ctx.backend.service needs BRAIN_SERVICE_API_KEY: create an API key with a scope naming the resource')
+      if (!serviceKey) throw configuration(503, 'ctx.backend.service needs BRAIN_SERVICE_API_KEY: create an API key with a scope naming the resource')
       return resource(incoming, response, rid, name, serviceKey)
     },
     // A declared file bucket from trusted server code, with BRAIN_SERVICE_API_KEY and its files.<bucket> scope
     files: bucket => {
-      if (!serviceKey) throw new HttpError(503, 'ctx.backend.files needs BRAIN_SERVICE_API_KEY: create an API key with a files.<bucket> scope')
+      if (!serviceKey) throw configuration(503, 'ctx.backend.files needs BRAIN_SERVICE_API_KEY: create an API key with a files.<bucket> scope')
       return bucketClient(target, serviceKey, bucket)
     },
     slugRedirect: (name, slug) => resource(incoming, response, rid, name).slugRedirect(slug),
@@ -762,7 +768,7 @@ export function nativeAuthBridge(raw, refused, serviceKey) {
     session(req, res, rid) {
       return {
         user: req.$nativeUser,
-        set() { throw new HttpError(409, 'With BRAIN_BACKEND_URL the backend owns the session: sign in with ctx.backend.login(credentials), or set BRAIN_BACKEND_SESSION=app so this app keeps its own signed session, and keep a server-only value with ctx.session.setSecret(value)') },
+        set() { throw configuration(409, 'With BRAIN_BACKEND_URL the backend owns the session: sign in with ctx.backend.login(credentials), or set BRAIN_BACKEND_SESSION=app so this app keeps its own signed session, and keep a server-only value with ctx.session.setSecret(value)', rid, 'Sign-in is not available right now') },
         clear() {
           if (req.$nativeLoginStarted) throw new HttpError(409,'Use a separate server request to sign out after signing in')
           if (req.method !== 'POST' || res.headersSent) throw new HttpError(403, 'B0742: Sign out through a same-origin POST request')
@@ -788,7 +794,7 @@ export function createServer(o = {}) {
   // ctx.env: what the supervisor passed, read-only; the service key stays with ctx.backend.service
   const { BRAIN_SERVICE_API_KEY: serviceKey, BRAIN_JOBS_API_KEY: _jobs, BRAIN_JOBS_SYSTEM_KEY: _jobsSystem, BRAIN_ROUTES_API_KEY: _routes, BRAIN_ROUTES_SYSTEM_KEY: _routesSystem, ...visibleEnv } = o.env || ENV
   const env = Object.freeze(visibleEnv)
-  const native = nativeAuthBridge(o.backendURL ?? env.BRAIN_BACKEND_URL, (...why) => originRefused(...why), serviceKey)
+  const native = nativeAuthBridge(o.backendURL ?? env.BRAIN_BACKEND_URL, (...why) => originRefused(...why), serviceKey, (...entry) => log(...entry))
   // Using the native backend does not have to mean it owns the visitor's session: `app` keeps the signed cookie.
   const backendSession = o.backendSession ?? env.BRAIN_BACKEND_SESSION
   if (backendSession && backendSession !== 'app') throw Error("BRAIN_BACKEND_SESSION must be app, or unset for the backend's own session")

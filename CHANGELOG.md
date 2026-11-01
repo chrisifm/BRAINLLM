@@ -11,6 +11,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [0.7.0] - 2026-10-31
 
+- In production `ctx.session.set` under a native backend answers visitors with a generic message; the configuration detail
+  goes to the log.
+- A route handler or before-hook that fails at startup names the import failure instead of only asking for a callable export.
 - A native socket no longer loses its final bytes when the backend closes first: the bridge used to drop up to 64 KB still
   queued for a slow browser.
 - Guides say which prohibitions no diagnostic enforces ("not machine-checked"), and a text color using `color-mix()` is described as judged by its contrast, not forbidden

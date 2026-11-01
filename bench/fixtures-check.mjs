@@ -7,7 +7,7 @@ import { join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const BRAIN = process.argv[2] ?? join(ROOT, 'target/debug/brain')
+const BRAIN = process.argv[2] ?? process.env.BRAIN_BIN ?? join(ROOT, 'target/debug/brain')
 const run = (p) => { try { return execFileSync(BRAIN, ['check', '--json', p], { cwd: join(ROOT, 'examples') }).toString() } catch (e) { if (!e.stdout) throw e; return e.stdout.toString() } }
 const got = JSON.parse(run('invalid') || '[]')
 const files = readdirSync(join(ROOT, 'examples/invalid'), { recursive: true })

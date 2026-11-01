@@ -783,6 +783,12 @@ pub(crate) fn unquote(s: &str) -> String {
 }
 
 /// `file:///abs/path?v=<mtime>`: Node caches by URL, so a change forces the module to reload.
+/// The first line of a failed import or call (a JSON-encoded stack), for a startup error the operator reads.
+pub fn failure_reason(detail: &str) -> String {
+    let text = serde_json::from_str::<String>(detail).unwrap_or_else(|_| detail.to_string());
+    text.lines().next().unwrap_or_default().trim().chars().take(300).collect()
+}
+
 pub fn file_url(p: &Path) -> String {
     let v = std::fs::metadata(p)
         .and_then(|m| m.modified())

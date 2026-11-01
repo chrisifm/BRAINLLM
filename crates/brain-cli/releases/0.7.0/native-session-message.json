@@ -1,0 +1,9 @@
+{
+  "id": "native-session-message",
+  "kind": "fix",
+  "title": "Visitors no longer read session configuration details",
+  "why": "The 409 from ctx.session.set reached the login form with the variable names that fix it.",
+  "changelog": [
+    "answers visitors with a generic message"
+  ]
+}

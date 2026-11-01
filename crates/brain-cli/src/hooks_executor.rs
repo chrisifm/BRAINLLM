@@ -91,7 +91,7 @@ pub fn load(
         pool.push(spawn(root, &vars, production)?);
     }
     for compiled in modules.values() {
-        pool[0].probe(&brain_serve::load::file_url(&compiled.module),"default").map_err(|_|"A before-hook could not be imported as a callable default export within its private execution budget".to_string())?;
+        pool[0].probe(&brain_serve::load::file_url(&compiled.module),"default").map_err(|(_,detail)|format!("A before-hook could not be imported as a callable default export within its private execution budget: {}",brain_serve::load::failure_reason(&detail)))?;
     }
     Ok(Some(Arc::new(Hooks {
         root: root.to_path_buf(),
