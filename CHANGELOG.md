@@ -11,6 +11,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [0.7.0] - 2026-10-31
 
+- A native socket no longer loses its final bytes when the backend closes first: the bridge used to drop up to 64 KB still
+  queued for a slow browser.
 - Guides say which prohibitions no diagnostic enforces ("not machine-checked"), and a text color using `color-mix()` is described as judged by its contrast, not forbidden
 - `brain seo audit` warns B1855 on a redirect by meta refresh, which answers 200 with the old URL; a refresh that only reloads the page is not reported
 - `brain doctor` warns when the app targets a version older than the installed compiler and names the `brain upgrade` command to run; it never fails the run

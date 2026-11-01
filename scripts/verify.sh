@@ -5,6 +5,8 @@ cd "$(dirname "$0")/.."
 
 # Fixtures invoke target/debug/brain; cargo test alone does not refresh that binary.
 cargo build --locked -p brain-cli
+# Suites that run the compiler must find it wherever CARGO_TARGET_DIR puts it, or they skip silently.
+export BRAIN_BIN="${BRAIN_BIN:-$(cd "${CARGO_TARGET_DIR:-target}" && pwd)/debug/brain}"
 # This real-browser lifecycle check runs in its own test process so unrelated unit subprocesses cannot compete
 # with Chrome startup. The workspace pass excludes only the check already required immediately above it.
 cargo test --locked -p brain-cli --bin brain browser::tests::comparison_closes_only_its_temporary_tab_on_success_and_evaluation_failure -- --exact

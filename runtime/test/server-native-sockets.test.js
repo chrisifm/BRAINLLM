@@ -271,6 +271,23 @@ test('normal upstream EOF flushes the final queued TCP bytes before both sides c
   await until(()=>app.backendSockets.size===0)
 })
 
+test('upstream EOF never discards bytes still queued for a slow browser',{timeout:10000},async t=>{
+  let source
+  const app=await fixture(t,{accept(request,socket){
+    source=socket
+    const digest=createHash('sha1').update(request.headers['sec-websocket-key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64')
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${digest}\r\nSec-WebSocket-Protocol: brain.v1\r\n\r\n`)
+  }})
+  const client=await app.open({streaming:true});assert.equal(client.status,101)
+  client.socket.pause()
+  const target=4*1024*1024
+  source.end(Buffer.alloc(target,122))
+  // Slower than the writer: the bridge still holds queued bytes at the moment its upstream closes.
+  const consume=setInterval(()=>{client.socket.read(16384)??client.socket.read()},1)
+  try {await until(client.closed,8000)} finally {clearInterval(consume)}
+  assert.equal(client.payloadBytes(),target)
+})
+
 test('native sockets are disabled by default and HTTP health remains available',{timeout:8000},async t=>{
   const app=await fixture(t,{nativeSockets:undefined})
   assert.equal(app.frontend.listenerCount('upgrade'),0)

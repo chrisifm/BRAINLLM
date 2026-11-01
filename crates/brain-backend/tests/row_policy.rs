@@ -240,7 +240,8 @@ async fn writes_never_return_a_row_their_author_may_not_read() {
     let (status, conflict) = call(&f.http, "POST", "/api/jobs", Some(&f.stranger), Some(json!({"shop":f.shop,"title":"Hidden draft","status":"pending","pay":1}))).await;
     assert_eq!(status, 409, "{conflict}");
     assert_eq!(conflict["error"]["fields"], json!({"title":"Already used"}));
-    assert!(!conflict.to_string().contains(&f.draft) && !conflict.to_string().contains("900"), "{conflict}");
+    // Only the error body: the random request id may legitimately contain any digits.
+    assert!(!conflict["error"].to_string().contains(&f.draft) && !conflict["error"].to_string().contains("900"), "{conflict}");
     // A writer whose new row stays hidden receives the id and no data.
     let (status, created) = call(&f.http, "POST", "/api/jobs", Some(&f.stranger), Some(json!({"shop":f.shop,"title":"Secret plan","status":"pending","pay":7}))).await;
     assert_eq!(status, 200);

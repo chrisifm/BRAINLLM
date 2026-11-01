@@ -129,7 +129,8 @@ export function installNativeSockets(server, {target, base='/', cookie, client, 
         if (done) { socket.destroy(); return }
         upstream=socket
         socket.on('error',()=>finish('NATIVE_SOCKET_UPSTREAM_ERROR'))
-        socket.once('close',()=>finish())
+        // After a clean EOF the browser may still hold queued bytes: its own finish (or the bounded close timer) ends the tunnel.
+        socket.once('close',()=>{if (!socket.readableEnded || browser.writableFinished) finish()})
         const expected=createHash('sha1').update(key+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64')
         if (response.statusCode !== 101 || !unique(response.rawHeaders,new Set(['upgrade','sec-websocket-accept','sec-websocket-protocol'])) || response.headers.upgrade?.toLowerCase() !== 'websocket' || !connectionUpgrade(response.headers.connection) || response.headers['sec-websocket-accept'] !== expected || response.headers['sec-websocket-protocol'] !== PROTOCOL || response.headers['sec-websocket-extensions'] || buffered.length>LIMITS.upstreamHead) return finish('NATIVE_SOCKET_BAD_UPSTREAM_HANDSHAKE',502)
         clearTimeout(handshake)

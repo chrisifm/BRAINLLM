@@ -19,6 +19,7 @@ async function harness() {
     location: { pathname: '/app/checkout', href: 'https://app.test/app/checkout?token=page-secret#private' },
     Date: { now: () => 123456 },
     ov: Promise.resolve(), O: null,
+    traceIds: { session: 'session-1', tab: 'tab-1' }, traceFailed: () => 'failed-rid',
     __errorModule: { capture: options => captureOptions.push(options), sub: { add: callback => callbacks.add(callback) } },
     __socket: { readyState: 1, send: text => sent.push(JSON.parse(text)) },
     setTimeout: (callback, delay) => { assert.equal(delay, 300); timers.set(++timerId, callback); return timerId },
@@ -66,6 +67,9 @@ test('real browser relay preserves structured runtime traces and sends only the 
   await h.flush()
   assert.equal(h.sent.length, 1)
   const event = h.sent[0]
+  assert.equal(event.session, 'session-1')
+  assert.equal(event.tab, 'tab-1')
+  assert.equal(event.rid, undefined, 'only an RPC failure carries the failed request id')
   for (const field of ['location', 'generatedLocation', 'frames', 'causes', 'truncated', 'mapping', 'brainStack', 'crumbs']) assert.deepEqual(event[field], record[field], `${field} survives runtime → WebSocket`)
   assert.deepEqual(event.componentChain, ['Checkout', 'App'])
   assert.equal(event.location.column, null, 'source column precision is not invented by the relay')

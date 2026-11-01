@@ -1,0 +1,9 @@
+{
+  "id": "native-socket-final-bytes",
+  "kind": "fix",
+  "title": "Native sockets keep their final bytes when the backend closes first",
+  "why": "The bridge closed the browser connection as soon as the backend closed, dropping up to 64 KB still queued for a slow browser.",
+  "changelog": [
+    "no longer loses its final bytes"
+  ]
+}
