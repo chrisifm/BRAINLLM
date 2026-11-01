@@ -1,6 +1,12 @@
 //! brain-serve: dev HTTP/HMR plus an opt-in opaque native socket tunnel.
 //! Native tunnels use one owned Tokio I/O worker; compiler and ordinary HTTP lifecycle remain separate.
 
+// Every stderr line of this crate is one write (`brain_lex::write_stderr_line`); this shadows the standard macro.
+macro_rules! eprintln {
+    () => { brain_lex::write_stderr_line("") };
+    ($($arg:tt)*) => { brain_lex::write_stderr_line(&format!($($arg)*)) };
+}
+
 pub(crate) mod http;
 mod native_socket_proxy;
 pub use native_socket_proxy::{NativeSocketProxy, SocketProxyDiagnostic, SocketProxyStats};

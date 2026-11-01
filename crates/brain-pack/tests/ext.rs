@@ -8,7 +8,8 @@ fn app() -> PathBuf {
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(d.join("views")).unwrap();
     std::fs::write(d.join("brain.json"), "{\"name\":\"x\",\"ext\":\"brain\"}").unwrap();
-    std::fs::write(d.join("tokens.cssbrain"), ":root{--fg:#111}").unwrap();
+    let tokens: String = (0..600).map(|i| format!("--long-token-name-{i}:#{i:06x};")).collect();
+    std::fs::write(d.join("tokens.cssbrain"), format!(":root{{{tokens}}}")).unwrap();
     std::fs::write(d.join("app.brain"), "<html lang=\"en\"><head><meta charset=\"utf-8\"><title>App</title></head><body><slot /></body></html>").unwrap();
     std::fs::write(d.join("views/home.brain"), "<meta seo title=\"Home\" description=\"Home\">\n<script>let n = sig(0)</script>\n<main><h1>Home</h1><a href=\"/about\">About</a><button on:click={() => n++}>{n}</button></main>").unwrap();
     std::fs::write(d.join("views/about.brain"), "<meta seo title=\"About\" description=\"About\">\n<main><h1>About</h1></main>").unwrap();
@@ -68,4 +69,78 @@ fn own_extensions_everywhere() {
     let c = &out.files["_brain/Caddyfile"];
     assert!(c.contains("@jsbrain path *.jsbrain") && c.contains("index index.brain") && c.contains("Content-Security-Policy"), "{c}");
     let _ = std::fs::remove_dir_all(&root);
+}
+
+fn pack_with_tokens(name: &str, tokens: &str) -> (String, Vec<(String, String)>) {
+    let root = std::env::temp_dir().join(format!("brain-pack-tokens-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("views")).unwrap();
+    std::fs::create_dir_all(root.join("public")).unwrap();
+    std::fs::write(root.join("public/font.woff2"), "font").unwrap();
+    std::fs::write(root.join("brain.json"), "{\"name\":\"x\"}").unwrap();
+    std::fs::write(root.join("tokens.cssbrain"), tokens).unwrap();
+    std::fs::write(root.join("app.brain"), "<html lang=\"en\"><head><meta charset=\"utf-8\"><title>App</title></head><body><slot /></body></html>").unwrap();
+    std::fs::write(root.join("views/home.brain"), "<meta seo title=\"Home\" description=\"Home\">\n<main><h1>Home</h1></main>").unwrap();
+    let root = root.canonicalize().unwrap();
+    let rt = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime");
+    let core = brain_min::minify_runtime_core(&std::fs::read_to_string(rt.join("brain.js")).unwrap()).unwrap();
+    let siblings: Vec<(String, String)> = std::fs::read_dir(&rt)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "js") && !p.ends_with("brain-dev.js") && !p.ends_with("brain-inspect.js"))
+        .map(|p| (p.file_name().unwrap().to_string_lossy().into_owned(), std::fs::read_to_string(&p).unwrap()))
+        .collect();
+    let r2 = root.clone();
+    let compile = move |src: &str, rel: &Path| -> Result<brain_pack::Unit, String> {
+        let opts = brain_codegen::Options { dev: false, root: Some(r2.clone()), ..Default::default() };
+        let o = brain_codegen::compile_with(src, rel, &opts).map_err(|d| format!("{}: {:?}", rel.display(), d.iter().map(|x| &x.msg).collect::<Vec<_>>()))?;
+        Ok(brain_pack::Unit { js: o.js, css: o.css, server_js: o.server_js, server_fns: o.server_fns })
+    };
+    let input = brain_pack::Input {
+        root: root.clone(),
+        compile: &compile,
+        runtime_core: core,
+        runtime_siblings: siblings,
+        layer_order: "<style>@layer reset,tokens,ui,comp,view;</style>".to_string(),
+        minify: true,
+        site: None,
+        shim: std::fs::read_to_string(rt.join("shim/dom.js")).ok(),
+        generator: String::new(),
+        server_module: None,
+        cache: brain_pack::cache::CacheCfg { sw_template: std::fs::read_to_string(rt.join("sw/brain-sw.js")).ok(), ..Default::default() },
+        server_mjs: None,
+        progress: None,
+        post: None,
+    };
+    let views = vec![("/".to_string(), "views/home.brain".to_string())];
+    let out = brain_pack::build(&input, &views, &|_| vec![], &|_| vec![]).unwrap_or_else(|e| panic!("{e}"));
+    let home = out.files["index.html"].clone();
+    let sheets = out.files.iter().filter(|(k, _)| k.ends_with(".css")).map(|(k, v)| (k.clone(), v.clone())).collect();
+    let _ = std::fs::remove_dir_all(&root);
+    (home, sheets)
+}
+
+const FONT_FACE: &str = "@font-face{font-family:Own;src:url(/font.woff2) format(\"woff2\")}";
+
+#[test]
+fn a_small_tokens_sheet_travels_in_the_head_so_it_does_not_block_the_first_paint() {
+    let (home, sheets) = pack_with_tokens("small", &format!("{FONT_FACE}:root{{--fg:#111}}"));
+    let head = home.split("</head>").next().unwrap();
+    assert!(!sheets.iter().any(|(_, v)| v.contains("--fg")), "no request for the tokens: {sheets:?}");
+    assert!(!head.contains("rel=\"stylesheet\""), "{head}");
+    let layers = head.find("@layer reset,tokens").expect("layer order");
+    let tokens = head.find("@layer tokens{").expect("tokens in the head");
+    assert!(layers < tokens, "the layer order is declared first: {head}");
+    assert!(head.contains("url(/_b/") && !head.contains("url(/font.woff2)"), "the font keeps its hashed URL: {head}");
+}
+
+#[test]
+fn a_large_tokens_sheet_stays_a_cacheable_request() {
+    let rules: String = (0..600).map(|i| format!("--long-token-name-{i}:#{:06x};", i)).collect();
+    let (home, sheets) = pack_with_tokens("large", &format!(":root{{{rules}}}"));
+    let head = home.split("</head>").next().unwrap();
+    let (key, _) = sheets.iter().find(|(_, v)| v.contains("--long-token-name-1")).expect("own sheet");
+    assert!(head.contains(&format!("href=\"/{key}\"")), "{head}");
+    assert!(!head.contains("@layer tokens{"), "{head}");
 }

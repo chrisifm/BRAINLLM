@@ -814,6 +814,9 @@ const HTTP_SETUP: &str = "api/_http.jsbrain";
 
 /// A view stylesheet up to this size (minified bytes) is inlined into the page instead of being a request (§13).
 const INLINE_CSS: usize = 4096;
+/// The shared tokens sheet up to this size (minified bytes) travels in the page's `<head>`: it blocks the first paint on
+/// every route, so a small one costs less as bytes in the HTML than as one more request before rendering.
+const INLINE_TOKENS_CSS: usize = 8192;
 
 /// A `paths()` page without content in `dist/`: the build stops, `--strict` or not.
 pub const EMPTY_LISTED_PAGE: &str = "no content for the paths() page";
@@ -1234,13 +1237,17 @@ fn build_inner_with_options(
     // 3. Shared tokens CSS + one CSS file per view (styles of every module it reaches statically).
     let tokens = ["tokens.cssbrain", "tokens.brain.css"].iter().find_map(|t| std::fs::read_to_string(input.root.join(t)).ok()).unwrap_or_default();
     let tokens = if class_map.is_empty() { tokens } else { classes::rename_css(&tokens, &class_map) };
-    let tokens_url = if tokens.trim().is_empty() {
-        None
+    let tokens_head = if tokens.trim().is_empty() {
+        String::new()
     } else {
         let css = minify_css(&format!("@layer tokens{{{tokens}}}"));
-        let key = format!("_b/{}.{}", content_hash(&css), ext.css());
-        files.insert(key.clone(), css);
-        Some(format!("{pre}/{key}"))
+        if css.len() <= INLINE_TOKENS_CSS {
+            format!("<style>{css}</style>")
+        } else {
+            let key = format!("_b/{}.{}", content_hash(&css), ext.css());
+            files.insert(key.clone(), css);
+            format!("<link rel=\"stylesheet\" href=\"{pre}/{key}\">")
+        }
     };
 
     report("pack", 0, views.len());
@@ -1480,9 +1487,7 @@ fn build_inner_with_options(
             });
         // SEO tags are added after the render: `seo(props)` needs the props (`head` here is the rest)
         let mut head = input.layer_order.clone();
-        if let Some(t) = &tokens_url {
-            head.push_str(&format!("<link rel=\"stylesheet\" href=\"{t}\">"));
-        }
+        head.push_str(&tokens_head);
         let css: String = reach.iter().map(|n| modules[n].css.as_str()).collect::<Vec<_>>().join("\n");
         // a ui/ child inlined into two parents brings its scoped CSS twice (COMPILER §13): keep one copy
         let (css, css_report) = cssdedup::dedupe(&css);
@@ -2201,7 +2206,7 @@ fn build_inner_with_options(
             css,
             css_gz,
             html: p.html.len(),
-            html_gz: transfer_size(p.html.as_bytes(), binary.get(&format!("{}.gz", p.file)).map(Vec::as_slice)),
+            html_gz: authored_html_size(&p.html, binary.get(&format!("{}.gz", p.file)).map(Vec::as_slice)),
         });
     }
     optimizations.sort_by(|a,b|(&a.source,a.stage).cmp(&(&b.source,b.stage)));
@@ -2211,6 +2216,14 @@ fn build_inner_with_options(
 /// Match production serving: precompressed bytes exist only when smaller than raw output.
 fn transfer_size(raw: &[u8], gzip: Option<&[u8]>) -> usize {
     gzip.map_or(raw.len(), |compressed| compressed.len().min(raw.len()))
+}
+
+/// The size a view answers for: the framework's optional credit line is not the author's to spend budget on.
+fn authored_html_size(html: &str, gzip: Option<&[u8]>) -> usize {
+    let credit = html.find("<p data-brain-credit").and_then(|a| Some((a, a + html[a..].find("</p>")? + 4)));
+    let Some((a, b)) = credit else { return transfer_size(html.as_bytes(), gzip) };
+    let rest = format!("{}{}", &html[..a], &html[b..]);
+    transfer_size(rest.as_bytes(), gzip.map(|_| gzip::gzip(rest.as_bytes(), 15)).as_deref())
 }
 
 #[test]

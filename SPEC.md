@@ -95,7 +95,7 @@ Signals are plain variables: `n++`, `items = [...items, x]`. Never mutate in pla
 | `store(init, {sync?:'tab'\|'storage'})` · `bus('name')` | only in `channels/*.jsbrain`; never `sync: 'storage'` for the signed-in user (another tab's copy brings a logged-out user back): read the user from `load` |
 
 ## Markup
-`{expr}` · `attr={e}` · `class:x={bool}` · `style:prop={v}` · `on:ev={fnRef | statement}` (`on:submit` prevents default)
+`{expr}` · `attr={e}` · `class:x={bool}` · `style:prop={v}` · `on:ev={fnRef | (e) => … | statement}` (`on:submit` prevents default)
 · `bind:value|checked|ref={x}` · `{#if c}…{:else if d}…{:else}…{/if}` · `{#each list as it (it.id)}…{:empty}…{/each}`
 (key required; list of primitives → key by value: `{#each perks as perk (perk)}`) · `{#await p}…{:then v}…{:catch e}…{/await}`
 · `<slot />` `<slot name="x" />` · `<Comp a={b} on:ev={f} />`.
@@ -148,7 +148,7 @@ has `title` · no tabindex > 0. Warnings: generic link text ("click here", "read
 ## SEO
 Every view: `<meta seo keyword="…" title="…" description="…" canonical? og:image? schema? robots?>`.
 Pick the query first; put it in the title, H1, first sentence and description. `keyword` is never rendered; an
-indexable view without it is B0502 (guarded, `robots="noindex"`, `_x`, `[id]` and error views are exempt).
+indexable view without it is B0502 (guarded, `robots="noindex"`, `_x`, `[id]` and error views are exempt). A guarded route is never indexed; a public page that only redirects some visitors does it in `load()` (B0505).
 A page rendered per request can list the parameters that make a different page, such as real pagination: `query="page"`
 keeps them in the canonical. Any other parameter (a dialog, `urlState`, a tracking tag) stays out, so it restores the UI
 without a new page for search. It must be literal, and it has no effect on a prerendered page (B0503).
@@ -388,7 +388,7 @@ Main: `brain new <app>` · `brain run` (dev server with hot reload, app :5180; v
 SEO and the no-JS HTML on `brain build` + `brain start`) · `brain build` (production) ·
 `brain doctor` (everything at once: check + tests + over-engineering + leaks; writes no versioned file; exits non-zero on any error; suspected leak B0601 is a warning unless `doctor.failOnSuspectedLeaks`).
 Production: `brain start` (serves `dist/`, restarts on crash, logs to `logs/app.log`) · `brain reload` (no downtime) ·
-`brain status` · `brain stop`. Optional PM2/nginx configurations: `brain deploy config pm2|nginx --request <JSON>`, and `brain deploy check --url <origin>` for what only the live server shows (headers sent twice, proxy, `/health`); see `docs/DEPLOYMENT.md`. `brain release-check [--env production] [--url <origin>] [--json]` is the one gate before a release: it runs `brain doctor`, the secrets of that environment (a route left disabled by B0790 fails it), `brain build --env <env>` and `brain seo audit`, plus the live checks with `--url`, and exits non-zero if any fails.
+`brain status` · `brain stop`. Optional PM2/nginx configurations: `brain deploy config pm2|nginx --request <JSON>`, and `brain deploy check --url <origin>` for what only the live server shows (headers sent twice, proxy, `/health`); `brain edge plan` lists what a CDN may keep; see `docs/DEPLOYMENT.md`. `brain release-check [--env production] [--url <origin>] [--json]` is the one gate before a release: it runs `brain doctor`, the secrets of that environment (a route left disabled by B0790 fails it), `brain build --env <env>` and `brain seo audit`, plus the live checks with `--url`, and exits non-zero if any fails.
 Hosted under a sub-path: `brain.json` `"base": "/app/"`; keep writing app-absolute links and paths (`<a href="/about">`,
 `redirect('/login')`); the build adds the base everywhere.
 Granular: `brain add view|comp|ui <name> --props "…"` · `brain check --json` · `brain test` · `brain spec [--topic x]` ·

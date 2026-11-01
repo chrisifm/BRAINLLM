@@ -352,7 +352,11 @@ pub fn add(root: &Path, kind: &str, name: &str, props: &str) -> Result<PathBuf, 
     let uses = if names.is_empty() { String::new() } else { format!("  <p>{}</p>\n", names.iter().map(|n| format!("{{{n}}}")).collect::<Vec<_>>().join(" · ")) };
     let route = crate::map::route_of(&rel);
     let body = match kind {
-        "view" => view_body(&meta, &uses, &class, &comp, route.as_deref(), &stem),
+        "view" => {
+            // a guard keeps the page out of search (B0505): no query or canonical to declare
+            let guarded = Path::new(&rel).ancestors().skip(1).any(|d| root.join(d).join("_guard.jsbrain").is_file());
+            view_body(&meta, &uses, &class, &comp, route.as_deref(), &stem, guarded)
+        }
         "comp" => format!(
             "{meta}<script>\n  let open = sig(false)\n  let query = sig('')\n</script>\n\n<section class=\"{class}\">\n  <button type=\"button\" on:click={{open = !open}}>{comp}</button>\n  <label>Search <input bind:value={{query}} placeholder=\"Type to filter\"></label>\n{uses}  {{#if open}}<slot />{{/if}}\n</section>\n\n<style>\n  .{class} {{ display: grid; gap: var(--space-2); }}\n</style>\n"
         ),
@@ -386,7 +390,7 @@ fn view_path(name: &str) -> Result<String, String> {
     }
 }
 
-fn view_body(meta: &str, uses: &str, class: &str, comp: &str, route: Option<&str>, stem: &str) -> String {
+fn view_body(meta: &str, uses: &str, class: &str, comp: &str, route: Option<&str>, stem: &str, guarded: bool) -> String {
     let style = format!("\n<style>\n  .{class} {{ padding: var(--space-4); }}\n</style>\n");
     match route {
         Some("*") => format!(
@@ -404,9 +408,9 @@ fn view_body(meta: &str, uses: &str, class: &str, comp: &str, route: Option<&str
         Some(r) => {
             let title = crate::names::pascal(r.rsplit('/').next().filter(|x| !x.is_empty()).unwrap_or(stem));
             // B0502: the page names its search query; the title is the starting point the author refines
-            let keyword = &title;
+            let (keyword, canonical) = if guarded { (String::new(), String::new()) } else { (format!("keyword=\"{title}\" "), format!(" canonical=\"{r}\"")) };
             format!(
-                "{meta}<meta seo keyword=\"{keyword}\" title=\"{title}\" description=\"TODO: describe {title} in one sentence (70 to 155 characters).\" canonical=\"{r}\">\n\n<main class=\"{class}\">\n  <h1>{title}</h1>\n  <p>TODO: write this page and link related pages, e.g. the <a href=\"/\">home page</a>.</p>\n{uses}</main>\n{style}"
+                "{meta}<meta seo {keyword}title=\"{title}\" description=\"TODO: describe {title} in one sentence (70 to 155 characters).\"{canonical}>\n\n<main class=\"{class}\">\n  <h1>{title}</h1>\n  <p>TODO: write this page and link related pages, e.g. the <a href=\"/\">home page</a>.</p>\n{uses}</main>\n{style}"
             )
         }
         None => format!("{meta}<main class=\"{class}\">\n  <h1>{comp}</h1>\n{uses}</main>\n{style}"),

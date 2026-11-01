@@ -108,7 +108,7 @@ security header sent twice (B1857), a site-wide noindex (B1858), a soft 404 (B18
 pages (B1860), a listed URL that redirects (B1867), a canonical other than the sitemap's (B1868), a URL variant answering 200
 (B1869), declared against observed caching and encoding (B1870), a blocked `noindex` (B1871). On staging pass `--expect-noindex` or set `seo.staging`: pages stay `noindex` and crawlable, because
 `Disallow` would hide that `noindex`. Titles are never shortened for you: a long one is reported, and keeping it is your
-decision. Pixel widths (B1802, B1804) are display widths, not Google limits. Each `[id]` page needs its own title (B0504).
+decision. Pixel widths (B1802, B1804) are display widths, not Google limits. Each `[id]` page needs its own title (B0504). A page behind `_guard.jsbrain` is never indexed; a public page that redirects some visitors does it in `load()` (B0505).
 `brain explain B1830` (or any B18xx) prints why and a correct example. GEO hints (B1830-B1835) are info: they never change the score but they decide whether an AI answer quotes the page.
 
 ## Minimal correct example

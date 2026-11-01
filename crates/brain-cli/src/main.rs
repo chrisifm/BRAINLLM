@@ -1,5 +1,11 @@
 //! `brain`: the single BRAINLLM CLI. Arguments are parsed by hand (no dependencies).
 
+// Every stderr line of this crate is one write (`brain_lex::write_stderr_line`); this shadows the standard macro.
+macro_rules! eprintln {
+    () => { brain_lex::write_stderr_line("") };
+    ($($arg:tt)*) => { brain_lex::write_stderr_line(&format!($($arg)*)) };
+}
+
 #[cfg(unix)]
 mod browser;
 mod trace;
@@ -38,6 +44,7 @@ mod lighthouse;
 mod asset_check;
 mod release_check;
 mod deploy_check;
+mod edge_plan;
 mod seo_live;
 mod view_links;
 mod platform_config;
@@ -135,6 +142,7 @@ granular:
   brain integration list|add|update   reviewed official SDK adapters (preview)
   brain deps analyze|preview|fetch    dependency evidence and explicit pinned CDN acquisition
   brain deploy config pm2|nginx       guarded front/backend deployment configuration
+  brain edge plan [--json]            what a CDN may keep of this build, rule by rule (read-only)
   brain deploy check --url <origin>   what only the live server shows: doubled headers, proxy, /health
   brain release-check [--env production] [--url <origin>] [--json]  one gate before a release: doctor, secrets, build output, SEO and the live checks
   brain media setup-gcs|list|cleanup  private media provisioning/library/owned cleanup
@@ -247,6 +255,7 @@ fn main() -> ExitCode {
             println!("{out}");
             return ExitCode::from(code.clamp(0, 255) as u8);
         }
+        Some("edge") => app_root().and_then(|root| edge_plan::run(&root, &positional(&args[1..], &[]), want_json(&args))),
         Some("deploy") if args.get(1).map(String::as_str) == Some("check") => {
             let (code, out) = deploy_check::run(app_root().ok().as_deref(), &args[2..]);
             println!("{out}");

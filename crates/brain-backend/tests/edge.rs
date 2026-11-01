@@ -331,3 +331,79 @@ async fn a_production_list_refusal_names_the_parameter_without_the_declared_cata
     let body = json_body(send(&development, "GET", "/api/probes?nope=1", &[]).await).await.to_string();
     assert!(body.contains("filterable: secret_rank"), "development keeps the fix: {body}");
 }
+
+// A server that stops admitting this role (pg_hba edit, role change, failover) is an operator's problem that clears: clients
+// get a 503 to come back to, and the log keeps the SQLSTATE. A password that changed is the same case.
+#[tokio::test]
+#[ignore = "Use scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn a_database_that_refuses_the_connection_answers_503_with_retry_after() {
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Disposable Postgres only; no developer database is selected");
+    let setup = brain_backend::db::connect(&url).await.unwrap();
+    let suffix = Uuid::new_v4().simple().to_string()[..8].to_string();
+    let role = format!("refused_{suffix}");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!("CREATE ROLE {role} LOGIN SUPERUSER PASSWORD 'synthetic'"))).execute(&setup).await.unwrap();
+    let notes: Resource = serde_json::from_value(json!({
+        "name": format!("refused_{suffix}"),
+        "fields": {"title": {"kind": "str", "required": true}},
+        "policy": {"read": ["public"], "create": ["user"], "update": ["owner"], "delete": ["owner"]}
+    }))
+    .unwrap();
+    brain_backend::db::migrate(&setup, std::slice::from_ref(&notes)).await.unwrap();
+    let options: sqlx::postgres::PgConnectOptions = url.parse().unwrap();
+    let pool = sqlx::postgres::PgPoolOptions::new().max_connections(4).acquire_timeout(Duration::from_secs(3)).connect_with(options.username(&role).password("synthetic")).await.unwrap();
+    let (http, _) = brain_backend::http::router_with_platform(pool.clone(), config(vec![notes.clone()]), Platform::default()).await.map_err(|e| e.to_string()).unwrap();
+    assert_eq!(send(&http, "GET", &format!("/api/{}", notes.name), &[]).await.status(), 200);
+    let kept = std::env::temp_dir().join(format!("brain-refused-{suffix}.jsonl"));
+    brain_backend::db::keep_diagnostics(kept.clone());
+    // the running connection goes away and a new one is refused with 28000
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!("ALTER ROLE {role} NOLOGIN; SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = '{role}'"))).execute(&setup).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let response = send(&http, "GET", &format!("/api/{}", notes.name), &[]).await;
+    let (status, retry) = (response.status(), response.headers().get("retry-after").cloned());
+    let body = json_body(response).await;
+    pool.close().await;
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!("DROP ROLE {role}"))).execute(&setup).await.unwrap();
+    setup.close().await;
+    assert_eq!((status.as_u16(), body["error"]["code"].as_str()), (503, Some("DATABASE_UNAVAILABLE")), "{body}");
+    assert_eq!(retry.unwrap(), "5");
+    assert!(body["error"]["fix"].as_str().unwrap().contains("Retry-After"), "{body}");
+    let events = std::fs::read_to_string(&kept).unwrap();
+    std::fs::remove_file(kept).unwrap();
+    assert!(events.lines().any(|l| l.contains("\"sqlstate\":\"28000\"") && l.contains("refused the connection")), "the cause stays in the log: {events}");
+}
+
+// The default limit has to carry a crawler from one address; a page spends one token per backend read.
+#[test]
+fn the_default_rate_limit_carries_a_crawler_at_two_reads_per_page() {
+    let edge = Platform::default().edge;
+    assert!(edge.requests_per_second >= 10 && edge.burst >= 300, "{} / {}", edge.requests_per_second, edge.burst);
+}
+
+#[tokio::test]
+#[ignore = "Use scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn head_answers_the_validator_of_get_and_honours_if_none_match() {
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Disposable Postgres only; no developer database is selected");
+    let pool = brain_backend::db::connect(&url).await.unwrap();
+    let suffix = Uuid::new_v4().simple().to_string()[..8].to_string();
+    let notes: Resource = serde_json::from_value(json!({
+        "name": format!("head_{suffix}"),
+        "fields": {"title": {"kind": "str", "required": true}},
+        "policy": {"read": ["public"], "create": ["user"], "update": ["owner"], "delete": ["owner"]}
+    }))
+    .unwrap();
+    brain_backend::db::migrate(&pool, std::slice::from_ref(&notes)).await.unwrap();
+    let (http, _) = brain_backend::http::router_with_platform(pool.clone(), config(vec![notes.clone()]), Platform::default()).await.map_err(|e| e.to_string()).unwrap();
+    let path = format!("/api/{}", notes.name);
+    let get = send(&http, "GET", &path, &[]).await;
+    let etag = get.headers()["etag"].to_str().unwrap().to_string();
+    let head = send(&http, "HEAD", &path, &[]).await;
+    assert_eq!(head.status(), 200);
+    assert_eq!(head.headers().get("etag").map(|v| v.to_str().unwrap()), Some(etag.as_str()));
+    assert!(to_bytes(head.into_body(), 64).await.unwrap().is_empty());
+    let unchanged = send(&http, "HEAD", &path, &[("if-none-match", &etag)]).await;
+    assert_eq!(unchanged.status(), 304);
+    let missing = send(&http, "HEAD", "/api/no_such_resource", &[]).await;
+    assert_eq!(missing.status(), 404);
+    assert!(to_bytes(missing.into_body(), 64).await.unwrap().is_empty());
+    pool.close().await;
+}

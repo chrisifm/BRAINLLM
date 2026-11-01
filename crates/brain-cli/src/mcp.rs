@@ -1340,6 +1340,13 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
         }),
     });
     tools.push(Tool {
+        name: "brain_edge_plan",
+        description: "Read-only: what a CDN may keep of the last build, rule by rule. Changes nothing and configures no provider.",
+        input_schema: schema([], &[]),
+        output_schema: out([("schemaVersion","number"),("rules","array")]),
+        run: Box::new(|_| crate::edge_plan::plan(&crate::app_root()?).map(|v|v.to_string())),
+    });
+    tools.push(Tool {
         name: "brain_e2e",
         description: "Opt-in browser-extension lane, only when the user asks for it: probe a connected Claude Viewer/Codex Viewer, or run declared app E2E scenarios in it. Only newly owned test tabs are touched; reports preserve actual lane evidence. Plain brain_test runs headless without any extension",
         input_schema: schema([("operation","string","probe (default) or run"),("path","string","optional declared .test.brain file or folder")], &[]),

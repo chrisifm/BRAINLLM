@@ -531,6 +531,20 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
       } catch { outgoing?.destroy(); finish(true) }
     })
   }
+  const readCache = new Map()
+  let readCacheBytes = 0
+  const rememberRead = (path, etag, body) => {
+    readCacheBytes -= readCache.get(path)?.body.length || 0
+    readCache.delete(path)
+    if (body.length > 1024 * 1024) return
+    readCache.set(path, { etag, body })
+    readCacheBytes += body.length
+    while (readCache.size > 256 || readCacheBytes > 16 * 1024 * 1024) {
+      const oldest = readCache.keys().next().value
+      readCacheBytes -= readCache.get(oldest).body.length
+      readCache.delete(oldest)
+    }
+  }
   const resource = (incoming, response, rid, name, serviceKey) => {
     if (typeof name !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(name)) throw new HttpError(400, 'Invalid native resource name')
     const idPath = id => {
@@ -538,7 +552,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
       return '/api/' + name + '/' + id
     }
     const request = async (method, path, body, notFound) => {
-      if (response.writableEnded || response.destroyed) throw new HttpError(409, 'The server request has ended')
+      if (response.writableEnded || response.destroyed) throw Object.assign(new HttpError(409, 'The server request has ended'), { clientGone: true })
       if (method !== 'GET' && incoming.method !== 'POST') throw new HttpError(405, 'Native writes require a server function called through POST')
       let bytes = Buffer.alloc(0)
       if (body !== undefined) {
@@ -559,7 +573,18 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
       }
       let req = outgoing()
       let value
+      // Revalidated reads (ETag/304): a read made without any credential remembers its body, so an unchanged answer is not
+      // sent or parsed again. Each answer is parsed afresh, so `load` can change what it gets. Signed-in reads stay out.
+      const remembers = method === 'GET' && !req.headers.authorization && !req.headers.cookie
+      const known = remembers ? readCache.get(path) : undefined
+      const conditional = r => (known ? (r.headers['if-none-match'] = known.etag, r) : r)
+      conditional(req)
       const answered = (_res, status, data, headers) => {
+          if (status === 304 && known) {
+            readCache.delete(path); readCache.set(path, known)
+            value = JSON.parse(known.body)
+            return
+          }
           if (status === 422) {
             // the backend's own field messages (never driver text): a server function that rethrows answers 422 {errors}
             let fields
@@ -574,11 +599,13 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
             try { answer = JSON.parse(data.toString('utf8'))?.error } catch {}
             const code = typeof answer?.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(answer.code) ? answer.code : undefined
             const fix = code && typeof answer.fix === 'string' ? answer.fix.slice(0, 512) : undefined
-            throw new HttpError(status >= 400 && status < 500 ? status : 503, NATIVE_FAILED, { code, fix })
+            const wait = Number(headers['retry-after'])
+            throw new HttpError(status >= 400 && status < 500 ? status : 503, NATIVE_FAILED, { code, fix, temporary: status === 429 || status === 503, ...(wait > 0 ? { retryAfter: wait } : {}) })
           }
           if (status === 204) { value = null; return }
           if (!String(headers['content-type'] || '').startsWith('application/json')) throw new HttpError(502, 'Native resource response must be JSON')
           try { value = JSON.parse(data.toString('utf8')) } catch { throw new HttpError(502, 'Native resource response is invalid') }
+          if (remembers && typeof headers.etag === 'string') rememberRead(path, headers.etag, data)
       }
       try {
         // A restarting backend refuses connections for a few seconds: a read waits for it instead of failing the page.
@@ -590,20 +617,23 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
             if (method !== 'GET' || wait > 2000 || stopped || response.destroyed || !['ECONNREFUSED', 'ECONNRESET'].includes(e?.transport)) throw e
             req.destroy()
             await new Promise(done => setTimeout(done, wait))
-            req = outgoing()
+            req = conditional(outgoing())
           }
         }
       } catch (e) {
         // A read that failed: `load` may catch it and render anyway, so the page answer says what happened (ssr below).
-        if (method === 'GET' && !(e?.status >= 400 && e.status < 500)) {
-          const seen = incoming.$brainFailedReads || (incoming.$brainFailedReads = { reads: 0, backendCode: undefined, transport: undefined })
+        // "Not now" is the backend limiting or unavailable: the same request can succeed later, so a page must not stand in for it.
+        if (e && (e.transport || e.status === 504 || e.code === 'BRIDGE_BUSY')) e.temporary = true
+        if (method === 'GET' && (e?.temporary || !(e?.status >= 400 && e.status < 500))) {
+          const seen = incoming.$brainFailedReads || (incoming.$brainFailedReads = { reads: 0, backendCode: undefined, transport: undefined, temporary: false, retryAfter: undefined })
           seen.reads++
           seen.backendCode ??= e?.code
           seen.transport ??= e?.transport
+          if (e?.temporary) { seen.temporary = true; seen.retryAfter = Math.max(seen.retryAfter || 0, e.retryAfter || 0) || undefined }
         }
         throw e
       } finally { req.destroy() }
-      if (response.destroyed || response.writableEnded) throw new HttpError(409, 'The server request has ended')
+      if (response.destroyed || response.writableEnded) throw Object.assign(new HttpError(409, 'The server request has ended'), { clientGone: true })
       return value
     }
     const names = (value, label) => {
@@ -1098,6 +1128,7 @@ export function createServer(o = {}) {
   // `<meta cache="N">` (route.cache, #235): the SSR HTML of an anonymous GET is kept N s per URL (and language) and
   // served again; between N and 2N s the copy is served while a fresh one renders in the background
   // (stale-while-revalidate). Never for requests with a session cookie or Authorization, forms or error pages.
+  const FILLING = new Map()
   const SSRC = new Map(), SSRC_MAX = 500, SSRC_BYTES = 32 * 1024 * 1024, SSRC_ENTRY = 1024 * 1024
   let ssrBytes = 0
   async function cached(req, res, route, params, url, rid) {
@@ -1140,10 +1171,29 @@ export function createServer(o = {}) {
       if (age >= ms && !c.busy) (c.busy = true), fill().finally(() => (c.busy = false))
       return serve(c)
     }
-    c = await fill()
-    return c ? serve(c) : ssr(req, res, route, params, url, rid, null, 200, null, true) // a redirect or an error: as usual
+    // Cold: the first request renders and the others that arrive meanwhile wait for it, so a burst runs load() once.
+    // Only a shareable result is shared (a private one holds its visitor's cookie); anything else answers as usual, one by one.
+    const running = FILLING.get(key)
+    if (running) {
+      c = await running
+      if (c?.cacheable) return serve(c)
+      return ssr(req, res, route, params, url, rid, null, 200, null, true)
+    }
+    const filling = fill().finally(() => FILLING.delete(key))
+    FILLING.set(key, filling)
+    c = await filling
+    if (c) return serve(c)
+    // the first render already asked the backend and logged why; another would only spend more of a limit it just hit
+    if (req.$brainFailedReads?.temporary) return comeBackPage(req, res, route, params, url, rid)
+    delete req.$brainFailedReads
+    return ssr(req, res, route, params, url, rid, null, 200, null, true) // a redirect or an error: as usual
   }
-  const anonymous = req => req.method === 'GET' && !req.headers.authorization && !req.headers.cookie
+  const comeBackPage = (req, res, route, params, url, rid) => {
+    res.setHeader('retry-after', String(Math.min(Math.ceil(req.$brainFailedReads.retryAfter) || 5, 3600)))
+    res.setHeader('cache-control', 'no-store')
+    return errorPage(req, res, route, params, url, rid, 503)
+  }
+  const anonymous = req => (req.method === 'GET' || req.method === 'HEAD') && !req.headers.authorization && !req.headers.cookie
 
   async function ssr(req, res, route, params, url, rid, forms = null, status = 200, fixed = null, nocache = false) {
     // the route's preloads (the same Link values as _headers): on the response, where hosts turn them into early hints,
@@ -1184,11 +1234,13 @@ export function createServer(o = {}) {
     }
     // what load() thrown or returned instead of props answers: redirect, notFound() (F11), deliberate status, failure
     const loadOutcome = e => {
+      // the visitor left (a closed tab, an aborted prefetch): nobody reads an answer, and it is no failure of the app
+      if (e && e.clientGone && res.destroyed) return log('info', 'client left during load', { rid, path: url.pathname })
       if (e && e.redirect) return send(res, e.status || 303, '', { location: withBase(linkTo(route, redirect(e.redirect, e.status ?? 303).redirect)), ...ctx.session.headers() })
       if ((e instanceof HttpError && e.status === 404) || (e && e.notFound === true)) return missing(req, res, e) // `notFound()` 404 / `gone()` 410
       // the backend or another service said "not now": a temporary 503 tells crawlers to come back, a 500 tells them it broke
       // a status the page chose itself (`new HttpError(429)`) stays as it is, with the same hint to come back
-      if (e && (e.status === 429 || e.status === 503) && !(e instanceof HttpError) && !res.headersSent) {
+      if (e && (e.status === 429 || e.status === 503) && (!(e instanceof HttpError) || e.temporary) && !res.headersSent) {
         log('warn', 'load temporarily unavailable', { rid, path: url.pathname, status: 503, ...trace(e) })
         res.setHeader('retry-after', String(Math.min(Math.ceil(e.retryAfter) || 5, 3600)))
         res.setHeader('cache-control', 'no-store')
@@ -1211,6 +1263,7 @@ export function createServer(o = {}) {
     }
     if (props && (props.redirect || props.notFound === true)) return loadOutcome(props) // `return redirect()` / `return notFound()`
     if (req.$brainFailedReads && !fixed) {
+      if (status === 200 && req.$brainFailedReads.temporary) return loadOutcome(comeBack(req, rid, url))
       softFailure(req, rid, url, status)
       extra = { ...extra, 'cache-control': 'no-store' } // what it rendered instead is not worth keeping
     }
@@ -1242,7 +1295,13 @@ export function createServer(o = {}) {
   // (head, CSS, layout shell) is sent, the view when load() ends. The status and headers are out by then, so a late
   // redirect becomes location.replace and a late failure an inline notice with the request id (both logged); load()
   // cannot change the session on a streamed route.
-  // `load` caught a failed backend read and rendered: the status it asked for stands, the log says what is behind it.
+  // `load` caught a read the backend refused for now (429, 503, unreachable) and rendered without its data: a 200 would put
+  // that page in the index and tell a crawler to keep going, so it answers 503 with Retry-After. The log says what was behind it.
+  const comeBack = (req, rid, url) => {
+    softFailure(req, rid, url, 503)
+    return Object.assign(new Error('A backend read failed for now'), { status: 503, retryAfter: req.$brainFailedReads.retryAfter })
+  }
+  // `load` caught any other failed backend read and rendered: the status it asked for stands, the log says what is behind it.
   const softFailure = (req, rid, url, status) => {
     const { reads, backendCode, transport } = req.$brainFailedReads
     log('warn', 'page rendered after a failed backend read', { rid, path: url.pathname, status, reads, backendCode, transport, fix: 'load caught the failure and returned other props; let it throw for a 503, or show that the data is missing' })
@@ -1257,6 +1316,7 @@ export function createServer(o = {}) {
     const early = await Promise.race([loadP.then(v => ({ v }), e => ({ e })), new Promise(r => (timer = setTimeout(r, STREAM_HOLD)))])
     clearTimeout(timer)
     if (early && (early.e !== undefined || (early.v && (early.v.redirect || early.v.notFound === true)))) return outcome(early.e !== undefined ? early.e : early.v)
+    if (early && req.$brainFailedReads?.temporary) return outcome(comeBack(req, rid, url))
     const seoF = sm.seo || (await load(route.view)).default.seo
     if (route.i18n) await load(route.i18n)
     const nonce = randomBytes(16).toString('base64'), n = h => h.replace(/<script(?![^>]*\bnonce=)/g, `<script nonce="${nonce}"`)
@@ -1313,6 +1373,7 @@ export function createServer(o = {}) {
       if (e && e.redirect) return end(`<meta name="robots" content="noindex"><script>location.replace(${jsonInHtml(withBase(linkTo(route, redirect(e.redirect, e.status ?? 303).redirect)))})</script>`)
       // a streamed page already sent its 200 head: the region gets the not-found notice and the page is noindex
       if (e && e.notFound === true) return end(`<meta name="robots" content="noindex"><p role="alert" class="brain-fallback">Page not found.</p>`, {}, bottom.replace(/<script type="module">(?:(?!<\/script>)[\s\S])*?brain-view[\s\S]*?<\/script>/g, ''))
+      if (e && e.clientGone && res.destroyed) return log('info', 'client left during load', { rid, path: url.pathname })
       log('error', 'load failed (streamed)', { rid, path: url.pathname, status: 200, ...trace(e) }) // headers already out
       return fail()
     }
@@ -1320,8 +1381,10 @@ export function createServer(o = {}) {
     try {
       const { body, failed } = await (queue = queue.then(() => render(route, props, null, at), () => render(route, props, null, at)))
       for (const f of failed || []) log('error', 'component failed during SSR', { rid, path: url.pathname, comp: f.comp, where: f.w, ...trace(f.e) })
+      // the 200 is already out: a page rendered without its data at least stays out of the index
+      const stale = req.$brainFailedReads?.temporary ? '<meta name="robots" content="noindex">' : ''
       const pm = params && Object.keys(params).length ? `<meta name="brain-params" content="${esc(JSON.stringify(params))}">` : ''
-      end(pm + body, props)
+      end(stale + pm + body, props)
     } catch (e) {
       log('error', 'render failed (streamed)', { rid, path: url.pathname, status: 200, ...trace(e) })
       await fail()

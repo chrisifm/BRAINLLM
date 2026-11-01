@@ -175,3 +175,27 @@ fn a_reserved_page_with_a_title_is_not_asked_for_a_description() {
     }
     assert!(codes_in("views/about.brain", source, &ctx).contains(&"B1601"));
 }
+
+#[test]
+fn b0505_names_search_metadata_on_a_page_its_guard_keeps_out_of_search() {
+    let root = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("b0505-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("views/account")).unwrap();
+    std::fs::write(root.join("brain.json"), "{}").unwrap();
+    std::fs::write(root.join("views/account/_guard.jsbrain"), "export default (ctx) => ctx.user ? true : redirect('/login')\n").unwrap();
+    for (rel, attrs, expect) in [
+        ("views/account/a.brain", "title=\"A\" description=\"Page a.\" canonical=\"/account/a\"", true),
+        ("views/account/b.brain", "title=\"B\" description=\"Page b.\" keyword=\"page b\"", true),
+        ("views/account/c.brain", "title=\"C\" description=\"Page c.\"", false),
+        ("views/account/d.brain", "title=\"D\" description=\"Page d.\" canonical=\"/account/d\" robots=\"noindex\"", false),
+        ("views/open.brain", "title=\"O\" description=\"Page o.\" canonical=\"/open\"", false),
+    ] {
+        let src = view(attrs);
+        std::fs::write(root.join(rel), &src).unwrap();
+        let c = brain_parse::parse(&src, Path::new(rel)).unwrap_or_else(|d| panic!("{d:?}"));
+        let (ctx, _) = brain_check::load_ctx(&root.join(rel), &c);
+        let found = brain_check::check(&c, &ctx).into_iter().find(|d| d.code == "B0505");
+        assert_eq!(found.is_some(), expect, "{rel}");
+        if let Some(d) = found { assert!(d.fix.contains("load()"), "{}", d.fix); }
+    }
+}

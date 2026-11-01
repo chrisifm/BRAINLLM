@@ -35,7 +35,7 @@ deployment that declares several processes cannot run with per-process windows b
 | Queue workers | `FOR UPDATE SKIP LOCKED` leases | unchanged: any number of workers |
 | Cron | one job per slot through the `cron:<name>:<slot>` idempotency key | unchanged: any number of schedulers |
 | Socket invalidation events | local broadcast | local broadcast plus `pg_notify('brain_resource_changes', …)`; every process relays other processes' changes to its sockets |
-| Global per-address limiter (120 burst, 1/s) | in-memory | in-memory on purpose: it is a per-process safety net. Put the per-visitor limit at the proxy or use a route `rate` |
+| Global per-address limiter (300 burst, 10/s) | in-memory | in-memory on purpose: it is a per-process safety net. Put the per-visitor limit at the proxy or use a route `rate` |
 
 The window subject (client address, user id or key id) is stored as a SHA-256 digest, never in clear. Expired windows
 are removed every five minutes in batches of 5,000.

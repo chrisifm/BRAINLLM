@@ -18,6 +18,26 @@ fn codes(src: &str) -> Vec<&'static str> {
     codes_with("comp/x.brain", src, &Ctx::default())
 }
 
+fn diags(src: &str) -> Vec<brain_lex::Diag> {
+    brain_check::check(&brain_parse::parse(src, Path::new("comp/x.brain")).unwrap_or_else(|d| panic!("{:?}", d)), &Ctx::default())
+}
+
+// A model used to other frameworks writes `$event`; "declare it as a signal" would send it the wrong way.
+#[test]
+fn the_magic_event_name_gets_a_fix_that_says_how_a_handler_receives_the_event() {
+    for src in ["<script>let v = sig('')</script><input aria-label=\"v\" on:input={v = $event.target.value}>", "<script>let v = sig('')</script><input aria-label=\"v\" on:input={v = event.target.value}>"] {
+        let d = diags(src);
+        let d = d.iter().find(|d| d.code == "B0111").unwrap_or_else(|| panic!("{d:?}"));
+        assert!(d.fix.contains("on:input={(e) =>") && d.fix.contains("first parameter") && !d.fix.contains("sig("), "{}", d.fix);
+    }
+    let shown = diags("<p>{$event}</p>");
+    assert!(shown.iter().any(|d| d.code == "B0111" && d.fix.contains("as a parameter")), "{shown:?}");
+    // the parameter itself is a declared name, and an unrelated name keeps the usual fix
+    assert!(codes("<script>let v = sig('')</script><input aria-label=\"v\" on:input={(e) => v = e.target.value}>").is_empty());
+    let other = diags("<button on:click={zzqq()}>x</button>");
+    assert!(other.iter().any(|d| d.code == "B0111" && d.fix.contains("declare it")), "{other:?}");
+}
+
 #[test]
 fn script_rules() {
     assert_eq!(codes("<script>let n = sig(0)\nconst f = () => this.n</script><p>x</p>"), ["B0102"]);

@@ -5,6 +5,7 @@
 //! - B1604 the same static `canonical` in two views.
 //! - B0502 (warning) indexable view without `keyword` (the search query the page targets).
 //! - B0504 (warning) dynamic route with a literal `title` or `description`.
+//! - B0505 (warning) `keyword` or `canonical` on a page its folder guard keeps out of search.
 
 use crate::Checker;
 use brain_parse::ast::*;
@@ -187,6 +188,14 @@ impl Checker<'_> {
                 seo_span,
                 "the view has no `keyword`: the page does not say which search query it should rank for",
                 "pick the query a reader would type to find this page (2-4 words, e.g. \"offline task planner\"), add `keyword=\"<that query>\"` to `<meta seo>`, and use those exact words in the title, the H1, the first sentence and the description; for a page that should not rank, add `robots=\"noindex\"` instead",
+            );
+        }
+        if self.ctx.guarded && !noindex && !special && info.attrs.iter().any(|(n, _)| n == "keyword" || n == "canonical") {
+            self.push(
+                "B0505",
+                seo_span,
+                "the view declares `keyword` or `canonical`, but its folder guard keeps the page out of search: the route answers noindex and is left out of sitemap.xml and llms.txt",
+                "if anyone may read this page, remove the guard and do the redirect in `load()` with `throw redirect('/x')`; if it is private, remove `keyword` and `canonical`",
             );
         }
         if let Some(meta) = attr("query") {

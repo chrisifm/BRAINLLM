@@ -76,8 +76,9 @@ impl Default for Edge {
             cors_origins: Vec::new(),
             cors_max_age: None,
             max_in_flight: DEFAULT_MAX_IN_FLIGHT,
-            requests_per_second: 1,
-            burst: 120,
+            // A server-rendered page spends its reads here: one crawler address at 5 pages/s with 2 reads per page stays under it.
+            requests_per_second: 10,
+            burst: 300,
             ready_delay: Duration::ZERO,
             drain: DEFAULT_DRAIN,
             request_log: RequestLog::Errors,
@@ -271,6 +272,7 @@ pub(crate) enum DatabaseLimit {
     Busy,
     Deadline,
     TooLarge,
+    Refused,
 }
 
 tokio::task_local! {
@@ -299,6 +301,8 @@ pub(crate) fn note_database_error(error: &sqlx::Error) {
             DatabaseLimit::Deadline
         } else if crate::db::too_large(&state) {
             DatabaseLimit::TooLarge
+        } else if crate::db::refused(&state) {
+            DatabaseLimit::Refused
         } else if crate::db::retryable(&state) {
             DatabaseLimit::Busy
         } else {

@@ -172,9 +172,14 @@ fn resource_read(path: &str) -> Option<&str> {
 }
 
 /// Adds validators and 304 answers to successful `GET /api/...` responses and marks declared public reads.
-pub(crate) async fn conditional(State(policy): State<Arc<CachePolicy>>, req: Request, next: Next) -> Response {
-    if req.method() != Method::GET || !req.uri().path().starts_with("/api/") {
+pub(crate) async fn conditional(State(policy): State<Arc<CachePolicy>>, mut req: Request, next: Next) -> Response {
+    if !matches!(*req.method(), Method::GET | Method::HEAD) || !req.uri().path().starts_with("/api/") {
         return next.run(req).await;
+    }
+    // A HEAD answers the validator a GET would: the route must produce the body to hash it, and the body is dropped below.
+    let head = req.method() == Method::HEAD;
+    if head {
+        *req.method_mut() = Method::GET;
     }
     let headers = req.headers().clone();
     let lifetime = resource_read(req.uri().path())
@@ -183,7 +188,7 @@ pub(crate) async fn conditional(State(policy): State<Arc<CachePolicy>>, req: Req
         .map(Lifetime::header);
     let response = next.run(req).await;
     if response.status() != StatusCode::OK {
-        return response;
+        return if head { let (parts, _) = response.into_parts(); Response::from_parts(parts, Body::empty()) } else { response };
     }
     let (mut parts, body) = response.into_parts();
     let (etag, body) = match parts.headers.get(header::ETAG).and_then(|v| v.to_str().ok()).map(str::to_owned) {
@@ -207,7 +212,7 @@ pub(crate) async fn conditional(State(policy): State<Arc<CachePolicy>>, req: Req
         parts.headers.remove(header::CONTENT_LENGTH);
         return Response::from_parts(parts, Body::empty());
     }
-    Response::from_parts(parts, body)
+    Response::from_parts(parts, if head { Body::empty() } else { body })
 }
 
 #[cfg(test)]

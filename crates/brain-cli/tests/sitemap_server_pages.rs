@@ -124,3 +124,18 @@ fn every_page_closes_with_the_credit_unless_the_app_turns_it_off() {
     assert!(!about.contains("data-brain-credit"), "{about}");
     let _ = std::fs::remove_dir_all(dir.parent().unwrap());
 }
+
+#[test]
+fn the_credit_line_does_not_spend_the_view_budget() {
+    let dir = app("bsmcreditsize");
+    write(&dir, &[("views/index.brain", view("Home", "", ""))]);
+    let total = |credit: bool| {
+        let site = if credit { "" } else { ",\"seo\":{\"credit\":false}" };
+        std::fs::write(dir.join("brain.json"), format!("{{\"budget\":{{\"viewKB\":0.001}}{site}}}")).unwrap();
+        let t = text(&brain(&dir, &["build", "--site", "https://shop.acme.dev"]));
+        let at = t.find("exceeded on /: ").unwrap_or_else(|| panic!("{t}")) + 15;
+        t[at..].split(' ').next().unwrap().parse::<usize>().unwrap()
+    };
+    assert_eq!(total(true), total(false));
+    let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+}
