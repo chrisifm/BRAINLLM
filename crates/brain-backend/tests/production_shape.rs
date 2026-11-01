@@ -9,6 +9,10 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 const ROWS: i32 = 6000;
+/// `BRAIN_SHAPE_ROWS` raises the table for a recorded measurement.
+fn rows() -> i32 {
+    std::env::var("BRAIN_SHAPE_ROWS").ok().and_then(|n| n.parse().ok()).unwrap_or(ROWS)
+}
 const ORIGIN: &str = "http://localhost:5190";
 
 fn items() -> Resource {
@@ -76,10 +80,10 @@ async fn long_text_tables_search_without_errors_and_list_through_their_index() {
          'title','Item '||n,'summary',CASE WHEN n%7=0 THEN 'qa review' ELSE 'long record' END,'state',CASE WHEN n%2=0 THEN 'open' ELSE 'closed' END,'rank',n,\
          'body',CASE WHEN n%5=0 THEN 'react ' ELSE '' END||CASE WHEN n%11=0 THEN '100% done ' ELSE '' END||CASE WHEN n%13=0 THEN 'a\\b ' ELSE '' END||\
          (SELECT string_agg(md5((n*k)::text),' ') FROM generate_series(1,121+n%121) k)) FROM generate_series(1,$2) n",
-    ).bind(author.id).bind(ROWS).execute(&mut *tx).await.unwrap();
+    ).bind(author.id).bind(rows()).execute(&mut *tx).await.unwrap();
     tx.commit().await.unwrap();
     let (rows, shortest, longest): (i64, i32, i32) = sqlx::query_as("SELECT count(*),min(length(data->>'body')),max(length(data->>'body')) FROM _brain_res_items").fetch_one(&pool).await.unwrap();
-    assert_eq!(rows, ROWS as i64);
+    assert_eq!(rows, self::rows() as i64);
     assert!(shortest >= 4000 && longest <= 8200, "control: the fixture has the production shape ({shortest}..{longest})");
     sqlx::query("ALTER TABLE _brain_res_items SET (autovacuum_enabled=false)").execute(&pool).await.unwrap();
     sqlx::query("VACUUM ANALYZE _brain_res_items").execute(&pool).await.unwrap();
@@ -95,7 +99,7 @@ async fn long_text_tables_search_without_errors_and_list_through_their_index() {
         }
     }
     let (status, found) = get(&http, "/api/items?search=react").await;
-    assert_eq!((status, found["total"].clone()), (200, json!(ROWS / 5)), "control: full-text search reads the long field to its end {found}");
+    assert_eq!((status, found["total"].clone()), (200, json!(self::rows() / 5)), "control: full-text search reads the long field to its end {found}");
 
     let mut admin = pool.acquire().await.unwrap().detach();
     // Plain lists: the first page never walks the table, whatever its size.
@@ -110,6 +114,20 @@ async fn long_text_tables_search_without_errors_and_list_through_their_index() {
         assert_eq!((after.seq_scan - before.seq_scan, after.seq_read - before.seq_read), (0, 0), "{uri} scanned the table: {before:?} -> {after:?}");
         assert!(after.idx_scan - before.idx_scan >= 3, "{uri} used no index: {before:?} -> {after:?}");
         assert!(after.idx_fetch - before.idx_fetch <= 3 * (page as i64 + 1) * 2, "{uri} read far more rows than its page: {before:?} -> {after:?}");
+    }
+    // `BRAIN_SHAPE_TIMINGS=1` prints the medians recorded in docs/backend/performance.md; nothing asserts on the clock.
+    if std::env::var_os("BRAIN_SHAPE_TIMINGS").is_some() {
+        tokio::time::sleep(std::time::Duration::from_secs(61)).await; // the requests above spent this minute's rate limit
+        for uri in ["/api/items?limit=20&sort=-created_at", "/api/items?limit=20&state=open&sort=rank", "/api/items?search=react&limit=20", "/api/items?search=%25", "/api/items?search=%5C", "/api/items?search=%25%25%25", "/api/items?search=%5C%5C%5C", "/api/items?search=reakt"] {
+            let (mut ms, mut last) = (Vec::new(), (0, Value::Null));
+            for _ in 0..5 {
+                let started = std::time::Instant::now();
+                last = get(&http, uri).await;
+                ms.push(started.elapsed().as_secs_f64() * 1000.0);
+            }
+            ms.sort_by(f64::total_cmp);
+            eprintln!("shape-timing {uri} status {} degraded {} median {:.1} ms max {:.1} ms", last.0, last.1["degraded"], ms[2], ms[4]);
+        }
     }
     pool.close().await;
 }
