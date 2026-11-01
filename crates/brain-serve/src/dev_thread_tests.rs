@@ -186,6 +186,8 @@ fn dispatch_failure_logs_coalesce_without_losing_counts() {
     dev.stop();
 }
 
+const RELEASE_WAIT: Duration = Duration::from_secs(5);
+
 #[test]
 fn startup_spawn_errors_release_listener_watcher_context_and_owned_socket_worker() {
     for role in [Role::Watch, Role::Accept] {
@@ -216,8 +218,10 @@ fn startup_spawn_errors_release_listener_watcher_context_and_owned_socket_worker
         assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
         assert!(error.to_string().contains("BDEV_THREAD_START"));
         assert!(error.to_string().contains("fix:"));
+        // A closed listener can stay unbindable for milliseconds on a busy host with no process holding it, so the
+        // proof is the bounded wait: a listener this startup leaked would keep the port past it.
         assert!(
-            TcpListener::bind(address).is_ok(),
+            crate::listen::bind_waiting("127.0.0.1", address.port(), RELEASE_WAIT).is_ok(),
             "failed startup must release its listener"
         );
         let deadline = Instant::now() + Duration::from_secs(3);

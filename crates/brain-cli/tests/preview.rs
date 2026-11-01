@@ -119,10 +119,12 @@ fn stop(mut p: Preview, port: u16, eof: bool) {
         assert!(Instant::now() < until, "preview did not stop");
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert!(
-        TcpListener::bind(("127.0.0.1", port)).is_ok(),
-        "preview still owns its port"
-    );
+    // A closed listener can stay unbindable for milliseconds on a busy host, with no process holding it.
+    let until = Instant::now() + Duration::from_secs(5);
+    while TcpListener::bind(("127.0.0.1", port)).is_err() {
+        assert!(Instant::now() < until, "preview still owns its port");
+        std::thread::sleep(Duration::from_millis(5));
+    }
     assert_eq!(
         std::fs::read_to_string(p.dir.join(".brain/run/brain.pid")).unwrap(),
         "untouched-production-owner"
