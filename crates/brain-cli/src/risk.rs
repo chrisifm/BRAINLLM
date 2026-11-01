@@ -206,7 +206,7 @@ pub(crate) mod tests {
         let root = std::env::temp_dir().join(format!(
             "brain-{tag}-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() | (u128::from({ static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) }) << 64)
         ));
         crate::scaffold::new_app(&root).unwrap();
         App(root.canonicalize().unwrap())

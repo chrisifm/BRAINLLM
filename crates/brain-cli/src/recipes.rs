@@ -404,7 +404,7 @@ mod tests {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos();
+            .as_nanos() | (u128::from({ static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) }) << 64);
         let root = std::env::temp_dir().join(format!(
             "brain-recipe-{name}-{}-{stamp}",
             std::process::id()

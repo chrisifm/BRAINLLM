@@ -79,7 +79,7 @@ fn local_export_pruning_preserves_real_node_values_effects_and_tdz_errors() {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos() | (u128::from({ static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) }) << 64)
     ));
     std::fs::create_dir(&root).unwrap();
     let fixture = Fixture(root);

@@ -10,7 +10,7 @@ fn build(source: &str, extra: &[(&str, &str)]) -> (Scratch, brain_pack::Output) 
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
-        .as_nanos();
+        .as_nanos() | (u128::from({ static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) }) << 64);
     let scratch = Scratch(
         std::env::temp_dir().join(format!("brain-form-capability-{}-{stamp}", std::process::id())),
     );

@@ -656,7 +656,7 @@ mod tests {
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
-                    .as_nanos()
+                    .as_nanos() | (u128::from({ static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) }) << 64)
             ));
             std::fs::create_dir_all(root.join("comp")).unwrap();
             std::fs::write(root.join("comp/test.brain"), source).unwrap();
