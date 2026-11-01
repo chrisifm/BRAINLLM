@@ -27,7 +27,12 @@ export async function launch() {
 }
 
 export async function openPage(port, url) {
-  const t = await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURI(url)}`, { method: 'PUT' })).json()
+  // Chrome writes DevToolsActivePort a moment before its HTTP endpoint answers.
+  let t
+  for (let i = 0; !t; i++) {
+    try { t = await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURI(url)}`, { method: 'PUT' })).json() }
+    catch (error) { if (i >= 40) throw error; await sleep(50) }
+  }
   const ws = new WebSocket(t.webSocketDebuggerUrl)
   await new Promise((r, j) => { ws.onopen = r; ws.onerror = j })
   let id = 0

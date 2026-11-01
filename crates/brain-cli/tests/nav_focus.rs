@@ -38,6 +38,9 @@ fn dev_navigation_moves_focus_and_announces_the_title() {
         return;
     }
     let probe = r#"{"expr":"new Promise(r=>setTimeout(()=>r(document.activeElement.tagName+'|'+(document.getElementById('brain-announce')?.textContent??'none')+'|'+(document.getElementById('brain-announce')?.getAttribute('aria-live')??'none')+'|'+location.pathname),700))"}"#;
+    // Before the dev router is up, navigate() is a normal page load by design.
+    let ready = tool(&mut call, "brain_eval", r#"{"expr":"new Promise(r=>{const t=setInterval(()=>{if(window.__brainDevGo){clearInterval(t);r('router-ready')}},20)})"}"#);
+    assert!(ready.contains("router-ready"), "{ready}");
     let clicked = tool(&mut call, "brain_click", r##"{"selector":"#b"}"##);
     assert!(!clicked.contains("isError\":true"), "{clicked}");
     let after_navigate = tool(&mut call, "brain_eval", probe);
