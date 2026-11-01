@@ -9,6 +9,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- `brain backend import` brings accounts and records from another system, keeping ids, owners, references and dates, with a rollback preview and whole-file refusal (B0798); imported scrypt hashes verify at login and become Argon2.
 - **Breaking:** the `ne` list filter now keeps records without a value, matching action guards; add `[exists]=true` to exclude them.
 - `brain build --strict` fails when a page ships with a component fallback or a route is left out of `dist/`; the output stays on disk and the JSON report still prints.
 - `brain mcp` refuses a stdin line over 32 MiB with a JSON-RPC error and keeps serving; invalid UTF-8 now answers a parse error instead of ending the session.

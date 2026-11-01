@@ -25,6 +25,7 @@
 @unreachable B0782 printed when the server starts
 @unreachable B0785 reported by `brain backend` commands
 @unreachable B0787 reported by `brain backend migrate` and `serve`
+@unreachable B0798 reported by `brain backend import`
 
 ### B0701 server module in client code
 @expect B0701 comp/x.brain 3:17

@@ -31,6 +31,7 @@ pub mod slugs;
 pub mod types;
 pub mod upload;
 pub mod files;
+pub mod import;
 pub mod platform;
 pub mod visibility;
 pub mod webhooks;

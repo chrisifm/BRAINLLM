@@ -1,8 +1,7 @@
 # Backend migration readiness
 
 This is an acceptance ledger for replacing an existing application backend, not a promise that the published
-framework already covers every requirement. Published baseline: **0.4.0**. Current development code checkpoint:
-**3987d0b**. No application database, credentials, identifiers or files were modified during this assessment.
+framework already covers every requirement. Reviewed against: **0.7.0** and the 0.8.0 development line (refreshed 2026-10-31). No application database, credentials, identifiers or files were modified during this assessment.
 
 The requesting project's `docs/MIGRACION-BACKEND-BRAINLLM.md` was read completely after it became available
 in the project root, one level above its frontend. The reviewed 147-line document defines **B-01 through B-43**.
@@ -13,14 +12,14 @@ below distinguish the published baseline, current development and still-open acc
 
 ## Capability assessment
 
-| Requirement | Published 0.4.0 | Development and remaining acceptance |
+| Requirement | Capability today | Remaining acceptance |
 |---|---|---|
 | Email/password and Google login | Native accounts, persisted sessions, optional JWT and Google recipes exist. | Real project identity, account linking, role and migration parity still require application tests. |
 | Verification and recovery email | Native flows and optional private Resend delivery exist. | Configure the provider and verify delivery/replay/account enumeration behavior with synthetic accounts. |
 | Persistent background work | PostgreSQL leases, retries and at-least-once processing exist. | Application jobs must be idempotent; verify real retries and side effects before removing the existing worker. |
 | CRUD with permissions | Schema/policy and request-scoped `ctx.backend.resource()` exist. | A role is not an organization membership. Access by one organization to a record owned by a person needs relational authorization. |
 | Amounts, dates, enums and relationships | App fields accept `str`, `num`, `bool`, `email`, `obj`; resource IDs are UUID. | Exact typed values, references/FKs, organizational scope and legacy bigint identity compatibility are open blockers. |
-| PDF resume uploads | Uploads are private, content-validated PNG/JPEG/WebP images. The upload route allows 5 MiB plus multipart overhead; the general 64 KiB body limit is not universal. | General document/PDF storage, authorized attachment download, quotas, retention and transport limits must be implemented and tested end to end. |
+| PDF resume uploads | Declared private file buckets take the listed content types with content validation ([files](backend/files.md)). | Quotas, retention and transport limits must be verified end to end. |
 | Stripe and PayPal webhooks | Native webhooks implement the BRAIN HMAC envelope, not those providers' protocols. | Provider-specific verification and header ingress, raw-body preservation, replay/idempotency and durable receipt are required. |
 | Typo-tolerant search | `pg_trgm`, `unaccent`, full-text/trigram GIN indexes and declared search fields exist. | Declarative index control, weights/configuration, reindex CLI, migration/drift and representative query-plan tests remain incomplete. |
 | Administrative panel | The published resource generator does not ship admin views. | Opt-in `--admin-ui` is integrated in development. Combined functional tests pass; the fixed edit fixture totals 30,720 B with zero budget headroom. Real native/browser acceptance is still required. |
@@ -34,46 +33,46 @@ even if the source labels it P1 or P2.
 
 | ID | Priority | General requirement | Current disposition |
 |---|---|---|---|
-| B-01 | P0 | References, real FKs, delete rules, related reads/filters | Open; owner FK is not a relation between application resources. |
+| B-01 | P0 | References, real FKs, delete rules, related reads/filters | Implemented: declared `ref:<resource>` fields with real foreign keys, delete rules and related reads ([relations](backend/relations.md)). |
 | B-02 | P0 | Exact integers/decimal/money values | Implemented 2026-10-30: `int` (JavaScript-safe range) and `decimal(p,s)` transported as canonical strings with a lossless `numeric(p,s)` CHECK; `num` unchanged. Needs migration evidence on real data. |
 | B-03 | P0 | Calendar dates, instants and exposed record timestamps | Implemented 2026-10-30: `date`, `datetime` (normalized to UTC) and read-only `created_at`/`updated_at` on every record read. |
 | B-04 | P0 | Bounded enums and database constraints | Implemented 2026-10-30: `enum(a\|b)` validated in the schema and by a database CHECK. |
 | B-05 | P0 | Typed arrays and element-count bounds | Partial 2026-10-30: bounded `list<str>`/`list<str,N>`; other element types remain open. Item byte limits are application-enforced only. |
 | B-06 | P0 | Field/composite uniqueness and cross-field constraints | Implemented 2026-10-30: `unique: true`, composite `unique` sets and declarative range/compare/together checks in `constraints.jsbrain`, enforced in the validator and in Postgres (409/422). |
 | B-07 | P1 | Declared field defaults | Implemented 2026-10-30: per-field `default` validated at load and applied on create and PUT. |
-| B-08 | P1 | Legacy bigint identity or indexed external-ID mapping | Open; preserve existing identifiers and URLs without lossy numeric conversion. |
-| B-09 | P1 | Organization ownership and explicit transfer | Open; user ownership and role grants do not establish organization membership. |
+| B-08 | P1 | Legacy bigint identity or indexed external-ID mapping | Implemented: keep an old id in a unique indexed field, private when needed ([ids](backend/ids.md)); UUIDs remain the record id. |
+| B-09 | P1 | Organization ownership and explicit transfer | Partial: ownership through relations covers an organization record ([ownership](backend/ownership.md)); explicit transfer is application work. |
 | B-10 | P1 | Bounded arbitrary JSON objects | Covered reference within the existing object-byte contract. |
-| B-11 | P0 | Declared scalar/related filters and visibility predicates | Open. |
-| B-12 | P0 | Declared multi-field sort with null ordering | Open. |
-| B-13 | P0 | Totals and bounded related aggregates | Open. |
-| B-14 | P1 | Search language, weights, related vocabulary and synonyms | Partial: FTS/trigram and fixed weights exist; configurable language/weights and application search parity remain open. |
-| B-15 | P2 | Exposed keyset pagination | Open; internal cursor helpers do not establish a public contract. |
-| B-16 | P0 | Transactional domain operations across resources | Open; asynchronous hooks/jobs do not substitute for atomic database commands. |
-| B-17 | P0 | Conditional changes, increments and idempotent insertion | Open beyond the existing single-record compare-and-swap behavior. |
-| B-18 | P0 | Authorized state transitions and transactional reads | Open beyond bounded payload-transforming before-hooks. |
-| B-19 | P1 | Validated partial merge updates | Open; existing PUT replacement must retain its compatibility contract. |
-| B-20 | P1 | Authorized field projections | Open; full resource data is not a role-specific projection. |
-| B-21 | P1 | Relationship-based authorization | Open; test access through the full ownership chain. |
+| B-11 | P0 | Declared scalar/related filters and visibility predicates | Implemented: declared scalar and related filters ([filters](backend/filters.md)). |
+| B-12 | P0 | Declared multi-field sort with null ordering | Implemented: declared multi-field sort with null ordering ([sorting](backend/sorting.md)). |
+| B-13 | P0 | Totals and bounded related aggregates | Implemented: totals, aggregates and related counts ([aggregates](backend/aggregates.md)). |
+| B-14 | P1 | Search language, weights, related vocabulary and synonyms | Partial: language and weights are declared ([search](backend/search.md)); synonyms and related vocabulary remain open. |
+| B-15 | P2 | Exposed keyset pagination | Implemented: public keyset cursors ([pagination](backend/pagination.md)). |
+| B-16 | P0 | Transactional domain operations across resources | Implemented: multi-resource transactional operations ([transactions](backend/transactions.md)). |
+| B-17 | P0 | Conditional changes, increments and idempotent insertion | Implemented: guards, increments and idempotent insertion ([atomic updates](backend/atomic-updates.md)). |
+| B-18 | P0 | Authorized state transitions and transactional reads | Implemented: authorized state transitions ([state machines](backend/state-machines.md)). |
+| B-19 | P1 | Validated partial merge updates | Implemented: validated PATCH merge, PUT unchanged ([patch](backend/patch.md)). |
+| B-20 | P1 | Authorized field projections | Implemented: per-role field visibility ([visibility](backend/visibility.md)). |
+| B-21 | P1 | Relationship-based authorization | Implemented: relationship-based grants ([ownership](backend/ownership.md)); test the application's full chain. |
 | B-22 | P0 | Provider webhook raw body and real signature protocol | Open; native BRAIN signing is not Stripe/PayPal signing. |
 | B-23 | P0 | Provider order creation/capture and idempotency | Requires domain flow and provider acceptance; do not confuse server HTTP capability with a transactional payment command. |
 | B-24 | P0 | Synchronous external operations returning results | Partial: Node server functions and request-scoped native repositories exist; domain/transaction/provider parity remains open. |
 | B-25 | P1 | Long-running AI work with durable result writes | Partial: jobs/SDK adapters exist; configurable bounded execution and transactional result persistence remain open. |
 | B-26 | P2 | Real client IP from explicitly trusted proxies | Open; never trust arbitrary forwarded identity/IP headers. |
 | B-27 | P2 | Multiple declared HTTP origins | Implemented in development shared settings; full deployment application acceptance remains required. |
-| B-28 | P0 | Existing-password/user import and controlled rehash | Open: no legacy scrypt/bcrypt verifier/importer. Do not infer that compatible external Argon2 PHC hashes are inherently unsupported without a test. |
+| B-28 | P0 | Existing-password/user import and controlled rehash | Implemented: `brain backend import users` takes scrypt and Argon2 PHC hashes and the first login stores Argon2 ([import](backend/import.md)). bcrypt and other formats remain open. |
 | B-29 | P0 | Safe bidirectional verified-provider account linking | Open: an already-linked provider subject can sign in; the first link to an existing email is deliberately refused. Any new linking policy must prevent pre-hijacking. |
 | B-30 | P1 | Redirect/code identity flow versus browser GIS | Explicit application decision; existing GIS support is not authorization-code support. |
-| B-31 | P1 | Bounded code verification and permitted signup role selection | Open; do not permit privileged roles from untrusted signup input. |
+| B-31 | P1 | Bounded code verification and permitted signup role selection | Open: bounded numeric code login and signup role selection need a product decision; signup never grants a privileged role from input. |
 | B-32 | P1 | Multiple memberships and active application space | Open; one assigned role is not the same model. |
 | B-33 | P1 | Password-policy compatibility | Explicit decision; retain strong defaults and handle legacy accounts separately, without silently lowering signup policy. |
 | B-34 | P1 | User administration, activation and session revocation | Partial native primitives; a complete authorized administration API remains open. |
 | B-35 | P2 | Signup disposable-domain policy hook | Open. |
-| B-36 | P0 | Private bounded PDF/documents with related authorization | Open; image support cannot establish safe document delivery. |
+| B-36 | P0 | Private bounded PDF/documents with related authorization | Implemented: declared private buckets with content validation and authorization ([files](backend/files.md)); application acceptance remains. |
 | B-37 | P2 | Versioned image/logo storage | Existing image capability; public-display/ownership behavior still needs application acceptance. |
-| B-38 | P0 | Reviewed versioned contract/data evolution | Open; schema-drift refusal is a safety boundary, not an evolution tool. |
-| B-39 | P0 | Import preserving IDs, owners and references | Open; no silent manual data rewrite or production auto-migration. |
-| B-40 | P1 | Scheduled work, retention and deliberate dead-job retry | Open: bounded automatic retries and terminal states exist; scheduling and an explicit dead-job retry contract remain separate. |
+| B-38 | P0 | Reviewed versioned contract/data evolution | Partial: `brain backend approve-contract` previews and applies a reviewed change (B0787); data rewriting remains application work. |
+| B-39 | P0 | Import preserving IDs, owners and references | Implemented: `brain backend import <resource>` keeps ids, owners, references and dates, previews by default and refuses as a whole ([import](backend/import.md)). |
+| B-40 | P1 | Scheduled work, retention and deliberate dead-job retry | Partial: bounded retries, terminal states and [cron](backend/cron.md) exist; verify the dead-job retry the application needs. |
 | B-41 | P1 | Application-owned ephemeral-database tests and service fakes | Partial framework harness; a stable app-facing seed/fake/integration contract remains open. |
 | B-42 | P2 | Operational metrics/tracing | Correlated logs, bounded backtraces/source locations and job frames exist; Prometheus/OTel and distributed tracing remain open. |
 | B-43 | P2 | Published throughput/p99 under deployment topology | Open; compile time and functional tests are not backend throughput measurements. |
@@ -169,7 +168,7 @@ Do not reproduce private application security findings in public release notes.
    deployment throughput. Approve a tested cutover only after behavior/data parity.
 
 A Node server function can already perform synchronous HTTP/SDK work and call request-scoped native resource
-repositories in 0.4.0. Its production request timeout defaults to 10 seconds but is configurable; the RPC body
+repositories. Its production request timeout defaults to 10 seconds but is configurable; the RPC body
 limit is a separate control. These capabilities do not provide a transaction spanning multiple native resource
 calls, a payment-state machine or unrestricted database access from a job. Keep those distinctions in proposals.
 
@@ -184,5 +183,4 @@ calls, a payment-state machine or unrestricted database access from a job. Keep 
 - `runtime/server/server.mjs`: image-specific proxy limit and current BRAIN webhook-header projection.
 - `docs/CONTINUATION-CHECKLIST.md`: exact component, integrated-test and publication evidence.
 
-The audited resource contract, search, database implementation and migrations are unchanged between the published
-baseline and checkpoint3987d0b. Native socket/admin work must not be mistaken for completion of relational migration.
+Native socket and admin work must not be mistaken for completion of relational migration.

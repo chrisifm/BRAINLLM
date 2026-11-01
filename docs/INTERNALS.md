@@ -2128,3 +2128,7 @@ LOCKED` and pushes `next_attempt_at` forward as its lease and backoff, and `file
 `Storage::remove` treats missing bytes as finished and refuses a key outside storage, which then waits in the table instead
 of being followed. Rejected uploads use `files::discard`. Bytes written just before a crash, with neither row nor
 tombstone, are still not recovered: nothing records them until the row exists.
+
+## Backend import
+
+`brain_backend::import` runs a file inside one transaction with a savepoint per row, so every bad row is reported and a preview is the same code path followed by a rollback. Reasons are built from fixed text and field names, never from a database message, because those quote the row. `auth::legacy_scrypt` bounds the parameters of an imported hash; `scrypt` is used without its PHC feature to avoid a second `password-hash` version next to `argon2`.

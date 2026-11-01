@@ -655,9 +655,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }
     if !matches!(
         operation,
-        "schema" | "migrate" | "approve-contract" | "serve" | "bootstrap-admin" | "rename-role" | "users"
+        "schema" | "migrate" | "approve-contract" | "serve" | "bootstrap-admin" | "rename-role" | "users" | "import"
     ) {
-        return Err("usage: brain backend capabilities|schema|migrate|approve-contract [--accept <resource>] [--apply]|serve|bootstrap-admin|rename-role --from <role> --to <role> [--apply]|logs [rid]|users|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182] [--with-workers]".into());
+        return Err("usage: brain backend capabilities|schema|migrate|approve-contract [--accept <resource>] [--apply]|import users|<resource> --file <rows.jsonl> [--apply]|serve|bootstrap-admin|rename-role --from <role> --to <role> [--apply]|logs [rid]|users|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182] [--with-workers]".into());
     }
     let snapshot = inspect(&root)?;
     if operation == "schema" {
@@ -711,6 +711,24 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 report["next"]=json!("Declare those roles in server/auth/roles.jsbrain, or preview moving their accounts with `brain backend rename-role --from <role> --to <role>` (add --apply; sessions are revoked)");
             }
             println!("{report}");return Ok(())
+        }
+        if operation=="import" {
+            let target=args.get(1).filter(|a|!a.starts_with("--")).map(String::as_str).ok_or("usage: brain backend import users|<resource> --file <rows.jsonl> [--apply]")?;
+            let file=crate::flag(args,"--file").ok_or("usage: brain backend import users|<resource> --file <rows.jsonl> [--apply]")?;
+            let text=std::fs::read_to_string(&file).map_err(|e|format!("{file}: {e}"))?;
+            let apply=args.iter().any(|a|a=="--apply");
+            let outcome=if target=="users" {
+                let declared=roles.roles.clone();
+                let auth=brain_backend::auth::Auth::new_with_role(pool.clone(),&roles.signup_role).await?;
+                brain_backend::import::users(&pool,&declared,auth.unusable_hash(),&text,apply).await?
+            } else {
+                let resource=resources.iter().find(|r|r.name==target).ok_or_else(||format!("no resource is named `{target}`; fix: use `users` or a resource from server/resources"))?;
+                brain_backend::import::records(&pool,resource,&text,apply).await?
+            };
+            pool.close().await;
+            let problems:Vec<_>=outcome.problems.iter().map(|(line,reason)|json!({"line":line,"reason":reason})).collect();
+            println!("{}",json!({"schemaVersion":1,"ok":problems.is_empty(),"rows":outcome.rows,"applied":outcome.applied,"problems":problems,"moreProblems":outcome.more_problems}));
+            return if problems.is_empty() {Ok(())} else {Err(format!("B0798: {file} was not imported: {} rows have problems; fix: correct them and run the import again",problems.len()+outcome.more_problems))};
         }
         if operation=="approve-contract" {
             let reviewed=brain_backend::contract_review::review(&pool,&resources).await?;
