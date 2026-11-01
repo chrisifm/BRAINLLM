@@ -127,16 +127,22 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [Behavior analytics (experimental backend)](backend/analytics.md) | Every app with a native backend records how visitors use it: which elements they click, where they are and how long they stay. |
 | [Project API keys](backend/api-keys.md) | A project can issue its own API keys so other services, scripts and partners call the resource API without a browser session. |
 | [Atomic updates: guarded increments, compare-and-set and upserts](backend/atomic-updates.md) | Read-modify-write from the client (`GET`, change, `PUT`) loses updates under concurrency. |
+| [Audit log](backend/audit.md) | `audit: true` in a resource's `policy.jsbrain` records every insert, update and delete of its rows, whichever path wrote them. |
 | [Batch writes](backend/batch.md) | `POST /api/<resource>/batch` creates, updates, upserts or deletes many records in ONE transaction. |
 | [HTTP caching and conditional requests](backend/caching.md) | Every successful `GET /api/...` response carries an `ETag`. |
+| [Captcha on public writes](backend/captcha.md) | Requires a verified token before a protected public write runs. |
 | [Running several backend processes](backend/cluster.md) | One `brain backend serve` process keeps two kinds of state in its own memory: rate-limit windows and the socket event fan-out. |
+| [Credits](backend/credits.md) | A balance per subject (a user or an organization) and an append-only ledger that explains it. |
 | [Cron schedules (single run per slot)](backend/cron.md) | `server/cron/<name>.jsbrain` enqueues a declared job on a cron schedule. |
+| [Facets](backend/facets.md) | Counts of each value of a field over the rows the reader may list, for filter sidebars. |
 | [File uploads of any type (native backend)](backend/files.md) | Declared file buckets hold the content types they list (PDF, Word, spreadsheets, zip, audio, video, images, plain text), stream the body to private disk withou… |
 | [Filters (B-11)](backend/filters.md) | List endpoints accept only the filters a resource declares in `query.jsbrain`. |
+| [Geo fields and filters](backend/geo.md) | A field of kind `geo` stores a point as `{"lat": 19.4, "lng": -99.1}`, in degrees. |
 | [Record ids and keeping existing numeric ids (B-08)](backend/ids.md) | Every native record gets a server-generated UUID (`id`). |
 | [Importing existing data (B-28, B-39)](backend/import.md) | `brain backend import` brings accounts and records from another system with their ids, owners, references and dates. |
 | [Reading and writing resources from job handlers](backend/job-backend.md) | A job handler (`server/jobs/<name>/handler.jsbrain`) gets `ctx.backend` with the same calls as server `load()` and server functions (server-queries.md): `resou… |
 | [Startup, health, load and shutdown](backend/lifecycle.md) | This page covers how the native backend connects to Postgres, how it reports health, how it behaves under load and how it stops. |
+| [Organizations and memberships](backend/organizations.md) | Tenant data belongs to an organization and is enforced by the server. |
 | [Outbound calls from server logic](backend/outbound.md) | Route handlers, jobs and server modules call external APIs (payment providers, shipping rates, mail services) with `httpCall`. |
 | [Ownership through relations (B-09, B-21)](backend/ownership.md) | A policy grant `owner` means "the authenticated user created this row". |
 | [Pagination (B-15)](backend/pagination.md) | Lists support offset pages (`limit` 1–100, default 25; `offset` 0–10000) and keyset cursors for deep or changing data. |

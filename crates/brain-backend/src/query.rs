@@ -14,9 +14,15 @@ use uuid::Uuid;
 pub const MAX_FILTERS: usize = 16;
 pub const MAX_IN: usize = 50;
 pub const GROUP_LIMIT: i64 = 100;
+/// Mean Earth radius (IUGG), in kilometers.
+const EARTH_KM: f64 = 6371.0088;
+/// Half the Earth's circumference: a `near` radius cannot usefully go past it.
+const MAX_NEAR_KM: f64 = 20040.0;
+/// Degrees added to an index box so rounding cannot drop a point that the exact distance check would keep.
+const GEO_MARGIN: f64 = 1e-6;
 /// Text comparisons and text indexes use the first 256 characters; equality is rechecked on the full value.
 const TEXT_KEY: usize = 256;
-pub const OPS: &[&str] = &["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "prefix", "iprefix", "exists", "has"];
+pub const OPS: &[&str] = &["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "prefix", "iprefix", "exists", "has", "near", "bbox"];
 const RESERVED: &[&str] = &["search", "limit", "offset", "sort", "include", "cursor", "after", "aggregate", "count", "fields", "owner"];
 const TIMESTAMPS: &[&str] = &["created_at", "updated_at"];
 /// Typo matches kept for one search; reaching it marks `total` approximate.
@@ -51,6 +57,9 @@ pub struct QueryContract {
     /// Named aggregates over the filtered set (`?aggregate=<name>`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub aggregate: BTreeMap<String, Aggregate>,
+    /// Fields whose values can be counted over the listed set (`?facets=<field>,...`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub facets: Vec<String>,
     /// Named per-record counts of related records (`?count=<name>`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub count: BTreeMap<String, Count>,
@@ -121,6 +130,7 @@ enum Kind {
     Bool,
     Ref,
     List,
+    Geo,
     Stamp,
 }
 /// Filter operators of a parsed field type, as the query parser enforces them (`None`: it cannot be filtered).
@@ -144,8 +154,9 @@ impl Kind {
             Ty::DateTime => Kind::DateTime,
             Ty::Str | Ty::Email | Ty::Enum(_) => Kind::Text,
             Ty::Bool => Kind::Bool,
-            Ty::Ref(_) => Kind::Ref,
+            Ty::Ref(_) | Ty::Org => Kind::Ref,
             Ty::ListStr { .. } => Kind::List,
+            Ty::Geo => Kind::Geo,
             Ty::Num | Ty::Obj => return None,
         })
     }
@@ -159,10 +170,11 @@ impl Kind {
             Kind::Bool => &["eq", "exists"],
             Kind::Ref => &["eq", "ne", "in", "exists"],
             Kind::List => &["has", "exists"],
+            Kind::Geo => &["near", "bbox", "exists"],
         }
     }
     fn sortable(self) -> bool {
-        !matches!(self, Kind::Ref | Kind::List)
+        !matches!(self, Kind::Ref | Kind::List | Kind::Geo)
     }
     fn numeric(self) -> bool {
         matches!(self, Kind::Int | Kind::Decimal)
@@ -178,6 +190,8 @@ fn expr(kind: Kind, field: &str) -> String {
         Kind::Bool => format!("(data->>'{field}')"),
         Kind::Ref => crate::relations::column(field),
         Kind::List => format!("(data->'{field}')"),
+        // `point` is built in and immutable, so the index needs no database extension.
+        Kind::Geo => format!("point((data#>>'{{{field},lng}}')::float8,(data#>>'{{{field},lat}}')::float8)"),
         Kind::Stamp => field.to_string(),
     }
 }
@@ -293,6 +307,18 @@ pub fn validate(r: &Resource) -> Result<(), String> {
             return Err(at(format!("include `{name}` must be a ref:<resource> field")));
         }
     }
+    if q.facets.len() > 8 {
+        return Err(at("declares too many facets; fix: at most 8".to_string()));
+    }
+    let mut seen_facets = BTreeSet::new();
+    for field in &q.facets {
+        if !seen_facets.insert(field) {
+            return Err(at(format!("facet `{field}` is declared twice")));
+        }
+        if !matches!(kind(r, field), Some(Kind::Text | Kind::Bool | Kind::Ref | Kind::Date | Kind::Int | Kind::List)) || restricted(r, field) {
+            return Err(at(format!("facet `{field}` must be a public str, enum, bool, ref, date, int or list<str> field")));
+        }
+    }
     for (name, aggregate) in &q.aggregate {
         if !crate::contract::identifier(name) {
             return Err(at(format!("aggregate name `{name}` must be an identifier")));
@@ -400,6 +426,7 @@ pub(crate) fn indexes(r: &Resource) -> Vec<(String, String)> {
         match kind(r, field) {
             Some(Kind::Stamp | Kind::Ref) | None => {}
             Some(Kind::List) => add("gin", expr(Kind::List, field)),
+            Some(Kind::Geo) => add("gist", expr(Kind::Geo, field)),
             Some(k) => {
                 add("btree", expr(k, field));
                 if iprefix {
@@ -461,6 +488,7 @@ pub struct ListRequest {
     pub include: Vec<String>,
     aggregate: Vec<String>,
     count: Vec<String>,
+    facets: Vec<String>,
     /// `?fields=`: the `data` keys each item keeps. Id, timestamps, `included` and `counts` always stay.
     fields: Option<BTreeSet<String>>,
     /// Sent branches of each declared `or` group.
@@ -519,6 +547,8 @@ fn operand(r: &Resource, field: &str, kind: Kind, op: &str, raw: &str) -> Option
     let ty = r.fields.get(field).and_then(|f| f.ty());
     let value = match (kind, op) {
         (_, "exists") => matches!(raw, "true" | "false").then(|| raw.to_string())?,
+        (Kind::Geo, "near") => near_operand(raw).map(|_| raw.to_string())?,
+        (Kind::Geo, "bbox") => box_operand(raw).map(|_| raw.to_string())?,
         (Kind::Text, "prefix" | "iprefix") | (Kind::List, _) => (!raw.is_empty()).then(|| raw.to_string())?,
         (Kind::Int, _) => ty?.normalize(&json!(raw.parse::<i64>().ok()?), true)?.to_string(),
         (Kind::Bool, _) => matches!(raw, "true" | "false").then(|| raw.to_string())?,
@@ -632,6 +662,14 @@ pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(Str
             "owner" if !r.query.filter.contains_key("owner") => {
                 if raw == "me" { req.owner_me = true } else { bad("owner accepts only `me`; the server resolves it from the session") }
             }
+            // A filter declared on a field of this name keeps working as before.
+            "facets" if !r.query.filter.contains_key("facets") => {
+                let names: Vec<String> = split(raw).into_iter().map(str::to_string).collect();
+                if let Some(name) = names.iter().find(|n| !r.query.facets.contains(n)) {
+                    bad(&format!("`{name}` is not a declared facet"));
+                }
+                req.facets = names;
+            }
             "aggregate" | "count" => {
                 let names: Vec<String> = split(raw).into_iter().map(str::to_string).collect();
                 let declared: Vec<&String> = if key == "aggregate" { r.query.aggregate.keys().collect() } else { r.query.count.keys().collect() };
@@ -725,6 +763,7 @@ fn expected(r: &Resource, field: &str, kind: Kind) -> String {
         Kind::Date | Kind::DateTime => format!("{} or now, now-7d, now+1h", r.fields[field].ty().map(|t| t.expected()).unwrap_or_default()),
         Kind::Bool => "true or false".into(),
         Kind::Ref => "a record UUID".into(),
+        Kind::Geo => "lat,lng,km for near (km above 0, at most 20040) or minLat,minLng,maxLat,maxLng for bbox".into(),
         _ => r.fields.get(field).and_then(|f| f.ty()).map(|t| t.expected()).unwrap_or_default(),
     }
 }
@@ -857,6 +896,68 @@ fn escape_like(s: &str) -> String {
     out.push('%');
     out
 }
+fn operand_text(value: &Operand) -> Option<&str> {
+    match value {
+        Operand::Value(text) => Some(text),
+        Operand::Now(_) => None,
+    }
+}
+/// `lat,lng,km` of a `near` filter.
+fn near_operand(raw: &str) -> Option<[f64; 3]> {
+    let [lat, lng, km] = geo_numbers::<3>(raw)?;
+    ((-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lng) && km > 0.0 && km <= MAX_NEAR_KM).then_some([lat, lng, km])
+}
+/// `minLat,minLng,maxLat,maxLng` of a `bbox` filter. `minLng` above `maxLng` means the box crosses the antimeridian.
+fn box_operand(raw: &str) -> Option<[f64; 4]> {
+    let [south, west, north, east] = geo_numbers::<4>(raw)?;
+    let lat = -90.0..=90.0;
+    let lng = -180.0..=180.0;
+    (lat.contains(&south) && lat.contains(&north) && south <= north && lng.contains(&west) && lng.contains(&east)).then_some([south, west, north, east])
+}
+fn geo_numbers<const N: usize>(raw: &str) -> Option<[f64; N]> {
+    let numbers: Vec<f64> = raw.split(',').map(|n| n.parse::<f64>().ok().filter(|n| n.is_finite())).collect::<Option<_>>()?;
+    numbers.try_into().ok()
+}
+/// Boxes as `[west, south, east, north]`, split at the antimeridian so each one is ordinary.
+fn lng_spans(south: f64, west: f64, north: f64, east: f64) -> Vec<[f64; 4]> {
+    if west <= east {
+        vec![[west, south, east, north]]
+    } else {
+        vec![[west, south, 180.0, north], [-180.0, south, east, north]]
+    }
+}
+/// Boxes that contain every point within `km` of the center, for the index; the exact distance is checked afterwards.
+fn near_boxes(lat: f64, lng: f64, km: f64) -> Vec<[f64; 4]> {
+    let angle = km / EARTH_KM;
+    let reach = angle.to_degrees() + GEO_MARGIN;
+    let (south, north) = (lat - reach, lat + reach);
+    // A circle that reaches a pole contains every longitude there.
+    if south <= -90.0 || north >= 90.0 {
+        return vec![[-180.0, south.max(-90.0), 180.0, north.min(90.0)]];
+    }
+    let span = (angle.sin() / lat.to_radians().cos()).clamp(-1.0, 1.0).asin().to_degrees() + GEO_MARGIN;
+    if span >= 180.0 {
+        return vec![[-180.0, south, 180.0, north]];
+    }
+    let (west, east) = (lng - span, lng + span);
+    if west < -180.0 {
+        lng_spans(south, west + 360.0, north, east)
+    } else if east > 180.0 {
+        lng_spans(south, west, north, east - 360.0)
+    } else {
+        vec![[west, south, east, north]]
+    }
+}
+fn push_boxes(q: &mut QueryBuilder<Postgres>, e: &str, boxes: &[[f64; 4]]) {
+    q.push("(");
+    for (i, [west, south, east, north]) in boxes.iter().enumerate() {
+        if i > 0 {
+            q.push(" OR ");
+        }
+        q.push(format!("{e} <@ box(point(")).push_bind(*west).push(",").push_bind(*south).push("),point(").push_bind(*east).push(",").push_bind(*north).push("))");
+    }
+    q.push(")");
+}
 fn push_predicate(q: &mut QueryBuilder<Postgres>, f: &Filter) {
     let e = expr(f.kind, &f.field);
     let field = &f.field;
@@ -867,6 +968,27 @@ fn push_predicate(q: &mut QueryBuilder<Postgres>, f: &Filter) {
         }
     };
     match f.op.as_str() {
+        "near" => {
+            if let Some([lat, lng, km]) = operand_text(first).and_then(near_operand) {
+                q.push("(");
+                push_boxes(q, &e, &near_boxes(lat, lng, km));
+                let (y, x) = (format!("(data#>>'{{{field},lat}}')::float8"), format!("(data#>>'{{{field},lng}}')::float8"));
+                q.push(format!(" AND 2*{EARTH_KM}::float8*asin(least(1::float8,sqrt(power(sin(radians({y}-"))
+                    .push_bind(lat)
+                    .push(")/2),2)+cos(radians(")
+                    .push_bind(lat)
+                    .push(format!("))*cos(radians({y}))*power(sin(radians({x}-"))
+                    .push_bind(lng)
+                    .push(")/2),2))))<=")
+                    .push_bind(km)
+                    .push(")");
+            }
+        }
+        "bbox" => {
+            if let Some([south, west, north, east]) = operand_text(first).and_then(box_operand) {
+                push_boxes(q, &e, &lng_spans(south, west, north, east));
+            }
+        }
         "exists" => {
             let yes = first == &Operand::Value("true".into());
             q.push(if yes { "(" } else { "NOT (" });
@@ -943,7 +1065,7 @@ fn push_predicate(q: &mut QueryBuilder<Postgres>, f: &Filter) {
 fn condition_operands(r: &Resource, field: &str, value: &Value) -> Option<(Kind, &'static str, Vec<Operand>)> {
     let f = r.fields.get(field)?;
     let ty = f.ty()?;
-    let kind = Kind::of(&ty).filter(|k| *k != Kind::List)?;
+    let kind = Kind::of(&ty).filter(|k| !matches!(k, Kind::List | Kind::Geo))?;
     let one = |v: &Value| {
         if v.is_array() || v.is_object() || v.is_null() {
             return None;
@@ -1004,6 +1126,8 @@ struct Ctx<'a> {
     matches: Matches,
     /// The session's user when the request says `owner=me`.
     owner: Option<Uuid>,
+    /// Field whose own filters do not apply, so a facet still offers its other values. The scope always applies.
+    facet: Option<&'a str>,
 }
 impl Ctx<'_> {
     /// Authorization scope and declared filters over the alias-free columns of the current table.
@@ -1023,6 +1147,9 @@ impl Ctx<'_> {
             q.push(")");
         }
         for f in &self.req.filters {
+            if f.via.is_none() && self.facet == Some(f.field.as_str()) {
+                continue;
+            }
             q.push(" AND ");
             match &f.via {
                 None => push_predicate(q, f),
@@ -1164,7 +1291,7 @@ pub async fn list(
         return Err(ListError::SignInRequired);
     }
     let owner = if req.owner_me { viewer.id } else { None };
-    let mut ctx = Ctx { r, resources, scope: &scope, related, req, matches: Matches::All, owner };
+    let mut ctx = Ctx { r, resources, scope: &scope, related, req, matches: Matches::All, owner, facet: None };
     let keys = keys(r, req);
     let sig = signature(&keys);
     let ranked = req.sort.is_none() && search_ranked(r, req);
@@ -1176,7 +1303,7 @@ pub async fn list(
     if !text.is_empty() {
         (degraded, approximate) = resolve_search(&mut tx, &mut ctx, &text).await?;
     }
-    let ctx = ctx;
+    let mut ctx = ctx;
 
     // Page.
     let mut q = QueryBuilder::<Postgres>::new(concat!("SELECT ", crate::record_columns!()));
@@ -1273,6 +1400,17 @@ pub async fn list(
             truncated.push(name.clone());
         }
     }
+    let mut facets = Map::new();
+    let mut facets_cut = Vec::new();
+    for field in &req.facets {
+        ctx.facet = Some(field);
+        let (value, cut) = facet(&mut tx, &ctx, field).await?;
+        facets.insert(field.clone(), value);
+        if cut {
+            facets_cut.push(field.clone());
+        }
+    }
+    ctx.facet = None;
     tx.commit().await?;
 
     let mut out = json!({"items": items, "limit": req.limit, "offset": req.offset, "total": total});
@@ -1288,6 +1426,13 @@ pub async fn list(
     if !truncated.is_empty() {
         // Named aggregates that hit GROUP_LIMIT: their largest groups are present, the rest are not.
         out["aggregates_truncated"] = json!(truncated);
+    }
+    if !facets.is_empty() {
+        out["facets"] = Value::Object(facets);
+    }
+    if !facets_cut.is_empty() {
+        // Facets that hit GROUP_LIMIT: their most frequent values are present, the rest are not.
+        out["facets_truncated"] = json!(facets_cut);
     }
     if degraded {
         out["degraded"] = json!(true);
@@ -1363,6 +1508,41 @@ fn relational_read(r: &Resource, viewer: Viewer<'_>) -> Option<Scope> {
     owner_visible.then(|| crate::ownership::relational_read(r, viewer)).flatten()
 }
 
+fn group_key(k: Kind, key: Option<String>) -> Value {
+    match (k, key) {
+        (_, None) => Value::Null,
+        (Kind::Int, Some(t)) => t.parse::<i64>().map(|n| json!(n)).unwrap_or(json!(t)),
+        (Kind::Bool, Some(t)) => json!(t == "true"),
+        (_, Some(t)) => json!(t),
+    }
+}
+/// Counts of one field's values over the rows the reader may list, and whether they were cut at [`GROUP_LIMIT`].
+/// Rows without a value count under a null key; a `list<str>` counts each row once per distinct element.
+async fn facet(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, field: &str) -> Result<(Value, bool), sqlx::Error> {
+    let r = ctx.r;
+    let k = kind(r, field).unwrap_or(Kind::Text);
+    let mut q = match k {
+        Kind::List => QueryBuilder::<Postgres>::new(format!(
+            "SELECT _element AS _g,count(DISTINCT id) AS _n FROM _brain_res_{} t CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(data->'{field}')='array' THEN data->'{field}' ELSE '[]'::jsonb END) AS _e(_element) WHERE ",
+            r.name
+        )),
+        _ => {
+            let e = match k {
+                Kind::Ref => format!("{}::text", crate::relations::column(field)),
+                Kind::Text => format!("(data->>'{field}')"),
+                _ => format!("({})::text", expr(k, field)),
+            };
+            QueryBuilder::<Postgres>::new(format!("SELECT {e} AS _g,count(*) AS _n FROM _brain_res_{} t WHERE ", r.name))
+        }
+    };
+    ctx.push_where(&mut q);
+    q.push(format!(" GROUP BY _g ORDER BY _n DESC,_g NULLS LAST LIMIT {}", GROUP_LIMIT + 1));
+    let mut rows = q.build().fetch_all(&mut **tx).await?;
+    let cut = rows.len() as i64 > GROUP_LIMIT;
+    rows.truncate(GROUP_LIMIT as usize);
+    let values = rows.iter().map(|row| json!({"key": group_key(k, row.get("_g")), "count": row.get::<i64, _>("_n")})).collect();
+    Ok((Value::Array(values), cut))
+}
 /// One aggregate and whether its groups were cut at [`GROUP_LIMIT`].
 async fn aggregate(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, a: &Aggregate) -> Result<(Value, bool), sqlx::Error> {
     let r = ctx.r;
@@ -1426,14 +1606,7 @@ async fn aggregate(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, a: &
             rows.iter()
                 .map(|row| {
                     let mut out = render(row);
-                    let key: Option<String> = row.get("_g");
-                    let key = match (k, key) {
-                        (_, None) => Value::Null,
-                        (Kind::Int, Some(t)) => t.parse::<i64>().map(|n| json!(n)).unwrap_or(json!(t)),
-                        (Kind::Bool, Some(t)) => json!(t == "true"),
-                        (_, Some(t)) => json!(t),
-                    };
-                    out.insert("key".into(), key);
+                    out.insert("key".into(), group_key(k, row.get("_g")));
                     Value::Object(out)
                 })
                 .collect(),
@@ -1472,11 +1645,28 @@ pub fn openapi_parameters(r: &Resource) -> Vec<Value> {
             params.push(json!({"name": key, "in":"query", "description": if key == "include" { format!("Comma-separated: {}. Dotted paths follow references up to {} levels", list.join(", "), crate::relations::MAX_INCLUDE_DEPTH) } else { format!("Comma-separated: {}", list.join(", ")) }, "schema":{"type":"string"}}));
         }
     }
+    if !r.query.facets.is_empty() {
+        params.push(json!({"name":"facets","in":"query","description":format!("Comma-separated: {}. Adds `facets` with the count of each value over the rows you may list, ignoring this field's own filters", r.query.facets.join(", ")),"schema":{"type":"string"}}));
+    }
     params
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn near_boxes_split_at_the_antimeridian_and_open_at_the_poles() {
+        use super::near_boxes;
+        assert_eq!(near_boxes(0.0, 0.0, 100.0).len(), 1);
+        let split = near_boxes(10.0, 179.9, 100.0);
+        assert_eq!(split.len(), 2);
+        assert!(split[0][0] > 170.0 && split[0][2] == 180.0 && split[1][0] == -180.0 && split[1][2] < -170.0, "{split:?}");
+        let split = near_boxes(10.0, -179.9, 100.0);
+        assert!(split.len() == 2 && split[0][2] == 180.0 && split[1][0] == -180.0, "{split:?}");
+        let pole = near_boxes(89.9, 0.0, 50.0);
+        assert_eq!((pole.len(), pole[0][0], pole[0][2], pole[0][3]), (1, -180.0, 180.0, 90.0));
+        let wide = near_boxes(0.0, 0.0, 20040.0);
+        assert_eq!((wide[0][0], wide[0][1], wide[0][2], wide[0][3]), (-180.0, -90.0, 180.0, 90.0));
+    }
     #[test]
     fn timestamps_order_without_a_null_position_so_their_index_serves_the_list() {
         let key = |kind, field: &str, nulls_first| SortKey { field: field.into(), kind, desc: true, nulls_first };

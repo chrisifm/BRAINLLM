@@ -88,6 +88,8 @@ pub struct Policy {
     pub api: bool,
     /// Declares that an unconditioned public read of a resource with state-like fields is intentional (B0749).
     pub expose_all_rows: bool,
+    /// Records every mutation of this resource in the audit log.
+    pub audit: bool,
 }
 impl Default for Policy {
     fn default() -> Self {
@@ -100,6 +102,7 @@ impl Default for Policy {
             read_where: BTreeMap::new(),
             api: true,
             expose_all_rows: false,
+            audit: false,
         }
     }
 }
@@ -119,12 +122,14 @@ struct RawPolicy {
     api: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     expose_all_rows: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    audit: Option<bool>,
 }
 impl TryFrom<RawPolicy> for Policy {
     type Error = String;
     fn try_from(raw: RawPolicy) -> Result<Self, String> {
         let api = raw.api.unwrap_or(true);
-        let mut policy = Policy { api, expose_all_rows: raw.expose_all_rows.unwrap_or(false), ..Policy::default() };
+        let mut policy = Policy { api, expose_all_rows: raw.expose_all_rows.unwrap_or(false), audit: raw.audit.unwrap_or(false), ..Policy::default() };
         let mut read_where = BTreeMap::new();
         for (op, list) in [("read", raw.read), ("create", raw.create), ("update", raw.update), ("delete", raw.delete)] {
             // A server-only resource may omit its lists: they stay admin-only.
@@ -155,7 +160,7 @@ impl TryFrom<RawPolicy> for Policy {
                         read_where.insert(name.clone(), conditions.into_iter().collect());
                         name
                     }
-                    _ => return Err(format!("{op} policy entries must be grant names; fix: use 'public', 'owner', 'owner.<ref>' or a role name")),
+                    _ => return Err(format!("{op} policy entries must be grant names; fix: use 'public', 'owner', 'owner.<ref>', 'org', 'org.<role>' or a role name")),
                 };
                 if names.contains(&name) {
                     return Err(format!("{op} policy lists `{name}` twice; fix: keep one entry, an unconditioned grant would make its row condition pointless"));
@@ -187,6 +192,7 @@ impl From<Policy> for RawPolicy {
             delete: names(p.delete),
             api: (!p.api).then_some(false),
             expose_all_rows: p.expose_all_rows.then_some(true),
+            audit: p.audit.then_some(true),
         }
     }
 }
@@ -367,6 +373,13 @@ impl Resource {
                 if crate::ownership::path(role).is_some() {
                     continue;
                 }
+                if crate::organizations::tenant(self).is_some() {
+                    // The membership rules below decide every grant of tenant data.
+                    continue;
+                }
+                if role.starts_with("org.") {
+                    continue;
+                }
                 if !(matches!(role.as_str(), "owner" | "public")
                     || crate::auth_flows::role_name(role))
                     || role == "public" && op != "read"
@@ -378,6 +391,7 @@ impl Resource {
                 }
             }
         }
+        crate::organizations::validate_resource(self)?;
         crate::query::validate_read_where(self)?;
         if !self.policy.api && self.policy.read.iter().any(|g| g == "public") {
             return Err(format!("{}: a server-only resource (api: false) cannot grant public read; fix: remove public or drop api: false", self.name));
@@ -641,6 +655,15 @@ impl Resource {
             .filter(|(_, f)| f.unique)
             .map(|(n, _)| vec![n.clone()])
             .chain(self.constraints.unique.iter().cloned())
+            // Tenant values are unique per organization: a shared index would reveal another organization's value.
+            .map(|mut set| {
+                if let Some(org) = crate::organizations::tenant(self)
+                    && !set.iter().any(|f| f == org)
+                {
+                    set.insert(0, org.to_string());
+                }
+                set
+            })
             .map(|set| (self.object_name("_brain_ux_", &set.join(",")), set))
             .collect()
     }
@@ -812,6 +835,21 @@ fn native_paths(roles: &crate::auth_flows::RolesConfig) -> Map<String, Value> {
         None,
         &[401, 403, 429, 500, 504],
     );
+    for (path, method, summary, success_body, codes) in [
+        ("/_brain/orgs", "post", "Create an organization with the caller as its first role (docs/backend/organizations.md)", true, &[401u16, 422, 429][..]),
+        ("/_brain/orgs", "get", "List the caller's organizations", false, &[401, 429]),
+        ("/_brain/orgs/{id}/members", "get", "List an organization's members", false, &[401, 404, 429]),
+        ("/_brain/orgs/{id}/members/{user}", "patch", "Change a member's role; an organization keeps at least one owner", true, &[401, 403, 404, 409, 422, 429]),
+        ("/_brain/orgs/{id}/members/{user}", "delete", "Remove a member; an organization keeps at least one owner", false, &[401, 403, 404, 409, 429]),
+        ("/_brain/orgs/{id}/invites", "post", "Create a single-use invitation token", true, &[401, 403, 404, 422, 429]),
+        ("/_brain/orgs/invites/accept", "post", "Join an organization with an invitation token", true, &[401, 403, 422, 429]),
+        ("/_brain/orgs/{id}/audit", "get", "Read an organization's audit log (docs/backend/audit.md)", false, &[401, 403, 404, 422, 429]),
+        ("/_brain/audit", "get", "Read audit entries outside any organization", false, &[401, 403, 422, 429]),
+        ("/_brain/credits/{subject}", "post", "Apply a signed credit change with an idempotency key (docs/backend/credits.md)", true, &[401, 403, 404, 409, 422, 429]),
+        ("/_brain/credits/{subject}", "get", "Read a balance and its ledger", false, &[401, 403, 404, 422, 429]),
+    ] {
+        add(path, method, summary, auth.clone(), 200, Some(json!({"type":"object"})), success_body.then(|| json!({"required":true,"content":{"application/json":{"schema":{"type":"object"}}}})), codes);
+    }
     add(
         "/_brain/auth/signup",
         "post",

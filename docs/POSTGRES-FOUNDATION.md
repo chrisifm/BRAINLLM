@@ -115,9 +115,8 @@ global result counts and cross-tenant suggestion vocabularies.
 A candidate limit bounds returned ranking input, not PostgreSQL's entire scan;
 statement deadlines and plan measurements remain necessary. Public/broad reads
 are available only when the resource's explicit policy grants them. Existing
-`owner` means a user, not an organization: do not claim multi-tenant isolation or
-infer an organization tenant from a role. A future tenant model needs tenant IDs,
-membership authorization and tenant-qualified uniqueness/FKs throughout.
+`owner` means a user, not an organization: tenant isolation comes only from an `org`
+field (`docs/backend/organizations.md`), never from a role.
 
 ## Index and retention proposal
 

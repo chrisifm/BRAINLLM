@@ -1,0 +1,29 @@
+{
+  "id": "organizations",
+  "kind": "capability",
+  "title": "Organizations and memberships",
+  "why": "Rows could belong to a user but not to a team; tenant isolation had to be written by hand per application.",
+  "changelog": [
+    "Organizations and memberships"
+  ],
+  "guide": "docs/backend/organizations.md",
+  "codes": [],
+  "apis": [
+    "org field",
+    "org grants",
+    "/_brain/orgs"
+  ],
+  "affects": [
+    "server/resources/*/schema.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/<name>/schema.jsbrain",
+    "snippet": "<meta server>\nexport default { org: 'org!', title: 'str!' }"
+  },
+  "uses": [
+    {
+      "glob": "server/resources/*/schema.jsbrain",
+      "contains": "'org"
+    }
+  ]
+}

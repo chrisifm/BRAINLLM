@@ -26,6 +26,10 @@ use uuid::Uuid;
 mod sockets;
 #[path = "domain_http.rs"]
 mod domain_http;
+#[path = "organizations_http.rs"]
+mod organizations_http;
+#[path = "credits_http.rs"]
+mod credits_http;
 #[path = "files_http.rs"]
 mod files_http;
 #[path = "edge_http.rs"]
@@ -96,6 +100,8 @@ pub struct App {
     platform: Arc<files_http::State>,
     routes: Arc<routes_http::State>,
     cluster: crate::cluster::Cluster,
+    organizations: Arc<crate::organizations::Organizations>,
+    captcha: Arc<crate::captcha::Captcha>,
 }
 #[derive(Debug)]
 pub struct Error {
@@ -213,7 +219,7 @@ impl Error {
         Self::new(
             StatusCode::FORBIDDEN,
             "POLICY_DENIED",
-            "The declared policy does not grant this operation to this identity (rules evaluated: role, owner, owner.<ref> and row conditions); sign in if anonymous, otherwise use an account those rules allow",
+            "The declared policy does not grant this operation to this identity (rules evaluated: role, owner, owner.<ref>, organization membership and row conditions); sign in if anonymous, otherwise use an account those rules allow",
         )
     }
     fn missing() -> Self {
@@ -271,7 +277,26 @@ impl<S: Send + Sync, T: serde::de::DeserializeOwned + Send> FromRequestParts<S> 
     }
 }
 impl App {
+    /// Admits a protected public write only with a token the provider confirmed.
+    async fn require_captcha(&self, action: &str, h: &HeaderMap, client: Option<std::net::IpAddr>) -> Result<()> {
+        if !self.captcha.protects(action) {
+            return Ok(());
+        }
+        let token = h.get(crate::captcha::HEADER).and_then(|v| v.to_str().ok());
+        match self.captcha.verify(token, client).await {
+            crate::captcha::Verdict::Passed => Ok(()),
+            crate::captcha::Verdict::Rejected => Err(Error::new(StatusCode::FORBIDDEN, "CAPTCHA_FAILED", "Complete the captcha again and send its new token in the X-Brain-Captcha header")),
+            crate::captcha::Verdict::Unavailable => Err(Error::new(StatusCode::SERVICE_UNAVAILABLE, "CAPTCHA_UNAVAILABLE", "The captcha could not be verified; nothing was changed; retry with a new token shortly")),
+        }
+    }
     async fn user(&self, h: &HeaderMap) -> Result<Option<User>> {
+        let user = self.identify(h).await?;
+        if let Some(user) = &user {
+            crate::audit::identified(user.id);
+        }
+        Ok(user)
+    }
+    async fn identify(&self, h: &HeaderMap) -> Result<Option<User>> {
         if let Some(user) = http_api_keys::key_user() {
             return Ok(Some(user));
         }
@@ -370,6 +395,8 @@ pub async fn router_full(
     }
     let (edge_state, edge_control) = edge_http::EdgeState::new(&platform.edge);
     let shared = platform.cluster.shared;
+    let platform_organizations = platform.organizations.clone();
+    let platform_captcha = platform.captcha.clone().ready(&platform.routes, config.production)?;
     let cache_policy = Arc::new(platform.cache.clone());
     let cors_max_age = platform.edge.cors_max_age;
     let (custom_routes, custom_handlers) = (platform.routes.clone(), platform.handlers.clone());
@@ -421,6 +448,7 @@ pub async fn router_full(
             if grants.iter().any(|role| {
                 !matches!(role.as_str(), "public" | "owner")
                     && crate::ownership::path(role).is_none()
+                    && !(crate::organizations::tenant(&r).is_some() && crate::organizations::grant(role).is_some())
                     && !config.roles.roles.contains(role)
             }) {
                 return Err(
@@ -443,6 +471,7 @@ pub async fn router_full(
             return Err("Duplicate job".into());
         }
     }
+    crate::organizations::validate_roles(&resources.values().collect::<Vec<_>>(), &platform.organizations, &config.roles.roles)?;
     contract::validate_graph(
         &resources.values().cloned().collect::<Vec<_>>(),
         &jobs.values().cloned().collect::<Vec<_>>(),
@@ -529,6 +558,8 @@ pub async fn router_full(
         .map(|cfg| crate::api_keys::Keys::new(pool.clone(), cfg).map(|keys| keys.shared(shared)))
         .transpose()?;
     let app = App {
+        organizations: Arc::new(platform_organizations),
+        captcha: Arc::new(platform_captcha),
         cluster: crate::cluster::Cluster { shared },
         platform: platform.clone(),
         routes: custom.clone(),
@@ -565,6 +596,7 @@ pub async fn router_full(
             header::CONTENT_TYPE,
             header::AUTHORIZATION,
             header::HeaderName::from_static("x-brain-rpc"),
+            header::HeaderName::from_static(crate::captcha::HEADER),
             header::IF_MATCH,
             header::IF_NONE_MATCH,
         ]);
@@ -656,6 +688,8 @@ pub async fn router_full(
         )
         .route("/_brain/media/{id}/variants", post(media_variants))
         .route("/_brain/media/{id}/v/{version}/{preset}", get(media_asset))
+        .merge(organizations_http::routes())
+        .merge(credits_http::routes())
         .merge(http_api_keys::routes())
         .merge(files_http::routes(&platform))
         .merge(routes_http::routes(&custom))
@@ -885,7 +919,7 @@ async fn response_headers(req: Request, next: Next) -> Response {
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
     let db_time = std::sync::Arc::new(db::DbTime::default());
-    let response = db::with_db_time(db_time.clone(), REQUEST_ID.scope(rid.clone(), REQUEST_OPERATION.scope(operation_of(&method, &route, &path), next.run(req)))).await;
+    let response = db::with_db_time(db_time.clone(), REQUEST_ID.scope(rid.clone(), REQUEST_OPERATION.scope(operation_of(&method, &route, &path), crate::audit::scope(next.run(req))))).await;
     crate::dev_trace::request(&rid, method.as_str(), &route, response.status().as_u16(), started.elapsed().as_secs_f64() * 1000.0);
     let log_policy = response.extensions().get::<edge_http::LogPolicy>().copied();
     let mut response = crate::response::finalize(&method, &path, accept.as_deref(), &rid, response);
@@ -1016,7 +1050,8 @@ async fn docs(State(app): State<App>, h: HeaderMap) -> Result<Json<Value>> {
     }
     Ok(Json(api))
 }
-async fn signup(State(app): State<App>, Json(c): Json<Credentials>) -> Result<Json<Value>> {
+async fn signup(State(app): State<App>, client: Option<axum::Extension<ClientIp>>, headers: HeaderMap, Json(c): Json<Credentials>) -> Result<Json<Value>> {
+    app.require_captcha("signup", &headers, client.map(|c| c.0.0)).await?;
     app.auth
         .signup(c)
         .await
@@ -1044,10 +1079,11 @@ fn login_failed() -> Error {
         "Check credentials or wait for the 15-minute account lockout to expire",
     )
 }
-async fn login(State(app): State<App>, client: Option<axum::Extension<ClientIp>>, Json(c): Json<Credentials>) -> Result<Response> {
+async fn login(State(app): State<App>, client: Option<axum::Extension<ClientIp>>, headers: HeaderMap, Json(c): Json<Credentials>) -> Result<Response> {
+    app.require_captcha("login", &headers, client.as_ref().map(|c| c.0.0)).await?;
     // The backend owns the session mode. A configured JWT authority never falls back to opaque login on failure.
     if app.jwt.is_some() {
-        return token_login(State(app), client, Json(c)).await;
+        return issue_token(app, client, c).await;
     }
     let Some((user, token)) = app.auth.login_from(c, client.map(|c| c.0.0)).await.map_err(|failure| match failure {
         auth::AuthFailure::Input(_) => login_failed(),
@@ -1132,8 +1168,13 @@ fn jwt_response(tokens: crate::jwt::Tokens) -> Response {
 async fn token_login(
     State(app): State<App>,
     client: Option<axum::Extension<ClientIp>>,
+    headers: HeaderMap,
     Json(credentials): Json<Credentials>,
 ) -> Result<Response> {
+    app.require_captcha("login", &headers, client.as_ref().map(|c| c.0.0)).await?;
+    issue_token(app, client, credentials).await
+}
+async fn issue_token(app: App, client: Option<axum::Extension<ClientIp>>, credentials: Credentials) -> Result<Response> {
     let jwt = app.jwt.as_ref().ok_or_else(auth_disabled)?;
     let (user, opaque) = app
         .auth
@@ -1467,6 +1508,13 @@ async fn scoped_owner(
     existing: &Value,
     id: Uuid,
 ) -> Result<(Option<Uuid>, bool)> {
+    if crate::organizations::enforced(r) {
+        let allowed = crate::ownership::row_allowed(&app.pool, r, &app.resources, operation, viewer(Some(u)), id).await.map_err(|e| Error::internal(db::safe(e)))?;
+        if allowed {
+            return Ok((None, false));
+        }
+        return Err(write_denied(&app.pool, &app.resources, r, u, id, Error::missing()).await);
+    }
     if r.policy.allows(operation, Some(&u.role), false) {
         return Ok((None, false));
     }
@@ -1517,8 +1565,9 @@ async fn create(
 ) -> Result<Json<Value>> {
     let r = app.resource(&name)?;
     let u = app.required(&h).await?;
-    let through = !r.policy.allows("create", Some(&u.role), false);
-    if through && !relational(r, "create") {
+    let tenant = crate::organizations::enforced(r);
+    let through = !tenant && !r.policy.allows("create", Some(&u.role), false);
+    if through && !relational(r, "create") || tenant && crate::ownership::scope(r, "create", viewer(Some(&u))).is_none() {
         return Err(Error::forbidden());
     }
     crate::visibility::reject_server_fields(r, &input).map_err(Error::validation)?;
@@ -1526,6 +1575,13 @@ async fn create(
     let data = r.input(&input).map_err(Error::validation)?;
     if through && !owns_data(&app, r, "create", &u, &data).await? {
         return Err(Error::forbidden());
+    }
+    // After the hook and validation: the organization that is written is the one checked.
+    if tenant {
+        let org = crate::organizations::org_of(r, &data).ok_or_else(Error::forbidden)?;
+        if !crate::organizations::may_create(&app.pool, r, u.id, org).await.map_err(|error| Error::database(error))? {
+            return Err(Error::forbidden());
+        }
     }
     app.domain.protect(r, None, &data).map_err(Error::validation)?;
     let mut record = db::create(&app.pool, r, u.id, data)
@@ -1543,7 +1599,7 @@ async fn update(
 ) -> Result<Json<Value>> {
     let r = app.resource(&name)?;
     let u = app.required(&h).await?;
-    if !r.policy.allows("update", Some(&u.role), true) && !relational(r, "update") {
+    if !r.policy.allows("update", Some(&u.role), true) && !relational(r, "update") && !crate::organizations::enforced(r) {
         return Err(Error::forbidden());
     }
     // Capture a real row before application code; policy never relies on client-supplied existing data.
@@ -1559,6 +1615,7 @@ async fn update(
     let previous = existing["data"].clone();
     let input = before(&app, r, "update", input, Some(existing), &u).await?;
     let data = r.input(&input).map_err(Error::validation)?;
+    crate::organizations::unchanged(r, &previous, &data).map_err(Error::validation)?;
     if through && !owns_data(&app, r, "update", &u, &data).await? {
         return Err(Error::forbidden());
     }
@@ -1580,7 +1637,7 @@ async fn patch(
 ) -> Result<Json<Value>> {
     let r = app.resource(&name)?;
     let u = app.required(&h).await?;
-    if !r.policy.allows("update", Some(&u.role), true) && !relational(r, "update") {
+    if !r.policy.allows("update", Some(&u.role), true) && !relational(r, "update") && !crate::organizations::enforced(r) {
         return Err(Error::forbidden());
     }
     let (existing, revision) = db::get_version(&app.pool, r, id)
@@ -1595,6 +1652,7 @@ async fn patch(
     let previous = existing["data"].clone();
     let merged = before(&app, r, "update", merged, Some(existing), &u).await?;
     let data = r.input(&merged).map_err(Error::validation)?;
+    crate::organizations::unchanged(r, &previous, &data).map_err(Error::validation)?;
     if through && !owns_data(&app, r, "update", &u, &data).await? {
         return Err(Error::forbidden());
     }
@@ -1614,7 +1672,7 @@ async fn delete(
 ) -> Result<Json<Value>> {
     let r = app.resource(&name)?;
     let u = app.required(&h).await?;
-    if !r.policy.allows("delete", Some(&u.role), true) && !relational(r, "delete") {
+    if !r.policy.allows("delete", Some(&u.role), true) && !relational(r, "delete") && !crate::organizations::enforced(r) {
         return Err(Error::forbidden());
     }
     let (existing, revision) = db::get_version(&app.pool, r, id)
@@ -2174,8 +2232,10 @@ fn account_flow_error(error: crate::auth_flows::Error) -> Error {
 async fn request_password_reset(
     State(app): State<App>,
     client: Option<axum::Extension<ClientIp>>,
+    headers: HeaderMap,
     Json(input): Json<ResetRequest>,
 ) -> Result<Response> {
+    app.require_captcha("password_request", &headers, client.as_ref().map(|c| c.0.0)).await?;
     app.auth_flows
         .request_reset_from(&input.email, client.map(|c| c.0.0))
         .await

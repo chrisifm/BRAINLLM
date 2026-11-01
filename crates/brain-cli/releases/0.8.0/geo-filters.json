@@ -1,0 +1,29 @@
+{
+  "id": "geo-filters",
+  "kind": "capability",
+  "title": "Geo field with radius and box filters",
+  "why": "Location search needed a database extension or a scan of every row.",
+  "changelog": [
+    "A `geo` field filters by radius and box"
+  ],
+  "guide": "docs/backend/geo.md",
+  "codes": [],
+  "apis": [
+    "geo field",
+    "near",
+    "bbox"
+  ],
+  "affects": [
+    "server/resources/*/schema.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/<name>/query.jsbrain",
+    "snippet": "<meta server>\nexport default { filter: { at: ['near', 'bbox', 'exists'] } }"
+  },
+  "uses": [
+    {
+      "glob": "server/resources/*/query.jsbrain",
+      "contains": "near"
+    }
+  ]
+}

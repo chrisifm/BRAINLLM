@@ -2200,3 +2200,7 @@ documents cited by SPEC, guides and manifests, plus `docs/backend/*.md`, and `br
 deny list keeps internal documents out. `capabilities.rs` renders `docs/CAPABILITIES.md` from `GUIDES`, `ADD_KINDS`,
 `recipes::list`, the backend inventory and capability manifests; a unit test compares the bytes, so a new manifest needs
 `brain capabilities > docs/CAPABILITIES.md`.
+
+## 56. SaaS building blocks (2026-10-31)
+
+Six independent slices. Tenancy compiles into the row scope (`ownership::tenant_scope`), so every read channel inherits it; organization references are verified by `_brain_org_row()`. The audit log is a trigger (`_brain_audit_row`) because a request-layer hook could be skipped by a new write path; `audit::mark` passes the actor through transaction-local settings, and the entry stores names only. A resource without `audit` has no trigger, so it pays nothing. Facets reuse `Ctx::push_where`, with `Ctx.facet` dropping only that field's own filters and never the scope. Geo uses an expression GiST index over `point(lng,lat)`, an expanded box (`near_boxes`) and a haversine recheck. Captcha runs in the handlers rather than a layer, after the route's IP rate limit and before the handler, and any answer other than `success: true` admits nothing. Credits take `FOR UPDATE` on the balance row before reading the idempotency key, which orders same-key races too. No new diagnostic codes: invalid contracts fail at load with a message and fix.

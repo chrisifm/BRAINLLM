@@ -29,6 +29,10 @@ pub enum Who {
     Anyone,
     Owner(Uuid),
     Through(Uuid, Vec<String>),
+    /// A member of the row's organization, optionally holding one of these membership roles.
+    Member(Uuid, Option<String>),
+    /// A member of the row's organization who also owns the row.
+    MemberOwner(Uuid),
 }
 
 /// Parses `owner.<ref>[.<ref>]`; None for every other grant.
@@ -52,6 +56,9 @@ pub fn scope(r: &Resource, operation: &str, viewer: Viewer<'_>) -> Option<Scope>
     if crate::api_keys::system_active() {
         return Some(Scope::All);
     }
+    if crate::organizations::tenant(r).is_some() {
+        return tenant_scope(r, operation, viewer);
+    }
     if operation == "read" && r.policy.conditioned() {
         return conditioned_scope(r, viewer);
     }
@@ -63,6 +70,30 @@ pub fn scope(r: &Resource, operation: &str, viewer: Viewer<'_>) -> Option<Scope>
     let direct = r.policy.allows(operation, viewer.role, true);
     let paths: Vec<Vec<String>> = grants.iter().filter_map(|g| path(g)).collect();
     (direct || !paths.is_empty()).then_some(Scope::Owned { user, direct, paths })
+}
+/// Tenant data has no global grant: each branch is decided by memberships of the row's own organization.
+fn tenant_scope(r: &Resource, operation: &str, viewer: Viewer<'_>) -> Option<Scope> {
+    use crate::organizations::{Grant, grant};
+    let mut branches = Vec::new();
+    for name in grants(r, operation) {
+        let who = match (name.as_str(), grant(name), viewer.id) {
+            ("public", ..) => Who::Anyone,
+            (_, Some(Grant::Member), Some(user)) => Who::Member(user, None),
+            (_, Some(Grant::Role(role)), Some(user)) => Who::Member(user, Some(role.to_string())),
+            (_, Some(Grant::Own), Some(user)) => Who::MemberOwner(user),
+            _ => continue,
+        };
+        let conditions: Vec<_> = if operation == "read" {
+            r.policy.read_where.get(name).map(|c| c.iter().map(|(f, v)| (f.clone(), v.clone())).collect()).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        if who == Who::Anyone && conditions.is_empty() {
+            return Some(Scope::All);
+        }
+        branches.push(Branch { who, conditions });
+    }
+    (!branches.is_empty()).then_some(Scope::Rows(branches))
 }
 /// The grants a viewer holds on a resource with conditioned reads. Any unconditioned general grant wins outright.
 fn conditioned_scope(r: &Resource, viewer: Viewer<'_>) -> Option<Scope> {
@@ -178,6 +209,11 @@ impl Scope {
                             q.push("owner=").push_bind(*user);
                         }
                         Who::Through(user, hops) => push_path(q, r, resources, hops, *user),
+                        Who::Member(user, role) => push_member(q, r, *user, role.as_deref()),
+                        Who::MemberOwner(user) => {
+                            push_member(q, r, *user, None);
+                            q.push(" AND owner=").push_bind(*user);
+                        }
                     }
                     for (field, value) in &branch.conditions {
                         q.push(" AND ");
@@ -189,6 +225,19 @@ impl Scope {
             }
         }
     }
+}
+fn push_member(q: &mut sqlx::QueryBuilder<sqlx::Postgres>, r: &Resource, user: Uuid, role: Option<&str>) {
+    let Some(field) = crate::organizations::tenant(r) else {
+        // Unreachable after validation; fail closed.
+        q.push("false");
+        return;
+    };
+    // The column comes from a validated contract name; user and role are bound.
+    q.push(relations::column(field)).push(" IN (SELECT org_id FROM _brain_org_members WHERE user_id=").push_bind(user);
+    if let Some(role) = role {
+        q.push(" AND role=").push_bind(role.to_string());
+    }
+    q.push(")");
 }
 fn push_path(
     q: &mut sqlx::QueryBuilder<sqlx::Postgres>,

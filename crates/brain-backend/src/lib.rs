@@ -1,13 +1,16 @@
 //! Experimental backend. The compiler owns source syntax; this crate consumes only validated resource contracts.
 pub mod analytics;
 pub mod api_keys;
+pub mod audit;
 pub mod auth;
+pub mod captcha;
 pub mod auth_flows;
 pub mod boot;
 pub mod capabilities;
 pub mod cluster;
 pub mod contract;
 pub mod contract_review;
+pub mod credits;
 pub mod db;
 pub mod dev_trace;
 pub mod domain;
@@ -20,6 +23,7 @@ pub mod links;
 pub mod query;
 pub mod relations;
 pub mod media;
+pub mod organizations;
 pub mod origins;
 pub mod ownership;
 pub mod response;

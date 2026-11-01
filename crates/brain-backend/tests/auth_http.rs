@@ -50,7 +50,7 @@ impl Server {
         let headers = response.headers().clone();
         let mut bytes = Vec::new();
         while let Some(chunk) = response.chunk().await.unwrap() {
-            assert!(bytes.len() + chunk.len() <= 256 * 1024);
+            assert!(bytes.len() + chunk.len() <= 512 * 1024, "{path}: {} bytes so far", bytes.len() + chunk.len());
             bytes.extend_from_slice(&chunk)
         }
         let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);

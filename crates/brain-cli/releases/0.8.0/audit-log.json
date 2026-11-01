@@ -1,0 +1,28 @@
+{
+  "id": "audit-log",
+  "kind": "capability",
+  "title": "Append-only audit log",
+  "why": "Who changed what could only be answered with custom logging that a new write path could skip.",
+  "changelog": [
+    "An append-only audit log"
+  ],
+  "guide": "docs/backend/audit.md",
+  "codes": [],
+  "apis": [
+    "policy audit",
+    "/_brain/audit"
+  ],
+  "affects": [
+    "server/resources/*/policy.jsbrain"
+  ],
+  "adopt": {
+    "file": "server/resources/<name>/policy.jsbrain",
+    "snippet": "<meta server>\nexport default { read: ['admin'], create: ['admin'], update: ['admin'], delete: ['admin'], audit: true }"
+  },
+  "uses": [
+    {
+      "glob": "server/resources/*/policy.jsbrain",
+      "contains": "audit:"
+    }
+  ]
+}

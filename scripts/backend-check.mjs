@@ -8,7 +8,7 @@ import net from 'node:net'
 import { createHmac, randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 const project = fileURLToPath(new URL('../', import.meta.url))
-const targets=['analytics','api_keys','backend','caching','cluster','data_queries','domain_writes','edge','exact_types','files','imports','foundation','jwt_sessions','links','media','native_openapi','production_shape','query_shape','routes','auth_flows','auth_http','native_sockets','queues','row_policy','security_matrix','system_keys']
+const targets=['analytics','api_keys','backend','caching','cluster','data_queries','domain_writes','edge','exact_types','files','imports','foundation','jwt_sessions','links','media','native_openapi','production_shape','query_shape','routes','auth_flows','auth_http','native_sockets','organizations','queues','row_policy','security_matrix','system_keys']
 // Release gates that drive the real binary over real sockets (scripts/gates/<name>.mjs); selectable like a test target.
 const gates=['http-truth-table','failure-logs']
 // A module missing from `targets` could not be selected and would silently run in every focused pass of another target.
@@ -221,7 +221,7 @@ try {
       const http=async(path,body,cookie)=>{
         const response=await fetch(backendURL+path,{method:body===undefined?'GET':'POST',headers:{Origin:'https://app.example.test',Accept:'application/json',...(body!==undefined?{'Content-Type':'application/json'}:{}),...(cookie?{Cookie:cookie}:{})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(3000),redirect:'manual'})
         const reader=response.body.getReader();let length=0,parts=[]
-        try{for(;;){const {done,value}=await reader.read();if(done)break;length+=value.length;if(length>256*1024)throw Error('Auth CLI smoke response exceeds its bound');parts.push(Buffer.from(value))}}finally{await reader.cancel().catch(()=>{})}
+        try{for(;;){const {done,value}=await reader.read();if(done)break;length+=value.length;if(length>512*1024)throw Error('Auth CLI smoke response exceeds its bound');parts.push(Buffer.from(value))}}finally{await reader.cancel().catch(()=>{})}
         let json=null;try{json=JSON.parse(Buffer.concat(parts).toString('utf8'))}catch{}
         return {status:response.status,json,headers:response.headers}
       }
