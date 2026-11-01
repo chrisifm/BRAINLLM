@@ -3,6 +3,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# A syntax error in the launcher or the runtime stops every install: it fails here in seconds, before the long suites.
+git ls-files -z -- 'npm/*.js' 'npm/*.mjs' 'runtime/*.js' 'runtime/*.mjs' 'scripts/*.mjs' | while IFS= read -r -d '' script; do
+  [ -f "$script" ] && node --check "$script"
+done
+
 # Fixtures invoke target/debug/brain; cargo test alone does not refresh that binary.
 cargo build --locked -p brain-cli
 # Suites that run the compiler must find it wherever CARGO_TARGET_DIR puts it, or they skip silently.
