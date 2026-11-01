@@ -259,6 +259,72 @@ fn stack_is_symbolized(stack: &str) -> bool {
     stack.contains("brain_backend") && !stack.contains("__mh_execute_header")
 }
 type Result<T> = std::result::Result<T, Error>;
+/// A JSON body of a fixed shape. A body of the wrong shape says which key to change; the answer depends only on the
+/// keys sent, before any account or row is read, and never repeats a value or lists what else the shape declares.
+pub(crate) struct Strict<T>(pub T);
+impl<S: Send + Sync, T: serde::de::DeserializeOwned> axum::extract::FromRequest<S> for Strict<T> {
+    type Rejection = Response;
+    async fn from_request(req: Request, state: &S) -> std::result::Result<Self, Response> {
+        use axum::extract::rejection::JsonRejection;
+        match <Json<T> as axum::extract::FromRequest<S>>::from_request(req, state).await {
+            Ok(Json(value)) => Ok(Self(value)),
+            Err(JsonRejection::JsonDataError(error)) => Err(shape_error(&error.body_text()).into_response()),
+            Err(other) => Err(other.into_response()),
+        }
+    }
+}
+fn shape_error(text: &str) -> Error {
+    let named = |marker: &str| {
+        let start = text.find(marker)? + marker.len();
+        let key = text[start..].split('`').next()?;
+        Some(key.chars().take(64).collect::<String>())
+    };
+    let fields = if let Some(key) = named("unknown field `") {
+        json!({ key: "This endpoint does not accept this field: remove it" })
+    } else if let Some(key) = named("missing field `") {
+        json!({ key: "This field is required" })
+    } else {
+        json!({ "body": "A field has the wrong type: compare the body with the API contract" })
+    };
+    Error {
+        status: StatusCode::UNPROCESSABLE_ENTITY,
+        code: "INVALID_INPUT",
+        fix: "Apply the field errors and send only the fields the API contract documents for this endpoint",
+        fields: Some(fields),
+        brain_code: None,
+        detail: None,
+    }
+}
+#[cfg(test)]
+mod strict_body_tests {
+    use super::*;
+    use axum::extract::FromRequest;
+    async fn signup_body(body: &str) -> Value {
+        let request = Request::builder()
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let Err(response) = Strict::<auth::Credentials>::from_request(request, &()).await else {
+            panic!("{body} was accepted");
+        };
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(response.extensions().get::<crate::response::DefaultError>().is_some());
+        let bytes = axum::body::to_bytes(response.into_body(), 4096).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+    #[tokio::test]
+    async fn a_body_of_the_wrong_shape_names_the_key_and_no_value() {
+        let extra = signup_body(r#"{"email":"a@example.com","password":"long-enough-secret","name":"Ana"}"#).await;
+        assert_eq!(extra["error"]["code"], "INVALID_INPUT");
+        assert!(extra["error"]["fields"]["name"].is_string(), "{extra}");
+        let text = extra.to_string();
+        assert!(!text.contains("long-enough-secret") && !text.contains("a@example.com") && !text.contains("expected"), "{text}");
+        let missing = signup_body(r#"{"email":"a@example.com"}"#).await;
+        assert!(missing["error"]["fields"]["password"].is_string(), "{missing}");
+        let wrong = signup_body(r#"{"email":"a@example.com","password":12345678901234}"#).await;
+        assert!(!wrong.to_string().contains("12345678901234"), "{wrong}");
+    }
+}
 /// URL parameters; a value of the wrong shape (a record id that is not a UUID) answers with what to send instead.
 pub(crate) struct Path<T>(pub T);
 impl<S: Send + Sync, T: serde::de::DeserializeOwned + Send> FromRequestParts<S> for Path<T> {
@@ -1016,7 +1082,7 @@ async fn docs(State(app): State<App>, h: HeaderMap) -> Result<Json<Value>> {
     }
     Ok(Json(api))
 }
-async fn signup(State(app): State<App>, Json(c): Json<Credentials>) -> Result<Json<Value>> {
+async fn signup(State(app): State<App>, Strict(c): Strict<Credentials>) -> Result<Json<Value>> {
     app.auth
         .signup(c)
         .await
@@ -1044,10 +1110,10 @@ fn login_failed() -> Error {
         "Check credentials or wait for the 15-minute account lockout to expire",
     )
 }
-async fn login(State(app): State<App>, client: Option<axum::Extension<ClientIp>>, Json(c): Json<Credentials>) -> Result<Response> {
+async fn login(State(app): State<App>, client: Option<axum::Extension<ClientIp>>, Strict(c): Strict<Credentials>) -> Result<Response> {
     // The backend owns the session mode. A configured JWT authority never falls back to opaque login on failure.
     if app.jwt.is_some() {
-        return token_login(State(app), client, Json(c)).await;
+        return token_login(State(app), client, Strict(c)).await;
     }
     let Some((user, token)) = app.auth.login_from(c, client.map(|c| c.0.0)).await.map_err(|failure| match failure {
         auth::AuthFailure::Input(_) => login_failed(),
@@ -1132,7 +1198,7 @@ fn jwt_response(tokens: crate::jwt::Tokens) -> Response {
 async fn token_login(
     State(app): State<App>,
     client: Option<axum::Extension<ClientIp>>,
-    Json(credentials): Json<Credentials>,
+    Strict(credentials): Strict<Credentials>,
 ) -> Result<Response> {
     let jwt = app.jwt.as_ref().ok_or_else(auth_disabled)?;
     let (user, opaque) = app
@@ -1182,7 +1248,7 @@ struct GoogleCredential {
 async fn google_login(
     State(app): State<App>,
     headers: HeaderMap,
-    Json(body): Json<GoogleCredential>,
+    Strict(body): Strict<GoogleCredential>,
 ) -> Result<Response> {
     let google = app.google.as_ref().ok_or_else(auth_disabled)?;
     let jwt = app.jwt.as_ref().ok_or_else(auth_disabled)?;
@@ -1666,7 +1732,7 @@ async fn enqueue(
     State(app): State<App>,
     Path(queue): Path<String>,
     h: HeaderMap,
-    Json(input): Json<Enqueue>,
+    Strict(input): Strict<Enqueue>,
 ) -> Result<Json<Value>> {
     app.admin(&h).await?;
     let contract = app.jobs.get(&queue).ok_or_else(Error::missing)?;
@@ -1876,7 +1942,7 @@ async fn media_metadata(
     State(app): State<App>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
-    Json(meta): Json<MediaMetadata>,
+    Strict(meta): Strict<MediaMetadata>,
 ) -> Result<Json<Value>> {
     let user = app.required(&headers).await?;
     if meta.alt.len() > 1024
@@ -1931,7 +1997,7 @@ async fn media_variants(
     State(app): State<App>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
-    Json(body): Json<MediaPresets>,
+    Strict(body): Strict<MediaPresets>,
 ) -> Result<Json<Value>> {
     let user = app.required(&headers).await?;
     crate::media::validate_presets(&body.presets).map_err(|_|Error::validation(json!({"presets":"Use at most six uniquely named PNG/JPEG/WebP presets with dimensions 1..4096; JPEG quality 1..100"})))?;
@@ -2063,7 +2129,7 @@ async fn analytics_script() -> Response {
 async fn create_short_link(
     State(app): State<App>,
     headers: HeaderMap,
-    Json(input): Json<crate::links::Create>,
+    Strict(input): Strict<crate::links::Create>,
 ) -> Result<Response> {
     let user = app.user(&headers).await?.ok_or_else(auth_denied)?;
     let link=crate::links::create(&app.pool,user.id,input,&app.origins).await.map_err(|_|Error::new(StatusCode::BAD_REQUEST,"SHORT_LINK_INVALID","Use an available public code, configured destination origin, valid expiry and available owner capacity"))?;
@@ -2113,7 +2179,7 @@ struct SlugRequest {
 async fn create_slug(
     State(app): State<App>,
     headers: HeaderMap,
-    Json(input): Json<SlugRequest>,
+    Strict(input): Strict<SlugRequest>,
 ) -> Result<Json<Value>> {
     app.user(&headers).await?.ok_or_else(auth_denied)?;
     let value = crate::links::slug(&input.title, input.limit.unwrap_or(80)).map_err(|_| {
@@ -2174,7 +2240,7 @@ fn account_flow_error(error: crate::auth_flows::Error) -> Error {
 async fn request_password_reset(
     State(app): State<App>,
     client: Option<axum::Extension<ClientIp>>,
-    Json(input): Json<ResetRequest>,
+    Strict(input): Strict<ResetRequest>,
 ) -> Result<Response> {
     app.auth_flows
         .request_reset_from(&input.email, client.map(|c| c.0.0))
@@ -2184,7 +2250,7 @@ async fn request_password_reset(
 }
 async fn complete_password_reset(
     State(app): State<App>,
-    Json(input): Json<ResetConfirmation>,
+    Strict(input): Strict<ResetConfirmation>,
 ) -> Result<Response> {
     if !app
         .auth_flows
@@ -2216,7 +2282,7 @@ async fn complete_password_reset(
 async fn request_email_verification(
     State(app): State<App>,
     headers: HeaderMap,
-    Json(_input): Json<EmptyAccountRequest>,
+    Strict(_input): Strict<EmptyAccountRequest>,
 ) -> Result<Response> {
     let user = app.user(&headers).await?.ok_or_else(auth_denied)?;
     app.auth_flows
@@ -2228,7 +2294,7 @@ async fn request_email_verification(
 async fn complete_email_verification(
     State(app): State<App>,
     headers: HeaderMap,
-    Json(input): Json<EmailConfirmation>,
+    Strict(input): Strict<EmailConfirmation>,
 ) -> Result<Response> {
     let user = app.user(&headers).await?.ok_or_else(auth_denied)?;
     if !app
@@ -2245,7 +2311,7 @@ async fn assign_user_role(
     State(app): State<App>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
-    Json(input): Json<RoleAssignment>,
+    Strict(input): Strict<RoleAssignment>,
 ) -> Result<Response> {
     let user = app.user(&headers).await?.ok_or_else(auth_denied)?;
     if user.role != "admin" {

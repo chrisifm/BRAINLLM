@@ -1,0 +1,10 @@
+{
+  "id": "named-body-fields",
+  "kind": "fix",
+  "title": "A rejected body names the key",
+  "why": "Signup answered a generic 422 for an extra field, so the author could not tell what to remove.",
+  "changelog": [
+    "A JSON body of the wrong shape answers 422 `INVALID_INPUT` naming the key in `error.fields`, on signup and on every other fixed-shape endpoint"
+  ],
+  "guide": "docs/BACKEND.md"
+}
