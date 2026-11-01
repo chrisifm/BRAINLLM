@@ -158,3 +158,16 @@ test('an anonymous read is revalidated with its ETag; a signed-in one is not rem
     assert.equal(asked.at(-1).inm,undefined,'a signed-in read never revalidates against what an anonymous one saw')
   }finally{own.close();await new Promise(resolve=>{origin.close(resolve);origin.closeAllConnections()})}
 })
+
+test('operation runs a declared operation as the visitor, only from a POST',async()=>{
+  const backend=context()
+  await backend.operation('place_order',{quantity:1})
+  const call=seen.at(-1)
+  assert.equal(call.method+' '+call.path,'POST /_brain/operations/place_order')
+  assert.deepEqual(JSON.parse(call.body),{quantity:1})
+  assert.match(call.cookie,/__Host-brain-access/)
+  assert.equal(call.key,undefined)
+  assert.throws(()=>backend.operation('../keys'),/Invalid operation name/)
+  await assert.rejects(context('GET').operation('place_order'),e=>e.status===405)
+  assert.deepEqual(Object.keys(backend.resource('articles')).includes('operation'),false)
+})

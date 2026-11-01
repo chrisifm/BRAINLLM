@@ -113,10 +113,10 @@ fn generate() -> (String, String) {
     let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
     (prefix, secret)
 }
-/// `resource:action` where resource is a resource name, `files.<bucket>` or `*` and action is `read`, `write` or `*`.
+/// `resource:action` where resource is a resource name, `files.<bucket>`, `operations.<name>` or `*` and action is `read`, `write` or `*`.
 pub fn valid_scope(scope: &str) -> bool {
     scope.split_once(':').is_some_and(|(resource, action)| {
-        (resource == "*" || crate::contract::identifier(resource) || resource.strip_prefix("files.").is_some_and(crate::contract::identifier))
+        (resource == "*" || crate::contract::identifier(resource) || resource.strip_prefix("files.").or_else(|| resource.strip_prefix("operations.")).is_some_and(crate::contract::identifier))
             && matches!(action, "read" | "write" | "*")
     })
 }
@@ -218,7 +218,7 @@ impl NewKey {
             return Err("name must be 1..80 printable characters");
         }
         if self.scopes.is_empty() || self.scopes.len() > 32 || !self.scopes.iter().all(|s| valid_scope(s)) {
-            return Err("scopes must be 1..32 entries shaped resource:read|write|* (resource may be * or files.<bucket>)");
+            return Err("scopes must be 1..32 entries shaped resource:read|write|* (resource may be *, files.<bucket> or operations.<name>)");
         }
         if self.expires_in_days.is_some_and(|d| !(1..=3650).contains(&d)) {
             return Err("expiresInDays must be 1..3650");

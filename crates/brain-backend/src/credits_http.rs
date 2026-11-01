@@ -16,12 +16,18 @@ async fn change(State(app): State<App>, Path(subject): Path<Uuid>, h: HeaderMap,
     let admin = app.admin(&h).await?;
     match credits::apply(&app.pool, subject, input.delta, &input.reason, &input.idempotency_key, Some(admin.id)).await {
         Ok(entry) => Ok(Json(json!({"id": entry.id, "delta": entry.delta, "balance": entry.balance, "replayed": entry.replayed}))),
-        Err(Refusal::Insufficient) => Err(Error::new(StatusCode::CONFLICT, "CREDITS_INSUFFICIENT", "The balance is lower than this debit; nothing was charged; read the balance or grant credits first")),
-        Err(Refusal::TooLarge) => Err(Error::validation(json!({"delta": "The balance would pass 9007199254740991"}))),
-        Err(Refusal::KeyReused) => Err(Error::new(StatusCode::CONFLICT, "CREDITS_KEY_REUSED", "This idempotency_key recorded a different change; nothing was charged; use a new key for a new change")),
-        Err(Refusal::UnknownSubject) => Err(Error::missing()),
-        Err(Refusal::Invalid(message)) => Err(Error::validation(json!({"body": message}))),
-        Err(Refusal::Database(error)) => Err(Error::database(error)),
+        Err(refusal) => Err(refused(refusal)),
+    }
+}
+/// The answer to a refused change, on this route and on an operation's debit step.
+pub(super) fn refused(refusal: Refusal) -> Error {
+    match refusal {
+        Refusal::Insufficient => Error::new(StatusCode::CONFLICT, "CREDITS_INSUFFICIENT", "The balance is lower than this debit; nothing was charged; read the balance or grant credits first"),
+        Refusal::TooLarge => Error::validation(json!({"delta": "The balance would pass 9007199254740991"})),
+        Refusal::KeyReused => Error::new(StatusCode::CONFLICT, "CREDITS_KEY_REUSED", "This idempotency_key recorded a different change; nothing was charged; use a new key for a new change"),
+        Refusal::UnknownSubject => Error::missing(),
+        Refusal::Invalid(message) => Error::validation(json!({"body": message})),
+        Refusal::Database(error) => Error::database(error),
     }
 }
 async fn read(State(app): State<App>, Path(subject): Path<Uuid>, h: HeaderMap, Query(pairs): Query<Vec<(String, String)>>) -> Result<Json<Value>> {

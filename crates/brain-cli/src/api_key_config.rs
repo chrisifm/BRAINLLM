@@ -60,7 +60,7 @@ pub fn metadata(root: &Path) -> Result<Value, String> {
             "selfService": config.self_service,
             "format": "bk_live_<12 hex prefix>_<64 hex secret>",
             "headers": ["X-API-Key", "Authorization: Bearer"],
-            "routes": "/api/<resource>[/<id>] and /_brain/files/<bucket> with a files.<bucket> scope",
+            "routes": "/api/<resource>[/<id>], /_brain/files/<bucket> with a files.<bucket> scope and /_brain/operations/<name> with an operations.<name>:write scope",
             "scopes": "resource:read|write|* (resource may be *); files.<bucket>:read|write|*; never exceeds the owner's role except for a system key",
             "docs": "docs/backend/api-keys.md"
         }),

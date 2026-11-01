@@ -304,10 +304,10 @@ administrator guard and missing project DS controls. These files and the generat
 validated file leases and compare-and-swap revisions. Existing files are never overwritten; without this flag no
 routes or controls are created. Native backend policy remains authoritative. Review policy, migrate explicitly,
 then build and doctor the application. The app's default 30 KiB route budget remains unchanged.
-Set `DATABASE_URL`; explicitly `brain backend migrate`, then `brain backend serve` (loopback REST at `/api/<resource>`).
+Set `DATABASE_URL`; explicitly `brain backend migrate`, then `brain backend serve` (loopback REST at `/api/<resource>`). After a bulk import, `brain data prepare --apply`.
 An error response carries a `rid`; `brain backend logs <rid>` returns its cause (SQLSTATE, resource, operation, code location).
 `PATCH /api/<resource>/<uuid>` changes only the sent fields (`null` clears an optional one); see `docs/backend/patch.md`.
-`server/operations/<name>.jsbrain` declares typed input and steps that `POST /_brain/operations/<name>` runs in one transaction (all or nothing); see `docs/backend/transactions.md`.
+`server/operations/<name>.jsbrain` declares typed input and steps that `POST /_brain/operations/<name>` runs in one transaction (all or nothing), `ctx.backend.operation(name, input)` from server code; see `docs/backend/transactions.md`.
 `actions.jsbrain` declares guarded atomic writes (`when`, `set`, `increment`, `decrement`) at `POST /api/<r>/<uuid>/actions/<name>`; `POST /api/<r>/upsert` inserts if absent on a unique key; see `docs/backend/atomic-updates.md`.
 `POST /api/<r>/batch` (`op`: create|update|upsert|delete, `items`) is all-or-nothing, max from `batch.jsbrain { max }`; see `docs/backend/batch.md`.
 `transitions.jsbrain { field, initial, transitions }` makes an `enum` field a state machine changed only by `POST /api/<r>/<uuid>/transitions/<name>`; see `docs/backend/state-machines.md`.
@@ -333,7 +333,7 @@ A field of kind `org` makes a resource tenant data, with grants `org`, `org.<rol
 Read grants take row conditions (`{ public: { where: { status: 'published' } } }`, OR-ed; hidden rows answer 404 on every read channel; B0749 warns on an unconditioned public read with a state field, `expose_all_rows: true` declares it); `api: false` makes a resource server-only (`ctx.backend.service(name)`).
 Policy grants `owner.<ref>[.<ref>]` scope rows through relations; field option `visible: ['owner','admin']` hides
 a field from other readers and from the query surface. Modifiers `'str writeonly'`, `readonly`, `private` control
-client writes and reads. `owner` is returned only to owners and named read roles unless `expose_owner: true`.
+client writes and reads; `access: { write: ['admin'] }` limits writes by role. Constraint `unique: [['$owner']]` allows one record per owner. `owner` is returned only to owners and named read roles unless `expose_owner: true`.
 See `docs/backend/*.md`.
 Set `BRAIN_BACKEND_URL` to the fixed loopback native backend URL to connect native API requests and SSR session verification.
 Native JWT accounts use short-lived access and rotating refresh cookies, persisted revocation, configured roles and Google Sign-In.

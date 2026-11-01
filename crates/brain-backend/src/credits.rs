@@ -34,6 +34,13 @@ impl From<sqlx::Error> for Refusal {
 }
 /// Applies one signed change: a positive delta grants, a negative one debits.
 pub async fn apply(pool: &PgPool, subject: Uuid, delta: i64, reason: &str, key: &str, actor: Option<Uuid>) -> Result<Entry, Refusal> {
+    let mut tx = pool.begin().await?;
+    let entry = apply_in(&mut tx, subject, delta, reason, key, actor).await?;
+    tx.commit().await?;
+    Ok(entry)
+}
+/// The same change inside a caller's transaction: it commits, or rolls back, with the caller's other writes.
+pub async fn apply_in(tx: &mut sqlx::PgConnection, subject: Uuid, delta: i64, reason: &str, key: &str, actor: Option<Uuid>) -> Result<Entry, Refusal> {
     if delta == 0 || !(-MAX_DELTA..=MAX_DELTA).contains(&delta) {
         return Err(Refusal::Invalid("delta must be a non-zero integer within the safe range"));
     }
@@ -43,7 +50,6 @@ pub async fn apply(pool: &PgPool, subject: Uuid, delta: i64, reason: &str, key: 
     if key.is_empty() || key.len() > 128 {
         return Err(Refusal::Invalid("idempotency_key must be 1 to 128 bytes"));
     }
-    let mut tx = pool.begin().await?;
     let known: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM _brain_users WHERE id=$1) OR EXISTS(SELECT 1 FROM _brain_orgs WHERE id=$1)").bind(subject).fetch_one(&mut *tx).await?;
     if !known {
         return Err(Refusal::UnknownSubject);
@@ -69,7 +75,6 @@ pub async fn apply(pool: &PgPool, subject: Uuid, delta: i64, reason: &str, key: 
     let id: i64 = sqlx::query_scalar("INSERT INTO _brain_credit_ledger(subject,delta,balance_after,reason,idempotency_key,actor,request) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id")
         .bind(subject).bind(delta).bind(balance).bind(reason).bind(key).bind(actor).bind(crate::http::request_reference())
         .fetch_one(&mut *tx).await?;
-    tx.commit().await?;
     Ok(Entry { id, delta, balance, replayed: false })
 }
 /// The balance and one newest-first page of its ledger. A subject that never had credits holds zero.

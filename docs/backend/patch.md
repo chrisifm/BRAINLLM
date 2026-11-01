@@ -37,6 +37,11 @@ export default {
 export default { check: [{ field: 'stock', min: 0 }] }
 ```
 
+`$owner` in a unique set means the record's owner: `unique: [['$owner']]` is one record per owner and
+`unique: [['$owner', 'slug']]` one `slug` per owner. `perOwner: { except: ['admin'] }` is one record per owner except
+for owners with those roles. A conflict answers 409 `UNIQUE_CONFLICT` on `owner`, on every write route, and rows already
+over the limit refuse the migration. `$owner` cannot be an upsert key.
+
 Stored record: `{"name":"Mug","sku":"MUG-1","stock":3,"price":"9.50","note":"blue"}`.
 
 ```http

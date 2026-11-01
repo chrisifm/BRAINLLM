@@ -32,7 +32,11 @@ fn resource_of(path: &str) -> Option<&str> {
     (crate::contract::identifier(name) && shape).then_some(name)
 }
 /// `/_brain/files/{bucket}[/{id}[/meta]]` → the scope subject `files.<bucket>`. Only a scope naming the bucket opens it.
+/// `/_brain/operations/{name}` → `operations.<name>`, under the same rule: its steps cross resources, so no wildcard opens it.
 fn bucket_of(path: &str) -> Option<String> {
+    if let Some(name) = path.strip_prefix("/_brain/operations/") {
+        return crate::contract::identifier(name).then(|| format!("operations.{name}"));
+    }
     let parts: Vec<&str> = path.strip_prefix("/_brain/files/")?.split('/').collect();
     let shape = parts.len() <= 2 || (parts.len() == 3 && parts[2] == "meta");
     (crate::contract::identifier(parts[0]) && shape).then(|| format!("files.{}", parts[0]))
@@ -83,7 +87,7 @@ pub(super) async fn gate(State(app): State<App>, req: Request, next: Next) -> Re
         return denied(
             StatusCode::UNAUTHORIZED,
             "API_KEY_NOT_ACCEPTED",
-            "API keys work only on /api resource routes and declared file buckets; auth and key management require a signed-in session",
+            "API keys work only on /api resource routes, declared file buckets and declared operations; auth and key management require a signed-in session",
         );
     };
     let action = api_keys::action(req.method());

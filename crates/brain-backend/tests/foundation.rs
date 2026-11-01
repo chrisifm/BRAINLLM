@@ -110,7 +110,8 @@ async fn postgres_migrations_search_scope_session_serialization_and_storage_outb
             (21, "organizations".into()),
             (22, "audit_log".into()),
             (23, "credits".into()),
-            (24, "session_controls".into())
+            (24, "session_controls".into()),
+            (25, "per_owner".into())
         ]
     );
     assert_eq!(

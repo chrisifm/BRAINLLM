@@ -18,5 +18,5 @@ The `idempotency_key` is required and unique per subject. Sending it again retur
 and charges nothing; the same key with another `delta` or `reason` is 409 `CREDITS_KEY_REUSED`.
 
 The ledger refuses `UPDATE`, `DELETE` and `TRUNCATE`. Amounts are integers up to 9007199254740991; choose your smallest unit.
-Changes require an administrator's session: there is no self-service spend endpoint, and no `ctx.backend` helper yet for a route handler to debit on a user's behalf.
+Direct changes require an administrator's session. To spend on a user's behalf, declare an operation with a `debit` step ([transactions.md](transactions.md#charging-credits)).
 Payments, prices and expiry are outside this feature.

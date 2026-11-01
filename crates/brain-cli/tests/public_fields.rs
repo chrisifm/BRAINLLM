@@ -50,3 +50,45 @@ fn internal_looking_fields_warn_until_their_exposure_is_stated() {
     assert!(!text(&brain(&dir, &["check"])).contains("B0797"));
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn a_unique_value_any_user_can_claim_warns_until_who_may_write_it_is_stated() {
+    let tmp = std::env::temp_dir().join(format!("brain-claimable-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    assert!(brain(&tmp, &["new", "app"]).status.success());
+    let dir = tmp.join("app");
+    assert!(!text(&brain(&dir, &["check"])).contains("B0794"), "a new app is silent");
+    let resource = dir.join("server/resources/sites");
+    std::fs::create_dir_all(&resource).unwrap();
+    let policy = |create: &str| std::fs::write(resource.join("policy.jsbrain"), format!("<meta server>\nexport default {{ read: ['public'], create: ['{create}'], update: ['owner'], delete: ['owner'] }}\n")).unwrap();
+    let schema = |domain: &str| std::fs::write(resource.join("schema.jsbrain"), format!("<meta server>\nexport default {{ title: 'str!', domain: {domain} }}\n")).unwrap();
+
+    policy("user");
+    schema("{ type: 'str', unique: true }");
+    let run = brain(&dir, &["check"]);
+    let out = text(&run);
+    assert!(out.contains("B0794") && out.contains("domain") && out.contains("server/resources/sites/schema.jsbrain"), "{out}");
+    assert!(run.status.success(), "a warning does not fail the check: {out}");
+
+    schema("{ type: 'str', unique: true, access: { write: ['admin'] } }");
+    assert!(!text(&brain(&dir, &["check"])).contains("B0794"), "restricted");
+    schema("{ type: 'str', unique: true, access: { write: ['user'] } }");
+    assert!(!text(&brain(&dir, &["check"])).contains("B0794"), "stated");
+    schema("{ type: 'str', unique: true }");
+    policy("admin");
+    assert!(!text(&brain(&dir, &["check"])).contains("B0794"), "only admins write it");
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn brain_data_names_its_usage_without_needing_a_database() {
+    let tmp = std::env::temp_dir().join(format!("brain-data-usage-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    assert!(brain(&tmp, &["new", "app"]).status.success());
+    let run = brain(&tmp.join("app"), &["data", "vacuum"]);
+    assert!(!run.status.success());
+    assert!(text(&run).contains("brain data prepare|maintain"), "{}", text(&run));
+    let _ = std::fs::remove_dir_all(&tmp);
+}

@@ -70,6 +70,12 @@ impl Api {
         let (_, token) = self.auth.login(credentials()).await.unwrap().unwrap();
         (user.id, token)
     }
+    /// A new session, which carries the role the account holds now.
+    async fn user_login(&self, email: &str) -> (Uuid, String) {
+        let credentials = Credentials { email: email.into(), password: "correct horse battery".into() };
+        let (user, token) = self.auth.login(credentials).await.unwrap().unwrap();
+        (user.id, token)
+    }
     async fn key(&self, owner: Uuid, scopes: &[&str], system: bool) -> String {
         let new = NewKey { name: "shape".into(), scopes: scopes.iter().map(|s| s.to_string()).collect(), expires_in_days: None, daily_quota: None, monthly_quota: None };
         let created = if system { self.keys.create_system(owner, new).await } else { self.keys.create(owner, new).await };
@@ -382,4 +388,304 @@ async fn order_without_a_null_position_pages_the_same_and_punctuation_finds_noth
     for text in ["100%25", "a%5Cb"] {
         assert_eq!(a.get(&format!("/api/notes?search={text}")).await.0, 200, "{text}");
     }
+}
+
+/// Documents large enough to live out of line, where each read of `data` decompresses it again.
+#[tokio::test]
+#[ignore]
+async fn counts_over_large_documents_agree_with_their_filters() {
+    let posts = resource("posts", vec![("status", field("str")), ("kind", field("str")), ("rank", field("int")), ("body", field("str"))], json!(["public"]), json!({
+        "filter": {"status": ["eq", "in"], "kind": ["eq", "in"], "rank": ["gte"]},
+        "aggregate": {"ranks": {"group": "kind", "sum": ["rank"]}},
+        "facets": ["kind"],
+    }));
+    let a = api("brain_shape_count", vec![posts]).await;
+    let (_, token) = a.user("count@example.test").await;
+    // Not compressible: a repeated text would shrink back into the row and never leave it.
+    let body = |seed: u64| {
+        let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+        (0..12_000).map(|_| { state ^= state << 13; state ^= state >> 7; state ^= state << 17; char::from(b'a' + (state % 26) as u8) }).collect::<String>()
+    };
+    for i in 0..12u64 {
+        let status = if i % 3 == 0 { "draft" } else { "live" };
+        let kind = if i % 2 == 0 { "even" } else { "odd" };
+        a.post("/api/posts", &token, json!({"status": status, "kind": kind, "rank": i, "body": body(i + 1)})).await;
+    }
+    let toast: bool = sqlx::query_scalar("SELECT pg_relation_size(reltoastrelid)>pg_relation_size(oid) FROM pg_class WHERE oid='_brain_res_posts'::regclass").fetch_one(&a.pool).await.unwrap();
+    assert!(toast, "the documents must live out of line for this test to reach the single-read count");
+    let (status, list) = a.get("/api/posts?status=live&kind[in]=even,odd&rank[gte]=2&limit=1&aggregate=ranks&facets=kind").await;
+    assert_eq!(status, 200, "{list}");
+    // Live ranks from 2 up: 2,4,5,7,8,10,11.
+    assert_eq!(list["total"], 7, "{list}");
+    let even = list["aggregates"]["ranks"].as_array().unwrap().iter().find(|g| g["key"] == "even").unwrap().clone();
+    assert_eq!((&even["count"], &even["sum"]["rank"]), (&json!(4), &json!("24")), "{list}");
+    assert_eq!(list["facets"]["kind"].as_array().unwrap().len(), 2, "{list}");
+    // `fields` leaves the document out of the page without changing the row set.
+    let (_, trimmed) = a.get("/api/posts?status=live&rank[gte]=2&limit=1&fields=rank").await;
+    assert_eq!(trimmed["total"], 7);
+    assert_eq!(trimmed["items"][0]["data"].as_object().unwrap().len(), 1, "{trimmed}");
+
+    // A value that fills the text key must not match a longer text that shares it.
+    let exact = "k".repeat(256);
+    a.post("/api/posts", &token, json!({"status": exact, "kind": "even", "rank": 1})).await;
+    a.post("/api/posts", &token, json!({"status": format!("{exact}z"), "kind": "even", "rank": 1})).await;
+    let (status, found) = a.get(&format!("/api/posts?status={exact}&rank[gte]=0")).await;
+    assert_eq!((status, found["total"].as_i64()), (200, Some(1)), "{found}");
+    assert_eq!(found["items"][0]["data"]["status"], exact.as_str());
+}
+
+/// Every client write path keeps server-set fields out: the single-record routes always did, batch and upsert did not.
+#[tokio::test]
+#[ignore]
+async fn field_write_access_holds_on_single_batch_and_upsert_writes() {
+    let mut tier = field("str");
+    tier.access = Some(serde_json::from_value(json!({"write": ["admin"]})).unwrap());
+    let locked = Field { access: Some("readonly".into()), ..field("str") };
+    let hidden = Field { access: Some("private".into()), ..field("str") };
+    let code = Field { unique: true, ..field("str") };
+    let mut items = resource("items", vec![("code", code), ("title", field("str")), ("tier", tier), ("state", locked), ("note", hidden)], json!(["public"]), json!({}));
+    items.policy.create = vec!["user".into(), "admin".into()];
+    items.policy.update = vec!["owner".into(), "admin".into()];
+    let a = api("brain_shape_write", vec![items]).await;
+    let (member, member_token) = a.user("member@example.test").await;
+    let (boss, boss_token) = a.user("boss@example.test").await;
+    sqlx::query("UPDATE _brain_users SET role='admin' WHERE id=$1").bind(boss).execute(&a.pool).await.unwrap();
+    let (_, boss_token) = { let _ = boss_token; a.user_login("boss@example.test").await };
+    let sends = |status: u16, body: &Value, path: &str, what: &str| {
+        assert_eq!(status, 422, "{what}: {body}");
+        assert!(body.pointer(path).is_some(), "{what}: {body}");
+    };
+
+    // A client never sets readonly or private, by any route and with any role.
+    for (sender, token) in [("member", &member_token), ("admin", &boss_token)] {
+        for (name, value) in [("state", "open"), ("note", "x")] {
+            let (status, body) = a.call("POST", "/api/items", Some(token), None, Some(json!({"code": "a", name: value}))).await;
+            sends(status, &body, &format!("/error/fields/{name}"), &format!("{sender} create {name}"));
+            let (status, body) = a.call("POST", "/api/items/batch", Some(token), None, Some(json!({"op": "create", "items": [{"code": "a", name: value}]}))).await;
+            sends(status, &body, &format!("/error/fields/items.0.{name}"), &format!("{sender} batch create {name}"));
+            let (status, body) = a.call("POST", "/api/items/batch", Some(token), None, Some(json!({"op": "upsert", "key": ["code"], "items": [{"code": "a", name: value}]}))).await;
+            sends(status, &body, &format!("/error/fields/items.0.{name}"), &format!("{sender} batch upsert {name}"));
+            let (status, body) = a.call("POST", "/api/items/upsert", Some(token), None, Some(json!({"key": ["code"], "data": {"code": "a", name: value}}))).await;
+            sends(status, &body, &format!("/error/fields/{name}"), &format!("{sender} upsert {name}"));
+        }
+    }
+    let (_, count) = a.get("/api/items").await;
+    assert_eq!(count["total"], 0, "nothing was written: {count}");
+
+    // `{ write: [roles] }`: those roles send it on every route, other clients on none.
+    let (status, body) = a.call("POST", "/api/items/batch", Some(&member_token), None, Some(json!({"op": "create", "items": [{"code": "m", "tier": "gold"}]}))).await;
+    sends(status, &body, "/error/fields/items.0.tier", "member batch tier");
+    let (status, body) = a.call("POST", "/api/items", Some(&member_token), None, Some(json!({"code": "m", "tier": "gold"}))).await;
+    sends(status, &body, "/error/fields/tier", "member create tier");
+    let mine = a.post("/api/items", &member_token, json!({"code": "m", "title": "Mine"})).await;
+    let uri = format!("/api/items/{}", id(&mine));
+    let (status, body) = a.call("PATCH", &uri, Some(&member_token), None, Some(json!({"tier": "gold"}))).await;
+    sends(status, &body, "/error/fields/tier", "member patch tier");
+    let (status, body) = a.call("POST", "/api/items/batch", Some(&member_token), None, Some(json!({"op": "update", "items": [{"id": id(&mine), "data": {"tier": "gold"}}]}))).await;
+    sends(status, &body, "/error/fields/items.0.tier", "member batch update tier");
+    let (status, body) = a.call("POST", "/api/items/batch", Some(&boss_token), None, Some(json!({"op": "update", "items": [{"id": id(&mine), "data": {"tier": "gold"}}]}))).await;
+    assert_eq!((status, &body["items"][0]["data"]["tier"]), (200, &json!("gold")), "{body}");
+    let (status, body) = a.call("POST", "/api/items/upsert", Some(&boss_token), None, Some(json!({"key": ["code"], "data": {"code": "b", "tier": "silver"}}))).await;
+    assert_eq!((status, &body["record"]["data"]["tier"]), (200, &json!("silver")), "{body}");
+    // The owner edits the rest and the value stays; every reader sees it.
+    let (status, body) = a.call("PATCH", &uri, Some(&member_token), None, Some(json!({"title": "Renamed"}))).await;
+    assert_eq!((status, &body["data"]["tier"]), (200, &json!("gold")), "{body}");
+    let (_, read) = a.get(&uri).await;
+    assert_eq!(read["data"]["tier"], "gold");
+
+    // A system key stays the way to set server fields in bulk.
+    let system = a.key(member, &["items:write", "items:read"], true).await;
+    let (status, body) = a.call("POST", "/api/items/batch", None, Some(&system), Some(json!({"op": "create", "items": [{"code": "s", "state": "open", "note": "kept"}]}))).await;
+    assert_eq!(status, 200, "{body}");
+}
+#[test]
+fn field_write_roles_are_validated() {
+    let with = |access: Value| {
+        let mut tier = field("str");
+        tier.access = Some(serde_json::from_value(access).unwrap());
+        resource("items", vec![("tier", tier)], json!(["public"]), json!({})).validate()
+    };
+    assert!(with(json!({"write": ["admin"]})).is_ok());
+    assert!(with(json!({"write": []})).unwrap_err().contains("write needs"));
+    assert!(with(json!("nope")).unwrap_err().contains("is invalid"));
+}
+/// `pattern` governs each element of a list and each key of an object, on the write paths that validate a value.
+#[tokio::test]
+#[ignore]
+async fn patterns_govern_list_elements_and_object_keys() {
+    let tags = Field { pattern: Some("[a-z]+".into()), ..field("list<str>") };
+    let meta = Field { pattern: Some("[a-z_]+".into()), ..field("obj") };
+    let a = api("brain_shape_pattern", vec![resource("notes", vec![("tags", tags), ("meta", meta)], json!(["public"]), json!({}))]).await;
+    let (_, token) = a.user("pattern@example.test").await;
+    let (status, body) = a.call("POST", "/api/notes", Some(&token), None, Some(json!({"tags": ["ok", "Not OK"]}))).await;
+    assert_eq!((status, &body["error"]["fields"]["tags"]), (422, &json!("Invalid format")), "{body}");
+    let (status, body) = a.call("POST", "/api/notes", Some(&token), None, Some(json!({"meta": {"good_key": 1, "Bad-Key": 2}}))).await;
+    assert_eq!((status, &body["error"]["fields"]["meta"]), (422, &json!("Invalid format")), "{body}");
+    let (status, body) = a.call("POST", "/api/notes/batch", Some(&token), None, Some(json!({"op": "create", "items": [{"tags": ["NOPE"]}]}))).await;
+    assert_eq!(status, 422, "{body}");
+    let note = a.post("/api/notes", &token, json!({"tags": ["ok", "fine"], "meta": {"good_key": {"Any": "nested"}}})).await;
+    let (status, body) = a.call("PATCH", &format!("/api/notes/{}", id(&note)), Some(&token), None, Some(json!({"tags": ["NOPE"]}))).await;
+    assert_eq!(status, 422, "{body}");
+    let bad = Field { pattern: Some("x".into()), ..field("int") };
+    assert!(resource("n", vec![("rank", bad)], json!(["public"]), json!({})).validate().unwrap_err().contains("only to a str, list<str> or obj"));
+}
+
+#[tokio::test]
+#[ignore]
+async fn one_record_per_owner_holds_on_every_write_and_with_a_role_exception() {
+    let writable = |name: &str| {
+        let mut r = resource(name, vec![("title", field("str"))], json!(["public"]), json!({}));
+        r.policy.create = vec!["user".into(), "admin".into()];
+        r.policy.update = vec!["owner".into(), "admin".into()];
+        r
+    };
+    let mut strict = writable("profiles");
+    strict.constraints.unique = vec![vec!["$owner".into()]];
+    let mut lenient = writable("companies");
+    lenient.constraints.per_owner = Some(brain_backend::contract::PerOwner { except: vec!["admin".into()] });
+    let mut scoped = writable("slots");
+    scoped.constraints.unique = vec![vec!["$owner".into(), "title".into()]];
+    let a = api("brain_shape_owner", vec![strict, lenient, scoped]).await;
+    let (_, member) = a.user("member@example.test").await;
+    let (boss, _) = a.user("boss@example.test").await;
+    sqlx::query("UPDATE _brain_users SET role='admin' WHERE id=$1").bind(boss).execute(&a.pool).await.unwrap();
+    let (_, boss_token) = a.user_login("boss@example.test").await;
+    let (_, other) = a.user("other@example.test").await;
+    let post = |uri: &'static str, token: String, body: Value| {
+        let a = &a;
+        async move { a.call("POST", uri, Some(&token), None, Some(body)).await }
+    };
+
+    for uri in ["/api/profiles", "/api/companies"] {
+        let (status, body) = post(uri, member.clone(), json!({"title": "first"})).await;
+        assert_eq!(status, 200, "{uri}: {body}");
+        let (status, body) = post(uri, member.clone(), json!({"title": "second"})).await;
+        assert_eq!(status, 409, "{uri}: {body}");
+        assert_eq!(body["error"]["code"], "UNIQUE_CONFLICT", "{uri}: {body}");
+        assert!(body["error"]["fields"].get("owner").is_some(), "{uri}: {body}");
+        let (status, body) = post(uri, other.clone(), json!({"title": "first"})).await;
+        assert_eq!(status, 200, "another owner is free: {uri}: {body}");
+    }
+    let batch = |uri: &'static str| format!("{uri}/batch");
+    for uri in ["/api/profiles", "/api/companies"] {
+        let (_, fresh) = a.user(&format!("fresh{}@example.test", uri.len())).await;
+        let (status, body) = a.call("POST", &batch(uri), Some(&fresh), None, Some(json!({"op": "create", "items": [{"title": "a"}, {"title": "b"}]}))).await;
+        assert_eq!(status, 409, "a batch cannot go around it: {uri}: {body}");
+    }
+
+    // The exception is the owner's role, and only where it was declared.
+    for title in ["a", "b"] {
+        let (status, body) = post("/api/companies", boss_token.clone(), json!({"title": title})).await;
+        assert_eq!(status, 200, "{body}");
+    }
+    let (status, _) = post("/api/profiles", boss_token.clone(), json!({"title": "a"})).await;
+    assert_eq!(status, 200);
+    let (status, body) = post("/api/profiles", boss_token.clone(), json!({"title": "b"})).await;
+    assert_eq!(status, 409, "{body}");
+
+    // With other fields, the set is per owner: another title is free, the same title is not.
+    let (status, _) = post("/api/slots", member.clone(), json!({"title": "a"})).await;
+    assert_eq!(status, 200);
+    let (status, _) = post("/api/slots", member.clone(), json!({"title": "b"})).await;
+    assert_eq!(status, 200);
+    let (status, body) = post("/api/slots", member.clone(), json!({"title": "a"})).await;
+    assert_eq!(status, 409, "{body}");
+    let (status, _) = post("/api/slots", other.clone(), json!({"title": "a"})).await;
+    assert_eq!(status, 200);
+
+    // The owner is not a value a client can name as an upsert key.
+    let (status, body) = a.call("POST", "/api/profiles/upsert", Some(&other), None, Some(json!({"key": ["$owner"], "data": {"title": "x"}}))).await;
+    assert_eq!(status, 422, "{body}");
+
+    // Updating an existing record is not a second record.
+    let (_, fresh) = a.user("updater@example.test").await;
+    let (_, created) = post("/api/companies", fresh.clone(), json!({"title": "one"})).await;
+    let (status, body) = a.call("PATCH", &format!("/api/companies/{}", id(&created)), Some(&fresh), None, Some(json!({"title": "two"}))).await;
+    assert_eq!(status, 200, "{body}");
+
+    // Rows already over the limit refuse the migration.
+    let over: Vec<Resource> = { let mut p = writable("slots"); p.constraints.per_owner = Some(brain_backend::contract::PerOwner { except: vec!["admin".into()] }); vec![p] };
+    let refused = brain_backend::db::migrate_approving(&a.pool, &over, &["slots".to_string()]).await.unwrap_err();
+    assert!(refused.contains("more than one record"), "{refused}");
+}
+
+#[tokio::test]
+#[ignore]
+async fn preparing_data_rewrites_documents_without_firing_triggers_and_is_repeatable() {
+    use brain_backend::maintenance::{Mode, run_all};
+    let code = Field { unique: true, ..field("str") };
+    let items = resource("items", vec![("code", code), ("state", field("str")), ("tier", field("str")), ("body", field("str"))], json!(["public"]), json!({"filter": {"state": ["eq"], "tier": ["eq"]}}));
+    let a = api("brain_shape_prepare", vec![items.clone()]).await;
+    let (member, _) = a.user("member@example.test").await;
+    // pglz documents, as an earlier release or an import would have stored them.
+    sqlx::query("ALTER TABLE _brain_res_items ALTER COLUMN data SET COMPRESSION pglz").execute(&a.pool).await.unwrap();
+    for n in 0..60 {
+        let body = format!("{n} ").repeat(4_000);
+        sqlx::query("INSERT INTO _brain_res_items(id,owner,data,updated_at) VALUES($1,$2,$3,'2020-01-01')")
+            .bind(uuid::Uuid::new_v4())
+            .bind(member)
+            .bind(json!({"code": format!("c{n}"), "state": "open", "tier": "a", "body": body}))
+            .execute(&a.pool)
+            .await
+            .unwrap();
+    }
+    let methods = || sqlx::query_scalar::<_, Option<String>>("SELECT DISTINCT pg_column_compression(data) FROM _brain_res_items").fetch_all(&a.pool);
+    let stamp = || sqlx::query_scalar::<_, Option<String>>("SELECT md5(string_agg(id::text||updated_at::text||data::text,'' ORDER BY id)) FROM _brain_res_items").fetch_one(&a.pool);
+    let statistics = || sqlx::query_scalar::<_, i64>("SELECT count(*) FROM pg_statistic_ext WHERE stxrelid='_brain_res_items'::regclass").fetch_one(&a.pool);
+    let before = stamp().await.unwrap();
+    assert_eq!(methods().await.unwrap(), [Some("pglz".to_string())]);
+
+    // Without --apply nothing changes, and it says what it would do.
+    let plan = run_all(&a.pool, std::slice::from_ref(&items), Mode::Prepare, false).await.unwrap();
+    assert_eq!(plan["applied"], false, "{plan}");
+    assert_eq!(plan["resources"][0]["compression"]["pglzRows"], 60, "{plan}");
+    assert_eq!(plan["resources"][0]["statistics"]["missing"], true, "{plan}");
+    assert_eq!(statistics().await.unwrap(), 0);
+    assert_eq!(methods().await.unwrap(), [Some("pglz".to_string())]);
+
+    // `maintain` does not rewrite rows; `prepare` does.
+    let kept = run_all(&a.pool, std::slice::from_ref(&items), Mode::Maintain, true).await.unwrap();
+    assert_eq!(kept["resources"][0]["compression"]["rewritten"], 0, "{kept}");
+    assert_eq!(statistics().await.unwrap(), 1);
+    let done = run_all(&a.pool, std::slice::from_ref(&items), Mode::Prepare, true).await.unwrap();
+    let compression = &done["resources"][0]["compression"];
+    if compression.get("skipped").is_none() {
+        assert_eq!(compression["rewritten"], 60, "{done}");
+        assert_eq!(methods().await.unwrap(), [Some("lz4".to_string())], "{done}");
+    }
+    assert_eq!(stamp().await.unwrap(), before, "no value or updated_at moved: {done}");
+    assert_eq!(done["resources"][0]["warmed"], true, "{done}");
+    let gate = &done["resources"][0]["gate"];
+    assert_eq!(gate["rows"], 50, "{done}");
+    assert!(gate["buffers"].as_f64().unwrap() > 0.0, "{done}");
+
+    // Repeating it finds nothing to do, and a dropped filter retires its statistics.
+    let again = run_all(&a.pool, std::slice::from_ref(&items), Mode::Prepare, true).await.unwrap();
+    assert_eq!(again["resources"][0]["compression"]["rewritten"], 0, "{again}");
+    assert_eq!(statistics().await.unwrap(), 1);
+    let mut plain = items.clone();
+    plain.query = Default::default();
+    run_all(&a.pool, &[plain], Mode::Maintain, true).await.unwrap();
+    assert_eq!(statistics().await.unwrap(), 0);
+}
+
+#[tokio::test]
+#[ignore]
+async fn the_buffer_gate_warns_on_a_list_that_opens_large_documents() {
+    use brain_backend::maintenance::{Mode, run_all};
+    let items = resource("items", vec![("body", field("str"))], json!(["public"]), json!({}));
+    let a = api("brain_shape_gate", vec![items.clone()]).await;
+    let (member, _) = a.user("member@example.test").await;
+    // Random hex barely compresses, so each document spans many TOAST chunks.
+    for _ in 0..60 {
+        sqlx::query("INSERT INTO _brain_res_items(id,owner,data) SELECT $1,$2,jsonb_build_object('body',(SELECT string_agg(md5(random()::text),'') FROM generate_series(1,2000)))")
+            .bind(uuid::Uuid::new_v4())
+            .bind(member)
+            .execute(&a.pool)
+            .await
+            .unwrap();
+    }
+    let report = run_all(&a.pool, &[items], Mode::Maintain, false).await.unwrap();
+    assert_eq!(report["resources"][0]["gate"]["ok"], false, "{report}");
+    assert!(report["warnings"][0].as_str().unwrap().contains("buffers per row"), "{report}");
 }

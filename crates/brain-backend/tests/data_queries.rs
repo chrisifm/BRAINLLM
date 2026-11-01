@@ -887,3 +887,59 @@ async fn search_over_long_text_keeps_full_text_results() {
     }
     pool.close().await;
 }
+
+#[tokio::test]
+#[ignore]
+async fn an_approved_contract_retires_the_references_and_indexes_it_dropped() {
+    let pool = database("brain_retire").await;
+    let shops = resource("shops", vec![("name", field("str", false))], policy(&["public"], &["user"], &["owner"], &["owner"]), json!({}));
+    let mut shop = field("ref:shops", false);
+    shop.on_delete = Some("restrict".into());
+    let items = |shop: Option<Field>, query: Value| {
+        let mut fields = vec![("label", field("str", false))];
+        fields.extend(shop.map(|f| ("shop", f)));
+        resource("items", fields, policy(&["public"], &["user"], &["owner"], &["owner"]), query)
+    };
+    let filtered = json!({"filter": {"label": ["eq"]}});
+    db::migrate(&pool, &[shops.clone(), items(Some(shop.clone()), filtered.clone())]).await.unwrap();
+    let (user, kept, gone) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    sqlx::query("INSERT INTO _brain_users(id,email,password_hash,role) VALUES($1,'owner@example.test','x','user')").bind(user).execute(&pool).await.unwrap();
+    for shop_id in [kept, gone] {
+        sqlx::query("INSERT INTO _brain_res_shops(id,owner,data) VALUES($1,$2,'{}')").bind(shop_id).bind(user).execute(&pool).await.unwrap();
+    }
+    let item = Uuid::new_v4();
+    sqlx::query("INSERT INTO _brain_res_items(id,owner,data) VALUES($1,$2,$3)").bind(item).bind(user).bind(json!({"shop": gone})).execute(&pool).await.unwrap();
+    assert!(sqlx::query("DELETE FROM _brain_res_shops WHERE id=$1").bind(gone).execute(&pool).await.is_err(), "the reference holds while declared");
+
+    let keys = || sqlx::query_scalar::<_, String>("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='_brain_res_items'::regclass AND contype='f' AND conname LIKE '\\_brain\\_fk\\_%'").fetch_all(&pool);
+    let generated = || sqlx::query_scalar::<_, i64>("SELECT count(*) FROM pg_indexes WHERE tablename='_brain_res_items' AND indexname LIKE '\\_brain\\_ix\\_%'").fetch_one(&pool);
+    assert_eq!(generated().await.unwrap(), 2, "the filter index and the reference index");
+
+    // Only the action changes: the old key must not keep refusing next to the new one.
+    shop.on_delete = Some("cascade".into());
+    db::migrate_approving(&pool, &[shops.clone(), items(Some(shop.clone()), filtered.clone())], &["items".to_string()]).await.unwrap();
+    let definitions = keys().await.unwrap();
+    assert_eq!(definitions.len(), 1, "{definitions:?}");
+    assert!(definitions[0].contains("CASCADE"), "{definitions:?}");
+
+    // The field is gone: column, key, index and trigger go with it; the value stays in the document.
+    db::migrate_approving(&pool, &[shops.clone(), items(None, json!({}))], &["items".to_string()]).await.unwrap();
+    assert!(keys().await.unwrap().is_empty());
+    assert_eq!(generated().await.unwrap(), 0, "neither the reference nor the filter index remains");
+    let column: i64 = sqlx::query_scalar("SELECT count(*) FROM information_schema.columns WHERE table_name='_brain_res_items' AND column_name='ref_shop'").fetch_one(&pool).await.unwrap();
+    let trigger: i64 = sqlx::query_scalar("SELECT count(*) FROM pg_trigger WHERE tgrelid='_brain_res_items'::regclass AND tgname='_brain_refs'").fetch_one(&pool).await.unwrap();
+    assert_eq!((column, trigger), (0, 0));
+    sqlx::query("DELETE FROM _brain_res_shops WHERE id=$1").bind(gone).execute(&pool).await.unwrap();
+    let data: Value = sqlx::query_scalar("SELECT data FROM _brain_res_items WHERE id=$1").bind(item).fetch_one(&pool).await.unwrap();
+    assert_eq!(data["shop"], json!(gone), "the stored value is not touched");
+    sqlx::query("UPDATE _brain_res_items SET data=data||'{\"label\":\"x\"}' WHERE id=$1").bind(item).execute(&pool).await.expect("writes do not need the retired column");
+
+    // Declaring it again backfills from the documents; a row whose target is gone refuses the migration cleanly.
+    let refused = db::migrate_approving(&pool, &[shops.clone(), items(Some(shop.clone()), json!({}))], &["items".to_string()]).await.unwrap_err();
+    assert!(refused.contains("reference missing"), "{refused}");
+    sqlx::query("UPDATE _brain_res_items SET data=jsonb_set(data,'{shop}',$1) WHERE id=$2").bind(json!(kept)).bind(item).execute(&pool).await.unwrap();
+    db::migrate_approving(&pool, &[shops, items(Some(shop), json!({}))], &["items".to_string()]).await.unwrap();
+    let mirrored: Option<Uuid> = sqlx::query_scalar("SELECT ref_shop FROM _brain_res_items WHERE id=$1").bind(item).fetch_one(&pool).await.unwrap();
+    assert_eq!(mirrored, Some(kept));
+    pool.close().await;
+}

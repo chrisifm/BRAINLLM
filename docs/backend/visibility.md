@@ -56,8 +56,10 @@ export default {
 | `readonly` | no; defaults and before-write hooks set it | yes (OpenAPI `readOnly`) |
 | `writeonly` | yes | never (OpenAPI `writeOnly`) |
 | `private` | no; defaults and before-write hooks set it | never |
+| `access: { write: ['admin'] }` | only these roles; hooks and system keys too | yes |
 
-Sending a `readonly` or `private` field answers 422 before any hook runs:
+These hold on single writes, `/batch` and `/upsert`. `pattern` applies to a `str`, to each element of a `list<str>` and
+to each top-level key of an `obj`. Sending a field the role may not write answers 422 before any hook runs:
 
 ```json
 {"error": {"code": "INVALID_INPUT", "fields": {"status": "Field is readonly; it is set by the server, remove it from the request"},

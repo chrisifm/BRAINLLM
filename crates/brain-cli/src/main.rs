@@ -148,6 +148,7 @@ granular:
   brain media setup-gcs|list|cleanup  private media provisioning/library/owned cleanup
   brain e2e probe|run                 opt-in Claude/Codex Viewer scenarios plus AX/heap gates
   brain backend <serve|migrate|approve-contract|capabilities|schema|bootstrap-admin>  experimental Rust/Postgres resource API (loopback); serve --with-workers also runs the queues
+  brain data prepare|maintain [--apply] after an import or periodically: statistics on declared filters, lz4 storage, vacuum, warm-up and a buffers-per-row gate; prepare also rewrites stored rows
   brain analytics <report|funnel|segment>  usage reports over the behavior events the backend stores
   brain risk <name> [--measure]       what changing a symbol can break, with its evidence
   brain mcp [--profile full|minimal|backend]  the same commands as MCP tools over stdio
@@ -272,6 +273,7 @@ fn main() -> ExitCode {
         Some("design") | Some("manifest") => project_metadata(&args),
         Some("upgrade") => return cmd_upgrade(&args[1..]),
         Some("backend") => backend::run(&args[1..]),
+        Some("data") => backend::run(&args),
         Some("jobs") => backend::jobs(&args[1..]),
         Some("analytics") => analytics::run(&args[1..]),
         Some("media") => backend::media(&args[1..]),
@@ -794,6 +796,11 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
             // B0749: every row of a resource with a state-like field is public; advisory, never a contract error
             for (file, message, fix) in backend::row_exposure(&app) {
                 let mut diag = compiler::Diag::new("B0749", &file, brain_parse::Span::default(), message, fix);
+                diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
+            }
+            // B0794: a unique value the first signed-in writer takes from everybody else; advisory
+            for (file, message, fix) in backend::claimable_unique_warnings(&app) {
+                let mut diag = compiler::Diag::new("B0794", &file, brain_parse::Span::default(), message, fix);
                 diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
             }
             // B0797: a field named like an internal that every reader receives; advisory, the name is only a hint

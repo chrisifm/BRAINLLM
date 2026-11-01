@@ -84,7 +84,7 @@ fn fields(value: Value) -> Result<BTreeMap<String, Field>, String> {
                 // `'str! private'`: an optional access modifier after the type.
                 Value::String(kind) => match kind.rsplit_once(' ').filter(|(_, m)| matches!(*m, "private" | "readonly" | "writeonly")) {
                     Some((kind, modifier)) => {
-                        access = Some(modifier.to_string());
+                        access = Some(brain_backend::contract::FieldAccess::Mode(modifier.to_string()));
                         (kind.trim_end(), None, false)
                     }
                     None => (kind.as_str(), None, false),
@@ -111,7 +111,7 @@ fn fields(value: Value) -> Result<BTreeMap<String, Field>, String> {
                         pattern = Some(text.as_str().ok_or_else(|| format!("field `{name}`: pattern must be a regular expression string"))?.to_string());
                     }
                     if let Some(mode) = spec.get("access") {
-                        access = Some(mode.as_str().ok_or_else(|| format!("field `{name}`: access must be 'private', 'readonly' or 'writeonly'"))?.to_string());
+                        access = Some(serde_json::from_value(mode.clone()).map_err(|_| format!("field `{name}`: access must be 'private', 'readonly', 'writeonly' or {{ write: ['admin'] }}"))?);
                     }
                     if let Some(grants) = spec.get("visible") {
                         visible = Some(serde_json::from_value(grants.clone()).map_err(|_| format!("field `{name}`: visible must be a list such as ['owner', 'admin']"))?);
@@ -386,7 +386,7 @@ pub fn public_field_warnings(root: &Path) -> Vec<(String, String, String)> {
     let mut out = Vec::new();
     for r in resources.iter().filter(|r| r.policy.api) {
         for (name, field) in &r.fields {
-            let hidden = matches!(field.access.as_deref(), Some("private" | "writeonly"));
+            let hidden = matches!(field.access_mode(), Some("private" | "writeonly"));
             if !hidden && field.visible.is_none() && internal_looking(name) {
                 out.push((
                     format!("server/resources/{}/schema.jsbrain", r.name),
@@ -394,6 +394,22 @@ pub fn public_field_warnings(root: &Path) -> Vec<(String, String, String)> {
                     format!("write `{name}: 'str private'` (server only), 'str writeonly' (accepted, never returned) or {{ type: 'str', visible: ['owner', 'admin'] }}; if it is meant to be public, say visible: ['public']"),
                 ));
             }
+        }
+    }
+    out
+}
+/// B0794: unique fields any signed-in user can write, so the first writer takes the value from everybody else.
+/// An explicit `access` states who may; grants limited to admins or named roles are not "any user".
+pub fn claimable_unique_warnings(root: &Path) -> Vec<(String, String, String)> {
+    let resources = contracts(root, "resources").unwrap_or_default();
+    let mut out = Vec::new();
+    for r in resources.iter().filter(|r| r.policy.api && r.policy.create.iter().chain(&r.policy.update).any(|grant| grant == "user" || grant == "public")) {
+        for (name, field) in r.fields.iter().filter(|(_, f)| f.unique && f.access_mode().is_none()) {
+            out.push((
+                format!("server/resources/{}/schema.jsbrain", r.name),
+                format!("any signed-in user can write `{name}` on `{}`, and it is unique: whoever writes a value first takes it from everybody else", r.name),
+                format!("restrict it with {{ type: '{}', unique: true, access: {{ write: ['admin'] }} }}, or state that it is meant with access: {{ write: ['user'] }}", field.kind),
+            ));
         }
     }
     out
@@ -805,9 +821,12 @@ pub fn run(args: &[String]) -> Result<(), String> {
     if operation == "keys" {
         return crate::api_key_config::run(&root, &args[1..], stated_database(args, &root, &environment)?);
     }
+    if operation == "data" && !matches!(args.get(1).map(String::as_str), Some("prepare" | "maintain")) {
+        return Err("usage: brain data prepare|maintain [--apply] [--resource <name>] [--env <environment>]".into());
+    }
     if !matches!(
         operation,
-        "schema" | "migrate" | "approve-contract" | "serve" | "bootstrap-admin" | "rename-role" | "users" | "import"
+        "schema" | "migrate" | "approve-contract" | "serve" | "bootstrap-admin" | "rename-role" | "users" | "import" | "data"
     ) {
         return Err("usage: brain backend capabilities|schema|migrate|approve-contract [--accept <resource>] [--apply]|import users|<resource> --file <rows.jsonl> [--apply]|serve|bootstrap-admin|rename-role --from <role> --to <role> [--apply]|logs [rid]|users|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182] [--with-workers]".into());
     }
@@ -897,6 +916,21 @@ pub fn run(args: &[String]) -> Result<(), String> {
             let problems:Vec<_>=outcome.problems.iter().map(|(line,reason)|json!({"line":line,"reason":reason})).collect();
             println!("{}",json!({"schemaVersion":1,"ok":problems.is_empty(),"rows":outcome.rows,"applied":outcome.applied,"problems":problems,"moreProblems":outcome.more_problems}));
             return if problems.is_empty() {Ok(())} else {Err(format!("B0798: {file} was not imported: {} rows have problems; fix: correct them and run the import again",problems.len()+outcome.more_problems))};
+        }
+        if operation=="data" {
+            let mode=match args.get(1).map(String::as_str) {
+                Some("prepare")=>brain_backend::maintenance::Mode::Prepare,
+                Some("maintain")=>brain_backend::maintenance::Mode::Maintain,
+                _=>brain_backend::maintenance::Mode::Maintain,
+            };
+            let chosen:Vec<_>=match crate::flag(args,"--resource") {
+                Some(name)=>vec![resources.iter().find(|r|r.name==name).cloned().ok_or_else(||format!("no resource is named `{name}`; fix: use a resource from server/resources"))?],
+                None=>resources.clone(),
+            };
+            let report=brain_backend::maintenance::run_all(&pool,&chosen,mode,args.iter().any(|a|a=="--apply")).await?;
+            pool.close().await;
+            println!("{report}");
+            return Ok(());
         }
         if operation=="approve-contract" {
             let reviewed=brain_backend::contract_review::review(&pool,&resources).await?;
@@ -2536,9 +2570,9 @@ mod tests {
     #[test]
     fn field_access_modifiers_parse_in_string_and_object_forms() {
         let parsed = fields(json!({"title":"str!","secret":"str writeonly","state":"enum(draft|live)! readonly","score":{"type":"int","access":"private"},"price":"decimal(10,2)"})).unwrap();
-        assert_eq!((parsed["secret"].kind.as_str(), parsed["secret"].access.as_deref()), ("str", Some("writeonly")));
-        assert_eq!((parsed["state"].kind.as_str(), parsed["state"].required, parsed["state"].access.as_deref()), ("enum(draft|live)", true, Some("readonly")));
-        assert_eq!(parsed["score"].access.as_deref(), Some("private"));
+        assert_eq!((parsed["secret"].kind.as_str(), parsed["secret"].access_mode()), ("str", Some("writeonly")));
+        assert_eq!((parsed["state"].kind.as_str(), parsed["state"].required, parsed["state"].access_mode()), ("enum(draft|live)", true, Some("readonly")));
+        assert_eq!(parsed["score"].access_mode(), Some("private"));
         assert_eq!(parsed["title"].access, None);
         assert_eq!(parsed["price"].access, None);
         assert!(fields(json!({"x":{"type":"str","access":1}})).is_err());

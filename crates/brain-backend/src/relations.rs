@@ -116,6 +116,32 @@ fn trigger_args(r: &Resource) -> Vec<u8> {
         .collect()
 }
 
+/// Removes what an approved contract no longer references: a column left behind keeps its key, so a deleted target
+/// would still be refused, and an old key survives next to the new one when only the target or action changed. The
+/// values stay in `data`; only the generated mirror goes. `install` runs later and rebuilds the trigger.
+pub(crate) async fn retire(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, r: &Resource) -> Result<(), String> {
+    let table = table(&r.name);
+    let refs = refs(r);
+    let keys: Vec<String> = refs.iter().map(|x| fk_name(r, x)).collect();
+    let columns: Vec<String> = refs.iter().map(|x| column(x.field)).collect();
+    let stored: Vec<String> = sqlx::query_scalar("SELECT conname::text FROM pg_constraint WHERE conrelid=to_regclass($1) AND contype='f' AND conname LIKE '\\_brain\\_fk\\_%'")
+        .bind(format!("public.{table}")).fetch_all(&mut **tx).await.map_err(crate::db::safe)?;
+    for name in stored.iter().filter(|name| !keys.contains(name)) {
+        // Audited SQL: the table was validated and the name was read from the catalog.
+        sqlx::raw_sql(sqlx::AssertSqlSafe(format!("ALTER TABLE {table} DROP CONSTRAINT {name}"))).execute(&mut **tx).await.map_err(crate::db::safe)?;
+    }
+    let stored: Vec<String> = sqlx::query_scalar("SELECT attname::text FROM pg_attribute WHERE attrelid=to_regclass($1) AND attnum>0 AND NOT attisdropped AND attname LIKE 'ref\\_%'")
+        .bind(format!("public.{table}")).fetch_all(&mut **tx).await.map_err(crate::db::safe)?;
+    let retired: Vec<&String> = stored.iter().filter(|name| !columns.contains(name)).collect();
+    if !retired.is_empty() {
+        sqlx::raw_sql(sqlx::AssertSqlSafe(format!("DROP TRIGGER IF EXISTS _brain_refs ON {table}"))).execute(&mut **tx).await.map_err(crate::db::safe)?;
+    }
+    for name in retired {
+        sqlx::raw_sql(sqlx::AssertSqlSafe(format!("ALTER TABLE {table} DROP COLUMN {name}"))).execute(&mut **tx).await.map_err(crate::db::safe)?;
+    }
+    Ok(())
+}
+
 /// Installs columns, the sync trigger, foreign keys and indexes. Runs after every resource table exists, so
 /// self references and cycles work. Existing rows are only backfilled when the column is new and empty.
 pub(crate) async fn install(
