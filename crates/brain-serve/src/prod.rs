@@ -256,6 +256,18 @@ impl Static {
                 head,
             );
         }
+        // One URL per page, as server.mjs: `/a//b` and `/about/index.html` answer one 301, through the rules below so the
+        // slash policy and the canonical host land in the same hop. A leading `//` never gets here: the parser answers 400.
+        if let Some(clean) = url_variant(&path, &self.pre) {
+            let q = if req.query.is_empty() { String::new() } else { format!("?{}", req.query) };
+            let inner = clean.strip_prefix(&self.pre).filter(|r| r.starts_with('/')).unwrap_or(&clean);
+            let loc = match brain_seo::redirects::resolve(&self.redirects.0, &self.redirects.1, inner, &q, req.header("host")) {
+                Some((loc, _)) if loc.starts_with('/') => format!("{}{loc}", self.pre),
+                Some((loc, _)) => loc,
+                None => format!("{clean}{q}"),
+            };
+            return write(&mut s, 301, &[("Location".into(), loc), ("Cache-Control".into(), "public, max-age=3600".into())], b"", head);
+        }
         // base (#148): `/app` → `/app/`; files resolve without it; outside it → 404 (`/_health` stays at the root)
         let inner = if self.pre.is_empty() {
             Some(path.clone())
@@ -342,6 +354,15 @@ impl Static {
             _ => file,
         };
         let mut hs = headers_for(&self.rules, &path);
+        // A Markdown copy names the canonical its page declares; no canonical in the page, no header (never an invented URL).
+        let markdown_of = if name.ends_with(".md") {
+            inner.as_deref().map(|p| p.trim_end_matches(".md")).and_then(|p| self.resolve(if p.is_empty() || p == "/index" { "/" } else { p }))
+        } else {
+            None
+        };
+        if let Some(link) = markdown_of.and_then(|page| std::fs::read_to_string(page).ok()).and_then(|page| canonical_link(&page)) {
+            hs.push(("Link".into(), link));
+        }
         if twin.is_some() {
             hs.retain(|(k, _)| !k.eq_ignore_ascii_case("vary"));
             hs.push(("Vary".into(), "Accept, Accept-Encoding".into()));
@@ -419,6 +440,41 @@ pub(crate) fn with_analytics(html: &str, pre: &str) -> String {
     } else {
         format!("{html}{tag}")
     }
+}
+
+/// The one clean path of a variant (`/a//b`, `/about/index.html`), or None when the path already is it.
+fn url_variant(path: &str, pre: &str) -> Option<String> {
+    if !path.contains("//") && !path.ends_with("/index.html") {
+        return None;
+    }
+    let mut clean = String::with_capacity(path.len());
+    for c in path.chars() {
+        if !(c == '/' && clean.ends_with('/')) {
+            clean.push(c);
+        }
+    }
+    if let Some(dir) = clean.strip_suffix("index.html") {
+        clean = dir.to_string();
+    }
+    let root = format!("{pre}/");
+    if clean != root && clean.ends_with('/') && path.ends_with("//") {
+        clean.pop();
+    }
+    if clean != root && path.ends_with("/index.html") {
+        clean = clean.trim_end_matches('/').to_string();
+    }
+    (clean != path).then_some(clean)
+}
+
+/// `Link: <url>; rel="canonical"` from the page's own `<link rel="canonical">`, when it is absolute and not a route pattern.
+fn canonical_link(page: &str) -> Option<String> {
+    let at = page.find("rel=\"canonical\"")?;
+    let start = page[..at].rfind('<')?;
+    let tag = &page[start..start + page[start..].find('>')?];
+    let href = tag.split("href=\"").nth(1)?.split('"').next()?.replace("&amp;", "&");
+    let rest = href.strip_prefix("https://").or_else(|| href.strip_prefix("http://"))?;
+    let invalid = rest.is_empty() || href.chars().any(|c| c.is_control() || c.is_whitespace() || c == '<' || c == '>') || rest.contains("/:") || rest.contains("/*");
+    (!invalid).then(|| format!("<{href}>; rel=\"canonical\""))
 }
 
 /// `/403`, `/404.html`, `/503`…: the status of a page named after one (a file is only served when it exists).
@@ -871,6 +927,41 @@ mod tests {
                 .any(|(k, _)| k == "Cache-Control"),
             "exact rules do not leak"
         );
+    }
+
+    #[test]
+    fn url_variants_answer_one_redirect_and_twins_name_the_page_canonical() {
+        let dist = std::env::temp_dir().join(format!("brain-prod-variants-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dist);
+        std::fs::create_dir_all(dist.join("about")).unwrap();
+        std::fs::write(dist.join("index.html"), "<h1>Home</h1>").unwrap();
+        std::fs::write(dist.join("about/index.html"), "<head><link rel=\"canonical\" href=\"https://site.example/about\"></head>").unwrap();
+        std::fs::write(dist.join("about.md"), "# About").unwrap();
+        std::fs::write(dist.join("plain.html"), "<h1>Plain</h1>").unwrap();
+        std::fs::write(dist.join("plain.md"), "# Plain").unwrap();
+        let request = |path: &str, accept: &str| {
+            let handler = Static::load(&dist, "/");
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let task = std::thread::spawn(move || handler.handle_with_backend(listener.accept().unwrap().0, None).unwrap());
+            let mut c = TcpStream::connect(addr).unwrap();
+            write!(c, "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: {accept}\r\n\r\n").unwrap();
+            let mut r = String::new();
+            c.read_to_string(&mut r).unwrap();
+            task.join().unwrap();
+            r
+        };
+        assert!(request("//about", "text/html").starts_with("HTTP/1.1 400"), "a leading // stays a parser refusal");
+        for (path, to) in [("/about/index.html?x=1", "/about?x=1"), ("/index.html", "/"), ("/about//", "/about"), ("/a//about", "/a/about")] {
+            let r = request(path, "text/html");
+            assert!(r.starts_with("HTTP/1.1 301") && r.contains(&format!("Location: {to}\r\n")), "{path}: {r}");
+        }
+        let link = "Link: <https://site.example/about>; rel=\"canonical\"\r\n";
+        assert!(request("/about.md", "*/*").contains(link));
+        assert!(request("/about", "text/markdown").contains(link));
+        assert!(!request("/about", "text/html").contains("rel=\"canonical\"\r\n"), "the page has it in its own head");
+        assert!(!request("/plain.md", "*/*").contains("Link:"), "a page without a canonical gets no header");
+        std::fs::remove_dir_all(&dist).unwrap();
     }
 
     #[test]
