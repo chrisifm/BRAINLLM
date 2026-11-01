@@ -7,8 +7,6 @@ diagnostics that reject code an earlier version accepted.
 Every npm package (`@christianirack/brainllm`, its seven native platform packages, `brainllm-runtime`,
 `create-brainllm` and `create-brainll`) ships the same version as `[workspace.package]` in `Cargo.toml`.
 
-## [Unreleased]
-
 ## [0.8.0] - Unreleased
 
 - Fix: `onclick={f}` on a native element compiles to `on:click` (B0223)
@@ -34,9 +32,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `csp.connectSrc` in brain.json lists the origins pages may call: it replaces the broad `https: wss:` of the production `connect-src`, the site's own origin always stays allowed, and an origin a page calls outside the list warns B0746. Without the list nothing changes and `brain check` warns B0795; an invalid entry is B0796. New apps start with `[]`
 - Breaking: a file bucket without `types` (or with `types: []`) is now error B0770 in `brain check`, and `brain backend serve` refuses to start. Write the types it holds, or `types: '*'` to keep accepting any file
 - `brain build --json` and the `brain_build` MCP tool report each stage's wall and CPU time and the work it executed, with or without terminal progress
-- The build cache scans its directory a logarithmic number of times per build and keeps the entries the running build uses; a warm build of 1000 components went from about 22 s to about 4 s
+- The build cache scans its directory a logarithmic number of times per build and keeps the entries the running build uses
 - A build reads each file's dependency hash and import summary once per source revision, and warns when a source changes while it runs
-- The SEO audit compares a page only with the topics it can mention; 4000 pages went from about 23 s to about 2 s of CPU with the same findings
+- The SEO audit compares a page only with the topics it can mention; 4000 pages went from about 23 s to about 2 s of CPU with the same findings (measured on one machine under load)
 - Prerendering inserts fragments and walks siblings in linear time
 - Fix: a build that fails on a file `brain check` does not reach names its location and real fix; `brain build --json` and `brain_build` report `phase` and `diagnostics` with the fields of `brain check`, marking locations outside the app as `generated`
 - Fix: a page rendered per request carries the site's head and its social card (`og:title`, `og:description`, an absolute `og:image`, `twitter:card`, the robots hint, theme color, manifest and feed links) like a prerendered page; a page behind a guard answers `x-robots-tag: noindex` and stays without the site's search and social tags

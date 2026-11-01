@@ -19,6 +19,7 @@ What an app author can use, generated from the tables the compiler dispatches on
 | `tests` | colocated *.test.brain: mount, interact, assert every state |
 | `i18n` | several languages: keys, plurals, formatting, localized routes |
 | `performance` | measure, budgets, lazy components, images, long lists, workers |
+| `llm` | ctx.llm: Anthropic and OpenAI from server code, keys, timeouts, server-side streaming |
 | `ai` | Chrome's built-in AI (Gemini Nano) on the device: ai.ready, prompt, summarize, translate |
 | `backend` | resources, policies, accounts and jobs on the native Rust/Postgres backend |
 | `analytics` | what visitors actually do: reports, funnels, segments in the project's own Postgres |
@@ -69,12 +70,18 @@ Policy grants: `public` `owner` `owner.<ref>` `<role>`.
 
 - brain add auth and brain new --backend (`brain guide backend`)
 - brain capabilities and docs/CAPABILITIES.md (`docs/CAPABILITIES.md`)
+- brain.json csp.connectSrc narrows where pages can send data (`SPEC.md`)
+- Dev observability panel (`SPEC.md`)
 - tel and file form rules (`docs/FORM-VALIDATION.md`)
 - brain guide whats-new, migrate and docs (`brain guide migrate`)
 - Backend and analytics guides (`brain guide backend`)
+- AVIF media renditions (`docs/MEDIA.md`)
 - brain recipe --apply (`brain guide backend`)
 - brain add resource --policy (`brain guide backend`)
 - brain run --backend and migrate --create-db (`brain guide backend`)
+- Query parameters that identify a page (`brain guide seo`)
+- Server LLM module: ctx.llm (`brain guide llm`)
+- Core Web Vitals reporting (`SPEC.md`)
 
 ### 0.7.0
 
