@@ -439,7 +439,7 @@ pub fn check(c: &Component, ctx: &Ctx) -> Vec<Diag> {
     let server_ctx = c.kind == FileKind::Module && c.meta.iter().any(|m| m.name == "server");
     let mut api_vars = HashMap::new();
     collect_api_vars(c, ctx, &c.template, &mut api_vars);
-    let mut ck = Checker { c, ctx, diags: Vec::new(), scopes: Scopes::new(scope::top_bindings(c)), fn_depth: 0, server_names, server_ctx, server_fns, api_vars, scoped_stores: HashSet::new(), shared: servershare::shared(c), can_await: c.kind == FileKind::Module || c.file.ends_with(".test.brain"), enclosing_fn: None, literal_text: 0 };
+    let mut ck = Checker { c, ctx, diags: Vec::new(), scopes: Scopes::new(scope::top_bindings(c)), fn_depth: 0, server_names, server_ctx, server_fns, api_vars, scoped_stores: HashSet::new(), shared: servershare::shared(c), can_await: c.kind == FileKind::Module || c.file.ends_with(".test.brain"), enclosing_fn: None, outer_fn: None, literal_text: 0 };
     ck.structure();
     ck.runaway();
     ck.security();
@@ -518,6 +518,8 @@ struct Checker<'a> {
     can_await: bool,
     /// The name of the function that encloses this code, for the B0781 fix.
     enclosing_fn: Option<String>,
+    /// The outermost function being walked: a handler and every callback inside it.
+    outer_fn: Option<Span>,
     /// Inside `<pre>`, `<code>` and the like, where a lone `}` is usually what the author means to show (B0780).
     literal_text: u32,
 }
@@ -936,6 +938,8 @@ impl<'a> Checker<'a> {
     fn func(&mut self, f: &Func) {
         let saved_await = std::mem::replace(&mut self.can_await, f.is_async);
         let saved_name = std::mem::replace(&mut self.enclosing_fn, f.name.as_ref().map(|n| n.name.clone()));
+        let saved_outer = self.outer_fn;
+        self.outer_fn = saved_outer.or(Some(f.span));
         self.fn_depth += 1;
         self.scopes.push();
         for p in &f.params {
@@ -952,6 +956,7 @@ impl<'a> Checker<'a> {
         self.fn_depth -= 1;
         self.can_await = saved_await;
         self.enclosing_fn = saved_name;
+        self.outer_fn = saved_outer;
     }
 
     /// B0781: the emitted JavaScript would not parse, so the module would never load.
@@ -1151,7 +1156,10 @@ impl<'a> Checker<'a> {
         let path = self.text(arg.span()).to_string();
         let call = if replace { format!("navigate({path}, {{ replace: true }})") } else { format!("navigate({path})") };
         let msg = "an absolute app path through `location` leaves the base path and reloads the page";
-        if scope::runtime_has("brain-router.js", "navigate") && self.scopes.lookup("navigate").is_none() {
+        if self.outer_fn.is_some_and(|f| ends_a_session(self.text(f))) {
+            let fix = format!("after a sign-out the full reload clears client state, so this is your call: keep it with a path that includes the base, or use `{call}` if nothing in memory outlives the session");
+            self.push("B0129", span, msg, fix);
+        } else if scope::runtime_has("brain-router.js", "navigate") && self.scopes.lookup("navigate").is_none() {
             self.push_edits("B0129", span, msg, format!("use `{call}`"), vec![(span.start, span.end, call)]);
         } else {
             self.push("B0129", span, msg, "use a path relative to the base, or the router once `navigate()` ships (B0128)");
@@ -2891,6 +2899,13 @@ fn provided_names_in(src: &str) -> HashSet<String> {
             (!n.is_empty()).then_some(n)
         })
         .collect()
+}
+
+
+/// Whether a handler's source ends the session: there a reload is the point, not an accident (B0129).
+fn ends_a_session(src: &str) -> bool {
+    let s: String = src.chars().filter(|c| !matches!(c, '_' | '-')).flat_map(char::to_lowercase).collect();
+    ["logout", "logoff", "signout", "signoff", "session.clear", "session.destroy"].iter().any(|n| s.contains(n))
 }
 
 /// `export [async] function <name>(…)` at the top of a script.

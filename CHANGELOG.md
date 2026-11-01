@@ -19,6 +19,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Fix: `brain upgrade` after `npm install` reads the previous pin from the last commit
 - Fix: `brain add channel session` writes the same store as `brain new`
 - Fix: `form()` shows `form.rejected` instead of the backend's developer `fix`
+- Fix: `brain fix` no longer rewrites `location.assign` to `navigate` in a handler that signs out: B0129 still warns, and the full reload that clears client state stays your decision
 - B0777 also warns when a title ends in the bare site name
 - Fix: B0765 waits 10 seconds for a worker started at the same time as the server
 - Fix: MCP `brain_run_start` reports and opens the declared `localhost` origin

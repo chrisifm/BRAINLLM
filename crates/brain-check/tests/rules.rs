@@ -157,6 +157,31 @@ fn navigation_through_location() {
 }
 
 #[test]
+fn navigation_through_location_after_sign_out_keeps_the_reload() {
+    let diags = |src: &str| {
+        let c = brain_parse::parse(src, Path::new("views/account.brain")).unwrap();
+        brain_check::check(&c, &Ctx::default())
+    };
+    // A full reload is what drops client state after a sign-out: warn, but never rewrite it to a client navigation.
+    for src in [
+        "<script>\n  server: async function logout(ctx) { ctx.session.clear(); return true }\n  const out = async () => {\n    await logout()\n    location.assign('/')\n  }\n</script>\n<button on:click={out}>Out</button>\n",
+        "<script>\n  server: async function signOut(ctx) { ctx.session.clear(); return true }\n  const out = () => signOut().then(() => { window.location.href = '/' })\n</script>\n<button on:click={out}>Out</button>\n",
+        "<script>\n  server: async function log_out(ctx) { ctx.session.clear(); return true }\n</script>\n<button on:click={async () => { await log_out(); location.replace('/') }}>Out</button>\n",
+    ] {
+        let d = diags(src);
+        let b: Vec<_> = d.iter().filter(|d| d.code == "B0129").collect();
+        assert_eq!(b.len(), 1, "{d:?}");
+        assert!(b[0].edits.is_empty(), "no automatic edit after a sign-out: {:?}", b[0]);
+        assert!(b[0].fix.contains("sign-out"), "the fix names the reason: {:?}", b[0].fix);
+    }
+    // Another handler in the same file still gets its exact edit.
+    let d = diags("<script>\n  server: async function logout(ctx) { ctx.session.clear(); return true }\n  const out = async () => { await logout() }\n  const go = () => location.assign('/account')\n</script>\n<button on:click={out}>Out</button><button on:click={go}>Go</button>\n");
+    let b: Vec<_> = d.iter().filter(|d| d.code == "B0129").collect();
+    assert_eq!(b.len(), 1, "{d:?}");
+    assert_eq!(b[0].edits[0].text, "navigate('/account')");
+}
+
+#[test]
 fn replacing_form_fields() {
     let diags = |src: &str| {
         let c = brain_parse::parse(src, Path::new("comp/job-form.brain")).unwrap();

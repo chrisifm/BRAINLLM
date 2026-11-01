@@ -1,0 +1,9 @@
+{
+  "id": "b0129-sign-out",
+  "kind": "fix",
+  "title": "brain fix keeps the reload after a sign-out",
+  "why": "B0129 rewrote `location.assign` to `navigate` inside a sign-out handler, which kept in-memory client state that the full reload was clearing.",
+  "changelog": [
+    "`brain fix` no longer rewrites `location.assign`"
+  ]
+}
