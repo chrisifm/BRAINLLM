@@ -24,6 +24,8 @@ Adapter contract version 1 describes the framework-owned glue and configuration.
 
 ## Server-only AI examples
 
+For text in and text out, `ctx.llm` needs no package (`brain guide server`). Use an SDK from this catalog for tools, images, structured output or any other provider method.
+
 Generated helpers live in `server/integrations/*.jsbrain` with `<meta server>` and direct official bare imports. Node resolves those imports from the deployed app's node_modules; they are not bundled into browser assets. The app must install production dependencies. The helper is imported by an actual `server:` function in a view/component; exporting a server module helper alone does not create a public RPC endpoint.
 
 The example `ask(ctx, input)` checks `ctx.user`, requires a server-only credential and explicit model environment name, bounds input/output and limits simultaneous local calls to eight. Use a normal Brain server function so the existing per-IP/function rate limiter also applies. Capacity is per process, not a distributed tenant quota. Add app authorization/billing/quota rules appropriate to the selected model and workload.

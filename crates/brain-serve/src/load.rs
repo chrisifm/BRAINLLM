@@ -9,6 +9,14 @@ use std::process::{Child, Command, Stdio};
 
 /// The API-key client of job and route handlers; route sidecars append it to their runner, job runs to theirs.
 pub const KEY_BACKEND: &str = include_str!("key-backend.js");
+const LLM_MODULE: &str = include_str!("../../../runtime/server/llm.mjs");
+
+/// The server LLM module as declarations for runner scripts, for processes with no `server.mjs` (route and job handlers):
+/// the same `llmClient` as `ctx.llm` in production. It goes before the runner: a runner awaits at the top level, so
+/// anything after it would stay uninitialized while handlers run.
+pub fn llm_script() -> String {
+    LLM_MODULE.replace("export class ", "class ").replace("export function ", "function ")
+}
 const RUNNER: &str = r#"
 import { createInterface } from 'node:readline'
 import { EventEmitter } from 'node:events'
@@ -173,6 +181,7 @@ for await (const line of createInterface({ input: process.stdin })) {
     if (ctx?.$dict) { const D = (globalThis.__brainDict ||= {}); for (const l in ctx.$dict) D[l] = ctx.$dict[l] }
     globalThis.__brainLocale = ctx?.$locale || null
     c.signal ||= new AbortController().signal // a timed-out call ends this process, which stops everything it started
+    if (typeof llmClient === 'function') c.llm = llmClient(process.env, c.signal)
     try {
       const v = await m[fn](c, ...(args || []))
       if (fn === 'load' && v && typeof v.redirect === 'string' && redirectProblem(v)) throw new Error(redirectProblem(v))
@@ -277,7 +286,7 @@ impl Sidecar {
         {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid bounded sidecar limits"));
         }
-        Self::spawn_script(root, vars, timeout, frame_limit, production, true, &format!("{RUNNER}\n{KEY_BACKEND}\nfunction routeExecutor() {{}}"))
+        Self::spawn_script(root, vars, timeout, frame_limit, production, true, &format!("{}\n{RUNNER}\n{KEY_BACKEND}\nfunction routeExecutor() {{}}", llm_script()))
     }
     fn spawn_with(
         root: &Path,
@@ -287,7 +296,7 @@ impl Sidecar {
         production: bool,
         private: bool,
     ) -> io::Result<Sidecar> {
-        Self::spawn_script(root, vars, timeout, frame_limit, production, private, RUNNER)
+        Self::spawn_script(root, vars, timeout, frame_limit, production, private, &format!("{}\n{RUNNER}", llm_script()))
     }
     fn spawn_script(
         root: &Path,
@@ -1015,6 +1024,20 @@ mod tests {
         assert!(out.contains("'node:fs'") && out.contains("'from ../no'"));
         assert!(out.contains("import(\"file:///app/views/./x.jsbrain\")"));
         assert_eq!(seen.len(), 2);
+    }
+
+    #[test]
+    fn sidecar_gives_every_server_call_the_llm_client() {
+        if Command::new("node").arg("--version").output().is_err() {
+            return;
+        }
+        let d = std::env::temp_dir().join(format!("brain-load-llm-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("v.mjs");
+        std::fs::write(&f, "export async function load(ctx) { const e = await ctx.llm.complete({ prompt: 'x' }).catch(e => e); return { code: e.code, stream: typeof ctx.llm.stream } }").unwrap();
+        let mut sc = Sidecar::spawn(&d, &[]).unwrap();
+        assert_eq!(sc.call(&file_url(&f), "load", "{}").unwrap(), "{\"code\":\"B0921\",\"stream\":\"function\"}");
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]

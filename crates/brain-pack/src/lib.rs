@@ -1879,7 +1879,8 @@ fn build_inner_with_options(
                         template_of("!forbidden").map_or(String::new(), |t| format!(",\"forbidden\":{t}"))
                     ),
                 );
-                files.insert("server.mjs".into(), server_mjs.replace("from './native-sockets.mjs'", "from './_server/native-sockets.mjs'"));
+                files.insert("server.mjs".into(), server_mjs.replace("from './native-sockets.mjs'", "from './_server/native-sockets.mjs'").replace("from './llm.mjs'", "from './_server/llm.mjs'"));
+                files.insert("_server/llm.mjs".into(), include_str!("../../../runtime/server/llm.mjs").into());
                 files.insert("_server/native-sockets.mjs".into(), include_str!("../../../runtime/server/native-sockets.mjs").into());
                 if let Some(shim) = &input.shim {
                     files.insert("_server/dom.js".into(), shim.clone());

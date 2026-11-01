@@ -1559,14 +1559,14 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
                             .unwrap_or_default();
                         let job_id = job.id.to_string();
                         let queue_name = job.queue.clone();
-                        let runner = concat!(include_str!("templates/job-runner.mjs"), "\n", include_str!("../../brain-serve/src/key-backend.js"));
+                        let runner = format!("{}\n{}\n{}", brain_serve::load::llm_script(), include_str!("templates/job-runner.mjs"), include_str!("../../brain-serve/src/key-backend.js"));
                         let mut cmd = tokio::process::Command::new("node");
                         cmd.args([
                             "--enable-source-maps",
                             "--max-old-space-size=256",
                             "--input-type=module",
                             "--eval",
-                            runner,
+                            &runner,
                         ])
                         .arg(module)
                         .envs(env)

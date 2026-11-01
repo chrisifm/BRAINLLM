@@ -1,0 +1,35 @@
+{
+  "id": "server-llm",
+  "kind": "capability",
+  "title": "Server LLM module: ctx.llm",
+  "why": "Server code can call Anthropic or OpenAI without an SDK. Keys stay in the server environment, and using the module from browser code is a compile error.",
+  "changelog": [
+    "Server LLM module"
+  ],
+  "guide": "brain guide server",
+  "codes": [
+    "B0920",
+    "B0921",
+    "B0922",
+    "B0923"
+  ],
+  "apis": [
+    "ctx.llm.complete",
+    "ctx.llm.stream"
+  ],
+  "affects": [
+    "views/**",
+    "server/**",
+    ".brain_env"
+  ],
+  "adopt": {
+    "file": "views/<name>.brain",
+    "snippet": "server: async function ask(ctx, q) { return (await ctx.llm.complete({ prompt: q })).text }"
+  },
+  "uses": [
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "ctx.llm"
+    }
+  ]
+}

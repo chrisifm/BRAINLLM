@@ -21,6 +21,7 @@ import { createServer as http, STATUS_CODES, request as httpRequest, Agent as Ht
 import { AsyncLocalStorage } from 'node:async_hooks'
 import net from 'node:net'
 import { installNativeSockets } from './native-sockets.mjs'
+import { llmClient } from './llm.mjs'
 import { BlockList, isIP } from 'node:net'
 import { Readable } from 'node:stream'
 import zlib from 'node:zlib'
@@ -1025,12 +1026,13 @@ export function createServer(o = {}) {
   const context = (req, res, url, extra) => {
     const cookies = parseCookies(req.headers.cookie)
     const { user, session: ses } = nativeSession ? { user: req.$nativeUser ?? null, session: sessionSecrets(native.session(req, res, res.getHeader('x-request-id')), cookies, secret) } : sessionFrom(cookies, secret)
+    const signal = lifetime(res)
     return {
       url, query: Object.fromEntries(url.searchParams), cookies, user, session: ses, env,
       ...(native ? { backend: native.backend(req, res, res.getHeader('x-request-id')) } : {}),
       // `prefetch`: the router fetched this page ahead of a click (§19); a `load` with side effects can skip them
       prefetch: req.headers['x-brain-prefetch'] === '1',
-      req: { method: req.method, headers: req.headers, ip: ipOf(req) }, signal: lifetime(res), ...extra,
+      req: { method: req.method, headers: req.headers, ip: ipOf(req) }, signal, llm: llmClient(env, signal), ...extra,
     }
   }
 

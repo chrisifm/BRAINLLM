@@ -1,0 +1,4 @@
+<script>
+  const ask = (ctx) => ctx.llm.complete({ prompt: 'x' })
+</script>
+<p>{ask ? 'ready' : 'no'}</p>

@@ -87,3 +87,20 @@ fn scan_secrets_output() {
     assert_eq!(kinds, ["sk-…", "GitHub token"]);
     assert!(brain_check::scan_secrets("mask-aaaaaaaaaaaaaaaaaaaaaaaaaa naïve ☃").is_empty());
 }
+
+#[test]
+fn llm_is_server_only_b0920() {
+    let ctx = server_ctx();
+    // In a server function, load and a server module it is fine.
+    assert!(codes_with("comp/x.brain", "<script>server: async function ask(ctx, q) { return ctx.llm.complete({ prompt: q }) }</script><button on:click={ask('x')}>ok</button>", &ctx).is_empty());
+    assert!(codes_with("comp/m.jsbrain", "<meta server>\nexport const ask = (ctx, q) => ctx.llm.stream({ prompt: q })", &ctx).is_empty());
+    // In code that reaches the browser it is a compile error, even with a parameter named ctx.
+    assert!(codes_with("comp/x.brain", "<script>const f = (ctx) => ctx.llm.complete({ prompt: 'x' })</script><p>{f}</p>", &ctx).contains(&"B0920"));
+    assert_eq!(codes_with("comp/m.jsbrain", "export const f = (ctx) => ctx.llm", &ctx), ["B0920"]);
+    // Provider keys cannot be made public by renaming them.
+    assert_eq!(codes_with("comp/m.jsbrain", "export const k = process.env.PUBLIC_ANTHROPIC_API_KEY", &ctx), ["B0920"]);
+    assert_eq!(codes_with("comp/m.jsbrain", "export const k = import.meta.env.PUBLIC_OPENAI_API_KEY", &ctx), ["B0920"]);
+    assert_eq!(codes_with("comp/m.jsbrain", "export const k = process.env.ANTHROPIC_API_KEY", &ctx), ["B0702"]);
+    // Other objects with their own `llm` field are not the module.
+    assert!(codes_with("comp/m.jsbrain", "export const f = (o) => o.llm", &ctx).is_empty());
+}

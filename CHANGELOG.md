@@ -9,6 +9,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- Server LLM module: `ctx.llm.complete` and `ctx.llm.stream` call Anthropic and OpenAI from server code with keys from the server environment; `ctx.llm` in browser code or a `PUBLIC_` provider key fails with B0920, and streaming to the browser is documented as absent.
+
 ## [0.7.0] - 2026-10-31
 
 - `brain dev` recompiles the component when a CSS edit changes its scope identity (a customized copy of a kit file); it used to keep the old script with the new `data-b` CSS.

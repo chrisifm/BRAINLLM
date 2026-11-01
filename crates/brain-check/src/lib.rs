@@ -766,6 +766,7 @@ impl<'a> Checker<'a> {
         }
         let root = if dump_root(e) == "import.meta" { "import.meta.env" } else { "process.env" };
         match key.flatten() {
+            Some(k) if env::is_public_llm_key(&k) => self.push("B0920", e.span(), format!("`{k}` would ship a model provider key to every visitor"), format!("set `{}` without `PUBLIC_` and call `ctx.llm` from `load()` or a `server:` function", k.trim_start_matches("PUBLIC_"))),
             Some(k) if k.starts_with("PUBLIC_") => {}
             Some(k) => self.push("B0702", e.span(), format!("`{root}.{k}` is a private variable and this code reaches the browser"), format!("read it on the server (`load()` or `server: async function`) and pass only the value; if it really is public, rename it to `PUBLIC_{k}`")),
             None => self.push("B0702", e.span(), format!("dynamic or whole access to `{root}` in code that reaches the browser"), "read each variable by name (`import.meta.env.PUBLIC_X`); private ones only in `load()` or `server: async function`"),
@@ -1191,7 +1192,21 @@ impl<'a> Checker<'a> {
         self.push_edits("B0130", *span, format!("`{0}.v`: read the signal directly as `{0}`", id.name), format!("write `{}`", id.name), vec![(start, span.end, String::new())]);
     }
 
+    /// B0920: the server LLM module in code that reaches the browser.
+    fn llm_client(&mut self, e: &Expr) {
+        if self.server_ctx {
+            return;
+        }
+        if let Expr::Member { obj, prop: MemberProp::Name(n), .. } = e.unparen()
+            && n.name == "llm"
+            && matches!(obj.unparen(), Expr::Ident(i) if i.name == "ctx")
+        {
+            self.push("B0920", e.span(), "`ctx.llm` runs only on the server and this code reaches the browser", "call it inside `export async function load(ctx)` or `server: async function ask(ctx, q) { return ctx.llm.complete({ prompt: q }) }` and call `ask(q)` from the client");
+        }
+    }
+
     fn expr(&mut self, e: &Expr) {
+        self.llm_client(e);
         self.location_nav(e);
         self.live_scope(e);
         self.form_replace(e);

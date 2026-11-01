@@ -155,6 +155,7 @@ COMPILER assigns the next free code there in the same change that emits it, then
 - B0750 declared route hides something (warning): a `server/routes/*` path that overlaps a view, a literal `public/` file or a framework prefix (`/_r`, `/_b`, `/_server`, `/_health`, `/@brain`), or that starts with a parameter; the gateways proxy declared routes on the site origin, so the overlap would hide the other one; a route that starts with a parameter is not proxied.
 - B0780 stray `}` in markup (warning): a `}` in text or right after a value in an attribute closes nothing; `<pre>`, `<code>`, `<samp>`, `<kbd>` and `<textarea>` may show one, unless it follows a value. `{{x}}` is the same mistake, with the exact edit. · B0781 `await` with no enclosing `async` function (error, the emitted JavaScript does not parse); the top level of a `.jsbrain` and of a test file may await. · B0782 `BRAIN_SECRET` missing when a request opens a session (runtime). · B0783 credential in a readable place (warning): `console.*`, `localStorage`/`sessionStorage.setItem`, and a stored password in what a `server:` function, `load` or a route handler returns.
 - B0737 credential in the signed session cookie (warning): every credential-shaped key, name or member passed to `ctx.session.set`; the fix moves it to `ctx.session.setSecret`. · B0751 backend setting missing or invalid (warning in check and doctor, startup error): see §31.
+- B0920–B0923 server LLM module (§51): B0920 `ctx.llm` or a `PUBLIC_` provider key in browser code or `.brain_env` · B0921 call not configured (runtime) · B0922 provider failure (runtime) · B0923 `ctx.llm` with no provider key declared (warning).
 - B07xx server and secrets (§11.1): B0701 server module used outside load/server: · B0702 env without `PUBLIC_` on the client · B0703 literal shaped like a key · B0704 `server:` function badly declared (not async, nested, in .jsbrain) or reading component state · B0707 invalid brain.json `server` setting (error; unknown key or a value outside its range).
 
 ## 6. Runtime (CODEGEN → RUNTIME contract), module `runtime/brain.js`
@@ -2126,3 +2127,18 @@ LOCKED` and pushes `next_attempt_at` forward as its lease and backoff, and `file
 `Storage::remove` treats missing bytes as finished and refuses a key outside storage, which then waits in the table instead
 of being followed. Rejected uploads use `files::discard`. Bytes written just before a crash, with neither row nor
 tombstone, are still not recovered: nothing records them until the row exists.
+
+## 51. Server LLM module (2026-10-31)
+
+`runtime/server/llm.mjs` exports `llmClient(env, signal)`. `server.mjs` puts it on `context()` as `ctx.llm`; the build copies
+it to `dist/_server/llm.mjs`, and client chunks never import it. `brain run` writes it next to `.brain/server/_rt/server.mjs`.
+Sidecars and the job runner have no `server.mjs` for every call, so `load::llm_script()` strips `export` and prepends the
+module: appended text would stay uninitialized behind the runner's top-level await (`const` in the temporal dead zone).
+Requests are built only in `llmRequest` and answers parsed only in `llmParsed` and `llmStream`; the file header records the
+date and sources of the contract review. Anthropic uses `anthropic-version: 2026-10-21`, which rejects sampling parameters,
+so the neutral API has none. OpenAI uses the Responses API with `store: false`; a gateway that offers only Chat Completions
+is not supported. Thinking blocks and reasoning items are dropped. Limits: 32 MiB answer, 4 MiB event, no retries.
+Browser streaming is absent on purpose: RPC is one JSON answer and no server route emits events.
+B0920 is in `brain-check` (`llm_client`, `env_access`, `env::check_file`), B0923 in `crates/brain-cli/src/env.rs`, and B0921 and
+B0922 only at runtime. Tests: `runtime/test/llm.test.js` (wire contracts against a fake provider) and
+`crates/brain-cli/tests/llm.rs` (built app through RPC, no key material in client files).

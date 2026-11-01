@@ -272,6 +272,9 @@ such as a provider token goes in `ctx.session.setSecret(value, {maxAge})`, read 
 `ctx.session.clearSecret()` or `clear()`: its own encrypted cookie, never `ctx.user`, also available with `BRAIN_BACKEND_URL`
 (setup in `brain guide server`).
 `load` belongs to views: in `_layout.brain` it is not run.
+Model calls: `await ctx.llm.complete({ prompt, system, messages, model, provider, maxTokens, timeoutMs })` returns
+`{ text, stopReason, usage, model, provider, requestId }`; `for await (const text of ctx.llm.stream(o))` reads the answer on the server. Set
+`ANTHROPIC_API_KEY` + `ANTHROPIC_MODEL` or `OPENAI_API_KEY` + `OPENAI_MODEL`; `ctx.llm` in browser code or a `PUBLIC_` provider key is B0920 (`brain guide server`).
 Server limits (dev and production alike): brain.json `"server": { "maxBodyKB": 1024, "timeoutMs": 10000,
 "rpcPerMinute": 60 }` bounds RPC/form bodies (413 past it, at most 65536), function calls and `load` (504) and calls
 per IP and function (429). Raise `maxBodyKB` to send a file as base64 in an RPC argument; invalid values are B0707.
