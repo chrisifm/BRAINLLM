@@ -60,7 +60,7 @@ pub fn catalog() -> Vec<Resource> {
         json!({
             "filter": {
                 "price": ["eq", "gte", "lte", "between"],
-                "stock": ["gt", "exists"],
+                "stock": ["gt", "ne", "exists"],
                 "category": ["eq", "in"],
                 "title": ["prefix", "iprefix"],
                 "released_on": ["lt", "gte"],
@@ -274,6 +274,19 @@ async fn relations_filters_sort_totals_aggregates_cursors_ownership_and_visibili
     assert_eq!(r["total"], 5);
     let (_, r) = api.get("/api/products?stock[exists]=false", None).await;
     assert_eq!(titles(&r), ["blue rake"]);
+    // A value of null and a value never sent mean the same: no stock.
+    let (s, stored) = api.post("/api/products", &owner, json!({"shop": &mx_id, "title": "null stock", "price": "1.00", "category": "tools", "cost": "1.00", "stock": null})).await;
+    assert_eq!(s, 200, "{stored}");
+    let (_, r) = api.get("/api/products?stock[exists]=false&sort=title", None).await;
+    assert_eq!(titles(&r), ["blue rake", "null stock"], "exists=false finds an explicit null");
+    let (_, r) = api.get("/api/products?stock[exists]=true&limit=100", None).await;
+    assert!(!titles(&r).iter().any(|t| t == "null stock" || t == "blue rake"), "{r}");
+    let (_, r) = api.get("/api/products?stock[ne]=1&limit=100", None).await;
+    let without_one = titles(&r);
+    assert!(without_one.iter().any(|t| t == "blue rake") && without_one.iter().any(|t| t == "null stock"), "ne keeps rows without a value: {r}");
+    assert!(!without_one.iter().any(|t| t == "Anvil"), "{r}");
+    let (s, gone) = api.call("DELETE", &format!("/api/products/{}", stored["id"].as_str().unwrap()), Some(&owner), None).await;
+    assert!(s < 300, "{gone}");
     let (_, r) = api.get("/api/products?search=hammer&category=tools", None).await;
     assert_eq!((titles(&r), r["total"].clone()), (vec!["Blue hammer".to_string()], json!(1)), "search composes with filters");
     let (_, r) = api.get(&format!("/api/products?shop={us_id}&sort=title"), None).await;
