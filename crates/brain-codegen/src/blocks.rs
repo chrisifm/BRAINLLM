@@ -26,6 +26,8 @@ pub struct Blocks {
     /// What importers depend on: props (name, type, optional, default, `~`), emits, expose and slot names.
     /// Empty when the file does not parse.
     pub contract: String,
+    /// The identity behind `data-b`: a style edit that changes it invalidates the compiled script too.
+    pub scope: String,
 }
 
 /// What an edit requires, from cheapest to most expensive.
@@ -62,7 +64,7 @@ pub fn blocks(src: &str, path: &Path) -> Blocks {
         _ => split(src),
     };
     let contract = brain_parse::parse(src, path).map(|c| contract_of(&c)).unwrap_or_default();
-    Blocks { meta: hash(&[&meta]), script: hash(&[&script]), markup: hash(&[&markup]), style: hash(&[&style]), contract: hash(&[&contract]) }
+    Blocks { meta: hash(&[&meta]), script: hash(&[&script]), markup: hash(&[&markup]), style: hash(&[&style]), contract: hash(&[&contract]), scope: crate::component_scope_key("", src) }
 }
 
 /// The cheapest [`Change`] that turns `old` into `new`.
@@ -71,7 +73,7 @@ pub fn change(old: &Blocks, new: &Blocks) -> Change {
         Change::None
     } else if old.contract != new.contract {
         Change::Contract
-    } else if old.meta == new.meta && old.script == new.script && old.markup == new.markup {
+    } else if old.scope == new.scope && old.meta == new.meta && old.script == new.script && old.markup == new.markup {
         Change::Style
     } else {
         Change::Component

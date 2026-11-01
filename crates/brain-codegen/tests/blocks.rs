@@ -114,3 +114,13 @@ fn persistent_keys_cover_adoption_lint_and_field_boundaries() {
     assert_ne!(key, source_cache_key(&format!("{BASE}\n"), p, &base));
     assert_eq!(key, source_cache_key(BASE, p, &base));
 }
+
+#[test]
+fn a_style_edit_that_changes_the_scope_identity_recompiles_the_component() {
+    let kit = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../runtime/ui/field.brain")).unwrap();
+    assert!(brain_check::scope::kit_source(&kit), "the fixture is the exact kit source");
+    let customized = kit.replacen("</style>", ".customized { color: red }\n</style>", 1);
+    assert_ne!(kit, customized);
+    assert_eq!(change(&b(&kit), &b(&customized)), Change::Component, "the data-b of the old script no longer matches the new CSS");
+    assert_eq!(change(&b(&customized), &b(&customized.replace("color: red", "color: blue"))), Change::Style);
+}

@@ -11,6 +11,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [0.7.0] - 2026-10-31
 
+- `brain dev` recompiles the component when a CSS edit changes its scope identity (a customized copy of a kit file); it used to keep the old script with the new `data-b` CSS.
 - In production `ctx.session.set` under a native backend answers visitors with a generic message; the configuration detail
   goes to the log.
 - A route handler or before-hook that fails at startup names the import failure instead of only asking for a callable export.
