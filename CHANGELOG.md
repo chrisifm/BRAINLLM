@@ -9,6 +9,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- Breaking: a file bucket without `types` (or with `types: []`) is now error B0770 in `brain check`, and `brain backend serve` refuses to start. Write the types it holds, or `types: '*'` to keep accepting any file
+
 ## [0.7.0] - 2026-10-31
 
 - `brain dev` recompiles the component when a CSS edit changes its scope identity (a customized copy of a kit file); it used to keep the old script with the new `data-b` CSS.

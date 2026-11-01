@@ -94,8 +94,8 @@ pub struct Bucket {
     pub visibility: Visibility,
     #[serde(default = "default_max", deserialize_with = "size")]
     pub max_bytes: u64,
-    /// MIME patterns (`application/pdf`, `image/*`), or `'*'` to accept any type. Omitted or empty still accepts any
-    /// type, as it did before 0.6.2, and `brain check` warns B0770.
+    /// MIME patterns (`application/pdf`, `image/*`), or `'*'` to accept any type. Omitted or empty accepts nothing:
+    /// `brain check` reports B0770 and `brain backend serve` refuses to start.
     #[serde(default, deserialize_with = "type_list")]
     pub types: Vec<String>,
     /// Optional resource whose records own these files; uploads then need `?record=<uuid>` and update rights on it.
@@ -168,14 +168,13 @@ impl Bucket {
         }
         Ok(())
     }
-    /// A bucket that never said which types it takes: it accepts every file only by omission (B0770).
+    /// A bucket that never said which types it takes (B0770).
     pub fn open_by_omission(&self) -> bool {
         self.types.is_empty()
     }
     pub fn accepts(&self, content_type: &str) -> bool {
         let detected = same_type(content_type);
-        self.types.is_empty()
-            || self.types.iter().any(|pattern| {
+        self.types.iter().any(|pattern| {
                 let pattern = same_type(pattern);
                 pattern == "*/*"
                     || pattern == detected
@@ -697,14 +696,20 @@ mod tests {
         assert!(parse_size(&json!(-1)).is_err());
     }
     #[test]
-    fn defaults_are_private_permissive_25mb_and_admin_upload() {
-        let b = bucket(json!({})).unwrap();
+    fn defaults_are_private_25mb_and_admin_upload() {
+        let b = bucket(json!({"types":"*"})).unwrap();
         assert_eq!(b.visibility, Visibility::Private);
         assert_eq!(b.max_bytes, DEFAULT_MAX_BYTES);
         assert!(b.accepts("application/zip") && b.accepts("video/mp4"));
         assert_eq!(b.create, vec!["admin"]);
         assert_eq!(b.read, vec!["owner", "admin"]);
         assert!(b.validate(&[], &["admin".into()]).is_ok());
+    }
+    #[test]
+    fn a_bucket_without_types_accepts_nothing() {
+        let open = bucket(json!({})).unwrap();
+        assert!(open.open_by_omission() && !open.accepts("application/pdf"));
+        assert!(!bucket(json!({"types":[]})).unwrap().accepts("application/pdf"));
     }
     #[test]
     fn declared_types_restrict_by_exact_type_or_family() {
@@ -716,7 +721,7 @@ mod tests {
         assert!(bucket(json!({"color":"red"})).is_err());
     }
     #[test]
-    fn any_type_is_said_with_a_star_and_omission_stays_open_with_a_warning() {
+    fn any_type_is_said_with_a_star_and_omission_is_detected() {
         let star = bucket(json!({"types":"*"})).unwrap();
         assert!(star.accepts("application/x-msdownload") && !star.open_by_omission());
         assert!(star.validate(&[], &["admin".to_string()]).is_ok());

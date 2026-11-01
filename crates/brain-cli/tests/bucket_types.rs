@@ -1,4 +1,4 @@
-//! B0770: a bucket that does not say which types it takes warns in `brain check`, and keeps compiling.
+//! B0770: a bucket that does not say which types it takes is an error in `brain check` and `brain backend serve` refuses it.
 use std::process::{Command, Output, Stdio};
 
 fn brain(dir: &std::path::Path, args: &[&str]) -> Output {
@@ -9,7 +9,7 @@ fn text(o: &Output) -> String {
 }
 
 #[test]
-fn a_bucket_without_types_warns_until_it_lists_them_or_says_any() {
+fn a_bucket_without_types_is_an_error_until_it_lists_them_or_says_any() {
     let tmp = std::env::temp_dir().join(format!("brain-bucket-types-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
@@ -24,11 +24,15 @@ fn a_bucket_without_types_warns_until_it_lists_them_or_says_any() {
     let run = brain(&dir, &["check"]);
     let omitted = text(&run);
     assert!(omitted.contains("B0770") && omitted.contains("server/files/uploads.jsbrain"), "{omitted}");
-    assert!(omitted.contains("types: '*'"), "the warning names the explicit opt-out: {omitted}");
-    assert!(run.status.success(), "a warning never fails a compiling app: {omitted}");
+    assert!(omitted.contains("types: '*'"), "the error names the explicit opt-out: {omitted}");
+    assert!(!run.status.success(), "an open bucket by omission fails the check: {omitted}");
+    let refused = brain(&dir, &["backend", "serve", "--env", "development", "--port", "0"]);
+    let refused_text = text(&refused);
+    assert!(!refused.status.success() && refused_text.contains("B0770") && refused_text.contains("server/files/uploads.jsbrain"), "{refused_text}");
 
     write(", types: []");
-    assert!(text(&brain(&dir, &["check"])).contains("B0770"));
+    let empty = brain(&dir, &["check"]);
+    assert!(text(&empty).contains("B0770") && !empty.status.success());
 
     write(", types: ['application/pdf']");
     assert!(!text(&brain(&dir, &["check"])).contains("B0770"));

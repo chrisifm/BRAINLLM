@@ -401,14 +401,15 @@ pub fn startup_contract_errors(root: &Path) -> Vec<String> {
     out.extend(contracts(root, "resources").map(|resources| crate::hooks_executor::source_problems(root, &resources)).unwrap_or_default());
     out
 }
-/// B0770: buckets that accept every file only because they never listed their types.
-pub fn bucket_warnings(root: &Path) -> Vec<(String, String, String)> {
+const BUCKET_TYPES_FIX: &str = "list what it should hold, for example types: ['application/pdf', 'image/*'], or write types: '*' to keep accepting any file as before; official MIME names work and matching uses the file's content";
+/// B0770: buckets that never listed their types (`check` reports them, `serve` refuses to start).
+pub fn bucket_type_errors(root: &Path) -> Vec<(String, String, String)> {
     let (Ok(resources), Ok(roles)) = (contracts(root, "resources"), auth_roles(root)) else { return Vec::new() };
     let buckets = crate::platform_config::load(root, &resources, &roles).map(|p| p.buckets).unwrap_or_default();
     buckets.iter().filter(|b| b.open_by_omission()).map(|b| (
         format!("server/files/{}.jsbrain", b.name),
-        format!("bucket `{}` does not say which types it takes, so it accepts every file, HTML and executables included", b.name),
-        "list what it should hold, for example types: ['application/pdf', 'image/*'], or say types: '*' if any file is meant to be accepted; official MIME names work and matching uses the file's content".to_string(),
+        format!("bucket `{}` does not say which types it takes; since 0.8.0 an unstated list is refused, because it would accept every file, HTML and executables included", b.name),
+        BUCKET_TYPES_FIX.to_string(),
     )).collect()
 }
 pub fn inspect(root: &Path) -> Result<Value, String> {
@@ -645,6 +646,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
             let lines: Vec<String> = problems.iter().map(|(problem, fix)| format!("{problem}; fix: {fix}")).collect();
             return Err(format!("B0751 backend settings: {}", lines.join(" | ")));
         }
+        if let Some((file, _, fix)) = bucket_type_errors(&root).into_iter().next() {
+            return Err(format!("B0770: {file} does not say which types it takes; fix: {fix}"));
+        }
     }
     let url = stated_database(args, &root, &environment)?;
     if operation == "users" {
@@ -746,7 +750,6 @@ pub fn run(args: &[String]) -> Result<(), String> {
         eprintln!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
         if let Some((msg,fix))=anonymous_catalog_warning(args,&environment){eprintln!("{}",json!({"schemaVersion":1,"event":"backend-warning","code":"B0771","msg":msg,"fix":fix}));}
         let mut platform=crate::platform_config::load(&root,&config.resources,&config.roles)?;
-        for bucket in platform.buckets.iter().filter(|b|b.open_by_omission()){eprintln!("{}",json!({"schemaVersion":1,"event":"backend-warning","code":"B0770","file":format!("server/files/{}.jsbrain",bucket.name),"message":"this bucket accepts every file type because it does not declare types; list them or say types: '*'"}));}
         platform.routes=crate::route_executor::contracts(&root,&environment)?;
         platform.handlers=crate::route_executor::load(&root,&environment,&platform.routes)?;
         // Separate HTTP and worker pools with declared sizes, checked against the server's connection budget.
