@@ -2135,3 +2135,19 @@ fn the_url_register_names_what_disappeared_and_what_is_new() {
     assert_eq!(brain_seo::register_new(&cfg, &pages, &list), ["/b"]);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn a_later_page_with_its_canonical_at_page_one_is_an_error() {
+    let later = |canonical: &str| Page {
+        route: "/blog/page/2".into(),
+        file: "blog/page/2/index.html".into(),
+        html: format!("<!doctype html><html lang=\"en\"><head><title>Blog, second page</title><link rel=\"canonical\" href=\"https://acme.dev{canonical}\"></head><body><main><h1>Blog</h1></main></body></html>"),
+        ..Page::default()
+    };
+    let level = |canonical: &str| {
+        let r = focus_report(&[], &[later(canonical)]);
+        r.pages[0].findings.iter().find(|f| f.code == "B1872").map(|f| f.level)
+    };
+    assert_eq!(level("/blog"), Some(brain_seo::Level::Error));
+    assert_eq!(level("/blog/page/2"), None, "its own canonical is the right answer");
+}

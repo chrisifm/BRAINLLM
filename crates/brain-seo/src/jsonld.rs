@@ -950,7 +950,7 @@ mod tests {
         let msgs = |b: &str| validate(b).into_iter().map(|i| i.msg).collect::<Vec<_>>().join(" | ");
         let forum = format!(r#"{{{c},"@type":"DiscussionForumPosting","author":{{"@type":"Person","url":"https://a.dev"}},"datePublished":"2026-10-01"}}"#);
         let m = msgs(&forum);
-        assert!(m.contains("text|image|video|url") || m.contains("text"), "{m}");
+        assert!(m.contains("DiscussionForumPosting has no `text` or `image` or `video` or `url`"), "{m}");
         assert!(m.contains("author has no `name`"), "{m}");
         assert_eq!(msgs(&format!(r#"{{{c},"@type":"DiscussionForumPosting","author":{{"@type":"Person","name":"Ada"}},"datePublished":"2026-10-01","image":"https://a.dev/x.png"}}"#)), "");
         let m = msgs(&format!(r#"{{{c},"@type":"QAPage","mainEntity":{{"@type":"Question","name":"Why?"}}}}"#));
