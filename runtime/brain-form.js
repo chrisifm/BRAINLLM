@@ -318,7 +318,8 @@ function createForm(schema, o, readRule, validateRule, remote) {
     },
   }
   DIRTY.add(f)
-  const watch = () => fx(() => void (f.dirty && guardUnload()))
+  // outside the fx: the listener outlives the form on purpose, one per page, and is not this effect's to clean up
+  const watch = () => fx(() => void (f.dirty && queueMicrotask(guardUnload)))
   owner ? I.root(watch, owner) : watch()
   if (owner) I.root(() => fx(() => () => DIRTY.delete(f)), owner)
   return f

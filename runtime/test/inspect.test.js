@@ -235,3 +235,22 @@ test('abortInflight stops only the requests the inspector owns the signal of', a
   fakeHold = null
   assert.deepEqual(api.inflight(), [])
 })
+
+test('a form guarding unsaved changes is not a leak: its one listener lives as long as the page', async () => {
+  const { form } = await rt.sibling('brain-form.js')
+  const own = globalThis.addEventListener
+  globalThis.addEventListener = (...a) => globalThis.window.addEventListener(...a)
+  delete globalThis.__brainDirtyHook
+  try {
+    let f
+    const JobForm = () => { f = form({ name: 'str' }, { init: { name: '' } }); return tpl('<p></p>')() }
+    const stop = mount(dev(JobForm), doc.body, {})
+    const before = I.inspect().leaks().filter(x => x.code === 'B0602').length
+    f.v.name = 'edited'
+    await wait()
+    assert.equal(f.dirty, true)
+    assert.equal(globalThis.__brainDirtyHook, 1)
+    assert.equal(I.inspect().leaks().filter(x => x.code === 'B0602').length, before)
+    stop()
+  } finally { globalThis.addEventListener = own }
+})
