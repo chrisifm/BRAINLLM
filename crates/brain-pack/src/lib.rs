@@ -2206,7 +2206,7 @@ fn build_inner_with_options(
             css,
             css_gz,
             html: p.html.len(),
-            html_gz: transfer_size(p.html.as_bytes(), binary.get(&format!("{}.gz", p.file)).map(Vec::as_slice)),
+            html_gz: authored_html_size(&p.html, binary.get(&format!("{}.gz", p.file)).map(Vec::as_slice)),
         });
     }
     optimizations.sort_by(|a,b|(&a.source,a.stage).cmp(&(&b.source,b.stage)));
@@ -2216,6 +2216,14 @@ fn build_inner_with_options(
 /// Match production serving: precompressed bytes exist only when smaller than raw output.
 fn transfer_size(raw: &[u8], gzip: Option<&[u8]>) -> usize {
     gzip.map_or(raw.len(), |compressed| compressed.len().min(raw.len()))
+}
+
+/// The size a view answers for: the framework's optional credit line is not the author's to spend budget on.
+fn authored_html_size(html: &str, gzip: Option<&[u8]>) -> usize {
+    let credit = html.find("<p data-brain-credit").and_then(|a| Some((a, a + html[a..].find("</p>")? + 4)));
+    let Some((a, b)) = credit else { return transfer_size(html.as_bytes(), gzip) };
+    let rest = format!("{}{}", &html[..a], &html[b..]);
+    transfer_size(rest.as_bytes(), gzip.map(|_| gzip::gzip(rest.as_bytes(), 15)).as_deref())
 }
 
 #[test]

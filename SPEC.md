@@ -148,7 +148,7 @@ has `title` · no tabindex > 0. Warnings: generic link text ("click here", "read
 ## SEO
 Every view: `<meta seo keyword="…" title="…" description="…" canonical? og:image? schema? robots?>`.
 Pick the query first; put it in the title, H1, first sentence and description. `keyword` is never rendered; an
-indexable view without it is B0502 (guarded, `robots="noindex"`, `_x`, `[id]` and error views are exempt).
+indexable view without it is B0502 (guarded, `robots="noindex"`, `_x`, `[id]` and error views are exempt). A guarded route is never indexed; a public page that only redirects some visitors does it in `load()` (B0505).
 A page rendered per request can list the parameters that make a different page, such as real pagination: `query="page"`
 keeps them in the canonical. Any other parameter (a dialog, `urlState`, a tracking tag) stays out, so it restores the UI
 without a new page for search. It must be literal, and it has no effect on a prerendered page (B0503).
