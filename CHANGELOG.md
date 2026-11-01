@@ -9,6 +9,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- `csp.connectSrc` in brain.json lists the origins pages may call: it replaces the broad `https: wss:` of the production `connect-src`, the site's own origin always stays allowed, and an origin a page calls outside the list warns B0746. Without the list nothing changes and `brain check` warns B0795; an invalid entry is B0796. New apps start with `[]`
 - Breaking: a file bucket without `types` (or with `types: []`) is now error B0770 in `brain check`, and `brain backend serve` refuses to start. Write the types it holds, or `types: '*'` to keep accepting any file
 
 ## [0.7.0] - 2026-10-31

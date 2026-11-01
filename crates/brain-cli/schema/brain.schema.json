@@ -50,6 +50,20 @@
         "rpcPerMinute": { "type": "integer", "minimum": 1, "maximum": 100000, "default": 60, "description": "Calls per client IP and function per minute; past it the server answers 429 with Retry-After." }
       }
     },
+    "csp": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Content-Security-Policy settings of the built site.",
+      "properties": {
+        "connectSrc": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^((https|wss)://(\\*\\.)?[a-z0-9.-]+|(http|ws)://(localhost|127\\.0\\.0\\.1))(:([0-9]+|\\*))?$" },
+          "description": "Origins pages may call besides the site's own, which is always allowed. Replaces the broad `https: wss:` of `connect-src`; [] means the own origin only. Omitted keeps the broad form and `brain check` warns B0795."
+        }
+      }
+    },
     "site": {
       "type": "string",
       "format": "uri",

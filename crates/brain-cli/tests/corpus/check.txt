@@ -287,6 +287,16 @@ PUBLIC_SITE_URL=ftp://shop.example.org
 <meta server>
 export default { maxBytes: '1mb' }
 
+### B0795 no connect-src allowlist
+@expect B0795 brain.json 1:1
+@file brain.json
+{ "name": "Corpus" }
+
+### B0796 invalid connect-src entry
+@expect B0796 brain.json 1:21
+@file brain.json
+{ "name": "Corpus", "csp": { "connectSrc": ["https:"] } }
+
 ### B0772 handler default export
 @expect B0772 server/routes/pay/handler.jsbrain 1:1
 @file server/routes/pay/route.jsbrain

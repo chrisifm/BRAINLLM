@@ -45,7 +45,7 @@ fn run(root: &Path, case: &Case) -> Vec<String> {
     let dir = root.join(case.name.replace(|c: char| !c.is_ascii_alphanumeric(), "-"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("brain.json"), "{ \"name\": \"Corpus\" }\n").unwrap();
+    std::fs::write(dir.join("brain.json"), "{ \"name\": \"Corpus\", \"csp\": { \"connectSrc\": [\"https://api.example.org\"] } }\n").unwrap();
     std::fs::write(dir.join("tokens.cssbrain"), ":root {\n}\n").unwrap();
     for (path, body) in &case.files {
         let at = dir.join(path);
@@ -67,6 +67,8 @@ fn run(root: &Path, case: &Case) -> Vec<String> {
     let mut got: Vec<String> = diags
         .iter()
         .filter(|d| in_scope(d))
+        // A case with its own brain.json is about something else; only the case naming B0795 expects that warning.
+        .filter(|d| d["code"] != "B0795" || case.expect.iter().any(|e| e.starts_with("B0795")))
         .map(|d| {
             assert!(d["msg"].as_str().is_some_and(|m| !m.is_empty()) && d["fix"].as_str().is_some_and(|f| !f.is_empty()), "{}: no msg or fix: {d}", case.name);
             format!("{} {} {}:{}", d["code"].as_str().unwrap(), d["file"].as_str().unwrap(), d["line"], d["col"])

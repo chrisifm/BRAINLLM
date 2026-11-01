@@ -85,15 +85,17 @@ pub struct Trace {
     queue: Mutex<Option<SyncSender<String>>>,
     worker: Mutex<Option<std::thread::JoinHandle<()>>>,
     warned: Arc<AtomicBool>,
+    policy: String,
 }
 
 impl Trace {
     fn new(root: &Path) -> Arc<Trace> {
         let (queue, lines) = sync_channel(QUEUE);
+        let policy = report_only_policy(root);
         let (root, warned) = (root.to_path_buf(), Arc::new(AtomicBool::new(false)));
         let flag = warned.clone();
         let worker = std::thread::spawn(move || pump(&root, lines, &flag));
-        Arc::new(Trace { queue: Mutex::new(Some(queue)), worker: Mutex::new(Some(worker)), warned })
+        Arc::new(Trace { queue: Mutex::new(Some(queue)), worker: Mutex::new(Some(worker)), warned, policy })
     }
     /// One JSON object per line. The line may hold raw values: the writer redacts before anything reaches disk.
     pub(crate) fn record(&self, line: String) {
@@ -136,7 +138,7 @@ pub(crate) fn begin(trace: &Arc<Trace>, req: &mut crate::http::Request, native: 
     if let Some((_, id)) = req.headers.iter().find(|(name, value)| name.eq_ignore_ascii_case("x-brain-trace") && valid_id(value)) {
         req.id = id.clone();
     }
-    crate::http::trace_begin(&req.id, report_only_policy());
+    crate::http::trace_begin(&req.id, trace.policy.clone());
     RequestScope {
         trace: trace.clone(),
         method: req.method.clone(),
@@ -232,7 +234,7 @@ pub(crate) fn classify(path: &str, status: u16, native: bool) -> Option<&'static
 
 /// The report-only policy of a dev page: the production directives (`brain_pack::cache::csp`), with what only the dev
 /// server needs (inline bootstrap scripts, local APIs). It never blocks; it shows what production would.
-pub(crate) fn report_only_policy() -> String {
+pub(crate) fn report_only_policy(root: &Path) -> String {
     // what a build adds when a page needs it (wasm, Google sign-in) is allowed here: a dev server cannot know it per page
     let mut dev: Vec<(String, String)> = vec![
         ("script-src".into(), "'unsafe-inline'".into()),
@@ -241,7 +243,7 @@ pub(crate) fn report_only_policy() -> String {
         ("connect-src".into(), "http://127.0.0.1:*".into()),
     ];
     dev.extend(brain_pack::cache::google_csp());
-    brain_pack::cache::csp(&[], &dev)
+    brain_pack::cache::app_csp(root, &[], &dev)
 }
 
 #[cfg(test)]
@@ -368,8 +370,15 @@ mod tests {
 
     #[test]
     fn the_report_only_policy_keeps_production_directives() {
-        let policy = report_only_policy();
+        let root = std::env::temp_dir().join(format!("brain-trace-policy-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let policy = report_only_policy(&root);
         assert!(policy.contains("object-src 'none'"), "{policy}");
+        assert!(policy.contains("connect-src 'self' https: wss:"), "{policy}");
+        std::fs::write(root.join("brain.json"), "{\"csp\":{\"connectSrc\":[\"https://api.site.test\"]}}").unwrap();
+        let narrow = report_only_policy(&root);
+        assert!(narrow.contains("connect-src 'self' https://api.site.test http://localhost:*"), "{narrow}");
+        let _ = std::fs::remove_dir_all(&root);
         assert!(policy.contains("'unsafe-inline'"), "{policy}");
         assert!(!policy.contains("'unsafe-eval'"), "{policy}");
     }

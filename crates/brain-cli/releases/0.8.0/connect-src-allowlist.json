@@ -1,0 +1,31 @@
+{
+  "id": "connect-src-allowlist",
+  "kind": "capability",
+  "title": "brain.json csp.connectSrc narrows where pages can send data",
+  "why": "The production connect-src allowed every HTTPS origin, so injected script could send data anywhere. Declaring the list keeps the site's own origin plus those origins only.",
+  "changelog": [
+    "`csp.connectSrc` in brain.json"
+  ],
+  "guide": "SPEC.md",
+  "codes": [
+    "B0795",
+    "B0796",
+    "B0746"
+  ],
+  "apis": [
+    "brain.json csp.connectSrc"
+  ],
+  "affects": [
+    "brain.json"
+  ],
+  "adopt": {
+    "file": "brain.json",
+    "snippet": "\"csp\": { \"connectSrc\": [\"https://api.example.com\"] }"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "connectSrc"
+    }
+  ]
+}

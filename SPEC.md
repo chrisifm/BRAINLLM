@@ -427,7 +427,7 @@ Use `brain integration list` and `brain integration add|update <provider> --vers
 Gemini and Maps SDK adapter previews; backend SDK credentials stay private and frontend callers use server functions.
 See `docs/DEPENDENCIES.md` for the supported ESM/CDN subset and explicit graph limits.
 `brain build` is production: minifies, mangles, obfuscates and removes dead code and `log()`. No flags needed.
-It also adds SRI and a strict CSP with the security headers to every page.
+It also adds SRI and a strict CSP with the security headers to every page. `brain.json` `"csp": { "connectSrc": ["https://api.example.com"] }` lists the origins pages may call besides the site's own; `[]` allows only the own origin, and omitting it allows any HTTPS origin and warns B0795.
 
 Native helpers need no imports or packages: `dateParse/dateAdd/dateDiff/dateRange/dateZone` use UTC arithmetic and
 explicit timezone projection; `hashText/shortHash` are async Web Crypto. `brain lib list` (MCP `brain_lib`) gives the
