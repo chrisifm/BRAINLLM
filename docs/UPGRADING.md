@@ -1,5 +1,7 @@
 # Upgrading
 
+What breaks between versions and how to preview a package pin change; `brain upgrade` measures it against your app.
+
 ## Breaking in 0.8.0: `ne` keeps records without a value
 
 `field[ne]=x` on a list now uses SQL `IS DISTINCT FROM`, so records with no value in `field` **are included**. Before

@@ -115,7 +115,7 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [Native resource generation](RESOURCE-GENERATION.md) | `brain add resource posts --fields 'title:str! body:str' --json` creates native backend contracts and executable client/server helpers offline. |
 | [Runtime execution and resource budgets](RUNTIME-BUDGETS.md) | Production and development compiled BrainScript functions have execution checkpoints. |
 | [Public website](SITE.md) | The landing lives in `docs/site/`. |
-| [Upgrade previews](UPGRADING.md) | An upgrade preview prepares an exact `@christianirack/brainllm` package pin change. |
+| [Upgrading](UPGRADING.md) | What breaks between versions and how to preview a package pin change; `brain upgrade` measures it against your app. |
 | [Viewer browser E2E lane](VIEWER-E2E.md) | This lane is opt-in. |
 | [Native webhooks](WEBHOOKS.md) | The Rust backend accepts signed inbound work and explicitly enqueues outbound deliveries. |
 
@@ -134,6 +134,7 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [File uploads of any type (native backend)](backend/files.md) | Declared file buckets hold the content types they list (PDF, Word, spreadsheets, zip, audio, video, images, plain text), stream the body to private disk withou… |
 | [Filters (B-11)](backend/filters.md) | List endpoints accept only the filters a resource declares in `query.jsbrain`. |
 | [Record ids and keeping existing numeric ids (B-08)](backend/ids.md) | Every native record gets a server-generated UUID (`id`). |
+| [Importing existing data (B-28, B-39)](backend/import.md) | `brain backend import` brings accounts and records from another system with their ids, owners, references and dates. |
 | [Reading and writing resources from job handlers](backend/job-backend.md) | A job handler (`server/jobs/<name>/handler.jsbrain`) gets `ctx.backend` with the same calls as server `load()` and server functions (server-queries.md): `resou… |
 | [Startup, health, load and shutdown](backend/lifecycle.md) | This page covers how the native backend connects to Postgres, how it reports health, how it behaves under load and how it stops. |
 | [Outbound calls from server logic](backend/outbound.md) | Route handlers, jobs and server modules call external APIs (payment providers, shipping rates, mail services) with `httpCall`. |
