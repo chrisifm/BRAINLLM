@@ -216,6 +216,49 @@ jobs:
           npm publish ./pkgs/christianirack-create-brainll-[0-9]*.tgz --provenance --access public
 
 
+  # The GitHub Release comes from the same CHANGELOG section npm users read; npm is already public at this point.
+  github-release:
+    needs: publish
+    if: always() && needs.publish.result == 'success'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PUBLIC_VERSION: ${{ needs.publish.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Create or update the GitHub Release from the CHANGELOG
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v$PUBLIC_VERSION"
+          node npm/github-release.mjs notes "$PUBLIC_VERSION" > "$RUNNER_TEMP/notes.md"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release edit "$tag" --title "$tag" --notes-file "$RUNNER_TEMP/notes.md" --latest
+          else
+            gh release create "$tag" --verify-tag --title "$tag" --notes-file "$RUNNER_TEMP/notes.md" --latest
+          fi
+      - name: Fail if the tag, npm latest and the GitHub Release disagree
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v$PUBLIC_VERSION"
+          found_tag=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag" --jq '.[].ref' | sed 's#^refs/tags/##' | grep -Fx "$tag" || true)
+          found_release=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name' || true)
+          # npm's dist-tags can lag a publish by a few minutes
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            npm_latest=$(npm view @christianirack/brainllm dist-tags.latest 2>/dev/null || true)
+            [[ "$npm_latest" == "$PUBLIC_VERSION" ]] && break
+            sleep 30
+          done
+          node npm/github-release.mjs agree "$PUBLIC_VERSION" "${found_tag:--}" "${npm_latest:--}" "${found_release:--}"
+
   registry-smoke:
     needs: publish
     if: always() && needs.publish.result == 'success'

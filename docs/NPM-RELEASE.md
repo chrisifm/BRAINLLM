@@ -52,6 +52,14 @@ References: [npm initializer resolution](https://docs.npmjs.com/cli/npm-init/),
 
 Relative source and asset links in packaged README files are pinned to the package's v<version> tag. Package documentation therefore resolves to the same reviewed source tree even when main changes. Create the matching source tag with the release; publishing the package without that tag would leave these links unresolved.
 
+## GitHub Release and agreement check (2026-10-31)
+
+After a successful publish, the `github-release` job creates or updates the GitHub Release for `v<version>` from that
+version's CHANGELOG section and marks it latest. It is the only job with `contents: write`, and `--verify-tag` means it
+never creates a tag: a manual publish from `main` without the tag fails here. Its final step fails when the tag, npm
+`latest` and the latest GitHub Release do not name the same version. npm is already public by then, so a red result calls
+for a correction, not a retry of the publisher. `node --test npm/test/github-release.test.mjs` covers the logic.
+
 ## Post-publication CI recovery (2026-10-30)
 
 Publication and consumer verification are separate jobs. A red registry-install job does not mean npm rejected the
