@@ -143,8 +143,9 @@ async fn no_read_channel_crosses_an_organization() {
     assert_eq!(hidden.1["error"]["code"], absent.1["error"]["code"]);
     assert_eq!(call(&f.http, "GET", &format!("/api/tasks/{}", task_b["id"].as_str().unwrap()), Some(a), None).await.0, 404);
     // Totals and aggregates count only the caller's rows.
-    let stats = call(&f.http, "GET", "/api/projects?aggregate=stats,by_tag&total=true", Some(a), None).await.1;
-    let text = stats.to_string();
+    let stats = call(&f.http, "GET", "/api/projects?aggregate=stats,by_tag", Some(a), None).await.1;
+    assert!(stats["aggregates"].is_object(), "{stats}");
+    let text = stats["aggregates"].to_string();
     assert!(!text.contains("700") && !text.contains("beta"), "{text}");
     assert!(text.contains('5'), "{text}");
     // Relation filters and counts stay inside the caller's organization.
@@ -565,4 +566,121 @@ async fn geo_filters_are_exact_scoped_and_served_by_a_builtin_index() {
     let plan: Vec<String> = sqlx::query_scalar("EXPLAIN SELECT id FROM _brain_res_sites WHERE point((data#>>'{at,lng}')::float8,(data#>>'{at,lat}')::float8) <@ box(point(-1,-1),point(1,1))").fetch_all(&mut *conn).await.unwrap();
     assert!(plan.join(" ").contains("_brain_ix_"), "{plan:?}");
     sqlx::raw_sql("RESET enable_seqscan").execute(&mut *conn).await.unwrap();
+}
+
+/// Fake verification endpoint: answers by token, and records each form body it received.
+async fn fake_provider() -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    use axum::{body::Bytes, routing::post};
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let log = seen.clone();
+    let app = Router::new().route("/siteverify", post(move |body: Bytes| {
+        let log = log.clone();
+        async move {
+            let text = String::from_utf8_lossy(&body).to_string();
+            log.lock().unwrap().push(text.clone());
+            let token = url::form_urlencoded::parse(text.as_bytes()).find(|(k, _)| k == "response").map(|(_, v)| v.to_string()).unwrap_or_default();
+            match token.as_str() {
+                "good" => (axum::http::StatusCode::OK, r#"{"success":true,"hostname":"app.test"}"#.to_string()),
+                "other-site" => (axum::http::StatusCode::OK, r#"{"success":true,"hostname":"evil.test"}"#.to_string()),
+                "bad" => (axum::http::StatusCode::OK, r#"{"success":false,"error-codes":["invalid-input-response"]}"#.to_string()),
+                "provider-fault" => (axum::http::StatusCode::OK, r#"{"success":false,"error-codes":["invalid-input-secret"]}"#.to_string()),
+                "truthy" => (axum::http::StatusCode::OK, r#"{"success":"true","hostname":"app.test"}"#.to_string()),
+                "garbage" => (axum::http::StatusCode::OK, "not json".to_string()),
+                "huge" => (axum::http::StatusCode::OK, format!(r#"{{"success":true,"hostname":"app.test","x":"{}"}}"#, "x".repeat(100_000))),
+                _ => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "{}".to_string()),
+            }
+        }
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (format!("http://{address}/siteverify"), seen)
+}
+async fn post_token(http: &Router, path: &str, token: Option<&str>, body: Value) -> (StatusCode, Value) {
+    let mut request = axum::http::Request::builder().method("POST").uri(path).header("content-type", "application/json").header("origin", ORIGIN)
+        .extension(ConnectInfo("127.0.0.1:42031".parse::<std::net::SocketAddr>().unwrap()));
+    if let Some(token) = token {
+        request = request.header("x-brain-captcha", token);
+    }
+    let answer = tower::ServiceExt::oneshot(http.clone(), request.body(axum::body::Body::from(body.to_string())).unwrap()).await.unwrap();
+    let status = answer.status();
+    let bytes = axum::body::to_bytes(answer.into_body(), 1 << 20).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+}
+
+#[tokio::test]
+#[ignore = "Use scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn captcha_admits_only_a_token_the_provider_confirmed() {
+    use brain_backend::captcha::Captcha;
+    let pool = database().await;
+    db::migrate(&pool, &[]).await.unwrap();
+    roles().register(&pool).await.unwrap();
+    let (url, seen) = fake_provider().await;
+    let contract = json!({"verify_url":url,"secret_env":"CAPTCHA_SECRET","hostname":"app.test","protect":["signup","login","password_request"]});
+    let secret = "synthetic-captcha-secret";
+    let captcha = Captcha::from_contract(&contract, |_| Some(secret.into())).unwrap();
+    let (http, _) = brain_backend::http::router_with_platform(pool.clone(), config(Vec::new()), Platform { captcha, ..Default::default() }).await.unwrap();
+    let users = async || sqlx::query_scalar::<_, i64>("SELECT count(*) FROM _brain_users").fetch_one(&pool).await.unwrap();
+    let before = users().await;
+    let person = json!({"email":"someone@example.test","password":"synthetic-password-1234"});
+    for (token, status, code) in [
+        (None, 403, "CAPTCHA_FAILED"), (Some(""), 403, "CAPTCHA_FAILED"), (Some("bad"), 403, "CAPTCHA_FAILED"), (Some("other-site"), 403, "CAPTCHA_FAILED"),
+        (Some("provider-fault"), 503, "CAPTCHA_UNAVAILABLE"), (Some("truthy"), 503, "CAPTCHA_UNAVAILABLE"), (Some("garbage"), 503, "CAPTCHA_UNAVAILABLE"),
+        (Some("huge"), 503, "CAPTCHA_UNAVAILABLE"), (Some("server-error"), 503, "CAPTCHA_UNAVAILABLE"),
+    ] {
+        let (s, body) = post_token(&http, "/_brain/auth/signup", token, person.clone()).await;
+        assert_eq!((s.as_u16(), body["error"]["code"].as_str()), (status, Some(code)), "{token:?}: {body}");
+        assert_eq!(users().await, before, "{token:?} created an account");
+    }
+    let (s, body) = post_token(&http, "/_brain/auth/signup", Some("good"), person.clone()).await;
+    assert_eq!(s, 200, "{body}");
+    assert_eq!(users().await, before + 1);
+    // Every protected action, including the one a provider outage must not open.
+    for (path, body) in [("/_brain/auth/login", person.clone()), ("/_brain/auth/password/request", json!({"email":"someone@example.test"}))] {
+        assert_eq!(post_token(&http, path, None, body.clone()).await.0, 403, "{path}");
+        assert_ne!(post_token(&http, path, Some("good"), body).await.0, 403, "{path}");
+    }
+    // The form follows the shared provider contract, and the secret never reaches a client.
+    let form = seen.lock().unwrap().last().unwrap().clone();
+    let pairs: std::collections::BTreeMap<String, String> = url::form_urlencoded::parse(form.as_bytes()).into_owned().collect();
+    assert_eq!((pairs["secret"].as_str(), pairs["response"].as_str()), (secret, "good"));
+    assert!(!Captcha::from_contract(&contract, |_| Some(secret.into())).unwrap().schema().to_string().contains(secret));
+    // A public write route runs its handler only with a confirmed token; its reads and other routes stay open.
+    struct Count(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+    impl brain_backend::routes::RouteHandlers for Count {
+        fn names(&self) -> Vec<String> {
+            vec!["contact".into(), "open_write".into()]
+        }
+        fn run(&self, name: &str, _: Value, _: std::time::Duration) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, brain_backend::routes::RouteFailure>> + Send + '_>> {
+            if name == "contact" {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            Box::pin(async { Ok(json!({"ok":true})) })
+        }
+    }
+    let ran = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let declared = |name: &str, path: &str| brain_backend::routes::Route::from_contract(name, &json!({"method":"POST","path":path,"auth":"public"}), &|_| None).unwrap();
+    let guarded = Captcha::from_contract(&json!({"verify_url":url,"secret_env":"S","protect":["route:contact"]}), |_| Some("x".into())).unwrap();
+    let platform = Platform { routes: vec![declared("contact", "/contact"), declared("open_write", "/open")], handlers: Some(std::sync::Arc::new(Count(ran.clone()))), captcha: guarded, ..Default::default() };
+    let (http, _) = brain_backend::http::router_with_platform(pool.clone(), config(Vec::new()), platform).await.unwrap();
+    assert_eq!(post_token(&http, "/contact", None, json!({})).await.0, 403);
+    assert_eq!(post_token(&http, "/contact", Some("bad"), json!({})).await.0, 403);
+    assert_eq!(post_token(&http, "/contact", Some("server-error"), json!({})).await.0, 503);
+    assert_eq!(ran.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(post_token(&http, "/contact", Some("good"), json!({})).await.0, 200);
+    assert_eq!(ran.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(post_token(&http, "/open", None, json!({})).await.0, 200);
+    // An unreachable provider and an unset secret both refuse.
+    let dead = Captcha::from_contract(&json!({"verify_url":"http://127.0.0.1:9/x","secret_env":"S","protect":["signup"]}), |_| Some("x".into())).unwrap();
+    let (http, _) = brain_backend::http::router_with_platform(pool.clone(), config(Vec::new()), Platform { captcha: dead, ..Default::default() }).await.unwrap();
+    assert_eq!(post_token(&http, "/_brain/auth/signup", Some("good"), person.clone()).await.0, 503);
+    let unset = Captcha::from_contract(&contract, |_| None).unwrap();
+    let (http, _) = brain_backend::http::router_with_platform(pool.clone(), config(Vec::new()), Platform { captcha: unset, ..Default::default() }).await.unwrap();
+    assert_eq!(post_token(&http, "/_brain/auth/signup", Some("good"), person.clone()).await.0, 503);
+    // Contracts that could not protect anything are refused.
+    for bad in [json!({"verify_url":"http://example.test/x","secret_env":"S","protect":["signup"]}), json!({"verify_url":"https://user:pw@example.test/x","secret_env":"S","protect":["signup"]}), json!({"verify_url":"https://example.test/x","secret_env":"S","protect":[]}), json!({"verify_url":"https://example.test/x","secret_env":"S","protect":["everything"]})] {
+        assert!(Captcha::from_contract(&bad, |_| None).is_err(), "{bad}");
+    }
+    let missing = Captcha::from_contract(&json!({"verify_url":"https://example.test/x","secret_env":"S","protect":["route:nothing"]}), |_| Some("x".into())).unwrap();
+    assert!(brain_backend::http::router_with_platform(pool.clone(), config(Vec::new()), Platform { captcha: missing, ..Default::default() }).await.is_err());
 }

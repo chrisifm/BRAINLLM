@@ -96,9 +96,19 @@ fn organizations(root: &Path) -> Result<brain_backend::organizations::Organizati
     Organizations::from_contract(&value)
 }
 
+fn captcha(root: &Path) -> Result<brain_backend::captcha::Captcha, String> {
+    use brain_backend::captcha::{CONTRACT, Captcha};
+    let path = root.join(CONTRACT);
+    if !path.exists() {
+        return Ok(Captcha::default());
+    }
+    let value = crate::backend::read_contract(root, &path).map_err(|e| format!("{CONTRACT}: {e}"))?;
+    Captcha::from_contract(&value, |name| std::env::var(name).ok())
+}
+
 pub fn load(root: &Path, resources: &[Resource], roles: &RolesConfig) -> Result<Platform, String> {
     let (edge, cluster) = edge(root)?;
-    Ok(Platform { buckets: buckets(root, resources, roles)?, edge, cluster, cache: cache(root, resources)?, organizations: organizations(root)?, ..Default::default() })
+    Ok(Platform { buckets: buckets(root, resources, roles)?, edge, cluster, cache: cache(root, resources)?, organizations: organizations(root)?, captcha: captcha(root)?, ..Default::default() })
 }
 
 /// Projection for `brain backend schema --json`; contains no environment values.
@@ -107,6 +117,7 @@ pub fn metadata(root: &Path, resources: &[Resource], roles: &RolesConfig) -> Res
     let edge = &platform.edge;
     Ok(json!({
         "files": platform.buckets.iter().map(Bucket::schema).collect::<Vec<_>>(),
+        "captcha": platform.captcha.schema(),
         "edge": {
             "trustProxy": edge.trust_proxy.iter().map(ToString::to_string).collect::<Vec<_>>(),
             "corsOrigins": edge.cors_origins,

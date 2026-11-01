@@ -99,6 +99,7 @@ pub struct App {
     routes: Arc<routes_http::State>,
     cluster: crate::cluster::Cluster,
     organizations: Arc<crate::organizations::Organizations>,
+    captcha: Arc<crate::captcha::Captcha>,
 }
 #[derive(Debug)]
 pub struct Error {
@@ -274,6 +275,18 @@ impl<S: Send + Sync, T: serde::de::DeserializeOwned + Send> FromRequestParts<S> 
     }
 }
 impl App {
+    /// Admits a protected public write only with a token the provider confirmed.
+    async fn require_captcha(&self, action: &str, h: &HeaderMap, client: Option<std::net::IpAddr>) -> Result<()> {
+        if !self.captcha.protects(action) {
+            return Ok(());
+        }
+        let token = h.get(crate::captcha::HEADER).and_then(|v| v.to_str().ok());
+        match self.captcha.verify(token, client).await {
+            crate::captcha::Verdict::Passed => Ok(()),
+            crate::captcha::Verdict::Rejected => Err(Error::new(StatusCode::FORBIDDEN, "CAPTCHA_FAILED", "Complete the captcha again and send its new token in the X-Brain-Captcha header")),
+            crate::captcha::Verdict::Unavailable => Err(Error::new(StatusCode::SERVICE_UNAVAILABLE, "CAPTCHA_UNAVAILABLE", "The captcha could not be verified; nothing was changed; retry with a new token shortly")),
+        }
+    }
     async fn user(&self, h: &HeaderMap) -> Result<Option<User>> {
         let user = self.identify(h).await?;
         if let Some(user) = &user {
@@ -381,6 +394,7 @@ pub async fn router_full(
     let (edge_state, edge_control) = edge_http::EdgeState::new(&platform.edge);
     let shared = platform.cluster.shared;
     let platform_organizations = platform.organizations.clone();
+    let platform_captcha = platform.captcha.clone().ready(&platform.routes, config.production)?;
     let cache_policy = Arc::new(platform.cache.clone());
     let cors_max_age = platform.edge.cors_max_age;
     let (custom_routes, custom_handlers) = (platform.routes.clone(), platform.handlers.clone());
@@ -543,6 +557,7 @@ pub async fn router_full(
         .transpose()?;
     let app = App {
         organizations: Arc::new(platform_organizations),
+        captcha: Arc::new(platform_captcha),
         cluster: crate::cluster::Cluster { shared },
         platform: platform.clone(),
         routes: custom.clone(),
@@ -579,6 +594,7 @@ pub async fn router_full(
             header::CONTENT_TYPE,
             header::AUTHORIZATION,
             header::HeaderName::from_static("x-brain-rpc"),
+            header::HeaderName::from_static(crate::captcha::HEADER),
             header::IF_MATCH,
             header::IF_NONE_MATCH,
         ]);
@@ -1031,7 +1047,8 @@ async fn docs(State(app): State<App>, h: HeaderMap) -> Result<Json<Value>> {
     }
     Ok(Json(api))
 }
-async fn signup(State(app): State<App>, Json(c): Json<Credentials>) -> Result<Json<Value>> {
+async fn signup(State(app): State<App>, client: Option<axum::Extension<ClientIp>>, headers: HeaderMap, Json(c): Json<Credentials>) -> Result<Json<Value>> {
+    app.require_captcha("signup", &headers, client.map(|c| c.0.0)).await?;
     app.auth
         .signup(c)
         .await
@@ -1059,10 +1076,11 @@ fn login_failed() -> Error {
         "Check credentials or wait for the 15-minute account lockout to expire",
     )
 }
-async fn login(State(app): State<App>, client: Option<axum::Extension<ClientIp>>, Json(c): Json<Credentials>) -> Result<Response> {
+async fn login(State(app): State<App>, client: Option<axum::Extension<ClientIp>>, headers: HeaderMap, Json(c): Json<Credentials>) -> Result<Response> {
+    app.require_captcha("login", &headers, client.as_ref().map(|c| c.0.0)).await?;
     // The backend owns the session mode. A configured JWT authority never falls back to opaque login on failure.
     if app.jwt.is_some() {
-        return token_login(State(app), client, Json(c)).await;
+        return issue_token(app, client, c).await;
     }
     let Some((user, token)) = app.auth.login_from(c, client.map(|c| c.0.0)).await.map_err(|failure| match failure {
         auth::AuthFailure::Input(_) => login_failed(),
@@ -1147,8 +1165,13 @@ fn jwt_response(tokens: crate::jwt::Tokens) -> Response {
 async fn token_login(
     State(app): State<App>,
     client: Option<axum::Extension<ClientIp>>,
+    headers: HeaderMap,
     Json(credentials): Json<Credentials>,
 ) -> Result<Response> {
+    app.require_captcha("login", &headers, client.as_ref().map(|c| c.0.0)).await?;
+    issue_token(app, client, credentials).await
+}
+async fn issue_token(app: App, client: Option<axum::Extension<ClientIp>>, credentials: Credentials) -> Result<Response> {
     let jwt = app.jwt.as_ref().ok_or_else(auth_disabled)?;
     let (user, opaque) = app
         .auth
@@ -2206,8 +2229,10 @@ fn account_flow_error(error: crate::auth_flows::Error) -> Error {
 async fn request_password_reset(
     State(app): State<App>,
     client: Option<axum::Extension<ClientIp>>,
+    headers: HeaderMap,
     Json(input): Json<ResetRequest>,
 ) -> Result<Response> {
+    app.require_captcha("password_request", &headers, client.as_ref().map(|c| c.0.0)).await?;
     app.auth_flows
         .request_reset_from(&input.email, client.map(|c| c.0.0))
         .await

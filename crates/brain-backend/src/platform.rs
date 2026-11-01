@@ -26,6 +26,8 @@ pub struct Platform {
     pub cache: crate::http::cache_http::CachePolicy,
     /// Membership roles of tenant resources (`server/auth/organizations.jsbrain`).
     pub organizations: crate::organizations::Organizations,
+    /// Token verification on public write endpoints (`server/auth/captcha.jsbrain`).
+    pub captcha: crate::captcha::Captcha,
 }
 
 /// Which finished requests the backend logs as structured JSON lines.

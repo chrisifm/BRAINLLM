@@ -120,6 +120,9 @@ async fn serve(app: App, state: Arc<State>, route: Arc<Route>, req: Request) -> 
             return Ok(rate_limited(retry));
         }
     }
+    if matches!(route.access, Access::Public) && parts.method != axum::http::Method::GET {
+        app.require_captcha(&format!("route:{}", route.name), &parts.headers, parts.extensions.get::<ClientIp>().map(|c| c.0)).await?;
+    }
     let user = match &route.access {
         Access::Public => app.user(&parts.headers).await.ok().flatten(),
         Access::SignedIn => Some(app.required(&parts.headers).await?),

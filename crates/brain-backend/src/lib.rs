@@ -3,6 +3,7 @@ pub mod analytics;
 pub mod api_keys;
 pub mod audit;
 pub mod auth;
+pub mod captcha;
 pub mod auth_flows;
 pub mod boot;
 pub mod capabilities;
