@@ -26,7 +26,7 @@ pub(crate) const TABLE: &[(&str, &[&str], &[&str])] = &[
     ("schema", &[], &[]),
     ("theme", &[], &["--list"]),
     ("i18n", &[], &["--missing"]),
-    ("seo", &["--since", "--env", "--url", "--sample", "--path", "--delay-ms"], &["--dry-run", "--expect-noindex"]),
+    ("seo", &["--since", "--env", "--url", "--sample", "--path", "--delay-ms"], &["--dry-run", "--expect-noindex", "--write"]),
     ("lighthouse", &["--preset"], &["--expect-noindex"]),
     ("stop", &[], &[]),
     ("reload", &[], &[]),
