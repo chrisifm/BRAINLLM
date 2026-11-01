@@ -516,7 +516,7 @@ data caching disabled. The checker never removes that endpoint privacy intent; w
 `brain_seo::Built.server_head` writes the site's request-independent head into the templates of pages rendered per request,
 through the same `social::head` and `inject_head` as prerendered pages. `head()` in server.mjs binds only request values:
 title-derived `og:*`, the absolute `og:image` and the card type. Not covered yet: the WebSite/WebPage JSON-LD graph, hreflang
-and image dimensions of a per-request page. A route with folder guards answers `x-robots-tag: noindex` even when it renders, and its template skips the site head: it is never indexed and the tags would only spend its view budget. `keyword` or `canonical` on such a view is warning B0505, because a guard cannot be read to learn whether it admits anonymous visitors. The optional credit line is left out of the measured view size.
+and image dimensions of a per-request page. A route with folder guards answers `x-robots-tag: noindex` even when it renders, and its template skips the site head: it is never indexed and the tags would only spend its view budget. `keyword` or `canonical` on such a view is warning B0505, because a guard cannot be read to learn whether it admits anonymous visitors. The optional credit line and the shared tokens sheet are left out of the measured view size, as when the sheet was a separate file.
 `query` is read by the build (`brain-query` marker in the template, removed per request). Canonical stays path-only unless a
 parameter is listed; `tests/seo_parity.rs` holds the parity and identity contract. A failed build is typed by
 `build_error.rs`: `phase` and `diagnostics` with `brain check` fields, `generated` on locations outside the app, no edits there.

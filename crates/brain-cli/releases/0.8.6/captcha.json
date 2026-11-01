@@ -5,5 +5,16 @@
   "why": "Sites with a captcha had to open the CSP and carry the token by hand.",
   "changelog": [
     "the CSP opens to the provider a captcha contract names; `brain recipe captcha`; `ctx.backend.login` and `signup` take `{ captcha }`; a one-use `login_grant` lasts 5 minutes; `operator_key_env` lets an operator skip the check; it fails closed"
+  ],
+  "guide": "docs/backend/captcha.md",
+  "adopt": {
+    "file": "views/signup.brain",
+    "snippet": "await ctx.backend.signup(values, { captcha })"
+  },
+  "uses": [
+    {
+      "glob": "{server,views,backend}/**/*.{jsbrain,brain,json}",
+      "contains": "captcha"
+    }
   ]
 }

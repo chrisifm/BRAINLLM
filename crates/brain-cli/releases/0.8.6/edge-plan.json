@@ -1,6 +1,6 @@
 {
   "id": "edge-plan",
-  "kind": "capability",
+  "kind": "change",
   "title": "brain edge plan",
   "why": "A CDN setup had to be worked out by hand.",
   "changelog": [

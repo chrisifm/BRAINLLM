@@ -2207,7 +2207,7 @@ fn build_inner_with_options(
             css,
             css_gz,
             html: p.html.len(),
-            html_gz: authored_html_size(&p.html, binary.get(&format!("{}.gz", p.file)).map(Vec::as_slice)),
+            html_gz: authored_html_size(&p.html, &tokens_head, binary.get(&format!("{}.gz", p.file)).map(Vec::as_slice)),
         });
     }
     optimizations.sort_by(|a,b|(&a.source,a.stage).cmp(&(&b.source,b.stage)));
@@ -2219,11 +2219,19 @@ fn transfer_size(raw: &[u8], gzip: Option<&[u8]>) -> usize {
     gzip.map_or(raw.len(), |compressed| compressed.len().min(raw.len()))
 }
 
-/// The size a view answers for: the framework's optional credit line is not the author's to spend budget on.
-fn authored_html_size(html: &str, gzip: Option<&[u8]>) -> usize {
-    let credit = html.find("<p data-brain-credit").and_then(|a| Some((a, a + html[a..].find("</p>")? + 4)));
-    let Some((a, b)) = credit else { return transfer_size(html.as_bytes(), gzip) };
-    let rest = format!("{}{}", &html[..a], &html[b..]);
+/// The size a view answers for: the framework's optional credit line and the tokens every route shares are not this
+/// view's to spend budget on, whether the sheet travels in the head or as its own file.
+fn authored_html_size(html: &str, tokens_head: &str, gzip: Option<&[u8]>) -> usize {
+    let mut rest = html.to_string();
+    if let Some((a, b)) = rest.find("<p data-brain-credit").and_then(|a| Some((a, a + rest[a..].find("</p>")? + 4))) {
+        rest.replace_range(a..b, "");
+    }
+    if tokens_head.starts_with("<style>") {
+        rest = rest.replacen(tokens_head, "", 1);
+    }
+    if rest.len() == html.len() {
+        return transfer_size(html.as_bytes(), gzip);
+    }
     transfer_size(rest.as_bytes(), gzip.map(|_| gzip::gzip(rest.as_bytes(), 15)).as_deref())
 }
 

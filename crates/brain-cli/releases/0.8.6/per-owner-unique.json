@@ -5,5 +5,16 @@
   "why": "Limits such as one profile per user needed custom code.",
   "changelog": [
     "`constraints: { unique: [['$owner']] }` and `perOwner: { except: [roles] }`; B0794 warns on a unique field any user can claim"
+  ],
+  "guide": "docs/backend/patch.md",
+  "adopt": {
+    "file": "server/resources/x.jsbrain",
+    "snippet": "constraints: { unique: [['$owner']] }"
+  },
+  "uses": [
+    {
+      "glob": "{server,backend}/**/*.{jsbrain,json}",
+      "contains": "$owner"
+    }
   ]
 }

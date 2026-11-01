@@ -69,6 +69,14 @@ Policy grants: `public` `owner` `owner.<ref>` `org` `org.<role>` `org.own` `<rol
 
 ## Added by release
 
+### 0.8.6
+
+- Captcha contract and recipe (`docs/backend/captcha.md`)
+- Role-gated fields and element patterns (`docs/backend/visibility.md`)
+- One record per owner (`docs/backend/patch.md`)
+- Operations from server code (`docs/backend/transactions.md`)
+- Session controls (`docs/backend/sessions.md`)
+
 ### 0.8.3
 
 - Check a deployed origin (`brain guide server`)

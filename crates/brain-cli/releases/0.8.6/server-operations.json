@@ -5,5 +5,16 @@
   "why": "Server code could not run a declared operation or charge credits inside it.",
   "changelog": [
     "`ctx.backend.operation(name, input)`, the `operations.<name>:write` key scope and `debit` steps inside operations"
+  ],
+  "guide": "docs/backend/transactions.md",
+  "adopt": {
+    "file": "server/x.jsbrain",
+    "snippet": "await ctx.backend.operation('place_order', { quantity: 1 })"
+  },
+  "uses": [
+    {
+      "glob": "{server,views}/**/*.{jsbrain,brain}",
+      "contains": "backend.operation("
+    }
   ]
 }

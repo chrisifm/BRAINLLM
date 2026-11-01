@@ -5,5 +5,16 @@
   "why": "Apps needed idle limits, per-role lifetimes and a list of sessions.",
   "changelog": [
     "`BRAIN_AUTH_IDLE_SECONDS`, `session_seconds` per role, `GET /_brain/auth/sessions` with revocation, `POST /_brain/auth/reauth` and `reauth` on routes; B0799 reports session controls that do not apply"
+  ],
+  "guide": "docs/backend/sessions.md",
+  "adopt": {
+    "file": ".env",
+    "snippet": "BRAIN_AUTH_IDLE_SECONDS=1800"
+  },
+  "uses": [
+    {
+      "glob": "{.env*,server/**/*}",
+      "contains": "BRAIN_AUTH_IDLE_SECONDS"
+    }
   ]
 }

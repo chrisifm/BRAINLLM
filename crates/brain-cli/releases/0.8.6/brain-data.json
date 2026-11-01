@@ -1,6 +1,6 @@
 {
   "id": "brain-data",
-  "kind": "capability",
+  "kind": "change",
   "title": "brain data prepare and maintain",
   "why": "Imported tables needed statistics and compression by hand.",
   "changelog": [
