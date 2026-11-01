@@ -957,6 +957,9 @@ mod tests {
         lock.try_lock().unwrap();
         let options = AddOptions { fields: Some("id:num!".into()), ..Default::default() };
         assert!(add_with_options(&root, "type", "Second", &options).unwrap_err().contains("active"));
+        // Explicit: a process another test is forking holds a copy of this descriptor until its exec, and a plain close
+        // leaves the lock with that copy.
+        lock.unlock().unwrap();
         drop(lock);
         add_with_options(&root, "type", "Second", &options).unwrap();
         assert!(!root.join(".brain-add-type.lock").exists());
