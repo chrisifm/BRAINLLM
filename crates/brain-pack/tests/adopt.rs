@@ -10,7 +10,7 @@ fn app(tag: &str) -> PathBuf {
     std::fs::write(d.join("app.brain"), "<html lang=\"en\"><head><meta charset=\"utf-8\"><title>App</title></head><body><slot /></body></html>").unwrap();
     std::fs::write(
         d.join("views/home.brain"),
-        "<meta seo title=\"Home\" description=\"Home\">\n<script>\n  let n = sig(0)\n</script>\n<main><h1>Home</h1><button onclick={() => n++}>Add</button>{#if n > 1}<p>many</p>{/if}<p>{n}</p></main>",
+        "<meta seo title=\"Home\" description=\"Home\">\n<script>\n  let n = sig(0)\n</script>\n<main><h1>Home</h1><button on:click={() => n++}>Add</button>{#if n > 1}<p>many</p>{/if}<p>{n}</p></main>",
     )
     .unwrap();
     // a request-reading load makes the app a server app: it gets server.mjs and _server/manifest.json

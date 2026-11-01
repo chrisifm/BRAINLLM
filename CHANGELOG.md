@@ -9,6 +9,22 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.8.0] - Unreleased
+
+- Fix: `onclick={f}` on a native element compiles to `on:click` (B0223)
+- `brain check` warns B0224 on `onclick="..."`, which the Content-Security-Policy blocks
+- Fix: `brain start` refuses a native-socket build without BRAIN_BACKEND_URL before printing a URL
+- Fix: `brain build` and `brain doctor` agree on native sockets when the site is loopback or a placeholder
+- Fix: `brain run` moves focus and announces the new title after a client navigation, and `navigate()` no longer reloads the page
+- Fix: `brain upgrade` after `npm install` reads the previous pin from the last commit
+- Fix: `brain add channel session` writes the same store as `brain new`
+- Fix: `form()` shows `form.rejected` instead of the backend's developer `fix`
+- B0777 also warns when a title ends in the bare site name
+- Fix: B0765 waits 10 seconds for a worker started at the same time as the server
+- Fix: MCP `brain_run_start` reports and opens the declared `localhost` origin
+- `brain check` warns B0788 on a member read of a `key()` channel
+- `brain check` warns B0789 when a route handler imports `pg`
+
 ## [0.7.0] - 2026-10-31
 
 - `brain dev` recompiles the component when a CSS edit changes its scope identity (a customized copy of a kit file); it used to keep the old script with the new `data-b` CSS.

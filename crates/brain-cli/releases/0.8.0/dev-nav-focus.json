@@ -1,0 +1,10 @@
+{
+  "id": "dev-nav-focus",
+  "kind": "fix",
+  "title": "`brain run` moves focus and announces the title after a client navigation",
+  "why": "The development router lacked what production does, and `navigate()` did a full load there.",
+  "changelog": [
+    "Fix: `brain run` moves focus and announces the new title after a client navigation, and `navigate()` no longer reloads the page"
+  ],
+  "guide": "CONTRIBUTING.md"
+}

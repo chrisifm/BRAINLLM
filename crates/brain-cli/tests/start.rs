@@ -422,3 +422,24 @@ fn static_mode_serves_a_build_with_brain_extensions() {
     assert!(nf.starts_with("HTTP/1.1 404") && nf.contains("<title>404</title>"), "{nf}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A build with native sockets cannot serve without its backend. The refusal comes before any URL is printed,
+/// and it names the setting to configure, instead of a published address that refuses every connection.
+#[test]
+fn native_sockets_without_a_backend_refuse_before_publishing_a_url() {
+    let d = app("sockets-no-backend", true);
+    std::fs::create_dir_all(d.join("dist/_server")).unwrap();
+    std::fs::write(d.join("dist/_server/manifest.json"), r#"{"v":1,"nativeSockets":true,"routes":[]}"#).unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_brain"))
+        .args(["start", "--port", "0"])
+        .current_dir(&d)
+        .env_remove("BRAIN_BACKEND_URL")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let (out, err) = (String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+    assert!(!o.status.success(), "{out}\n{err}");
+    assert!(!out.contains("brain start →"), "{out}");
+    assert!(err.contains("BRAIN_BACKEND_URL") && err.contains("fix:"), "{err}");
+    let _ = std::fs::remove_dir_all(&d);
+}

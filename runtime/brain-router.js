@@ -36,6 +36,7 @@ export function navigate(to, o = {}) {
   if (/[\\\x00-\x20\x7f]/.test(raw)) throw Error('Invalid navigation target')
   const u = app(raw)
   if (active) return active.go(u, o.replace ? 'replace' : true)
+  if (G.__brainDevGo) return G.__brainDevGo(u, o.replace)
   o.replace ? location.replace(u) : location.assign(u)
 }
 G.__brainNavigate = navigate // brain-form follows a server function's { redirect } without importing the router

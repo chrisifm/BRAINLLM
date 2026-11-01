@@ -370,6 +370,17 @@ export async function f(ctx) {
   ctx.session.set({ a: 1 })
 }
 
+### B0789 stays on routes: a job handler may import pg
+@file server/jobs/sync/handler.jsbrain
+<meta server>
+import pg from 'pg'
+export default async function handle(ctx) {
+  return { driver: typeof pg }
+}
+@file server/jobs/sync/schema.jsbrain
+<meta server>
+export default { x: 'str' }
+
 ### B0790 route secret
 @expect B0790 server/routes/pay/route.jsbrain 1:1
 @file server/routes/pay/route.jsbrain
@@ -578,3 +589,32 @@ slug: same
 Body.
 @expect B1824 content/blog/b.md 4:1
 
+### B0777 title ends in the bare site name
+@expect B0777 views/forum.brain 1:1
+@file app.brain
+<meta seo titleTemplate="%s · Corpus">
+<html lang="en"><head></head><body><slot /></body></html>
+@file views/forum.brain
+<meta seo title="Forum Corpus" description="All threads.">
+<main><h1>Forum</h1></main>
+
+### B0788 member read on a key channel
+@expect B0788 views/home.brain 5:1
+@file channels/session.jsbrain
+export default key('session')
+@file views/home.brain
+<meta seo title="Home" description="The first page.">
+<script>
+  import session from '../channels/session.jsbrain'
+</script>
+<main><h1>{session.user}</h1></main>
+
+### B0789 raw pg in a route handler
+@expect B0789 server/routes/pay/handler.jsbrain 1:1
+@file server/routes/pay/route.jsbrain
+<meta server>
+export default { method: 'POST', path: '/pay', auth: 'public' }
+@file server/routes/pay/handler.jsbrain
+<meta server>
+import pg from 'pg'
+export default async function handle(ctx) { return { ok: Boolean(pg) } }

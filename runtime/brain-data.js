@@ -380,10 +380,11 @@ async function once(u, M, body, sg, pri, up) {
   if (st === 401 && P.login && G.location && !location.pathname.endsWith(P.login)) location.assign(appBase() + P.login + '?next=' + encodeURIComponent(location.pathname + location.search))
   const native = j && j.schemaVersion === 1 && j.error && typeof j.error === 'object' && typeof j.error.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(j.error.code)
   const fields = native && st === 422 ? j.error.fields : j && j.errors
-  // "highlighted fields" only when there are fields to highlight: else the backend's own fix, or a plain sentence
-  const generic = st === 401 ? 'Authentication failed. Sign in again.' : st === 403 ? 'You do not have permission to continue.' : st === 422 ? (fields && Object.keys(fields).length ? 'Check the highlighted fields.' : (native && typeof j.error.fix === 'string' && j.error.fix.slice(0, 512)) || 'The server rejected this request. Check it and try again.') : st === 429 ? 'Too many requests. Wait before trying again.' : `Request failed (${st}).`
+  // "highlighted fields" only when there are fields to highlight. The backend's `fix` is for the developer (error.fix),
+  // never visitor text: it is English and names what the app should change.
+  const generic = st === 401 ? 'Authentication failed. Sign in again.' : st === 403 ? 'You do not have permission to continue.' : st === 422 ? (fields && Object.keys(fields).length ? 'Check the highlighted fields.' : 'The server rejected this request. Check it and try again.') : st === 429 ? 'Too many requests. Wait before trying again.' : `Request failed (${st}).`
   const message = !native && st < 500 && typeof j?.error === 'string' && j.error.length <= 512 && !/[\r\n]|(?:TypeError|ReferenceError|SyntaxError|Error):/.test(j.error) ? j.error : generic
-  throw new ApiError('http', message, { status: st, errors: fields, retryAfter, id: h('x-request-id') || undefined, ...(native ? { backendCode: j.error.code, fix: typeof j.error.fix === 'string' ? j.error.fix.slice(0,1024) : undefined } : {}) })
+  throw new ApiError('http', message, { status: st, errors: fields, retryAfter, id: h('x-request-id') || undefined, plain: message === generic, ...(native ? { backendCode: j.error.code, fix: typeof j.error.fix === 'string' ? j.error.fix.slice(0,1024) : undefined } : {}) })
 }
 
 // multipart upload with progress (fetch has no upload progress)

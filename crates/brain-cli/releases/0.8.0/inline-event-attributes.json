@@ -1,0 +1,15 @@
+{
+  "id": "inline-event-attributes",
+  "kind": "fix",
+  "title": "Inline event attributes compile to event listeners",
+  "why": "`onclick={f}` reached setAttribute: the handler never ran and the Content-Security-Policy blocked it, while SPEC.md documented that form.",
+  "changelog": [
+    "Fix: `onclick={f}` on a native element compiles to `on:click` (B0223)",
+    "`brain check` warns B0224 on `onclick=\"...\"`, which the Content-Security-Policy blocks"
+  ],
+  "guide": "CONTRIBUTING.md",
+  "codes": [
+    "B0223",
+    "B0224"
+  ]
+}

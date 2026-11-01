@@ -192,6 +192,8 @@ fn diags_after_write(root: &Path, rel: &str) -> Json {
 #[derive(Default)]
 struct State {
     dev: Mutex<Option<brain_serve::Dev>>,
+    /// the origin to open: `localhost` when that is the one the socket allow-list declares
+    dev_browser_url: Mutex<Option<String>>,
     /// impact report of the managed dev server (§43.1), read by brain_impact
     impact: Mutex<Option<crate::impact::Tracker>>,
     #[cfg(unix)]
@@ -207,7 +209,7 @@ fn app(a: &Json) -> Result<PathBuf, String> {
 
 impl State {
     fn dev_url(&self) -> Result<String, String> {
-        self.dev.lock().unwrap().as_ref().map(|d| d.url()).ok_or_else(|| "the dev server is not running; fix: call `brain_run_start`".to_string())
+        self.dev_browser_url.lock().unwrap().clone().ok_or_else(|| "the dev server is not running; fix: call `brain_run_start`".to_string())
     }
 
     #[cfg(unix)]
@@ -811,7 +813,8 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
             Box::new(move |a| {
                 let mut dev = st.dev.lock().unwrap();
                 if let Some(d) = dev.as_ref() {
-                    return Ok(Json::obj([("url", Json::str(d.url())), ("port", Json::Num(d.addr.port() as f64))]).stringify());
+                    let url = st.dev_browser_url.lock().unwrap().clone().unwrap_or_else(|| d.url());
+                    return Ok(Json::obj([("url", Json::str(url)), ("port", Json::Num(d.addr.port() as f64))]).stringify());
                 }
                 let root = app(a)?;
                 brain_serve::trace::enable(&root);
@@ -842,7 +845,9 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
                     n.log(level, j);
                 });
                 let d = crate::start_project_dev(opts, crate::compile_fn(root.clone(), true), true, Some(on_event), "development")?;
-                let info = Json::obj([("url", Json::str(d.url())), ("port", Json::Num(d.addr.port() as f64))]);
+                let url = crate::browser_url(&root, "development", &d);
+                *st.dev_browser_url.lock().unwrap() = Some(url.clone());
+                let info = Json::obj([("url", Json::str(url)), ("port", Json::Num(d.addr.port() as f64))]);
                 let _ = std::fs::create_dir_all(root.join(".brain"));
                 let _ = std::fs::write(crate::dev_json_path(&root), format!("{{\"port\":{},\"pid\":{},\"url\":{}}}", d.addr.port(), std::process::id(), brain_serve::json_str(&d.url())));
                 *dev = Some(d);

@@ -1205,7 +1205,12 @@ pub(crate) fn warn_queues_in_background(root: &Path, environment: &str) {
     }
     let (root, environment) = (root.to_path_buf(), environment.to_string());
     std::thread::spawn(move || {
-        for (code, file, message, fix) in queue_findings(&root, &environment) {
+        let mut findings = queue_findings(&root, &environment);
+        if findings.iter().any(|(code, ..)| *code == "B0765") {
+            std::thread::sleep(std::time::Duration::from_secs(WORKER_START_GRACE_SECONDS));
+            findings = queue_findings(&root, &environment);
+        }
+        for (code, file, message, fix) in findings {
             eprintln!("{}", json!({"schemaVersion":1,"event":"queue-warning","code":code,"file":file,"msg":message,"fix":fix,"valuesCaptured":false}));
         }
     });
@@ -1221,6 +1226,13 @@ pub fn job_warnings(root: &Path) -> Vec<Finding> {
     }).collect()
 }
 
+/// A worker restarted with the server needs a moment to report in: no warning until it has had that moment.
+const WORKER_START_GRACE_SECONDS: u64 = 10;
+
+fn first_read_waits(rows: &[Value], graced: bool, own_workers: bool) -> bool {
+    !graced && !own_workers && rows.iter().any(|row| row["declared"] == json!(true) && row["workers"].as_i64().unwrap_or(0) == 0)
+}
+
 /// Backend startup list, then a periodic `queue-stalled` line for each queue not being drained. Counts and ages only:
 /// never a payload value. `BRAIN_QUEUE_CHECK_SECONDS` sets the period (5..3600, default 60).
 async fn monitor_queues(queue: brain_backend::jobs::Queue, queues: Vec<String>, schedules: Vec<String>, own_workers: bool) {
@@ -1233,11 +1245,17 @@ async fn monitor_queues(queue: brain_backend::jobs::Queue, queues: Vec<String>, 
     }
     let mut first = true;
     let mut unknown = false;
+    let mut graced = false;
     loop {
         let read = async { Ok::<_, String>((queue_rows(&queue, &queues).await?, queue.schedulers().await?)) };
         match read.await {
             Ok((rows, schedulers)) => {
                 unknown = false;
+                if first && first_read_waits(&rows, graced, own_workers) {
+                    graced = true;
+                    tokio::time::sleep(std::time::Duration::from_secs(WORKER_START_GRACE_SECONDS)).await;
+                    continue;
+                }
                 if first {
                     let list: Vec<Value> = rows.iter().map(|row| json!({"queue":row["queue"],"pending":row["pending"],"oldestWaitSeconds":row["oldestWaitSeconds"],"workers":row["workers"]})).collect();
                     eprintln!("{}", json!({"schemaVersion":1,"event":"queue-workers","queues":list,"schedules":schedules,"schedulers":schedulers,"valuesCaptured":false}));
@@ -1783,6 +1801,15 @@ mod tests {
     fn policy(create: &str) -> String {
         format!("<meta server>\nexport default {{ read: ['owner'], create: {create}, update: ['owner'], delete: ['owner'] }}\n")
     }
+    #[test]
+    fn a_first_read_without_workers_waits_once_for_a_worker_started_beside_the_server() {
+        let row = |workers: i64| json!({"queue":"mail","declared":true,"pending":0,"oldestWaitSeconds":0,"workers":workers});
+        assert!(first_read_waits(&[row(0)], false, false), "the worker may be starting in this same second");
+        assert!(!first_read_waits(&[row(1)], false, false));
+        assert!(!first_read_waits(&[row(0)], true, false), "only one grace period");
+        assert!(!first_read_waits(&[row(0)], false, true), "own workers already had theirs");
+    }
+
     #[test]
     fn liveness_findings_name_each_queue_that_nothing_runs() {
         let row = |queue: &str, pending: i64, workers: i64, declared: bool| json!({"queue":queue,"pending":pending,"oldestWaitSeconds":90,"workers":workers,"declared":declared});

@@ -1,0 +1,14 @@
+{
+  "id": "route-raw-pg",
+  "kind": "change",
+  "title": "B0789 warns on raw pg in a route handler",
+  "why": "A driver in a handler skips the backend's policies, audit and pool.",
+  "changelog": [
+    "`brain check` warns B0789 when a route handler imports `pg`"
+  ],
+  "guide": "CONTRIBUTING.md",
+  "codes": [
+    "B0789"
+  ],
+  "apis": []
+}

@@ -227,7 +227,7 @@ Every response is compressed for you (zstd, Brotli or gzip by `Accept-Encoding`;
 HTML and JSON); never compress bodies or set `Content-Encoding` in app code (docs/PERFORMANCE.md).
 Public API data offline: `"cache": { "routes": [{ "match": "/api/products/*", "strategy": "stale-while-revalidate",
 "maxAge": "1h", "maxEntries": 50 }] }` (also `cache-first`, `network-first`, `network-only`); personal data → `network-only`.
-`"update": "prompt"` waits for the user: `{#if updateReady()}<button onclick={() => applyUpdate()}>Reload</button>{/if}`.
+`"update": "prompt"` waits for the user: `{#if updateReady()}<button on:click={() => applyUpdate()}>Reload</button>{/if}`.
 Keep data across visits: `api('/posts', { get: { out: '[Post]', cache: '10m' } })` (never for personal data) ·
 `store(init, { persist: true })`. Heavy work off the main thread: name the module `*.worker.jsbrain`; its exports
 become async functions. Their native bridge bounds pending work, deadlines, bytes and cancellation.

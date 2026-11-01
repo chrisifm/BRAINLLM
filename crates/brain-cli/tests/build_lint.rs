@@ -113,3 +113,48 @@ fn check_reports_stale_links_by_source_line_and_titles_that_repeat_the_site_name
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
+
+/// `brain doctor` and `brain build` must agree on the site native sockets use: a placeholder origin is "no site" for
+/// SEO, never for sockets, whose exact allow-list is the author's explicit declaration.
+#[test]
+fn native_sockets_use_the_declared_site_even_when_it_is_a_placeholder_for_seo() {
+    let tmp = std::env::temp_dir().join(format!("bsocketsite-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    assert!(brain(&tmp, &["new", "app"]).status.success());
+    let dir = tmp.join("app");
+    let cfg = std::fs::read_to_string(dir.join("brain.json")).unwrap();
+    let with = |allowed: &str| cfg.trim_end().trim_end_matches('}').trim_end().to_string() + &format!(",\n  \"backend\": {{ \"origins\": [\"{allowed}\"], \"sockets\": {{ \"allowedOrigins\": [\"{allowed}\"] }} }}\n}}\n");
+    let env = std::fs::read_to_string(dir.join(".brain_env")).unwrap().replace("PUBLIC_SITE_URL=https://example.com", "PUBLIC_SITE_URL=http://127.0.0.1:5280");
+    std::fs::write(dir.join(".brain_env"), env).unwrap();
+    std::fs::write(dir.join("brain.json"), with("http://127.0.0.1:5280")).unwrap();
+    let o = brain(&dir, &["build"]);
+    let t = text(&o);
+    assert!(o.status.success(), "the declared origin is listed: {t}");
+    assert!(t.contains("B0736"), "SEO still treats it as no public site: {t}");
+    // not listed: the refusal names the value and the list instead of saying the site is missing
+    std::fs::write(dir.join("brain.json"), with("https://forum.example.org")).unwrap();
+    let o = brain(&dir, &["build"]);
+    let t = text(&o);
+    assert!(!o.status.success(), "{t}");
+    assert!(t.contains("B0745") && t.contains("http://127.0.0.1:5280") && t.contains("https://forum.example.org"), "{t}");
+    assert!(!t.contains("require PUBLIC_SITE_URL"), "the value is set: {t}");
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn add_channel_session_matches_the_session_store_the_guides_use() {
+    let tmp = std::env::temp_dir().join(format!("bchansession-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    assert!(brain(&tmp, &["new", "app"]).status.success());
+    let dir = tmp.join("app");
+    std::fs::remove_file(dir.join("channels/session.jsbrain")).unwrap();
+    assert!(brain(&dir, &["add", "channel", "session"]).status.success());
+    let made = std::fs::read_to_string(dir.join("channels/session.jsbrain")).unwrap();
+    assert!(made.contains("store({ user: null })"), "{made}");
+    // any other name, and an explicit flag, keep their meaning
+    assert!(brain(&dir, &["add", "channel", "theme"]).status.success());
+    assert!(std::fs::read_to_string(dir.join("channels/theme.jsbrain")).unwrap().contains("key('theme')"));
+    let _ = std::fs::remove_dir_all(&tmp);
+}

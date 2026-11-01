@@ -1,0 +1,10 @@
+{
+  "id": "native-sockets-declared-site",
+  "kind": "fix",
+  "title": "`brain build` accepts a listed loopback site with native sockets",
+  "why": "A placeholder or loopback PUBLIC_SITE_URL is still no site for SEO, but sockets now judge the declared value, so build and doctor agree and a refusal names the value and the list.",
+  "changelog": [
+    "Fix: `brain build` and `brain doctor` agree on native sockets when the site is loopback or a placeholder"
+  ],
+  "guide": "CONTRIBUTING.md"
+}

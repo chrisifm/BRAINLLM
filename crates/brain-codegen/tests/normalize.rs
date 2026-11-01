@@ -133,3 +133,26 @@ fn console_error_and_warn_stay_in_the_output() {
     assert!(o.js.contains("console.error(") && o.js.contains("console.warn("), "{}", o.js);
     assert!(!o.warnings.iter().any(|d| d.code == "B1308"), "{:#?}", o.warnings);
 }
+
+#[test]
+fn inline_event_attribute_becomes_a_directive() {
+    let src = r#"<script>
+let n = sig(0)
+</script>
+<button onclick={() => n++}>Add</button>
+<form onsubmit={(e) => n++}><button>Go</button></form>"#;
+    let o = brain_codegen::compile(src, Path::new("comp/ev.brain")).unwrap_or_else(|d| panic!("{d:#?}"));
+    assert_eq!(o.warnings.iter().filter(|d| d.code == "B0223" && d.level == Severity::Info).count(), 2, "{:#?}", o.warnings);
+    // Without normalization the function reaches `setAttribute` and becomes an inline handler, which the CSP blocks.
+    assert!(!o.js.contains("\"onclick\"") && !o.js.contains("\"onsubmit\""), "{}", o.js);
+    assert!(o.js.contains("\"click\"") && o.js.contains("\"submit\""), "{}", o.js);
+}
+
+#[test]
+fn inline_event_string_is_reported_and_custom_elements_keep_their_attributes() {
+    let src = "<script>\nlet n = sig(0)\nfunction bump() { n++ }\n</script>\n<button onclick=\"bump()\">Add</button>\n<my-el onpick={bump}></my-el>";
+    let o = brain_codegen::compile(src, Path::new("comp/ev2.brain")).unwrap_or_else(|d| panic!("{d:#?}"));
+    let lit = o.warnings.iter().find(|d| d.code == "B0224").expect("B0224");
+    assert_eq!((lit.line, lit.level), (5, Severity::Warning), "{lit:#?}");
+    assert!(!o.warnings.iter().any(|d| d.code == "B0223"), "{:#?}", o.warnings);
+}

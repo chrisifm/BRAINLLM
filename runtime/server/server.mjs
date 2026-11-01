@@ -550,7 +550,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report) {
             try { answer = JSON.parse(data.toString('utf8'))?.error } catch {}
             const code = typeof answer?.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(answer.code) ? answer.code : undefined
             const fix = code && typeof answer.fix === 'string' ? answer.fix.slice(0, 512) : undefined
-            throw new HttpError(status >= 400 && status < 500 ? status : 503, 'Native resource request failed', { code, fix })
+            throw new HttpError(status >= 400 && status < 500 ? status : 503, NATIVE_FAILED, { code, fix })
           }
           if (status === 204) { value = null; return }
           if (!String(headers['content-type'] || '').startsWith('application/json')) throw new HttpError(502, 'Native resource response must be JSON')
@@ -863,7 +863,7 @@ export function createServer(o = {}) {
   const hasManifestSockets = Object.hasOwn(mf,'nativeSockets')
   if (hasManifestSockets && typeof mf.nativeSockets !== 'boolean') throw Error('Manifest nativeSockets must be an explicit boolean')
   const nativeSockets = o.nativeSockets === undefined ? hasManifestSockets && mf.nativeSockets : o.nativeSockets
-  if (nativeSockets && !native) throw Error('Native sockets require a configured native backend')
+  if (nativeSockets && !native) throw Error('Native sockets require a configured native backend; fix: run `brain backend serve` and set BRAIN_BACKEND_URL to its loopback URL')
   // the build's single route table (#187): already in match order, each with its RegExp source (named groups = params)
   const routes = mf.routes.map(r => ({ ...r, rx: r.rx ? new RegExp(r.rx) : exact(r.path) }))
   // The address RPC and form limits key on, ctx.req.ip and the logs: a client header counts only through a trusted proxy.
@@ -1877,7 +1877,7 @@ export async function callRpc({ fn, args, ctx, key, limit = 60, timeout = 10000 
     const pub = publicError(e)
     if (pub) return { status: pub.status, body: { error: pub.message } }
     const deliberate = intendedStatus(e)
-    if (deliberate && deliberate < 500) return { status: deliberate, body: { error: e instanceof HttpError ? e.message : STATUS_CODES[deliberate] } }
+    if (deliberate && deliberate < 500) return { status: deliberate, body: { error: e instanceof HttpError && e.message !== NATIVE_FAILED ? e.message : STATUS_CODES[deliberate] } }
     if (deliberate) return {status:deliberate,body:{error:STATUS_CODES[deliberate]},cause:e}
     return { status: 500, body: { error: 'Internal error' }, cause: e }
   }
@@ -1888,6 +1888,8 @@ export async function callRpc({ fn, args, ctx, key, limit = 60, timeout = 10000 
 // `locale` (§37): the page's language, so the schema messages (`form.*`) and the generic error come from its dictionary
 // (globalThis.__brainDict, filled by the page's chunk) like form() in the browser. It is set only around the synchronous
 // validation, so concurrent requests in other languages never see it.
+// English text for the server's log: a form or a server function never shows it to a visitor
+const NATIVE_FAILED = 'Native resource request failed'
 export async function callForm({ module, raw, ctx, rules, key, limit = 60, timeout = 10000, locale }) {
   const q = new URLSearchParams(raw || ''), id = q.get('_brain') || '', fn = id.split('/')[1] || ''
   if (key) {
@@ -1914,7 +1916,7 @@ export async function callForm({ module, raw, ctx, rules, key, limit = 60, timeo
     r = await withTimeout(pageLocale.run(locale, () => Promise.resolve(module[fn](ctx, values))), timeout, ctx)
   } catch (e) {
     if (e && e.errors && typeof e.errors === 'object') return again(e.errors, '')
-    if (e instanceof HttpError && e.status >= 400 && e.status < 500) return again({}, e.message)
+    if (e instanceof HttpError && e.status >= 400 && e.status < 500) return again({}, e.message === NATIVE_FAILED ? generic : e.message)
     const pub = publicError(e)
     if (pub) return again({}, pub.message)
     const deliberate = intendedStatus(e)

@@ -1724,9 +1724,28 @@ impl<'a> Checker<'a> {
         self.push_info("B0212", a.span, "conditional inside `class=` (normalized to `class:x`)", format!("write `{text}`"), vec![(a.span.start, a.span.end, text)]);
     }
 
+    /// `onclick={f}` on a native element reaches `setAttribute`: an inline handler that never calls `f` and that the
+    /// CSP blocks. It has one meaning, `on:click={f}` (B0223, normalized); a string is source text only the author can move (B0224).
+    fn inline_event(&mut self, a: &Attr, tag: Option<&str>) {
+        let Some(event) = a.name.strip_prefix("on") else { return };
+        let native = tag.is_some_and(|t| t.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
+        if a.kind != AttrKind::Plain || !native || event.is_empty() || !event.chars().all(|c| c.is_ascii_lowercase()) {
+            return;
+        }
+        match &a.value {
+            AttrValue::Expr(_) => {
+                let end = a.span.start + a.name.len() as u32;
+                self.push_info("B0223", a.span, format!("`{}=` is an inline handler (normalized to `on:{event}`)", a.name), format!("write `on:{event}={{handler}}`"), vec![(a.span.start, end, format!("on:{event}"))]);
+            }
+            AttrValue::None => {}
+            _ => self.push("B0224", a.span, format!("`{}=\"…\"` is an inline handler: the Content-Security-Policy blocks it in production", a.name), format!("write `on:{event}={{handler}}`")),
+        }
+    }
+
     fn attrs(&mut self, attrs: &[Attr], tag: Option<&str>) {
         for a in attrs {
             self.class_ternary(a, attrs);
+            self.inline_event(a, tag);
             // `title="{x}}"`: the part right after a value starts with the brace that closes nothing
             if let AttrValue::Mixed(parts) = &a.value
                 && parts.windows(2).any(|w| matches!((&w[0], &w[1]), (AttrPart::Expr(_), AttrPart::Text(t)) if t.starts_with('}')))

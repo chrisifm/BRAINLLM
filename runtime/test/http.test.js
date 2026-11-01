@@ -480,7 +480,7 @@ test('native backend errors retain actionable codes and fields without rendering
   }
 })
 
-test('a 422 without fields never points at highlighted fields: backend fix, then its own text, then a plain sentence',async()=>{
+test('a 422 without fields never points at highlighted fields: the backend fix stays in error.fix, never in the message',async()=>{
   http({retry:0})
   reset({
     'POST /a':[{status:422,body:JSON.stringify({schemaVersion:1,error:{code:'INVALID_INPUT',fix:'Remove NUL characters and invalid bytes from the text values',fields:null}})}],
@@ -490,9 +490,24 @@ test('a 422 without fields never points at highlighted fields: backend fix, then
     'POST /e':[{status:422,body:JSON.stringify({errors:{name:'Too short'}})}],
   })
   const fail=path=>api(path,{post:{}}).post({}).catch(error=>error)
-  const a=await fail('/a');assert.equal(a.message,'Remove NUL characters and invalid bytes from the text values');assert.equal(a.errors,null)
+  const a=await fail('/a');assert.equal(a.message,'The server rejected this request. Check it and try again.');assert.equal(a.fix,'Remove NUL characters and invalid bytes from the text values');assert.equal(a.plain,true);assert.equal(a.errors,null)
   assert.equal((await fail('/b')).message,'Slug already taken')
   assert.equal((await fail('/c')).message,'The server rejected this request. Check it and try again.')
   assert.equal((await fail('/d')).message,'The server rejected this request. Check it and try again.')
   assert.equal((await fail('/e')).message,'Check the highlighted fields.')
+})
+
+test('form() shows the translated form.rejected, never the backend fix, for a 422 without fields',async()=>{
+  http({retry:0})
+  reset({'POST /signup':[{status:422,body:JSON.stringify({schemaVersion:1,error:{code:'SIGNUP_FAILED',fix:'Use a valid email and a unique account',fields:null}})}]})
+  ;(globalThis.__brainDict ||= {}).xx={'form.rejected':'Translated rejection'}
+  globalThis.__brainLocale='xx'
+  try{
+    const {form}=await import('../brain-form.js')
+    const signup=api('/signup',{post:{}})
+    const f=form({email:'str'},{submit:v=>signup.post(v)})
+    f.v.email='a'
+    await f.submit()
+    assert.equal(f.error,'Translated rejection')
+  }finally{delete globalThis.__brainDict.xx;globalThis.__brainLocale=null}
 })

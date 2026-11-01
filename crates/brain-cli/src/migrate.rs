@@ -47,16 +47,26 @@ pub fn recorded(root: &Path) -> Option<(String, &'static str)> {
     if let Some(v) = read_json(&root.join("brain.json")).and_then(|j| j.get("brainVersion").and_then(Value::as_str).and_then(exact)) {
         return Some((v, "brain.json brainVersion"));
     }
-    if let Some(pkg) = read_json(&root.join("package.json")) {
-        for s in ["dependencies", "devDependencies", "optionalDependencies"] {
-            if let Some(v) = pkg.get(s).and_then(|d| d.get(PACKAGE)).and_then(Value::as_str).and_then(exact) {
-                return Some((v, "package.json pin"));
-            }
-        }
+    if let Some(v) = read_json(&root.join("package.json")).as_ref().and_then(pin_of) {
+        // Installing the new compiler rewrites the pin, and installing is the only way to get this command: an app with
+        // no brainVersion (older than 0.7.0) still has its previous pin in the last commit.
+        let committed = std::process::Command::new("git").args(["show", "HEAD:./package.json"]).current_dir(root).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| serde_json::from_slice::<Value>(&o.stdout).ok())
+            .as_ref()
+            .and_then(pin_of);
+        return match committed {
+            Some(old) if releases::cmp(&old, &v) == Ordering::Less => Some((old, "package.json pin at git HEAD")),
+            _ => Some((v, "package.json pin")),
+        };
     }
     read_json(&root.join("package-lock.json"))
         .and_then(|l| l.pointer(&format!("/packages/node_modules~1{}", PACKAGE.replace('/', "~1"))).and_then(|p| p.get("version")).and_then(Value::as_str).and_then(exact))
         .map(|v| (v, "package-lock.json"))
+}
+
+fn pin_of(pkg: &Value) -> Option<String> {
+    ["dependencies", "devDependencies", "optionalDependencies"].iter().find_map(|s| pkg.get(*s).and_then(|d| d.get(PACKAGE)).and_then(Value::as_str).and_then(exact))
 }
 
 pub struct Options {
@@ -250,9 +260,11 @@ pub fn run_with(root: &Path, opts: &Options, before_write: &mut dyn FnMut(&Path,
         next.push("Adopt the new capabilities that fit this app: read each guide, start from the snippet, add a test.".into());
     }
     next.push("Finish with `brain doctor` exit 0, then `brain build`.".into());
+    // The pin alone cannot tell an app already on this version from one whose install just rewrote it.
+    let uncertain = (matches!(from_source, "package.json pin" | "package-lock.json") && from == to).then(|| format!("this app records no brainVersion and {from_source} already says {from}, which an install rewrites; if the app was written for an older version, pass --from <that version> to see its steps"));
     Ok(json!({
         "schemaVersion": 1, "mode": if opts.apply { "apply" } else { "dry-run" },
-        "from": from, "fromSource": from_source, "to": to, "installed": installed(),
+        "from": from, "fromSource": from_source, "uncertainFrom": uncertain, "to": to, "installed": installed(),
         "releases": span.iter().map(|r| json!({"version": r.version, "entries": r.entries.len()})).collect::<Vec<_>>(),
         "codemods": codemods, "manual": manual, "adopt": adopt, "alreadyUsing": using, "changes": changes, "gates": gates,
         "ok": ok, "next": next,
@@ -276,6 +288,9 @@ fn s(v: &Value) -> &str {
 /// The report as a markdown checklist an agent follows top to bottom.
 pub fn markdown(r: &Value) -> String {
     let mut m = format!("# BRAINLLM upgrade {} → {} ({})\n\n", s(&r["from"]), s(&r["to"]), s(&r["mode"]));
+    if let Some(warning) = r["uncertainFrom"].as_str() {
+        m.push_str(&format!("Warning: {warning}.\n\n"));
+    }
     m.push_str(&format!("Version source: {}. Installed compiler: {}.\n\n## Next\n", s(&r["fromSource"]), s(&r["installed"])));
     for n in r["next"].as_array().into_iter().flatten() {
         m.push_str(&format!("- [ ] {}\n", s(n)));
@@ -402,6 +417,30 @@ mod tests {
         assert_eq!(recorded(&d).unwrap(), ("0.5.0".to_string(), "package.json pin"));
         fs::write(d.join("brain.json"), "{\"brainVersion\":\"0.4.0\"}").unwrap();
         assert_eq!(recorded(&d).unwrap().0, "0.4.0");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn an_install_that_rewrote_the_pin_still_reports_the_version_at_git_head() {
+        let d = std::env::temp_dir().join(format!("bupgrade-pin-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        let git = |args: &[&str]| assert!(std::process::Command::new("git").args(["-c", "user.name=t", "-c", "user.email=t@example.org"]).args(args).current_dir(&d).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().unwrap().success());
+        let pin = |v: &str| fs::write(d.join("package.json"), format!("{{\"dependencies\":{{\"{PACKAGE}\":\"{v}\"}}}}")).unwrap();
+        fs::write(d.join("brain.json"), "{\"name\":\"x\"}").unwrap();
+        pin("0.6.1");
+        git(&["init", "-q"]);
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        pin("0.7.0");
+        assert_eq!(recorded(&d), Some(("0.6.1".to_string(), "package.json pin at git HEAD")));
+        // committed with the install: nothing older is left, and the report says so instead of claiming no steps
+        git(&["add", "."]);
+        git(&["commit", "-qm", "install"]);
+        assert_eq!(recorded(&d), Some(("0.7.0".to_string(), "package.json pin")));
+        let r = run(&d, &Options { from: None, to: Some("0.7.0".into()), apply: false, doctor: false }).unwrap();
+        assert!(r["uncertainFrom"].as_str().is_some_and(|w| w.contains("--from")), "{r}");
+        assert!(markdown(&r).contains("--from"), "{}", markdown(&r));
         let _ = fs::remove_dir_all(&d);
     }
 

@@ -1093,10 +1093,7 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
     }
     // the site URL: --site > PUBLIC_SITE_URL of the environment > brain.json "site" (legacy)
     let explicit = site.is_some();
-    let site = site.or_else(|| env::value(root, env_name, "PUBLIC_SITE_URL")).or_else(|| {
-        let j = brain_mcp::Json::parse(&std::fs::read_to_string(root.join("brain.json")).ok()?).ok()?;
-        j.get("site")?.as_str().filter(|s| !s.is_empty()).map(str::to_string)
-    });
+    let site = site.or_else(|| declared_site(root, env_name));
     if let Some(s) = &site
         && !(s.starts_with("https://") || s.starts_with("http://"))
     {
@@ -1268,6 +1265,14 @@ pub(crate) fn cache_cfg(root: &Path) -> Result<brain_pack::cache::CacheCfg, Stri
 }
 
 /// Returns (route, HTML) of every built page.
+/// The environment's site URL: PUBLIC_SITE_URL of that environment, else brain.json "site" (legacy).
+fn declared_site(root: &Path, env_name: &str) -> Option<String> {
+    env::value(root, env_name, "PUBLIC_SITE_URL").or_else(|| {
+        let j = brain_mcp::Json::parse(&std::fs::read_to_string(root.join("brain.json")).ok()?).ok()?;
+        j.get("site")?.as_str().filter(|s| !s.is_empty()).map(str::to_string)
+    })
+}
+
 fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mut BuildReport, progress: Option<&term::Progress>) -> Result<Vec<(String, String)>, String> {
     let on_phase = |phase: &str, done: usize, total: usize| {
         if let Some(p) = progress {
@@ -1477,6 +1482,10 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
             })
             .collect()
     };
+    // A placeholder origin is "no site" for SEO (B0736), never for sockets: their exact allow-list is the author's own
+    // declaration, so `brain build` and `brain doctor` judge the same value.
+    let declared = site.map(str::to_string).or_else(|| declared_site(root, env_name));
+    let site = declared.as_deref();
     let socket_settings: backend::SocketSettings = backend::socket_settings(root, site, None)?;
     let mut socket_options = socket_settings.build_options(site).map_err(|e| format!("{e}. This `{env_name}` build took the site from --site or PUBLIC_SITE_URL in the [{env_name}] section of .brain_env"))?;
     socket_options.native_routes = route_executor::gateway_routes(root)?;

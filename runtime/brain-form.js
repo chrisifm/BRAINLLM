@@ -303,8 +303,9 @@ function createForm(schema, o, readRule, validateRule, remote) {
       } catch (x) {
         if (x?.errors) mark(x.errors)
         // a server failure reads the same as without JS: 4xx and the author's own errors keep their message; 5xx and a
-        // TypeError (the network dropped, or a bug) get the generic one
-        else if (x?.kind !== 'aborted') error.v = (!(x?.status >= 500) && x?.name !== 'TypeError' && x?.message) || msg('form.error', GENERIC)
+        // TypeError (the network dropped, or a bug) get the generic one; the runtime's own English sentence (`plain`) gives
+        // way to the app's translated form.rejected
+        else if (x?.kind !== 'aborted') error.v = (!(x?.status >= 500) && x?.name !== 'TypeError' && (x?.plain ? msg('form.rejected', x.message) : x?.message)) || msg('form.error', GENERIC)
       } finally {
         busy.v = false
         if (fm) fm.removeAttribute('aria-busy')
