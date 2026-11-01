@@ -76,6 +76,50 @@
           "sha256": "bfb1112d49db5b1daecdfef24bd7e2f3ea0bafb33aa67aa0ab51e2bf8407c03d"
         }
       ]
+    },
+    "profiling-procmacros@1.0.18": {
+      "vcsCommit": "8271551172eb6fa4cba47369aedd93790c623df9",
+      "license": "MIT OR Apache-2.0",
+      "files": [
+        {
+          "file": "profiling-LICENSE-MIT.txt",
+          "url": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-MIT",
+          "sha256": "c8167fdeeed46d3f244d3f85c5bf998ce889343691c32be2c61a8bc4b5c08333"
+        },
+        {
+          "file": "profiling-LICENSE-APACHE.txt",
+          "url": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-APACHE",
+          "sha256": "10d30a673cd5e9349bdc02aeb48f14b3386d27d0da32df8f0a555d4aa16aa551"
+        }
+      ]
+    },
+    "profiling@1.0.18": {
+      "vcsCommit": "8271551172eb6fa4cba47369aedd93790c623df9",
+      "license": "MIT OR Apache-2.0",
+      "files": [
+        {
+          "file": "profiling-LICENSE-MIT.txt",
+          "url": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-MIT",
+          "sha256": "c8167fdeeed46d3f244d3f85c5bf998ce889343691c32be2c61a8bc4b5c08333"
+        },
+        {
+          "file": "profiling-LICENSE-APACHE.txt",
+          "url": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-APACHE",
+          "sha256": "10d30a673cd5e9349bdc02aeb48f14b3386d27d0da32df8f0a555d4aa16aa551"
+        }
+      ]
+    },
+    "simd_helpers@0.1.0": {
+      "vcsCommit": "ca1a2f84aa386d758e98f8a609d990263932fb85",
+      "license": "MIT",
+      "note": "The crate declares MIT and its repository holds no license text at this commit. The canonical SPDX template accompanies the declaration without inventing a copyright holder.",
+      "files": [
+        {
+          "file": "SPDX-MIT.txt",
+          "url": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+        }
+      ]
     }
   }
 }
