@@ -845,6 +845,10 @@ fn native_paths(roles: &crate::auth_flows::RolesConfig) -> Map<String, Value> {
         ("/_brain/orgs/invites/accept", "post", "Join an organization with an invitation token", true, &[401, 403, 422, 429]),
         ("/_brain/orgs/{id}/audit", "get", "Read an organization's audit log (docs/backend/audit.md)", false, &[401, 403, 404, 422, 429]),
         ("/_brain/audit", "get", "Read audit entries outside any organization", false, &[401, 403, 422, 429]),
+        ("/_brain/auth/sessions", "get", "List the caller's live sessions, with when each last proved its password", false, &[401, 429]),
+        ("/_brain/auth/sessions/revoke-others", "post", "End every session of the caller except this one", false, &[401, 403, 429]),
+        ("/_brain/auth/sessions/{id}/revoke", "post", "End another session of the caller; an unknown id and another account's answer the same 404", false, &[400, 401, 403, 404, 409, 429]),
+        ("/_brain/auth/reauth", "post", "Prove the password again for this session, for routes that declare reauth", true, &[401, 403, 415, 422, 429, 503]),
         ("/_brain/credits/{subject}", "post", "Apply a signed credit change with an idempotency key (docs/backend/credits.md)", true, &[401, 403, 404, 409, 422, 429]),
         ("/_brain/credits/{subject}", "get", "Read a balance and its ledger", false, &[401, 403, 404, 422, 429]),
     ] {

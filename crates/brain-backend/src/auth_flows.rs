@@ -12,12 +12,16 @@ use uuid::Uuid;
 pub struct RolesConfig {
     pub roles: Vec<String>,
     pub signup_role: String,
+    /// Length of new sessions per role, in seconds; a role not named uses `BRAIN_AUTH_SESSION_SECONDS`.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub session_seconds: std::collections::BTreeMap<String, u32>,
 }
 impl Default for RolesConfig {
     fn default() -> Self {
         Self {
             roles: ["admin", "user"].map(String::from).to_vec(),
             signup_role: "user".into(),
+            session_seconds: Default::default(),
         }
     }
 }
@@ -38,6 +42,7 @@ impl RolesConfig {
         Self {
             roles: LEGACY_IMPLICIT_ROLES.map(String::from).to_vec(),
             signup_role: LEGACY_IMPLICIT_SIGNUP_ROLE.into(),
+            session_seconds: Default::default(),
         }
     }
     pub fn validate(&self) -> Result<(), String> {
@@ -60,6 +65,12 @@ impl RolesConfig {
         }
         if !self.roles.contains(&self.signup_role) {
             return Err(format!("{AT}: signup_role `{}` is not in roles; fix: add it to roles or name a declared role", self.signup_role));
+        }
+        if let Some((role, _)) = self.session_seconds.iter().find(|(role, _)| !self.roles.contains(role)) {
+            return Err(format!("{AT}: session_seconds names `{role}`, which is not in roles; fix: name a declared role"));
+        }
+        if let Some((role, _)) = self.session_seconds.iter().find(|(_, seconds)| !(300..=31_536_000).contains(*seconds)) {
+            return Err(format!("{AT}: session_seconds of `{role}` must be 300..31536000; fix: use whole seconds in that range"));
         }
         Ok(())
     }

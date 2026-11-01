@@ -8,6 +8,13 @@ use std::{collections::BTreeSet, net::IpAddr, time::Duration};
 
 pub const CONTRACT: &str = "server/auth/captcha.jsbrain";
 pub const HEADER: &str = "x-brain-captcha";
+/// Spent by the login right after a verified signup, instead of a second challenge (`crate::sessions`).
+pub const LOGIN_GRANT_HEADER: &str = "x-brain-login-grant";
+/// Lets an operator's script sign accounts up in a batch. Never forwarded by the site's own proxies.
+pub const OPERATOR_HEADER: &str = "x-brain-operator-key";
+const OPERATOR_KEY_MIN: usize = 32;
+/// The providers' published always-pass secrets (docs read 2026-11-01): fine locally, an open door in production.
+const TEST_SECRETS: &[&str] = &["1x0000000000000000000000000000000AA", "0x0000000000000000000000000000000000000000", "6LeIxAcTAAAAAGG-vFI1TnRWxMZNFuojJ4WifJWe"];
 const AUTH_ACTIONS: &[&str] = &["signup", "login", "password_request"];
 const MAX_TOKEN: usize = 8192;
 const MAX_ANSWER: usize = 64 * 1024;
@@ -20,6 +27,8 @@ pub struct Captcha {
     hostname: Option<String>,
     protect: BTreeSet<String>,
     client: Option<reqwest::Client>,
+    operator_env: Option<String>,
+    operator_key: Option<String>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verdict {
@@ -39,9 +48,9 @@ fn secure_or_local(url: &Url) -> bool {
 impl Captcha {
     /// Reads the literal contract. `env` resolves the secret, which never appears in the contract.
     pub fn from_contract(value: &Value, env: impl Fn(&str) -> Option<String>) -> Result<Self, String> {
-        let fix = "fix: export { verify_url: 'https://...', secret_env: 'NAME', hostname: 'app.example.com', protect: ['signup', 'login', 'password_request', 'route:<name>'] }";
+        let fix = "fix: export { verify_url: 'https://...', secret_env: 'NAME', hostname: 'app.example.com', protect: ['signup', 'login', 'password_request', 'route:<name>'], operator_key_env: 'OPTIONAL_NAME' }";
         let map = value.as_object().ok_or_else(|| format!("{CONTRACT} must export an object; {fix}"))?;
-        if let Some(key) = map.keys().find(|k| !matches!(k.as_str(), "verify_url" | "secret_env" | "hostname" | "protect")) {
+        if let Some(key) = map.keys().find(|k| !matches!(k.as_str(), "verify_url" | "secret_env" | "hostname" | "protect" | "operator_key_env")) {
             return Err(format!("{CONTRACT}: unknown key `{key}`; {fix}"));
         }
         let text = |key: &str| map.get(key).and_then(Value::as_str).filter(|s| !s.is_empty());
@@ -55,7 +64,13 @@ impl Captcha {
         if map.get("hostname").is_some() && text("hostname").is_none() {
             return Err(format!("{CONTRACT}: hostname must be a non-empty string; {fix}"));
         }
-        Ok(Self { secret: env(secret_env).filter(|s| !s.is_empty()), secret_env: secret_env.to_string(), verify_url: Some(url), hostname: text("hostname").map(str::to_string), protect, client: None })
+        let env_name = |n: &&str| n.bytes().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_');
+        if map.get("operator_key_env").is_some() && text("operator_key_env").filter(env_name).is_none() {
+            return Err(format!("{CONTRACT}: operator_key_env must name an environment variable; {fix}"));
+        }
+        let operator_env = text("operator_key_env").map(str::to_string);
+        let operator_key = operator_env.as_deref().and_then(&env).filter(|key| !key.is_empty());
+        Ok(Self { secret: env(secret_env).filter(|s| !s.is_empty()), secret_env: secret_env.to_string(), verify_url: Some(url), hostname: text("hostname").map(str::to_string), protect, client: None, operator_env, operator_key })
     }
     pub fn enabled(&self) -> bool {
         self.verify_url.is_some()
@@ -63,9 +78,14 @@ impl Captcha {
     pub fn protects(&self, action: &str) -> bool {
         self.protect.contains(action)
     }
+    /// True only for the declared key, compared in constant time. An undeclared or unset key admits nobody.
+    pub fn operator(&self, presented: Option<&str>) -> bool {
+        let (Some(expected), Some(presented)) = (&self.operator_key, presented) else { return false };
+        bool::from(subtle::ConstantTimeEq::ct_eq(crate::auth::digest(expected).as_bytes(), crate::auth::digest(presented).as_bytes()))
+    }
     /// Metadata for `brain backend schema`; carries no secret or environment value.
     pub fn schema(&self) -> Value {
-        serde_json::json!({"enabled": self.enabled(), "header": HEADER, "protect": self.protect, "secretEnv": self.secret_env})
+        serde_json::json!({"enabled": self.enabled(), "header": HEADER, "protect": self.protect, "secretEnv": self.secret_env, "operatorKeyEnv": self.operator_env})
     }
     /// Refuses a configuration that could never admit a request or that protects something unprotectable.
     pub(crate) fn ready(mut self, routes: &[crate::routes::Route], production: bool) -> Result<Self, String> {
@@ -80,6 +100,14 @@ impl Captcha {
         }
         if production && self.secret.is_none() {
             return Err(format!("{CONTRACT}: {} is not set; fix: set it in the server environment", self.secret_env));
+        }
+        if production && self.secret.as_deref().is_some_and(|s| TEST_SECRETS.contains(&s)) {
+            return Err(format!("{CONTRACT}: {} holds a provider's always-pass test secret; fix: set the real secret in the server environment", self.secret_env));
+        }
+        if let Some(name) = &self.operator_env {
+            if production && self.operator_key.as_ref().is_none_or(|key| key.len() < OPERATOR_KEY_MIN) {
+                return Err(format!("{CONTRACT}: {name} must hold a generated key of at least {OPERATOR_KEY_MIN} bytes; fix: set it in the server environment or remove operator_key_env"));
+            }
         }
         if production && self.verify_url.as_ref().is_some_and(|u| u.scheme() != "https") {
             return Err(format!("{CONTRACT}: verify_url must use https in production"));
@@ -136,5 +164,27 @@ impl Captcha {
             Some(expected) if verdict.get("hostname").and_then(Value::as_str) != Some(expected.as_str()) => Verdict::Rejected,
             _ => Verdict::Passed,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn production_refuses_what_would_leave_the_gate_open() {
+        let check = |contract: Value, secret: &'static str, key: Option<&'static str>| {
+            Captcha::from_contract(&contract, move |name| if name == "S" { Some(secret.to_string()) } else { key.map(str::to_string) }).unwrap().ready(&[], true).map(|_| ())
+        };
+        const KEY: &str = "synthetic-operator-key-0123456789abcdef";
+        let https = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+        let plain = json!({"verify_url":https,"secret_env":"S","protect":["signup"]});
+        let operated = json!({"verify_url":https,"secret_env":"S","protect":["signup"],"operator_key_env":"OPERATOR_KEY"});
+        assert!(check(plain.clone(), "synthetic-captcha-secret", None).is_ok());
+        assert!(check(plain.clone(), "1x0000000000000000000000000000000AA", None).unwrap_err().contains("test secret"));
+        assert!(check(operated.clone(), "synthetic-captcha-secret", None).unwrap_err().contains("OPERATOR_KEY"));
+        assert!(check(operated.clone(), "synthetic-captcha-secret", Some("short")).unwrap_err().contains("OPERATOR_KEY"));
+        assert!(check(operated, "synthetic-captcha-secret", Some(KEY)).is_ok());
     }
 }

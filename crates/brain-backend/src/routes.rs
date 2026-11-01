@@ -244,6 +244,8 @@ pub struct Route {
     pub headers: Vec<String>,
     /// Identity of `ctx.backend` in the handler: `key` (BRAIN_ROUTES_API_KEY) or `system` (BRAIN_ROUTES_SYSTEM_KEY). Absent: no ctx.backend.
     pub run_as: Option<String>,
+    /// Longest age, in seconds, of the session's password proof this route accepts.
+    pub reauth: Option<u32>,
 }
 
 fn object<'a>(value: &'a Value, at: &str, keys: &[&str]) -> Result<&'a Map<String, Value>, String> {
@@ -295,7 +297,7 @@ impl Route {
             return Err(format!("route `{name}`: the folder name must be a lowercase identifier"));
         }
         let at = format!("route `{name}`");
-        let map = object(value, &at, &["method", "path", "auth", "body", "bodyLimit", "timeout", "rate", "verify", "internal", "params", "query", "headers", "runAs"])?;
+        let map = object(value, &at, &["method", "path", "auth", "body", "bodyLimit", "timeout", "rate", "verify", "internal", "params", "query", "headers", "reauth", "runAs"])?;
         let method = match map.get("method").and_then(Value::as_str).unwrap_or("GET").to_ascii_uppercase().as_str() {
             "GET" => axum::http::Method::GET,
             "POST" => axum::http::Method::POST,
@@ -400,7 +402,14 @@ impl Route {
             Some(Value::String(who)) if matches!(who.as_str(), "key" | "system") => Some(who.clone()),
             Some(_) => return Err(format!("{at}: runAs must be 'key' or 'system'; fix: it picks the API key of ctx.backend, and without it the handler has no ctx.backend")),
         };
-        Ok(Route { name: name.into(), method, path: path.into(), access, raw_body, body_limit, timeout, rate, verify, disabled: false, params, query, headers, run_as })
+        let reauth = match map.get("reauth") {
+            None => None,
+            Some(value) => Some(value.as_u64().filter(|s| (60..=86_400).contains(s)).map(|s| s as u32).ok_or_else(|| format!("{at}: reauth must be whole seconds, 60..86400; fix: the longest age of the password proof this route accepts"))?),
+        };
+        if reauth.is_some() && !matches!(access, Access::SignedIn | Access::Roles(_)) {
+            return Err(format!("{at}: reauth needs a signed-in route; fix: set auth to 'user' or a list of roles"));
+        }
+        Ok(Route { name: name.into(), method, path: path.into(), access, raw_body, body_limit, timeout, rate, verify, disabled: false, params, query, headers, run_as, reauth })
     }
     pub fn schema(&self) -> Value {
         json!({
@@ -413,6 +422,7 @@ impl Route {
             "query": self.query.iter().map(|(k, p)| (k.clone(), json!({"kind": format!("{:?}", p.kind).to_lowercase(), "required": p.required}))).collect::<Map<_, _>>(),
             "headers": self.headers,
             "runAs": self.run_as,
+            "reauth": self.reauth,
         })
     }
 }

@@ -585,7 +585,7 @@ pub async fn router_full(
             "Configured auth roles are not provisioned; run the explicit backend migration".into(),
         );
     }
-    let auth = Auth::new_with_role(pool.clone(), &config.roles.signup_role).await?;
+    let auth = Auth::new_with_role(pool.clone(), &config.roles.signup_role).await?.with_role_sessions(config.roles.session_seconds.clone());
     let auth_base = config
         .auth_public_base_url
         .as_deref()
@@ -674,6 +674,7 @@ pub async fn router_full(
             header::AUTHORIZATION,
             header::HeaderName::from_static("x-brain-rpc"),
             header::HeaderName::from_static(crate::captcha::HEADER),
+            header::HeaderName::from_static(crate::captcha::LOGIN_GRANT_HEADER),
             header::IF_MATCH,
             header::IF_NONE_MATCH,
         ]);
@@ -703,6 +704,10 @@ pub async fn router_full(
         .route("/_brain/auth/login", post(login))
         .route("/_brain/auth/logout", post(logout))
         .route("/_brain/auth/me", get(me))
+        .route("/_brain/auth/sessions", get(list_sessions))
+        .route("/_brain/auth/sessions/revoke-others", post(revoke_other_sessions))
+        .route("/_brain/auth/sessions/{id}/revoke", post(revoke_session))
+        .route("/_brain/auth/reauth", post(reauthenticate))
         .route("/_brain/auth/token", post(token_login))
         .route("/_brain/auth/refresh", post(token_refresh))
         .route("/_brain/auth/google/challenge", post(google_challenge))
@@ -1132,11 +1137,18 @@ async fn docs(State(app): State<App>, h: HeaderMap) -> Result<Json<Value>> {
     Ok(Json(api))
 }
 async fn signup(State(app): State<App>, client: Option<axum::Extension<ClientIp>>, headers: HeaderMap, Strict(c): Strict<Credentials>) -> Result<Json<Value>> {
-    app.require_captcha("signup", &headers, client.map(|c| c.0.0)).await?;
-    app.auth
+    let guarded = app.captcha.protects("signup");
+    let operator = guarded && headers.contains_key(crate::captcha::OPERATOR_HEADER);
+    if operator {
+        if !app.captcha.operator(headers.get(crate::captcha::OPERATOR_HEADER).and_then(|v| v.to_str().ok())) {
+            return Err(captcha_failed());
+        }
+    } else {
+        app.require_captcha("signup", &headers, client.map(|c| c.0.0)).await?;
+    }
+    let user = app.auth
         .signup(c)
         .await
-        .map(|u| Json(json!({"user":u})))
         .map_err(|failure| match failure {
             auth::AuthFailure::Input(_) => Error::new(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -1144,7 +1156,31 @@ async fn signup(State(app): State<App>, client: Option<axum::Extension<ClientIp>
                 "Use a valid email and a unique account with a password of 12..1024 bytes",
             ),
             auth::AuthFailure::Unavailable(_) => auth_unavailable("SIGNUP_UNAVAILABLE"),
-        })
+        })?;
+    if operator {
+        sqlx::query("INSERT INTO _brain_auth_events(user_id,event,outcome) VALUES ($1,'operator-signup','success')").bind(user.id).execute(&app.pool).await.map_err(|error| Error::internal(crate::db::safe(error)))?;
+    }
+    // The account just passed a challenge, so the login that follows does not need its own. A failure here costs a second
+    // challenge at most, never the account that already exists.
+    if guarded && !operator && app.captcha.protects("login") {
+        if let Ok(grant) = crate::sessions::signup_grant(&app.pool, user.id).await {
+            return Ok(Json(json!({"user":user,"login_grant":grant})));
+        }
+    }
+    Ok(Json(json!({"user":user})))
+}
+fn captcha_failed() -> Error {
+    Error::new(StatusCode::FORBIDDEN, "CAPTCHA_FAILED", "Complete the captcha again and send its new token in the X-Brain-Captcha header")
+}
+/// A signup's grant replaces the challenge of its first login; a grant that does not fit is a failed challenge.
+async fn login_gate(app: &App, headers: &HeaderMap, client: Option<std::net::IpAddr>, email: &str) -> Result<()> {
+    if app.captcha.protects("login") {
+        if let Some(grant) = headers.get(crate::captcha::LOGIN_GRANT_HEADER) {
+            let spent = crate::sessions::consume_signup_grant(&app.pool, grant.to_str().unwrap_or(""), email).await.map_err(|_| auth_unavailable("LOGIN_UNAVAILABLE"))?;
+            return if spent { Ok(()) } else { Err(captcha_failed()) };
+        }
+    }
+    app.require_captcha("login", headers, client).await
 }
 fn auth_unavailable(code: &'static str) -> Error {
     Error::new(
@@ -1161,7 +1197,7 @@ fn login_failed() -> Error {
     )
 }
 async fn login(State(app): State<App>, client: Option<axum::Extension<ClientIp>>, headers: HeaderMap, Strict(c): Strict<Credentials>) -> Result<Response> {
-    app.require_captcha("login", &headers, client.as_ref().map(|c| c.0.0)).await?;
+    login_gate(&app, &headers, client.as_ref().map(|c| c.0.0), &c.email).await?;
     // The backend owns the session mode. A configured JWT authority never falls back to opaque login on failure.
     if app.jwt.is_some() {
         return issue_token(app, client, c).await;
@@ -1173,10 +1209,11 @@ async fn login(State(app): State<App>, client: Option<axum::Extension<ClientIp>>
     else {
         return Err(login_failed());
     };
+    let age = app.auth.session_length(&user.role);
     let mut response = Json(json!({"user":user})).into_response();
     response.headers_mut().insert(
         header::SET_COOKIE,
-        auth::cookie(&token, auth::session_seconds()).parse().unwrap(),
+        auth::cookie(&token, age).parse().unwrap(),
     );
     Ok(response)
 }
@@ -1233,7 +1270,7 @@ fn jwt_response(tokens: crate::jwt::Tokens) -> Response {
     let refresh = (!tokens.refresh_token.is_empty()).then(|| crate::jwt::cookie_header(
         crate::jwt::REFRESH_COOKIE,
         &tokens.refresh_token,
-        crate::auth::session_seconds(),
+        tokens.refresh_age,
     ));
     let mut response = Json(tokens).into_response();
     response
@@ -1252,7 +1289,7 @@ async fn token_login(
     headers: HeaderMap,
     Strict(credentials): Strict<Credentials>,
 ) -> Result<Response> {
-    app.require_captcha("login", &headers, client.as_ref().map(|c| c.0.0)).await?;
+    login_gate(&app, &headers, client.as_ref().map(|c| c.0.0), &credentials.email).await?;
     issue_token(app, client, credentials).await
 }
 async fn issue_token(app: App, client: Option<axum::Extension<ClientIp>>, credentials: Credentials) -> Result<Response> {
@@ -1338,6 +1375,67 @@ async fn google_login(
             .unwrap(),
     );
     Ok(response)
+}
+/// The caller's own session: only a session credential names one, so an API key never manages sessions.
+async fn own_session(app: &App, h: &HeaderMap) -> Result<(User, uuid::Uuid)> {
+    let user = app.required(h).await?;
+    let session = if http_api_keys::key_user().is_some() {
+        None
+    } else if h.contains_key(header::AUTHORIZATION) || crate::jwt::cookie(h, crate::jwt::ACCESS_COOKIE).is_some() {
+        app.jwt.as_ref().and_then(|jwt| jwt.session_id(crate::jwt::access(h)))
+    } else {
+        app.auth.session_id(auth::session_cookie(h), user.id).await.map_err(|error| Error::internal(error))?
+    };
+    let session = session.ok_or_else(|| Error::new(StatusCode::UNAUTHORIZED, "SIGN_IN_REQUIRED", "Sign in with a session; API keys do not manage sessions"))?;
+    Ok((user, session))
+}
+impl App {
+    /// A route's `reauth`: the session must have proved its password within `seconds`.
+    pub(super) async fn require_recent_auth(&self, h: &HeaderMap, seconds: u32) -> Result<()> {
+        let (user, session) = own_session(self, h).await?;
+        let age = crate::sessions::auth_age(&self.pool, user.id, session).await.map_err(|error| Error::internal(error))?;
+        if age.is_some_and(|age| age >= 0.0 && age <= f64::from(seconds)) {
+            return Ok(());
+        }
+        Err(Error::new(StatusCode::UNAUTHORIZED, "REAUTH_REQUIRED", "Confirm your password with POST /_brain/auth/reauth, then retry"))
+    }
+}
+async fn list_sessions(State(app): State<App>, h: HeaderMap) -> Result<Json<Value>> {
+    let (user, session) = own_session(&app, &h).await?;
+    let sessions = crate::sessions::list(&app.pool, user.id, session).await.map_err(|error| Error::internal(error))?;
+    Ok(Json(json!({"sessions":sessions})))
+}
+async fn revoke_session(State(app): State<App>, h: HeaderMap, Path(id): Path<uuid::Uuid>) -> Result<Json<Value>> {
+    let (user, session) = own_session(&app, &h).await?;
+    if id == session {
+        return Err(Error::new(StatusCode::CONFLICT, "CURRENT_SESSION", "This is the session making the request; end it with POST /_brain/auth/logout"));
+    }
+    // The same answer for an unknown id and another account's: this route never confirms a session exists.
+    if !crate::sessions::revoke_one(&app.pool, user.id, id).await.map_err(|error| Error::internal(error))? {
+        return Err(Error::missing());
+    }
+    Ok(Json(json!({"ok":true})))
+}
+async fn revoke_other_sessions(State(app): State<App>, h: HeaderMap) -> Result<Json<Value>> {
+    let (user, session) = own_session(&app, &h).await?;
+    let revoked = crate::sessions::revoke_others(&app.pool, user.id, session).await.map_err(|error| Error::internal(error))?;
+    Ok(Json(json!({"ok":true,"revoked":revoked})))
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Reauth {
+    password: String,
+}
+async fn reauthenticate(State(app): State<App>, client: Option<axum::Extension<ClientIp>>, h: HeaderMap, Strict(body): Strict<Reauth>) -> Result<Json<Value>> {
+    let (user, session) = own_session(&app, &h).await?;
+    let proved = app.auth.reauthenticate(&user, session, body.password, client.map(|c| c.0.0)).await.map_err(|failure| match failure {
+        auth::AuthFailure::Input(_) => login_failed(),
+        auth::AuthFailure::Unavailable(_) => auth_unavailable("LOGIN_UNAVAILABLE"),
+    })?;
+    if !proved {
+        return Err(login_failed());
+    }
+    Ok(Json(json!({"ok":true})))
 }
 async fn me(State(app): State<App>, h: HeaderMap) -> Result<Json<Value>> {
     Ok(Json(json!({"user":app.required(&h).await?})))

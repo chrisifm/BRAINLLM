@@ -151,6 +151,9 @@ async fn serve(app: App, state: Arc<State>, route: Arc<Route>, req: Request) -> 
             Some(user)
         }
     };
+    if let Some(seconds) = route.reauth {
+        app.require_recent_auth(&parts.headers, seconds).await?;
+    }
     if let (Some(rate), Some(user)) = (route.rate.as_ref().filter(|r| r.key == RateKey::User), user.as_ref()) {
         if let Err(retry) = limit(&app, &state, &route.name, &user.id.to_string(), rate).await? {
             return Ok(rate_limited(retry));

@@ -57,7 +57,7 @@ async fn actor(pool: &sqlx::PgPool, role: &str) -> Actor {
     Actor { id, token }
 }
 fn roles() -> brain_backend::auth_flows::RolesConfig {
-    brain_backend::auth_flows::RolesConfig { roles: ["admin", "user"].map(String::from).to_vec(), signup_role: "user".into() }
+    brain_backend::auth_flows::RolesConfig { roles: ["admin", "user"].map(String::from).to_vec(), signup_role: "user".into(), ..Default::default() }
 }
 fn config(resources: Vec<Resource>) -> brain_backend::Config {
     brain_backend::Config {
