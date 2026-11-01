@@ -106,8 +106,62 @@ pub fn compile_hash(
     Ok(out)
 }
 
-/// FNV-1a 64 of a file's bytes (`None` = unreadable/missing).
+/// Identity of a path on disk: an in-place edit changes the change time even when length and mtime are restored.
+#[derive(PartialEq, Eq, Clone)]
+struct Stamp {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    changed: (i64, i64),
+    inode: u64,
+}
+
+fn stamp(p: &Path) -> Option<Stamp> {
+    let meta = std::fs::symlink_metadata(p).ok()?;
+    #[cfg(unix)]
+    let (changed, inode) = {
+        use std::os::unix::fs::MetadataExt;
+        ((meta.ctime(), meta.ctime_nsec()), meta.ino())
+    };
+    #[cfg(not(unix))]
+    let (changed, inode) = ((0, 0), 0);
+    Some(Stamp { len: meta.len(), modified: meta.modified().ok(), changed, inode })
+}
+
+const HASH_FACT: &str = "dep-hash:";
+
+/// `file_hash` once per file revision within a build: thousands of cache entries share the same tokens and directory
+/// listings, and rereading them for each entry made validation quadratic in the number of components.
 fn file_hash(p: &Path) -> Option<String> {
+    let key = format!("{HASH_FACT}{}", p.display());
+    let now = stamp(p);
+    let reused = std::cell::Cell::new(true);
+    let fact = brain_metrics::memo(
+        key,
+        |known: &(Option<Stamp>, Option<String>)| known.0.is_some() && known.0 == now,
+        || {
+            reused.set(false);
+            (now.clone(), hash_from_disk(p))
+        },
+    );
+    brain_metrics::count(if reused.get() { brain_metrics::Counter::DependencyHashesReused } else { brain_metrics::Counter::DependencyHashes }, 1);
+    fact.1.clone()
+}
+
+/// Final snapshot validation of a build: the dependency files whose content differs from the revision the build used.
+pub(crate) fn changed_during_build() -> Vec<String> {
+    let mut changed: Vec<String> = brain_metrics::facts::<(Option<Stamp>, Option<String>)>(HASH_FACT)
+        .into_iter()
+        .filter_map(|(key, fact)| {
+            let path = key.strip_prefix(HASH_FACT)?;
+            (hash_from_disk(Path::new(path)) != fact.1).then(|| path.to_string())
+        })
+        .collect();
+    changed.sort();
+    changed
+}
+
+/// FNV-1a 64 of a file's bytes (`None` = unreadable/missing).
+fn hash_from_disk(p: &Path) -> Option<String> {
     let meta = match std::fs::symlink_metadata(p) {
         Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some("missing".into()),
@@ -414,6 +468,33 @@ mod tests {
         );
         assert!(compile(src, p, Path::new("/nonexistent"), true).is_err());
     }
+    #[test]
+    fn dependency_hashes_are_shared_until_the_file_changes() {
+        let dir = std::env::temp_dir().join(format!("brain-dep-hash-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("tokens.cssbrain");
+        std::fs::write(&file, "aaaa").unwrap();
+        let build = brain_metrics::Build::new();
+        let _observed = brain_metrics::attach(&build);
+        let first = file_hash(&file);
+        assert_eq!(file_hash(&file), first);
+        assert_eq!(build.get(brain_metrics::Counter::DependencyHashes), 1);
+        assert_eq!(build.get(brain_metrics::Counter::DependencyHashesReused), 1);
+        assert!(changed_during_build().is_empty());
+        // same length: only the stamp reveals the edit
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        std::fs::write(&file, "bbbb").unwrap();
+        assert_eq!(changed_during_build(), [file.display().to_string()], "the final validation sees the edit");
+        assert_ne!(file_hash(&file), first, "an edit during the build is a new revision");
+        // absent files: creating one invalidates
+        let absent = dir.join("absent.brain");
+        assert_eq!(file_hash(&absent).as_deref(), Some("missing"));
+        std::fs::write(&absent, "x").unwrap();
+        assert_ne!(file_hash(&absent).as_deref(), Some("missing"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn cache_budget_evicts_only_complete_owned_entries() {
         let dir = std::env::temp_dir().join(format!("brain-cache-budget-{}", std::process::id()));

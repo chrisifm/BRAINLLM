@@ -1,5 +1,5 @@
 //! Runtime export liveness is a graph fixed point, not a HashMap iteration side effect.
-use crate::{Node, Optimization, dynamic_import_of, feedback};
+use crate::{Node, Optimization, feedback};
 use std::collections::{HashMap, HashSet};
 
 pub(super) fn apply(
@@ -18,6 +18,11 @@ pub(super) fn apply(
         })
         .collect();
     siblings.sort();
+    // Read once per source revision; a shake that changes a module refreshes only its summary. A module that does not
+    // lex keeps its error: it pins dynamic liveness and stops named liveness, as reading it directly would.
+    let mut summaries: HashMap<Node, Result<brain_min::ModuleImports, String>> = sources.iter().map(|(node, source)| (node.clone(), brain_min::module_imports(source))).collect();
+    // A pruning already proven to change nothing is not repeated: (module, its source, sorted live exports).
+    let mut stable: HashSet<(Node, String, Vec<String>)> = HashSet::new();
     // Each pass only removes proven unused exports/bindings. A dependency chain can
     // propagate liveness changes across at most N runtime modules; one pass proves stability.
     let bound = siblings.len() + usize::from(sources.contains_key(&core)) + 1;
@@ -40,29 +45,25 @@ pub(super) fn apply(
             let matches =
                 |spec: &str| spec.ends_with(&format!("/{name}")) || spec == format!("./{name}");
             // Namespace properties reached through dynamic import are not inferred.
-            if sources
-                .iter()
-                .any(|(other, source)| *other != node && dynamic_import_of(source, &matches))
-            {
+            if summaries.iter().any(|(other, imports)| {
+                *other != node && imports.as_ref().map_or(true, |imports| imports.dynamic.iter().any(|spec| matches(spec)))
+            }) {
                 continue;
             }
-            for (other, source) in sources.iter() {
+            for (other, imports) in &summaries {
                 if *other != node {
-                    keep.extend(brain_min::imported_names(source, &matches)?);
+                    keep.extend(imports.as_ref().map_err(Clone::clone)?.names_from(&matches));
                 }
             }
-            changed |= shake(sources, node, keep, reports)?;
+            changed |= shake(sources, &mut summaries, &mut stable, node, keep, reports)?;
         }
         // Recompute core roots AFTER sibling pruning: removed functions must not
         // permanently pin their former imports. Mount/hydrate are generated inline.
         if sources.contains_key(&core) {
             let mut keep: HashSet<String> = ["m".to_string(), "h".to_string()].into();
-            for (other, source) in sources.iter() {
+            for (other, imports) in &summaries {
                 if *other != core {
-                    keep.extend(brain_min::imported_names(
-                        source,
-                        &brain_min::is_runtime_spec,
-                    )?);
+                    keep.extend(imports.as_ref().map_err(Clone::clone)?.names_from(&brain_min::is_runtime_spec));
                 }
             }
             if let Some(names) = server_roots.get("brain.js") {
@@ -75,7 +76,7 @@ pub(super) fn apply(
                 }));
             }
             if !keep.contains("*") {
-                changed |= shake(sources, core.clone(), keep, reports)?;
+                changed |= shake(sources, &mut summaries, &mut stable, core.clone(), keep, reports)?;
             }
         }
         if !changed {
@@ -86,13 +87,22 @@ pub(super) fn apply(
 }
 fn shake(
     sources: &mut HashMap<Node, String>,
+    summaries: &mut HashMap<Node, Result<brain_min::ModuleImports, String>>,
+    stable: &mut HashSet<(Node, String, Vec<String>)>,
     node: Node,
     keep: HashSet<String>,
     reports: &mut Vec<Optimization>,
 ) -> Result<bool, String> {
     let original = &sources[&node];
+    let mut live: Vec<String> = keep.iter().cloned().collect();
+    live.sort();
+    let proof = (node.clone(), original.clone(), live);
+    if stable.contains(&proof) {
+        return Ok(false);
+    }
     let (next, detail) = feedback::shake(original, &keep)?;
     if next == *original {
+        stable.insert(proof);
         return Ok(false);
     }
     let Node::Runtime(name) = &node else {
@@ -104,6 +114,7 @@ fn shake(
         stage: "runtime-tree-shake",
         detail,
     });
+    summaries.insert(node.clone(), brain_min::module_imports(&next));
     sources.insert(node, next);
     Ok(true)
 }
@@ -153,6 +164,21 @@ mod tests {
             apply(&mut fresh, &HashMap::new(), &mut Vec::new()).unwrap();
             assert_eq!(fresh, first);
         }
+    }
+    #[test]
+    fn a_wide_graph_is_read_once_per_source_revision() {
+        let mut sources = fixture(false);
+        for n in 0..200 {
+            sources.insert(Node::File(format!("views/v{n}.brain")), format!("import{{formStatic}}from'/@brain/brain-form.js';export default()=>formStatic({n});"));
+        }
+        let modules = sources.len() as u64;
+        let build = brain_metrics::Build::new();
+        let observed = brain_metrics::attach(&build);
+        apply(&mut sources, &HashMap::new(), &mut Vec::new()).unwrap();
+        drop(observed);
+        let lexes = build.get(brain_metrics::Counter::JsLexes);
+        // one summary per module, plus what pruning itself reads for the few runtime modules
+        assert!(lexes < modules + 40, "{lexes} lexes for {modules} modules");
     }
     #[test]
     fn server_roots_dynamic_namespaces_and_module_evaluation_are_preserved() {

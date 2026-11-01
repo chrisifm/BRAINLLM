@@ -1,6 +1,8 @@
 //! Per-build observations. A build owns one `Build`; each thread working for it attaches, so concurrent builds in one
 //! process never mix their numbers. Storage is fixed-size, and nothing here reaches generated files or build hashes.
+use std::any::Any;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime};
@@ -60,6 +62,7 @@ pub struct Build {
     counters: Vec<AtomicU64>,
     active: Mutex<(usize, Instant, u64)>,
     current: AtomicUsize,
+    facts: Mutex<HashMap<String, Arc<dyn Any + Send + Sync>>>,
 }
 
 /// One closed stage. `wall_ms` of a stage that never ran is zero.
@@ -116,6 +119,7 @@ impl Build {
             counters: COUNTERS.iter().map(|_| AtomicU64::new(0)).collect(),
             active: Mutex::new((OTHER, now, thread_cpu_ns())),
             current: AtomicUsize::new(OTHER),
+            facts: Mutex::default(),
         })
     }
 
@@ -209,6 +213,26 @@ pub fn phase(name: &str, items: usize) {
     })
 }
 
+/// A fact computed once per build. `fresh` revalidates a stored value (its file stamp, say) on every use, so an edit
+/// during the build recomputes it. Outside a build nothing is stored: the dev server always sees the disk.
+pub fn memo<V: Send + Sync + 'static>(key: String, fresh: impl Fn(&V) -> bool, compute: impl FnOnce() -> V) -> Arc<V> {
+    let Some(build) = current() else { return Arc::new(compute()) };
+    let known = build.facts.lock().unwrap_or_else(|e| e.into_inner()).get(&key).cloned();
+    if let Some(value) = known.and_then(|v| v.downcast::<V>().ok()).filter(|v| fresh(v)) {
+        return value;
+    }
+    let value = Arc::new(compute());
+    build.facts.lock().unwrap_or_else(|e| e.into_inner()).insert(key, value.clone());
+    value
+}
+
+/// Every stored fact of type `V` under `prefix`, for a final validation against the disk.
+pub fn facts<V: Send + Sync + 'static>(prefix: &str) -> Vec<(String, Arc<V>)> {
+    let Some(build) = current() else { return Vec::new() };
+    let all = build.facts.lock().unwrap_or_else(|e| e.into_inner());
+    all.iter().filter(|(k, _)| k.starts_with(prefix)).filter_map(|(k, v)| v.clone().downcast::<V>().ok().map(|v| (k.clone(), v))).collect()
+}
+
 /// A worker thread of the running stage: attaches and credits its CPU to that stage when dropped.
 pub struct Worker {
     _attached: Attached,
@@ -293,6 +317,23 @@ mod tests {
         }
         count(Counter::Parses, 1);
         assert_eq!(outer.get(Counter::Parses), 1);
+    }
+
+    #[test]
+    fn memo_is_per_build_and_revalidated() {
+        let calls = std::cell::Cell::new(0);
+        let get = |ok: bool| *memo("k".into(), |_: &i32| ok, || { calls.set(calls.get() + 1); 7 });
+        get(true);
+        get(true);
+        assert_eq!(calls.get(), 2, "outside a build nothing is stored");
+        let b = Build::new();
+        let _a = attach(&b);
+        get(true);
+        get(true);
+        assert_eq!(calls.get(), 3);
+        get(false);
+        assert_eq!(calls.get(), 4, "a stale fact is recomputed");
+        assert_eq!(facts::<i32>("k").len(), 1);
     }
 
     #[test]

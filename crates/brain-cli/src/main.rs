@@ -1142,6 +1142,10 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
         let skipped = if live.is_empty() { String::new() } else { format!("; the sitemap() routes {} are not listed either", live.join(", ")) };
         rep.warnings.push(format!("B0736 .brain_env:1:1 the {env_name} site URL {p} is {}, so the build publishes no sitemap.xml, no robots.txt Sitemap line and no absolute URL{skipped}; fix: set PUBLIC_SITE_URL in the [{env_name}] section of .brain_env (or `brain build --site https://your-domain`)", env::no_site_kind(p)));
     }
+    let edited = compiler::changed_during_build();
+    if !edited.is_empty() {
+        rep.warnings.push(format!("{} changed while this build ran, so the output may mix revisions; fix: build again", edited.join(", ")));
+    }
     rep.metrics = metrics.finish();
     let budget_error = budget::enforce(root, &rep.report).err();
     if budget_error.is_none() {
