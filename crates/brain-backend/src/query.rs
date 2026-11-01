@@ -441,6 +441,17 @@ pub(crate) fn indexes(r: &Resource) -> Vec<(String, String)> {
     out.extend(opposite);
     out.into_iter().collect()
 }
+/// The scalar expressions declared filters compare, spelled as their indexes and predicates spell them, so the planner
+/// matches extended statistics to them.
+pub(crate) fn statistics_expressions(r: &Resource) -> Vec<String> {
+    let mut out = BTreeSet::new();
+    for field in r.query.filter.keys().filter(|k| !k.contains('.')) {
+        if let Some(k) = kind(r, field).filter(|k| !matches!(k, Kind::Stamp | Kind::Ref | Kind::List | Kind::Geo)) {
+            out.insert(expr(k, field));
+        }
+    }
+    out.into_iter().collect()
+}
 pub(crate) async fn install_indexes(tx: &mut sqlx::Transaction<'_, Postgres>, r: &Resource) -> Result<(), String> {
     // A filter or sort that is gone leaves an index every write still pays for; only generated names are touched.
     let mut declared: Vec<String> = indexes(r).into_iter().map(|(name, _)| name).collect();

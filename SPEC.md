@@ -304,7 +304,7 @@ administrator guard and missing project DS controls. These files and the generat
 validated file leases and compare-and-swap revisions. Existing files are never overwritten; without this flag no
 routes or controls are created. Native backend policy remains authoritative. Review policy, migrate explicitly,
 then build and doctor the application. The app's default 30 KiB route budget remains unchanged.
-Set `DATABASE_URL`; explicitly `brain backend migrate`, then `brain backend serve` (loopback REST at `/api/<resource>`).
+Set `DATABASE_URL`; explicitly `brain backend migrate`, then `brain backend serve` (loopback REST at `/api/<resource>`). After a bulk import, `brain data prepare --apply`.
 An error response carries a `rid`; `brain backend logs <rid>` returns its cause (SQLSTATE, resource, operation, code location).
 `PATCH /api/<resource>/<uuid>` changes only the sent fields (`null` clears an optional one); see `docs/backend/patch.md`.
 `server/operations/<name>.jsbrain` declares typed input and steps that `POST /_brain/operations/<name>` runs in one transaction (all or nothing); see `docs/backend/transactions.md`.

@@ -818,9 +818,12 @@ pub fn run(args: &[String]) -> Result<(), String> {
     if operation == "keys" {
         return crate::api_key_config::run(&root, &args[1..], stated_database(args, &root, &environment)?);
     }
+    if operation == "data" && !matches!(args.get(1).map(String::as_str), Some("prepare" | "maintain")) {
+        return Err("usage: brain data prepare|maintain [--apply] [--resource <name>] [--env <environment>]".into());
+    }
     if !matches!(
         operation,
-        "schema" | "migrate" | "approve-contract" | "serve" | "bootstrap-admin" | "rename-role" | "users" | "import"
+        "schema" | "migrate" | "approve-contract" | "serve" | "bootstrap-admin" | "rename-role" | "users" | "import" | "data"
     ) {
         return Err("usage: brain backend capabilities|schema|migrate|approve-contract [--accept <resource>] [--apply]|import users|<resource> --file <rows.jsonl> [--apply]|serve|bootstrap-admin|rename-role --from <role> --to <role> [--apply]|logs [rid]|users|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182] [--with-workers]".into());
     }
@@ -910,6 +913,21 @@ pub fn run(args: &[String]) -> Result<(), String> {
             let problems:Vec<_>=outcome.problems.iter().map(|(line,reason)|json!({"line":line,"reason":reason})).collect();
             println!("{}",json!({"schemaVersion":1,"ok":problems.is_empty(),"rows":outcome.rows,"applied":outcome.applied,"problems":problems,"moreProblems":outcome.more_problems}));
             return if problems.is_empty() {Ok(())} else {Err(format!("B0798: {file} was not imported: {} rows have problems; fix: correct them and run the import again",problems.len()+outcome.more_problems))};
+        }
+        if operation=="data" {
+            let mode=match args.get(1).map(String::as_str) {
+                Some("prepare")=>brain_backend::maintenance::Mode::Prepare,
+                Some("maintain")=>brain_backend::maintenance::Mode::Maintain,
+                _=>brain_backend::maintenance::Mode::Maintain,
+            };
+            let chosen:Vec<_>=match crate::flag(args,"--resource") {
+                Some(name)=>vec![resources.iter().find(|r|r.name==name).cloned().ok_or_else(||format!("no resource is named `{name}`; fix: use a resource from server/resources"))?],
+                None=>resources.clone(),
+            };
+            let report=brain_backend::maintenance::run_all(&pool,&chosen,mode,args.iter().any(|a|a=="--apply")).await?;
+            pool.close().await;
+            println!("{report}");
+            return Ok(());
         }
         if operation=="approve-contract" {
             let reviewed=brain_backend::contract_review::review(&pool,&resources).await?;

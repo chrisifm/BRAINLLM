@@ -140,6 +140,7 @@ granular:
   brain media setup-gcs|list|cleanup  private media provisioning/library/owned cleanup
   brain e2e probe|run                 opt-in Claude/Codex Viewer scenarios plus AX/heap gates
   brain backend <serve|migrate|approve-contract|capabilities|schema|bootstrap-admin>  experimental Rust/Postgres resource API (loopback); serve --with-workers also runs the queues
+  brain data prepare|maintain [--apply] after an import or periodically: statistics on declared filters, lz4 storage, vacuum, warm-up and a buffers-per-row gate; prepare also rewrites stored rows
   brain analytics <report|funnel|segment>  usage reports over the behavior events the backend stores
   brain risk <name> [--measure]       what changing a symbol can break, with its evidence
   brain mcp [--profile full|minimal|backend]  the same commands as MCP tools over stdio
@@ -263,6 +264,7 @@ fn main() -> ExitCode {
         Some("design") | Some("manifest") => project_metadata(&args),
         Some("upgrade") => return cmd_upgrade(&args[1..]),
         Some("backend") => backend::run(&args[1..]),
+        Some("data") => backend::run(&args),
         Some("jobs") => backend::jobs(&args[1..]),
         Some("analytics") => analytics::run(&args[1..]),
         Some("media") => backend::media(&args[1..]),

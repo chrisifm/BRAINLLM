@@ -43,3 +43,15 @@ even when the old password is shorter than the signup minimum.
 `created_at`. Declared constraints and uniqueness still hold, so a duplicate refuses the file. State machines and
 before-hooks do not run and no webhook, socket event or after-hook fires: history is being restored, nothing has just
 happened. An old numeric id belongs in a declared field, see [ids](ids.md).
+
+## After the import
+
+`brain data prepare` reports what the imported tables need and measures the list page; add `--apply` to do it:
+
+- statistics on the declared filters, so the planner stops guessing how they combine;
+- lz4 storage, rewriting stored documents in batches with triggers off, so `updated_at`, slugs, search and the audit log
+  do not move (needs a superuser; otherwise new writes use lz4 and the report says why old rows stayed);
+- `VACUUM (ANALYZE)`, a warm-up of at most 500 rows or 5 s per resource, and a warning above 5 buffers per row on a list page.
+
+`brain data maintain` does the same without rewriting rows. Neither runs `VACUUM FULL`, `REINDEX` or `pg_prewarm`.
+Both print JSON with `schemaVersion`, accept `--resource <name>` and `--env <environment>`, and exit non-zero only on failure.

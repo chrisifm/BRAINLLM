@@ -44,6 +44,7 @@ pub mod upload;
 pub mod files;
 pub mod import;
 pub mod platform;
+pub mod maintenance;
 pub mod visibility;
 pub mod webhooks;
 

@@ -80,3 +80,15 @@ fn a_unique_value_any_user_can_claim_warns_until_who_may_write_it_is_stated() {
     assert!(!text(&brain(&dir, &["check"])).contains("B0794"), "only admins write it");
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn brain_data_names_its_usage_without_needing_a_database() {
+    let tmp = std::env::temp_dir().join(format!("brain-data-usage-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    assert!(brain(&tmp, &["new", "app"]).status.success());
+    let run = brain(&tmp.join("app"), &["data", "vacuum"]);
+    assert!(!run.status.success());
+    assert!(text(&run).contains("brain data prepare|maintain"), "{}", text(&run));
+    let _ = std::fs::remove_dir_all(&tmp);
+}

@@ -608,3 +608,84 @@ async fn one_record_per_owner_holds_on_every_write_and_with_a_role_exception() {
     let refused = brain_backend::db::migrate_approving(&a.pool, &over, &["slots".to_string()]).await.unwrap_err();
     assert!(refused.contains("more than one record"), "{refused}");
 }
+
+#[tokio::test]
+#[ignore]
+async fn preparing_data_rewrites_documents_without_firing_triggers_and_is_repeatable() {
+    use brain_backend::maintenance::{Mode, run_all};
+    let code = Field { unique: true, ..field("str") };
+    let items = resource("items", vec![("code", code), ("state", field("str")), ("tier", field("str")), ("body", field("str"))], json!(["public"]), json!({"filter": {"state": ["eq"], "tier": ["eq"]}}));
+    let a = api("brain_shape_prepare", vec![items.clone()]).await;
+    let (member, _) = a.user("member@example.test").await;
+    // pglz documents, as an earlier release or an import would have stored them.
+    sqlx::query("ALTER TABLE _brain_res_items ALTER COLUMN data SET COMPRESSION pglz").execute(&a.pool).await.unwrap();
+    for n in 0..60 {
+        let body = format!("{n} ").repeat(4_000);
+        sqlx::query("INSERT INTO _brain_res_items(id,owner,data,updated_at) VALUES($1,$2,$3,'2020-01-01')")
+            .bind(uuid::Uuid::new_v4())
+            .bind(member)
+            .bind(json!({"code": format!("c{n}"), "state": "open", "tier": "a", "body": body}))
+            .execute(&a.pool)
+            .await
+            .unwrap();
+    }
+    let methods = || sqlx::query_scalar::<_, Option<String>>("SELECT DISTINCT pg_column_compression(data) FROM _brain_res_items").fetch_all(&a.pool);
+    let stamp = || sqlx::query_scalar::<_, Option<String>>("SELECT md5(string_agg(id::text||updated_at::text||data::text,'' ORDER BY id)) FROM _brain_res_items").fetch_one(&a.pool);
+    let statistics = || sqlx::query_scalar::<_, i64>("SELECT count(*) FROM pg_statistic_ext WHERE stxrelid='_brain_res_items'::regclass").fetch_one(&a.pool);
+    let before = stamp().await.unwrap();
+    assert_eq!(methods().await.unwrap(), [Some("pglz".to_string())]);
+
+    // Without --apply nothing changes, and it says what it would do.
+    let plan = run_all(&a.pool, std::slice::from_ref(&items), Mode::Prepare, false).await.unwrap();
+    assert_eq!(plan["applied"], false, "{plan}");
+    assert_eq!(plan["resources"][0]["compression"]["pglzRows"], 60, "{plan}");
+    assert_eq!(plan["resources"][0]["statistics"]["missing"], true, "{plan}");
+    assert_eq!(statistics().await.unwrap(), 0);
+    assert_eq!(methods().await.unwrap(), [Some("pglz".to_string())]);
+
+    // `maintain` does not rewrite rows; `prepare` does.
+    let kept = run_all(&a.pool, std::slice::from_ref(&items), Mode::Maintain, true).await.unwrap();
+    assert_eq!(kept["resources"][0]["compression"]["rewritten"], 0, "{kept}");
+    assert_eq!(statistics().await.unwrap(), 1);
+    let done = run_all(&a.pool, std::slice::from_ref(&items), Mode::Prepare, true).await.unwrap();
+    let compression = &done["resources"][0]["compression"];
+    if compression.get("skipped").is_none() {
+        assert_eq!(compression["rewritten"], 60, "{done}");
+        assert_eq!(methods().await.unwrap(), [Some("lz4".to_string())], "{done}");
+    }
+    assert_eq!(stamp().await.unwrap(), before, "no value or updated_at moved: {done}");
+    assert_eq!(done["resources"][0]["warmed"], true, "{done}");
+    let gate = &done["resources"][0]["gate"];
+    assert_eq!(gate["rows"], 50, "{done}");
+    assert!(gate["buffers"].as_f64().unwrap() > 0.0, "{done}");
+
+    // Repeating it finds nothing to do, and a dropped filter retires its statistics.
+    let again = run_all(&a.pool, std::slice::from_ref(&items), Mode::Prepare, true).await.unwrap();
+    assert_eq!(again["resources"][0]["compression"]["rewritten"], 0, "{again}");
+    assert_eq!(statistics().await.unwrap(), 1);
+    let mut plain = items.clone();
+    plain.query = Default::default();
+    run_all(&a.pool, &[plain], Mode::Maintain, true).await.unwrap();
+    assert_eq!(statistics().await.unwrap(), 0);
+}
+
+#[tokio::test]
+#[ignore]
+async fn the_buffer_gate_warns_on_a_list_that_opens_large_documents() {
+    use brain_backend::maintenance::{Mode, run_all};
+    let items = resource("items", vec![("body", field("str"))], json!(["public"]), json!({}));
+    let a = api("brain_shape_gate", vec![items.clone()]).await;
+    let (member, _) = a.user("member@example.test").await;
+    // Random hex barely compresses, so each document spans many TOAST chunks.
+    for _ in 0..60 {
+        sqlx::query("INSERT INTO _brain_res_items(id,owner,data) SELECT $1,$2,jsonb_build_object('body',(SELECT string_agg(md5(random()::text),'') FROM generate_series(1,2000)))")
+            .bind(uuid::Uuid::new_v4())
+            .bind(member)
+            .execute(&a.pool)
+            .await
+            .unwrap();
+    }
+    let report = run_all(&a.pool, &[items], Mode::Maintain, false).await.unwrap();
+    assert_eq!(report["resources"][0]["gate"]["ok"], false, "{report}");
+    assert!(report["warnings"][0].as_str().unwrap().contains("buffers per row"), "{report}");
+}
