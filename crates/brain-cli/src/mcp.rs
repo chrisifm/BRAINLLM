@@ -1099,7 +1099,8 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
         input_schema: schema([("site", "string", "absolute origin for the sitemap, e.g. https://example.dev")], &[]),
         output_schema: out([("files", "array"), ("warnings", "array"), ("ledger", "array"), ("metrics", "object")]),
         run: Box::new(|a| {
-            let r = crate::run_build(&crate::app_root()?, arg(a, "site"))?;
+            let root = crate::app_root()?;
+            let r = crate::run_build(&root, arg(a, "site")).map_err(|e| e.json(Some(&root)))?;
             Ok(crate::build_json(&r).stringify())
         }),
     });

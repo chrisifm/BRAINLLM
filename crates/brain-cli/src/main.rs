@@ -12,6 +12,8 @@ mod brand;
 mod edit;
 mod budget;
 mod build_assessment;
+mod build_error;
+use build_error::BuildError;
 #[cfg(unix)]
 mod preview;
 mod impact;
@@ -396,7 +398,7 @@ fn main() -> ExitCode {
             }
             Ok(())
         }),
-        Some("build") => cmd_build(&args[1..]),
+        Some("build") => return build_exit(&args[1..]),
         Some("-h") | Some("--help") | Some("help") | None => {
             print!("{USAGE}");
             Ok(())
@@ -1073,18 +1075,18 @@ pub(crate) struct BuildReport {
 }
 
 /// `brain build` (today: sitemap.xml + robots.txt; bundling, minification and prerender arrive with #9/#26).
-pub(crate) fn run_build(root: &Path, site: Option<String>) -> Result<BuildReport, String> {
+pub(crate) fn run_build(root: &Path, site: Option<String>) -> Result<BuildReport, BuildError> {
     run_build_with(root, site, "production", None)
 }
 
 /// `run_build` reporting its phases to the terminal view (`brain build`; MCP and tests pass None).
-pub(crate) fn run_build_with(root: &Path, site: Option<String>, env_name: &str, progress: Option<&term::Progress>) -> Result<BuildReport, String> {
-    run_build_assessed_with(root, site, env_name, progress)?.into_report()
+pub(crate) fn run_build_with(root: &Path, site: Option<String>, env_name: &str, progress: Option<&term::Progress>) -> Result<BuildReport, BuildError> {
+    Ok(run_build_assessed_with(root, site, env_name, progress)?.into_report()?)
 }
 
 // An assessment retains fresh output and measured payloads when only the budget fails. Normal builds still
 // require into_report(); doctor can audit that exact output while keeping its build gate red.
-fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, progress: Option<&term::Progress>) -> Result<build_assessment::Assessment, String> {
+fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, progress: Option<&term::Progress>) -> Result<build_assessment::Assessment, BuildError> {
     let metrics = brain_metrics::Build::new();
     let _observed = brain_metrics::attach(&metrics);
     // environment (§36): PUBLIC_* become constants; a key with no value in it stops the build (B0720)
@@ -1093,7 +1095,8 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
     let mut empty: Vec<compiler::Diag> = env::check(root).into_iter().filter(|d| !d.is_warning()).collect();
     empty.extend(env::empty(root, env_name));
     if !empty.is_empty() {
-        return Err(empty.iter().map(|d| format!("{} {}:{}:{} {}; fix: {}", d.code, d.file, d.line, d.col, d.msg, d.fix)).collect::<Vec<_>>().join("\n"));
+        let message = empty.iter().map(build_error::line).collect::<Vec<_>>().join("\n");
+        return Err(BuildError { message, phase: "env", diagnostics: empty });
     }
     // the site URL: --site > PUBLIC_SITE_URL of the environment > brain.json "site" (legacy)
     let explicit = site.is_some();
@@ -1104,7 +1107,7 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
     if let Some(s) = &site
         && !(s.starts_with("https://") || s.starts_with("http://"))
     {
-        return Err(format!("`--site {s}` must be absolute; fix: `--site https://{s}`"));
+        return Err(format!("`--site {s}` must be absolute; fix: `--site https://{s}`").into());
     }
     // B0736: a placeholder origin from .brain_env/brain.json is "no site" outside development (an explicit --site is
     // the author's intent): no sitemap, no robots Sitemap line, no absolute URL pointing at it
@@ -1118,13 +1121,13 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
     }
     brain_metrics::phase("check", 0);
     let (_, diags, _) = run_check_base(Some(root.to_path_buf()))?;
-    let line = |d: &compiler::Diag| format!("{} {}:{}:{} {}; fix: {}", d.code, d.file, d.line, d.col, d.msg, d.fix);
-    let errors: Vec<String> = diags.iter().filter(|d| !d.is_warning()).map(line).collect();
+    let failed = diags.iter().filter(|d| !d.is_warning()).count();
     let warns = diags.iter().filter(|d| d.level == brain_parse::Severity::Warning).count();
-    if !errors.is_empty() {
-        return Err(format!("{}\nbuild stopped: {} error(s), {warns} warning(s); fix them (`brain check` lists the same) and build again", errors.join("\n"), errors.len()));
+    if failed > 0 {
+        let errors: Vec<compiler::Diag> = diags.into_iter().filter(|d| !d.is_warning()).collect();
+        return Err(BuildError::with("check", errors, &format!("build stopped: {failed} error(s), {warns} warning(s); fix them (`brain check` lists the same) and build again")));
     }
-    rep.warnings.extend(diags.iter().filter(|d| d.level == brain_parse::Severity::Warning).map(line));
+    rep.warnings.extend(diags.iter().filter(|d| d.level == brain_parse::Severity::Warning).map(build_error::line));
     let dist = root.join("dist");
     std::fs::create_dir_all(&dist).map_err(|e| e.to_string())?;
     // robots.txt, sitemap.xml, llms.txt, manifest and the head rewrite come from brain-seo's finish (inside bundle)
@@ -1149,7 +1152,7 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
     rep.metrics = metrics.finish();
     let budget_error = budget::enforce(root, &rep.report).err();
     if budget_error.is_none() {
-        let feedback:serde_json::Value=serde_json::from_str(&build_json(&rep).stringify()).map_err(|_|"build feedback serialization failed")?;
+        let feedback:serde_json::Value=serde_json::from_str(&build_json(&rep).stringify()).map_err(|_| "build feedback serialization failed".to_string())?;
         if quality::record_build(root,&feedback).is_err() {rep.warnings.push("Build succeeded but private quality feedback could not be stored; inspect brain quality refresh".into());}
     }
     Ok(build_assessment::Assessment { report: rep, budget_error })
@@ -1295,7 +1298,20 @@ fn seo_view_info(root: &Path, view: &str) -> Option<std::sync::Arc<brain_check::
 }
 
 /// Returns (route, HTML) of every built page.
-fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mut BuildReport, progress: Option<&term::Progress>) -> Result<Vec<(String, String)>, String> {
+fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mut BuildReport, progress: Option<&term::Progress>) -> Result<Vec<(String, String)>, BuildError> {
+    let failed = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    bundle_files(root, dist, site, env_name, rep, progress, failed.clone()).map_err(|message| {
+        let mut diagnostics: Vec<compiler::Diag> = std::mem::take(&mut *failed.lock().unwrap_or_else(|e| e.into_inner()));
+        if diagnostics.is_empty() {
+            return BuildError::from(message);
+        }
+        diagnostics.sort_by(|a, b| (&a.file, a.line, a.col, a.code).cmp(&(&b.file, b.line, b.col, b.code)));
+        diagnostics.dedup();
+        BuildError::with("compile", diagnostics, "build stopped: `brain check` does not reach these files; fix them and build again")
+    })
+}
+
+fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mut BuildReport, progress: Option<&term::Progress>, failed: std::sync::Arc<std::sync::Mutex<Vec<compiler::Diag>>>) -> Result<Vec<(String, String)>, String> {
     let on_phase = |phase: &str, done: usize, total: usize| {
         brain_metrics::phase(phase, total.max(done));
         if let Some(p) = progress {
@@ -1322,6 +1338,7 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
         let key = rel.to_string_lossy().replace('\\', "/");
         let len = lens.get(&key).copied().unwrap_or(4);
         let o = compiler::compile_hash(src, rel, &r2, false, len).map_err(|ds| {
+            failed.lock().unwrap_or_else(|e| e.into_inner()).extend(ds.iter().cloned());
             format!("{key} does not compile: {}; fix: run `brain check`", ds.iter().map(|d| format!("{} {}", d.code, d.msg)).collect::<Vec<_>>().join("; "))
         })?;
         Ok(brain_pack::Unit { js: o.js, css: o.css, server_js: o.server_js, server_fns: o.server_fns })
@@ -1627,11 +1644,27 @@ pub(crate) fn build_json(r: &BuildReport) -> brain_mcp::Json {
 /// `brain build --ext web|brain` (#26): the published file names; flag > `BRAIN_EXT` > brain.json `"ext"` > `web`.
 static BUILD_EXT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
-fn cmd_build(args: &[String]) -> Result<(), String> {
+/// `brain build`: a failure with `--json` reports the phase and the typed diagnostics that stopped it.
+fn build_exit(args: &[String]) -> ExitCode {
+    match cmd_build(args) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) if closed_pipe(&e.message) => ExitCode::SUCCESS,
+        Err(e) => {
+            if want_json(args) {
+                println!("{}", e.json(app_root().ok().as_deref()));
+            } else {
+                eprintln!("error: {}", e.message);
+            }
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn cmd_build(args: &[String]) -> Result<(), BuildError> {
     let identity = brand::Session::start(args, "Turning your frontend into browser-ready output.");
     if let Some(e) = flag(args, "--ext").or_else(|| std::env::var("BRAIN_EXT").ok().filter(|v| !v.is_empty())) {
         if e != "web" && e != "brain" {
-            return Err(format!("invalid --ext `{e}`; fix: `--ext web` (.html/.js/.css, the default) or `--ext brain` (.brain/.jsbrain/.cssbrain)"));
+            return Err(format!("invalid --ext `{e}`; fix: `--ext web` (.html/.js/.css, the default) or `--ext brain` (.brain/.jsbrain/.cssbrain)").into());
         }
         let _ = BUILD_EXT.set(e);
     }
@@ -2117,7 +2150,7 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
     let (build_ok, fresh_output, build) = match &app {
         Some(a) if check.get("errors") == Some(&Json::Num(0.0)) => match run_build_assessed_with(a, doctor_site.clone(), "production", None) {
             Ok(assessment) => (assessment.budget_error.is_none(), true, assessment.doctor_json()),
-            Err(e) => (false, false, Json::obj([("ok", Json::Bool(false)), ("freshOutput", Json::Bool(false)), ("error", Json::str(&e))])),
+            Err(e) => (false, false, Json::obj([("ok", Json::Bool(false)), ("freshOutput", Json::Bool(false)), ("error", Json::str(&e.message))])),
         },
         Some(_) => (true, false, Json::obj([("freshOutput", Json::Bool(false)), ("skipped", Json::str("check has errors; fix them first"))])),
         None => (true, false, Json::obj([("freshOutput", Json::Bool(false)), ("skipped", Json::str("no app"))])),
