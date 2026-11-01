@@ -169,8 +169,17 @@ fn check_declared(pages: &[(String, Response)], probes: &Probes) -> Vec<Live> {
     let mut out = Vec::new();
     let mut push = |url: &str, msg: String, fix: &str| out.push(Live { code: "B1870", level: Level::Warning, url: url.to_string(), msg, fix: fix.into() });
     let seen = pages.iter().chain(probes.assets.iter()).filter(|(_, r)| r.status == 200);
-    let (mut cookie, mut immutable) = (false, false);
+    let (mut cookie, mut immutable, mut stored, mut speculation) = (false, false, false, false);
     for (url, response) in seen {
+        let declared = values(response, "cache-control").join(",").to_ascii_lowercase();
+        if !stored && (declared.contains("private") || declared.contains("no-store")) && cdn_status(response).is_some_and(|s| s.contains("HIT")) {
+            stored = true;
+            push(url, "this response says `private` or `no-store` and the CDN served it from its cache: one visitor can receive what was meant for another".into(), "remove the cache rule that overrides the origin on this path, then purge it");
+        }
+        if !speculation && values(response, "speculation-rules").iter().any(|v| v.contains("/cdn-cgi/")) {
+            speculation = true;
+            push(url, "the CDN adds its own `Speculation-Rules`, so browsers prefetch pages the origin never offered, and a prefetch the CDN refuses shows as a 503 in the console".into(), "turn the feature off at the CDN (Cloudflare: Speed Brain), or accept those 503: visitors still get the page on a real navigation");
+        }
         if !cookie && cacheable(response) && !values(response, "set-cookie").is_empty() {
             cookie = true;
             push(url, "this response is cacheable and sets a cookie: a shared cache can hand one visitor's cookie to another".into(), "send `private` or `no-store` where a cookie is set, or drop the cookie from cached responses");
@@ -581,6 +590,16 @@ mod tests {
         assert!(with(vec![page("/a", 200, &cookie, "Page a title", None)], Probes::default()).contains("sets a cookie"));
         let private = [("cache-control", "private, max-age=600"), ("set-cookie", "s=1")];
         assert!(!with(vec![page("/a", 200, &private, "Page a title", None)], Probes::default()).contains("B1870"));
+    }
+    #[test]
+    fn a_private_page_from_the_cache_and_the_rules_a_cdn_injects_are_reported() {
+        let served = |cache: &'static str, status: &'static str| vec![page("/a", 200, &[("cache-control", cache), ("cf-cache-status", status)], "Page a title", None)];
+        assert!(with(served("private, no-store", "HIT"), Probes::default()).contains("served it from its cache"));
+        assert!(!with(served("private, no-store", "DYNAMIC"), Probes::default()).contains("served it from its cache"));
+        assert!(!with(served("public, max-age=600", "HIT"), Probes::default()).contains("served it from its cache"));
+        let rules = |value: &'static str| vec![page("/a", 200, &[("speculation-rules", value)], "Page a title", None)];
+        assert!(with(rules("\"/cdn-cgi/speculation\""), Probes::default()).contains("Speed Brain"));
+        assert!(!with(rules("\"/_b/rules.json\""), Probes::default()).contains("Speed Brain"));
     }
     #[test]
     fn immutable_needs_a_hashed_name_and_text_assets_need_an_encoding() {
