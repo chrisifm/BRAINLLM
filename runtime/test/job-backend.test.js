@@ -8,7 +8,7 @@ import {mkdtempSync, writeFileSync, readFileSync, rmSync} from 'node:fs'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {fileURLToPath} from 'node:url'
-const runner=readFileSync(fileURLToPath(new URL('../../crates/brain-cli/src/templates/job-runner.mjs',import.meta.url)),'utf8')+'\n'+readFileSync(new URL('../../crates/brain-serve/src/key-backend.js',import.meta.url),'utf8')
+const runner=readFileSync(new URL('../server/llm.mjs',import.meta.url),'utf8').replace(/^export /gm,'')+'\n'+readFileSync(fileURLToPath(new URL('../../crates/brain-cli/src/templates/job-runner.mjs',import.meta.url)),'utf8')+'\n'+readFileSync(new URL('../../crates/brain-serve/src/key-backend.js',import.meta.url),'utf8')
 const key='bk_live_0123456789ab_'+'c'.repeat(64)
 const seen=[]
 const fileId='00000000-0000-4000-8000-00000000000f'

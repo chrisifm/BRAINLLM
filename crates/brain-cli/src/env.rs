@@ -83,6 +83,7 @@ pub fn check(root: &Path) -> Vec<crate::compiler::Diag> {
             let mut diags = brain_check::env::check_file(&src, FILE);
             diags.extend(startup(root, &src));
             diags.extend(own_session(root, &src));
+            diags.extend(llm_without_key(root, &src));
             diags
         }
         Err(_) => Vec::new(),
@@ -131,6 +132,35 @@ fn own_session(root: &Path, src: &str) -> Vec<crate::compiler::Diag> {
     }
     out.sort_by(|a, b| a.file.cmp(&b.file));
     out
+}
+
+/// B0923: `ctx.llm` is used and no environment declares a provider key, so every call would answer B0921. A warning: the
+/// key may live only on the host, which is also read here.
+fn llm_without_key(root: &Path, src: &str) -> Vec<crate::compiler::Diag> {
+    let f = brain_check::env::parse(src);
+    let declared = |key: &str| f.shared.iter().chain(f.sections.iter().flat_map(|(_, e)| e.iter())).any(|e| e.key == key);
+    if brain_check::env::LLM_KEYS.iter().any(|k| declared(k) || std::env::var(k).is_ok_and(|v| !v.is_empty())) {
+        return Vec::new();
+    }
+    let mut stack = vec![root.to_path_buf()];
+    let mut files = Vec::new();
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || matches!(name.as_str(), "node_modules" | "dist" | "target") {
+                continue;
+            }
+            if path.is_dir() {
+                stack.push(path);
+            } else if (name.ends_with(".brain") || name.ends_with(".jsbrain")) && std::fs::read_to_string(&path).is_ok_and(|t| t.contains("ctx.llm")) {
+                files.push(path.strip_prefix(root).unwrap_or(&path).to_string_lossy().to_string());
+            }
+        }
+    }
+    files.sort();
+    files.into_iter().take(1).map(|file| crate::compiler::Diag::new("B0923", &file, brain_parse::Span::default(), "`ctx.llm` is used and no provider key is declared".to_string(), "add `ANTHROPIC_API_KEY=` or `OPENAI_API_KEY=` and the matching `ANTHROPIC_MODEL=` or `OPENAI_MODEL=` to .brain_env, or set them on the host".to_string())).collect()
 }
 
 /// Backend settings that cannot start, per environment the file declares, as warnings (B0760–B0764): `brain backend

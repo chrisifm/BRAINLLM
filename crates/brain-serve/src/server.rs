@@ -2160,9 +2160,12 @@ fn runtime_file(ctx: &Ctx, name: &str) -> Option<String> {
 /// production share the request handling); its `file://` URL.
 fn runtime_server(ctx: &Ctx) -> Option<String> {
     let (_, src) = ctx.runtime.iter().find(|(n, _)| n == "server/server.mjs")?;
-    if src.contains("from './native-sockets.mjs'") {
-        let (_, helper) = ctx.runtime.iter().find(|(n, _)| n == "server/native-sockets.mjs")?;
-        let helper_out = ctx.root.join(".brain/server/_rt/native-sockets.mjs");
+    for file in ["native-sockets.mjs", "llm.mjs"] {
+        if !src.contains(&format!("from './{file}'")) {
+            continue;
+        }
+        let (_, helper) = ctx.runtime.iter().find(|(n, _)| *n == format!("server/{file}"))?;
+        let helper_out = ctx.root.join(".brain/server/_rt").join(file);
         if std::fs::read_to_string(&helper_out).ok().as_deref() != Some(helper.as_str()) {
             std::fs::create_dir_all(helper_out.parent()?).ok()?;
             std::fs::write(&helper_out, helper).ok()?;

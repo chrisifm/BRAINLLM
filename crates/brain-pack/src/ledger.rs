@@ -156,7 +156,7 @@ fn initial_refs(html: &str, base: &str) -> Result<BTreeSet<String>, String> {
             }
         }
     }
-    for script in cache::inline_scripts(html) {
+    for script in cache::inline_javascript(html) {
         seeds.extend(static_refs(&script, base)?);
     }
     Ok(seeds)
@@ -203,7 +203,7 @@ pub fn page(
     let mut result = PageLedger {
         route: route.into(),
         html: sizes(file, html.as_bytes(), binary),
-        inline_js_bytes: cache::inline_scripts(html).iter().map(String::len).sum(),
+        inline_js_bytes: cache::inline_javascript(html).iter().map(String::len).sum(),
         ..Default::default()
     };
     for path in seen {

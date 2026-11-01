@@ -1608,9 +1608,8 @@ fn build_inner_with_options(
     } else {
         String::new()
     };
-    // No Speculation Rules (2026-10-29): the router intercepts every same-origin click, so a browser prerender was
-    // never activated and only doubled the request; the router's own predictive prefetch (brain-router.js `predict`)
-    // fetches the probable next pages instead.
+    // Speculation Rules cover only real document navigations (§53): the router intercepts other same-origin clicks and
+    // predicts them itself (brain-router.js `predict`), so a rule there would only double the request.
     // Prerender is deterministic given the chunks it runs, and chunk URLs are content hashes: a job whose URLs did
     // not change reuses the cached HTML (.brain/cache/pre/), so only edited views start Node.
     // The server module's content (seo/head code) is part of the key; a build-time `load` reads live data, so its
@@ -1682,6 +1681,14 @@ fn build_inner_with_options(
     zero_paths.sort();
     let zero_json = format!("[{}]",zero_paths.iter().map(|path|prerender_json(path)).collect::<Vec<_>>().join(","));
     let router_tag = if zero_json == "[]" { router_tag.replace(",fullLoad:__BRAIN_ZERO_PATHS__", "") } else { router_tag.replace("__BRAIN_ZERO_PATHS__", &zero_json) };
+    // Public static pages can be fetched ahead of a click: no server code runs for them and no guard decides on them.
+    let speculation_on = speculation_enabled(&input.root);
+    let mut public_paths: Vec<String> = plans.iter().filter(|p| !p.ssr && p.prerender && !protected(&p.view) && !p.route.starts_with('!') && !p.route.starts_with("/_") && p.route != "*" && !routes::is_dynamic(&p.route)
+        // a status page (/403, /404) is not a place anyone navigates to on purpose
+        && !(p.route.len() == 4 && p.route[1..].bytes().all(|b| b.is_ascii_digit())))
+        .map(|p|format!("{}{}",pre,if p.route=="/" {"/"} else {p.route.trim_end_matches('/')})).collect();
+    public_paths.sort();
+    public_paths.dedup();
     // Nonstatic pages retain hydration across client navigation; static targets use full navigation.
     // hydrate() so islands arriving through the router resume (the core is one cached chunk).
     let hydrate_everywhere = !router_tag.is_empty() && plans.iter().any(|p| p.interactive);
@@ -1806,7 +1813,12 @@ fn build_inner_with_options(
         }
         // page scripts go INSIDE the region (the router recreates them after a swap); the router itself stays outside
         let page_router = if zero_js { "" } else { router_tag.as_str() };
-        let slot = format!("<div id=\"brain-view\">{}{body_html}{script}</div>{page_router}", p.css);
+        let speculation = if speculation_on {
+            speculation_rules(&public_paths, zero_js, &zero_paths, &format!("{pre}{}", if p.route == "/" { "/" } else { p.route.trim_end_matches('/') }))
+        } else {
+            String::new()
+        };
+        let slot = format!("<div id=\"brain-view\">{}{body_html}{script}</div>{page_router}{speculation}", p.css);
         let mut doc = shell.replace("<slot />", &slot).replace("<slot/>", &slot);
         if let (Some(loc), Some((def, _))) = (&p.locale, &i18n) {
             doc = html_lang(&doc, loc, def);
@@ -1946,7 +1958,8 @@ fn build_inner_with_options(
                         template_of("!forbidden").map_or(String::new(), |t| format!(",\"forbidden\":{t}"))
                     ),
                 );
-                files.insert("server.mjs".into(), server_mjs.replace("from './native-sockets.mjs'", "from './_server/native-sockets.mjs'"));
+                files.insert("server.mjs".into(), server_mjs.replace("from './native-sockets.mjs'", "from './_server/native-sockets.mjs'").replace("from './llm.mjs'", "from './_server/llm.mjs'"));
+                files.insert("_server/llm.mjs".into(), include_str!("../../../runtime/server/llm.mjs").into());
                 files.insert("_server/native-sockets.mjs".into(), include_str!("../../../runtime/server/native-sockets.mjs").into());
                 if let Some(shim) = &input.shim {
                     files.insert("_server/dom.js".into(), shim.clone());
@@ -2522,6 +2535,25 @@ fn needs_space(prev: Option<char>, next: char) -> bool {
         None => false,
         Some(p) => !matches!(p, '{' | '}' | ':' | ';' | ',' | '>' | '(' | '~' | '+') && !matches!(next, '{' | '}' | ':' | ';' | ',' | '>' | ')' | '!' | '~' | '+'),
     }
+}
+
+/// brain.json `"speculation": false` removes the rules from every page.
+fn speculation_enabled(root: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(root.join("brain.json")) else { return true };
+    let Some(i) = text.find("\"speculation\"") else { return true };
+    !text[i + 13..].trim_start().strip_prefix(':').is_some_and(|rest| rest.trim_start().starts_with("false"))
+}
+/// At most this many targets on a page: past it, the bytes outweigh a hint browsers may ignore anyway.
+const SPECULATION_TARGETS: usize = 64;
+/// A same-origin prefetch on hover, never a prerender, so a page's scripts do not run ahead of the visit.
+/// `data-prefetch="false"` on a link or an ancestor is the router's own opt-out and works here too.
+fn speculation_rules(public: &[String], zero_js: bool, zero_paths: &[String], current: &str) -> String {
+    // A page with the router loads only zero-JS targets as documents; a page without it loads every target that way.
+    let list: Vec<String> = public.iter().filter(|path| path.as_str() != current && (zero_js || zero_paths.contains(path))).take(SPECULATION_TARGETS).map(|path| prerender_json(path)).collect();
+    if list.is_empty() {
+        return String::new();
+    }
+    format!("<script type=\"speculationrules\">{{\"prefetch\":[{{\"where\":{{\"and\":[{{\"href_matches\":[{}]}},{{\"not\":{{\"selector_matches\":\"[data-prefetch=false],[data-prefetch=false] *,[download]\"}}}}]}},\"eagerness\":\"moderate\"}}]}}</script>", list.join(","))
 }
 
 #[cfg(test)]

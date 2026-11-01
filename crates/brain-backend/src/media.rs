@@ -32,6 +32,10 @@ pub struct Preset {
     #[serde(default)]
     pub quality: Option<u8>,
 }
+/// AV1 encoding is far slower than the other formats, and it shares the two image workers and the request deadline.
+pub const AVIF_MAX_SIDE: u32 = 2048;
+const AVIF_SPEED: u8 = 8;
+const AVIF_THREADS: usize = 2;
 impl Preset {
     fn validate(&self) -> Result<(), String> {
         if self.name.is_empty()
@@ -42,12 +46,13 @@ impl Preset {
             || matches!(self.name.as_str(), "original" | "full" | "thumbnail")
             || !(1..=4096).contains(&self.width)
             || !(1..=4096).contains(&self.height)
-            || !matches!(self.format.as_str(), "png" | "jpeg" | "webp")
-            || self
-                .quality
-                .is_some_and(|quality| self.format != "jpeg" || !(1..=100).contains(&quality))
+            || !matches!(self.format.as_str(), "png" | "jpeg" | "webp" | "avif")
+            || (self.format == "avif" && (self.width > AVIF_MAX_SIDE || self.height > AVIF_MAX_SIDE))
+            || self.quality.is_some_and(|quality| {
+                !matches!(self.format.as_str(), "jpeg" | "avif") || !(1..=100).contains(&quality)
+            })
         {
-            return Err("Invalid image preset; use a unique name, dimensions 1..4096 and png/jpeg/webp (quality only for JPEG)".into());
+            return Err("Invalid image preset; use a unique name, dimensions 1..4096 (AVIF 1..2048) and png/jpeg/webp/avif (quality only for JPEG and AVIF)".into());
         }
         Ok(())
     }
@@ -97,6 +102,7 @@ fn mime(format: &str) -> Result<&'static str, String> {
         "png" => Ok("image/png"),
         "jpeg" => Ok("image/jpeg"),
         "webp" => Ok("image/webp"),
+        "avif" => Ok("image/avif"),
         _ => Err("Unsupported stored image format".into()),
     }
 }
@@ -122,6 +128,14 @@ fn encode(image: &DynamicImage, format: &str, quality: Option<u8>) -> Result<Vec
         "webp" => image
             .write_to(&mut output, ImageFormat::WebP)
             .map_err(|_| "Cannot encode lossless WebP rendition")?,
+        "avif" => {
+            use image::ImageEncoder;
+            let pixels = image.to_rgba8();
+            image::codecs::avif::AvifEncoder::new_with_speed_quality(&mut output, AVIF_SPEED, quality.unwrap_or(60))
+                .with_num_threads(Some(AVIF_THREADS))
+                .write_image(pixels.as_raw(), pixels.width(), pixels.height(), image::ExtendedColorType::Rgba8)
+                .map_err(|_| "Cannot encode AVIF rendition")?;
+        }
         _ => return Err("Unsupported image encoder".into()),
     }
     let bytes = output.into_inner();
@@ -140,6 +154,9 @@ pub fn validate_presets(presets: &[Preset]) -> Result<(), String> {
         if !names.insert(preset.name.clone()) {
             return Err("Image preset names must be unique".into());
         }
+    }
+    if presets.iter().any(|preset| preset.format == "avif") && presets.iter().all(|preset| preset.format == "avif") {
+        return Err("An AVIF preset needs a fallback preset in png, jpeg or webp for browsers without AVIF".into());
     }
     Ok(())
 }
@@ -1149,4 +1166,70 @@ pub fn gcs_files() -> BTreeMap<String, String> {
         ("server/storage/package.json".into(),"{\n  \"private\": true,\n  \"type\": \"module\",\n  \"engines\": { \"node\": \">=22\" },\n  \"dependencies\": { \"@google-cloud/storage\": \"8.4.0\" }\n}\n".into()),
         ("server/storage/README.md".into(),"# Private GCS provider\n\nInstall this private server package explicitly with `npm install --prefix server/storage`. Configure Application Default Credentials outside public/dist and set the backend's private BRAIN_GCS_BUCKET, BRAIN_GCS_PREFIX and BRAIN_GCS_ADAPTER values. The adapter path must be absolute. Use a bucket with enforced public access prevention and uniform bucket-level access. The service identity needs only its intended bucket/prefix object permissions and bucket metadata read access.\n\nThe generated worker does not create buckets, change IAM or request credentials from the browser. No package is bundled into frontend output. Operations use immutable hash keys, conditional creation, pinned generation reads/deletes, checksums and fixed resource limits. `--validate` checks a supplied JSON job offline without importing the Google SDK. No cloud operation happens without explicit provider configuration. See docs/MEDIA.md in the framework repository for the native API and cleanup protocol.\n".into()),
     ])
+}
+
+#[cfg(test)]
+mod avif_tests {
+    use super::*;
+    fn source() -> Vec<u8> {
+        let image = image::RgbaImage::from_fn(96, 64, |x, y| image::Rgba([(x * 2) as u8, (y * 3) as u8, 90, if x < 8 { 0 } else { 255 }]));
+        let mut out = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(image).write_to(&mut out, ImageFormat::Png).unwrap();
+        out.into_inner()
+    }
+    fn preset(name: &str, format: &str, quality: Option<u8>) -> Preset {
+        Preset { name: name.into(), width: 48, height: 48, crop: false, format: format.into(), quality }
+    }
+    #[test]
+    fn avif_preset_writes_a_real_avif_file_next_to_its_fallback() {
+        let done = prepare(source(), &[preset("a", "avif", Some(60)), preset("w", "webp", None)]).unwrap();
+        let avif = done.renditions.iter().find(|r| r.name == "a").unwrap();
+        assert_eq!(avif.format, "avif");
+        assert_eq!(&avif.data[4..12], b"ftypavif", "the file must carry the AVIF brand");
+        assert_eq!(mime("avif").unwrap(), "image/avif");
+        if let Ok(path) = std::env::var("BRAIN_AVIF_OUT") {
+            std::fs::write(path, &avif.data).unwrap(); // scripts/test/media-avif-browser.test.mjs decodes it in Chrome
+        }
+        assert!(avif.width == 48 && avif.height <= 48 && avif.data.len() < 20_000);
+        assert!(done.renditions.iter().any(|r| r.format == "webp"), "fallback kept");
+    }
+    #[test]
+    fn avif_needs_a_fallback_format_and_a_bounded_size() {
+        let lone = validate_presets(&[preset("a", "avif", None)]).unwrap_err();
+        assert!(lone.contains("fallback"), "{lone}");
+        let mut big = preset("a", "avif", None);
+        big.width = AVIF_MAX_SIDE + 1;
+        assert!(validate_presets(&[big, preset("w", "webp", None)]).is_err());
+        let mut bad = preset("a", "avif", Some(0));
+        assert!(validate_presets(&[bad.clone(), preset("w", "webp", None)]).is_err());
+        bad.quality = Some(101);
+        assert!(validate_presets(&[bad, preset("w", "webp", None)]).is_err());
+        assert!(validate_presets(&[preset("w", "webp", Some(50))]).is_err(), "WebP stays lossless");
+    }
+    #[test]
+    fn the_default_plan_stays_without_avif() {
+        assert!(defaults().iter().all(|p| p.format != "avif"));
+    }
+}
+
+#[cfg(test)]
+mod avif_cost {
+    /// `cargo test --release -p brain-backend --lib avif_cost -- --ignored --nocapture` prints what a preset costs.
+    #[test]
+    #[ignore = "measurement, run with --release"]
+    fn encode_time_by_size() {
+        for side in [320u32, 640, 1280, 2048] {
+            let image = image::RgbaImage::from_fn(side, side * 3 / 4, |x, y| {
+                let n = x.wrapping_mul(2654435761).wrapping_add(y.wrapping_mul(40503)) >> 24;
+                image::Rgba([(x * 255 / side) as u8 ^ (n as u8 & 15), (y * 255 / side) as u8, (n % 64) as u8, 255])
+            });
+            let view = super::DynamicImage::ImageRgba8(image);
+            let start = std::time::Instant::now();
+            let avif = super::encode(&view, "avif", None).unwrap();
+            let avif_time = start.elapsed();
+            let webp = super::encode(&view, "webp", None).unwrap();
+            let jpeg = super::encode(&view, "jpeg", Some(82)).unwrap();
+            println!("{side}px avif {} B in {avif_time:?}; lossless webp {} B; jpeg {} B", avif.len(), webp.len(), jpeg.len());
+        }
+    }
 }

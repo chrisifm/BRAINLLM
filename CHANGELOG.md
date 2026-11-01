@@ -52,6 +52,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `brain add auth` adds signup, login and account pages, the session channel, the auth configuration and the environment keys to an existing app and overwrites nothing; `brain new <app> --backend` starts an app with them.
 - `brain run --backend` (and `brain dev --backend`) starts the native backend beside the frontend, waits for it to be ready, refuses a port another process answers, follows `--port` with the backend's public URL and allowed origin, and stops it on exit. `brain backend migrate --create-db` creates a missing local database.
 - `brain recipe <id> --apply` writes the files a recipe previews and never overwrites one.
+- Speculation Rules for document navigations: pages prefetch public static targets on hover where a click loads a new document, and never a target the router takes; opt out with brain.json `"speculation": false` or `data-prefetch="false"`.
+- AVIF media renditions: a preset can use `format: "avif"` with a required PNG, JPEG or WebP fallback; the default plan is unchanged and the native binary grows about 1.2 MB.
+- Dev observability panel: Alt+Shift+O or `?brain-observe` in `brain run` shows Web Vitals, requests, long frames, errors and live components, and names an element's source file; a production build holds none of it.
+- Core Web Vitals reporting: `vitals()` and `reportVitals(path)` measure LCP, CLS, INP, FCP and TTFB, opt-in with no bytes when unused.
+- Server LLM module: `ctx.llm.complete` and `ctx.llm.stream` call Anthropic and OpenAI from server code with keys from the server environment; `ctx.llm` in browser code or a `PUBLIC_` provider key fails with B0920, and streaming to the browser is documented as absent.
 
 ## [0.7.0] - 2026-10-31
 

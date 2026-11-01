@@ -158,6 +158,7 @@ COMPILER assigns the next free code there in the same change that emits it, then
 - B0750 declared route hides something (warning): a `server/routes/*` path that overlaps a view, a literal `public/` file or a framework prefix (`/_r`, `/_b`, `/_server`, `/_health`, `/@brain`), or that starts with a parameter; the gateways proxy declared routes on the site origin, so the overlap would hide the other one; a route that starts with a parameter is not proxied.
 - B0780 stray `}` in markup (warning): a `}` in text or right after a value in an attribute closes nothing; `<pre>`, `<code>`, `<samp>`, `<kbd>` and `<textarea>` may show one, unless it follows a value. `{{x}}` is the same mistake, with the exact edit. · B0781 `await` with no enclosing `async` function (error, the emitted JavaScript does not parse); the top level of a `.jsbrain` and of a test file may await. · B0782 `BRAIN_SECRET` missing when a request opens a session (runtime). · B0783 credential in a readable place (warning): `console.*`, `localStorage`/`sessionStorage.setItem`, and a stored password in what a `server:` function, `load` or a route handler returns.
 - B0737 credential in the signed session cookie (warning): every credential-shaped key, name or member passed to `ctx.session.set`; the fix moves it to `ctx.session.setSecret`. · B0751 backend setting missing or invalid (warning in check and doctor, startup error): see §31.
+- B0920–B0923 server LLM module (§51): B0920 `ctx.llm` or a `PUBLIC_` provider key in browser code or `.brain_env` · B0921 call not configured (runtime) · B0922 provider failure (runtime) · B0923 `ctx.llm` with no provider key declared (warning).
 - B07xx server and secrets (§11.1): B0701 server module used outside load/server: · B0702 env without `PUBLIC_` on the client · B0703 literal shaped like a key · B0704 `server:` function badly declared (not async, nested, in .jsbrain) or reading component state · B0707 invalid brain.json `server` setting (error; unknown key or a value outside its range).
 
 ## 6. Runtime (CODEGEN → RUNTIME contract), module `runtime/brain.js`
@@ -592,7 +593,7 @@ The `.brain` author writes nothing different: the compiler or the runtime applie
 | Navigation API | Baseline 2026: Chrome 102+, Firefox 147+, Safari 26.2+ | RUNTIME router | intercept navigations, scroll and focus restored; fallback History |
 | View Transitions (same document) | Baseline 2025: Chrome 111+, Firefox 144+, Safari 18+ | RUNTIME | animated transition between views in the router |
 | `@view-transition` (cross-document) | Chrome 126+, Safari 18.2+; Firefox no | COMPILER | transition between prerendered pages |
-| Speculation Rules | Chrome 109+; Safari 26.2 behind flag (prefetch only); Firefox no | — (removed 2026-10-29) | the router intercepts every click, so a prerender was never used; the router's predictive prefetch replaces it |
+| Speculation Rules | Chrome 109+; Safari 26.2 behind flag (prefetch only); Firefox no | prefetch on document navigations only (§53, 2026-10-31) | the router intercepts other clicks, so a prerender was never used there (removed 2026-10-29); the router's predictive prefetch replaces it |
 | Predictive prefetch (IntersectionObserver + `requestIdleCallback` + `fetch priority: 'low'`) | Baseline (idle callback: Safari no, `setTimeout` fallback) | RUNTIME router | links in view are fetched while idle (2 at a time, 12 per view), hover/focus/touch first; the next navigation swaps from memory and its chunks get `modulepreload`. Off: `router({ prefetch: false })`, `<meta name="brain-prefetch" content="off">`, `data-prefetch="false"`; skips Save-Data/2G, files, `/api/`, `/auth/`, log-out, unsubscribe and confirm paths and URLs with a token; any write (form submit, `api()` write, server function) forgets every fetched page; private/no-store and dynamic no-cache HTML is never reused; static HTML (`X-Brain-Static: 1`) and explicitly cacheable public HTML stay at most 5 min (bounded by max-age); requests carry `x-brain-prefetch: 1` (`ctx.prefetch`) (2026-10-29) |
 | Built-in AI: Prompt API, Summarizer, Translator, LanguageDetector, Writer, Rewriter, Proofreader | Chrome 138+ (Summarizer, Translator, LanguageDetector stable; Prompt API origin trial on the web, stable in extensions; the rest trials); other browsers no | RUNTIME `brain-ai.js` (`ai` primitive) | on-device Gemini Nano; `ai.ready()` answers 'unavailable' where absent and calls throw `code: 'unavailable'` (`brain guide ai`, docs checked 2026-10-29) |
 | `103 Early Hints` | Chrome 103+, Firefox 120+, Safari 17+ (HTTP/2+) | TOOLCHAIN | preload before the response |
@@ -2147,11 +2148,48 @@ LOCKED` and pushes `next_attempt_at` forward as its lease and backoff, and `file
 of being followed. Rejected uploads use `files::discard`. Bytes written just before a crash, with neither row nor
 tombstone, are still not recovered: nothing records them until the row exists.
 
-## Backend import
+## 51. Server LLM module (2026-10-31)
+
+`runtime/server/llm.mjs` exports `llmClient(env, signal)`. `server.mjs` puts it on `context()` as `ctx.llm`; the build copies
+it to `dist/_server/llm.mjs`, and client chunks never import it. `brain run` writes it next to `.brain/server/_rt/server.mjs`.
+Sidecars and the job runner have no `server.mjs` for every call, so `load::llm_script()` strips `export` and prepends the
+module: appended text would stay uninitialized behind the runner's top-level await (`const` in the temporal dead zone).
+Requests are built only in `llmRequest` and answers parsed only in `llmParsed` and `llmStream`; the file header records the
+date and sources of the contract review. Anthropic uses `anthropic-version: 2026-10-21`, which rejects sampling parameters,
+so the neutral API has none. OpenAI uses the Responses API with `store: false`; a gateway that offers only Chat Completions
+is not supported. Thinking blocks and reasoning items are dropped. Limits: 32 MiB answer, 4 MiB event, no retries.
+Browser streaming is absent on purpose: RPC is one JSON answer and no server route emits events.
+B0920 is in `brain-check` (`llm_client`, `env_access`, `env::check_file`), B0923 in `crates/brain-cli/src/env.rs`, and B0921 and
+B0922 only at runtime. Tests: `runtime/test/llm.test.js` (wire contracts against a fake provider) and
+`crates/brain-cli/tests/llm.rs` (built app through RPC, no key material in client files).
+
+## 52. Dev observability panel and Web Vitals (2026-10-31)
+
+`runtime/brain-observe.js` is loaded by the dev client (`crates/brain-serve/src/client.js`) and excluded from builds by the
+same lists as the other dev modules (`main.rs`, `impact.rs`). It stays closed until Alt+Shift+O or `?brain-observe`, so
+screenshots and tests see an unchanged page; `sessionStorage` keeps it open across reloads. It reads `brain:net`,
+`brain:hmr`, `brain-err`, Long Animation Frames and the `live` registry of `brain-dev.js`; Pick uses the `$i` mark on root
+elements. It sends nothing over the socket: `brain-inspect` remains the recorder and this is the on-page view.
+`runtime/brain-vitals.js` is a normal opt-in primitive module (`scope.rs`) and costs 1116 B gzip when imported. INP follows
+the metric definition (slowest interaction, one in 50 discarded), and Event Timing is observed from 40 ms, so a faster
+interaction reports nothing. Browser test: `scripts/test/dev-observe.test.mjs`.
+
+## 53. Speculation Rules on document navigations (2026-10-31)
+
+Commit e0e1fb4 removed Speculation Rules because the router intercepts same-origin clicks: a rule on those targets never
+activated and doubled the request. That reason still holds, so rules appear only where a click is a real document
+navigation: a zero-JS page lists public static routes (it has no router), and a router page lists only zero-JS targets
+(`fullLoad`). `speculation_rules` emits a hover `prefetch`, never a prerender, so no target script runs ahead of the
+visit. Guarded, SSR, dynamic, `/_` and current routes are never listed; at most 64 targets. `has_executable_scripts`
+accepts the type because it runs no code, and the build hashes its body into `script-src` as for any inline script.
+Opt-outs: brain.json `"speculation": false`, and `data-prefetch="false"` on a link or ancestor. A server sees
+`ctx.prefetch` for `Sec-Purpose: prefetch` too. Browser proof: `scripts/test/speculation-browser.test.mjs`.
+
+## 54. Backend import (2026-10-31)
 
 `brain_backend::import` runs a file inside one transaction with a savepoint per row, so every bad row is reported and a preview is the same code path followed by a rollback. Reasons are built from fixed text and field names, never from a database message, because those quote the row. `auth::legacy_scrypt` bounds the parameters of an imported hash; `scrypt` is used without its PHC feature to avoid a second `password-hash` version next to `argon2`.
 
-## Accounts generator and catalog (2026-10-31)
+## 55. Accounts generator and catalog (2026-10-31)
 
 `auth_setup.rs` writes the accounts path for `brain add auth` and `brain new --backend` and never overwrites a file.
 `backend::start_for_dev` owns the child of `brain run --backend`: it refuses a port that already answers (B0763), waits

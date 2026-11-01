@@ -1,0 +1,25 @@
+{
+  "id": "media-avif",
+  "kind": "capability",
+  "title": "AVIF media renditions",
+  "why": "Native media presets can produce AVIF next to a required fallback format, so pages can serve smaller images through picture.",
+  "changelog": [
+    "AVIF media renditions"
+  ],
+  "guide": "docs/MEDIA.md",
+  "codes": [],
+  "apis": [
+    "POST /_brain/media/:id/variants"
+  ],
+  "affects": [],
+  "adopt": {
+    "file": "views/<name>.brain",
+    "snippet": "<source type=\"image/avif\" srcset={item.srcset.avif}>"
+  },
+  "uses": [
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "srcset.avif"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "id": "web-vitals",
+  "kind": "capability",
+  "title": "Core Web Vitals reporting",
+  "why": "Apps can measure real LCP, CLS, INP, FCP and TTFB and send them to their own route, with no cost when unused.",
+  "changelog": [
+    "Core Web Vitals reporting"
+  ],
+  "guide": "SPEC.md",
+  "codes": [],
+  "apis": [
+    "vitals",
+    "reportVitals"
+  ],
+  "affects": [
+    "views/**"
+  ],
+  "adopt": {
+    "file": "views/_layout.brain",
+    "snippet": "reportVitals('/api/vitals')"
+  },
+  "uses": [
+    {
+      "glob": "**/*.{brain,jsbrain}",
+      "contains": "reportVitals("
+    }
+  ]
+}

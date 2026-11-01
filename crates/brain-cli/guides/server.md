@@ -51,7 +51,7 @@ environment. `brain check` reports an invalid value as B0707. Pass `ctx.signal` 
 4. Protect a folder: `brain add guard account` → `export default (ctx) => ctx.user ? true : redirect('/login')`.
 5. Never set the session cookie from browser code (B0713); never keep the signed-in user in `store(…, { sync: 'storage' })` (not machine-checked).
 
-## Server-only code
+## Server-only code (hosted models: `brain guide llm`)
 - `load` and `server:` functions run only on the server. Modules that touch a database or secrets start with
   `<meta server>` (`brain add server users-db`) and are imported only by `load` or server functions (B0701).
 - The client never calls `fetch()` to your own server: use `server:` functions or `api()` (`brain guide data`).

@@ -789,8 +789,8 @@ pub fn has_executable_scripts(html: &str) -> bool {
         let Some(end) = tag_rest.find('>') else { return true };
         let tag = &tag_rest[..end];
         let kind = attr(tag, "type").unwrap_or_default();
-        // Unknown types are conservative: only known inert metadata is accepted as zero-JS.
-        if !matches!(kind.as_str(), "application/json" | "application/ld+json" | "b/state") { return true; }
+        // Unknown types are conservative: only known inert metadata is accepted as zero-JS. Speculation rules run no code.
+        if !matches!(kind.as_str(), "application/json" | "application/ld+json" | "b/state" | "speculationrules") { return true; }
         rest = &tag_rest[end+1..];
         if let Some(close) = rest.find("</script") { rest = &rest[close+8..]; }
     }
@@ -800,6 +800,13 @@ pub fn has_executable_scripts(html: &str) -> bool {
 /// Bodies of the inline scripts the browser executes (classic, module, import map, speculation rules); data blocks
 /// (`application/json`, `application/ld+json`, `b/state`) are not subject to CSP.
 pub fn inline_scripts(html: &str) -> Vec<String> {
+    inline_blocks(html, true)
+}
+/// The same without speculation rules: they need a CSP hash, but they are a JSON block and no code runs.
+pub fn inline_javascript(html: &str) -> Vec<String> {
+    inline_blocks(html, false)
+}
+fn inline_blocks(html: &str, with_rules: bool) -> Vec<String> {
     let mut out = Vec::new();
     let mut rest = html;
     while let Some(i) = rest.find("<script") {
@@ -809,7 +816,7 @@ pub fn inline_scripts(html: &str) -> Vec<String> {
         let body_rest = &tag_rest[gt + 1..];
         let end = body_rest.find("</script").unwrap_or(body_rest.len());
         let ty = attr(tag, "type").unwrap_or_default().to_ascii_lowercase();
-        let runs = matches!(ty.as_str(), "" | "module" | "text/javascript" | "application/javascript" | "importmap" | "speculationrules");
+        let runs = matches!(ty.as_str(), "" | "module" | "text/javascript" | "application/javascript" | "importmap") || (with_rules && ty == "speculationrules");
         if runs && attr(tag, "src").is_none() && !body_rest[..end].is_empty() {
             out.push(body_rest[..end].to_string());
         }

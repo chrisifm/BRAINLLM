@@ -248,6 +248,14 @@ fn span_at(src: &str, line: u32, offset: usize) -> Span {
     Span { start: offset as u32, end: (offset + len) as u32, line, col: 1 }
 }
 
+/// Model provider keys `ctx.llm` reads from the server environment.
+pub const LLM_KEYS: &[&str] = &["ANTHROPIC_API_KEY", "OPENAI_API_KEY"];
+
+/// `PUBLIC_ANTHROPIC_API_KEY` and the like: B0920 whatever the value looks like.
+pub fn is_public_llm_key(key: &str) -> bool {
+    key.strip_prefix("PUBLIC_").is_some_and(|k| LLM_KEYS.contains(&k))
+}
+
 /// B0724 and B0723 for the file itself (`file` is how the diagnostics name it, usually `.brain_env`).
 pub fn check_file(src: &str, file: &str) -> Vec<Diag> {
     let f = parse(src);
@@ -256,6 +264,10 @@ pub fn check_file(src: &str, file: &str) -> Vec<Diag> {
         out.push(Diag::new("B0724", file, span_at(src, *line, *offset), format!("malformed line: {msg}"), "write `KEY=value` (UPPER_SNAKE_CASE key, optional quotes) or a `[section]` header; comments start with `#`"));
     }
     for e in f.shared.iter().chain(f.sections.iter().flat_map(|(_, e)| e.iter())) {
+        if is_public_llm_key(&e.key) {
+            out.push(Diag::new("B0920", file, span_at(src, e.line, e.offset), format!("`{}` would ship a model provider key to every visitor", e.key), format!("rename it to `{}`; `ctx.llm` reads it on the server", e.key.trim_start_matches("PUBLIC_"))));
+            continue;
+        }
         if e.key.starts_with("PUBLIC_") && !crate::scan_secrets(&e.value).is_empty() {
             out.push(Diag::new(
                 "B0723",
@@ -673,6 +685,12 @@ pub fn unused_keys(root: &Path) -> Vec<Diag> {
                 && let Ok(text) = std::fs::read_to_string(&p)
             {
                 used.extend(reads_of_file(&text, &name).into_iter().map(|r| r.key));
+                if text.contains(".llm") || text.contains("llm }") {
+                    for prefix in ["ANTHROPIC", "OPENAI"] {
+                        used.extend(["API_KEY", "MODEL", "BASE_URL"].map(|suffix| format!("{prefix}_{suffix}")));
+                    }
+                    used.insert("BRAIN_LLM_PROVIDER".to_string());
+                }
                 // A contract under server/ names a variable as a string (`verify: { secret: 'X' }`), and a literal
                 // that equals a declared key is read somewhere; keeping one is harmless, dropping one breaks startup.
                 if p.strip_prefix(root).is_ok_and(|rel| rel.starts_with("server")) {

@@ -1,0 +1,11 @@
+[
+  {
+    "code": "B0920",
+    "level": "error",
+    "file": "invalid/comp/b0920-llm-in-browser.brain",
+    "line": 2,
+    "col": 24,
+    "msg": "`ctx.llm` runs only on the server and this code reaches the browser",
+    "fix": "call it inside `export async function load(ctx)` or `server: async function ask(ctx, q) { return ctx.llm.complete({ prompt: q }) }` and call `ask(q)` from the client"
+  }
+]

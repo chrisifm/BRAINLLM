@@ -1357,7 +1357,7 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
         rt.into_iter()
             // runtime modules, plus the built-in ui/ kit (compiled by brain-pack like an app component) and RUNTIME's
             // runaway probe for the build (shim/probe.js, B0907; never served)
-            .filter(|(n, _)| (n.ends_with(".js") && !n.contains('/') && n != "brain-dev.js" && n != "brain-inspect.js" && n != "brain-trace.js" && n != "brain-why.js" && n != "brain-mock.js" && n != "brain-overlay.js") || (n.starts_with("ui/") && n.ends_with(".brain")) || n == "shim/probe.js")
+            .filter(|(n, _)| (n.ends_with(".js") && !n.contains('/') && n != "brain-dev.js" && n != "brain-inspect.js" && n != "brain-trace.js" && n != "brain-why.js" && n != "brain-mock.js" && n != "brain-overlay.js" && n != "brain-observe.js") || (n.starts_with("ui/") && n.ends_with(".brain")) || n == "shim/probe.js")
             .collect();
     on_phase("check", 0, 0);
     let lens = hash_lengths(root)?;

@@ -98,6 +98,7 @@ try {
   ctx.backend = keyBackend(process.env, system ? 'BRAIN_JOBS_SYSTEM_KEY' : 'BRAIN_JOBS_API_KEY', 'job')
   for (const name of ['BRAIN_JOBS_API_KEY', 'BRAIN_JOBS_SYSTEM_KEY', 'BRAIN_ROUTES_API_KEY', 'BRAIN_ROUTES_SYSTEM_KEY', 'BRAIN_SERVICE_API_KEY', 'BRAIN_JOB_RUN_AS']) delete process.env[name]
   ctx.env = Object.freeze(Object.assign({}, process.env))
+  ctx.llm = llmClient(ctx.env)
   const module = await import(pathToFileURL(entry).href)
   if (typeof module.default !== 'function') throw Error()
   await module.default(ctx)

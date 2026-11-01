@@ -29,6 +29,8 @@ async function show(all, file) {
 }
 // dev only: the runtime reports extra diagnostics (missing i18n keys, `brain:net` per api() request)
 globalThis.__brainDev = true;
+// the observability panel (runtime/brain-observe.js, Alt+Shift+O): closed until asked for, absent from builds
+import(base + '/@brain/brain-observe.js').then(m => m.start(), () => {});
 // Browser errors → server (brain_errors via MCP, brain run terminal). Queued until the WS opens.
 let ws;
 const pending = [];

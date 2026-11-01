@@ -242,6 +242,7 @@ Preserve unrelated query parameters; never serialize credentials or private form
 Structured local cache: `database('navigation', {namespace:'my-app',build:'v1'})` supports get/put/batch/scan/prune/close
 with native IndexedDB, quotas, expiry and atomic batches. `storage()` and `cookie()` are small public preferences.
 `storageInfo()` reports capabilities; `persistStorage()` requests persistence from a user action. Storage remains evictable.
+Web Vitals (opt-in, 0 bytes unused): `vitals(m => …)` gives `{ name, value, rating }` for LCP, CLS, INP, FCP and TTFB where the browser has them; `reportVitals('/api/vitals')` sends `{ path, metrics }` by beacon when the page is hidden. Write that route yourself.
 Optional `sqlite(officialInitializer, options)` runs official SQLite Wasm in an owned OPFS worker; it is not a core dependency.
 `threadCapabilities`, `sharedWorker`, `messageChannel`, `transfer`, `offscreen`, `sharedMemory` and `loadWorklet` expose
 bounded native thread operations and explicit unsupported-capability errors. See `docs/BROWSER-DATA.md` for contracts.
@@ -256,6 +257,8 @@ A component that keeps growing (DOM nodes, list rows, effect runs) or loops is s
 `brain build` mounts every view with fake timers and fails (B0907) if anything grows with no user input. Never append
 to a list from a timer, interval, bus or `fx` without a limit; create timers only inside `fx` and return their cleanup.
 Public production messages contain safe references, never raw traces, arbitrary exception text or internal paths.
+Links to public static pages that load a full document are prefetched on hover (Speculation Rules); `data-prefetch="false"` on a link or brain.json `"speculation": false` opts out, and `ctx.prefetch` is true on such a request.
+Dev panel (`brain run` only, never in builds): Alt+Shift+O or `?brain-observe` shows vitals, requests, long frames, errors and live components; Pick names an element's component file. `__brainObserve.snapshot()` returns it as JSON.
 Private captured errors (message, stack, recent actions) are listed by `brain_errors` (MCP) and `brain doctor`.
 
 ## Server and secrets
@@ -276,6 +279,9 @@ such as a provider token goes in `ctx.session.setSecret(value, {maxAge})`, read 
 `ctx.session.clearSecret()` or `clear()`: its own encrypted cookie, never `ctx.user`, also available with `BRAIN_BACKEND_URL`
 (setup in `brain guide server`).
 `load` belongs to views: in `_layout.brain` it is not run.
+Model calls: `await ctx.llm.complete({ prompt, system, messages, model, provider, maxTokens, timeoutMs })` returns
+`{ text, stopReason, usage, model, provider, requestId }`; `for await (const text of ctx.llm.stream(o))` reads the answer on the server. Set
+`ANTHROPIC_API_KEY` + `ANTHROPIC_MODEL` or `OPENAI_API_KEY` + `OPENAI_MODEL`; `ctx.llm` in browser code or a `PUBLIC_` provider key is B0920 (`brain guide llm`).
 Server limits (dev and production alike): brain.json `"server": { "maxBodyKB": 1024, "timeoutMs": 10000,
 "rpcPerMinute": 60 }` bounds RPC/form bodies (413 past it, at most 65536), function calls and `load` (504) and calls
 per IP and function (429). Raise `maxBodyKB` to send a file as base64 in an RPC argument; invalid values are B0707.

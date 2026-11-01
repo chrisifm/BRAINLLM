@@ -20,6 +20,7 @@ pub const GUIDES: &[(&str, &str, &str)] = &[
     ("tests", "colocated *.test.brain: mount, interact, assert every state", include_str!("../guides/tests.md")),
     ("i18n", "several languages: keys, plurals, formatting, localized routes", include_str!("../guides/i18n.md")),
     ("performance", "measure, budgets, lazy components, images, long lists, workers", include_str!("../guides/performance.md")),
+    ("llm", "ctx.llm: Anthropic and OpenAI from server code, keys, timeouts, server-side streaming", include_str!("../guides/llm.md")),
     ("ai", "Chrome's built-in AI (Gemini Nano) on the device: ai.ready, prompt, summarize, translate", include_str!("../guides/ai.md")),
     ("backend", "resources, policies, accounts and jobs on the native Rust/Postgres backend", include_str!("../guides/backend.md")),
     ("analytics", "what visitors actually do: reports, funnels, segments in the project's own Postgres", include_str!("../guides/analytics.md")),
@@ -137,7 +138,7 @@ mod tests {
     /// The topics the owner asked for (2026-10-29); removing one is a decision, not a refactor.
     #[test]
     fn every_required_topic_exists_and_is_a_dense_playbook() {
-        for t in ["start", "views", "data", "sockets", "forms", "server", "seo", "a11y", "webmcp", "tests", "i18n", "performance", "ai", "backend", "analytics", "migrate"] {
+        for t in ["start", "views", "data", "sockets", "forms", "server", "seo", "a11y", "webmcp", "tests", "i18n", "performance", "llm", "ai", "backend", "analytics", "migrate"] {
             let (_, sum, body) = find(t).unwrap_or_else(|e| panic!("{e}"));
             assert!(!sum.trim().is_empty(), "{t}: empty summary");
             assert!(body.starts_with(&format!("# guide: {t} ")), "{t}: must open with `# guide: {t} — …`");
