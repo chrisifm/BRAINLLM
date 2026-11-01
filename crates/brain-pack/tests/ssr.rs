@@ -72,7 +72,7 @@ fn ssr_and_rpc_through_the_real_server() {
     };
     // the CLI's post step passes brain-seo's redirect table for server.mjs (#219)
     let post = |_: &mut [brain_pack::Page], _: &[(String, u64)]| -> Result<brain_pack::PostOut, String> {
-        Ok(brain_pack::PostOut { files: vec![("_server/redirects.json".into(), "{\"exact\":{\"/old\":[\"/\",301]},\"patterns\":[]}".into())], ..Default::default() })
+        Ok(brain_pack::PostOut { site: None, files: vec![("_server/redirects.json".into(), "{\"exact\":{\"/old\":[\"/\",301]},\"patterns\":[]}".into())], ..Default::default() })
     };
     let input = brain_pack::Input {
         root: root.clone(),

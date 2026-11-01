@@ -505,6 +505,11 @@ pub async fn reserve_session(
     Ok(())
 }
 
+/// Accounts per role, for the check that every role in use is declared.
+pub async fn role_counts(pool: &PgPool) -> Result<Vec<(String, i64)>, sqlx::Error> {
+    sqlx::query_as("SELECT role, count(*) FROM _brain_users GROUP BY role ORDER BY role").fetch_all(pool).await
+}
+
 #[cfg(test)]
 mod identity_tests {
     use super::*;

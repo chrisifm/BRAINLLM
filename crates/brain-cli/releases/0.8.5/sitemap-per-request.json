@@ -1,0 +1,11 @@
+{
+  "id": "sitemap-per-request",
+  "kind": "fix",
+  "title": "A site rendered per request has a sitemap",
+  "why": "A site with no prerendered indexable page served an empty /sitemap.xml: the origin came from the static file and per-request pages were never listed.",
+  "changelog": [
+    "`/sitemap.xml` takes the origin from the manifest and lists public pages rendered per request, as does llms.txt",
+    "B1900 stops a build whose sitemap would list no URL; `brain seo audit --url` reports it on a live site"
+  ],
+  "guide": "brain guide seo"
+}

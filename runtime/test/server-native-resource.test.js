@@ -59,3 +59,20 @@ test('upstream failures remain generic and responses have a separate two MiB ser
     mode='limit';await assert.rejects(resource.list(),error=>error.status===503&&error.code==='BATCH_TOO_SLOW'&&/Split/.test(error.fix)&&error.message==='Native resource request failed')
   } finally {mode='normal'}
 })
+
+test('a read waits for a restarting backend instead of failing the page, and a write never repeats',async()=>{
+  const probe=createServer();await new Promise(resolve=>probe.listen(0,'127.0.0.1',resolve))
+  const port=probe.address().port;await new Promise(resolve=>probe.close(resolve))
+  const late=nativeAuthBridge(`http://127.0.0.1:${port}`)
+  const call=method=>{
+    const req=new EventEmitter(),res=new EventEmitter()
+    req.method=method;req.headers={host:'app.example.test',origin:'https://app.example.test'}
+    res.writableEnded=false;res.destroyed=false
+    return late.resource(req,res,'00000000-0000-4000-8000-000000000006','notes')
+  }
+  await assert.rejects(call('POST').create({title:'x'}),e=>e.status===503)
+  const restarted=createServer((req,res)=>{req.resume();res.writeHead(200,{'content-type':'application/json'});res.end('{"items":[]}')})
+  setTimeout(()=>restarted.listen(port,'127.0.0.1'),400)
+  try{assert.deepEqual(await call('GET').list({limit:1}),{items:[]})}
+  finally{late.close();await new Promise(resolve=>{restarted.close(resolve);restarted.closeAllConnections()})}
+})

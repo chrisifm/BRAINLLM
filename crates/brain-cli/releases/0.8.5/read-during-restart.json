@@ -1,0 +1,10 @@
+{
+  "id": "read-during-restart",
+  "kind": "fix",
+  "title": "Reads wait for a restarting backend",
+  "why": "A deploy answered 503 to pages rendering while the backend restarted, including to crawlers.",
+  "changelog": [
+    "a read from `ctx.backend` waits up to about 4 seconds when the backend refuses the connection; writes never repeat"
+  ],
+  "guide": "brain guide backend"
+}

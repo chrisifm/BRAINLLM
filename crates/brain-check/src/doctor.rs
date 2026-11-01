@@ -294,6 +294,25 @@ fn common_suffix(a: &str, b: &str) -> String {
     common.concat()
 }
 
+/// Whether the component `rel` appears in more than one place, or inside a `{#each}`, in the components that import it.
+fn mounted_repeatedly(root: &Path, comps: &[&File], rel: &str) -> bool {
+    let mut sites = 0;
+    for parent in comps {
+        let Some(tag) = parent.imports.iter().find_map(|(name, target)| (target == rel).then(|| format!("<{name}"))) else { continue };
+        let Ok(src) = std::fs::read_to_string(root.join(&parent.rel)) else { return true };
+        for (at, _) in src.match_indices(&tag) {
+            if src[at + tag.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_' || c == '-') {
+                continue;
+            }
+            sites += 1;
+            if src[..at].matches("{#each").count() > src[..at].matches("{/each").count() {
+                return true;
+            }
+        }
+    }
+    sites > 1
+}
+
 /// Overengineering findings for the app under `root` (B1002, B1003, B1006, B1007, B1008).
 pub fn doctor(root: &Path) -> Vec<Diag> {
     let files = load(root);
@@ -322,6 +341,10 @@ pub fn doctor(root: &Path) -> Vec<Diag> {
             continue;
         }
         let user = &users[0].rel;
+        // a component mounted more than once shares what the store holds: a local `sig` would give each mount its own
+        if mounted_repeatedly(root, &comps, user) {
+            continue;
+        }
         let first = match call {
             Expr::Call { args, .. } => match args.first().map(Expr::unparen) {
                 Some(Expr::Object { props, .. }) => props.iter().find_map(|p| match p {

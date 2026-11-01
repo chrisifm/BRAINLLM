@@ -1217,6 +1217,7 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
             rep.warnings.push(seo_routes::warning(&route, &view));
         }
     }
+    rep.warnings.extend(seo_routes::empty_sitemap(&dist));
     if let Some(p) = &placeholder {
         let live: Vec<String> = std::fs::read_to_string(dist.join("_server/manifest.json")).ok().and_then(|s| brain_mcp::Json::parse(&s).ok())
             .and_then(|m| m.get("routes").and_then(|r| if let brain_mcp::Json::Arr(a) = r { Some(a) } else { None }).map(|a| a.iter().filter(|r| r.get("sitemap") == Some(&brain_mcp::Json::Bool(true))).filter_map(|r| r.get("path").and_then(brain_mcp::Json::as_str).map(str::to_string)).collect()))
@@ -1538,23 +1539,37 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
                 }
             })
             .collect();
+        // a page behind a guard is out of the index (x-robots-tag): search and social tags would only add weight
+        let guarded = |view: &str| Path::new(view).ancestors().skip(1).any(|dir| root.join(dir).join("_guard.jsbrain").is_file());
+        let mut list_cfg = seo_cfg.clone();
+        list_cfg.server_pages = pages.iter().filter(|p| p.file.starts_with("_server/") && seo_routes::listable(root, &p.route, &p.view) && !guarded(&p.view)).map(|p| (p.route.clone(), p.html.clone())).collect();
         // social images: views/_og.brain (or brain-seo's template) rendered in headless Chrome, cached by brain-seo
         #[cfg(unix)]
         let built = {
             let shoot = |job: &brain_seo::og::Job, tpl: &str| shooter.shoot(&job.props, tpl);
-            brain_seo::finish_with_og(&seo_cfg, root, &mut sp, &routes, assets, Some(&shoot))?
+            brain_seo::finish_with_og(&list_cfg, root, &mut sp, &routes, assets, Some(&shoot))?
         };
         #[cfg(not(unix))]
-        let built = brain_seo::finish(&seo_cfg, root, &mut sp, &routes, assets)?;
+        let built = brain_seo::finish(&list_cfg, root, &mut sp, &routes, assets)?;
         for s in &sp {
             if let Some(p) = pages.iter_mut().find(|p| p.file == s.file) {
                 p.html = s.html.clone();
             }
         }
-        // a page behind a guard is out of the index (x-robots-tag): search and social tags would only add weight
-        let guarded = |view: &str| Path::new(view).ancestors().skip(1).any(|dir| root.join(dir).join("_guard.jsbrain").is_file());
         for p in pages.iter_mut().filter(|p| p.file.starts_with("_server/") && !guarded(&p.view)) {
             p.html = built.server_head.apply(&seo_cfg, &p.route, &p.html);
+        }
+        if seo_cfg.credit {
+            let credit = format!(
+                "<p data-brain-credit style=\"margin:0;padding:8px 16px;text-align:right;font:12px/1.4 system-ui,sans-serif\">By <a href=\"{}\" rel=\"nofollow noopener\">BRAINLLM</a> {}</p>",
+                brain_pack::HOME,
+                env!("CARGO_PKG_VERSION")
+            );
+            for p in pages.iter_mut() {
+                if let Some(end) = p.html.rfind("</body>") {
+                    p.html.insert_str(end, &credit);
+                }
+            }
         }
         let scores: Vec<u32> = built.report.pages.iter().filter_map(|p| p.score).collect();
         seo_range.set(scores.iter().min().zip(scores.iter().max()).map(|(a, b)| (*a, *b)));
@@ -1569,7 +1584,7 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
         if !built.redirects.is_empty() || !built.policy.is_default() {
             files.push(("_server/redirects.json".into(), brain_seo::redirects::server_json_with(&built.redirects, &built.policy).stringify()));
         }
-        Ok(brain_pack::PostOut { files, binary: built.binary, warnings: built.warnings, csp: built.csp.iter().map(|(d, o)| (d.to_string(), o.to_string())).collect() })
+        Ok(brain_pack::PostOut { site: seo_cfg.site.clone(), files, binary: built.binary, warnings: built.warnings, csp: built.csp.iter().map(|(d, o)| (d.to_string(), o.to_string())).collect() })
     };
     let mut cache = cache_cfg(root)?;
     // empty = brain.json "ext" (brain-pack reads it), else web
@@ -2319,7 +2334,7 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
     }
     // queues and schedules that nothing runs (B0765-B0768): warnings; a queue is often worked on another machine
     if let Some(a) = &app {
-        for (code, file, msg, fix) in backend::queue_findings(a, "development") {
+        for (code, file, msg, fix) in backend::queue_findings(a, "development").into_iter().chain(backend::role_findings(a, "development")) {
             advice.push(Json::obj([("code", Json::str(code)), ("level", Json::str("warning")), ("file", Json::str(file)), ("msg", Json::str(msg)), ("fix", Json::str(fix))]));
         }
     }

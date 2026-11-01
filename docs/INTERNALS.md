@@ -1153,7 +1153,13 @@ WordPress `/feed`: every indexable page, newest `lastmod` first, 50 items, `<gen
 section without a content collection (a collection keeps its richer RSS + Atom at the same path), sections.json (the
 manifest: site, generator, discovery files and every section with title, description, home page, feed and its pages
 with URL, Markdown copy and lastmod; `crates/brain-seo/src/sections.rs`). Every page gets `<link rel="alternate">` to
-`/rss.xml` and `/sections.json`; `seo.feed: false` / `seo.sections: false` turn them off. Attribution: next to
+`/rss.xml` and `/sections.json`; `seo.feed: false` / `seo.sections: false` turn them off. **Sitemap of a per-request site:**
+`_server/manifest.json` carries `site`, so `/sitemap.xml` knows the origin even when the build lists no URL; public pages
+rendered per request join the sitemap and llms.txt (llms-full.txt leaves them out: they have no prerendered text); no URL at
+all is B1900. `sitemap()` of every view runs at once, an expired list is served while the next is prepared, and a view that
+fails keeps its last good list. **Credit:** `seo.credit` (default true) closes every page, prerendered or a `_server/`
+template, with «By BRAINLLM x.y.z» before `</body>`, outside `#brain-view` so client navigation keeps it; it is added after
+the SEO audit and the Markdown copies, and its link is `nofollow` because a sitewide footer link reads as a paid widget to search engines. Attribution: next to
 `<meta name="generator">` each page carries `<!-- Built with BRAINLLM x.y.z … Home … Source … -->`, llms.txt and
 llms-full.txt end with `## Built with`, and documents carry `X-Generated-By: BRAINLLM (<home>; <repo>)` from `brain start` and the generated `_headers`, nginx and Caddy configs, without a version.
 All configurable in `brain.json`.

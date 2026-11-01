@@ -123,6 +123,11 @@ pub struct Config {
     pub news: Option<News>,
     /// What built the site, closing llms.txt and llms-full.txt: `(generator, home, source)`, set by `brain build`.
     pub built_with: Option<(String, String, String)>,
+    /// `(route, HTML template)` of the public pages rendered per request, set by `brain build`: they exist for crawlers
+    /// but have no file, so only sitemap.xml and llms.txt can name them.
+    pub server_pages: Vec<(String, String)>,
+    /// `seo.credit`: the "By BRAINLLM <version>" line at the bottom of every page (default true).
+    pub credit: bool,
     /// `seo.feed`: site-wide `rss.xml` and `<section>/rss.xml` (default true).
     pub feed: bool,
     /// `seo.sections`: `sections.json`, the manifest of every section (default true).
@@ -163,6 +168,8 @@ impl Default for Config {
             authors: vec![],
             news: None,
             built_with: None,
+            server_pages: vec![],
+            credit: true,
             feed: true,
             sections: true,
             redirect_policy: crate::redirects::Policy::default(),
@@ -261,6 +268,7 @@ impl Config {
             c.manifest = b(seo, "manifest", true)?;
             c.indexnow = b(seo, "indexnow", false)?;
             c.markdown = b(seo, "markdown", true)?;
+            c.credit = b(seo, "credit", true)?;
             c.feed = b(seo, "feed", true)?;
             c.sections = b(seo, "sections", true)?;
             match seo.get("focus") {

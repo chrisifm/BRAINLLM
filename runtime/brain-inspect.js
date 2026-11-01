@@ -214,13 +214,14 @@ function leak(r) {
   leaks.push(r)
   push(r)
 }
-function b602(n, what, line) {
+function b602(n, what, line, foreign) {
   if (!n || flagged.has(n) || n.s >= 3) return
   flagged.add(n)
   const i = instOf(n), name = i ? nameOf(i) : '?'
   const fx = `fx in ${name} (${what})${line ? ' ' + line : ''}`
   if (i) (b602ByInst.get(i.r) || b602ByInst.set(i.r, []).get(i.r)).push(fx)
-  leak({ code: 'B0602', h: i ? i.h : null, name, file: i && i.C.f, line, msg: `global ${what} inside an fx without cleanup`, fix: 'return a cleanup function from the fx: `fx(() => { …; return () => remove() })`', fx: [fx] })
+  // a listener another module registered while this fx ran is not the component's: name where it really comes from
+  leak({ code: 'B0602', h: i ? i.h : null, name, file: foreign && line ? line.replace(/:\d+$/, '') : i && i.C.f, line, msg: `global ${what} inside an fx${foreign && line ? ` of ${name}, registered by ${line},` : ''} without cleanup`, fix: 'return a cleanup function from the fx: `fx(() => { …; return () => remove() })`', fx: [fx] })
 }
 function patchGlobalListeners() {
   for (const t of [G.window, G.document].filter(Boolean)) {
@@ -229,8 +230,8 @@ function patchGlobalListeners() {
     t.addEventListener = function (type, ...a) {
       const c = ctx()
       if (c && c.o === 'fx') {
-        const line = site().line
-        O.st.call(G, () => !c.n.k && b602(c.n, `addEventListener('${type}')`, line), 0)
+        const { line, foreign } = site()
+        O.st.call(G, () => !c.n.k && b602(c.n, `addEventListener('${type}')`, line, foreign), 0)
       }
       return add.call(this, type, ...a)
     }

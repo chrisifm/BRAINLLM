@@ -98,7 +98,8 @@ impl Log {
             // One write per line: another process appending to the same file cannot split it.
             let _ = f.write_all(format!("{s}\n").as_bytes());
         }
-        if self.tty {
+        // A process manager only sees stderr: failures reach it too, so a 500 never hides in logs/app.log alone.
+        if self.tty || s.contains("\"level\":\"error\"") || s.contains("\"level\":\"warn\"") {
             eprintln!("{s}");
         }
     }

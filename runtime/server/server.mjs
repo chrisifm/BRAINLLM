@@ -546,17 +546,20 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
         try { bytes = Buffer.from(JSON.stringify(body)) } catch { throw new HttpError(400, 'Native resource values must be JSON serializable') }
         if (bytes.length > 65536) throw new HttpError(413, 'Native resource values exceed their byte budget')
       }
-      const req = Readable.from(bytes.length ? [bytes] : [])
-      req.method = method
-      req.$brainForwardedFor = forwardedFor(incoming)
-      // A service call acts as the key's owner, never as the visitor: it sends no session.
-      req.headers = { ...(serviceKey ? { authorization: 'Bearer ' + serviceKey } : ownSession ? {} : { cookie: cookies(incoming, false) }), accept: 'application/json', 'content-type':'application/json', 'content-length':String(bytes.length) }
-      if (method !== 'GET') {
-        req.headers.origin = bridgeOrigin(incoming, rid, 'Native writes require a same-origin server request')
+      const outgoing = () => {
+        const req = Readable.from(bytes.length ? [bytes] : [])
+        req.method = method
+        req.$brainForwardedFor = forwardedFor(incoming)
+        // A service call acts as the key's owner, never as the visitor: it sends no session.
+        req.headers = { ...(serviceKey ? { authorization: 'Bearer ' + serviceKey } : ownSession ? {} : { cookie: cookies(incoming, false) }), accept: 'application/json', 'content-type':'application/json', 'content-length':String(bytes.length) }
+        if (method !== 'GET') {
+          req.headers.origin = bridgeOrigin(incoming, rid, 'Native writes require a same-origin server request')
+        }
+        return req
       }
+      let req = outgoing()
       let value
-      try {
-        await proxy(req, response, new URL(path, target), rid, (_res, status, data, headers) => {
+      const answered = (_res, status, data, headers) => {
           if (status === 422) {
             // the backend's own field messages (never driver text): a server function that rethrows answers 422 {errors}
             let fields
@@ -576,7 +579,20 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
           if (status === 204) { value = null; return }
           if (!String(headers['content-type'] || '').startsWith('application/json')) throw new HttpError(502, 'Native resource response must be JSON')
           try { value = JSON.parse(data.toString('utf8')) } catch { throw new HttpError(502, 'Native resource response is invalid') }
-        }, 2 * 1024 * 1024)
+      }
+      try {
+        // A restarting backend refuses connections for a few seconds: a read waits for it instead of failing the page.
+        for (let wait = 250; ; wait *= 2) {
+          try {
+            await proxy(req, response, new URL(path, target), rid, answered, 2 * 1024 * 1024)
+            break
+          } catch (e) {
+            if (method !== 'GET' || wait > 2000 || stopped || response.destroyed || !['ECONNREFUSED', 'ECONNRESET'].includes(e?.transport)) throw e
+            req.destroy()
+            await new Promise(done => setTimeout(done, wait))
+            req = outgoing()
+          }
+        }
       } catch (e) {
         // A read that failed: `load` may catch it and render anyway, so the page answer says what happened (ssr below).
         if (method === 'GET' && !(e?.status >= 400 && e.status < 500)) {
@@ -1352,6 +1368,7 @@ export function createServer(o = {}) {
     }
     if (route.i18n) await load(route.i18n) // the route's dictionary chunk: add(locale, {…}) before anything renders
     globalThis.__brainForms = forms // form() reads it while the view is built (renders are serialized)
+    globalThis.__brainIds = (globalThis.__brainIds || 0) + 1 // each page numbers its instance ids from the start, as the client will
     globalThis.__brainLocale = route.locale || null // t(), fmt and locale() of this page (§37)
     globalThis.__brainAlternates = route.alternates || null // <LangSwitch> links, in the HTML before any JS
     globalThis.__brainRoute = at // route(): app path, params, query of this request
@@ -1468,8 +1485,8 @@ export function createServer(o = {}) {
   // pages, plus an optional `lastmod`, at request time. /sitemap.xml is the build's file with those URLs added (a sitemap
   // index gets one more child, /sitemap-dynamic.xml). A file holds at most 50 000 URLs (sitemaps.org): when the build's
   // URLs plus the dynamic ones pass that, /sitemap.xml becomes an index of /sitemap-static.xml (the build's file) and
-  // /sitemap-dynamic.xml; dynamic URLs past 50 000 are dropped with a warning. Absolute URLs take the origin of the
-  // build's sitemap (brain.json `site`); a build without a sitemap serves none. The list is kept 5 min (one sitemap() run
+  // /sitemap-dynamic.xml; dynamic URLs past 50 000 are dropped with a warning. Absolute URLs take the site origin from
+  // the manifest (an older manifest: from the build's sitemap); a build without a sitemap serves none. The list is kept 5 min (one sitemap() run
   // at a time when it expires) and the response says max-age=300; a sitemap() that throws is logged and skipped.
   const DYN = routes.filter(r => r.sitemap && r.server)
   let dynList = null
@@ -1485,14 +1502,23 @@ export function createServer(o = {}) {
   const day = v => (v instanceof Date ? v.toISOString().slice(0, 10) : typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? v : null)
   const MAX_URLS = 50000
   let dynRun = null
+  const dynGood = new Map()
   async function collect(origin) {
     const urls = []
     let dropped = 0
-    for (const r of DYN) {
+    // Views answer at the same time, so one slow view costs one timeout; a view that fails keeps its last good list.
+    const lists = await Promise.all(DYN.map(async r => {
       try {
         const sm = await load(r.server)
         const list = typeof sm.sitemap === 'function' ? await withTimeout(Promise.resolve().then(() => sm.sitemap({ env })), TIMEOUT) : []
-        for (const p of Array.isArray(list) ? list : []) {
+        dynGood.set(r, Array.isArray(list) ? list : [])
+      } catch (e) {
+        log('error', 'sitemap() failed', { view: r.view, ...trace(e) })
+      }
+      return dynGood.get(r) || []
+    }))
+    DYN.forEach((r, n) => {
+        for (const p of lists[n]) {
           const path = fill(r.path, p)
           if (!path) continue
           const loc = origin + withBase(path)
@@ -1500,19 +1526,17 @@ export function createServer(o = {}) {
           else if (urls.length < MAX_URLS) urls.push({ loc, lastmod: day(p.lastmod) })
           else dropped++
         }
-      } catch (e) {
-        log('error', 'sitemap() failed', { view: r.view, ...trace(e) })
-      }
-    }
+    })
     if (dropped) log('warn', 'sitemap(): more than 50000 URLs, the rest are not listed', { dropped })
+    if (!urls.length) log('warn', 'sitemap(): no view returned a URL, so /sitemap.xml lists only the pages of the build', { views: DYN.map(r => r.view) })
     dynList = { at: Date.now(), urls }
     return urls
   }
   async function dynamicUrls(origin) {
     if (dynList && Date.now() - dynList.at < 300000) return dynList.urls
-    // concurrent requests after expiry share one run of every sitemap()
+    // concurrent requests after expiry share one run of every sitemap(); a crawler never waits while a list exists
     if (!dynRun) dynRun = collect(origin).finally(() => (dynRun = null))
-    return dynRun
+    return dynList ? dynList.urls : dynRun
   }
   // §33 S01: every sitemap file holds at most 50 000 URLs and SITEMAP_BYTES bytes of UTF-8 XML; the dynamic URLs fill
   // /sitemap-dynamic.xml, /sitemap-dynamic-2.xml, … in sitemap() order, so the split is deterministic
@@ -1535,7 +1559,7 @@ export function createServer(o = {}) {
     const f = file('/sitemap.xml')
     if (!f) return false
     const text = readFileSync(f, 'utf8')
-    const origin = [...text.matchAll(/<loc>(https?:\/\/[^<]+)<\/loc>/g)].map(m => URL.canParse(m[1]) && new URL(m[1]).origin).find(Boolean)
+    const origin = mf.site || [...text.matchAll(/<loc>(https?:\/\/[^<]+)<\/loc>/g)].map(m => URL.canParse(m[1]) && new URL(m[1]).origin).find(Boolean)
     if (!origin) return false
     const index = text.includes('<sitemapindex')
     const sets = pages(await dynamicUrls(origin))

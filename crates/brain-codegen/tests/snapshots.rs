@@ -50,7 +50,7 @@ fn web_component_target() {
 fn static_ids_get_an_instance_suffix() {
     let src = r#"<label for="q">Search</label><input id="q" aria-describedby="q-help ext" /><p id="q-help">Help</p>"#;
     let o = brain_codegen::compile(src, Path::new("comp/search.brain")).unwrap();
-    assert!(o.js.contains("let $n = 0;"), "{}", o.js);
+    assert!(o.js.contains("let $n = 0, $e;"), "{}", o.js);
     assert!(o.js.contains("const $u = $n++ ? \"~\" + $n : \"\";"), "{}", o.js);
     assert!(o.js.contains("attr($e1, \"for\", \"q\" + $u);"), "{}", o.js);
     assert!(o.js.contains("\"id\", \"q\" + $u);"), "{}", o.js);

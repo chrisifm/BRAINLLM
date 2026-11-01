@@ -1,0 +1,10 @@
+{
+  "id": "role-diagnostics",
+  "kind": "fix",
+  "title": "Doctor reports accounts with an undeclared role",
+  "why": "An account whose role server/auth/roles.jsbrain does not declare got a 403 from every grant, with no reason.",
+  "changelog": [
+    "B0778 in `brain doctor`: accounts hold a role that server/auth/roles.jsbrain does not declare"
+  ],
+  "guide": "brain guide backend"
+}

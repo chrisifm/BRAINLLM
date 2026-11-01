@@ -737,6 +737,23 @@ pub fn finish_with_og(
             cfg.abs("/sitemap.xml")
         ));
     }
+    // public pages rendered per request have no file, but crawlers reach them: they are listed like the others
+    let server_docs: Vec<(&str, html::Doc)> = cfg
+        .server_pages
+        .iter()
+        .filter(|(r, _)| !entries.iter().any(|e| audit::norm(e.route) == audit::norm(r)))
+        .map(|(r, h)| (r.as_str(), html::parse(h)))
+        .collect();
+    let mut entries = entries;
+    entries.extend(server_docs.iter().map(|(r, d)| files::Entry {
+        route: r,
+        url: cfg.abs(&files::encode_path(r)),
+        doc: d,
+        lastmod: None,
+        indexable: audit::indexable(cfg, r, d),
+        alternates: vec![],
+        videos: vec![],
+    }));
     let (sm, rejected) = files::sitemaps_with(cfg, &entries, files::SITEMAP_MAX, files::SITEMAP_MAX_BYTES);
     for u in rejected {
         warnings.push(format!(

@@ -4,7 +4,7 @@ import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { gzipSync, brotliCompressSync } from 'node:zlib'
 import { fileURLToPath } from 'node:url'
 
@@ -344,6 +344,54 @@ test('sitemap.xml: a dynamic view without paths() adds the pages its sitemap() l
   assert.equal(r.headers.get('cache-control'), 'public, max-age=300') // the same 5 min the list is kept
   assert.equal((await get('/sitemap-dynamic.xml')).status, 404) // only a sitemap index gets that child
   assert.equal((await get('/sitemap-static.xml')).status, 404) // and the static child only exists after a split
+})
+
+test('sitemap.xml: a build that lists nothing still gets the sitemap() URLs, from the origin in the manifest', async () => {
+  const d = mkdtempSync(join(tmpdir(), 'brain-sm-empty-'))
+  const w2 = (f, c) => { mkdirSync(dirname(join(d, f)), { recursive: true }); writeFileSync(join(d, f), c) }
+  w2('sitemap.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n</urlset>\n')
+  w2('_server/one.mjs', "export async function sitemap() { return [{ id: 'a' }] }")
+  w2('_server/manifest.json', JSON.stringify({ v: 1, build: 'e1', site: 'https://empty.test', routes: [{ path: '/items/:id', rx: '^/items/(?<id>[^/]+)/?$', view: '/_b/view.js', layouts: [], server: '_server/one.mjs', sitemap: true }] }))
+  const s2 = createServer({ dist: d, log: () => {} })
+  await new Promise(r => s2.listen(0, '127.0.0.1', r))
+  try {
+    const r = await fetch(`http://127.0.0.1:${s2.address().port}/sitemap.xml`)
+    assert.equal(r.status, 200)
+    assert.equal(r.headers.get('cache-control'), 'public, max-age=300')
+    assert.ok((await r.text()).includes('<url><loc>https://empty.test/items/a</loc></url>'))
+  } finally {
+    s2.close()
+  }
+})
+
+test('sitemap.xml: one slow view costs one timeout, and a later failure keeps the last good list without making a crawler wait', async () => {
+  const d = mkdtempSync(join(tmpdir(), 'brain-sm-slow-'))
+  const w2 = (f, c) => { mkdirSync(dirname(join(d, f)), { recursive: true }); writeFileSync(join(d, f), c) }
+  w2('sitemap.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n</urlset>\n')
+  w2('_server/slow.mjs', 'export async function sitemap() { await new Promise(() => {}) }')
+  w2('_server/slow2.mjs', 'export async function sitemap() { await new Promise(() => {}) }')
+  w2('_server/flaky.mjs', 'let runs = 0; export async function sitemap() { if (++runs > 1) throw new Error("down"); return [{ id: "kept" }] }')
+  const route = (name, server) => ({ path: `/${name}/:id`, rx: `^/${name}/(?<id>[^/]+)/?$`, view: '/_b/view.js', layouts: [], server: `_server/${server}.mjs`, sitemap: true })
+  w2('_server/manifest.json', JSON.stringify({ v: 1, build: 'e2', site: 'https://slow.test', routes: [route('a', 'slow'), route('b', 'slow2'), route('c', 'flaky')] }))
+  const s2 = createServer({ dist: d, timeout: 400, log: () => {} })
+  await new Promise(r => s2.listen(0, '127.0.0.1', r))
+  const real = Date.now
+  try {
+    const url = `http://127.0.0.1:${s2.address().port}/sitemap.xml`
+    const started = real()
+    assert.ok((await (await fetch(url)).text()).includes('https://slow.test/c/kept'))
+    assert.ok(real() - started < 750, 'the views answer together, not one after the other')
+    Date.now = () => real() + 301000
+    const stale = real()
+    assert.ok((await (await fetch(url)).text()).includes('https://slow.test/c/kept'))
+    assert.ok(real() - stale < 300, 'an expired list is served while the next one is prepared')
+    await new Promise(r => setTimeout(r, 500))
+    Date.now = () => real() + 700000
+    assert.ok((await (await fetch(url)).text()).includes('https://slow.test/c/kept'), 'a view that now fails keeps its last good list')
+  } finally {
+    Date.now = real
+    s2.close()
+  }
 })
 
 test('sitemap.xml: past 50 000 URLs in total it becomes an index of the static and dynamic files; one sitemap() run', async () => {

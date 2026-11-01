@@ -12,6 +12,7 @@
 @unreachable B1828 needs a multilingual site; tests/audit.rs covers it
 @unreachable B1829 reported by the build for an untranslated content entry
 @unreachable B1837 read from view sources by `brain seo audit`; tests in brain-cli/tests/seo_unlisted_routes.rs
+@unreachable B1900 reported by `brain build` and `brain seo audit --url`; tests in brain-cli/tests/sitemap_server_pages.rs
 @unreachable B1867 needs a running site; the tests of `brain seo audit --url` cover it
 @unreachable B1868 needs a running site; the tests of `brain seo audit --url` cover it
 @unreachable B1869 needs a running site; the tests of `brain seo audit --url` cover it

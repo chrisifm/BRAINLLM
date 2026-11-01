@@ -1,0 +1,10 @@
+{
+  "id": "stable-ssr-ids",
+  "kind": "fix",
+  "title": "A page repeats its size on every request",
+  "why": "The id counter of a component kept growing across requests, so each render differed in size and could mismatch hydration.",
+  "changelog": [
+    "generated ids restart for every server render, so a page repeats its ids and its size"
+  ],
+  "guide": "brain guide performance"
+}

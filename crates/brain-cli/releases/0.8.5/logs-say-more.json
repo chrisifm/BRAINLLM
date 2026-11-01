@@ -1,0 +1,10 @@
+{
+  "id": "logs-say-more",
+  "kind": "change",
+  "title": "Logs name the version, the resource and the failure",
+  "why": "Logs did not say which version ran or which resource was slow, and under a process manager failures stayed in logs/app.log.",
+  "changelog": [
+    "`backend-ready` and `worker-ready` carry `version`; `backend-request-slow` carries `resource`; `brain start` also writes warnings and errors to stderr"
+  ],
+  "guide": "brain guide backend"
+}

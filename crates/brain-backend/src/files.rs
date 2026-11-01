@@ -297,6 +297,8 @@ fn ole_format(directory: &[u8]) -> Option<&'static str> {
 /// Sharpen a container type with what only the whole stored file shows. Any read failure keeps the container type.
 pub async fn refine(path: &Path, head: &[u8], sniffed: Option<String>) -> Option<String> {
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    // the signature check names an Office format from the first entry alone: only the directory can confirm it
+    let sniffed = sniffed.map(|s| if [DOCX, XLSX, PPTX].contains(&s.as_str()) { ZIP.to_string() } else { s });
     let sharper = async {
         let mut file = tokio::fs::File::open(path).await.ok()?;
         match sniffed.as_deref()? {
@@ -779,6 +781,19 @@ mod tests {
         let n = lying.len();
         lying[n - 10..n - 6].copy_from_slice(&u32::MAX.to_le_bytes());
         assert_eq!(zip_format(&lying), None, "a directory size past the file is refused, not trusted");
+    }
+    #[tokio::test]
+    async fn a_zip_named_like_a_word_document_needs_its_package_manifest() {
+        let path = std::env::temp_dir().join(format!("brain-refine-{}", std::process::id()));
+        let lacking = zip_of(&["word/document.xml"]);
+        std::fs::write(&path, &lacking).unwrap();
+        // what the upload path does: the signature check alone calls this a Word document
+        let sniffed = classify(&lacking, "application/octet-stream").0;
+        assert_eq!(refine(&path, &lacking, sniffed).await.as_deref(), Some(ZIP));
+        assert_eq!(refine(&path, &lacking, Some(DOCX.into())).await.as_deref(), Some(ZIP));
+        std::fs::write(&path, zip_of(&["[Content_Types].xml", "word/document.xml"])).unwrap();
+        assert_eq!(refine(&path, b"PK", Some(DOCX.into())).await.as_deref(), Some(DOCX));
+        let _ = std::fs::remove_file(&path);
     }
     #[test]
     fn compound_files_name_their_format_by_stream() {

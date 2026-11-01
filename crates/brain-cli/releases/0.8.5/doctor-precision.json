@@ -1,0 +1,13 @@
+{
+  "id": "doctor-precision",
+  "kind": "fix",
+  "title": "Fewer false findings in doctor",
+  "why": "Some findings appeared for correct code.",
+  "changelog": [
+    "B0722 and B0727 know the `BRAIN_JOBS_SYSTEM_KEY`, `BRAIN_ROUTES_API_KEY` and `BRAIN_ROUTES_SYSTEM_KEY` keys of the tooling",
+    "B1002 stays quiet for a store shared by several mounts of one component",
+    "B0766 stays quiet when a local backend is answering",
+    "B0602 names the file that registered a listener when it is not the component"
+  ],
+  "guide": "brain guide start"
+}

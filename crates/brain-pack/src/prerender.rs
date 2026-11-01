@@ -104,6 +104,7 @@ for (const j of JSON.parse(input)) {
     globalThis.__brainAlternates = j.alternates || null
     if (j.i18n) await import(j.i18n)
     // components that fall back while rendering report here (the same contract server.mjs logs from, QA #176)
+    globalThis.__brainIds = (globalThis.__brainIds || 0) + 1
     const failed = (globalThis.__brainSSR = [])
     const { m } = await import(j.core)
     const V = (await import(j.view)).default

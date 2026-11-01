@@ -1321,7 +1321,7 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
         }
     }
     if !g.ids.is_empty() || g.dyn_ids {
-        body.push_str("  // #268: the first instance keeps the ids as written (`/#pricing` works); later ones get `~2`, `~3`…\n  const $u = $n++ ? \"~\" + $n : \"\";\n");
+        body.push_str("  // #268: the first instance keeps the ids as written (`/#pricing` works); later ones get `~2`, `~3`… A server render starts the count again\n  if ($e !== globalThis.__brainIds) $e = globalThis.__brainIds, $n = 0;\n  const $u = $n++ ? \"~\" + $n : \"\";\n");
     }
     let server_helpers = brain_check::servershare::shared(c).helpers;
     // `load` and `server:` bodies live in `server_js`; the client only gets an RPC stub per server function.
@@ -1412,7 +1412,7 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
         } else {js.push_str(&format!("const $t{i} = {tpl}({});\n", js_str(h)));}
     }
     if !g.ids.is_empty() || g.dyn_ids {
-        js.push_str("let $n = 0;\n");
+        js.push_str("let $n = 0, $e;\n");
     }
     if g.uses_sx {
         // #308: suffix the ids an ID reference computed at run time names. With computed ids every token is local;

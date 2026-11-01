@@ -412,7 +412,8 @@ pub fn llms_txt(cfg: &Config, entries: &[Entry]) -> String {
         o.push_str(&format!("\n## {g}\n\n"));
         for e in list {
             let title = strip_site(&e.doc.title.clone().unwrap_or_else(|| e.route.to_string()), &site);
-            let link = if cfg.markdown {
+            // a page rendered per request has no Markdown copy
+            let link = if cfg.markdown && !cfg.server_pages.iter().any(|(r, _)| r == e.route) {
                 cfg.abs(&format!("/{}", encode_path(&md_path(e.route))))
             } else {
                 e.url.clone()
@@ -449,7 +450,7 @@ pub fn llms_full(cfg: &Config, entries: &[Entry]) -> String {
     if let Some(d) = site_description(cfg, entries) {
         o.push_str(&format!("\n> {}\n", one_line(&d)));
     }
-    let mut list: Vec<&Entry> = entries.iter().filter(|e| e.indexable).collect();
+    let mut list: Vec<&Entry> = entries.iter().filter(|e| e.indexable && !cfg.server_pages.iter().any(|(r, _)| r == e.route)).collect();
     list.sort_by(|a, b| (a.route != "/", a.route).cmp(&(b.route != "/", b.route)));
     for e in list {
         o.push_str("\n---\n\n");

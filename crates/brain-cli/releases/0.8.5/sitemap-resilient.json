@@ -1,0 +1,10 @@
+{
+  "id": "sitemap-resilient",
+  "kind": "fix",
+  "title": "Sitemaps answer without long waits",
+  "why": "Views ran `sitemap()` one after the other, so slow ones added up to 30 seconds, and a failure dropped their URLs for five minutes.",
+  "changelog": [
+    "`sitemap()` of every view runs at once, an expired list is served while the next is prepared, and a view that fails keeps its last good list"
+  ],
+  "guide": "brain guide seo"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "zip-as-office",
+  "kind": "fix",
+  "title": "A plain zip is not a Word document",
+  "why": "A zip named like a Word, Excel or PowerPoint file passed the upload check without its package manifest.",
+  "changelog": [
+    "uploads named DOCX, XLSX or PPTX need the package manifest of that format; otherwise they count as ZIP"
+  ],
+  "guide": "brain guide backend"
+}

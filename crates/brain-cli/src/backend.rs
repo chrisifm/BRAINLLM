@@ -719,6 +719,14 @@ fn backend_ready(address: &std::net::SocketAddr) -> bool {
     stream.read(&mut head).is_ok_and(|n| head[..n].starts_with(b"HTTP/1.1 200"))
 }
 
+/// Something listens at this backend URL: another process on this machine owns the database and the queues.
+fn answers(url: &str) -> bool {
+    use std::net::ToSocketAddrs;
+    let host = url.split_once("://").map_or(url, |(_, rest)| rest).split('/').next().unwrap_or("");
+    let target = if host.rsplit_once(':').is_some_and(|(_, port)| port.parse::<u16>().is_ok()) { host.to_string() } else { format!("{host}:{}", if url.starts_with("https:") { 443 } else { 80 }) };
+    target.to_socket_addrs().ok().into_iter().flatten().any(|addr| std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(300)).is_ok())
+}
+
 /// A backend URL that does not point at this machine.
 fn is_remote_backend(url: &str) -> bool {
     let host = url.split_once("://").map_or("", |(_, rest)| rest).split('/').next().unwrap_or("");
@@ -1413,7 +1421,7 @@ pub(crate) fn queue_findings(root: &Path, environment: &str) -> Vec<Finding> {
     let Ok(url) = database(root, environment) else {
         // A front-only process: its backend, and the queues with it, run on another host.
         let backend = std::env::var("BRAIN_BACKEND_URL").ok().or_else(|| crate::env::value(root, environment, "BRAIN_BACKEND_URL"));
-        if backend.as_deref().is_some_and(is_remote_backend) {
+        if backend.as_deref().is_some_and(|url| is_remote_backend(url) || answers(url)) {
             return vec![];
         }
         return unknown("queue workers were not checked: no DATABASE_URL, so jobs can be neither stored nor run here", "set DATABASE_URL in .brain_env and run `brain backend migrate`");
@@ -1433,6 +1441,30 @@ pub(crate) fn queue_findings(root: &Path, environment: &str) -> Vec<Finding> {
         Err("query") => unknown("queue workers were not checked: the database is reachable but has no worker table", "run `brain backend migrate`"),
         Err(_) => unknown("queue workers were not checked: the database is unreachable. Stored jobs stay safe and wait, but no worker can claim them and no new job can be enqueued until it returns", "start Postgres or correct DATABASE_URL, then run `brain doctor` again"),
     }
+}
+
+/// B0778: accounts whose role `server/auth/roles.jsbrain` does not declare. Every grant refuses them with a plain 403, and
+/// nothing in the response says why. Silent when the database cannot answer: the queue check already reports that.
+pub(crate) fn role_findings(root: &Path, environment: &str) -> Vec<Finding> {
+    let (Ok(url), Ok(config)) = (database(root, environment), auth_roles(root)) else { return vec![] };
+    let Ok(rt) = runtime() else { return vec![] };
+    let rows: Vec<(String, i64)> = rt
+        .block_on(async {
+            let boot = brain_backend::boot::Boot::command(environment == "production");
+            let pool = tokio::time::timeout(std::time::Duration::from_secs(5), brain_backend::boot::connect(&url, &boot)).await.ok()?.ok()?;
+            let rows = brain_backend::auth::role_counts(&pool).await.ok();
+            pool.close().await;
+            rows
+        })
+        .unwrap_or_default();
+    undeclared_roles(&rows, &config.roles)
+}
+
+fn undeclared_roles(rows: &[(String, i64)], declared: &[String]) -> Vec<Finding> {
+    rows.iter()
+        .filter(|(role, _)| !declared.contains(role))
+        .map(|(role, count)| ("B0778", "server/auth/roles.jsbrain".to_string(), format!("{count} account(s) have the role `{role}`, which is not declared here, so every grant answers them 403 POLICY_DENIED"), format!("add '{role}' to roles, or change those accounts with POST /_brain/auth/users/{{id}}/role")))
+        .collect()
 }
 
 /// Run the one-shot check beside a starting server, so a slow database never delays it.
@@ -1734,7 +1766,7 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
                 let (send, recv) = tokio::sync::watch::channel(false);
                 brain_backend::log_line!(
                     "{}",
-                    json!({"schemaVersion":1,"event":"worker-ready","queue":name,"concurrency":n})
+                    json!({"schemaVersion":1,"event":"worker-ready","queue":name,"concurrency":n,"version":env!("CARGO_PKG_VERSION")})
                 );
                 policy.concurrency = n;
                 let worker = queue.work_with(&name, &policy, recv, move |mut job| {
@@ -2636,6 +2668,21 @@ pub fn media(args: &[String]) -> Result<(), String> {
 
 #[cfg(test)]
 mod failure_log_tests {
+    #[test]
+    fn accounts_with_an_undeclared_role_are_named() {
+        let found = super::undeclared_roles(&[("admin".into(), 2), ("employer".into(), 3)], &["admin".into(), "user".into()]);
+        assert_eq!(found.len(), 1);
+        assert!(found[0].0 == "B0778" && found[0].2.contains("3 account(s)") && found[0].2.contains("`employer`"), "{:?}", found[0]);
+    }
+    #[test]
+    fn a_backend_on_this_machine_excuses_a_process_without_a_database_only_while_it_answers() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        assert!(super::answers(&format!("http://127.0.0.1:{port}/")));
+        drop(listener);
+        assert!(!super::answers(&format!("http://127.0.0.1:{port}")));
+        assert!(!super::answers(""));
+    }
     #[test]
     fn only_a_backend_on_another_host_excuses_a_process_without_a_database() {
         assert!(is_remote_backend("https://api.example.com"));

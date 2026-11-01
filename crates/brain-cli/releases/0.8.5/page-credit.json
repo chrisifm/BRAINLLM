@@ -1,0 +1,10 @@
+{
+  "id": "page-credit",
+  "kind": "change",
+  "title": "Pages carry a BRAINLLM credit",
+  "why": "A site built with BRAINLLM had no visible way to say so.",
+  "changelog": [
+    "every generated page ends with a small \"By BRAINLLM x.y.z\" line linking to the home page; `seo.credit: false` removes it"
+  ],
+  "guide": "brain guide seo"
+}

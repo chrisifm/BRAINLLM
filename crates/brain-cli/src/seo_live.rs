@@ -353,6 +353,9 @@ pub fn report(origin: &str, cfg: &mut brain_seo::Config, sampled: bool, expect_n
     if let Some((url, response)) = &missing {
         live.extend(check_missing(url, response));
     }
+    if probes.listed && pages.is_empty() {
+        live.push(Live { code: "B1900", level: Level::Warning, url: format!("{origin}/sitemap.xml"), msg: "the sitemap lists no URL, so search engines get no page from it and this audit has nothing to read".into(), fix: "remove `noindex` from the views that should be found, or check that `sitemap()` returns its pages; `--path` audits named pages meanwhile".into() });
+    }
     live.extend(check_addresses(origin, &pages, probes.listed));
     live.extend(check_variants(origin, &probes.variants));
     live.extend(check_declared(&pages, &probes));

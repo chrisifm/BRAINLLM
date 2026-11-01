@@ -28,3 +28,23 @@ fn doctor_app_matches_expected() {
     w.sort();
     assert_eq!(g, w);
 }
+
+#[test]
+fn a_store_shared_by_every_mount_of_one_component_is_not_overengineering() {
+    let root = std::env::temp_dir().join(format!("brain-doctor-b1002-{}", std::process::id()));
+    let write = |rel: &str, src: &str| {
+        let f = root.join(rel);
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(f, src).unwrap();
+    };
+    write("channels/menu.jsbrain", "export default store({ open: false })\n");
+    write("comp/menu.brain", "<script>\n  import menu from '../channels/menu.jsbrain'\n</script>\n<button type=\"button\" on:click={menu.open = !menu.open}>Menu</button>\n");
+    write("views/index.brain", "<script>\n  import Menu from '../comp/menu.brain'\n</script>\n<main><Menu /></main>\n");
+    let b1002 = || brain_check::doctor::doctor(&root).iter().filter(|d| d.code == "B1002").count();
+    assert_eq!(b1002(), 1, "one mount: a local sig is enough");
+    write("views/index.brain", "<script>\n  import Menu from '../comp/menu.brain'\n</script>\n<main><Menu /><Menu /></main>\n");
+    assert_eq!(b1002(), 0, "two mounts share the store");
+    write("views/index.brain", "<script>\n  import Menu from '../comp/menu.brain'\n  let items = sig([1])\n</script>\n<main>{#each items as item}<Menu />{/each}</main>\n");
+    assert_eq!(b1002(), 0, "a mount inside a loop shares it too");
+    let _ = std::fs::remove_dir_all(&root);
+}

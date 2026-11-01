@@ -7,6 +7,24 @@ diagnostics that reject code an earlier version accepted.
 Every npm package (`@christianirack/brainllm`, its seven native platform packages, `brainllm-runtime`,
 `create-brainllm` and `create-brainll`) ships the same version as `[workspace.package]` in `Cargo.toml`.
 
+## [0.8.5] - 2026-11-01
+
+Upgrade with `npm install -D @christianirack/brainllm@0.8.5 --save-exact`. A site rendered per request rebuilds with its public origin to get its sitemap (`brain build --site`, or `PUBLIC_SITE_URL`).
+
+- `/sitemap.xml` takes the origin from the manifest and lists public pages rendered per request, as does llms.txt
+- B1900 stops a build whose sitemap would list no URL; `brain seo audit --url` reports it on a live site
+- `sitemap()` of every view runs at once, an expired list is served while the next is prepared, and a view that fails keeps its last good list
+- every generated page ends with a small "By BRAINLLM x.y.z" line linking to the home page; `seo.credit: false` removes it
+- generated ids restart for every server render, so a page repeats its ids and its size
+- uploads named DOCX, XLSX or PPTX need the package manifest of that format; otherwise they count as ZIP
+- a read from `ctx.backend` waits up to about 4 seconds when the backend refuses the connection; writes never repeat
+- `backend-ready` and `worker-ready` carry `version`; `backend-request-slow` carries `resource`; `brain start` also writes warnings and errors to stderr
+- B0778 in `brain doctor`: accounts hold a role that server/auth/roles.jsbrain does not declare
+- B0722 and B0727 know the `BRAIN_JOBS_SYSTEM_KEY`, `BRAIN_ROUTES_API_KEY` and `BRAIN_ROUTES_SYSTEM_KEY` keys of the tooling
+- B1002 stays quiet for a store shared by several mounts of one component
+- B0766 stays quiet when a local backend is answering
+- B0602 names the file that registered a listener when it is not the component
+
 ## [0.8.4] - 2026-11-01
 
 Upgrade with `npm install -D @christianirack/brainllm@0.8.4 --save-exact`. This release also carries everything listed under 0.8.3.

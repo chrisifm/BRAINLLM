@@ -23,6 +23,25 @@ pub fn unlisted(root: &Path) -> Vec<(String, String)> {
     out
 }
 
+/// A static route rendered per request that crawlers may read: not a template of a dynamic route, not `_`-prefixed, not
+/// an error view and not `noindex`. A guard is the caller's check.
+pub fn listable(root: &Path, route: &str, view: &str) -> bool {
+    let name = view.rsplit('/').next().unwrap_or("");
+    if route.starts_with('!') || route.contains([':', '*']) || name.starts_with('_') || ["404.brain", "410.brain", "500.brain"].contains(&name) {
+        return false;
+    }
+    std::fs::read_to_string(root.join(view)).is_ok_and(|src| !src.contains("noindex"))
+}
+
+/// B1900: a published sitemap.xml with no URL, and no view that adds any at request time.
+pub fn empty_sitemap(dist: &Path) -> Option<String> {
+    let sitemap = std::fs::read_to_string(dist.join("sitemap.xml")).ok()?;
+    let filled = std::fs::read_to_string(dist.join("_server/manifest.json")).is_ok_and(|m| m.contains("\"sitemap\":true"));
+    (!sitemap.contains("<loc>") && !filled).then(|| {
+        "B1900 sitemap.xml:1:1 sitemap.xml lists no URL, so search engines get no page from it; fix: remove `noindex` from the views that should be found, or export `sitemap()` from a dynamic view".to_string()
+    })
+}
+
 fn guarded(root: &Path, view: &str) -> bool {
     let mut dir = root.to_path_buf();
     let parts: Vec<&str> = view.split('/').collect();

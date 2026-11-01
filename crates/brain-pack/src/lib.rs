@@ -92,6 +92,8 @@ pub struct PostOut {
     pub warnings: Vec<String>,
     /// `(CSP directive, source)` third-party origins the pages need (Google tags): added to the build's CSP.
     pub csp: Vec<(String, String)>,
+    /// Absolute origin of the site: the server's `sitemap()` URLs need it even when the build's sitemap lists nothing.
+    pub site: Option<String>,
 }
 
 /// Runs after the pages are assembled (HTML may be rewritten in place) and before caching, the build signature and
@@ -2041,6 +2043,9 @@ fn build_inner_with_options(
             w.push_str(&format!("; sitemap() of {} is skipped until then", skipped.join(", ")));
         }
         post_csp = out.csp;
+        if let (Some(site), Some(manifest)) = (&out.site, files.get_mut("_server/manifest.json")) {
+            *manifest = manifest.replacen("{\"v\":1,", &format!("{{\"v\":1,\"site\":{},", prerender_json(site)), 1);
+        }
     }
     if let Some(socket) = &options.native_sockets {
         post_csp.extend(cache::native_socket_csp(socket));

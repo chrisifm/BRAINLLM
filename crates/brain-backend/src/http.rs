@@ -883,7 +883,7 @@ pub async fn serve_full(
     });
     crate::log_line!(
         "{}",
-        json!({"schemaVersion":1,"event":"backend-ready","address":address,"experimental":true})
+        json!({"schemaVersion":1,"event":"backend-ready","address":address,"version":env!("CARGO_PKG_VERSION"),"experimental":true})
     );
     let file_sweep = tokio::spawn(crate::files::sweep_loop(pool.clone(), file_storage));
     let retention = crate::analytics::settings()
@@ -1032,6 +1032,10 @@ async fn response_headers(req: Request, next: Next) -> Response {
     // Lines carry the matched route template, never the raw path, query, headers or body.
     if let Some(event) = edge_http::request_event(log_policy.as_ref(), response.status(), started.elapsed()) {
         let mut line = json!({"event":event,"rid":rid,"route":route,"method":method.as_str(),"status":response.status().as_u16(),"ms":started.elapsed().as_millis()});
+        // The template alone hides which resource was slow; only a name of the declared shape is written.
+        if let Some(name) = path.strip_prefix("/api/").and_then(|rest| rest.split('/').next()).filter(|name| route.starts_with("/api/{name}") && !name.is_empty() && name.len() <= 48 && name.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')) {
+            line["resource"] = json!(name);
+        }
         if let Some((db_ms, wait_ms)) = db_time.fields() {
             line["dbMs"] = json!(db_ms);
             line["dbWaitMs"] = json!(wait_ms);
