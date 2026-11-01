@@ -111,7 +111,7 @@ fn every_page_closes_with_the_credit_unless_the_app_turns_it_off() {
         ("views/about.brain", "<meta seo title=\"About\" description=\"About this site: who makes it and what it is for, in a few words.\" />\n<main><h1>About</h1></main>\n".to_string()),
     ]);
     assert!(brain(&dir, &["build", "--site", "https://shop.acme.dev"]).status.success());
-    let line = format!("By <a href=\"https://chrisifm.github.io/BRAINLLM/\" rel=\"nofollow noopener\">BRAINLLM</a> {}</p>", env!("CARGO_PKG_VERSION"));
+    let line = format!("By <a href=\"https://chrisifm.github.io/BRAINLLM/\" rel=\"nofollow\">BRAINLLM</a> {}</p>", env!("CARGO_PKG_VERSION"));
     let about = std::fs::read_to_string(dir.join("dist/about.html")).or_else(|_| std::fs::read_to_string(dir.join("dist/about/index.html"))).unwrap();
     assert!(about.contains(&line), "{about}");
     let served = std::fs::read_dir(dir.join("dist/_server/pages")).unwrap().flatten().map(|f| std::fs::read_to_string(f.path()).unwrap()).collect::<Vec<_>>();

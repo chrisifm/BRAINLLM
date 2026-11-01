@@ -1561,7 +1561,7 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
         }
         if seo_cfg.credit {
             let credit = format!(
-                "<p data-brain-credit style=\"margin:0;padding:8px 16px;text-align:right;font:12px/1.4 system-ui,sans-serif\">By <a href=\"{}\" rel=\"nofollow noopener\">BRAINLLM</a> {}</p>",
+                "<p data-brain-credit style=\"margin:8px 16px;text-align:right;font:12px system-ui\">By <a href=\"{}\" rel=\"nofollow\">BRAINLLM</a> {}</p>",
                 brain_pack::HOME,
                 env!("CARGO_PKG_VERSION")
             );

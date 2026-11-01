@@ -62,12 +62,9 @@ page text, not after.
   The server lists `/blog/hello-world` and `/blog/second-post` in /sitemap.xml (kept 5 min).
   A public dynamic view (no `_guard.jsbrain`, not `noindex`) without `paths()` or `sitemap()` is rendered per request
   but listed nowhere; `brain build` warns `B1837 views/blog/[slug].brain … dynamic route `/blog/:slug` …` with this fix.
-- Public pages rendered per request without params (`/catalog`) are listed in /sitemap.xml and llms.txt on their own. A site
-  whose sitemap would list nothing stops the build at B1900, and `brain seo audit --url` reports the same on a live site.
-- Every page ends with a small «By BRAINLLM x.y.z» line; `"seo": { "credit": false }` in brain.json removes it.
+- Public per-request pages without params are listed in /sitemap.xml and llms.txt; a sitemap with no URL is B1900.
 - Sitemaps and robots `Sitemap:` need the deployed origin: `PUBLIC_SITE_URL` in the `[production]` section of
-  `.brain_env`. With none, or a placeholder (example.com, `*.test`, localhost: B0736, also in `brain doctor`), the build
-  publishes neither and warns; `brain build --site https://your-domain` overrides it.
+  `.brain_env`. With none, or a placeholder (example.com, `*.test`, localhost: B0736, also in `brain doctor`), the build publishes neither and warns; `brain build --site https://your-domain` overrides it.
 - Collections: `brain add collection blog` turns `content/blog/*.md` (frontmatter `title description date updated?
   tags? cover? author? draft?`) into pages, tag pages, RSS and Atom, with Article JSON-LD.
 
