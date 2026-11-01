@@ -124,6 +124,45 @@ pub struct Built {
     /// `(dist path, bytes)` of generated binary files (social images).
     pub binary: Vec<(String, Vec<u8>)>,
     pub report: Report,
+    /// The request-independent head of this site, for the templates of pages rendered per request.
+    pub server_head: ServerHead,
+}
+
+/// What every page of the site carries whatever the request, decided once by the build. The prerendered pages get it
+/// from [`finish`]; a page rendered per request gets it in its template, and the server binds what depends on the
+/// request (`head()` in server.mjs).
+pub struct ServerHead {
+    start: String,
+    icon: String,
+    touch_icon: String,
+    end: String,
+    site_name: String,
+}
+
+impl ServerHead {
+    /// The template of a per-request page with the site's head. Not-found and error templates are not URLs: untouched.
+    pub fn apply(&self, cfg: &Config, route: &str, template: &str) -> String {
+        if !route.starts_with('/') {
+            return template.to_string();
+        }
+        let head = template.split("</head>").next().unwrap_or("").to_ascii_lowercase();
+        let icon = if head.contains("rel=\"icon\"") || head.contains("rel=\"shortcut icon\"") || head.contains("rel=icon") { "" } else { &self.icon };
+        let touch = if head.contains("apple-touch-icon") { "" } else { &self.touch_icon };
+        let page = inject_head(&inject_head(template, &format!("{}{icon}{touch}", self.start), false), &self.end, true);
+        let doc = html::parse(&page);
+        let facts = social::Facts {
+            site_name: &self.site_name,
+            home: false,
+            indexable: audit::indexable(cfg, route, &doc),
+            article: None,
+            section: None,
+            image_dims: None,
+            locale: None,
+            locale_alternates: &[],
+        };
+        let (start, end) = social::head(cfg, &doc, &facts);
+        dedupe_head(&inject_head(&inject_head(&page, &start, false), &end, true))
+    }
 }
 
 /// Byte index of the first case-insensitive match.
@@ -861,7 +900,16 @@ pub fn finish_with_og(
             broken.join("\n")
         ));
     }
+    let mut site_tags = String::new();
+    if cfg.feed && files.iter().any(|(f, _)| f == "rss.xml") {
+        site_tags.push_str(FEED_LINK);
+    }
+    if cfg.sections {
+        site_tags.push_str("<link rel=\"alternate\" type=\"application/json\" title=\"Sections\" href=\"/sections.json\">");
+    }
+    let server_head = ServerHead { start, icon: icon_tag, touch_icon: touch_tag, end: format!("{site_tags}{end}"), site_name: name };
     Ok(Built {
+        server_head,
         files,
         warnings,
         csp: google.csp,

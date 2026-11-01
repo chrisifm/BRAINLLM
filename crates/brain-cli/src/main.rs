@@ -1464,6 +1464,9 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
                 p.html = s.html.clone();
             }
         }
+        for p in pages.iter_mut().filter(|p| p.file.starts_with("_server/")) {
+            p.html = built.server_head.apply(&seo_cfg, &p.route, &p.html);
+        }
         let scores: Vec<u32> = built.report.pages.iter().filter_map(|p| p.score).collect();
         seo_range.set(scores.iter().min().zip(scores.iter().max()).map(|(a, b)| (*a, *b)));
         // redirects.json → host configs (BUILD #219): brain-pack folds these fragments into nginx/Caddy (with the base)
