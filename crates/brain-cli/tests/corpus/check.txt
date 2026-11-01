@@ -654,6 +654,7 @@ export default async function handle(ctx) { return { ok: Boolean(pg) } }
 </script>
 <p>Two</p>
 @file views/both.brain
+<meta seo title="Both" description="A page that renders two components which register tools.">
 <script>
   import One from '../comp/one.brain'
   import Two from '../comp/two.brain'
