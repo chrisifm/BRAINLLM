@@ -1,0 +1,14 @@
+{
+  "id": "key-channel-member",
+  "kind": "change",
+  "title": "B0788 warns on a member read of a key() channel",
+  "why": "`session.user` on a key() channel is always undefined and nothing reported it.",
+  "changelog": [
+    "`brain check` warns B0788 on a member read of a `key()` channel"
+  ],
+  "guide": "CONTRIBUTING.md",
+  "codes": [
+    "B0788"
+  ],
+  "apis": []
+}

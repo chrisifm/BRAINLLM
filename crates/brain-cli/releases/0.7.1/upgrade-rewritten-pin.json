@@ -1,0 +1,10 @@
+{
+  "id": "upgrade-rewritten-pin",
+  "kind": "fix",
+  "title": "`brain upgrade` finds the version an install rewrote",
+  "why": "An app without brainVersion lost its version when installing the new compiler; the pin at git HEAD is now read, and the report warns when the version cannot be told.",
+  "changelog": [
+    "Fix: `brain upgrade` after `npm install` reads the previous pin from the last commit"
+  ],
+  "guide": "CONTRIBUTING.md"
+}

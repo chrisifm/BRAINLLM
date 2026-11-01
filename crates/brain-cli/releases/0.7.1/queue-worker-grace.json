@@ -1,0 +1,13 @@
+{
+  "id": "queue-worker-grace",
+  "kind": "fix",
+  "title": "B0765 waits for a worker starting beside the server",
+  "why": "A worker restarted in the same second as the server raised a false alarm.",
+  "changelog": [
+    "Fix: B0765 waits 10 seconds for a worker started at the same time as the server"
+  ],
+  "guide": "CONTRIBUTING.md",
+  "codes": [
+    "B0765"
+  ]
+}

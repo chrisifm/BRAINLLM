@@ -1,0 +1,14 @@
+{
+  "id": "title-bare-site-name",
+  "kind": "change",
+  "title": "B0777 sees a title ending in the bare site name",
+  "why": "`Forum X` with `%s · X` rendered the name twice with no warning. The scaffold's about page drops the name too.",
+  "changelog": [
+    "B0777 also warns when a title ends in the bare site name"
+  ],
+  "guide": "CONTRIBUTING.md",
+  "codes": [
+    "B0777"
+  ],
+  "apis": []
+}

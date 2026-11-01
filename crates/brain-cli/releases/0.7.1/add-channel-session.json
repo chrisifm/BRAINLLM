@@ -1,0 +1,10 @@
+{
+  "id": "add-channel-session",
+  "kind": "fix",
+  "title": "`brain add channel session` writes the session store",
+  "why": "The command wrote a key() while the guides read `session.user`.",
+  "changelog": [
+    "Fix: `brain add channel session` writes the same store as `brain new`"
+  ],
+  "guide": "CONTRIBUTING.md"
+}

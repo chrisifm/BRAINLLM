@@ -1,0 +1,10 @@
+{
+  "id": "form-hides-backend-fix",
+  "kind": "fix",
+  "title": "`form()` never shows the backend's fix",
+  "why": "A 422 without fields showed the developer's English fix to visitors. It stays in `error.fix`; forms show `form.rejected`.",
+  "changelog": [
+    "Fix: `form()` shows `form.rejected` instead of the backend's developer `fix`"
+  ],
+  "guide": "CONTRIBUTING.md"
+}

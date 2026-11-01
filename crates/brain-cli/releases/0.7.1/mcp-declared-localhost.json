@@ -1,0 +1,10 @@
+{
+  "id": "mcp-declared-localhost",
+  "kind": "fix",
+  "title": "MCP `brain_run_start` opens the declared localhost origin",
+  "why": "It reported 127.0.0.1 even when only localhost was allowed, where live sockets are refused.",
+  "changelog": [
+    "Fix: MCP `brain_run_start` reports and opens the declared `localhost` origin"
+  ],
+  "guide": "CONTRIBUTING.md"
+}
