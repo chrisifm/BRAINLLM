@@ -179,6 +179,21 @@ export function acceptedEncodings(header = '', order = ['br', 'zstd', 'gzip']) {
 // already has an encoding, a `no-transform` cache policy or a status without content is sent as is.
 const COMPRESSIBLE = /^(?:text\/|image\/svg\+xml|application\/(?:json|javascript|xml|[\w.-]+\+(?:json|xml)))/i
 const DYNAMIC = ['zstd', 'br', 'gzip']
+// Each Vary token once: a relayed backend header and the additions here must not repeat one (tokens are case-insensitive).
+const varyOnce = v => {
+  const seen = new Set()
+  return String(v).split(',').map(t => t.trim()).filter(t => t && !seen.has(t.toLowerCase()) && seen.add(t.toLowerCase())).join(', ')
+}
+// Parameters that do not make a different page: the list of `<meta seo query>` (brain-check seo.rs, B0503).
+const TRACKING = /^(?:utm_.*|gclid|fbclid|msclkid)$/
+const cacheSearch = url => {
+  const kept = new URLSearchParams([...url.searchParams].filter(([key]) => !TRACKING.test(key)))
+  kept.sort()
+  return kept.size ? '?' + kept : ''
+}
+// Messages this file writes itself, safe to log as the cause; anything else in an error message may hold private data.
+const OWN_CAUSES = new Set(['Backend request unavailable', 'Backend request timed out', 'Backend response exceeds its byte budget', 'Backend request capacity is unavailable', 'Backend stream capacity is unavailable', 'Native file request failed', 'Native file response is invalid', 'Native authentication is temporarily unavailable', 'Native resource response must be JSON', 'Native resource response is invalid', 'Native resource request failed', 'Invalid final response status', 'Invalid configured redirect location', 'timeout'])
+const CODE_SHAPE = /^[A-Z][A-Z0-9_]{0,63}$/
 const varyEncoding = v => (/accept-encoding/i.test(v || '') ? v : [v, 'Accept-Encoding'].filter(Boolean).join(', '))
 function bodyEncoding(req, status, headers) {
   if (status < 200 || status === 204 || status === 206 || status === 304 || headers['content-encoding'] || !COMPRESSIBLE.test(headers['content-type'] || '') || /no-transform/i.test(headers['cache-control'] || '')) return null
@@ -430,7 +445,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report) {
       }
       const closed = () => finish()
       const count = chunk => { sent += chunk.length; if (sent > ceiling) finish(new HttpError(413, 'Request body is too large')) }
-      const unavailable = () => new HttpError(503, 'Backend request unavailable')
+      const unavailable = transport => new HttpError(503, 'Backend request unavailable', { transport })
       try {
         outgoing = httpRequest(new URL(url.pathname + url.search, target), { agent:streamAgent, method:req.method, headers:requestHeaders(req, rid, FILE_HEADERS) }, backend => {
           const safe = { 'cache-control':'no-store' }
@@ -440,9 +455,11 @@ export function nativeAuthBridge(raw, refused, serviceKey, report) {
           }
           const cookies = nativeCookies(backend.headers['set-cookie'])
           if (cookies.length) safe['set-cookie'] = cookies
+          if (safe.vary) safe.vary = varyOnce(safe.vary)
+          if (backend.statusCode >= 500) res.$brainCause = 'answered by the native backend'
           res.writeHead(backend.statusCode || 502, safe)
-          backend.once('error', () => finish(unavailable()))
-          backend.once('aborted', () => finish(unavailable()))
+          backend.once('error', e => finish(unavailable(e.code)))
+          backend.once('aborted', () => finish(unavailable('BACKEND_ABORTED')))
           backend.once('end', () => { res.end(() => finish()) })
           backend.pipe(res)
         })
@@ -451,7 +468,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report) {
         outgoing.setTimeout(60000, () => finish(new HttpError(504, 'Backend request timed out')))
         // The backend's own upload deadline is 300 s; nothing else needs a total limit after the headers.
         if (req.method === 'POST') deadline = setTimeout(() => finish(new HttpError(504, 'Backend request timed out')), 310000)
-        outgoing.once('error', () => finish(unavailable()))
+        outgoing.once('error', e => finish(unavailable(e.code)))
         res.once('close', closed)
         req.on('data', count)
         req.pipe(outgoing)
@@ -466,7 +483,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report) {
     if (Number(req.headers['content-length'] || 0) > limit) throw new HttpError(413, 'Request body is too large')
     active++
     return new Promise((resolve, reject) => {
-      let outgoing, timer, done = false, bytes = 0, requestBytes = 0, failure
+      let outgoing, timer, done = false, bytes = 0, requestBytes = 0, failure, transport
       const chunks = []
       const headers = requestHeaders(req, rid, declared?.headers)
       const finish = (error, backend) => {
@@ -474,7 +491,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report) {
         done = true; clearTimeout(timer); active--; proxyBytes -= bytes; owned.delete(outgoing)
         req.removeListener('aborted',cancel); req.removeListener('data',data); req.removeListener('end',end)
         res.removeListener('close',cancel)
-        if (error) { if (!res.destroyed) reject(failure || new HttpError(503,'Backend request unavailable')); else resolve(); return }
+        if (error) { if (!res.destroyed) reject(failure || new HttpError(503,'Backend request unavailable',{transport})); else resolve(); return }
         const safe = { 'cache-control':'no-store' }
         for (const key of RESPONSE_HEADERS) {
           const value = backend.headers[key]
@@ -486,6 +503,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report) {
         }
         const cookies = nativeCookies(backend.headers['set-cookie'])
         if (cookies.length) safe['set-cookie'] = cookies
+        if (backend.statusCode >= 500 && !res.$capture) res.$brainCause = 'answered by the native backend'
         try { reply(res,backend.statusCode || 502,req.method === 'HEAD' ? '' : Buffer.concat(chunks,bytes),safe); resolve() } catch (e) { reject(e) }
       }
       const cancel = () => { outgoing?.destroy(); finish(true) }
@@ -502,11 +520,11 @@ export function nativeAuthBridge(raw, refused, serviceKey, report) {
             if (bytes > responseLimit || proxyBytes > 64 * 1024 * 1024) { failure = new HttpError(502,'Backend response exceeds its byte budget'); outgoing.destroy(); finish(true); return }
             chunks.push(chunk)
           })
-          backend.once('end',()=>finish(false,backend)); backend.once('error',()=>finish(true)); backend.once('aborted',()=>finish(true))
+          backend.once('end',()=>finish(false,backend)); backend.once('error',e=>{transport=e.code;finish(true)}); backend.once('aborted',()=>{transport='BACKEND_ABORTED';finish(true)})
         })
         owned.add(outgoing)
         timer = setTimeout(()=>{failure = new HttpError(504,'Backend request timed out');outgoing.destroy();finish(true)},declared || url.pathname === '/_brain/uploads' || url.pathname.startsWith('/_brain/uploads/') ? 35000 : 10000)
-        outgoing.once('error',()=>finish(true)); req.once('aborted',cancel); res.once('close',cancel)
+        outgoing.once('error',e=>{transport=e.code;finish(true)}); req.once('aborted',cancel); res.once('close',cancel)
         req.on('data',data); req.once('end',end)
         if (req.readableEnded) end()
       } catch { outgoing?.destroy(); finish(true) }
@@ -558,6 +576,15 @@ export function nativeAuthBridge(raw, refused, serviceKey, report) {
           if (!String(headers['content-type'] || '').startsWith('application/json')) throw new HttpError(502, 'Native resource response must be JSON')
           try { value = JSON.parse(data.toString('utf8')) } catch { throw new HttpError(502, 'Native resource response is invalid') }
         }, 2 * 1024 * 1024)
+      } catch (e) {
+        // A read that failed: `load` may catch it and render anyway, so the page answer says what happened (ssr below).
+        if (method === 'GET' && !(e?.status >= 400 && e.status < 500)) {
+          const seen = incoming.$brainFailedReads || (incoming.$brainFailedReads = { reads: 0, backendCode: undefined, transport: undefined })
+          seen.reads++
+          seen.backendCode ??= e?.code
+          seen.transport ??= e?.transport
+        }
+        throw e
       } finally { req.destroy() }
       if (response.destroyed || response.writableEnded) throw new HttpError(409, 'The server request has ended')
       return value
@@ -806,8 +833,12 @@ export function createServer(o = {}) {
   const secret = o.secret ?? env.BRAIN_SECRET ?? ''
   const COMPRESS = o.compress !== false && env.BRAIN_COMPRESS !== 'off' // a proxy that already compresses can opt out
   const sink = o.log || ((level, msg, extra) => console[level === 'error' ? 'error' : 'log'](json({ t: new Date().toISOString(), level, msg, ...extra })))
+  // Requests in flight by rid: a 5xx whose cause reached no log line gets one when the response closes (dispatch below).
+  const liveRequests = new Map()
+  let statusPageWindow = 0, statusPageLogs = 0
   const log = (level, msg, extra = {}) => {
     const safe = { ...extra }
+    if (level !== 'info' && extra.rid) { const live = liveRequests.get(extra.rid); if (live) live.logged = true }
     // Error messages may contain credentials or request data. Retain only bounded V8 source frames.
     if (typeof safe.stack === 'string') {
       const kind = /^(TypeError|ReferenceError|RangeError|SyntaxError|AggregateError|Error):/.exec(safe.stack)?.[1] || 'Error'
@@ -843,6 +874,9 @@ export function createServer(o = {}) {
   // log fields for a thrown value: its stack (sanitized by log) plus, for B09xx budget failures, the typed fields only
   const trace = e => {
     const out = { stack: String((e && e.stack) || e) }
+    if (e instanceof HttpError && OWN_CAUSES.has(e.message)) out.cause = e.message
+    if (e && CODE_SHAPE.test(e.transport || '')) out.transport = e.transport
+    if (e && typeof e.code === 'string' && CODE_SHAPE.test(e.code)) out.backendCode = e.code
     if (e && e.kind === 'budget' && /^B09\d\d$/.test(e.code) && typeof e.budget === 'string' && /^[a-zA-Z]{1,16}$/.test(e.budget)) {
       const str = (v, n) => typeof v === 'string' ? v.slice(0, n) : null, pos = v => Number.isSafeInteger(v) && v > 0 ? v : null
       out.budgetFailure = { code: e.code, budget: e.budget, limit: Number.isFinite(e.limit) ? e.limit : null, file: str(e.file, 256), component: str(e.component, 80), line: pos(e.line), column: pos(e.column), fix: str(e.fix, 200) || 'Bound the work or move it to an owned worker.' }
@@ -936,7 +970,7 @@ export function createServer(o = {}) {
       res.req.$nativeLogout.then(() => send(res, status, body, headers, configuredExternal), () => send(res, 503, '', {}, false))
       return
     }
-    if (native && res.req.$nativeLogoutError) { status = 503; body = ''; headers = {}; res.req.$nativeLogoutError = false }
+    if (native && res.req.$nativeLogoutError) { status = 503; body = ''; headers = {}; res.req.$nativeLogoutError = false; res.$brainCause = 'native sign-out failed' }
     if (native && res.req.$nativeLogoutHeaders) {
       const relay = res.req.$nativeLogoutHeaders, own = headers['set-cookie']
       headers = { ...headers, ...relay, 'set-cookie': [...(own ? Array.isArray(own) ? own : [own] : []), ...relay['set-cookie']] }
@@ -974,6 +1008,7 @@ export function createServer(o = {}) {
         delete headers['content-length']
       }
     }
+    if (headers.vary) headers = { ...headers, vary: varyOnce(headers.vary) }
     res.writeHead(status, { ...SECURITY, ...(server.draining ? { connection: 'close' } : {}), ...headers })
     res.end(res.req.method === 'HEAD' || status === 204 || status === 205 || status === 304 ? undefined : body)
   }
@@ -1049,16 +1084,20 @@ export function createServer(o = {}) {
   const SSRC = new Map(), SSRC_MAX = 500, SSRC_BYTES = 32 * 1024 * 1024, SSRC_ENTRY = 1024 * 1024
   let ssrBytes = 0
   async function cached(req, res, route, params, url, rid) {
-    const n = +route.cache, ms = n * 1000, key = (route.locale || '') + url.pathname + url.search
-    const fill = () =>
-      new Promise(ok => {
+    const n = +route.cache, ms = n * 1000, key = (route.locale || '') + url.pathname + cacheSearch(url)
+    const fill = () => {
+      let failed = false
+      return new Promise(ok => {
         const cap = { req, $capture: (out, h, st) => {
           const headers = Object.fromEntries(Object.entries(h).map(([k, v]) => [k.toLowerCase(), v]))
           const privateResponse = headers['set-cookie'] || headers['vary'] || /private|no-store|no-cache/i.test(headers['cache-control'] || '')
+          if (st >= 500) failed = true
           ok(st === 200 ? { out, h, cacheable: !privateResponse, etag: 'W/"' + tag(out) + '"', t: Date.now(), bytes: Buffer.byteLength(out) } : null)
-        }, writeHead() {}, end: () => ok(null), setHeader() {}, getHeader() {} }
+        }, writeHead(st) { if (st >= 500) failed = true }, end: () => ok(null), setHeader() {}, getHeader: name => (name === 'x-request-id' ? rid : undefined), once() {}, removeListener() {} }
         ssr(req, cap, route, params, url, rid, null, 200, null, true).catch(() => ok(null))
       }).then(c => {
+        // A failed revalidation keeps the copy until 2N, which is what `stale-if-error` promises downstream.
+        if ((!c || !c.cacheable) && (failed || req.$brainFailedReads) && SSRC.has(key)) return c
         if (!c || !c.cacheable) {
           ssrBytes -= SSRC.get(key)?.bytes || 0
           SSRC.delete(key)
@@ -1076,7 +1115,8 @@ export function createServer(o = {}) {
         }
         return c
       })
-    const serve = c => html(res, 200, c.out, { ...c.h, 'cache-control': c.cacheable ? `public, s-maxage=${n}, stale-while-revalidate=${n}` : 'no-store' }, c.etag)
+    }
+    const serve = c => html(res, 200, c.out, { ...c.h, 'cache-control': c.cacheable ? `public, s-maxage=${n}, stale-while-revalidate=${n}, stale-if-error=${n}` : 'no-store' }, c.etag)
     let c = SSRC.get(key)
     const age = c ? Date.now() - c.t : Infinity
     if (c && age < 2 * ms) {
@@ -1153,6 +1193,10 @@ export function createServer(o = {}) {
       return loadOutcome(e)
     }
     if (props && (props.redirect || props.notFound === true)) return loadOutcome(props) // `return redirect()` / `return notFound()`
+    if (req.$brainFailedReads && !fixed) {
+      softFailure(req, rid, url, status)
+      extra = { ...extra, 'cache-control': 'no-store' } // what it rendered instead is not worth keeping
+    }
     let body, seo, failed
     try {
       const at = { path: url.pathname, params: params || {}, query: Object.fromEntries(url.searchParams) } // route() (§41.5)
@@ -1181,6 +1225,11 @@ export function createServer(o = {}) {
   // (head, CSS, layout shell) is sent, the view when load() ends. The status and headers are out by then, so a late
   // redirect becomes location.replace and a late failure an inline notice with the request id (both logged); load()
   // cannot change the session on a streamed route.
+  // `load` caught a failed backend read and rendered: the status it asked for stands, the log says what is behind it.
+  const softFailure = (req, rid, url, status) => {
+    const { reads, backendCode, transport } = req.$brainFailedReads
+    log('warn', 'page rendered after a failed backend read', { rid, path: url.pathname, status, reads, backendCode, transport, fix: 'load caught the failure and returned other props; let it throw for a 503, or show that the data is missing' })
+  }
   async function streamed(req, res, route, params, url, rid, ctx, extra, outcome) {
     const [top, bottom = ''] = readFileSync(file(route.page), 'utf8').split('<!--brain:ssr-->')
     const sm = await load(route.server)
@@ -1250,6 +1299,7 @@ export function createServer(o = {}) {
       log('error', 'load failed (streamed)', { rid, path: url.pathname, status: 200, ...trace(e) }) // headers already out
       return fail()
     }
+    if (req.$brainFailedReads) softFailure(req, rid, url, 200)
     try {
       const { body, failed } = await (queue = queue.then(() => render(route, props, null, at), () => render(route, props, null, at)))
       for (const f of failed || []) log('error', 'component failed during SSR', { rid, path: url.pathname, comp: f.comp, where: f.w, ...trace(f.e) })
@@ -1527,8 +1577,18 @@ export function createServer(o = {}) {
     if (path === null) return false
     const md = file(mdPath(path))
     if (!md) return false
-    send(res, 200, req.method === 'HEAD' ? '' : readFileSync(md), { 'content-type': MIME['.md'], 'cache-control': 'public, max-age=3600', vary: 'accept' })
+    send(res, 200, req.method === 'HEAD' ? '' : readFileSync(md), { 'content-type': MIME['.md'], 'cache-control': 'public, max-age=3600', vary: 'accept', ...twinCanonical(path) })
     return true
+  }
+  // A Markdown copy repeats its page: the header names the canonical the page itself declares. A page without one (no
+  // site configured) or with a per-request pattern gets no header, so this never invents a URL.
+  function twinCanonical(path) {
+    const stem = path.replace(/\.md$/, '').replace(/\/+$/, '')
+    const page = file(stem ? stem + '.html' : 'index.html') || file(stem + '/index.html')
+    if (!page) return {}
+    const tag = /<link\b[^>]*\brel=["']canonical["'][^>]*>/i.exec(readFileSync(page, 'utf8'))?.[0]
+    const href = tag && /\bhref="(https?:\/\/[^"<>\s]+)"/.exec(tag)?.[1].replaceAll('&amp;', '&')
+    return href && URL.canParse(href) && !/\/[:*]/.test(new URL(href).pathname) ? { link: `<${href}>; rel="canonical"` } : {}
   }
   function serveStatic(req, res, url) {
     const p = publicStaticPath(url.pathname)
@@ -1547,6 +1607,7 @@ export function createServer(o = {}) {
         return html(res, 200, page, md ? { vary: 'accept', 'x-brain-static': '1' } : { 'x-brain-static': '1' }, '"' + (mf.build || tag(page)) + '"'), true
       }
       const headers = {
+        ...(ext === '.md' ? twinCanonical(p) : {}),
         'content-type': type,
         // the worker script must be revalidated on every check, or a CDN could keep an old worker for an hour (§35.7)
         'cache-control': p.startsWith('/_b/') ? 'public, max-age=31536000, immutable' : p === '/sw.js' ? 'no-cache' : 'public, max-age=3600',
@@ -1577,7 +1638,43 @@ export function createServer(o = {}) {
     if (req.method !== 'GET' && req.method !== 'HEAD') return notFound(req, res)
     if (!native) return send(res, 200, json({ ok: true }), headers)
     try { await native.proxy(req, res, new URL(url.pathname, url), rid, send) }
-    catch { if (!res.headersSent) send(res, 503, json({ ok: false }), headers) }
+    catch (e) {
+      if (!res.headersSent) {
+        log('warn', 'health probe could not reach the native backend', { rid, path: url.pathname, status: 503, ...trace(e) })
+        send(res, 503, json({ ok: false }), headers)
+      }
+    }
+  }
+
+  const urlVariant = req => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return null
+    const q = req.url.indexOf('?'), raw = q < 0 ? req.url : req.url.slice(0, q)
+    if (!raw.includes('//') && !raw.endsWith('/index.html')) return null
+    let path = raw.replace(/\/{2,}/g, '/')
+    const app = '/' + (path.startsWith(BASE) ? path.slice(BASE.length) : path.slice(1))
+    if (/^\/(?:api|_brain|_r|s)(?:\/|$)/.test(app) && !raw.startsWith('//')) return null
+    if (path.endsWith('/index.html')) path = path.slice(0, -'index.html'.length)
+    if (path !== BASE && path !== '/' && (path.endsWith('/') && SLASH !== 'always')) path = path.replace(/\/+$/, '')
+    const location = path + (q < 0 ? '' : req.url.slice(q))
+    try { safeLocation(location) } catch { return null }
+    return location
+  }
+  // `<meta seo query="page">`: `page` is a number from 1 and page 1 is the URL without it. A view decides past its last
+  // page with notFound(). → null (nothing to do) · 404 · the URL to redirect to.
+  const pagedRoutes = new Map()
+  const pageParameter = (route, url) => {
+    if (!url.searchParams.has('page') || !route.page) return null
+    if (!pagedRoutes.has(route.page)) {
+      const keys = /<meta name="brain-query" content="([^"]*)">/.exec(readFileSync(file(route.page), 'utf8'))?.[1]
+      pagedRoutes.set(route.page, !!keys && keys.split(/[\s,]+/).includes('page'))
+    }
+    if (!pagedRoutes.get(route.page)) return null
+    const values = url.searchParams.getAll('page')
+    if (values.length > 1 || !/^[1-9]\d{0,8}$/.test(values[0])) return 404
+    if (values[0] !== '1') return null
+    const rest = new URLSearchParams(url.search)
+    rest.delete('page')
+    return url.pathname + (rest.size ? '?' + rest : '')
   }
 
   // ---------- dispatch ----------
@@ -1594,13 +1691,23 @@ export function createServer(o = {}) {
     }
     const rid = req.headers['x-request-id'] && /^[\w-]{1,64}$/.test(req.headers['x-request-id']) ? req.headers['x-request-id'] : randomUUID()
     res.setHeader('x-request-id', rid)
+    const live = { logged: false }
+    liveRequests.set(rid, live)
+    res.once('close', () => {
+      if (liveRequests.get(rid) === live) liveRequests.delete(rid)
+      // The net under every path: a 5xx that was answered always leaves a line with its request id.
+      if (res.statusCode >= 500 && !live.logged && !res.$brainMuted) log(res.$brainCause === STATUS_PAGE ? 'info' : 'error', 'server error answered', { rid, path: req.$brainPath || String(req.url || '').split('?')[0], status: res.statusCode, cause: res.$brainCause || 'no cause recorded on this path', ...(res.$brainCause === STATUS_PAGE ? {} : { fix: 'Search this rid in the native backend log; its failed requests carry the same id' }) })
+    })
     const t0 = performance.now()
     res.on('finish', () => {
       const ms = performance.now() - t0
       if (ms > 1000) log('warn', 'slow request', { rid, path: req.$brainPath || String(req.url || '').split('?')[0], status: res.statusCode, ms: Math.round(ms) })
     })
     try {
-      // `//` makes new URL throw and `//host/x` would be read as another host
+      // One URL per page: `//route`, `/a//b` and `/route/index.html` answer one 301 on this origin. The path is rewritten
+      // as text, before URL parsing: `//host/x` would be read as another host. Backend paths are left to the backend.
+      const variant = urlVariant(req)
+      if (variant) return send(res, 301, '', { location: variant, 'cache-control': 'public, max-age=3600' })
       if (req.url.startsWith('//')) return notFound(req, res)
       const full = new URL(req.url, 'http://' + (req.headers.host || 'localhost'))
       // /_health stays at the root: the supervisor calls it there whatever the base
@@ -1629,13 +1736,23 @@ export function createServer(o = {}) {
       // a status page opened directly answers its own status: `/403` is never a 200 that a crawler or a probe can trust
       const reserved = post ? 0 : reservedStatus(url.pathname)
       if (reserved === 403) return forbidden(req, res, url, rid, '')
-      if (reserved) return failPage(res, reserved, rid)
+      if (reserved) {
+        // Anyone can open it, so the note about it is bounded and is not an error.
+        const minute = Math.floor(Date.now() / 60000)
+        if (statusPageWindow !== minute) { statusPageWindow = minute; statusPageLogs = 0 }
+        res.$brainCause = STATUS_PAGE
+        res.$brainMuted = statusPageLogs++ >= 16
+        return failPage(res, reserved, rid)
+      }
       for (const route of routes) {
         const m = route.rx.exec(url.pathname)
         if (!m) continue
         // a form page without load is prerendered: GET serves that file (build ETag); only its POST needs the server
         if (!post && route.forms && serveStatic(req, res, url)) return
         if (!post && serveTwin(req, res, url)) return
+        const paged = post ? null : pageParameter(route, url)
+        if (paged === 404) return notFound(req, res)
+        if (paged) return send(res, 301, '', { location: withBase(paged), 'cache-control': 'public, max-age=3600' })
         return await (post ? formPost : ssr)(req, res, route, m.groups ? { ...m.groups } : {}, url, rid)
       }
       if (post) return send(res, 405, 'Method not allowed', { allow: 'GET, HEAD' })
@@ -1647,8 +1764,15 @@ export function createServer(o = {}) {
       notFound(req, res)
     } catch (e) {
       log('error', 'unhandled', { rid, path: req.url, ...trace(e) })
-      if (!res.headersSent) failPage(res, intendedStatus(e) || 500, rid)
-      else res.end()
+      try {
+        if (!res.headersSent) failPage(res, intendedStatus(e) || 500, rid)
+        else res.end()
+      } catch (again) {
+        // the error page itself failed: still an answer, never an unhandled rejection that takes the process down
+        log('error', 'error page failed', { rid, path: req.url, ...trace(again) })
+        if (!res.headersSent) res.writeHead(500, SECURITY)
+        res.end()
+      }
     }
   })
   if (native) server.once('close', () => native.close())
@@ -1660,6 +1784,7 @@ export function createServer(o = {}) {
 }
 
 // ---------- session (signed cookie; shared with the dev server) ----------
+const STATUS_PAGE = 'status page opened directly'
 const COOKIE = '__Host-session', SECRET_COOKIE = '__Host-session-secret', SECRET_MAX = 3500, DEFAULT_SESSION_SECONDS = 7 * 24 * 3600
 // Keys that still verify and decrypt during a rotation; new cookies always use the current key.
 const previousKeys = () => (process.env.BRAIN_SECRET_PREVIOUS || '').split(',').map(k => k.trim()).filter(Boolean)

@@ -152,11 +152,11 @@ test('SSR: load timeout → 504 page, load error → generic 500 (stack only in 
   }
 })
 
-test('a request path starting with // is a 404: never a 500 and never parsed as another host', async () => {
-  for (const path of ['//', '//evil.example/about', '///about']) {
+test('a request path starting with // collapses on this origin: never a 500 and never parsed as another host', async () => {
+  for (const [path, to] of [['//', '/'], ['//evil.example/about', '/evil.example/about'], ['///about', '/about']]) {
     const r = await get(path)
-    assert.equal(r.status, 404, path)
-    assert.equal(r.headers.get('location'), null, path)
+    assert.equal(r.status, 301, path)
+    assert.equal(r.headers.get('location'), to, path)
   }
 })
 

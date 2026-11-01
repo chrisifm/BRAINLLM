@@ -33,7 +33,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms))
 
 test('<meta cache>: same HTML within N s (fresh nonce each time), stale-while-revalidate after, never for a session', async () => {
   const r1 = await get('/n')
-  assert.equal(r1.headers.get('cache-control'), 'public, s-maxage=1, stale-while-revalidate=1')
+  assert.equal(r1.headers.get('cache-control'), 'public, s-maxage=1, stale-while-revalidate=1, stale-if-error=1')
   const t1 = await r1.text()
   assert.match(t1, /call 1/)
   const r2 = await get('/n')
