@@ -22,6 +22,9 @@ w('_server/pages/list.html', page('<meta name="brain-query" content="page">'))
 w('_server/n.server.mjs', `let n = 0\nexport function load() { return { n: ++n } }\n`)
 w('_server/flaky.server.mjs', `let n = 0\nexport function load(ctx) { if (globalThis.flakyFails) throw new Error('private-load-value'); return { n: ++n } }\n`)
 w('_server/soft.server.mjs', `export async function load(ctx) { try { await ctx.backend.resource('things').list() } catch { return { n: 'fallback' } } return { n: 'real' } }\n`)
+w('_server/slowcount.server.mjs', `let n = 0\nexport async function load() { n++; globalThis.slowLoads = n; await new Promise(r => setTimeout(r, 40)); return { n } }\n`)
+w('_server/private.server.mjs', `let n = 0\nexport async function load(ctx) { const me = ++n; ctx.session.set({ who: me }); await new Promise(r => setTimeout(r, 40)); return { n: me } }\n`)
+w('_server/thrown.server.mjs', `export async function load(ctx) { await ctx.backend.resource('things').list(); return { n: 'real' } }\n`)
 w('500.html', page())
 w('about/index.html', page('<link rel="canonical" href="https://site.example/about">'))
 w('about.md', '# About')
@@ -34,19 +37,23 @@ w('_server/manifest.json', JSON.stringify({
     route('/cached', '_server/n.server.mjs', { cache: 60 }),
     route('/flaky', '_server/flaky.server.mjs', { cache: 1 }),
     route('/soft', '_server/soft.server.mjs'),
+    route('/thrown', '_server/thrown.server.mjs'),
+    route('/coldburst', '_server/slowcount.server.mjs', { cache: 60 }),
+    route('/coldprivate', '_server/private.server.mjs', { cache: 60 }),
     route('/softcached', '_server/soft.server.mjs', { cache: 60 }),
     route('/list', '_server/n.server.mjs', { page: '_server/pages/list.html' }),
     route('/plain', '_server/n.server.mjs'),
   ],
 }))
 
-let backendStatus = 500, backendVary = null, hits = 0
+let backendStatus = 500, backendVary = null, hits = 0, backendRetry = null
 const backend = http((req, res) => {
   hits++
   const headers = { 'content-type': 'application/json' }
   if (backendVary) headers.vary = backendVary
+  if (backendRetry) headers['retry-after'] = backendRetry
   res.writeHead(backendStatus, headers)
-  res.end('{"error":{"code":"DATABASE_BUSY"}}')
+  res.end(backendStatus === 429 ? '{"error":{"code":"RATE_LIMITED"}}' : '{"error":{"code":"DATABASE_BUSY"}}')
 })
 await new Promise(r => backend.listen(0, '127.0.0.1', r))
 const logs = []
@@ -217,4 +224,66 @@ test('a cached page whose load reads the native backend is stored like any other
   const again = await get('/softcached?stored=1')
   await again.arrayBuffer()
   assert.equal(hits, 1)
+})
+
+test('a read the backend refused for now answers 503 with its Retry-After, caught or not, and the log keeps the cause', async () => {
+  backendRetry = '9'
+  for (const [path, status] of [['/soft', 429], ['/soft', 503], ['/thrown', 429], ['/thrown', 503]]) {
+    backendStatus = status
+    const res = await get(path)
+    assert.equal(res.status, 503, `${path} after ${status}`)
+    assert.equal(res.headers.get('retry-after'), '9', `${path} after ${status}`)
+    assert.match(res.headers.get('cache-control'), /no-store/)
+    assert.doesNotMatch(await res.text(), /call /)
+    await settled()
+    assert.ok(logs.some(l => l.rid === res.headers.get('x-request-id') && l.level === 'warn'), 'the failure stays in the log')
+  }
+  backendStatus = 429
+  const caught = await get('/soft?who=log')
+  await caught.arrayBuffer()
+  await settled()
+  const line = logs.find(l => l.rid === caught.headers.get('x-request-id') && /failed backend read/.test(l.msg))
+  assert.deepEqual([line.status, line.backendCode, line.reads], [503, 'RATE_LIMITED', 1])
+  backendRetry = null
+  backendStatus = 200
+})
+
+test('a cold page cache renders once for a burst of the same URL and only shares what is shareable', async () => {
+  backendStatus = 200
+  globalThis.slowLoads = 0
+  const pages = await Promise.all(Array.from({ length: 12 }, () => get('/coldburst?x=1').then(r => r.text().then(t => [r.status, t]))))
+  assert.equal(globalThis.slowLoads, 1, 'load ran once')
+  assert.ok(pages.every(([status, text]) => status === 200 && /call 1</.test(text)), JSON.stringify(pages.map(p => p[0])))
+  // a response that sets a cookie is its visitor's: never handed to the requests that waited
+  const own = make({})
+  await new Promise(r => own.listen(0, '127.0.0.1', r))
+  try {
+    const answers = await Promise.all(Array.from({ length: 3 }, () => fetch(`http://127.0.0.1:${own.address().port}/coldprivate`, { headers: { accept: 'text/html' } })))
+    const cookies = answers.map(r => r.headers.get('set-cookie'))
+    assert.equal(new Set(cookies).size, 3, `each visitor has their own session cookie: ${cookies}`)
+    assert.ok(cookies.every(Boolean))
+    for (const a of answers) await a.arrayBuffer()
+  } finally { own.closeAllConnections?.(); await new Promise(r => own.close(r)) }
+})
+
+test('a burst on a cold page whose backend limits it answers 503 without spending the limit twice', async () => {
+  backendStatus = 429
+  hits = 0
+  const res = await get('/softcached?burst=1')
+  assert.equal(res.status, 503)
+  await res.arrayBuffer()
+  assert.equal(hits, 1, 'one render, one read')
+  backendStatus = 200
+})
+
+test('HEAD answers the same validator as GET and a cached page does not run load for it', async () => {
+  backendStatus = 200
+  const get1 = await get('/cached?head=1')
+  await get1.arrayBuffer()
+  const head = await fetch(base + '/cached?head=1', { method: 'HEAD', headers: { accept: 'text/html' } })
+  assert.equal(head.status, 200)
+  assert.ok(head.headers.get('etag'))
+  assert.equal(head.headers.get('etag'), get1.headers.get('etag'))
+  const plain = await fetch(base + '/plain', { method: 'HEAD', headers: { accept: 'text/html' } })
+  assert.ok(plain.headers.get('etag'), 'an uncached page too')
 })

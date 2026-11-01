@@ -126,3 +126,35 @@ test('anonymous get through the bridge answers a hidden row exactly like a missi
     assert.deepEqual(hidden,missing)
   }finally{anonymous.close();await new Promise(resolve=>{reader.close(resolve);reader.closeAllConnections()})}
 })
+
+test('an anonymous read is revalidated with its ETag; a signed-in one is not remembered',async()=>{
+  const body={items:[{id,data:{n:1}}],limit:1,offset:0,total:1}
+  const asked=[]
+  let served=0
+  const origin=createServer((req,res)=>{
+    asked.push({inm:req.headers['if-none-match'],path:req.url})
+    res.setHeader('content-type','application/json')
+    if(req.headers['if-none-match']==='W/"v1"'){res.statusCode=304;res.setHeader('etag','W/"v1"');return res.end()}
+    served++;res.setHeader('etag','W/"v1"');res.end(JSON.stringify(body))
+  })
+  await new Promise(resolve=>origin.listen(0,'127.0.0.1',resolve))
+  const own=nativeAuthBridge(`http://127.0.0.1:${origin.address().port}`)
+  const call=cookie=>{
+    const req=new EventEmitter(),res=new EventEmitter()
+    req.method='GET';req.headers={host:'shop.example.test',...(cookie?{cookie}:{})}
+    res.writableEnded=false;res.destroyed=false
+    return own.backend(req,res,'00000000-0000-4000-8000-000000000006').resource('products')
+  }
+  try{
+    const first=await call().list({limit:1})
+    first.items[0].data.n=99 // what load does with its copy stays in its copy
+    const second=await call().list({limit:1})
+    assert.deepEqual(second,body)
+    assert.deepEqual(asked.map(a=>a.inm),[undefined,'W/"v1"'])
+    assert.equal(served,1)
+    await call().list({limit:2})
+    assert.equal(asked.at(-1).inm,undefined,'another URL is another read')
+    await call('__Host-brain-access=synthetic').list({limit:1})
+    assert.equal(asked.at(-1).inm,undefined,'a signed-in read never revalidates against what an anonymous one saw')
+  }finally{own.close();await new Promise(resolve=>{origin.close(resolve);origin.closeAllConnections()})}
+})
