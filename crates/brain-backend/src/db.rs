@@ -950,7 +950,14 @@ pub(crate) fn log_failure(error: &sqlx::Error, at: &std::panic::Location<'_>, co
 #[doc(hidden)]
 macro_rules! record_columns {
     () => {
-        "id,owner,data,to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS created_at_utc,to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS updated_at_utc"
+        concat!("id,owner,data,", $crate::record_times!())
+    };
+}
+#[macro_export]
+#[doc(hidden)]
+macro_rules! record_times {
+    () => {
+        "to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS created_at_utc,to_char(updated_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS updated_at_utc"
     };
 }
 pub(crate) fn record(row: sqlx::postgres::PgRow) -> Value {

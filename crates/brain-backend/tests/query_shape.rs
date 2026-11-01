@@ -383,3 +383,47 @@ async fn order_without_a_null_position_pages_the_same_and_punctuation_finds_noth
         assert_eq!(a.get(&format!("/api/notes?search={text}")).await.0, 200, "{text}");
     }
 }
+
+/// Documents large enough to live out of line, where each read of `data` decompresses it again.
+#[tokio::test]
+#[ignore]
+async fn counts_over_large_documents_agree_with_their_filters() {
+    let posts = resource("posts", vec![("status", field("str")), ("kind", field("str")), ("rank", field("int")), ("body", field("str"))], json!(["public"]), json!({
+        "filter": {"status": ["eq", "in"], "kind": ["eq", "in"], "rank": ["gte"]},
+        "aggregate": {"ranks": {"group": "kind", "sum": ["rank"]}},
+        "facets": ["kind"],
+    }));
+    let a = api("brain_shape_count", vec![posts]).await;
+    let (_, token) = a.user("count@example.test").await;
+    // Not compressible: a repeated text would shrink back into the row and never leave it.
+    let body = |seed: u64| {
+        let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+        (0..12_000).map(|_| { state ^= state << 13; state ^= state >> 7; state ^= state << 17; char::from(b'a' + (state % 26) as u8) }).collect::<String>()
+    };
+    for i in 0..12u64 {
+        let status = if i % 3 == 0 { "draft" } else { "live" };
+        let kind = if i % 2 == 0 { "even" } else { "odd" };
+        a.post("/api/posts", &token, json!({"status": status, "kind": kind, "rank": i, "body": body(i + 1)})).await;
+    }
+    let toast: bool = sqlx::query_scalar("SELECT pg_relation_size(reltoastrelid)>pg_relation_size(oid) FROM pg_class WHERE oid='_brain_res_posts'::regclass").fetch_one(&a.pool).await.unwrap();
+    assert!(toast, "the documents must live out of line for this test to reach the single-read count");
+    let (status, list) = a.get("/api/posts?status=live&kind[in]=even,odd&rank[gte]=2&limit=1&aggregate=ranks&facets=kind").await;
+    assert_eq!(status, 200, "{list}");
+    // Live ranks from 2 up: 2,4,5,7,8,10,11.
+    assert_eq!(list["total"], 7, "{list}");
+    let even = list["aggregates"]["ranks"].as_array().unwrap().iter().find(|g| g["key"] == "even").unwrap().clone();
+    assert_eq!((&even["count"], &even["sum"]["rank"]), (&json!(4), &json!("24")), "{list}");
+    assert_eq!(list["facets"]["kind"].as_array().unwrap().len(), 2, "{list}");
+    // `fields` leaves the document out of the page without changing the row set.
+    let (_, trimmed) = a.get("/api/posts?status=live&rank[gte]=2&limit=1&fields=rank").await;
+    assert_eq!(trimmed["total"], 7);
+    assert_eq!(trimmed["items"][0]["data"].as_object().unwrap().len(), 1, "{trimmed}");
+
+    // A value that fills the text key must not match a longer text that shares it.
+    let exact = "k".repeat(256);
+    a.post("/api/posts", &token, json!({"status": exact, "kind": "even", "rank": 1})).await;
+    a.post("/api/posts", &token, json!({"status": format!("{exact}z"), "kind": "even", "rank": 1})).await;
+    let (status, found) = a.get(&format!("/api/posts?status={exact}&rank[gte]=0")).await;
+    assert_eq!((status, found["total"].as_i64()), (200, Some(1)), "{found}");
+    assert_eq!(found["items"][0]["data"]["status"], exact.as_str());
+}

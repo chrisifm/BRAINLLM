@@ -499,8 +499,17 @@ pub struct ListRequest {
     no_total: bool,
 }
 impl ListRequest {
-    /// Narrows items to `?fields=`. It runs after projection and includes, so it can only remove what the reader
-    /// already received, and includes may still follow a reference it drops.
+    /// The `data` keys the page must read: `?fields=` plus the references includes follow. `None`: the whole document.
+    fn stored_keys(&self) -> Option<Vec<String>> {
+        let fields = self.fields.as_ref()?;
+        let mut keys: BTreeSet<String> = fields.clone();
+        keys.extend(self.include.iter().map(|path| path.split('.').next().unwrap_or(path).to_string()));
+        Some(keys.into_iter().collect())
+    }
+}
+impl ListRequest {
+    /// Narrows items to `?fields=`. SQL already left out the rest of the document; this runs after projection and
+    /// includes, so it can only remove what the reader already received, and includes may still follow a reference it drops.
     pub fn keep_fields(&self, items: &mut [Value]) {
         let Some(fields) = &self.fields else { return };
         for data in items.iter_mut().filter_map(|item| item.get_mut("data").and_then(Value::as_object_mut)) {
@@ -968,8 +977,12 @@ fn push_predicate(q: &mut QueryBuilder<Postgres>, f: &Filter) {
     let e = expr(f.kind, &f.field);
     let field = &f.field;
     let first = &f.values[0];
+    // A value shorter than the text key equals the stored text exactly when their keys match: only a value that fills
+    // the key could match a longer text. The recheck reads `data` again, once more per row.
     let full = |q: &mut QueryBuilder<Postgres>, v: &Operand| {
-        if let (Kind::Text, Operand::Value(v)) = (f.kind, v) {
+        if let (Kind::Text, Operand::Value(v)) = (f.kind, v)
+            && v.chars().count() >= TEXT_KEY
+        {
             q.push(format!(" AND (data->>'{field}')=")).push_bind(v.clone());
         }
     };
@@ -1134,6 +1147,8 @@ struct Ctx<'a> {
     owner: Option<Uuid>,
     /// Field whose own filters do not apply, so a facet still offers its other values. The scope always applies.
     facet: Option<&'a str>,
+    /// Counting statements read a large `data` once per row instead of once per predicate ([`Ctx::decide_read_once`]).
+    read_once: bool,
 }
 impl Ctx<'_> {
     /// Authorization scope and declared filters over the alias-free columns of the current table.
@@ -1192,6 +1207,41 @@ impl Ctx<'_> {
             }
         }
     }
+    /// WHERE body of a statement that visits every matching row. Postgres decompresses `data` again for each predicate
+    /// that reads it; inside the subquery `data` resolves to one already decompressed copy of the row's document.
+    /// `||` with an empty object returns its detoasted operand without rebuilding it.
+    fn push_counted(&self, q: &mut QueryBuilder<Postgres>) {
+        if self.read_once {
+            q.push("EXISTS (SELECT 1 FROM (SELECT t.data||'{}'::jsonb AS data OFFSET 0) _once WHERE ");
+        }
+        self.push_where(q);
+        if self.read_once {
+            q.push(")");
+        }
+    }
+    /// Whether the counting statements of this request should read `data` once. The rewritten predicates cannot use an
+    /// index and the rewritten plan runs without parallel workers, so it applies only to what it pays for: several
+    /// reads per row, of a table whose documents live out of line, that the planner would scan whole anyway.
+    async fn decide_read_once(&self, tx: &mut sqlx::Transaction<'_, Postgres>) -> Result<bool, sqlx::Error> {
+        let table = format!("_brain_res_{}", self.r.name);
+        let mut q = QueryBuilder::<Postgres>::new(format!("EXPLAIN SELECT count(*) FROM {table} t WHERE "));
+        self.push_where(&mut q);
+        let sql = q.sql();
+        if ["data->", "data#>", "data ?"].iter().map(|read| sql.as_str().matches(read).count()).sum::<usize>() < 2 {
+            return Ok(false);
+        }
+        let out_of_line: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT pg_relation_size(reltoastrelid)>pg_relation_size(oid) FROM pg_class WHERE oid='{table}'::regclass"
+        )))
+        .fetch_one(&mut **tx)
+        .await?;
+        if !out_of_line {
+            return Ok(false);
+        }
+        let plan: Vec<String> = q.build_query_scalar().fetch_all(&mut **tx).await?;
+        let scan = format!("Seq Scan on {table} t");
+        Ok(plan.iter().any(|line| line.contains(&scan)))
+    }
     /// Opening of the text-search query expression; the caller binds the text and closes two parentheses.
     fn tsquery(&self) -> String {
         format!("websearch_to_tsquery('{}',public.unaccent('public.unaccent'::regdictionary,", crate::search_config::regconfig(self.r))
@@ -1204,7 +1254,7 @@ impl Ctx<'_> {
     }
     async fn count(&self, tx: &mut sqlx::Transaction<'_, Postgres>) -> Result<i64, sqlx::Error> {
         let mut q = QueryBuilder::<Postgres>::new(format!("SELECT count(*) FROM _brain_res_{} t WHERE ", self.r.name));
-        self.push_where(&mut q);
+        self.push_counted(&mut q);
         q.build_query_scalar().fetch_one(&mut **tx).await
     }
     /// Typo candidates within [`FUZZY_BUDGET`]; `None` when the budget ran out, which leaves the transaction usable.
@@ -1297,7 +1347,7 @@ pub async fn list(
         return Err(ListError::SignInRequired);
     }
     let owner = if req.owner_me { viewer.id } else { None };
-    let mut ctx = Ctx { r, resources, scope: &scope, related, req, matches: Matches::All, owner, facet: None };
+    let mut ctx = Ctx { r, resources, scope: &scope, related, req, matches: Matches::All, owner, facet: None, read_once: false };
     let keys = keys(r, req);
     let sig = signature(&keys);
     let ranked = req.sort.is_none() && search_ranked(r, req);
@@ -1312,7 +1362,15 @@ pub async fn list(
     let mut ctx = ctx;
 
     // Page.
-    let mut q = QueryBuilder::<Postgres>::new(concat!("SELECT ", crate::record_columns!()));
+    // `?fields=` reads the document once and sends only what the answer uses: the page is what crosses the wire.
+    let mut q = match req.stored_keys() {
+        None => QueryBuilder::<Postgres>::new(concat!("SELECT ", crate::record_columns!())),
+        Some(stored) => {
+            let mut q = QueryBuilder::<Postgres>::new("SELECT id,owner,COALESCE((SELECT jsonb_object_agg(_key,_value) FROM jsonb_each(t.data) AS _e(_key,_value) WHERE _key=ANY(");
+            q.push_bind(stored).push(")),'{}'::jsonb) AS data,").push(crate::record_times!());
+            q
+        }
+    };
     for (i, k) in keys.iter().enumerate() {
         q.push(format!(",{} AS _k{i}", key_text(k.kind, &k.field)));
     }
@@ -1391,12 +1449,15 @@ pub async fn list(
         items.push(record);
     }
 
+    if !req.no_total || !req.aggregate.is_empty() || !req.facets.is_empty() {
+        ctx.read_once = ctx.decide_read_once(&mut tx).await?;
+    }
     // Total over the same WHERE (without the cursor).
     let total: Option<i64> = if req.no_total {
         None
     } else {
         let mut q = QueryBuilder::<Postgres>::new(format!("SELECT count(*) FROM _brain_res_{} t WHERE ", r.name));
-        ctx.push_where(&mut q);
+        ctx.push_counted(&mut q);
         Some(q.build_query_scalar().fetch_one(&mut *tx).await?)
     };
 
@@ -1548,7 +1609,7 @@ async fn facet(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, field: &
             QueryBuilder::<Postgres>::new(format!("SELECT {e} AS _g,count(*) AS _n FROM _brain_res_{} t WHERE ", r.name))
         }
     };
-    ctx.push_where(&mut q);
+    ctx.push_counted(&mut q);
     q.push(format!(" GROUP BY _g ORDER BY _n DESC,_g NULLS LAST LIMIT {}", GROUP_LIMIT + 1));
     let mut rows = q.build().fetch_all(&mut **tx).await?;
     let cut = rows.len() as i64 > GROUP_LIMIT;
@@ -1592,7 +1653,7 @@ async fn aggregate(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, a: &
         q.push(format!(",{e} AS _g"));
     }
     q.push(format!(" FROM _brain_res_{} t WHERE ", r.name));
-    ctx.push_where(&mut q);
+    ctx.push_counted(&mut q);
     if let Some((_, e)) = &group {
         q.push(format!(" GROUP BY {e} ORDER BY count(*) DESC,{e} NULLS LAST LIMIT {}", GROUP_LIMIT + 1));
     }
@@ -1667,6 +1728,24 @@ pub fn openapi_parameters(r: &Resource) -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_short_text_value_is_compared_by_its_key_alone() {
+        let filter = |value: String| Filter { via: None, field: "title".into(), kind: Kind::Text, op: "eq".into(), values: vec![Operand::Value(value)] };
+        let sql = |value: String| {
+            let mut q = QueryBuilder::<Postgres>::new("");
+            push_predicate(&mut q, &filter(value));
+            q.sql().as_str().to_string()
+        };
+        assert!(!sql("short".into()).contains("(data->>'title')="), "{}", sql("short".into()));
+        // Only a value that fills the key can match a longer text, so only it needs the stored text read again.
+        assert!(sql("x".repeat(TEXT_KEY)).contains("(data->>'title')="));
+    }
+    #[test]
+    fn fields_read_only_what_the_answer_and_its_includes_use() {
+        let request = ListRequest { fields: Some(BTreeSet::from(["title".to_string()])), include: vec!["shop.region".into()], ..Default::default() };
+        assert_eq!(request.stored_keys(), Some(vec!["shop".to_string(), "title".to_string()]));
+        assert_eq!(ListRequest::default().stored_keys(), None);
+    }
     #[test]
     fn near_boxes_split_at_the_antimeridian_and_open_at_the_poles() {
         use super::near_boxes;
