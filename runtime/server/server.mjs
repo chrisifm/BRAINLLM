@@ -863,7 +863,7 @@ export function createServer(o = {}) {
   const hasManifestSockets = Object.hasOwn(mf,'nativeSockets')
   if (hasManifestSockets && typeof mf.nativeSockets !== 'boolean') throw Error('Manifest nativeSockets must be an explicit boolean')
   const nativeSockets = o.nativeSockets === undefined ? hasManifestSockets && mf.nativeSockets : o.nativeSockets
-  if (nativeSockets && !native) throw Error('Native sockets require a configured native backend')
+  if (nativeSockets && !native) throw Error('Native sockets require a configured native backend; fix: run `brain backend serve` and set BRAIN_BACKEND_URL to its loopback URL')
   // the build's single route table (#187): already in match order, each with its RegExp source (named groups = params)
   const routes = mf.routes.map(r => ({ ...r, rx: r.rx ? new RegExp(r.rx) : exact(r.path) }))
   // The address RPC and form limits key on, ctx.req.ip and the logs: a client header counts only through a trusted proxy.

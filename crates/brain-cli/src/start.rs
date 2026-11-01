@@ -361,11 +361,19 @@ pub fn send(root: &Path, cmd: &str) -> Result<String, String> {
     Ok(out.trim().to_string())
 }
 
+fn manifest_declares_sockets(dist: &Path) -> bool {
+    std::fs::read_to_string(dist.join("_server/manifest.json")).ok().and_then(|m| serde_json::from_str::<serde_json::Value>(&m).ok()).is_some_and(|m| m["nativeSockets"] == true)
+}
+
 /// Runs in the foreground until stopped. Exit codes: 0 clean stop · 1 crash loop or never ready.
 pub fn start(root: &Path, o: &Opts) -> Result<i32, String> {
     let dist = root.join("dist");
     if !["index.html", "index.brain", "server.mjs"].iter().any(|f| dist.join(f).is_file()) {
         return Err("dist/ has no build; fix: run `brain build` first".into());
+    }
+    // The server refuses to run without its backend: say so here, not after publishing a URL that refuses connections.
+    if dist.join("server.mjs").is_file() && manifest_declares_sockets(&dist) && crate::env::value(root, &o.env, "BRAIN_BACKEND_URL").is_none() {
+        return Err(format!("this build uses native sockets and environment `{}` has no BRAIN_BACKEND_URL; fix: start the backend with `brain backend serve` and set BRAIN_BACKEND_URL to its loopback URL", o.env));
     }
     let listener = brain_serve::listen::bind_waiting(&o.host, o.port, brain_serve::listen::RESTART_WAIT).map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
