@@ -85,7 +85,7 @@ With `"update": "prompt"` a new build waits until the user accepts it instead of
 
 ```html
 {#if updateReady()}
-  <p role="status">A new version is ready. <button onclick={() => applyUpdate()}>Reload</button></p>
+  <p role="status">A new version is ready. <button on:click={() => applyUpdate()}>Reload</button></p>
 {/if}
 ```
 

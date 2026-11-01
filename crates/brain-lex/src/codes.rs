@@ -64,6 +64,8 @@ pub const CODES: &[(&str, Severity, &str, &str, &str)] = &[
     ("B0220", Severity::Error, "Unknown lazy mode", "A lazy component loads when visible (`lazy`), when the browser is idle (`lazy=\"idle\"`) or on the first interaction (`lazy=\"interaction\"`).", "<Chart lazy=\"idle\" data={rows} />"),
     ("B0221", Severity::Error, "Image without dimensions", "Without width and height the browser cannot reserve the space and the layout shifts when the image arrives.", "<Img src=\"/hero.jpg\" alt=\"Our team\" width=\"1200\" height=\"630\" />"),
     ("B0222", Severity::Info, "Component discovered automatically", "One project component matches the written tag. The compiler injects its import internally; brain fix can persist the explicit import in source.", "<UserCard user={user} />"),
+    ("B0223", Severity::Error, "Inline event attribute", "`onclick={f}` would become an inline handler that the Content-Security-Policy blocks; the compiler normalizes it to `on:click`.", "<button on:click={save}>Save</button>"),
+    ("B0224", Severity::Warning, "Inline event handler in a string", "`onclick=\"…\"` is source text the Content-Security-Policy blocks in production; events take a handler in braces.", "<button on:click={save}>Save</button>"),
     ("B0301", Severity::Error, "Global selector in a component", "Component styles are scoped; global rules belong to the reset layer.", "<style>.card { padding: var(--space-2); }</style>"),
     ("B0302", Severity::Error, "Unknown design token", "Only tokens declared in tokens.cssbrain exist; exact synonyms are normalized.", "color: var(--accent);"),
     ("B0303", Severity::Error, "Unknown mixin", "`@include` needs a `@mixin` with that name.", "@mixin card { padding: var(--space-2); }\n.box { @include card; }"),

@@ -37,7 +37,7 @@ fn routes_and_update_prompt_reach_the_worker() {
     )
     .unwrap();
     let about = std::fs::read_to_string(dir.join("views/about.brain")).unwrap();
-    let banner = "<main class=\"page\">\n  {#if updateReady()}<p role=\"status\">A new version is ready. <button onclick={() => applyUpdate()}>Reload</button></p>{/if}";
+    let banner = "<main class=\"page\">\n  {#if updateReady()}<p role=\"status\">A new version is ready. <button on:click={() => applyUpdate()}>Reload</button></p>{/if}";
     std::fs::write(dir.join("views/about.brain"), about.replacen("<main class=\"page\">", banner, 1)).unwrap();
     let o = brain(&dir, &["build"]);
     assert!(o.status.success(), "{}", text(&o));
