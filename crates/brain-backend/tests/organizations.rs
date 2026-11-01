@@ -508,3 +508,61 @@ async fn facets_count_only_rows_the_reader_may_list() {
     let restricted: Result<Resource, _> = serde_json::from_value(json!({"name":"bad","fields":{"code":{"kind":"str","access":"private"}},"policy":{"read":["admin"]},"query":{"facets":["code"]}}));
     assert!(restricted.is_err() || brain_backend::query::validate(&restricted.unwrap()).unwrap_err().contains("facet `code`"));
 }
+
+#[tokio::test]
+#[ignore = "Use scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn geo_filters_are_exact_scoped_and_served_by_a_builtin_index() {
+    let pool = database().await;
+    let list: Vec<Resource> = serde_json::from_value(json!([
+        {"name":"sites","fields":{"name":{"kind":"str","required":true},"at":{"kind":"geo"}},
+         "policy":{"read":["owner"],"create":["user"],"update":["owner"],"delete":["owner"]},
+         "query":{"filter":{"at":["near","bbox","exists"]}}}
+    ])).unwrap();
+    db::migrate(&pool, &list).await.unwrap();
+    roles().register(&pool).await.unwrap();
+    let extensions: Vec<String> = sqlx::query_scalar("SELECT extname::text FROM pg_extension").fetch_all(&pool).await.unwrap();
+    assert!(!extensions.iter().any(|e| e == "postgis" || e == "earthdistance" || e == "cube"), "{extensions:?}");
+    let (alice, bob) = (actor(&pool, "user").await, actor(&pool, "user").await);
+    let (http, _) = brain_backend::http::router_with_platform(pool.clone(), config(list), Platform::default()).await.unwrap();
+    for (name, lat, lng) in [
+        ("origin", 0.0, 0.0), ("east-100km", 0.0, 0.899), ("east-120km", 0.0, 1.0791), ("corner-box-only", 0.8, 0.8),
+        ("dateline-west", 10.0, 179.9), ("dateline-east", 10.0, -179.9), ("pole-a", 89.9, 0.0), ("pole-b", 89.9, 180.0),
+    ] {
+        let (s, body) = call(&http, "POST", "/api/sites", Some(&alice), Some(json!({"name":name,"at":{"lat":lat,"lng":lng}}))).await;
+        assert_eq!(s, 200, "{body}");
+    }
+    assert_eq!(call(&http, "POST", "/api/sites", Some(&alice), Some(json!({"name":"nowhere"}))).await.0, 200);
+    assert_eq!(call(&http, "POST", "/api/sites", Some(&bob), Some(json!({"name":"foreign","at":{"lat":0.0,"lng":0.0}}))).await.0, 200);
+    let names = async |query: &str| -> Vec<String> {
+        let (s, out) = call(&http, "GET", &format!("/api/sites?{query}&limit=50"), Some(&alice), None).await;
+        let _ = s;
+        let mut found: Vec<String> = out["items"].as_array().unwrap_or_else(|| panic!("{query}: {out}")).iter().map(|i| i["data"]["name"].as_str().unwrap().to_string()).collect();
+        found.sort();
+        found
+    };
+    // Great-circle distance, not the box: the corner is inside the box but about 125 km away.
+    assert_eq!(names("at[near]=0,0,110").await, ["east-100km", "origin"]);
+    assert_eq!(names("at[near]=0,0,130").await, ["corner-box-only", "east-100km", "east-120km", "origin"]);
+    // Across the antimeridian and over a pole.
+    assert_eq!(names("at[near]=10,180,50").await, ["dateline-east", "dateline-west"]);
+    assert_eq!(names("at[near]=89.95,90,50").await, ["pole-a", "pole-b"]);
+    assert_eq!(names("at[bbox]=9,179,11,-179").await, ["dateline-east", "dateline-west"]);
+    assert_eq!(names("at[bbox]=-1,-1,1,1").await, ["corner-box-only", "east-100km", "origin"]);
+    assert_eq!(names("at[exists]=false").await, ["nowhere"]);
+    // Refused input names the shape.
+    for query in ["at[near]=91,0,1", "at[near]=0,0,0", "at[near]=0,0", "at[near]=0,0,99999", "at[near]=NaN,0,1", "at[near]=0,0,inf", "at[bbox]=2,0,1,1", "at[bbox]=0,0,1", "at[bbox]=0,181,1,0", "at[eq]=0"] {
+        assert_eq!(call(&http, "GET", &format!("/api/sites?{query}"), Some(&alice), None).await.0, 422, "{query}");
+    }
+    // Stored values are validated at the API and in the database.
+    for at in [json!({"lat":91,"lng":0}), json!({"lat":0}), json!({"lat":"0","lng":0}), json!({"lat":0,"lng":0,"x":1}), json!([0,0]), json!("0,0")] {
+        assert_eq!(call(&http, "POST", "/api/sites", Some(&alice), Some(json!({"name":"bad","at":at}))).await.0, 422, "{at}");
+    }
+    let error = sqlx::query("UPDATE _brain_res_sites SET data=data||'{\"at\":{\"lat\":\"x\",\"lng\":0}}'").execute(&pool).await.unwrap_err();
+    assert!(error.to_string().contains("check constraint"), "{error}");
+    // The filter uses the built-in GiST index.
+    let mut conn = pool.acquire().await.unwrap();
+    sqlx::raw_sql("SET enable_seqscan=off").execute(&mut *conn).await.unwrap();
+    let plan: Vec<String> = sqlx::query_scalar("EXPLAIN SELECT id FROM _brain_res_sites WHERE point((data#>>'{at,lng}')::float8,(data#>>'{at,lat}')::float8) <@ box(point(-1,-1),point(1,1))").fetch_all(&mut *conn).await.unwrap();
+    assert!(plan.join(" ").contains("_brain_ix_"), "{plan:?}");
+    sqlx::raw_sql("RESET enable_seqscan").execute(&mut *conn).await.unwrap();
+}

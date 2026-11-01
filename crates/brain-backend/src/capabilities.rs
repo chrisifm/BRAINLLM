@@ -11,6 +11,7 @@ const FIELD_TYPES: &[(&str, &str)] = &[
     ("bool", "bool"),
     ("email", "email"),
     ("obj", "obj"),
+    ("geo", "geo"),
     ("int", "int"),
     ("decimal(p,s)", "decimal(10,2)"),
     ("date", "date"),

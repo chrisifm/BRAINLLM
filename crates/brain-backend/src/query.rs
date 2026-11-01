@@ -14,9 +14,15 @@ use uuid::Uuid;
 pub const MAX_FILTERS: usize = 16;
 pub const MAX_IN: usize = 50;
 pub const GROUP_LIMIT: i64 = 100;
+/// Mean Earth radius (IUGG), in kilometers.
+const EARTH_KM: f64 = 6371.0088;
+/// Half the Earth's circumference: a `near` radius cannot usefully go past it.
+const MAX_NEAR_KM: f64 = 20040.0;
+/// Degrees added to an index box so rounding cannot drop a point that the exact distance check would keep.
+const GEO_MARGIN: f64 = 1e-6;
 /// Text comparisons and text indexes use the first 256 characters; equality is rechecked on the full value.
 const TEXT_KEY: usize = 256;
-pub const OPS: &[&str] = &["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "prefix", "iprefix", "exists", "has"];
+pub const OPS: &[&str] = &["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "prefix", "iprefix", "exists", "has", "near", "bbox"];
 const RESERVED: &[&str] = &["search", "limit", "offset", "sort", "include", "cursor", "after", "aggregate", "count", "fields", "owner"];
 const TIMESTAMPS: &[&str] = &["created_at", "updated_at"];
 /// Typo matches kept for one search; reaching it marks `total` approximate.
@@ -124,6 +130,7 @@ enum Kind {
     Bool,
     Ref,
     List,
+    Geo,
     Stamp,
 }
 /// Filter operators of a parsed field type, as the query parser enforces them (`None`: it cannot be filtered).
@@ -149,6 +156,7 @@ impl Kind {
             Ty::Bool => Kind::Bool,
             Ty::Ref(_) | Ty::Org => Kind::Ref,
             Ty::ListStr { .. } => Kind::List,
+            Ty::Geo => Kind::Geo,
             Ty::Num | Ty::Obj => return None,
         })
     }
@@ -162,10 +170,11 @@ impl Kind {
             Kind::Bool => &["eq", "exists"],
             Kind::Ref => &["eq", "ne", "in", "exists"],
             Kind::List => &["has", "exists"],
+            Kind::Geo => &["near", "bbox", "exists"],
         }
     }
     fn sortable(self) -> bool {
-        !matches!(self, Kind::Ref | Kind::List)
+        !matches!(self, Kind::Ref | Kind::List | Kind::Geo)
     }
     fn numeric(self) -> bool {
         matches!(self, Kind::Int | Kind::Decimal)
@@ -181,6 +190,8 @@ fn expr(kind: Kind, field: &str) -> String {
         Kind::Bool => format!("(data->>'{field}')"),
         Kind::Ref => crate::relations::column(field),
         Kind::List => format!("(data->'{field}')"),
+        // `point` is built in and immutable, so the index needs no database extension.
+        Kind::Geo => format!("point((data#>>'{{{field},lng}}')::float8,(data#>>'{{{field},lat}}')::float8)"),
         Kind::Stamp => field.to_string(),
     }
 }
@@ -415,6 +426,7 @@ pub(crate) fn indexes(r: &Resource) -> Vec<(String, String)> {
         match kind(r, field) {
             Some(Kind::Stamp | Kind::Ref) | None => {}
             Some(Kind::List) => add("gin", expr(Kind::List, field)),
+            Some(Kind::Geo) => add("gist", expr(Kind::Geo, field)),
             Some(k) => {
                 add("btree", expr(k, field));
                 if iprefix {
@@ -535,6 +547,8 @@ fn operand(r: &Resource, field: &str, kind: Kind, op: &str, raw: &str) -> Option
     let ty = r.fields.get(field).and_then(|f| f.ty());
     let value = match (kind, op) {
         (_, "exists") => matches!(raw, "true" | "false").then(|| raw.to_string())?,
+        (Kind::Geo, "near") => near_operand(raw).map(|_| raw.to_string())?,
+        (Kind::Geo, "bbox") => box_operand(raw).map(|_| raw.to_string())?,
         (Kind::Text, "prefix" | "iprefix") | (Kind::List, _) => (!raw.is_empty()).then(|| raw.to_string())?,
         (Kind::Int, _) => ty?.normalize(&json!(raw.parse::<i64>().ok()?), true)?.to_string(),
         (Kind::Bool, _) => matches!(raw, "true" | "false").then(|| raw.to_string())?,
@@ -749,6 +763,7 @@ fn expected(r: &Resource, field: &str, kind: Kind) -> String {
         Kind::Date | Kind::DateTime => format!("{} or now, now-7d, now+1h", r.fields[field].ty().map(|t| t.expected()).unwrap_or_default()),
         Kind::Bool => "true or false".into(),
         Kind::Ref => "a record UUID".into(),
+        Kind::Geo => "lat,lng,km for near (km above 0, at most 20040) or minLat,minLng,maxLat,maxLng for bbox".into(),
         _ => r.fields.get(field).and_then(|f| f.ty()).map(|t| t.expected()).unwrap_or_default(),
     }
 }
@@ -881,6 +896,68 @@ fn escape_like(s: &str) -> String {
     out.push('%');
     out
 }
+fn operand_text(value: &Operand) -> Option<&str> {
+    match value {
+        Operand::Value(text) => Some(text),
+        Operand::Now(_) => None,
+    }
+}
+/// `lat,lng,km` of a `near` filter.
+fn near_operand(raw: &str) -> Option<[f64; 3]> {
+    let [lat, lng, km] = geo_numbers::<3>(raw)?;
+    ((-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lng) && km > 0.0 && km <= MAX_NEAR_KM).then_some([lat, lng, km])
+}
+/// `minLat,minLng,maxLat,maxLng` of a `bbox` filter. `minLng` above `maxLng` means the box crosses the antimeridian.
+fn box_operand(raw: &str) -> Option<[f64; 4]> {
+    let [south, west, north, east] = geo_numbers::<4>(raw)?;
+    let lat = -90.0..=90.0;
+    let lng = -180.0..=180.0;
+    (lat.contains(&south) && lat.contains(&north) && south <= north && lng.contains(&west) && lng.contains(&east)).then_some([south, west, north, east])
+}
+fn geo_numbers<const N: usize>(raw: &str) -> Option<[f64; N]> {
+    let numbers: Vec<f64> = raw.split(',').map(|n| n.parse::<f64>().ok().filter(|n| n.is_finite())).collect::<Option<_>>()?;
+    numbers.try_into().ok()
+}
+/// Boxes as `[west, south, east, north]`, split at the antimeridian so each one is ordinary.
+fn lng_spans(south: f64, west: f64, north: f64, east: f64) -> Vec<[f64; 4]> {
+    if west <= east {
+        vec![[west, south, east, north]]
+    } else {
+        vec![[west, south, 180.0, north], [-180.0, south, east, north]]
+    }
+}
+/// Boxes that contain every point within `km` of the center, for the index; the exact distance is checked afterwards.
+fn near_boxes(lat: f64, lng: f64, km: f64) -> Vec<[f64; 4]> {
+    let angle = km / EARTH_KM;
+    let reach = angle.to_degrees() + GEO_MARGIN;
+    let (south, north) = (lat - reach, lat + reach);
+    // A circle that reaches a pole contains every longitude there.
+    if south <= -90.0 || north >= 90.0 {
+        return vec![[-180.0, south.max(-90.0), 180.0, north.min(90.0)]];
+    }
+    let span = (angle.sin() / lat.to_radians().cos()).clamp(-1.0, 1.0).asin().to_degrees() + GEO_MARGIN;
+    if span >= 180.0 {
+        return vec![[-180.0, south, 180.0, north]];
+    }
+    let (west, east) = (lng - span, lng + span);
+    if west < -180.0 {
+        lng_spans(south, west + 360.0, north, east)
+    } else if east > 180.0 {
+        lng_spans(south, west, north, east - 360.0)
+    } else {
+        vec![[west, south, east, north]]
+    }
+}
+fn push_boxes(q: &mut QueryBuilder<Postgres>, e: &str, boxes: &[[f64; 4]]) {
+    q.push("(");
+    for (i, [west, south, east, north]) in boxes.iter().enumerate() {
+        if i > 0 {
+            q.push(" OR ");
+        }
+        q.push(format!("{e} <@ box(point(")).push_bind(*west).push(",").push_bind(*south).push("),point(").push_bind(*east).push(",").push_bind(*north).push("))");
+    }
+    q.push(")");
+}
 fn push_predicate(q: &mut QueryBuilder<Postgres>, f: &Filter) {
     let e = expr(f.kind, &f.field);
     let field = &f.field;
@@ -891,6 +968,27 @@ fn push_predicate(q: &mut QueryBuilder<Postgres>, f: &Filter) {
         }
     };
     match f.op.as_str() {
+        "near" => {
+            if let Some([lat, lng, km]) = operand_text(first).and_then(near_operand) {
+                q.push("(");
+                push_boxes(q, &e, &near_boxes(lat, lng, km));
+                let (y, x) = (format!("(data#>>'{{{field},lat}}')::float8"), format!("(data#>>'{{{field},lng}}')::float8"));
+                q.push(format!(" AND 2*{EARTH_KM}::float8*asin(least(1::float8,sqrt(power(sin(radians({y}-"))
+                    .push_bind(lat)
+                    .push(")/2),2)+cos(radians(")
+                    .push_bind(lat)
+                    .push(format!("))*cos(radians({y}))*power(sin(radians({x}-"))
+                    .push_bind(lng)
+                    .push(")/2),2))))<=")
+                    .push_bind(km)
+                    .push(")");
+            }
+        }
+        "bbox" => {
+            if let Some([south, west, north, east]) = operand_text(first).and_then(box_operand) {
+                push_boxes(q, &e, &lng_spans(south, west, north, east));
+            }
+        }
         "exists" => {
             let yes = first == &Operand::Value("true".into());
             q.push(if yes { "(" } else { "NOT (" });
@@ -967,7 +1065,7 @@ fn push_predicate(q: &mut QueryBuilder<Postgres>, f: &Filter) {
 fn condition_operands(r: &Resource, field: &str, value: &Value) -> Option<(Kind, &'static str, Vec<Operand>)> {
     let f = r.fields.get(field)?;
     let ty = f.ty()?;
-    let kind = Kind::of(&ty).filter(|k| *k != Kind::List)?;
+    let kind = Kind::of(&ty).filter(|k| !matches!(k, Kind::List | Kind::Geo))?;
     let one = |v: &Value| {
         if v.is_array() || v.is_object() || v.is_null() {
             return None;
@@ -1555,6 +1653,20 @@ pub fn openapi_parameters(r: &Resource) -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn near_boxes_split_at_the_antimeridian_and_open_at_the_poles() {
+        use super::near_boxes;
+        assert_eq!(near_boxes(0.0, 0.0, 100.0).len(), 1);
+        let split = near_boxes(10.0, 179.9, 100.0);
+        assert_eq!(split.len(), 2);
+        assert!(split[0][0] > 170.0 && split[0][2] == 180.0 && split[1][0] == -180.0 && split[1][2] < -170.0, "{split:?}");
+        let split = near_boxes(10.0, -179.9, 100.0);
+        assert!(split.len() == 2 && split[0][2] == 180.0 && split[1][0] == -180.0, "{split:?}");
+        let pole = near_boxes(89.9, 0.0, 50.0);
+        assert_eq!((pole.len(), pole[0][0], pole[0][2], pole[0][3]), (1, -180.0, 180.0, 90.0));
+        let wide = near_boxes(0.0, 0.0, 20040.0);
+        assert_eq!((wide[0][0], wide[0][1], wide[0][2], wide[0][3]), (-180.0, -90.0, 180.0, 90.0));
+    }
     #[test]
     fn timestamps_order_without_a_null_position_so_their_index_serves_the_list() {
         let key = |kind, field: &str, nulls_first| SortKey { field: field.into(), kind, desc: true, nulls_first };

@@ -31,6 +31,8 @@ pub enum Ty {
     /// Reference to another resource's record id (`ref:<resource>`), stored as a canonical lowercase UUID string
     /// and mirrored into a real `ref_<field> uuid` column with a foreign key (see `relations.rs`).
     Ref(String),
+    /// A point on Earth, stored as `{lat, lng}` in degrees.
+    Geo,
     /// The organization that owns a tenant row (see `organizations.rs`), stored like a reference and keyed to `_brain_orgs`.
     Org,
 }
@@ -54,6 +56,7 @@ pub fn parse(kind: &str) -> Option<Ty> {
         "date" => Ty::Date,
         "datetime" => Ty::DateTime,
         "org" => Ty::Org,
+        "geo" => Ty::Geo,
         "list<str>" => Ty::ListStr {
             max: LIST_DEFAULT_ITEMS,
         },
@@ -113,7 +116,7 @@ fn canonical_small(s: &str) -> Option<u8> {
     s.parse::<u16>().ok().filter(|n| *n <= 255).map(|n| n as u8)
 }
 
-pub const KIND_HELP: &str = "str|num|bool|email|obj|int|decimal(p,s)|date|datetime|enum(a|b)|list<str>|list<str,N>|ref:<resource>|org";
+pub const KIND_HELP: &str = "str|num|bool|email|obj|int|decimal(p,s)|date|datetime|enum(a|b)|list<str>|list<str,N>|ref:<resource>|org|geo";
 
 impl Ty {
     /// Kinds that existed before exact types; they keep legacy validation and never get database checks.
@@ -152,11 +155,17 @@ impl Ty {
             ),
             Ty::Ref(target) => format!("Expected the UUID string of an existing {target} record"),
             Ty::Org => "Expected the UUID string of an organization you belong to".into(),
+            Ty::Geo => "Expected {\"lat\": -90 to 90, \"lng\": -180 to 180} in degrees".into(),
         }
     }
     /// Validates and returns the canonical stored value. `required` matters only for non-empty text/list rules.
     pub fn normalize(&self, v: &Value, required: bool) -> Option<Value> {
         match self {
+            Ty::Geo => {
+                let point = v.as_object().filter(|point| point.len() == 2)?;
+                let (lat, lng) = (point.get("lat")?.as_f64()?, point.get("lng")?.as_f64()?);
+                ((-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lng)).then(|| v.clone())
+            }
             Ty::Str => v
                 .as_str()
                 .filter(|s| s.len() <= 16384 && (!required || !s.trim().is_empty()))
@@ -238,6 +247,12 @@ impl Ty {
                 "items":{"type":"string","x-brain-maxBytes":LIST_ITEM_BYTES}
             }),
             Ty::Ref(target) => json!({"type":"string","format":"uuid","x-brain-ref":target}),
+            Ty::Geo => json!({
+                "type":"object",
+                "additionalProperties":false,
+                "required":["lat","lng"],
+                "properties":{"lat":{"type":"number","minimum":-90,"maximum":90},"lng":{"type":"number","minimum":-180,"maximum":180}}
+            }),
             Ty::Org => json!({"type":"string","format":"uuid","x-brain-org":true}),
         }
     }
@@ -271,6 +286,9 @@ impl Ty {
             ),
             Ty::Ref(_) | Ty::Org => format!(
                 "jsonb_typeof({j})='string' AND ({t}) ~ '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$'"
+            ),
+            Ty::Geo => format!(
+                "CASE WHEN jsonb_typeof(({j})->'lat')='number' AND jsonb_typeof(({j})->'lng')='number' AND (({j})-'lat'-'lng')='{{}}'::jsonb THEN (({j})->>'lat')::numeric BETWEEN -90 AND 90 AND (({j})->>'lng')::numeric BETWEEN -180 AND 180 ELSE false END"
             ),
             Ty::ListStr { max } => format!(
                 "jsonb_typeof({j})='array' AND jsonb_array_length({j})<={max} AND NOT jsonb_path_exists({j},'$[*] ? (@.type() != \"string\")')"
