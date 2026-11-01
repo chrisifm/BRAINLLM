@@ -2327,6 +2327,8 @@ function real(p) {
 }
 if (process.argv[1] && real(process.argv[1]) === real(fileURLToPath(import.meta.url))) {
   process.env.NODE_ENV = 'production'
+  // A closed log pipe is the operator's matter: requests do not depend on it.
+  for (const stream of [process.stdout, process.stderr]) stream.on('error', error => { if (error.code !== 'EPIPE') throw error })
   const s = createServer({ dist: fileURLToPath(new URL('.', import.meta.url)) })
   const fd = ENV.BRAIN_LISTEN_FD
   const where = fd ? { fd: Number(fd) } : { port: +(ENV.PORT || 3000), host: ENV.HOST || '127.0.0.1' }
