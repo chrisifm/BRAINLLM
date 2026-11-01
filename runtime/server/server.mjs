@@ -6,6 +6,7 @@
 //
 // It serves, in this order:
 //   GET  /_health                → 200 {"ok":true,"build":"<sig>"}
+//   GET  /health[/live|/ready]   → forwarded to the native backend, or 200 {"ok":true} without one
 //   POST /_r/<hash>/<fn>         → RPC to a `server:` function (same origin + X-Brain-RPC; body, rate and time limits from brain.json `server`)
 //   GET  routes in the manifest  → SSR: load(ctx) → render the view on the DOM shim → page with props and SEO head
 //   GET  files in dist/          → static (the smallest accepted .zst/.br/.gz sibling; /_b/* immutable), clean URLs
@@ -1553,6 +1554,17 @@ export function createServer(o = {}) {
     return false
   }
 
+  // /health is reserved for the backend (B0735), so an app cannot declare it and deploy gates ask this port for it. An app
+  // page at that path still wins: this only runs where the answer would have been a 404. Nothing here names the backend.
+  const isProbe = path => path === '/health' || path === '/health/live' || path === '/health/ready'
+  const answerProbe = async (req, res, url, rid) => {
+    const headers = { 'content-type': MIME['.json'], 'cache-control': 'no-store' }
+    if (req.method !== 'GET' && req.method !== 'HEAD') return notFound(req, res)
+    if (!native) return send(res, 200, json({ ok: true }), headers)
+    try { await native.proxy(req, res, new URL(url.pathname, url), rid, send) }
+    catch { if (!res.headersSent) send(res, 503, json({ ok: false }), headers) }
+  }
+
   // ---------- dispatch ----------
   const server = http(async (req, res) => {
     // Only a file upload may outlast the 30-second body budget; the dispatcher lifts this guard for that path alone.
@@ -1581,7 +1593,7 @@ export function createServer(o = {}) {
       let url = full
       if (BASE !== '/') {
         if (full.pathname === BASE.slice(0, -1)) return send(res, 301, '', { location: BASE + full.search })
-        if (!full.pathname.startsWith(BASE)) return notFound(req, res)
+        if (!full.pathname.startsWith(BASE)) return isProbe(full.pathname) ? await answerProbe(req, res, full, rid) : notFound(req, res)
         url = new URL('/' + full.pathname.slice(BASE.length) + full.search, full) // the app path
       }
       req.$brainPath = url.pathname
@@ -1616,6 +1628,7 @@ export function createServer(o = {}) {
       if (serveStatic(req, res, url)) return
       // browsers still ask for /favicon.ico: the app's SVG icon answers it
       if (url.pathname === '/favicon.ico' && file('favicon.svg')) return send(res, 301, '', { location: withBase('/favicon.svg'), 'cache-control': 'public, max-age=86400' })
+      if (isProbe(url.pathname)) return await answerProbe(req, res, url, rid)
       notFound(req, res)
     } catch (e) {
       log('error', 'unhandled', { rid, path: req.url, ...trace(e) })

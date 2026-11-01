@@ -349,7 +349,7 @@ Files of any type: `server/files/invoices.jsbrain` `export default {types:['appl
 → multipart `POST /_brain/files/invoices` (field `file`), `GET /_brain/files/invoices/<id>` (Range, ETag). Type comes
 from content, not the name; empty `types` accepts any type. See `docs/backend/files.md`.
 Edge: `server/platform.jsbrain` `export default {trustProxy:['127.0.0.1'],cors:{origins:[...],maxAge:600},limits:{maxInFlight:256},shutdown:{readyDelay:'5s',drain:'25s'},logging:{requests:'errors'|'all'|'off',slow:'1s'}}`.
-Probes `GET /health/live` and `GET /health/ready`; overload answers `503 OVERLOADED` + `Retry-After`. Production
+Probes `GET /health/live` and `GET /health/ready`, also answered on the `brain start` port; overload answers `503 OVERLOADED` + `Retry-After`. Production
 requires `sslmode=verify-full` for a remote `DATABASE_URL`. See `docs/backend/proxy-cors.md`, `docs/backend/lifecycle.md`.
 Several processes: `cluster:{shared:true}` in `server/platform.jsbrain` (automatic when `BRAIN_BACKEND_PROCESSES>1`) keeps route/API-key rate windows in Postgres and relays socket events between processes. See `docs/backend/cluster.md`.
 Caching: API GETs send `ETag` (304 on `If-None-Match`); `server/cache.jsbrain` `export default {products:{maxAge:'1m',staleWhileRevalidate:'10m'}}` sets a public `Cache-Control` for anonymous reads of public-read resources; `If-Match` on PUT/PATCH/DELETE → 412 `PRECONDITION_FAILED` when stale. See `docs/backend/caching.md`.

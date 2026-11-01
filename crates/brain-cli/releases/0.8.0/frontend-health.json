@@ -1,0 +1,10 @@
+{
+  "id": "frontend-health",
+  "kind": "fix",
+  "title": "The frontend port answers /health",
+  "why": "B0735 reserves /health, so an app could neither declare it nor get one on the frontend port that deploy gates ask.",
+  "changelog": [
+    "`brain start` answers `/health`, `/health/live` and `/health/ready`, reserved by B0735, on its own port"
+  ],
+  "guide": "docs/DEPLOYMENT.md"
+}

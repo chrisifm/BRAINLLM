@@ -215,6 +215,10 @@ pub(crate) fn forwarded_for(req: &http::Request, peer: Option<SocketAddr>) -> Op
         _ => Some(peer.to_string()),
     }
 }
+/// The probes the backend owns (B0735 reserves them); a frontend answers them only where it would have answered 404.
+pub(crate) fn is_probe(path: &str) -> bool {
+    matches!(path, "/health" | "/health/live" | "/health/ready")
+}
 pub(crate) fn handles(path: &str) -> bool {
     // the one script the backend serves; other `.js` paths are the dev server's modules
     path == "/_brain/analytics.js" || (path.starts_with("/s/")
