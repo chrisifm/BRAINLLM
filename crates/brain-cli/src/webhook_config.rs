@@ -211,14 +211,14 @@ mod tests {
     fn an_endpoint_without_its_keys_is_disabled_and_endpoints_left_without_encryption_stop() {
         let app = app();
         let key = "a".repeat(64);
-        std::fs::write(app.0.join(SOURCE), "export default { encryptionKeys: ['ENC'], inbound: { orders: { queue: 'order_received', signingKeys: ['SIGN_ORDERS'] }, other: { queue: 'order_received', signingKeys: ['SIGN_OTHER'] } } }\n").unwrap();
+        std::fs::write(app.0.join(SOURCE), "export default { encryptionKeys: ['BRAIN_WEBHOOK_ENC'], inbound: { orders: { queue: 'order_received', signingKeys: ['BRAIN_WEBHOOK_ORDERS'] }, other: { queue: 'order_received', signingKeys: ['BRAIN_WEBHOOK_OTHER'] } } }\n").unwrap();
         std::fs::write(app.0.join(".brain_env"), "").unwrap();
         assert!(load(&app.0, "development").unwrap().is_none(), "no endpoint left needs no encryption");
         assert!(secret_problem(&app.0, "development").unwrap().2);
         assert_eq!(disabled_inbound(&app.0, "development").len(), 2);
-        std::fs::write(app.0.join(".brain_env"), format!("SIGN_ORDERS={key}\n")).unwrap();
+        std::fs::write(app.0.join(".brain_env"), format!("BRAIN_WEBHOOK_ORDERS={key}\n")).unwrap();
         let (_, message, disables) = secret_problem(&app.0, "development").unwrap();
-        assert!(!disables && message.contains("ENC") && !message.contains(&key), "{message}");
+        assert!(!disables && message.contains("BRAIN_WEBHOOK_ENC") && !message.contains(&key), "{message}");
         assert_eq!(disabled_inbound(&app.0, "development"), vec!["other"]);
     }
     #[test]
@@ -228,7 +228,7 @@ mod tests {
         let info = metadata(&app.0).unwrap();
         assert_eq!(info["runtimeReadiness"], "unverified");
         assert_eq!(references(&app.0).unwrap().len(), 4);
-        assert!(load(&app.0, "development").is_err());
+        assert!(load(&app.0, "development").unwrap().is_none(), "no endpoint holds its keys, so none is served");
         let encoded = info.to_string();
         assert!(!encoded.contains("ciphertext"));
         assert_eq!(info["outbound"][0]["name"], "partner");
