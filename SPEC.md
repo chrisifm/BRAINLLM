@@ -157,7 +157,7 @@ Values may be expressions from `load` props: `<meta seo title={props.user.name} 
 jsonld={{ '@type': 'Person', name: props.user.name }}>`. Site defaults live in `app.brain`:
 `<meta seo titleTemplate="%s · Nimbus" og:image="/og.png" twitter="@nimbus">`. Any other tag goes in a `<head>` block of
 the view (merged, deduplicated by name/property). `[id]` views list their pages with
-`export async function paths() { return [{ id: '1' }] }` so they are prerendered and appear in the sitemap.
+`export async function paths() { return [{ id: '1' }] }` so they are prerendered and appear in the sitemap. A listed page that throws or renders nothing stops `brain build`.
 Live `[slug]` views (SSR, no `paths()`) export `sitemap({ env })` instead, returning `[{ slug, lastmod? }]` (key = the
 bracket name; `lastmod` a `YYYY-MM-DD` string or Date; an item without the key is skipped). `brain guide seo`; never both, B0117.
 A public dynamic view (no guard, not `noindex`) with neither export is listed nowhere: `brain build` warns B1837 with the route.

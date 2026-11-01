@@ -31,6 +31,16 @@ fn shop_domain() -> Domain {
 }
 
 #[test]
+fn a_stored_field_no_longer_in_the_schema_does_not_block_a_write() {
+    let r = products();
+    let stored = json!({"name":"Mug","sku":"M-1","stock":3,"price":"9.50","status":"active","retired":"old"});
+    let merged = domain::merge_patch(&r, &stored, &json!({"stock":4})).unwrap();
+    assert!(merged.get("retired").is_none(), "{merged}");
+    r.input(&merged).unwrap();
+    assert_eq!(domain::merge_patch(&r, &stored, &json!({"retired":"new"})).unwrap_err()["retired"], "Unknown field");
+}
+
+#[test]
 fn patch_merges_only_sent_fields_and_rejects_unknown_ones() {
     let r = products();
     let stored = json!({"name":"Mug","sku":"M-1","stock":3,"price":"9.50","status":"active","note":"blue"});

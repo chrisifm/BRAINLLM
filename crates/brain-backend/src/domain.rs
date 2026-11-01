@@ -29,6 +29,8 @@ pub fn merge_patch(
         return Err(unknown);
     }
     let mut merged: Map<String, Value> = existing.as_object().cloned().unwrap_or_default();
+    // a field removed from the schema stays in old rows until they are next written; it must not block that write
+    merged.retain(|key, _| r.fields.contains_key(key));
     for (key, value) in patch {
         if value.is_null() {
             merged.remove(key);
@@ -1087,6 +1089,7 @@ impl<'a> Engine<'a> {
             return Err(Failure::Guard(at(failed)));
         }
         let mut next = data.clone();
+        next.retain(|key, _| r.fields.contains_key(key));
         let mut errors = BTreeMap::new();
         for (field, value) in &action.set {
             let ty = r.fields[field].ty();

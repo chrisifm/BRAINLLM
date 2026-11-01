@@ -43,3 +43,24 @@ fn strict_fails_a_degraded_build_and_invalid_limits_stop_any_build() {
     assert!(!limits.status.success() && text(&limits).contains("B0707"), "{}", text(&limits));
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// A page listed by `paths()` is published to be read: a failed render must not reach `dist/` as an empty 200.
+#[test]
+fn a_paths_page_that_cannot_render_stops_the_build() {
+    let tmp = std::env::temp_dir().join(format!("brain-build-paths-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    assert!(brain(&tmp, &["new", "app"], None).status.success());
+    let dir = tmp.join("app");
+    std::fs::create_dir_all(dir.join("views/cat")).unwrap();
+    let view = |load: &str| format!("<meta seo title=\"Category page title\" description=\"A category page with its own description text.\">\n<script>\n  export async function paths() {{ return [{{ slug: 'art' }}] }}\n  export async function load() {{ {load} }}\n</script>\n<h1>Category</h1>\n");
+    std::fs::write(dir.join("views/cat/[slug].brain"), view("throw Object.assign(new Error('backend down'), { status: 503 })")).unwrap();
+    let failed = brain(&dir, &["build"], None);
+    assert!(!failed.status.success(), "{}", text(&failed));
+    assert!(text(&failed).contains("/cat/art") && text(&failed).contains("backend down") && text(&failed).contains("sitemap()"), "{}", text(&failed));
+    std::fs::write(dir.join("views/cat/[slug].brain"), view("return {}")).unwrap();
+    let fine = brain(&dir, &["build"], None);
+    assert!(fine.status.success(), "{}", text(&fine));
+    assert!(std::fs::read_to_string(dir.join("dist/cat/art/index.html")).unwrap().contains(">Category</h1>"));
+    let _ = std::fs::remove_dir_all(&tmp);
+}

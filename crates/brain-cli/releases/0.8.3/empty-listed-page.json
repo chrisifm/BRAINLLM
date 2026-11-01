@@ -1,0 +1,10 @@
+{
+  "id": "empty-listed-page",
+  "kind": "fix",
+  "title": "An empty paths() page stops the build",
+  "why": "A failed read during the build published a 200 with no content, and only an SEO audit caught it.",
+  "changelog": [
+    "`brain build` stops when a page listed by `paths()` throws or renders nothing, instead of publishing an empty 200"
+  ],
+  "guide": "brain guide seo"
+}

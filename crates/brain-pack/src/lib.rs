@@ -813,6 +813,9 @@ const HTTP_SETUP: &str = "api/_http.jsbrain";
 /// A view stylesheet up to this size (minified bytes) is inlined into the page instead of being a request (§13).
 const INLINE_CSS: usize = 4096;
 
+/// A `paths()` page without content in `dist/`: the build stops, `--strict` or not.
+pub const EMPTY_LISTED_PAGE: &str = "no content for the paths() page";
+
 pub fn build(
     input: &Input,
     views: &[(String, String)],
@@ -1756,7 +1759,13 @@ fn build_inner_with_options(
         if !p.ssr && p.params.trim() != "{}" && !p.params.trim().is_empty() {
             head.push_str(&format!("<meta name=\"brain-params\" content='{}'>", p.params.replace('&', "&amp;").replace('\'', "&#39;")));
         }
+        // listed by `paths()`: the file is the whole answer for that URL, so a failed render would publish an empty 200
+        let listed_page = !p.ssr && !p.params.trim().is_empty() && p.params.trim() != "{}";
         let body_html = match rendered.get(&p.route) {
+            Some(Ok(h)) if listed_page && h.html.trim().is_empty() => {
+                warnings.push(format!("{}: {EMPTY_LISTED_PAGE} {}: it rendered nothing", p.view, p.route));
+                String::new()
+            }
             Some(Ok(h)) => {
                 // the page still ships (with the fallback), but the author must know (QA #176)
                 for f in &h.failed {
@@ -1765,6 +1774,10 @@ fn build_inner_with_options(
                 h.html.clone()
             }
             Some(Err(_)) if p.ssr => String::new(),
+            Some(Err(e)) if listed_page => {
+                warnings.push(format!("{}: {EMPTY_LISTED_PAGE} {}: {}", p.view, p.route, e.lines().next().unwrap_or("")));
+                String::new()
+            }
             Some(Err(e)) => {
                 warnings.push(format!("{}: prerender threw, the page renders on the client: {}", p.view, e.lines().next().unwrap_or("")));
                 String::new()

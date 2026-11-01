@@ -1814,6 +1814,10 @@ fn degrades_output(warning: &str) -> bool {
 
 /// `brain build --strict`: the output stays on disk for inspection and the exit code stops the release that wanted all of it.
 fn strict_build_failure(args: &[String], warnings: &[String]) -> Result<(), String> {
+    let empty: Vec<&str> = warnings.iter().map(String::as_str).filter(|w| w.contains(brain_pack::EMPTY_LISTED_PAGE)).collect();
+    if !empty.is_empty() {
+        return Err(format!("the build would publish empty pages: {}; fix: make the data `load` reads reachable during the build, or list these pages with sitemap() and render them per request", empty.join("; ")));
+    }
     let degraded: Vec<&str> = warnings.iter().map(String::as_str).filter(|w| degrades_output(w)).collect();
     if degraded.is_empty() || !args.iter().any(|a| a == "--strict") {
         return Ok(());
