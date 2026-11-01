@@ -101,7 +101,7 @@ pub const REVALIDATE: &str = "no-cache";
 pub const PUBLIC_SWR: &str = "no-cache";
 
 /// Registration snippet (not part of the core runtime: §35 keeps the 4 KB budget), for an app at the root.
-pub const REGISTER: &str = "<script>if(isSecureContext&&'serviceWorker'in navigator)addEventListener('load',()=>(self.requestIdleCallback||setTimeout)(()=>navigator.serviceWorker.register('/sw.js',{updateViaCache:'none'}).then(r=>r.update())))</script>";
+pub const REGISTER: &str = "<script>if(isSecureContext&&'serviceWorker'in navigator)addEventListener('load',()=>(self.requestIdleCallback||setTimeout)(()=>navigator.serviceWorker.register('/sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{})))</script>";
 
 /// The registration for an app hosted under `base` (`/app/`): the worker file and its scope live under it.
 pub fn register(base: &str) -> String {
@@ -1062,6 +1062,8 @@ mod tests {
         assert!(files["index.html"].contains(&format!("<meta name=\"brain-build\" content=\"{}\">", a.build_hash)));
         assert!(files["_headers"].contains(&format!("X-Brain-Build: {}", a.build_hash)) && files["_brain/nginx.conf"].contains(&a.build_hash));
         assert!(REGISTER.contains("updateViaCache:'none'") && REGISTER.contains("r.update()"));
+        // a failed check (offline, a dropped request) retries on the next visit: it is no console error for the visitor
+        assert!(REGISTER.contains("r.update()).catch("), "{REGISTER}");
         // any change in any shipped file gives a new signature
         let (mut fx, mut bx) = (built(), BTreeMap::new());
         fx.insert("_b/core.js".into(), "export const m=2".into());
