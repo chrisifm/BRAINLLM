@@ -162,6 +162,13 @@ pub fn finalize(
     mut response: Response,
 ) -> Response {
     let status = response.status();
+    // The limiter rounds its wait down: "retry in 0 seconds" sends the caller straight back into the limit.
+    if status == StatusCode::TOO_MANY_REQUESTS {
+        let wait = response.headers().get(header::RETRY_AFTER).and_then(|value| value.to_str().ok()).and_then(|value| value.parse::<u64>().ok());
+        if wait.unwrap_or(0) == 0 {
+            response.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from(1u64));
+        }
+    }
     if status.is_client_error() || status.is_server_error() {
         let kind = response
             .headers()
@@ -182,7 +189,12 @@ pub fn finalize(
             let body = if html {
                 page(status, rid)
             } else {
-                serde_json::json!({"schemaVersion":1,"status":status.as_u16(),"rid":rid,"error":{"code":"HTTP_REJECTED","message":status.canonical_reason().unwrap_or("Request failed"),"fix":"Check the documented method, authentication, path and request body"}}).to_string()
+                let (code, fix) = if status == StatusCode::TOO_MANY_REQUESTS {
+                    ("RATE_LIMITED", "Too many requests from this client; wait for the Retry-After delay and send fewer at a time")
+                } else {
+                    ("HTTP_REJECTED", "Check the documented method, authentication, path and request body")
+                };
+                serde_json::json!({"schemaVersion":1,"status":status.as_u16(),"rid":rid,"error":{"code":code,"message":status.canonical_reason().unwrap_or("Request failed"),"fix":fix}}).to_string()
             };
             *response.body_mut() = Body::from(body);
             let headers = response.headers_mut();
@@ -281,6 +293,24 @@ mod tests {
                 .to_bytes()
                 .is_empty()
         );
+    }
+    #[tokio::test]
+    async fn a_rate_limited_answer_names_itself_and_never_says_retry_in_zero_seconds() {
+        let limited = |seconds: Option<&'static str>| {
+            let mut response = (StatusCode::TOO_MANY_REQUESTS, "Too Many Requests").into_response();
+            if let Some(seconds) = seconds {
+                response.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from_static(seconds));
+            }
+            finalize(&Method::GET, "/api/items", Some("application/json"), "rid", response)
+        };
+        for (given, expected) in [(Some("0"), "1"), (None, "1"), (Some("7"), "7")] {
+            let response = limited(given);
+            assert_eq!(response.headers()[header::RETRY_AFTER], expected);
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(body["error"]["code"], "RATE_LIMITED");
+            assert!(body["error"]["fix"].as_str().unwrap().contains("Retry-After"));
+        }
     }
     #[test]
     fn helpers_validate_final_codes_and_same_site_locations() {

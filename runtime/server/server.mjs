@@ -81,6 +81,7 @@ export class HttpError extends Error {
     Object.assign(this, extra)
   }
 }
+const bridgeBusy = message => new HttpError(503, message, { code: 'BRIDGE_BUSY', retryAfter: 1, fix: 'The server is at its limit of concurrent backend requests; retry after the Retry-After delay' })
 // Plain deliberate 4xx signals are portable from server-only application modules; exception messages stay private.
 function intendedStatus(error) {
   if (!error || typeof error !== 'object') return null
@@ -427,7 +428,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report) {
   const nativeCookies = values => (values || []).filter(value => /^(?:__Host-brain(?:-access|-refresh|-google)?)=/.test(value) && value.length <= 8192).slice(0,8)
   // /_brain/files: both directions stream with backpressure. The bucket enforces its own maxBytes and access checks.
   function fileStream(req, res, url, rid) {
-    if (stopped || streams >= 32) throw new HttpError(503, 'Backend stream capacity is unavailable')
+    if (stopped || streams >= 32) throw bridgeBusy('Backend stream capacity is unavailable')
     if (!['GET','HEAD','POST','DELETE'].includes(req.method)) throw new HttpError(405, 'Method not allowed')
     const ceiling = 2 * 1024 * 1024 * 1024 + 1024 * 1024
     if (Number(req.headers['content-length'] || 0) > ceiling) throw new HttpError(413, 'Request body is too large')
@@ -476,7 +477,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report) {
     })
   }
   function proxy(req, res, url, rid, reply, responseLimit = 20 * 1024 * 1024, declared) {
-    if (stopped || active >= 8) throw new HttpError(503, 'Backend request capacity is unavailable')
+    if (stopped || active >= 8) throw bridgeBusy('Backend request capacity is unavailable')
     if (!['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(req.method)) throw new HttpError(405, 'Method not allowed')
     const post = req.method === 'POST'
     const limit = url.pathname === '/_brain/uploads' && post ? 5 * 1024 * 1024 + 65536 : declared || post && /^\/api\/[^/]+\/batch$/.test(url.pathname) ? 1024 * 1024 : 65536
@@ -1030,8 +1031,8 @@ export function createServer(o = {}) {
   const notFound = (req, res) => failPage(res, 404, res.getHeader('x-request-id'))
   // `gone()` from load (§33): 410 tells crawlers the URL was removed for good; views/410.brain, else the 404 page
   const missing = (req, res, x) => (x && x.gone === true ? failPage(res, 410, res.getHeader('x-request-id')) : notFound(req, res))
-  const failPage = (res, status, rid) => {
-    if (!wantsHtml(res.req)) return send(res, status, json({ schemaVersion: 1, status, rid, error: STATUS_CODES[status] || 'Request failed' }), { 'content-type': MIME['.json'] })
+  const failPage = (res, status, rid, detail) => {
+    if (!wantsHtml(res.req)) return send(res, status, json({ schemaVersion: 1, status, rid, error: detail || STATUS_CODES[status] || 'Request failed' }), { 'content-type': MIME['.json'] })
     const custom = (status === 404 && mf.notFound) || (mf.errors && mf.errors[status]) || (status === 410 && !file('410.html') ? mf.notFound : `${status}.html`)
     const path = typeof custom === 'string' && file(custom)
     return html(res, status, path ? readFileSync(path, 'utf8') : defaultError(status, rid, BASE))
@@ -1763,9 +1764,12 @@ export function createServer(o = {}) {
       if (isProbe(url.pathname)) return await answerProbe(req, res, url, rid)
       notFound(req, res)
     } catch (e) {
-      log('error', 'unhandled', { rid, path: req.url, ...trace(e) })
+      const busy = e instanceof HttpError && e.code === 'BRIDGE_BUSY'
+      if (busy) log('warn', 'backend bridge busy', { rid, path: req.$brainPath || String(req.url || '').split('?')[0], fix: e.fix })
+      else log('error', 'unhandled', { rid, path: req.url, ...trace(e) })
       try {
-        if (!res.headersSent) failPage(res, intendedStatus(e) || 500, rid)
+        if (busy && !res.headersSent) { res.setHeader('retry-after', String(e.retryAfter)); failPage(res, 503, rid, { code: e.code, message: 'Service Unavailable', fix: e.fix }) }
+        else if (!res.headersSent) failPage(res, intendedStatus(e) || 500, rid)
         else res.end()
       } catch (again) {
         // the error page itself failed: still an answer, never an unhandled rejection that takes the process down
