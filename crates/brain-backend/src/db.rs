@@ -696,7 +696,7 @@ pub async fn undeclared_fields(pool: &PgPool, resources: &[Resource]) -> Result<
     let mut found = Vec::new();
     for r in resources {
         let declared: Vec<String> = r.fields.keys().cloned().collect();
-        let sql = format!("SELECT k, count(*) FROM {} t, jsonb_object_keys(t.data) k WHERE k <> ALL() GROUP BY k ORDER BY k", table(r));
+        let sql = format!("SELECT k, count(*) FROM {} t, jsonb_object_keys(t.data) k WHERE k <> ALL($1) GROUP BY k ORDER BY k", table(r));
         let rows: Vec<(String, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(sql)).bind(&declared).fetch_all(pool).await.map_err(|e| format!("{}: {e}", r.name))?;
         found.extend(rows.into_iter().map(|(field, count)| (r.name.clone(), field, count)));
     }
