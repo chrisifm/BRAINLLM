@@ -4,6 +4,10 @@
 
 Options include topology (static/node/rust-node/rust-static), name, frontend port, backendPort, memoryMb, brainBinary, domain, certificate, certificateKey and expectedRevision. Ports remain loopback upstreams. Names, DNS names and certificate paths are validated; PM2 values are JSON-serialized literal values, never interpolated shell commands. Configuration operations target deploy/ecosystem.brain.config.cjs or deploy/nginx.brain.conf. An existing file is preserved and returned as a separate proposed comparison, with no replacement operation.
 
+## Installing the compiler on the server
+
+An app created with npm pins `@christianirack/brainllm` in `devDependencies`. With `NODE_ENV=production` in the shell, `npm ci` skips those packages and `npm run build` then stops with `brain: command not found`. Install with `npm ci --include=dev`. `brain start`, `brain backend serve` and `brain jobs work` come from the same package, so do not run `npm prune --omit=dev` afterwards. A source installation with `cargo install` has no such step.
+
 ## Explicit topology
 
 - Static uses the native Rust static handler through brain start. Inspect the build artifact: the topology label does not disable or remove a server runtime from an existing dist directory.

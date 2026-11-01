@@ -157,3 +157,16 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod deploy_install_tests {
+    // `NODE_ENV=production` makes `npm ci` skip devDependencies, and the scaffold pins the compiler there.
+    #[test]
+    fn the_deploy_guide_names_the_install_a_production_shell_needs() {
+        let guide = include_str!("../guides/server.md");
+        let manual = include_str!("../../../docs/DEPLOYMENT.md");
+        for text in [guide, manual] {
+            assert!(text.contains("npm ci --include=dev"), "{text}");
+        }
+    }
+}

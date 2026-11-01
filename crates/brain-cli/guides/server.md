@@ -91,7 +91,7 @@ brain reload                      # zero-downtime: new instances ready before th
 brain stop
 brain start --install             # writes a systemd unit (Linux) or launchd plist (macOS) and prints the enable command
 ```
-Logs go to `logs/app.log` (rotated). Hosted under a sub-path: `brain.json` `"base": "/app/"`. `brain preview` serves `dist/` on a temporary loopback port to look before deploying.
+An npm-created app pins the compiler in devDependencies, which `NODE_ENV=production` skips: install with `npm ci --include=dev` or `npm run build` stops with `brain: command not found`, and do not prune it afterwards (`brain start` is the same package). Logs go to `logs/app.log` (rotated). Hosted under a sub-path: `brain.json` `"base": "/app/"`. `brain preview` serves `dist/` on a temporary loopback port to look before deploying.
 
 ## Verify
 ```bash
