@@ -237,3 +237,13 @@ fn video_without_captions() {
     // a muted autoplay loop without controls is decorative
     assert!(a11y("<video autoplay muted loop playsinline src=\"/bg.mp4\"></video>").is_empty());
 }
+
+// The build and the server write every title and tag before `</head>`; a shell without it loses them with no error.
+#[test]
+fn an_app_shell_without_head_is_reported() {
+    let ctx = Ctx::default();
+    assert_eq!(codes_with("app.brain", "<html><body><slot /></body></html>", &ctx), ["B0940"]);
+    assert_eq!(codes_with("app.brain", "<slot />", &ctx), ["B0940"]);
+    assert!(codes_with("app.brain", "<html><head><title>a</title></head><body><slot /></body></html>", &ctx).is_empty());
+    assert!(codes_with("comp/x.brain", "<p>x</p>", &ctx).is_empty());
+}
