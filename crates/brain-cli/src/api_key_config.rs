@@ -14,6 +14,7 @@ struct Definition {
     monthly_quota: Option<i64>,
     retention_days: Option<i64>,
     per_key_per_minute: Option<u32>,
+    self_service: Option<bool>,
 }
 
 /// `None` when the file is absent or `enabled` is false: any presented key is then rejected.
@@ -27,7 +28,7 @@ pub fn load(root: &Path) -> Result<Option<Config>, String> {
     let value = crate::backend::read_contract(root, &root.join(SOURCE))
         .map_err(|_| format!("{SOURCE}: use one regular literal configuration <=64 KiB"))?;
     let definition: Definition = serde_json::from_value(value).map_err(|_| {
-        format!("{SOURCE}: use enabled, dailyQuota, monthlyQuota, retentionDays and perKeyPerMinute")
+        format!("{SOURCE}: use enabled, dailyQuota, monthlyQuota, retentionDays, perKeyPerMinute and selfService")
     })?;
     if !definition.enabled {
         return Ok(None);
@@ -40,6 +41,7 @@ pub fn load(root: &Path) -> Result<Option<Config>, String> {
         per_key_per_minute: definition
             .per_key_per_minute
             .unwrap_or(defaults.per_key_per_minute),
+        self_service: definition.self_service.unwrap_or(defaults.self_service),
     };
     config.validate().map_err(|error| format!("{SOURCE}: {error}"))?;
     Ok(Some(config))
@@ -55,6 +57,7 @@ pub fn metadata(root: &Path) -> Result<Value, String> {
             "monthlyQuota": config.default_monthly_quota,
             "retentionDays": config.retention_days,
             "perKeyPerMinute": config.per_key_per_minute,
+            "selfService": config.self_service,
             "format": "bk_live_<12 hex prefix>_<64 hex secret>",
             "headers": ["X-API-Key", "Authorization: Bearer"],
             "routes": "/api/<resource>[/<id>] and /_brain/files/<bucket> with a files.<bucket> scope",

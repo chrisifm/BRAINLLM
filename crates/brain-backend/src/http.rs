@@ -1111,8 +1111,8 @@ async fn docs(State(app): State<App>, h: HeaderMap) -> Result<Json<Value>> {
     let mut api = contract::openapi_with_roles(&resources, app.auth_flows.roles());
     crate::domain::openapi(&app.domain, &resources, &mut api);
     crate::openapi::extend(&mut api, &app.routes.declared(), &app.platform.buckets());
-    if app.api_keys.is_some() {
-        crate::api_keys::document(&mut api);
+    if let Some(keys) = &app.api_keys {
+        crate::api_keys::document(&mut api, keys.config().self_service);
     }
     Ok(Json(api))
 }

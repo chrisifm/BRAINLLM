@@ -336,7 +336,7 @@ Roles: `admin` and `user` by default, signup role `user`; `brain add roles` writ
 `brain recipe auth-ui|password-reset|email-verification|google-signin` prepares project-owned account UI;
 mail needs private `BRAIN_MAIL_RESEND_KEY`, `BRAIN_MAIL_FROM` and `PUBLIC_SITE_URL` (HTTPS, optional hosting prefix). The emails are in English unless the default locale defines `auth.email.verify`, `auth.email.reset` and `auth.email.notice` (B0941).
 `brain backend bootstrap-admin --user <existing-uuid>` (or `--email <address>`) explicitly assigns the first administrator; signup never grants it.
-API keys: add `server/api-keys.jsbrain` `{enabled:true}`; signed-in users manage keys at `/_brain/keys` (secret shown once), callers send `X-API-Key: bk_live_...` to `/api/<resource>` only; scopes `posts:read|write|*` never exceed the owner. See `docs/backend/api-keys.md`.
+API keys: add `server/api-keys.jsbrain` `{enabled:true}`; signed-in users manage keys at `/_brain/keys` (secret shown once; `selfService:false` closes those routes and leaves only the operator CLI), callers send `X-API-Key: bk_live_...` to `/api/<resource>` only; scopes `posts:read|write|*` never exceed the owner. See `docs/backend/api-keys.md`.
 `brain backend users disable|enable|revoke-sessions|disable-identity|enable-identity` and their administrator routes act without SQL; a route with `auth:'internal'` takes a rotatable secret in a header (`docs/backend/routes.md`).
 See `docs/AUTH-FLOWS.md`; mail responses deliberately do not disclose account existence or delivery failures.
 In a same-origin POST server function, `await ctx.backend.login({email,password})` establishes native JWT or opaque

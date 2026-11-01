@@ -230,8 +230,9 @@ pub(super) async fn gate(State(app): State<App>, req: Request, next: Next) -> Re
     response
 }
 
+/// The key routes answer 404 when keys are off or kept to the operator CLI (`selfService: false`).
 fn keys(app: &App) -> Result<&api_keys::Keys> {
-    app.api_keys.as_ref().ok_or_else(Error::missing)
+    app.api_keys.as_ref().filter(|keys| keys.config().self_service).ok_or_else(Error::missing)
 }
 fn invalid(message: &'static str) -> Error {
     Error::validation(json!({ "body": message }))

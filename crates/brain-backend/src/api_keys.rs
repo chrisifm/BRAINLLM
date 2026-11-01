@@ -54,6 +54,8 @@ pub struct Config {
     pub retention_days: i64,
     /// Burst-smoothing limit per key, independent of the per-IP limiter.
     pub per_key_per_minute: u32,
+    /// Whether signed-in people manage keys over `/_brain/keys`. Off, keys exist only through the operator CLI.
+    pub self_service: bool,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -62,6 +64,7 @@ impl Default for Config {
             default_monthly_quota: None,
             retention_days: 90,
             per_key_per_minute: 600,
+            self_service: true,
         }
     }
 }
@@ -603,8 +606,8 @@ pub async fn purge(pool: &PgPool, days: i64) -> Result<u64, String> {
     Ok(total)
 }
 
-/// Adds the API-key security schemes and the key routes to a generated OpenAPI document.
-pub fn document(doc: &mut Value) {
+/// Adds the API-key security schemes and, with self-service on, the key routes to a generated OpenAPI document.
+pub fn document(doc: &mut Value, self_service: bool) {
     let Some(root) = doc.as_object_mut() else { return };
     let components = root.entry("components").or_insert_with(|| json!({}));
     if let Some(components) = components.as_object_mut() {
@@ -631,6 +634,9 @@ pub fn document(doc: &mut Value) {
                     }
                 }
             }
+        }
+        if !self_service {
+            return;
         }
         paths.insert("/_brain/keys".into(), json!({
             "get":{"summary":"List your API keys (admins: ?all=true)","responses":{"200":{"description":"Keys without secrets"}}},

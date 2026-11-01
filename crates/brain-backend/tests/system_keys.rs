@@ -240,3 +240,30 @@ async fn keys_reach_buckets_only_by_named_scope_and_under_the_bucket_rules() {
     assert_eq!(call(&router, keyed("DELETE", &file, &system_key, None)).await.0, StatusCode::NO_CONTENT);
     assert_eq!(call(&router, keyed("GET", "/_brain/keys", &author_key, None)).await.1["error"]["code"], "API_KEY_NOT_ACCEPTED");
 }
+
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn self_service_off_closes_the_key_routes_and_keeps_operator_keys_working() {
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Use a disposable database");
+    let pool = db::connect(&url).await.unwrap();
+    let notes = sealed();
+    db::migrate(&pool, std::slice::from_ref(&notes)).await.unwrap();
+    let auth = Auth::new(pool.clone()).await.unwrap();
+    let mut closed = config(vec![notes]);
+    closed.api_keys = Some(brain_backend::api_keys::Config { self_service: false, ..Default::default() });
+    let router = brain_backend::http::router(pool.clone(), closed).await.unwrap();
+    let keys = Keys::new(pool.clone(), Default::default()).unwrap();
+    let (admin, admin_session) = user(&auth, &pool, "admin").await;
+    let (_, system_key) = keys.create_system(admin, new_key(&["sys_notes:*"])).await.unwrap().unwrap();
+
+    let created = call(&router, session("POST", "/_brain/keys", &admin_session, Some(json!({"name":"mine","scopes":["sys_notes:read"]})))).await;
+    assert_eq!(created.0, StatusCode::NOT_FOUND, "a session cannot create a key: {}", created.1);
+    assert_eq!(call(&router, session("GET", "/_brain/keys?all=true", &admin_session, None)).await.0, StatusCode::NOT_FOUND);
+    let listed = call(&router, keyed("GET", "/api/sys_notes", &system_key, None)).await;
+    assert_eq!(listed.0, StatusCode::OK, "the operator key still authenticates: {}", listed.1);
+    let inserted = call(&router, keyed("POST", "/api/sys_notes", &system_key, Some(json!({"title":"from the job"})))).await;
+    assert_eq!(inserted.0, StatusCode::OK, "{}", inserted.1);
+    let api = call(&router, session("GET", "/_brain/api", &admin_session, None)).await.1;
+    assert!(api["paths"].get("/_brain/keys").is_none(), "the description leaves the closed routes out");
+    assert!(api["components"]["securitySchemes"].get("apiKey").is_some(), "keys remain a way in");
+}

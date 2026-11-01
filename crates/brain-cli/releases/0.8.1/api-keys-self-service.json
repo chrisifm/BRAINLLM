@@ -1,0 +1,8 @@
+{
+  "id": "api-keys-self-service",
+  "kind": "fix",
+  "title": "Operator keys no longer require the self-service key routes",
+  "why": "A system key needs server/api-keys.jsbrain, and that file also opened /_brain/keys to every signed-in person. A project that only wanted a worker key had to choose between exposing key management and keeping a second database client. The default does not change.",
+  "changelog": ["`selfService: false` in `server/api-keys.jsbrain`"],
+  "guide": "docs/backend/api-keys.md"
+}

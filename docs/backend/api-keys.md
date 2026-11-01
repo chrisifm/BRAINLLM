@@ -14,13 +14,16 @@ export default {
   dailyQuota: 1000,        // default requests per UTC day for keys without their own quota (omit = unlimited)
   monthlyQuota: 20000,     // default requests per UTC month (omit = unlimited)
   retentionDays: 90,       // request trace kept this many days (1..3650, default 90)
-  perKeyPerMinute: 600     // burst limit per key, on top of the per-IP limiter (default 600)
+  perKeyPerMinute: 600,    // burst limit per key, on top of the per-IP limiter (default 600)
+  selfService: true        // false removes /_brain/keys; keys then exist only through the operator CLI (default true)
 }
 ```
 
 Then `brain backend migrate` (creates `_brain_api_keys`, `_brain_api_key_usage`, `_brain_api_key_events`) and
 `brain backend serve`. Without the file (or with `enabled: false`) any presented key is rejected with
-`401 API_KEYS_DISABLED` and the `/_brain/keys` routes answer 404. The generated OpenAPI document gains the
+`401 API_KEYS_DISABLED` and the `/_brain/keys` routes answer 404. With `selfService: false` presented keys keep
+working, but `/_brain/keys` answers 404 and leaves the OpenAPI document, so a project that only needs operator-created
+keys (for example a [system key](job-backend.md#system-identity)) exposes no key management to its users. The generated OpenAPI document gains the
 `apiKey` (`X-API-Key` header) and `apiKeyBearer` (`Authorization: Bearer`) security schemes on every `/api` operation,
 and `brain backend schema --json` reports the effective settings under `apiKeys` (null when disabled).
 

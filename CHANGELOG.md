@@ -7,8 +7,11 @@ diagnostics that reject code an earlier version accepted.
 Every npm package (`@christianirack/brainllm`, its seven native platform packages, `brainllm-runtime`,
 `create-brainllm` and `create-brainll`) ships the same version as `[workspace.package]` in `Cargo.toml`.
 
-## [Unreleased]
+## [0.8.1] - 2026-11-01
 
+Upgrade with `npm install -D @christianirack/brainllm@0.8.1 --save-exact`. Nothing here needs a change in your app. Send `total=false` on long list walks that do not show the count, and take a backup before `brain backend migrate`. A project that only uses operator-created keys can add `selfService: false` to `server/api-keys.jsbrain`.
+
+- `selfService: false` in `server/api-keys.jsbrain` keeps operator-created keys working while `/_brain/keys` answers 404, so a system key no longer opens key management to your users.
 - List requests accept `total=false`, which skips the count and leaves `total` out, for walks over many pages.
 - An older binary on a newer database names both migration versions and how to return, instead of only `migration version`.
 - `brain upgrade` no longer lists every file bucket as a manual step: B0770 reports the ones without `types`.

@@ -41,7 +41,8 @@ Some jobs act for nobody: a nightly cleanup, a reconciliation, a job that reads 
 brain backend keys create --system --user <uuid> --name "Nightly jobs" --scopes orders:*,files.reports:read
 ```
 
-Set the secret as `BRAIN_JOBS_SYSTEM_KEY` for the worker. A `runAs: 'system'` queue reads only that variable and never
+This needs `server/api-keys.jsbrain`; add `selfService: false` to it when nobody else should manage keys, so
+`/_brain/keys` stays closed. Set the secret as `BRAIN_JOBS_SYSTEM_KEY` for the worker. A `runAs: 'system'` queue reads only that variable and never
 falls back to `BRAIN_JOBS_API_KEY`; other queues never see it. A route handler gets the same choice with
 [`runAs`](routes.md#calling-resources-from-a-handler).
 
