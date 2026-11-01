@@ -396,7 +396,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
   let proxyBytes = 0, streams = 0
   // A file transfer lasts as long as the client needs, so streams have their own sockets and budget and never hold API slots.
   const streamAgent = new HttpAgent({ keepAlive: false, maxSockets: 32, maxTotalSockets: 32 })
-  const REQUEST_HEADERS = ['origin','authorization','x-api-key','content-type','content-length','x-brain-rpc','accept','if-match','if-none-match','x-brain-webhook-id','x-brain-webhook-timestamp','x-brain-webhook-signature','user-agent','dnt','sec-gpc','cf-ipcountry']
+  const REQUEST_HEADERS = ['origin','authorization','x-api-key','content-type','content-length','x-brain-rpc','x-brain-captcha','x-brain-login-grant','accept','if-match','if-none-match','x-brain-webhook-id','x-brain-webhook-timestamp','x-brain-webhook-signature','user-agent','dnt','sec-gpc','cf-ipcountry']
   const FILE_HEADERS = ['range','if-range','if-modified-since','if-unmodified-since']
   const RESPONSE_HEADERS = ['content-type','content-disposition','allow','retry-after','www-authenticate','location','etag','last-modified','clear-site-data','cache-control']
   const FILE_RESPONSE_HEADERS = ['content-length','content-range','accept-ranges','vary','content-security-policy','x-content-type-options','cross-origin-resource-policy','referrer-policy']
@@ -720,17 +720,32 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
       },
     })
   }
-  async function login(incoming,response,rid,credentials) {
+  // The token of the captcha widget: passed by the server function, or the header the page sent with this request.
+  const captchaHeaders = (incoming,options) => {
+    const token = options?.captcha ?? incoming.headers['x-brain-captcha']
+    if (token === undefined) return {}
+    if (typeof token !== 'string' || !token || Buffer.byteLength(token) > 8192 || /[\x00-\x1f\x7f]/.test(token)) throw new HttpError(403,'Complete the captcha again',{code:'CAPTCHA_FAILED'})
+    return {'x-brain-captcha':token}
+  }
+  const captchaRefusal = (status,data) => {
+    let code
+    try {code=JSON.parse(data.toString('utf8'))?.error?.code}catch{}
+    if(status===403&&code==='CAPTCHA_FAILED')return new HttpError(403,'Complete the captcha again',{code})
+    if(status===503&&code==='CAPTCHA_UNAVAILABLE')return new HttpError(503,'The captcha could not be verified. Nothing was changed; retry shortly',{code})
+    return null
+  }
+  async function login(incoming,response,rid,credentials,options) {
     if (incoming.method !== 'POST' || response.headersSent || response.writableEnded || response.destroyed) throw new HttpError(403,'B0742: Sign in through a same-origin POST server function')
     if (incoming.$nativeLoginStarted || incoming.$nativeLogout) throw new HttpError(409,'Use one authentication change per server request')
     if (!credentials || typeof credentials !== 'object' || Array.isArray(credentials) || Object.keys(credentials).some(key=>!['email','password'].includes(key)) || typeof credentials.email !== 'string' || typeof credentials.password !== 'string' || Buffer.byteLength(credentials.email)>254 || Buffer.byteLength(credentials.password)>1024) throw new HttpError(422,'Enter a valid email and password')
     const origin=bridgeOrigin(incoming,rid,'Sign in through a same-origin POST server function')
     incoming.$nativeLoginStarted=true
     const bytes=Buffer.from(JSON.stringify({email:credentials.email,password:credentials.password}))
-    const request=Readable.from([bytes]);request.method='POST';request.$brainForwardedFor=forwardedFor(incoming);request.headers={origin,accept:'application/json','content-type':'application/json','content-length':String(bytes.length)}
+    const request=Readable.from([bytes]);request.method='POST';request.$brainForwardedFor=forwardedFor(incoming);const grant=incoming.$nativeLoginGrant?.email===credentials.email?{'x-brain-login-grant':incoming.$nativeLoginGrant.grant}:captchaHeaders(incoming,options);delete incoming.$nativeLoginGrant;request.headers={origin,accept:'application/json','content-type':'application/json','content-length':String(bytes.length),...grant}
     let user
     try {
       await proxy(request,response,new URL('/_brain/auth/login',target),rid,(_res,status,data,headers)=>{
+        const refusal=captchaRefusal(status,data);if(refusal)throw refusal
         if(status===403)throw new HttpError(403,"B0740: the backend refused this site's origin; fix: add the site origin to backend.origins in brain.json. The backend log has the seen and allowed origins. Run brain explain B0740")
         if(status!==200)throw new HttpError(status===400||status===401||status===422?401:status===429?429:503,status===429?'Too many attempts. Wait before trying again.':status===400||status===401||status===422?'Wrong email or password':'Sign-in is temporarily unavailable')
         let payload
@@ -748,21 +763,26 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
   // Creates the account and leaves the session alone: `await ctx.backend.signup(v); return ctx.backend.login(v)` signs in
   // too. A refused address is the email field's error: the same 422 for an invalid one and for one already taken, and no
   // more than any signup form reveals by succeeding.
-  async function signup(incoming,response,rid,credentials) {
+  async function signup(incoming,response,rid,credentials,options) {
     if (incoming.method !== 'POST' || response.headersSent || response.writableEnded || response.destroyed) throw new HttpError(403,'B0742: Sign up through a same-origin POST server function')
     if (!credentials || typeof credentials !== 'object' || Array.isArray(credentials) || Object.keys(credentials).some(key=>!['email','password'].includes(key)) || typeof credentials.email !== 'string' || typeof credentials.password !== 'string' || Buffer.byteLength(credentials.email)>254 || Buffer.byteLength(credentials.password)>1024) throw new HttpError(422,'Enter a valid email and password')
     if (Buffer.byteLength(credentials.password) < 12 || Buffer.byteLength(credentials.password) > 1024) throw new HttpError(422,'Use a password of 12 to 1024 bytes',{errors:{password:'Use a password of 12 to 1024 bytes'}})
     const origin=bridgeOrigin(incoming,rid,'Sign up through a same-origin POST server function')
     const bytes=Buffer.from(JSON.stringify({email:credentials.email,password:credentials.password}))
-    const request=Readable.from([bytes]);request.method='POST';request.$brainForwardedFor=forwardedFor(incoming);request.headers={origin,accept:'application/json','content-type':'application/json','content-length':String(bytes.length)}
+    const request=Readable.from([bytes]);request.method='POST';request.$brainForwardedFor=forwardedFor(incoming);request.headers={origin,accept:'application/json','content-type':'application/json','content-length':String(bytes.length),...captchaHeaders(incoming,options)}
     let user
     try {
       await proxy(request,response,new URL('/_brain/auth/signup',target),rid,(_res,status,data)=>{
+        const refusal=captchaRefusal(status,data);if(refusal)throw refusal
         if(status===403)throw new HttpError(403,"B0740: the backend refused this site's origin; fix: add the site origin to backend.origins in brain.json. Run brain explain B0740")
         if(status===422)throw new HttpError(422,'This email cannot be used',{errors:{email:'This email cannot be used'}})
         if(status===429)throw new HttpError(429,'Too many attempts. Wait before trying again.')
         if(status!==200&&status!==201)throw unavailable()
-        try {user=safeUser(JSON.parse(data.toString('utf8'))?.user)}catch{throw unavailable()}
+        try {
+          const payload=JSON.parse(data.toString('utf8'));user=safeUser(payload?.user)
+          // The login that follows in this same request needs no second challenge; the grant never reaches the page.
+          if(typeof payload?.login_grant==='string')incoming.$nativeLoginGrant={email:credentials.email,grant:payload.login_grant}
+        }catch{throw unavailable()}
       },16384)
     } finally {request.destroy();bytes.fill(0)}
     return {user}
@@ -821,8 +841,8 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
       return bucketClient(target, serviceKey, bucket)
     },
     slugRedirect: (name, slug) => resource(incoming, response, rid, name).slugRedirect(slug),
-    login: credentials => login(incoming, response, rid, credentials),
-    signup: credentials => signup(incoming, response, rid, credentials),
+    login: (credentials, options) => login(incoming, response, rid, credentials, options),
+    signup: (credentials, options) => signup(incoming, response, rid, credentials, options),
     google: Object.freeze({
       challenge: () => googleChallenge(incoming, response, rid),
       login: values => googleLogin(incoming, response, rid, values),

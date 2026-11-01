@@ -44,6 +44,7 @@ pub struct Auth {
     slots: Arc<Semaphore>,
     dummy: String,
     signup_role: Arc<str>,
+    role_sessions: Arc<std::collections::BTreeMap<String, u32>>,
 }
 pub fn digest(s: &str) -> String {
     let digest = Sha256::digest(s.as_bytes());
@@ -175,7 +176,16 @@ impl Auth {
             slots: Arc::new(Semaphore::new(2)),
             dummy,
             signup_role: signup_role.into(),
+            role_sessions: Arc::default(),
         })
+    }
+    /// `session_seconds` of `server/auth/roles.jsbrain`: the length of new sessions per role.
+    pub fn with_role_sessions(mut self, lengths: std::collections::BTreeMap<String, u32>) -> Self {
+        self.role_sessions = Arc::new(lengths);
+        self
+    }
+    pub fn session_length(&self, role: &str) -> u32 {
+        self.role_sessions.get(role).copied().unwrap_or_else(session_seconds)
     }
     pub fn signup_role(&self) -> &str {
         &self.signup_role
@@ -326,7 +336,7 @@ impl Auth {
         if !live {
             return Ok(None);
         }
-        sqlx::query("INSERT INTO _brain_sessions(token_hash,user_id,expires_at) VALUES ($1,$2,now()+make_interval(secs=>$3))").bind(digest(&token)).bind(user.id).bind(f64::from(session_seconds())).execute(&mut *tx).await.map_err(crate::db::safe)?;
+        sqlx::query("INSERT INTO _brain_sessions(token_hash,user_id,expires_at) VALUES ($1,$2,now()+make_interval(secs=>$3))").bind(digest(&token)).bind(user.id).bind(f64::from(self.session_length(&user.role))).execute(&mut *tx).await.map_err(crate::db::safe)?;
         sqlx::query("INSERT INTO _brain_auth_events(user_id,event) VALUES ($1,'login')")
             .bind(user.id)
             .execute(&mut *tx)
@@ -410,7 +420,7 @@ impl Auth {
     ) -> Result<Option<(User, String)>, String> {
         reserve_session(&mut tx, user.id).await?;
         let token = token();
-        sqlx::query("INSERT INTO _brain_sessions(token_hash,user_id,expires_at) VALUES ($1,$2,now()+make_interval(secs=>$3))").bind(digest(&token)).bind(user.id).bind(f64::from(session_seconds())).execute(&mut *tx).await.map_err(crate::db::safe)?;
+        sqlx::query("INSERT INTO _brain_sessions(token_hash,user_id,expires_at) VALUES ($1,$2,now()+make_interval(secs=>$3))").bind(digest(&token)).bind(user.id).bind(f64::from(self.session_length(&user.role))).execute(&mut *tx).await.map_err(crate::db::safe)?;
         sqlx::query("INSERT INTO _brain_auth_events(user_id,event,outcome) VALUES ($1,'google-login','success')").bind(user.id).execute(&mut *tx).await.map_err(crate::db::safe)?;
         tx.commit().await.map_err(crate::db::safe)?;
         Ok(Some((user, token)))
@@ -472,8 +482,54 @@ impl Auth {
         else {
             return Ok(None);
         };
-        sqlx::query("SELECT u.id,u.email,u.role,u.verified FROM _brain_users u JOIN _brain_sessions s ON s.user_id=u.id WHERE s.token_hash=$1 AND s.expires_at>now() AND s.revoked_at IS NULL AND u.disabled_at IS NULL")
-            .bind(digest(token)).fetch_optional(&self.pool).await.map(|r|r.map(|r|User {id:r.get("id"),email:r.get("email"),role:r.get("role"),verified:r.get("verified")})).map_err(crate::db::safe)
+        let row = sqlx::query("SELECT u.id,u.email,u.role,u.verified,s.session_id,s.last_used_at<now()-interval '60 seconds' AS stale FROM _brain_users u JOIN _brain_sessions s ON s.user_id=u.id WHERE s.token_hash=$1 AND s.expires_at>now() AND s.revoked_at IS NULL AND u.disabled_at IS NULL AND ($2::float8 IS NULL OR s.last_used_at>now()-make_interval(secs=>$2))")
+            .bind(digest(token)).bind(crate::sessions::idle_seconds()).fetch_optional(&self.pool).await.map_err(crate::db::safe)?;
+        let Some(r) = row else { return Ok(None) };
+        if r.get::<bool, _>("stale") {
+            crate::sessions::touch(&self.pool, r.get("session_id")).await;
+        }
+        Ok(Some(User { id: r.get("id"), email: r.get("email"), role: r.get("role"), verified: r.get("verified") }))
+    }
+    /// The session behind an opaque cookie, for a caller already identified as `user`.
+    pub async fn session_id(&self, token: Option<&str>, user: Uuid) -> Result<Option<Uuid>, String> {
+        let Some(token) = token else { return Ok(None) };
+        sqlx::query_scalar("SELECT session_id FROM _brain_sessions WHERE token_hash=$1 AND user_id=$2").bind(digest(token)).bind(user).fetch_optional(&self.pool).await.map_err(crate::db::safe)
+    }
+    /// Proves the password again for one live session, under the same attempt limits as login. An account without a
+    /// password (Google only) can never pass here: it signs in again instead.
+    pub async fn reauthenticate(&self, user: &User, session: Uuid, password: String, client: Option<std::net::IpAddr>) -> Result<bool, AuthFailure> {
+        if password.len() > 1024 {
+            return Ok(false);
+        }
+        let account = digest(&user.email);
+        let key = client.map_or_else(|| account.clone(), |ip| digest(&format!("{}|{ip}", user.email)));
+        if self.login_attempt(&key, LOGIN_ATTEMPTS).await? > LOGIN_ATTEMPTS {
+            return Ok(false);
+        }
+        if client.is_some() && self.login_attempt(&account, LOGIN_ATTEMPTS_ACCOUNT).await? > LOGIN_ATTEMPTS_ACCOUNT {
+            return Ok(false);
+        }
+        let hash: Option<String> = sqlx::query_scalar("SELECT password_hash FROM _brain_users WHERE id=$1 AND disabled_at IS NULL").bind(user.id).fetch_optional(&self.pool).await.map_err(crate::db::safe)?;
+        let hash = hash.unwrap_or_else(|| self.dummy.clone());
+        let permit = self.slots.clone().try_acquire_owned().map_err(|_| "Password workers busy; retry shortly")?;
+        let valid = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            match legacy_scrypt(&hash) {
+                Some(stored) => stored.verify(password.as_bytes()),
+                None => PasswordHash::new(&hash).is_ok_and(|h| Argon2::default().verify_password(password.as_bytes(), &h).is_ok()),
+            }
+        })
+        .await
+        .map_err(|_| "Password worker failed")?;
+        if !valid {
+            return Ok(false);
+        }
+        let mut tx = self.pool.begin().await.map_err(crate::db::safe)?;
+        sqlx::query("DELETE FROM _brain_login_limits WHERE key=$1").bind(&key).execute(&mut *tx).await.map_err(crate::db::safe)?;
+        let done = sqlx::query("UPDATE _brain_sessions SET auth_time=now() WHERE session_id=$1 AND user_id=$2 AND revoked_at IS NULL AND expires_at>now()").bind(session).bind(user.id).execute(&mut *tx).await.map_err(crate::db::safe)?.rows_affected();
+        sqlx::query("INSERT INTO _brain_auth_events(user_id,event,outcome) VALUES ($1,'reauthenticated','success')").bind(user.id).execute(&mut *tx).await.map_err(crate::db::safe)?;
+        tx.commit().await.map_err(crate::db::safe)?;
+        Ok(done == 1)
     }
     pub async fn logout(&self, token: Option<&str>) -> Result<(), String> {
         if let Some(token) = token {

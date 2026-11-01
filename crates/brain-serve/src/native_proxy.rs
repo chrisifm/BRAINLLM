@@ -468,13 +468,15 @@ fn upstream_headers(head: &mut String, req: &http::Request, names: &[&str]) -> R
     }
     Ok(())
 }
-const REQUEST_HEADERS: [&str; 14] = [
+const REQUEST_HEADERS: [&str; 16] = [
     "content-type",
     "accept",
     "origin",
     "authorization",
     // A project API key: a non-ambient credential the backend verifies or refuses (docs/backend/api-keys.md).
     "x-api-key",
+    "x-brain-captcha",
+    "x-brain-login-grant",
     // Validators: without them optimistic locking and conditional reads are silently off (docs/backend/caching.md).
     "if-match",
     "if-none-match",

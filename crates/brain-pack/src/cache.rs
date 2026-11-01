@@ -727,6 +727,30 @@ pub fn native_socket_csp(options: &crate::NativeSocketOptions) -> Vec<(String, S
     vec![("connect-src".into(), options.connect_source().into())]
 }
 
+/// What the page needs to load the widget of the captcha provider named by `server/auth/captcha.jsbrain` `verify_url`.
+/// Fixed per known provider: an app never opens the policy by hand, and an unknown or absent `verify_url` opens nothing.
+pub fn captcha_csp(root: &Path) -> Vec<(String, String)> {
+    let Ok(contract) = std::fs::read_to_string(root.join("server/auth/captcha.jsbrain")) else { return vec![] };
+    let Some(url) = contract.split("verify_url").nth(1).and_then(|rest| rest.split(['\'', '"', '`']).nth(1)) else { return vec![] };
+    let host = url.strip_prefix("https://").and_then(|rest| rest.split(['/', '?', '#']).next()).unwrap_or("");
+    let pairs: &[(&str, &str)] = match host {
+        "challenges.cloudflare.com" => &[("script-src", "https://challenges.cloudflare.com"), ("frame-src", "https://challenges.cloudflare.com")],
+        "hcaptcha.com" | "api.hcaptcha.com" => &[
+            ("script-src", "https://hcaptcha.com"), ("script-src", "https://*.hcaptcha.com"),
+            ("frame-src", "https://hcaptcha.com"), ("frame-src", "https://*.hcaptcha.com"),
+            ("style-src", "https://hcaptcha.com"), ("style-src", "https://*.hcaptcha.com"),
+            ("connect-src", "https://hcaptcha.com"), ("connect-src", "https://*.hcaptcha.com"),
+        ],
+        "www.google.com" | "www.recaptcha.net" => &[
+            ("script-src", "https://www.google.com/recaptcha/"), ("script-src", "https://www.gstatic.com/recaptcha/"),
+            ("frame-src", "https://www.google.com/recaptcha/"), ("frame-src", "https://recaptcha.google.com/recaptcha/"),
+            ("connect-src", "https://www.google.com/recaptcha/"),
+        ],
+        _ => &[],
+    };
+    pairs.iter().map(|(directive, source)| (directive.to_string(), source.to_string())).collect()
+}
+
 /// The site's Content-Security-Policy (§31): scripts from the site itself and from the listed inline hashes only (no
 /// `unsafe-inline`, no `unsafe-eval`), no plugins, no framing, no `<base>` hijack, forms to the same origin.
 /// Styles allow inline (`style=` attributes and the layer-order `<style>`); `connect-src` allows HTTPS APIs unless the
@@ -958,6 +982,30 @@ mod tests {
         assert!(csp_with(&[], &[], Some(&[])).contains("connect-src 'self';"));
     }
     use super::*;
+
+    #[test]
+    fn the_captcha_contract_opens_the_policy_only_to_its_known_provider() {
+        let policy = |contract: Option<&str>| {
+            let root = tmp(&format!("captcha-{}", contract.map_or(0, str::len)));
+            if let Some(contract) = contract {
+                std::fs::create_dir_all(root.join("server/auth")).unwrap();
+                std::fs::write(root.join("server/auth/captcha.jsbrain"), contract).unwrap();
+            }
+            csp(&[], &captcha_csp(&root))
+        };
+        let turnstile = policy(Some("<meta server>\nexport default { verify_url: 'https://challenges.cloudflare.com/turnstile/v0/siteverify', secret_env: 'S', protect: ['signup'] }\n"));
+        assert!(turnstile.contains("script-src 'self' https://challenges.cloudflare.com;"), "{turnstile}");
+        assert!(turnstile.contains("frame-src 'self' https://challenges.cloudflare.com"), "{turnstile}");
+        assert!(turnstile.contains("frame-ancestors 'none'"), "framing this site stays closed: {turnstile}");
+        let hcaptcha = policy(Some("export default { verify_url: \"https://api.hcaptcha.com/siteverify\" }"));
+        assert!(hcaptcha.contains("https://*.hcaptcha.com") && hcaptcha.contains("style-src 'self' 'unsafe-inline' https://hcaptcha.com"), "{hcaptcha}");
+        let recaptcha = policy(Some("export default { verify_url: 'https://www.google.com/recaptcha/api/siteverify' }"));
+        assert!(recaptcha.contains("https://www.gstatic.com/recaptcha/") && recaptcha.contains("https://recaptcha.google.com/recaptcha/"), "{recaptcha}");
+        let closed = csp(&[], &[]);
+        for other in [None, Some("export default { verify_url: 'https://evil.example/siteverify' }"), Some("export default { verify_url: 'http://challenges.cloudflare.com/x' }"), Some("export default { verify_url: 'https://challenges.cloudflare.com.evil.example/x' }"), Some("export default { verify_url: 'http://127.0.0.1:9/fake' }"), Some("export default { protect: ['signup'] }")] {
+            assert_eq!(policy(other), closed, "{other:?}");
+        }
+    }
 
     fn tmp(name: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!("brain-cache-{}-{name}", std::process::id()));

@@ -228,6 +228,14 @@ pub fn doctor(root: &Path) -> Vec<(String, &'static str, String, String)> {
     if tracked {
         out.push(("B0725".into(), "error", ".brain_env is tracked by git: its values may be secrets".into(), "run `git rm --cached .brain_env` and keep `.brain_env` in .gitignore (commit .brain_env.example instead)".into()));
     }
+    if let Ok(src) = std::fs::read_to_string(root.join(FILE)) {
+        let parsed = brain_check::env::parse(&src);
+        let mut envs = parsed.environments();
+        envs.push("production".into());
+        if envs.iter().any(|env| parsed.resolve(env, &|_| None).get("BRAIN_BACKEND_SESSION").is_some_and(|value| value.trim() == "app")) {
+            out.push(("B0799".into(), "warning", "BRAIN_BACKEND_SESSION=app: the app's own session outlives a backend revoke, idle timeout or role length".into(), "end the app session when the backend answers 401, as docs/backend/sessions.md shows, or keep the backend session".into()));
+        }
+    }
     if root.join(".env").is_file() {
         out.push(("B0726".into(), "warning", "a .env file is ignored: variables live in .brain_env".into(), "move its lines into the shared block (or a [section]) of .brain_env and delete .env".into()));
     }
@@ -330,6 +338,19 @@ pub fn example_of(src: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn doctor_warns_that_session_controls_do_not_reach_an_app_owned_session() {
+        let root = std::env::temp_dir().join(format!("brain-app-session-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let codes = |source: &str| {
+            std::fs::write(root.join(FILE), source).unwrap();
+            super::doctor(&root).into_iter().map(|finding| finding.0).collect::<Vec<_>>()
+        };
+        assert!(codes("BRAIN_BACKEND_SESSION=app\n").contains(&"B0799".to_string()));
+        assert!(codes("[production]\nBRAIN_BACKEND_SESSION=app\n").contains(&"B0799".to_string()));
+        assert!(!codes("BRAIN_BACKEND_URL=http://127.0.0.1:9\n").contains(&"B0799".to_string()));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
     use super::*;
 
     #[test]

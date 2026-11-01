@@ -72,7 +72,7 @@ async fn declared_buckets_stream_any_type_enforce_policy_and_serve_ranges() {
     }))
     .unwrap();
     brain_backend::db::migrate(&pool, std::slice::from_ref(&orders)).await.unwrap();
-    let roles = brain_backend::auth_flows::RolesConfig { roles: ["admin", "user", "staff"].map(String::from).to_vec(), signup_role: "user".into() };
+    let roles = brain_backend::auth_flows::RolesConfig { roles: ["admin", "user", "staff"].map(String::from).to_vec(), signup_role: "user".into(), ..Default::default() };
     roles.register(&pool).await.unwrap();
     let auth = Auth::new(pool.clone()).await.unwrap();
     let mut sessions = Vec::new();
@@ -243,7 +243,7 @@ async fn a_failed_file_delete_leaves_a_tombstone_the_sweep_finishes() {
     let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Disposable Postgres only; no developer database is selected");
     let pool = brain_backend::db::connect(&url).await.unwrap();
     brain_backend::db::migrate(&pool, &[]).await.unwrap();
-    let roles = brain_backend::auth_flows::RolesConfig { roles: ["admin", "user"].map(String::from).to_vec(), signup_role: "user".into() };
+    let roles = brain_backend::auth_flows::RolesConfig { roles: ["admin", "user"].map(String::from).to_vec(), signup_role: "user".into(), ..Default::default() };
     roles.register(&pool).await.unwrap();
     let auth = Auth::new(pool.clone()).await.unwrap();
     let email = format!("files-{}@example.test", Uuid::new_v4().simple());

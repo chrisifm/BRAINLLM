@@ -77,7 +77,7 @@ async fn postgres_migrations_search_scope_session_serialization_and_storage_outb
             .fetch_one(&pool)
             .await
             .unwrap(),
-        23
+        24
     );
     assert_eq!(
         sqlx::query_as::<_, (i32, String)>(
@@ -109,7 +109,8 @@ async fn postgres_migrations_search_scope_session_serialization_and_storage_outb
             (20, "file_deletions".into()),
             (21, "organizations".into()),
             (22, "audit_log".into()),
-            (23, "credits".into())
+            (23, "credits".into()),
+            (24, "session_controls".into())
         ]
     );
     assert_eq!(

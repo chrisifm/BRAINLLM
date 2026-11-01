@@ -84,6 +84,9 @@ pub struct Tokens {
     pub expires_in: u32,
     #[serde(skip)]
     pub refresh_token: String,
+    /// `Max-Age` of the refresh cookie: what is left of the session.
+    #[serde(skip)]
+    pub refresh_age: u32,
 }
 #[derive(Clone)]
 pub struct Jwt {
@@ -195,14 +198,21 @@ impl Jwt {
         let Some(claims) = token.and_then(|token| self.decode(token)) else {
             return Ok(None);
         };
-        let row=sqlx::query("SELECT u.id,u.email,u.role,u.verified FROM _brain_users u JOIN _brain_sessions s ON s.user_id=u.id WHERE u.id=$1 AND s.session_id=$2 AND u.auth_version=$3 AND u.disabled_at IS NULL AND s.revoked_at IS NULL AND s.expires_at>now()")
-            .bind(claims.sub).bind(claims.sid).bind(claims.ver).fetch_optional(&self.pool).await.map_err(crate::db::safe)?;
+        let row=sqlx::query("SELECT u.id,u.email,u.role,u.verified,s.last_used_at<now()-interval '60 seconds' AS stale FROM _brain_users u JOIN _brain_sessions s ON s.user_id=u.id WHERE u.id=$1 AND s.session_id=$2 AND u.auth_version=$3 AND u.disabled_at IS NULL AND s.revoked_at IS NULL AND s.expires_at>now() AND ($4::float8 IS NULL OR s.last_used_at>now()-make_interval(secs=>$4))")
+            .bind(claims.sub).bind(claims.sid).bind(claims.ver).bind(crate::sessions::idle_seconds()).fetch_optional(&self.pool).await.map_err(crate::db::safe)?;
+        if row.as_ref().is_some_and(|row| row.get::<bool, _>("stale")) {
+            crate::sessions::touch(&self.pool, claims.sid).await;
+        }
         Ok(row.map(|row| User {
             id: row.get("id"),
             email: row.get("email"),
             role: row.get("role"),
             verified: row.get("verified"),
         }))
+    }
+    /// The session named by a valid access token; the caller still identifies the user against the database.
+    pub fn session_id(&self, token: Option<&str>) -> Option<Uuid> {
+        token.and_then(|token| self.decode(token)).map(|claims| claims.sid)
     }
     /// Upgrade the already authenticated opaque session; no second session is created and the existing cap is preserved.
     pub async fn issue(&self, user: User, session_token: &str) -> Result<Tokens, String> {
@@ -212,10 +222,11 @@ impl Jwt {
             .fetch_one(&mut *tx)
             .await
             .map_err(crate::db::safe)?;
-        let row=sqlx::query("SELECT s.session_id,u.auth_version FROM _brain_sessions s JOIN _brain_users u ON u.id=s.user_id WHERE s.token_hash=$1 AND u.id=$2 AND u.disabled_at IS NULL AND s.revoked_at IS NULL AND s.expires_at>now() FOR UPDATE OF s")
+        let row=sqlx::query("SELECT s.session_id,u.auth_version,GREATEST(EXTRACT(EPOCH FROM s.expires_at-now()),0)::float8 AS remaining FROM _brain_sessions s JOIN _brain_users u ON u.id=s.user_id WHERE s.token_hash=$1 AND u.id=$2 AND u.disabled_at IS NULL AND s.revoked_at IS NULL AND s.expires_at>now() FOR UPDATE OF s")
             .bind(auth::digest(session_token)).bind(user.id).fetch_optional(&mut *tx).await.map_err(crate::db::safe)?.ok_or("Session unavailable")?;
         let sid: Uuid = row.get("session_id");
         let version: i64 = row.get("auth_version");
+        let refresh_age = row.get::<f64, _>("remaining") as u32;
         let access_token = self.sign(user.id, sid, version)?;
         // Retain replay evidence within explicit per-account and per-family budgets.
         sqlx::query("DELETE FROM _brain_refresh_families WHERE id IN (SELECT id FROM _brain_refresh_families WHERE user_id=$1 AND expires_at<=now() ORDER BY expires_at LIMIT 1)").bind(user.id).execute(&mut *tx).await.map_err(crate::db::safe)?;
@@ -227,13 +238,14 @@ impl Jwt {
         }
         let refresh_token = opaque();
         let family = Uuid::new_v4();
-        sqlx::query("INSERT INTO _brain_refresh_families(id,session_id,user_id,auth_version,expires_at) SELECT $1,session_id,user_id,$3,LEAST(expires_at,now()+make_interval(secs=>$4)) FROM _brain_sessions WHERE session_id=$2").bind(family).bind(sid).bind(version).bind(f64::from(auth::session_seconds())).execute(&mut *tx).await.map_err(crate::db::safe)?;
+        sqlx::query("INSERT INTO _brain_refresh_families(id,session_id,user_id,auth_version,expires_at) SELECT $1,session_id,user_id,$3,expires_at FROM _brain_sessions WHERE session_id=$2").bind(family).bind(sid).bind(version).execute(&mut *tx).await.map_err(crate::db::safe)?;
         sqlx::query("INSERT INTO _brain_refresh_tokens(token_hash,family_id,expires_at) SELECT $1,id,expires_at FROM _brain_refresh_families WHERE id=$2").bind(auth::digest(&refresh_token)).bind(family).execute(&mut *tx).await.map_err(crate::db::safe)?;
         tx.commit().await.map_err(crate::db::safe)?;
         Ok(Tokens {
             user,
             access_token,
             refresh_token,
+            refresh_age,
             token_type: "Bearer",
             expires_in: ACCESS_SECONDS,
         })
@@ -252,8 +264,8 @@ impl Jwt {
             .fetch_one(&mut *tx)
             .await
             .map_err(crate::db::safe)?;
-        let row=sqlx::query("SELECT u.id,u.email,u.role,u.verified,u.auth_version,s.session_id,f.id AS family_id,t.used_at IS NOT NULL AS used, t.used_at>now()-make_interval(secs=>$2) AND t.grace_uses<$3 AND COALESCE((SELECT r.used_at IS NULL FROM _brain_refresh_tokens r WHERE r.token_hash=t.replacement_hash),false) AS in_grace, f.revoked_at IS NULL AND f.expires_at>now() AND t.expires_at>now() AND s.expires_at>now() AND s.revoked_at IS NULL AND u.disabled_at IS NULL AND f.auth_version=u.auth_version AS live FROM _brain_refresh_tokens t JOIN _brain_refresh_families f ON f.id=t.family_id JOIN _brain_sessions s ON s.session_id=f.session_id JOIN _brain_users u ON u.id=s.user_id WHERE t.token_hash=$1 FOR UPDATE OF t,f,s")
-            .bind(&hash).bind(f64::from(self.config.refresh_grace)).bind(REFRESH_GRACE_USES).fetch_optional(&mut *tx).await.map_err(crate::db::safe)?;
+        let row=sqlx::query("SELECT u.id,u.email,u.role,u.verified,u.auth_version,s.session_id,f.id AS family_id,t.used_at IS NOT NULL AS used, t.used_at>now()-make_interval(secs=>$2) AND t.grace_uses<$3 AND COALESCE((SELECT r.used_at IS NULL FROM _brain_refresh_tokens r WHERE r.token_hash=t.replacement_hash),false) AS in_grace, f.revoked_at IS NULL AND f.expires_at>now() AND t.expires_at>now() AND s.expires_at>now() AND s.revoked_at IS NULL AND u.disabled_at IS NULL AND f.auth_version=u.auth_version AND ($4::float8 IS NULL OR s.last_used_at>now()-make_interval(secs=>$4)) AS live, GREATEST(EXTRACT(EPOCH FROM s.expires_at-now()),0)::float8 AS remaining FROM _brain_refresh_tokens t JOIN _brain_refresh_families f ON f.id=t.family_id JOIN _brain_sessions s ON s.session_id=f.session_id JOIN _brain_users u ON u.id=s.user_id WHERE t.token_hash=$1 FOR UPDATE OF t,f,s")
+            .bind(&hash).bind(f64::from(self.config.refresh_grace)).bind(REFRESH_GRACE_USES).bind(crate::sessions::idle_seconds()).fetch_optional(&mut *tx).await.map_err(crate::db::safe)?;
         let Some(row) = row else { return Ok(None) };
         let family: Uuid = row.get("family_id");
         let sid: Uuid = row.get("session_id");
@@ -264,7 +276,7 @@ impl Jwt {
             let access_token = self.sign(user, sid, row.get("auth_version"))?;
             let signed = User { id: row.get("id"), email: row.get("email"), role: row.get("role"), verified: row.get("verified") };
             tx.commit().await.map_err(crate::db::safe)?;
-            return Ok(Some(Tokens { user: signed, access_token, refresh_token: String::new(), token_type: "Bearer", expires_in: ACCESS_SECONDS }));
+            return Ok(Some(Tokens { user: signed, access_token, refresh_token: String::new(), refresh_age: 0, token_type: "Bearer", expires_in: ACCESS_SECONDS }));
         }
         if row.get::<bool, _>("used") {
             sqlx::query("UPDATE _brain_refresh_families SET revoked_at=now() WHERE id=$1")
@@ -306,6 +318,8 @@ impl Jwt {
             verified: row.get("verified"),
         };
         let access_token = self.sign(user.id, sid, row.get("auth_version"))?;
+        sqlx::query("UPDATE _brain_sessions SET last_used_at=now() WHERE session_id=$1").bind(sid).execute(&mut *tx).await.map_err(crate::db::safe)?;
+        let refresh_age = row.get::<f64, _>("remaining") as u32;
         let refresh_token = opaque();
         let next_hash = auth::digest(&refresh_token);
         sqlx::query("INSERT INTO _brain_refresh_tokens(token_hash,family_id,parent_hash,expires_at) SELECT $1,id,$2,expires_at FROM _brain_refresh_families WHERE id=$3").bind(&next_hash).bind(&hash).bind(family).execute(&mut *tx).await.map_err(crate::db::safe)?;
@@ -315,6 +329,7 @@ impl Jwt {
             user,
             access_token,
             refresh_token,
+            refresh_age,
             token_type: "Bearer",
             expires_in: ACCESS_SECONDS,
         }))

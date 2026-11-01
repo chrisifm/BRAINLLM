@@ -14,6 +14,9 @@ const cookies=['__Host-brain-access=synthetic-access; Path=/; Secure; HttpOnly; 
 const backend=http((req,res)=>{
  const chunks=[];req.on('data',chunk=>chunks.push(chunk));req.on('end',()=>{
   seen.push({path:req.url,headers:req.headers,body:Buffer.concat(chunks).toString()})
+  if(mode==='captcha-failed'){res.writeHead(403,{'content-type':'application/json'});res.end('{"error":{"code":"CAPTCHA_FAILED"}}');return}
+  if(mode==='captcha-down'){res.writeHead(503,{'content-type':'application/json'});res.end('{"error":{"code":"CAPTCHA_UNAVAILABLE"}}');return}
+  if(mode==='grant'&&req.url==='/_brain/auth/signup'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({user,login_grant:'synthetic-login-grant'}));return}
   if(mode==='taken'){res.writeHead(422,{'content-type':'application/json'});res.end('{"error":{"code":"SIGNUP_FAILED"}}');return}
   if(mode==='unavailable'){res.writeHead(503,{'content-type':'application/json'});res.end('{"error":"private driver detail"}');return}
   const set=mode==='opaque'?['__Host-brain=synthetic-opaque; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=604800']:mode==='insecure'?['__Host-brain-access=bad; Path=/']:cookies
@@ -22,7 +25,7 @@ const backend=http((req,res)=>{
  })
 })
 await new Promise(resolve=>backend.listen(0,'127.0.0.1',resolve))
-writeFileSync(join(dist,'_server/account.mjs'),`export async function signup(ctx,values){return ctx.backend.signup(values)};export async function join(ctx,values){await ctx.backend.signup(values);return ctx.backend.login(values)};export async function login(ctx,values){return {...await ctx.backend.login(values),redirect:'/account'}};export const $forms={login:{email:'email!',password:'str!'}}`)
+writeFileSync(join(dist,'_server/account.mjs'),`export async function signup(ctx,values){return ctx.backend.signup(values)};export async function guarded(ctx,values,token){return ctx.backend.login(values,{captcha:token})};export async function other(ctx,values){await ctx.backend.signup(values);return ctx.backend.login({...values,email:'other@example.test'})};export async function join(ctx,values){await ctx.backend.signup(values);return ctx.backend.login(values)};export async function login(ctx,values){return {...await ctx.backend.login(values),redirect:'/account'}};export const $forms={login:{email:'email!',password:'str!'}}`)
 writeFileSync(join(dist,'_server/manifest.json'),JSON.stringify({base:'/app/',routes:[{path:'/login',forms:true}],rpc:{account:'_server/account.mjs'}}))
 const frontend=createServer({dist,backendURL:`http://127.0.0.1:${backend.address().port}`,log(){}})
 await new Promise(resolve=>frontend.listen(0,'127.0.0.1',resolve));frontendBase=`http://127.0.0.1:${frontend.address().port}`
@@ -70,4 +73,28 @@ test('ctx.backend.signup names the field: a refused address and a short password
  const before=seen.length,short=await call('signup',{...credentials,password:'short'})
  assert.equal(short.status,422);assert.ok((await short.json()).errors.password);assert.equal(seen.length,before)
  mode='jwt'
+})
+
+test('the captcha token reaches the backend from a server function or the page header, and a refusal is named',async()=>{
+ mode='jwt'
+ const send=(fn,args,headers={})=>fetch(frontendBase+'/app/_r/account/'+fn,{method:'POST',headers:{origin:frontendBase,'x-brain-rpc':'1','content-type':'application/json',...headers},body:JSON.stringify(args)})
+ let response=await send('guarded',[credentials,'synthetic-server-token']);assert.equal(response.status,200);assert.equal(seen.at(-1).headers['x-brain-captcha'],'synthetic-server-token')
+ response=await send('signup',[credentials],{'x-brain-captcha':'synthetic-page-token'});assert.equal(response.status,200);assert.equal(seen.at(-1).headers['x-brain-captcha'],'synthetic-page-token')
+ const before=seen.length;response=await send('guarded',[credentials,'bad\ntoken']);assert.equal(response.status,403);assert.equal(seen.length,before,'a malformed token never leaves the server')
+ mode='captcha-failed';response=await send('guarded',[credentials,'synthetic-server-token']);assert.equal(response.status,403);let body=await response.text();assert.ok(body.includes('captcha')&&!body.includes('B0740'),body)
+ response=await send('signup',[credentials]);assert.equal(response.status,403);body=await response.text();assert.ok(body.includes('captcha')&&!body.includes('B0740'),body)
+ mode='captcha-down';response=await send('guarded',[credentials,'synthetic-server-token']);assert.equal(response.status,503);assert.equal(response.headers.get('set-cookie'),null)
+})
+test('a signup grant signs in that same address once and stays out of the page',async()=>{
+ mode='grant'
+ const send=(fn,args)=>fetch(frontendBase+'/app/_r/account/'+fn,{method:'POST',headers:{origin:frontendBase,'x-brain-rpc':'1','content-type':'application/json'},body:JSON.stringify(args)})
+ let response=await send('join',[credentials]);assert.equal(response.status,200);assert.equal(seen.at(-1).path,'/_brain/auth/login');assert.equal(seen.at(-1).headers['x-brain-login-grant'],'synthetic-login-grant')
+ assert.ok(!(await response.text()).includes('synthetic-login-grant'))
+ response=await send('signup',[credentials]);assert.ok(!(await response.text()).includes('synthetic-login-grant'))
+ response=await send('other',[credentials]);assert.equal(seen.at(-1).path,'/_brain/auth/login');assert.equal(seen.at(-1).headers['x-brain-login-grant'],undefined,'a grant never travels with another address')
+})
+test('the backend proxy passes the captcha token and never an operator key',async()=>{
+ mode='jwt'
+ await fetch(frontendBase+'/app/_brain/auth/signup',{method:'POST',headers:{origin:frontendBase,'content-type':'application/json','x-brain-captcha':'synthetic-page-token','x-brain-operator-key':'synthetic-operator-key'},body:JSON.stringify(credentials)})
+ assert.equal(seen.at(-1).headers['x-brain-captcha'],'synthetic-page-token');assert.equal(seen.at(-1).headers['x-brain-operator-key'],undefined)
 })

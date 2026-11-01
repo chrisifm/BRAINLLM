@@ -2071,6 +2071,7 @@ fn build_inner_with_options(
     if emitted_assets.keys().any(|path|path.ends_with(".wasm")) {post_csp.push(("script-src".into(),"'wasm-unsafe-eval'".into()));}
     // Explicit compiled-page feature opt-in: exact Google SDK sources, never a token-controlled URL.
     if pages.iter().any(|page|cache::google_signin(&page.html)) {post_csp.extend(cache::google_csp());}
+    post_csp.extend(cache::captcha_csp(&input.root));
     // #148: root-relative links of every page (the author's and SEO's) go under the base, after SEO checked them
     if !pre.is_empty() {
         for p in pages.iter_mut() {

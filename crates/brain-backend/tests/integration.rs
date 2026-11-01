@@ -25,6 +25,8 @@ mod domain_writes;
 mod edge;
 #[path = "exact_types.rs"]
 mod exact_types;
+#[path = "session_controls.rs"]
+mod session_controls;
 #[path = "imports.rs"]
 mod imports;
 #[path = "files.rs"]

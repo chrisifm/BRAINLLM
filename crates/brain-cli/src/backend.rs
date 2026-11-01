@@ -593,6 +593,9 @@ pub fn config_problems(setting: &dyn Fn(&str) -> Option<String>) -> Vec<(String,
     if setting("BRAIN_AUTH_SESSION_SECONDS").is_some_and(|v| !v.parse::<u32>().is_ok_and(|n| (300..=31_536_000).contains(&n))) {
         report("BRAIN_AUTH_SESSION_SECONDS must be 300..31536000".into(), "set the session length in whole seconds, or remove it to use the default");
     }
+    if setting("BRAIN_AUTH_IDLE_SECONDS").is_some_and(|v| !v.parse::<u32>().is_ok_and(|n| (300..=31_536_000).contains(&n))) {
+        report("BRAIN_AUTH_IDLE_SECONDS must be 300..31536000".into(), "set the idle timeout in whole seconds, or remove it so sessions end only when they expire");
+    }
     problems
 }
 /// The same findings for `brain check` and `brain doctor`, from the development section of .brain_env. Only for apps
@@ -947,6 +950,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let jwt=match (jwt,setting("BRAIN_JWT_SECRET_PREVIOUS")) {(Some(config),Some(previous))=>Some(config.with_previous(previous.split(',').map(str::to_string).collect())?),(config,_)=>config};
         let jwt=match (jwt,setting("BRAIN_AUTH_REFRESH_GRACE_SECONDS")) {(Some(config),Some(seconds))=>Some(config.with_refresh_grace(seconds.parse().map_err(|_|"BRAIN_AUTH_REFRESH_GRACE_SECONDS must be 0..60")?)?),(config,_)=>config};
         if let Some(seconds)=setting("BRAIN_AUTH_SESSION_SECONDS") {brain_backend::auth::configure_session_seconds(seconds.parse().map_err(|_|"BRAIN_AUTH_SESSION_SECONDS must be 300..31536000")?)?;}
+        if let Some(seconds)=setting("BRAIN_AUTH_IDLE_SECONDS") {brain_backend::sessions::configure_idle_seconds(seconds.parse().map_err(|_|"BRAIN_AUTH_IDLE_SECONDS must be 300..31536000")?)?;}
         let google=setting("GOOGLE_CLIENT_ID").map(brain_backend::google::Config::new).transpose()?;
         if google.is_some() && jwt.is_none() {return Err("Google Sign-In requires configured native JWT sessions; set BRAIN_JWT_SECRET, issuer and audience".into());}
         let gcs=match setting("BRAIN_GCS_BUCKET") {

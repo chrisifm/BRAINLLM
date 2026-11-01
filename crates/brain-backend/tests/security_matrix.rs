@@ -130,7 +130,7 @@ async fn every_role_resource_operation_and_row_state_answers_what_the_contract_d
     let pool = db::connect(options.to_url_lossy().as_str()).await.unwrap();
     let all = resources();
     db::migrate(&pool, &all).await.unwrap();
-    let roles = brain_backend::auth_flows::RolesConfig { roles: ["admin", "member", "seller"].map(String::from).to_vec(), signup_role: "member".into() };
+    let roles = brain_backend::auth_flows::RolesConfig { roles: ["admin", "member", "seller"].map(String::from).to_vec(), signup_role: "member".into(), ..Default::default() };
     roles.register(&pool).await.unwrap();
     let identities = vec![
         Identity { label: "anonymous", id: None, role: None, token: None },

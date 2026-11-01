@@ -39,6 +39,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("organizations", include_str!("../migrations/0021_organizations.sql")),
     ("audit_log", include_str!("../migrations/0022_audit_log.sql")),
     ("credits", include_str!("../migrations/0023_credits.sql")),
+    ("session_controls", include_str!("../migrations/0024_session_controls.sql")),
 ];
 fn checksum(sql: &str) -> String {
     Sha256::digest(sql.as_bytes())

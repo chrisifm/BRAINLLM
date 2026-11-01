@@ -105,7 +105,7 @@ try {
   if(onlyCLI)console.log('Backend integration explicitly skipped: CLI resume only; no Rust test pass is inferred')
   else console.log('Backend integration targets: '+(selection<0?'library + ':'')+selected.join(', ')+(selection<0?'':' (focused; other targets are not rerun)'))
   const gatesOnly=selection>=0&&!selectedTests.length
-  const code=onlyCLI||gatesOnly?0:await phase('cargo',['test','--locked','-p','brain-backend','--jobs','2',...(selection<0?['--lib']:[]),'--test','integration','--','--include-ignored','--nocapture','--test-threads=2',...targets.filter(name=>!selectedTests.includes(name)).flatMap(name=>['--skip',name+'::'])],
+  const code=onlyCLI||gatesOnly?0:await phase('cargo',['test','--locked','-p','brain-backend','--jobs','2',...(selection<0?['--lib','--test','session_idle']:[]),'--test','integration','--','--include-ignored','--nocapture','--test-threads=2',...targets.filter(name=>!selectedTests.includes(name)).flatMap(name=>['--skip',name+'::'])],
     {...process.env,BRAIN_BACKEND_TEST_URL:`postgres://brain_test@127.0.0.1:${port}/postgres`},15*60*1000,'Backend integration')
   process.exitCode=code
   if(code===0&&!process.env.BRAIN_BIN&&(!gatesOnly||selectedGates.length)) {
