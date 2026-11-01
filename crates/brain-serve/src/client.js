@@ -213,10 +213,36 @@ async function go(url, push) {
     if (pm) document.head.append(pm);
     await route(JSON.parse(json.textContent));
     scrollTo(0, push ? 0 : (history.state && history.state.y) || 0);
+    if (mine + 1 === seq) landed(url);
   } catch {
     location.assign(url);
   }
 }
+// After a swap, for assistive technology (as brain-router.js, §19): focus moves to the URL's target, else the page's
+// h1, else the region, unless the new page already holds focus; #brain-announce reads the new title. Without this the
+// development server hid what production does, in both directions.
+function say(text) {
+  let a = document.getElementById('brain-announce');
+  if (!a) {
+    a = document.body.appendChild(document.createElement('div'));
+    a.id = 'brain-announce';
+    a.style.cssText = 'position:fixed;clip-path:inset(50%)';
+    a.setAttribute('aria-live', 'polite');
+  }
+  a.textContent = text;
+}
+function landed(url) {
+  say(document.title);
+  const m = document.getElementById('brain-view'), f = document.activeElement;
+  if (!m || (f && f !== document.body && f !== m && m.contains(f))) return;
+  const id = new URL(url, location.href).hash.slice(1), h = (id && document.getElementById(id)) || m.querySelector('h1') || m;
+  if (!h.hasAttribute('tabindex')) h.setAttribute('tabindex', '-1');
+  h.focus({ preventScroll: true });
+}
+if (document.body) say('');
+else addEventListener('DOMContentLoaded', () => say(''));
+// navigate() and a form's { redirect } take this path: brain-router.js has no running router under `brain run`
+window.__brainDevGo = (url, replace) => (replace ? (history.replaceState(history.state, '', url), go(new URL(url, location.href).href, false)) : go(new URL(url, location.href).href, true));
 addEventListener('click', e => {
   const a = e.target.closest?.('a[href]');
   if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || a.target || a.hasAttribute('download')) return;
