@@ -156,3 +156,38 @@ fn a_session_set_the_backend_would_refuse_warns_until_the_app_owns_the_session()
     let (_, out) = brain(&app.0, &["check", "--json"]);
     assert!(!out.contains("B0786"), "{out}");
 }
+
+fn with_node_env(root: &Path, args: &[&str], node_env: Option<&str>) -> (bool, String) {
+    let mut command = Command::new(bin());
+    command.args(args).current_dir(root).env("NO_COLOR", "1").env_remove("DATABASE_URL").env_remove("NODE_ENV").stdin(Stdio::null());
+    if let Some(value) = node_env { command.env("NODE_ENV", value); }
+    let o = command.output().unwrap();
+    (o.status.success(), format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)))
+}
+const PRODUCTION_ONLY_DB: &str = "[production]\nDATABASE_URL=postgres://u:synthetic-password@127.0.0.1:1/app\n";
+
+// A deployed shell that forgot --env must learn that, not that the database is missing from a section it never asked for.
+#[test]
+fn a_production_shell_without_env_is_told_about_env_on_every_database_command() {
+    let a = app("node-env");
+    fs::write(a.0.join(".brain_env"), PRODUCTION_ONLY_DB).unwrap();
+    for args in [&["jobs", "work", "mail"][..], &["jobs", "stats"], &["backend", "migrate"], &["backend", "serve"], &["analytics", "report"], &["media", "list", "--owner", "x"]] {
+        let (ok, text) = with_node_env(&a.0, args, Some("production"));
+        assert!(!ok && text.contains("B0785") && text.contains("--env production") && !text.contains("B0762"), "{args:?}: {text}");
+        assert!(!text.contains("synthetic-password"), "{text}");
+    }
+}
+
+#[test]
+fn a_database_url_in_another_section_is_named_and_an_equals_env_counts_as_stated() {
+    let a = app("other-section");
+    fs::write(a.0.join(".brain_env"), PRODUCTION_ONLY_DB).unwrap();
+    let (_, text) = with_node_env(&a.0, &["jobs", "stats"], None);
+    assert!(text.contains("B0762") && text.contains("[production]") && text.contains("--env production") && !text.contains("synthetic-password"), "{text}");
+    let (_, text) = with_node_env(&a.0, &["jobs", "stats", "--env=production"], Some("production"));
+    assert!(!text.contains("B0785"), "--env=production states the environment: {text}");
+    // negative: nothing to point at when no section has it
+    fs::write(a.0.join(".brain_env"), "PUBLIC_SITE_NAME=app\n").unwrap();
+    let (_, text) = with_node_env(&a.0, &["jobs", "stats"], None);
+    assert!(text.contains("B0762") && !text.contains("[production]"), "{text}");
+}

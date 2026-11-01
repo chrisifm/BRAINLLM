@@ -1,0 +1,15 @@
+{
+  "id": "env-before-database",
+  "kind": "fix",
+  "title": "A deployed shell without --env hears B0785, not B0762",
+  "why": "Without --env the lookup reads the development section, so a variable set under [production] was reported as missing. `brain analytics` could also act on a production database without stating the environment.",
+  "changelog": [
+    "stop with B0785 instead of B0762 about a variable set under `[production]`",
+    "B0762 names `[production]` when `DATABASE_URL` is only set there"
+  ],
+  "guide": "docs/backend/lifecycle.md",
+  "codes": [
+    "B0785",
+    "B0762"
+  ]
+}

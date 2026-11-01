@@ -11,6 +11,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 - Fix: the Node server no longer sends 103 Early Hints by default; set `server.earlyHints` or `BRAIN_EARLY_HINTS=1` to opt in, never for HTTP/1.0
 - Fix: page responses carry the route preloads in a `Link` header, so hosts can still produce early hints
+- Fix: with `NODE_ENV=production` and no `--env`, `brain jobs`, `brain backend`, `brain media` and `brain analytics` stop with B0785 instead of B0762 about a variable set under `[production]`; `brain analytics` used to skip the check, and `--env=production` counts as stating it
+- B0762 names `[production]` when `DATABASE_URL` is only set there
 
 ## [0.7.0] - 2026-10-31
 

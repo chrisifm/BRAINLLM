@@ -42,7 +42,7 @@ without TLS. Development keeps accepting any mode. The check applies to every CL
 
 **Restart.** `brain backend serve` waits up to 10 s for its port while a previous instance exits, then stops and names the live holder. Two live servers never share a port.
 
-**Environment.** `brain backend` commands that connect stop with B0785 when no `--env` was given and `DATABASE_URL`
+**Environment.** `brain backend`, `brain jobs`, `brain media` and `brain analytics` commands that connect stop with B0785 when no `--env` was given and `DATABASE_URL`
 points at another machine or `NODE_ENV=production`, because the default is development: no TLS check on the database, an
 open API description and no HSTS. Even in development, `/_brain/api` needs an administrator for a request that came
 through a proxy.

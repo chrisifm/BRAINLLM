@@ -441,10 +441,12 @@ fn database(root: &Path, environment: &str) -> Result<String, String> {
         .ok()
         .or_else(|| crate::env::value(root, environment, "DATABASE_URL"))
         .filter(|s| !s.is_empty())
-        .ok_or(
-            "B0762: DATABASE_URL is not set and the native backend requires Postgres; fix: set it in .brain_env or the process environment"
-                .into(),
-        )
+        .ok_or_else(|| {
+            if environment != "production" && crate::env::value(root, "production", "DATABASE_URL").is_some_and(|v| !v.is_empty()) {
+                return format!("B0762: DATABASE_URL is not set for the {environment} environment, but .brain_env has it under [production]; fix: pass --env production on a deployed machine, or set it under [{environment}]");
+            }
+            "B0762: DATABASE_URL is not set and the native backend requires Postgres; fix: set it in .brain_env or the process environment".into()
+        })
 }
 /// `application_name` for this app's Postgres sessions: `brain:<brain.json name>:<role>`.
 pub(crate) fn pg_name(root: &Path, role: &str) -> String {
@@ -592,7 +594,7 @@ fn operator(args: &[String], url: &str, production: bool) -> Result<(), String> 
 /// B0785: without `--env`, `serve` runs as development: no TLS check on the database, open API description, no HSTS.
 /// That default is only right on a developer's machine, so anything that looks deployed has to say what it is.
 fn unstated_environment(args: &[String], database: Option<&str>, node_env: Option<&str>) -> Option<String> {
-    if args.iter().any(|a| a == "--env") {
+    if args.iter().any(|a| a == "--env" || a.starts_with("--env=")) {
         return None;
     }
     let why = if node_env == Some("production") {
@@ -604,9 +606,15 @@ fn unstated_environment(args: &[String], database: Option<&str>, node_env: Optio
     };
     Some(format!("B0785: {why} and no --env was given, so this would run with development defaults; fix: pass --env production (or --env development if this really is a development machine)"))
 }
-fn stated_database(args: &[String], root: &Path, environment: &str) -> Result<String, String> {
+/// The environment is checked before the lookup: without `--env` the lookup reads the development section, so a deployed
+/// shell would otherwise hear B0762 about a variable it did set, under [production].
+pub(crate) fn stated_database(args: &[String], root: &Path, environment: &str) -> Result<String, String> {
+    let node_env = std::env::var("NODE_ENV").ok();
+    if let Some(refusal) = unstated_environment(args, None, node_env.as_deref()) {
+        return Err(refusal);
+    }
     let url = database(root, environment)?;
-    match unstated_environment(args, Some(&url), std::env::var("NODE_ENV").ok().as_deref()) {
+    match unstated_environment(args, Some(&url), node_env.as_deref()) {
         Some(refusal) => Err(refusal),
         None => Ok(url),
     }

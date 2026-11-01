@@ -296,7 +296,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         return Err(USAGE.into());
     }
     let environment = crate::env::name(args, "development");
-    let url = crate::backend::database_url(&root, &environment)?;
+    let url = crate::backend::stated_database(args, &root, &environment)?;
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
     rt.block_on(async {
         let pool = brain_backend::db::connect_as(&url, &crate::backend::pg_name(&root, "cli")).await?;
