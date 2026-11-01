@@ -1,0 +1,7 @@
+{
+  "id": "launcher-forwards-signals",
+  "kind": "fix",
+  "title": "Stopping the npm launcher stops the native binary",
+  "why": "A signal sent only to the launcher left the binary running with its old configuration on the same port, so a later request could reach the wrong process.",
+  "changelog": ["Stopping the npm `brain` launcher with a signal now stops the native binary"]
+}

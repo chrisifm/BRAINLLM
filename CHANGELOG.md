@@ -12,6 +12,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - List requests accept `total=false`, which skips the count and leaves `total` out, for walks over many pages.
 - An older binary on a newer database names both migration versions and how to return, instead of only `migration version`.
 - `brain upgrade` no longer lists every file bucket as a manual step: B0770 reports the ones without `types`.
+- Stopping the npm `brain` launcher with a signal now stops the native binary, which used to stay listening as an orphan.
 - The upgrade and deploy guides state that migrations do not run backwards, the `approve-contract` step and what `pm2 restart` keeps.
 
 ## [0.8.0] - 2026-11-01

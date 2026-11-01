@@ -7,7 +7,7 @@
 // 2. BRAIN_BINARY=<path> runs that binary instead (local builds, unsupported platforms).
 // 3. Otherwise the platform package's bin/brain(.exe); its exit code and signal pass through unchanged.
 'use strict'
-const { spawnSync } = require('node:child_process')
+const { spawn } = require('node:child_process')
 const { existsSync, realpathSync } = require('node:fs')
 const { dirname, join, resolve } = require('node:path')
 
@@ -67,7 +67,16 @@ function fail(msg) {
 
 const delegate = projectLauncher()
 const [cmd, args] = delegate ? [process.execPath, [delegate, ...process.argv.slice(2)]] : [binary(), process.argv.slice(2)]
-const r = spawnSync(cmd, args, { stdio: 'inherit', windowsHide: true })
-if (r.error) fail(`could not run ${cmd}: ${r.error.message}`)
-if (r.signal) process.kill(process.pid, r.signal)
-process.exit(r.status ?? 1)
+const child = spawn(cmd, args, { stdio: 'inherit', windowsHide: true })
+// A signal sent to this process alone (`kill <pid>`, a process manager) must reach the binary, or it stays listening as an orphan.
+const forwarded = ['SIGTERM', 'SIGINT', 'SIGHUP'].map(signal => {
+  const forward = () => child.kill(signal)
+  process.on(signal, forward)
+  return [signal, forward]
+})
+child.on('error', e => fail(`could not run ${cmd}: ${e.message}`))
+child.on('exit', (status, signal) => {
+  for (const [name, forward] of forwarded) process.removeListener(name, forward)
+  if (signal) process.kill(process.pid, signal)
+  else process.exit(status ?? 1)
+})

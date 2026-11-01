@@ -13,6 +13,8 @@ origin checks, request/body limits and rate limiting.
 | `/_brain/auth/email/verify` | `{token}` | Verifies the current signed-in account once |
 | `/_brain/auth/users/{id}/role` | `{role}` | Administrator-only assignment from the server's configured roles |
 
+Signup does not send the verification mail: the account signs in, then calls `/_brain/auth/email/request`.
+
 Request bodies reject unknown fields. Signup and Google sign-in use only the server's configured default role;
 Signup creates the account and starts no session: call login next, so a sign-up form signs in with a second request. Signup credentials never accept a client-supplied role. Passwords retain Argon2id and the existing bounded hashing
 workers and 12..1024-byte password limits. Recovery links do not appear in HTTP responses, private diagnostics,
