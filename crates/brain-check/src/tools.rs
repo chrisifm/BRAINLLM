@@ -134,7 +134,8 @@ fn public_action(e: &Element) -> Option<&'static str> {
 }
 /// A form behind a login has no outside agent to serve, so B1706 stays out of it.
 fn private_area(file: &str) -> bool {
-    ["admin", "account", "dashboard", "settings"].iter().any(|word| file.split(['/', '\\']).any(|part| part == *word))
+    // `ui/` is a reusable kit: it cannot name one tool, since the page that mounts it decides what the form acts on.
+    ["ui", "admin", "account", "dashboard", "settings"].iter().any(|word| file.split(['/', '\\']).any(|part| part == *word))
 }
 /// First word of the name says the tool deletes, pays or administers, or the file sits under an admin folder.
 fn consequential(name: &str, file: &str) -> bool {

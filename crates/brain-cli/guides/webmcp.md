@@ -58,7 +58,7 @@ brain shot /shop --text           # every field has a name in the accessibility 
 | CamelCase or duplicated tool name in a file | B1702 | snake_case, unique per page |
 | the same tool in two files of one page | B1709 | rename one, or render one of the two components |
 | exposing delete/pay/admin without a confirmation | B1705 | `confirm(…)` or a `<dialog>` in that file, and say so in the description |
-| public search, filter, apply or subscribe form without `tool=` | B1706 (warning) | add `tool=` and `tool-description=` |
+| public search, filter, apply or subscribe form without `tool=` (not in a reusable `ui/` component) | B1706 (warning) | add `tool=` and `tool-description=` |
 | missing description, very short, or repeating the name ("Search tool") | B1707 (warning) | say what it does, needs and returns |
 | `<meta tools>` entry without a function of that name | B1701 | write `const add_task = async ({ text }) => …` |
 | tool parameter without a type | B1703 | `text:str` (types `str num bool list obj email url date any`) |
