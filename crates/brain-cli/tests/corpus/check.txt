@@ -299,6 +299,15 @@ export default { maxBytes: '1mb' }
 @file brain.json
 { "name": "Corpus", "csp": { "connectSrc": ["https:"] } }
 
+### B0794 unique value any user can claim
+@expect B0794 server/resources/sites/schema.jsbrain 1:1
+@file server/resources/sites/schema.jsbrain
+<meta server>
+export default { title: 'str!', domain: { type: 'str', unique: true } }
+@file server/resources/sites/policy.jsbrain
+<meta server>
+export default { read: ['public'], create: ['user'], update: ['owner'], delete: ['owner'] }
+
 ### B0797 internal field returned to readers
 @expect B0797 server/resources/items/schema.jsbrain 1:1
 @file server/resources/items/schema.jsbrain
