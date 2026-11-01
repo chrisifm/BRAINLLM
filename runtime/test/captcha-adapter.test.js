@@ -32,6 +32,12 @@ test('a token arrives through its state, expires, and a reset clears it for the 
   } finally { widget.destroy(); delete globalThis.turnstile }
   assert.deepEqual(api.calls.remove, ['widget-1'])
 })
+test('a provider ready() is never called, since Turnstile refuses it on a script loaded async', async () => {
+  const api = fake(); api.ready = () => { throw Error('ready() is not allowed with async') }; globalThis.turnstile = api
+  const { widget, last } = mount({})
+  try { await flush(); assert.equal(last().status, 'ready'); assert.equal(api.calls.render.length, 1) }
+  finally { widget.destroy(); delete globalThis.turnstile }
+})
 test('a provider error drops the token and tells the provider it was handled', async () => {
   const api = fake(); globalThis.hcaptcha = api
   const { widget, last } = mount({ provider: 'hcaptcha' })

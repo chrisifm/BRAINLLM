@@ -55,20 +55,15 @@ export default {
         const loaded = await sdk(provider)
         if (!alive || mine !== nonce) return
         api = loaded
-        const render = () => {
-          if (!alive || mine !== nonce) return
-          id = api.render(element, {
-            sitekey: props.sitekey,
-            callback: token => report('verified', typeof token === 'string' ? token : ''),
-            'expired-callback': () => report('expired'),
-            'timeout-callback': () => report('expired'),
-            'error-callback': () => { report('error'); return true }
-          })
-          report('ready')
-        }
-        // reCAPTCHA defines render only once it is ready; the others have no `ready`, or call back at once.
-        if (typeof api.ready === 'function') api.ready(render)
-        else render()
+        // No provider `ready()`: the poll in `sdk` already waited for `render`, and Turnstile's refuses a script loaded async.
+        id = api.render(element, {
+          sitekey: props.sitekey,
+          callback: token => report('verified', typeof token === 'string' ? token : ''),
+          'expired-callback': () => report('expired'),
+          'timeout-callback': () => report('expired'),
+          'error-callback': () => { report('error'); return true }
+        })
+        report('ready')
       } catch { if (alive && mine === nonce) report('error') }
     }
     const reset = () => {
