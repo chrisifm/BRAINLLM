@@ -83,7 +83,7 @@ main:
   brain seo <audit|links|preview R>  SEO audit of the built site (score per page, B18xx findings)
   brain new <app>                    creates the app (app.brain, tokens.cssbrain, views/, comp/, ui/, AGENTS.md)
   brain run [--port 5180] [--base /app/] [--mock[=seed]] [--profile] [--no-trace] [--inspect-port N | --no-inspect]  dev server with hot reload; the debugger on port+1
-  brain build [--site https://…] [--report] [--ext web|brain]   production (--report: bytes per page before/after each pass)
+  brain build [--site https://…] [--report] [--strict] [--ext web|brain]   production (--report: bytes per page before/after each pass; --strict: a page shipped without its content or a route left out fails the build)
   brain preview [--port 4173]         temporary local preview of dist/; Ctrl+C to stop
   brain doctor [--fix]                everything at once: check + tests + overengineering + leaks; exit ≠ 0 on any error
   brain start [--port 3000] [--instances N] [--install]   serves dist/ in production (static or server.mjs)
@@ -1616,9 +1616,10 @@ fn cmd_build(args: &[String]) -> Result<(), String> {
             Err(e) => eprintln!("warning: brain docs: {e}"),
         }
     }
+    let strict = strict_build_failure(args, &rep.warnings);
     if want_json(args) {
         println!("{}", build_json(&rep).stringify());
-        return Ok(());
+        return strict;
     }
     if args.iter().any(|a| a == "--report") {
         println!("{:<24} {:>9} {:>9} {:>8} {:>8} {:>8} {:>8}", "page", "js raw", "js min", "js gz", "css", "css gz", "html gz");
@@ -1635,7 +1636,21 @@ fn cmd_build(args: &[String]) -> Result<(), String> {
         let s = term::Summary { views: &views, budget, written: rep.written, unchanged: rep.unchanged, signature: Some(&rep.signature).filter(|s| !s.is_empty()).map(String::as_str), seo: rep.seo, took: pr.elapsed(), warnings: rep.warnings.len() };
         print!("{}", term::summary(pr.paint(), &s));
     }
-    Ok(())
+    strict
+}
+
+/// A warning that means `dist/` is not what the source describes: a page without its prerendered HTML or a route left out.
+fn degrades_output(warning: &str) -> bool {
+    ["prerender skipped", "prerender threw", "component failed during prerender", "left out of dist/"].iter().any(|n| warning.contains(n))
+}
+
+/// `brain build --strict`: the output stays on disk for inspection and the exit code stops the release that wanted all of it.
+fn strict_build_failure(args: &[String], warnings: &[String]) -> Result<(), String> {
+    let degraded: Vec<&str> = warnings.iter().map(String::as_str).filter(|w| degrades_output(w)).collect();
+    if degraded.is_empty() || !args.iter().any(|a| a == "--strict") {
+        return Ok(());
+    }
+    Err(format!("--strict: the build is incomplete: {}; fix: resolve these warnings, or build without --strict to accept this output", degraded.join("; ")))
 }
 
 /// `brain start [--port N] [--host H] [--instances N] [--max-memory 300M] [--env production] [--install]`.

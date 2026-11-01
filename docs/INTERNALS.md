@@ -895,7 +895,7 @@ critical CSS per view; exact `modulepreload` graph.
 zstd dictionary deltas for returning visitors (§19), and build-time Brotli (2026-10-29): latest stable Rust brotli 9.1.1,
 quality 11/window 22, content cache keyed by codec/settings, two compression workers, emit only when smaller than raw.
 Static Rust and Node servers negotiate br/gzip weights and exclusions; Caddy enables both, nginx documents ngx_brotli.
-`brain build --report` prints, per view, raw → minified → gz → dcz bytes and what each pass saved.
+`brain build --report` prints, per view, raw → minified → gz → dcz bytes and what each pass saved. `--strict` turns the warnings that mean an incomplete `dist/` into a failure (`degrades_output`, `main.rs`); a throwing prerender is the case reached in practice, because a missing Node already stops the build.
 
 ## 27. AI-driven development: closing the gaps (fixed 2026-10-13)
 Goal: the agent composes verified building blocks and applies changes transactionally; it writes free-form code

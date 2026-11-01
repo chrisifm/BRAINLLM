@@ -426,7 +426,7 @@ Worker/SDK URL resources, including reached Wasm assets, retain content-addresse
 Use `brain integration list` and `brain integration add|update <provider> --version <exact>` for official OpenAI, Claude,
 Gemini and Maps SDK adapter previews; backend SDK credentials stay private and frontend callers use server functions.
 See `docs/DEPENDENCIES.md` for the supported ESM/CDN subset and explicit graph limits.
-`brain build` is production: minifies, mangles, obfuscates and removes dead code and `log()`. No flags needed.
+`brain build` is production: minifies, mangles, obfuscates and removes dead code and `log()`. No flags needed. `--strict` fails the build when a page ships a component fallback or a route is left out of `dist/`.
 It also adds SRI and a strict CSP with the security headers to every page. `brain.json` `"csp": { "connectSrc": ["https://api.example.com"] }` lists the origins pages may call besides the site's own; `[]` allows only the own origin, and omitting it allows any HTTPS origin and warns B0795.
 
 Native helpers need no imports or packages: `dateParse/dateAdd/dateDiff/dateRange/dateZone` use UTC arithmetic and

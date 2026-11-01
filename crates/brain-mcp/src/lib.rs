@@ -68,6 +68,10 @@ impl Notifier {
     }
 }
 
+/// Largest JSON-RPC line accepted on stdin: past it the line is discarded unread, so a client cannot grow this process
+/// without bound.
+pub const MAX_LINE_BYTES: usize = 32 << 20;
+
 pub struct Server {
     pub name: &'static str,
     pub version: &'static str,
@@ -79,17 +83,47 @@ pub struct Server {
 
 impl Server {
     /// Serves JSON-RPC lines until EOF, writing through `out` (shared with notifications).
-    pub fn run<R: BufRead>(&self, input: R, out: &Notifier) -> io::Result<()> {
-        for line in input.lines() {
-            let line = line?;
-            if line.trim().is_empty() {
-                continue;
+    pub fn run<R: BufRead>(&self, mut input: R, out: &Notifier) -> io::Result<()> {
+        let mut line = Vec::new();
+        let mut oversized = false;
+        loop {
+            let buf = input.fill_buf()?;
+            if buf.is_empty() {
+                self.finish_line(&line, oversized, out);
+                return Ok(());
             }
-            if let Some(resp) = self.handle_line(&line) {
-                out.send(&resp);
+            let newline = buf.iter().position(|b| *b == b'\n');
+            let chunk = &buf[..newline.unwrap_or(buf.len())];
+            oversized = oversized || line.len() + chunk.len() > MAX_LINE_BYTES;
+            if oversized {
+                line = Vec::new();
+            } else {
+                line.extend_from_slice(chunk);
+            }
+            let used = newline.map_or(buf.len(), |at| at + 1);
+            input.consume(used);
+            if newline.is_some() {
+                self.finish_line(&line, oversized, out);
+                line.clear();
+                oversized = false;
             }
         }
-        Ok(())
+    }
+
+    /// Answers one complete stdin line; a bad line gets a JSON-RPC error and the session goes on.
+    fn finish_line(&self, line: &[u8], oversized: bool, out: &Notifier) {
+        let resp = if oversized {
+            Some(error(Json::Null, -32600, &format!("invalid request: line larger than {MAX_LINE_BYTES} bytes")))
+        } else {
+            match std::str::from_utf8(line) {
+                Ok(text) if text.trim().is_empty() => None,
+                Ok(text) => self.handle_line(text.trim()),
+                Err(e) => Some(error(Json::Null, -32700, &format!("parse error: {e}"))),
+            }
+        };
+        if let Some(resp) = resp {
+            out.send(&resp);
+        }
     }
 
     /// One input line → response (None for notifications).
@@ -323,5 +357,69 @@ mod tests {
         assert!(s.handle_line("{nope").unwrap().stringify().contains("-32700"));
         assert!(s.handle_line(r#"{"jsonrpc":"2.0","id":9,"method":"x/y"}"#).unwrap().stringify().contains("-32601"));
         assert!(s.handle_line(r#"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"zzz"}}"#).unwrap().stringify().contains("-32602"));
+    }
+}
+
+#[cfg(test)]
+mod line_cap_tests {
+    use super::*;
+    use std::io::Cursor;
+    use std::sync::Mutex as StdMutex;
+
+    #[derive(Clone, Default)]
+    struct Sink(Arc<StdMutex<Vec<u8>>>);
+    impl Write for Sink {
+        fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    fn server() -> Server {
+        Server { name: "t", version: "0", instructions: "", tools: vec![], resources: vec![], prompts: vec![] }
+    }
+    fn answers(input: Vec<u8>) -> Vec<String> {
+        let sink = Sink::default();
+        server().run(Cursor::new(input), &Notifier::new(Box::new(sink.clone()))).unwrap();
+        let bytes = sink.0.lock().unwrap().clone();
+        String::from_utf8(bytes).unwrap().lines().map(str::to_string).collect()
+    }
+    const PING: &str = "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"ping\"}";
+
+    #[test]
+    fn an_oversized_line_is_refused_and_the_next_one_is_served() {
+        let mut input = vec![b'x'; MAX_LINE_BYTES + 1];
+        input.push(b'\n');
+        input.extend_from_slice(PING.as_bytes());
+        input.push(b'\n');
+        let out = answers(input);
+        assert_eq!(out.len(), 2, "{out:?}");
+        assert!(out[0].contains("-32600") && out[0].contains("larger than"), "{}", out[0]);
+        assert!(out[1].contains("\"id\":7"), "{}", out[1]);
+    }
+    #[test]
+    fn a_line_at_the_limit_still_reaches_the_parser() {
+        let mut input = vec![b' '; MAX_LINE_BYTES - PING.len()];
+        input.extend_from_slice(PING.as_bytes());
+        input.push(b'\n');
+        let out = answers(input);
+        assert_eq!(out.len(), 1);
+        assert!(out[0].contains("\"id\":7"), "{}", out[0]);
+    }
+    #[test]
+    fn invalid_utf8_answers_a_parse_error_instead_of_ending_the_session() {
+        let mut input = vec![0xff, 0xfe, b'\n'];
+        input.extend_from_slice(PING.as_bytes());
+        input.push(b'\n');
+        let out = answers(input);
+        assert_eq!(out.len(), 2, "{out:?}");
+        assert!(out[0].contains("-32700"), "{}", out[0]);
+        assert!(out[1].contains("\"id\":7"), "{}", out[1]);
+    }
+    #[test]
+    fn a_final_line_without_newline_is_served() {
+        assert!(answers(PING.as_bytes().to_vec())[0].contains("\"id\":7"));
     }
 }

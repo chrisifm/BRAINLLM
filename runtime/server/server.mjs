@@ -1326,7 +1326,8 @@ export function createServer(o = {}) {
     let raw
     try {
       raw = await body(req, MAX_BODY)
-    } catch {
+    } catch (e) {
+      if (e.aborted) return
       return fail(413, tooBig(rid, url.pathname))
     }
     if (native) await native.prepare(req, res, rid)
@@ -1366,7 +1367,8 @@ export function createServer(o = {}) {
     let raw
     try {
       raw = await body(req, MAX_BODY)
-    } catch {
+    } catch (e) {
+      if (e.aborted) return
       return plain(413, tooBig(rid, url.pathname))
     }
     const id = new URLSearchParams(raw).get('_brain') || '', modPath = mf.rpc[id.split('/')[0]]
@@ -2004,6 +2006,7 @@ export function resolveClient(peer, forwarded, nets) {
   }
   return client
 }
+export function readBody(req, max) { return body(req, max) }
 function body(req, max) {
   return new Promise((ok, fail) => {
     let n = 0
@@ -2015,7 +2018,10 @@ function body(req, max) {
       else if (n <= max) parts.push(c)
     })
     req.on('end', () => (n > max ? fail(new Error('too large')) : ok(Buffer.concat(parts).toString('utf8'))))
-    req.on('error', fail)
+    // a disconnect or the cut above never reaches 'end': the reader settles anyway and nobody is left to answer
+    const aborted = () => fail(Object.assign(new Error('body aborted'), { aborted: true }))
+    req.on('error', aborted)
+    req.on('close', aborted)
   })
 }
 // bind:value / checked are properties; copy them into attributes so the SSR HTML shows them
