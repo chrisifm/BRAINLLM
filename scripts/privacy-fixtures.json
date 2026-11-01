@@ -202,5 +202,17 @@
     "rule": "credential-url",
     "sha256": "a28b8176f57374f4f478f28ad1530d57fff8e37cdb58a74e5146350154124e29",
     "reason": "Reviewed rejection fixture verifies that synthetic user:password loopback backend URLs are refused."
+  },
+  {
+    "path": "crates/brain-backend/tests/organizations.rs",
+    "rule": "credential-url",
+    "sha256": "288a54939d6ba40b4826b0549aa6a2067e121a9d442ab22486ea3611af155091",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
+    "path": "crates/brain-cli/tests/env_truth.rs",
+    "rule": "credential-url",
+    "sha256": "fc642f0e11f0e9878bbe88f19266fbc086c114595a51a16c441b4e2b0cf7189a",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
   }
 ]
