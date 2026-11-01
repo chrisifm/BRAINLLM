@@ -9,6 +9,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- Speculation Rules for document navigations: pages prefetch public static targets on hover where a click loads a new document, and never a target the router takes; opt out with brain.json `"speculation": false` or `data-prefetch="false"`.
 - AVIF media renditions: a preset can use `format: "avif"` with a required PNG, JPEG or WebP fallback; the default plan is unchanged and the native binary grows about 1.2 MB.
 - Dev observability panel: Alt+Shift+O or `?brain-observe` in `brain run` shows Web Vitals, requests, long frames, errors and live components, and names an element's source file; a production build holds none of it.
 - Core Web Vitals reporting: `vitals()` and `reportVitals(path)` measure LCP, CLS, INP, FCP and TTFB, opt-in with no bytes when unused.

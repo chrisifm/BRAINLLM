@@ -1031,7 +1031,7 @@ export function createServer(o = {}) {
       url, query: Object.fromEntries(url.searchParams), cookies, user, session: ses, env,
       ...(native ? { backend: native.backend(req, res, res.getHeader('x-request-id')) } : {}),
       // `prefetch`: the router fetched this page ahead of a click (§19); a `load` with side effects can skip them
-      prefetch: req.headers['x-brain-prefetch'] === '1',
+      prefetch: req.headers['x-brain-prefetch'] === '1' || /\bprefetch\b/.test(req.headers['sec-purpose'] ?? ''),
       req: { method: req.method, headers: req.headers, ip: ipOf(req) }, signal, llm: llmClient(env, signal), ...extra,
     }
   }

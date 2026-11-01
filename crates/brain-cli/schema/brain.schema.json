@@ -40,6 +40,11 @@
       "type": "string",
       "description": "Default document language, e.g. \"en\"."
     },
+    "speculation": {
+      "type": "boolean",
+      "default": true,
+      "description": "Speculation Rules on pages that navigate with a full document load: public static targets are prefetched on hover. false removes them."
+    },
     "server": {
       "type": "object",
       "additionalProperties": false,

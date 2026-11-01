@@ -772,8 +772,8 @@ pub fn has_executable_scripts(html: &str) -> bool {
         let Some(end) = tag_rest.find('>') else { return true };
         let tag = &tag_rest[..end];
         let kind = attr(tag, "type").unwrap_or_default();
-        // Unknown types are conservative: only known inert metadata is accepted as zero-JS.
-        if !matches!(kind.as_str(), "application/json" | "application/ld+json" | "b/state") { return true; }
+        // Unknown types are conservative: only known inert metadata is accepted as zero-JS. Speculation rules run no code.
+        if !matches!(kind.as_str(), "application/json" | "application/ld+json" | "b/state" | "speculationrules") { return true; }
         rest = &tag_rest[end+1..];
         if let Some(close) = rest.find("</script") { rest = &rest[close+8..]; }
     }

@@ -581,7 +581,7 @@ The `.brain` author writes nothing different: the compiler or the runtime applie
 | Navigation API | Baseline 2026: Chrome 102+, Firefox 147+, Safari 26.2+ | RUNTIME router | intercept navigations, scroll and focus restored; fallback History |
 | View Transitions (same document) | Baseline 2025: Chrome 111+, Firefox 144+, Safari 18+ | RUNTIME | animated transition between views in the router |
 | `@view-transition` (cross-document) | Chrome 126+, Safari 18.2+; Firefox no | COMPILER | transition between prerendered pages |
-| Speculation Rules | Chrome 109+; Safari 26.2 behind flag (prefetch only); Firefox no | — (removed 2026-10-29) | the router intercepts every click, so a prerender was never used; the router's predictive prefetch replaces it |
+| Speculation Rules | Chrome 109+; Safari 26.2 behind flag (prefetch only); Firefox no | prefetch on document navigations only (§53, 2026-10-31) | the router intercepts other clicks, so a prerender was never used there (removed 2026-10-29); the router's predictive prefetch replaces it |
 | Predictive prefetch (IntersectionObserver + `requestIdleCallback` + `fetch priority: 'low'`) | Baseline (idle callback: Safari no, `setTimeout` fallback) | RUNTIME router | links in view are fetched while idle (2 at a time, 12 per view), hover/focus/touch first; the next navigation swaps from memory and its chunks get `modulepreload`. Off: `router({ prefetch: false })`, `<meta name="brain-prefetch" content="off">`, `data-prefetch="false"`; skips Save-Data/2G, files, `/api/`, `/auth/`, log-out, unsubscribe and confirm paths and URLs with a token; any write (form submit, `api()` write, server function) forgets every fetched page; private/no-store and dynamic no-cache HTML is never reused; static HTML (`X-Brain-Static: 1`) and explicitly cacheable public HTML stay at most 5 min (bounded by max-age); requests carry `x-brain-prefetch: 1` (`ctx.prefetch`) (2026-10-29) |
 | Built-in AI: Prompt API, Summarizer, Translator, LanguageDetector, Writer, Rewriter, Proofreader | Chrome 138+ (Summarizer, Translator, LanguageDetector stable; Prompt API origin trial on the web, stable in extensions; the rest trials); other browsers no | RUNTIME `brain-ai.js` (`ai` primitive) | on-device Gemini Nano; `ai.ready()` answers 'unavailable' where absent and calls throw `code: 'unavailable'` (`brain guide ai`, docs checked 2026-10-29) |
 | `103 Early Hints` | Chrome 103+, Firefox 120+, Safari 17+ (HTTP/2+) | TOOLCHAIN | preload before the response |
@@ -2153,3 +2153,14 @@ elements. It sends nothing over the socket: `brain-inspect` remains the recorder
 `runtime/brain-vitals.js` is a normal opt-in primitive module (`scope.rs`) and costs 1116 B gzip when imported. INP follows
 the metric definition (slowest interaction, one in 50 discarded), and Event Timing is observed from 40 ms, so a faster
 interaction reports nothing. Browser test: `scripts/test/dev-observe.test.mjs`.
+
+## 53. Speculation Rules on document navigations (2026-10-31)
+
+Commit e0e1fb4 removed Speculation Rules because the router intercepts same-origin clicks: a rule on those targets never
+activated and doubled the request. That reason still holds, so rules appear only where a click is a real document
+navigation: a zero-JS page lists public static routes (it has no router), and a router page lists only zero-JS targets
+(`fullLoad`). `speculation_rules` emits a hover `prefetch`, never a prerender, so no target script runs ahead of the
+visit. Guarded, SSR, dynamic, `/_` and current routes are never listed; at most 64 targets. `has_executable_scripts`
+accepts the type because it runs no code, and the build hashes its body into `script-src` as for any inline script.
+Opt-outs: brain.json `"speculation": false`, and `data-prefetch="false"` on a link or ancestor. A server sees
+`ctx.prefetch` for `Sec-Purpose: prefetch` too. Browser proof: `scripts/test/speculation-browser.test.mjs`.

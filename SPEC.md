@@ -253,6 +253,7 @@ A component that keeps growing (DOM nodes, list rows, effect runs) or loops is s
 `brain build` mounts every view with fake timers and fails (B0907) if anything grows with no user input. Never append
 to a list from a timer, interval, bus or `fx` without a limit; create timers only inside `fx` and return their cleanup.
 Public production messages contain safe references, never raw traces, arbitrary exception text or internal paths.
+Links to public static pages that load a full document are prefetched on hover (Speculation Rules); `data-prefetch="false"` on a link or brain.json `"speculation": false` opts out, and `ctx.prefetch` is true on such a request.
 Dev panel (`brain run` only, never in builds): Alt+Shift+O or `?brain-observe` shows vitals, requests, long frames, errors and live components; Pick names an element's component file. `__brainObserve.snapshot()` returns it as JSON.
 Private captured errors (message, stack, recent actions) are listed by `brain_errors` (MCP) and `brain doctor`.
 
