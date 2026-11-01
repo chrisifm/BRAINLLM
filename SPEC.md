@@ -329,7 +329,7 @@ referenced on restrict delete → 409 `REFERENCE_IN_USE`). Optional `query.jsbra
 `now-7d`), `sort` (`?sort=-price,title`, ties by id), `include` (dotted paths up to three levels), `or` groups (`?group.field=v`), `?fields=a,b`, `?owner=me`, named `aggregate`s and related `count`s;
 undeclared or repeated parameters → 422. Lists return `total` and `next_cursor` (pass back as `cursor` or `after`).
 `facets: [field]` adds `?facets=a,b` counts over readable rows; a `geo` field (`{lat,lng}`) filters with `near` (`lat,lng,km`) and `bbox`.
-A field of kind `org` makes a resource tenant data, with grants `org`, `org.<role>`, `org.own`; `audit: true` in a policy records changed field names; `server/auth/captcha.jsbrain` requires a token on protected public writes; `/_brain/credits/{subject}` holds an atomic ledger.
+A field of kind `org` makes a resource tenant data, with grants `org`, `org.<role>`, `org.own`; `audit: true` in a policy records changed field names; `server/auth/captcha.jsbrain` requires a token on protected public writes (docs/backend/captcha.md); `docs/backend/sessions.md` covers idle timeout, list and revoke, and route `reauth`; `/_brain/credits/{subject}` holds an atomic ledger.
 Read grants take row conditions (`{ public: { where: { status: 'published' } } }`, OR-ed; hidden rows answer 404 on every read channel; B0749 warns on an unconditioned public read with a state field, `expose_all_rows: true` declares it); `api: false` makes a resource server-only (`ctx.backend.service(name)`).
 Policy grants `owner.<ref>[.<ref>]` scope rows through relations; field option `visible: ['owner','admin']` hides
 a field from other readers and from the query surface. Modifiers `'str writeonly'`, `readonly`, `private` control
@@ -338,7 +338,7 @@ See `docs/backend/*.md`.
 Set `BRAIN_BACKEND_URL` to the fixed loopback native backend URL to connect native API requests and SSR session verification.
 Native JWT accounts use short-lived access and rotating refresh cookies, persisted revocation, configured roles and Google Sign-In.
 Roles: `admin` and `user` by default, signup role `user`; `brain add roles` writes `server/auth/roles.jsbrain` for your own names (only `admin` is required). A role grant admits only that role; route `auth: 'user'` means any signed-in account.
-`brain recipe auth-ui|password-reset|email-verification|google-signin` prepares project-owned account UI;
+`brain recipe auth-ui|password-reset|email-verification|google-signin|captcha` prepares project-owned account UI;
 mail needs private `BRAIN_MAIL_RESEND_KEY`, `BRAIN_MAIL_FROM` and `PUBLIC_SITE_URL` (HTTPS, optional hosting prefix). The emails are in English unless the default locale defines `auth.email.verify`, `auth.email.reset` and `auth.email.notice` (B0941).
 `brain backend bootstrap-admin --user <existing-uuid>` (or `--email <address>`) explicitly assigns the first administrator; signup never grants it.
 API keys: add `server/api-keys.jsbrain` `{enabled:true}`; signed-in users manage keys at `/_brain/keys` (secret shown once; `selfService:false` closes those routes and leaves only the operator CLI), callers send `X-API-Key: bk_live_...` to `/api/<resource>` only; scopes `posts:read|write|*` never exceed the owner. See `docs/backend/api-keys.md`.

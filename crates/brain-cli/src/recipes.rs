@@ -8,7 +8,8 @@ pub fn list() -> Value {
         {"name":"auth-ui","params":{"view":"optional view filename"},"states":["checking","anonymous","authenticated","error","busy"],"experimental":true},
         {"name":"password-reset","params":{"view":"fixed reset-password callback"},"states":["request","sent","confirm","complete","error","busy"],"experimental":true},
         {"name":"email-verification","params":{"view":"fixed verify-email callback"},"states":["anonymous","request","sent","verify","complete","error","busy"],"experimental":true},
-        {"name":"google-signin","params":{"view":"optional view filename"},"states":["checking","anonymous","authenticated","error","busy"],"experimental":true}
+        {"name":"google-signin","params":{"view":"optional view filename"},"states":["checking","anonymous","authenticated","error","busy"],"experimental":true},
+        {"name":"captcha","params":{"view":"optional view filename"},"states":["loading","ready","verified","expired","error","busy"],"experimental":true}
     ]})
 }
 
@@ -39,6 +40,7 @@ pub fn generate(root: &Path, name: &str, params: &Value, dry_run: bool) -> Resul
         }
         "auth-ui" => ("account-access".into(), auth_view().into(), None),
         "google-signin" => ("google-access".into(), String::new(), None),
+        "captcha" => ("create-account".into(), String::new(), None),
         "password-reset" => (
             "reset-password".into(),
             include_str!("templates/auth/reset-password.brain").into(),
@@ -82,6 +84,7 @@ pub fn generate(root: &Path, name: &str, params: &Value, dry_run: bool) -> Resul
         "auth-ui" | "password-reset" => &["button", "field", "input", "error-state"],
         "email-verification" => &["button", "error-state"],
         "google-signin" => &["button"],
+        "captcha" => &["button", "field", "input"],
         _ => &[],
     };
     let mut basics: std::collections::BTreeMap<String, String> = crate::design::new_basics()
@@ -109,6 +112,18 @@ pub fn generate(root: &Path, name: &str, params: &Value, dry_run: bool) -> Resul
         operations[0]["content"] = json!(google_view(&module));
         operations.push(json!({"path":module,"expectedRevision":null,"content":format!("import adapter from '../{adapter}'\nexport default adapter\n")}));
         operations.push(json!({"path":adapter,"expectedRevision":null,"content":include_str!("../../../runtime/templates/google-signin.js")}));
+    }
+    if name == "captcha" {
+        let module = format!("lib/{view}-captcha.jsbrain");
+        let adapter = format!("public/{view}-captcha.js");
+        for candidate in [&module, &adapter] {
+            if root.join(candidate).symlink_metadata().is_ok() {
+                return Err(format!("Recipe refuses to overwrite {candidate}"));
+            }
+        }
+        operations[0]["content"] = json!(captcha_view(&module));
+        operations.push(json!({"path":module,"expectedRevision":null,"content":format!("import adapter from '../{adapter}'\nexport default adapter\n")}));
+        operations.push(json!({"path":adapter,"expectedRevision":null,"content":include_str!("../../../runtime/templates/captcha.js")}));
     }
     Ok(
         json!({"schemaVersion":1,"recipe":name,"dryRun":dry_run,"previewOnly":dry_run,
@@ -176,6 +191,68 @@ fn google_view(module: &str) -> String {
   section {{ max-width: 36rem; padding: var(--space-4); margin: auto; }}
   div {{ min-height: 44px; }}
 </style>
+"#
+    )
+}
+
+/// Signup and immediate login behind one challenge; the site key is the provider's public always-pass test key.
+fn captcha_view(module: &str) -> String {
+    format!(
+        r#"<meta seo title="Create an account" description="Create an account protected by a captcha." robots="noindex">
+<meta client height="420px">
+<script>
+  import Button from '../ui/button.brain'
+  import Input from '../ui/input.brain'
+  import adapter from '../{module}'
+  // Replace with your own public site key; this one is Turnstile's documented always-pass test key.
+  const sitekey = '1x00000000000000000000AA'
+  let host = ref()
+  let status = sig('loading')
+  let token = sig('')
+  let busy = sig(false)
+  let failure = sig('')
+  const widget = interop(() => host, adapter, {{ sitekey, onState: (next) => {{ status = next.status; token = next.token }} }}, {{ onError: () => {{ status = 'error'; token = '' }} }})
+  const retry = () => widget.update({{ action: 'reset' }})
+  let f = form({{ email: 'email!', password: 'str!>=12' }}, {{ submit: async (v) => {{
+    if (busy || !token) return
+    busy = true
+    failure = ''
+    const used = token
+    token = ''
+    try {{
+      const made = await adapter.post('/_brain/auth/signup', v, {{ 'x-brain-captcha': used }})
+      if (made.status !== 200) {{
+        failure = made.status === 503 ? 'The check is unavailable right now. Retry in a moment.' : 'Could not create the account. Check the fields and complete the check again.'
+        return
+      }}
+      const grant = made.body?.login_grant
+      const signedIn = await adapter.post('/_brain/auth/login', v, grant ? {{ 'x-brain-login-grant': grant }} : {{}})
+      if (signedIn.status === 200) navigate('/')
+      else failure = 'Account created. Complete the check again to sign in.'
+    }} catch {{
+      failure = 'The request did not finish. Retry when you are back online.'
+    }} finally {{
+      busy = false
+      retry()
+    }}
+  }} }})
+</script>
+<main class="page">
+  <h1>Create an account</h1>
+  <form on:submit={{f.submit}}>
+    <Input label="Email" name="email" type="email" autocomplete="email" bind:value={{f.v.email}} error={{f.err.email}} />
+    <Input label="Password" name="password" type="password" autocomplete="new-password" bind:value={{f.v.password}} error={{f.err.password}} />
+    <div bind:ref={{host}} aria-label="Captcha"></div>
+    {{#if status === 'loading'}}<p role="status">Loading the check...</p>{{/if}}
+    {{#if status === 'expired'}}<p role="status">The check expired. Complete it again.</p>{{/if}}
+    {{#if status === 'error'}}
+      <p role="alert">The check could not run.</p>
+      <Button type="button" on:click={{retry}}>Retry the check</Button>
+    {{/if}}
+    {{#if failure}}<p role="alert">{{failure}}</p>{{/if}}
+    <Button type="submit" busy={{busy}} disabled={{!token || busy}}>Create account</Button>
+  </form>
+</main>
 "#
     )
 }
@@ -500,6 +577,27 @@ mod tests {
         )
         .unwrap_or_else(|diags| panic!("{}", crate::diags_json(&diags)));
         assert!(generate(&scratch.0, "google-signin", &json!({}), true).is_err());
+    }
+    #[test]
+    fn generated_captcha_view_has_owned_adapter_and_compiles_in_real_scaffold() {
+        let scratch = scaffold_fixture("captcha");
+        let plan = generate(&scratch.0, "captcha", &json!({}), true).unwrap();
+        write_plan(&scratch.0, &plan);
+        assert_compiles(&scratch.0, "captcha");
+        let source = std::fs::read_to_string(scratch.0.join("views/create-account.brain")).unwrap();
+        for part in ["x-brain-captcha", "x-brain-login-grant", "retry()", "1x00000000000000000000AA"] {
+            assert!(source.contains(part), "{part}");
+        }
+        brain_codegen::compile_with(
+            &source,
+            Path::new("views/create-account.brain"),
+            &brain_codegen::Options {
+                root: Some(scratch.0.clone()),
+                ..Default::default()
+            },
+        )
+        .unwrap_or_else(|diags| panic!("{}", crate::diags_json(&diags)));
+        assert!(generate(&scratch.0, "captcha", &json!({}), true).is_err());
     }
     #[test]
     fn generated_auth_view_compiles_in_real_scaffold() {

@@ -154,6 +154,7 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [Application routes](backend/routes.md) | Resources cover CRUD. |
 | [Search (B-14)](backend/search.md) | A resource opts fields into search (see BACKEND.md). |
 | [Querying resources from server code (`ctx.backend`)](backend/server-queries.md) | Server `load(ctx)`, server functions, actions and the development sidecar get `ctx.backend` when the app is connected to the native backend (`BRAIN_BACKEND_URL… |
+| [Session controls](backend/sessions.md) | What the native backend does for the sessions it owns. |
 | [Slug history](backend/slugs.md) | A resource can mark one unique text field as its slug. |
 | [Sorting (B-12)](backend/sorting.md) | — |
 | [State machines (declared transitions)](backend/state-machines.md) | A resource may declare one `enum` field as its state. |
