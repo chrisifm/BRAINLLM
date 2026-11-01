@@ -64,3 +64,24 @@ fn a_paths_page_that_cannot_render_stops_the_build() {
     assert!(std::fs::read_to_string(dir.join("dist/cat/art/index.html")).unwrap().contains(">Category</h1>"));
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn a_server_module_a_view_reaches_can_call_outbound_and_a_bad_import_names_its_file() {
+    let tmp = std::env::temp_dir().join(format!("brain-build-outbound-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    assert!(brain(&tmp, &["new", "app"], None).status.success());
+    let dir = tmp.join("app");
+    std::fs::create_dir_all(dir.join("server")).unwrap();
+    std::fs::write(dir.join("server/gateway.jsbrain"), "<meta server>\nexport async function ping(url) { return (await httpCall(url)).status }\n").unwrap();
+    std::fs::write(dir.join("views/reach.brain"), "<meta seo title=\"Page reaching a gateway\" description=\"A view that calls an outside service through a server module.\">\n<script>\n  import { ping } from '../server/gateway.jsbrain'\n  export async function load() { return { code: await ping('http://127.0.0.1:9/x').catch((e) => e.code) } }\n  let { code } = props\n</script>\n<main><h1>{code}</h1></main>\n").unwrap();
+    let built = brain(&dir, &["build"], None);
+    assert!(built.status.success(), "{}", text(&built));
+    // negative: an import the browser cannot resolve says which file holds it
+    std::fs::create_dir_all(dir.join("lib")).unwrap();
+    std::fs::write(dir.join("lib/remote.jsbrain"), "import x from 'node:fs'\nexport default x\n").unwrap();
+    std::fs::write(dir.join("views/reach.brain"), "<meta seo title=\"Page reaching a gateway\" description=\"A view that imports a module the browser cannot load.\">\n<script>\n  import x from '../lib/remote.jsbrain'\n</script>\n<main><h1>{x}</h1></main>\n").unwrap();
+    let refused = text(&brain(&dir, &["build"], None));
+    assert!(refused.contains("lib/remote.jsbrain") && refused.contains("node:fs"), "{refused}");
+    let _ = std::fs::remove_dir_all(&tmp);
+}

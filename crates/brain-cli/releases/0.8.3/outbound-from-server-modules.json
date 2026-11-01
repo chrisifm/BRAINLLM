@@ -1,0 +1,11 @@
+{
+  "id": "outbound-from-server-modules",
+  "kind": "fix",
+  "title": "httpCall builds from server modules a view reaches",
+  "why": "The build read the outbound module as a browser dependency and stopped with an error that named no file.",
+  "changelog": [
+    "`httpCall` in a `<meta server>` module that a view reaches no longer stops `brain build`",
+    "a browser dependency error names the importing file and the specifier"
+  ],
+  "guide": "brain guide backend"
+}

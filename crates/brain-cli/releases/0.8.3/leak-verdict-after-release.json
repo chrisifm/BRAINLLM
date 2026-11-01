@@ -1,0 +1,10 @@
+{
+  "id": "leak-verdict-after-release",
+  "kind": "fix",
+  "title": "Leak checks wait for work that began after the unmount",
+  "why": "A promise or script load chained after the unmount kept an instance alive for seconds, so `brain test --heap` and `doctor` reported a leak depending on timing.",
+  "changelog": [
+    "`brain test --heap` and `brain doctor` give an unmounted instance up to 10 s before suspecting B0601, and only spend that time while an instance is alive"
+  ],
+  "guide": "brain guide tests"
+}

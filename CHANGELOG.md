@@ -11,6 +11,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 Upgrade with `npm install -D @christianirack/brainllm@0.8.3 --save-exact`. New diagnostics may report code that passed before; B1872 and a removed URL in `seo-urls.txt` (B1879) are errors.
 
+- `httpCall` in a `<meta server>` module that a view reaches no longer stops `brain build`
+- a browser dependency error names the importing file and the specifier
+- `brain test --heap` and `brain doctor` give an unmounted instance up to 10 s before suspecting B0601, and only spend that time while an instance is alive
 - every 5xx from `brain start` logs its cause and a request id
 - a page rendered after `load` caught a failed backend read logs a warning and is not stored
 - `<meta cache>` pages can read the native backend

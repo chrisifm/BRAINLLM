@@ -107,6 +107,24 @@ fn startup_settings_are_reported_before_start_without_their_values() {
     assert!(!ok && !out.contains("B0760") && !out.contains("Resend requires") && out.contains("B0762"), "{out}");
 }
 
+#[test]
+fn work_that_begins_after_the_unmount_is_not_a_leak_but_a_lasting_reference_still_is() {
+    let a = app("late-wait");
+    fs::create_dir_all(a.0.join("comp")).unwrap();
+    component(&a, "late-wait", "<script>\n  server: async function slow(ctx) { await new Promise((r) => setTimeout(r, 300)); return 1 }\n  let el = ref()\n  mounted(() => { slow().then(() => new Promise((r) => setTimeout(r, 3000))).then(() => { if (el) el.textContent = 'done' }) })\n</script>\n<p bind:ref={el}>Late</p>\n");
+    let leaks = |file: &str| {
+        let (_, out) = brain(&a.0, &["test", file, "--heap", "--json"]);
+        if !chrome(&out) { return None; }
+        Some(out.matches("\"code\":\"B0601\"").count())
+    };
+    let Some(late) = leaks("comp/late-wait.test.brain") else { eprintln!("skipped: no Chrome"); return; };
+    assert_eq!(late, 0, "a bounded wait that began after the unmount ends on its own");
+    fs::create_dir_all(a.0.join("lib")).unwrap();
+    fs::write(a.0.join("lib/cache.jsbrain"), "const all = []\nexport default { keep: (x) => all.push(x) }\n").unwrap();
+    component(&a, "kept", "<script>\n  import cache from '../lib/cache.jsbrain'\n  let el = ref()\n  mounted(() => { cache.keep(el) })\n</script>\n<p bind:ref={el}>Kept</p>\n");
+    assert_eq!(leaks("comp/kept.test.brain"), Some(1), "a module cache keeps it for good");
+}
+
 fn component(a: &App, name: &str, body: &str) {
     fs::write(a.0.join(format!("comp/{name}.brain")), body).unwrap();
     let cap: String = name.split('-').map(|w| w[..1].to_uppercase() + &w[1..]).collect();

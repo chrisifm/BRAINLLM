@@ -264,6 +264,9 @@ const fin = G.FinalizationRegistry ? new FinalizationRegistry(w => (w.dead = 1))
 // Where a pending request went, without origin or query: evidence for a fix, never a value.
 const pendingUrls = () => [...inflight.values()].slice(0, 3).map(r => `${r.m} ${r.url.replace(/^[a-z]+:\/\/[^/]+/i, '').split(/[?#]/)[0]}`)
 const SETTLE_MS = 60000
+// While a suite holds the verdict, an instance only ages from its release: a promise or a script load that begins after
+// the unmount is invisible to the network watch and keeps the instance alive for a bounded time.
+let held_verdict = false
 function watch(d) {
   if (!fin) return
   // its first DOM node: an app that keeps a detached node (a module array, a cache) is the leak to catch. The browser
@@ -279,11 +282,13 @@ function checkLeaks() {
   for (let j = watched.length - 1; j >= 0; j--) {
     const w = watched[j]
     if (w.dead) watched.splice(j, 1)
+    else if (held_verdict) w.at = gcs
     // A request from before the unmount may be what holds it: judge after it settles (bounded, for a long poll).
     else if (w.net.some(id => inflight.has(id)) && now() - w.since < SETTLE_MS) w.at = gcs
     else if (gcs - w.at >= 2) {
       watched.splice(j, 1)
-      const waited = w.urls.length ? `${w.urls.length > 2 ? 'several requests' : w.urls.join(', ')} ${w.urls.length > 1 ? 'were' : 'was'} in flight when it unmounted; ` : ''
+      const finished = !w.net.some(id => inflight.has(id))
+      const waited = w.urls.length ? `${w.urls.length > 2 ? 'several requests' : w.urls.join(', ')} ${w.urls.length > 1 ? 'were' : 'was'} in flight when it unmounted${finished ? ' and finished, so look past it' : ''}; ` : ''
       leak({ code: 'B0601', h: w.h, name: w.name, file: w.file, msg: `unmounted ${w.name} instance still alive after 2 GC cycles`, fix: w.fx.length ? 'add cleanup to the listed fx: they retain the instance' : `${waited}look for what still references its nodes or signals: an in-flight promise (a pending server call, \`.then\` or \`await\`) or timer that writes to the component, global listeners, caches, module closures`, fx: w.fx })
     }
   }
@@ -708,7 +713,7 @@ export function inspect(o) {
     G.document.addEventListener.call(G.document, 'keydown', e => e.altKey && e.shiftKey && e.code === 'KeyB' && toggle())
   return api
 }
-const api = { tick, drain, comps, onLoaf, onEvents, leaks: () => leaks.slice(), timers: () => [...timers.values()], toggle: () => toggle(), inflight: () => [...inflight.values()].map(r => `${r.m} ${r.url}`), abortInflight: () => { for (const r of inflight.values()) if (r.stop) r.stop() } }
+const api = { tick, drain, comps, onLoaf, onEvents, leaks: () => leaks.slice(), timers: () => [...timers.values()], toggle: () => toggle(), inflight: () => [...inflight.values()].map(r => `${r.m} ${r.url}`), abortInflight: () => { for (const r of inflight.values()) if (r.stop) r.stop() }, holdVerdict: on => (held_verdict = !!on), alive: () => watched.filter(w => !w.dead).length }
 
 // ---------- mini panel (Alt+Shift+B): heap, leaks and link to the full debugger (§9.1) ----------
 let panel = null

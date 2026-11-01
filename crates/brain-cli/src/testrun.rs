@@ -246,6 +246,10 @@ pub(crate) fn audit(
 /// How long unmounted tests wait for their in-flight requests before aborting them and counting leaks.
 #[cfg(unix)]
 const SETTLE_MS: u64 = 3000;
+/// How long an unmounted instance may stay alive before it is suspected: work that begins after the unmount (a promise
+/// chained on a settled call, a script load) is invisible to the network watch, and it ends on its own. Spent only when
+/// an instance is still alive, so a clean file does not pay for it.
+const RELEASE_GRACE_MS: u64 = 10_000;
 
 /// `brain test --heap` / `brain doctor`: watch for leaks while the tests run (§9, §18).
 static HEAP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -558,7 +562,7 @@ fn run_headless(
         let heap = HEAP.load(std::sync::atomic::Ordering::SeqCst);
         if heap {
             // the inspector watches every unmounted instance (FinalizationRegistry) and fx timers/listeners
-            let _ = chrome.eval(&session, "import('/@brain/brain-inspect.js').then(m => (m.inspect({ noPanel: true }), true), () => false)");
+            let _ = chrome.eval(&session, "import('/@brain/brain-inspect.js').then(m => (m.inspect({ noPanel: true }).holdVerdict(true), true), () => false)");
         }
         // capture runtime errors (without console noise) while this file's tests run
         let _ = chrome.eval(&session, "import('/@brain/brain-err.js').then(m => (m.capture({ log: false }), true), () => false)");
@@ -614,18 +618,36 @@ fn run_headless(
                 let _ = chrome.call(Some(&session), d, Json::Obj(vec![]));
             }
             let _ = chrome.call(Some(&session), "HeapProfiler.enable", Json::Obj(vec![]));
-            // a few forced GC cycles: an instance still alive after two of them is a suspected leak
-            for _ in 0..4 {
+            let mut collect = |chrome: &mut Chrome| {
                 let _ = chrome.call(
                     Some(&session),
                     "HeapProfiler.collectGarbage",
                     Json::Obj(vec![]),
                 );
                 std::thread::sleep(Duration::from_millis(60));
-                let _ = chrome.eval(
+                chrome.eval(
                     &session,
-                    "import('/@brain/brain-inspect.js').then(m => (m.tick(), true), () => false)",
-                );
+                    "import('/@brain/brain-inspect.js').then(m => (m.tick(), m.inspect().alive()), () => 0)",
+                )
+            };
+            // give what began after the unmount its bounded time, and stop as soon as nothing is left alive
+            let grace = Instant::now() + Duration::from_millis(RELEASE_GRACE_MS);
+            for round in 0.. {
+                let alive = matches!(collect(&mut chrome), Ok(Json::Num(n)) if n > 0.0);
+                if round >= 3 && (!alive || Instant::now() >= grace) {
+                    break;
+                }
+                if round >= 3 {
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+            }
+            let _ = chrome.eval(
+                &session,
+                "import('/@brain/brain-inspect.js').then(m => (m.inspect().holdVerdict(false), true), () => false)",
+            );
+            // a few forced GC cycles more: an instance still alive after two of them is a suspected leak
+            for _ in 0..4 {
+                let _ = collect(&mut chrome);
             }
             if let Ok(Json::Arr(ls)) = chrome.eval(&session, "import('/@brain/brain-inspect.js').then(m => m.inspect().leaks().map(l => ({ code: l.code, name: l.name, file: l.file, line: l.line || null, msg: l.msg, fix: l.fix })), () => [])") {
                 rep.leaks = ls;

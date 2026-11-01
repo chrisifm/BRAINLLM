@@ -1026,6 +1026,10 @@ fn build_inner_with_options(
         let worker_specs:Vec<String>=literal_urls.iter().filter(|(_,_,s)|s.ends_with(".js")||s.ends_with(".mjs")||s.ends_with(".jsbrain")).map(|(_,_,s)|s.clone()).collect();
         let mut references=specifiers(&js)?;references.extend(literal_urls);references.sort();
         for (_, _, spec) in references {
+            // the runtime's own server modules load Node's builtins lazily; they stay as written
+            if matches!(n, Node::Runtime(_)) && spec.starts_with("node:") {
+                continue;
+            }
             if urls.contains(&spec) {
                 let Some(file)=dependency_resolver.resolve_url(&from,&spec)? else {continue;};
                 if !(file.ends_with(".js") || file.ends_with(".mjs") || file.ends_with(".jsbrain")) {
@@ -1041,7 +1045,7 @@ fn build_inner_with_options(
                     let dir = r.rsplit_once('/').map_or(String::new(), |(d, _)| format!("{d}/"));
                     Node::Runtime(format!("{dir}{}", spec.trim_start_matches("./")))
                 }
-                _ => match if let Some(file) = dependency_resolver.resolve(&from,&spec)? { Node::File(file) } else { resolve(&from, &spec)? } {
+                _ => match if let Some(file) = dependency_resolver.resolve(&from,&spec).map_err(|e| format!("`{from}` imports `{spec}`: {e}"))? { Node::File(file) } else { resolve(&from, &spec)? } {
                     // a plain JS worker gets the generated entry that serves its exports
                     Node::File(r) if worker_specs.contains(&spec) && !dependencies::is_foreign(&r) && r.ends_with(".worker.js") => Node::Worker(r),
                     d => d,
