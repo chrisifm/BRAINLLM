@@ -1,0 +1,9 @@
+{
+  "id": "dev-style-scope-identity",
+  "kind": "fix",
+  "title": "brain dev recompiles when a CSS edit changes the scope identity",
+  "why": "Customizing the CSS of a copied kit file changes its data-b, but the style-only path kept the old script, so the page lost its styles until a full rebuild.",
+  "changelog": [
+    "recompiles the component when a CSS edit changes its scope identity"
+  ]
+}
