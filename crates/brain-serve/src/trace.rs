@@ -243,6 +243,7 @@ pub(crate) fn report_only_policy(root: &Path) -> String {
         ("connect-src".into(), "http://127.0.0.1:*".into()),
     ];
     dev.extend(brain_pack::cache::google_csp());
+    dev.extend(brain_pack::cache::captcha_csp(root));
     brain_pack::cache::app_csp(root, &[], &dev)
 }
 
