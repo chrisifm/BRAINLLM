@@ -16,6 +16,7 @@ serde_json = "1.0.154"
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "json", "migrate", "uuid"] }
 argon2 = "0.6.0"
+scrypt = { version = "0.11.0", default-features = false }
 tower_governor = "0.8.0"
 governor = "0.10.4"
 subtle = "2.6.1"

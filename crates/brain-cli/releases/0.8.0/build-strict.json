@@ -1,0 +1,17 @@
+{
+  "id": "build-strict",
+  "kind": "change",
+  "title": "brain build --strict fails an incomplete build",
+  "why": "A page shipped with a component fallback or a route left out of dist/ was only a warning, so a release pipeline published it. The new flag lets the pipeline refuse that output.",
+  "changelog": [
+    "`brain build --strict` fails"
+  ],
+  "guide": "SPEC.md",
+  "codes": [],
+  "affects": [
+    "brain.json"
+  ],
+  "steps": [
+    "Optional: add `--strict` to the build command of your release pipeline."
+  ]
+}

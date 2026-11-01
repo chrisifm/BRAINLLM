@@ -34,6 +34,13 @@ Rows stored before the 256-character bound are rebuilt once by the next `brain b
 with no statement deadline and without touching `updated_at`. Until then, typo searches on long text can answer
 `degraded`; full-text searches are unaffected. No `brain doctor` check is needed because the bound applies to every row.
 
+## Measured cost
+
+`crates/brain-backend/tests/production_shape.rs` with `BRAIN_SHAPE_ROWS=30000 BRAIN_SHAPE_TIMINGS=1`, on a table of 30,000
+rows of 4 to 8 KB, debug build, local Postgres, median of 5 (2026-10-31): first page by `created_at` 8 ms, filter plus
+sort 62 ms, full text 39 ms, typo fallback 146 ms, and text made only of `%` or `\` under 1 ms, because it never reaches
+the database's text matching. Rerun it for your own shape: these figures are one machine, not a promise.
+
 ## Language and weights
 
 By default search uses the language-neutral `simple` configuration (no stemming) and fixed weights (`title`/`name` A,

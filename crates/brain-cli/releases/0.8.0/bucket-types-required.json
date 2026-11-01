@@ -1,0 +1,25 @@
+{
+  "id": "bucket-types-required",
+  "kind": "breaking",
+  "title": "A file bucket must state its types",
+  "why": "A bucket that omitted `types` accepted every file, HTML and executables included, only by omission. It now fails `brain check` and `brain backend serve` refuses to start, so no app stays open by accident.",
+  "changelog": [
+    "a file bucket without `types`"
+  ],
+  "guide": "docs/backend/files.md",
+  "codes": [
+    "B0770"
+  ],
+  "affects": [
+    "server/files/*.jsbrain"
+  ],
+  "finds": [
+    {
+      "glob": "server/files/*.jsbrain"
+    }
+  ],
+  "steps": [
+    "For each bucket B0770 reports, add the types it should hold, for example `types: ['application/pdf']`. Stored files stay as they are; only new uploads are matched.",
+    "To keep today's behaviour exactly, add `types: '*'`: it accepts any file, as the omission did, and states it."
+  ]
+}

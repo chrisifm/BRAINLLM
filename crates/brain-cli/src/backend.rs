@@ -373,6 +373,31 @@ pub fn row_exposure(root: &Path) -> Vec<(String, String, String)> {
         })
         .collect()
 }
+/// True when a field name reads as internal. Whole `_`-separated words only, so `tokens` or `hashtag` stay out.
+fn internal_looking(name: &str) -> bool {
+    let words: Vec<&str> = name.split('_').collect();
+    let pair = |a: &str, b: &str| words.windows(2).any(|w| w[0] == a && w[1] == b);
+    words.iter().any(|w| ["password", "passwd", "pwd", "secret", "token", "salt", "hash", "otp", "internal", "legacy", "apikey"].contains(w))
+        || pair("api", "key") || pair("private", "key") || pair("ip", "address") || pair("external", "id")
+}
+/// B0797: fields named like internals that every reader of the record receives, because nothing says otherwise.
+pub fn public_field_warnings(root: &Path) -> Vec<(String, String, String)> {
+    let resources = contracts(root, "resources").unwrap_or_default();
+    let mut out = Vec::new();
+    for r in resources.iter().filter(|r| r.policy.api) {
+        for (name, field) in &r.fields {
+            let hidden = matches!(field.access.as_deref(), Some("private" | "writeonly"));
+            if !hidden && field.visible.is_none() && internal_looking(name) {
+                out.push((
+                    format!("server/resources/{}/schema.jsbrain", r.name),
+                    format!("`{name}` reads as an internal field, and every reader of `{}` receives it because nothing limits it", r.name),
+                    format!("write `{name}: 'str private'` (server only), 'str writeonly' (accepted, never returned) or {{ type: 'str', visible: ['owner', 'admin'] }}; if it is meant to be public, say visible: ['public']"),
+                ));
+            }
+        }
+    }
+    out
+}
 /// B0790: secrets a declared route or webhook needs and the development environment does not hold: `(file, message, fix)`.
 /// `brain backend serve` refuses to start without them; names only, never values.
 pub fn secret_warnings(root: &Path) -> Vec<(String, String, String)> {
@@ -401,14 +426,15 @@ pub fn startup_contract_errors(root: &Path) -> Vec<String> {
     out.extend(contracts(root, "resources").map(|resources| crate::hooks_executor::source_problems(root, &resources)).unwrap_or_default());
     out
 }
-/// B0770: buckets that accept every file only because they never listed their types.
-pub fn bucket_warnings(root: &Path) -> Vec<(String, String, String)> {
+const BUCKET_TYPES_FIX: &str = "list what it should hold, for example types: ['application/pdf', 'image/*'], or write types: '*' to keep accepting any file as before; official MIME names work and matching uses the file's content";
+/// B0770: buckets that never listed their types (`check` reports them, `serve` refuses to start).
+pub fn bucket_type_errors(root: &Path) -> Vec<(String, String, String)> {
     let (Ok(resources), Ok(roles)) = (contracts(root, "resources"), auth_roles(root)) else { return Vec::new() };
     let buckets = crate::platform_config::load(root, &resources, &roles).map(|p| p.buckets).unwrap_or_default();
     buckets.iter().filter(|b| b.open_by_omission()).map(|b| (
         format!("server/files/{}.jsbrain", b.name),
-        format!("bucket `{}` does not say which types it takes, so it accepts every file, HTML and executables included", b.name),
-        "list what it should hold, for example types: ['application/pdf', 'image/*'], or say types: '*' if any file is meant to be accepted; official MIME names work and matching uses the file's content".to_string(),
+        format!("bucket `{}` does not say which types it takes; since 0.8.0 an unstated list is refused, because it would accept every file, HTML and executables included", b.name),
+        BUCKET_TYPES_FIX.to_string(),
     )).collect()
 }
 pub fn inspect(root: &Path) -> Result<Value, String> {
@@ -629,9 +655,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }
     if !matches!(
         operation,
-        "schema" | "migrate" | "approve-contract" | "serve" | "bootstrap-admin" | "rename-role" | "users"
+        "schema" | "migrate" | "approve-contract" | "serve" | "bootstrap-admin" | "rename-role" | "users" | "import"
     ) {
-        return Err("usage: brain backend capabilities|schema|migrate|approve-contract [--accept <resource>] [--apply]|serve|bootstrap-admin|rename-role --from <role> --to <role> [--apply]|logs [rid]|users|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182] [--with-workers]".into());
+        return Err("usage: brain backend capabilities|schema|migrate|approve-contract [--accept <resource>] [--apply]|import users|<resource> --file <rows.jsonl> [--apply]|serve|bootstrap-admin|rename-role --from <role> --to <role> [--apply]|logs [rid]|users|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182] [--with-workers]".into());
     }
     let snapshot = inspect(&root)?;
     if operation == "schema" {
@@ -644,6 +670,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
         if !problems.is_empty() {
             let lines: Vec<String> = problems.iter().map(|(problem, fix)| format!("{problem}; fix: {fix}")).collect();
             return Err(format!("B0751 backend settings: {}", lines.join(" | ")));
+        }
+        if let Some((file, _, fix)) = bucket_type_errors(&root).into_iter().next() {
+            return Err(format!("B0770: {file} does not say which types it takes; fix: {fix}"));
         }
     }
     let url = stated_database(args, &root, &environment)?;
@@ -682,6 +711,24 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 report["next"]=json!("Declare those roles in server/auth/roles.jsbrain, or preview moving their accounts with `brain backend rename-role --from <role> --to <role>` (add --apply; sessions are revoked)");
             }
             println!("{report}");return Ok(())
+        }
+        if operation=="import" {
+            let target=args.get(1).filter(|a|!a.starts_with("--")).map(String::as_str).ok_or("usage: brain backend import users|<resource> --file <rows.jsonl> [--apply]")?;
+            let file=crate::flag(args,"--file").ok_or("usage: brain backend import users|<resource> --file <rows.jsonl> [--apply]")?;
+            let text=std::fs::read_to_string(&file).map_err(|e|format!("{file}: {e}"))?;
+            let apply=args.iter().any(|a|a=="--apply");
+            let outcome=if target=="users" {
+                let declared=roles.roles.clone();
+                let auth=brain_backend::auth::Auth::new_with_role(pool.clone(),&roles.signup_role).await?;
+                brain_backend::import::users(&pool,&declared,auth.unusable_hash(),&text,apply).await?
+            } else {
+                let resource=resources.iter().find(|r|r.name==target).ok_or_else(||format!("no resource is named `{target}`; fix: use `users` or a resource from server/resources"))?;
+                brain_backend::import::records(&pool,resource,&text,apply).await?
+            };
+            pool.close().await;
+            let problems:Vec<_>=outcome.problems.iter().map(|(line,reason)|json!({"line":line,"reason":reason})).collect();
+            println!("{}",json!({"schemaVersion":1,"ok":problems.is_empty(),"rows":outcome.rows,"applied":outcome.applied,"problems":problems,"moreProblems":outcome.more_problems}));
+            return if problems.is_empty() {Ok(())} else {Err(format!("B0798: {file} was not imported: {} rows have problems; fix: correct them and run the import again",problems.len()+outcome.more_problems))};
         }
         if operation=="approve-contract" {
             let reviewed=brain_backend::contract_review::review(&pool,&resources).await?;
@@ -746,7 +793,6 @@ pub fn run(args: &[String]) -> Result<(), String> {
         eprintln!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
         if let Some((msg,fix))=anonymous_catalog_warning(args,&environment){eprintln!("{}",json!({"schemaVersion":1,"event":"backend-warning","code":"B0771","msg":msg,"fix":fix}));}
         let mut platform=crate::platform_config::load(&root,&config.resources,&config.roles)?;
-        for bucket in platform.buckets.iter().filter(|b|b.open_by_omission()){eprintln!("{}",json!({"schemaVersion":1,"event":"backend-warning","code":"B0770","file":format!("server/files/{}.jsbrain",bucket.name),"message":"this bucket accepts every file type because it does not declare types; list them or say types: '*'"}));}
         platform.routes=crate::route_executor::contracts(&root,&environment)?;
         platform.handlers=crate::route_executor::load(&root,&environment,&platform.routes)?;
         // Separate HTTP and worker pools with declared sizes, checked against the server's connection budget.

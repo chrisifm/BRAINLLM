@@ -1,0 +1,27 @@
+{
+  "id": "ne-keeps-empty",
+  "kind": "breaking",
+  "title": "The ne filter keeps records without a value",
+  "why": "`field[ne]=x` silently dropped every record with no value through SQL NULL logic, while action guards on the same field counted those records as different.",
+  "changelog": [
+    "the `ne` list filter now keeps records"
+  ],
+  "guide": "docs/backend/filters.md",
+  "codes": [],
+  "affects": [
+    "server/resources/*/schema.jsbrain"
+  ],
+  "finds": [
+    {
+      "glob": "**/*.brain",
+      "contains": "[ne]="
+    },
+    {
+      "glob": "**/*.jsbrain",
+      "contains": "[ne]="
+    }
+  ],
+  "steps": [
+    "Where a client relied on `field[ne]=x` hiding empty records, add `field[exists]=true` and declare `exists` for that field."
+  ]
+}

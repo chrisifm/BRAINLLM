@@ -373,7 +373,7 @@ pub fn apply(root: &Path, cfg: &CacheCfg, pages: &[PageRef], extra_csp: &[(Strin
     if inline.len() > 64 {
         warnings.push(format!("the CSP lists {} inline script hashes (one per distinct page script); keep page scripts generic so the header stays small", inline.len()));
     }
-    let policy = csp(&inline, extra_csp);
+    let policy = app_csp(root, &inline, extra_csp);
     let unhashed: Vec<String> = if cfg.http { assets.keys().cloned().collect() } else { Vec::new() }; // original paths (revalidated)
     // 103 Early Hints (§13): hosts that turn `Link` headers into early hints (Cloudflare, Netlify) start fetching the
     // page's module chunks and stylesheets while the HTML is still on its way
@@ -729,8 +729,21 @@ pub fn native_socket_csp(options: &crate::NativeSocketOptions) -> Vec<(String, S
 
 /// The site's Content-Security-Policy (§31): scripts from the site itself and from the listed inline hashes only (no
 /// `unsafe-inline`, no `unsafe-eval`), no plugins, no framing, no `<base>` hijack, forms to the same origin.
-/// Styles allow inline (`style=` attributes and the layer-order `<style>`); `connect-src` allows HTTPS APIs.
+/// Styles allow inline (`style=` attributes and the layer-order `<style>`); `connect-src` allows HTTPS APIs unless the
+/// app declares `csp.connectSrc` (see [`app_csp`]).
 pub fn csp(inline_hashes: &[String], extra: &[(String, String)]) -> String {
+    csp_with(inline_hashes, extra, None)
+}
+
+/// The policy of one app: `brain.json` `csp.connectSrc`, when declared, replaces the broad `https: wss:` of `connect-src`.
+/// An invalid entry is dropped, never widened into the broad form (`brain check` reports it as B0796).
+pub fn app_csp(root: &Path, inline_hashes: &[String], extra: &[(String, String)]) -> String {
+    let declared = crate::read_connect_src(root).0;
+    csp_with(inline_hashes, extra, declared.as_deref())
+}
+
+/// `connect`: the sources the app declared; sources the build derives itself (sockets, analytics tags) stay in `extra`.
+pub fn csp_with(inline_hashes: &[String], extra: &[(String, String)], connect: Option<&[String]>) -> String {
     let mut d: Vec<(&str, Vec<String>)> = vec![
         ("default-src", vec!["'self'".into()]),
         ("script-src", vec!["'self'".into()]),
@@ -745,6 +758,10 @@ pub fn csp(inline_hashes: &[String], extra: &[(String, String)]) -> String {
         ("frame-src", vec!["'self'".into()]),
     ];
     d[1].1.extend(inline_hashes.iter().cloned());
+    if let Some(sources) = connect {
+        let at = d.iter().position(|(k, _)| *k == "connect-src").expect("connect-src is a fixed directive");
+        d[at].1 = std::iter::once("'self'".to_string()).chain(sources.iter().cloned()).collect();
+    }
     for (dir, src) in extra {
         // a source with a quote, semicolon or comma would break the header: never pass it through
         if src.contains(['"', ';', ',', '\n']) || dir.contains([' ', ';']) {
@@ -923,6 +940,16 @@ fn walk(base: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_declared_connect_src_replaces_the_broad_sources_and_keeps_own_origin_and_derived_ones() {
+        let derived = vec![("connect-src".to_string(), "wss://live.site.test".to_string())];
+        let broad = csp(&[], &derived);
+        assert!(broad.contains("connect-src 'self' https: wss: wss://live.site.test"), "{broad}");
+        let list = vec!["https://api.site.test".to_string()];
+        let narrow = csp_with(&[], &derived, Some(&list));
+        assert!(narrow.contains("connect-src 'self' https://api.site.test wss://live.site.test;"), "{narrow}");
+        assert!(csp_with(&[], &[], Some(&[])).contains("connect-src 'self';"));
+    }
     use super::*;
 
     fn tmp(name: &str) -> std::path::PathBuf {

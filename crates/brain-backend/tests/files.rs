@@ -95,8 +95,8 @@ async fn declared_buckets_stream_any_type_enforce_policy_and_serve_ranges() {
         "create": ["user"], "read": ["owner", "related", "admin"]
     }))
     .unwrap();
-    let attachments = Bucket::from_contract("attachments", json!({"create": ["user"], "maxBytes": 4096})).unwrap();
-    let banners = Bucket::from_contract("banners", json!({"visibility": "public", "create": ["user"]})).unwrap();
+    let attachments = Bucket::from_contract("attachments", json!({"types": "*", "create": ["user"], "maxBytes": 4096})).unwrap();
+    let banners = Bucket::from_contract("banners", json!({"visibility": "public", "types": "*", "create": ["user"]})).unwrap();
     let root = Scratch(std::env::temp_dir().join(format!("brain-files-http-{}", Uuid::new_v4())));
     let (http, _) = brain_backend::http::router_with_platform(
         pool.clone(),

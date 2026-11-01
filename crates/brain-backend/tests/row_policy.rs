@@ -302,8 +302,8 @@ async fn upload(http: &Router, path: &str, who: &Actor) -> Value {
 #[tokio::test]
 #[ignore = "requires scripts/backend-check.mjs disposable Postgres"]
 async fn related_files_follow_the_get_rule_for_relational_owners_and_hidden_rows() {
-    let bucket = Bucket::from_contract("job_files", json!({"resource":"jobs","field":"title","create":["member","admin"],"read":["related"]})).unwrap();
-    let banners = Bucket::from_contract("banners", json!({"visibility":"public","create":["member"]})).unwrap();
+    let bucket = Bucket::from_contract("job_files", json!({"resource":"jobs","field":"title","types":"*","create":["member","admin"],"read":["related"]})).unwrap();
+    let banners = Bucket::from_contract("banners", json!({"visibility":"public","types":"*","create":["member"]})).unwrap();
     let f = fixture(Platform { buckets: vec![bucket, banners], ..Default::default() }).await;
     let uploaded = upload(&f.http, &format!("/_brain/files/job_files?record={}", f.draft), &f.admin).await;
     let meta = format!("/_brain/files/job_files/{}/meta", uploaded["id"].as_str().unwrap());

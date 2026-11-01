@@ -11,7 +11,7 @@ pub(crate) const TABLE: &[(&str, &[&str], &[&str])] = &[
     ("check", &[], &[]),
     ("fix", &[], &[]),
     ("doctor", &[], &["--fix", "--viewer"]),
-    ("build", &["--site", "--ext", "--env"], &["--report"]),
+    ("build", &["--site", "--ext", "--env"], &["--report", "--strict"]),
     ("run", &["--port", "--host", "--base", "--inspect-port", "--env"], &["--mock", "--profile", "--no-inspect", "--no-trace"]),
     ("dev", &["--port", "--host", "--base", "--inspect-port", "--env"], &["--mock", "--profile", "--no-inspect", "--no-trace"]),
     ("test", &["--timeout"], &["--heap", "--viewer"]),
@@ -46,7 +46,7 @@ pub(crate) const TABLE: &[(&str, &[&str], &[&str])] = &[
         "backend",
         &[
             "--env", "--port", "--origin", "--from", "--to", "--user", "--email", "--provider", "--name", "--scopes", "--expires-days", "--daily",
-            "--monthly", "--status", "--resource", "--before", "--limit", "--days", "--accept",
+            "--monthly", "--status", "--resource", "--before", "--limit", "--days", "--accept", "--file",
         ],
         &["--apply", "--with-workers", "--system"],
     ),

@@ -93,7 +93,68 @@ impl From<&str> for AuthFailure {
     }
 }
 
+/// An imported `$scrypt$ln=..,r=..,p=..$salt$hash` (unpadded base64). The bounds keep one login from taking a server down.
+pub struct LegacyScrypt {
+    params: scrypt::Params,
+    salt: Vec<u8>,
+    hash: Vec<u8>,
+}
+pub fn legacy_scrypt(stored: &str) -> Option<LegacyScrypt> {
+    let mut parts = stored.strip_prefix("$scrypt$")?.split('$');
+    let (settings, salt, hash) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() {
+        return None;
+    }
+    let (mut ln, mut r, mut p) = (None, None, None);
+    for pair in settings.split(',') {
+        match pair.split_once('=')? {
+            ("ln", v) => ln = v.parse::<u8>().ok(),
+            ("r", v) => r = v.parse::<u32>().ok(),
+            ("p", v) => p = v.parse::<u32>().ok(),
+            _ => return None,
+        }
+    }
+    let (ln, r, p) = (ln?, r?, p?);
+    if !(1..=20).contains(&ln) || !(1..=32).contains(&r) || !(1..=8).contains(&p) || (128u64 * u64::from(r)) << ln > 1 << 30 {
+        return None;
+    }
+    let (salt, hash) = (unpadded_base64(salt)?, unpadded_base64(hash)?);
+    if salt.is_empty() || salt.len() > 64 || !(16..=64).contains(&hash.len()) {
+        return None;
+    }
+    Some(LegacyScrypt { params: scrypt::Params::new(ln, r, p, hash.len()).ok()?, salt, hash })
+}
+impl LegacyScrypt {
+    fn verify(&self, password: &[u8]) -> bool {
+        let mut out = vec![0u8; self.hash.len()];
+        scrypt::scrypt(password, &self.salt, &self.params, &mut out).is_ok() && bool::from(subtle::ConstantTimeEq::ct_eq(out.as_slice(), self.hash.as_slice()))
+    }
+}
+fn unpadded_base64(text: &str) -> Option<Vec<u8>> {
+    let (mut out, mut bits, mut buffer) = (Vec::with_capacity(text.len() * 3 / 4), 0u32, 0u32);
+    for c in text.bytes() {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' | b'-' => 62,
+            b'/' | b'_' => 63,
+            _ => return None,
+        };
+        buffer = (buffer << 6) | u32::from(v);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buffer >> bits) as u8);
+        }
+    }
+    Some(out)
+}
+
 impl Auth {
+    pub fn unusable_hash(&self) -> &str {
+        &self.dummy
+    }
     pub async fn new(pool: PgPool) -> Result<Self, String> {
         Self::new_with_role(pool, &crate::auth_flows::RolesConfig::default().signup_role).await
     }
@@ -226,18 +287,27 @@ impl Auth {
             .map_err(|_| "Password workers busy; retry shortly")?;
         let valid = tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            PasswordHash::new(&hash).is_ok_and(|h| {
-                Argon2::default()
-                    .verify_password(password.as_bytes(), &h)
-                    .is_ok()
-            })
+            let legacy = legacy_scrypt(&hash);
+            let valid = match &legacy {
+                Some(stored) => stored.verify(password.as_bytes()),
+                None => PasswordHash::new(&hash).is_ok_and(|h| Argon2::default().verify_password(password.as_bytes(), &h).is_ok()),
+            };
+            // An imported hash becomes a native one at its first successful login, whatever the password's length.
+            let upgrade = (valid && legacy.is_some()).then(|| Argon2::default().hash_password(password.as_bytes()).map(|h| h.to_string()).ok()).flatten();
+            (valid, upgrade.map(|new| (hash, new)))
         })
         .await
         .map_err(|_| "Password worker failed")?;
+        let (valid, upgrade) = valid;
         if !valid {
             return Ok(None);
         }
         let Some(row) = row else { return Ok(None) };
+        if let Some((old, new)) = upgrade {
+            // The guard on the old hash keeps a password changed meanwhile; a failure here costs one more verification next time.
+            let _ = sqlx::query("UPDATE _brain_users SET password_hash=$2,updated_at=now() WHERE id=$1 AND password_hash=$3")
+                .bind(row.get::<Uuid, _>("id")).bind(new).bind(old).execute(&self.pool).await;
+        }
         let user = User {
             id: row.get("id"),
             email: row.get("email"),

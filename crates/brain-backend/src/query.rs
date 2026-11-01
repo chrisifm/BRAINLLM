@@ -915,14 +915,14 @@ fn push_predicate(q: &mut QueryBuilder<Postgres>, f: &Filter) {
         op => {
             let sql = match op {
                 "eq" => "=",
-                "ne" => "<>",
+                "ne" => " IS DISTINCT FROM ",
                 "gt" => ">",
                 "gte" => ">=",
                 "lt" => "<",
                 _ => "<=",
             };
             if op == "ne" && f.kind == Kind::Text {
-                q.push(format!("((data->>'{field}')<>"));
+                q.push(format!("((data->>'{field}') IS DISTINCT FROM "));
                 if let Operand::Value(v) = first {
                     q.push_bind(v.clone());
                 }

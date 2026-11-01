@@ -1,0 +1,19 @@
+{
+  "id": "backend-import",
+  "kind": "change",
+  "title": "brain backend import keeps ids, owners and legacy passwords",
+  "why": "Moving an existing application needed its accounts and records to keep their identifiers, and its users to keep their passwords, without a hand-written script against internal tables.",
+  "changelog": [
+    "`brain backend import` brings accounts"
+  ],
+  "guide": "docs/backend/import.md",
+  "codes": [
+    "B0798"
+  ],
+  "affects": [
+    "server/resources/*/schema.jsbrain"
+  ],
+  "steps": [
+    "Optional: follow docs/backend/import.md when moving data from another system."
+  ]
+}

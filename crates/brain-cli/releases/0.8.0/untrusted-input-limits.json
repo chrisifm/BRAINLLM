@@ -1,0 +1,18 @@
+{
+  "id": "untrusted-input-limits",
+  "kind": "change",
+  "title": "The MCP server caps a stdin line and the server settles aborted bodies",
+  "why": "One unbounded line could grow `brain mcp` without limit and invalid UTF-8 ended the session; a client that disconnected mid-body left its request reader pending forever.",
+  "changelog": [
+    "`brain mcp` refuses a stdin line",
+    "A request body that is aborted"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "codes": [],
+  "affects": [
+    "brain.json"
+  ],
+  "steps": [
+    "No action needed."
+  ]
+}

@@ -25,6 +25,7 @@
 @unreachable B0782 printed when the server starts
 @unreachable B0785 reported by `brain backend` commands
 @unreachable B0787 reported by `brain backend migrate` and `serve`
+@unreachable B0798 reported by `brain backend import`
 
 ### B0701 server module in client code
 @expect B0701 comp/x.brain 3:17
@@ -286,6 +287,25 @@ PUBLIC_SITE_URL=ftp://shop.example.org
 @file server/files/uploads.jsbrain
 <meta server>
 export default { maxBytes: '1mb' }
+
+### B0795 no connect-src allowlist
+@expect B0795 brain.json 1:1
+@file brain.json
+{ "name": "Corpus" }
+
+### B0796 invalid connect-src entry
+@expect B0796 brain.json 1:21
+@file brain.json
+{ "name": "Corpus", "csp": { "connectSrc": ["https:"] } }
+
+### B0797 internal field returned to readers
+@expect B0797 server/resources/items/schema.jsbrain 1:1
+@file server/resources/items/schema.jsbrain
+<meta server>
+export default { title: 'str!', password_hash: 'str' }
+@file server/resources/items/policy.jsbrain
+<meta server>
+export default { read: ['admin'], create: ['admin'], update: ['admin'], delete: ['admin'] }
 
 ### B0772 handler default export
 @expect B0772 server/routes/pay/handler.jsbrain 1:1

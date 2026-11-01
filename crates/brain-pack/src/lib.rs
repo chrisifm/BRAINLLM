@@ -202,6 +202,63 @@ pub fn read_server_limits(root: &Path) -> Result<ServerLimits, String> {
     Ok(limits)
 }
 
+/// Why one `csp.connectSrc` entry cannot be a `connect-src` source; `None` when it can. Only exact TLS origins (a leading
+/// `*.` allowed) and local loopback origins: a bare scheme would bring back the broad form the list exists to replace.
+pub fn connect_source_problem(source: &str) -> Option<&'static str> {
+    let Some((scheme, authority)) = source.split_once("://") else { return Some("it is not an origin such as https://api.example.com") };
+    let (host, port) = authority.split_once(':').unwrap_or((authority, ""));
+    if !port.is_empty() && port != "*" && !(port.bytes().all(|b| b.is_ascii_digit()) && port.parse::<u16>().is_ok()) {
+        return Some("its port is not a number");
+    }
+    if authority.ends_with(':') {
+        return Some("its port is empty");
+    }
+    let name = host.strip_prefix("*.").unwrap_or(host);
+    let valid_name = !name.is_empty() && name.split('.').all(|l| !l.is_empty() && l.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'));
+    if !valid_name {
+        return Some("it needs a lowercase host and nothing after it: no path, query, quote or trailing slash");
+    }
+    let loopback = matches!(host, "localhost" | "127.0.0.1");
+    match scheme {
+        "https" | "wss" => None,
+        "http" | "ws" if loopback => None,
+        "http" | "ws" => Some("plain http and ws are only for localhost and 127.0.0.1"),
+        _ => Some("its scheme must be https or wss"),
+    }
+}
+
+/// brain.json `csp.connectSrc`: `(declared valid sources, problems)`. `None` when the app declares no list; an invalid
+/// entry is left out and reported (B0796), so a mistake narrows the policy and never widens it.
+pub fn read_connect_src(root: &Path) -> (Option<Vec<String>>, Vec<String>) {
+    const FIX: &str = "write \"csp\": { \"connectSrc\": [\"https://api.example.com\", \"wss://live.example.com\"] }, or [] for the site's own origin only";
+    let Ok(src) = std::fs::read_to_string(root.join("brain.json")) else { return (None, vec![]) };
+    let Ok(json) = brain_mcp::Json::parse(&src) else { return (None, vec![]) }; // malformed brain.json is reported elsewhere
+    let Some(csp) = json.get("csp") else { return (None, vec![]) };
+    let brain_mcp::Json::Obj(entries) = csp else { return (Some(vec![]), vec![format!("brain.json `csp` must be an object; fix: {FIX}")]) };
+    let mut problems: Vec<String> = entries.iter().filter(|(k, _)| k != "connectSrc").map(|(k, _)| format!("brain.json `csp.{k}` is not a CSP setting; fix: {FIX}")).collect();
+    let Some(list) = csp.get("connectSrc") else { return (None, problems) };
+    let brain_mcp::Json::Arr(items) = list else {
+        problems.push(format!("brain.json `csp.connectSrc` must be a list of origins; fix: {FIX}"));
+        return (Some(vec![]), problems);
+    };
+    let mut sources = Vec::new();
+    for item in items {
+        match item.as_str() {
+            Some(text) => match connect_source_problem(text) {
+                None if !sources.iter().any(|s| s == text) => sources.push(text.to_string()),
+                None => {}
+                Some(why) => problems.push(format!("brain.json `csp.connectSrc` has {text:?}: {why}; fix: {FIX}")),
+            },
+            None => problems.push(format!("brain.json `csp.connectSrc` entries are strings; fix: {FIX}")),
+        }
+    }
+    if sources.len() > 64 {
+        sources.truncate(64);
+        problems.push(format!("brain.json `csp.connectSrc` lists more than 64 origins; fix: keep the origins this site really calls, and call the rest from the server"));
+    }
+    (Some(sources), problems)
+}
+
 /// brain.json `"ext"` (#26): `"brain"` publishes `.brain`/`.jsbrain`/`.cssbrain`; anything else is `web`.
 pub fn read_ext(root: &Path) -> Ext {
     if read_json_str(root, "ext").as_deref() == Some("brain") { Ext::Brain } else { Ext::Web }
@@ -1982,7 +2039,7 @@ fn build_inner_with_options(
     // server.mjs answers /_health and X-Brain-Build with it (written after the signature: see cache::apply)
     if let Some(mut m) = files.remove("_server/manifest.json") {
         // `csp`: the site policy without inline hashes; server.mjs adds its per-response nonce to script-src (RUNTIME)
-        let policy = prerender_json(&cache::csp(&[], &post_csp));
+        let policy = prerender_json(&cache::app_csp(&input.root, &[], &post_csp));
         // `base` (#148): server.mjs strips it before routing; routes stay as the app writes them
         m = m.replacen("{\"v\":1,", &format!("{{\"v\":1,\"build\":\"{signature}\",\"base\":{},\"csp\":{policy},", prerender_json(&base)), 1);
         // `server` (§11.1): brain.json body/time/rate limits; an invalid value keeps the defaults (brain check: B0707)

@@ -65,9 +65,26 @@ fn called_address<'a>(e: &'a Expr) -> Option<(&'a str, Span)> {
     Some((literal(args.first()?)?, span))
 }
 
+/// True when a `csp.connectSrc` list covers this address (exact origin, or a `*.` source covering a subdomain).
+fn listed(address: &str, connect: &[String]) -> bool {
+    let (scheme, rest) = address.split_once("://").unwrap_or(("", address));
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("").rsplit('@').next().unwrap_or("").to_ascii_lowercase();
+    let scheme = scheme.to_ascii_lowercase();
+    connect.iter().any(|source| {
+        let Some((want_scheme, want_host)) = source.split_once("://") else { return false };
+        // connect-src: an https source also covers wss on the same host, and the reverse does not hold
+        let scheme_ok = want_scheme == scheme || (want_scheme, scheme.as_str()) == ("https", "wss") || (want_scheme, scheme.as_str()) == ("http", "ws");
+        scheme_ok && match want_host.strip_prefix("*.") {
+            Some(parent) => host.strip_suffix(parent).is_some_and(|left| left.ends_with('.') && left.len() > 1),
+            None => want_host == host,
+        }
+    })
+}
+
 /// One diagnostic per literal call to an origin outside `declared`. A plain `http:`/`ws:` address is a Warning because
-/// the production `connect-src` blocks it; `https:`/`wss:` is an Info because only that server can say whether it allows us.
-pub fn check(root: &Path, declared: &[String]) -> Vec<Diag> {
+/// the production `connect-src` blocks it; `https:`/`wss:` is an Info because only that server can say whether it allows
+/// us, and a Warning when `connect` (brain.json `csp.connectSrc`) is declared and does not cover it.
+pub fn check(root: &Path, declared: &[String], connect: Option<&[String]>) -> Vec<Diag> {
     let mut out = Vec::new();
     for (rel, c) in crate::doctor::load_files(root) {
         if !client_file(&rel, &c) {
@@ -80,12 +97,18 @@ pub fn check(root: &Path, declared: &[String]) -> Vec<Diag> {
         for e in exprs {
             let Some((address, span)) = called_address(e) else { continue };
             let Some(origin) = absolute_origin(address) else { continue };
-            if declared.contains(&origin) {
+            if declared.contains(&origin) || connect.is_some_and(|list| listed(address, list)) {
                 continue;
             }
-            let (msg, fix, level) = if origin.starts_with("http://") {
+            let (msg, fix, level) = if let (Some(_), false) = (connect, origin.starts_with("http://")) {
                 (
-                    format!("this page calls {origin}, which is plain http and not a declared origin; the production `connect-src 'self' https: wss:` blocks it and the browser reports only a network error"),
+                    format!("this page calls {origin}, which is outside `csp.connectSrc`, so the production `connect-src` blocks it and the browser reports only a network error"),
+                    format!("add {origin} to `csp.connectSrc` in brain.json, or call it from a server function. Run brain explain B0746"),
+                    Severity::Warning,
+                )
+            } else if origin.starts_with("http://") {
+                (
+                    format!("this page calls {origin}, which is plain http and not a declared origin; the production `connect-src` blocks it and the browser reports only a network error"),
                     format!("use a relative path through your own server, or the https address of {origin}. Run brain explain B0746"),
                     Severity::Warning,
                 )
@@ -131,7 +154,7 @@ mod tests {
     #[test]
     fn undeclared_literal_calls_are_reported_by_their_scheme() {
         let root = app(&[("views/shop.brain", "<script>\nasync function a() { return fetch('http://api.shop.example.test/items') }\nasync function b() { return fetch('https://pay.example.test/x') }\n</script>\n<p>Shop</p>\n")]);
-        let found = check(&root, &[]);
+        let found = check(&root, &[], None);
         std::fs::remove_dir_all(&root).ok();
         assert_eq!(found.len(), 2, "{found:?}");
         let plain = found.iter().find(|d| d.msg.contains("http://api.shop.example.test")).unwrap();
@@ -149,7 +172,7 @@ mod tests {
             ("server/mail.jsbrain", "<meta server>\nexport async function send() { return fetch('https://mail.example.test/x') }\n"),
             ("lib/util.jsbrain", "export function get() { return fetch('https://other.example.test/x') }\n"),
         ]);
-        let found = check(&root, &["https://api.shop.example.test".to_string()]);
+        let found = check(&root, &["https://api.shop.example.test".to_string()], None);
         std::fs::remove_dir_all(&root).ok();
         assert!(found.is_empty(), "{found:?}");
     }

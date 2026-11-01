@@ -80,7 +80,25 @@ pub fn check(app: &Path) -> Vec<Diag> {
         }
     }
     let declared: Vec<String> = http.iter().chain(&cors).chain(&sites).filter_map(|o| brain_check::origins::absolute_origin(o)).collect();
-    diags.extend(brain_check::origins::check(app, &declared));
+    let (connect, problems) = brain_pack::read_connect_src(app);
+    let at = span_of(&source, "\"csp\"");
+    for problem in problems {
+        let (msg, fix) = problem.split_once("; fix: ").unwrap_or((problem.as_str(), "list exact origins"));
+        diags.push(Diag::new("B0796", BRAIN_JSON, at, msg, fix));
+    }
+    // A brain.json that cannot be read has its own diagnostic and says nothing about the policy.
+    if connect.is_none() && json.is_object() {
+        let mut diag = Diag::new(
+            "B0795",
+            BRAIN_JSON,
+            Span { line: 1, col: 1, ..Default::default() },
+            "pages may call any HTTPS origin, because brain.json declares no `csp.connectSrc`; a script injected into a page could send data anywhere",
+            "list the origins pages call: \"csp\": { \"connectSrc\": [\"https://api.example.com\"] }, or [] for the site's own origin only. Run brain explain B0795",
+        );
+        diag.level = Severity::Warning;
+        diags.push(diag);
+    }
+    diags.extend(brain_check::origins::check(app, &declared, connect.as_deref()));
     diags
 }
 
@@ -102,9 +120,19 @@ mod tests {
     }
     fn run(files: &[(&str, &str)]) -> Vec<Diag> {
         let root = app(files);
-        let found = check(&root);
+        let mut found = check(&root);
         fs::remove_dir_all(&root).ok();
+        found.retain(|d| d.code != "B0795"); // its own test below; these cases are about origins
         found
+    }
+
+    #[test]
+    fn only_an_app_that_declares_no_list_gets_b0795() {
+        let root = app(&[("brain.json", "{}")]);
+        assert!(check(&root).iter().any(|d| d.code == "B0795" && d.level == Severity::Warning));
+        fs::write(root.join("brain.json"), r#"{"csp":{"connectSrc":[]}}"#).unwrap();
+        assert!(check(&root).iter().all(|d| d.code != "B0795"));
+        fs::remove_dir_all(&root).ok();
     }
 
     #[test]

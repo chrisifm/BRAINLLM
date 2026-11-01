@@ -15,7 +15,7 @@ One literal file per bucket: `server/files/<name>.jsbrain`. The file name is the
 export default {
   visibility: 'private',          // 'private' (default) or 'public'
   maxBytes: '25mb',               // integer bytes or '512kb' / '25mb' / '1gb'; default 25 MiB, ceiling 2 GiB
-  types: '*',                     // MIME patterns, or '*' for any type; omitting it warns B0770
+  types: '*',                     // MIME patterns, or '*' for any type; required (B0770)
   create: ['user'],               // roles that may upload (default ['admin'])
   read: ['owner', 'admin'],       // default; also 'related' when a resource is declared
   delete: ['owner', 'admin']      // default
@@ -39,7 +39,7 @@ export default {
 |---|---|
 | `visibility` | `public` downloads need no session and are cached `public, max-age=31536000, immutable` (an id never changes content). `private` downloads require a grant and are `no-store`. |
 | `maxBytes` | Per-bucket limit enforced while streaming; the request is cut at the first byte over the limit (413). |
-| `types` | `application/pdf`, `image/*`, or `'*'` for any type. Matching uses the type detected from content (below), never the file name. Omitting it, or `[]`, still accepts any type and warns B0770. |
+| `types` | `application/pdf`, `image/*`, or `'*'` for any type. Matching uses the type detected from content (below), never the file name. Required: omitting it, or `[]`, fails `brain check` with B0770 and `brain backend serve` refuses to start. |
 | `resource` / `field` | Link files to records of a declared resource. |
 | `read` / `create` / `delete` | Configured role names, `owner` (uploader) and `related` (resource-linked buckets). `create` takes role names only. |
 
