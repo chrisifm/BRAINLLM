@@ -70,7 +70,7 @@ In production set `BRAIN_SECRET` (32+ random bytes) in the `[production]` sectio
   `brain run` uses development, `brain build` production, `--env staging` another.
 - Server: `process.env.KEY`. Client: only `process.env.PUBLIC_KEY` (B0702 otherwise; a secret in a `PUBLIC_` key is B0723).
 - `.brain_env` is never committed (B0725); `.brain_env.example` lists its keys and the keys the code reads (B0727 when out of sync; `brain doctor --fix` writes it).
-- An empty key in the build environment fails the build (B0720). A variable the app works without is declared `KEY?=`: it may stay empty, and the program sees it as unset. A secret a route or webhook contract names stays required: remove that route in environments without it (B0790). The line that wins for an environment decides, so `[production]` can require what the shared block leaves optional. MCP `brain_env_keys` lists keys, never values.
+- An empty key in the build environment fails the build (B0720). A variable the app works without is declared `KEY?=`: it may stay empty, and the program sees it as unset. A route or webhook whose secret is absent starts disabled: it answers 503, runs no handler and logs a `route-disabled` event; a route secret held too short stops the server (B0790). The line that wins for an environment decides, so `[production]` can require what the shared block leaves optional. MCP `brain_env_keys` lists keys, never values.
 
 ## Errors
 - `throw notFound()` in `load` → 404 with `views/404.brain`; `throw redirect('/x')` → 303; `deny('reason')` in a

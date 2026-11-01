@@ -20,6 +20,8 @@ pub struct Platform {
     /// Application-declared routes and the executor that runs their handlers.
     pub routes: Vec<crate::routes::Route>,
     pub handlers: Option<crate::routes::Handlers>,
+    /// B0790: inbound webhook endpoints whose signing key is not configured; they answer 503.
+    pub disabled_webhooks: Vec<String>,
     /// Shared rate windows and cross-process socket fan-out (`cluster` in `server/platform.jsbrain`).
     pub cluster: crate::cluster::Cluster,
     /// Declared public caching of anonymous resource reads (`server/cache.jsbrain`).

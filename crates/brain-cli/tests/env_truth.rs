@@ -205,7 +205,7 @@ fn with_stripe_route(a: &App, env: &str) {
 #[test]
 fn a_missing_route_secret_stops_serve_once_with_its_code_and_a_no_restart_status() {
     let a = app("config-exit");
-    for secret in ["", "PAYMENTS_WEBHOOK_SECRET=\n", "PAYMENTS_WEBHOOK_SECRET?=\n", "PAYMENTS_WEBHOOK_SECRET=short-value\n"] {
+    for secret in ["PAYMENTS_WEBHOOK_SECRET=short-value\n"] {
         // nothing listens on this port: reaching the database would take a minute and report it instead
         with_stripe_route(&a, &format!("DATABASE_URL=postgres://u@127.0.0.1:1/none\n{secret}"));
         let started = std::time::Instant::now();
@@ -232,9 +232,28 @@ fn the_empty_key_guidance_names_the_optional_form_and_what_it_does_not_cover() {
     fs::write(a.0.join(".brain_env"), "EMPTY_KEY=\n").unwrap();
     let (ok, out) = brain(&a.0, &["build", "--progress=off"]);
     assert!(!ok && out.contains("EMPTY_KEY?=") && out.contains("B0790"), "{out}");
-    with_stripe_route(&a, "DATABASE_URL=postgres://u@127.0.0.1:1/none\nPAYMENTS_WEBHOOK_SECRET?=\n");
-    let (ok, out) = brain(&a.0, &["backend", "serve", "--env", "development", "--port", "0"]);
-    assert!(!ok && out.contains("B0790") && out.contains("?="), "`KEY?=` does not disable the route: {out}");
+}
+
+// A missing secret costs that route, not the whole server, and says so at start instead of looping under a supervisor.
+#[test]
+fn an_absent_route_secret_starts_with_the_route_disabled_and_warns() {
+    use std::io::BufRead;
+    let a = app("disabled-route");
+    for secret in ["", "PAYMENTS_WEBHOOK_SECRET=\n", "PAYMENTS_WEBHOOK_SECRET?=\n"] {
+        with_stripe_route(&a, &format!("DATABASE_URL=postgres://u@127.0.0.1:1/none\n{secret}"));
+        let mut child = Command::new(bin()).args(["backend", "serve", "--env", "development", "--port", "0"]).current_dir(&a.0).env("NO_COLOR", "1").env_remove("DATABASE_URL").env_remove("NODE_ENV").env_remove("PAYMENTS_WEBHOOK_SECRET").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).spawn().unwrap();
+        let mut seen = String::new();
+        for line in std::io::BufReader::new(child.stderr.take().unwrap()).lines().map_while(Result::ok) {
+            seen.push_str(&line);
+            seen.push('\n');
+            if line.contains("route-disabled") || seen.lines().count() > 8 { break; }
+        }
+        child.kill().ok();
+        child.wait().ok();
+        assert!(seen.contains("route-disabled") && seen.contains("B0790") && seen.contains("PAYMENTS_WEBHOOK_SECRET") && seen.contains("503"), "{secret:?}: {seen}");
+    }
+    let (_, out) = brain(&a.0, &["check"]);
+    assert!(out.contains("B0790") && out.contains("503"), "`brain check` says what start will do: {out}");
 }
 
 // The worker a deploy starts by hand: the message has to say which file it read and how to pass the environment.

@@ -111,6 +111,10 @@ async fn limit(app: &App, state: &State, route: &str, subject: &str, rate: &crat
 }
 
 async fn serve(app: App, state: Arc<State>, route: Arc<Route>, req: Request) -> Result<Response> {
+    // Fails closed before anything looks at the request: a sender keeps retrying and no handler runs unverified.
+    if route.disabled {
+        return Ok(with_retry(error(StatusCode::SERVICE_UNAVAILABLE, "ROUTE_DISABLED", "This route's secret is not configured on the server; retry after the Retry-After delay").into_response(), 300));
+    }
     let rid = super::request_reference();
     let client = req.extensions().get::<ClientIp>().map(|c| c.0.to_string());
     let (mut parts, body) = req.into_parts();

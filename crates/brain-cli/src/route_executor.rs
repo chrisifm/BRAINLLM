@@ -39,10 +39,17 @@ fn spawn(root: &Path, vars: &[(String, String)], budget: Duration, production: b
     })
 }
 
-/// Reads every route contract. `env` resolves signing secret names.
+/// Reads every route contract. `env` resolves signing secret names. A route whose secret is absent comes back disabled
+/// (503, its handler never runs); one held too short stays an error, since a weak signature would let forgeries in.
 pub fn contracts(root: &Path, environment: &str) -> Result<Vec<Route>, String> {
     let lookup = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty()).or_else(|| crate::env::value(root, environment, key));
-    read_routes(root, &lookup)
+    let absent: Vec<String> = secret_problems(root, environment).into_iter().filter(|p| p.disables).filter_map(|p| p.route).collect();
+    let mut routes = read_routes(root, &|key: &str| lookup(key).or_else(|| (!absent.is_empty()).then(|| "0".repeat(32))))?;
+    // The stand-in above only lets a disabled contract parse; a route that really holds its secrets re-reads them.
+    for route in &mut routes {
+        route.disabled = absent.contains(&route.name);
+    }
+    Ok(routes)
 }
 
 /// Reads every route contract without its secrets: validation and documentation hold whether or not this machine has
@@ -51,9 +58,17 @@ pub fn declared(root: &Path) -> Result<Vec<Route>, String> {
     read_routes(root, &|_: &str| Some("0".repeat(32)))
 }
 
-/// B0790: routes whose declared secret this environment does not hold, or holds too short: `(file, message)`.
+/// One B0790 finding. Absent secrets disable the route or endpoint; anything else stops the server.
+pub struct SecretProblem {
+    pub file: String,
+    pub message: String,
+    pub disables: bool,
+    pub route: Option<String>,
+}
+
+/// B0790: routes whose declared secret this environment does not hold, or holds too short.
 /// Each message names the variable and never its value. An invalid contract is B0735's and is skipped here.
-pub fn secret_problems(root: &Path, environment: &str) -> Vec<(String, String)> {
+pub fn secret_problems(root: &Path, environment: &str) -> Vec<SecretProblem> {
     let lookup = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty()).or_else(|| crate::env::value(root, environment, key));
     let names = route_folders(root).unwrap_or_default();
     let mut out = Vec::new();
@@ -63,8 +78,14 @@ pub fn secret_problems(root: &Path, environment: &str) -> Vec<(String, String)> 
         if Route::from_contract(&name, &value, &|_: &str| Some("0".repeat(32))).is_err() {
             continue;
         }
-        if let Err(message) = Route::from_contract(&name, &value, &lookup) {
-            out.push((relative, message));
+        let absent = std::cell::Cell::new(false);
+        let recording = |key: &str| {
+            let found = lookup(key);
+            absent.set(absent.get() || found.is_none());
+            found
+        };
+        if let Err(message) = Route::from_contract(&name, &value, &recording) {
+            out.push(SecretProblem { file: relative, message, disables: absent.get(), route: Some(name) });
         }
     }
     out

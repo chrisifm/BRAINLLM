@@ -87,6 +87,7 @@ pub struct App {
     google: Option<crate::google::Google>,
     auth_flows: crate::auth_flows::Flows,
     webhooks: Option<crate::webhooks::Webhooks>,
+    disabled_webhooks: Arc<Vec<String>>,
     before_hooks: Option<crate::before_hooks::Executor>,
     resources: Arc<BTreeMap<String, Resource>>,
     jobs: Arc<BTreeMap<String, Resource>>,
@@ -467,6 +468,7 @@ pub async fn router_full(
     let cache_policy = Arc::new(platform.cache.clone());
     let cors_max_age = platform.edge.cors_max_age;
     let (custom_routes, custom_handlers) = (platform.routes.clone(), platform.handlers.clone());
+    let disabled_webhooks = Arc::new(platform.disabled_webhooks.clone());
     let socket_origins = config.sockets.as_ref().map(|s| s.allowed().to_vec()).unwrap_or_default();
     if let Some(origin) = socket_origins.iter().find(|origin| !config.origins.contains(origin)) {
         return Err(format!("B0745: Socket origins must be an explicit subset of backend HTTP origins: {} has {origin:?}, HTTP origins are {:?}; fix: add {origin:?} to {} or remove it from {}", crate::origins::SOCKET_KEY, config.origins, crate::origins::BRAIN_JSON_KEY, crate::origins::SOCKET_KEY));
@@ -625,6 +627,7 @@ pub async fn router_full(
         .map(|cfg| crate::api_keys::Keys::new(pool.clone(), cfg).map(|keys| keys.shared(shared)))
         .transpose()?;
     let app = App {
+        disabled_webhooks,
         organizations: Arc::new(platform_organizations),
         captcha: Arc::new(platform_captcha),
         cluster: crate::cluster::Cluster { shared },
@@ -2440,6 +2443,12 @@ async fn webhook_inbound(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response> {
+    // A sender retries a 503, and would give up on a 404 while the key is being set.
+    if app.disabled_webhooks.contains(&name) {
+        let mut response = Error::new(StatusCode::SERVICE_UNAVAILABLE, "WEBHOOK_DISABLED", "This webhook's signing key is not configured on the server; retry after the Retry-After delay").into_response();
+        response.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from(300u64));
+        return Ok(response);
+    }
     let webhooks = app.webhooks.as_ref().ok_or_else(Error::missing)?;
     if headers
         .get(header::CONTENT_TYPE)

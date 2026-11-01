@@ -117,15 +117,20 @@ pub fn metadata(root: &Path) -> Result<Value, String> {
         json!({"configuredSource":true,"runtimeReadiness":"unverified","sourceFile":SOURCE,"environmentReferences":names(&config),"inbound":config.inbound.iter().map(|(name,h)|json!({"name":name,"queue":h.queue})).collect::<Vec<_>>(),"outbound":config.outbound.iter().map(|(name,h)|json!({"name":name,"allowedOrigins":h.allowed_origins})).collect::<Vec<_>>(),"automaticResourceSubscription":false}),
     )
 }
-/// B0790: why `load` would refuse the keys of this environment: every missing reference at once, then the first key or
-/// URL that does not parse. Never a value. A contract that does not parse is B0735's and yields nothing here.
-pub fn secret_problem(root: &Path, environment: &str) -> Option<(String, String)> {
-    let names = references(root).ok()?;
-    let missing: Vec<String> = names.into_iter().filter(|name| crate::env::value(root, environment, name).is_none()).collect();
-    if !missing.is_empty() {
-        return Some((SOURCE.to_string(), format!("{SOURCE}: set {} in the environment or .brain_env", missing.join(", "))));
+/// B0790: the endpoints this environment disables because a key is absent, then why `load` would refuse what remains.
+/// Never a value. A contract that does not parse is B0735's and yields nothing here.
+pub fn secret_problem(root: &Path, environment: &str) -> Option<(String, String, bool)> {
+    let config = definition(root).ok()??;
+    let missing: Vec<String> = names(&config).into_iter().filter(|name| crate::env::value(root, environment, name).is_none()).collect();
+    if let Err(message) = load(root, environment) {
+        return Some((SOURCE.to_string(), message, false));
     }
-    load(root, environment).err().map(|message| (SOURCE.to_string(), message))
+    (!missing.is_empty()).then(|| (SOURCE.to_string(), format!("{SOURCE}: set {} in the environment or .brain_env", missing.join(", ")), true))
+}
+/// Inbound endpoints that answer 503 because this environment lacks one of their signing keys.
+pub fn disabled_inbound(root: &Path, environment: &str) -> Vec<String> {
+    let Ok(Some(config)) = definition(root) else { return vec![] };
+    config.inbound.iter().filter(|(_, h)| h.signing_keys.iter().any(|k| crate::env::value(root, environment, k).is_none())).map(|(name, _)| name.clone()).collect()
 }
 fn value(root: &Path, environment: &str, name: &str) -> Result<String, String> {
     crate::env::value(root, environment, name).ok_or_else(|| {
@@ -137,10 +142,18 @@ fn value(root: &Path, environment: &str, name: &str) -> Result<String, String> {
 fn key(root: &Path, environment: &str, name: &str) -> Result<Secret, String> {
     Secret::from_hex(&value(root,environment,name)?).map_err(|_|format!("{SOURCE}: private {name} must contain an independently generated 32-byte key encoded as 64 hex characters"))
 }
+/// An endpoint without its keys is left out, and with none left nothing needs the encryption key. Endpoints that remain
+/// without it would store deliveries they cannot protect, so that stops the server.
 pub fn load(root: &Path, environment: &str) -> Result<Option<Config>, String> {
-    let Some(config) = definition(root)? else {
+    let Some(mut config) = definition(root)? else {
         return Ok(None);
     };
+    let held = |name: &String| crate::env::value(root, environment, name).is_some();
+    config.inbound.retain(|_, h| h.signing_keys.iter().all(held));
+    config.outbound.retain(|_, h| held(&h.url_env) && held(&h.signing_key));
+    if config.inbound.is_empty() && config.outbound.is_empty() {
+        return Ok(None);
+    }
     let keys = config
         .encryption_keys
         .iter()
@@ -193,6 +206,20 @@ mod tests {
         ));
         std::fs::create_dir_all(root.join("server/webhooks")).unwrap();
         App(root)
+    }
+    #[test]
+    fn an_endpoint_without_its_keys_is_disabled_and_endpoints_left_without_encryption_stop() {
+        let app = app();
+        let key = "a".repeat(64);
+        std::fs::write(app.0.join(SOURCE), "export default { encryptionKeys: ['ENC'], inbound: { orders: { queue: 'order_received', signingKeys: ['SIGN_ORDERS'] }, other: { queue: 'order_received', signingKeys: ['SIGN_OTHER'] } } }\n").unwrap();
+        std::fs::write(app.0.join(".brain_env"), "").unwrap();
+        assert!(load(&app.0, "development").unwrap().is_none(), "no endpoint left needs no encryption");
+        assert!(secret_problem(&app.0, "development").unwrap().2);
+        assert_eq!(disabled_inbound(&app.0, "development").len(), 2);
+        std::fs::write(app.0.join(".brain_env"), format!("SIGN_ORDERS={key}\n")).unwrap();
+        let (_, message, disables) = secret_problem(&app.0, "development").unwrap();
+        assert!(!disables && message.contains("ENC") && !message.contains(&key), "{message}");
+        assert_eq!(disabled_inbound(&app.0, "development"), vec!["other"]);
     }
     #[test]
     fn metadata_is_available_without_credentials_and_never_resolves_private_urls_or_keys() {
