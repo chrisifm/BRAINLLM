@@ -1126,8 +1126,8 @@ fn seo_object(g: &mut Gen, c: &Component) -> Option<String> {
         if matches!(m.name.as_str(), "props" | "emits" | "expose" | "export" | "tools" | "server" | "fallback" | "cache" | "http" | "client" | "budget" | "route") {
             break;
         }
-        // `keyword` is for the audit only: never rendered.
-        if m.name == "keyword" {
+        // `keyword` is for the audit only, `query` for the build's route policy: never rendered.
+        if m.name == "keyword" || m.name == "query" {
             continue;
         }
         let v = match (&m.expr, &m.value) {

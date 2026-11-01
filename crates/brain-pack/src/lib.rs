@@ -1639,7 +1639,7 @@ fn build_inner_with_options(
         let mut seo: Vec<(String, String)> = app_seo.iter().filter(|(k, _)| k != "title" && k != "canonical" && k != "description").cloned().collect();
         let over = |seo: &mut Vec<(String, String)>, kv: &[(String, String)]| {
             for (k, v) in kv {
-                if k == "seo" || k == "keyword" || v.starts_with('{') && k != "jsonld" {
+                if k == "seo" || k == "keyword" || k == "query" || v.starts_with('{') && k != "jsonld" {
                     continue; // unevaluated expressions from the static fallback, and audit-only fields
                 }
                 seo.retain(|(a, _)| a != k);
@@ -1670,6 +1670,15 @@ fn build_inner_with_options(
         let (title, seo_html) = prerender::seo_head(&seo, site.as_deref(), &p.route, &input.generator);
         let props = r.map_or("{}".to_string(), |r| r.props.replace("</", "<\\/"));
         let mut head = format!("{seo_html}{}{}", p.head, r.map_or("", |r| r.head.as_str()));
+        // `query="page"`: the request parameters that are part of the page's identity. The server reads the marker,
+        // removes it and writes them into the canonical; a prerendered file is one URL and cannot vary by them.
+        if let Some((_, query)) = static_seo.iter().find(|(k, _)| k == "query") {
+            if p.ssr {
+                head.push_str(&format!("<meta name=\"brain-query\" content=\"{}\">", query.replace(['"', '<', '>', '&'], "")));
+            } else if !warnings.iter().any(|w: &String| w.starts_with(&format!("B0503 {}", p.view))) {
+                warnings.push(format!("B0503 {}: `query` has no effect on a prerendered page, which is one URL; fix: remove it, or render the view per request", p.view));
+            }
+        }
         if !p.ssr && p.params.trim() != "{}" && !p.params.trim().is_empty() {
             head.push_str(&format!("<meta name=\"brain-params\" content='{}'>", p.params.replace('&', "&amp;").replace('\'', "&#39;")));
         }

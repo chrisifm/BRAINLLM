@@ -188,6 +188,27 @@ impl Checker<'_> {
                 "pick the query a reader would type to find this page (2-4 words, e.g. \"offline task planner\"), add `keyword=\"<that query>\"` to `<meta seo>`, and use those exact words in the title, the H1, the first sentence and the description; for a page that should not rank, add `robots=\"noindex\"` instead",
             );
         }
+        if let Some(meta) = attr("query") {
+            let fix = "keep one literal list of parameters that make a different page (`query=\"page\"`), or remove `query`";
+            match info.attrs.iter().find(|(n, _)| n == "query") {
+                Some((_, SeoValue::Text(keys))) => {
+                    for key in keys.split([' ', ',']).filter(|k| !k.is_empty()) {
+                        let tracking = key.starts_with("utm_") || ["gclid", "fbclid", "msclkid"].contains(&key);
+                        let valid = key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+                        if tracking || !valid {
+                            self.push("B0503", meta.span, format!("`query` lists `{key}`, which does not identify a page"), fix);
+                        }
+                    }
+                }
+                _ => self.push("B0503", meta.span, "`query` must be literal text: the build reads it", fix),
+            }
+            if noindex || self.ctx.guarded {
+                self.push("B0503", meta.span, "`query` gives search results an identity on a page kept out of them", fix);
+            }
+            if info.canonical.is_some() || attr("canonical").is_some() {
+                self.push("B0503", meta.span, "`query` and `canonical` both decide this page's canonical URL", "keep `query` to build it from the request, or `canonical` to fix it");
+            }
+        }
         if !info.attrs.iter().any(|(n, _)| n == "description") {
             self.push("B1601", seo_span, "the view has no `description`", "add `description=\"…\"` (one sentence, ≤ 160 characters) or `description={props.…}` to `<meta seo>`");
         }

@@ -1149,7 +1149,7 @@ export function createServer(o = {}) {
       .replace('<!--brain:props-->', () => jsonInHtml(props))
     // a page behind a guard passes it only for its visitor: it stays out of the index even when it renders (§33)
     if (route.guards && route.guards.length) res.setHeader('x-robots-tag', NOINDEX)
-    let out = head(page, seo, url.pathname)
+    let out = head(page, seo, url.pathname, url.search)
     // route params for route() in the browser (the client has no route table)
     if (params && Object.keys(params).length) out = out.replace('</head>', () => `<meta name="brain-params" content="${esc(JSON.stringify(params))}"></head>`)
     if (forms) out = out.replace('</body>', () => `<script type="application/json" id="brain-forms">${jsonInHtml(forms)}</script></body>`)
@@ -1193,7 +1193,7 @@ export function createServer(o = {}) {
       globalThis.__brainLocale = null
     }
     const at = { path: url.pathname, params: params || {}, query: Object.fromEntries(url.searchParams) }
-    write(n(head(top, seo0, url.pathname)))
+    write(n(head(top, seo0, url.pathname, url.search)))
     // QA #253: the folder's _loading.brain goes in the region with the first chunk (SPEC: shows while load runs),
     // between two marker comments; the last chunk starts with a script that removes them and what is between
     let clear = ''
@@ -2066,11 +2066,19 @@ export function prefersMarkdown(accept) {
 // SEO head from View.seo(props): title, description, canonical, og:*/twitter:*, JSON-LD and the view's <head> block
 // F5: the build writes an SSR route's canonical/og:url from its pattern (/posts/:slug); the request has the real path.
 // A view's own <head> tags replace the generated ones with the same name/property (one tag per key, SPEC «SEO»).
-function head(page, seo, path) {
+function head(page, seo, path, search = '') {
   let h = page
+  // `<meta seo query="page">`: these parameters make a different page; any other (a dialog, a tracking tag) does not
+  let identity = ''
+  h = h.replace(/<meta name="brain-query" content="([^"]*)">/, (_, keys) => {
+    const given = new URLSearchParams(search), kept = new URLSearchParams()
+    for (const key of keys.split(/[\s,]+/)) for (const value of key ? given.getAll(key) : []) kept.append(key, value)
+    if (kept.size) identity = esc('?' + kept)
+    return ''
+  })
   if (path) {
     // the attribute is already escaped HTML: only the request path that replaces a pattern is escaped
-    const real = v => v.replace(/^(https?:\/\/[^/]+)?(\/[^"]*)$/, (m, o = '', p) => (/\/[:*]/.test(p) ? o + esc(path) : m))
+    const real = v => v.replace(/^(https?:\/\/[^/]+)?(\/[^"]*)$/, (m, o = '', p) => (/\/[:*]/.test(p) ? o + esc(path) : m)) + identity
     h = h.replace(/(<link[^>]*rel=["']canonical["'][^>]*href=")([^"]*)(")/i, (m, a, v, b) => a + real(v) + b)
     h = h.replace(/(<meta[^>]*property=["']og:url["'][^>]*content=")([^"]*)(")/i, (m, a, v, b) => a + real(v) + b)
   }
