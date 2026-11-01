@@ -14,6 +14,17 @@ Policy is the same as for single writes: `create` for create/upsert, `update`/`d
 grants make other owners' rows answer 404. Rows are locked in id order, so concurrent batches cannot deadlock.
 A duplicate id inside one batch answers 422.
 
+```http
+POST /api/posts/batch
+Content-Type: application/json
+
+{"op":"create","items":[{"title":"First"},{"title":"Second"}]}
+```
+
+```json
+{"count":2,"items":[{"id":"6a1d...","owner":"0b7e...","data":{"title":"First"}},{"id":"7c2e...","owner":"0b7e...","data":{"title":"Second"}}]}
+```
+
 ## Size limit: `server/resources/<r>/batch.jsbrain`
 
 ```js

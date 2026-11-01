@@ -40,6 +40,18 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Fix: a build that fails on a file `brain check` does not reach names its location and real fix; `brain build --json` and `brain_build` report `phase` and `diagnostics` with the fields of `brain check`, marking locations outside the app as `generated`
 - Fix: a page rendered per request carries the site's head and its social card (`og:title`, `og:description`, an absolute `og:image`, `twitter:card`, the robots hint, theme color, manifest and feed links) like a prerendered page; a page behind a guard answers `x-robots-tag: noindex` and stays without the site's search and social tags
 - `<meta seo query="page">` keeps the listed request parameters in the canonical of a page rendered per request; every other parameter stays out, and a contradictory declaration warns B0503
+- `brain add resource --policy owner|public-read` starts a resource with a common policy instead of admin-only.
+- B0735 now points at the policy or roles file that is wrong instead of `server/`.
+- `BRAIN_VIEWER_PROFILE` and `BRAIN_VIEWER_SERVICE` can live in `.brain_env`; the process environment still wins.
+- The server guide no longer forbids PM2 while `brain deploy config pm2` generates its file.
+- Form rules gain `tel` and `file`: a phone shape, `file(image/*,.pdf)!<=5000000` for accepted types and size in bytes, with `form.tel` and `form.file*` messages.
+- A cross-field `validate` that returns an empty message no longer blocks the submit with no visible error; the option is now documented.
+- `brain capabilities` prints the catalog of playbooks, generators, recipes and backend types from the compiler's own tables; `docs/CAPABILITIES.md` is its output, a test fails on drift, and a new app's `AGENTS.md` lists a summary.
+- `brain guide whats-new` prints what changed from the release manifests, `brain guide migrate` is the upgrade playbook, and `brain guide docs/<path>` serves every public reference page from the binary, so npm installs read them too.
+- `brain guide backend` and `brain guide analytics` are new playbooks with steps, verification and common mistakes.
+- `brain add auth` adds signup, login and account pages, the session channel, the auth configuration and the environment keys to an existing app and overwrites nothing; `brain new <app> --backend` starts an app with them.
+- `brain run --backend` (and `brain dev --backend`) starts the native backend beside the frontend, waits for it to be ready, refuses a port another process answers, follows `--port` with the backend's public URL and allowed origin, and stops it on exit. `brain backend migrate --create-db` creates a missing local database.
+- `brain recipe <id> --apply` writes the files a recipe previews and never overwrites one.
 
 ## [0.7.0] - 2026-10-31
 

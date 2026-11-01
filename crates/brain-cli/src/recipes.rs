@@ -111,11 +111,37 @@ pub fn generate(root: &Path, name: &str, params: &Value, dry_run: bool) -> Resul
         operations.push(json!({"path":adapter,"expectedRevision":null,"content":include_str!("../../../runtime/templates/google-signin.js")}));
     }
     Ok(
-        json!({"schemaVersion":1,"recipe":name,"dryRun":dry_run,"previewOnly":true,
+        json!({"schemaVersion":1,"recipe":name,"dryRun":dry_run,"previewOnly":dry_run,
         "operations":operations,
         "contract":contract,"requirements":["Experimental Rust backend must be running and migrated","Expose /api and /_brain/auth on the frontend origin; a separate backend port alone is insufficient","Configure fixed loopback BRAIN_BACKEND_URL for native API proxy and SSR session verification; enforce policy on the backend","Native account endpoints stay same-origin under the app base; resource API paths require an appropriate HTTP policy base","auth-ui and google-signin require configured BRAIN_JWT_SECRET/ISSUER/AUDIENCE and GOOGLE_CLIENT_ID, HTTPS, and the documented Google GIS CSP allowlist"],
         "nativeAccountFlows":{"passwordReset":"brain recipe password-reset","emailVerification":"brain recipe email-verification","administrator":"brain backend bootstrap-admin --user <existing-uuid>","mail":"Configure private BRAIN_MAIL_RESEND_KEY/BRAIN_MAIL_FROM and PUBLIC_SITE_URL; no email is sent by this preview"},"deployment":"brain deploy config pm2|nginx prepares optional guarded native topology configuration"}),
     )
+}
+
+/// `brain recipe <name> --apply`: writes a plan's files. Every target must still be absent, checked before the first
+/// write, so a refused plan leaves nothing behind and nothing an author wrote is replaced.
+pub fn apply(root: &Path, mut plan: Value) -> Result<Value, String> {
+    let operations = plan["operations"].as_array().cloned().unwrap_or_default();
+    let mut files = vec![];
+    for op in &operations {
+        let (Some(path), Some(content)) = (op["path"].as_str(), op["content"].as_str()) else { return Err("Recipe plan has a malformed operation".into()) };
+        crate::changes::source_path(root, path)?;
+        if root.join(path).symlink_metadata().is_ok() {
+            return Err(format!("Recipe refuses to overwrite {path}; nothing was written; choose another view or remove the file"));
+        }
+        files.push((path, content));
+    }
+    for (path, content) in &files {
+        let target = root.join(path);
+        std::fs::create_dir_all(target.parent().unwrap_or(root)).map_err(|e| format!("could not create the folder of {path}: {e}"))?;
+        std::fs::write(&target, content).map_err(|e| format!("could not write {path}: {e}"))?;
+    }
+    plan["written"] = json!(files.iter().map(|f| f.0).collect::<Vec<_>>());
+    plan["next"] = json!("brain check --json, then link the new view from your navigation");
+    if let Some(o) = plan.as_object_mut() {
+        o.remove("operations");
+    }
+    Ok(plan)
 }
 
 fn google_view(module: &str) -> String {
@@ -359,6 +385,30 @@ fn auth_view() -> &'static str {
   form { display: grid; gap: var(--space-3); }
 </style>
 "#
+}
+
+#[cfg(test)]
+mod apply_tests {
+    use super::*;
+
+    #[test]
+    fn apply_writes_the_view_and_refuses_to_overwrite_anything() {
+        let dir = std::env::temp_dir().join(format!("brain-recipe-apply-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        crate::scaffold::new_app(&dir).unwrap();
+        let plan = generate(&dir, "auth-ui", &json!({}), false).unwrap();
+        assert_eq!(plan["previewOnly"], json!(false));
+        let done = apply(&dir, plan).unwrap();
+        assert!(dir.join("views/account-access.brain").is_file());
+        assert!(done["written"].as_array().unwrap().iter().any(|p| p == "views/account-access.brain"));
+        assert!(done.get("operations").is_none());
+        // the same plan again: nothing replaced, and a refused plan writes nothing
+        let plan = json!({"operations":[{"path":"views/fresh.brain","content":"new"},{"path":"views/account-access.brain","content":"replaced"}]});
+        assert!(apply(&dir, plan).unwrap_err().contains("refuses to overwrite"));
+        assert!(!dir.join("views/fresh.brain").exists());
+        assert_ne!(std::fs::read_to_string(dir.join("views/account-access.brain")).unwrap(), "replaced");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg(test)]

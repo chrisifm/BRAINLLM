@@ -1,0 +1,31 @@
+{
+  "id": "form-tel-file",
+  "kind": "capability",
+  "title": "tel and file form rules",
+  "why": "Phones and uploads were checked by hand in each form; the shared schema now validates a phone shape, file size in bytes and accepted types with translatable messages.",
+  "changelog": [
+    "`tel` and `file`"
+  ],
+  "guide": "docs/FORM-VALIDATION.md",
+  "apis": [
+    "tel",
+    "file(image/*,.pdf)!<=N"
+  ],
+  "affects": [
+    "views/**/*.brain"
+  ],
+  "adopt": {
+    "file": "views/contact.brain",
+    "snippet": "form({ phone: 'tel!', cv: 'file(.pdf)!<=5000000' })"
+  },
+  "uses": [
+    {
+      "glob": "**/*.brain",
+      "contains": "'tel"
+    },
+    {
+      "glob": "**/*.brain",
+      "contains": "'file"
+    }
+  ]
+}

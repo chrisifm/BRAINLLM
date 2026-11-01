@@ -1,7 +1,7 @@
 // BRAINLLM schema mini-language (INTERNALS §14, §15): shared by form() (brain-form.js), api() validation
 // (brain-data.js) and server.mjs, so a page that only fetches data does not load the form module.
-// Per field: `str num bool email url date` + `!` required + `<=N >=N` (length for str and lists, value for num) + `[T]`
-// list of T, or a nested schema object.
+// Per field: `str num bool email url date tel file` + `!` required + `<=N >=N` (length for str and lists, value for num,
+// bytes for file) + `[T]` list of T, or a nested schema object. `file(image/*,.pdf)` names the accepted types.
 const RX_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const G = globalThis
 
@@ -9,7 +9,8 @@ const G = globalThis
 // i18n/<locale>.json; plural objects allowed for keys with `{n}`), else the English text. The table is read directly
 // (globalThis.__brainDict, filled by brain-i18n.js `add`) so a page that only validates does not load brain-i18n.js.
 // Keys: form.required form.list form.min_items form.max_items form.item form.number form.min form.max form.email
-// form.url form.date form.text form.boolean form.min_chars form.max_chars.
+// form.url form.date form.text form.boolean form.min_chars form.max_chars form.tel form.file form.file_type
+// form.file_min form.file_max.
 export function msg(key, en, vars) {
   const D = G.__brainDict
   if (D) {
@@ -29,14 +30,21 @@ export function msg(key, en, vars) {
 }
 
 // 'str!<=80' → { t: 'str', req: true, min, max, list: false }
-const TYPES = new Set(['str', 'num', 'bool', 'email', 'url', 'date'])
+const TYPES = new Set(['str', 'num', 'bool', 'email', 'url', 'date', 'tel', 'file'])
+const ACCEPT = /^(?:\.[a-z0-9]+|[a-z]+\/(?:\*|[a-z0-9.+-]+))$/
 function scalarRule(s) {
-  if (typeof s !== 'string' || s.length > 256) throw Error('form: invalid rule (use str num bool email url date, ! required, <=N >=N, [T])')
-  const m = /^(?:([a-z]+)(!)?|\[([a-z]+)(!)?\](!)?)((?:[<>]=-?\d+(?:\.\d+)?)*)$/.exec(s)
-  if (!m || m[4] && m[5]) throw Error(`form: invalid rule '${s}' (use str num bool email url date, ! required, <=N >=N, [T])`)
-  const r = { t: m[1] || m[3], req: !!(m[2] || m[4] || m[5]), list: !!m[3], min: null, max: null }
+  const syntax = '(use str num bool email url date tel file, file(image/*,.pdf), ! required, <=N >=N, [T])'
+  if (typeof s !== 'string' || s.length > 256) throw Error(`form: invalid rule ${syntax}`)
+  const m = /^(?:([a-z]+)(?:\(([^()]*)\))?(!)?|\[([a-z]+)(?:\(([^()]*)\))?(!)?\](!)?)((?:[<>]=-?\d+(?:\.\d+)?)*)$/.exec(s)
+  if (!m || m[6] && m[7]) throw Error(`form: invalid rule '${s}' ${syntax}`)
+  const r = { t: m[1] || m[4], req: !!(m[3] || m[6] || m[7]), list: !!m[4], min: null, max: null }
   if (!TYPES.has(r.t)) throw Error(`form: unknown type '${r.t}'`)
-  for (const [, op, n] of m[6].matchAll(/([<>])=(-?\d+(?:\.\d+)?)/g)) {
+  const accept = m[2] ?? m[5]
+  if (accept != null) {
+    r.accept = accept.split(',').map(a => a.trim().toLowerCase())
+    if (r.t !== 'file' || !r.accept.every(a => ACCEPT.test(a))) throw Error(`form: invalid rule '${s}' ${syntax}`)
+  }
+  for (const [, op, n] of m[8].matchAll(/([<>])=(-?\d+(?:\.\d+)?)/g)) {
     const key = op === '<' ? 'max' : 'min', value = Number(n)
     if (r[key] != null || !Number.isFinite(value) || (!r.list && r.t === 'bool') || ((r.list || r.t !== 'num') && (!Number.isSafeInteger(value) || value < 0))) throw Error(`form: invalid bounds in rule '${s}'`)
     r[key] = value
@@ -73,6 +81,24 @@ function calendarDate(s) {
   return year > 0 && month > 0 && month <= 12 && day > 0 && day <= days[month - 1]
 }
 
+// A phone as people write it: optional leading +, digits with single separators, 7 to 15 digits (E.164's maximum).
+function validTel(s) {
+  const t = s.trim()
+  if (!/^\+?\(?\d(?:[ .()-]{0,2}\d)*$/.test(t)) return false
+  const digits = t.replace(/\D/g, '').length
+  return digits >= 7 && digits <= 15
+}
+// The browser's File/Blob shape. The type and name come from the client: the server has to verify the content again.
+const isFile = v => !!v && typeof v === 'object' && typeof v.size === 'number' && typeof v.type === 'string'
+const accepted = (r, f) => r.accept.some(a => a[0] === '.' ? String(f.name || '').toLowerCase().endsWith(a) : a.endsWith('/*') ? f.type.toLowerCase().startsWith(a.slice(0, -1)) : f.type.toLowerCase() === a)
+function checkFile(r, f) {
+  if (!isFile(f)) return msg('form.file', 'Choose a file')
+  if (r.accept && !accepted(r, f)) return msg('form.file_type', 'This file type is not allowed')
+  if (r.min != null && f.size < r.min) return msg('form.file_min', `The file must be at least ${r.min} bytes`, { n: r.min })
+  if (r.max != null && f.size > r.max) return msg('form.file_max', `The file must be at most ${r.max} bytes`, { n: r.max })
+  return ''
+}
+
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`
 
 // Compiler-only validators for proven unbounded scalars. Separate entry points let
@@ -106,6 +132,7 @@ export function check(r, v) {
     }
     return ''
   }
+  if (r.t === 'file' && !empty(v)) return checkFile(r, v)
   if (Array.isArray(v)) return msg(r.t === 'num' ? 'form.number' : r.t === 'bool' ? 'form.boolean' : 'form.text', r.t === 'num' ? 'Enter a number' : r.t === 'bool' ? 'Choose true or false' : 'Enter text')
   if (empty(v)) return r.req ? msg('form.required', 'Required') : ''
   if (r.t === 'bool') return typeof v !== 'boolean' ? msg('form.boolean', 'Choose true or false') : r.req && !v ? msg('form.required', 'Required') : ''
@@ -132,9 +159,14 @@ export function check(r, v) {
     case 'date':
       if (typeof v !== 'string' || !calendarDate(s)) return msg('form.date', 'Enter a valid date')
       break
+    case 'tel':
+      if (typeof v !== 'string' || !validTel(s)) return msg('form.tel', 'Enter a valid phone number')
+      break
     case 'str':
       if (typeof v !== 'string') return msg('form.text', 'Enter text')
       break
+    case 'file':
+      return msg('form.file', 'Choose a file')
     default:
       throw Error(`form: unknown type '${r.t}'`)
   }

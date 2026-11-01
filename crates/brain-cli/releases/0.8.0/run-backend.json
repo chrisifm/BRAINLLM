@@ -1,0 +1,29 @@
+{
+  "id": "run-backend",
+  "kind": "capability",
+  "title": "brain run --backend and migrate --create-db",
+  "why": "One command runs frontend and backend in development, stops both together, and a missing local database no longer needs a separate tool.",
+  "changelog": [
+    "`brain run --backend`"
+  ],
+  "guide": "brain guide backend",
+  "apis": [
+    "brain run --backend",
+    "brain dev --backend",
+    "brain backend migrate --create-db"
+  ],
+  "affects": [
+    "package.json"
+  ],
+  "adopt": {
+    "command": "brain backend migrate --create-db && brain run --backend",
+    "file": "package.json",
+    "snippet": "\"dev\": \"brain run --backend\""
+  },
+  "uses": [
+    {
+      "glob": "package.json",
+      "contains": "--backend"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 // BRAINLLM forms (INTERNALS §14). `let f = form(schema, { submit: async (v) => … })` →
 //   bind:value={f.v.email} · {f.err.email} · f.busy · f.error (form-level) · f.ok · on:submit={f.submit}
-// Schema mini-language per field: `str num bool email url date` + `!` required + `<=N >=N` (length for str and lists,
-// value for num) + `[T]` list of T, or a nested schema object (a type from types.jsbrain).
+// Schema mini-language per field: `str num bool email url date tel file` + `!` required + `<=N >=N` (length for str and
+// lists, value for num, bytes for file) + `[T]` list of T, or a nested schema object (a type from types.jsbrain).
 // Validation: a field is validated when it loses focus and every field on submit; errors show only after that.
 // The element of each field is found without ids: the control that has focus while its value is written (the
 // `bind:` input handler), or on submit `form.elements[name]`. On it the runtime keeps `aria-invalid` and, when the
@@ -42,7 +42,7 @@ if (globalThis.addEventListener && !globalThis.__brainDirtyHook) {
   })
 }
 const empty = v => v == null || typeof v === 'string' && v.trim() === '' || Array.isArray(v) && !v.length
-const init0 = r => (r.list ? [] : r.t === 'bool' ? false : '')
+const init0 = r => (r.list ? [] : r.t === 'bool' ? false : r.t === 'file' ? null : '')
 const out = (r, v) => {
   if (r.list) {
     if (!Array.isArray(v)) return []
@@ -277,9 +277,10 @@ function createForm(schema, o, readRule, validateRule, remote) {
         shown.v++
       })
       if (o.validate && !first) {
-        const cross = o.validate(values()) // cross-field rules: { field: msg }
-        if (cross && Object.keys(cross).length) {
-          mark(cross)
+        const cross = o.validate(values()) // cross-field rules: { field: msg }; an empty message means valid
+        const failed = cross && Object.fromEntries(Object.entries(cross).filter(([, message]) => message))
+        if (failed && Object.keys(failed).length) {
+          mark(failed)
           return void aim()
         }
       }

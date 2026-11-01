@@ -35,9 +35,12 @@ Every framework document with a one-line summary. Apps get their own generated d
 |---|---|
 | [a11y](../crates/brain-cli/guides/a11y.md) | accessibility (the build fails otherwise) |
 | [ai](../crates/brain-cli/guides/ai.md) | Chrome's built-in AI (Gemini Nano) on the device, when the browser has it |
+| [analytics](../crates/brain-cli/guides/analytics.md) | what visitors actually do, stored in the project's own Postgres |
+| [backend](../crates/brain-cli/guides/backend.md) | resources, policies, accounts and jobs on the native Rust/Postgres backend |
 | [data](../crates/brain-cli/guides/data.md) | load, server functions, resources, channels, caching |
 | [forms](../crates/brain-cli/guides/forms.md) | validation, submit, server errors, edit forms |
 | [i18n](../crates/brain-cli/guides/i18n.md) | a site in several languages |
+| [migrate](../crates/brain-cli/guides/migrate.md) | move an existing app to the installed compiler, step by step |
 | [performance](../crates/brain-cli/guides/performance.md) | fast first load, smooth updates, small pages |
 | [seo](../crates/brain-cli/guides/seo.md) | classic search and AI answers (GEO) |
 | [server](../crates/brain-cli/guides/server.md) | sessions, errors, environment, deploy with brain start |
@@ -65,6 +68,7 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [BRAINLLM messaging](BRAND.md) | — |
 | [Browser compatibility evidence](BROWSER-COMPATIBILITY.md) | The compatibility table is generated from the official `web-features` dataset. |
 | [Native browser data and threads](BROWSER-DATA.md) | Use small public URL state for navigation, IndexedDB for structured cache records, and optional official SQLite Wasm inside an owned worker when a relational l… |
+| [Capabilities](CAPABILITIES.md) | What an app author can use, generated from the tables the compiler dispatches on. |
 | [Concurrent source changes](CHANGES.md) | The change API coordinates agents through file leases, exact revisions and checked plans. |
 | [Compatible warning diagnostics in 0.4](CHECKER-COMPATIBILITY.md) | A recognized name does not guarantee browser support or execution checkpoints. |
 | [A terminal with a point of view](CLI-EXPERIENCE.md) | Your intent. |

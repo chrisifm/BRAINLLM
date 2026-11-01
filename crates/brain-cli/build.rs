@@ -80,6 +80,61 @@ fn main() {
     code.push_str("];\n");
     std::fs::write(out_dir.join("runtime_files.rs"), code).unwrap();
     embed_releases(&Path::new(&manifest).join("releases"), &out_dir);
+    embed_docs(&Path::new(&manifest).join("../.."), &Path::new(&manifest).join("guides"), &Path::new(&manifest).join("releases"), &out_dir);
+}
+
+/// `docs/*.md` paths named in a text (`docs/app/` belongs to the app, not the framework).
+fn doc_paths(text: &str) -> Vec<String> {
+    let mut out = vec![];
+    let mut rest = text;
+    while let Some(i) = rest.find("docs/") {
+        let tail = &rest[i..];
+        let path: String = tail.chars().take_while(|c| c.is_ascii_alphanumeric() || "/-_.".contains(*c)).collect();
+        rest = &tail[5..];
+        let path = path.trim_end_matches('.');
+        if path.ends_with(".md") && !path.starts_with("docs/app/") {
+            out.push(path.to_string());
+        }
+    }
+    out
+}
+
+/// Documents reachable from what an app author reads (the spec, guides and manifests), plus `docs/backend/`, for
+/// `brain guide <path>`: npm packages have no docs folder. Framework-internal documents stay out.
+fn embed_docs(repo: &Path, guides: &Path, releases: &Path, out_dir: &Path) {
+    const INTERNAL: &[&str] = &["docs/INTERNALS.md", "docs/CONTINUATION-CHECKLIST.md", "docs/PROJECT-HISTORY.md", "docs/NPM-RELEASE.md"];
+    println!("cargo:rerun-if-changed={}", repo.join("docs").display());
+    println!("cargo:rerun-if-changed={}", repo.join("docs/backend").display());
+    println!("cargo:rerun-if-changed={}", guides.display());
+    let mut queue: Vec<String> = vec![];
+    if let Ok(s) = std::fs::read_to_string(repo.join("SPEC.md")) { queue.extend(doc_paths(&s)); }
+    for f in std::fs::read_dir(guides).into_iter().flatten().flatten() {
+        if let Ok(s) = std::fs::read_to_string(f.path()) { queue.extend(doc_paths(&s)); }
+    }
+    for v in std::fs::read_dir(releases).into_iter().flatten().flatten() {
+        for f in std::fs::read_dir(v.path()).into_iter().flatten().flatten() {
+            if let Ok(s) = std::fs::read_to_string(f.path()) { queue.extend(doc_paths(&s)); }
+        }
+    }
+    for f in std::fs::read_dir(repo.join("docs/backend")).into_iter().flatten().flatten() {
+        if f.path().extension().is_some_and(|x| x == "md") {
+            queue.push(format!("docs/backend/{}", f.file_name().to_string_lossy()));
+        }
+    }
+    let mut seen = std::collections::BTreeMap::new();
+    while let Some(path) = queue.pop() {
+        if seen.contains_key(&path) || INTERNAL.contains(&path.as_str()) { continue; }
+        let Ok(body) = std::fs::read_to_string(repo.join(&path)) else { continue };
+        println!("cargo:rerun-if-changed={}", repo.join(&path).display());
+        queue.extend(doc_paths(&body));
+        seen.insert(path, ());
+    }
+    let mut code = String::from("pub const EMBEDDED_DOCS: &[(&str, &str)] = &[\n");
+    for path in seen.keys() {
+        writeln!(code, "    ({path:?}, include_str!({:?})),", repo.join(path).display().to_string()).unwrap();
+    }
+    code.push_str("];\n");
+    std::fs::write(out_dir.join("embedded_docs.rs"), code).unwrap();
 }
 
 /// Versioned change manifests (`releases/<version>/<entry>.json`, see `src/releases.rs`): every file is embedded,

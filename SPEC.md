@@ -1,6 +1,6 @@
 # BRAINLLM SPEC
-Normative. Anything not here does not exist. Internals: docs/INTERNALS.md (not needed to write apps).
-Before each kind of task run `brain guide <topic>` (`brain guide` lists them): steps, checks, mistakes, example.
+Normative. Anything not here does not exist. Internals: docs/INTERNALS.md (not needed to write apps). Any other `docs/…` path named here: `brain guide docs/<path>` prints it, so it works from an npm install.
+Before each kind of task run `brain guide <topic>` (`brain guide` lists them): steps, checks, mistakes, example. `brain capabilities` lists what exists.
 
 ## Files
 - `app.brain` entry: `<html lang>`, common `<head>`, layout, `<slot />` for the view. No `.html` anywhere.
@@ -57,6 +57,7 @@ pattern already in place (contract `<meta>`, typed stubs, a11y-correct markup, a
 | lib | `lib format` | `lib/format.jsbrain` | pure functions, no markup |
 | channel | `channel cart --store "{items:[]}"` · `--bus` · `--key` | `channels/cart.jsbrain` | shared state, event bus or context key |
 | service | `service payments` | `services/payments.jsbrain` | injectable dependency (`provide`/`use`) |
+| auth | `auth` (no name) | `views/{signup,login,account/*}.brain`, `channels/session.jsbrain`, `server/auth.jsbrain`, `server/platform.jsbrain` | accounts on the native backend; existing files are kept |
 | api | `api users --get "[User]" --post "User:User"` | `api/users.jsbrain` | typed endpoint + client |
 | type | `type User --fields "id:num! email:email!"` | `types.jsbrain` | shared data shape |
 | guard | `guard admin` | `views/admin/_guard.jsbrain` | protects a folder of routes |
@@ -187,7 +188,7 @@ value (or thrown message) is the agent's answer, and invalid arguments never rea
 token-styled, every state (loading, disabled, error, empty) covered.
 Forms: `let f = form(schema, { submit: async (v) => … })` → `bind:value={f.v.email}`, `f.err.email`, `f.busy`,
 `f.error` (form-level), `on:submit={f.submit}`. A rejected submit puts focus on the first rejected field, or back on the control that held it. Leaving a dirty form asks first, unless it holds a password field. Schema: `{ email: 'email!', age: 'num>=18', name: 'str!<=80' }`
-(`!` required; types `str num bool email url date`, `[T]` list, a nested type object). Server errors: return or
+(`!` required; types `str num bool email url date tel file`, `file(image/*,.pdf)!<=5000000` bytes and accepted types, `[T]` list, a nested type object). Cross-field: option `validate: v => ({ field: message })`, an empty message is valid; `docs/FORM-VALIDATION.md`. Server errors: return or
 throw `{ errors: { email: 'Taken' } }` from `submit`, or mark them later with `f.errors({ email: 'Taken' })`; any other
 failure shows in `f.error`. Initial values: `form(schema, { init })`; later values: `f.reset(values)`; never replace
 `f.v` or `f.err` (B0133). Translated messages, edit forms and server errors: `brain guide forms`.
@@ -283,7 +284,7 @@ per IP and function (429). Raise `maxBodyKB` to send a file as base64 in an RPC 
 `brain backend capabilities` lists what this version supports (field types, filter operators, policy grants, limits), generated from the code.
 First read `brain backend schema --json` (resolved resource/job contracts + resource OpenAPI); inspect one with
 `brain card resource:posts` / `brain card job:notify`. Generate with `brain add resource posts --fields "title:str! body:str"`
-or `brain add job notify --fields "message:str!"`; fields: `str num bool email obj`, `!` required. Resources have explicit
+or `brain add job notify --fields "message:str!"` (a resource starts admin-only; `--policy owner|public-read` starts open); fields: `str num bool email obj`, `!` required. Resources have explicit
 `schema/policy/hooks.jsbrain`; jobs have `schema/handler.jsbrain` under `server/resources/` and `server/jobs/`.
 Resource generation also creates collection/detail clients under `api/`, an executable native repository and
 server service, and `client-contract.json` pointing to the canonical schema revision. Add `--admin-ui` when creating

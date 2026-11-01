@@ -77,7 +77,7 @@ pub fn auth_public_url_message(url: &str, origin: Option<&str>, allowed: &[Strin
     let url = seen(url.split(['?', '#']).next().unwrap_or(""));
     match origin {
         Some(origin) => format!(
-            "B0748: Auth public base URL {url:?} resolves to {origin:?}, which is outside the allowed origins {allowed:?}; fix: pass --origin {origin} (repeat it for every frontend) or add it to {BRAIN_JSON_KEY}, or set PUBLIC_SITE_URL to a URL on an allowed origin; never a wildcard. Run brain explain B0748"
+            "B0748: Auth public base URL {url:?} resolves to {origin:?}, which is outside the allowed origins {allowed:?}; fix: pass --origin {origin} (one frontend) or list every frontend in {BRAIN_JSON_KEY}, or set PUBLIC_SITE_URL to a URL on an allowed origin; never a wildcard. Run brain explain B0748"
         ),
         None => format!(
             "B0748: Auth public base URL {url:?} is not a valid HTTP(S) URL; allowed origins are {allowed:?}; fix: set PUBLIC_SITE_URL to a full URL on one of them. Run brain explain B0748"

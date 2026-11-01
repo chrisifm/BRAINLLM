@@ -83,9 +83,15 @@ fn invoke(input: &Value, timeout: Duration) -> Result<Value, String> {
     serde_json::from_slice(&bytes)
         .map_err(|_| "Viewer runner returned an invalid structured response".into())
 }
+/// The process environment wins, then the app's private `.brain_env`: a connected profile is a machine choice, not code.
+fn setting(root: Option<&Path>, name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|v| !v.is_empty()).or_else(|| crate::env::value(root?, "development", name).filter(|v| !v.is_empty()))
+}
 /// Probe projects only service version, connected state and userScripts capability; never profiles or tabs.
 pub fn probe() -> Result<Value, String> {
-    match invoke(&json!({"op":"probe","profile":std::env::var("BRAIN_VIEWER_PROFILE").ok(),"service":std::env::var("BRAIN_VIEWER_SERVICE").ok()}), Duration::from_secs(5)) {
+    let root = crate::app_root().ok();
+    let (profile, service) = (setting(root.as_deref(), "BRAIN_VIEWER_PROFILE"), setting(root.as_deref(), "BRAIN_VIEWER_SERVICE"));
+    match invoke(&json!({"op":"probe","profile":profile,"service":service}), Duration::from_secs(5)) {
         Err(error) if error == "Viewer runner needs Node.js with fetch support" => Ok(
             json!({"ok":true,"available":false,"engine":"viewer","reason":"node-runner-unavailable","fallbackEligible":true}),
         ),
@@ -112,7 +118,21 @@ pub fn run(base: &str, root: &Path, files: &[PathBuf], timeout: Duration) -> Res
     }
     let ms = timeout.as_millis().clamp(2000, 180000) as u64;
     invoke(
-        &json!({"op":"run","base":base,"files":relative,"timeoutMs":ms,"profile":std::env::var("BRAIN_VIEWER_PROFILE").ok(),"service":std::env::var("BRAIN_VIEWER_SERVICE").ok()}),
+        &json!({"op":"run","base":base,"files":relative,"timeoutMs":ms,"profile":setting(Some(root), "BRAIN_VIEWER_PROFILE"),"service":setting(Some(root), "BRAIN_VIEWER_SERVICE")}),
         Duration::from_millis(ms + 7000),
     )
+}
+
+#[cfg(test)]
+mod setting_tests {
+    #[test]
+    fn a_viewer_setting_comes_from_the_private_env_file() {
+        let dir = std::env::temp_dir().join(format!("brain-viewer-setting-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".brain_env"), "BRAIN_VIEWER_TEST_PROFILE=WORK\n").unwrap();
+        assert_eq!(super::setting(Some(&dir), "BRAIN_VIEWER_TEST_PROFILE").as_deref(), Some("WORK"));
+        assert_eq!(super::setting(Some(&dir), "BRAIN_VIEWER_TEST_ABSENT"), None);
+        assert_eq!(super::setting(None, "BRAIN_VIEWER_TEST_PROFILE"), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

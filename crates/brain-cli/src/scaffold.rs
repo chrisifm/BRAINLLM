@@ -45,7 +45,7 @@ pub fn new_app_named(dir: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
         // the brain version this app was made with, pinned exactly: a global `brain` delegates to it (INTERNALS §23)
         ("package.json", PACKAGE_JSON.replace("{{name}}", &name.to_ascii_lowercase()).replace("{{version}}", env!("CARGO_PKG_VERSION"))),
         ("APP.md", APP_MD.replace("{{name}}", &name)),
-        ("AGENTS.md", AGENTS_MD.into()),
+        ("AGENTS.md", format!("{AGENTS_MD}\n{}", crate::capabilities::summary())),
         ("CLAUDE.md", "@AGENTS.md\n".into()),
         ("views/home.brain", HOME.into()),
         ("views/about.brain", fill(include_str!("templates/new/about.brain"))),
@@ -137,7 +137,7 @@ pub const ADD_KINDS: &[(&str, AddRoute)] = &[
     ("lib", AddRoute::Template), ("test", AddRoute::Template), ("collection", AddRoute::Template), ("locale", AddRoute::Template),
     ("channel", AddRoute::Generated), ("service", AddRoute::Generated), ("api", AddRoute::Generated), ("type", AddRoute::Generated),
     ("guard", AddRoute::Generated), ("server", AddRoute::Generated), ("hook", AddRoute::Hook),
-    ("resource", AddRoute::Backend), ("job", AddRoute::Backend), ("roles", AddRoute::NoName),
+    ("resource", AddRoute::Backend), ("job", AddRoute::Backend), ("roles", AddRoute::NoName), ("auth", AddRoute::NoName),
 ];
 
 /// `micro` is the old name of `ui`: it still works and is no longer advertised.
@@ -151,7 +151,7 @@ fn add_kind_names() -> String {
 }
 
 pub fn add_usage() -> String {
-    format!("usage: brain add <kind> <name> [--props \"...\"]; kinds: {}; `roles` takes no name", add_kind_names())
+    format!("usage: brain add <kind> <name> [--props \"...\"]; kinds: {}; `roles` and `auth` take no name", add_kind_names())
 }
 
 /// Options shared by the CLI and MCP generators. Flags outside their kind are rejected.
@@ -801,7 +801,7 @@ const BADGE: &str = r#"<span class="badge"><slot /></span>
 pub(crate) const AGENTS_MD: &str = r#"# AGENTS.md — app BRAINLLM
 For an npm-created app, prefix shell commands below with `npx` (for example `npx brain spec`). A source installation provides a global `brain` command.
 Before each kind of task run `brain guide <topic>` (the playbook: steps, verify commands, common mistakes, example):
-`start` first, then `views` `data` `forms` `server` `seo` `a11y` `webmcp` `tests` `i18n` `performance`.
+`start` first, then `views` `data` `forms` `server` `backend` `analytics` `seo` `a11y` `webmcp` `tests` `i18n` `performance`. After a framework upgrade: `brain guide whats-new` and `brain guide migrate`. Every reference page ships with the binary: `brain guide docs`.
 1. Before writing code read `brain spec` (or `brain spec --topic <topic>`); what is not there does not exist.
 2. Start with `docs/app/index.md` (generated app docs: routes, components, data, backend, env, SEO; `brain build` refreshes them, `brain docs` regenerates them on demand and `brain docs --check` reports stale pages; add prose only in `docs/app/notes/<page>.md`). Read `brain map --json` to see existing routes, components, props and modules; import only what it lists. To use a component read `brain card <name>` (its contract), never its body; `brain map --reads cart.total` lists who reads a store field. A component over 150 lines gets B1010: run the `brain split` it suggests.
 3. Every UI change MUST follow `design.brain.json` and the native token stylesheet. First run `brain design --json`, `brain design check --json` and `brain manifest --json`; reuse project components through their contracts and explicit imports. Extend the foundation through revision-checked design plans; never install a CSS framework, fetch fonts automatically, duplicate existing primitives or bypass the baseline with arbitrary colors/spacing. Build mobile first, then verify tablet/desktop, safe areas, 16px inputs, 44px touch targets, keyboard/focus, reduced motion and permission/loading/error/empty/success/disabled states. Regenerate `brain design gallery --json` after adding UI contracts.
@@ -813,7 +813,7 @@ Before each kind of task run `brain guide <topic>` (the playbook: steps, verify 
 9. `brain run` serves the app and prints one `impact {…}` line per save: new/fixed diagnostics and Δ bytes per view. Per-environment values (API URLs, tokens) go in `.brain_env` through MCP `brain_env_set {key, section, value}`; `brain_env_keys` lists the keys, never the values. MCP is preconfigured in `.mcp.json` (Claude Code) and `.cursor/mcp.json` (Cursor), using the local npm binary. Install dependencies first (`npm install`); restart the client, approve the project server if prompted, and verify `brain_spec` and `brain_map` appear in its tool list. With a source-only installation, change the registration command to `brain` and args to `["mcp"]`. Other clients need their own MCP registration; the CLI remains available. Prefer structured output where supported. Inspect the exit status and result; unified exit codes are still planned.
 10. For concurrent edits use `brain changes read|lease|plan|apply` (or MCP `brain_changes`), not independent overwrites. `brain context` and `brain preflight` provide focused static evidence and preventive diagnostics. `brain lib list` discovers built-in helpers without dependency setup.
 11. Tests run in owned headless Chrome (`brain test`, `brain doctor`); no browser extension is required. Only when the user asks for it, run them in a connected Claude Viewer/Codex Viewer: `brain e2e probe --json`, then `brain test --viewer` (or `brain e2e run --json`); with several connected profiles set private BRAIN_VIEWER_PROFILE. An opted-in Viewer run that fails is a failure, never replaced by a headless result. Either way, reproduce the entire flow (permission, load, error, empty, success, disabled; URL/back-forward; responsive; network; console) and record actual evidence.
-12. Optional Claude Code edit feedback: `brain agent setup --hooks` (checks after source edits; no tests, downloads or auto-fixes). For experimental backend resources/jobs, inspect `brain backend schema --json` and `brain card resource:<name>` / `brain card job:<name>` before editing; `brain run` does not start that backend.
+12. Optional Claude Code edit feedback: `brain agent setup --hooks` (checks after source edits; no tests, downloads or auto-fixes). For experimental backend resources/jobs, inspect `brain backend schema --json` and `brain card resource:<name>` / `brain card job:<name>` before editing; `brain run` starts that backend only with `--backend`. `brain add auth` adds signup, login and account pages to an existing app.
 
 ## Edit risk (locate → risk → change → verify)
 Before editing a shared component, route, resource or `tokens.cssbrain`, run `brain risk <target> --json` (MCP `brain_risk`). Read `score`, `level` and `factors`; run every command in `requiredChecks` after the edit. Above `medium`, add the missing test it names before changing behaviour. `brain preflight <target>` returns the same static risk in `risks`.

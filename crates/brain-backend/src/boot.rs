@@ -100,6 +100,34 @@ pub fn require_verified_tls(url: &str, production: bool) -> Result<PgConnectOpti
     Ok(options)
 }
 
+/// `brain backend migrate --create-db`: creates the database a loopback `DATABASE_URL` names, once. Never for another
+/// machine: that database belongs to a provider. Returns its name when it was created.
+pub async fn create_local_database(url: &str) -> Result<Option<String>, String> {
+    use sqlx::{Connection, Executor};
+    let options = connect_options(url).map_err(|_| "B0762: DATABASE_URL is not a valid Postgres URL (its value is not logged); fix: use postgres://user:password@host:5432/database".to_string())?;
+    if !loopback(&options) {
+        return Err("--create-db only creates a database on this machine; fix: create it with your provider, then run `brain backend migrate`".into());
+    }
+    let name = options.get_database().map(str::to_string).unwrap_or_else(|| options.get_username().to_string());
+    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return Err(format!("--create-db accepts letters, digits, `_` and `-` in the database name, not `{name}`; fix: create it with `createdb`"));
+    }
+    match sqlx::PgConnection::connect_with(&options).await {
+        Ok(connection) => {
+            let _ = connection.close().await;
+            return Ok(None);
+        }
+        Err(sqlx::Error::Database(db)) if db.code().as_deref() == Some("3D000") => {}
+        Err(error) => return Err(connect_failure(&options, &error)),
+    }
+    let maintenance = options.clone().database("postgres");
+    let mut connection = sqlx::PgConnection::connect_with(&maintenance).await.map_err(|error| connect_failure(&maintenance, &error))?;
+    let create = format!("CREATE DATABASE \"{name}\"");
+    connection.execute(sqlx::raw_sql(sqlx::AssertSqlSafe(create))).await.map_err(|error| format!("Cannot create database `{name}` (B0762): {error}; fix: `createdb {name}` as a role that may create databases"))?;
+    let _ = connection.close().await;
+    Ok(Some(name))
+}
+
 /// Why a connection failed, naming what was tried: the host, the database and the user, which libpq and sqlx take from
 /// `PGUSER` or the system account when the URL has none. The password never appears.
 pub fn connect_failure(options: &PgConnectOptions, error: &sqlx::Error) -> String {
@@ -109,7 +137,7 @@ pub fn connect_failure(options: &PgConnectOptions, error: &sqlx::Error) -> Strin
     let (reason, fix) = match error {
         sqlx::Error::Database(db) => match db.code().as_deref() {
             Some("28P01" | "28000") => ("the server refused this user", format!("create the role (`createuser {user}`) or name another one: postgres://user:password@host:5432/{database}")),
-            Some("3D000") => ("this database does not exist", format!("create it: `createdb {database}`")),
+            Some("3D000") => ("this database does not exist", format!("create it: `createdb {database}`, or `brain backend migrate --create-db` for a local URL")),
             _ => ("the server refused the connection", "check DATABASE_URL and the server log".to_string()),
         },
         sqlx::Error::Io(_) | sqlx::Error::PoolTimedOut => ("nothing answered there", "start Postgres or correct the host and port in DATABASE_URL".to_string()),

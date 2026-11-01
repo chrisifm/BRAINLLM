@@ -164,7 +164,7 @@ pub fn contracts(root: &Path, kind: &str) -> Result<Vec<Resource>, String> {
             .map_err(|message| format!("server/{kind}/{name}/schema.jsbrain: {message}"))?;
         let policy = if kind == "resources" {
             serde_json::from_value(read_contract(root, &e.path().join("policy.jsbrain"))?).map_err(
-                |error| format!("{name}: {error}"),
+                |error| format!("server/{kind}/{name}/policy.jsbrain: {error}"),
             )?
         } else {
             Policy::default()
@@ -637,6 +637,81 @@ fn stated_database(args: &[String], root: &Path, environment: &str) -> Result<St
         None => Ok(url),
     }
 }
+/// The backend started by `brain run --backend`; stops with the command that owns it.
+pub struct DevBackend {
+    child: std::process::Child,
+    pub page_origin: Option<String>,
+}
+impl Drop for DevBackend {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn backend_ready(address: &std::net::SocketAddr) -> bool {
+    use std::io::{Read, Write};
+    let Ok(mut stream) = std::net::TcpStream::connect_timeout(address, std::time::Duration::from_millis(200)) else { return false };
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(1)));
+    if stream.write_all(b"GET /health/ready HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n").is_err() {
+        return false;
+    }
+    let mut head = [0u8; 16];
+    stream.read(&mut head).is_ok_and(|n| head[..n].starts_with(b"HTTP/1.1 200"))
+}
+
+/// The port of a fixed loopback backend URL.
+fn loopback_port(url: &str) -> Option<u16> {
+    let rest = url.strip_prefix("http://")?.trim_end_matches('/');
+    let (host, port) = rest.rsplit_once(':')?;
+    matches!(host, "127.0.0.1" | "localhost" | "[::1]").then_some(())?;
+    port.parse().ok()
+}
+
+/// `brain run --backend`: one command for both processes. The port comes from `BRAIN_BACKEND_URL` and the allowed origin
+/// from the development server's real port, so no setting is repeated. Migrations stay explicit: if they are pending, this
+/// stops and names the command.
+pub fn start_for_dev(root: &Path, environment: &str, dev_port: u16) -> Result<DevBackend, String> {
+    let url = std::env::var("BRAIN_BACKEND_URL").ok().filter(|v| !v.is_empty()).or_else(|| crate::env::value(root, environment, "BRAIN_BACKEND_URL"))
+        .ok_or("--backend needs BRAIN_BACKEND_URL; fix: run `brain add auth`, or set it in .brain_env")?;
+    let port = loopback_port(&url).ok_or_else(|| format!("--backend needs a loopback BRAIN_BACKEND_URL with a port, for example {}; fix: correct it in .brain_env", crate::auth_setup::DEFAULT_BACKEND_URL))?;
+    let site = crate::env::value(root, environment, "PUBLIC_SITE_URL").and_then(|s| brain_backend::links::origin(&s));
+    let host = site.as_deref().filter(|s| s.starts_with("http://localhost")).map_or("127.0.0.1", |_| "localhost");
+    let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    // Something else on that port would answer for the backend: its data and allowed origins, not this app's.
+    if std::net::TcpStream::connect_timeout(&address, std::time::Duration::from_millis(200)).is_ok() {
+        return Err(format!("B0763: port {port} from BRAIN_BACKEND_URL is already in use, so --backend would talk to another process; fix: stop it, or change the port in BRAIN_BACKEND_URL in .brain_env"));
+    }
+    let exe = std::env::current_exe().map_err(|e| format!("cannot find this brain binary: {e}"))?;
+    let mut command = std::process::Command::new(exe);
+    command.args(["backend", "serve", "--env", environment, "--port", &port.to_string()]).stdin(std::process::Stdio::null()).current_dir(root);
+    // A dev port other than the declared site (`--port`, a fallback): the backend's public URL and allowed origin follow it.
+    let declared = crate::backend::socket_settings(root, site.as_deref(), None).map(|s| s.http_origins).unwrap_or_default();
+    let origin = format!("http://{host}:{dev_port}");
+    let bound_origin_allowed = declared.contains(&format!("http://127.0.0.1:{dev_port}"));
+    if !declared.contains(&origin) && !bound_origin_allowed {
+        command.env("PUBLIC_SITE_URL", &origin);
+    }
+    // The page has to open on an origin the backend accepts, or every mutation answers ORIGIN_DENIED.
+    let page_origin = (!bound_origin_allowed).then_some(origin);
+    let mut child = command.spawn().map_err(|e| format!("could not start the backend: {e}"))?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(format!("the backend stopped at startup ({status}); its message is above. If tables are missing: `brain backend migrate --create-db`"));
+        }
+        // Ready, not merely listening: settings refused after the bind would otherwise read as a healthy start.
+        if backend_ready(&address) {
+            return Ok(DevBackend { child, page_origin });
+        }
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            return Err(format!("the backend did not answer on port {port} within 30 s; run `brain backend serve` alone to see why"));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
 pub fn run(args: &[String]) -> Result<(), String> {
     if args.first().is_some_and(|a| a == "capabilities") {
         println!("{}", brain_backend::capabilities::inventory());
@@ -697,6 +772,10 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let domain = domain::checked(&root, &resources, &roles)?;
     runtime()?.block_on(async{
         let production=environment=="production";
+        if operation=="migrate" && args.iter().any(|a|a=="--create-db") {
+            if production {return Err("--create-db is for local development; fix: create the production database with your provider".into());}
+            if let Some(name)=brain_backend::boot::create_local_database(&url).await? {eprintln!("created database {name}");}
+        }
         let boot=if operation=="serve" {brain_backend::boot::Boot::server(production)} else {brain_backend::boot::Boot::command(production)};
         let pool=brain_backend::boot::connect(&url,&boot).await?;
         if operation=="migrate"{
@@ -850,6 +929,25 @@ pub fn add(root: &Path, kind: &str, name: &str, shapes: &str) -> Result<Value, S
 }
 /// Opt-in project-owned administrative views committed with the generated backend contract.
 pub fn add_with_admin(root: &Path, kind: &str, name: &str, shapes: &str, admin_ui: bool) -> Result<Value, String> {
+    add_with_policy(root, kind, name, shapes, admin_ui, None)
+}
+
+/// The starting policies `brain add resource --policy` offers; the file stays the place to change them.
+fn policy_preset(preset: &str) -> Result<Policy, String> {
+    let grants = match preset {
+        "admin" => json!({"read":["admin"],"create":["admin"],"update":["admin"],"delete":["admin"]}),
+        "owner" => json!({"read":["owner","admin"],"create":["user","admin"],"update":["owner","admin"],"delete":["owner","admin"]}),
+        "public-read" => json!({"read":["public"],"create":["admin"],"update":["admin"],"delete":["admin"]}),
+        other => return Err(format!("unknown --policy `{other}`; fix: use admin (the default), owner or public-read")),
+    };
+    serde_json::from_value(grants).map_err(|e| e.to_string())
+}
+
+pub fn add_with_policy(root: &Path, kind: &str, name: &str, shapes: &str, admin_ui: bool, preset: Option<&str>) -> Result<Value, String> {
+    if preset.is_some() && kind != "resource" {
+        return Err("--policy is only supported for resources".into());
+    }
+    let policy = preset.map(policy_preset).transpose()?.unwrap_or_default();
     if admin_ui && kind != "resource" {
         return Err("--admin-ui is only supported for resources".into());
     }
@@ -873,7 +971,7 @@ pub fn add_with_admin(root: &Path, kind: &str, name: &str, shapes: &str, admin_u
         search: Vec::new(),
         name: name.into(),
         fields,
-        policy: Policy::default(),
+        policy,
         hooks: Hooks::default(),
         constraints: Default::default(),
         query: Default::default(),

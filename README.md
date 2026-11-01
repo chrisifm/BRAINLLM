@@ -33,9 +33,11 @@ automatically to a review branch. Maintainers decide what merges.
 
 ## Built for agents that change code safely
 
-BRAINLLM is not another React, Next or Node. It is a compiler whose first user is an LLM, and it is designed to
-improve itself: when an agent hits a compiler gap, `scripts/evolve.mjs` turns it into an isolated, tested proposal
-for human review. The tools other stacks sell as advanced analysis are the baseline here:
+BRAINLLM is not another React, Next or Node, and it does not try to replace them. It aims to be the first
+self-improving compiler for LLMs: when an agent hits a compiler gap, `scripts/evolve.mjs` turns it into an isolated,
+tested proposal, and a person decides whether it ships. No change merges itself. Every claim below is a command you can
+run; the numbers are under [the benchmarks](#show-me-the-numbers). The tools other stacks sell as advanced analysis are
+the baseline here:
 
 - **Locate without reading.** `brain map`, `brain card`, `brain graph`, `brain context` and symbol search give an
   agent the contract and the exact location of what it must touch, never a 2,000-line file.

@@ -5,7 +5,7 @@ Any input the user submits: sign in, sign up, search, create or edit a record, s
 
 ## Steps
 1. Declare the schema once: `{ email: 'email!', age: 'num>=18', name: 'str!<=80', tags: '[str]' }`.
-   `!` required · types `str num bool email url date` · `[T]` list · a nested type object · bounds `>=`, `<=`.
+   `!` required · types `str num bool email url date tel file` · `[T]` list · a nested type object · bounds `>=`, `<=`.
 2. `let f = form(schema, { submit: async (v) => …, init: { email: '' } })`. `v` is already validated.
 3. Markup: `<form on:submit={f.submit}>` (prevents default), fields `bind:value={f.v.email}`, the message
    `{f.err.email}` (or the kit's `error={f.err.email}`), the form-level error `{f.error}`, the busy state `f.busy` on the submit button.
@@ -23,7 +23,7 @@ Any input the user submits: sign in, sign up, search, create or edit a record, s
 7. After success: a server function may `return { redirect: '/account' }` (without JS the form post answers 303 there);
    with JS, `navigate(r.redirect)` in `submit`.
 8. Edit forms: values that arrive later → `f.reset(values)`. Never replace `f.v` or `f.err` (B0133).
-9. Translated messages: add `form.required`, `form.min_chars`, `form.max_chars`, `form.min_items`, `form.max_items`,
+9. Translated messages: add `form.required`, `form.tel`, `form.file`, `form.file_type`, `form.file_min`, `form.file_max`, `form.min_chars`, `form.max_chars`, `form.min_items`, `form.max_items`,
    `form.item`, `form.list`, `form.number`, `form.min`, `form.max`, `form.email`, `form.url`, `form.date`,
    `form.error`, `form.rejected` (errors naming no field of this form) and `form.check_failed` to `i18n/<locale>.json` (`{n}` = the limit; in `form.item` `{n}` = the 1-based
    item number and `{error}` = that item's message; plural objects allowed). English otherwise.

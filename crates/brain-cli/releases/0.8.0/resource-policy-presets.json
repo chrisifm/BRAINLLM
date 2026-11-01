@@ -1,0 +1,27 @@
+{
+  "id": "resource-policy-presets",
+  "kind": "capability",
+  "title": "brain add resource --policy",
+  "why": "A new resource is admin-only, so a freshly signed-up account got POLICY_DENIED on its first request; a preset starts with the common shapes.",
+  "changelog": [
+    "--policy owner|public-read"
+  ],
+  "guide": "brain guide backend",
+  "apis": [
+    "brain add resource --policy"
+  ],
+  "affects": [
+    "server/resources/*/policy.jsbrain"
+  ],
+  "adopt": {
+    "command": "brain add resource notes --fields \"title:str!\" --policy owner",
+    "file": "server/resources/notes/policy.jsbrain",
+    "snippet": "\"read\": [\"owner\", \"admin\"]"
+  },
+  "uses": [
+    {
+      "glob": "server/resources/*/policy.jsbrain",
+      "contains": "\"owner\""
+    }
+  ]
+}

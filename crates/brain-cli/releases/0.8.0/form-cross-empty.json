@@ -1,0 +1,13 @@
+{
+  "id": "form-cross-empty",
+  "kind": "fix",
+  "title": "A cross-field rule with an empty message no longer blocks the submit",
+  "why": "`validate` returning `{ confirm: '' }` stopped the submit with no visible error.",
+  "changelog": [
+    "cross-field `validate`"
+  ],
+  "guide": "docs/FORM-VALIDATION.md",
+  "affects": [
+    "views/**/*.brain"
+  ]
+}

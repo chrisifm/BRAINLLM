@@ -1,0 +1,29 @@
+{
+  "id": "guide-whats-new",
+  "kind": "capability",
+  "title": "brain guide whats-new, migrate and docs",
+  "why": "An author upgrading sees what changed from the binary itself, and the reference pages reach npm installs, which ship no docs folder.",
+  "changelog": [
+    "`brain guide whats-new`"
+  ],
+  "guide": "brain guide migrate",
+  "apis": [
+    "brain guide whats-new",
+    "brain guide migrate",
+    "brain guide docs/<path>"
+  ],
+  "affects": [
+    "AGENTS.md"
+  ],
+  "adopt": {
+    "command": "brain guide whats-new",
+    "file": "AGENTS.md",
+    "snippet": "After a framework upgrade: `brain guide whats-new` and `brain guide migrate`."
+  },
+  "uses": [
+    {
+      "glob": "AGENTS.md",
+      "contains": "brain guide whats-new"
+    }
+  ]
+}

@@ -34,17 +34,21 @@ fn run(args: &[String]) -> Result<bool, String> {
             let input: Value = serde_json::from_str(positional[1]).map_err(|e| e.to_string())?;
             crate::changes::dispatch(&root, positional[0], &input)?
         }
-        "recipe" => match positional.as_slice() {
-            [] | ["list"] => crate::recipes::list(),
-            [name] => crate::recipes::generate(&root, name, &json!({}), true)?,
-            [name, input] if *name != "list" => crate::recipes::generate(
-                &root,
-                name,
-                &serde_json::from_str(input).map_err(|e| e.to_string())?,
-                true,
-            )?,
-            _ => return Err("usage: brain recipe [list|name ['<json>']] [--json]".into()),
-        },
+        "recipe" => {
+            let apply = flags.contains_key("--apply");
+            let plan = match positional.as_slice() {
+                [] | ["list"] if !apply => crate::recipes::list(),
+                [name] => crate::recipes::generate(&root, name, &json!({}), !apply)?,
+                [name, input] if *name != "list" => crate::recipes::generate(
+                    &root,
+                    name,
+                    &serde_json::from_str(input).map_err(|e| e.to_string())?,
+                    !apply,
+                )?,
+                _ => return Err("usage: brain recipe [list|name ['<json>']] [--apply] [--json]".into()),
+            };
+            if apply { crate::recipes::apply(&root, plan)? } else { plan }
+        }
         "graph" if positional.is_empty() => {
             crate::intelligence::graph_page(&root, number("--cursor", 0)?, number("--limit", 100)?)?
         }
@@ -80,8 +84,8 @@ fn parse(
     let mut i = 1;
     while i < args.len() {
         let value = args[i].as_str();
-        if value == "--json" || (command == "risk" && value == "--measure") {
-            if value == "--measure" {
+        if value == "--json" || (command == "risk" && value == "--measure") || (command == "recipe" && value == "--apply") {
+            if value != "--json" {
                 flags.insert(value, "");
             }
             i += 1;
@@ -134,5 +138,10 @@ mod tests {
         assert_eq!(p, ["Cart"]);
         assert!(f.contains_key("--measure"));
         assert!(parse(&args(&["graph", "--measure"])).is_err());
+        let a = args(&["recipe", "auth-ui", "--apply"]);
+        let (_, p, f) = parse(&a).unwrap();
+        assert_eq!(p, ["auth-ui"]);
+        assert!(f.contains_key("--apply"));
+        assert!(parse(&args(&["graph", "--apply"])).is_err());
     }
 }

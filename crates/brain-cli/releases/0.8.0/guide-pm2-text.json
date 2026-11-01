@@ -1,0 +1,13 @@
+{
+  "id": "guide-pm2-text",
+  "kind": "fix",
+  "title": "Server guide agrees with brain deploy config",
+  "why": "The guide said never to use PM2 while the CLI generates a PM2 file, so an author could not tell which to trust.",
+  "changelog": [
+    "no longer forbids PM2"
+  ],
+  "guide": "brain guide server",
+  "affects": [
+    "AGENTS.md"
+  ]
+}

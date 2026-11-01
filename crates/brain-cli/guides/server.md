@@ -82,7 +82,7 @@ In production set `BRAIN_SECRET` (32+ random bytes) in the `[production]` sectio
   the page keeps working. Do not wrap everything in try/catch.
 - Browser errors captured in development: `brain doctor` and MCP `brain_errors`.
 
-## Deploy (one way: `brain build` then `brain start`; never PM2 or another process manager; not machine-checked)
+## Deploy (`brain build` then `brain start`, which supervises its own instances; a host that requires PM2 or nginx gets its file from `brain deploy config pm2|nginx`; not machine-checked)
 ```bash
 brain build                       # production into dist/ (minify, CSP + SRI, sitemap, robots, llms.txt)
 brain start --port 3000 --instances 2   # static apps served from Rust; apps with server code run Node children

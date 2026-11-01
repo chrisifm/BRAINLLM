@@ -1,0 +1,49 @@
+<meta seo keyword="create an account" title="Create an account" description="Create an account with your email and a password." robots="noindex">
+
+<script>
+  import session from '../channels/session.jsbrain'
+  import Button from '../ui/button.brain'
+
+  export async function load(ctx) {
+    if (ctx.user) throw redirect('/account')
+    return { configured: Boolean(ctx.backend) }
+  }
+  server: async function signup(ctx, v) {
+    if (!ctx.backend) throw { status: 503 }
+    await ctx.backend.signup(v)
+    const result = await ctx.backend.login(v)
+    return { redirect: '/account', user: result.user }
+  }
+  let f = form({ email: 'email!', password: 'str!' }, {
+    submit: async (v) => {
+      const r = await signup(v)
+      session.user = r.user
+      f.reset()
+      navigate(r.redirect)
+    },
+  })
+</script>
+
+<main class="page">
+  <h1>Create an account</h1>
+  {#if props.configured}
+    <form on:submit={f.submit}>
+      <label>Email <input type="email" autocomplete="email" bind:value={f.v.email} disabled={f.busy}></label>
+      {#if f.err.email}<p class="err">{f.err.email}</p>{/if}
+      <label>Password <input type="password" autocomplete="new-password" bind:value={f.v.password} disabled={f.busy}></label>
+      {#if f.err.password}<p class="err">{f.err.password}</p>{/if}
+      {#if f.error}<p role="alert">{f.error}</p>{/if}
+      <Button type="submit" busy={f.busy}>Create account</Button>
+    </form>
+    <p>Already have an account? <a href="/login">Sign in</a></p>
+  {:else}
+    <p role="status">Accounts are not connected. Set BRAIN_BACKEND_URL and start the backend: `brain run --backend`.</p>
+  {/if}
+</main>
+
+<style>
+  .page { max-width: 40ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-3); }
+  form { display: grid; gap: var(--space-3); }
+  label { display: grid; gap: var(--space-1); }
+  .err { margin: 0; color: var(--bad); }
+</style>

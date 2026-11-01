@@ -484,7 +484,7 @@ evergreen browsers (Baseline).
 focus trap), Table (sortable, virtualized >200 rows), Tabs, Toast (bus), Menu, Field (label + error + help).
 Each one complies with §8 and covers loading/disabled/error/empty. `form(schema, {submit})` in the runtime (`brain-form.js`):
 validates on blur and on submit, automatic `aria-invalid` + `aria-describedby`, blocks double submit (`busy`).
-Schema mini-language: `str num bool email url date` + `!` required + `<=N >=N` + `[T]` list + type name.
+Schema mini-language: `str num bool email url date tel file` + `!` required + `<=N >=N` (bytes for `file`) + `file(image/*,.pdf)` accepted types + `[T]` list + type name (2026-10-31: `tel`, `file`).
 2026-10-29: `f.v` and `f.err` are accessors whose setters throw (replacing them left the inputs bound to signals the
 form no longer read, so submit saw empty fields); B0133 catches it at compile time. Validation messages go through
 `msg(key, english, vars)` in `brain-schema.js`, which reads `globalThis.__brainDict` directly (no brain-i18n.js
@@ -2150,3 +2150,14 @@ tombstone, are still not recovered: nothing records them until the row exists.
 ## Backend import
 
 `brain_backend::import` runs a file inside one transaction with a savepoint per row, so every bad row is reported and a preview is the same code path followed by a rollback. Reasons are built from fixed text and field names, never from a database message, because those quote the row. `auth::legacy_scrypt` bounds the parameters of an imported hash; `scrypt` is used without its PHC feature to avoid a second `password-hash` version next to `argon2`.
+
+## Accounts generator and catalog (2026-10-31)
+
+`auth_setup.rs` writes the accounts path for `brain add auth` and `brain new --backend` and never overwrites a file.
+`backend::start_for_dev` owns the child of `brain run --backend`: it refuses a port that already answers (B0763), waits
+for `/health/ready` instead of a TCP connect, sets the child's `PUBLIC_SITE_URL` when the dev port differs from the
+declared site, and the printed page URL follows the origin the backend accepts. `build.rs` embeds the closure of
+documents cited by SPEC, guides and manifests, plus `docs/backend/*.md`, and `brain guide docs/<path>` serves them; a
+deny list keeps internal documents out. `capabilities.rs` renders `docs/CAPABILITIES.md` from `GUIDES`, `ADD_KINDS`,
+`recipes::list`, the backend inventory and capability manifests; a unit test compares the bytes, so a new manifest needs
+`brain capabilities > docs/CAPABILITIES.md`.
