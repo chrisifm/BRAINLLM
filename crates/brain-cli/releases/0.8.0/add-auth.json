@@ -1,0 +1,30 @@
+{
+  "id": "add-auth",
+  "kind": "capability",
+  "title": "brain add auth and brain new --backend",
+  "why": "Accounts took several manual steps across views, channels, configuration and environment; one command now writes the whole path and overwrites nothing.",
+  "changelog": [
+    "`brain add auth`"
+  ],
+  "guide": "brain guide backend",
+  "apis": [
+    "brain add auth",
+    "brain new --backend"
+  ],
+  "affects": [
+    "views/signup.brain",
+    "views/login.brain",
+    "server/auth.jsbrain"
+  ],
+  "adopt": {
+    "command": "brain add auth",
+    "file": "views/signup.brain",
+    "snippet": "await ctx.backend.signup(v)"
+  },
+  "uses": [
+    {
+      "glob": "views/signup.brain",
+      "contains": "ctx.backend.signup"
+    }
+  ]
+}

@@ -343,7 +343,7 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
     tools.push(Tool {
         name: "brain_guide",
         description: "Task playbooks: what to do for one kind of task, in which order, the commands that verify it, the diagnostic codes that catch common mistakes and a minimal correct example. Call it without `topic` for the list; read `start` first, then the topic of the task (e.g. `seo` before writing a page that must be found).",
-        input_schema: schema([("topic", "string", "start | views | data | forms | server | seo | a11y | webmcp | tests | i18n | performance; omit for the list")], &[]),
+        input_schema: schema([("topic", "string", "start | views | data | forms | server | backend | analytics | seo | a11y | webmcp | tests | i18n | performance | whats-new | migrate | docs/<path>; omit for the list")], &[]),
         output_schema: None,
         run: Box::new(|a| crate::guide::text(arg(a, "topic").as_deref())),
     });

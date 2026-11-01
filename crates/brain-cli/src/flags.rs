@@ -6,14 +6,14 @@ const GLOBAL: &[&str] = &["--json", "--quiet", "-q", "--progress"];
 
 /// `(command, flags that take a value, switches)`.
 pub(crate) const TABLE: &[(&str, &[&str], &[&str])] = &[
-    ("new", &[], &[]),
+    ("new", &[], &["--backend"]),
     ("add", &["--props", "--store", "--get", "--post", "--fields"], &["--bus", "--key", "--admin-ui"]),
     ("check", &[], &[]),
     ("fix", &[], &[]),
     ("doctor", &[], &["--fix", "--viewer"]),
     ("build", &["--site", "--ext", "--env"], &["--report"]),
-    ("run", &["--port", "--host", "--base", "--inspect-port", "--env"], &["--mock", "--profile", "--no-inspect", "--no-trace"]),
-    ("dev", &["--port", "--host", "--base", "--inspect-port", "--env"], &["--mock", "--profile", "--no-inspect", "--no-trace"]),
+    ("run", &["--port", "--host", "--base", "--inspect-port", "--env"], &["--mock", "--profile", "--no-inspect", "--no-trace", "--backend"]),
+    ("dev", &["--port", "--host", "--base", "--inspect-port", "--env"], &["--mock", "--profile", "--no-inspect", "--no-trace", "--backend"]),
     ("test", &["--timeout"], &["--heap", "--viewer"]),
     ("e2e", &["--timeout"], &["--heap", "--viewer"]),
     ("explain", &[], &[]),
@@ -48,7 +48,7 @@ pub(crate) const TABLE: &[(&str, &[&str], &[&str])] = &[
             "--env", "--port", "--origin", "--from", "--to", "--user", "--email", "--provider", "--name", "--scopes", "--expires-days", "--daily",
             "--monthly", "--status", "--resource", "--before", "--limit", "--days", "--accept",
         ],
-        &["--apply", "--with-workers", "--system"],
+        &["--apply", "--with-workers", "--system", "--create-db"],
     ),
     ("jobs", &["--env", "--payload", "--key", "--priority", "--delay", "--id", "--concurrency"], &["--once"]),
     ("analytics", &["--env", "--since", "--days", "--viewed", "--min-views", "--within", "--not-viewed", "--tracked", "--signed-in", "--limit", "--user"], &["--csv"]),

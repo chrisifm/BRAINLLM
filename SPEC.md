@@ -1,5 +1,5 @@
 # BRAINLLM SPEC
-Normative. Anything not here does not exist. Internals: docs/INTERNALS.md (not needed to write apps).
+Normative. Anything not here does not exist. Internals: docs/INTERNALS.md (not needed to write apps). Any other `docs/…` path named here: `brain guide docs/<path>` prints it, so it works from an npm install.
 Before each kind of task run `brain guide <topic>` (`brain guide` lists them): steps, checks, mistakes, example.
 
 ## Files
@@ -57,6 +57,7 @@ pattern already in place (contract `<meta>`, typed stubs, a11y-correct markup, a
 | lib | `lib format` | `lib/format.jsbrain` | pure functions, no markup |
 | channel | `channel cart --store "{items:[]}"` · `--bus` · `--key` | `channels/cart.jsbrain` | shared state, event bus or context key |
 | service | `service payments` | `services/payments.jsbrain` | injectable dependency (`provide`/`use`) |
+| auth | `auth` (no name) | `views/{signup,login,account/*}.brain`, `channels/session.jsbrain`, `server/auth.jsbrain`, `server/platform.jsbrain` | accounts on the native backend; existing files are kept |
 | api | `api users --get "[User]" --post "User:User"` | `api/users.jsbrain` | typed endpoint + client |
 | type | `type User --fields "id:num! email:email!"` | `types.jsbrain` | shared data shape |
 | guard | `guard admin` | `views/admin/_guard.jsbrain` | protects a folder of routes |

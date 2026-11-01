@@ -1,0 +1,27 @@
+{
+  "id": "recipe-apply",
+  "kind": "capability",
+  "title": "brain recipe --apply",
+  "why": "A recipe that only previewed left the author copying files by hand.",
+  "changelog": [
+    "`brain recipe <id> --apply`"
+  ],
+  "guide": "brain guide backend",
+  "apis": [
+    "brain recipe <id> --apply"
+  ],
+  "affects": [
+    "views/"
+  ],
+  "adopt": {
+    "command": "brain recipe auth-ui --apply",
+    "file": "views/login.brain",
+    "snippet": "brain recipe auth-ui --apply"
+  },
+  "uses": [
+    {
+      "glob": "views/login.brain",
+      "contains": "ctx.backend.login"
+    }
+  ]
+}

@@ -81,8 +81,8 @@ pub(crate) const USAGE: &str = "brain — the BRAINLLM toolchain (every command 
 main:
   brain --version                    prints the version (also -V, --json)
   brain seo <audit|links|preview R>  SEO audit of the built site (score per page, B18xx findings)
-  brain new <app>                    creates the app (app.brain, tokens.cssbrain, views/, comp/, ui/, AGENTS.md)
-  brain run [--port 5180] [--base /app/] [--mock[=seed]] [--profile] [--no-trace] [--inspect-port N | --no-inspect]  dev server with hot reload; the debugger on port+1
+  brain new <app> [--backend]        creates the app (app.brain, tokens.cssbrain, views/, comp/, ui/, AGENTS.md); --backend adds accounts on the native backend
+  brain run [--port 5180] [--backend] [--base /app/] [--mock[=seed]] [--profile] [--no-trace] [--inspect-port N | --no-inspect]  dev server with hot reload; the debugger on port+1; --backend also runs `brain backend serve`
   brain build [--site https://…] [--report] [--ext web|brain]   production (--report: bytes per page before/after each pass)
   brain preview [--port 4173]         temporary local preview of dist/; Ctrl+C to stop
   brain doctor [--fix]                everything at once: check + tests + overengineering + leaks; exit ≠ 0 on any error
@@ -92,7 +92,7 @@ main:
 granular:
   brain changes <operation> <json>   leased revision-checked file plans and commits
   brain graph | context <task> | why <target> | preflight
-  brain recipe [list|name <json>]    preview generated CRUD/auth flows
+  brain recipe [list|name <json>] [--apply]  generated CRUD/auth flows: a preview, or written with --apply (never overwrites)
   brain find <query> | symbols <file> | refs <name> [--watch]  native AST index
   brain lib list | lib new <name>    discover native functions or create a pure project helper
   brain upgrade [--from V] [--to V] [--dry-run|--apply] [--no-doctor]  migration report from the app's recorded version to this compiler (--apply runs the safe codemods)
@@ -107,7 +107,7 @@ granular:
   brain trace [<requestId>|issues] [--since 5m] [--failed] [--module m] [--limit n] [--json]  what `brain run` captured: requests, errors, CSP, sockets, queries
   brain map                          project graph: routes, components and props, modules, tests, tokens
   brain spec [--topic X] [--all]     the spec for the LLM (topics: files script markup channels css a11y tests cli)
-  brain guide [topic] [--json]       playbooks per task: start views data forms server seo a11y webmcp tests i18n performance
+  brain guide [topic] [--json]       playbooks per task: start views data forms server backend analytics seo a11y webmcp tests i18n performance; whats-new; migrate; docs/<path>
   brain schema                       JSON Schema of brain.json
   brain i18n --missing [--json]      per language: keys missing (exit 1) and texts still in the default language
   brain theme <preset> | --list      writes tokens.cssbrain from a preset (glass, dark, paper, contrast)
@@ -131,6 +131,8 @@ granular:
   brain risk <name> [--measure]       what changing a symbol can break, with its evidence
   brain mcp [--profile full|minimal|backend]  the same commands as MCP tools over stdio
 ";
+
+mod auth_setup;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -570,7 +572,11 @@ pub(crate) fn app_root() -> Result<PathBuf, String> {
 fn cmd_new(args: &[String]) -> Result<(), String> {
     let [name] = <[String; 1]>::try_from(positional(args, &[])).map_err(|_| "usage: brain new <app>".to_string())?;
     let dir = cwd().join(&name);
-    let files = scaffold::new_app(&dir)?;
+    let mut files = scaffold::new_app(&dir)?;
+    let backend_report = if args.iter().any(|a| a == "--backend") { Some(auth_setup::add(&dir)?) } else { None };
+    if let Some(report) = &backend_report {
+        files.extend(report["written"].as_array().into_iter().flatten().filter_map(|f| f.as_str()).map(|f| dir.join(f)).filter(|f| !files.contains(f)).collect::<Vec<_>>());
+    }
     let rels: Vec<String> = files.iter().map(|f| f.strip_prefix(&dir).unwrap_or(f).display().to_string()).collect();
     if want_json(args) {
         let j = brain_mcp::Json::obj([
@@ -582,6 +588,13 @@ fn cmd_new(args: &[String]) -> Result<(), String> {
     }
     for r in rels {
         println!("+ {r}");
+    }
+    if let Some(report) = backend_report {
+        println!("\ndone: cd {name}, then:");
+        for step in report["next"].as_array().into_iter().flatten().filter_map(|n| n.as_str()) {
+            println!("  {step}");
+        }
+        return Ok(());
     }
     println!("\ndone: cd {name} && brain run");
     Ok(())
@@ -606,6 +619,11 @@ fn cmd_edit(args: &[String]) -> Result<(), String> {
 fn cmd_add(args: &[String]) -> Result<(), String> {
     let pos = positional(args, &["--props", "--store", "--get", "--post", "--fields"]);
     if pos.len() == 1 && scaffold::add_route(&pos[0]) == Some(scaffold::AddRoute::NoName) {
+        if pos[0] == "auth" {
+            let report = auth_setup::add(&app_root()?)?;
+            if want_json(args) { println!("{report}"); } else { auth_setup::print(&report); }
+            return Ok(());
+        }
         println!("+ {}", backend::add_roles(&app_root()?)?);
         return Ok(());
     }
@@ -2355,7 +2373,11 @@ fn cmd_dev(args: &[String]) -> Result<(), String> {
         println!("{{\"profile\":\"boot\",\"ms\":{:.1}}}", boot.elapsed().as_secs_f64() * 1000.0);
     }
     let addr = dev.addr;
-    let url = if native_enabled { browser_url(&root, &environment, &dev) } else {
+    // Lives as long as this command; dropped (and stopped) when `brain run` returns.
+    let _backend = if args.iter().any(|a| a == "--backend") { Some(backend::start_for_dev(&root, &environment, addr.port())?) } else { None };
+    let url = if let Some(origin) = _backend.as_ref().and_then(|b| b.page_origin.as_deref()) {
+        format!("{origin}{}", dev.url().trim_start_matches(&format!("http://{addr}")))
+    } else if native_enabled { browser_url(&root, &environment, &dev) } else {
         format!("http://{host}:{}{}", addr.port(), dev.url().trim_start_matches(&format!("http://{addr}")))
     };
     // the debugger (§9.1, #269) on :P+1, same origin for its data: it proxies /@brain/metrics and /@brain/problems here

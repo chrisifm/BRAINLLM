@@ -9,6 +9,14 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.8.0] - Unreleased
+
+- `brain guide whats-new` prints what changed from the release manifests, `brain guide migrate` is the upgrade playbook, and `brain guide docs/<path>` serves every public reference page from the binary, so npm installs read them too.
+- `brain guide backend` and `brain guide analytics` are new playbooks with steps, verification and common mistakes.
+- `brain add auth` adds signup, login and account pages, the session channel, the auth configuration and the environment keys to an existing app and overwrites nothing; `brain new <app> --backend` starts an app with them.
+- `brain run --backend` (and `brain dev --backend`) starts the native backend beside the frontend, waits for it to be ready, refuses a port another process answers, follows `--port` with the backend's public URL and allowed origin, and stops it on exit. `brain backend migrate --create-db` creates a missing local database.
+- `brain recipe <id> --apply` writes the files a recipe previews and never overwrites one.
+
 ## [0.7.0] - 2026-10-31
 
 - `brain dev` recompiles the component when a CSS edit changes its scope identity (a customized copy of a kit file); it used to keep the old script with the new `data-b` CSS.

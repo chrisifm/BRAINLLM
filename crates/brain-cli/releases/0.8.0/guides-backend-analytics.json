@@ -1,0 +1,28 @@
+{
+  "id": "guides-backend-analytics",
+  "kind": "capability",
+  "title": "Backend and analytics guides",
+  "why": "Two features with many reference pages had no playbook with steps and verification.",
+  "changelog": [
+    "`brain guide backend`"
+  ],
+  "guide": "brain guide backend",
+  "apis": [
+    "brain guide backend",
+    "brain guide analytics"
+  ],
+  "affects": [
+    "AGENTS.md"
+  ],
+  "adopt": {
+    "command": "brain guide backend",
+    "file": "AGENTS.md",
+    "snippet": "`backend` `analytics`"
+  },
+  "uses": [
+    {
+      "glob": "AGENTS.md",
+      "contains": "`backend`"
+    }
+  ]
+}
