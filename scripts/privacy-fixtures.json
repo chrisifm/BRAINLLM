@@ -138,9 +138,21 @@
     "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
   },
   {
+    "path": "crates/brain-cli/tests/corpus/check.txt",
+    "rule": "credential",
+    "sha256": "e90931eb14b8c956b6413eb802a9f53cb1d5dcfa93b4ca788dca3121a09c2ee2",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
     "path": "crates/brain-cli/tests/env_truth.rs",
     "rule": "credential-url",
     "sha256": "950c41a821615abb8554473910fabc7f6face0d8c066e5c631d60ebdf00e8d3c",
+    "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
+  },
+  {
+    "path": "crates/brain-cli/tests/handler_rules.rs",
+    "rule": "credential",
+    "sha256": "f0776c5eced4efea97fb5e8cbd91cb20dd2574edeec54d8d93ff3b2632aafc04",
     "reason": "Reviewed synthetic diagnostic fixture or generic CI path; no usable credential."
   },
   {
