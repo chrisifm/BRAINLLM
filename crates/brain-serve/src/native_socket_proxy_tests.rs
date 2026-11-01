@@ -499,6 +499,7 @@ fn dev_options(root: &Temp, env: Option<crate::EnvLoader>) -> crate::Options {
         .join("../../runtime/server/native-sockets.mjs");
     if let Ok(source) = std::fs::read_to_string(optional) {
         runtime.push(("server/native-sockets.mjs".into(), source));
+        runtime.push(("server/llm.mjs".into(), include_str!("../../../runtime/server/llm.mjs").into()));
     }
     crate::Options {
         root: root.0.clone(),
