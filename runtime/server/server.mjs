@@ -552,7 +552,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
       return '/api/' + name + '/' + id
     }
     const request = async (method, path, body, notFound) => {
-      if (response.writableEnded || response.destroyed) throw new HttpError(409, 'The server request has ended')
+      if (response.writableEnded || response.destroyed) throw Object.assign(new HttpError(409, 'The server request has ended'), { clientGone: true })
       if (method !== 'GET' && incoming.method !== 'POST') throw new HttpError(405, 'Native writes require a server function called through POST')
       let bytes = Buffer.alloc(0)
       if (body !== undefined) {
@@ -633,7 +633,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
         }
         throw e
       } finally { req.destroy() }
-      if (response.destroyed || response.writableEnded) throw new HttpError(409, 'The server request has ended')
+      if (response.destroyed || response.writableEnded) throw Object.assign(new HttpError(409, 'The server request has ended'), { clientGone: true })
       return value
     }
     const names = (value, label) => {
@@ -1234,6 +1234,8 @@ export function createServer(o = {}) {
     }
     // what load() thrown or returned instead of props answers: redirect, notFound() (F11), deliberate status, failure
     const loadOutcome = e => {
+      // the visitor left (a closed tab, an aborted prefetch): nobody reads an answer, and it is no failure of the app
+      if (e && e.clientGone && res.destroyed) return log('info', 'client left during load', { rid, path: url.pathname })
       if (e && e.redirect) return send(res, e.status || 303, '', { location: withBase(linkTo(route, redirect(e.redirect, e.status ?? 303).redirect)), ...ctx.session.headers() })
       if ((e instanceof HttpError && e.status === 404) || (e && e.notFound === true)) return missing(req, res, e) // `notFound()` 404 / `gone()` 410
       // the backend or another service said "not now": a temporary 503 tells crawlers to come back, a 500 tells them it broke
@@ -1371,6 +1373,7 @@ export function createServer(o = {}) {
       if (e && e.redirect) return end(`<meta name="robots" content="noindex"><script>location.replace(${jsonInHtml(withBase(linkTo(route, redirect(e.redirect, e.status ?? 303).redirect)))})</script>`)
       // a streamed page already sent its 200 head: the region gets the not-found notice and the page is noindex
       if (e && e.notFound === true) return end(`<meta name="robots" content="noindex"><p role="alert" class="brain-fallback">Page not found.</p>`, {}, bottom.replace(/<script type="module">(?:(?!<\/script>)[\s\S])*?brain-view[\s\S]*?<\/script>/g, ''))
+      if (e && e.clientGone && res.destroyed) return log('info', 'client left during load', { rid, path: url.pathname })
       log('error', 'load failed (streamed)', { rid, path: url.pathname, status: 200, ...trace(e) }) // headers already out
       return fail()
     }

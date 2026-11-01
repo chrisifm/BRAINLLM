@@ -46,9 +46,10 @@ w('_server/manifest.json', JSON.stringify({
   ],
 }))
 
-let backendStatus = 500, backendVary = null, hits = 0, backendRetry = null
-const backend = http((req, res) => {
+let backendStatus = 500, backendVary = null, hits = 0, backendRetry = null, backendDelay = 0
+const backend = http(async (req, res) => {
   hits++
+  if (backendDelay) await new Promise(r => setTimeout(r, backendDelay))
   const headers = { 'content-type': 'application/json' }
   if (backendVary) headers.vary = backendVary
   if (backendRetry) headers['retry-after'] = backendRetry
@@ -286,4 +287,18 @@ test('HEAD answers the same validator as GET and a cached page does not run load
   assert.equal(head.headers.get('etag'), get1.headers.get('etag'))
   const plain = await fetch(base + '/plain', { method: 'HEAD', headers: { accept: 'text/html' } })
   assert.ok(plain.headers.get('etag'), 'an uncached page too')
+})
+
+test('a visitor who leaves during load is not a failure of the app', async () => {
+  const from = logs.length
+  backendDelay = 150
+  const held = new AbortController()
+  const asked = fetch(base + '/thrown', { headers: { accept: 'text/html', 'x-brain-prefetch': '1' }, signal: held.signal }).catch(e => e.name)
+  setTimeout(() => held.abort(), 40)
+  assert.equal(await asked, 'AbortError')
+  await new Promise(r => setTimeout(r, 300))
+  backendDelay = 0
+  const lines = logs.slice(from)
+  assert.deepEqual(lines.filter(l => l.level === 'error'), [], 'an aborted prefetch logs no error')
+  assert.ok(lines.some(l => l.msg === 'client left during load'), JSON.stringify(lines))
 })
