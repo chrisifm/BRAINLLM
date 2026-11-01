@@ -292,3 +292,20 @@ fn read_only_commands_leave_a_committed_app_clean() {
         assert!(dirty.trim().is_empty(), "`brain {}` changed the app:\n{dirty}", args.join(" "));
     }
 }
+
+// What a process manager's daemon holds must not decide what the app runs with.
+#[test]
+fn env_only_file_ignores_the_supervisors_environment_except_what_it_was_told_to_keep() {
+    let a = app("env-only");
+    fs::write(a.0.join(".brain_env"), "PUBLIC_SITE_NAME=app\n").unwrap();
+    let run = |only: bool, keep: &str| {
+        let mut c = Command::new(bin());
+        c.args(["jobs", "stats", "--env", "production"]).current_dir(&a.0).env("NO_COLOR", "1").env("DATABASE_URL", "not-a-url").stdin(Stdio::null());
+        if only { c.env("BRAIN_ENV_ONLY", "file").env("BRAIN_ENV_KEEP", keep); }
+        let o = c.output().unwrap();
+        format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))
+    };
+    assert!(!run(false, "").contains("is not set"), "without the policy the process environment wins");
+    assert!(run(true, "").contains("DATABASE_URL is not set"), "the daemon's variable is gone");
+    assert!(!run(true, "DATABASE_URL").contains("is not set"), "a kept variable stays");
+}

@@ -1247,7 +1247,7 @@ to appear in LLMs, traditional search and social networks"; implemented in brain
 
 ## 34. Production process manager: `brain start` (fixed 2026-10-13, Chris: our own manager, not PM2)
 
-The `brain` binary runs the app in production. Optional PM2/nginx configuration can be prepared with `brain deploy config` (maintainer request, 2026-10-30); it never installs or activates services. The native manager remains the default:
+The `brain` binary runs the app in production. Optional PM2/nginx configuration can be prepared with `brain deploy config` (maintainer request, 2026-10-30; PM2 files pass `BRAIN_ENV_ONLY=file` so `main::apply_env_policy` drops the daemon's environment before any thread exists, and the preview carries a `recipe` that recreates processes, 2026-11-01); it never installs or activates services. The native manager remains the default:
 one way for the model, `brain build` then `brain start`.
 
 - **Static apps** (no `load`, no `server:`): `brain start` serves `dist/` from Rust with brain-serve's static handler

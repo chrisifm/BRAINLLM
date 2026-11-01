@@ -142,7 +142,24 @@ granular:
 mod auth_setup;
 mod capabilities;
 
+/// `BRAIN_ENV_ONLY=file` (generated PM2 file): a supervisor's environment holds other apps' secrets and stale settings
+/// such as `NODE_OPTIONS`. Only the system's own variables and `BRAIN_ENV_KEEP` survive, so `.brain_env` decides the rest.
+fn apply_env_policy() {
+    if std::env::var("BRAIN_ENV_ONLY").as_deref() != Ok("file") {
+        return;
+    }
+    let keep = std::env::var("BRAIN_ENV_KEEP").unwrap_or_default();
+    let kept = |key: &str| matches!(key, "PATH" | "HOME" | "USER" | "LOGNAME" | "SHELL" | "LANG" | "TZ" | "TMPDIR" | "NODE_ENV" | "BRAIN_ENV_ONLY" | "BRAIN_ENV_KEEP") || key.starts_with("LC_") || keep.split(',').any(|k| k == key);
+    for (key, _) in std::env::vars_os() {
+        if !key.to_str().is_some_and(kept) {
+            // SAFETY: first statement of `main`, before any thread exists.
+            unsafe { std::env::remove_var(&key) };
+        }
+    }
+}
+
 fn main() -> ExitCode {
+    apply_env_policy();
     let args: Vec<String> = std::env::args().skip(1).collect();
     // INTERNALS §25: a crash is a diagnosis too. Outside the MCP server (which must outlive a failing tool), an
     // internal panic prints where it happened and the next command to run, and exits with code 3.

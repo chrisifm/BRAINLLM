@@ -8,6 +8,26 @@ Options include topology (static/node/rust-node/rust-static), name, frontend por
 
 An app created with npm pins `@christianirack/brainllm` in `devDependencies`. With `NODE_ENV=production` in the shell, `npm ci` skips those packages and `npm run build` then stops with `brain: command not found`. Install with `npm ci --include=dev`. `brain start`, `brain backend serve` and `brain jobs work` come from the same package, so do not run `npm prune --omit=dev` afterwards. A source installation with `cargo install` has no such step.
 
+## Starting, stopping and the environment
+
+The generated PM2 file runs one process per service and passes `BRAIN_ENV_ONLY=file`: `brain` drops everything the daemon handed it except system variables and `BRAIN_ENV_KEEP`, so another app's secrets or a stale `NODE_OPTIONS` never reach it and `.brain_env` decides. Preview option `envSource: "host"` keeps the host environment instead. Process environment still wins over `.brain_env` for what is kept.
+
+Apply a change by recreating the processes, as the preview's `recipe` lists: `npm ci --include=dev`, `brain build`, `pm2 delete <names>`, `pm2 start deploy/ecosystem.brain.config.cjs`, `pm2 save`. `pm2 restart` keeps the environment of the first start.
+
+| Exit status | Meaning | Supervisor |
+|---|---|---|
+| 0 | Clean stop | Do not restart |
+| 1 | A check or build found errors | Report it |
+| 2 | A command failed; for a long-running process, something that recovers: database unreachable, port busy | Restart with backoff |
+| 3 | Internal error, with its location | Restart with backoff and report it |
+| 78 | Configuration a restart cannot fix (`EX_CONFIG`) | Do not restart (`stop_exit_codes`, systemd `RestartPreventExitStatus=78`) |
+
+Each process listens or works alone: `brain start`, `brain backend serve` and `brain jobs work <queue> --concurrency N` take one PM2 instance each. Scale a queue with `--concurrency` or a preview `workers` entry; several backend processes need `cluster: { shared: true }` in `server/platform.jsbrain` so rate windows and socket fan-out are shared.
+
+`/health`, `/health/live` and `/health/ready` belong to the framework: a route declared on them is refused (B0735). Point the load balancer at `/health/ready`.
+
+Applying a backend contract change in CI has no prompt: `brain backend approve-contract [--accept <resource>] --apply` records the approval (B0787) and exits non-zero if it cannot.
+
 ## Explicit topology
 
 - Static uses the native Rust static handler through brain start. Inspect the build artifact: the topology label does not disable or remove a server runtime from an existing dist directory.
