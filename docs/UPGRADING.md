@@ -1,3 +1,21 @@
+# Upgrading
+
+## Breaking in 0.8.0: `ne` keeps records without a value
+
+`field[ne]=x` on a list now uses SQL `IS DISTINCT FROM`, so records with no value in `field` **are included**. Before
+0.8.0 they were silently left out, which disagreed with action guards on the same field. Nothing fails: the list simply
+returns more rows, so review every use, including those that show or count private records.
+
+To keep the old result, add `field[exists]=true` and declare `exists` for that field:
+
+```http
+GET /api/products?stock[ne]=1                     # 0.8.0: also returns products with no stock value
+GET /api/products?stock[ne]=1&stock[exists]=true  # the result before 0.8.0
+```
+
+`brain upgrade` lists each `[ne]=` it finds with its `file:line`; a filter built at run time needs a manual search.
+Reference: [filters](backend/filters.md).
+
 # Upgrade previews
 
 An upgrade preview prepares an exact `@christianirack/brainllm` package pin change.

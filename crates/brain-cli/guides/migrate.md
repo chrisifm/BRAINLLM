@@ -19,6 +19,11 @@ a different task: `brain guide docs/MIGRATION.md`.
 6. Adopt what helps the task; a capability is never required. Each one names its guide: read it before using the snippet.
 7. Repeat `brain upgrade --json` until it exits 0, then `brain doctor`.
 
+## Breaking in 0.8.0: `ne` includes records without a value
+`field[ne]=x` now also returns records with no value in `field`; before 0.8.0 it left them out. Nothing fails, the list
+just returns more rows. To keep the old result, add `field[exists]=true` and declare `exists` for that field.
+`brain upgrade` finds literal `[ne]=`; search by hand for a filter built at run time.
+
 ## Skipping versions
 `brain upgrade --from 0.6.0` starts from an explicit version when the recording is missing or wrong; `--to` stops earlier
 than the installed compiler. The report covers every release between them, in order, so do not upgrade one version at a
