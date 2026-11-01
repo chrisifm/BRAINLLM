@@ -383,7 +383,7 @@ Main: `brain new <app>` · `brain run` (dev server with hot reload, app :5180; v
 SEO and the no-JS HTML on `brain build` + `brain start`) · `brain build` (production) ·
 `brain doctor` (everything at once: check + tests + over-engineering + leaks; writes no versioned file; exits non-zero on any error; suspected leak B0601 is a warning unless `doctor.failOnSuspectedLeaks`).
 Production: `brain start` (serves `dist/`, restarts on crash, logs to `logs/app.log`) · `brain reload` (no downtime) ·
-`brain status` · `brain stop`. Optional PM2/nginx configurations: `brain deploy config pm2|nginx --request <JSON>`; see `docs/DEPLOYMENT.md`.
+`brain status` · `brain stop`. Optional PM2/nginx configurations: `brain deploy config pm2|nginx --request <JSON>`, and `brain deploy check --url <origin>` for what only the live server shows (headers sent twice, proxy, `/health`); see `docs/DEPLOYMENT.md`.
 Hosted under a sub-path: `brain.json` `"base": "/app/"`; keep writing app-absolute links and paths (`<a href="/about">`,
 `redirect('/login')`); the build adds the base everywhere.
 Granular: `brain add view|comp|ui <name> --props "…"` · `brain check --json` · `brain test` · `brain spec [--topic x]` ·

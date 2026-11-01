@@ -309,3 +309,30 @@ fn env_only_file_ignores_the_supervisors_environment_except_what_it_was_told_to_
     assert!(run(true, "").contains("DATABASE_URL is not set"), "the daemon's variable is gone");
     assert!(!run(true, "DATABASE_URL").contains("is not set"), "a kept variable stays");
 }
+
+// The whole command, against a server that repeats a header the way a proxy in front of an app does.
+#[test]
+fn deploy_check_reads_a_live_origin_and_fails_only_on_a_dead_health_endpoint() {
+    use std::io::{Read, Write};
+    let a = app("deploy-check");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut buf = [0; 2048];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let status = if String::from_utf8_lossy(&buf[..n]).starts_with("GET /health") { "502 Bad Gateway" } else { "200 OK" };
+            let _ = write!(stream, "HTTP/1.1 {status}\r\nX-Frame-Options: DENY\r\nX-Frame-Options: SAMEORIGIN\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        }
+    });
+    let o = Command::new(bin()).args(["deploy", "check", "--url", &format!("http://127.0.0.1:{port}"), "--json"]).current_dir(&a.0).stdin(Stdio::null()).output().unwrap();
+    let text = String::from_utf8_lossy(&o.stdout).to_string();
+    assert_eq!(o.status.code(), Some(1), "{text}");
+    let v: serde_json::Value = serde_json::from_str(text.trim()).unwrap();
+    assert_eq!(v["schemaVersion"], 1);
+    let codes: Vec<&str> = v["findings"].as_array().unwrap().iter().map(|f| f["code"].as_str().unwrap()).collect();
+    assert_eq!(codes, ["B1857", "B1893"], "{text}");
+    let (ok, usage) = brain(&a.0, &["deploy", "check"]);
+    assert!(!ok && usage.contains("--url"), "{usage}");
+}

@@ -28,6 +28,10 @@ Each process listens or works alone: `brain start`, `brain backend serve` and `b
 
 Applying a backend contract change in CI has no prompt: `brain backend approve-contract [--accept <resource>] --apply` records the approval (B0787) and exits non-zero if it cannot.
 
+## Checking a live server
+
+`brain deploy check --url https://your-domain [--json]` reads `/` and `/health` from the origin the public reaches and changes nothing. It reports a security header sent twice (B1857), `server.earlyHints` behind nginx below 1.29 (B1891), a CDN the backend's `trustPublicProxy` does not list (B1892) and a `/health` that does not answer 200 (B1893, exit status 1). The nginx file `brain deploy config nginx` generates sets no security headers, so they come from the app alone; the `_brain/nginx.conf` a static build emits does set them, for hosting with no app behind it. 103 Early Hints are off unless `brain.json` sets `server.earlyHints: true`. `brain doctor` also warns about a `trustProxy` private range wider than /16 (B0784).
+
 ## Explicit topology
 
 - Static uses the native Rust static handler through brain start. Inspect the build artifact: the topology label does not disable or remove a server runtime from an existing dist directory.

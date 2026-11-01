@@ -535,6 +535,7 @@ mod tests {
         assert!(c.contains("proxy_cache off"));
         assert!(c.contains("127.0.0.1:5182"));
         assert!(c.contains("location ^~ /s/"));
+        assert!(!c.contains("add_header"), "security headers come from the app alone, or the proxy would send them twice (B1857)");
         assert!(c.contains("location = /_brain"));
         assert!(
             preview(

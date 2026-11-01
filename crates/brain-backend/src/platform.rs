@@ -164,6 +164,10 @@ impl Edge {
     pub fn undeclared_public_proxies(&self) -> Vec<IpNet> {
         self.trust_proxy.iter().filter(|net| !private_range(net) && !self.public_proxy.contains(net)).copied().collect()
     }
+    /// Private `trustProxy` ranges wider than a proxy needs: /16 for IPv4, /48 for IPv6.
+    pub fn wide_private_proxies(&self) -> Vec<IpNet> {
+        self.trust_proxy.iter().filter(|net| private_range(net) && match net { IpNet::V4(v4) => v4.prefix_len() < 16, IpNet::V6(v6) => v6.prefix_len() < 48 }).copied().collect()
+    }
     /// Reads the `server/platform.jsbrain` literal. Unknown keys are rejected so typos never
     /// silently fall back to defaults.
     pub fn from_contract(value: &Value) -> Result<Self, String> {
@@ -312,6 +316,11 @@ pub(crate) fn database_limit() -> Option<DatabaseLimit> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_a_private_range_wider_than_a_proxy_needs_is_wide() {
+        let edge = Edge::from_contract(&json!({"trustProxy": ["10.0.0.0/8", "10.1.0.0/16", "127.0.0.1", "::1", "fc00::/7"]})).unwrap();
+        assert_eq!(edge.wide_private_proxies().iter().map(ToString::to_string).collect::<Vec<_>>(), ["10.0.0.0/8", "fc00::/7"]);
+    }
     #[test]
     fn ranges_wide_enough_to_add_up_to_everyone_are_refused() {
         for wide in ["0.0.0.0/0", "0.0.0.0/1", "128.0.0.0/1", "10.0.0.0/7", "::/0", "::/1", "8000::/1", "2000::/3", "2000::/15"] {

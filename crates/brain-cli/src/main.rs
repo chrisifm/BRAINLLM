@@ -35,6 +35,7 @@ mod api_key_config;
 mod webhook_config;
 mod origin_check;
 mod lighthouse;
+mod deploy_check;
 mod seo_live;
 mod view_links;
 mod platform_config;
@@ -233,9 +234,14 @@ fn main() -> ExitCode {
                 println!("{value}");Ok(())
             })
         },
+        Some("deploy") if args.get(1).map(String::as_str) == Some("check") => {
+            let (code, out) = deploy_check::run(app_root().ok().as_deref(), &args[2..]);
+            println!("{out}");
+            return ExitCode::from(code.clamp(0, 255) as u8);
+        }
         Some("deploy") => {
             app_root().and_then(|root| {
-                if args.get(1).map(String::as_str)!=Some("config") {return Err("usage: brain deploy config pm2|nginx --request '<json>'; preview only".into());}
+                if args.get(1).map(String::as_str)!=Some("config") {return Err("usage: brain deploy config pm2|nginx --request '<json>' (preview only) | brain deploy check --url <origin>".into());}
                 let target=args.get(2).ok_or("deployment target is required")?;
                 let request=serde_json::from_str(&flag(&args,"--request").unwrap_or_else(||"{}".into())).map_err(|_|"deployment request must be JSON")?;
                 println!("{}",deployment::preview(&root,target,&request)?);Ok(())
