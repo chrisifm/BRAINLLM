@@ -1,6 +1,6 @@
 # BRAINLLM SPEC
 Normative. Anything not here does not exist. Internals: docs/INTERNALS.md (not needed to write apps). Any other `docs/…` path named here: `brain guide docs/<path>` prints it, so it works from an npm install.
-Before each kind of task run `brain guide <topic>` (`brain guide` lists them): steps, checks, mistakes, example.
+Before each kind of task run `brain guide <topic>` (`brain guide` lists them): steps, checks, mistakes, example. `brain capabilities` lists what exists.
 
 ## Files
 - `app.brain` entry: `<html lang>`, common `<head>`, layout, `<slot />` for the view. No `.html` anywhere.

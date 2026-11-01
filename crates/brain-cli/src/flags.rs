@@ -22,6 +22,7 @@ pub(crate) const TABLE: &[(&str, &[&str], &[&str])] = &[
     ("split", &[], &[]),
     ("spec", &["--topic"], &["--all"]),
     ("guide", &[], &[]),
+    ("capabilities", &[], &[]),
     ("schema", &[], &[]),
     ("theme", &[], &["--list"]),
     ("i18n", &[], &["--missing"]),

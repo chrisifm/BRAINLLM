@@ -45,7 +45,7 @@ pub fn new_app_named(dir: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
         // the brain version this app was made with, pinned exactly: a global `brain` delegates to it (INTERNALS §23)
         ("package.json", PACKAGE_JSON.replace("{{name}}", &name.to_ascii_lowercase()).replace("{{version}}", env!("CARGO_PKG_VERSION"))),
         ("APP.md", APP_MD.replace("{{name}}", &name)),
-        ("AGENTS.md", AGENTS_MD.into()),
+        ("AGENTS.md", format!("{AGENTS_MD}\n{}", crate::capabilities::summary())),
         ("CLAUDE.md", "@AGENTS.md\n".into()),
         ("views/home.brain", HOME.into()),
         ("views/about.brain", fill(include_str!("templates/new/about.brain"))),

@@ -97,6 +97,7 @@ granular:
   brain lib list | lib new <name>    discover native functions or create a pure project helper
   brain upgrade [--from V] [--to V] [--dry-run|--apply] [--no-doctor]  migration report from the app's recorded version to this compiler (--apply runs the safe codemods)
   brain upgrade <exact-version>      preview package pin changes and remaining decisions
+  brain capabilities                 what an app can use, generated from the compiler's own tables (docs/CAPABILITIES.md)
   brain add <kind> <name> [--props \"a:num=0 b:str?\"]   creates a file from its template; `brain add` lists every kind
   brain check [path]                 errors and warnings with an exact fix
   brain explain <code>               what a diagnostic code means, why, and a minimal correct example
@@ -133,6 +134,7 @@ granular:
 ";
 
 mod auth_setup;
+mod capabilities;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -171,6 +173,7 @@ fn main() -> ExitCode {
         Some("changes") | Some("graph") | Some("context") | Some("why") | Some("preflight") | Some("recipe") | Some("risk") => return agent_cli::entry(&args),
         Some("find") | Some("symbols") | Some("refs") => search::run(&args),
         Some("lib") => libraries::run(&args),
+        Some("capabilities") => capabilities::render().map(|text| print!("{text}")),
         Some("history") => history_command(&args),
         Some("integration") => integration_command(&args),
         Some("deps") => {

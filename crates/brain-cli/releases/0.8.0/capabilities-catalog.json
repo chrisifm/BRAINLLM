@@ -1,0 +1,27 @@
+{
+  "id": "capabilities-catalog",
+  "kind": "capability",
+  "title": "brain capabilities and docs/CAPABILITIES.md",
+  "why": "An author checks what already exists before building it by hand; the catalog comes from the tables the compiler dispatches on, and a new app lists it in AGENTS.md.",
+  "changelog": [
+    "`brain capabilities`"
+  ],
+  "guide": "docs/CAPABILITIES.md",
+  "apis": [
+    "brain capabilities"
+  ],
+  "affects": [
+    "AGENTS.md"
+  ],
+  "adopt": {
+    "command": "brain capabilities",
+    "file": "AGENTS.md",
+    "snippet": "`brain capabilities` prints the full catalog."
+  },
+  "uses": [
+    {
+      "glob": "AGENTS.md",
+      "contains": "brain capabilities"
+    }
+  ]
+}

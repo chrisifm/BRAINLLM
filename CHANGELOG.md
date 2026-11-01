@@ -11,6 +11,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [0.8.0] - Unreleased
 
+- `brain capabilities` prints the catalog of playbooks, generators, recipes and backend types from the compiler's own tables; `docs/CAPABILITIES.md` is its output, a test fails on drift, and a new app's `AGENTS.md` lists a summary.
 - `brain guide whats-new` prints what changed from the release manifests, `brain guide migrate` is the upgrade playbook, and `brain guide docs/<path>` serves every public reference page from the binary, so npm installs read them too.
 - `brain guide backend` and `brain guide analytics` are new playbooks with steps, verification and common mistakes.
 - `brain add auth` adds signup, login and account pages, the session channel, the auth configuration and the environment keys to an existing app and overwrites nothing; `brain new <app> --backend` starts an app with them.
