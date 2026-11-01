@@ -140,6 +140,7 @@ pub enum Imported {
 /// `tokens.brain.css` while apps migrate, SPEC §10) and the props of imported
 /// `.brain` files. Returns the context and the files read (for watch/HMR dependencies).
 pub fn load_ctx(disk_path: &Path, c: &Component) -> (Ctx, Vec<PathBuf>) {
+    brain_metrics::count(brain_metrics::Counter::ContextLoads, 1);
     let mut deps = Vec::new();
     let mut ctx = Ctx::default();
     let dir = disk_path.parent().unwrap_or(Path::new("."));
@@ -414,6 +415,7 @@ fn missing_hint(dir: &Path, source: &str, root: &Path) -> (String, Option<String
 
 /// Runs every rule. Diagnostics come sorted by position.
 pub fn check(c: &Component, ctx: &Ctx) -> Vec<Diag> {
+    brain_metrics::count(brain_metrics::Counter::Checks, 1);
     let mut server_names = HashSet::new();
     for s in &c.script {
         if let Stmt::Import(i) = s

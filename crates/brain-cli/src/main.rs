@@ -1068,6 +1068,8 @@ pub(crate) struct BuildReport {
     pub signature: String,
     /// lowest and highest SEO score of the indexable pages
     pub seo: Option<(u32, u32)>,
+    /// observations of this build only; never part of `dist/` or of the signature
+    pub metrics: brain_metrics::Report,
 }
 
 /// `brain build` (today: sitemap.xml + robots.txt; bundling, minification and prerender arrive with #9/#26).
@@ -1083,6 +1085,8 @@ pub(crate) fn run_build_with(root: &Path, site: Option<String>, env_name: &str, 
 // An assessment retains fresh output and measured payloads when only the budget fails. Normal builds still
 // require into_report(); doctor can audit that exact output while keeping its build gate red.
 fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, progress: Option<&term::Progress>) -> Result<build_assessment::Assessment, String> {
+    let metrics = brain_metrics::Build::new();
+    let _observed = brain_metrics::attach(&metrics);
     // environment (§36): PUBLIC_* become constants; a key with no value in it stops the build (B0720)
     env::select(root, env_name);
     // any error in the file stops the build too (B0724 malformed line, B0723 secret-shaped PUBLIC_*)
@@ -1106,12 +1110,13 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
     // the author's intent): no sitemap, no robots Sitemap line, no absolute URL pointing at it
     let placeholder = site.clone().filter(|s| !explicit && env_name != "development" && env::placeholder_origin(s));
     let site = if placeholder.is_some() { None } else { site };
-    let mut rep = BuildReport { files: vec![], warnings: vec![], ledger: vec![], build_cache:brain_mcp::Json::Null, optimizations:vec![], report: vec![], written: 0, unchanged: 0, signature: String::new(), seo: None };
+    let mut rep = BuildReport { files: vec![], warnings: vec![], ledger: vec![], build_cache:brain_mcp::Json::Null, optimizations:vec![], report: vec![], written: 0, unchanged: 0, signature: String::new(), seo: None, metrics: brain_metrics::Report::default() };
     // the native linter (INTERNALS §20): the same diagnostics as `brain check`; errors stop the build with a summary,
     // warnings are listed with their count (info stays in `brain check`)
     if let Some(p) = progress {
         p.event("check", 0, 0)
     }
+    brain_metrics::phase("check", 0);
     let (_, diags, _) = run_check_base(Some(root.to_path_buf()))?;
     let line = |d: &compiler::Diag| format!("{} {}:{}:{} {}; fix: {}", d.code, d.file, d.line, d.col, d.msg, d.fix);
     let errors: Vec<String> = diags.iter().filter(|d| !d.is_warning()).map(line).collect();
@@ -1137,6 +1142,7 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
         let skipped = if live.is_empty() { String::new() } else { format!("; the sitemap() routes {} are not listed either", live.join(", ")) };
         rep.warnings.push(format!("B0736 .brain_env:1:1 the {env_name} site URL {p} is {}, so the build publishes no sitemap.xml, no robots.txt Sitemap line and no absolute URL{skipped}; fix: set PUBLIC_SITE_URL in the [{env_name}] section of .brain_env (or `brain build --site https://your-domain`)", env::no_site_kind(p)));
     }
+    rep.metrics = metrics.finish();
     let budget_error = budget::enforce(root, &rep.report).err();
     if budget_error.is_none() {
         let feedback:serde_json::Value=serde_json::from_str(&build_json(&rep).stringify()).map_err(|_|"build feedback serialization failed")?;
@@ -1195,13 +1201,17 @@ fn prewarm(root: &Path, lens: &HashMap<String, usize>) {
         .collect();
     let workers = std::thread::available_parallelism().map_or(4, |n| n.get()).min(jobs.len().max(1));
     let next = std::sync::atomic::AtomicUsize::new(0);
+    let metrics = brain_metrics::current();
     std::thread::scope(|sc| {
         for _ in 0..workers {
-            sc.spawn(|| loop {
-                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let Some((f, rel, len)) = jobs.get(i) else { break };
-                if let Ok(src) = std::fs::read_to_string(f) {
-                    let _ = compiler::compile_hash(&src, Path::new(rel), root, false, *len);
+            sc.spawn(|| {
+                let _observed = metrics.as_ref().map(brain_metrics::worker);
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some((f, rel, len)) = jobs.get(i) else { break };
+                    if let Ok(src) = std::fs::read_to_string(f) {
+                        let _ = compiler::compile_hash(&src, Path::new(rel), root, false, *len);
+                    }
                 }
             });
         }
@@ -1270,6 +1280,7 @@ pub(crate) fn cache_cfg(root: &Path) -> Result<brain_pack::cache::CacheCfg, Stri
 /// Returns (route, HTML) of every built page.
 fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mut BuildReport, progress: Option<&term::Progress>) -> Result<Vec<(String, String)>, String> {
     let on_phase = |phase: &str, done: usize, total: usize| {
+        brain_metrics::phase(phase, total.max(done));
         if let Some(p) = progress {
             p.event(phase, done, total)
         }
@@ -1287,6 +1298,7 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
     on_phase("check", 0, 0);
     let lens = hash_lengths(root)?;
     let _ = analytics::write_map(root); // .brain/analytics/elements.json: element ids → file:line, never deployed
+    brain_metrics::phase("compile", 0);
     prewarm(root, &lens);
     let r2 = root.to_path_buf();
     let compile = move |src: &str, rel: &Path| -> Result<brain_pack::Unit, String> {
@@ -1553,6 +1565,21 @@ fn bundle(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, rep: &mu
     Ok(out.pages.into_iter().map(|p| (p.route, p.html)).collect())
 }
 
+/// Timings vary per run and stay out of everything hashed or written to `dist/`; the counters are the executed work.
+fn metrics_json(m: &brain_metrics::Report) -> brain_mcp::Json {
+    use brain_mcp::Json;
+    let rounded = |ms: f64| Json::Num((ms * 100.0).round() / 100.0);
+    Json::obj([
+        ("scope", Json::str("this build only; cpuMs covers threads of this process, not child processes such as the prerender runtime or a headless browser")),
+        ("wallMs", rounded(m.wall_ms)),
+        (
+            "stages",
+            Json::Arr(m.stages.iter().map(|s| Json::obj([("name", Json::str(s.name)), ("wallMs", rounded(s.wall_ms)), ("cpuMs", rounded(s.cpu_ms)), ("items", Json::Num(s.items as f64))])).collect()),
+        ),
+        ("counters", Json::Obj(m.counters.iter().map(|(k, v)| (k.to_string(), Json::Num(*v as f64))).collect())),
+    ])
+}
+
 pub(crate) fn build_json(r: &BuildReport) -> brain_mcp::Json {
     use brain_mcp::Json;
     let keys = ["jsRaw", "jsMin", "jsGz", "css", "cssGz", "html", "htmlGz"];
@@ -1564,6 +1591,7 @@ pub(crate) fn build_json(r: &BuildReport) -> brain_mcp::Json {
         ("ledger", Json::Arr(r.ledger.clone())),
         ("buildCache",r.build_cache.clone()),
         ("optimizations",Json::Arr(r.optimizations.clone())),
+        ("metrics", metrics_json(&r.metrics)),
         (
             "report",
             Json::Arr(

@@ -275,6 +275,7 @@ version = "0.7.0"
 dependencies = [
  "brain-css",
  "brain-lex",
+ "brain-metrics",
  "brain-parse",
  "libc",
  "sha2 0.11.1",
@@ -290,6 +291,7 @@ dependencies = [
  "brain-css",
  "brain-lex",
  "brain-mcp",
+ "brain-metrics",
  "brain-min",
  "brain-pack",
  "brain-parse",
@@ -309,6 +311,7 @@ dependencies = [
  "brain-check",
  "brain-css",
  "brain-lex",
+ "brain-metrics",
  "brain-parse",
 ]
 
@@ -331,8 +334,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "brain-metrics"
+version = "0.7.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "brain-min"
 version = "0.7.0"
+dependencies = [
+ "brain-metrics",
+]
 
 [[package]]
 name = "brain-pack"
@@ -341,6 +354,7 @@ dependencies = [
  "brain-codegen",
  "brain-css",
  "brain-mcp",
+ "brain-metrics",
  "brain-min",
  "brotli",
  "libc",
@@ -354,6 +368,7 @@ version = "0.7.0"
 dependencies = [
  "brain-css",
  "brain-lex",
+ "brain-metrics",
 ]
 
 [[package]]
@@ -362,6 +377,7 @@ version = "0.7.0"
 dependencies = [
  "brain-check",
  "brain-lex",
+ "brain-metrics",
 ]
 
 [[package]]

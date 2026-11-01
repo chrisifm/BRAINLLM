@@ -13,6 +13,7 @@ use std::path::Path;
 
 /// Parses a whole `.brain` file. `path` is used for the component name, its level and diagnostics.
 pub fn parse(src: &str, path: &Path) -> Result<Component, Vec<Diag>> {
+    brain_metrics::count(brain_metrics::Counter::Parses, 1);
     let file = display_path(path);
     let idx = LineIndex::new(src);
     let kind = file_kind(path);

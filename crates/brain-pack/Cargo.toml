@@ -6,6 +6,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+brain-metrics = { path = "../brain-metrics" }
 brain-min = { path = "../brain-min" }
 brain-mcp = { path = "../brain-mcp" }
 libc = "0.2.191"

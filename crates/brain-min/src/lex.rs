@@ -57,6 +57,7 @@ fn is_id_part(c: char) -> bool {
 }
 
 pub fn lex(src: &str) -> Result<Vec<Tok>, String> {
+    brain_metrics::count(brain_metrics::Counter::JsLexes, 1);
     let chars: Vec<char> = src.chars().collect();
     // byte offset of each char index (plus one extra at the end)
     let byte_at: Vec<usize> = src.char_indices().map(|(b, _)| b).chain(std::iter::once(src.len())).collect();

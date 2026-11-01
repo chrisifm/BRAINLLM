@@ -89,8 +89,11 @@ pub fn compile_hash(
     // `-2`: entry format with server_fns (older entries lack it and are recomputed)
     let entry = root.join(".brain/cache").join(format!("{key}-2.json"));
     if let Some(o) = read_cache(&entry) {
+        brain_metrics::count(brain_metrics::Counter::CompileCacheHits, 1);
         return Ok(o);
     }
+    brain_metrics::count(brain_metrics::Counter::CompileCacheMisses, 1);
+    brain_metrics::count(brain_metrics::Counter::CompileRuns, 1);
     let o = brain_codegen::compile_with(src, rel, &opts)?;
     let out = Output {
         js: o.js,
@@ -199,13 +202,14 @@ fn read_cache(entry: &Path) -> Option<Output> {
         return None;
     }
     let mut text = String::new();
-    file.take(CACHE_ENTRY_BYTES + 1)
+    (&file).take(CACHE_ENTRY_BYTES + 1)
         .read_to_string(&mut text)
         .ok()?;
     if text.len() as u64 > CACHE_ENTRY_BYTES {
         return None;
     }
     let j = Json::parse(&text).ok()?;
+    let used = file.metadata().ok().and_then(|m| m.modified().ok());
     let s = |k: &str| j.get(k).and_then(Json::as_str).map(str::to_string);
     let mut deps = Vec::new();
     if let Some(Json::Arr(ds)) = j.get("deps") {
@@ -230,6 +234,7 @@ fn read_cache(entry: &Path) -> Option<Output> {
                 .collect()
         })
         .unwrap_or_default();
+    brain_pack::cache_budget::touch(entry, used);
     Some(Output {
         js: s("js")?,
         css: s("css")?,
@@ -268,19 +273,22 @@ fn write_cache(entry: &Path, o: &Output) {
     if bytes.len() as u64 > CACHE_ENTRY_BYTES {
         return;
     }
+    let size = bytes.len() as u64;
+    let fits = entry.parent().is_none_or(|dir| brain_pack::cache_budget::reserve(dir, size, CACHE_ENTRIES, CACHE_BYTES, || Some(prune_for(dir, CACHE_BYTES, CACHE_ENTRIES, 1, size))));
+    if !fits {
+        return;
+    }
     if std::fs::write(&tmp, bytes).is_ok() {
         let _ = std::fs::rename(&tmp, entry);
     }
     let _ = std::fs::remove_file(&tmp);
-    if let Some(dir) = entry.parent() {
-        prune_cache(dir, CACHE_BYTES, CACHE_ENTRIES);
-    }
 }
 
-/// Oldest-write eviction; only complete entries in this project's compiler cache are eligible.
-fn prune_cache(dir: &Path, max_bytes: u64, max_entries: usize) {
+/// Least-recently-used eviction; only complete entries in this project's compiler cache are eligible. Returns what is left.
+fn prune_for(dir: &Path, max_bytes: u64, max_entries: usize, slots: usize, size: u64) -> (usize, u64) {
+    brain_metrics::count(brain_metrics::Counter::CacheDirectoryScans, 1);
     let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
+        return (0, 0);
     };
     let mut files = Vec::new();
     let mut bytes = 0u64;
@@ -292,6 +300,7 @@ fn prune_cache(dir: &Path, max_bytes: u64, max_entries: usize) {
         {
             continue;
         }
+        brain_metrics::count(brain_metrics::Counter::CacheMetadataReads, 1);
         let Ok(meta) = entry.file_type().and_then(|kind| {
             if kind.is_file() {
                 entry.metadata()
@@ -302,26 +311,9 @@ fn prune_cache(dir: &Path, max_bytes: u64, max_entries: usize) {
             continue;
         };
         bytes = bytes.saturating_add(meta.len());
-        files.push((
-            meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH),
-            path,
-            meta.len(),
-        ));
+        files.push((meta.modified().ok(), path, meta.len()));
     }
-    if bytes <= max_bytes && files.len() <= max_entries {
-        return;
-    }
-    files.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-    let mut count = files.len();
-    for (_, path, size) in files {
-        if bytes <= max_bytes && count <= max_entries {
-            break;
-        }
-        if std::fs::remove_file(path).is_ok() {
-            bytes = bytes.saturating_sub(size);
-            count -= 1;
-        }
-    }
+    brain_pack::cache_budget::evict(files, bytes, slots, size, max_entries, max_bytes)
 }
 
 #[cfg(test)]
@@ -432,7 +424,7 @@ mod tests {
         }
         std::fs::write(dir.join("other.json"), b"preserve").unwrap();
         std::fs::write(dir.join("active.tmp1-1"), b"preserve").unwrap();
-        prune_cache(&dir, 16, 2);
+        prune_for(&dir, 16, 2, 0, 0);
         let kept = std::fs::read_dir(&dir)
             .unwrap()
             .flatten()

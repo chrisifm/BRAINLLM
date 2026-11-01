@@ -141,74 +141,59 @@ fn owned_name(name: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
+#[cfg(test)]
 fn reserve(dir: &Path, incoming: &Path, size: u64, entries: usize, total: u64) -> bool {
-    let Ok(read) = fs::read_dir(dir) else {
-        return false;
-    };
+    scan_evict(dir, incoming, size, entries, total).is_some_and(|(count, used)| count < entries && used.saturating_add(size) <= total)
+}
+fn scan_evict(dir: &Path, incoming: &Path, size: u64, entries: usize, total: u64) -> Option<(usize, u64)> {
+    brain_metrics::count(brain_metrics::Counter::CacheDirectoryScans, 1);
+    let read = fs::read_dir(dir).ok()?;
     let mut files = Vec::new();
     let mut used = 0u64;
     for (index, entry) in read.enumerate() {
         if index >= entries.saturating_mul(4).max(64) {
-            return false;
+            return None;
         }
-        let Ok(entry) = entry else { return false };
+        let entry = entry.ok()?;
         let path = entry.path();
         let name = entry.file_name();
         let name = name.to_string_lossy();
         if !owned_name(&name) {
             continue;
         }
-        let Ok(m) = fs::symlink_metadata(&path) else {
-            return false;
-        };
+        brain_metrics::count(brain_metrics::Counter::CacheMetadataReads, 1);
+        let m = fs::symlink_metadata(&path).ok()?;
         if !m.is_file() || m.file_type().is_symlink() {
             continue;
         }
         if path == incoming {
-            if fs::remove_file(&path).is_err() {
-                return false;
-            }
+            fs::remove_file(&path).ok()?;
             continue;
         }
         used = used.saturating_add(m.len());
         files.push((m.modified().ok(), path, m.len()));
     }
-    files.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-    let mut count = files.len();
-    for (_, path, len) in files {
-        if count < entries && used.saturating_add(size) <= total {
-            break;
-        }
-        if fs::remove_file(path).is_err() {
-            return false;
-        }
-        EVICTED.fetch_add(1, Ordering::Relaxed);
-        count -= 1;
-        used = used.saturating_sub(len);
+    let before = files.len();
+    let (count, used) = crate::cache_budget::evict(files, used, 1, size, entries, total);
+    EVICTED.fetch_add((before - count) as u64, Ordering::Relaxed);
+    Some((count, used))
+}
+/// One scan at a time per directory across processes; another process holding the lock means skip this write.
+fn reserve_scan(dir: &Path, path: &Path, size: u64) -> Option<(usize, u64)> {
+    let lock_path = dir.join(".write.lock");
+    if fs::symlink_metadata(&lock_path).is_ok_and(|m| !m.is_file() || m.file_type().is_symlink()) {
+        return None;
     }
-    count < entries && used.saturating_add(size) <= total
+    let lock = OpenOptions::new().write(true).create(true).truncate(false).open(lock_path).ok()?;
+    let _guard = lock.try_lock().ok()?;
+    scan_evict(dir, path, size, ENTRIES, TOTAL)
 }
 fn store(dir: &Path, path: &Path, output: &[u8]) -> bool {
     if output.len() > MAX {
         return false;
     }
-    let lock_path = dir.join(".write.lock");
-    if fs::symlink_metadata(&lock_path).is_ok_and(|m| !m.is_file() || m.file_type().is_symlink()) {
-        return false;
-    }
-    let Ok(lock) = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(lock_path)
-    else {
-        return false;
-    };
-    let Ok(_guard) = lock.try_lock() else {
-        return false;
-    };
     let size = 48 + output.len() as u64;
-    if !reserve(dir, path, size, ENTRIES, TOTAL) {
+    if !crate::cache_budget::reserve(dir, size, ENTRIES, TOTAL, || reserve_scan(dir, path, size)) {
         return false;
     }
     let temp = dir.join(format!(
@@ -225,7 +210,7 @@ fn store(dir: &Path, path: &Path, output: &[u8]) -> bool {
         file.write_all(&(output.len() as u64).to_be_bytes())?;
         file.write_all(&crate::sha::sha256(output))?;
         file.write_all(output)?;
-        file.sync_all()?;
+        // No fsync: `read` verifies length and SHA-256, so an entry torn by a crash is a miss, never compiler output.
         fs::rename(&temp, path)?;
         Ok(())
     })();
@@ -252,6 +237,8 @@ pub(crate) fn get(
     if let Some((_, path)) = &location {
         if let Some(bytes) = read(path) {
             HITS.fetch_add(1, Ordering::Relaxed);
+            brain_metrics::count(brain_metrics::Counter::BuildCacheHits, 1);
+            crate::cache_budget::touch(path, fs::symlink_metadata(path).ok().and_then(|m| m.modified().ok()));
             return Ok(bytes);
         }
     }
@@ -263,6 +250,7 @@ pub(crate) fn get(
         UNSAFE.fetch_add(1, Ordering::Relaxed);
     }
     MISSES.fetch_add(1, Ordering::Relaxed);
+    brain_metrics::count(brain_metrics::Counter::BuildCacheMisses, 1);
     let output = match compute() {
         Ok(value) => value,
         Err(error) => {
@@ -273,8 +261,10 @@ pub(crate) fn get(
     if let Some((dir, path)) = location {
         if store(&dir, &path, &output) {
             WRITES.fetch_add(1, Ordering::Relaxed);
+            brain_metrics::count(brain_metrics::Counter::BuildCacheWrites, 1);
         } else {
             SKIPPED.fetch_add(1, Ordering::Relaxed);
+            brain_metrics::count(brain_metrics::Counter::BuildCacheWritesSkipped, 1);
         }
     }
     Ok(output)

@@ -1097,7 +1097,7 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
         name: "brain_build",
         description: "Build production assets, prerendered pages and SEO into dist/. Returns conservative route budgets and a final-asset raw/gzip/Brotli ledger separating initial and deferred references; not measured network traffic.",
         input_schema: schema([("site", "string", "absolute origin for the sitemap, e.g. https://example.dev")], &[]),
-        output_schema: out([("files", "array"), ("warnings", "array"), ("ledger", "array")]),
+        output_schema: out([("files", "array"), ("warnings", "array"), ("ledger", "array"), ("metrics", "object")]),
         run: Box::new(|a| {
             let r = crate::run_build(&crate::app_root()?, arg(a, "site"))?;
             Ok(crate::build_json(&r).stringify())

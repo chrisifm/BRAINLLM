@@ -22,6 +22,7 @@ pub mod cssdedup;
 mod css_values;
 pub mod server;
 mod server_runtime;
+pub mod cache_budget;
 mod runtime_shake;
 mod navigation;
 pub mod prerender;
@@ -2026,11 +2027,13 @@ fn build_inner_with_options(
     report("compress", 0, entries.len());
     let workers = std::thread::available_parallelism().map_or(2, |n| n.get()).min(2).min(entries.len().max(1));
     let root = input.root.clone(); // `input` holds the (non-Sync) compile closure: share only the root
+    let metrics = brain_metrics::current();
     std::thread::scope(|sc| {
         for _ in 0..workers {
-            sc.spawn(|| loop {
+            sc.spawn(|| { let _observed = metrics.as_ref().map(brain_metrics::worker); loop {
                 let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let Some((p, c)) = entries.get(i) else { break };
+                brain_metrics::count(brain_metrics::Counter::Compressions, 1);
                 let z = cached_bytes(&root, "gz", c, || Ok(gzip::gzip(c, 15))).unwrap_or_else(|_| gzip::gzip(c, 15));
                 let br = cached_bytes(&root, "br-9.1.1-q11-w22", c, || brotli::compress(c));
                 // zstd (Chrome 123+, Firefox 126+): kept only when it beats Brotli, because every client that accepts
@@ -2047,7 +2050,7 @@ fn build_inner_with_options(
                 if let Some(f) = progress {
                     f("compress", compressed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1, entries.len());
                 }
-            });
+            }});
         }
     });
     let mut binary = results.into_inner().unwrap();
