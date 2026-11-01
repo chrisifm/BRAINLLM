@@ -1,0 +1,9 @@
+{
+  "id": "page-validators",
+  "kind": "fix",
+  "title": "HEAD, ETag and one fill of a cold page",
+  "why": "Identical requests could fill a cold page at the same time, and HEAD lacked the validator of GET.",
+  "changelog": [
+    "a cold page fills once for concurrent requests; pages and the backend answer HEAD with the validator of GET; anonymous reads revalidate with their ETag"
+  ]
+}

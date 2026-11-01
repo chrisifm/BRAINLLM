@@ -1,0 +1,9 @@
+{
+  "id": "inline-tokens",
+  "kind": "change",
+  "title": "Small tokens sheet in the head",
+  "why": "A separate request for a small sheet slowed first paint.",
+  "changelog": [
+    "a tokens sheet of up to 8192 bytes goes inline in `<head>`"
+  ]
+}

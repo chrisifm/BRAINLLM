@@ -1,0 +1,9 @@
+{
+  "id": "large-document-reads",
+  "kind": "fix",
+  "title": "Counted lists read a large document once",
+  "why": "Counts and facets opened large documents several times per row.",
+  "changelog": [
+    "list `count`, aggregates and facets read a large document once per row; equality rechecks only values that fill the text key; `?fields=` is trimmed in SQL"
+  ]
+}

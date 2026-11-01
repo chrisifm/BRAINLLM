@@ -1,0 +1,9 @@
+{
+  "id": "server-operations",
+  "kind": "capability",
+  "title": "Operations from server code",
+  "why": "Server code could not run a declared operation or charge credits inside it.",
+  "changelog": [
+    "`ctx.backend.operation(name, input)`, the `operations.<name>:write` key scope and `debit` steps inside operations"
+  ]
+}

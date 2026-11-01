@@ -1,0 +1,9 @@
+{
+  "id": "batch-upsert-fields",
+  "kind": "fix",
+  "title": "Server-set fields stay out of batch and upsert",
+  "why": "Any user allowed to create could write readonly and private fields through /batch and /upsert.",
+  "changelog": [
+    "`/api/<resource>/batch` and `/upsert` reject `readonly` and `private` fields from clients that are not the system; a client writing them now gets an error"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "id": "brain-data",
+  "kind": "capability",
+  "title": "brain data prepare and maintain",
+  "why": "Imported tables needed statistics and compression by hand.",
+  "changelog": [
+    "`brain data prepare|maintain`: dry run by default, statistics for declared filters, batched lz4 rewrite and a buffer gate"
+  ]
+}

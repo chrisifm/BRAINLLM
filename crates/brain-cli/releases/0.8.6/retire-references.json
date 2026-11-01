@@ -1,0 +1,9 @@
+{
+  "id": "retire-references",
+  "kind": "fix",
+  "title": "Approved contracts retire what they drop",
+  "why": "A changed reference left the old foreign key next to the new one.",
+  "changelog": [
+    "removing a `ref` field or changing its target or action retires its column, key and trigger on approval; removed filters and sorts drop their indexes"
+  ]
+}

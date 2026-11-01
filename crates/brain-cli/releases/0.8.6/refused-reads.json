@@ -1,0 +1,9 @@
+{
+  "id": "refused-reads",
+  "kind": "change",
+  "title": "Reads refused for now answer 503",
+  "why": "A busy or refused backend read surfaced as an error page.",
+  "changelog": [
+    "a read refused with 429 or 503 answers 503 with no opt-out; a refused connection (28000, 28P01) answers 503 with `Retry-After: 5` and no stack"
+  ]
+}

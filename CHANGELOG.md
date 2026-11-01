@@ -7,6 +7,29 @@ diagnostics that reject code an earlier version accepted.
 Every npm package (`@christianirack/brainllm`, its seven native platform packages, `brainllm-runtime`,
 `create-brainllm` and `create-brainll`) ships the same version as `[workspace.package]` in `Cargo.toml`.
 
+## [0.8.6] - 2026-11-01
+
+Upgrade with `npm install -D @christianirack/brainllm@0.8.6 --save-exact`. The default limit per address is now 10 requests per second with a burst of 300: define `limits` in server/platform.jsbrain if you need another. Clients that write `readonly` or `private` fields through `/batch` or `/upsert` now get an error.
+
+- `/api/<resource>/batch` and `/upsert` reject `readonly` and `private` fields from clients that are not the system; a client writing them now gets an error
+- `access: { write: [roles] }` on a field; `pattern` also applies to `list<str>` elements and `obj` keys
+- `constraints: { unique: [['$owner']] }` and `perOwner: { except: [roles] }`; B0794 warns on a unique field any user can claim
+- removing a `ref` field or changing its target or action retires its column, key and trigger on approval; removed filters and sorts drop their indexes
+- list `count`, aggregates and facets read a large document once per row; equality rechecks only values that fill the text key; `?fields=` is trimmed in SQL
+- `brain data prepare|maintain`: dry run by default, statistics for declared filters, batched lz4 rewrite and a buffer gate
+- `ctx.backend.operation(name, input)`, the `operations.<name>:write` key scope and `debit` steps inside operations
+- the CSP opens to the provider a captcha contract names; `brain recipe captcha`; `ctx.backend.login` and `signup` take `{ captcha }`; a one-use `login_grant` lasts 5 minutes; `operator_key_env` lets an operator skip the check; it fails closed
+- `BRAIN_AUTH_IDLE_SECONDS`, `session_seconds` per role, `GET /_brain/auth/sessions` with revocation, `POST /_brain/auth/reauth` and `reauth` on routes; B0799 reports session controls that do not apply
+- a read refused with 429 or 503 answers 503 with no opt-out; a refused connection (28000, 28P01) answers 503 with `Retry-After: 5` and no stack
+- a cold page fills once for concurrent requests; pages and the backend answer HEAD with the validator of GET; anonymous reads revalidate with their ETag
+- the default limit per address is 10 requests per second with a burst of 300; set `limits` in server/platform.jsbrain to choose yours
+- a visitor who leaves during `load` is logged as info; each stderr line is written in a single call; a failed service worker check stays quiet
+- `brain edge plan` and the MCP tool `brain_edge_plan` print a read-only cache plan for a CDN
+- a tokens sheet of up to 8192 bytes goes inline in `<head>`
+- B0505 warns when `keyword` or `canonical` sits on a page its folder guard keeps out of search; a public page that redirects some visitors does it in `load()`; `brain add view` omits both under a guard
+- the credit line is left out of the measured view size
+- B0111 says how a handler receives the event
+
 ## [0.8.5] - 2026-11-01
 
 Upgrade with `npm install -D @christianirack/brainllm@0.8.5 --save-exact`. A site rendered per request rebuilds with its public origin to get its sitemap (`brain build --site`, or `PUBLIC_SITE_URL`).

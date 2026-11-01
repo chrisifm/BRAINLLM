@@ -1,0 +1,9 @@
+{
+  "id": "credit-budget",
+  "kind": "fix",
+  "title": "The credit line spends no view budget",
+  "why": "Turning the credit on could break budget.viewKB.",
+  "changelog": [
+    "the credit line is left out of the measured view size"
+  ]
+}

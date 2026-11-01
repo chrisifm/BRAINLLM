@@ -1,0 +1,9 @@
+{
+  "id": "per-owner-unique",
+  "kind": "capability",
+  "title": "One record per owner",
+  "why": "Limits such as one profile per user needed custom code.",
+  "changelog": [
+    "`constraints: { unique: [['$owner']] }` and `perOwner: { except: [roles] }`; B0794 warns on a unique field any user can claim"
+  ]
+}

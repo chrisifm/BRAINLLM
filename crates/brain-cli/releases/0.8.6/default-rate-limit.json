@@ -1,0 +1,9 @@
+{
+  "id": "default-rate-limit",
+  "kind": "change",
+  "title": "Default limit per address",
+  "why": "The default limit cut off normal pages that make many reads.",
+  "changelog": [
+    "the default limit per address is 10 requests per second with a burst of 300; set `limits` in server/platform.jsbrain to choose yours"
+  ]
+}

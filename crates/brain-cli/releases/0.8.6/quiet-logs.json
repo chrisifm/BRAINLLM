@@ -1,0 +1,9 @@
+{
+  "id": "quiet-logs",
+  "kind": "fix",
+  "title": "Logs say what happened",
+  "why": "A visitor leaving was logged as a failure and stderr lines could interleave.",
+  "changelog": [
+    "a visitor who leaves during `load` is logged as info; each stderr line is written in a single call; a failed service worker check stays quiet"
+  ]
+}

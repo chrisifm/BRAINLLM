@@ -1,0 +1,9 @@
+{
+  "id": "field-write-roles",
+  "kind": "capability",
+  "title": "Role-gated fields and element patterns",
+  "why": "Apps needed fields only some roles may write, and pattern checks on lists and object keys.",
+  "changelog": [
+    "`access: { write: [roles] }` on a field; `pattern` also applies to `list<str>` elements and `obj` keys"
+  ]
+}

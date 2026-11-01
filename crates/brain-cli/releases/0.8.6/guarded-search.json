@@ -1,0 +1,9 @@
+{
+  "id": "guarded-search",
+  "kind": "fix",
+  "title": "Guarded pages that declare search metadata",
+  "why": "A public page in a guarded folder was silently left out of sitemap.xml and llms.txt.",
+  "changelog": [
+    "B0505 warns when `keyword` or `canonical` sits on a page its folder guard keeps out of search; a public page that redirects some visitors does it in `load()`; `brain add view` omits both under a guard"
+  ]
+}

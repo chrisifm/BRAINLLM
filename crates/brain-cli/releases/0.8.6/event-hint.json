@@ -1,0 +1,9 @@
+{
+  "id": "event-hint",
+  "kind": "fix",
+  "title": "B0111 explains $event",
+  "why": "The message did not say how a handler receives the event.",
+  "changelog": [
+    "B0111 says how a handler receives the event"
+  ]
+}
