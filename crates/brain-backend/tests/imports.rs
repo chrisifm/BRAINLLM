@@ -41,6 +41,7 @@ async fn stored_hash(pool: &sqlx::PgPool, id: &str) -> String {
 }
 
 #[tokio::test]
+#[ignore = "requires scripts/backend-check.mjs disposable Postgres"]
 async fn an_import_keeps_identity_previews_refuses_as_a_whole_and_upgrades_legacy_hashes() {
     let pool = database().await;
     let field = |kind: &str| Field { kind: kind.into(), required: true, ..Default::default() };
