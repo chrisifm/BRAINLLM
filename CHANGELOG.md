@@ -7,6 +7,13 @@ diagnostics that reject code an earlier version accepted.
 Every npm package (`@christianirack/brainllm`, its seven native platform packages, `brainllm-runtime`,
 `create-brainllm` and `create-brainll`) ships the same version as `[workspace.package]` in `Cargo.toml`.
 
+## [0.8.8] - 2026-11-01
+
+Upgrade with `npm install -D @christianirack/brainllm@0.8.8 --save-exact`.
+
+- a cookie the browser cannot decode (`Cookie: foo=%%%`) keeps its raw value instead of answering 500 on every page, and an unparsable `Host` answers 400
+- `<select bind:value>` shows the bound value when its options come from `{#each}` or `{#if}`, also when they mount or change after hydration
+
 ## [0.8.7] - 2026-11-01
 
 Upgrade with `npm install -D @christianirack/brainllm@0.8.7 --save-exact`.

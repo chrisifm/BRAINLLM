@@ -1,0 +1,9 @@
+{
+  "id": "select-value",
+  "kind": "fix",
+  "title": "Bound select value",
+  "why": "A select with options from a loop showed the first option after hydration instead of the bound value.",
+  "changelog": [
+    "`<select bind:value>` shows the bound value when its options come from `{#each}` or `{#if}`, also when they mount or change after hydration"
+  ]
+}

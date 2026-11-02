@@ -1,0 +1,9 @@
+{
+  "id": "hostile-headers",
+  "kind": "fix",
+  "title": "Hostile request headers",
+  "why": "A single malformed cookie or Host header answered 500 on public pages.",
+  "changelog": [
+    "a cookie the browser cannot decode (`Cookie: foo=%%%`) keeps its raw value instead of answering 500 on every page, and an unparsable `Host` answers 400"
+  ]
+}
