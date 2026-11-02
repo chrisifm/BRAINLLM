@@ -2063,6 +2063,14 @@ an error after the render window logs `component failed after SSR`. Boundaries k
 The development `load` sidecar describes non-`Error` rejections (plain objects, cycles, `undefined`) instead of
 printing `[object Object]` or crashing on `JSON.stringify`.
 
+### `<select multiple bind:value>` binds an array (2026-11-02)
+
+Codegen writes `Array.from(e.target.querySelectorAll("option")).filter((o) => o.selected).map((o) => o.value)` on
+`change` when the `<select>` carries a plain `multiple` attribute; other selects keep `e.target.value`. In the core,
+`attr(select, 'value', …)` routes through `pick`: an array selects each option whose value attribute (else text) it
+lists, also when `{#each}` options mount later (the `keepSelected` observer), and never lands on `select.value`.
+SSR marks those options `selected` through `fillValues`.
+
 ### Mandatory native before-hooks and single-row conflict checks (2026-10-30)
 
 `Resource.hooks.before_create/before_update/before_delete` reference private `server/hooks/<name>.jsbrain`

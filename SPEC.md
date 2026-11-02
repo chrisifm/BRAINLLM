@@ -106,7 +106,7 @@ Text interpolation is escaped. `id`s in `comp/` and `ui/`, static or computed (`
 in the first instance (so `/page#id` links work); later instances get `~2`, `~3`… and their `for`, `aria-*` and
 `href="#…"` references follow. Ids in views and layouts stay as written.
 `<pre raw>` and `<code raw>` keep their text literal (code samples with `{` `}`).
-`bind:value|checked` also accepts a field of a sig object: `bind:checked={prefs.email}`.
+`bind:value|checked` also accepts a field of a sig object: `bind:checked={prefs.email}`. `<select multiple bind:value={tags}>` binds an array of option values.
 Raw HTML only as `{@html sanitize(x)}`.
 
 ## Lifecycle and helpers

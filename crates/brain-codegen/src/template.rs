@@ -422,7 +422,9 @@ impl Gen<'_> {
                 (AttrKind::Bind, AttrValue::Expr(x)) => {
                     let target = self.expr(x);
                     let checked = self.bind_write(x, "e.target.checked");
-                    let value = self.bind_write(x, "e.target.value");
+                    // `<select multiple>`: the bound value is the array of selected option values
+                    let multiple = tag == "select" && e.attrs.iter().any(|a| a.kind == AttrKind::Plain && a.name == "multiple");
+                    let value = self.bind_write(x, if multiple { "Array.from(e.target.querySelectorAll(\"option\")).filter((o) => o.selected).map((o) => o.value)" } else { "e.target.value" });
                     let (attr, on) = (self.rt("attr"), self.rt("on"));
                     match a.name.as_str() {
                         "ref" => actions.push(format!("{target} = {el};")),
