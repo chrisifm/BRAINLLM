@@ -24,7 +24,7 @@ Level by folder: `ui/` micro (no `<script>` with state) · `comp/` component · 
 Allowed: `let` `const` · arrow `() =>` and `function` · `if/else` · `for (x of y)` · `return` · `await` · `try/catch/finally` · `throw` ·
 objects, arrays, spread, destructuring · template strings · JS operators · `import x from './a.brain'|'./a.jsbrain'|'./a.js'`. Exports: `export default expr` · `export const|function` (only in `.jsbrain`, and `load` in `views/`).
 Forbidden (error with fix): `class`, `this`, `var`, `with`, `eval`, `new Function`, generators, getters/setters,
-labels, `for in`.
+labels, `for in`, dynamic `import()` (B0002 names it in statement and expression position, 2026-11-02).
 
 Primitives (the only globals):
 

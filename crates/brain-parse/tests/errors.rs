@@ -60,3 +60,19 @@ fn expressions_and_blocks() {
     assert!(d.contains("title=\"n={n}!\""), "{d}");
     assert!(d.contains("prop@1:14 items:list = []"), "{d}");
 }
+
+// A dynamic `import()` used to say "expected `from` but found `(`" as a statement.
+#[test]
+fn dynamic_import_names_the_construct_in_every_position() {
+    for (src, col) in [
+        ("<script>\n  import('./a.jsbrain')\n</script>", 3),
+        ("<script>\n  const load = async () => await import('./a.jsbrain')\n</script>", 34),
+        ("<script>\n  import('./a.jsbrain').then((m) => m)\n</script>", 3),
+    ] {
+        let d = err(src);
+        assert_eq!((d.code, d.line, d.col), ("B0002", 2, col), "{src}: {d}");
+        assert!(d.msg.contains("dynamic `import()`") && d.fix.contains("import x from") && d.fix.contains("lazy"), "{d}");
+    }
+    // `import.meta` and static imports still parse.
+    assert!(brain_parse::parse("<script>\nimport a from './a.jsbrain'\nconst e = import.meta.env.X\n</script><p>{a}{e}</p>", Path::new("comp/x.brain")).is_ok());
+}

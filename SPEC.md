@@ -79,7 +79,8 @@ More `<meta>` attributes: `value:str~` (`~` bindable: the child may write it) ·
 Allowed: let const · arrow/function · if/else · for-of · return · await · try/catch/finally · throw · objects arrays
 spread destructuring · template strings · JS built-ins and Web APIs · `import x from './a.brain'|'./a.jsbrain'|'./a.js'`
 · `export default`/`export const|function` (only .jsbrain, and `load` in views).
-Forbidden: class this var with eval new-Function generators get/set labels for-in for(;;) while switch.
+Forbidden: class this var with eval new-Function generators get/set labels for-in for(;;) while switch, dynamic
+`import()` (import statically; each view is its own chunk, and `<Comp lazy />` defers a component).
 Signals are plain variables: `n++`, `items = [...items, x]`. Never mutate in place (`items.push` is an error).
 
 | Primitive | Use |
