@@ -9,6 +9,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.8.10] - 2026-11-02
+
+Upgrade with `npm install -D @christianirack/brainllm@0.8.10 --save-exact`, then run `brain backend migrate` before serving: backend lists now read a new `query_keys` column.
+
 - every operation step with an id applies the resource's read policy and answers 404 for a row the caller cannot read, as for a missing one, and an `upsert` step whose key matches such a row answers 403 and rolls the operation back; B0809 warns where a role cannot read every row a write step targets
 - `route-failed` names the error class, the app file and line that threw and, when the backend client raised it, the backend's status, code and field names; never the message
 - `backend-request-failed` carries the answer's error code, such as `OVERLOADED` when every route executor is busy
