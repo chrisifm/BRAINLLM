@@ -45,6 +45,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `brain fix` writes only inside its target and skips files with uncommitted changes unless `--force`, and a relative target works
 - a form's `_brain` id must be exactly `<hash>/<name>`; anything else answers 400 and never runs the function
 - RPC and form rate limits count only a function that exists, keyed by `<hash>/<name>` and the client address; unknown names answer 404/400 without a rate-limit entry
+- RPC and form posts call only a view's `server:` functions, in production and in `brain run`; `load`, `seo` and the module's other exports answer as an unknown function does, so a page's data stays behind its guards and middleware
 - the rate-limit map is capped at 50 000 entries (oldest window first) and long keys are stored as a digest
 - the native analytics limiter tracks at most 50 000 visitors and evicts the oldest window first, in constant time
 - the browser router drops a prefetch rank when its link leaves the queue and on every new page

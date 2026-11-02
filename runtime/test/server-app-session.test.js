@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from '../server/server.mjs'
 const dist = mkdtempSync(join(tmpdir(), 'brain-app-session-')); mkdirSync(join(dist, '_server'))
-writeFileSync(join(dist, '_server/data.mjs'), `export async function read(ctx) { return ctx.backend.resource('items').list() }`)
+writeFileSync(join(dist, '_server/data.mjs'), `export async function read(ctx) { return ctx.backend.resource('items').list() }\nexport const $server = ['read']`)
 writeFileSync(join(dist, '_server/manifest.json'), JSON.stringify({ routes: [], rpc: { data: '_server/data.mjs' } }))
 const seen = []
 const backend = http((req, res) => {

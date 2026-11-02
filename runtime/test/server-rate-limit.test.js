@@ -19,6 +19,7 @@ w('_server/acct.mjs', `export let runs = 0
 export async function login(ctx, v) { runs++; return { redirect: '/done' } }
 export async function ping() { return 'pong' }
 export const $forms = { login: { email: 'str!' } }
+export const $server = Object.freeze(['login', 'ping'])
 `)
 w('index.html', '<!doctype html><title>Home</title><main><h1>Home</h1></main>')
 w('404.html', '<!doctype html><title>404</title><main><h1>Lost</h1></main>')

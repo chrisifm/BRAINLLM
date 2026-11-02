@@ -1,0 +1,9 @@
+{
+  "id": "rpc-server-functions-only",
+  "kind": "fix",
+  "title": "RPC and forms reach only server: functions",
+  "why": "The RPC endpoint and the no-JS form path looked a name up among every export of a view's server module, so a page's load(), seo and head answered a direct call without the route's guards or middleware.",
+  "changelog": [
+    "RPC and form posts call only a view's `server:` functions, in production and in `brain run`"
+  ]
+}

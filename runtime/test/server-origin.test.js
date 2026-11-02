@@ -15,7 +15,8 @@ mkdirSync(join(dist, '_server'))
 writeFileSync(join(dist, '_server/account.mjs'), `export async function ping() { return 'pong' }
 export async function signIn(ctx, values) { return ctx.backend.login(values) }
 export async function signOut(ctx) { await ctx.session.clear(); return 'out' }
-export async function save(ctx) { return ctx.backend.resource('posts').create({ title: 'One' }) }`)
+export async function save(ctx) { return ctx.backend.resource('posts').create({ title: 'One' }) }
+export const $server = ['ping', 'signIn', 'signOut', 'save']`)
 writeFileSync(join(dist, '_server/manifest.json'), JSON.stringify({ routes: [], rpc: { account: '_server/account.mjs' } }))
 const backend = http((req, res) => { res.writeHead(401, { 'content-type': 'application/json' }); res.end('{}') })
 await new Promise(resolve => backend.listen(0, '127.0.0.1', resolve))

@@ -35,7 +35,7 @@ test('dates check leap years, month lengths and clock fields without Date.parse 
 })
 test('server form validation rejects blank numbers, impossible dates and disguised bool/hex before side effects', async () => {
   let calls = 0, received
-  const module = { $forms: { save: { name: 'str!', age: 'num!', date: 'date!', active: 'bool' } }, save: (_, value) => { calls++; received = value } }
+  const module = { $server: ['save'], $forms: { save: { name: 'str!', age: 'num!', date: 'date!', active: 'bool' } }, save: (_, value) => { calls++; received = value } }
   const ctx = { url: new URL('https://example.test/form') }, rules = { rule, check }
   for (const fields of [{ name: ' ', age: '12', date: '2026-01-01' }, { name: 'Ada', age: ' ', date: '2026-01-01' }, { name: 'Ada', age: '0x10', date: '2026-01-01' }, { name: 'Ada', age: '12', date: '2026-02-30' }, { name: 'Ada', age: '12', date: '2026-01-01', active: 'arbitrary' }]) {
     const raw = new URLSearchParams({ _brain: 'h/save', ...fields }).toString()

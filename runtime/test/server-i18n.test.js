@@ -20,7 +20,7 @@ w('_b/home.js', `import { tpl } from '/_b/brain.js'\nimport { t } from '/_b/brai
 w('_server/home.server.mjs', `import { t } from './_rt/brain-i18n.js'\nexport const seo = () => ({ title: t('home.title') })\nexport function load() { return {} }\n`)
 w('_b/dict-en.js', `import { add } from '/_b/brain-i18n.js'\nadd('en', { 'home.hi': 'Hello' })\n`)
 w('_b/late.js', `import { tpl } from '/_b/brain.js'\nexport default function Late(p) { return tpl('<h1>' + p.msg + '</h1>')() }\n`)
-w('_server/late.server.mjs', `import { t, locale } from './_rt/brain-i18n.js'\nexport async function load() { await new Promise(r => setTimeout(r, 5)); return { msg: t('home.hi') + ' ' + locale() } }\nconst redirect = to => ({ redirect: to, status: 303 })\nexport async function send() { await new Promise(r => setTimeout(r, 1)); return redirect('/late/nl?m=' + t('home.hi')) }\nexport const $forms = {}\n`)
+w('_server/late.server.mjs', `import { t, locale } from './_rt/brain-i18n.js'\nexport async function load() { await new Promise(r => setTimeout(r, 5)); return { msg: t('home.hi') + ' ' + locale() } }\nconst redirect = to => ({ redirect: to, status: 303 })\nexport async function send() { await new Promise(r => setTimeout(r, 1)); return redirect('/late/nl?m=' + t('home.hi')) }\nexport const $forms = {}\nexport const $server = ['send']\n`)
 w('_server/pages/p.html', '<!doctype html><html lang="nl"><head><title>t</title></head><body><div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
 w('_server/manifest.json', JSON.stringify({
   v: 1, build: 'b1', core: '/_b/brain.js', rpc: { hf: '_server/late.server.mjs' },

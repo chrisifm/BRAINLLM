@@ -276,7 +276,7 @@ An empty key fails the build (B0720); `KEY?=` declares one the app works without
 Read them as `process.env.KEY` (server) or `process.env.PUBLIC_KEY` (anywhere; an undeclared one reads as `undefined`). Never create a `.env`.
 `.jsbrain` files starting with `<meta server>` run only on the server and may be used only inside `load` or server
 functions. Server function in a `.brain`: `server: async function save(ctx, data) {…}`; the client calls
-`await save(data)` (no `ctx`). Validate `data` inside. `throw { message: 'Title already used' }` (400) or an Error
+`await save(data)` (no `ctx`); only `server:` functions are callable from the browser, never `load`. Validate `data` inside. `throw { message: 'Title already used' }` (400) or an Error
 subclass with a 4xx `status` reaches the calling form's `f.error` as is; other exceptions stay private.
 Server-only modules may signal a deliberate client failure with `throw {status:403}` (standard 4xx only); RPC returns
 the status with a generic public message. Arbitrary exception messages remain private and are excluded from server logs too.

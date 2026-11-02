@@ -13,7 +13,7 @@ function app(server) {
   const hash = 'h' + ++n
   const d = mkdtempSync(join(tmpdir(), 'brain-dist-limits-'))
   const w = (rel, s) => (mkdirSync(join(d, rel, '..'), { recursive: true }), writeFileSync(join(d, rel), s))
-  w('_server/items.mjs', 'export async function save(ctx, data) { return data.length }\nexport async function wait() { await new Promise(r => setTimeout(r, 300)); return 1 }\n')
+  w('_server/items.mjs', 'export async function save(ctx, data) { return data.length }\nexport async function wait() { await new Promise(r => setTimeout(r, 300)); return 1 }\nexport const $server = [\'save\', \'wait\']\n')
   w('_server/manifest.json', JSON.stringify({ v: 1, build: 'l1', routes: [], rpc: { [hash]: '_server/items.mjs' }, ...(server ? { server } : {}) }))
   return { dist: d, hash }
 }

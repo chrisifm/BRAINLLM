@@ -34,6 +34,7 @@ export async function signup(ctx, v) {
   if (v.email.startsWith('go')) return { redirect: '/welcome' }
   return 'ok'
 }
+export const $server = ['signup']
 `)
 w('_b/hallo.js', `import { tpl, insert } from '/_b/brain.js'
 import { t, add } from '/_b/i18n.js'

@@ -1080,6 +1080,11 @@ fn generate_server(g: &mut Gen, c: &Component, opts: &Options) -> (String, Vec<S
             _ => {}
         }
     }
+    // The names RPC and form posts may call (server.mjs serverFn): only `server:` functions, never `load` or `seo`.
+    if !fns.is_empty() {
+        let names: Vec<String> = fns.iter().map(|f| js_str(f)).collect();
+        body.push_str(&format!("export const $server = Object.freeze([{}]);\n", names.join(", ")));
+    }
     // §38: a form posted without JS runs its `server:` function with the same schema as `form()` (server.mjs callForm).
     let forms = server_forms(c);
     if !forms.is_empty() {

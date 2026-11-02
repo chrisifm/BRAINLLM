@@ -55,6 +55,7 @@ export async function envinfo(ctx) { let threw = false; try { ctx.env.BRAIN_SECR
 export async function slow() { return new Promise(() => {}) }
 export async function boom() { throw new Error('secret stack detail') }
 export async function invalid() { throw Object.assign(new Error('Invalid input'), { errors: { email: 'Already taken' } }) }
+export const $server = ['save', 'login', 'who', 'logout', 'envinfo', 'slow', 'boom', 'invalid']
 `)
 w('_server/offers.mjs', `export async function load(ctx) { return { id: ctx.params.slug, name: ctx.params.slug } }
 export async function sitemap(ctx) { return [{ slug: 'a b', lastmod: '2026-10-01' }, { slug: ctx.env.APP_NAME }, { other: 1 }] }
