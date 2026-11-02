@@ -28,15 +28,30 @@ if (Number.isInteger(owner) && owner > 1) {
   watcher.unref()
 }
 // stdout is the protocol channel: the user's console.log calls go to stderr (brain run terminal).
+// A closed reader (the parent stopped, `brain test | head`) is EPIPE: nobody reads the answers, so exit quietly instead of
+// printing an unhandled `Error: write EPIPE`; a closed stderr only loses console output.
+process.stdout.on('error', e => { if (e.code === 'EPIPE') process.exit(0); throw e })
+process.stderr.on('error', e => { if (e.code !== 'EPIPE') throw e })
 const out = process.stdout.write.bind(process.stdout)
 const raw = { warn: console.warn.bind(console), error: console.error.bind(console) }
 // `brain trace` under `brain run`: `TRC <json>` lines on the protocol channel, one request at a time like this loop.
 const tracing = process.env.BRAIN_TRACE === '1'
 let traceRid = null
 const trace = (kind, level, fields) => { if (tracing) { try { out(`TRC ${JSON.stringify({ ts: Date.now(), module: 'server', kind, level, request_id: traceRid, ...fields })}\n`) } catch {} } }
+// A thrown value as one readable text: an Error keeps its stack; anything else (a plain object, a cycle, undefined) says
+// what was thrown instead of printing `[object Object]` or crashing the sidecar on JSON.stringify.
+const described = e => {
+  if (typeof e === 'string') return e
+  if (e === null || (typeof e !== 'object' && typeof e !== 'function')) return `${String(e)} (a non-Error value was thrown; throw an Error with a message)`
+  const message = typeof e.message === 'string' && e.message ? e.message : ''
+  if (typeof e.stack === 'string' && e.stack) return message === '[object Object]' ? e.stack + '\n(the Error message was an object, not a string: pass a string to new Error())' : e.stack
+  let shown
+  try { const seen = new WeakSet(); shown = JSON.stringify(e, (k, v) => typeof v === 'bigint' ? String(v) : v && typeof v === 'object' ? (seen.has(v) ? '[Circular]' : (seen.add(v), v)) : v) } catch {}
+  return `${message ? message + ' ' : ''}(a non-Error ${e.constructor?.name || 'object'} was thrown: ${String(shown || Object.prototype.toString.call(e)).slice(0, 2048)})`
+}
 const failure = (e, where) => {
-  raw.error(String(e?.stack ?? e))
-  trace('exception', 'error', { title: `${e?.name || 'Error'}: ${e?.message ?? e}`, data: { stack: String(e?.stack ?? e), where } })
+  raw.error(described(e))
+  trace('exception', 'error', { title: `${e?.name || 'Error'}: ${described(e).split('\n', 1)[0]}`, data: { stack: described(e), where } })
 }
 // A route failure's safe shape for the backend log: the error class, the backend client's status, code and field names,
 // and the first app source line. Never the message, field texts, values or the stack itself.
@@ -232,9 +247,9 @@ for await (const line of createInterface({ input: process.stdin })) {
     else if (contextServer && e?.status === 404 && e?.constructor?.name === 'HttpError') out(`OK ${id} {"notFound":true,"status":404}\n`) // as server.mjs: the 404 page
     else if (contextServer && e?.status === 503) out(`STATUS ${id} ${JSON.stringify({status:503,message:typeof e.message === 'string' && e.message ? e.message : e.message ? JSON.stringify(e.message) : 'The service is temporarily unavailable'})}\n`) // the visitor reads a fixed message; the log keeps the cause
     else if (contextServer && e?.constructor?.name === 'HttpError' && Number.isInteger(e.status) && e.status >= 400 && e.status < 600) out(`STATUS ${id} ${JSON.stringify({status:e.status,message:'The request could not complete'})}\n`) // as server.mjs: a deliberate status never shows its message
-    else { trace('exception', 'error', { title: `${e?.name || 'Error'}: ${e?.message ?? e}`, data: { stack: String(e?.stack ?? e), where: fn } })
+    else { const text = described(e); trace('exception', 'error', { title: `${e?.name || 'Error'}: ${text.split('\n', 1)[0]}`, data: { stack: text, where: fn } })
     if (typeof routeExecutor === 'function' && !probe) { out(`ERR ${id} ${JSON.stringify(JSON.stringify({ routeCause: routeCause(e) }))}\n`) }
-    else out(`ERR ${id} ${JSON.stringify(String(e?.stack ?? (e && typeof e === 'object' ? JSON.stringify(e) : e)))}\n`) }
+    else out(`ERR ${id} ${JSON.stringify(text)}\n`) }
   }
 }
 "#;
@@ -1090,6 +1105,62 @@ mod tests {
         assert_eq!(ok, "{\"id\":\"42\",\"hasEnv\":true}");
         let err = sc.call(&file_url(&f), "boom", "{}").unwrap_err();
         assert!(err.contains("Error: bad"), "{err}");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn a_sidecar_whose_reader_is_gone_exits_without_an_epipe_crash() {
+        if Command::new("node").arg("--version").output().is_err() {
+            return; // without node there is nothing to test
+        }
+        use std::io::{Read, Write};
+        let d = std::env::temp_dir().join(format!("brain-load-epipe-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("v.mjs");
+        std::fs::write(&f, "export async function load() { console.log('noise'); return { big: 'x'.repeat(200000) } }").unwrap();
+        let script = format!("{}\n{RUNNER}", llm_script());
+        let mut child = Command::new("node")
+            .args(["--input-type=module", "-e", &script])
+            .current_dir(&d)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        drop(child.stdout.take()); // the reader went away (a closed `| head`, a parent that stopped reading)
+        let mut stdin = child.stdin.take().unwrap();
+        for id in 1..=3 {
+            let _ = writeln!(stdin, "{{\"id\":{id},\"file\":{},\"fn\":\"load\",\"ctx\":{{}}}}", crate::json_str(&file_url(&f)));
+        }
+        drop(stdin);
+        let mut err = String::new();
+        child.stderr.take().unwrap().read_to_string(&mut err).unwrap();
+        let status = child.wait().unwrap();
+        assert!(!err.contains("EPIPE") && !err.contains("Unhandled"), "{err}");
+        assert!(status.success(), "{status:?} {err}");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn sidecar_describes_rejections_that_are_not_errors() {
+        if Command::new("node").arg("--version").output().is_err() {
+            return; // without node there is nothing to test
+        }
+        let d = std::env::temp_dir().join(format!("brain-load-plain-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("v.mjs");
+        std::fs::write(&f, "export async function plain() { throw { code: 'E_SAMPLE', status: 502 } }\nexport async function cyclic() { const o = { code: 'E_LOOP' }; o.self = o; throw o }\nexport async function wrapped() { throw new Error({ code: 'E_WRAPPED' }) }\nexport async function nothing() { throw undefined }\nexport async function odd() { throw { stack: { frames: 1 }, message: 'odd stack' } }").unwrap();
+        let mut sc = Sidecar::spawn(&d, &[]).unwrap();
+        let plain = sc.call(&file_url(&f), "plain", "{}").unwrap_err();
+        assert!(plain.contains("E_SAMPLE") && !plain.contains("[object Object]"), "{plain}");
+        let cyclic = sc.call(&file_url(&f), "cyclic", "{}").unwrap_err();
+        assert!(cyclic.contains("E_LOOP") && !cyclic.contains("[object Object]"), "{cyclic}");
+        let wrapped = sc.call(&file_url(&f), "wrapped", "{}").unwrap_err();
+        assert!(!wrapped.starts_with("[object Object]") && wrapped.contains("not a string"), "{wrapped}");
+        let nothing = sc.call(&file_url(&f), "nothing", "{}").unwrap_err();
+        assert!(nothing.contains("undefined"), "{nothing}");
+        let odd = sc.call(&file_url(&f), "odd", "{}").unwrap_err();
+        assert!(odd.contains("odd stack") && !odd.contains("[object Object]"), "{odd}");
         std::fs::remove_dir_all(&d).unwrap();
     }
     #[test]

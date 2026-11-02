@@ -226,17 +226,31 @@ function googleSignInPage(page) {
 
 // One configured loopback authority. No user-controlled target, proxy, redirect, auth cache or pending queue.
 // ctx.backend.files(bucket): the same file calls as job and route handlers (docs/backend/files.md).
-function bucketClient(target, key, bucket) {
+function bucketClient(target, key, bucket, readBudgetMs = () => 0) {
   const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
   if (typeof bucket !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(bucket)) throw new HttpError(400, 'Invalid native bucket name')
   const base = '/_brain/files/' + bucket
   const idPath = id => { if (typeof id !== 'string' || !UUID.test(id)) throw new HttpError(404, 'No file has this id; file ids are UUIDs'); return base + '/' + id }
+  // A read waits for a draining or restarting backend like ctx.backend reads do (nativeAuthBridge); a write never repeats.
   const send = async (method, path, body, timeout) => {
-    let response
-    try { response = await fetch(new URL(path, target), { method, redirect: 'error', signal: AbortSignal.timeout(timeout), headers: { 'x-api-key': key }, body }) } catch { throw new HttpError(503, 'Native backend is unavailable') }
-    if (response.ok) return response
-    await response.body?.cancel()
-    throw new HttpError(response.status >= 400 && response.status < 500 ? response.status : 503, 'Native file request failed')
+    const end = Date.now() + (method === 'GET' ? readBudgetMs() : 0)
+    for (let wait = 250; ; wait = Math.min(wait * 2, 2000)) {
+      let response, failure, notNow = false
+      try { response = await fetch(new URL(path, target), { method, redirect: 'error', signal: AbortSignal.timeout(timeout), headers: { 'x-api-key': key }, body }) } catch (e) {
+        failure = new HttpError(503, 'Native backend is unavailable', { temporary: true }); notNow = e?.name !== 'TimeoutError'
+      }
+      if (response?.ok) return response
+      if (response) {
+        let code
+        try { code = (await response.json())?.error?.code } catch {}
+        const retryAfter = Number(response.headers.get('retry-after'))
+        notNow = [502, 503, 504].includes(response.status) && (!code || code === 'DRAINING' || code === 'OVERLOADED')
+        failure = new HttpError(response.status >= 400 && response.status < 500 ? response.status : 503, 'Native file request failed', { temporary: response.status === 429 || response.status === 503 || notNow, ...(typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? { code } : {}), ...(retryAfter > 0 ? { retryAfter } : {}) })
+      }
+      const pause = Math.max(wait, (failure.retryAfter || 0) * 1000)
+      if (!notNow || Date.now() + pause > end) throw failure
+      await new Promise(done => setTimeout(done, pause))
+    }
   }
   const json = async response => { try { return await response.json() } catch { throw new HttpError(502, 'Native file response is invalid') } }
   return Object.freeze({
@@ -266,7 +280,13 @@ function bucketClient(target, key, bucket) {
     async remove(id) { await send('DELETE', idPath(id), undefined, 10000); return null },
   })
 }
-export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
+// Failures of a native read that may be asked again (a gateway error, DRAINING, OVERLOADED), marked where built.
+const askAgain = new WeakSet()
+// `readBudget`: ms (or a function giving them) a read may spend waiting for a draining or restarting backend; the
+// server passes its load timeout minus a second, so the page still answers within it.
+export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession, readBudget = 8000) {
+  const budget = typeof readBudget === 'function' ? readBudget : () => readBudget
+  const readBudgetMs = () => Math.max(0, Math.min(Number(budget()) || 0, 30000))
   // How to fix the configuration is for the operator: a visitor of a production app reads a generic message.
   const configuration = (status, detail, rid, shown = 'This service is not available right now') => {
     if (process.env.NODE_ENV !== 'production') return new HttpError(status, detail)
@@ -602,7 +622,12 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
             const code = typeof answer?.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(answer.code) ? answer.code : undefined
             const fix = code && typeof answer.fix === 'string' ? answer.fix.slice(0, 512) : undefined
             const wait = Number(headers['retry-after'])
-            throw new HttpError(status >= 400 && status < 500 ? status : 503, NATIVE_FAILED, { code, fix, temporary: status === 429 || status === 503, ...(wait > 0 ? { retryAfter: wait } : {}) })
+            // A gateway error, or a backend draining/at capacity, is "not now": a read may ask again (below). A code
+            // of the backend's own (BATCH_TOO_SLOW…) is an answer on purpose and is never repeated.
+            const notNow = [502, 503, 504].includes(status) && (!code || code === 'DRAINING' || code === 'OVERLOADED')
+            const failure = new HttpError(status >= 400 && status < 500 ? status : 503, NATIVE_FAILED, { code, fix, temporary: status === 429 || status === 503 || notNow, ...(wait > 0 ? { retryAfter: wait } : {}) })
+            if (notNow) askAgain.add(failure)
+            throw failure
           }
           if (status === 204) { value = null; return }
           if (!String(headers['content-type'] || '').startsWith('application/json')) throw new HttpError(502, 'Native resource response must be JSON')
@@ -610,15 +635,20 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
           if (remembers && typeof headers.etag === 'string') rememberRead(path, headers.etag, data)
       }
       try {
-        // A restarting backend refuses connections for a few seconds: a read waits for it instead of failing the page.
-        for (let wait = 250; ; wait *= 2) {
+        // An autodeploy drains the backend (503 DRAINING, then a closed port) and starts the new one: a read waits for
+        // it within the load budget instead of failing the page, honoring Retry-After. A write is never repeated.
+        const end = Date.now() + readBudgetMs()
+        for (let wait = 250; ; wait = Math.min(wait * 2, 2000)) {
           try {
             await proxy(req, response, new URL(path, target), rid, answered, 2 * 1024 * 1024)
             break
           } catch (e) {
-            if (method !== 'GET' || wait > 2000 || stopped || response.destroyed || !['ECONNREFUSED', 'ECONNRESET'].includes(e?.transport)) throw e
+            const transient = ['ECONNREFUSED', 'ECONNRESET'].includes(e?.transport) || askAgain.has(e)
+            const pause = Math.max(wait, (e?.retryAfter || 0) * 1000)
+            if (method !== 'GET' || !transient || stopped || response.destroyed || Date.now() + pause > end) throw e
             req.destroy()
-            await new Promise(done => setTimeout(done, wait))
+            await new Promise(done => setTimeout(done, pause))
+            if (stopped || response.destroyed) throw e
             req = conditional(outgoing())
           }
         }
@@ -841,7 +871,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
     // A declared file bucket from trusted server code, with BRAIN_SERVICE_API_KEY and its files.<bucket> scope
     files: bucket => {
       if (!serviceKey) throw configuration(503, 'ctx.backend.files needs BRAIN_SERVICE_API_KEY: create an API key with a files.<bucket> scope')
-      return bucketClient(target, serviceKey, bucket)
+      return bucketClient(target, serviceKey, bucket, readBudgetMs)
     },
     slugRedirect: (name, slug) => resource(incoming, response, rid, name).slugRedirect(slug),
     // A declared operation, as this visitor (docs/backend/transactions.md).
@@ -900,7 +930,7 @@ export function createServer(o = {}) {
   const env = Object.freeze(visibleEnv)
   const backendSession = o.backendSession ?? env.BRAIN_BACKEND_SESSION
   if (backendSession && backendSession !== 'app') throw Error("BRAIN_BACKEND_SESSION must be app, or unset for the backend's own session")
-  const native = nativeAuthBridge(o.backendURL ?? env.BRAIN_BACKEND_URL, (...why) => originRefused(...why), serviceKey, (...entry) => log(...entry), backendSession === 'app')
+  const native = nativeAuthBridge(o.backendURL ?? env.BRAIN_BACKEND_URL, (...why) => originRefused(...why), serviceKey, (...entry) => log(...entry), backendSession === 'app', () => TIMEOUT - 1000)
   // Using the native backend does not have to mean it owns the visitor's session: `app` keeps the signed cookie.
   const nativeSession = native && backendSession !== 'app'
   if (o.nativeSockets !== undefined && typeof o.nativeSockets !== 'boolean') throw Error('nativeSockets must be an explicit boolean')
@@ -910,6 +940,7 @@ export function createServer(o = {}) {
   const sink = o.log || ((level, msg, extra) => console[level === 'error' ? 'error' : 'log'](json({ t: new Date().toISOString(), level, msg, ...extra })))
   // Requests in flight by rid: a 5xx whose cause reached no log line gets one when the response closes (dispatch below).
   const liveRequests = new Map()
+  const hooked = new WeakSet() // core modules whose error hook reports to this server's log (render below)
   let statusPageWindow = 0, statusPageLogs = 0
   const log = (level, msg, extra = {}) => {
     const safe = { ...extra }
@@ -918,12 +949,13 @@ export function createServer(o = {}) {
     if (typeof safe.stack === 'string') {
       const kind = /^(TypeError|ReferenceError|RangeError|SyntaxError|AggregateError|Error):/.exec(safe.stack)?.[1] || 'Error'
       safe.errorType = kind
-      safe.code = kind === 'Error' ? 'NODE_INTERNAL_ERROR' : 'NODE_' + kind.replace(/Error$/, '').toUpperCase() + '_ERROR'
+      // "not now" (a 429/503, a backend restarting or busy) is not a defect: its own code, so alerts can tell them apart
+      safe.code = safe.temporary ? 'NODE_TEMPORARY_ERROR' : kind === 'Error' ? 'NODE_INTERNAL_ERROR' : 'NODE_' + kind.replace(/Error$/, '').toUpperCase() + '_ERROR'
       const truncated = safe.stack.length > 32768 || safe.stack.split('\n').length > 41
       safe.traceTruncated = truncated
       safe.stack = safe.stack.slice(0, 32768).split('\n').filter(line => /^\s+at (?:async )?(?:[A-Za-z0-9_.$<>]+(?: \[as [A-Za-z0-9_$]+\])? \()?(?:file:\/\/\/|\/|node:)[^\s()?#]*:\d+:\d+\)?$/.test(line) && line.length <= 1024).slice(0, 40).join('\n')
       safe.private = true; safe.valuesCaptured = false
-      safe.fix = kind === 'TypeError' ? 'Check nullable values, argument types and the data contract at these source frames' : kind === 'ReferenceError' ? 'Check the missing binding or import at these source frames' : kind === 'RangeError' ? 'Check recursive calls, array sizes and configured resource budgets at these source frames' : kind === 'SyntaxError' ? 'Check module syntax or JSON input parsing at these source frames without logging input values' : 'Inspect these source frames and the request reference; reproduce with synthetic inputs'
+      safe.fix = safe.thrown ? `A non-Error value (${safe.thrown}) was thrown, so there are no source frames; throw an Error (or HttpError) instead` : safe.temporary ? 'A dependency answered not now (rate limit, restart, overload or a closed connection); the same request can succeed later. If it persists, check the backend health and its Retry-After' : kind === 'TypeError' ? 'Check nullable values, argument types and the data contract at these source frames' : kind === 'ReferenceError' ? 'Check the missing binding or import at these source frames' : kind === 'RangeError' ? 'Check recursive calls, array sizes and configured resource budgets at these source frames' : kind === 'SyntaxError' ? 'Check module syntax or JSON input parsing at these source frames without logging input values' : 'Inspect these source frames and the request reference; reproduce with synthetic inputs'
     }
     // a compiler budget failure (brain-budget.js) keeps its own code, limit, source position and fix
     const b = safe.budgetFailure
@@ -949,6 +981,9 @@ export function createServer(o = {}) {
   // log fields for a thrown value: its stack (sanitized by log) plus, for B09xx budget failures, the typed fields only
   const trace = e => {
     const out = { stack: String((e && e.stack) || e) }
+    // a thrown plain object, string or undefined has no stack: say what kind of value it was (never the value itself)
+    if (!(e instanceof Error)) out.thrown = e === null ? 'null' : Array.isArray(e) ? 'array' : typeof e
+    if (e && typeof e === 'object' && (e.temporary === true || e.status === 429 || e.status === 503)) out.temporary = true
     if (e instanceof HttpError && (OWN_CAUSES.has(e.message) || e.message.startsWith('Native authentication is unavailable:'))) out.cause = e.message
     if (e && e.code === 'ERR_MODULE_NOT_FOUND') out.fix = 'this process runs an older build whose files are gone; restart it after brain build'
     if (e && CODE_SHAPE.test(e.transport || '')) out.transport = e.transport
@@ -1450,6 +1485,18 @@ export function createServer(o = {}) {
     const root = doc.createElement('div')
     const core = await load(mf.core)
     const mount = core.mount || core.m
+    // The core's console fallback (`BRAIN_ERROR: …`) is for the browser: on the server an fx/drv error goes to this
+    // render's failures (logged with rid and path by ssr()), once. A component boundary (brain-guard) collects its own.
+    if (core._err && !hooked.has(core)) {
+      hooked.add(core)
+      core._err((e, x, w) => {
+        if (w === 'render' || w === 'B0908') return // brain-guard reports these itself, with the component's name
+        for (let o = x; o; o = o.nodeType ? o.parentNode : o.p) if (o.$g) return
+        const into = globalThis.__brainSSR
+        if (into) into.push({ e, w, comp: null })
+        else log('error', 'component failed after SSR', { where: w, ...trace(e) }) // an async fx of a finished render
+      })
+    }
     const V = (await load(route.view)).default
     const L = []
     for (const l of route.layouts || []) L.push((await load(l)).default)

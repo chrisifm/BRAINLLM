@@ -2518,6 +2518,20 @@ fn serve_brain(
 ) -> io::Result<()> {
     match compile_cached(ctx, file) {
         Ok(c) if css => http::respond(s, 200, http::mime("x.css"), c.css.as_bytes(), head),
+        Ok(c) if c.js.trim().is_empty() && !c.server_js.trim().is_empty() => {
+            // A `<meta server>` module has no client code and its server code never reaches the browser. Only a
+            // browser test imports one directly (components drop such imports): name the reason instead of the
+            // engine's "does not provide an export named 'default'", and keep the default binding linkable.
+            let file = json_str(url.trim_start_matches('/'));
+            let js = format!(concat!(
+                "const file={};\n",
+                "const error=new Error(file+' is a <meta server> module: it runs only on the server, so browser code and tests cannot import it.\\n",
+                "  fix: test the component or view that calls it and answer its server function or endpoint with stub(), e.g. stub(\\'save\\', {{ ok: true }})');\n",
+                "error.name='BrainServerOnlyModule';error.file=file;\n",
+                "export default undefined;\nthrow error;\n",
+            ), file);
+            http::respond(s, 200, http::mime("x.js"), js.as_bytes(), head)
+        }
         Ok(c) => {
             if let Some(h) =
                 c.js.rfind(".h = \"")
@@ -3267,6 +3281,30 @@ mod admission_tests {
         });
         drop(held);
         assert!(lock_for(&job, Duration::from_millis(30)).is_some());
+    }
+
+    #[test]
+    fn a_server_only_module_requested_by_the_browser_fails_with_its_reason() {
+        // A `<meta server>` module has no client code. A browser test that imports it got an empty module and the
+        // engine's "does not provide an export named 'default'"; it must say the module is server-only and what to do.
+        let root=std::env::temp_dir().join(format!("brain-server-only-{}-{}",std::process::id(),now_ms()));
+        std::fs::create_dir_all(root.join("lib")).unwrap();
+        std::fs::write(root.join("lib/rank.jsbrain"),"server").unwrap();
+        std::fs::write(root.join("lib/plain.jsbrain"),"client").unwrap();
+        let root=root.canonicalize().unwrap();
+        let compiler:CompileFn=Arc::new(|source,_|Ok(if source=="server"{Compiled{js:String::new(),css:String::new(),deps:Vec::new(),server_js:"export default {}".into()}}else{Compiled{js:"export default {}".into(),css:String::new(),deps:Vec::new(),server_js:String::new()}}));
+        let options=Options{root:root.clone(),host:"127.0.0.1".into(),port:0,head_prepend:String::new(),runtime:Vec::new(),env:None,base:"/".into(),diagnose:None,problems:None,upstream:None,mock:None};
+        let mut dev=start_dev(options,compiler,false,None).unwrap();
+        let request=|address,path:&str|{let mut socket=TcpStream::connect(address).unwrap();socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();socket.write_all(format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").as_bytes()).unwrap();let mut bytes=Vec::new();socket.read_to_end(&mut bytes).unwrap();String::from_utf8(bytes).unwrap()};
+        let server_only=request(dev.addr,"/lib/rank.jsbrain");
+        assert!(server_only.starts_with("HTTP/1.1 200"),"{server_only}");
+        assert!(server_only.contains("export default undefined"),"{server_only}");
+        assert!(server_only.contains("const file=\"lib/rank.jsbrain\"")&&server_only.contains("is a <meta server> module: it runs only on the server"),"{server_only}");
+        assert!(server_only.contains("stub("),"{server_only}");
+        assert!(!server_only.contains("export default {}"),"server code must never reach the browser: {server_only}");
+        let plain=request(dev.addr,"/lib/plain.jsbrain");
+        assert!(plain.contains("export default {}")&&!plain.contains("<meta server>"),"{plain}");
+        dev.stop();drop(dev);std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

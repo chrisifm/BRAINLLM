@@ -205,6 +205,23 @@ test('region contract: disposes the mount stored on the region and recreates its
   r.stop()
 })
 
+test('a navigation restarts instance ids: the view mounted after the swap keeps its authored ids, not ~2', async () => {
+  // The compiled prelude of a component with ids (brain-codegen, #268): the first instance of a page keeps `id`, later
+  // ones get `id~2`. A layout header mounted again on every client navigation must not count the page it replaced.
+  let $e, $n = 0
+  const suffix = () => { if ($e !== globalThis.__brainIds) $e = globalThis.__brainIds, $n = 0; return $n++ ? '~' + $n : '' }
+  hist()
+  page()
+  assert.equal(suffix(), '', 'first page: the header keeps its ids')
+  const r = router({ parse, hard: u => assert.fail('hard ' + u) })
+  await r.go('/v')
+  assert.equal(suffix(), '', 'after the swap the new header is the only live instance')
+  assert.equal(suffix(), '~2', 'a second instance on the same page still gets ~2')
+  await r.go('/b')
+  assert.equal(suffix(), '')
+  r.stop()
+})
+
 // --- #131: never mix builds ---
 const withBuild = sig => {
   for (const m of doc.querySelectorAll('meta[name=brain-build]')) m.remove()

@@ -279,7 +279,7 @@ accessibility tree with `Accessibility.getFullAXTree`. No jsdom or Playwright.
 
 Test API in `*.test.brain`: `test(name, async () => {…})` · `await mount(Comp, props, options?)` · `await click(sel)` ·
 `await type(sel, text)` · synchronous readers `text(sel)`, `attr(sel, name)`, `hasClass(sel, cls)`, `count(sel)` ·
-`expect(x).toBe(y)`, `.toEqual(y)`, `.toBeTruthy()` · `stub(target, answer)`, `reply(status, body)`: `stub` overrides `fetch` on the test page only (the runtime has no test code), so it covers `server:` functions (`/_r/<hash>/<name>`, by name, the answer function receives the call's arguments) and `api()` endpoints (`'GET /path'`, by method and path, with the query if the target has one), not an XHR upload. It lives for one test, a stub nobody called fails it, and the page turns the data cache off so answers do not leak between tests. Selectors are CSS within the mounted component; `#id` also finds that id's `~N` form, because a component's ids stay unique across the mounts of one file. `options`:
+`expect(x).toBe(y)`, `.toEqual(y)`, `.toBeTruthy()`, `.toBeFalsy()`, `.toContain(y)` (substring, or an array element by `Object.is`; anything else fails), each negated with `expect(x).not.…` · `await waitFor(fn, { timeout })` (default 3000 ms) calls `fn`, then waits 20 ms plus a render flush and calls it again until it neither throws nor returns `false`; on timeout the last failure becomes the test's error, prefixed `waitFor: still failing after N ms` · `stub(target, answer)`, `reply(status, body)`: `stub` overrides `fetch` on the test page only (the runtime has no test code), so it covers `server:` functions (`/_r/<hash>/<name>`, by name, the answer function receives the call's arguments) and `api()` endpoints (`'GET /path'`, by method and path, with the query if the target has one), not an XHR upload. It lives for one test, a stub nobody called fails it, and the page turns the data cache off so answers do not leak between tests. Selectors are CSS within the mounted component; `#id` also finds that id's `~N` form, because a component's ids stay unique across the mounts of one file. `options`:
 `slot` (text of the default `<slot />`), `slots` (`{ name: text }` for `<slot name="…" />`) and `provide` (service
 swaps); slot text is real DOM, so the accessibility audit sees it. Unknown options and non-text slot values fail the test.
 
@@ -2052,6 +2052,60 @@ Private server diagnostics discard arbitrary exception messages but retain bound
 sidecars enable Node source maps so existing inline maps report the original `.brain` source line.
 The pack fingerprint includes embedded `.mjs`, `.brain`, `.cssbrain` and JSON runtime sources as well as JS/Rust;
 server runtime and UI changes cannot reuse a toolchain identity that omits those files.
+
+### Server render errors and temporary failures in the private log (2026-11-02)
+
+The core's console fallback (`BRAIN_ERROR: Operation failed. Try again.`) is a browser message. `server.mjs`
+installs the core's `_err` hook once per core module: an fx/drv error during a render joins that render's failures
+(`component failed during SSR`, with `rid`, `path`, `where` and `comp: null` when no `brain-guard` boundary owns it);
+an error after the render window logs `component failed after SSR`. Boundaries keep reporting their own failures
+(`render`, `B0908`, owners with `$g`), so each failure is logged once. A thrown value that is not an `Error` adds
+`thrown: <kind>` and never its value. A 429/503 or an error marked `temporary` (closed connection, 504,
+`BRIDGE_BUSY`) logs `code: NODE_TEMPORARY_ERROR` and `temporary: true` instead of `NODE_INTERNAL_ERROR`.
+The development `load` sidecar describes non-`Error` rejections (plain objects, cycles, `undefined`) instead of
+printing `[object Object]` or crashing on `JSON.stringify`.
+
+### `<select multiple bind:value>` binds an array (2026-11-02)
+
+Codegen writes `Array.from(e.target.querySelectorAll("option")).filter((o) => o.selected).map((o) => o.value)` on
+`change` when the `<select>` carries a plain `multiple` attribute; other selects keep `e.target.value`. In the core,
+`attr(select, 'value', …)` routes through `pick`: an array selects each option whose value attribute (else text) it
+lists, also when `{#each}` options mount later (the `keepSelected` observer), and never lands on `select.value`.
+SSR marks those options `selected` through `fillValues`.
+
+### A visible lazy child is released on unmount (2026-11-02)
+
+`<X lazy />` (visible mode) leaked its parent and child: after unmount and `io.disconnect()`, both survived forced GCs
+for the whole `--heap` grace (B0601), while `idle`, `interaction` and eager children were released. The observer's
+callback closed over `lazy()`'s scope (owner, props, built nodes), and Chrome still held the observer. The observer now
+lives in its own function and reaches the trigger through a box emptied on stop, so whatever keeps the observer keeps
+nothing of the component. Sweep: `visible(ref)` in brain-env.js (its callback holds only the signal) measured no leak; the
+router's prefetch observer and the inspector's observers are page-wide, not per instance. Test:
+`crates/brain-cli/tests/lazy_heap.rs` (four lazy modes plus `visible(ref)` under `--heap`).
+
+### Instance ids restart on each client navigation (2026-11-02)
+
+A component with ids numbers its instances (#268): the first keeps `id`, later ones get `id~2`, and `for`, `aria-*`
+and `href="#…"` follow the same suffix. The count restarts when `globalThis.__brainIds` changes, which the server did
+per render but the client router never did. A layout header mounted again with each swapped view therefore counted the
+page it replaced and came back as `main-nav~2`, so a component rule `#main-nav { … }` stopped applying. The router now
+bumps `__brainIds` right after disposing the old region (and before its early mount of a slow page), so the view that
+mounts next numbers its ids from the start. Known limits: an element outside the swapped region keeps its id, so the same
+component live there and inside the new view would share it; a single dev HMR remount or a guard Retry remount still
+counts the instance it replaces. Test: `runtime/test/router.test.js` («a navigation restarts instance ids»).
+
+### Native reads wait out an autodeploy drain (2026-11-02)
+
+During an autodeploy the backend first answers `503 DRAINING` (Retry-After 5) on readiness while it finishes its
+requests, then closes its listener until the new process listens. The old read retry covered only a refused or reset
+connection for about 3.75 s, so a page rendered during the switch failed with a 503. A `GET` through `ctx.backend`
+(resources, `service`, `operation` reads) and through `ctx.backend.files(bucket)` now asks again while the failure is
+"not now": a refused or reset connection, or a 502/503/504 with no code, `DRAINING` or `OVERLOADED`. It waits 250 ms
+doubling to 2 s, or the answer's Retry-After when longer, and gives up as soon as the next wait would pass its budget:
+the load timeout minus one second (`nativeAuthBridge(..., readBudget)`, capped at 30 s; 8 s when the bridge is built
+alone). A code of the backend's own (`BATCH_TOO_SLOW`) is an answer on purpose and is never repeated, and writes are
+sent once. The failure that ends the wait keeps `temporary: true` and its Retry-After, so the page answers 503 with it
+and the log says `NODE_TEMPORARY_ERROR`. Tests: `runtime/test/server-native-drain.test.js`.
 
 ### Mandatory native before-hooks and single-row conflict checks (2026-10-30)
 

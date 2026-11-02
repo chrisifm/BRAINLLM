@@ -106,7 +106,7 @@ Text interpolation is escaped. `id`s in `comp/` and `ui/`, static or computed (`
 in the first instance (so `/page#id` links work); later instances get `~2`, `~3`… and their `for`, `aria-*` and
 `href="#…"` references follow. Ids in views and layouts stay as written.
 `<pre raw>` and `<code raw>` keep their text literal (code samples with `{` `}`).
-`bind:value|checked` also accepts a field of a sig object: `bind:checked={prefs.email}`.
+`bind:value|checked` also accepts a field of a sig object: `bind:checked={prefs.email}`. `<select multiple bind:value={tags}>` binds an array of option values.
 Raw HTML only as `{@html sanitize(x)}`.
 
 ## Lifecycle and helpers
@@ -380,7 +380,10 @@ Keep existing production routes until their behavior and policies pass a tested 
 ## Tests (`*.test.brain`)
 `test(name, async () => {…})` · `await mount(Comp, props, { slot, slots, provide }?)` (`slot`: default slot text;
 `slots: { name: text }`: named slots) · `await click(sel)` · `await type(sel, text)` ·
-`text(sel)` `attr(sel, n)` `hasClass(sel, c)` `count(sel)` · `expect(x).toBe(y)|toEqual(y)|toBeTruthy()`.
+`text(sel)` `attr(sel, n)` `hasClass(sel, c)` `count(sel)` ·
+`expect(x).toBe(y)|toEqual(y)|toBeTruthy()|toBeFalsy()|toContain(y)` (string or array), each also as `expect(x).not.…` ·
+`await waitFor(fn, { timeout: 3000 }?)` retries `fn` after each render until it neither throws nor returns `false`; use it instead of a fixed sleep.
+A `<meta server>` module cannot be imported by a test (it runs only on the server): test what calls it, with `stub`.
 No server is needed: `stub('save', { ok: true })` answers a `server:` function, `stub('GET /api/posts', [{ id: 1 }])` an endpoint (add `?query` to match it exactly). The answer is a value (200), `reply(422, { errors: { email: 'Taken' } })`, or a function of the call's arguments returning either; `stub()` returns `{ calls }`. It lasts one test, and one never called fails it. `mount`, `click` and `type` wait for stubbed answers.
 `brain test` fails on a path that selects no test. It runs beside `brain run`: each uses its own port, and with native sockets, whose port is fixed, tests use the running dev server.
 

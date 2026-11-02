@@ -63,3 +63,27 @@ test('options arriving later still select the current value, and a state change 
   await tick()
   assert.equal(el.value, 'B')
 })
+
+// <select multiple bind:value={picked}>: the bound value is an array; every option it names is selected.
+test('a multiple select bound to an array selects every listed option, also options that mount later', async () => {
+  const el = doc.createElement('select')
+  el.setAttribute('multiple', '')
+  doc.body.appendChild(el)
+  const opt = v => {
+    const o = doc.createElement('option')
+    o.setAttribute('value', v)
+    el.appendChild(o)
+    return o
+  }
+  const v = sig(['b', 'c'])
+  const a = opt('a'), b = opt('b')
+  attr(el, 'value', () => v.v)
+  assert.deepEqual([a.selected, b.selected], [false, true])
+  const c = opt('c')
+  await tick()
+  assert.equal(c.selected, true, 'an option that mounts later and is in the array becomes selected')
+  v.v = ['a']
+  await tick()
+  assert.deepEqual([a.selected, b.selected, c.selected], [true, false, false])
+  assert.ok(!Array.isArray(el.value), 'the array never lands on select.value (a browser would stringify it)')
+})

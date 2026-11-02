@@ -15,6 +15,10 @@
 // else → full page load: the server decides.
 import { prefetchPage } from './brain-prefetch-shared.js'
 const G = globalThis
+// The view mounted after a swap is a new page: its components number their instance ids from the start (codegen #268:
+// the first keeps `id`, later ones `id~2`), as the server does per render. Without this, a layout header mounted again
+// on each navigation counted the page it replaced and came back as `main-nav~2`, so `#main-nav` CSS stopped applying.
+const fresh = () => { G.__brainIds = (G.__brainIds || 0) + 1 }
 // Base path (<meta name="brain-base" content="/app/">, §23 #148): links in the HTML already carry it; guards and
 // routes work with app paths (strip), and app paths given to go()/navigate()/redirect() get it (app). '/' when absent.
 const base = () => G.document?.querySelector('meta[name=brain-base]')?.getAttribute('content') || '/'
@@ -170,6 +174,7 @@ export function router(o = {}) {
             const el = document.querySelector(region), mount = c.m || c.mount
             if (w.done || my !== seq || !el || !mount) return // the page arrived first
             dispose(el)
+            fresh()
             for (const n of [...el.childNodes]) if (!/^(STYLE|LINK)$/.test(n.nodeName)) n.remove() // the view's CSS stays (BUILD #35)
             el.$d = mount(v.default, el, {})
           })
@@ -207,6 +212,7 @@ export function router(o = {}) {
       const swap = () => {
         if (my !== seq) return
         dispose(cur)
+        fresh()
         cur.replaceChildren(...[...next.childNodes].map(adopt))
         // Scripts parsed by DOMParser never run: the region's own scripts (the view's mount, `e.$d = mount(...)`) are
         // recreated so they execute. Already-imported modules come from the module map: their state survives.
