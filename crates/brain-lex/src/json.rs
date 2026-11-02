@@ -253,9 +253,35 @@ impl Parser<'_> {
     }
 }
 
+/// JSON text made safe inside an HTML `<script>` element (the runtime's `jsonInHtml`): `<`, `>` and `&` become `\u003c`,
+/// `\u003e`, `\u0026`, and U+2028/U+2029 their escapes. Neither `</script>` nor `<!--<script` can then end or confuse the
+/// element, and the text parses to the same value (in valid JSON those characters only occur inside strings).
+pub fn in_html(json: &str) -> String {
+    let mut o = String::with_capacity(json.len());
+    for c in json.chars() {
+        match c {
+            '<' => o.push_str("\\u003c"),
+            '>' => o.push_str("\\u003e"),
+            '&' => o.push_str("\\u0026"),
+            '\u{2028}' => o.push_str("\\u2028"),
+            '\u{2029}' => o.push_str("\\u2029"),
+            c => o.push(c),
+        }
+    }
+    o
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn in_html_cannot_end_or_confuse_a_script_element() {
+        let src = "{\"a\":\"<!--<script></script> & \u{2028}\"}";
+        let safe = in_html(src);
+        assert!(!safe.contains('<') && !safe.contains('>') && !safe.contains('&') && !safe.contains('\u{2028}'), "{safe}");
+        assert_eq!(Json::parse(&safe).unwrap(), Json::parse(src).unwrap());
+    }
 
     #[test]
     fn roundtrip() {

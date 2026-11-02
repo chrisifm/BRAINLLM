@@ -463,11 +463,12 @@ pub fn typed_nodes(doc: &Doc) -> Vec<Json> {
         .collect()
 }
 
-/// `<script type="application/ld+json">` with `</` escaped so the content cannot close the element.
+/// `<script type="application/ld+json">` with `<`, `>`, `&` and U+2028/2029 escaped so the content cannot close or confuse
+/// the element.
 pub fn script(j: &Json) -> String {
     format!(
         "<script type=\"application/ld+json\">{}</script>",
-        j.stringify().replace("</", "<\\/")
+        brain_lex::json::in_html(&j.stringify())
     )
 }
 

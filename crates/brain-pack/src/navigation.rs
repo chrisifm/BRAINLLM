@@ -158,7 +158,7 @@ pub fn apply(pages: &mut [Page], files: &mut BTreeMap<String, String>, pre: &str
         plans.push(format!("{{\"v\":1,\"next\":[{}]}}", items.join(",")));
     }
     for (page, plan) in pages.iter_mut().zip(plans) {
-        let safe = plan.replace('<', "\\u003c");
+        let safe = brain_lex::json::in_html(&plan);
         let script = format!("<script type=\"application/json\" id=\"brain-next\">{safe}</script>");
         page.html = match page.html.rfind("</body>") {
             Some(i) => format!("{}{script}{}", &page.html[..i], &page.html[i..]),

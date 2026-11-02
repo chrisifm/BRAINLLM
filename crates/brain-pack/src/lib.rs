@@ -1799,7 +1799,7 @@ fn build_inner_with_options(
         // canonical/og:url = site + base + route (#148; brain-seo builds its own absolute URLs the same way)
         let site = input.site.as_deref().map(|s| format!("{}{pre}", s.trim_end_matches('/')));
         let (title, seo_html) = prerender::seo_head(&seo, site.as_deref(), &p.route, &input.generator);
-        let props = r.map_or("{}".to_string(), |r| r.props.replace("</", "<\\/"));
+        let props = r.map_or("{}".to_string(), |r| brain_lex::json::in_html(&r.props));
         let mut head = format!("{seo_html}{}{}", p.head, r.map_or("", |r| r.head.as_str()));
         // `query="page"`: the request parameters that are part of the page's identity. The server reads the marker,
         // removes it and writes them into the canonical; a prerendered file is one URL and cannot vary by them.

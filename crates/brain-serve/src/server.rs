@@ -1576,8 +1576,8 @@ fn app_page(ctx: &Ctx, req: &http::Request) -> (u16, String, Option<String>) {
                         json_str(&format!("/{}", r.view)),
                         layouts.join(","),
                         props
-                    )
-                    .replace("</", "<\\/");
+                    );
+                    let data = brain_lex::json::in_html(&data);
                     (
                         if r.not_found { 404 } else { brain_pack::reserved_view(&r.view).map_or(200, |(status, _)| status) },
                         format!(
@@ -1849,8 +1849,8 @@ fn fixed_view(ctx: &Ctx, view: &str, props: &str, title: &str, detail: &str) -> 
     let data = format!(
         "{{\"v\":{},\"l\":[],\"p\":{props}}}",
         json_str(&format!("/{view}"))
-    )
-    .replace("</", "<\\/");
+    );
+    let data = brain_lex::json::in_html(&data);
     format!(
         "<div id=\"brain-view\"></div><script type=\"application/json\" id=\"brain-route\">{data}</script><script type=\"module\">import{{route}}from'/@brain/client.js';route()</script>"
     )
@@ -2110,7 +2110,7 @@ fn form_post(s: &mut TcpStream, ctx: &Ctx, req: &http::Request) -> io::Result<()
             let (_, html, _) = app_page(ctx, &get);
             let tag = format!(
                 "<script type=\"application/json\" id=\"brain-forms\">{}</script>",
-                state.replace("</", "<\\/")
+                brain_lex::json::in_html(&state)
             );
             let html = match html.rfind("</body>") {
                 Some(i) => format!("{}{tag}{}", &html[..i], &html[i..]),
