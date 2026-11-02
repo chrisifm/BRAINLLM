@@ -399,7 +399,7 @@ async fn relations_filters_sort_totals_aggregates_cursors_ownership_and_visibili
     let (_, r) = api.get("/api/reviews?limit=100", Some(&rival)).await;
     assert_eq!(r["total"], 0);
     let (s, _) = api.get("/api/reviews", None).await;
-    assert_eq!(s, 403);
+    assert_eq!(s, 401);
     let (s, e) = api.call("DELETE", &format!("/api/products/{}", product["Anvil"]), Some(&owner), None).await;
     assert_eq!(s, 409, "restrict keeps referenced rows: {e}");
     assert_eq!(e["error"]["code"], "REFERENCE_IN_USE");

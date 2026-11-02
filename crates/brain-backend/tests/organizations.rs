@@ -152,7 +152,7 @@ async fn no_read_channel_crosses_an_organization() {
     assert!(call(&f.http, "GET", &format!("/api/tasks?project={}", f.project_b), Some(a), None).await.1["items"].as_array().unwrap().is_empty());
     assert!(call(&f.http, "GET", "/api/tasks?project.tag=beta", Some(a), None).await.1["items"].as_array().unwrap().is_empty());
     // Anonymous readers have no grant; a global administrator holds no membership and sees nothing.
-    assert_eq!(call(&f.http, "GET", "/api/projects", None, None).await.0, 403);
+    assert_eq!(call(&f.http, "GET", "/api/projects", None, None).await.0, 401);
     assert!(titles(&call(&f.http, "GET", "/api/projects", Some(&f.global_admin), None).await.1).is_empty());
     assert_eq!(call(&f.http, "GET", &format!("/api/projects/{}", f.project_b), Some(&f.global_admin), None).await.0, 404);
     // Member listing of another organization is invisible.
