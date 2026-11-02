@@ -18,6 +18,12 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - B0812 warns when a server route reads `process.env` instead of `ctx.env`, or reads a variable `.brain_env` declares only under `[production]`
 - B0813 warns when an operation `debit` step takes its `subject` from the input or an earlier step instead of `$user.id`, which lets anyone the operation admits spend another person's credits
 - `brain test` and `brain doctor` retry once when the browser connection breaks, and a second failure names probable machine load with the 1-minute load average
+- a form's `_brain` id must be exactly `<hash>/<name>`; anything else answers 400 and never runs the function
+- RPC and form rate limits count only a function that exists, keyed by `<hash>/<name>` and the client address; unknown names answer 404/400 without a rate-limit entry
+- the rate-limit map is capped at 50 000 entries (oldest window first) and long keys are stored as a digest
+- the native analytics limiter tracks at most 50 000 visitors and evicts the oldest window first, in constant time
+- the browser router drops a prefetch rank when its link leaves the queue and on every new page
+- `brain run` keeps at most 1000 inspector batches and 32 MiB in /@brain/metrics, besides the 5-minute window
 
 ## [0.8.9] - 2026-11-02
 
