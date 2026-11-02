@@ -347,7 +347,7 @@ export default { title: 'str!' }
 export default { read: ['owner'], create: ['user'], update: ['owner'], delete: ['owner'] }
 @file server/operations/touch.jsbrain
 <meta server>
-export default { roles: ['user'], input: { item: 'str!' }, steps: [{ as: 'item', read: 'items', id: '$input.item' }] }
+export default { roles: ['user'], input: { item: 'str!' }, steps: [{ as: 'item', update: 'items', id: '$input.item', data: { title: 'seen' } }] }
 
 ### B0810 answer built but not thrown
 @expect B0501 views/item.brain 1:1

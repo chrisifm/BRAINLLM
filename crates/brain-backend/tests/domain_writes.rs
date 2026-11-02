@@ -34,6 +34,8 @@ fn shop_domain() -> Domain {
     paid["steps"].as_array_mut().unwrap().insert(0, json!({"as":"charge","debit":{"subject":"$user.id","amount":3,"reason":"order","key":"$input.request_id"}}));
     paid["result"].as_array_mut().map(|result| result.push(json!("charge")));
     domain["operations"]["paid_order"] = paid;
+    // A read step by an id from the input, without `owned: true`, on a resource whose rows only their owner reads.
+    domain["operations"]["peek_order"] = json!({"input":{"order_id":"str!"},"roles":["user","admin"],"steps":[{"as":"order","read":"shop_orders","id":"$input.order_id"}]});
     serde_json::from_value(domain).unwrap()
 }
 
@@ -309,6 +311,28 @@ async fn postgres_operations_commit_every_step_or_roll_all_of_them_back() {
     let (status, _) = call(&s.app, "POST", "/_brain/operations/place_order", "not-a-session", Some(json!({"product_id":p,"quantity":1}))).await;
     assert_eq!(status, 401);
     assert_eq!(stock(&s, &p).await, 98);
+}
+
+/// A `read` step answers only for rows the caller could read through the resource policy: another user's row is
+/// missing, exactly as on `GET /api/<resource>/<id>`, so the operation is not an existence oracle.
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn postgres_operation_read_step_applies_the_resource_read_policy() {
+    let s = shop().await;
+    let (status, order) = call(&s.app, "POST", "/api/shop_orders", &s.alice, Some(json!({"product":"p","quantity":1}))).await;
+    assert_eq!(status, 200, "{order}");
+    let peek = |token: String, order: String| {
+        let app = s.app.clone();
+        async move { call(&app, "POST", "/_brain/operations/peek_order", &token, Some(json!({"order_id":order}))).await }
+    };
+    let (status, body) = peek(s.bob.clone(), id(&order)).await;
+    assert_eq!((status, &body["error"]["fields"]["order"]), (404, &json!("Not found")), "another user's row: {body}");
+    let (unknown, unknown_body) = peek(s.bob.clone(), uuid::Uuid::new_v4().to_string()).await;
+    assert_eq!((unknown, &unknown_body["error"]), (status, &body["error"]), "a hidden row and a missing row answer the same");
+    let (status, body) = peek(s.alice.clone(), id(&order)).await;
+    assert_eq!((status, &body["result"]["order"]["id"]), (200, &order["id"]), "the owner reads it: {body}");
+    let (status, body) = peek(s.admin.clone(), id(&order)).await;
+    assert_eq!(status, 200, "a role with a read grant reads it: {body}");
 }
 
 /// A malformed id is the caller's mistake on every record route, including the action and transition routes.

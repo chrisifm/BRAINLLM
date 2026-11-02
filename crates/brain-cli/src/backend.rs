@@ -440,14 +440,15 @@ pub fn blind_update_warnings(root: &Path) -> Vec<(String, String, String)> {
     out
 }
 /// B0809: an operation step that takes a row id from the caller, on a resource one of its roles cannot read in full. An
-/// operation's roles replace the resource policy, so without `owned: true` the answer confirms rows that role reads as missing.
+/// operation's roles replace the resource write policy, so without `owned: true` the answer confirms rows that role reads
+/// as missing. A `read` step applies the read policy itself (0.8.10), so it is never reported.
 pub fn operation_reach_warnings(root: &Path) -> Vec<(String, String, String)> {
     let resources = contracts(root, "resources").unwrap_or_default();
     let Ok(d) = domain::load(root, &resources) else { return Vec::new() };
     let mut out = Vec::new();
     for (name, op) in &d.operations {
         for step in op.steps.iter().filter(|s| !s.owned && s.id.as_deref().is_some_and(|id| id.starts_with("$input."))) {
-            let target = [&step.read, &step.update, &step.delete, &step.action, &step.transition].into_iter().find_map(|t| t.as_deref());
+            let target = [&step.update, &step.delete, &step.action, &step.transition].into_iter().find_map(|t| t.as_deref());
             let Some(resource) = target.and_then(|t| t.split('.').next()).and_then(|t| resources.iter().find(|r| r.name == t)) else { continue };
             if let Some(role) = op.roles.iter().find(|role| !resource.policy.allows("read", Some(role.as_str()), false)) {
                 out.push((

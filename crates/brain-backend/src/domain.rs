@@ -1049,6 +1049,21 @@ impl<'a> Engine<'a> {
         q.build_query_scalar::<bool>().fetch_one(&mut **tx).await
     }
 
+    /// True when the resource's read policy shows this row to the caller (always for a system key).
+    async fn may_read(&self, tx: &mut Tx, r: &Resource, id: Uuid) -> Result<bool, sqlx::Error> {
+        let viewer = crate::visibility::Viewer { id: Some(self.user.id), role: Some(&self.user.role) };
+        let scope = match crate::ownership::scope(r, "read", viewer) {
+            None => return Ok(false),
+            Some(crate::ownership::Scope::All) => return Ok(true),
+            Some(scope) => scope,
+        };
+        let mut q = sqlx::QueryBuilder::new(format!("SELECT EXISTS(SELECT 1 FROM {} WHERE id=", table(r)));
+        q.push_bind(id).push(" AND ");
+        scope.push(&mut q, r, self.resources);
+        q.push(")");
+        q.build_query_scalar::<bool>().fetch_one(&mut **tx).await
+    }
+
     /// Run one declared action (or transition when `state` is set) on a locked row.
     async fn act(
         &mut self,
@@ -1265,6 +1280,11 @@ impl<'a> Engine<'a> {
                         .ok_or_else(|| Failure::Missing(label.into()))?;
                     if step.owned && !owns(&existing, self.user) {
                         return Err(Failure::Denied { resource: r.name.clone(), id, label: label.into() });
+                    }
+                    // A read step answers what the resource's read policy shows this caller: a row it may not read is
+                    // missing, so an operation is no oracle for other users' records.
+                    if kind == Kind::Read && !self.may_read(tx, r, id).await.map_err(located(&r.name, Some(label)))? {
+                        return Err(Failure::Missing(label.into()));
                     }
                     match kind {
                         Kind::Read => existing,

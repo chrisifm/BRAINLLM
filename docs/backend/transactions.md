@@ -63,7 +63,7 @@ Error field keys start with the step name (`order.quantity`), so the client know
 
 | Step | Needs | Effect |
 |---|---|---|
-| `read: 'r'` | `id` | locks the row (`FOR UPDATE`) and returns it to later steps |
+| `read: 'r'` | `id` | locks the row (`FOR UPDATE`) and returns it to later steps; a row the resource's read policy hides from the caller answers 404, like a missing one |
 | `create: 'r'` | `data` | inserts with the caller as owner; contract and state rules apply |
 | `update: 'r'` | `id`, `data` | PATCH semantics: only the listed fields change |
 | `upsert: 'r'` | `data`, `key` | insert, or merge into the row with the same declared unique key |
@@ -79,9 +79,9 @@ otherwise).
 ## Authority and limits
 
 - `roles` lists configured role names (not `owner` or `public`); the caller must have one of them. The operation's
-  roles replace the resource policies for its steps, so keep each operation narrow and use `owned: true` for
-  per-user rows. A step with an id from the input and no `owned: true` answers for rows the role could not read, which
-  confirms they exist; `brain check` warns B0809.
+  roles replace the resource write policies for its steps, so keep each operation narrow and use `owned: true` for
+  per-user rows. A `read` step always applies the resource's read policy. Any other step with an id from the input and
+  no `owned: true` answers for rows the role could not read, which confirms they exist; `brain check` warns B0809.
 - Resources with a mandatory before-hook cannot be a step target (the contract is rejected at load); their writes stay
   on the single-record endpoints.
 - 1–32 steps, at most 64 operations, input of up to 32 typed fields (`int!`, `str`, `decimal(10,2)!`, ...).
