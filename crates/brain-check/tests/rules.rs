@@ -302,3 +302,16 @@ fn prop_default_with_an_undeclared_name_is_b0111_and_says_to_quote_text() {
     assert!(hit.fix.contains("kind:str=\"complaint\""), "{}", hit.fix);
     assert!(!codes("<meta props=\"kind:str='complaint' n:num=1 a:list=[]\">\n<p>{kind}{n}{a.length}</p>\n").contains(&"B0111"));
 }
+
+// B0901 used to suggest `untrack(…)`, which app authors cannot call (B0111). Its fix names only primitives that
+// exist, and the suggested shape checks clean.
+#[test]
+fn b0901_fix_suggests_only_declared_primitives_and_its_shape_checks_clean() {
+    let d = diags("<script>let n = sig(0)\nfx(() => {\n  n = n + 1\n})</script><p>{n}</p>");
+    let d = d.iter().find(|d| d.code == "B0901").unwrap_or_else(|| panic!("{d:?}"));
+    assert!(!d.fix.contains("untrack(") && d.fix.contains("watch("), "{}", d.fix);
+    let loop2 = diags("<script>let a = sig(0)\nlet b = sig(0)\nfx(() => { a = b + 1 })\nfx(() => { b = a + 1 })</script><p>{a}{b}</p>");
+    let d = loop2.iter().find(|d| d.code == "B0901").unwrap_or_else(|| panic!("{loop2:?}"));
+    assert!(!d.fix.contains("untrack("), "{}", d.fix);
+    assert!(codes("<script>let n = sig(0)\nlet src = sig(0)\nwatch(() => src, () => {\n  n = n + 1\n})</script><p>{n}</p><button on:click={() => src++}>go</button>").is_empty());
+}

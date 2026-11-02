@@ -284,7 +284,7 @@ impl Checker<'_> {
         for (i, rw) in rws.iter().enumerate() {
             if let Some(x) = rw.writes.iter().filter(|w| sigs.contains(*w) && dep_sets[i].contains(*w)).min() {
                 reported.insert(i);
-                self.push("B0901", fxs[i].1, format!("`fx` writes `{x}`, which it also reads: direct cycle"), format!("if it counts runs read with `untrack(() => {x})`; if `{x}` derives from something else, make it a `drv`"));
+                self.push("B0901", fxs[i].1, format!("`fx` writes `{x}`, which it also reads: direct cycle"), format!("if `{x}` derives from other values, make it a `drv`; to update it when a source changes, use `watch(() => source, (now) => {{ … }})`: its callback is untracked, so reading `{x}` there does not re-run it"));
             }
         }
         // fx_i → fx_j when fx_i writes a signal fx_j depends on; a cycle among effects loops forever.
@@ -319,7 +319,7 @@ impl Checker<'_> {
                 for i in &path {
                     reported.insert(*i);
                 }
-                self.push("B0901", fxs[start].1, format!("effects write each other's inputs in a loop ({})", names.join(" → ")), "derive the values with `drv` instead of writing them from `fx`, or break the loop with `untrack(…)`");
+                self.push("B0901", fxs[start].1, format!("effects write each other's inputs in a loop ({})", names.join(" → ")), "derive the values with `drv` instead of writing them from `fx`, or write them from `watch(() => source, (now) => { … })`, whose callback is untracked");
             }
         }
 
