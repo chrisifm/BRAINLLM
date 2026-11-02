@@ -496,8 +496,17 @@ fn finish_adds_structured_data() {
         image: Some("/c.png".into()),
         ..Default::default()
     });
+    pages.push(page(
+        "*",
+        "Page not found — Acme offline task planner",
+        "This page does not exist; the home page lists what Acme offers for small teams.",
+        "<h1>Page not found</h1><p><a href=\"/\">Home</a></p>",
+    ));
     let built = finish(&c, &dir, &mut pages, &[], &[]).unwrap();
     let ld = |i: usize| brain_seo::html::parse(&pages[i].html).jsonld;
+    // the not-found page answers any URL: site nodes only, never `*#webpage` or `"url":"*"`
+    let missing = ld(pages.len() - 1).join("\n");
+    assert!(!missing.contains("*#webpage") && !missing.contains("\"url\":\"*\"") && missing.contains("#website"), "{missing}");
     assert_eq!(
         brain_seo::jsonld::declared_types(&brain_seo::html::parse(&pages[0].html)),
         vec!["WebSite", "Organization", "WebPage"]

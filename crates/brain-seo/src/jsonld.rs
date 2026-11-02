@@ -362,9 +362,12 @@ pub fn auto(
         if let Some(o) = org.clone() {
             graph.push(graph_node(o, Some(&org_id)));
         }
-        let crumb = breadcrumb(cfg, route, names).filter(|_| !declared("BreadcrumbList"));
-        let faq = faq_page(doc).filter(|_| !declared("FAQPage"));
-        let own_page = PAGE_TYPES.iter().any(|t| declared(t));
+        // a page with no address of its own (the `*` not-found page answers any URL) gets the site nodes only:
+        // a WebPage `*#webpage` with `"url":"*"` names no page
+        let addressed = route.starts_with('/');
+        let crumb = breadcrumb(cfg, route, names).filter(|_| addressed && !declared("BreadcrumbList"));
+        let faq = faq_page(doc).filter(|_| addressed && !declared("FAQPage"));
+        let own_page = !addressed || PAGE_TYPES.iter().any(|t| declared(t));
         let mut faq_left = faq.clone();
         if !own_page {
             let mut kv: Vec<(String, Json)> = vec![
@@ -418,7 +421,7 @@ pub fn auto(
         if let Some(f) = faq_left {
             graph.push(graph_node(f, None));
         }
-        if let Some(a) = art
+        if let Some(a) = art.filter(|_| addressed)
             && !have.iter().any(|h| matches!(h.as_str(), "Article" | "BlogPosting" | "NewsArticle"))
         {
             let mut node = graph_node(article(cfg, route, a), Some(&format!("{url}#article")));
