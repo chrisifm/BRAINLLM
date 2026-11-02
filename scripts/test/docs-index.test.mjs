@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
+import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { buildIndex, summary, unlinkedBackendPages } from '../gen-docs-index.mjs'
 
@@ -37,6 +38,23 @@ test('new docs/backend pages appear with no generator edits and must be linked',
     assert.match(index, /\| \[start\]\(\.\.\/crates\/brain-cli\/guides\/start\.md\) \| the working loop \|/)
     assert.match(index, /\| \[Task API\]\(backend\/tasks\.md\) \| CRUD for tasks\. \|/)
     assert.deepEqual(unlinkedBackendPages(dir), ['docs/backend/tasks.md'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('docs that git ignores (local notes) stay out of the index', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'brain-docs-ignored-'))
+  try {
+    execFileSync('git', ['init', '-q', dir], { stdio: 'ignore' })
+    mkdirSync(join(dir, 'docs'), { recursive: true })
+    writeFileSync(join(dir, 'SPEC.md'), '# Spec\n')
+    writeFileSync(join(dir, '.git/info/exclude'), 'docs/LOCAL.md\n')
+    writeFileSync(join(dir, 'docs/GUIDE.md'), '# Guide\n\nShared page.\n')
+    writeFileSync(join(dir, 'docs/LOCAL.md'), '# Local notes\n\nNever published.\n')
+    const index = buildIndex(dir)
+    assert.match(index, /\[Guide\]\(GUIDE\.md\)/)
+    assert.doesNotMatch(index, /LOCAL\.md/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

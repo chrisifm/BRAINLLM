@@ -4,6 +4,7 @@
 //   node scripts/gen-docs-index.mjs          rewrite docs/INDEX.md
 //   node scripts/gen-docs-index.mjs --check  exit 1 when docs/INDEX.md is stale or a docs/backend page is not linked
 //                                           from docs/BACKEND.md
+import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,6 +18,19 @@ const mdFiles = (dir) =>
         .map((e) => e.name)
         .sort()
     : []
+
+// Files git ignores under docs/ (local notes listed in .git/info/exclude): the published index never links them.
+const ignoredDocs = (root) => {
+  try {
+    const out = execFileSync('git', ['-C', root, 'ls-files', '--others', '--ignored', '--exclude-standard', '--', 'docs'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    return new Set(out.split('\n').filter(Boolean))
+  } catch {
+    return new Set()
+  }
+}
 
 const clean = (s) =>
   s
@@ -115,11 +129,12 @@ export function buildIndex(root) {
     }),
   )
 
+  const ignored = ignoredDocs(root)
   for (const [dir, heading, prefix] of [
     ['docs', '## docs/', ''],
     ['docs/backend', '## docs/backend/', 'backend/'],
   ]) {
-    const files = mdFiles(join(root, dir)).filter((f) => f !== 'INDEX.md')
+    const files = mdFiles(join(root, dir)).filter((f) => f !== 'INDEX.md' && !ignored.has(`${dir}/${f}`))
     if (!files.length) continue
     out.push(heading, '')
     table(
