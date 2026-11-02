@@ -1604,6 +1604,7 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
                     article: None,
                     view: Some(p.view.clone()),
                     ssr: false,
+                    request_seo: vec![],
                 }
             })
             .collect();

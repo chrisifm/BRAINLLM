@@ -50,6 +50,9 @@ pub struct Page {
     pub view: Option<String>,
     /// Read from a server template (`dist/_server/pages/…`): only the `<head>` is audited.
     pub ssr: bool,
+    /// `<meta seo>` keys of a server template whose value comes from `load` per request (`title={props.name}`): the
+    /// template cannot show it, so the audit does not report it missing or duplicated.
+    pub request_seo: Vec<String>,
 }
 
 /// `(path without leading slash, size in bytes)` of every non-page file served from `dist/`.
@@ -1030,17 +1033,41 @@ pub fn read_dist(dist: &Path) -> Result<(Vec<Page>, Assets), String> {
                 continue;
             }
             if let Ok(html) = std::fs::read_to_string(dist.join(page)) {
+                let module = r.get("server").and_then(Json::as_str).and_then(|m| std::fs::read_to_string(dist.join(m)).ok());
                 pages.push(Page {
                     route: route.to_string(),
                     file: page.to_string(),
                     html,
                     ssr: true,
+                    request_seo: module.as_deref().map(request_seo_keys).unwrap_or_default(),
                     ..Page::default()
                 });
             }
         }
     }
     Ok((pages, assets))
+}
+
+/// Keys of the server module's `export const seo = (props) => ({ "title": …, … })` whose value is not a string
+/// literal: the server computes them from `load` on each request.
+fn request_seo_keys(module: &str) -> Vec<String> {
+    let Some(body) = module.lines().find_map(|l| l.strip_prefix("export const seo = (props) => ({")) else { return vec![] };
+    let body = body.trim_end().trim_end_matches(';').trim_end_matches(')').trim_end_matches('}');
+    let mut keys = Vec::new();
+    for key in ["title", "description"] {
+        let Some(at) = body.find(&format!("\"{key}\": ")) else { continue };
+        let rest = &body[at + key.len() + 4..];
+        // the value runs to the next `, "key": ` (keys are emitted as JSON strings) or the end of the object
+        let end = rest.find(", \"").unwrap_or(rest.len());
+        let value = rest[..end].trim();
+        let literal = value.len() >= 2
+            && ((value.starts_with('"') && value.ends_with('"')) || (value.starts_with('\'') && value.ends_with('\'')))
+            && !value[1..value.len() - 1].contains(['"', '\'']);
+        if !literal {
+            keys.push(key.to_string());
+        }
+    }
+    keys
 }
 
 /// `brain seo <audit|links|preview <route>> [--json]`, run in the app root. Returns `(exit code, stdout)`: 0 ok,

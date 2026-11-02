@@ -307,6 +307,36 @@ fn cli_audit_reads_keywords_from_the_caller() {
 }
 
 #[test]
+fn a_per_request_title_and_description_are_not_reported_missing_or_duplicated() {
+    let dir = fresh_dir("ssr-bound");
+    for p in good_site() {
+        let f = dir.join("dist").join(&p.file);
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(f, p.html).unwrap();
+    }
+    std::fs::write(dir.join("brain.json"), r#"{"site":"https://acme.dev"}"#).unwrap();
+    std::fs::create_dir_all(dir.join("dist/_server/pages")).unwrap();
+    let home_title = brain_seo::html::parse(&std::fs::read_to_string(dir.join("dist/index.html")).unwrap()).title.unwrap();
+    // the template carries the shell title: the server replaces it with the `load` values on every request
+    let template = |t: &str, r: &str| format!("<!doctype html><html lang=\"en\"><head><title>{t}</title><link rel=\"canonical\" href=\"https://acme.dev{r}\"></head><body><main><h1>Compare</h1><a href=\"/\">Home</a></main></body></html>");
+    std::fs::write(dir.join("dist/_server/pages/c.html"), template(&home_title, "/compare")).unwrap();
+    std::fs::write(dir.join("dist/_server/c.mjs"), "export async function load(ctx) { return {} }\nexport const seo = (props) => ({ \"title\": \"\" + (props.title) + \" · Acme\", \"description\": props.description });\n").unwrap();
+    std::fs::write(dir.join("dist/_server/pages/f.html"), template("Fixed", "/fixed")).unwrap();
+    std::fs::write(dir.join("dist/_server/f.mjs"), "export const seo = (props) => ({ \"title\": \"Fixed\" });\n").unwrap();
+    std::fs::write(dir.join("dist/_server/manifest.json"), r#"{"v":1,"routes":[{"path":"/compare","page":"_server/pages/c.html","server":"_server/c.mjs"},{"path":"/fixed","page":"_server/pages/f.html","server":"_server/f.mjs"}]}"#).unwrap();
+    let (_, out) = brain_seo::cli(&dir, &["audit".into()]);
+    let section = |route: &str| out.split("\n\n").find(|b| b.starts_with(&format!("{route} —"))).unwrap_or_default().to_string();
+    let compare = section("/compare");
+    assert!(!compare.is_empty(), "{out}");
+    for code in ["B1801", "B1802", "B1803", "B1814"] {
+        assert!(!compare.contains(code), "{code}: {compare}");
+    }
+    assert!(!section("/").contains("/compare"), "{out}");
+    // a literal value is in the template and still audited
+    assert!(section("/fixed").contains("B1803"), "{out}");
+}
+
+#[test]
 fn cli_audit_warns_when_a_source_changed_after_the_build() {
     let dir = fresh_dir("cli-stale");
     std::fs::create_dir_all(dir.join("views")).unwrap();

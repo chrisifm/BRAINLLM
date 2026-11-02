@@ -321,6 +321,7 @@ fn seo_scores(root: &Path, m: &brain_pack::impact::Measure) -> BTreeMap<String, 
             article: None,
             view: Some(v.view.clone()),
             ssr: false,
+            request_seo: vec![],
         })
         .collect();
     let routes: Vec<String> = m.values().map(|v| v.route.clone()).collect();
