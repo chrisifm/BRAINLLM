@@ -2326,6 +2326,11 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
                 ("passed", Json::Num(passed as f64)),
                 ("failed", Json::Num(failed as f64)),
                 ("a11y", Json::Num(a11y as f64)),
+                // which ones: an intermittent failure is gone by the next run, so this line is the only record of it
+                ("failures", Json::Arr(reports.iter().flat_map(|r| {
+                    let failure = |name: &str, error: &str| Json::obj([("file", Json::str(&r.file)), ("name", Json::str(name)), ("error", Json::str(error.lines().next().unwrap_or("").chars().take(200).collect::<String>()))]);
+                    r.load_error.iter().map(|e| failure("failed to load", e)).chain(r.tests.iter().filter(|t| !t.ok).map(|t| failure(&t.name, t.error.as_deref().unwrap_or("")))).collect::<Vec<_>>()
+                }).collect())),
                 // captured runtime errors of every test file, deduplicated (brain_errors' view, offline)
                 ("errors", Json::Arr(reports.iter().flat_map(|r| r.errors.iter().map(move |e| match e {
                     Json::Obj(kv) => Json::Obj([("test".to_string(), Json::str(&r.file))].into_iter().chain(kv.clone()).collect()),
@@ -2569,7 +2574,16 @@ fn cmd_doctor(args: &[String]) -> ExitCode {
                     n("check", "warnings"),
                     match test_err {
                         Some(e) => format!("did not run: {e}"),
-                        None => format!("{} ok · {} failed · {} accessibility issues", n("test", "passed"), n("test", "failed"), n("test", "a11y")),
+                        None => {
+                            let failures = match j.get("test").and_then(|t| t.get("failures")) {
+                                Some(brain_mcp::Json::Arr(list)) => list.iter().map(|f| {
+                                    let s = |k: &str| f.get(k).and_then(brain_mcp::Json::as_str).unwrap_or("").to_string();
+                                    format!("\n  ✗ {} › {}: {}", s("file"), s("name"), s("error"))
+                                }).collect::<String>(),
+                                _ => String::new(),
+                            };
+                            format!("{} ok · {} failed · {} accessibility issues{failures}", n("test", "passed"), n("test", "failed"), n("test", "a11y"))
+                        }
                     },
                     match (ok, j.get("failed")) {
                         (true, _) => "✓ no errors".to_string(),

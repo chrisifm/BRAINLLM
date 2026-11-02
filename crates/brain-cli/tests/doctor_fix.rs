@@ -20,3 +20,22 @@ fn doctor_fix_applies_exact_edits_and_retains_unresolved_errors() {
     assert!(report.stringify().contains("B0401"));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// An intermittent failure is gone by the next run, so the report itself has to name it.
+#[test]
+fn doctor_names_the_tests_that_failed() {
+    let dir = std::env::temp_dir().join(format!("brain-doctor-tests-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    assert!(Command::new(env!("CARGO_BIN_EXE_brain")).args(["new", "app"]).current_dir(&dir).output().unwrap().status.success());
+    let app = dir.join("app");
+    std::fs::write(app.join("comp/zz.test.brain"), "<script>\ntest('always fails', () => { expect(1).toBe(2) })\n</script>\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_brain")).args(["doctor", "--json"]).current_dir(&app).stdin(Stdio::null()).output().unwrap();
+    let report = brain_mcp::Json::parse(&String::from_utf8(output.stdout).unwrap()).unwrap();
+    let text = report.get("test").map(|t| t.stringify()).unwrap_or_default();
+    // Without a browser the tests do not run, and there is nothing to name.
+    if text.contains("\"passed\"") {
+        assert!(text.contains("comp/zz.test.brain") && text.contains("always fails") && text.contains("expected 2, got 1"), "{text}");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
