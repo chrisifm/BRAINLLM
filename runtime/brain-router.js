@@ -73,17 +73,20 @@ export function redirect(url, status = 303) {
   throw { redirect: String(url), status }
 }
 export const deny = (reason = 'Forbidden') => ({ deny: String(reason) })
+// A guard redirects to same-site paths only: `//host`, `/\\host` and a control character after the first `/` (browsers
+// drop tabs and newlines) leave the site. Anything else is a full load, where the server's redirect() refuses it.
+const local = u => typeof u === 'string' && /^\/(?![\/\\])/.test(u) && !/[\\\x00-\x20\x7f]/.test(u)
 // guard result → true (go on) · false (cancel) · string (redirect) · null (full load: the server decides, e.g. 403)
 const outcome = v =>
   v && typeof v === 'object'
     ? typeof v.redirect === 'string'
-      ? v.redirect
+      ? local(v.redirect) ? v.redirect : null
       : v.deny !== undefined
         ? null
         : true
-    : v === false || typeof v === 'string'
+    : v === false || local(v)
       ? v
-      : true
+      : typeof v === 'string' ? null : true
 
 export function router(o = {}) {
   const region = o.region || 'main'
@@ -124,7 +127,7 @@ export function router(o = {}) {
         v = await g(ctx)
       } catch (e) {
         if (asked) return null
-        return typeof e?.redirect === 'string' ? e.redirect : null
+        return local(e?.redirect) ? e.redirect : null
       }
       v = outcome(v)
       if (v !== true) return asked ? null : v

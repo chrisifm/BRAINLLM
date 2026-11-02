@@ -190,3 +190,32 @@ fn b0710_accepts_helpers_that_only_return_same_origin_paths() {
     assert_eq!(check("import paths from '../lib/paths.jsbrain'\nexport default (ctx) => ctx.user ? true : redirect(paths.raw(ctx.query))"), ["B0710"]);
     std::fs::remove_dir_all(&dir).ok();
 }
+
+// B0710 accepted `redirect('/' + runtime)`: the runtime part can start with `/` or `\`, which turns the path into a
+// protocol-relative URL (`//evil.example`, `/\evil.example`) that leaves the site.
+#[test]
+fn b0710_rejects_a_bare_slash_followed_by_a_runtime_value() {
+    let guard = |arg: &str| format!("export default (ctx) => ctx.user ? true : redirect({arg})");
+    for arg in [
+        "'/' + ctx.query.next",
+        "`/${ctx.query.next}`",
+        "'/' + '/evil.example'",
+        "'/\\\\evil.example'",
+        "'/\\t/evil.example'",
+        "'https://allowed.example' + ctx.query.rest",
+    ] {
+        let ctx = Ctx { redirect_hosts: vec!["allowed.example".into()], ..Ctx::default() };
+        assert_eq!(codes_in("views/_guard.jsbrain", &guard(arg), &ctx), ["B0710"], "{arg}");
+    }
+    let module = |helper: &str, arg: &str| format!("{helper}\nexport default (ctx) => ctx.user ? true : redirect({arg})");
+    for (helper, arg) in [
+        ("const pathOf = (r) => '/' + r.slug", "pathOf(ctx.query)"),
+        ("const pathOf = (r) => r.home ? '/' : '/items/' + r.slug", "pathOf(ctx.query) + ctx.query.rest"),
+    ] {
+        assert_eq!(codes_in("views/_guard.jsbrain", &module(helper, arg), &Ctx::default()), ["B0710"], "{helper}");
+    }
+    for arg in ["'/'", "'/login'", "'/items/' + ctx.params.slug", "`/items/${ctx.params.slug}`", "'https://allowed.example/' + ctx.query.rest", "ctx.query.home ? '/' : '/login'"] {
+        let ctx = Ctx { redirect_hosts: vec!["allowed.example".into()], ..Ctx::default() };
+        assert!(codes_in("views/_guard.jsbrain", &guard(arg), &ctx).is_empty(), "{arg}");
+    }
+}

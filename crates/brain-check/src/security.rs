@@ -152,6 +152,31 @@ fn url_prefix(e: &Expr) -> Option<String> {
     }
 }
 
+/// The whole value when it is known at compile time (`'/a' + '/b'`, a template without expressions).
+fn literal_value(e: &Expr) -> Option<String> {
+    match e.unparen() {
+        Expr::Str { value, .. } => Some(value.clone()),
+        Expr::Template { tag: None, quasis, exprs, .. } if exprs.is_empty() => Some(quasis.concat()),
+        Expr::Binary { op: "+", left, right, .. } => Some(literal_value(left)? + &literal_value(right)?),
+        _ => None,
+    }
+}
+
+/// A same-site path: `/` and then a character that cannot turn it into another origin. Browsers read `//host` and
+/// `/\host` as protocol-relative and drop tabs and newlines first (`/\t/host`), so the second character decides.
+/// `complete` says the value ends here: the bare `/` is safe on its own but not as the start of a longer value.
+fn safe_path_start(p: &str, complete: bool) -> bool {
+    let mut c = p.chars();
+    c.next() == Some('/') && c.next().map_or(complete, |x| x != '/' && x != '\\' && !x.is_whitespace() && !x.is_control())
+}
+
+/// An allowed host only when the host part cannot grow: `'https://good.example' + rest` can become `good.example.evil`.
+fn fixed_host(p: &str, complete: bool) -> Option<&str> {
+    let h = host_of(p)?;
+    let start = p.find("//").map_or(0, |i| i + 2);
+    (complete || p.len() > start + h.len()).then_some(h)
+}
+
 /// `https://host/…` → `host`.
 fn host_of(url: &str) -> Option<&str> {
     let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://")).or_else(|| url.strip_prefix("//"))?;
@@ -380,12 +405,10 @@ impl Checker<'_> {
                 if name == "redirect"
                     && let Some(a) = args.first()
                 {
-                    let prefix = url_prefix(a);
-                    let ok = same_origin_target(a, &same_origin) || match prefix.as_deref() {
-                        Some(p) if p.starts_with('/') && !p.starts_with("//") => true,
-                        Some(p) => host_of(p).is_some_and(|h| !h.is_empty() && allowed.iter().any(|x| x == h)),
-                        None => false,
-                    };
+                    let whole = literal_value(a);
+                    let prefix = whole.clone().or_else(|| url_prefix(a));
+                    let ok = same_origin_target(a, &same_origin, false)
+                        || prefix.as_deref().and_then(|p| fixed_host(p, whole.is_some())).is_some_and(|h| !h.is_empty() && allowed.iter().any(|x| x == h));
                     if !ok {
                         let what = match prefix.as_deref().and_then(host_of) {
                             Some(h) => format!("`redirect` to another origin (`{h}`)"),
@@ -594,13 +617,18 @@ fn regex_source_safe(e: &Expr) -> bool {
 
 /// A `redirect` target that stays on this origin: a literal path prefix (`'/x' + …`, `` `/x/${…}` ``), a ternary of
 /// two such targets, or a call to a helper (in `known`, by its call path) whose every return is one.
-fn same_origin_target(e: &Expr, known: &HashSet<String>) -> bool {
+/// `strict`: the value may be followed by more text (a helper's return, the left side of `+`), so the bare `/` is not
+/// enough: `'/' + next` with `next = '/evil.example'` leaves the site.
+fn same_origin_target(e: &Expr, known: &HashSet<String>, strict: bool) -> bool {
+    if let Some(v) = literal_value(e) {
+        return safe_path_start(&v, !strict);
+    }
     match e.unparen() {
-        Expr::Cond { cons, alt, .. } => same_origin_target(cons, known) && same_origin_target(alt, known),
+        Expr::Cond { cons, alt, .. } => same_origin_target(cons, known, strict) && same_origin_target(alt, known, strict),
         Expr::Call { callee, .. } => path(callee).is_some_and(|p| known.contains(&p)),
-        Expr::Binary { op: "+", left, .. } if url_prefix(left).is_none() => same_origin_target(left, known),
-        Expr::Template { tag: None, quasis, exprs, .. } if quasis.first().is_some_and(|q| q.is_empty()) => exprs.first().is_some_and(|x| same_origin_target(x, known)),
-        _ => url_prefix(e).is_some_and(|p| p.starts_with('/') && !p.starts_with("//")),
+        Expr::Binary { op: "+", left, .. } if url_prefix(left).is_none() => same_origin_target(left, known, true),
+        Expr::Template { tag: None, quasis, exprs, .. } if quasis.first().is_some_and(|q| q.is_empty()) => exprs.first().is_some_and(|x| same_origin_target(x, known, true)),
+        _ => url_prefix(e).is_some_and(|p| safe_path_start(&p, false)),
     }
 }
 
@@ -610,7 +638,7 @@ fn func_returns_same_origin(f: &Func, known: &HashSet<String>) -> bool {
         FnBody::Block(body) => returns(body, &mut answers),
         FnBody::Expr(e) => answers.push(e),
     }
-    !answers.is_empty() && answers.iter().all(|a| same_origin_target(a, known))
+    !answers.is_empty() && answers.iter().all(|a| same_origin_target(a, known, true))
 }
 
 /// Helpers of a file whose every return is a same-origin path (B0710 accepts `redirect(helper(x))`).
