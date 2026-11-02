@@ -990,7 +990,12 @@ pub(crate) fn run_fix_scoped(target: Option<PathBuf>, force: bool, all_levels: b
         Some(t) => std::path::absolute(t).map_err(|e| e.to_string())?,
         None => app_root()?,
     };
-    let dirty = if force { std::collections::HashSet::new() } else { dirty_files(&start) };
+    let mut dirty = if force { std::collections::HashSet::new() } else { dirty_files(&start) };
+    // A file named as the target is the author's request: written even with uncommitted changes. The guard is for
+    // files a folder or a whole-project run reaches without being asked.
+    if start.is_file() {
+        dirty.remove(&canonical(&start));
+    }
     let scope = FixScope { inside: target.as_ref().map(|_| canonical(&start)), dirty, skip_info: target.is_none() && !all_levels };
     run_fix_only_body(target, None, before_write, Some(&scope))
 }
@@ -1006,7 +1011,8 @@ const OUTSIDE: &str = "outside the target";
 struct FixScope {
     /// The target the user named: nothing outside it is written.
     inside: Option<PathBuf>,
-    /// Files with uncommitted changes (or untracked) when the run started: they may hold someone else's work.
+    /// Files with uncommitted changes (or untracked) when the run started: they may hold someone else's work. A file
+    /// named as the target is not in it.
     dirty: std::collections::HashSet<PathBuf>,
     /// Leave info-level normalizations alone (`brain fix` without a target).
     skip_info: bool,

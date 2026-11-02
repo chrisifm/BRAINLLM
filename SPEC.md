@@ -402,7 +402,8 @@ Unified exit codes across all commands: 0 ok · 1 project errors · 2 usage · 3
 <!--/planned-->
 `brain fix` applies every `edits` from `brain check` and re-checks (run it before editing by hand). It writes only inside
 the path you give it; without a path it skips info-level normalizations; a file with uncommitted changes from before
-the run is listed in `skipped` and left alone unless `--force`.
+the run, reached through a folder or the whole project, is listed in `skipped` and left alone unless `--force` (a file
+you name is always written).
 `brain trace [<requestId>|issues] [--since 5m] [--failed] [--module m] [--limit n] [--json]`: what `brain run` recorded (MCP `brain_trace`): requests with payload and response, errors at their `.brain` line, CSP, cross-origin and socket failures, backend queries, with B-codes and fixes. Development only and redacted; `brain run --no-trace` turns it off.
 `brain map --json`: whole project graph (routes, components, props, channels, tests); read it instead of opening files.
 `brain docs [--check] [--json] [--out docs/app]`: generated app docs (routes, components, data, backend, env keys, SEO); `brain build` refreshes them when `docs/app/index.md` exists or `brain.json` has `"docs": true`; prose goes in `docs/app/notes/<page>.md`.

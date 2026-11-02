@@ -1,6 +1,6 @@
 //! `brain fix` runs where other people (and agents) are working: it writes only inside the target it was given,
 //! leaves info-level normalizations alone without a target, and never overwrites a file that already had
-//! uncommitted changes unless `--force`.
+//! uncommitted changes unless `--force` or the file itself is the target.
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -56,5 +56,19 @@ fn fix_respects_the_target_info_level_and_uncommitted_work() {
     // A file the run itself fixed in an earlier round is not "someone else's"; `--force` writes the dirty file too.
     let j = brain(&app, &["fix", "--force"]);
     assert!(read("comp/theirs.brain").contains("var(--fg)") && read("comp/theirs.brain").contains("draft"), "{}", j.stringify());
+
+    // A folder target reaches files without naming them: a dirty one inside it is skipped.
+    write("comp/theirs.brain", &ERR.replace("x</p>", "draft</p>"));
+    write("comp/new.brain", ERR);
+    let j = brain(&app, &["fix", "comp"]);
+    assert!(read("comp/theirs.brain").contains("#1d1d1f") && read("comp/new.brain").contains("#1d1d1f"), "{}", j.stringify());
+    let skipped = j.get("skipped").map(|s| s.stringify()).unwrap_or_default();
+    assert!(skipped.contains("comp/theirs.brain") && skipped.contains("comp/new.brain"), "{skipped}");
+
+    // A file named as the target is the author's request: written with uncommitted changes, and untracked.
+    let j = brain(&app, &["fix", "comp/theirs.brain"]);
+    assert!(read("comp/theirs.brain").contains("var(--fg)") && read("comp/theirs.brain").contains("draft"), "{}", j.stringify());
+    let j = brain(&app, &["fix", "comp/new.brain"]);
+    assert!(read("comp/new.brain").contains("var(--fg)"), "{}", j.stringify());
     std::fs::remove_dir_all(&root).ok();
 }
