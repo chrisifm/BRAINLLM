@@ -350,6 +350,33 @@ test('#94 B0213: javascript:, vbscript: and data: (not data:image/) in a bound U
   assert.equal(errs.filter(m => m.startsWith('B0213')).length, 2)
 })
 
+test('B0213 covers every URL attribute: xlink:href, cite, data on <object>, background, ping and each srcset candidate', () => {
+  const errs = [], e0 = console.error
+  console.error = e => errs.push(String((e && e.message) || e))
+  const el = tag => doc.createElement(tag)
+  const a = el('a'), q = el('blockquote'), o = el('object'), d = el('div'), t = el('td'), p = el('a'), img = el('img'), link = el('link')
+  attr(a, 'xlink:href', () => 'javascript:alert(1)')
+  attr(q, 'cite', () => 'java\tscript:alert(1)')
+  attr(o, 'data', () => 'data:text/html,<script>x</script>')
+  attr(d, 'data', () => 'javascript:not-a-url-here') // `data` is a URL on <object> only
+  attr(t, 'background', () => 'vbscript:x')
+  attr(p, 'ping', () => '/ok javascript:alert(1) https://x.test/p')
+  attr(img, 'srcset', () => 'a.jpg 1x, javascript:alert(1) 2x, data:image/png;base64,AA== 3x, /b.jpg')
+  attr(link, 'imagesrcset', () => 'data:text/html,x 1x')
+  console.error = e0
+  assert.equal(a.getAttribute('xlink:href'), '')
+  assert.equal(q.getAttribute('cite'), '')
+  assert.equal(o.getAttribute('data'), '')
+  assert.equal(d.getAttribute('data'), 'javascript:not-a-url-here')
+  assert.equal(t.getAttribute('background'), '')
+  assert.equal(p.getAttribute('ping'), '/ok https://x.test/p')
+  assert.equal(img.getAttribute('srcset'), 'a.jpg 1x, data:image/png;base64,AA== 3x, /b.jpg')
+  assert.equal(link.getAttribute('imagesrcset'), '')
+  assert.equal(errs.filter(m => m.startsWith('B0213')).length, 7)
+  // SSR serializes the same element tree (server.mjs renders through this attr() on the shim)
+  assert.ok(!a.outerHTML.includes('javascript:') && !img.outerHTML.includes('javascript:'), a.outerHTML + img.outerHTML)
+})
+
 test('TOOLCHAIN #24: a delegated handler sees currentTarget as a data property (a getter would be cached in the shared event map and keep the first component alive)', () => {
   const b = doc.createElement('button')
   doc.body.appendChild(b)

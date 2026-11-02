@@ -300,15 +300,40 @@ export function attr(el, k, f) {
           : v => {
               if (el[k] !== v) el[k] = v
             }
-        : v => (v == null || (v === false && k[4] != '-') ? el.removeAttribute(k) : el.setAttribute(k, v === true && k[4] != '-' ? '' : /^(href|src|action|formaction|poster)$/.test(k) && typeof v == 'string' ? inBase(v) : v))
+        : v => (v == null || (v === false && k[4] != '-') ? el.removeAttribute(k) : el.setAttribute(k, v === true && k[4] != '-' ? '' : typeof v == 'string' ? safeUrl(el, k, v) : v))
   )
+}
+// Attributes whose value is a URL the browser follows or loads (§31): one list for the browser and SSR (server.mjs renders
+// through this same attr()); brain-check security.rs URL_ATTRS checks literal values against the same names.
+// `url`: one URL · `list`: a srcset (`url descriptor, …`) · `space`: space-separated URLs. `data` is a URL on <object> only.
+const URL_ATTRS = { href: 'url', src: 'url', action: 'url', formaction: 'url', poster: 'url', 'xlink:href': 'url', cite: 'url', data: 'url', background: 'url', longdesc: 'url', manifest: 'url', codebase: 'url', icon: 'url', srcset: 'list', imagesrcset: 'list', ping: 'space' }
+const safeUrl = (el, k, v, kind = Object.hasOwn(URL_ATTRS, k.toLowerCase()) && URL_ATTRS[k.toLowerCase()]) =>
+  !kind || (k.toLowerCase() == 'data' && el.tagName != 'OBJECT') ? v
+    : kind == 'url' ? inBase(v)
+    : kind == 'space' ? v.split(/\s+/).filter(Boolean).map(u => inBase(u)).filter(Boolean).join(' ')
+    : srcsetCandidates(v).map(([u, d]) => [inBase(u), d]).filter(([u]) => u).map(([u, d]) => d ? u + ' ' + d : u).join(', ')
+// `a.jpg 1x, data:image/png;base64,AA== 2x` → [[url, descriptor], …] (HTML srcset parsing: a URL ends at whitespace,
+// trailing commas end a candidate without descriptor, descriptors run to the next comma).
+const srcsetCandidates = (v, out = [], i = 0) => {
+  for (;;) {
+    while (i < v.length && /[\s,]/.test(v[i])) i++
+    if (i >= v.length) return out
+    let j = i
+    while (j < v.length && !/\s/.test(v[j])) j++
+    let url = v.slice(i, j), d = ''
+    if (/,+$/.test(url)) url = url.replace(/,+$/, '')
+    else { const e = v.indexOf(',', j); d = v.slice(j, e < 0 ? v.length : e).trim(); j = e < 0 ? v.length : e }
+    out.push([url, d])
+    i = j
+  }
 }
 // Base path (§23 #148): <meta name="brain-base"> in the browser, globalThis.__brainBase while server.mjs renders.
 // A computed app URL ('/posts/7') gets it; literal ones already have it from the build.
 const base = (m = document.querySelector('meta[name=brain-base]')) => globalThis.__brainBase || (m ? m.getAttribute('content') : '/')
 // javascript:, vbscript: and data: (other than data:image/) in a bound URL are dropped and reported (B0213, §31)
+// (tabs and newlines inside the scheme do not hide it: the browser strips them before reading the scheme)
 const inBase = (v, b = base()) =>
-  /^\s*(javascript|vbscript|data(?!:image\/)):/i.test(v)
+  /^[\s\x00-\x1f]*(javascript|vbscript|data(?!:image\/)):/i.test(v.replace(/[\t\n\r]/g, ''))
     ? (oops(Error('B0213 blocked URL scheme')), '')
     : v[0] == '/' && v[1] != '/' && !(v + '/').startsWith(b) ? b + v.slice(1) : v
 

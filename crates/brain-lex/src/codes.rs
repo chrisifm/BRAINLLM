@@ -52,7 +52,7 @@ pub const CODES: &[(&str, Severity, &str, &str, &str)] = &[
     ("B0207", Severity::Error, "Missing required prop", "Props without `?` or a default must be passed.", "<UserCard user={u} />"),
     ("B0208", Severity::Error, "on: without a handler", "Events take a function reference or a statement in braces.", "<button on:click={save}>Save</button>"),
     ("B0209", Severity::Error, "Repeated attribute", "Each attribute appears once.", "<input aria-label=\"Name\" type=\"text\">"),
-    ("B0210", Severity::Error, "Raw HTML without sanitize", "`{@html}` inserts markup; only values passed through `sanitize` are cleaned (native setHTML or an allowlist).", "<div>{@html sanitize(post.body)}</div>"),
+    ("B0210", Severity::Error, "Raw HTML without sanitize", "`{@html}` inserts markup; only values passed through `sanitize` are cleaned (native setHTML or an allowlist). A bound iframe `srcdoc` becomes a same-origin document: it needs `sandbox` without `allow-same-origin`.", "<div>{@html sanitize(post.body)}</div>"),
     ("B0212", Severity::Error, "Conditional inside class=", "Toggle classes with `class:x={cond}`; the compiler normalizes the ternary.", "<li class=\"row\" class:done={it.done}>{it.name}</li>"),
     ("B0213", Severity::Error, "Dangerous URL scheme", "`javascript:`, `vbscript:` and `data:` URLs run or inject code when followed.", "<button type=\"button\" on:click={open}>Open</button>"),
     ("B0214", Severity::Warning, "Hydration mismatch", "The first render in the browser differs from the prerendered HTML: make it depend only on props and state that exist on the server (no Date.now, Math.random or window in the markup) and move browser-only values into mounted().", "let now = sig(null)\nmounted(() => { now = Date.now() })"),
