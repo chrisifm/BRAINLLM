@@ -93,7 +93,7 @@ test('Google opener policy is limited to actual document-head opt-in', async () 
 })
 
 test('static dispatch cannot expose encoded server modules, deployment files or dotfiles',async()=>{
-  for(const path of ['/_server/manifest.json','/%5fserver/manifest.json','/_server%2fmanifest.json','/public%2f..%2f_server%2fmanifest.json','/server.mjs','/server%2emjs','/_headers','/%5fheaders','/.brain_env','/%2ebrain_env']){
+  for(const path of ['/_server/manifest.json','/%5fserver/manifest.json','/_server%2fmanifest.json','/public%2f..%2f_server%2fmanifest.json','/server.mjs','/server%2emjs','/_headers','/%5fheaders','/.brain_env','/%2ebrain_env','/_SERVER/manifest.json','/Server.mjs','/_HEADERS']){
     const response=await request(path)
     assert.equal(response.status,404,path)
     const body=await response.text()

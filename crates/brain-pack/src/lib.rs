@@ -15,6 +15,7 @@ pub use build_cache::Stats as BuildCacheStats;
 pub mod ledger;
 pub mod impact;
 pub mod cache;
+pub mod private;
 mod socket_options;
 pub use socket_options::{BuildOptions, NativeSocketOptions};
 pub mod classes;
@@ -2176,7 +2177,7 @@ fn build_inner_with_options(
     let compressible = |p: &str| p.rsplit_once('.').is_some_and(|(_, e)| matches!(e, "svg" | "json" | "txt" | "xml" | "webmanifest" | "ico" | "map" | "wasm" | "csv" | "md" | "css"));
     let entries: Vec<(&String, &[u8])> = files
         .iter()
-        .filter(|(p, _)| *p != "_headers" && *p != "server.mjs" && !p.starts_with("_brain/") && !p.starts_with("_server/"))
+        .filter(|(p, _)| !private::is_private(p))
         .map(|(p, c)| (p, c.as_bytes()))
         .chain(public_bin.iter().filter(|(p, b)| compressible(p) && b.len() > 256 && !p.ends_with(".gz")).map(|(p, b)| (p, b.as_slice())))
         .collect();
