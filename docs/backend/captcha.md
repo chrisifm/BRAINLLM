@@ -32,7 +32,7 @@ The page sends the widget's token in the `X-Brain-Captcha` header. `protect` tak
 | Situation | Answer |
 |---|---|
 | No token, rejected token, or a hostname other than `hostname` | 403 `CAPTCHA_FAILED` |
-| Provider unreachable, an HTTP error, unreadable JSON, or a fault with our secret | 503 `CAPTCHA_UNAVAILABLE` |
+| Provider unreachable, an HTTP error, unreadable JSON, or a fault with our secret | 503 `CAPTCHA_UNAVAILABLE`, and a `captcha-unavailable` log line whose `reason` names which (`secret-not-set`, `provider-unreachable`, `provider-status`, `provider-answer-unreadable`, `provider-missing-secret`, `provider-invalid-secret`, `provider-sitekey-secret-mismatch`, `provider-internal-error`) |
 
 It fails closed: nothing runs without an explicit `success: true`. Tokens are single use, so verification never retries.
 Production refuses to start without the secret or with a non-https `verify_url`; `http` is accepted on loopback only, for a local fake.

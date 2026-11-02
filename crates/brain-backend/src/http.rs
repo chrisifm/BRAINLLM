@@ -278,6 +278,7 @@ impl IntoResponse for Error {
         response
             .extensions_mut()
             .insert(crate::response::DefaultError);
+        response.extensions_mut().insert(ErrorCode(self.code));
         if self.code == "DATABASE_BUSY" {
             response.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
         }
@@ -292,6 +293,10 @@ impl IntoResponse for Error {
         response
     }
 }
+/// The catalog code of an error answer (`OVERLOADED`, `CAPTCHA_UNAVAILABLE`…), so the request log line names the reason
+/// the client read. A fixed constant, never request text.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ErrorCode(pub(crate) &'static str);
 /// Whether a captured backtrace names this crate's code, which a stripped binary cannot do.
 fn stack_is_symbolized(stack: &str) -> bool {
     stack.contains("brain_backend") && !stack.contains("__mh_execute_header")
@@ -384,7 +389,10 @@ impl App {
         match self.captcha.verify(token, client).await {
             crate::captcha::Verdict::Passed => Ok(()),
             crate::captcha::Verdict::Rejected => Err(Error::new(StatusCode::FORBIDDEN, "CAPTCHA_FAILED", "Complete the captcha again and send its new token in the X-Brain-Captcha header")),
-            crate::captcha::Verdict::Unavailable => Err(Error::new(StatusCode::SERVICE_UNAVAILABLE, "CAPTCHA_UNAVAILABLE", "The captcha could not be verified; nothing was changed; retry with a new token shortly")),
+            crate::captcha::Verdict::Unavailable(reason) => {
+                crate::log_line!("{}", json!({"schemaVersion":1,"event":"captcha-unavailable","code":"CAPTCHA_UNAVAILABLE","action":action,"reason":reason,"rid":REQUEST_ID.try_with(Clone::clone).ok(),"valuesCaptured":false}));
+                Err(Error::new(StatusCode::SERVICE_UNAVAILABLE, "CAPTCHA_UNAVAILABLE", "The captcha could not be verified; nothing was changed; retry with a new token shortly"))
+            }
         }
     }
     async fn user(&self, h: &HeaderMap) -> Result<Option<User>> {
@@ -1028,6 +1036,7 @@ async fn response_headers(req: Request, next: Next) -> Response {
     let response = db::with_db_time(db_time.clone(), REQUEST_ID.scope(rid.clone(), REQUEST_OPERATION.scope(operation_of(&method, &route, &path), crate::audit::scope(next.run(req))))).await;
     crate::dev_trace::request(&rid, method.as_str(), &route, response.status().as_u16(), started.elapsed().as_secs_f64() * 1000.0);
     let log_policy = response.extensions().get::<edge_http::LogPolicy>().copied();
+    let error_code = response.extensions().get::<ErrorCode>().map(|code| code.0);
     let mut response = crate::response::finalize(&method, &path, accept.as_deref(), &rid, response);
     let cacheable = response.status().is_success() || response.status() == StatusCode::NOT_MODIFIED;
     let declared = response.extensions().get::<cache_http::Declared>().filter(|_| cacheable).map(|d| d.0.clone());
@@ -1064,6 +1073,9 @@ async fn response_headers(req: Request, next: Next) -> Response {
         // The template alone hides which resource was slow; only a name of the declared shape is written.
         if let Some(name) = path.strip_prefix("/api/").and_then(|rest| rest.split('/').next()).filter(|name| route.starts_with("/api/{name}") && !name.is_empty() && name.len() <= 48 && name.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')) {
             line["resource"] = json!(name);
+        }
+        if let Some(code) = error_code.filter(|_| !response.status().is_success()) {
+            line["code"] = json!(code);
         }
         if let Some((db_ms, wait_ms)) = db_time.fields() {
             line["dbMs"] = json!(db_ms);
@@ -2699,6 +2711,12 @@ mod stack_note_tests {
         assert_eq!(note["event"], "backend-stack-unavailable", "{note}");
         assert!(note.get("stack").is_none() && note["reason"].as_str().unwrap().contains("no symbols") && note["location"]["line"].is_u64(), "{note}");
         assert!(super::stack_event(stripped, false, || false, None, None, Some("r1"), at).is_none(), "the note is once per process");
+    }
+    #[test]
+    fn an_error_answer_carries_its_code_for_the_request_log() {
+        use axum::response::IntoResponse;
+        let response = super::Error::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, "OVERLOADED", "retry").into_response();
+        assert_eq!(response.extensions().get::<super::ErrorCode>().map(|c| c.0), Some("OVERLOADED"));
     }
     #[test]
     fn the_note_about_a_binary_without_symbols_is_kept_once_per_process() {

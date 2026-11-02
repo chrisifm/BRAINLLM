@@ -263,6 +263,15 @@ fn rejection(status: u16, raw: &str) -> Option<RouteFailure> {
     })
 }
 
+/// A handler that threw: the sidecar sends only `{routeCause: {name, backend?, location?}}`, which the backend re-checks
+/// before logging. Anything else (a crash, a bad redirect) stays an unexplained failure.
+fn thrown(raw: &str) -> RouteFailure {
+    match serde_json::from_str::<Value>(raw).ok().and_then(|v| v.get("routeCause").filter(|c| c.is_object()).cloned()) {
+        Some(cause) => RouteFailure::Failed(cause),
+        None => RouteFailure::Unavailable,
+    }
+}
+
 impl RouteHandlers for Executor {
     fn names(&self) -> Vec<String> {
         self.modules.keys().cloned().collect()
@@ -281,7 +290,7 @@ impl RouteHandlers for Executor {
                     Ok(raw) => (serde_json::from_str::<Value>(&raw).map_err(|_| RouteFailure::Unavailable), true),
                     Err((status, raw)) => match rejection(status, &raw) {
                         Some(failure) => (Err(failure), true),
-                        None => (Err(RouteFailure::Unavailable), false),
+                        None => (Err(thrown(&raw)), false),
                     },
                 };
                 if reusable {
@@ -348,12 +357,28 @@ mod tests {
         fs::create_dir_all(&keyed).unwrap();
         fs::write(keyed.join("route.jsbrain"), "<meta server>\nexport default { path: '/reports', auth: 'public', runAs: 'system' }\n").unwrap();
         fs::write(keyed.join("handler.jsbrain"), "<meta server>\nexport default async function handle(ctx) {\n  if (!ctx.backend) return { backend: false, runAs: ctx.$runAs ?? null, leaked: ctx.env.BRAIN_ROUTES_SYSTEM_KEY ?? null }\n  const uses = await Promise.resolve().then(() => ctx.backend.resource('notes').list()).catch((e) => e.message)\n  const stored = await Promise.resolve().then(() => ctx.backend.files('reports')).catch((e) => e.message)\n  return { backend: true, uses, stored, runAs: ctx.$runAs ?? null, leaked: ctx.env.BRAIN_ROUTES_SYSTEM_KEY ?? null }\n}\n").unwrap();
+        // A handler that throws: the log gets the error class, the backend client's status, code and field names and the
+        // source line, never the message or the field texts.
+        let crash = root.join(ROUTES).join("crash");
+        fs::create_dir_all(&crash).unwrap();
+        fs::write(crash.join("route.jsbrain"), "<meta server>\nexport default { method: 'POST', path: '/crash', auth: 'public' }\n").unwrap();
+        fs::write(crash.join("handler.jsbrain"), "<meta server>\nexport default async function handle(ctx) {\n  if (ctx.body.plain) throw new TypeError('private 4111')\n  const e = Object.assign(new Error('private 4111'), { status: 503, code: 'BACKEND_UNAVAILABLE' })\n  e[Symbol.for('brain.backendError')] = true\n  throw e\n}\n").unwrap();
         fs::write(root.join(".env"), "BRAIN_BACKEND_URL=http://127.0.0.1:9\nBRAIN_ROUTES_SYSTEM_KEY=not-a-key\n").unwrap();
         let routes = contracts(&root, "development").unwrap();
         assert_eq!(routes.iter().find(|r| r.name == "reports").unwrap().run_as.as_deref(), Some("system"));
-        assert_eq!(routes[0].path, "/orders/quote");
+        assert_eq!(routes.iter().find(|r| r.name == "order_quote").unwrap().path, "/orders/quote");
         let handlers = load(&root, "development", &routes).unwrap().unwrap();
-        assert_eq!(handlers.names(), vec!["order_quote".to_string(), "rates".to_string(), "reports".to_string()]);
+        assert_eq!(handlers.names(), vec!["crash".to_string(), "order_quote".to_string(), "rates".to_string(), "reports".to_string()]);
+        let failure = handlers.run("crash", json!({"body": {}}), Duration::from_secs(5)).await.unwrap_err();
+        let RouteFailure::Failed(cause) = failure else { panic!("a thrown error is a failure with its cause: {failure:?}") };
+        assert!(!cause.to_string().contains("4111"), "no message or field text: {cause}");
+        assert_eq!(cause["name"], "Error", "{cause}");
+        assert_eq!(cause["backend"], json!({"status": 503, "code": "BACKEND_UNAVAILABLE", "fields": []}), "{cause}");
+        assert_eq!(cause["location"]["file"], "server/routes/crash/handler.jsbrain", "{cause}");
+        assert_eq!(cause["location"]["line"], 4, "{cause}");
+        let RouteFailure::Failed(plain) = handlers.run("crash", json!({"body": {"plain": true}}), Duration::from_secs(5)).await.unwrap_err() else { panic!("a thrown TypeError is a failure") };
+        assert_eq!(plain["name"], "TypeError", "{plain}");
+        assert!(plain.get("backend").is_none() && plain["location"]["line"] == 3, "{plain}");
         let plain = handlers.run("reports", json!({}), Duration::from_secs(5)).await.unwrap();
         assert_eq!(plain["backend"], false, "no runAs in the context, no ctx.backend: {plain}");
         let system = handlers.run("reports", json!({"$runAs": "system"}), Duration::from_secs(5)).await.unwrap();

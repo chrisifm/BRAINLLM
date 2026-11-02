@@ -285,11 +285,42 @@ async fn serve(app: App, state: Arc<State>, route: Arc<Route>, req: Request) -> 
             crate::db::diagnostic(&json!({"schemaVersion":1,"event":"route-timeout","route":route.name,"timeoutMs":route.timeout.as_millis() as u64,"rid":rid}));
             Err(error(StatusCode::GATEWAY_TIMEOUT, "ROUTE_TIMEOUT", "The route handler did not finish within its timeout"))
         }
-        Err(RouteFailure::Unavailable) => {
-            crate::db::diagnostic(&json!({"schemaVersion":1,"event":"route-failed","code":"ROUTE_FAILED","route":route.name,"location":{"file":format!("server/routes/{}/handler.jsbrain", route.name)},"rid":rid,"valuesCaptured":false}));
+        Err(failure @ (RouteFailure::Unavailable | RouteFailure::Failed(_))) => {
+            let cause = match &failure {
+                RouteFailure::Failed(cause) => Some(cause),
+                _ => None,
+            };
+            crate::db::diagnostic(&route_failed(&route.name, &rid, cause));
             Err(error(StatusCode::INTERNAL_SERVER_ERROR, "ROUTE_FAILED", "The route handler failed; inspect server diagnostics with the request reference"))
         }
     }
+}
+
+/// The `route-failed` line. A thrown error adds its class, the backend client's `status`, `code` and field names, and the
+/// app source line; each value is re-checked here so a sidecar can never put free text in the log.
+fn route_failed(route: &str, rid: &impl serde::Serialize, cause: Option<&Value>) -> Value {
+    let word = |v: &Value, max: usize| v.as_str().filter(|s| !s.is_empty() && s.len() <= max && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'$')).map(|s| json!(s));
+    let mut location = json!({"file": format!("server/routes/{route}/handler.jsbrain")});
+    let mut line = json!({"schemaVersion":1,"event":"route-failed","code":"ROUTE_FAILED","route":route,"rid":rid,"valuesCaptured":false});
+    if let Some(cause) = cause {
+        if let Some(name) = word(&cause["name"], 64) {
+            line["error"] = name;
+        }
+        if let Some(backend) = cause.get("backend").filter(|b| b.is_object()) {
+            let fields: Vec<Value> = backend["fields"].as_array().into_iter().flatten().filter_map(|f| f.as_str().filter(|s| !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"_$.".contains(&b))).map(|s| json!(s))).take(16).collect();
+            line["backend"] = json!({
+                "status": backend["status"].as_u64().filter(|s| (100..=599).contains(s)),
+                "code": word(&backend["code"], 64),
+                "fields": fields,
+            });
+        }
+        let file = cause["location"]["file"].as_str().filter(|f| f.starts_with("server/") && f.ends_with(".jsbrain") && f.len() <= 200 && !f.contains("..") && f.bytes().all(|b| b.is_ascii_alphanumeric() || b"_-./".contains(&b)));
+        if let (Some(file), Some(at)) = (file, cause["location"]["line"].as_u64().filter(|n| (1..=9_999_999).contains(n))) {
+            location = json!({"file": file, "line": at});
+        }
+    }
+    line["location"] = location;
+    line
 }
 
 const RESPONSE_HEADERS: &[&str] = &["location", "cache-control", "etag", "retry-after", "link", "content-language"];
@@ -383,6 +414,22 @@ pub(super) fn matched(req: &Request) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_route_failure_logs_only_the_checked_shape_of_its_cause() {
+        let plain = super::route_failed("pay", &"r1", None);
+        assert_eq!(plain["location"], serde_json::json!({"file": "server/routes/pay/handler.jsbrain"}));
+        assert!(plain.get("error").is_none() && plain.get("backend").is_none());
+        let cause = serde_json::json!({"name": "Error", "backend": {"status": 503, "code": "BACKEND_UNAVAILABLE", "fields": ["card", "card number 4111"]}, "location": {"file": "server/lib/pay.jsbrain", "line": 12}});
+        let line = super::route_failed("pay", &"r1", Some(&cause));
+        assert_eq!(line["error"], "Error");
+        assert_eq!(line["backend"], serde_json::json!({"status": 503, "code": "BACKEND_UNAVAILABLE", "fields": ["card"]}));
+        assert_eq!(line["location"], serde_json::json!({"file": "server/lib/pay.jsbrain", "line": 12}));
+        let hostile = serde_json::json!({"name": "secret value", "backend": {"status": 9000, "code": "has space"}, "location": {"file": "/etc/passwd", "line": 1}});
+        let line = super::route_failed("pay", &"r1", Some(&hostile));
+        assert!(!line.to_string().contains("secret") && !line.to_string().contains("passwd") && !line.to_string().contains("space"), "{line}");
+        assert_eq!(line["backend"], serde_json::json!({"status": null, "code": null, "fields": []}));
+    }
+
     use super::*;
 
     #[tokio::test]

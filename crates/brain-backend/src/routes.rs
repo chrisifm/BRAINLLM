@@ -557,6 +557,9 @@ pub enum RouteFailure {
     Capacity,
     Timeout,
     Unavailable,
+    /// The handler threw. The value holds only what is safe to log: the error class, the backend client's status, code
+    /// and field names, and the app source line (`{name, backend?, location?}`); never a message, value or stack.
+    Failed(Value),
 }
 
 /// Runs project route handlers. Implemented by the CLI with private Node sidecars.

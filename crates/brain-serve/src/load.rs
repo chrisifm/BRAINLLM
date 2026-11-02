@@ -38,6 +38,38 @@ const failure = (e, where) => {
   raw.error(String(e?.stack ?? e))
   trace('exception', 'error', { title: `${e?.name || 'Error'}: ${e?.message ?? e}`, data: { stack: String(e?.stack ?? e), where } })
 }
+// A route failure's safe shape for the backend log: the error class, the backend client's status, code and field names,
+// and the first app source line. Never the message, field texts, values or the stack itself.
+const routeCause = e => {
+  const word = v => typeof v === 'string' && /^[A-Za-z_$][\w$]{0,63}$/.test(v) ? v : null
+  const cause = { name: word(e?.name) ?? word(e?.constructor?.name) ?? (e === null || typeof e !== 'object' ? typeof e : 'Object') }
+  try {
+    if (e?.[Symbol.for('brain.backendError')] === true) cause.backend = {
+      status: Number.isInteger(e.status) && e.status >= 100 && e.status <= 599 ? e.status : null,
+      code: typeof e.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(e.code) ? e.code : null,
+      fields: e.errors && typeof e.errors === 'object' ? Object.keys(e.errors).filter(k => /^[A-Za-z_$][\w$.]{0,63}$/.test(k)).slice(0, 16) : [] }
+    // Source-mapped frames name `<scratch>/_server/<file>.jsbrain`; the private trace index next to the module gives
+    // the app path. A name two sources share stays unnamed rather than guessed.
+    for (const hit of String(e?.stack ?? '').matchAll(/(?:file:\/\/)?(\/[^\s()]{1,1024}\/_server)\/([\w.-]{1,128}\.jsbrain):(\d{1,7}):\d+/g)) {
+      const sources = traceSources(hit[1]).filter(source => source.split('/').pop() === hit[2])
+      if (sources.length === 1) { cause.location = { file: sources[0], line: Number(hit[3]) }; break }
+    }
+  } catch {}
+  return cause
+}
+const traceIndexes = new Map()
+const traceSources = dir => {
+  if (!traceIndexes.has(dir)) {
+    let sources = []
+    try {
+      const index = JSON.parse(process.getBuiltinModule('node:fs').readFileSync(decodeURIComponent(dir) + '/trace-index.json', 'utf8'))
+      sources = Object.values(index?.modules ?? {}).filter(source => typeof source === 'string' && /^server\/[\w./-]{1,200}\.jsbrain$/.test(source) && !source.includes('..'))
+    } catch {}
+    if (traceIndexes.size < 64) traceIndexes.set(dir, sources)
+    return sources
+  }
+  return traceIndexes.get(dir)
+}
 if (tracing) for (const [method, level] of [['warn', 'warn'], ['error', 'error']]) console[method] = (...a) => {
   raw[method](...a)
   trace('console', level, { title: a.map(x => (typeof x === 'string' ? x : x?.stack || (() => { try { return JSON.stringify(x) } catch { return String(x) } })())).join(' ').slice(0, 1024) })
@@ -201,7 +233,8 @@ for await (const line of createInterface({ input: process.stdin })) {
     else if (contextServer && e?.status === 503) out(`STATUS ${id} ${JSON.stringify({status:503,message:typeof e.message === 'string' && e.message ? e.message : e.message ? JSON.stringify(e.message) : 'The service is temporarily unavailable'})}\n`) // the visitor reads a fixed message; the log keeps the cause
     else if (contextServer && e?.constructor?.name === 'HttpError' && Number.isInteger(e.status) && e.status >= 400 && e.status < 600) out(`STATUS ${id} ${JSON.stringify({status:e.status,message:'The request could not complete'})}\n`) // as server.mjs: a deliberate status never shows its message
     else { trace('exception', 'error', { title: `${e?.name || 'Error'}: ${e?.message ?? e}`, data: { stack: String(e?.stack ?? e), where: fn } })
-    out(`ERR ${id} ${JSON.stringify(String(e?.stack ?? (e && typeof e === 'object' ? JSON.stringify(e) : e)))}\n`) }
+    if (typeof routeExecutor === 'function' && !probe) { out(`ERR ${id} ${JSON.stringify(JSON.stringify({ routeCause: routeCause(e) }))}\n`) }
+    else out(`ERR ${id} ${JSON.stringify(String(e?.stack ?? (e && typeof e === 'object' ? JSON.stringify(e) : e)))}\n`) }
   }
 }
 "#;
