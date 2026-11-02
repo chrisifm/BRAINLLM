@@ -1,0 +1,9 @@
+{
+  "id": "debit-subject-warning",
+  "kind": "fix",
+  "title": "Warn when an operation debits a balance the caller chooses",
+  "why": "A debit step whose subject came from the input let anyone the operation admits spend another person's credits, and nothing reported it.",
+  "changelog": [
+    "B0813 warns when an operation `debit` step takes its `subject` from the input or an earlier step instead of `$user.id`, which lets anyone the operation admits spend another person's credits"
+  ]
+}

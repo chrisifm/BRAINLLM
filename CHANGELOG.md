@@ -16,6 +16,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - B0740 and B0743 log each refused origin once until the server restarts
 - outside production, an allowlist that names an `http` loopback origin also admits every other `http` loopback origin on any port; production still allows exactly the listed origins
 - B0812 warns when a server route reads `process.env` instead of `ctx.env`, or reads a variable `.brain_env` declares only under `[production]`
+- B0813 warns when an operation `debit` step takes its `subject` from the input or an earlier step instead of `$user.id`, which lets anyone the operation admits spend another person's credits
 - `brain test` and `brain doctor` retry once when the browser connection breaks, and a second failure names probable machine load with the 1-minute load average
 
 ## [0.8.9] - 2026-11-02

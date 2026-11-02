@@ -108,6 +108,10 @@ A balance that does not fit answers 409 `CREDITS_INSUFFICIENT` and no step appli
 charge back. The same `key` value does not charge twice, while the other steps do run again, so pair it with a step that
 is safe to repeat. Its result is `{ delta, balance, replayed }`.
 
+`subject` names whose balance pays. Charge the caller with `'$user.id'`. A subject from the input or from an earlier step
+lets anyone the operation admits spend another person's credits, so `brain check` warns B0813; when an operation must
+charge someone else, admit only a system key or an administrator role. A literal id charges one fixed account.
+
 ## From server code
 
 `await ctx.backend.operation('place_order', { product_id, quantity })` runs it as the signed-in visitor from `load` and

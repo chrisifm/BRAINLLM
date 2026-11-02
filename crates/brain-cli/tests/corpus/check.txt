@@ -391,6 +391,29 @@ export default async function handle(ctx) {
 [production]
 SEARCH_KEY=configured-on-the-host
 
+### B0813 debit subject from the input
+@expect B0813 server/operations/charge.jsbrain 1:1
+@file server/resources/items/schema.jsbrain
+<meta server>
+export default { title: 'str!' }
+@file server/resources/items/policy.jsbrain
+<meta server>
+export default { read: ['owner'], create: ['user'], update: ['owner'], delete: ['owner'] }
+@file server/operations/charge.jsbrain
+<meta server>
+export default { roles: ['user'], input: { user: 'str!', request: 'str!' }, steps: [{ as: 'charge', debit: { subject: '$input.user', amount: 1, reason: 'order', key: '$input.request' } }, { as: 'item', create: 'items', data: { title: 'paid' } }] }
+
+### B0813 negative debit charges the caller
+@file server/resources/items/schema.jsbrain
+<meta server>
+export default { title: 'str!' }
+@file server/resources/items/policy.jsbrain
+<meta server>
+export default { read: ['owner'], create: ['user'], update: ['owner'], delete: ['owner'] }
+@file server/operations/charge.jsbrain
+<meta server>
+export default { roles: ['user'], input: { user: 'str!', request: 'str!' }, steps: [{ as: 'charge', debit: { subject: '$user.id', amount: 1, reason: 'order', key: '$input.request' } }, { as: 'item', create: 'items', data: { title: 'paid' } }] }
+
 ### B0810 answer built but not thrown
 @expect B0501 views/item.brain 1:1
 @expect B0810 views/item.brain 3:5

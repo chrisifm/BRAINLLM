@@ -471,6 +471,30 @@ pub fn operation_reach_warnings(root: &Path) -> Vec<(String, String, String)> {
 fn from_input(id: Option<&str>) -> bool {
     id.is_some_and(|id| id.starts_with("$input."))
 }
+/// B0813: a `debit` step (the only credit-balance step an operation has) whose `subject` is not the caller: an id from
+/// the input or from an earlier step lets anyone the operation admits spend another person's balance. Returns
+/// `(file, message, fix)`.
+pub fn debit_subject_warnings(root: &Path) -> Vec<(String, String, String)> {
+    let resources = contracts(root, "resources").unwrap_or_default();
+    let Ok(d) = domain::load(root, &resources) else { return Vec::new() };
+    let mut out = Vec::new();
+    for (name, op) in &d.operations {
+        for step in &op.steps {
+            let Some(debit) = &step.debit else { continue };
+            let subject = debit.subject.trim();
+            if !subject.starts_with('$') || subject.starts_with("$user.") {
+                continue;
+            }
+            let roles = op.roles.join("`, `");
+            out.push((
+                format!("server/operations/{name}.jsbrain"),
+                format!("step `{}` debits `{subject}`, a balance the caller chooses: anyone with role `{roles}` can spend another person's credits", step.name),
+                "charge the caller with `subject: '$user.id'`; when the operation must charge others, admit only a system key or an administrator role and keep this warning as the record of that decision".to_string(),
+            ));
+        }
+    }
+    out
+}
 /// B0790: secrets a declared route or webhook needs and the development environment does not hold: `(file, message, fix)`.
 /// Absent, serve starts with that route disabled; too short, it refuses to start. Names only, never values.
 pub fn secret_warnings(root: &Path) -> Vec<(String, String, String)> {
