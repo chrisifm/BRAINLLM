@@ -15,7 +15,7 @@ export BRAIN_BIN="${BRAIN_BIN:-$(cd "${CARGO_TARGET_DIR:-target}" && pwd)/debug/
 # This real-browser lifecycle check runs in its own test process so unrelated unit subprocesses cannot compete
 # with Chrome startup. The workspace pass excludes only the check already required immediately above it.
 cargo test --locked -p brain-cli --bin brain browser::tests::comparison_closes_only_its_temporary_tab_on_success_and_evaluation_failure -- --exact
-cargo test --locked --workspace -- --skip browser::tests::comparison_closes_only_its_temporary_tab_on_success_and_evaluation_failure
+cargo test --locked --workspace --no-fail-fast -- --skip browser::tests::comparison_closes_only_its_temporary_tab_on_success_and_evaluation_failure
 npm test --prefix runtime
 node --test --test-timeout=900000 --test-concurrency=2 scripts/test/*.test.mjs
 node --test --test-timeout=900000 bench/fixtures-check.test.mjs bench/agents/runner.test.mjs bench/llm/codex.test.mjs bench/llm/check.test.mjs bench/llm/compare.test.mjs
