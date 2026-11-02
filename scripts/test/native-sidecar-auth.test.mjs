@@ -37,7 +37,7 @@ test('real sidecar uses native authority once across guard/load, awaits logout a
   let next = 0, pending = null, stderr = 0, stdout = 0
   try {
     backend.listen(0, '127.0.0.1'); await once(backend, 'listening')
-    writeFileSync(join(dir, 'view.mjs'), 'export function load(ctx) { return { user:ctx.user, isURL:ctx.url instanceof URL } }; export function logout(ctx) { ctx.session.clear(); return {ok:true} }; export function forge(ctx) { ctx.session.set({role:"admin"}); return {ok:true} }')
+    writeFileSync(join(dir, 'view.mjs'), 'export function load(ctx) { return { user:ctx.user, isURL:ctx.url instanceof URL } }; export function logout(ctx) { ctx.session.clear(); return {ok:true} }; export function forge(ctx) { ctx.session.set({role:"admin"}); return {ok:true} }; export const $server = ["logout", "forge"]')
     const file = pathToFileURL(join(dir, 'view.mjs')).href
     child = spawn(process.execPath, ['--input-type=module', '-e', runner], { env: { ...process.env, BRAIN_BACKEND_URL: 'http://127.0.0.1:' + backend.address().port }, stdio: ['pipe', 'pipe', 'pipe'] })
     child.stderr.on('data', chunk => { stderr += chunk.length; if (stderr > 65536) child.kill() })
