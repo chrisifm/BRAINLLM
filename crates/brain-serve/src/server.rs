@@ -1119,6 +1119,14 @@ fn dev_seo_file(path: &str) -> bool {
 
 /// Pages a dev sitemap renders to read their head and static images (beyond it, URLs are listed without them).
 const DEV_SEO_RENDER_MAX: usize = 300;
+/// Wall time a dev sitemap spends rendering pages: each render runs the view's load(), so 300 pages at 0.4 s held the
+/// request past two minutes; past the budget the remaining URLs are listed without their head, like past the cap.
+const DEV_SEO_RENDER_BUDGET: Duration = Duration::from_secs(3);
+
+/// Whether the dev sitemap still renders page `n` after `spent` rendering time.
+fn dev_seo_renders(n: usize, spent: Duration) -> bool {
+    n < DEV_SEO_RENDER_MAX && spent < DEV_SEO_RENDER_BUDGET
+}
 
 /// Dev `/robots.txt`, `/sitemap.xml` and `/llms.txt` (zero config): the origin is the request's Host, so the files always
 /// point at the server that answers them. Pages: every static route, plus the params a dynamic view's `paths()` or
@@ -1206,8 +1214,15 @@ fn dev_seo(ctx: &Ctx, req: &http::Request) -> Option<(&'static str, String)> {
         None => Default::default(),
     };
     let mut docs = Vec::with_capacity(pages.len());
+    let rendering = Instant::now();
+    let mut cut = false;
     for (n, (path, _, view)) in pages.iter().enumerate() {
-        let html = if n < DEV_SEO_RENDER_MAX {
+        let renders = dev_seo_renders(n, rendering.elapsed());
+        if !renders && !cut && n < DEV_SEO_RENDER_MAX {
+            cut = true;
+            ctx.log("info", format!("[seo] {}: rendered {n} of {} pages in {} ms; the rest are listed without their head", req.path, pages.len(), rendering.elapsed().as_millis()));
+        }
+        let html = if renders {
             let page = http::Request {
                 upgrade: Default::default(),
                 method: "GET".into(),
@@ -3063,6 +3078,14 @@ mod admission_tests {
         assert!(start.elapsed() < Duration::from_secs(1));
         drop(stream);
         sender.join().unwrap();
+    }
+
+    #[test]
+    fn dev_sitemap_stops_rendering_at_its_time_budget() {
+        assert!(dev_seo_renders(0, Duration::ZERO));
+        assert!(dev_seo_renders(DEV_SEO_RENDER_MAX - 1, DEV_SEO_RENDER_BUDGET - Duration::from_millis(1)));
+        assert!(!dev_seo_renders(1, DEV_SEO_RENDER_BUDGET));
+        assert!(!dev_seo_renders(DEV_SEO_RENDER_MAX, Duration::ZERO));
     }
 
     #[test]
