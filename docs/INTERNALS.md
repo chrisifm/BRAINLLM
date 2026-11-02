@@ -2071,6 +2071,19 @@ Codegen writes `Array.from(e.target.querySelectorAll("option")).filter((o) => o.
 lists, also when `{#each}` options mount later (the `keepSelected` observer), and never lands on `select.value`.
 SSR marks those options `selected` through `fillValues`.
 
+### Native reads wait out an autodeploy drain (2026-11-02)
+
+During an autodeploy the backend first answers `503 DRAINING` (Retry-After 5) on readiness while it finishes its
+requests, then closes its listener until the new process listens. The old read retry covered only a refused or reset
+connection for about 3.75 s, so a page rendered during the switch failed with a 503. A `GET` through `ctx.backend`
+(resources, `service`, `operation` reads) and through `ctx.backend.files(bucket)` now asks again while the failure is
+"not now": a refused or reset connection, or a 502/503/504 with no code, `DRAINING` or `OVERLOADED`. It waits 250 ms
+doubling to 2 s, or the answer's Retry-After when longer, and gives up as soon as the next wait would pass its budget:
+the load timeout minus one second (`nativeAuthBridge(..., readBudget)`, capped at 30 s; 8 s when the bridge is built
+alone). A code of the backend's own (`BATCH_TOO_SLOW`) is an answer on purpose and is never repeated, and writes are
+sent once. The failure that ends the wait keeps `temporary: true` and its Retry-After, so the page answers 503 with it
+and the log says `NODE_TEMPORARY_ERROR`. Tests: `runtime/test/server-native-drain.test.js`.
+
 ### Mandatory native before-hooks and single-row conflict checks (2026-10-30)
 
 `Resource.hooks.before_create/before_update/before_delete` reference private `server/hooks/<name>.jsbrain`

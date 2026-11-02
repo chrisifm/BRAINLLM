@@ -226,17 +226,31 @@ function googleSignInPage(page) {
 
 // One configured loopback authority. No user-controlled target, proxy, redirect, auth cache or pending queue.
 // ctx.backend.files(bucket): the same file calls as job and route handlers (docs/backend/files.md).
-function bucketClient(target, key, bucket) {
+function bucketClient(target, key, bucket, readBudgetMs = () => 0) {
   const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
   if (typeof bucket !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(bucket)) throw new HttpError(400, 'Invalid native bucket name')
   const base = '/_brain/files/' + bucket
   const idPath = id => { if (typeof id !== 'string' || !UUID.test(id)) throw new HttpError(404, 'No file has this id; file ids are UUIDs'); return base + '/' + id }
+  // A read waits for a draining or restarting backend like ctx.backend reads do (nativeAuthBridge); a write never repeats.
   const send = async (method, path, body, timeout) => {
-    let response
-    try { response = await fetch(new URL(path, target), { method, redirect: 'error', signal: AbortSignal.timeout(timeout), headers: { 'x-api-key': key }, body }) } catch { throw new HttpError(503, 'Native backend is unavailable') }
-    if (response.ok) return response
-    await response.body?.cancel()
-    throw new HttpError(response.status >= 400 && response.status < 500 ? response.status : 503, 'Native file request failed')
+    const end = Date.now() + (method === 'GET' ? readBudgetMs() : 0)
+    for (let wait = 250; ; wait = Math.min(wait * 2, 2000)) {
+      let response, failure, notNow = false
+      try { response = await fetch(new URL(path, target), { method, redirect: 'error', signal: AbortSignal.timeout(timeout), headers: { 'x-api-key': key }, body }) } catch (e) {
+        failure = new HttpError(503, 'Native backend is unavailable', { temporary: true }); notNow = e?.name !== 'TimeoutError'
+      }
+      if (response?.ok) return response
+      if (response) {
+        let code
+        try { code = (await response.json())?.error?.code } catch {}
+        const retryAfter = Number(response.headers.get('retry-after'))
+        notNow = [502, 503, 504].includes(response.status) && (!code || code === 'DRAINING' || code === 'OVERLOADED')
+        failure = new HttpError(response.status >= 400 && response.status < 500 ? response.status : 503, 'Native file request failed', { temporary: response.status === 429 || response.status === 503 || notNow, ...(typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? { code } : {}), ...(retryAfter > 0 ? { retryAfter } : {}) })
+      }
+      const pause = Math.max(wait, (failure.retryAfter || 0) * 1000)
+      if (!notNow || Date.now() + pause > end) throw failure
+      await new Promise(done => setTimeout(done, pause))
+    }
   }
   const json = async response => { try { return await response.json() } catch { throw new HttpError(502, 'Native file response is invalid') } }
   return Object.freeze({
@@ -266,7 +280,13 @@ function bucketClient(target, key, bucket) {
     async remove(id) { await send('DELETE', idPath(id), undefined, 10000); return null },
   })
 }
-export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
+// Failures of a native read that may be asked again (a gateway error, DRAINING, OVERLOADED), marked where built.
+const askAgain = new WeakSet()
+// `readBudget`: ms (or a function giving them) a read may spend waiting for a draining or restarting backend; the
+// server passes its load timeout minus a second, so the page still answers within it.
+export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession, readBudget = 8000) {
+  const budget = typeof readBudget === 'function' ? readBudget : () => readBudget
+  const readBudgetMs = () => Math.max(0, Math.min(Number(budget()) || 0, 30000))
   // How to fix the configuration is for the operator: a visitor of a production app reads a generic message.
   const configuration = (status, detail, rid, shown = 'This service is not available right now') => {
     if (process.env.NODE_ENV !== 'production') return new HttpError(status, detail)
@@ -602,7 +622,12 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
             const code = typeof answer?.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(answer.code) ? answer.code : undefined
             const fix = code && typeof answer.fix === 'string' ? answer.fix.slice(0, 512) : undefined
             const wait = Number(headers['retry-after'])
-            throw new HttpError(status >= 400 && status < 500 ? status : 503, NATIVE_FAILED, { code, fix, temporary: status === 429 || status === 503, ...(wait > 0 ? { retryAfter: wait } : {}) })
+            // A gateway error, or a backend draining/at capacity, is "not now": a read may ask again (below). A code
+            // of the backend's own (BATCH_TOO_SLOW…) is an answer on purpose and is never repeated.
+            const notNow = [502, 503, 504].includes(status) && (!code || code === 'DRAINING' || code === 'OVERLOADED')
+            const failure = new HttpError(status >= 400 && status < 500 ? status : 503, NATIVE_FAILED, { code, fix, temporary: status === 429 || status === 503 || notNow, ...(wait > 0 ? { retryAfter: wait } : {}) })
+            if (notNow) askAgain.add(failure)
+            throw failure
           }
           if (status === 204) { value = null; return }
           if (!String(headers['content-type'] || '').startsWith('application/json')) throw new HttpError(502, 'Native resource response must be JSON')
@@ -610,15 +635,20 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
           if (remembers && typeof headers.etag === 'string') rememberRead(path, headers.etag, data)
       }
       try {
-        // A restarting backend refuses connections for a few seconds: a read waits for it instead of failing the page.
-        for (let wait = 250; ; wait *= 2) {
+        // An autodeploy drains the backend (503 DRAINING, then a closed port) and starts the new one: a read waits for
+        // it within the load budget instead of failing the page, honoring Retry-After. A write is never repeated.
+        const end = Date.now() + readBudgetMs()
+        for (let wait = 250; ; wait = Math.min(wait * 2, 2000)) {
           try {
             await proxy(req, response, new URL(path, target), rid, answered, 2 * 1024 * 1024)
             break
           } catch (e) {
-            if (method !== 'GET' || wait > 2000 || stopped || response.destroyed || !['ECONNREFUSED', 'ECONNRESET'].includes(e?.transport)) throw e
+            const transient = ['ECONNREFUSED', 'ECONNRESET'].includes(e?.transport) || askAgain.has(e)
+            const pause = Math.max(wait, (e?.retryAfter || 0) * 1000)
+            if (method !== 'GET' || !transient || stopped || response.destroyed || Date.now() + pause > end) throw e
             req.destroy()
-            await new Promise(done => setTimeout(done, wait))
+            await new Promise(done => setTimeout(done, pause))
+            if (stopped || response.destroyed) throw e
             req = conditional(outgoing())
           }
         }
@@ -841,7 +871,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
     // A declared file bucket from trusted server code, with BRAIN_SERVICE_API_KEY and its files.<bucket> scope
     files: bucket => {
       if (!serviceKey) throw configuration(503, 'ctx.backend.files needs BRAIN_SERVICE_API_KEY: create an API key with a files.<bucket> scope')
-      return bucketClient(target, serviceKey, bucket)
+      return bucketClient(target, serviceKey, bucket, readBudgetMs)
     },
     slugRedirect: (name, slug) => resource(incoming, response, rid, name).slugRedirect(slug),
     // A declared operation, as this visitor (docs/backend/transactions.md).
@@ -900,7 +930,7 @@ export function createServer(o = {}) {
   const env = Object.freeze(visibleEnv)
   const backendSession = o.backendSession ?? env.BRAIN_BACKEND_SESSION
   if (backendSession && backendSession !== 'app') throw Error("BRAIN_BACKEND_SESSION must be app, or unset for the backend's own session")
-  const native = nativeAuthBridge(o.backendURL ?? env.BRAIN_BACKEND_URL, (...why) => originRefused(...why), serviceKey, (...entry) => log(...entry), backendSession === 'app')
+  const native = nativeAuthBridge(o.backendURL ?? env.BRAIN_BACKEND_URL, (...why) => originRefused(...why), serviceKey, (...entry) => log(...entry), backendSession === 'app', () => TIMEOUT - 1000)
   // Using the native backend does not have to mean it owns the visitor's session: `app` keeps the signed cookie.
   const nativeSession = native && backendSession !== 'app'
   if (o.nativeSockets !== undefined && typeof o.nativeSockets !== 'boolean') throw Error('nativeSockets must be an explicit boolean')
