@@ -2071,6 +2071,17 @@ Codegen writes `Array.from(e.target.querySelectorAll("option")).filter((o) => o.
 lists, also when `{#each}` options mount later (the `keepSelected` observer), and never lands on `select.value`.
 SSR marks those options `selected` through `fillValues`.
 
+### Instance ids restart on each client navigation (2026-11-02)
+
+A component with ids numbers its instances (#268): the first keeps `id`, later ones get `id~2`, and `for`, `aria-*`
+and `href="#…"` follow the same suffix. The count restarts when `globalThis.__brainIds` changes, which the server did
+per render but the client router never did. A layout header mounted again with each swapped view therefore counted the
+page it replaced and came back as `main-nav~2`, so a component rule `#main-nav { … }` stopped applying. The router now
+bumps `__brainIds` right after disposing the old region (and before its early mount of a slow page), so the view that
+mounts next numbers its ids from the start. Known limits: an element outside the swapped region keeps its id, so the same
+component live there and inside the new view would share it; a single dev HMR remount or a guard Retry remount still
+counts the instance it replaces. Test: `runtime/test/router.test.js` («a navigation restarts instance ids»).
+
 ### Native reads wait out an autodeploy drain (2026-11-02)
 
 During an autodeploy the backend first answers `503 DRAINING` (Retry-After 5) on readiness while it finishes its
