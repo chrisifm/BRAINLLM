@@ -61,6 +61,20 @@
       "additionalProperties": false,
       "description": "Content-Security-Policy settings of the built site.",
       "properties": {
+        "scriptSrc": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^(https://[a-z0-9.-]+|http://(localhost|127\\.0\\.0\\.1))(:([0-9]+|\\*))?$" },
+          "description": "Exact hosts pages may load scripts from, besides the site's own. A literal script outside this list is reported as B0811; a third-party script tag still needs integrity (B0123)."
+        },
+        "frameSrc": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^(https://(\\*\\.)?[a-z0-9.-]+|http://(localhost|127\\.0\\.0\\.1))(:([0-9]+|\\*))?$" },
+          "description": "Origins pages may embed in an iframe, besides the site's own. A literal iframe outside this list is reported as B0811."
+        },
         "connectSrc": {
           "type": "array",
           "maxItems": 64,

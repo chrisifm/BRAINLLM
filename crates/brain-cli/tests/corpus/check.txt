@@ -295,6 +295,16 @@ export default { maxBytes: '1mb' }
 @file brain.json
 { "name": "Corpus" }
 
+### B0811 iframe outside frame-src
+@expect B0811 comp/x.brain 1:9
+@file comp/x.brain
+<iframe src="https://video.example.org/embed/1" title="Clip"></iframe>
+
+### B0796 invalid frame-src entry
+@expect B0796 brain.json 1:21
+@file brain.json
+{ "name": "Corpus", "csp": { "frameSrc": ["wss://video.example.org"] } }
+
 ### B0796 invalid connect-src entry
 @expect B0796 brain.json 1:21
 @file brain.json

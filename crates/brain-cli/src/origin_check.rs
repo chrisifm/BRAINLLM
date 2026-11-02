@@ -80,7 +80,11 @@ pub fn check(app: &Path) -> Vec<Diag> {
         }
     }
     let declared: Vec<String> = http.iter().chain(&cors).chain(&sites).filter_map(|o| brain_check::origins::absolute_origin(o)).collect();
-    let (connect, problems) = brain_pack::read_connect_src(app);
+    let (connect, mut problems) = brain_pack::read_connect_src(app);
+    let (frames, frame_problems) = brain_pack::read_frame_src(app);
+    problems.extend(frame_problems);
+    let (scripts, script_problems) = brain_pack::read_script_src(app);
+    problems.extend(script_problems);
     let at = span_of(&source, "\"csp\"");
     for problem in problems {
         let (msg, fix) = problem.split_once("; fix: ").unwrap_or((problem.as_str(), "list exact origins"));
@@ -99,6 +103,7 @@ pub fn check(app: &Path) -> Vec<Diag> {
         diags.push(diag);
     }
     diags.extend(brain_check::origins::check(app, &declared, connect.as_deref()));
+    diags.extend(brain_check::origins::check_embeds(app, &frames, &scripts));
     diags
 }
 

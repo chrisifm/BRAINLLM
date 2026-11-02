@@ -242,36 +242,76 @@ pub fn connect_source_problem(source: &str) -> Option<&'static str> {
     }
 }
 
-/// brain.json `csp.connectSrc`: `(declared valid sources, problems)`. `None` when the app declares no list; an invalid
-/// entry is left out and reported (B0796), so a mistake narrows the policy and never widens it.
+/// Why one `csp.frameSrc` entry cannot be a `frame-src` source; `None` when it can. A frame loads a document, so sockets do not apply.
+pub fn frame_source_problem(source: &str) -> Option<&'static str> {
+    if source.starts_with("wss://") || source.starts_with("ws://") {
+        return Some("a frame loads a page, so its scheme must be https");
+    }
+    connect_source_problem(source)
+}
+
+/// Why one `csp.scriptSrc` entry cannot be a `script-src` source; `None` when it can. Code runs with the page's rights, so
+/// a host is named exactly: no wildcard.
+pub fn script_source_problem(source: &str) -> Option<&'static str> {
+    if source.contains('*') {
+        return Some("a script runs with the page's rights, so name the exact host, without a wildcard");
+    }
+    frame_source_problem(source).map(|why| if why.starts_with("a frame") { "a script is a file, so its scheme must be https" } else { why })
+}
+
+/// One `csp.<key>` list: `(declared valid sources, problems)`. An invalid entry is left out and reported (B0796), so a
+/// mistake narrows the policy and never widens it.
+fn read_csp_list(list: &brain_mcp::Json, key: &str, fix: &str, problem_of: fn(&str) -> Option<&'static str>) -> (Vec<String>, Vec<String>) {
+    let brain_mcp::Json::Arr(items) = list else {
+        return (vec![], vec![format!("brain.json `csp.{key}` must be a list of origins; fix: {fix}")]);
+    };
+    let (mut sources, mut problems) = (Vec::new(), Vec::new());
+    for item in items {
+        match item.as_str() {
+            Some(text) => match problem_of(text) {
+                None if !sources.iter().any(|s| s == text) => sources.push(text.to_string()),
+                None => {}
+                Some(why) => problems.push(format!("brain.json `csp.{key}` has {text:?}: {why}; fix: {fix}")),
+            },
+            None => problems.push(format!("brain.json `csp.{key}` entries are strings; fix: {fix}")),
+        }
+    }
+    if sources.len() > 64 {
+        sources.truncate(64);
+        problems.push(format!("brain.json `csp.{key}` lists more than 64 origins; fix: keep the origins this site really uses"));
+    }
+    (sources, problems)
+}
+
+/// brain.json `csp.connectSrc`: `(declared valid sources, problems)`. `None` when the app declares no list.
 pub fn read_connect_src(root: &Path) -> (Option<Vec<String>>, Vec<String>) {
     const FIX: &str = "write \"csp\": { \"connectSrc\": [\"https://api.example.com\", \"wss://live.example.com\"] }, or [] for the site's own origin only";
     let Ok(src) = std::fs::read_to_string(root.join("brain.json")) else { return (None, vec![]) };
     let Ok(json) = brain_mcp::Json::parse(&src) else { return (None, vec![]) }; // malformed brain.json is reported elsewhere
     let Some(csp) = json.get("csp") else { return (None, vec![]) };
     let brain_mcp::Json::Obj(entries) = csp else { return (Some(vec![]), vec![format!("brain.json `csp` must be an object; fix: {FIX}")]) };
-    let mut problems: Vec<String> = entries.iter().filter(|(k, _)| k != "connectSrc").map(|(k, _)| format!("brain.json `csp.{k}` is not a CSP setting; fix: {FIX}")).collect();
+    let mut problems: Vec<String> = entries.iter().filter(|(k, _)| !matches!(k.as_str(), "connectSrc" | "frameSrc" | "scriptSrc")).map(|(k, _)| format!("brain.json `csp.{k}` is not a CSP setting; fix: {FIX}")).collect();
     let Some(list) = csp.get("connectSrc") else { return (None, problems) };
-    let brain_mcp::Json::Arr(items) = list else {
-        problems.push(format!("brain.json `csp.connectSrc` must be a list of origins; fix: {FIX}"));
-        return (Some(vec![]), problems);
-    };
-    let mut sources = Vec::new();
-    for item in items {
-        match item.as_str() {
-            Some(text) => match connect_source_problem(text) {
-                None if !sources.iter().any(|s| s == text) => sources.push(text.to_string()),
-                None => {}
-                Some(why) => problems.push(format!("brain.json `csp.connectSrc` has {text:?}: {why}; fix: {FIX}")),
-            },
-            None => problems.push(format!("brain.json `csp.connectSrc` entries are strings; fix: {FIX}")),
-        }
-    }
-    if sources.len() > 64 {
-        sources.truncate(64);
-        problems.push(format!("brain.json `csp.connectSrc` lists more than 64 origins; fix: keep the origins this site really calls, and call the rest from the server"));
-    }
+    let (sources, found) = read_csp_list(list, "connectSrc", FIX, connect_source_problem);
+    problems.extend(found);
     (Some(sources), problems)
+}
+
+fn read_added_sources(root: &Path, key: &str, fix: &str, problem_of: fn(&str) -> Option<&'static str>) -> (Vec<String>, Vec<String>) {
+    let Ok(src) = std::fs::read_to_string(root.join("brain.json")) else { return (vec![], vec![]) };
+    let Ok(json) = brain_mcp::Json::parse(&src) else { return (vec![], vec![]) };
+    let Some(list) = json.get("csp").and_then(|csp| csp.get(key)) else { return (vec![], vec![]) };
+    read_csp_list(list, key, fix, problem_of)
+}
+
+/// brain.json `csp.frameSrc`: the origins pages may embed in an `<iframe>`, besides the site's own.
+pub fn read_frame_src(root: &Path) -> (Vec<String>, Vec<String>) {
+    read_added_sources(root, "frameSrc", "write \"csp\": { \"frameSrc\": [\"https://www.youtube-nocookie.com\"] }", frame_source_problem)
+}
+
+/// brain.json `csp.scriptSrc`: the hosts pages may load scripts from, besides the site's own.
+pub fn read_script_src(root: &Path) -> (Vec<String>, Vec<String>) {
+    read_added_sources(root, "scriptSrc", "write \"csp\": { \"scriptSrc\": [\"https://www.googletagmanager.com\"] }", script_source_problem)
 }
 
 /// brain.json `"ext"` (#26): `"brain"` publishes `.brain`/`.jsbrain`/`.cssbrain`; anything else is `web`.

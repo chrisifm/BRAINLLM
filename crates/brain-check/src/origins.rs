@@ -177,3 +177,76 @@ mod tests {
         assert!(found.is_empty(), "{found:?}");
     }
 }
+
+/// The literal address of a template attribute: its whole text, or the text before the first interpolation.
+fn attr_address(value: &AttrValue) -> Option<&str> {
+    match value {
+        AttrValue::Text(text) => Some(text),
+        AttrValue::Expr(e) => literal(e),
+        AttrValue::Mixed(parts) => match parts.first()? {
+            AttrPart::Text(text) => Some(text),
+            AttrPart::Expr(_) => None,
+        },
+        AttrValue::None => None,
+    }
+}
+
+fn embeds_in(nodes: &[Node], out: &mut Vec<(&'static str, String, Span)>) {
+    for node in nodes {
+        match node {
+            Node::Element(e) => {
+                let kind = if e.tag.eq_ignore_ascii_case("iframe") { Some("frame") } else if e.tag.eq_ignore_ascii_case("script") { Some("script") } else { None };
+                if let (Some(kind), Some(attr)) = (kind, e.attrs.iter().find(|a| a.name == "src")) {
+                    if let Some(address) = attr_address(&attr.value) {
+                        out.push((kind, address.to_string(), attr.span));
+                    }
+                }
+                embeds_in(&e.children, out);
+            }
+            Node::ComponentRef(r) => embeds_in(&r.children, out),
+            Node::If(b) => {
+                for branch in &b.branches {
+                    embeds_in(&branch.body, out);
+                }
+                if let Some(otherwise) = &b.otherwise {
+                    embeds_in(otherwise, out);
+                }
+            }
+            Node::Each(b) => embeds_in(&b.body, out),
+            Node::SlotScope(b) => embeds_in(&b.body, out),
+            Node::Await(b) => {
+                embeds_in(&b.pending, out);
+                for branch in [&b.then, &b.catch].into_iter().flatten() {
+                    embeds_in(&branch.body, out);
+                }
+            }
+            Node::Text(_) | Node::Interp(_) | Node::Slot(_) => {}
+        }
+    }
+}
+
+/// B0811: a literal `<iframe src>` or `<script src>` the production policy blocks, which only the browser console reports.
+pub fn check_embeds(root: &Path, frames: &[String], scripts: &[String]) -> Vec<Diag> {
+    let mut out = Vec::new();
+    for (rel, c) in crate::doctor::load_files(root) {
+        let mut found = Vec::new();
+        embeds_in(&c.template, &mut found);
+        for (kind, address, span) in found {
+            let Some(origin) = absolute_origin(&address) else { continue };
+            let (list, key, directive) = if kind == "frame" { (frames, "frameSrc", "frame-src") } else { (scripts, "scriptSrc", "script-src") };
+            if listed(&address, list) {
+                continue;
+            }
+            let mut diag = Diag::new(
+                "B0811",
+                &rel,
+                span,
+                format!("this {kind} loads {origin}, which is outside `csp.{key}`, so the production `{directive}` blocks it"),
+                format!("add {origin} to `csp.{key}` in brain.json. Run brain explain B0811"),
+            );
+            diag.level = Severity::Warning;
+            out.push(diag);
+        }
+    }
+    out
+}

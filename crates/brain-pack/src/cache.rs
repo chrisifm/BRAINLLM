@@ -759,11 +759,15 @@ pub fn csp(inline_hashes: &[String], extra: &[(String, String)]) -> String {
     csp_with(inline_hashes, extra, None)
 }
 
-/// The policy of one app: `brain.json` `csp.connectSrc`, when declared, replaces the broad `https: wss:` of `connect-src`.
+/// The policy of one app: `brain.json` `csp.connectSrc`, when declared, replaces the broad `https: wss:` of `connect-src`;
+/// `csp.frameSrc` and `csp.scriptSrc` add origins to `frame-src` and `script-src`.
 /// An invalid entry is dropped, never widened into the broad form (`brain check` reports it as B0796).
 pub fn app_csp(root: &Path, inline_hashes: &[String], extra: &[(String, String)]) -> String {
     let declared = crate::read_connect_src(root).0;
-    csp_with(inline_hashes, extra, declared.as_deref())
+    let frames = crate::read_frame_src(root).0.into_iter().map(|source| ("frame-src".to_string(), source));
+    let scripts = crate::read_script_src(root).0.into_iter().map(|source| ("script-src".to_string(), source));
+    let extra: Vec<(String, String)> = extra.iter().cloned().chain(frames).chain(scripts).collect();
+    csp_with(inline_hashes, &extra, declared.as_deref())
 }
 
 /// `connect`: the sources the app declared; sources the build derives itself (sockets, analytics tags) stay in `extra`.
@@ -993,6 +997,16 @@ mod tests {
             }
             csp(&[], &captcha_csp(&root))
         };
+        let framed = std::env::temp_dir().join(format!("brain-frame-src-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&framed);
+        std::fs::write(framed.join("brain.json"), r#"{"csp":{"frameSrc":["https://video.example.org","wss://not-a-page.example.org"],"scriptSrc":["https://tags.example.org","https://*.wide.example.org"]}}"#).unwrap();
+        let embed = app_csp(&framed, &[], &[]);
+        assert!(embed.contains("frame-src 'self' https://video.example.org"), "{embed}");
+        assert!(!embed.contains("not-a-page"), "an invalid entry narrows the policy: {embed}");
+        assert!(embed.contains("script-src 'self' https://tags.example.org"), "{embed}");
+        assert!(!embed.contains("wide.example.org"), "a script host has no wildcard: {embed}");
+        assert!(embed.contains("connect-src 'self' https: wss:"), "frameSrc leaves connect-src alone: {embed}");
+        std::fs::remove_dir_all(&framed).unwrap();
         let turnstile = policy(Some("<meta server>\nexport default { verify_url: 'https://challenges.cloudflare.com/turnstile/v0/siteverify', secret_env: 'S', protect: ['signup'] }\n"));
         assert!(turnstile.contains("script-src 'self' https://challenges.cloudflare.com;"), "{turnstile}");
         assert!(turnstile.contains("frame-src 'self' https://challenges.cloudflare.com"), "{turnstile}");
