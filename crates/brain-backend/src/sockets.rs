@@ -291,7 +291,7 @@ pub(super) async fn upgrade(
         .get(header::ORIGIN)
         .and_then(|v| v.to_str().ok())
         .ok_or_else(forbidden)?;
-    if !app.sockets.origins.iter().any(|allowed| allowed == origin) {
+    if !crate::origins::allows(&app.sockets.origins, origin, app.production) {
         // A browser hides the 403 of a failed WebSocket: the log is the only place the reason can reach.
         crate::origins::log_refusal("B0743", "socket", "GET", uri.path(), Some(origin), &app.sockets.origins);
         let mut refused = forbidden();

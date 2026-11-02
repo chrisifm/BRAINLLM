@@ -690,8 +690,15 @@ pub async fn router_full(
         domain: Arc::new(domain),
         api_keys,
     };
+    // Production answers exactly the listed origins; development also the loopback ports `origins::allows` admits.
+    let allow_origin = if app.production {
+        tower_http::cors::AllowOrigin::list(origins)
+    } else {
+        let (allowed, production) = (app.origins.clone(), app.production);
+        tower_http::cors::AllowOrigin::predicate(move |origin, _| origin.to_str().is_ok_and(|o| crate::origins::allows(&allowed, o, production)))
+    };
     let cors = CorsLayer::new()
-        .allow_origin(origins)
+        .allow_origin(allow_origin)
         .allow_credentials(true)
         .allow_methods([
             Method::GET,
@@ -1100,13 +1107,13 @@ async fn transport_security(State(production): State<bool>, req: Request, next: 
 /// the reason for the operator. That layer still adds its credentials, expose, methods, headers and max-age values to
 /// every answer; a refused origin must not receive any of them, so they are removed here. `Vary` stays for shared caches.
 async fn origin_watch(State(app): State<App>, req: Request, next: Next) -> Response {
-    let refused = req.headers().get(header::ORIGIN).is_some_and(|origin| !app.origins.iter().any(|allowed| allowed.as_bytes() == origin.as_bytes()));
+    let refused = req.headers().get(header::ORIGIN).is_some_and(|origin| !origin.to_str().is_ok_and(|o| crate::origins::allows(&app.origins, o, app.production)));
     let reads = matches!(*req.method(), Method::GET | Method::HEAD);
     let preflight = *req.method() == Method::OPTIONS && req.headers().contains_key(header::ACCESS_CONTROL_REQUEST_METHOD);
     if reads || preflight {
         if let Some(origin) = req.headers().get(header::ORIGIN).and_then(|v| v.to_str().ok()) {
             let socket = reads && req.uri().path() == "/_brain/socket";
-            if !socket && !app.origins.iter().any(|allowed| allowed == origin) {
+            if !socket && !crate::origins::allows(&app.origins, origin, app.production) {
                 crate::origins::log_refusal("B0740", if preflight { "preflight" } else { "read" }, req.method().as_str(), req.uri().path(), Some(origin), &app.origins);
             }
         }
@@ -1136,7 +1143,7 @@ async fn protect(State(app): State<App>, req: Request, next: Next) -> Response {
             .headers()
             .get(header::ORIGIN)
             .and_then(|v| v.to_str().ok());
-        if !origin.is_some_and(|o| app.origins.iter().any(|allowed| allowed == o)) {
+        if !origin.is_some_and(|o| crate::origins::allows(&app.origins, o, app.production)) {
             crate::origins::log_refusal("B0740", "mutation", req.method().as_str(), req.uri().path(), origin, &app.origins);
             return Error::new(StatusCode::FORBIDDEN,"ORIGIN_DENIED","Send the configured site Origin; backend mutations require an explicit allowed origin. Run `brain explain B0740`; the server log names the seen and allowed origins")
                 .origin_refused("B0740", origin, &app.origins, app.production)

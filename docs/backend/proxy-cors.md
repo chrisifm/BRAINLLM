@@ -75,6 +75,10 @@ credentials or wildcard. Every allowed origin may:
 - read responses with credentials (`Access-Control-Allow-Credentials: true`),
 - send mutations; other origins get `403 ORIGIN_DENIED` with `brainCode: "B0740"`.
 
+Outside production, when the allowed origins include an `http` loopback origin (`127.0.0.1`, `localhost` or `[::1]`),
+every other `http` loopback origin is allowed too, whatever its port, so a development server that moved to the next free
+port keeps working. Production allows exactly the listed origins, and sockets follow the same rule.
+
 `cors.maxAge` lets browsers cache preflight results, which removes one round trip from every cross-origin mutation:
 
 ```sh

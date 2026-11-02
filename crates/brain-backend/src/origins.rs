@@ -1,6 +1,8 @@
 //! Origin declarations and origin refusals (B0740, B0743, B0744, B0748): the single place that says what a valid origin
-//! looks like and what the operator should change. Nothing here widens a policy: refused stays refused. Production
-//! responses never carry the allowlist; the server log does.
+//! looks like and what the operator should change. Outside production, an allowlist that names a loopback origin also
+//! admits every other http loopback origin (`allows`), because a development server moves to the next free port; that is
+//! the only widening, and production matches the allowlist exactly. Production responses never carry the allowlist; the
+//! server log does.
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub const PLATFORM_KEY: &str = "server/platform.jsbrain cors.origins";
@@ -9,6 +11,22 @@ pub const SOCKET_KEY: &str = "brain.json backend.sockets.allowedOrigins";
 /// A refused origin is attacker-controlled text: bounded before it reaches a log or a dev response.
 const SEEN_BYTES: usize = 256;
 const LOGS_PER_MINUTE: u64 = 16;
+
+/// True when a browser `origin` may use the backend. Production: exactly one of `allowed`. Outside production, also any
+/// http origin on 127.0.0.1, localhost or [::1] when `allowed` already holds a loopback origin, whatever the port: a
+/// development server that took the next free port keeps working, and no non-loopback origin is ever added.
+pub fn allows(allowed: &[String], origin: &str, production: bool) -> bool {
+    allowed.iter().any(|a| a == origin) || !production && loopback(origin) && allowed.iter().any(|a| loopback(a))
+}
+
+/// An http origin, exactly as a browser serializes it, whose host is a loopback name.
+fn loopback(origin: &str) -> bool {
+    url::Url::parse(origin).is_ok_and(|u| {
+        u.scheme() == "http"
+            && matches!(u.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))
+            && u.origin().ascii_serialization() == origin
+    })
+}
 
 /// Why a declared origin can never match what a browser sends.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -221,6 +239,21 @@ mod tests {
         }
         assert!(seen.lock().unwrap().len() <= REMEMBERED_ORIGINS, "the memory is bounded");
         assert!(first_refusal(&seen, "B0740", Some("https://late.example.test")), "past the cap, a new origin still logs");
+    }
+
+    #[test]
+    fn production_matches_the_allowlist_exactly_and_development_admits_any_loopback_port() {
+        let local = vec!["http://localhost:5190".to_string()];
+        let site = vec!["https://example.com".to_string()];
+        for origin in ["http://localhost:5192", "http://127.0.0.1:5190", "http://[::1]:4000", "http://localhost"] {
+            assert!(!allows(&local, origin, true), "production refuses {origin}");
+            assert!(allows(&local, origin, false), "development admits {origin}");
+            assert!(!allows(&site, origin, false), "no loopback origin declared, so {origin} stays refused");
+        }
+        assert!(allows(&local, "http://localhost:5190", true), "the declared origin in production");
+        for origin in ["https://localhost:5192", "http://localhost.evil.test:5190", "http://127.0.0.2:5190", "http://LOCALHOST:5192", "http://localhost:5192/", "http://evil.test", "null"] {
+            assert!(!allows(&local, origin, false), "development still refuses {origin}");
+        }
     }
 
     #[test]

@@ -14,6 +14,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `backend-request-failed` carries the answer's error code, such as `OVERLOADED` when every route executor is busy
 - a `captcha-unavailable` log line names why the captcha could not be verified, such as `secret-not-set`
 - B0740 and B0743 log each refused origin once until the server restarts
+- outside production, an allowlist that names an `http` loopback origin also admits every other `http` loopback origin on any port; production still allows exactly the listed origins
 - `brain test` and `brain doctor` retry once when the browser connection breaks, and a second failure names probable machine load with the 1-minute load average
 
 ## [0.8.9] - 2026-11-02
