@@ -270,6 +270,7 @@ Private captured errors (message, stack, recent actions) are listed by `brain_er
 `load` runs only on the server. Client code may only read env vars prefixed `PUBLIC_`.
 Variables live in `.brain_env` (already created): shared `KEY=value` lines, then `[development]` `[staging]`
 `[production]` sections that override them. `brain run` uses development, `brain build` production, `--env x` another.
+`PORT=5190` fixes the project's port for `brain run` and `brain start` (`--port` wins). A declared port never moves: a previous brain of this project holding it is stopped; any other owner is left running and named in the error. With no declaration, `brain run` takes the next free port from 5180.
 An empty key fails the build (B0720); `KEY?=` declares one the app works without: it may stay empty and reads as unset (a route or webhook whose secret is absent answers 503 until it is set, B0790).
 Read them as `process.env.KEY` (server) or `process.env.PUBLIC_KEY` (anywhere; an undeclared one reads as `undefined`). Never create a `.env`.
 `.jsbrain` files starting with `<meta server>` run only on the server and may be used only inside `load` or server

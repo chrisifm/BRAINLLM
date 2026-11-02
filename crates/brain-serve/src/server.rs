@@ -501,8 +501,8 @@ fn start_with_threads(
     threads: Threads,
 ) -> io::Result<Dev> {
     let root = opts.root.canonicalize()?;
-    // If the port is taken, try the next 20 (except 0, which the OS assigns). A restart first gets a moment to release it,
-    // so a supervised `brain run` keeps its port; an unrelated server still moves this one to the next port.
+    // If the port is taken, try the next 20 (except 0, which the OS assigns). A restart first gets a moment to release it.
+    // `brain run` with a declared port never gets here with it taken: the CLI claims it first and refuses to move.
     let tries = if opts.port == 0 { 0 } else { 20 };
     let requested = crate::listen::bind_waiting(&opts.host, opts.port, std::time::Duration::from_secs(1)).ok();
     let listener = requested

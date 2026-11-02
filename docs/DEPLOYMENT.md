@@ -134,3 +134,7 @@ known names. The Node upstream was a transport fixture; actual Node bridge autho
 Four actual generated ecosystem files passed the installed PM2 6.0.14 parser without starting its daemon or any
 service. These are isolated preflight results, not a substitute for final release gates or the actual host's
 configuration and authenticated browser verification.
+
+## Port ownership
+
+`--port` or `PORT` (process, then `.brain_env`) is the project's port. `brain run` and `brain start` stop a previous brain of the same project on it (SIGTERM, then SIGKILL after 10 s) and never move to another port. A process from another project, another program, or a brain that PM2 manages from outside this command is left running and named in the error. On Windows no process is stopped: the command waits 10 s and reports the owner to look for.

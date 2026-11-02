@@ -8,6 +8,7 @@ macro_rules! eprintln {
 
 #[cfg(unix)]
 mod browser;
+mod port_claim;
 mod trace;
 mod startup_config;
 #[cfg(unix)]
@@ -1943,13 +1944,19 @@ fn cmd_start(args: &[String]) -> ExitCode {
             return Ok(0);
         }
         let num = |k: &str, env: &str, d: &str| flag(args, k).or_else(|| std::env::var(env).ok()).unwrap_or_else(|| d.to_string());
-        let port = num("--port", "PORT", "3000").parse().map_err(|_| "invalid --port; fix: a number 1-65535".to_string())?;
+        let environment = env::name(args, "production");
+        let declared = port_claim::declared(args, &root, &environment)?;
+        let host = num("--host", "HOST", "127.0.0.1");
+        if let Some(port) = declared {
+            port_claim::claim(&root, &host, port)?;
+        }
+        let port = declared.unwrap_or(3000);
         let o = start::Opts {
-            host: num("--host", "HOST", "127.0.0.1"),
+            host,
             port,
             instances: num("--instances", "BRAIN_INSTANCES", "1").parse().map_err(|_| "invalid --instances".to_string())?,
             max_rss_kb: start::parse_mem(&num("--max-memory", "BRAIN_MAX_MEMORY", "300M")).ok_or("invalid --max-memory; fix: e.g. 300M or 1G")?,
-            env: env::name(args, "production"),
+            env: environment,
             health_ms: num("--health-ms", "BRAIN_HEALTH_MS", "10000").parse().unwrap_or(10_000),
             rss_ms: num("--rss-ms", "BRAIN_RSS_MS", "5000").parse().unwrap_or(5_000),
             backoff_ms: num("--backoff-ms", "BRAIN_BACKOFF_MS", "100").parse().unwrap_or(100),
@@ -2592,11 +2599,18 @@ pub(crate) fn dev_json_path(root: &Path) -> PathBuf {
 
 fn cmd_dev(args: &[String]) -> Result<(), String> {
     let root = app_root()?;
-    let port = match flag(args, "--port") {
-        Some(p) => p.parse().map_err(|_| format!("invalid port `{p}`; fix: a number 1-65535"))?,
-        None => 5180,
-    };
+    let declared = port_claim::declared(args, &root, &env::name(args, "development"))?;
+    let port = declared.unwrap_or(5180);
     let host = flag(args, "--host").unwrap_or_else(|| "127.0.0.1".into());
+    if let Some(port) = declared {
+        port_claim::claim(&root, &host, port)?;
+    }
+    let inspect_flag = flag(args, "--inspect-port");
+    if let Some(inspect) = inspect_flag.as_deref().filter(|_| declared.is_some()).and_then(|p| p.parse().ok()) {
+        if let Err(error) = port_claim::claim(&root, &host, inspect) {
+            eprintln!("brain run: the debugger port is unavailable ({error})");
+        }
+    }
     // --mock[=seed] (#266): fake api() data; the seed defaults to the app's name, so a reload shows the same data
     let mock = args.iter().find_map(|a| {
         if a == "--mock" {
@@ -2638,6 +2652,9 @@ fn cmd_dev(args: &[String]) -> Result<(), String> {
     let site = env::value(&root, &environment, "PUBLIC_SITE_URL");
     let native_enabled = backend::socket_settings(&root, site.as_deref(), None)?.enabled();
     let dev = start_project_dev(opts, compile_fn(root.clone(), true), true, on_event, &environment)?;
+    if declared.is_some_and(|port| port != 0 && dev.addr.port() != port) {
+        return Err(format!("port {port} was taken while `brain run` was starting; fix: run it again"));
+    }
     if profile {
         println!("{{\"profile\":\"boot\",\"ms\":{:.1}}}", boot.elapsed().as_secs_f64() * 1000.0);
     }
