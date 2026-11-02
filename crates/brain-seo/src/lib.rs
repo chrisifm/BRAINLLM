@@ -350,6 +350,32 @@ const FEED_LINK: &str = "<link rel=\"alternate\" type=\"application/rss+xml\" ti
 /// The `brain build` step (INTERNALS §32): rewrites every page's `<head>` in place and returns the generated files.
 /// `assets` lists the other files of `dist/` (chunks, CSS); `public/` is added here. Fails on broken internal links
 /// or anchors (B1819/B1820), listing each one with its fix.
+/// Rewrites a page's canonical (and an `og:url` equal to it) to the trailing-slash form when it names the page itself.
+fn self_canonical(cfg: &Config, route: &str, page: &mut String) {
+    let Some(href) = html::parse(page).link("canonical").map(str::to_string) else { return };
+    let Some((target, _)) = audit::internal(cfg, route, &href) else { return };
+    if target != *route {
+        return;
+    }
+    let cut = href.find(['?', '#']).unwrap_or(href.len());
+    let path_start = if href.starts_with('/') { 0 } else { href.find("://").and_then(|i| href[i + 3..].find('/').map(|j| i + 3 + j)).unwrap_or(cut) };
+    if path_start >= cut {
+        return;
+    }
+    let (head, rest) = href.split_at(path_start);
+    let want = format!("{head}{}", cfg.redirect_policy.path_form(rest));
+    if want == href {
+        return;
+    }
+    let esc = |s: &str| s.replace('&', "&amp;").replace('"', "&quot;");
+    for (from, to) in [
+        (format!("rel=\"canonical\" href=\"{}\"", esc(&href)), format!("rel=\"canonical\" href=\"{}\"", esc(&want))),
+        (format!("property=\"og:url\" content=\"{}\"", esc(&href)), format!("property=\"og:url\" content=\"{}\"", esc(&want))),
+    ] {
+        *page = page.replacen(&from, &to, 1);
+    }
+}
+
 pub fn finish(
     cfg: &Config,
     root: &Path,
@@ -485,6 +511,9 @@ pub fn finish_with_og(
         if cfg.sections {
             tags.push_str("<link rel=\"alternate\" type=\"application/json\" title=\"Sections\" href=\"/sections.json\">");
         }
+        // The page's own canonical names the form the trailing-slash policy serves, the one the sitemap lists: a
+        // literal `canonical="/salarios/"` under `never` otherwise disagrees with the sitemap's `/salarios`.
+        self_canonical(cfg, &route, &mut p.html);
         // a view's literal `canonical="/x"` is rendered once per locale: on `/es/x` it means the page itself, not the
         // default-locale version (which B1828 reports as an error); an untranslated content fallback keeps its own
         if let Some(i) = &i18n
@@ -497,7 +526,7 @@ pub fn finish_with_og(
         {
             tags.push_str(&format!(
                 "<link rel=\"canonical\" href=\"{}\">",
-                cfg.abs(&files::encode_path(&route))
+                cfg.abs(&files::encode_path(&cfg.redirect_policy.path_form(&route)))
             ));
         }
         if let Some(e) = by_route.get(&route) {
@@ -704,7 +733,7 @@ pub fn finish_with_og(
         .map(|(p, d)| {
             let mut alt: Vec<(String, String)> = alternates.get(&p.route).map_or(vec![], |v| {
                 v.iter()
-                    .map(|(l, r)| (l.clone(), cfg.abs(&files::encode_path(r))))
+                    .map(|(l, r)| (l.clone(), cfg.abs(&files::encode_path(&cfg.redirect_policy.path_form(r)))))
                     .collect()
             });
             if let (Some(i), false) = (&i18n, alt.is_empty())
@@ -723,7 +752,7 @@ pub fn finish_with_og(
             let videos = video::collect(cfg, root, &p.route, d, page_date.as_deref()).0;
             files::Entry {
                 route: &p.route,
-                url: cfg.abs(&files::encode_path(&p.route)),
+                url: cfg.abs(&files::encode_path(&cfg.redirect_policy.path_form(&p.route))),
                 doc: d,
                 lastmod: p.lastmod.as_deref(),
                 indexable: audit::indexable(cfg, &p.route, d),
@@ -750,7 +779,7 @@ pub fn finish_with_og(
     let mut entries = entries;
     entries.extend(server_docs.iter().map(|(r, d)| files::Entry {
         route: r,
-        url: cfg.abs(&files::encode_path(r)),
+        url: cfg.abs(&files::encode_path(&cfg.redirect_policy.path_form(r))),
         doc: d,
         lastmod: None,
         indexable: audit::indexable(cfg, r, d),

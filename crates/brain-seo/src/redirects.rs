@@ -46,6 +46,24 @@ impl Policy {
     pub fn is_default(&self) -> bool {
         self.slash == Slash::Never && self.host.is_none()
     }
+    /// The form of a page path the policy serves without a redirect, the one the sitemap and a page's own canonical
+    /// name: `never` and `ignore` drop the trailing slash, `always` adds it (the root and file-like paths such as
+    /// `/feed.xml` keep their form). A query or fragment stays after the path.
+    pub fn path_form(&self, path: &str) -> String {
+        let cut = path.find(['?', '#']).unwrap_or(path.len());
+        let (p, rest) = path.split_at(cut);
+        if p.is_empty() || p == "/" || !p.starts_with('/') {
+            return path.to_string();
+        }
+        let bare = p.trim_end_matches('/');
+        let bare = if bare.is_empty() { "/" } else { bare };
+        let file_like = bare.rsplit('/').next().is_some_and(|last| last.contains('.'));
+        match self.slash {
+            Slash::Always if !file_like && bare != "/" => format!("{bare}/{rest}"),
+            Slash::Always => format!("{p}{rest}"),
+            Slash::Never | Slash::Ignore => format!("{bare}{rest}"),
+        }
+    }
     fn slash_name(&self) -> &'static str {
         match self.slash {
             Slash::Never => "never",

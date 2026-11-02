@@ -2215,3 +2215,39 @@ fn a_later_page_with_its_canonical_at_page_one_is_an_error() {
     assert_eq!(level("/blog"), Some(brain_seo::Level::Error));
     assert_eq!(level("/blog/page/2"), None, "its own canonical is the right answer");
 }
+
+// A view's literal `canonical="/pricing/"` disagreed with the sitemap (`/pricing`), and under `trailingSlash: always`
+// the sitemap listed URLs that redirect. The page's own canonical and its sitemap entry now follow the policy.
+#[test]
+fn self_canonical_and_sitemap_follow_the_trailing_slash_policy() {
+    use brain_seo::redirects::{Policy, Slash};
+    for (slash, want) in [(Slash::Never, "https://acme.dev/pricing"), (Slash::Ignore, "https://acme.dev/pricing"), (Slash::Always, "https://acme.dev/pricing/")] {
+        let dir = fresh_dir("slash");
+        let mut c = cfg();
+        c.redirect_policy = Policy { slash, host: None };
+        let mut pages = good_site();
+        for written in ["https://acme.dev/pricing", "https://acme.dev/pricing/", "/pricing/"] {
+            pages[1].html = pages[1].html.replace("<link rel=\"canonical\" href=\"https://acme.dev/pricing\">", &format!("<link rel=\"canonical\" href=\"{written}\">"));
+            let mut ps = pages.clone();
+            let built = finish(&c, &dir, &mut ps, &[], &[]).unwrap();
+            let canonical = brain_seo::html::parse(&ps[1].html).link("canonical").map(str::to_string);
+            let expect = if written.starts_with('/') { want.trim_start_matches("https://acme.dev") } else { want };
+            assert_eq!(canonical.as_deref(), Some(expect), "{slash:?} {written}");
+            let sitemap = &built.files.iter().find(|(p, _)| p == "sitemap.xml").expect("sitemap").1;
+            assert!(sitemap.contains(&format!("<loc>{want}</loc>")), "{slash:?}: {sitemap}");
+            let ld = brain_seo::html::parse(&ps[1].html).jsonld.join("\n");
+            assert!(ld.contains(&format!("\"@id\":\"{want}#webpage\"")), "{slash:?}: {ld}");
+            // the home page keeps its form
+            assert!(sitemap.contains("<loc>https://acme.dev/</loc>"), "{sitemap}");
+            pages[1].html = ps[1].html.replace(&format!("href=\"{expect}\""), "href=\"https://acme.dev/pricing\"");
+        }
+        // a canonical that names another page is that page's business, not this one's
+        let mut ps = good_site();
+        ps[1].html = ps[1].html.replace("href=\"https://acme.dev/pricing\"", "href=\"https://acme.dev/plans/\"");
+        finish(&c, &dir, &mut ps, &[], &[]).unwrap();
+        assert_eq!(brain_seo::html::parse(&ps[1].html).link("canonical"), Some("https://acme.dev/plans/"));
+    }
+    assert_eq!(Policy { slash: Slash::Always, host: None }.path_form("/feed.xml"), "/feed.xml");
+    assert_eq!(Policy { slash: Slash::Always, host: None }.path_form("/a?x=1"), "/a/?x=1");
+    assert_eq!(Policy { slash: Slash::Never, host: None }.path_form("/"), "/");
+}

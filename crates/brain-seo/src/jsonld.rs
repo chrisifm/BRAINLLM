@@ -91,7 +91,7 @@ pub fn breadcrumb(cfg: &Config, route: &str, names: &BTreeMap<String, String>) -
                 ("@type", s("ListItem")),
                 ("position", Json::Num((i + 1) as f64)),
                 ("name", s(n)),
-                ("item", s(&cfg.abs(r))),
+                ("item", s(&cfg.page_url(r))),
             ])
         })
         .collect();
@@ -219,7 +219,7 @@ pub fn article(cfg: &Config, route: &str, a: &Article) -> Json {
     if !a.tags.is_empty() {
         kv.push(("keywords".into(), s(&a.tags.join(", "))));
     }
-    kv.push(("mainEntityOfPage".into(), s(&cfg.abs(route))));
+    kv.push(("mainEntityOfPage".into(), s(&cfg.page_url(route))));
     Json::Obj(kv)
 }
 
@@ -247,7 +247,7 @@ pub fn schema_shortcut(cfg: &Config, route: &str, doc: &Doc, lastmod: Option<&st
         kv.push(("description".into(), s(d)));
     }
     if cfg.site.is_some() {
-        kv.push(("url".into(), s(&cfg.abs(route))));
+        kv.push(("url".into(), s(&cfg.page_url(route))));
     }
     if let Some(i) = doc.meta("og:image") {
         kv.push(("image".into(), s(&cfg.abs(i))));
@@ -344,7 +344,7 @@ pub fn auto(
     let mut out = Vec::new();
     let home = cfg.abs("/");
     if cfg.site.is_some() && home.contains("://") {
-        let url = cfg.abs(route);
+        let url = cfg.page_url(route);
         let (site_id, org_id) = (format!("{home}#website"), format!("{home}#organization"));
         let (page_id, crumb_id) = (format!("{url}#webpage"), format!("{url}#breadcrumb"));
         let mut graph = Vec::new();

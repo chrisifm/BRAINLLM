@@ -103,7 +103,7 @@ pub fn news_sitemap(cfg: &Config, cols: &[crate::content::Collection]) -> Option
             .to_ascii_lowercase();
         o.push_str(&format!(
             "  <url><loc>{}</loc><news:news><news:publication><news:name>{}</news:name><news:language>{}</news:language></news:publication><news:publication_date>{}</news:publication_date><news:title>{}</news:title></news:news></url>\n",
-            xml(&cfg.abs(&encode_path(&e.route()))),
+            xml(&cfg.abs(&encode_path(&cfg.redirect_policy.path_form(&e.route())))),
             xml(&news.name),
             xml(&lang),
             xml(e.date.as_deref().unwrap_or_default()),

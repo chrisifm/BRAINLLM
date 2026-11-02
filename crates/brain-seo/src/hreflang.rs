@@ -166,13 +166,13 @@ pub fn head_tags(cfg: &Config, i: &I18n, variants: &[(String, String)]) -> Strin
     for (lang, r) in variants {
         html.push_str(&format!(
             "<link rel=\"alternate\" hreflang=\"{lang}\" href=\"{}\">",
-            cfg.abs(&crate::files::encode_path(r))
+            cfg.abs(&crate::files::encode_path(&cfg.redirect_policy.path_form(r)))
         ));
     }
     if let Some((_, r)) = variants.iter().find(|(l, _)| *l == i.default) {
         html.push_str(&format!(
             "<link rel=\"alternate\" hreflang=\"x-default\" href=\"{}\">",
-            cfg.abs(&crate::files::encode_path(r))
+            cfg.abs(&crate::files::encode_path(&cfg.redirect_policy.path_form(r)))
         ));
     }
     html

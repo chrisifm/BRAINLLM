@@ -544,6 +544,11 @@ impl Config {
     }
 
     /// `path` → absolute URL when `site` is known, else unchanged.
+    /// The absolute URL of a page route in the form the trailing-slash policy serves (`seo.trailingSlash`).
+    pub fn page_url(&self, route: &str) -> String {
+        self.abs(&self.redirect_policy.path_form(route))
+    }
+
     pub fn abs(&self, path: &str) -> String {
         match &self.site {
             Some(s) if path.starts_with('/') => {
