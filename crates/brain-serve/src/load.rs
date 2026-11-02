@@ -58,7 +58,7 @@ let nativeBridge = null, nativeModule = null, nativeURL = null
 const withSession = async (S, ctx, secret, preauthenticated = false, nativeRequired = false) => {
   const c = { ...ctx, url: new URL(ctx.url, 'http://localhost'), env: process.env }
   const configured = process.env.BRAIN_BACKEND_URL
-  if (nativeRequired && !configured) throw Object.assign(Error('Native authentication is temporarily unavailable'), { status: 503 })
+  if (nativeRequired && !configured) throw Object.assign(Error('Native authentication is unavailable: BRAIN_BACKEND_URL is not set; fix: set it for this environment'), { status: 503 })
   const ownSession = process.env.BRAIN_BACKEND_SESSION === 'app'
   if (configured) {
     if (typeof S.nativeAuthBridge !== 'function') throw Object.assign(Error('Native authentication bridge is unavailable in this runtime version'), { status: 503 })
@@ -102,7 +102,7 @@ const contextHeaders = async ctx => {
   if (!native) return ctx.session.headers()
   const { req } = native
   if (req.$nativeLogout) await req.$nativeLogout
-  if (req.$nativeLogoutError) throw Object.assign(Error('Native authentication is temporarily unavailable'), { status: 503 })
+  if (req.$nativeLogoutError) throw Object.assign(Error('Native authentication is unavailable: signing out failed against the backend'), { status: 503 })
   const own = ctx.session.headers()['set-cookie']?.filter(c => c.startsWith('__Host-session-secret=')) || []
   const relay = req.$nativeLogoutHeaders || req.$nativeLoginHeaders || {}
   if (!own.length) return relay
@@ -653,7 +653,7 @@ impl Sidecar {
             false,
         )
         .map_err(|(status, message)| {
-            if status == 503 {
+            if status == 503 && message.starts_with("Native authentication") {
                 format!("BNATIVE_AUTH_UNAVAILABLE: {message}")
             } else if (400..600).contains(&status) {
                 format!("BNATIVE_STATUS:{status}: {message}")

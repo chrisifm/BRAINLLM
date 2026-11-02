@@ -193,7 +193,7 @@ const cacheSearch = url => {
   return kept.size ? '?' + kept : ''
 }
 // Messages this file writes itself, safe to log as the cause; anything else in an error message may hold private data.
-const OWN_CAUSES = new Set(['Backend request unavailable', 'Backend request timed out', 'Backend response exceeds its byte budget', 'Backend request capacity is unavailable', 'Backend stream capacity is unavailable', 'Native file request failed', 'Native file response is invalid', 'Native authentication is temporarily unavailable', 'Native resource response must be JSON', 'Native resource response is invalid', 'Native resource request failed', 'Invalid final response status', 'Invalid configured redirect location', 'timeout'])
+const OWN_CAUSES = new Set(['Backend request unavailable', 'Backend request timed out', 'Backend response exceeds its byte budget', 'Backend request capacity is unavailable', 'Backend stream capacity is unavailable', 'Native file request failed', 'Native file response is invalid', 'Native resource response must be JSON', 'Native resource response is invalid', 'Native resource request failed', 'Invalid final response status', 'Invalid configured redirect location', 'timeout'])
 const CODE_SHAPE = /^[A-Z][A-Z0-9_]{0,63}$/
 const varyEncoding = v => (/accept-encoding/i.test(v || '') ? v : [v, 'Accept-Encoding'].filter(Boolean).join(', '))
 function bodyEncoding(req, status, headers) {
@@ -308,9 +308,9 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
     if (!user || typeof user.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(user.id) || typeof user.email !== 'string' || user.email.length > 254 || typeof user.role !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(user.role) || ['public','owner'].includes(user.role) || typeof user.verified !== 'boolean') throw new HttpError(503,'Native authentication response is unavailable')
     return Object.freeze({id:user.id,email:user.email,role:user.role,verified:user.verified})
   }
-  const unavailable = () => new HttpError(503, 'Native authentication is temporarily unavailable')
+  const unavailable = (why = 'the backend did not answer') => new HttpError(503, `Native authentication is unavailable: ${why}`)
   const call = (incoming, response, path, method, rid, origin) => {
-    if (stopped || active >= 8) return Promise.reject(unavailable())
+    if (stopped || active >= 8) return Promise.reject(unavailable(stopped ? 'the server is shutting down' : '8 session checks are already in flight'))
     const cookie = cookies(incoming, method === 'POST')
     const client = forwardedFor(incoming)
     active++
@@ -350,7 +350,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
           })
         })
         owned.add(outgoing); incoming.once('aborted', cancel); response.once('close', disconnected)
-        timer = setTimeout(() => outgoing.destroy(unavailable()), 2000)
+        timer = setTimeout(() => outgoing.destroy(unavailable('the backend took more than 2 s')), 2000)
         outgoing.once('error', () => finish(true)); outgoing.end()
       } catch { outgoing?.destroy(); finish(true) }
     })
@@ -363,7 +363,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
     let origin
     try { origin = new URL(process.env.PUBLIC_SITE_URL).origin } catch { origin = 'https://' + (req.headers['x-forwarded-host'] || req.headers.host) }
     return new Promise((resolve, reject) => {
-      if (stopped || active >= 8) return reject(unavailable())
+      if (stopped || active >= 8) return reject(unavailable(stopped ? 'the server is shutting down' : '8 session checks are already in flight'))
       active++
       let settled = false
       const done = (error, value) => { if (settled) return; settled = true; active--; clearTimeout(timer); error ? reject(unavailable()) : resolve(value) }
@@ -388,7 +388,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession) {
           } catch { done(true) }
         })
       })
-      const timer = setTimeout(() => outgoing.destroy(unavailable()), 2000)
+      const timer = setTimeout(() => outgoing.destroy(unavailable('the backend took more than 2 s')), 2000)
       owned.add(outgoing); outgoing.once('close', () => owned.delete(outgoing))
       outgoing.once('error', () => done(true)); outgoing.end()
     })
@@ -949,7 +949,7 @@ export function createServer(o = {}) {
   // log fields for a thrown value: its stack (sanitized by log) plus, for B09xx budget failures, the typed fields only
   const trace = e => {
     const out = { stack: String((e && e.stack) || e) }
-    if (e instanceof HttpError && OWN_CAUSES.has(e.message)) out.cause = e.message
+    if (e instanceof HttpError && (OWN_CAUSES.has(e.message) || e.message.startsWith('Native authentication is unavailable:'))) out.cause = e.message
     if (e && CODE_SHAPE.test(e.transport || '')) out.transport = e.transport
     if (e && typeof e.code === 'string' && CODE_SHAPE.test(e.code)) out.backendCode = e.code
     if (e && e.kind === 'budget' && /^B09\d\d$/.test(e.code) && typeof e.budget === 'string' && /^[a-zA-Z]{1,16}$/.test(e.budget)) {
