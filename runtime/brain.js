@@ -276,15 +276,23 @@ export function insert(p, f, end) {
 }
 
 // aria-* and data-* are enumerated, not boolean: true and false render as text (k[4] is their dash)
+// A select only takes a value its options offer, and {#each}/{#if} options mount after attr() or change later.
+const keepSelected = (el, f, M = globalThis.MutationObserver) =>
+  M && new M(() => {
+    const i = el.selectedIndex
+    el.value = typeof f == 'function' ? untrack(f) : f
+    if (el.selectedIndex < 0) el.selectedIndex = i // no option matches yet: the browser's choice stays
+  }).observe(el, { childList: true, subtree: true })
+
 export function attr(el, k, f) {
   bind(
     f,
     k.startsWith('style:')
       ? ((k = k.slice(6)), v => (v == null || v === false ? el.style.removeProperty(k) : el.style.setProperty(k, v)))
       : /^(value|checked|selected)$/.test(k) && !(k == 'value' && el.tagName == 'OPTION') // an option's value is its attribute (SSR, value="")
-        ? v => {
+        ? ((el.tagName == 'SELECT' && k == 'value') ? keepSelected(el, f) : 0, v => {
             if (el[k] !== v) el[k] = v
-          }
+          })
         : v => (v == null || (v === false && k[4] != '-') ? el.removeAttribute(k) : el.setAttribute(k, v === true && k[4] != '-' ? '' : /^(href|src|action|formaction|poster)$/.test(k) && typeof v == 'string' ? inBase(v) : v))
   )
 }
