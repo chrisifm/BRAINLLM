@@ -28,6 +28,10 @@ if (Number.isInteger(owner) && owner > 1) {
   watcher.unref()
 }
 // stdout is the protocol channel: the user's console.log calls go to stderr (brain run terminal).
+// A closed reader (the parent stopped, `brain test | head`) is EPIPE: nobody reads the answers, so exit quietly instead of
+// printing an unhandled `Error: write EPIPE`; a closed stderr only loses console output.
+process.stdout.on('error', e => { if (e.code === 'EPIPE') process.exit(0); throw e })
+process.stderr.on('error', e => { if (e.code !== 'EPIPE') throw e })
 const out = process.stdout.write.bind(process.stdout)
 const raw = { warn: console.warn.bind(console), error: console.error.bind(console) }
 // `brain trace` under `brain run`: `TRC <json>` lines on the protocol channel, one request at a time like this loop.
@@ -1068,6 +1072,39 @@ mod tests {
         assert_eq!(ok, "{\"id\":\"42\",\"hasEnv\":true}");
         let err = sc.call(&file_url(&f), "boom", "{}").unwrap_err();
         assert!(err.contains("Error: bad"), "{err}");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn a_sidecar_whose_reader_is_gone_exits_without_an_epipe_crash() {
+        if Command::new("node").arg("--version").output().is_err() {
+            return; // without node there is nothing to test
+        }
+        use std::io::{Read, Write};
+        let d = std::env::temp_dir().join(format!("brain-load-epipe-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("v.mjs");
+        std::fs::write(&f, "export async function load() { console.log('noise'); return { big: 'x'.repeat(200000) } }").unwrap();
+        let script = format!("{}\n{RUNNER}", llm_script());
+        let mut child = Command::new("node")
+            .args(["--input-type=module", "-e", &script])
+            .current_dir(&d)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        drop(child.stdout.take()); // the reader went away (a closed `| head`, a parent that stopped reading)
+        let mut stdin = child.stdin.take().unwrap();
+        for id in 1..=3 {
+            let _ = writeln!(stdin, "{{\"id\":{id},\"file\":{},\"fn\":\"load\",\"ctx\":{{}}}}", crate::json_str(&file_url(&f)));
+        }
+        drop(stdin);
+        let mut err = String::new();
+        child.stderr.take().unwrap().read_to_string(&mut err).unwrap();
+        let status = child.wait().unwrap();
+        assert!(!err.contains("EPIPE") && !err.contains("Unhandled"), "{err}");
+        assert!(status.success(), "{status:?} {err}");
         std::fs::remove_dir_all(&d).unwrap();
     }
 
