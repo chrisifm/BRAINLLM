@@ -126,3 +126,26 @@ fn b0737_credentials_in_the_signed_session_cookie() {
         assert!(!d.iter().any(|d| d.code == "B0737"), "{call}: {d:?}");
     }
 }
+
+// B1311 warned on the very escape its fix proposes, alone or concatenated with literal parts.
+#[test]
+fn b1311_accepts_the_escape_its_fix_proposes() {
+    let wrap = |expr: &str| format!("<script>let q = sig('')\nlet re = drv(() => {expr})</script><input aria-label=\"q\" bind:value={{q}} /><p>{{re}}</p>");
+    for ok in [
+        r"new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))",
+        r"new RegExp('\\b' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i')",
+        r"new RegExp(`^${q.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)",
+        r"RegExp(q.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'))",
+    ] {
+        assert!(codes(&wrap(ok)).is_empty(), "{ok}: {:?}", codes(&wrap(ok)));
+    }
+    for bad in [
+        r"new RegExp('\\b' + q + '\\b')",
+        r"new RegExp(q.replace(/[.*]/g, '\\$&'))",
+        r"new RegExp(q.replace(/[.*+?^${}()|[\]\\]/, '\\$&'))",
+        r"new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, ''))",
+        r"new RegExp(`^${q}$`)",
+    ] {
+        assert_eq!(codes(&wrap(bad)), ["B1311"], "{bad}");
+    }
+}

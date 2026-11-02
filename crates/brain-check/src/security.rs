@@ -431,18 +431,14 @@ impl Checker<'_> {
                 }
                 if name == "RegExp"
                     && let Some(a) = args.first()
-                    && !matches!(a.unparen(), Expr::Str { .. } | Expr::Regex { .. })
-                    && !matches!(a.unparen(), Expr::Template { exprs, .. } if exprs.is_empty())
-                    && !matches!(a.unparen(), Expr::Call { callee, .. } if path(callee).is_some_and(|p| p.to_ascii_lowercase().contains("escape")))
+                    && !regex_source_safe(a)
                 {
                     out.push(("B1311", *span, "`RegExp` built from a runtime value: a crafted pattern can freeze the page (ReDoS)".into(), "escape it first: `new RegExp(text.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&'))`, or use `includes()`".into()));
                 }
             }
             Expr::New { callee, args, span } if path(callee).as_deref() == Some("RegExp") => {
                 if let Some(a) = args.first()
-                    && !matches!(a.unparen(), Expr::Str { .. } | Expr::Regex { .. })
-                    && !matches!(a.unparen(), Expr::Template { exprs, .. } if exprs.is_empty())
-                    && !matches!(a.unparen(), Expr::Call { callee, .. } if path(callee).is_some_and(|p| p.to_ascii_lowercase().contains("escape")))
+                    && !regex_source_safe(a)
                 {
                     out.push(("B1311", *span, "`RegExp` built from a runtime value: a crafted pattern can freeze the page (ReDoS)".into(), "escape it first: `new RegExp(text.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&'))`, or use `includes()`".into()));
                 }
@@ -566,5 +562,30 @@ impl Checker<'_> {
                 self.push_info("B0215", t.span, "`target=\"_blank\"` without `rel=\"noopener noreferrer\"` (normalized)", "add `rel=\"noopener noreferrer\"`", vec![(t.span.end, t.span.end, " rel=\"noopener noreferrer\"".into())]);
             }
         }
+    }
+}
+
+/// B1311: a `RegExp` source that cannot carry a crafted pattern: literals, an `escape…(…)` helper, the escape the
+/// fix itself proposes (`x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')`, also `replaceAll`), and `+` or template
+/// concatenations made only of those parts.
+fn regex_source_safe(e: &Expr) -> bool {
+    match e.unparen() {
+        Expr::Str { .. } | Expr::Regex { .. } | Expr::Num { .. } => true,
+        Expr::Template { tag: None, exprs, .. } => exprs.iter().all(regex_source_safe),
+        Expr::Binary { op: "+", left, right, .. } => regex_source_safe(left) && regex_source_safe(right),
+        Expr::Call { callee, args, .. } => {
+            if path(callee).is_some_and(|p| p.to_ascii_lowercase().contains("escape")) {
+                return true;
+            }
+            let Expr::Member { prop: MemberProp::Name(m), .. } = callee.unparen() else { return false };
+            if !matches!(m.name.as_str(), "replace" | "replaceAll") {
+                return false;
+            }
+            let escapes_all = matches!(args.first().map(Expr::unparen), Some(Expr::Regex { raw, .. })
+                if raw.rsplit_once('/').is_some_and(|(_, flags)| flags.contains('g')) && ['.', '*', '+', '?', '^', '$', '{', '}', '(', ')', '|', '[', ']', '\\'].iter().all(|c| raw.contains(*c)));
+            let keeps_match = matches!(args.get(1).map(Expr::unparen), Some(Expr::Str { value, .. }) if value == "\\$&");
+            escapes_all && keeps_match
+        }
+        _ => false,
     }
 }
