@@ -2051,6 +2051,18 @@ sidecars enable Node source maps so existing inline maps report the original `.b
 The pack fingerprint includes embedded `.mjs`, `.brain`, `.cssbrain` and JSON runtime sources as well as JS/Rust;
 server runtime and UI changes cannot reuse a toolchain identity that omits those files.
 
+### Server render errors and temporary failures in the private log (2026-11-02)
+
+The core's console fallback (`BRAIN_ERROR: Operation failed. Try again.`) is a browser message. `server.mjs`
+installs the core's `_err` hook once per core module: an fx/drv error during a render joins that render's failures
+(`component failed during SSR`, with `rid`, `path`, `where` and `comp: null` when no `brain-guard` boundary owns it);
+an error after the render window logs `component failed after SSR`. Boundaries keep reporting their own failures
+(`render`, `B0908`, owners with `$g`), so each failure is logged once. A thrown value that is not an `Error` adds
+`thrown: <kind>` and never its value. A 429/503 or an error marked `temporary` (closed connection, 504,
+`BRIDGE_BUSY`) logs `code: NODE_TEMPORARY_ERROR` and `temporary: true` instead of `NODE_INTERNAL_ERROR`.
+The development `load` sidecar describes non-`Error` rejections (plain objects, cycles, `undefined`) instead of
+printing `[object Object]` or crashing on `JSON.stringify`.
+
 ### Mandatory native before-hooks and single-row conflict checks (2026-10-30)
 
 `Resource.hooks.before_create/before_update/before_delete` reference private `server/hooks/<name>.jsbrain`

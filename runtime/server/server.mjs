@@ -910,6 +910,7 @@ export function createServer(o = {}) {
   const sink = o.log || ((level, msg, extra) => console[level === 'error' ? 'error' : 'log'](json({ t: new Date().toISOString(), level, msg, ...extra })))
   // Requests in flight by rid: a 5xx whose cause reached no log line gets one when the response closes (dispatch below).
   const liveRequests = new Map()
+  const hooked = new WeakSet() // core modules whose error hook reports to this server's log (render below)
   let statusPageWindow = 0, statusPageLogs = 0
   const log = (level, msg, extra = {}) => {
     const safe = { ...extra }
@@ -918,12 +919,13 @@ export function createServer(o = {}) {
     if (typeof safe.stack === 'string') {
       const kind = /^(TypeError|ReferenceError|RangeError|SyntaxError|AggregateError|Error):/.exec(safe.stack)?.[1] || 'Error'
       safe.errorType = kind
-      safe.code = kind === 'Error' ? 'NODE_INTERNAL_ERROR' : 'NODE_' + kind.replace(/Error$/, '').toUpperCase() + '_ERROR'
+      // "not now" (a 429/503, a backend restarting or busy) is not a defect: its own code, so alerts can tell them apart
+      safe.code = safe.temporary ? 'NODE_TEMPORARY_ERROR' : kind === 'Error' ? 'NODE_INTERNAL_ERROR' : 'NODE_' + kind.replace(/Error$/, '').toUpperCase() + '_ERROR'
       const truncated = safe.stack.length > 32768 || safe.stack.split('\n').length > 41
       safe.traceTruncated = truncated
       safe.stack = safe.stack.slice(0, 32768).split('\n').filter(line => /^\s+at (?:async )?(?:[A-Za-z0-9_.$<>]+(?: \[as [A-Za-z0-9_$]+\])? \()?(?:file:\/\/\/|\/|node:)[^\s()?#]*:\d+:\d+\)?$/.test(line) && line.length <= 1024).slice(0, 40).join('\n')
       safe.private = true; safe.valuesCaptured = false
-      safe.fix = kind === 'TypeError' ? 'Check nullable values, argument types and the data contract at these source frames' : kind === 'ReferenceError' ? 'Check the missing binding or import at these source frames' : kind === 'RangeError' ? 'Check recursive calls, array sizes and configured resource budgets at these source frames' : kind === 'SyntaxError' ? 'Check module syntax or JSON input parsing at these source frames without logging input values' : 'Inspect these source frames and the request reference; reproduce with synthetic inputs'
+      safe.fix = safe.thrown ? `A non-Error value (${safe.thrown}) was thrown, so there are no source frames; throw an Error (or HttpError) instead` : safe.temporary ? 'A dependency answered not now (rate limit, restart, overload or a closed connection); the same request can succeed later. If it persists, check the backend health and its Retry-After' : kind === 'TypeError' ? 'Check nullable values, argument types and the data contract at these source frames' : kind === 'ReferenceError' ? 'Check the missing binding or import at these source frames' : kind === 'RangeError' ? 'Check recursive calls, array sizes and configured resource budgets at these source frames' : kind === 'SyntaxError' ? 'Check module syntax or JSON input parsing at these source frames without logging input values' : 'Inspect these source frames and the request reference; reproduce with synthetic inputs'
     }
     // a compiler budget failure (brain-budget.js) keeps its own code, limit, source position and fix
     const b = safe.budgetFailure
@@ -949,6 +951,9 @@ export function createServer(o = {}) {
   // log fields for a thrown value: its stack (sanitized by log) plus, for B09xx budget failures, the typed fields only
   const trace = e => {
     const out = { stack: String((e && e.stack) || e) }
+    // a thrown plain object, string or undefined has no stack: say what kind of value it was (never the value itself)
+    if (!(e instanceof Error)) out.thrown = e === null ? 'null' : Array.isArray(e) ? 'array' : typeof e
+    if (e && typeof e === 'object' && (e.temporary === true || e.status === 429 || e.status === 503)) out.temporary = true
     if (e instanceof HttpError && (OWN_CAUSES.has(e.message) || e.message.startsWith('Native authentication is unavailable:'))) out.cause = e.message
     if (e && e.code === 'ERR_MODULE_NOT_FOUND') out.fix = 'this process runs an older build whose files are gone; restart it after brain build'
     if (e && CODE_SHAPE.test(e.transport || '')) out.transport = e.transport
@@ -1450,6 +1455,18 @@ export function createServer(o = {}) {
     const root = doc.createElement('div')
     const core = await load(mf.core)
     const mount = core.mount || core.m
+    // The core's console fallback (`BRAIN_ERROR: …`) is for the browser: on the server an fx/drv error goes to this
+    // render's failures (logged with rid and path by ssr()), once. A component boundary (brain-guard) collects its own.
+    if (core._err && !hooked.has(core)) {
+      hooked.add(core)
+      core._err((e, x, w) => {
+        if (w === 'render' || w === 'B0908') return // brain-guard reports these itself, with the component's name
+        for (let o = x; o; o = o.nodeType ? o.parentNode : o.p) if (o.$g) return
+        const into = globalThis.__brainSSR
+        if (into) into.push({ e, w, comp: null })
+        else log('error', 'component failed after SSR', { where: w, ...trace(e) }) // an async fx of a finished render
+      })
+    }
     const V = (await load(route.view)).default
     const L = []
     for (const l of route.layouts || []) L.push((await load(l)).default)
