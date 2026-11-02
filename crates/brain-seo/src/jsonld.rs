@@ -569,6 +569,12 @@ fn google_rules(t: &str, n: &Json, out: &mut Vec<Issue>) {
             if !description.is_empty() && description.trim() == str_of(n.get("title")).unwrap_or_default().trim() {
                 warn("JobPosting description is the same as its title".into(), "write the full description: responsibilities, qualifications, skills, hours, education and experience".into());
             }
+            // Google: the title of the job, not of the posting; no company name, address, code, date or salary in it
+            let title = str_of(n.get("title")).unwrap_or_default().to_lowercase();
+            let company = list("hiringOrganization").iter().filter_map(|o| str_of(o.get("name"))).map(|c| c.trim().to_string()).find(|c| c.chars().count() >= 3 && title.contains(&c.to_lowercase()));
+            if let Some(c) = company {
+                warn(format!("JobPosting title names the company `{c}`"), "keep `title` to the job itself (\"Senior data engineer\"); the company goes in hiringOrganization and the place in jobLocation, and the page <title> can still name both".into());
+            }
             if (1..=6).any(|h| description.to_ascii_lowercase().contains(&format!("<h{h}"))) {
                 warn("JobPosting description uses heading tags".into(), "use <p>, <ul> and <li>: those are the tags Google recognizes in a job description".into());
             }
@@ -1016,6 +1022,12 @@ mod tests {
         assert_eq!(check(r#","validThrough":"2999-01-01T00:00""#), "");
         assert!(check(r#","jobLocationType":"TELECOMMUTE""#).contains("applicantLocationRequirements"));
         assert_eq!(check(r#","jobLocationType":"TELECOMMUTE","applicantLocationRequirements":{"@type":"Country","name":"Mexico"}"#), "");
+        // Google: the title names the job, never the company (that is hiringOrganization)
+        let named = Json::parse(r#"{"title":"Engineer at Acme","description":"<p>Build things</p>","hiringOrganization":{"@type":"Organization","name":"Acme"}}"#).unwrap();
+        let mut out = Vec::new();
+        google_rules("JobPosting", &named, &mut out);
+        assert!(out.iter().any(|i| i.msg.contains("title names the company `Acme`")), "{:?}", out.iter().map(|i| &i.msg).collect::<Vec<_>>());
+        assert_eq!(check(r#","hiringOrganization":{"@type":"Organization","name":"Acme"}"#), "");
         let same = Json::parse(r#"{"title":"Engineer","description":"Engineer"}"#).unwrap();
         let heading = Json::parse(r#"{"title":"Engineer","description":"<h2>Role</h2><p>Build</p>"}"#).unwrap();
         for (node, expected) in [(same, "same as its title"), (heading, "heading tags")] {
