@@ -1,0 +1,9 @@
+{
+  "id": "budget-margin",
+  "kind": "change",
+  "title": "Budget margin and measured document",
+  "why": "Doctor and `build --report` could disagree on `budget.viewKB` and a route a few bytes over failed the deploy.",
+  "changelog": [
+    "a route within max(2%, 256 bytes) of `budget.viewKB` passes with a warning, per-request pages count gzip-compressed like prerendered ones, and every budget message names the environment it measured"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "id": "check-fix-hints",
+  "kind": "fix",
+  "title": "Checker fixes that compile",
+  "why": "Several diagnostics proposed fixes the checker itself rejected.",
+  "changelog": [
+    "the B0901 fix names a primitive an app can call, the escape B1311 proposes is accepted as a safe RegExp source, B0408 lets an unresolvable background hide the ancestor fill, and B0304 and B0305 substitute only an exact color or spacing token"
+  ]
+}

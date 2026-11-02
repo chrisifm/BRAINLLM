@@ -1,0 +1,9 @@
+{
+  "id": "brain-fix-scope",
+  "kind": "fix",
+  "title": "brain fix stays in its target",
+  "why": "`brain fix` rewrote files outside its target, including others' uncommitted work.",
+  "changelog": [
+    "`brain fix` writes only inside its target and skips files with uncommitted changes unless `--force`, and a relative target works"
+  ]
+}

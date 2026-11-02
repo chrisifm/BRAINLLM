@@ -1,0 +1,9 @@
+{
+  "id": "backend-drain-retry",
+  "kind": "fix",
+  "title": "Native reads wait out a backend drain",
+  "why": "During an autodeploy reads answered 503 because the retry covered only about 3.75 s of refused connections.",
+  "changelog": [
+    "a `GET` through `ctx.backend` asks again on a refused or reset connection or a 502, 503 or 504 with no code, `DRAINING` or `OVERLOADED`, honoring `Retry-After`, until one second before the load timeout; writes and backend error codes are never repeated"
+  ]
+}

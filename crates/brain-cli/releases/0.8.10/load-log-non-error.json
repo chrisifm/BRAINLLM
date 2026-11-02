@@ -1,0 +1,9 @@
+{
+  "id": "load-log-non-error",
+  "kind": "fix",
+  "title": "Non-Error rejections in the load log",
+  "why": "A load() that rejected with a plain object logged `[object Object]`.",
+  "changelog": [
+    "the dev load log describes a rejection that is not an `Error` instead of printing `[object Object]`"
+  ]
+}

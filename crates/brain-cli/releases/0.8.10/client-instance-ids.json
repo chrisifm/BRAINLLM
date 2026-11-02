@@ -1,0 +1,9 @@
+{
+  "id": "client-instance-ids",
+  "kind": "fix",
+  "title": "Instance ids restart on navigation",
+  "why": "A layout mounted again after client navigation came back as `main-nav~2`, so its `#main-nav` rule stopped applying.",
+  "changelog": [
+    "client navigation restarts instance ids, so a layout element keeps its `id` instead of gaining a `~2` suffix"
+  ]
+}

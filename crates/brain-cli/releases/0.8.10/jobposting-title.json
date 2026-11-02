@@ -1,0 +1,9 @@
+{
+  "id": "jobposting-title",
+  "kind": "change",
+  "title": "JobPosting title warning",
+  "why": "A JobPosting title that names the hiring company hurts its listing.",
+  "changelog": [
+    "`brain seo` warns when a JobPosting title names the hiring company"
+  ]
+}

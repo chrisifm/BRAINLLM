@@ -1,0 +1,9 @@
+{
+  "id": "open-redirect-checks",
+  "kind": "change",
+  "title": "Stricter redirect targets",
+  "why": "`'/' + value`, `/\\host` and runtime values passed to browser navigation can become a protocol-relative or foreign URL.",
+  "changelog": [
+    "B0710 rejects a redirect target built as `'/'` plus a runtime value, `//host` or `/\\host`, and client guards and `form()` refuse the same targets; B0814 warns when browser navigation goes to a URL built at runtime"
+  ]
+}

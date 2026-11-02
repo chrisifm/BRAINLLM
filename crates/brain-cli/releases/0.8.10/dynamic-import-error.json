@@ -1,0 +1,9 @@
+{
+  "id": "dynamic-import-error",
+  "kind": "fix",
+  "title": "Dynamic import is named",
+  "why": "A dynamic `import()` in statement position failed with a generic parse error.",
+  "changelog": [
+    "a dynamic `import()` in statement position is named in the parse error and in the docs"
+  ]
+}

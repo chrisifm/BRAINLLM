@@ -1,0 +1,9 @@
+{
+  "id": "test-matchers-waitfor",
+  "kind": "change",
+  "title": "More test matchers and waitFor",
+  "why": "Tests needed fixed sleeps and lacked common matchers; a `<meta server>` import failed with an engine error.",
+  "changelog": [
+    "`brain test` adds `toBeFalsy`, `toContain`, a `.not` form for each matcher and `waitFor`, and a browser test that imports a `<meta server>` module gets an error naming `stub()`"
+  ]
+}

@@ -25,6 +25,24 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - the checker reports a dangerous literal in the same attributes, each `srcset` candidate included
 - a bound iframe `srcdoc` without `sandbox` (or with `allow-same-origin`) is B0210: it would render the value as a same-origin document
 - prerendered JSON-LD, page props and route data escape `<`, `>`, `&`, U+2028 and U+2029
+- the dev load log describes a rejection that is not an `Error` instead of printing `[object Object]`
+- an fx error during a server render is logged with the request's time, id and route, and a 429, 503 or temporary load failure logs `NODE_TEMPORARY_ERROR`
+- `<select multiple bind:value>` binds an array in both directions
+- the dev load sidecar exits quietly instead of printing `EPIPE` when its reader is gone
+- `brain test` adds `toBeFalsy`, `toContain`, a `.not` form for each matcher and `waitFor`, and a browser test that imports a `<meta server>` module gets an error naming `stub()`
+- a `GET` through `ctx.backend` asks again on a refused or reset connection or a 502, 503 or 504 with no code, `DRAINING` or `OVERLOADED`, honoring `Retry-After`, until one second before the load timeout; writes and backend error codes are never repeated
+- client navigation restarts instance ids, so a layout element keeps its `id` instead of gaining a `~2` suffix
+- a `<X lazy/>` that became visible releases itself and its parent on unmount
+- the B0901 fix names a primitive an app can call, the escape B1311 proposes is accepted as a safe RegExp source, B0408 lets an unresolvable background hide the ancestor fill, and B0304 and B0305 substitute only an exact color or spacing token
+- a dynamic `import()` in statement position is named in the parse error and in the docs
+- `brain add --props` accepts bindable props
+- a route within max(2%, 256 bytes) of `budget.viewKB` passes with a warning, per-request pages count gzip-compressed like prerendered ones, and every budget message names the environment it measured
+- the not-found page carries only site nodes, per-request pages get the `WebSite` and `WebPage` graph with the request URL, `brain seo` no longer reports a per-request title or description as missing, and llms.txt names a per-request page by its route
+- page URLs and a literal root-relative canonical keep the built origin and follow `seo.trailingSlash`
+- `brain seo` warns when `dist/` is older than the sources and explains that it takes the domain from the build
+- `brain seo` warns when a JobPosting title names the hiring company
+- B0710 rejects a redirect target built as `'/'` plus a runtime value, `//host` or `/\host`, and client guards and `form()` refuse the same targets; B0814 warns when browser navigation goes to a URL built at runtime
+- `brain fix` writes only inside its target and skips files with uncommitted changes unless `--force`, and a relative target works
 
 ## [0.8.9] - 2026-11-02
 

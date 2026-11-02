@@ -1,0 +1,9 @@
+{
+  "id": "seo-request-pages",
+  "kind": "fix",
+  "title": "SEO for per-request pages",
+  "why": "Per-request pages got a WebPage at `*`, a missing title report and a site-name entry in llms.txt.",
+  "changelog": [
+    "the not-found page carries only site nodes, per-request pages get the `WebSite` and `WebPage` graph with the request URL, `brain seo` no longer reports a per-request title or description as missing, and llms.txt names a per-request page by its route"
+  ]
+}

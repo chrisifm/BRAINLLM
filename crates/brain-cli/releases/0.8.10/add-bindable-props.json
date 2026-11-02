@@ -1,0 +1,9 @@
+{
+  "id": "add-bindable-props",
+  "kind": "fix",
+  "title": "brain add accepts bindable props",
+  "why": "`brain add --props` refused a bindable prop.",
+  "changelog": [
+    "`brain add --props` accepts bindable props"
+  ]
+}

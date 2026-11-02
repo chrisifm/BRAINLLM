@@ -1,0 +1,9 @@
+{
+  "id": "lazy-visible-release",
+  "kind": "fix",
+  "title": "Visible lazy children are released",
+  "why": "A `lazy` child that had become visible stayed in memory after unmount (B0601).",
+  "changelog": [
+    "a `<X lazy/>` that became visible releases itself and its parent on unmount"
+  ]
+}

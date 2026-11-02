@@ -1,0 +1,9 @@
+{
+  "id": "select-multiple-bind",
+  "kind": "fix",
+  "title": "Arrays on select multiple",
+  "why": "`<select multiple bind:value>` did not read or write an array.",
+  "changelog": [
+    "`<select multiple bind:value>` binds an array in both directions"
+  ]
+}

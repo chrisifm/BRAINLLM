@@ -1,0 +1,9 @@
+{
+  "id": "ssr-fx-error-context",
+  "kind": "fix",
+  "title": "SSR fx errors with request context",
+  "why": "An fx error during a server render printed the browser fallback line with no time, request id or route.",
+  "changelog": [
+    "an fx error during a server render is logged with the request's time, id and route, and a 429, 503 or temporary load failure logs `NODE_TEMPORARY_ERROR`"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "id": "seo-canonical-slash",
+  "kind": "fix",
+  "title": "Canonicals follow trailingSlash",
+  "why": "A literal root-relative canonical lost the built origin and slash URLs disagreed with the sitemap.",
+  "changelog": [
+    "page URLs and a literal root-relative canonical keep the built origin and follow `seo.trailingSlash`"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "id": "seo-stale-dist",
+  "kind": "fix",
+  "title": "brain seo names a stale build",
+  "why": "`brain seo` audited an old `dist/` silently and did not say where the domain comes from.",
+  "changelog": [
+    "`brain seo` warns when `dist/` is older than the sources and explains that it takes the domain from the build"
+  ]
+}

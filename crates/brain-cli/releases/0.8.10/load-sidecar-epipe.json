@@ -1,0 +1,9 @@
+{
+  "id": "load-sidecar-epipe",
+  "kind": "fix",
+  "title": "Quiet load sidecar exit",
+  "why": "The dev load sidecar printed EPIPE when its reader closed first.",
+  "changelog": [
+    "the dev load sidecar exits quietly instead of printing `EPIPE` when its reader is gone"
+  ]
+}
