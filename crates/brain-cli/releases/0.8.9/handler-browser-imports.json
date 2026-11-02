@@ -1,0 +1,9 @@
+{
+  "id": "handler-browser-imports",
+  "kind": "fix",
+  "title": "Handlers that import browser modules",
+  "why": "A job worker restarted 48 times because nothing reported the import before it started.",
+  "changelog": [
+    "B0792 reports a job or route handler whose imports need the browser runtime, before its worker or route starts, and the startup error names the module to fix"
+  ]
+}

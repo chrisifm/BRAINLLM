@@ -7,7 +7,7 @@ diagnostics that reject code an earlier version accepted.
 Every npm package (`@christianirack/brainllm`, its seven native platform packages, `brainllm-runtime`,
 `create-brainllm` and `create-brainll`) ships the same version as `[workspace.package]` in `Cargo.toml`.
 
-## [0.8.9] - 2026-11-01
+## [0.8.9] - 2026-11-02
 
 Upgrade with `npm install -D @christianirack/brainllm@0.8.9 --save-exact`.
 
@@ -25,6 +25,10 @@ Upgrade with `npm install -D @christianirack/brainllm@0.8.9 --save-exact`.
 - `job-failed` logs the backend's status, code and field messages when the backend client raised the failure
 - a job may declare an empty schema, `{}`, and take no payload
 - a system key may list one account's rows with `?owner=<id>`; any other caller still gets 422
+- an undeclared name in a prop default is B0111, and for a `str` prop the fix says to quote the text; existing code with that mistake stops building
+- B0792 reports a job or route handler whose imports need the browser runtime, before its worker or route starts, and the startup error names the module to fix
+- `brain jobs enqueue` no longer requires `--payload`; it defaults to `{}` and the job's schema still validates it
+- a backend that cannot be reached logs its transport cause again
 
 ## [0.8.8] - 2026-11-01
 

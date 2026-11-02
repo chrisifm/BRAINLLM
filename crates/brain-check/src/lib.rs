@@ -622,6 +622,19 @@ impl<'a> Checker<'a> {
     // ───────────────────────── script ─────────────────────────
 
     fn script(&mut self) {
+        // A prop default is an expression: `kind:str=complaint` compiles to a read of a name that does not exist.
+        for p in &self.c.props {
+            let Some(default) = &p.default else { continue };
+            let before = self.diags.len();
+            self.expr(default);
+            if p.ty == PropType::Str
+                && let Expr::Ident(id) = default
+            {
+                for d in self.diags[before..].iter_mut().filter(|d| d.code == "B0111") {
+                    d.fix = format!("a prop default is an expression: quote the text, `{}:str=\"{}\"`", p.name, id.name);
+                }
+            }
+        }
         let c = self.c;
         for s in &c.script {
             // Top-level declarations initialised with a primitive are the legal place for sig/drv/ref.

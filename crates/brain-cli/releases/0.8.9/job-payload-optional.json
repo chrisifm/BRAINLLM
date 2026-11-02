@@ -1,0 +1,9 @@
+{
+  "id": "job-payload-optional",
+  "kind": "fix",
+  "title": "Optional job payload",
+  "why": "A job that takes no input still had to pass an empty payload.",
+  "changelog": [
+    "`brain jobs enqueue` no longer requires `--payload`; it defaults to `{}` and the job's schema still validates it"
+  ]
+}

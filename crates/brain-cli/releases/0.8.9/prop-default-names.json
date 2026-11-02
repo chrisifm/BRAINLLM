@@ -1,0 +1,9 @@
+{
+  "id": "prop-default-names",
+  "kind": "fix",
+  "title": "Undeclared names in prop defaults",
+  "why": "`kind:str=complaint` passed brain check and failed on every server render.",
+  "changelog": [
+    "an undeclared name in a prop default is B0111, and for a `str` prop the fix says to quote the text; existing code with that mistake stops building"
+  ]
+}

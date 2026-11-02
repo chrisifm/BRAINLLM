@@ -1580,6 +1580,26 @@ pub fn job_warnings(root: &Path) -> Vec<Finding> {
     }).collect()
 }
 
+/// A handler that imports a browser module compiles on its own and only fails when its worker or route starts: a job
+/// restarted 48 times before anyone saw it. The same bundling the process does, before anything starts.
+pub fn handler_bundle_problems(root: &Path) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for kind in ["jobs", "routes"] {
+        let Ok(entries) = fs::read_dir(root.join("server").join(kind)) else { continue };
+        let mut names: Vec<String> = entries.flatten().filter(|e| e.path().join("handler.jsbrain").is_file()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        for name in names {
+            let rel = format!("server/{kind}/{name}/handler.jsbrain");
+            if let Err(message) = server_module(root, &rel)
+                && message.contains("which the build did not emit")
+            {
+                out.push((rel, message));
+            }
+        }
+    }
+    out
+}
+
 /// A worker restarted with the server needs a moment to report in: no warning until it has had that moment.
 const WORKER_START_GRACE_SECONDS: u64 = 10;
 
@@ -1712,7 +1732,7 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
     let environment = crate::env::name(args, "development");
     let op = args.first().map(String::as_str).unwrap_or("");
     if !matches!(op, "enqueue" | "status" | "work" | "prune" | "dead" | "retry" | "stats" | "cron") {
-        return Err("usage: brain jobs enqueue <queue> --payload '<json>' [--key K] [--priority N] [--delay S] | status <id> | work <queue> [--concurrency 2] | dead <queue> | retry <queue> [--id <uuid>] | stats [queue] | cron [--once] | prune".into());
+        return Err("usage: brain jobs enqueue <queue> [--payload '<json>'] [--key K] [--priority N] [--delay S] | status <id> | work <queue> [--concurrency 2] | dead <queue> | retry <queue> [--id <uuid>] | stats [queue] | cron [--once] | prune".into());
     }
     let snapshot = inspect(&root)?;
     let long_running = matches!(op, "work" | "cron");
@@ -1763,7 +1783,7 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
 
         match op {
             "enqueue" => {
-                let payload = crate::flag(args, "--payload").ok_or("Missing --payload JSON")?;
+                let payload = crate::flag(args, "--payload").unwrap_or_else(|| "{}".to_string());
                 let payload: Value =
                     serde_json::from_str(&payload).map_err(|_| "Invalid payload JSON")?;
                 let payload = job_contract
@@ -2206,6 +2226,20 @@ mod tests {
         assert_eq!(codes(&[], &daily, 0), ["B0767"]);
         // Negative: a worker and a scheduler silence them.
         assert!(codes(&[row("mail", 78, 1, true)], &daily, 1).is_empty());
+    }
+
+    #[test]
+    fn a_handler_importing_a_browser_module_is_found_before_it_starts() {
+        let (root, _) = roles_app(&[
+            ("server/lib/data.jsbrain", "import { resource } from 'brain'\nexport const rows = resource('/x')\n"),
+            ("server/jobs/mail/handler.jsbrain", "<meta server>\nimport { rows } from '../../lib/data.jsbrain'\nexport default async function handle(ctx) { return rows }\n"),
+        ]);
+        let found = handler_bundle_problems(&root);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].0, "server/jobs/mail/handler.jsbrain");
+        assert!(found[0].1.contains("add `<meta server>` to server/lib/data.jsbrain"), "{}", found[0].1);
+        std::fs::write(root.join("server/lib/data.jsbrain"), "<meta server>\nexport const rows = []\n").unwrap();
+        assert!(handler_bundle_problems(&root).is_empty());
     }
 
     #[test]

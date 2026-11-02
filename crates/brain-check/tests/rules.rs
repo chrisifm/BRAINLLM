@@ -292,3 +292,13 @@ fn an_app_shell_without_head_is_reported() {
     assert!(codes_with("app.brain", "<html><head><title>a</title></head><body><slot /></body></html>", &ctx).is_empty());
     assert!(codes_with("comp/x.brain", "<p>x</p>", &ctx).is_empty());
 }
+
+#[test]
+fn prop_default_with_an_undeclared_name_is_b0111_and_says_to_quote_text() {
+    let src = "<meta props=\"kind:str=complaint\">\n<p>{kind}</p>\n";
+    let c = brain_parse::parse(src, Path::new("comp/x.brain")).unwrap();
+    let d = brain_check::check(&c, &Ctx::default());
+    let hit = d.iter().find(|d| d.code == "B0111").unwrap_or_else(|| panic!("{d:?}"));
+    assert!(hit.fix.contains("kind:str=\"complaint\""), "{}", hit.fix);
+    assert!(!codes("<meta props=\"kind:str='complaint' n:num=1 a:list=[]\">\n<p>{kind}{n}{a.length}</p>\n").contains(&"B0111"));
+}

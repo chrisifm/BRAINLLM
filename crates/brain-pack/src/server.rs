@@ -47,7 +47,7 @@ pub fn emit(
             return Ok(Some("./content.mjs".to_string()));
         }
         if let Some(name) = spec.strip_prefix("/@brain/") {
-            return runtime_url(name).map(Some).ok_or_else(|| format!("{rel}: imports `{spec}`, which the build did not emit"));
+            return runtime_url(name).map(Some).ok_or_else(|| format!("{rel}: imports `{spec}`, which the build did not emit; fix: add `<meta server>` to {rel}, because code that runs on the server cannot use browser runtime modules"));
         }
         if spec.starts_with("./") || spec.starts_with("../") {
             let target = normalize(&dir.join(spec)).ok_or_else(|| format!("{rel}: `{spec}` points outside the app"))?;

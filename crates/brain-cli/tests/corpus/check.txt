@@ -621,6 +621,16 @@ export default async function handle(ctx) {
 <meta server>
 export default { x: 'str' }
 
+### B0792 job handler importing a browser module
+@expect B0792 server/jobs/probe/handler.jsbrain 1:1
+@file server/lib/data.jsbrain
+import { resource } from 'brain'
+export const rows = resource('/x')
+@file server/jobs/probe/handler.jsbrain
+<meta server>
+import { rows } from '../../lib/data.jsbrain'
+export default async function handle(ctx) { return rows }
+
 ### B1823 frontmatter date
 @file content/blog/bad.md
 ---

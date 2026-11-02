@@ -148,7 +148,7 @@ granular:
   brain release-check [--env production] [--url <origin>] [--json]  one gate before a release: doctor, secrets, build output, SEO and the live checks
   brain media setup-gcs|list|cleanup  private media provisioning/library/owned cleanup
   brain e2e probe|run                 opt-in Claude/Codex Viewer scenarios plus AX/heap gates
-  brain backend <serve|migrate|approve-contract|capabilities|schema|bootstrap-admin>  experimental Rust/Postgres resource API (loopback); serve --with-workers also runs the queues
+  brain backend <serve|migrate|approve-contract|capabilities|schema|bootstrap-admin|keys|logs>  experimental Rust/Postgres resource API (loopback); serve --with-workers also runs the queues
   brain data prepare|maintain [--apply] after an import or periodically: statistics on declared filters, lz4 storage, vacuum, warm-up and a buffers-per-row gate; prepare also rewrites stored rows
   brain analytics <report|funnel|segment>  usage reports over the behavior events the backend stores
   brain risk <name> [--measure]       what changing a symbol can break, with its evidence
@@ -788,6 +788,10 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
             for (code, file, message, fix) in backend::role_warnings(&app).into_iter().chain(backend::job_warnings(&app)) {
                 let mut diag = compiler::Diag::new(code, &file, brain_parse::Span::default(), message, fix);
                 diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
+            }
+            for (file, message) in backend::handler_bundle_problems(&app) {
+                let mut diag = compiler::Diag::new("B0792", &file, brain_parse::Span::default(), message, "add `<meta server>` to the imported module, or import a plain .js file");
+                diag.line=1;diag.col=1;diags.push(diag);
             }
             for (file, message) in route_executor::gateway_conflicts(&app) {
                 let mut diag = compiler::Diag::new("B0750", &file, brain_parse::Span::default(), message,

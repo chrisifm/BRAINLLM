@@ -1,0 +1,9 @@
+{
+  "id": "backend-transport-log",
+  "kind": "fix",
+  "title": "Transport cause in backend logs",
+  "why": "The busy-bridge log branch dropped the code that names why the backend was unreachable.",
+  "changelog": [
+    "a backend that cannot be reached logs its transport cause again"
+  ]
+}
