@@ -57,6 +57,19 @@ fn configuration_bounds_are_enforced() {
     assert!(limiter.admit(Uuid::new_v4(), 10));
 }
 
+#[test]
+fn visitor_limiter_never_tracks_more_than_its_cap() {
+    // the visitor id comes from the browser: fresh ids inside one minute must not grow the map past its cap
+    let limiter = analytics::Limiter::with_capacity(10, 100);
+    for _ in 0..1_000 {
+        assert!(limiter.admit(Uuid::new_v4(), 1));
+        assert!(limiter.tracked() <= 100, "tracked {} visitors", limiter.tracked());
+    }
+    let kept = Uuid::new_v4();
+    assert!(limiter.admit(kept, 10));
+    assert!(!limiter.admit(kept, 1), "a visitor inside the cap keeps its window");
+}
+
 const BROWSER: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15";
 const ORIGIN: &str = "https://shop.example.test";
 
