@@ -1162,6 +1162,39 @@ fn cmd_check(args: &[String]) -> ExitCode {
     if diags.iter().all(|d| d.is_warning()) { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
 
+/// Chunks of earlier builds still inside their day of grace, with the moment each stopped being produced kept in
+/// `.brain/stale-chunks.json`: a chunk's own mtime says when it was written, which can be long before it went stale.
+fn previous_chunks(root: &Path, dist: &Path, current: &dyn Fn(&str) -> bool) -> std::collections::BTreeSet<String> {
+    const GRACE_SECS: u64 = 24 * 60 * 60;
+    let ledger = root.join(".brain/stale-chunks.json");
+    let known: std::collections::BTreeMap<String, u64> = std::fs::read_to_string(&ledger).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let mut fresh = std::collections::BTreeMap::new();
+    for folder in ["_b", "_server"] {
+        let mut stack = vec![dist.join(folder)];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                let rel = path.strip_prefix(dist).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+                if current(&rel) {
+                    continue;
+                }
+                let since = known.get(&rel).copied().unwrap_or(now);
+                if now.saturating_sub(since) < GRACE_SECS {
+                    fresh.insert(rel, since);
+                }
+            }
+        }
+    }
+    let _ = std::fs::create_dir_all(root.join(".brain"));
+    let _ = std::fs::write(&ledger, serde_json::to_string(&fresh).unwrap_or_default());
+    fresh.into_keys().collect()
+}
+
 pub(crate) struct BuildReport {
     pub files: Vec<String>,
     pub warnings: Vec<String>,
@@ -1685,8 +1718,9 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
     }
     rep.written = written;
     rep.unchanged = unchanged;
-    // dist/ is pure build output: anything this build did not produce (stale chunks, a sitemap from another
-    // environment, removed pages) is deleted, so a deploy never ships leftovers
+    // dist/ is pure build output: anything this build did not produce (a sitemap from another environment, removed
+    // pages) is deleted, so a deploy never ships leftovers. Hashed chunks are the exception: a running server and open
+    // tabs still load the previous build's, so each one stays for a day after it stopped being produced.
     fn sweep(dir: &Path, dist: &Path, keep: &dyn Fn(&str) -> bool) {
         let Ok(rd) = std::fs::read_dir(dir) else { return };
         for e in rd.flatten() {
@@ -1702,7 +1736,8 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
             }
         }
     }
-    let keep = |rel: &str| out.files.contains_key(rel) || out.binary.contains_key(rel);
+    let graced = previous_chunks(root, dist, &|rel| out.files.contains_key(rel) || out.binary.contains_key(rel));
+    let keep = |rel: &str| out.files.contains_key(rel) || out.binary.contains_key(rel) || graced.contains(rel);
     sweep(dist, dist, &keep);
     rep.report = out
         .report

@@ -950,6 +950,7 @@ export function createServer(o = {}) {
   const trace = e => {
     const out = { stack: String((e && e.stack) || e) }
     if (e instanceof HttpError && (OWN_CAUSES.has(e.message) || e.message.startsWith('Native authentication is unavailable:'))) out.cause = e.message
+    if (e && e.code === 'ERR_MODULE_NOT_FOUND') out.fix = 'this process runs an older build whose files are gone; restart it after brain build'
     if (e && CODE_SHAPE.test(e.transport || '')) out.transport = e.transport
     if (e && typeof e.code === 'string' && CODE_SHAPE.test(e.code)) out.backendCode = e.code
     if (e && e.kind === 'budget' && /^B09\d\d$/.test(e.code) && typeof e.budget === 'string' && /^[a-zA-Z]{1,16}$/.test(e.budget)) {
