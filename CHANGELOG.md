@@ -7,6 +7,15 @@ diagnostics that reject code an earlier version accepted.
 Every npm package (`@christianirack/brainllm`, its seven native platform packages, `brainllm-runtime`,
 `create-brainllm` and `create-brainll`) ships the same version as `[workspace.package]` in `Cargo.toml`.
 
+## [Unreleased]
+
+- an operation `read` step applies the resource's read policy and answers 404 for a row the caller cannot read, as for a missing one; B0809 no longer reports read steps
+- `route-failed` names the error class, the app file and line that threw and, when the backend client raised it, the backend's status, code and field names; never the message
+- `backend-request-failed` carries the answer's error code, such as `OVERLOADED` when every route executor is busy
+- a `captcha-unavailable` log line names why the captcha could not be verified, such as `secret-not-set`
+- B0740 and B0743 log each refused origin once until the server restarts
+- `brain test` and `brain doctor` retry once when the browser connection breaks, and a second failure names probable machine load with the 1-minute load average
+
 ## [0.8.9] - 2026-11-02
 
 Upgrade with `npm install -D @christianirack/brainllm@0.8.9 --save-exact`.

@@ -1,0 +1,9 @@
+{
+  "id": "operation-read-policy",
+  "kind": "fix",
+  "title": "Operation read steps apply the read policy",
+  "why": "A read step returned any row by id to every role the operation admits, so it confirmed other users' private rows.",
+  "changelog": [
+    "an operation `read` step applies the resource's read policy and answers 404 for a row the caller cannot read, as for a missing one; B0809 no longer reports read steps"
+  ]
+}

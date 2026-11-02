@@ -1,0 +1,9 @@
+{
+  "id": "request-log-code",
+  "kind": "fix",
+  "title": "Error code in failed request lines",
+  "why": "A 503 or 403 line in the backend log did not say which refusal the client received.",
+  "changelog": [
+    "`backend-request-failed` carries the answer's error code, such as `OVERLOADED` when every route executor is busy"
+  ]
+}

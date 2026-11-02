@@ -1,0 +1,9 @@
+{
+  "id": "captcha-unavailable-reason",
+  "kind": "fix",
+  "title": "Reason for an unavailable captcha",
+  "why": "A 503 CAPTCHA_UNAVAILABLE left no log line saying whether the secret was missing or the provider failed.",
+  "changelog": [
+    "a `captcha-unavailable` log line names why the captcha could not be verified, such as `secret-not-set`"
+  ]
+}
