@@ -34,8 +34,8 @@ fn one_page_per_locale_with_its_dictionary() {
         .filter(|p| p.extension().is_some_and(|x| x == "js") && !p.ends_with("brain-dev.js") && !p.ends_with("brain-inspect.js"))
         .map(|p| (p.file_name().unwrap().to_string_lossy().into_owned(), std::fs::read_to_string(&p).unwrap()))
         .collect();
-    // the kit, embedded like the CLI does (`ui/<name>.brain`)
-    for e in std::fs::read_dir(rt.join("ui")).unwrap().flatten() {
+    // the kit, embedded like the CLI does (`ui/<name>.brain`); a local `.brain/` state folder there is not part of it
+    for e in std::fs::read_dir(rt.join("ui")).unwrap().flatten().filter(|e| e.path().extension().is_some_and(|x| x == "brain")) {
         siblings.push((format!("ui/{}", e.file_name().to_string_lossy()), std::fs::read_to_string(e.path()).unwrap()));
     }
     let r2 = root.clone();
