@@ -34,7 +34,7 @@ w('pricing.html', '<!doctype html><title>Pricing</title><main><h1>Pricing</h1></
 w('pricing.md', '# Pricing\n')
 w('about.html', '<!doctype html><title>About</title><main><h1>About</h1></main>')
 w('_server/manifest.json', JSON.stringify({
-  v: 1, build: 'b1', core: '/_b/core.js',
+  v: 1, build: 'b1', core: '/_b/core.js', redirects: { slash: 'ignore' },
   routes: [
     { path: '/posts/:slug', rx: '^/posts/(?<slug>[^/]+)/?$', view: '/_b/post.js', layouts: [], server: '_server/post.mjs', page: '_server/pages/post.html' },
     { path: '/places/:id', rx: '^/places/(?<id>[^/]+)/?$', view: '/_b/post.js', layouts: [], server: '_server/place.mjs', page: '_server/pages/place.html' },
@@ -65,6 +65,11 @@ test('SSR: a literal root-relative canonical keeps the origin the build wrote in
   const h = await (await get('/places/a')).text()
   assert.match(h, /<link rel="canonical" href="https:\/\/x\.test\/places">/)
   assert.match(h, /<meta property="og:url" content="https:\/\/x\.test\/places">/)
+})
+
+test('SSR: with trailingSlash "ignore" the canonical of a slash URL is the form the sitemap lists', async () => {
+  const h = await (await get('/posts/hello/')).text()
+  assert.match(h, /<link rel="canonical" href="https:\/\/x\.test\/posts\/hello">/)
 })
 
 test('SSR: an explicit jsonld wins over the schema shortcut', async () => {
