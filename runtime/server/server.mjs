@@ -1825,8 +1825,9 @@ export function createServer(o = {}) {
       const variant = urlVariant(req)
       if (variant) return send(res, 301, '', { location: variant, 'cache-control': 'public, max-age=3600' })
       if (req.url.startsWith('//')) return notFound(req, res)
+      const host = req.headers.host || 'localhost'
       let full
-      try { full = new URL(req.url, 'http://' + (req.headers.host || 'localhost')) } catch { return send(res, 400, 'Bad Request') }
+      try { full = new URL(req.url, 'http://' + host) } catch { return send(res, 400, 'Bad Request') }
       // /_health stays at the root: the supervisor calls it there whatever the base
       if (full.pathname === '/_health' || full.pathname === BASE + '_health') return send(res, 200, json({ ok: true, build: mf.build || null }), { 'content-type': MIME['.json'], 'cache-control': 'no-store' })
       let url = full
