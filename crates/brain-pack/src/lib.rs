@@ -2241,6 +2241,11 @@ fn build_inner_with_options(
             }
         }
         ledger.push(ledger::page(&p.route,&p.file,&p.html,&base,&files,&binary,&sources)?);
+        // A page rendered per request (`_server/pages`) has no `.gz` beside it: the server compresses the response,
+        // so it is measured compressed like a prerendered page instead of raw.
+        let page_gz: Option<Vec<u8>> = binary.get(&format!("{}.gz", p.file)).cloned().or_else(|| {
+            p.file.starts_with("_server/").then(|| cached_bytes(&root, "gz", p.html.as_bytes(), || Ok(gzip::gzip(p.html.as_bytes(), 15))).unwrap_or_else(|_| gzip::gzip(p.html.as_bytes(), 15)))
+        });
         report.push(ReportRow {
             route: p.route.clone(),
             js_raw,
@@ -2249,8 +2254,8 @@ fn build_inner_with_options(
             css,
             css_gz,
             html: p.html.len(),
-            html_gz: transfer_size(p.html.as_bytes(), binary.get(&format!("{}.gz", p.file)).map(Vec::as_slice)),
-            html_shared: shared_html_size(&p.html, binary.get(&format!("{}.gz", p.file)).map(Vec::as_slice)),
+            html_gz: transfer_size(p.html.as_bytes(), page_gz.as_deref()),
+            html_shared: shared_html_size(&p.html, page_gz.as_deref()),
         });
     }
     optimizations.sort_by(|a,b|(&a.source,a.stage).cmp(&(&b.source,b.stage)));

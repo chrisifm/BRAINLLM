@@ -432,7 +432,10 @@ mod tests {
                 None,
             )
             .unwrap();
-            let gate = crate::budget::enforce(root, &report.report);
+            let gate = crate::budget::enforce(root, &report.report, &crate::budget::document("production", true));
+            // pages rendered per request are compressed by the server, so they count compressed like prerendered ones
+            let dynamic = &report.report.iter().find(|(route, _)| route == "/admin/posts/:id").expect("dynamic admin page").1;
+            assert!(dynamic[6] < dynamic[5], "{label}: per-request HTML measured raw: {dynamic:?}");
             let rows: Vec<Value> = report
                 .ledger
                 .iter()

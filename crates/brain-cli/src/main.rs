@@ -1294,12 +1294,16 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
         rep.warnings.push(format!("{} changed while this build ran, so the output may mix revisions; fix: build again", edited.join(", ")));
     }
     rep.metrics = metrics.finish();
-    let budget_error = budget::enforce(root, &rep.report).err();
+    let (budget_error, budget_warnings) = match budget::enforce(root, &rep.report, &budget::document(env_name, site.is_some())) {
+        Ok(near) => (None, near),
+        Err(e) => (Some(e), vec![]),
+    };
+    rep.warnings.extend(budget_warnings.iter().cloned());
     if budget_error.is_none() {
         let feedback:serde_json::Value=serde_json::from_str(&build_json(&rep).stringify()).map_err(|_| "build feedback serialization failed".to_string())?;
         if quality::record_build(root,&feedback).is_err() {rep.warnings.push("Build succeeded but private quality feedback could not be stored; inspect brain quality refresh".into());}
     }
-    Ok(build_assessment::Assessment { report: rep, budget_error })
+    Ok(build_assessment::Assessment { report: rep, budget_error, budget_warnings })
 }
 
 /// Production hash length per file: 4 base36 chars, 5 for every file whose 4-char hash collides with another's.
@@ -1881,7 +1885,7 @@ fn cmd_build(args: &[String]) -> Result<(), BuildError> {
     }
     if mode != term::Mode::Off {
         let views: Vec<term::ViewSize> = rep.report.iter().map(|(r, n)| term::ViewSize { route: r.clone(), js_gz: n[2], css_gz: n[4], html_gz: n[6].saturating_sub(n[7]) }).collect();
-        let budget = budget_view_kb(&root).map(|kb| kb * 1024);
+        let budget = budget_view_bytes(&root);
         let s = term::Summary { views: &views, budget, written: rep.written, unchanged: rep.unchanged, signature: Some(&rep.signature).filter(|s| !s.is_empty()).map(String::as_str), seo: rep.seo, took: pr.elapsed(), warnings: rep.warnings.len() };
         print!("{}", term::summary(pr.paint(), &s));
     }
@@ -1976,11 +1980,12 @@ fn cmd_start(args: &[String]) -> ExitCode {
     }
 }
 
-/// `brain.json` → `"budget": { "viewKB": N }` (gz bytes per view, INTERNALS §16).
-fn budget_view_kb(root: &Path) -> Option<usize> {
+/// `brain.json` → `"budget": { "viewKB": N }` in bytes (gz bytes per view, INTERNALS §16). A fractional limit keeps its
+/// fraction, so the report marks a route over budget exactly when the build gate fails it.
+fn budget_view_bytes(root: &Path) -> Option<usize> {
     let j = brain_mcp::Json::parse(&std::fs::read_to_string(root.join("brain.json")).ok()?).ok()?;
     match j.get("budget")?.get("viewKB")? {
-        brain_mcp::Json::Num(n) if *n > 0.0 => Some(*n as usize),
+        brain_mcp::Json::Num(n) if *n > 0.0 => Some((*n * 1024.0) as usize),
         _ => None,
     }
 }

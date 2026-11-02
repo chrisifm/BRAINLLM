@@ -537,7 +537,13 @@ Pin browser, OS, fonts and app data for stable comparisons. The accessibility ou
 it is not an AX-tree diff or a complete layout model. MCP `brain_shot` offers the same comparison for one viewport.
 PNG decoding is bounded by bytes, dimensions and a deadline. Output/baseline paths reject traversal and symlinks.
 Build `budget.viewKB` measures emitted JS + CSS + HTML per route (KiB=1024 bytes), including dynamic dependencies
-conservatively, excluding media/fonts. It uses gzip sizes when emitted and raw bytes otherwise. Invalid or unknown
+conservatively, excluding media/fonts. It uses gzip sizes when emitted and raw bytes otherwise; a page rendered per
+request (`_server/pages`) counts gzip-compressed, as the server compresses its response (2026-11-02). Every budget
+message names the document it measured: the environment, its `.brain_env` values on this machine, and whether pages
+carry absolute URLs (`brain doctor` builds with a placeholder site so SEO can score them, `brain build` without one,
+which is why the two can differ by the length of those URLs). A route within max(2% of the limit, 256 bytes) passes
+with a warning in the build and in doctor's `build.budget.warnings`: the HTML carries environment values, so the same
+commit can fail on another machine (2026-11-02). Invalid or unknown
 budget fields fail instead of silently disabling enforcement. `mountMs` p95 and `heapMB` remain planned and are
 rejected explicitly until a real browser measurement contract is implemented.
 
