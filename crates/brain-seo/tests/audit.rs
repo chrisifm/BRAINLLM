@@ -307,6 +307,31 @@ fn cli_audit_reads_keywords_from_the_caller() {
 }
 
 #[test]
+fn cli_audit_warns_when_a_source_changed_after_the_build() {
+    let dir = fresh_dir("cli-stale");
+    std::fs::create_dir_all(dir.join("views")).unwrap();
+    std::fs::write(dir.join("brain.json"), r#"{"site":"https://acme.dev"}"#).unwrap();
+    std::fs::write(dir.join("views/pricing.brain"), "<main></main>").unwrap();
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+    for f in ["brain.json", "views/pricing.brain"] {
+        std::fs::File::options().write(true).open(dir.join(f)).unwrap().set_modified(old).unwrap();
+    }
+    for p in good_site() {
+        let f = dir.join("dist").join(&p.file);
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(f, p.html).unwrap();
+    }
+    let (_, fresh) = brain_seo::cli(&dir, &["audit".into()]);
+    assert!(!fresh.contains("previous build"), "{fresh}");
+    let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
+    std::fs::File::options().write(true).open(dir.join("views/pricing.brain")).unwrap().set_modified(later).unwrap();
+    let (_, stale) = brain_seo::cli(&dir, &["audit".into()]);
+    assert!(stale.starts_with("warning: dist/ was built before views/pricing.brain changed") && stale.contains("`brain build`"), "{stale}");
+    let (_, json) = brain_seo::cli(&dir, &["audit".into(), "--json".into()]);
+    assert!(json.contains("\"staleDist\""), "{json}");
+}
+
+#[test]
 fn noindex_and_canonicalized_pages_are_not_scored() {
     let c = cfg();
     let mut pages = good_site();

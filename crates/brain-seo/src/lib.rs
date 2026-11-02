@@ -1402,14 +1402,67 @@ pub fn cli_with(root: &Path, args: &[String], keyword: &dyn Fn(&str) -> Option<S
         r.min_score = 0;
     }
     let code = if r.ok() { 0 } else { 1 };
+    // the audit reads the last build: a source edited after it is not in these findings yet
+    let stale = stale_source(root).map(|file| format!("dist/ was built before {file} changed, so this audit reads the previous build; fix: `brain build`, then audit again"));
     (
         code,
         if json {
-            r.to_json().stringify()
+            match (r.to_json(), &stale) {
+                (Json::Obj(mut kv), Some(w)) => {
+                    kv.push(("staleDist".into(), Json::str(w)));
+                    Json::Obj(kv).stringify()
+                }
+                (j, _) => j.stringify(),
+            }
         } else {
-            r.text()
+            match &stale {
+                Some(w) => format!("warning: {w}\n{}", r.text()),
+                None => r.text(),
+            }
         },
     )
+}
+
+/// The newest app source (views, components, content, `app.brain`, `brain.json`, ...) changed after `dist/` was built.
+fn stale_source(root: &Path) -> Option<String> {
+    let built = ["dist/_server/manifest.json", "dist/index.html", "dist/sitemap.xml"]
+        .iter()
+        .filter_map(|f| std::fs::metadata(root.join(f)).and_then(|m| m.modified()).ok())
+        .max()?;
+    fn newest(dir: &Path, out: &mut Option<(std::time::SystemTime, std::path::PathBuf)>, depth: usize) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let path = e.path();
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('.') || matches!(name.as_ref(), "node_modules" | "dist" | "target") {
+                continue;
+            }
+            let Ok(meta) = e.metadata() else { continue };
+            if meta.is_dir() {
+                if depth < 8 {
+                    newest(&path, out, depth + 1);
+                }
+            } else if let Ok(t) = meta.modified()
+                && out.as_ref().is_none_or(|(n, _)| t > *n)
+            {
+                *out = Some((t, path));
+            }
+        }
+    }
+    let mut found = None;
+    for dir in ["views", "comp", "ui", "content", "lib", "public"] {
+        newest(&root.join(dir), &mut found, 0);
+    }
+    for file in ["app.brain", "brain.json", "tokens.cssbrain", "redirects.json"] {
+        if let Ok(t) = std::fs::metadata(root.join(file)).and_then(|m| m.modified())
+            && found.as_ref().is_none_or(|(n, _)| t > *n)
+        {
+            found = Some((t, root.join(file)));
+        }
+    }
+    let (t, path) = found?;
+    (t > built).then(|| path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/"))
 }
 
 /// `brain seo indexnow`: the sitemap URLs (≥ `since`) as an IndexNow request; printed with `dry_run`, else sent.
