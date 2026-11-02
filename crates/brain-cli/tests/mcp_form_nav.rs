@@ -66,8 +66,10 @@ fn submit_that_navigates_does_not_ask_to_leave() {
     let dirty = tool(&mut call, "brain_eval", r#"{"expr":"[...(globalThis.__brainDirty || [])].some(f => f.dirty && !f.busy)"}"#);
     assert!(dirty.contains("\"value\":true"), "the control form must actually be dirty: {dirty}");
     let r = tool(&mut call, "brain_eval", r#"{"expr":"(globalThis.__brainNavigate || ((u) => location.assign(u)))('/about'), 1"}"#);
-    let later = tool(&mut call, "brain_eval", r#"{"expr":"location.pathname"}"#);
-    assert!(r.contains("dialogs") || later.contains("dialogs") || later.contains("/new"), "{r} {later}");
+    // long enough for a client navigation that ignored the form to finish
+    let later = tool(&mut call, "brain_eval", r#"{"expr":"new Promise(r => setTimeout(r, 1500)).then(() => location.pathname)"}"#);
+    assert!(r.contains("dialogs") || later.contains("dialogs"), "{r} {later}");
+    assert!(later.contains("/new"), "{r} {later}");
     assert!(tool(&mut call, "brain_run_stop", "{}").contains("stopped"));
     let _ = p.kill();
     let _ = p.wait();

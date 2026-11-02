@@ -188,6 +188,12 @@ async function loading(url, mine) {
     if (d.v && mine === seq) await route({ v: d.v, l: d.l, p: {} });
   } catch {}
 }
+// A form() with unsaved changes asks before leaving, as brain-router.js does; one being submitted does not
+const leave = () => {
+  for (const f of globalThis.__brainDirty || []) if (f.dirty && !f.busy) return confirm('Leave this page? Changes you made will not be saved.');
+  return true;
+};
+let here = location.href;
 async function go(url, push) {
   // same event as brain-router.js: brain-data aborts background requests (priority low, prefetch) on it
   dispatchEvent(new CustomEvent('brain:navigate', { detail: { url } }));
@@ -204,6 +210,7 @@ async function go(url, push) {
     if (!json || doc.documentElement.lang !== document.documentElement.lang) return location.assign(url);
     // the scroll of the page we leave, restored when back/forward returns to it (brain-router.js does the same)
     if (push) history.replaceState({ ...history.state, y: scrollY }, ''), history.pushState({ y: 0 }, '', url);
+    here = location.href;
     document.title = doc.title;
     // the head tags a view sets (seo/head): description, canonical, robots, Open Graph, Twitter, JSON-LD
     const seoTags = 'meta[name=description],link[rel=canonical],meta[name=robots],meta[property^="og:"],meta[name^="twitter:"],script[type="application/ld+json"]';
@@ -244,7 +251,7 @@ function landed(url) {
 if (document.body) say('');
 else addEventListener('DOMContentLoaded', () => say(''));
 // navigate() and a form's { redirect } take this path: brain-router.js has no running router under `brain run`
-window.__brainDevGo = (url, replace) => (replace ? (history.replaceState(history.state, '', url), go(new URL(url, location.href).href, false)) : go(new URL(url, location.href).href, true));
+window.__brainDevGo = (url, replace) => !leave() ? undefined : (replace ? (history.replaceState(history.state, '', url), go(new URL(url, location.href).href, false)) : go(new URL(url, location.href).href, true));
 addEventListener('click', e => {
   const a = e.target.closest?.('a[href]');
   if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || a.target || a.hasAttribute('download')) return;
@@ -252,9 +259,9 @@ addEventListener('click', e => {
   if (u.origin !== location.origin || u.pathname.startsWith(base + '/@brain/') || /\.[a-z0-9]+$/i.test(u.pathname)) return;
   if (u.pathname === location.pathname && u.hash) return;
   e.preventDefault();
-  go(u.href, true);
+  if (leave()) go(u.href, true);
 });
-addEventListener('popstate', () => go(location.href, false));
+addEventListener('popstate', () => (leave() ? go(location.href, false) : history.pushState(history.state, '', here)));
 // active links (§41.5, as brain-router.js): every internal <a href> to the current page gets aria-current="page"
 function current() {
   for (const a of document.querySelectorAll('a[href]')) {
