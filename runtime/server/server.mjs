@@ -1706,6 +1706,15 @@ export function createServer(o = {}) {
     const href = tag && /\bhref="(https?:\/\/[^"<>\s]+)"/.exec(tag)?.[1].replaceAll('&amp;', '&')
     return href && URL.canParse(href) && !/\/[:*]/.test(new URL(href).pathname) ? { link: `<${href}>; rel="canonical"` } : {}
   }
+  // What exists whatever the routes say: generated sitemaps, built files and the icon browsers ask for by habit.
+  async function serveFixed(req, res, url) {
+    if (DYN.length && /^\/sitemap(-static|-dynamic(-\d+)?)?\.xml$/.test(url.pathname) && (await serveSitemap(req, res, url))) return true
+    if (serveStatic(req, res, url)) return true
+    if (url.pathname !== '/favicon.ico' || !file('favicon.svg')) return false
+    send(res, 301, '', { location: withBase('/favicon.svg'), 'cache-control': 'public, max-age=86400' })
+    return true
+  }
+
   function serveStatic(req, res, url) {
     const p = publicStaticPath(url.pathname)
     if (p === null) return false
@@ -1867,6 +1876,8 @@ export function createServer(o = {}) {
         if (!m) continue
         // a form page without load is prerendered: GET serves that file (build ETag); only its POST needs the server
         if (!post && route.forms && serveStatic(req, res, url)) return
+        // a parameter never hides a real file: `/[code]` must not swallow /favicon.svg, /sitemap.xml or a prerendered /login
+        if (!post && m.groups && (await serveFixed(req, res, url))) return
         if (!post && serveTwin(req, res, url)) return
         const paged = post ? null : pageParameter(route, url)
         if (paged === 404) return notFound(req, res)
@@ -1874,10 +1885,7 @@ export function createServer(o = {}) {
         return await (post ? formPost : ssr)(req, res, route, m.groups ? { ...m.groups } : {}, url, rid)
       }
       if (post) return send(res, 405, 'Method not allowed', { allow: 'GET, HEAD' })
-      if (DYN.length && /^\/sitemap(-static|-dynamic(-\d+)?)?\.xml$/.test(url.pathname) && (await serveSitemap(req, res, url))) return
-      if (serveStatic(req, res, url)) return
-      // browsers still ask for /favicon.ico: the app's SVG icon answers it
-      if (url.pathname === '/favicon.ico' && file('favicon.svg')) return send(res, 301, '', { location: withBase('/favicon.svg'), 'cache-control': 'public, max-age=86400' })
+      if (await serveFixed(req, res, url)) return
       if (isProbe(url.pathname)) return await answerProbe(req, res, url, rid)
       notFound(req, res)
     } catch (e) {
