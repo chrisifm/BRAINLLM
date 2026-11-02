@@ -22,8 +22,15 @@ struct Rule {
     parts: Vec<Compound>,
     spec: (u32, u32),
     order: usize,
-    color: Option<(String, (f64, f64, f64), Span)>,
-    bg: Option<(String, (f64, f64, f64))>,
+    /// `Some(None)`: the rule sets a color the checker cannot resolve (a `var()` to a gradient, an image, an
+    /// unknown token). It still wins the cascade, so it hides the inherited value instead of letting it through.
+    color: Option<Option<(String, (f64, f64, f64), Span)>>,
+    bg: Option<Option<(String, (f64, f64, f64))>>,
+}
+
+/// Values that paint nothing, so the nearest painted ancestor still shows through.
+fn transparent(v: &str) -> bool {
+    matches!(v.trim().to_ascii_lowercase().as_str(), "none" | "transparent" | "inherit" | "unset" | "initial" | "revert" | "revert-layer")
 }
 
 fn compound(s: &str) -> Option<Compound> {
@@ -48,8 +55,8 @@ fn rules(items: &[CssItem], tokens: &[(String, String)], out: &mut Vec<Rule>) {
                 for d in inner {
                     if let CssItem::Decl { name, value, span } = d {
                         match name.as_str() {
-                            "color" => color = resolve_color(value, tokens).map(|(n, c)| (n, c, *span)),
-                            "background" | "background-color" => bg = resolve_color(value, tokens),
+                            "color" if !transparent(value) && !value.trim().eq_ignore_ascii_case("currentcolor") => color = Some(resolve_color(value, tokens).map(|(n, c)| (n, c, *span))),
+                            "background" | "background-color" if !transparent(value) => bg = Some(resolve_color(value, tokens)),
                             _ => {}
                         }
                     }
@@ -145,11 +152,11 @@ impl Walk<'_> {
                     }
                     let label = |r: &Rule| r.parts.iter().map(|p| format!("{}{}", p.tag.clone().unwrap_or_default(), p.classes.iter().map(|c| format!(".{c}")).collect::<String>())).collect::<Vec<_>>().join(" ");
                     let fg2: Fg = match win_fg {
-                        Some(r) => r.color.clone().map(|(n, c, s)| (n, c, s, r.order, label(r))),
+                        Some(r) => r.color.clone().flatten().map(|(n, c, s)| (n, c, s, r.order, label(r))),
                         None => fg.clone(),
                     };
                     let bg2: Bg = match win_bg {
-                        Some(r) => r.bg.clone().map(|(n, c)| (n, c, r.order, label(r))),
+                        Some(r) => r.bg.clone().flatten().map(|(n, c)| (n, c, r.order, label(r))),
                         None => bg.clone(),
                     };
                     if has_text(&e.children)
@@ -200,7 +207,7 @@ impl Checker<'_> {
     pub(crate) fn cascade_contrast(&mut self, items: &[CssItem], tokens: &[(String, String)]) {
         let mut rs = Vec::new();
         rules(items, tokens, &mut rs);
-        if !rs.iter().any(|r| r.color.is_some()) || !rs.iter().any(|r| r.bg.is_some()) {
+        if !rs.iter().any(|r| matches!(r.color, Some(Some(_)))) || !rs.iter().any(|r| matches!(r.bg, Some(Some(_)))) {
             return;
         }
         let mut w = Walk { rules: &rs, seen: Vec::new(), hits: Vec::new() };
