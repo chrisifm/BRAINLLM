@@ -563,7 +563,7 @@ async fn geo_filters_are_exact_scoped_and_served_by_a_builtin_index() {
     // The filter uses the built-in GiST index.
     let mut conn = pool.acquire().await.unwrap();
     sqlx::raw_sql("SET enable_seqscan=off").execute(&mut *conn).await.unwrap();
-    let plan: Vec<String> = sqlx::query_scalar("EXPLAIN SELECT id FROM _brain_res_sites WHERE point((data#>>'{at,lng}')::float8,(data#>>'{at,lat}')::float8) <@ box(point(-1,-1),point(1,1))").fetch_all(&mut *conn).await.unwrap();
+    let plan: Vec<String> = sqlx::query_scalar("EXPLAIN SELECT id FROM _brain_res_sites WHERE point((query_keys#>>'{at,lng}')::float8,(query_keys#>>'{at,lat}')::float8) <@ box(point(-1,-1),point(1,1))").fetch_all(&mut *conn).await.unwrap();
     assert!(plan.join(" ").contains("_brain_ix_"), "{plan:?}");
     sqlx::raw_sql("RESET enable_seqscan").execute(&mut *conn).await.unwrap();
 }

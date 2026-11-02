@@ -848,7 +848,9 @@ async fn search_over_long_text_keeps_full_text_results() {
     let legacy = "ALTER TABLE _brain_res_listings DISABLE TRIGGER _brain_search; SET statement_timeout=0; UPDATE _brain_res_listings SET search_text=search_text||' '||coalesce(data->>'description',''); ALTER TABLE _brain_res_listings ENABLE TRIGGER _brain_search; RESET statement_timeout; ANALYZE _brain_res_listings;";
     sqlx::raw_sql(legacy).execute(&pool).await.unwrap();
     assert!(longest(pool.clone()).await > bound);
-    let (s, cut) = api.get("/api/listings?search=developr", None).await;
+    // The typo has to reach every row: a rare one is answered from the trigram index whatever the text length, now that
+    // the inline query copy makes the table wide enough for the planner to prefer it.
+    let (s, cut) = api.get("/api/listings?search=retai", None).await;
     assert_eq!((s, cut["degraded"].clone(), cut["total_approximate"].clone()), (200, json!(true), json!(true)), "{cut}");
     let (s, found) = api.get("/api/listings?search=react", None).await;
     assert_eq!((s, found["total"].clone(), found.get("degraded")), (200, json!(1001), None), "{found}");

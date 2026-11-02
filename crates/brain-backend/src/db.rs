@@ -1263,6 +1263,7 @@ pub async fn verify(pool: &PgPool, resources: &[Resource]) -> Result<(), String>
     for r in resources {
         r.validate()?;
         resource_shape(&mut conn, r).await?;
+        crate::query::verify_keys(&mut conn, r).await?;
         crate::relations::verify(&mut conn, r).await?;
         crate::organizations::verify(&mut conn, r, resources).await?;
         crate::audit::verify(&mut conn, r).await?;

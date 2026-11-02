@@ -689,3 +689,83 @@ async fn the_buffer_gate_warns_on_a_list_that_opens_large_documents() {
     assert_eq!(report["resources"][0]["gate"]["ok"], false, "{report}");
     assert!(report["warnings"][0].as_str().unwrap().contains("buffers per row"), "{report}");
 }
+
+#[tokio::test]
+#[ignore]
+async fn lists_filter_sort_and_count_without_opening_the_stored_documents() {
+    // Counted, never timed: TOAST blocks the table's statistics record for one list (filter, sort, total, facet).
+    let items = resource("items", vec![("title", field("str")), ("status", field("enum(open|closed)")), ("rank", field("int")), ("tags", field("list<str,8>")), ("body", field("str"))], json!(["public"]), json!({
+        "filter": {"status": ["eq", "in"], "title": ["eq", "ne", "iprefix"], "rank": ["gte"], "tags": ["has"], "body": ["exists"]},
+        "sort": ["rank", "title"],
+        "facets": ["status"],
+    }));
+    let a = api("brain_shape_keys", vec![items.clone()]).await;
+    let pool = a.pool.clone();
+    let (member, _) = a.user("member@example.test").await;
+    // Random hex barely compresses: every body spans many TOAST chunks. Two titles share their first 256 characters,
+    // and one of them is exactly that long (the longest value a filter accepts).
+    let long = "t".repeat(256);
+    // An autovacuum pass over the TOAST table would count as reads; only the list's own reads are measured.
+    sqlx::query("ALTER TABLE _brain_res_items SET (autovacuum_enabled=false, toast.autovacuum_enabled=false)").execute(&pool).await.unwrap();
+    for i in 0..60 {
+        let title = match i { 0 => long.clone(), 1 => format!("{long}-b"), _ => format!("item {i:02}") };
+        sqlx::query("INSERT INTO _brain_res_items(id,owner,data) SELECT $1,$2,jsonb_build_object('title',$3::text,'status',CASE WHEN $4%3=0 THEN 'closed' ELSE 'open' END,'rank',$4,'tags',jsonb_build_array('x'||($4%2)),'body',(SELECT string_agg(md5(random()::text),'') FROM generate_series(1,2000)))")
+            .bind(Uuid::new_v4()).bind(member).bind(&title).bind(i).execute(&pool).await.unwrap();
+    }
+    // Every pooled connection flushes its pending statistics, so the count includes the list's own reads.
+    let toast = || async {
+        let mut held = Vec::new();
+        for _ in 0..pool.size() {
+            held.push(pool.acquire().await.unwrap());
+        }
+        for conn in held.iter_mut() {
+            sqlx::query("SELECT pg_stat_force_next_flush()").execute(&mut **conn).await.unwrap();
+        }
+        drop(held);
+        sqlx::query_scalar::<_, i64>("SELECT COALESCE(toast_blks_hit,0)+COALESCE(toast_blks_read,0) FROM pg_statio_user_tables WHERE relname='_brain_res_items'").fetch_one(&pool).await.unwrap()
+    };
+    let per_body: i64 = sqlx::query_scalar("SELECT (pg_relation_size(reltoastrelid)/8192/60)::bigint FROM pg_class WHERE relname='_brain_res_items'").fetch_one(&pool).await.unwrap();
+    assert!(per_body >= 4, "each body should span several TOAST blocks: {per_body}");
+    let before = toast().await;
+    let (status, page) = a.get("/api/items?status=open&rank%5Bgte%5D=3&tags%5Bhas%5D=x1&body%5Bexists%5D=true&sort=-rank&limit=2&facets=status&fields=title").await;
+    assert_eq!(status, 200, "{page}");
+    let read = toast().await - before;
+    // The page's two documents (and their index entries), not the 60 the filter, sort, total and facet visit.
+    assert!(read <= 4 * per_body, "{read} TOAST blocks for a two-row page; {per_body} per document: {page}");
+    let ranks: Vec<i64> = page["items"].as_array().unwrap().iter().map(|i| i["data"]["title"].as_str().unwrap()[5..].parse().unwrap()).collect();
+    assert_eq!(ranks, vec![59, 55]);
+    assert_eq!(page["total"], 19, "{page}");
+
+    // The copy holds every key, strings cut at the text key, lists whole.
+    let (title, body, tags): (String, String, Value) = sqlx::query_as("SELECT query_keys->>'title',query_keys->>'body',query_keys->'tags' FROM _brain_res_items WHERE data->>'title'=$1")
+        .bind(format!("{long}-b")).fetch_one(&pool).await.unwrap();
+    assert_eq!((title.chars().count(), body.chars().count(), tags), (256, 256, json!(["x1"])));
+    let defs: Vec<String> = sqlx::query_scalar("SELECT indexdef FROM pg_indexes WHERE tablename='_brain_res_items' AND indexname LIKE '\\_brain\\_ix\\_%'").fetch_all(&pool).await.unwrap();
+    assert!(!defs.is_empty() && defs.iter().all(|d| d.contains("query_keys") && !d.contains("(data")), "{defs:?}");
+
+    // Exact text semantics past the key: the copy of both long titles reads the same, yet equality and difference compare
+    // the whole text.
+    let (_, eq) = a.get(&format!("/api/items?title={long}")).await;
+    assert_eq!(eq["total"], 1, "{eq}");
+    let (_, ne) = a.get(&format!("/api/items?title%5Bne%5D={long}&limit=1")).await;
+    assert_eq!(ne["total"], 59, "{ne}");
+    let (_, prefix) = a.get("/api/items?title%5Biprefix%5D=ITEM%205&limit=1").await;
+    assert_eq!(prefix["total"], 10, "{prefix}");
+    let (_, sorted) = a.get("/api/items?sort=title&limit=2&fields=title").await;
+    let first: Vec<&str> = sorted["items"].as_array().unwrap().iter().map(|i| i["data"]["title"].as_str().unwrap()).collect();
+    assert_eq!(first, vec!["item 02", "item 03"], "{sorted}");
+
+    // The copy stays in the row even when the document leaves it wide: twenty long keys add up past the TOAST threshold,
+    // where a default column would be moved out of line next to the document and every list would open it again.
+    sqlx::query("INSERT INTO _brain_res_items(id,owner,data) SELECT $1,$2,jsonb_build_object('title','wide','status','open','rank',0,'tags','[]'::jsonb,'body','b')||(SELECT jsonb_object_agg('k'||i,(SELECT string_agg(md5(random()::text||i||g),'') FROM generate_series(1,8) g)) FROM generate_series(1,20) i)")
+        .bind(Uuid::new_v4()).bind(member).execute(&pool).await.unwrap();
+    let (size, external): (i32, Option<i64>) = sqlx::query_as("SELECT pg_column_size(query_keys),pg_column_toast_chunk_id(query_keys)::text::bigint FROM _brain_res_items WHERE data->>'title'='wide'").fetch_one(&pool).await.unwrap();
+    assert!(size > 1000 && external.is_none(), "{size} bytes, chunk {external:?}");
+
+    // A database an older brain migrated has no copy: serving refuses it before HTTP opens, migrating adds it back.
+    sqlx::query("ALTER TABLE _brain_res_items DROP COLUMN query_keys CASCADE").execute(&pool).await.unwrap();
+    let refused = brain_backend::db::verify(&pool, &[items.clone()]).await.unwrap_err();
+    assert!(refused.contains("BDB_SCHEMA_DRIFT") && refused.contains("query_keys"), "{refused}");
+    brain_backend::db::migrate(&pool, &[items.clone()]).await.unwrap();
+    brain_backend::db::verify(&pool, &[items]).await.unwrap();
+}

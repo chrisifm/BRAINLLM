@@ -7,6 +7,7 @@
 // It serves, in this order:
 //   GET  /_health                → 200 {"ok":true,"build":"<sig>"}
 //   GET  /health[/live|/ready]   → forwarded to the native backend, or 200 {"ok":true} without one
+//   GET  /_brain/health[/live|/ready] → the same probe (mapped to /health…), never forwarded as a /_brain call
 //   POST /_r/<hash>/<fn>         → RPC to a `server:` function (same origin + X-Brain-RPC; body, rate and time limits from brain.json `server`)
 //   GET  routes in the manifest  → SSR: load(ctx) → render the view on the DOM shim → page with props and SEO head
 //   GET  files in dist/          → static (the smallest accepted .zst/.br/.gz sibling; /_b/* immutable), clean URLs
@@ -1171,6 +1172,34 @@ export function createServer(o = {}) {
     if (!mods.has(rel)) mods.set(rel, import(new URL(rel.replace(/^\//, ''), distURL).href))
     return mods.get(rel)
   }
+  // Every module a request can import (the DOM shim, the core, each route's view, layouts, guards, middleware, server
+  // module, dictionary, loading and error views, the RPC modules), imported once, one after another. `node server.mjs`
+  // runs it before `brain:ready`, so the first request after a (re)start finds them loaded instead of reading,
+  // compiling and evaluating the app's module graph (and its packages) while the visitor waits. A module that throws
+  // stays rejected in `mods`, exactly as the request that imports it would have found it; it is counted, never fatal.
+  const warm = async () => {
+    const want = new Set(['_server/dom.js', mf.core])
+    const add = r => {
+      if (!r || typeof r !== 'object') return
+      for (const k of ['view', 'server', 'loading', 'i18n']) if (typeof r[k] === 'string') want.add(r[k])
+      for (const k of ['layouts', 'guards', 'middleware']) for (const m of r[k] || []) if (typeof m === 'string') want.add(m)
+      add(r.error)
+    }
+    for (const r of mf.routes) add(r)
+    add(mf.notFound)
+    add(mf.forbidden)
+    for (const m of Object.values(mf.rpc)) if (typeof m === 'string') want.add(m)
+    for (const m of ['_server/brain-hydrate.js', '_server/brain-form.js']) if (file(m)) want.add(m)
+    let failed = 0
+    for (const rel of want) {
+      try {
+        await load(rel)
+      } catch {
+        failed++
+      }
+    }
+    return { modules: want.size, failed }
+  }
 
   const context = (req, res, url, extra) => {
     const cookies = parseCookies(req.headers.cookie)
@@ -1197,15 +1226,19 @@ export function createServer(o = {}) {
   let ssrBytes = 0
   async function cached(req, res, route, params, url, rid) {
     const n = +route.cache, ms = n * 1000, key = (route.locale || '') + url.pathname + cacheSearch(url)
-    const fill = () => {
+    // `kept.answer`: what this render answered when it was not a 200 (an error page, a redirect, a not-found), so the
+    // request that started it replays that answer instead of running load() and its backend reads a second time
+    const fill = (kept = {}) => {
       let failed = false
+      const set = {}
       return new Promise(ok => {
         const cap = { req, $capture: (out, h, st) => {
           const headers = Object.fromEntries(Object.entries(h).map(([k, v]) => [k.toLowerCase(), v]))
           const privateResponse = headers['set-cookie'] || headers['vary'] || /private|no-store|no-cache/i.test(headers['cache-control'] || '')
           if (st >= 500) failed = true
+          if (st !== 200) kept.answer = { page: out, h, st, set }
           ok(st === 200 ? { out, h, cacheable: !privateResponse, etag: 'W/"' + tag(out) + '"', t: Date.now(), bytes: Buffer.byteLength(out) } : null)
-        }, writeHead(st) { if (st >= 500) failed = true }, end: () => ok(null), setHeader() {}, getHeader: name => (name === 'x-request-id' ? rid : undefined), once() {}, removeListener() {} }
+        }, writeHead(st, h) { if (st >= 500) failed = true; kept.answer = { st, h: h || {}, set } }, end: body => { if (kept.answer && kept.answer.page === undefined) kept.answer.body = body; ok(null) }, setHeader(k, v) { set[k] = v }, getHeader: name => (name === 'x-request-id' ? rid : set[name]), once() {}, removeListener() {} }
         ssr(req, cap, route, params, url, rid, null, 200, null, true).catch(() => ok(null))
       }).then(c => {
         // A failed revalidation keeps the copy until 2N, which is what `stale-if-error` promises downstream.
@@ -1243,14 +1276,23 @@ export function createServer(o = {}) {
       if (c?.cacheable) return serve(c)
       return ssr(req, res, route, params, url, rid, null, 200, null, true)
     }
-    const filling = fill().finally(() => FILLING.delete(key))
+    const kept = {}
+    const filling = fill(kept).finally(() => FILLING.delete(key))
     FILLING.set(key, filling)
     c = await filling
     if (c) return serve(c)
     // the first render already asked the backend and logged why; another would only spend more of a limit it just hit
     if (req.$brainFailedReads?.temporary) return comeBackPage(req, res, route, params, url, rid)
     delete req.$brainFailedReads
-    return ssr(req, res, route, params, url, rid, null, 200, null, true) // a redirect or an error: as usual
+    // a redirect, a not-found or an error page: the answer that render produced, not a second load() (and its reads)
+    const a = kept.answer
+    if (a && !res.headersSent) {
+      for (const [k, v] of Object.entries(a.set)) res.setHeader(k, v)
+      if (a.page !== undefined) return html(res, a.st, a.page, a.h)
+      res.writeHead(a.st, a.h)
+      return void res.end(a.body)
+    }
+    return ssr(req, res, route, params, url, rid, null, 200, null, true) // nothing to replay (the render threw): as usual
   }
   const comeBackPage = (req, res, route, params, url, rid) => {
     res.setHeader('retry-after', String(Math.min(Math.ceil(req.$brainFailedReads.retryAfter) || 5, 3600)))
@@ -1811,6 +1853,9 @@ export function createServer(o = {}) {
   // /health is reserved for the backend (B0735), so an app cannot declare it and deploy gates ask this port for it. An app
   // page at that path still wins: this only runs where the answer would have been a 404. Nothing here names the backend.
   const isProbe = path => path === '/health' || path === '/health/live' || path === '/health/ready'
+  // /_brain/health[/live|/ready] is the same probe under the framework prefix; the backend only serves /health, so it is
+  // answered here (mapped to that route) instead of being forwarded with the rest of /_brain and coming back a 404.
+  const brainProbe = path => path.startsWith('/_brain/health') && isProbe(path.slice(7)) ? path.slice(7) : null
   const answerProbe = async (req, res, url, rid) => {
     const headers = { 'content-type': MIME['.json'], 'cache-control': 'no-store' }
     if (req.method !== 'GET' && req.method !== 'HEAD') return notFound(req, res)
@@ -1895,10 +1940,15 @@ export function createServer(o = {}) {
       let url = full
       if (BASE !== '/') {
         if (full.pathname === BASE.slice(0, -1)) return send(res, 301, '', { location: BASE + full.search })
-        if (!full.pathname.startsWith(BASE)) return isProbe(full.pathname) ? await answerProbe(req, res, full, rid) : notFound(req, res)
+        if (!full.pathname.startsWith(BASE)) {
+          const probe = isProbe(full.pathname) ? full.pathname : brainProbe(full.pathname)
+          return probe ? await answerProbe(req, res, new URL(probe, full), rid) : notFound(req, res)
+        }
         url = new URL('/' + full.pathname.slice(BASE.length) + full.search, full) // the app path
       }
       req.$brainPath = url.pathname
+      const probe = brainProbe(url.pathname)
+      if (probe) return await answerProbe(req, res, new URL(probe, url), rid)
       if (native && /^\/_brain\/files(?:\/|$)/.test(url.pathname)) return await native.fileStream(req,res,url,rid)
       if (native && /^\/(?:api(?:\/|$)|_brain(?:\/|$)|s\/)/.test(url.pathname)) return await native.proxy(req,res,url,rid,send)
       const declaredRoute = native && nativeRoutes.find(route => route.rx.test(url.pathname))
@@ -1963,6 +2013,8 @@ export function createServer(o = {}) {
   server.headersTimeout = 15000
   // With a native backend the file upload deadline is enforced per request (above); 30 s stays for every other body.
   server.requestTimeout = native ? 320000 : 30000
+  // `warm: true` (`node server.mjs`): import the app's modules now; requests that arrive meanwhile share the same imports
+  if (o.warm) server.$brainWarm = warm()
   return server
 }
 
@@ -2551,6 +2603,8 @@ function hook(base, app = '/') {
 }
 
 const LISTEN_WAIT_MS = 10000
+// the supervisor gives an instance 30 s to print brain:ready: warming may hold it this long at most
+const WARM_WAIT_MS = 15000
 // `node server.mjs` (directly or under `brain start`); paths compared after symlinks (/var → /private/var on macOS)
 function real(p) {
   try {
@@ -2563,12 +2617,17 @@ if (process.argv[1] && real(process.argv[1]) === real(fileURLToPath(import.meta.
   process.env.NODE_ENV = 'production'
   // A closed log pipe is the operator's matter: requests do not depend on it.
   for (const stream of [process.stdout, process.stderr]) stream.on('error', error => { if (error.code !== 'EPIPE') throw error })
-  const s = createServer({ dist: fileURLToPath(new URL('.', import.meta.url)) })
+  const s = createServer({ dist: fileURLToPath(new URL('.', import.meta.url)), warm: true })
   const fd = ENV.BRAIN_LISTEN_FD
   const where = fd ? { fd: Number(fd) } : { port: +(ENV.PORT || 3000), host: ENV.HOST || '127.0.0.1' }
-  s.once('listening', () => {
+  s.once('listening', async () => {
+    // ready once the app's modules are imported (see `warm`), so a reload only switches traffic to a warm instance;
+    // a slow machine gets WARM_WAIT_MS at most, the rest keeps importing while requests are served
+    let timer
+    const warmed = await Promise.race([s.$brainWarm, new Promise(r => (timer = setTimeout(r, WARM_WAIT_MS)))])
+    clearTimeout(timer)
     process.stdout.write(`brain:ready ${process.pid}\n`) // the supervisor waits for this line (§34)
-    console.log(json({ t: new Date().toISOString(), level: 'info', msg: 'listening', ...(fd ? { fd: Number(fd) } : where) }))
+    console.log(json({ t: new Date().toISOString(), level: 'info', msg: 'listening', ...(fd ? { fd: Number(fd) } : where), ...(warmed ? { warmModules: warmed.modules, warmFailed: warmed.failed } : { warm: 'continuing' }) }))
   })
   // A restart may find the previous instance still draining: wait for it, briefly. Two live servers never share a port.
   const waitUntil = Date.now() + LISTEN_WAIT_MS

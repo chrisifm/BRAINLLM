@@ -22,6 +22,15 @@ const MAX_NEAR_KM: f64 = 20040.0;
 const GEO_MARGIN: f64 = 1e-6;
 /// Text comparisons and text indexes use the first 256 characters; equality is rechecked on the full value.
 const TEXT_KEY: usize = 256;
+/// Inline copy of `data` that filters, sorts, facets and their indexes read: every key, with each string cut at
+/// [`TEXT_KEY`] characters. A large `data` lives out of line and compressed, so a predicate over it decompressed the whole
+/// document of every row it visited (a cold list read the entire TOAST table); the copy stays small and in the row.
+/// Text comparisons already use `left(...,TEXT_KEY)`, so they answer the same; a value that fills the key is rechecked
+/// against `data` for that row only.
+const KEYS: &str = "query_keys";
+/// Builds the copy from `data` (a stored generated column). The version is part of the name: a different body is a new
+/// function and a new column, never a silent change of stored values.
+const KEYS_FUNCTION: &str = "public._brain_query_keys_v1";
 pub const OPS: &[&str] = &["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "prefix", "iprefix", "exists", "has", "near", "bbox"];
 const RESERVED: &[&str] = &["search", "limit", "offset", "sort", "include", "cursor", "after", "aggregate", "count", "fields", "owner"];
 const TIMESTAMPS: &[&str] = &["created_at", "updated_at"];
@@ -183,17 +192,21 @@ impl Kind {
 /// SQL expression over the unqualified columns of the resource table. `field` is a validated identifier.
 fn expr(kind: Kind, field: &str) -> String {
     match kind {
-        Kind::Int => format!("(data->'{field}')::numeric"),
-        Kind::Decimal => format!("(data->>'{field}')::numeric"),
-        Kind::Date | Kind::DateTime => format!("(data->>'{field}') COLLATE \"C\""),
-        Kind::Text => format!("left(data->>'{field}',{TEXT_KEY}) COLLATE \"C\""),
-        Kind::Bool => format!("(data->>'{field}')"),
+        Kind::Int => format!("({KEYS}->'{field}')::numeric"),
+        Kind::Decimal => format!("({KEYS}->>'{field}')::numeric"),
+        Kind::Date | Kind::DateTime => format!("({KEYS}->>'{field}') COLLATE \"C\""),
+        Kind::Text => format!("left({KEYS}->>'{field}',{TEXT_KEY}) COLLATE \"C\""),
+        Kind::Bool => format!("({KEYS}->>'{field}')"),
         Kind::Ref => crate::relations::column(field),
-        Kind::List => format!("(data->'{field}')"),
+        Kind::List => format!("({KEYS}->'{field}')"),
         // `point` is built in and immutable, so the index needs no database extension.
-        Kind::Geo => format!("point((data#>>'{{{field},lng}}')::float8,(data#>>'{{{field},lat}}')::float8)"),
+        Kind::Geo => format!("point(({KEYS}#>>'{{{field},lng}}')::float8,({KEYS}#>>'{{{field},lat}}')::float8)"),
         Kind::Stamp => field.to_string(),
     }
+}
+/// A text group key: the inline copy unless it was cut at [`TEXT_KEY`]; only such a row reads its full `data`.
+fn full_text(field: &str) -> String {
+    format!("(CASE WHEN length({KEYS}->>'{field}')<{TEXT_KEY} THEN {KEYS}->>'{field}' ELSE data->>'{field}' END)")
 }
 /// One `ORDER BY` term. Timestamps are `NOT NULL`, so naming a null position changes no order, yet Postgres only matches an
 /// index whose null position is the same: `created_at DESC NULLS LAST` sorted the whole table on every plain list.
@@ -430,7 +443,7 @@ pub(crate) fn indexes(r: &Resource) -> Vec<(String, String)> {
             Some(k) => {
                 add("btree", expr(k, field));
                 if iprefix {
-                    add("btree", format!("lower(left(data->>'{field}',{TEXT_KEY})) COLLATE \"C\""));
+                    add("btree", format!("lower(left({KEYS}->>'{field}',{TEXT_KEY})) COLLATE \"C\""));
                 }
             }
         }
@@ -453,6 +466,7 @@ pub(crate) fn statistics_expressions(r: &Resource) -> Vec<String> {
     out.into_iter().collect()
 }
 pub(crate) async fn install_indexes(tx: &mut sqlx::Transaction<'_, Postgres>, r: &Resource) -> Result<(), String> {
+    install_keys(tx, r).await?;
     // A filter or sort that is gone leaves an index every write still pays for; only generated names are touched.
     let mut declared: Vec<String> = indexes(r).into_iter().map(|(name, _)| name).collect();
     declared.extend(crate::relations::refs(r).iter().map(|x| crate::relations::index_name(r, x.field)));
@@ -475,6 +489,37 @@ pub(crate) async fn install_indexes(tx: &mut sqlx::Transaction<'_, Postgres>, r:
                 format!("{}: a declared query index could not be built; existing values may not match their field types; nothing was changed", r.name)
             })?;
     }
+    Ok(())
+}
+
+/// The inline [`KEYS`] column every query reads. Adding it rewrites the table once (under the migration lock, without
+/// the statement deadline, like the search rebuild); after that every write keeps it current, with no trigger.
+async fn keys_present(conn: &mut sqlx::PgConnection, table: &str) -> Result<bool, String> {
+    sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass($1) AND attname=$2 AND NOT attisdropped)")
+        .bind(format!("public.{table}"))
+        .bind(KEYS)
+        .fetch_one(conn)
+        .await
+        .map_err(crate::db::safe)
+}
+/// Serving reads every list through the key copy, so a database migrated by an older brain fails before HTTP opens.
+pub(crate) async fn verify_keys(conn: &mut sqlx::PgConnection, r: &Resource) -> Result<(), String> {
+    let table = format!("_brain_res_{}", r.name);
+    if keys_present(conn, &table).await? {
+        return Ok(());
+    }
+    Err(format!("BDB_SCHEMA_DRIFT: {table}.{KEYS}; review schema and run the explicit backend migration; no rows were removed"))
+}
+async fn install_keys(tx: &mut sqlx::Transaction<'_, Postgres>, r: &Resource) -> Result<(), String> {
+    let table = format!("_brain_res_{}", r.name);
+    if keys_present(&mut **tx, &table).await? {
+        return Ok(());
+    }
+    // Audited SQL: constant names and a validated table identifier. The function is immutable: same document, same copy.
+    let ddl = format!(
+        "CREATE OR REPLACE FUNCTION {KEYS_FUNCTION}(d jsonb) RETURNS jsonb LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$ SELECT COALESCE(jsonb_object_agg(k,CASE WHEN jsonb_typeof(v)='string' AND length(v#>>'{{}}')>{TEXT_KEY} THEN to_jsonb(left(v#>>'{{}}',{TEXT_KEY})) ELSE v END),'{{}}'::jsonb) FROM jsonb_each(d) AS e(k,v) $$; SET LOCAL statement_timeout=0; ALTER TABLE {table} ADD COLUMN {KEYS} jsonb GENERATED ALWAYS AS ({KEYS_FUNCTION}(data)) STORED, ALTER COLUMN {KEYS} SET STORAGE MAIN; SET LOCAL statement_timeout='60s';"
+    );
+    sqlx::raw_sql(sqlx::AssertSqlSafe(ddl)).execute(&mut **tx).await.map_err(crate::db::safe)?;
     Ok(())
 }
 
@@ -1021,7 +1066,7 @@ fn push_predicate(q: &mut QueryBuilder<Postgres>, f: &Filter) {
             if let Some([lat, lng, km]) = operand_text(first).and_then(near_operand) {
                 q.push("(");
                 push_boxes(q, &e, &near_boxes(lat, lng, km));
-                let (y, x) = (format!("(data#>>'{{{field},lat}}')::float8"), format!("(data#>>'{{{field},lng}}')::float8"));
+                let (y, x) = (format!("({KEYS}#>>'{{{field},lat}}')::float8"), format!("({KEYS}#>>'{{{field},lng}}')::float8"));
                 q.push(format!(" AND 2*{EARTH_KM}::float8*asin(least(1::float8,sqrt(power(sin(radians({y}-"))
                     .push_bind(lat)
                     .push(")/2),2)+cos(radians(")
@@ -1044,7 +1089,7 @@ fn push_predicate(q: &mut QueryBuilder<Postgres>, f: &Filter) {
             if f.kind == Kind::Ref {
                 q.push(&e).push(" IS NOT NULL)");
             } else {
-                q.push(format!("data ? '{field}')"));
+                q.push(format!("{KEYS} ? '{field}')"));
             }
         }
         "has" => {
@@ -1057,7 +1102,7 @@ fn push_predicate(q: &mut QueryBuilder<Postgres>, f: &Filter) {
                 if f.op == "prefix" {
                     q.push(format!("({e} LIKE ")).push_bind(escape_like(v)).push(" ESCAPE '\\')");
                 } else {
-                    q.push(format!("(lower(left(data->>'{field}',{TEXT_KEY})) COLLATE \"C\" LIKE "))
+                    q.push(format!("(lower(left({KEYS}->>'{field}',{TEXT_KEY})) COLLATE \"C\" LIKE "))
                         .push_bind(escape_like(&v.to_lowercase()))
                         .push(" ESCAPE '\\')");
                 }
@@ -1093,7 +1138,7 @@ fn push_predicate(q: &mut QueryBuilder<Postgres>, f: &Filter) {
                 _ => "<=",
             };
             if op == "ne" && f.kind == Kind::Text {
-                q.push(format!("((data->>'{field}') IS DISTINCT FROM "));
+                q.push(format!("({} IS DISTINCT FROM ", full_text(field)));
                 if let Operand::Value(v) = first {
                     q.push_bind(v.clone());
                 }
@@ -1627,13 +1672,13 @@ async fn facet(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, field: &
     let k = kind(r, field).unwrap_or(Kind::Text);
     let mut q = match k {
         Kind::List => QueryBuilder::<Postgres>::new(format!(
-            "SELECT _element AS _g,count(DISTINCT id) AS _n FROM _brain_res_{} t CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(data->'{field}')='array' THEN data->'{field}' ELSE '[]'::jsonb END) AS _e(_element) WHERE ",
+            "SELECT _element AS _g,count(DISTINCT id) AS _n FROM _brain_res_{} t CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof({KEYS}->'{field}')='array' THEN {KEYS}->'{field}' ELSE '[]'::jsonb END) AS _e(_element) WHERE ",
             r.name
         )),
         _ => {
             let e = match k {
                 Kind::Ref => format!("{}::text", crate::relations::column(field)),
-                Kind::Text => format!("(data->>'{field}')"),
+                Kind::Text => full_text(field),
                 _ => format!("({})::text", expr(k, field)),
             };
             QueryBuilder::<Postgres>::new(format!("SELECT {e} AS _g,count(*) AS _n FROM _brain_res_{} t WHERE ", r.name))
@@ -1672,7 +1717,7 @@ async fn aggregate(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &Ctx<'_>, a: &
         let k = kind(r, g).unwrap_or(Kind::Text);
         let e = match k {
             Kind::Ref => format!("{}::text", crate::relations::column(g)),
-            Kind::Text => format!("(data->>'{g}')"),
+            Kind::Text => full_text(g),
             _ => format!("({})::text", expr(k, g)),
         };
         (k, e)
@@ -1795,7 +1840,7 @@ mod tests {
         let key = |kind, field: &str, nulls_first| SortKey { field: field.into(), kind, desc: true, nulls_first };
         assert_eq!(order_term(&key(Kind::Stamp, "created_at", false)), "created_at DESC");
         assert_eq!(order_term(&key(Kind::Stamp, "updated_at", true)), "updated_at DESC");
-        assert_eq!(order_term(&key(Kind::Int, "stock", false)), "(data->'stock')::numeric DESC NULLS LAST");
+        assert_eq!(order_term(&key(Kind::Int, "stock", false)), "(query_keys->'stock')::numeric DESC NULLS LAST");
     }
     use super::*;
     #[test]
@@ -1815,6 +1860,25 @@ mod tests {
         assert_eq!(decoded, id);
         assert_eq!(keys, vec![Some("10.50".into()), Some("-price:last".into())]);
         assert!(decode_cursor("zz").is_none());
+    }
+    #[test]
+    fn filters_and_sorts_read_the_inline_query_keys_not_the_stored_document() {
+        // `data` lives out of line once a document is large: a predicate or sort key that reads it decompresses the whole
+        // document of every row it visits. Only a long text value's exact recheck may read it, and only for that row.
+        let mut kinds = vec![Kind::Int, Kind::Decimal, Kind::Date, Kind::DateTime, Kind::Text, Kind::Bool, Kind::List, Kind::Geo];
+        for k in kinds.drain(..) {
+            assert!(!expr(k, "f").contains("data"), "{k:?}: {}", expr(k, "f"));
+            assert!(!order_term(&SortKey { field: "f".into(), kind: k, desc: true, nulls_first: false }).contains("data"));
+        }
+        let sql = |kind: Kind, op: &str, value: &str| {
+            let mut q = QueryBuilder::<Postgres>::new("");
+            push_predicate(&mut q, &Filter { via: None, field: "f".into(), kind, op: op.into(), values: vec![Operand::Value(value.into())] });
+            q.sql().as_str().to_string()
+        };
+        for (kind, op, value) in [(Kind::Text, "eq", "a"), (Kind::Text, "in", "a"), (Kind::Text, "prefix", "a"), (Kind::Text, "iprefix", "a"), (Kind::Text, "exists", "false"), (Kind::Int, "gte", "1"), (Kind::DateTime, "gte", "2026-01-01"), (Kind::List, "has", "a"), (Kind::Geo, "near", "1,2,3")] {
+            let sql = sql(kind, op, value);
+            assert!(!sql.contains("data"), "{kind:?} {op}: {sql}");
+        }
     }
     #[test]
     fn like_prefixes_escape_wildcards() {
