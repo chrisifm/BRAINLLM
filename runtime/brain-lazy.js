@@ -23,6 +23,16 @@ function reloadOnce() {
   }
 }
 
+// The observer is built in its own scope and reaches `go` through a box emptied on stop. A callback closing over
+// lazy()'s scope kept the owner, the props and the built component alive after unmount and disconnect() (measured:
+// parent and child survived forced GCs for the whole 10 s `--heap` grace, B0601; Chrome still holds the observer).
+function visible(el, go) {
+  const box = { go }
+  const io = new IntersectionObserver(es => es.some(e => e.isIntersecting) && box.go?.(), { rootMargin: '200px' })
+  io.observe(el)
+  return () => { box.go = null; io.disconnect() }
+}
+
 export function lazy(el, imp, mode, props = {}) {
   const owner = I.owner()
   let dead = false, stop = () => {}, retry = () => {}, clicked = null, built
@@ -77,11 +87,8 @@ export function lazy(el, imp, mode, props = {}) {
     }
   } else if (G.document && document.visibilityState === 'hidden') {
     go() // a hidden tab runs no observer: without this the content is missing until the tab is shown
-  } else if (G.IntersectionObserver) {
-    const io = new IntersectionObserver(es => es.some(e => e.isIntersecting) && go(), { rootMargin: '200px' })
-    io.observe(el)
-    stop = () => io.disconnect()
-  } else go()
+  } else if (G.IntersectionObserver) stop = visible(el, go)
+  else go()
   if (owner)
     fx(() => () => {
       dead = true

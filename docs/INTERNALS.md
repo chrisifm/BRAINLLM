@@ -2071,6 +2071,16 @@ Codegen writes `Array.from(e.target.querySelectorAll("option")).filter((o) => o.
 lists, also when `{#each}` options mount later (the `keepSelected` observer), and never lands on `select.value`.
 SSR marks those options `selected` through `fillValues`.
 
+### A visible lazy child is released on unmount (2026-11-02)
+
+`<X lazy />` (visible mode) leaked its parent and child: after unmount and `io.disconnect()`, both survived forced GCs
+for the whole `--heap` grace (B0601), while `idle`, `interaction` and eager children were released. The observer's
+callback closed over `lazy()`'s scope (owner, props, built nodes), and Chrome still held the observer. The observer now
+lives in its own function and reaches the trigger through a box emptied on stop, so whatever keeps the observer keeps
+nothing of the component. Sweep: `visible(ref)` in brain-env.js (its callback holds only the signal) measured no leak; the
+router's prefetch observer and the inspector's observers are page-wide, not per instance. Test:
+`crates/brain-cli/tests/lazy_heap.rs` (four lazy modes plus `visible(ref)` under `--heap`).
+
 ### Instance ids restart on each client navigation (2026-11-02)
 
 A component with ids numbers its instances (#268): the first keeps `id`, later ones get `id~2`, and `for`, `aria-*`
