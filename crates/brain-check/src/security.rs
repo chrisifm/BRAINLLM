@@ -453,7 +453,7 @@ impl Checker<'_> {
                             Some(h) => format!("`redirect` to another origin (`{h}`)"),
                             None => "`redirect` to a URL built at runtime: it can be pointed at any site (open redirect)".to_string(),
                         };
-                        out.push(("B0710", *span, what, "redirect to a same-origin path (`redirect('/home')`), or list the host in `brain.json` → `\"redirects\": [\"host\"]`".into()));
+                        out.push(("B0710", *span, what, "redirect to a same-origin path with a fixed first segment (`redirect('/home')`, `redirect('/jobs/' + slug)`; a bare `'/' + value` can become `/\\host`), or list the host in `brain.json` → `\"redirects\": [\"host\"]`".into()));
                     }
                 }
                 if server && (name == "fetch" || name.ends_with(".fetch")) && let Some(a) = args.first() {
