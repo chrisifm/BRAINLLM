@@ -405,7 +405,16 @@ pub fn report(origin: &str, cfg: &mut brain_seo::Config, sampled: bool, expect_n
         text.push_str(&format!("{} {} {}: {}; fix: {}\n", l.level.as_str(), l.code, l.url, l.msg, l.fix));
     }
     text.push_str(&audit.text());
+    if live_failed {
+        text = live_verdict(&text);
+    }
     (if ok { 0 } else { 1 }, json, text)
+}
+
+/// The audit's closing line speaks for the pages; the exit code also counts what only the live server shows.
+fn live_verdict(text: &str) -> String {
+    let body = text.trim_end();
+    format!("{}\nfailed: the live checks above found errors\n", body.strip_suffix("\nok").unwrap_or(body))
 }
 
 fn fetch(runtime: &tokio::runtime::Runtime, client: &reqwest::Client, url: &str) -> Result<Response, String> {
@@ -661,6 +670,13 @@ mod tests {
         assert_eq!(code, 1);
         assert!(out.contains("answers 429") && out.contains("rate limit"), "{out}");
     }
+    #[test]
+    fn a_failed_live_check_never_closes_with_ok() {
+        let out = live_verdict("error B1858 /: noindex\nSEO audit: 1 page(s)\n\nok\n");
+        assert!(out.ends_with("failed: the live checks above found errors\n"), "{out}");
+        assert!(!out.lines().any(|l| l == "ok"), "{out}");
+    }
+
     #[test]
     fn a_site_wide_noindex_fails_unless_it_is_expected() {
         let both = || vec![page("/a", 200, &[("x-robots-tag", "noindex, nofollow")], "Page a title", None), page("/b", 200, &[("x-robots-tag", "noindex, nofollow")], "Page b title", None)];

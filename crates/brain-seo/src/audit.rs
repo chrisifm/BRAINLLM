@@ -875,12 +875,12 @@ fn page_checks(
         || match canonical {
             None => (
                 "page has no canonical URL".into(),
-                "build with `--site https://your-domain` (canonical is filled in from the route)"
+                "set PUBLIC_SITE_URL or run `brain build --site https://your-domain`, then audit again (canonical is filled in from the route)"
                     .into(),
             ),
             Some(c) => (
                 format!("canonical `{c}` is relative"),
-                "build with `--site https://your-domain` so the canonical is absolute".into(),
+                "set PUBLIC_SITE_URL or run `brain build --site https://your-domain` so the canonical is absolute, then audit again".into(),
             ),
         },
     );
@@ -913,7 +913,7 @@ fn page_checks(
                 format!(
                     "og:image `{img}` is relative; Facebook, LinkedIn and X ignore relative images"
                 ),
-                "build with `--site https://your-domain` so it becomes absolute".into(),
+                "set PUBLIC_SITE_URL or run `brain build --site https://your-domain` so it becomes absolute, then audit again".into(),
             ))
         } else if let Some((w, h)) = dims.filter(|(w, h)| *w < 1200 || *h < 630) {
             Some((

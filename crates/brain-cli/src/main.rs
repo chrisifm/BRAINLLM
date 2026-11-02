@@ -96,7 +96,7 @@ main:
   brain --version                    prints the version (also -V, --json)
   brain seo <audit|links|preview R>  SEO audit of the built site (score per page, B18xx findings)
   brain seo urls [--write]           the committed list of published URLs: a listed one that disappears fails the build
-  brain seo audit --url <origin>     the same audit over a running site, with its sitemap, status codes and headers
+  brain seo audit --url <origin> [--expect-noindex]     the same audit over a running site, with its sitemap, status codes and headers
   brain lighthouse <url>             Lighthouse scores and Core Web Vitals, checked against lighthouse.minScores
   brain new <app> [--backend]        creates the app (app.brain, tokens.cssbrain, views/, comp/, ui/, AGENTS.md); --backend adds accounts on the native backend
   brain run [--port 5180] [--backend] [--base /app/] [--mock[=seed]] [--profile] [--no-trace] [--inspect-port N | --no-inspect]  dev server with hot reload; the debugger on port+1; --backend also runs `brain backend serve`
