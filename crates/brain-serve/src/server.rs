@@ -2631,6 +2631,10 @@ fn broadcast(clients: &Clients, msg: &str) {
 }
 
 fn ignored(rel: &Path) -> bool {
+    // What the framework itself writes at runtime: `brain start` logs here, so reloading on it never stops.
+    if rel.starts_with("logs") || rel.starts_with("docs/app") {
+        return true;
+    }
     rel.components().any(|c| {
         let c = c.as_os_str().to_string_lossy();
         c == "dist" || c == "node_modules" || c.starts_with('.')
@@ -2850,6 +2854,17 @@ fn on_change(ctx: &Ctx, path: &Path) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_watcher_skips_what_the_framework_writes_but_not_app_files() {
+        use std::path::Path;
+        for skipped in ["logs/app.log", "docs/app/data.md", "dist/x.js", "node_modules/a/b.js", ".brain/x"] {
+            assert!(super::ignored(Path::new(skipped)), "{skipped}");
+        }
+        for watched in ["views/home.brain", "server/logs.jsbrain", "views/logs/index.brain", "docs/guide.md", "content/a.md"] {
+            assert!(!super::ignored(Path::new(watched)), "{watched}");
+        }
+    }
+
     use super::*;
 
     #[test]
