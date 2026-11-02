@@ -212,6 +212,63 @@ fn read_routes(root: &Path, lookup: &dyn Fn(&str) -> Option<String>) -> Result<V
 }
 
 /// Compiles and probes every handler before HTTP starts; `None` when no route is declared.
+/// B0812 findings in `server/routes/**`: a handler that reads `process.env` instead of `ctx.env`, and a key a handler
+/// reads that `.brain_env` declares only for production, so development runs the route without it. Returns
+/// `(file, line, col, message, fix)`; names only, never values.
+pub fn env_warnings(root: &Path) -> Vec<(String, u32, u32, String, String)> {
+    let env = fs::read_to_string(root.join(brain_check::env::FILE)).ok().map(|src| brain_check::env::parse(&src));
+    let production_only = |key: &str| {
+        env.as_ref().is_some_and(|f| {
+            !f.shared.iter().any(|e| e.key == key)
+                && f.sections.iter().any(|(_, entries)| entries.iter().any(|e| e.key == key))
+                && f.sections.iter().all(|(name, entries)| name == "production" || !entries.iter().any(|e| e.key == key))
+        })
+    };
+    let mut files = Vec::new();
+    let mut stack = vec![root.join(ROUTES)];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for path in entries.flatten().map(|e| e.path()) {
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|x| x == "jsbrain") {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    let mut out = Vec::new();
+    for path in files {
+        let Ok(src) = fs::read_to_string(&path) else { continue };
+        let file = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+        let idx = brain_parse::LineIndex::new(&src);
+        for at in brain_check::env::process_env_offsets(&src) {
+            let (line, col) = idx.line_col(&src, at);
+            out.push((
+                file.clone(),
+                line,
+                col,
+                "this route reads `process.env`; a route receives its environment as `ctx.env`, which `brain check` verifies against .brain_env".to_string(),
+                "read the variable as `ctx.env.NAME` from the handler's `ctx` argument".to_string(),
+            ));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for read in brain_check::env::reads_of_file(&src, &file) {
+            if production_only(&read.key) && seen.insert(read.key.clone()) {
+                let (line, col) = idx.line_col(&src, read.at);
+                out.push((
+                    file.clone(),
+                    line,
+                    col,
+                    format!("`{}` is declared in .brain_env only under [production], so this route reads it as unset in development", read.key),
+                    format!("declare `{0}` in the shared block of .brain_env (or `{0}?=` when the route works without it) and keep the production value under [production]", read.key),
+                ));
+            }
+        }
+    }
+    out
+}
+
 pub fn load(root: &Path, environment: &str, routes: &[Route]) -> Result<Option<Handlers>, String> {
     if routes.is_empty() {
         return Ok(None);
@@ -263,6 +320,15 @@ fn rejection(status: u16, raw: &str) -> Option<RouteFailure> {
     })
 }
 
+/// A handler that threw: the sidecar sends only `{routeCause: {name, backend?, location?}}`, which the backend re-checks
+/// before logging. Anything else (a crash, a bad redirect) stays an unexplained failure.
+fn thrown(raw: &str) -> RouteFailure {
+    match serde_json::from_str::<Value>(raw).ok().and_then(|v| v.get("routeCause").filter(|c| c.is_object()).cloned()) {
+        Some(cause) => RouteFailure::Failed(cause),
+        None => RouteFailure::Unavailable,
+    }
+}
+
 impl RouteHandlers for Executor {
     fn names(&self) -> Vec<String> {
         self.modules.keys().cloned().collect()
@@ -281,7 +347,7 @@ impl RouteHandlers for Executor {
                     Ok(raw) => (serde_json::from_str::<Value>(&raw).map_err(|_| RouteFailure::Unavailable), true),
                     Err((status, raw)) => match rejection(status, &raw) {
                         Some(failure) => (Err(failure), true),
-                        None => (Err(RouteFailure::Unavailable), false),
+                        None => (Err(thrown(&raw)), false),
                     },
                 };
                 if reusable {
@@ -348,12 +414,28 @@ mod tests {
         fs::create_dir_all(&keyed).unwrap();
         fs::write(keyed.join("route.jsbrain"), "<meta server>\nexport default { path: '/reports', auth: 'public', runAs: 'system' }\n").unwrap();
         fs::write(keyed.join("handler.jsbrain"), "<meta server>\nexport default async function handle(ctx) {\n  if (!ctx.backend) return { backend: false, runAs: ctx.$runAs ?? null, leaked: ctx.env.BRAIN_ROUTES_SYSTEM_KEY ?? null }\n  const uses = await Promise.resolve().then(() => ctx.backend.resource('notes').list()).catch((e) => e.message)\n  const stored = await Promise.resolve().then(() => ctx.backend.files('reports')).catch((e) => e.message)\n  return { backend: true, uses, stored, runAs: ctx.$runAs ?? null, leaked: ctx.env.BRAIN_ROUTES_SYSTEM_KEY ?? null }\n}\n").unwrap();
+        // A handler that throws: the log gets the error class, the backend client's status, code and field names and the
+        // source line, never the message or the field texts.
+        let crash = root.join(ROUTES).join("crash");
+        fs::create_dir_all(&crash).unwrap();
+        fs::write(crash.join("route.jsbrain"), "<meta server>\nexport default { method: 'POST', path: '/crash', auth: 'public' }\n").unwrap();
+        fs::write(crash.join("handler.jsbrain"), "<meta server>\nexport default async function handle(ctx) {\n  if (ctx.body.plain) throw new TypeError('private 4111')\n  const e = Object.assign(new Error('private 4111'), { status: 503, code: 'BACKEND_UNAVAILABLE' })\n  e[Symbol.for('brain.backendError')] = true\n  throw e\n}\n").unwrap();
         fs::write(root.join(".env"), "BRAIN_BACKEND_URL=http://127.0.0.1:9\nBRAIN_ROUTES_SYSTEM_KEY=not-a-key\n").unwrap();
         let routes = contracts(&root, "development").unwrap();
         assert_eq!(routes.iter().find(|r| r.name == "reports").unwrap().run_as.as_deref(), Some("system"));
-        assert_eq!(routes[0].path, "/orders/quote");
+        assert_eq!(routes.iter().find(|r| r.name == "order_quote").unwrap().path, "/orders/quote");
         let handlers = load(&root, "development", &routes).unwrap().unwrap();
-        assert_eq!(handlers.names(), vec!["order_quote".to_string(), "rates".to_string(), "reports".to_string()]);
+        assert_eq!(handlers.names(), vec!["crash".to_string(), "order_quote".to_string(), "rates".to_string(), "reports".to_string()]);
+        let failure = handlers.run("crash", json!({"body": {}}), Duration::from_secs(5)).await.unwrap_err();
+        let RouteFailure::Failed(cause) = failure else { panic!("a thrown error is a failure with its cause: {failure:?}") };
+        assert!(!cause.to_string().contains("4111"), "no message or field text: {cause}");
+        assert_eq!(cause["name"], "Error", "{cause}");
+        assert_eq!(cause["backend"], json!({"status": 503, "code": "BACKEND_UNAVAILABLE", "fields": []}), "{cause}");
+        assert_eq!(cause["location"]["file"], "server/routes/crash/handler.jsbrain", "{cause}");
+        assert_eq!(cause["location"]["line"], 4, "{cause}");
+        let RouteFailure::Failed(plain) = handlers.run("crash", json!({"body": {"plain": true}}), Duration::from_secs(5)).await.unwrap_err() else { panic!("a thrown TypeError is a failure") };
+        assert_eq!(plain["name"], "TypeError", "{plain}");
+        assert!(plain.get("backend").is_none() && plain["location"]["line"] == 3, "{plain}");
         let plain = handlers.run("reports", json!({}), Duration::from_secs(5)).await.unwrap();
         assert_eq!(plain["backend"], false, "no runAs in the context, no ctx.backend: {plain}");
         let system = handlers.run("reports", json!({"$runAs": "system"}), Duration::from_secs(5)).await.unwrap();
@@ -391,5 +473,29 @@ mod conflict_tests {
         assert!(check("/{slug}")[0].contains("every path"));
         assert!(check("/_r/hook")[0].contains("framework"));
         assert!(check("/robots.txt")[0].contains("public/robots.txt"));
+    }
+}
+
+#[cfg(test)]
+mod env_tests {
+    #[test]
+    fn only_real_process_env_reads_and_production_only_keys_are_reported() {
+        let root = std::env::temp_dir().join(format!("brain-route-env-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("server/routes/lookup");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("handler.jsbrain"),
+            "<meta server>\n// process.env.IN_A_COMMENT\nexport default async function handle(ctx) {\n  const note = 'process.env.IN_A_STRING'\n  return { a: ctx.env.SHARED, b: ctx.env.BOTH, c: ctx.process.env, d: process.env.REAL }\n}\n",
+        )
+        .unwrap();
+        std::fs::write(root.join(".brain_env"), "SHARED=1\nREAL?=\n\n[development]\nBOTH=1\n\n[production]\nBOTH=2\n").unwrap();
+        let found = super::env_warnings(&root);
+        assert_eq!(found.iter().map(|f| (f.1, f.2)).collect::<Vec<_>>(), vec![(5, 71)], "only the real read: {found:?}");
+        std::fs::write(root.join(".brain_env"), "[production]\nSHARED=1\nBOTH=2\nREAL=3\n").unwrap();
+        let keys: Vec<String> = super::env_warnings(&root).into_iter().skip(1).map(|f| f.3).collect();
+        assert_eq!(keys.len(), 3, "{keys:?}");
+        assert!(keys.iter().all(|m| m.contains("only under [production]") && !m.contains('=')), "names only, never values: {keys:?}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

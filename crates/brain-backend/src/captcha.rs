@@ -34,7 +34,8 @@ pub struct Captcha {
 pub enum Verdict {
     Passed,
     Rejected,
-    Unavailable,
+    /// Nothing the visitor did: a fixed reason for the server log, never a provider message or a value.
+    Unavailable(&'static str),
 }
 fn secure_or_local(url: &Url) -> bool {
     let local = match url.host() {
@@ -131,7 +132,7 @@ impl Captcha {
     /// Asks the provider about one token. Anything but an explicit `success: true` admits nothing.
     pub async fn verify(&self, token: Option<&str>, client_ip: Option<IpAddr>) -> Verdict {
         let Some(token) = token.filter(|t| !t.is_empty() && t.len() <= MAX_TOKEN) else { return Verdict::Rejected };
-        let (Some(url), Some(secret), Some(client)) = (&self.verify_url, &self.secret, &self.client) else { return Verdict::Unavailable };
+        let (Some(url), Some(secret), Some(client)) = (&self.verify_url, &self.secret, &self.client) else { return Verdict::Unavailable("secret-not-set") };
         let mut form = Url::parse("http://form.invalid/").expect("static URL");
         {
             let mut pairs = form.query_pairs_mut();
@@ -142,27 +143,30 @@ impl Captcha {
         }
         let body = form.query().unwrap_or_default().to_string();
         let sent = client.post(url.clone()).header(reqwest::header::CONTENT_TYPE, "application/x-www-form-urlencoded").body(body).send().await;
-        let Ok(mut answer) = sent else { return Verdict::Unavailable };
+        let Ok(mut answer) = sent else { return Verdict::Unavailable("provider-unreachable") };
         if !answer.status().is_success() {
-            return Verdict::Unavailable;
+            return Verdict::Unavailable("provider-status");
         }
         let mut bytes = Vec::new();
         loop {
             match answer.chunk().await {
                 Ok(Some(chunk)) if bytes.len() + chunk.len() <= MAX_ANSWER => bytes.extend_from_slice(&chunk),
                 Ok(None) => break,
-                _ => return Verdict::Unavailable,
+                _ => return Verdict::Unavailable("provider-answer-unreadable"),
             }
         }
-        let Ok(Value::Object(verdict)) = serde_json::from_slice::<Value>(&bytes) else { return Verdict::Unavailable };
+        let Ok(Value::Object(verdict)) = serde_json::from_slice::<Value>(&bytes) else { return Verdict::Unavailable("provider-answer-unreadable") };
         match verdict.get("success") {
             Some(Value::Bool(true)) => {}
             Some(Value::Bool(false)) => {
                 // A provider-side fault is not the visitor's failure (names shared by the three providers' docs).
-                let ours = verdict.get("error-codes").and_then(Value::as_array).is_some_and(|codes| codes.iter().filter_map(Value::as_str).any(|c| matches!(c, "missing-input-secret" | "invalid-input-secret" | "internal-error" | "sitekey-secret-mismatch")));
-                return if ours { Verdict::Unavailable } else { Verdict::Rejected };
+                let codes: Vec<&str> = verdict.get("error-codes").and_then(Value::as_array).map(|codes| codes.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+                return match codes.iter().find_map(|c| provider_fault(c)) {
+                    Some(reason) => Verdict::Unavailable(reason),
+                    None => Verdict::Rejected,
+                };
             }
-            _ => return Verdict::Unavailable,
+            _ => return Verdict::Unavailable("provider-answer-unreadable"),
         }
         match &self.hostname {
             Some(expected) if verdict.get("hostname").and_then(Value::as_str) != Some(expected.as_str()) => Verdict::Rejected,
@@ -171,10 +175,31 @@ impl Captcha {
     }
 }
 
+/// A provider-side fault is not the visitor's failure (names shared by the three providers' docs): the log reason.
+fn provider_fault(code: &str) -> Option<&'static str> {
+    match code {
+        "missing-input-secret" => Some("provider-missing-secret"),
+        "invalid-input-secret" => Some("provider-invalid-secret"),
+        "sitekey-secret-mismatch" => Some("provider-sitekey-secret-mismatch"),
+        "internal-error" => Some("provider-internal-error"),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn an_unavailable_verdict_names_its_reason() {
+        let contract = json!({"verify_url":"https://challenges.cloudflare.com/turnstile/v0/siteverify","secret_env":"S","protect":["signup"]});
+        let captcha = Captcha::from_contract(&contract, |_| None).unwrap().ready(&[], false).unwrap();
+        assert_eq!(captcha.verify(Some("token"), None).await, Verdict::Unavailable("secret-not-set"));
+        assert_eq!(captcha.verify(None, None).await, Verdict::Rejected, "a missing token stays the visitor's failure");
+        assert_eq!(provider_fault("invalid-input-secret"), Some("provider-invalid-secret"));
+        assert_eq!(provider_fault("invalid-input-response"), None, "a bad token is the visitor's");
+    }
 
     #[test]
     fn production_refuses_what_would_leave_the_gate_open() {

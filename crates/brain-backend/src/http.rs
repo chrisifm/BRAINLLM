@@ -278,6 +278,7 @@ impl IntoResponse for Error {
         response
             .extensions_mut()
             .insert(crate::response::DefaultError);
+        response.extensions_mut().insert(ErrorCode(self.code));
         if self.code == "DATABASE_BUSY" {
             response.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
         }
@@ -292,6 +293,10 @@ impl IntoResponse for Error {
         response
     }
 }
+/// The catalog code of an error answer (`OVERLOADED`, `CAPTCHA_UNAVAILABLE`…), so the request log line names the reason
+/// the client read. A fixed constant, never request text.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ErrorCode(pub(crate) &'static str);
 /// Whether a captured backtrace names this crate's code, which a stripped binary cannot do.
 fn stack_is_symbolized(stack: &str) -> bool {
     stack.contains("brain_backend") && !stack.contains("__mh_execute_header")
@@ -384,7 +389,10 @@ impl App {
         match self.captcha.verify(token, client).await {
             crate::captcha::Verdict::Passed => Ok(()),
             crate::captcha::Verdict::Rejected => Err(Error::new(StatusCode::FORBIDDEN, "CAPTCHA_FAILED", "Complete the captcha again and send its new token in the X-Brain-Captcha header")),
-            crate::captcha::Verdict::Unavailable => Err(Error::new(StatusCode::SERVICE_UNAVAILABLE, "CAPTCHA_UNAVAILABLE", "The captcha could not be verified; nothing was changed; retry with a new token shortly")),
+            crate::captcha::Verdict::Unavailable(reason) => {
+                crate::log_line!("{}", json!({"schemaVersion":1,"event":"captcha-unavailable","code":"CAPTCHA_UNAVAILABLE","action":action,"reason":reason,"rid":REQUEST_ID.try_with(Clone::clone).ok(),"valuesCaptured":false}));
+                Err(Error::new(StatusCode::SERVICE_UNAVAILABLE, "CAPTCHA_UNAVAILABLE", "The captcha could not be verified; nothing was changed; retry with a new token shortly"))
+            }
         }
     }
     async fn user(&self, h: &HeaderMap) -> Result<Option<User>> {
@@ -682,8 +690,15 @@ pub async fn router_full(
         domain: Arc::new(domain),
         api_keys,
     };
+    // Production answers exactly the listed origins; development also the loopback ports `origins::allows` admits.
+    let allow_origin = if app.production {
+        tower_http::cors::AllowOrigin::list(origins)
+    } else {
+        let (allowed, production) = (app.origins.clone(), app.production);
+        tower_http::cors::AllowOrigin::predicate(move |origin, _| origin.to_str().is_ok_and(|o| crate::origins::allows(&allowed, o, production)))
+    };
     let cors = CorsLayer::new()
-        .allow_origin(origins)
+        .allow_origin(allow_origin)
         .allow_credentials(true)
         .allow_methods([
             Method::GET,
@@ -1028,6 +1043,7 @@ async fn response_headers(req: Request, next: Next) -> Response {
     let response = db::with_db_time(db_time.clone(), REQUEST_ID.scope(rid.clone(), REQUEST_OPERATION.scope(operation_of(&method, &route, &path), crate::audit::scope(next.run(req))))).await;
     crate::dev_trace::request(&rid, method.as_str(), &route, response.status().as_u16(), started.elapsed().as_secs_f64() * 1000.0);
     let log_policy = response.extensions().get::<edge_http::LogPolicy>().copied();
+    let error_code = response.extensions().get::<ErrorCode>().map(|code| code.0);
     let mut response = crate::response::finalize(&method, &path, accept.as_deref(), &rid, response);
     let cacheable = response.status().is_success() || response.status() == StatusCode::NOT_MODIFIED;
     let declared = response.extensions().get::<cache_http::Declared>().filter(|_| cacheable).map(|d| d.0.clone());
@@ -1065,6 +1081,9 @@ async fn response_headers(req: Request, next: Next) -> Response {
         if let Some(name) = path.strip_prefix("/api/").and_then(|rest| rest.split('/').next()).filter(|name| route.starts_with("/api/{name}") && !name.is_empty() && name.len() <= 48 && name.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')) {
             line["resource"] = json!(name);
         }
+        if let Some(code) = error_code.filter(|_| !response.status().is_success()) {
+            line["code"] = json!(code);
+        }
         if let Some((db_ms, wait_ms)) = db_time.fields() {
             line["dbMs"] = json!(db_ms);
             line["dbWaitMs"] = json!(wait_ms);
@@ -1088,13 +1107,13 @@ async fn transport_security(State(production): State<bool>, req: Request, next: 
 /// the reason for the operator. That layer still adds its credentials, expose, methods, headers and max-age values to
 /// every answer; a refused origin must not receive any of them, so they are removed here. `Vary` stays for shared caches.
 async fn origin_watch(State(app): State<App>, req: Request, next: Next) -> Response {
-    let refused = req.headers().get(header::ORIGIN).is_some_and(|origin| !app.origins.iter().any(|allowed| allowed.as_bytes() == origin.as_bytes()));
+    let refused = req.headers().get(header::ORIGIN).is_some_and(|origin| !origin.to_str().is_ok_and(|o| crate::origins::allows(&app.origins, o, app.production)));
     let reads = matches!(*req.method(), Method::GET | Method::HEAD);
     let preflight = *req.method() == Method::OPTIONS && req.headers().contains_key(header::ACCESS_CONTROL_REQUEST_METHOD);
     if reads || preflight {
         if let Some(origin) = req.headers().get(header::ORIGIN).and_then(|v| v.to_str().ok()) {
             let socket = reads && req.uri().path() == "/_brain/socket";
-            if !socket && !app.origins.iter().any(|allowed| allowed == origin) {
+            if !socket && !crate::origins::allows(&app.origins, origin, app.production) {
                 crate::origins::log_refusal("B0740", if preflight { "preflight" } else { "read" }, req.method().as_str(), req.uri().path(), Some(origin), &app.origins);
             }
         }
@@ -1124,7 +1143,7 @@ async fn protect(State(app): State<App>, req: Request, next: Next) -> Response {
             .headers()
             .get(header::ORIGIN)
             .and_then(|v| v.to_str().ok());
-        if !origin.is_some_and(|o| app.origins.iter().any(|allowed| allowed == o)) {
+        if !origin.is_some_and(|o| crate::origins::allows(&app.origins, o, app.production)) {
             crate::origins::log_refusal("B0740", "mutation", req.method().as_str(), req.uri().path(), origin, &app.origins);
             return Error::new(StatusCode::FORBIDDEN,"ORIGIN_DENIED","Send the configured site Origin; backend mutations require an explicit allowed origin. Run `brain explain B0740`; the server log names the seen and allowed origins")
                 .origin_refused("B0740", origin, &app.origins, app.production)
@@ -2699,6 +2718,12 @@ mod stack_note_tests {
         assert_eq!(note["event"], "backend-stack-unavailable", "{note}");
         assert!(note.get("stack").is_none() && note["reason"].as_str().unwrap().contains("no symbols") && note["location"]["line"].is_u64(), "{note}");
         assert!(super::stack_event(stripped, false, || false, None, None, Some("r1"), at).is_none(), "the note is once per process");
+    }
+    #[test]
+    fn an_error_answer_carries_its_code_for_the_request_log() {
+        use axum::response::IntoResponse;
+        let response = super::Error::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, "OVERLOADED", "retry").into_response();
+        assert_eq!(response.extensions().get::<super::ErrorCode>().map(|c| c.0), Some("OVERLOADED"));
     }
     #[test]
     fn the_note_about_a_binary_without_symbols_is_kept_once_per_process() {

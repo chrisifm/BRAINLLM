@@ -823,6 +823,16 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
                 let mut diag = compiler::Diag::new("B0809", &file, brain_parse::Span::default(), message, fix);
                 diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
             }
+            // B0813: a debit whose subject the caller chooses; advisory
+            for (file, message, fix) in backend::debit_subject_warnings(&app) {
+                let mut diag = compiler::Diag::new("B0813", &file, brain_parse::Span::default(), message, fix);
+                diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
+            }
+            // B0812: a server route reading process.env, or a key declared only for production; advisory
+            for (file, line, col, message, fix) in route_executor::env_warnings(&app) {
+                let mut diag = compiler::Diag::new("B0812", &file, brain_parse::Span::default(), message, fix);
+                diag.line=line;diag.col=col;diag.level=brain_parse::Severity::Warning;diags.push(diag);
+            }
             // B1709: one page's files registering the same tool, which no single file can see
             for (file, tool, other, view) in brain_check::webmcp::duplicates(&app) {
                 let mut diag = compiler::Diag::new("B1709", &file, brain_parse::Span::default(), format!("tool `{tool}` is also registered by {other}, and {view} loads both, so the browser refuses the second"), "give each tool a name unique on the page, or render one of the two components");

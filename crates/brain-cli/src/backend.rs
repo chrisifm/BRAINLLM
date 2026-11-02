@@ -439,23 +439,58 @@ pub fn blind_update_warnings(root: &Path) -> Vec<(String, String, String)> {
     }
     out
 }
-/// B0809: an operation step that takes a row id from the caller, on a resource one of its roles cannot read in full. An
-/// operation's roles replace the resource policy, so without `owned: true` the answer confirms rows that role reads as missing.
+/// B0809: an operation step that writes rows by id or key, without `owned: true`, on a resource one of its roles cannot
+/// read in full. Every keyed step applies the read policy at run time (`Engine::may_read`), so such a step answers 404
+/// (403 for an upsert) for a row the caller cannot read: an author expecting the operation to reach every row learns it here.
+/// Returns `(file, message, fix)`.
 pub fn operation_reach_warnings(root: &Path) -> Vec<(String, String, String)> {
     let resources = contracts(root, "resources").unwrap_or_default();
     let Ok(d) = domain::load(root, &resources) else { return Vec::new() };
     let mut out = Vec::new();
     for (name, op) in &d.operations {
-        for step in op.steps.iter().filter(|s| !s.owned && s.id.as_deref().is_some_and(|id| id.starts_with("$input."))) {
-            let target = [&step.read, &step.update, &step.delete, &step.action, &step.transition].into_iter().find_map(|t| t.as_deref());
-            let Some(resource) = target.and_then(|t| t.split('.').next()).and_then(|t| resources.iter().find(|r| r.name == t)) else { continue };
+        for step in op.steps.iter().filter(|s| !s.owned) {
+            let by_id = from_input(step.id.as_deref());
+            let target = if by_id { [&step.update, &step.delete, &step.action, &step.transition].into_iter().find_map(|t| t.as_deref()) } else { None };
+            let (target, answer) = match (target, step.upsert.as_deref()) {
+                (Some(t), _) => (t, "404, as for a missing row"),
+                (None, Some(t)) => (t, "403 when the key matches one of them"),
+                (None, None) => continue,
+            };
+            let Some(resource) = target.split('.').next().and_then(|t| resources.iter().find(|r| r.name == t)) else { continue };
             if let Some(role) = op.roles.iter().find(|role| !resource.policy.allows("read", Some(role.as_str()), false)) {
                 out.push((
                     format!("server/operations/{name}.jsbrain"),
-                    format!("step `{}` reaches any row of `{}` by id, including rows `{role}` reads as missing", step.name, resource.name),
-                    "add `owned: true` to the step, or check the row in the operation and keep this warning only if every row is meant to be reachable".to_string(),
+                    format!("step `{}` cannot change rows of `{}` that `{role}` reads as missing: it answers {answer}", step.name, resource.name),
+                    format!("add `owned: true` when the step is meant for the caller's own rows, or grant `{role}` read on `{}` when it must reach every row", resource.name),
                 ));
             }
+        }
+    }
+    out
+}
+fn from_input(id: Option<&str>) -> bool {
+    id.is_some_and(|id| id.starts_with("$input."))
+}
+/// B0813: a `debit` step (the only credit-balance step an operation has) whose `subject` is not the caller: an id from
+/// the input or from an earlier step lets anyone the operation admits spend another person's balance. Returns
+/// `(file, message, fix)`.
+pub fn debit_subject_warnings(root: &Path) -> Vec<(String, String, String)> {
+    let resources = contracts(root, "resources").unwrap_or_default();
+    let Ok(d) = domain::load(root, &resources) else { return Vec::new() };
+    let mut out = Vec::new();
+    for (name, op) in &d.operations {
+        for step in &op.steps {
+            let Some(debit) = &step.debit else { continue };
+            let subject = debit.subject.trim();
+            if !subject.starts_with('$') || subject.starts_with("$user.") {
+                continue;
+            }
+            let roles = op.roles.join("`, `");
+            out.push((
+                format!("server/operations/{name}.jsbrain"),
+                format!("step `{}` debits `{subject}`, a balance the caller chooses: anyone with role `{roles}` can spend another person's credits", step.name),
+                "charge the caller with `subject: '$user.id'`; when the operation must charge others, admit only a system key or an administrator role and keep this warning as the record of that decision".to_string(),
+            ));
         }
     }
     out

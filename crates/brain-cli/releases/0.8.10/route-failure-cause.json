@@ -1,0 +1,9 @@
+{
+  "id": "route-failure-cause",
+  "kind": "fix",
+  "title": "Cause of a failed route in the log",
+  "why": "A route handler that threw logged only its file and request id.",
+  "changelog": [
+    "`route-failed` names the error class, the app file and line that threw and, when the backend client raised it, the backend's status, code and field names; never the message"
+  ]
+}

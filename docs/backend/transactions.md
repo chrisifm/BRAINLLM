@@ -63,10 +63,10 @@ Error field keys start with the step name (`order.quantity`), so the client know
 
 | Step | Needs | Effect |
 |---|---|---|
-| `read: 'r'` | `id` | locks the row (`FOR UPDATE`) and returns it to later steps |
+| `read: 'r'` | `id` | locks the row (`FOR UPDATE`) and returns it to later steps; a row the resource's read policy hides from the caller answers 404, like a missing one |
 | `create: 'r'` | `data` | inserts with the caller as owner; contract and state rules apply |
-| `update: 'r'` | `id`, `data` | PATCH semantics: only the listed fields change |
-| `upsert: 'r'` | `data`, `key` | insert, or merge into the row with the same declared unique key |
+| `update: 'r'` | `id`, `data` | PATCH semantics: only the listed fields change; like every step with an `id`, a row the caller cannot read answers 404 |
+| `upsert: 'r'` | `data`, `key` | insert, or merge into the row with the same declared unique key; a matching row the caller cannot read answers 403 |
 | `delete: 'r'` | `id` | deletes the locked row |
 | `action: 'r.name'` | `id`, `input?` | runs a declared [atomic action](atomic-updates.md) |
 | `transition: 'r.name'` | `id`, `input?` | runs a declared [state transition](state-machines.md) |
@@ -79,9 +79,10 @@ otherwise).
 ## Authority and limits
 
 - `roles` lists configured role names (not `owner` or `public`); the caller must have one of them. The operation's
-  roles replace the resource policies for its steps, so keep each operation narrow and use `owned: true` for
-  per-user rows. A step with an id from the input and no `owned: true` answers for rows the role could not read, which
-  confirms they exist; `brain check` warns B0809.
+  roles replace the resource write policies for its steps, so keep each operation narrow and use `owned: true` for
+  per-user rows. Every keyed step applies the resource's read policy: a `read`, `update`, `delete`, action or transition
+  step answers 404 for a row the caller cannot read, as for a missing one, and an `upsert` whose key matches such a row
+  answers 403 and rolls the operation back. `brain check` warns B0809 where a role cannot read every row a step targets.
 - Resources with a mandatory before-hook cannot be a step target (the contract is rejected at load); their writes stay
   on the single-record endpoints.
 - 1–32 steps, at most 64 operations, input of up to 32 typed fields (`int!`, `str`, `decimal(10,2)!`, ...).
@@ -106,6 +107,10 @@ A step can debit a [credit balance](credits.md) in the same transaction, so the 
 A balance that does not fit answers 409 `CREDITS_INSUFFICIENT` and no step applies; a later step that fails takes the
 charge back. The same `key` value does not charge twice, while the other steps do run again, so pair it with a step that
 is safe to repeat. Its result is `{ delta, balance, replayed }`.
+
+`subject` names whose balance pays. Charge the caller with `'$user.id'`. A subject from the input or from an earlier step
+lets anyone the operation admits spend another person's credits, so `brain check` warns B0813; when an operation must
+charge someone else, admit only a system key or an administrator role. A literal id charges one fixed account.
 
 ## From server code
 

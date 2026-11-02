@@ -1,0 +1,9 @@
+{
+  "id": "origin-refusal-once",
+  "kind": "fix",
+  "title": "One origin refusal line per origin",
+  "why": "A beacon that cannot read its 403 repeated the same B0740 line on every request.",
+  "changelog": [
+    "B0740 and B0743 log each refused origin once until the server restarts"
+  ]
+}

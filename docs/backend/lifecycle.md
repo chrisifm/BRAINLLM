@@ -120,7 +120,7 @@ export default { logging: { requests: 'errors', slow: '1s' } }
 
 | `requests` | Lines |
 |---|---|
-| `errors` (default) | `backend-request-failed` for 4xx and 5xx |
+| `errors` (default) | `backend-request-failed` for 4xx and 5xx, with the answer's error `code` (`OVERLOADED`, `POLICY_DENIED`…) when it has one |
 | `all` | also `backend-request` for every success except health probes |
 | `off` | none; internal error and lifecycle events still log |
 

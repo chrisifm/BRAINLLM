@@ -1,0 +1,9 @@
+{
+  "id": "browser-transport-retry",
+  "kind": "fix",
+  "title": "Browser transport retry under load",
+  "why": "A starved machine broke the Chrome pipe and the run failed with a bare transport error.",
+  "changelog": [
+    "`brain test` and `brain doctor` retry once when the browser connection breaks, and a second failure names probable machine load with the 1-minute load average"
+  ]
+}

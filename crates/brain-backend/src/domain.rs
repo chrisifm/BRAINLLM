@@ -1049,6 +1049,21 @@ impl<'a> Engine<'a> {
         q.build_query_scalar::<bool>().fetch_one(&mut **tx).await
     }
 
+    /// True when the resource's read policy shows this row to the caller (always for a system key).
+    async fn may_read(&self, tx: &mut Tx, r: &Resource, id: Uuid) -> Result<bool, sqlx::Error> {
+        let viewer = crate::visibility::Viewer { id: Some(self.user.id), role: Some(&self.user.role) };
+        let scope = match crate::ownership::scope(r, "read", viewer) {
+            None => return Ok(false),
+            Some(crate::ownership::Scope::All) => return Ok(true),
+            Some(scope) => scope,
+        };
+        let mut q = sqlx::QueryBuilder::new(format!("SELECT EXISTS(SELECT 1 FROM {} WHERE id=", table(r)));
+        q.push_bind(id).push(" AND ");
+        scope.push(&mut q, r, self.resources);
+        q.push(")");
+        q.build_query_scalar::<bool>().fetch_one(&mut **tx).await
+    }
+
     /// Run one declared action (or transition when `state` is set) on a locked row.
     async fn act(
         &mut self,
@@ -1266,6 +1281,11 @@ impl<'a> Engine<'a> {
                     if step.owned && !owns(&existing, self.user) {
                         return Err(Failure::Denied { resource: r.name.clone(), id, label: label.into() });
                     }
+                    // A keyed step reaches only what the resource's read policy shows this caller: a row it may not read
+                    // is missing, so an operation neither changes, returns nor confirms other users' records.
+                    if !self.may_read(tx, r, id).await.map_err(located(&r.name, Some(label)))? {
+                        return Err(Failure::Missing(label.into()));
+                    }
                     match kind {
                         Kind::Read => existing,
                         Kind::Delete => {
@@ -1297,7 +1317,14 @@ impl<'a> Engine<'a> {
                     let user = self.user;
                     let owned = step.owned;
                     let can = move |row: &Value| !owned || owns(row, user);
-                    self.upsert(tx, r, &data, &step.key, true, Some(label), &can).await?.0
+                    let (row, created) = self.upsert(tx, r, &data, &step.key, true, Some(label), &can).await?;
+                    // The key matched a row this caller may not read: refuse as the upsert endpoint refuses a row it may
+                    // not update. The failure rolls the whole operation back, so the write never lands.
+                    let row_id = row["id"].as_str().and_then(|s| Uuid::parse_str(s).ok()).ok_or_else(|| Failure::Missing(label.into()))?;
+                    if !created && !self.may_read(tx, r, row_id).await.map_err(located(&r.name, Some(label)))? {
+                        return Err(Failure::Forbidden);
+                    }
+                    row
                 }
                 Kind::Action | Kind::Transition => {
                     let member = target.split_once('.').map(|(_, m)| m).unwrap_or_default();
@@ -1309,8 +1336,12 @@ impl<'a> Engine<'a> {
                         let t = domain.transitions.as_ref().ok_or_else(|| Failure::Missing(label.into()))?;
                         (t.transitions.get(member).ok_or_else(|| Failure::Missing(label.into()))?.action(&t.field), Some(member))
                     };
+                    let id = id.expect("validated id");
+                    if !self.may_read(tx, r, id).await.map_err(located(&r.name, Some(label)))? {
+                        return Err(Failure::Missing(label.into()));
+                    }
                     let steps_now = steps.clone();
-                    self.act(tx, r, &action, id.expect("validated id"), &step_input, authority, Some(label), &steps_now, state).await?
+                    self.act(tx, r, &action, id, &step_input, authority, Some(label), &steps_now, state).await?
                 }
             };
             steps.insert(step.name.clone(), record);

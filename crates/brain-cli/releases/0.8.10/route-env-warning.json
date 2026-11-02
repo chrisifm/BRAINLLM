@@ -1,0 +1,9 @@
+{
+  "id": "route-env-warning",
+  "kind": "fix",
+  "title": "Routes warn on environment reads outside ctx.env",
+  "why": "A route handler that read process.env, or a variable declared only under [production], passed brain check and then ran in development without the value.",
+  "changelog": [
+    "B0812 warns when a server route reads `process.env` instead of `ctx.env`, or reads a variable `.brain_env` declares only under `[production]`"
+  ]
+}

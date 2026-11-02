@@ -75,6 +75,10 @@ credentials or wildcard. Every allowed origin may:
 - read responses with credentials (`Access-Control-Allow-Credentials: true`),
 - send mutations; other origins get `403 ORIGIN_DENIED` with `brainCode: "B0740"`.
 
+Outside production, when the allowed origins include an `http` loopback origin (`127.0.0.1`, `localhost` or `[::1]`),
+every other `http` loopback origin is allowed too, whatever its port, so a development server that moved to the next free
+port keeps working. Production allows exactly the listed origins, and sockets follow the same rule.
+
 `cors.maxAge` lets browsers cache preflight results, which removes one round trip from every cross-origin mutation:
 
 ```sh
@@ -91,7 +95,7 @@ curl -si -X OPTIONS http://127.0.0.1:5182/api/orders \
 
 | Code | You see | Where the detail is | Fix |
 |---|---|---|---|
-| B0740 | `403 ORIGIN_DENIED`, or a browser CORS error on a read or preflight | Server log `origin-refused`: seen origin, allowed origins, key. Development answers add `error.origin`. Production answers carry only the codes and a generic fix | Add the exact origin to `cors.origins` in `server/platform.jsbrain` or `backend.origins` in `brain.json`, or call from the site itself |
+| B0740 | `403 ORIGIN_DENIED`, or a browser CORS error on a read or preflight | Server log `origin-refused`: seen origin, allowed origins, key, once per origin until the server restarts. Development answers add `error.origin`. Production answers carry only the codes and a generic fix | Add the exact origin to `cors.origins` in `server/platform.jsbrain` or `backend.origins` in `brain.json`, or call from the site itself |
 | B0741 | `403 Cross-origin request`, or the cross-origin form page | Server log `origin-refused`: seen origin, host, forwarded host. Production adds only the code (`brainCode`, or the `x-brain-code` header on the form page) | Call from the page this server serves. Behind a proxy, forward the host (`proxy_set_header Host $host;`). There is no allowlist to widen |
 | B0742 | `ctx.backend` refuses the call | Server log `origin-refused`; the message starts with the code | Run the login, logout or write from a same-origin POST |
 | B0743 | The browser reports only that the socket closed | Backend log and the dev proxy diagnostics: seen origin, allowed origins. The dev console prints the likely fix. The handshake answer stays opaque | Add the exact origin to `backend.sockets.allowedOrigins` and `backend.origins` |

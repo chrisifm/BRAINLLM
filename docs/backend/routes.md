@@ -90,12 +90,15 @@ The call acts as the key, not as `ctx.user`: check the caller yourself before re
 Handlers follow the same source rules as the rest of `server/`: one default export; no `class`, `while`, `do` or
 classic `for`. `for (const x of list)` is allowed. `brain check`, `brain build` and `brain doctor` report them, and
 `brain backend serve` and `brain jobs work` refuse to start on them. A handler with no default export (B0772) or a
-secret-shaped literal in its source (B0773) is refused the same way; read keys from `ctx.env`.
+secret-shaped literal in its source (B0773) is refused the same way; read keys from `ctx.env`. `brain check` warns B0812 when a handler reads `process.env`, and when it reads a
+variable that `.brain_env` declares only under `[production]`, which the route reads as unset in development.
 
 Throwing `{errors: {field: 'message'}}` answers `422 INVALID_INPUT` with those fields. Throwing an error
 with a 4xx `status` answers that status with a generic `ROUTE_REJECTED` code, and `throw notFound()` or `throw gone()` answers `404` or `410` the same way.
 `redirect(url, status)`, returned or thrown, answers that redirect with `Location`. Any other throw answers
-`500 ROUTE_FAILED`; its message is never sent to the client. `scripts/gates/http-truth-table.mjs` pins every shape on
+`500 ROUTE_FAILED`; its message is never sent to the client. The server log line `route-failed` names the error class
+(`error`), the app file and line that threw (`location`), and, when the backend client raised it, the backend's
+`status`, `code` and field names (`backend`); never the message or a value. `scripts/gates/http-truth-table.mjs` pins every shape on
 the backend and on each gateway.
 
 ## Checks the backend runs before the handler
@@ -107,7 +110,7 @@ INVALID_JSON`; keys `__proto__`, `constructor` and `prototype` are refused at an
 
 Mutations on unsigned routes keep the browser `Origin` check of the rest of the backend. A handler that
 outlives `timeout` answers `504 ROUTE_TIMEOUT`; when every executor is busy the route answers `503
-OVERLOADED`.
+OVERLOADED` at once (requests are not queued), and the `backend-request-failed` line carries `"code":"OVERLOADED"`.
 
 Handlers run in private Node sidecars (four per server) with the selected environment's variables, so
 they can use `fetch` and any server module of the app.

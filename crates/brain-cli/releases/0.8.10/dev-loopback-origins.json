@@ -1,0 +1,9 @@
+{
+  "id": "dev-loopback-origins",
+  "kind": "fix",
+  "title": "Development admits any loopback port",
+  "why": "A development server that took the next free port (5192 instead of 5190) got 403 ORIGIN_DENIED on every mutation although the allowlist already named a loopback origin.",
+  "changelog": [
+    "outside production, an allowlist that names an `http` loopback origin also admits every other `http` loopback origin on any port; production still allows exactly the listed origins"
+  ]
+}
