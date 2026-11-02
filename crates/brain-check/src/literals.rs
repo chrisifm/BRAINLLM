@@ -1,6 +1,6 @@
 //! INTERNALS §8.1: colors and spacing only through tokens.
-//! - B0304 (error): a literal color in a color property; the edit points at the token with the same value, or the
-//!   nearest color token.
+//! - B0304 (error): a literal color in a color property; the edit points at the token with the same value (the
+//!   nearest color token is only named in the fix: it would change the color).
 //! - B0305: a literal length in a spacing property. Equal to a token value → info (normalized to the token);
 //!   anything else → warning. `0`, `auto`, percentages, keywords and `var()`/`calc()` contents are allowed.
 //! - B0408: `opacity` below 1 on a rule that sets a text color (its contrast can no longer be verified).
@@ -192,6 +192,7 @@ impl Checker<'_> {
                 let tokens = tokens.unwrap_or(&[]);
                 let mut edits = Vec::new();
                 let mut best_name = None;
+                let mut nearest: Option<(&str, &str)> = None;
                 for l in &lits {
                     // A translucent veil behind content (overlays, modals) is the `--scrim` token (SPEC «Tokens»).
                     if matches!(name, "background" | "background-color") && translucent(&l.text) {
@@ -199,16 +200,24 @@ impl Checker<'_> {
                         best_name.get_or_insert("--scrim");
                         continue;
                     }
+                    // Only a token with the same value is written; the nearest one changes the color, so it is
+                    // only named in the fix. A translucent literal never equals an opaque token.
                     if let Some(rgb) = literal_hex(&l.text)
-                        && let Some((tn, _)) = nearest_color(rgb, tokens)
+                        && let Some((tn, d)) = nearest_color(rgb, tokens)
                     {
-                        edits.push(((base + l.start) as u32, (base + l.end) as u32, format!("var({tn})")));
-                        best_name.get_or_insert(tn);
+                        if d < 1e-9 && !translucent(&l.text) {
+                            edits.push(((base + l.start) as u32, (base + l.end) as u32, format!("var({tn})")));
+                            best_name.get_or_insert(tn);
+                        } else if nearest.is_none() {
+                            let value = tokens.iter().find(|(n, _)| n == tn).map_or("", |(_, v)| v.trim());
+                            nearest = Some((tn, value));
+                        }
                     }
                 }
-                let fix = match best_name {
-                    Some(t) => format!("use a color token instead of a literal: `var({t})`"),
-                    None => {
+                let fix = match (best_name, nearest) {
+                    (Some(t), None) => format!("use a color token instead of a literal: `var({t})`"),
+                    (_, Some((t, v))) => format!("no color token has the value `{}`; the nearest is `var({t})` (`{v}`): use it if that is the intended color, or declare this color in tokens.cssbrain and use `var(--name)`", lits.iter().find(|l| literal_hex(&l.text).is_some() && !edits.iter().any(|e| e.0 as usize == base + l.start)).map_or(first.text.as_str(), |l| l.text.as_str())),
+                    (None, None) => {
                         let names: Vec<&str> = tokens.iter().filter(|(_, v)| parse_hex(v).is_some()).map(|(n, _)| n.as_str()).collect();
                         if names.is_empty() { "declare the color in tokens.cssbrain and use `var(--name)`".to_string() } else { format!("use a color token: {}", names.join(", ")) }
                     }
@@ -235,7 +244,7 @@ impl Checker<'_> {
     }
 }
 
-/// Exact token match first, else the closest color token by RGB distance.
+/// The closest color token by RGB distance (0 = the same value).
 fn nearest_color(c: (f64, f64, f64), tokens: &[(String, String)]) -> Option<(&str, f64)> {
     tokens
         .iter()

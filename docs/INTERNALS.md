@@ -1111,13 +1111,15 @@ specified elsewhere; ➕ = new in this section.
 
 ### 8.1 Literal colors and spacing (fixed 2026-10-13)
 - Color properties (`color`, `background(-color)`, `border(-*)-color`, `outline-color`, `fill`, `stroke`, `caret-color`)
-  with a literal color: B0304 error; `edits` replace it with the token whose value matches exactly (or the nearest
-  token that keeps the AA pair). `filter`/`box-shadow` colors and SVG attributes in markup are free.
+  with a literal color: B0304 error; `edits` replace it only with the token whose value matches exactly (an opaque
+  literal; a translucent background becomes `--scrim`). Otherwise the fix names the nearest color token and its value
+  without writing it, because it changes the color (2026-11-02). `filter`/`box-shadow` colors and SVG attributes in
+  markup are free.
 - Spacing properties (`padding*`, `margin*`, `gap`, `row-gap`, `column-gap`, `inset*`) with a literal length equal to a
   token value: B0305 info, normalized to the token (§21); any other literal: B0305 warning. `0`, `auto` and
   percentages are always allowed. Sizes (`width`, `height`, `max-*`, `font-size`, `border-radius`, `line-height`) are free.
-- Implementation notes (#97, accepted): B0304's edit picks the exact-value token, else the nearest by RGB distance;
-  if that token breaks the AA pair, B0408 reports it on the next pass. B0125 (markup required) counts `<meta>` and
+- Implementation notes (#97, accepted; narrowed 2026-11-02): B0304's edit is the exact-value token only; the
+  nearest by RGB distance is a suggestion in the fix, so no write changes a color the author chose. B0125 (markup required) counts `<meta>` and
   `<script src|type>` in `app.brain`'s head as markup. B0126 exempts `*.test.brain`.
 
 ## 32. Dynamic metadata, generated SEO files and WebMCP (fixed 2026-10-13, dynamic sitemap 2026-10-29, imperative tools 2026-10-30)

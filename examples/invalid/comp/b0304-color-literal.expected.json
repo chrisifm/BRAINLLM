@@ -6,6 +6,6 @@
     "line": 3,
     "col": 11,
     "msg": "literal color `red` in `color`: colors come from tokens",
-    "fix": "use a color token instead of a literal: `var(--fg)`"
+    "fix": "no color token has the value `red`; the nearest is `var(--fg)` (`#1a1a1a`): use it if that is the intended color, or declare this color in tokens.cssbrain and use `var(--name)`"
   }
 ]
