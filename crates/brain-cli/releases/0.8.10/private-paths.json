@@ -1,0 +1,11 @@
+{
+  "id": "private-paths",
+  "kind": "fix",
+  "title": "Every host config refuses server code",
+  "why": "The built nginx.conf only refused /_brain/ and the Caddyfile only /_server/, so server.mjs and server function bodies could be downloaded as files.",
+  "changelog": [
+    "`_brain/nginx.conf`, `_brain/Caddyfile` and `brain deploy config nginx` refuse `server.mjs`, `_server/`, `_brain/`, `_headers`, `_redirects` and dot files other than `.well-known`, from one list the static handler and the Node server also follow",
+    "private paths are refused in any letter case, so a case-insensitive disk cannot serve `/_SERVER/`",
+    "a build with server code says at the top of `_headers` that it must not go to a static host, which cannot refuse a path"
+  ]
+}

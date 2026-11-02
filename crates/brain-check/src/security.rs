@@ -1,6 +1,8 @@
 //! INTERNALS §31, compiler side:
 //! - B0213 static `javascript:`/`vbscript:`/`data:` URL in `href`/`src`/`action`/`formaction`/`srcset`/`xlink:href`
 //!   (`data:image/*` is fine in `src`/`srcset`). Bound expressions are checked by the runtime.
+//! - B0210 a bound iframe `srcdoc` without a `sandbox` that keeps it in an opaque origin: the iframe would render the value
+//!   as a same-origin document. (`sanitize` does not help here: it marks a value for `{@html}`, which cleans it.)
 //! - B0215 (info) `target="_blank"` without `rel="noopener noreferrer"`: added automatically.
 //! - B0122 import by URL (`http(s)://`, `//host`).
 //! - B0123 third-party `<script src>` in `app.brain` without `integrity`.
@@ -18,7 +20,9 @@ use brain_parse::ast::*;
 use brain_parse::Span;
 use std::collections::HashSet;
 
-const URL_ATTRS: &[&str] = &["href", "src", "action", "formaction", "srcset", "xlink:href", "poster", "cite"];
+/// Attributes whose value is a URL; the same names as runtime/brain.js `URL_ATTRS` (a test keeps them identical).
+/// `srcset`/`imagesrcset` hold one URL per comma-separated candidate, `ping` space-separated URLs.
+const URL_ATTRS: &[&str] = &["href", "src", "action", "formaction", "poster", "xlink:href", "cite", "data", "background", "longdesc", "manifest", "codebase", "icon", "srcset", "imagesrcset", "ping"];
 
 /// Every expression of a statement list, with whether it runs on the server, depth first.
 pub(crate) fn walk(stmts: &[Stmt], server: bool, f: &mut dyn FnMut(&Expr, bool, &[String])) {
@@ -183,13 +187,48 @@ fn host_of(url: &str) -> Option<&str> {
     Some(rest.split(['/', '?', '#', ':']).next().unwrap_or(""))
 }
 
+/// The URLs of an attribute value: each srcset candidate, each space-separated `ping` URL, else the value itself.
+fn url_list<'a>(v: &'a str, attr: &str) -> Vec<&'a str> {
+    match attr {
+        "srcset" | "imagesrcset" => v.split(',').filter_map(|c| c.split_whitespace().next()).collect(),
+        "ping" => v.split_whitespace().collect(),
+        _ => vec![v],
+    }
+}
+
+/// Markup the author wrote: text, a string literal or a template without values.
+fn literal_markup(v: &AttrValue) -> bool {
+    match v {
+        AttrValue::Text(_) | AttrValue::None => true,
+        AttrValue::Mixed(parts) => parts.iter().all(|p| matches!(p, AttrPart::Text(_))),
+        AttrValue::Expr(x) => match x.unparen() {
+            Expr::Str { .. } => true,
+            Expr::Template { tag: None, exprs, .. } => exprs.is_empty(),
+            _ => false,
+        },
+    }
+}
+
+/// A literal `sandbox` without `allow-same-origin`: the framed document gets an opaque origin, so it cannot reach the page.
+fn opaque_sandbox(attrs: &[Attr]) -> bool {
+    attrs.iter().any(|a| {
+        a.kind == AttrKind::Plain
+            && a.name.eq_ignore_ascii_case("sandbox")
+            && match &a.value {
+                AttrValue::None => true,
+                AttrValue::Text(t) => !t.split_ascii_whitespace().any(|f| f.eq_ignore_ascii_case("allow-same-origin")),
+                _ => false,
+            }
+    })
+}
+
 fn dangerous_url(v: &str, attr: &str) -> Option<&'static str> {
     let l: String = v.trim().chars().filter(|c| !c.is_whitespace()).collect::<String>().to_ascii_lowercase();
     if l.starts_with("javascript:") {
         Some("javascript:")
     } else if l.starts_with("vbscript:") {
         Some("vbscript:")
-    } else if l.starts_with("data:") && !(l.starts_with("data:image/") && matches!(attr, "src" | "srcset" | "poster")) {
+    } else if l.starts_with("data:") && !(l.starts_with("data:image/") && matches!(attr, "src" | "srcset" | "imagesrcset" | "poster")) {
         Some("data:")
     } else {
         None
@@ -503,7 +542,7 @@ impl Checker<'_> {
         for n in nodes {
             match n {
                 Node::Element(e) => {
-                    self.url_attrs(&e.attrs);
+                    self.url_attrs(&e.tag, &e.attrs);
                     if e.tag == "script" && e.attrs.iter().any(|a| a.name == "src") && !e.attrs.iter().any(|a| a.name == "integrity") {
                         let src = e.attrs.iter().find(|a| a.name == "src").map(|a| match &a.value {
                             AttrValue::Text(t) => t.clone(),
@@ -539,9 +578,14 @@ impl Checker<'_> {
         }
     }
 
-    fn url_attrs(&mut self, attrs: &[Attr]) {
+    fn url_attrs(&mut self, tag: &str, attrs: &[Attr]) {
         for a in attrs {
-            if a.kind != AttrKind::Plain || !URL_ATTRS.contains(&a.name.as_str()) {
+            let name = a.name.to_ascii_lowercase();
+            if a.kind == AttrKind::Plain && name == "srcdoc" && tag.eq_ignore_ascii_case("iframe") && !literal_markup(&a.value) && !opaque_sandbox(attrs) {
+                self.push("B0210", a.span, "bound `srcdoc` without `sandbox`: the iframe renders the value as a same-origin document, so its scripts run with the page's rights", "add `sandbox` without `allow-same-origin` to the iframe (the document then runs in an opaque origin), or write the document literally");
+                continue;
+            }
+            if a.kind != AttrKind::Plain || !URL_ATTRS.contains(&name.as_str()) || (name == "data" && !tag.eq_ignore_ascii_case("object")) {
                 continue;
             }
             let lit = match &a.value {
@@ -558,7 +602,7 @@ impl Checker<'_> {
                 AttrValue::None => None,
             };
             if let Some(v) = lit
-                && let Some(scheme) = dangerous_url(&v, &a.name)
+                && let Some(scheme) = url_list(&v, &name).into_iter().find_map(|u| dangerous_url(u, &name))
             {
                 self.push("B0213", a.span, format!("`{scheme}` URL in `{}`: it runs or injects code when followed", a.name), "use a button with `on:click` for actions, or a real `https://`/same-origin URL");
             }
@@ -823,5 +867,20 @@ impl Checker<'_> {
             format!("`{sink}` gets a URL built at runtime: a crafted link can send the user to any site (open redirect)"),
             format!("navigate to a same-origin path (`'/items/' + id`, or a helper whose every return starts with `/`), or check it first: `if (new URL({v}, location.origin).origin === location.origin)`"),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The runtime sanitizes bound values (client and SSR) and the checker literal ones: the same attribute names.
+    #[test]
+    fn url_attributes_match_the_runtime_list() {
+        let src = include_str!("../../../runtime/brain.js");
+        let line = src.lines().find(|l| l.starts_with("const URL_ATTRS = {")).expect("runtime/brain.js declares URL_ATTRS");
+        let names: Vec<String> = line.split(['{', ',']).skip(1).filter_map(|e| e.split(": ").next()).map(|n| n.trim().trim_matches('\'').to_string()).filter(|n| !n.is_empty() && !n.contains('}')).collect();
+        let runtime: Vec<String> = { let mut v = names; v.sort(); v };
+        let mut checker: Vec<String> = super::URL_ATTRS.iter().map(|s| s.to_string()).collect();
+        checker.sort();
+        assert_eq!(runtime, checker);
     }
 }

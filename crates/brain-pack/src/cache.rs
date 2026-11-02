@@ -393,6 +393,11 @@ pub fn apply(root: &Path, cfg: &CacheCfg, pages: &[PageRef], extra_csp: &[(Strin
         h = h.replace("\n/404.html\n", "\n/404.brain\n").replace("\n/_offline.html\n", "\n/_offline.brain\n");
         h = brain_types(&h, pages, files, &offline_file);
     }
+    // A static host publishes every file it receives and `_headers` has no way to refuse a path, so a build with server
+    // code says so where that host reads its configuration (the server and every generated config refuse them)
+    if files.contains_key("server.mjs") {
+        h = format!("{SERVER_CODE_NOTE}{h}");
+    }
     files.insert("_headers".into(), if pre.is_empty() { h } else { base_paths(&h, pre) });
     // redirects.json (SEO, #219): fragments the CLI passes through the post step, placed in the host configs here
     let redir_nginx = files.remove("_brain/redirects.nginx").map(|r| base_redirects(&r, pre)).unwrap_or_default();
@@ -410,6 +415,9 @@ pub fn apply(root: &Path, cfg: &CacheCfg, pages: &[PageRef], extra_csp: &[(Strin
     files.insert("_brain/Caddyfile".into(), if redir_caddy.is_empty() { c } else { insert_after_first_line(&c, &format!("# redirects.json\n{redir_caddy}")) });
     Applied { warnings, build_hash }
 }
+
+/// First lines of `_headers` when dist/ holds server code (`server.mjs`, `_server/`).
+pub const SERVER_CODE_NOTE: &str = "# This dist/ holds server code (server.mjs, _server/). Do not upload it to a static host: it would publish\n# that code as files, and _headers cannot refuse a path. Serve it with `brain start` (alone or behind the proxy\n# `brain deploy config nginx` writes); it and every generated host config refuse these paths.\n";
 
 /// Precache list: core and router (every `_b/*.js` the shell pages load first), each route's entry chunks and CSS,
 /// then the offline page, while the total raw size stays under `budget` bytes. Pages themselves are not precached
@@ -628,7 +636,7 @@ pub fn caddy(build_hash: &str, http: bool, csp: &str, pre: &str, ext: crate::Ext
         o.push_str(&format!("    {k} \"{}\"\n", v.replace('"', "\\\"")));
     }
     o.push_str(&format!("    X-Brain-Build {build_hash}\n}}\n"));
-    o.push_str(&format!("@private path {pre}/_brain/* {pre}/_server/*\nrespond @private 404\n"));
+    o.push_str(&crate::private::caddy(pre));
     if http {
         o.push_str(&format!("@chunks path {pre}/_b/*\nheader @chunks Cache-Control \"{IMMUTABLE}\"\nheader {pre}/sw.js Cache-Control \"{REVALIDATE}\"\n"));
         o.push_str(&format!("@pages not path {pre}/_b/*\nheader @pages Cache-Control \"{REVALIDATE}\"\n"));
@@ -683,19 +691,24 @@ pub fn base_paths(headers: &str, pre: &str) -> String {
 /// `nginx` for an app under the base prefix `pre` (`/app`): every location moves under it; the server's `root` must
 /// be the folder where `<root>/app/` is dist/ (for example a symlink `app` → dist).
 pub fn nginx_at(build_hash: &str, http: bool, csp: &str, pre: &str) -> String {
-    let n = nginx(build_hash, http, csp);
+    let n = nginx_private(build_hash, http, csp, pre);
     if pre.is_empty() {
         return n;
     }
     n.replace("(root = dist/).", &format!("(root = the folder where {pre}/ is dist/, e.g. a symlink)."))
         .replace("location /_b/", &format!("location {pre}/_b/"))
         .replace("location = /sw.js", &format!("location = {pre}/sw.js"))
-        .replace("location ~ ^/_brain/", &format!("location ~ ^{pre}/_brain/"))
         .replace("location / {", &format!("location {pre}/ {{"))
         .replace("location ~ (^/$|/$|\\.html$)", &format!("location ~ (^{pre}/$|/$|\\.html$)"))
 }
 
 pub fn nginx(build_hash: &str, http: bool, csp: &str) -> String {
+    nginx_private(build_hash, http, csp, "")
+}
+
+/// `nginx` with the private-path blocks ([`crate::private`]) already under the base `pre`.
+fn nginx_private(build_hash: &str, http: bool, csp: &str, pre: &str) -> String {
+    let private = crate::private::nginx(pre, false, "");
     // nginx drops server-level add_header in any location that has its own: every location repeats the security set
     let mut sec = String::new();
     for (k, v) in SECURITY {
@@ -708,7 +721,7 @@ pub fn nginx(build_hash: &str, http: bool, csp: &str) -> String {
     }
     doc.push_str(&format!("    add_header Content-Security-Policy \"{csp}\" always;\n"));
     if !http {
-        return format!("# BRAINLLM build {build_hash}: include this file inside the app's server {{}} block (root = dist/).\nlocation ~ ^/_brain/ {{\n    return 404;\n}}\nlocation / {{\n{doc}    try_files $uri $uri/index.html $uri.html =404;\n}}\n");
+        return format!("# BRAINLLM build {build_hash}: include this file inside the app's server {{}} block (root = dist/).\n{private}location / {{\n{doc}    try_files $uri $uri/index.html $uri.html =404;\n}}\n");
     }
     format!(
         "# BRAINLLM build {build_hash}: include this file inside the app's server {{}} block (root = dist/).\n\
@@ -716,7 +729,7 @@ gzip_static on;\n\
 # brotli_static on;  # enable when nginx has ngx_brotli; brain build emits .br files\n\
 location /_b/ {{\n{sec}    add_header Cache-Control \"{IMMUTABLE}\";\n    add_header Vary Accept-Encoding;\n    try_files $uri =404;\n}}\n\
 location = /sw.js {{\n{sec}    add_header Cache-Control \"{REVALIDATE}\";\n}}\n\
-location ~ ^/_brain/ {{\n    return 404;\n}}\n\
+{private}\
 location / {{\n{doc}    etag on;\n    add_header Cache-Control \"{PUBLIC_SWR}\";\n    try_files $uri $uri/index.html =404;\n}}\n\
 location ~ (^/$|/$|\\.html$) {{\n{doc}    etag on;\n    add_header Cache-Control \"{REVALIDATE}\";\n    add_header Vary Accept-Encoding;\n    add_header X-Brain-Build {build_hash};\n    try_files $uri $uri/index.html $uri.html =404;\n}}\n"
     )
@@ -975,6 +988,27 @@ fn walk(base: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_generated_host_config_refuses_the_private_paths() {
+        for http in [true, false] {
+            for pre in ["", "/app"] {
+                let n = nginx_at("h", http, "default-src 'self'", pre);
+                let blocks = crate::private::nginx(pre, false, "");
+                assert!(n.contains(&blocks), "nginx http={http} pre={pre}: {n}");
+                // regex locations run in file order: the private ones come before the page ones
+                assert!(n.find(&blocks).unwrap() < n.find("location ~ (^").unwrap_or(usize::MAX), "{n}");
+                assert!(nginx_brain(&n).contains(&blocks), "ext brain keeps the blocks");
+                for ext in [crate::Ext::Web, crate::Ext::Brain] {
+                    let c = caddy("h", http, "default-src 'self'", pre, ext);
+                    assert!(c.contains(&crate::private::caddy(pre)), "caddy http={http} pre={pre}: {c}");
+                }
+            }
+        }
+        // the old lists only named `/_brain/` (nginx) and `/_server/*` (Caddy): server.mjs was served as a file
+        assert!(nginx("h", true, "x").contains("server\\.mjs"));
+        assert!(caddy("h", true, "x", "", crate::Ext::Web).contains("server\\.mjs"));
+    }
+
     #[test]
     fn a_declared_connect_src_replaces_the_broad_sources_and_keeps_own_origin_and_derived_ones() {
         let derived = vec![("connect-src".to_string(), "wss://live.site.test".to_string())];

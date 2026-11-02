@@ -14,7 +14,7 @@ fn diags_with(path: &str, src: &str, ctx: &Ctx) -> Vec<brain_parse::Diag> {
 
 /// Only the §31 codes (snippets touch `document` etc. loosely).
 fn codes_in(path: &str, src: &str, ctx: &Ctx) -> Vec<&'static str> {
-    diags_with(path, src, ctx).into_iter().map(|d| d.code).filter(|c| matches!(*c, "B0122" | "B0123" | "B0213" | "B0215" | "B0710" | "B0711" | "B0713" | "B0737" | "B1310" | "B1311")).collect()
+    diags_with(path, src, ctx).into_iter().map(|d| d.code).filter(|c| matches!(*c, "B0122" | "B0123" | "B0210" | "B0213" | "B0215" | "B0710" | "B0711" | "B0713" | "B0737" | "B1310" | "B1311")).collect()
 }
 
 fn codes(src: &str) -> Vec<&'static str> {
@@ -28,6 +28,29 @@ fn b0213_dangerous_static_urls() {
     assert_eq!(codes("<iframe title=\"t\" src=\"data:text/html,<b>x</b>\"></iframe>"), ["B0213"]);
     assert_eq!(codes("<form action={'javascript:go()'}><button>x</button></form>"), ["B0213"]);
     assert!(codes("<img alt=\"x\" src=\"data:image/png;base64,AAAA\"><a href=\"/home\">x</a><a href=\"https://example.com\">y</a>").is_empty());
+}
+
+#[test]
+fn b0213_covers_every_url_attribute_and_each_srcset_candidate() {
+    assert_eq!(codes("<svg><a xlink:href=\"javascript:alert(1)\"><text>x</text></a></svg>"), ["B0213"]);
+    assert_eq!(codes("<blockquote cite=\"javascript:x\">q</blockquote>"), ["B0213"]);
+    assert_eq!(codes("<object data=\"data:text/html,x\" title=\"o\"></object>"), ["B0213"]);
+    assert_eq!(codes("<a href=\"/a\" ping=\"/ok javascript:x\">x</a>"), ["B0213"]);
+    assert_eq!(codes("<img alt=\"x\" width=\"1\" height=\"1\" srcset=\"a.jpg 1x, javascript:x 2x\">"), ["B0213"]);
+    assert!(codes("<img alt=\"x\" width=\"1\" height=\"1\" srcset=\"a.jpg 1x, data:image/png;base64,AA 2x\">").is_empty());
+    assert!(codes("<div data=\"javascript-free text\">x</div>").is_empty(), "`data` is a URL on <object> only");
+}
+
+#[test]
+fn b0210_bound_srcdoc_needs_an_opaque_sandbox() {
+    let comp = |attrs: &str| format!("<script>\nlet body = sig('')\n</script>\n<iframe title=\"t\" {attrs}></iframe>");
+    assert_eq!(codes(&comp("srcdoc={body}")), ["B0210"]);
+    assert_eq!(codes(&comp("srcdoc=\"<p>{body}</p>\"")), ["B0210"]);
+    assert_eq!(codes(&comp("srcdoc={`<p>${body}</p>`}")), ["B0210"]);
+    assert_eq!(codes(&comp("sandbox=\"allow-scripts allow-same-origin\" srcdoc={body}")), ["B0210"]);
+    assert!(codes(&comp("sandbox srcdoc={body}")).is_empty());
+    assert!(codes(&comp("sandbox=\"allow-scripts\" srcdoc={body}")).is_empty());
+    assert!(codes(&comp("srcdoc=\"<p>static</p>\"")).is_empty());
 }
 
 #[test]

@@ -1,0 +1,11 @@
+{
+  "id": "url-attributes",
+  "kind": "fix",
+  "title": "Every URL attribute is checked",
+  "why": "A bound `xlink:href`, `cite`, `<object data>`, `ping` or `srcset` candidate kept a `javascript:` URL in the browser and in SSR.",
+  "changelog": [
+    "bound `xlink:href`, `cite`, `<object data>`, `background`, `longdesc`, `manifest`, `codebase`, `icon`, `ping` and each `srcset`/`imagesrcset` candidate drop `javascript:`, `vbscript:` and non-image `data:` URLs (B0213), in the browser and in SSR",
+    "the checker reports a dangerous literal in the same attributes, each `srcset` candidate included",
+    "a bound iframe `srcdoc` without `sandbox` (or with `allow-same-origin`) is B0210: it would render the value as a same-origin document"
+  ]
+}

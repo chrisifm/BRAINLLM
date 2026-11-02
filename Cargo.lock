@@ -462,6 +462,7 @@ version = "0.8.9"
 dependencies = [
  "brain-codegen",
  "brain-css",
+ "brain-lex",
  "brain-mcp",
  "brain-metrics",
  "brain-min",

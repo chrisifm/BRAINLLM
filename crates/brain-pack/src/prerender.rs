@@ -531,7 +531,7 @@ pub fn seo_head(seo: &[(String, String)], site: Option<&str>, route: &str, gener
         let ld = ld.trim();
         let ld = if ld.starts_with('{') && !ld.contains("\"@context\"") { format!("{{\"@context\":\"https://schema.org\",{}", &ld[1..]) } else { ld.to_string() };
         let ld = if ld.ends_with(",}") { ld.replace(",}", "}") } else { ld };
-        h.push_str(&format!("<script type=\"application/ld+json\">{}</script>", ld.replace("</", "<\\/")));
+        h.push_str(&format!("<script type=\"application/ld+json\">{}</script>", brain_lex::json::in_html(&ld)));
     } else if let Some(schema) = get("schema") {
         // `schema="Article"` (SPEC «SEO»): the page's own values; article types need `headline` (server.mjs head()
         // writes the same node for SSR pages and replaces this one, so keep the prefix `{"@context":…,"@type":"T"`)
@@ -553,7 +553,7 @@ pub fn seo_head(seo: &[(String, String)], site: Option<&str>, route: &str, gener
             ld.push_str(&format!(",\"dateModified\":{}", json_str(d)));
         }
         ld.push('}');
-        h.push_str(&format!("<script type=\"application/ld+json\">{}</script>", ld.replace("</", "<\\/")));
+        h.push_str(&format!("<script type=\"application/ld+json\">{}</script>", brain_lex::json::in_html(&ld)));
     }
     (title, h)
 }
@@ -701,7 +701,17 @@ mod tests {
         let seo: Vec<(String, String)> = [("titleTemplate", "%s · Site"), ("title", "Post"), ("jsonld", "{\"@type\":\"Article\",\"headline\":\"</script>\"}")].iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
         let (title, h) = seo_head(&seo, None, "/p", "");
         assert_eq!(title.as_deref(), Some("Post · Site"));
-        assert!(h.contains("{\"@context\":\"https://schema.org\",\"@type\":\"Article\",\"headline\":\"<\\/script>\"}"), "{h}");
+        assert!(h.contains("{\"@context\":\"https://schema.org\",\"@type\":\"Article\",\"headline\":\"\\u003c/script\\u003e\"}"), "{h}");
+        // `<!--<script` in author data would put the HTML parser in the double-escaped state and swallow the page's
+        // next `</script>`: every `<` is escaped, in `jsonld` and in the `schema` node built from the page's values
+        let seo: Vec<(String, String)> = [("title", "<!--<script>"), ("schema", "Article"), ("jsonld", "{\"name\":\"<!--<script> & \u{2028}\"}")].iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
+        let (_, h) = seo_head(&seo, None, "/p", "");
+        let ld = &h[h.find("application/ld+json\">").unwrap()..];
+        let body = &ld[ld.find('>').unwrap() + 1..ld.find("</script>").unwrap()];
+        assert!(!body.contains('<') && !body.contains('&') && !body.contains('\u{2028}'), "{body}");
+        let seo: Vec<(String, String)> = [("title", "<!--<script>"), ("schema", "Article")].iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
+        let (_, h) = seo_head(&seo, None, "/p", "");
+        assert!(h.contains("\"headline\":\"\\u003c!--\\u003cscript\\u003e\""), "{h}");
     }
 
     #[test]

@@ -128,15 +128,8 @@ impl Static {
         if Path::new(rel)
             .components()
             .any(|c| !matches!(c, Component::Normal(_)))
-            || rel.starts_with("_server")
-            || rel.starts_with("_brain")
-            || rel == "_headers"
-            || rel.starts_with("server.mjs")
-            || rel == "_redirects"
+            || brain_pack::private::is_private(rel)
             || rel.contains('\\')
-            || rel
-                .split('/')
-                .any(|part| part.starts_with('.') && part != ".well-known")
         {
             return None;
         }
@@ -829,6 +822,8 @@ mod tests {
             "/_headers",
             "/_redirects",
             "/_server/private.mjs",
+            "/_SERVER/private.mjs",
+            "/Server.mjs",
         ] {
             assert!(app.resolve(path).is_none(), "{path}");
         }

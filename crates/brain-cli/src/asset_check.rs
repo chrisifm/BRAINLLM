@@ -18,7 +18,7 @@ fn extension(path: &str) -> &str {
 }
 /// Read by the host or the server itself, never downloaded by a browser.
 fn host_file(path: &str) -> bool {
-    path == "_headers" || path == "server.mjs" || path.starts_with("_brain/") || path.starts_with("_server/")
+    brain_pack::private::is_private(path)
 }
 fn finding(code: &str, file: &str, msg: String, fix: &str) -> String {
     format!("{code} {file}:1:1 {msg}; fix: {fix}")

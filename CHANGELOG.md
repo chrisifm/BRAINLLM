@@ -18,6 +18,13 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - B0812 warns when a server route reads `process.env` instead of `ctx.env`, or reads a variable `.brain_env` declares only under `[production]`
 - B0813 warns when an operation `debit` step takes its `subject` from the input or an earlier step instead of `$user.id`, which lets anyone the operation admits spend another person's credits
 - `brain test` and `brain doctor` retry once when the browser connection breaks, and a second failure names probable machine load with the 1-minute load average
+- `_brain/nginx.conf`, `_brain/Caddyfile` and `brain deploy config nginx` refuse `server.mjs`, `_server/`, `_brain/`, `_headers`, `_redirects` and dot files other than `.well-known`, from one list the static handler and the Node server also follow
+- private paths are refused in any letter case, so a case-insensitive disk cannot serve `/_SERVER/`
+- a build with server code says at the top of `_headers` that it must not go to a static host, which cannot refuse a path
+- bound `xlink:href`, `cite`, `<object data>`, `background`, `longdesc`, `manifest`, `codebase`, `icon`, `ping` and each `srcset`/`imagesrcset` candidate drop `javascript:`, `vbscript:` and non-image `data:` URLs (B0213), in the browser and in SSR
+- the checker reports a dangerous literal in the same attributes, each `srcset` candidate included
+- a bound iframe `srcdoc` without `sandbox` (or with `allow-same-origin`) is B0210: it would render the value as a same-origin document
+- prerendered JSON-LD, page props and route data escape `<`, `>`, `&`, U+2028 and U+2029
 
 ## [0.8.9] - 2026-11-02
 

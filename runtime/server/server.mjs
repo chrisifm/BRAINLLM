@@ -1725,6 +1725,9 @@ export function createServer(o = {}) {
   }
 
   // ---------- static ----------
+  // Never served (brain-pack private.rs holds the same list for the Rust handler and every generated host config).
+  const PRIVATE_PREFIXES = ['_server', '_brain', 'server.mjs']
+  const PRIVATE_FILES = ['_headers', '_redirects']
   // §33 content negotiation: `Accept` preferring text/markdown gets the page's Markdown twin (`/pricing` → pricing.md,
   // `/` → index.md) when the build published one (`seo.markdown`, default true; never for noindex pages).
   function publicStaticPath(pathname) {
@@ -1732,8 +1735,8 @@ export function createServer(o = {}) {
     try { path = decodeURIComponent(pathname) } catch { return null }
     if (/[\\\x00]/.test(path)) return null
     const clean = normalize(path).replaceAll('\\', '/')
-    const rel = clean.replace(/^\/+/, '')
-    if (rel.startsWith('_server') || rel.startsWith('_brain') || rel.startsWith('server.mjs') || rel === '_headers' || rel === '_redirects' || clean.split('/').some(part => part.startsWith('.') && part !== '.well-known')) return null
+    const rel = clean.replace(/^\/+/, '').toLowerCase() // a case-insensitive file system opens _SERVER/ as _server/
+    if (PRIVATE_PREFIXES.some(p => rel.startsWith(p)) || PRIVATE_FILES.includes(rel) || clean.split('/').some(part => part.startsWith('.') && part.toLowerCase() !== '.well-known')) return null
     return path
   }
   function serveTwin(req, res, url) {

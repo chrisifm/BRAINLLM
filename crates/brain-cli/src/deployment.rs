@@ -323,7 +323,8 @@ pub fn preview(root: &Path, target: &str, options: &Value) -> Result<Value, Stri
                 .replace("{{DOMAIN}}", &host)
                 .replace("{{CERTIFICATE}}", &cert)
                 .replace("{{CERTIFICATE_KEY}}", &key)
-                .replace("{{ROUTES}}", &routes);
+                .replace("{{ROUTES}}", &routes)
+                .replace("{{PRIVATE}}", &brain_pack::private::nginx(brain_pack::read_base(&root).trim_end_matches('/'), true, "    "));
             if native_sockets {
                 content = content.replace(
                     "No HMR/WebSocket routes.",
@@ -597,7 +598,7 @@ mod tests {
             // All pre-existing native HTTP locations and frontend cache ownership remain present.
             assert!(content.contains("location ^~ /api/"));
             assert!(content.contains("location ^~ /s/"));
-            assert!(content.contains("location ^~ /_server/ { return 404; }"));
+            assert!(content.contains(&brain_pack::private::nginx("/app", true, "    ")));
             assert!(!content.contains("@brain/hmr"));
             assert!(!content.contains("$proxy_add_x_forwarded_for"));
         }

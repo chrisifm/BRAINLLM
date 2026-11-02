@@ -9,6 +9,7 @@ authors.workspace = true
 brain-metrics = { path = "../brain-metrics" }
 brain-min = { path = "../brain-min" }
 brain-mcp = { path = "../brain-mcp" }
+brain-lex = { path = "../brain-lex" }
 libc = "0.2.191"
 brain-css = { path = "../brain-css" }
 brotli = "9.1.1"
