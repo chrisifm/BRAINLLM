@@ -1,0 +1,9 @@
+{
+  "id": "warm-modules-before-ready",
+  "kind": "change",
+  "title": "Warm app modules before ready",
+  "why": "The first request after a start paid the import of every app module (0.09-0.14 s).",
+  "changelog": [
+    "`brain start` imports the app's server modules before `brain:ready` (at most 15 s), so the first request is warm"
+  ]
+}

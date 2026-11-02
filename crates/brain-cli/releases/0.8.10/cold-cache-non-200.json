@@ -1,0 +1,9 @@
+{
+  "id": "cold-cache-non-200",
+  "kind": "fix",
+  "title": "A cold cached route runs load once",
+  "why": "A cached route whose first answer was not 200 ran its `load()` twice.",
+  "changelog": [
+    "a cached route whose first answer is not 200 replays that answer instead of running `load()` a second time"
+  ]
+}

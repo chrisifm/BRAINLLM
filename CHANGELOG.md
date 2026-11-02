@@ -49,6 +49,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - the native analytics limiter tracks at most 50 000 visitors and evicts the oldest window first, in constant time
 - the browser router drops a prefetch rank when its link leaves the queue and on every new page
 - `brain run` keeps at most 1000 inspector batches and 32 MiB in /@brain/metrics, besides the 5-minute window
+- `brain start` imports the app's server modules before `brain:ready` (at most 15 s), so the first request is warm
+- a cached route whose first answer is not 200 replays that answer instead of running `load()` a second time
+- backend lists filter, sort, count, facet and aggregate on `query_keys`, an inline generated copy of each document's keys, instead of opening every stored document; run `brain backend migrate` before serving this version, which refuses a database without that column with `BDB_SCHEMA_DRIFT`
+- `/_brain/health`, `/_brain/health/live` and `/_brain/health/ready` answer on the web port also when `BRAIN_BACKEND_URL` is set
 
 ## [0.8.9] - 2026-11-02
 

@@ -1,0 +1,9 @@
+{
+  "id": "health-with-backend-url",
+  "kind": "fix",
+  "title": "Health answered with a backend URL",
+  "why": "`/_brain/health` answered 404 when `BRAIN_BACKEND_URL` was set.",
+  "changelog": [
+    "`/_brain/health`, `/_brain/health/live` and `/_brain/health/ready` answer on the web port also when `BRAIN_BACKEND_URL` is set"
+  ]
+}

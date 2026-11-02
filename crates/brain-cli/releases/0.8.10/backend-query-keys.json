@@ -1,0 +1,9 @@
+{
+  "id": "backend-query-keys",
+  "kind": "change",
+  "title": "Lists read an inline copy of the document keys",
+  "why": "Every filter, sort, count, facet and aggregate opened each stored document from TOAST storage; a home list read 75,024 buffers.",
+  "changelog": [
+    "backend lists filter, sort, count, facet and aggregate on `query_keys`, an inline generated copy of each document's keys, instead of opening every stored document; run `brain backend migrate` before serving this version, which refuses a database without that column with `BDB_SCHEMA_DRIFT`"
+  ]
+}
