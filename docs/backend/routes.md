@@ -90,7 +90,8 @@ The call acts as the key, not as `ctx.user`: check the caller yourself before re
 Handlers follow the same source rules as the rest of `server/`: one default export; no `class`, `while`, `do` or
 classic `for`. `for (const x of list)` is allowed. `brain check`, `brain build` and `brain doctor` report them, and
 `brain backend serve` and `brain jobs work` refuse to start on them. A handler with no default export (B0772) or a
-secret-shaped literal in its source (B0773) is refused the same way; read keys from `ctx.env`.
+secret-shaped literal in its source (B0773) is refused the same way; read keys from `ctx.env`. `brain check` warns B0812 when a handler reads `process.env`, and when it reads a
+variable that `.brain_env` declares only under `[production]`, which the route reads as unset in development.
 
 Throwing `{errors: {field: 'message'}}` answers `422 INVALID_INPUT` with those fields. Throwing an error
 with a 4xx `status` answers that status with a generic `ROUTE_REJECTED` code, and `throw notFound()` or `throw gone()` answers `404` or `410` the same way.

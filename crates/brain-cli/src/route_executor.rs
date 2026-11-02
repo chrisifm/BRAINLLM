@@ -212,6 +212,63 @@ fn read_routes(root: &Path, lookup: &dyn Fn(&str) -> Option<String>) -> Result<V
 }
 
 /// Compiles and probes every handler before HTTP starts; `None` when no route is declared.
+/// B0812 findings in `server/routes/**`: a handler that reads `process.env` instead of `ctx.env`, and a key a handler
+/// reads that `.brain_env` declares only for production, so development runs the route without it. Returns
+/// `(file, line, col, message, fix)`; names only, never values.
+pub fn env_warnings(root: &Path) -> Vec<(String, u32, u32, String, String)> {
+    let env = fs::read_to_string(root.join(brain_check::env::FILE)).ok().map(|src| brain_check::env::parse(&src));
+    let production_only = |key: &str| {
+        env.as_ref().is_some_and(|f| {
+            !f.shared.iter().any(|e| e.key == key)
+                && f.sections.iter().any(|(_, entries)| entries.iter().any(|e| e.key == key))
+                && f.sections.iter().all(|(name, entries)| name == "production" || !entries.iter().any(|e| e.key == key))
+        })
+    };
+    let mut files = Vec::new();
+    let mut stack = vec![root.join(ROUTES)];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for path in entries.flatten().map(|e| e.path()) {
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|x| x == "jsbrain") {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    let mut out = Vec::new();
+    for path in files {
+        let Ok(src) = fs::read_to_string(&path) else { continue };
+        let file = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+        let idx = brain_parse::LineIndex::new(&src);
+        for at in brain_check::env::process_env_offsets(&src) {
+            let (line, col) = idx.line_col(&src, at);
+            out.push((
+                file.clone(),
+                line,
+                col,
+                "this route reads `process.env`; a route receives its environment as `ctx.env`, which `brain check` verifies against .brain_env".to_string(),
+                "read the variable as `ctx.env.NAME` from the handler's `ctx` argument".to_string(),
+            ));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for read in brain_check::env::reads_of_file(&src, &file) {
+            if production_only(&read.key) && seen.insert(read.key.clone()) {
+                let (line, col) = idx.line_col(&src, read.at);
+                out.push((
+                    file.clone(),
+                    line,
+                    col,
+                    format!("`{}` is declared in .brain_env only under [production], so this route reads it as unset in development", read.key),
+                    format!("declare `{0}` in the shared block of .brain_env (or `{0}?=` when the route works without it) and keep the production value under [production]", read.key),
+                ));
+            }
+        }
+    }
+    out
+}
+
 pub fn load(root: &Path, environment: &str, routes: &[Route]) -> Result<Option<Handlers>, String> {
     if routes.is_empty() {
         return Ok(None);
@@ -416,5 +473,29 @@ mod conflict_tests {
         assert!(check("/{slug}")[0].contains("every path"));
         assert!(check("/_r/hook")[0].contains("framework"));
         assert!(check("/robots.txt")[0].contains("public/robots.txt"));
+    }
+}
+
+#[cfg(test)]
+mod env_tests {
+    #[test]
+    fn only_real_process_env_reads_and_production_only_keys_are_reported() {
+        let root = std::env::temp_dir().join(format!("brain-route-env-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("server/routes/lookup");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("handler.jsbrain"),
+            "<meta server>\n// process.env.IN_A_COMMENT\nexport default async function handle(ctx) {\n  const note = 'process.env.IN_A_STRING'\n  return { a: ctx.env.SHARED, b: ctx.env.BOTH, c: ctx.process.env, d: process.env.REAL }\n}\n",
+        )
+        .unwrap();
+        std::fs::write(root.join(".brain_env"), "SHARED=1\nREAL?=\n\n[development]\nBOTH=1\n\n[production]\nBOTH=2\n").unwrap();
+        let found = super::env_warnings(&root);
+        assert_eq!(found.iter().map(|f| (f.1, f.2)).collect::<Vec<_>>(), vec![(5, 71)], "only the real read: {found:?}");
+        std::fs::write(root.join(".brain_env"), "[production]\nSHARED=1\nBOTH=2\nREAL=3\n").unwrap();
+        let keys: Vec<String> = super::env_warnings(&root).into_iter().skip(1).map(|f| f.3).collect();
+        assert_eq!(keys.len(), 3, "{keys:?}");
+        assert!(keys.iter().all(|m| m.contains("only under [production]") && !m.contains('=')), "names only, never values: {keys:?}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

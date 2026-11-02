@@ -631,6 +631,21 @@ pub fn reads_in(src: &str, markup: bool) -> Vec<Read> {
     out
 }
 
+/// Byte offsets of each global `process.env` in script source, outside comments and strings: where a server route
+/// reads the process environment instead of its `ctx.env`.
+pub fn process_env_offsets(src: &str) -> Vec<usize> {
+    let t = tokens(src, &LineIndex::new(src), 0, src.len());
+    (0..t.len())
+        .filter(|&i| {
+            t[i].is_word("process")
+                && !(i > 0 && (t[i - 1].is_punct(".") || t[i - 1].is_punct("?.")))
+                && t.get(i + 1).is_some_and(|x| x.is_punct(".") || x.is_punct("?."))
+                && t.get(i + 2).is_some_and(|x| x.is_word("env"))
+        })
+        .map(|i| t[i].span.start as usize)
+        .collect()
+}
+
 /// `reads` by file name: a `.brain` file is markup, except a `.test.brain`, which is a script.
 pub fn reads_of_file(src: &str, file: &str) -> Vec<Read> {
     reads_in(src, file.ends_with(".brain") && !file.ends_with(".test.brain"))

@@ -362,6 +362,35 @@ export default { read: ['owner'], create: ['user'], update: ['owner'], delete: [
 <meta server>
 export default { roles: ['user'], input: { code: 'str!' }, steps: [{ as: 'item', upsert: 'items', key: ['code'], data: { code: '$input.code', title: 'claimed' } }] }
 
+### B0812 server route reads process.env
+@expect B0812 server/routes/lookup/handler.jsbrain 3:15
+@file server/routes/lookup/route.jsbrain
+<meta server>
+export default { method: 'GET', path: '/lookup', auth: 'public' }
+@file server/routes/lookup/handler.jsbrain
+<meta server>
+export default async function handle(ctx) {
+  const key = process.env.SEARCH_KEY
+  return { ok: Boolean(key) }
+}
+@file .brain_env
+SEARCH_KEY?=
+
+### B0812 server route reads a variable declared only for production
+@expect B0812 server/routes/lookup/handler.jsbrain 3:15
+@file server/routes/lookup/route.jsbrain
+<meta server>
+export default { method: 'GET', path: '/lookup', auth: 'public' }
+@file server/routes/lookup/handler.jsbrain
+<meta server>
+export default async function handle(ctx) {
+  const key = ctx.env.SEARCH_KEY
+  return { ok: Boolean(key) }
+}
+@file .brain_env
+[production]
+SEARCH_KEY=configured-on-the-host
+
 ### B0810 answer built but not thrown
 @expect B0501 views/item.brain 1:1
 @expect B0810 views/item.brain 3:5
