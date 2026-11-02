@@ -100,11 +100,37 @@ Object.assign(globalThis, {
   attr: (sel, name) => q(sel).getAttribute(name),
   hasClass: (sel, cls) => q(sel).classList.contains(cls),
   count: sel => root.querySelectorAll(scoped(sel)).length,
-  expect: x => ({
-    toBe: y => Object.is(x, y) || fail(`expected ${fmt(y)}, got ${fmt(x)}`),
-    toEqual: y => JSON.stringify(x) === JSON.stringify(y) || fail(`expected ${fmt(y)}, got ${fmt(x)}`),
-    toBeTruthy: () => !!x || fail(`expected a truthy value, got ${fmt(x)}`),
-  }),
+  // `expect(x).toBe|toEqual|toBeTruthy|toBeFalsy|toContain`, each with its `.not` form.
+  expect: x => {
+    const check = negated => {
+      const assert = (ok, what) => (negated ? !ok : ok) || fail(`expected ${negated ? 'not ' : ''}${what}, got ${fmt(x)}`);
+      return {
+        toBe: y => assert(Object.is(x, y), fmt(y)),
+        toEqual: y => assert(JSON.stringify(x) === JSON.stringify(y), fmt(y)),
+        toBeTruthy: () => assert(!!x, 'a truthy value'),
+        toBeFalsy: () => assert(!x, 'a falsy value'),
+        toContain: y => {
+          if (typeof x !== 'string' && !Array.isArray(x)) fail(`toContain needs a string or an array, got ${fmt(x)}`);
+          return assert(typeof x === 'string' ? x.includes(String(y)) : x.some(v => Object.is(v, y)), `a value containing ${fmt(y)}`);
+        },
+      };
+    };
+    return Object.assign(check(false), { not: check(true) });
+  },
+  // `await waitFor(() => expect(text('.error')).toBe('Wrong password'), { timeout: 3000 })`: retries after each render
+  // until the callback neither throws nor returns false, for what `mount`/`click`/`type` cannot await (a request
+  // nobody stubbed, a timer). Use it instead of a fixed sleep; on timeout the last failure is the test's error.
+  waitFor: async (fn, { timeout = 3000 } = {}) => {
+    if (typeof fn !== 'function') fail(`waitFor: pass a function, got ${fmt(fn)}`);
+    const end = performance.now() + timeout;
+    for (;;) {
+      let last;
+      try { const v = await fn(); if (v !== false) return v; last = new Error('the condition returned false') } catch (e) { last = e }
+      if (performance.now() >= end) { last.message = `waitFor: still failing after ${timeout} ms: ${last.message}`; throw last }
+      await new Promise(r => setTimeout(r, 20));
+      await flush();
+    }
+  },
 });
 
 window.__brainLoad = async url => {

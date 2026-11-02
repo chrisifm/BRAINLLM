@@ -15,7 +15,10 @@ already creates the test file; fill it before calling the task done.
    what it received. It lasts one test, and one never called fails it.
 4. Act: `await click(sel)`, `await type(sel, text)`.
 5. Assert: `text(sel)`, `attr(sel, name)`, `hasClass(sel, c)`, `count(sel)` with
-   `expect(x).toBe(y) | toEqual(y) | toBeTruthy()`.
+   `expect(x).toBe(y) | toEqual(y) | toBeTruthy() | toBeFalsy() | toContain(y)`, each also as `expect(x).not.…`.
+   Something `mount`, `click` and `type` cannot await (a request nobody stubbed, a timer) → never a fixed sleep:
+   `await waitFor(() => expect(text('.error')).toBe('Wrong password'), { timeout: 3000 })`.
+   A `<meta server>` module cannot be imported here (it runs only on the server): test the component that calls it.
 6. Cover the states, not only the happy path: empty list, validation errors, server error, disabled while busy.
 7. Run `brain test` (or `brain test comp/user-card.test.brain`). Each test also gets an accessibility audit of the
    mounted tree; `--heap` adds the leak watch that `brain doctor` always runs.
