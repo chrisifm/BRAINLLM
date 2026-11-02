@@ -1136,6 +1136,34 @@ export function createServer(o = {}) {
     if (!mods.has(rel)) mods.set(rel, import(new URL(rel.replace(/^\//, ''), distURL).href))
     return mods.get(rel)
   }
+  // Every module a request can import (the DOM shim, the core, each route's view, layouts, guards, middleware, server
+  // module, dictionary, loading and error views, the RPC modules), imported once, one after another. `node server.mjs`
+  // runs it before `brain:ready`, so the first request after a (re)start finds them loaded instead of reading,
+  // compiling and evaluating the app's module graph (and its packages) while the visitor waits. A module that throws
+  // stays rejected in `mods`, exactly as the request that imports it would have found it; it is counted, never fatal.
+  const warm = async () => {
+    const want = new Set(['_server/dom.js', mf.core])
+    const add = r => {
+      if (!r || typeof r !== 'object') return
+      for (const k of ['view', 'server', 'loading', 'i18n']) if (typeof r[k] === 'string') want.add(r[k])
+      for (const k of ['layouts', 'guards', 'middleware']) for (const m of r[k] || []) if (typeof m === 'string') want.add(m)
+      add(r.error)
+    }
+    for (const r of mf.routes) add(r)
+    add(mf.notFound)
+    add(mf.forbidden)
+    for (const m of Object.values(mf.rpc)) if (typeof m === 'string') want.add(m)
+    for (const m of ['_server/brain-hydrate.js', '_server/brain-form.js']) if (file(m)) want.add(m)
+    let failed = 0
+    for (const rel of want) {
+      try {
+        await load(rel)
+      } catch {
+        failed++
+      }
+    }
+    return { modules: want.size, failed }
+  }
 
   const context = (req, res, url, extra) => {
     const cookies = parseCookies(req.headers.cookie)
@@ -1924,6 +1952,8 @@ export function createServer(o = {}) {
   server.headersTimeout = 15000
   // With a native backend the file upload deadline is enforced per request (above); 30 s stays for every other body.
   server.requestTimeout = native ? 320000 : 30000
+  // `warm: true` (`node server.mjs`): import the app's modules now; requests that arrive meanwhile share the same imports
+  if (o.warm) server.$brainWarm = warm()
   return server
 }
 
@@ -2465,6 +2495,8 @@ function hook(base, app = '/') {
 }
 
 const LISTEN_WAIT_MS = 10000
+// the supervisor gives an instance 30 s to print brain:ready: warming may hold it this long at most
+const WARM_WAIT_MS = 15000
 // `node server.mjs` (directly or under `brain start`); paths compared after symlinks (/var → /private/var on macOS)
 function real(p) {
   try {
@@ -2477,12 +2509,17 @@ if (process.argv[1] && real(process.argv[1]) === real(fileURLToPath(import.meta.
   process.env.NODE_ENV = 'production'
   // A closed log pipe is the operator's matter: requests do not depend on it.
   for (const stream of [process.stdout, process.stderr]) stream.on('error', error => { if (error.code !== 'EPIPE') throw error })
-  const s = createServer({ dist: fileURLToPath(new URL('.', import.meta.url)) })
+  const s = createServer({ dist: fileURLToPath(new URL('.', import.meta.url)), warm: true })
   const fd = ENV.BRAIN_LISTEN_FD
   const where = fd ? { fd: Number(fd) } : { port: +(ENV.PORT || 3000), host: ENV.HOST || '127.0.0.1' }
-  s.once('listening', () => {
+  s.once('listening', async () => {
+    // ready once the app's modules are imported (see `warm`), so a reload only switches traffic to a warm instance;
+    // a slow machine gets WARM_WAIT_MS at most, the rest keeps importing while requests are served
+    let timer
+    const warmed = await Promise.race([s.$brainWarm, new Promise(r => (timer = setTimeout(r, WARM_WAIT_MS)))])
+    clearTimeout(timer)
     process.stdout.write(`brain:ready ${process.pid}\n`) // the supervisor waits for this line (§34)
-    console.log(json({ t: new Date().toISOString(), level: 'info', msg: 'listening', ...(fd ? { fd: Number(fd) } : where) }))
+    console.log(json({ t: new Date().toISOString(), level: 'info', msg: 'listening', ...(fd ? { fd: Number(fd) } : where), ...(warmed ? { warmModules: warmed.modules, warmFailed: warmed.failed } : { warm: 'continuing' }) }))
   })
   // A restart may find the previous instance still draining: wait for it, briefly. Two live servers never share a port.
   const waitUntil = Date.now() + LISTEN_WAIT_MS

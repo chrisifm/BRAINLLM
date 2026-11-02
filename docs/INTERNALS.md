@@ -1291,7 +1291,10 @@ one way for the model, `brain build` then `brain start`.
 - **Apps with a server**: the supervisor binds the port once (`--port`/`PORT`, default 3000; `--host`/`HOST`, default
   127.0.0.1) and starts `--instances N` (default 1) children `node dist/server.mjs` with the environment resolved from `.brain_env` (§36), each
   inheriting the listening socket as fd 3 (`BRAIN_LISTEN_FD=3`). The child listens on that fd (`listen({ fd })`) and
-  prints `brain:ready` on stdout once it accepts. All children accept from the same socket, which is also how several
+  prints `brain:ready` on stdout once it accepts and has imported every module a request can need (each route's server
+  module, view, layouts, guards, middleware and dictionary, the RPC modules, the DOM shim; at most 15 s, then it
+  continues while serving), so the first request after a start or reload does not pay for the app's module graph. A
+  module that throws at import does not stop the start: its route answers as it would have. All children accept from the same socket, which is also how several
   instances share one port. `SO_REUSEPORT` is not used: Node returns ENOTSUP on macOS (measured on 22.21).
 - **Zero-downtime reload**: `brain reload` (or SIGHUP to the supervisor) starts new children on the same socket, waits
   for `brain:ready` (30 s), then sends SIGTERM to the old ones. On SIGTERM a child drains: it stops accepting, finishes
