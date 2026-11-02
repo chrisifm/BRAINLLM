@@ -271,7 +271,7 @@ coordinates. Source-map URLs or arbitrary map paths never replace the index path
 The parent worker retains at most 64 KiB of child stderr and continues draining
 additional bytes into a fixed-size discard buffer. It accepts only correlated
 `JOB_TRACE` records and reconstructs allowlisted paths, coordinates and boolean
-flags. A failed attempt emits structured `job-failed` JSON with `jobId`, `queue`,
+flags. A failed attempt emits structured `job-failed` JSON with `jobId`, `queue`, `backend` (status, code and field messages when the backend client raised the failure),
 the sanitized trace, `stderrBytes` and `stderrTruncated`. It never forwards raw
 stderr or exception text. Persisted queue errors remain generic.
 

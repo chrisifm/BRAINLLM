@@ -42,3 +42,21 @@ fn check_and_the_worker_agree_on_what_a_handler_may_be() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// A job may take no payload: `{}` is its schema, and a cron may enqueue it with `payload: {}`.
+#[test]
+fn a_job_without_payload_fields_is_a_valid_contract() {
+    let tmp = std::env::temp_dir().join(format!("brain-empty-job-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    assert!(brain(&tmp, &["new", "app"]).status.success());
+    let dir = tmp.join("app");
+    let job = dir.join("server/jobs/tick");
+    std::fs::create_dir_all(&job).unwrap();
+    std::fs::write(job.join("schema.jsbrain"), "<meta server>\nexport default {}\n").unwrap();
+    std::fs::write(job.join("handler.jsbrain"), "<meta server>\nexport default async function handle(ctx) { return { ok: true } }\n").unwrap();
+    let out = brain(&dir, &["check"]);
+    let text = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+    assert!(!text.contains("B0735"), "{text}");
+    std::fs::remove_dir_all(&tmp).unwrap();
+}

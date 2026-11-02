@@ -518,6 +518,8 @@ pub struct ListRequest {
     alternatives: BTreeMap<String, Vec<Filter>>,
     /// `?owner=me`: limit to the reader's own rows. The id always comes from the authenticated session.
     owner_me: bool,
+    /// `?owner=<id>`, from a system key only.
+    owner_id: Option<Uuid>,
     /// `?total=false`: skip the count; a walk over every page does not need it on each one.
     no_total: bool,
 }
@@ -694,7 +696,12 @@ pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(Str
             }
             // A filter declared on a field of this name keeps working as before.
             "owner" if !r.query.filter.contains_key("owner") => {
-                if raw == "me" { req.owner_me = true } else { bad("owner accepts only `me`; the server resolves it from the session") }
+                // Only a system key may name an account: for anyone else this would reveal who owns a readable row.
+                match Uuid::parse_str(raw) {
+                    _ if raw == "me" => req.owner_me = true,
+                    Ok(id) if crate::api_keys::system_active() => req.owner_id = Some(id),
+                    _ => bad("owner accepts only `me`; the server resolves it from the session"),
+                }
             }
             // A filter declared on a field of this name keeps working as before.
             "total" if !r.query.filter.contains_key("total") => {
@@ -1369,7 +1376,7 @@ pub async fn list(
     if req.owner_me && viewer.id.is_none() {
         return Err(ListError::SignInRequired);
     }
-    let owner = if req.owner_me { viewer.id } else { None };
+    let owner = if req.owner_me { viewer.id } else { req.owner_id };
     let mut ctx = Ctx { r, resources, scope: &scope, related, req, matches: Matches::All, owner, facet: None, read_once: false };
     let keys = keys(r, req);
     let sig = signature(&keys);

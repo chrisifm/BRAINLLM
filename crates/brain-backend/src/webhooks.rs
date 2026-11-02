@@ -256,7 +256,7 @@ impl Webhooks {
             return Err("The native outbound webhook queue is reserved; application jobs cannot use that name".into());
         }
         for job in jobs {
-            job.validate()?;
+            job.validate_job()?;
         }
         let count = jobs.len();
         let jobs: BTreeMap<_, _> = jobs.iter().cloned().map(|j| (j.name.clone(), j)).collect();

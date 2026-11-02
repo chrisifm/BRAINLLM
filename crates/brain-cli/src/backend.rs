@@ -211,12 +211,21 @@ pub fn contracts(root: &Path, kind: &str) -> Result<Vec<Resource>, String> {
             constraints,
             query,
         };
-        r.validate()
+        if kind == "jobs" { r.validate_job() } else { r.validate() }
             .map_err(|message| format!("server/{kind}/{}: {message}", r.name))?;
         out.push(r);
     }
     Ok(out)
 }
+/// Child stderr is untrusted: keep only the shape the job runner reports for a backend client failure.
+fn job_backend_failure(raw: &Value) -> Value {
+    let Some(status) = raw["status"].as_u64().filter(|status| (400..600).contains(status)) else { return Value::Null };
+    let code = raw["code"].as_str().filter(|code| code.len() <= 64 && code.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_'));
+    let fields: serde_json::Map<String, Value> = raw["fields"].as_object().into_iter().flatten().take(16)
+        .filter_map(|(name, text)| Some((name.chars().take(64).collect(), json!(text.as_str()?.chars().take(160).collect::<String>())))).collect();
+    json!({"status":status,"code":code,"fields":fields})
+}
+
 pub fn auth_roles(root: &Path) -> Result<brain_backend::auth_flows::RolesConfig, String> {
     use brain_backend::auth_flows::RolesConfig;
     let path = root.join("server/auth/roles.jsbrain");
@@ -1148,7 +1157,7 @@ pub fn add_with_policy(root: &Path, kind: &str, name: &str, shapes: &str, admin_
         constraints: Default::default(),
         query: Default::default(),
     };
-    r.validate()?;
+    if kind == "job" { r.validate_job()? } else { r.validate()? }
     let dir = if kind == "resource" {
         "resources"
     } else if kind == "job" {
@@ -1982,6 +1991,7 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
                         let success = status.map_err(|_| "Job process failed")?.success();
                         if !success {
                             let mut trace = Value::Null;
+                            let mut backend_failure = Value::Null;
                             for bytes in retained.split(|b| *b == b'\n')
                                 .filter_map(|line|line.strip_prefix(b"JOB_TRACE "))
                                 .take(16) {
@@ -2029,12 +2039,13 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
                                     "indexUnavailable".into(),
                                     json!(truncated["indexUnavailable"] == true || trace_modules.is_empty()),
                                 );
+                                backend_failure = job_backend_failure(&raw["backend"]);
                                 trace = json!({"schemaVersion":1,"location":group["location"],"frames":group["frames"],"causes":causes,"truncated":truncated});
                                 break;
                             }
                             brain_backend::log_line!(
                                 "{}",
-                                json!({"schemaVersion":1,"event":"job-failed","jobId":job_id,"queue":queue_name,
+                                json!({"schemaVersion":1,"event":"job-failed","jobId":job_id,"queue":queue_name,"backend":backend_failure,
                             "trace":trace,"stderrBytes":stderr_bytes,"stderrTruncated":stderr_bytes>65536})
                             );
                             Err("Job handler failed".into())
@@ -2124,6 +2135,16 @@ impl Drop for HandlerGroup {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_job_backend_failure_keeps_only_its_validated_shape() {
+        use serde_json::json;
+        let kept = super::job_backend_failure(&json!({"status":422,"code":"BAD_INPUT","fields":{"limit":"limit must be 1..100","odd":7},"extra":"dropped"}));
+        assert_eq!(kept, json!({"status":422,"code":"BAD_INPUT","fields":{"limit":"limit must be 1..100"}}));
+        assert_eq!(super::job_backend_failure(&json!({"status":200})), json!(null));
+        assert_eq!(super::job_backend_failure(&json!(null)), json!(null));
+        assert_eq!(super::job_backend_failure(&json!({"status":503,"code":"lower case"}))["code"], json!(null));
+    }
+
     #[test]
     fn a_configuration_exit_is_the_one_a_worker_supervisor_does_not_restart() {
         assert!(!super::restart_worker(Some(i32::from(super::CONFIG_EXIT))));

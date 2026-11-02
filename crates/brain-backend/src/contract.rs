@@ -346,6 +346,21 @@ impl Resource {
         if self.fields.is_empty() || self.fields.len() > 64 {
             return Err("a resource needs 1..64 fields".into());
         }
+        self.validate_fields()
+    }
+
+    /// A job's schema is its payload, and a job may take none: `{}` is valid, as a cron `payload` of `{}` needs.
+    pub fn validate_job(&self) -> Result<(), String> {
+        if !identifier(&self.name) {
+            return Err("job name must be lowercase letters, digits and underscores, starting with a letter (max 48)".into());
+        }
+        if self.fields.len() > 64 {
+            return Err("a job payload has at most 64 fields".into());
+        }
+        self.validate_fields()
+    }
+
+    fn validate_fields(&self) -> Result<(), String> {
         for (name, field) in &self.fields {
             let ty = field.ty();
             if !identifier(name) || ty.is_none() {
@@ -1447,8 +1462,11 @@ fn native_paths(roles: &crate::auth_flows::RolesConfig) -> Map<String, Value> {
 
 /// A hook is a typed event, not an arbitrary payload sent to an unrelated queue.
 pub fn validate_graph(resources: &[Resource], jobs: &[Resource]) -> Result<(), String> {
-    for r in resources.iter().chain(jobs) {
+    for r in resources {
         r.validate()?;
+    }
+    for j in jobs {
+        j.validate_job()?;
     }
     crate::relations::validate_graph(resources)?;
     if jobs.iter().any(|j| j.fields.values().any(|f| f.kind.starts_with("ref:"))) {

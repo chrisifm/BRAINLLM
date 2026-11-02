@@ -1,4 +1,4 @@
-// One trusted-project job per process. Report structural locations only, never payloads, env or exception text.
+// One trusted-project job per process. Report structural locations and the backend client's own failure shape, never payloads, env or exception text.
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import { dirname, basename, resolve } from 'node:path'
 import { readFileSync, statSync, realpathSync } from 'node:fs'
@@ -68,6 +68,15 @@ function frames(error, budget) {
   }
   return { location: out[0] || fallback(), frames: out, truncated }
 }
+// A failure the backend client raised: its status, its code and the backend's own field messages, which name fields and
+// limits and never carry a submitted value. Anything else a handler threw stays out.
+function backendFailure(error) {
+  try {
+    if (error?.[Symbol.for('brain.backendError')] !== true) return null
+    const fields = error.errors && typeof error.errors === 'object' ? Object.entries(error.errors).slice(0, 16).filter(([, text]) => typeof text === 'string').map(([name, text]) => [name.slice(0, 64), text.slice(0, 160)]) : []
+    return { status: error.status, code: error.code ?? null, fields: Object.fromEntries(fields) }
+  } catch { return null }
+}
 function trace(error, jobId) {
   const budget = { left: LIMIT.frames }, root = frames(error, budget), causes = [], seen = new Set([error])
   let next = property(error, 'cause'), causeTruncated = false
@@ -77,7 +86,7 @@ function trace(error, jobId) {
     causes.push({ depth: causes.length + 1, ...frames(next, budget) })
     next = property(next, 'cause')
   }
-  const result = { schemaVersion: 1, event: 'job-trace', jobId, location: root.location, frames: root.frames, causes, truncated: { frames: root.truncated.frames || causes.some(c => c.truncated.frames), causes: causeTruncated, stackUnavailable: root.truncated.stackUnavailable, indexUnavailable, output: false } }
+  const result = { schemaVersion: 1, event: 'job-trace', jobId, backend: backendFailure(error), location: root.location, frames: root.frames, causes, truncated: { frames: root.truncated.frames || causes.some(c => c.truncated.frames), causes: causeTruncated, stackUnavailable: root.truncated.stackUnavailable, indexUnavailable, output: false } }
   while (Buffer.byteLength(JSON.stringify(result)) > LIMIT.outputBytes && result.causes.length) { result.causes.pop(); result.truncated.output = result.truncated.causes = true }
   while (Buffer.byteLength(JSON.stringify(result)) > LIMIT.outputBytes && result.frames.length > 1) { result.frames.pop(); result.truncated.output = result.truncated.frames = true }
   return result

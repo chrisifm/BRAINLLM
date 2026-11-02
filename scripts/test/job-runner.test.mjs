@@ -56,6 +56,13 @@ test('job runner supplies a frozen environment snapshot and reports structural f
   assert.equal(record.location.generated.line,1)
 }))
 
+test('a backend client failure reports its status, code and field messages; any other error reports none',()=>fixture(({module,execute})=>{
+  writeFileSync(module,"export default async ()=>{throw Object.defineProperty(Object.assign(Error('Invalid input'),{status:422,errors:{limit:'limit must be 1..100',odd:7}}),Symbol.for('brain.backendError'),{value:true})}\n")
+  assert.deepEqual(trace(execute()).backend,{status:422,code:null,fields:{limit:'limit must be 1..100'}})
+  writeFileSync(module,"export default async ()=>{throw Object.assign(Error('private-payload'),{status:422,errors:{limit:'private-payload'}})}\n")
+  assert.equal(trace(execute()).backend,null)
+}))
+
 test('job source maps preserve actual app lines and bounded cyclic causes without original columns',()=>fixture(({module,source,execute})=>{
   writeFileSync(module,mapped(source,[
     'export default async function handle() {',

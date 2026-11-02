@@ -563,7 +563,7 @@ pub async fn router_full(
     }
     let mut jobs = BTreeMap::new();
     for j in config.jobs {
-        j.validate()?;
+        j.validate_job()?;
         if j.name == crate::webhooks::OUTBOUND_QUEUE {
             return Err("Application jobs must not use the reserved webhook delivery queue".into());
         }

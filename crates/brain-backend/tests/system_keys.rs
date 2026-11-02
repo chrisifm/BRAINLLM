@@ -165,6 +165,17 @@ async fn system_identity_is_operator_only_audited_and_no_other_key_reaches_it() 
     assert_eq!(read.1["owner"].as_str(), Some(author.to_string().as_str()), "the row keeps its owner");
     let listed = call(&router, keyed("GET", "/api/sys_notes?limit=100", &system_key, None)).await;
     assert!(listed.1["items"].as_array().unwrap().iter().any(|r| r["id"] == json!(id)), "{}", listed.1);
+    // Only this identity may name an account: a job finds one person's rows; for anyone else it would reveal an owner.
+    let by_owner = call(&router, keyed("GET", &format!("/api/sys_notes?owner={author}&limit=100"), &system_key, None)).await;
+    assert_eq!(by_owner.0, StatusCode::OK, "{}", by_owner.1);
+    let items = by_owner.1["items"].as_array().unwrap();
+    assert!(items.iter().any(|r| r["id"] == json!(id)) && items.iter().all(|r| r["owner"] == json!(author)), "{}", by_owner.1);
+    let nobody = call(&router, keyed("GET", &format!("/api/sys_notes?owner={}", Uuid::new_v4()), &system_key, None)).await;
+    assert_eq!(nobody.1["items"], json!([]), "{}", nobody.1);
+    for key in [&author_key, &admin_key] {
+        let denied = call(&router, keyed("GET", &format!("/api/sys_notes?owner={author}"), key, None)).await;
+        assert_eq!(denied.0, StatusCode::UNPROCESSABLE_ENTITY, "{}", denied.1);
+    }
     let bumped = call(&router, keyed("POST", &format!("{row}/actions/bump"), &system_key, Some(json!({})))).await;
     assert_eq!(bumped.0, StatusCode::OK, "{}", bumped.1);
     let owner_view = call(&router, keyed("GET", &row, &author_key, None)).await;

@@ -6,7 +6,7 @@ function keyBackend(env, keyName, kind) {
   const LIST_OPTIONS = ['search', 'limit', 'offset', 'filter', 'sort', 'cursor', 'after', 'include', 'aggregate', 'count', 'facets', 'fields', 'owner']
   const FILTER_OPS = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'between', 'in', 'exists', 'prefix', 'iprefix', 'has']
   const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
-  const fail = (status, message, extra) => Object.assign(new Error(message), { status }, extra)
+  const fail = (status, message, extra) => Object.defineProperty(Object.assign(new Error(message), { status }, extra), Symbol.for('brain.backendError'), { value: true })
   let target = null, problem = null
   const key = env[keyName] || ''
   try {
@@ -100,8 +100,8 @@ function keyBackend(env, keyName, kind) {
         }
         for (const [k, value] of [['include', include], ['aggregate', aggregate], ['count', count], ['facets', facets], ['fields', fields]]) if (value !== undefined) q.set(k, names(value, k))
         if (options.owner !== undefined) {
-          if (options.owner !== 'me') throw fail(400, "Invalid native list owner; use 'me'")
-          q.set('owner', 'me')
+          if (options.owner !== 'me' && !(typeof options.owner === 'string' && UUID.test(options.owner))) throw fail(400, "Invalid native list owner; use 'me' or an account id")
+          q.set('owner', options.owner)
         }
         const query = q.toString()
         return request('GET', '/api/' + name + (query ? '?' + query : ''))

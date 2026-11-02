@@ -67,7 +67,8 @@ declaration. New groups need `brain backend migrate` to build their indexes.
 
 `?owner=me` limits the list to rows the signed-in reader owns, on top of the read policy, even when the resource is public.
 The id comes from the session or key, so a client cannot name another account; any other value answers `422`, and a
-request with no identity answers `401`. A filter declared on a field called `owner` or `fields` keeps its meaning.
+request with no identity answers `401`. A system key may also name an account, `?owner=<id>`, so a job finds one person's
+rows without reading every page. A filter declared on a field called `owner` or `fields` keeps its meaning.
 
 ## Choose the fields
 
