@@ -28,6 +28,10 @@ export const seo = p => ({ title: 'Thing ' + p.name, schema: 'Product', jsonld: 
 // the build already wrote the static schema node (prerender seo_head) into the SSR page template
 w('_server/pages/post.html', '<!doctype html><html><head><title>Post</title><link rel="canonical" href="https://x.test/posts/:slug"><script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Post"}</script></head><body><div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
 w('_server/pages/thing.html', '<!doctype html><html><head><title>Thing</title></head><body><div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
+w('_server/job.mjs', `export async function load(ctx) { return { name: ctx.params.slug } }
+export const seo = p => ({ title: 'Job <' + p.name + '> & co', description: 'Apply to ' + p.name })`)
+// the build wrote the site graph into the template with the route pattern (brain-seo ServerHead::apply)
+w('_server/pages/job.html', '<!doctype html><html><head><title>Site</title><link rel="canonical" href="https://x.test/jobs/:slug"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@id":"https://x.test/#website","@type":"WebSite","url":"https://x.test/","name":"Site"},{"@id":"https://x.test/jobs/:slug#webpage","@type":"WebPage","url":"https://x.test/jobs/:slug","isPartOf":{"@id":"https://x.test/#website"}}]}</script></head><body><div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
 w('index.html', '<!doctype html><title>Home</title><main><h1>Home</h1></main>')
 w('index.md', '# Home\n')
 w('pricing.html', '<!doctype html><title>Pricing</title><main><h1>Pricing</h1></main>')
@@ -38,6 +42,7 @@ w('_server/manifest.json', JSON.stringify({
   routes: [
     { path: '/posts/:slug', rx: '^/posts/(?<slug>[^/]+)/?$', view: '/_b/post.js', layouts: [], server: '_server/post.mjs', page: '_server/pages/post.html' },
     { path: '/places/:id', rx: '^/places/(?<id>[^/]+)/?$', view: '/_b/post.js', layouts: [], server: '_server/place.mjs', page: '_server/pages/place.html' },
+    { path: '/jobs/:slug', rx: '^/jobs/(?<slug>[^/]+)/?$', view: '/_b/post.js', layouts: [], server: '_server/job.mjs', page: '_server/pages/job.html' },
     { path: '/things/:id', rx: '^/things/(?<id>[^/]+)/?$', view: '/_b/post.js', layouts: [], server: '_server/thing.mjs', page: '_server/pages/thing.html' },
   ],
 }))
@@ -70,6 +75,19 @@ test('SSR: a literal root-relative canonical keeps the origin the build wrote in
 test('SSR: with trailingSlash "ignore" the canonical of a slash URL is the form the sitemap lists', async () => {
   const h = await (await get('/posts/hello/')).text()
   assert.match(h, /<link rel="canonical" href="https:\/\/x\.test\/posts\/hello">/)
+})
+
+test('SSR: the site graph of a per-request page carries the request URL, title and description', async () => {
+  const h = await (await get('/jobs/dev')).text()
+  const [g] = ld(h)
+  const [site, page] = g['@graph']
+  assert.equal(site['@id'], 'https://x.test/#website')
+  assert.equal(page['@id'], 'https://x.test/jobs/dev#webpage')
+  assert.equal(page.url, 'https://x.test/jobs/dev')
+  assert.equal(page.name, 'Job <dev> & co')
+  assert.equal(page.description, 'Apply to dev')
+  assert.doesNotMatch(h, /<\/script>[^]*"@graph"[^]*<\/script>[^]*"@graph"/, 'one graph')
+  assert.doesNotMatch(/<script[^>]*application\/ld\+json[^>]*>([^]*?)<\/script>/.exec(h)[1], /</, 'the JSON-LD cannot close its element')
 })
 
 test('SSR: an explicit jsonld wins over the schema shortcut', async () => {

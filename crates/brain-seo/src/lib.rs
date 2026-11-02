@@ -166,7 +166,35 @@ impl ServerHead {
             locale_alternates: &[],
         };
         let (start, end) = social::head(cfg, &doc, &facts);
-        dedupe_head(&inject_head(&inject_head(&page, &start, false), &end, true))
+        let page = dedupe_head(&inject_head(&inject_head(&page, &start, false), &end, true));
+        // The WebSite + WebPage graph a prerendered page gets. The URL keeps the route pattern (`/jobs/:slug`) and the
+        // server writes the request path into it, as it does for the canonical; the page name and description are the
+        // request's (`head()` in server.mjs), so the template's shell title is not written. No breadcrumb: its names
+        // come from the prerendered pages.
+        let graph = jsonld::auto(cfg, route, &html::parse(&page), &Default::default(), &self.site_name, None, &[], None);
+        let tags: String = graph.into_iter().map(|mut j| {
+            server_graph(&mut j);
+            jsonld::script(&j)
+        }).collect();
+        inject_head(&page, &tags, true)
+    }
+}
+
+/// Removes from a per-request graph what only the request knows: the page name, description and image, and the
+/// breadcrumb.
+fn server_graph(j: &mut Json) {
+    let Json::Obj(kv) = j else { return };
+    let Some((_, Json::Arr(nodes))) = kv.iter_mut().find(|(k, _)| k == "@graph") else { return };
+    nodes.retain(|n| n.get("@type").and_then(Json::as_str) != Some("BreadcrumbList"));
+    for n in nodes.iter_mut() {
+        let page = match n.get("@type") {
+            Some(Json::Str(t)) => t == "WebPage",
+            Some(Json::Arr(ts)) => ts.iter().any(|t| t.as_str() == Some("WebPage")),
+            _ => false,
+        };
+        if let (true, Json::Obj(fields)) = (page, n) {
+            fields.retain(|(k, _)| !matches!(k.as_str(), "name" | "description" | "primaryImageOfPage" | "breadcrumb"));
+        }
     }
 }
 
