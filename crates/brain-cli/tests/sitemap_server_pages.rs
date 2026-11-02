@@ -136,7 +136,10 @@ fn the_credit_line_does_not_spend_the_view_budget() {
         let at = t.find("exceeded on /: ").unwrap_or_else(|| panic!("{t}")) + 15;
         t[at..].split(' ').next().unwrap().parse::<usize>().unwrap()
     };
-    assert_eq!(total(true), total(false));
+    // the two brain.json files give two build ids (`<meta name="brain-build">`): their compressed size may differ by a
+    // byte or two, the ~200-byte credit line may not
+    let (with, without) = (total(true), total(false));
+    assert!(with.abs_diff(without) <= 4, "{with} vs {without}");
     let _ = std::fs::remove_dir_all(dir.parent().unwrap());
 }
 

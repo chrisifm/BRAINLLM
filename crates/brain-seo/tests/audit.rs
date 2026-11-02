@@ -2258,18 +2258,18 @@ fn a_per_request_template_gets_the_website_and_webpage_graph_with_the_route_patt
     let c = cfg();
     let mut ps = good_site();
     let built = finish(&c, &dir, &mut ps, &[], &[]).unwrap();
-    let template = "<!doctype html><html lang=\"en\"><head><title>Acme</title><link rel=\"canonical\" href=\"https://acme.dev/jobs/:slug\"></head><body><div id=\"brain-view\"><!--brain:ssr--></div></body></html>";
-    let out = built.server_head.apply(&c, "/jobs/:slug", template);
+    let template = "<!doctype html><html lang=\"en\"><head><title>Acme</title><link rel=\"canonical\" href=\"https://acme.dev/items/:slug\"></head><body><div id=\"brain-view\"><!--brain:ssr--></div></body></html>";
+    let out = built.server_head.apply(&c, "/items/:slug", template);
     let ld = brain_seo::html::parse(&out).jsonld.join("\n");
     assert!(ld.contains("\"@type\":\"WebSite\""), "{ld}");
-    assert!(ld.contains("\"@id\":\"https://acme.dev/jobs/:slug#webpage\""), "{ld}");
-    assert!(ld.contains("\"url\":\"https://acme.dev/jobs/:slug\""), "{ld}");
+    assert!(ld.contains("\"@id\":\"https://acme.dev/items/:slug#webpage\""), "{ld}");
+    assert!(ld.contains("\"url\":\"https://acme.dev/items/:slug\""), "{ld}");
     // the shell title is not the page's name, and the breadcrumb needs names only prerendered pages have
     assert!(!ld.contains("\"name\":\"Acme\",\"isPartOf\"") && !ld.contains("BreadcrumbList") && !ld.contains("\"breadcrumb\""), "{ld}");
     let webpage = ld.split("#webpage\"").nth(1).unwrap_or("");
     assert!(!webpage.split('}').next().unwrap_or("").contains("\"name\""), "{ld}");
     // a template that already carries its own graph is left alone
-    let again = built.server_head.apply(&c, "/jobs/:slug", &out);
+    let again = built.server_head.apply(&c, "/items/:slug", &out);
     assert_eq!(brain_seo::html::parse(&again).jsonld.len(), brain_seo::html::parse(&out).jsonld.len());
     // not-found and error templates are not URLs
     assert_eq!(built.server_head.apply(&c, "*", template), template);

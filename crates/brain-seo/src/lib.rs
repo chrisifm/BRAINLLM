@@ -167,7 +167,7 @@ impl ServerHead {
         };
         let (start, end) = social::head(cfg, &doc, &facts);
         let page = dedupe_head(&inject_head(&inject_head(&page, &start, false), &end, true));
-        // The WebSite + WebPage graph a prerendered page gets. The URL keeps the route pattern (`/jobs/:slug`) and the
+        // The WebSite + WebPage graph a prerendered page gets. The URL keeps the route pattern (`/posts/:slug`) and the
         // server writes the request path into it, as it does for the canonical; the page name and description are the
         // request's (`head()` in server.mjs), so the template's shell title is not written. No breadcrumb: its names
         // come from the prerendered pages.
