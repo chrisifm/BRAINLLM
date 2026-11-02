@@ -2392,9 +2392,13 @@ function head(page, seo, path, search = '') {
     if (v == null || k === '$head' || k === 'schema' || k === 'lastmod') continue
     if (k === 'title') h = /<title>[\s\S]*?<\/title>/i.test(h) ? h.replace(/<title>[\s\S]*?<\/title>/i, () => `<title>${esc(v)}</title>`) : h.replace('</head>', () => `<title>${esc(v)}</title></head>`)
     else if (k === 'canonical') {
-      const tag = `<link rel="canonical" href="${esc(v)}">`
+      // a root-relative canonical takes the origin the build wrote into the template (PUBLIC_SITE_URL), as it does on
+      // a prerendered page: a relative canonical is ignored by search engines
+      const built = /^\/(?!\/)/.test(v) && /<link[^>]*rel=["']canonical["'][^>]*href="(https?:\/\/[^/"]+)/i.exec(h)?.[1]
+      const url = built ? built + v : v
+      const tag = `<link rel="canonical" href="${esc(url)}">`
       h = /<link[^>]*rel=["']canonical["'][^>]*>/i.test(h) ? h.replace(/<link[^>]*rel=["']canonical["'][^>]*>/i, () => tag) : h.replace('</head>', () => tag + '</head>')
-      if (seo['og:url'] == null) meta('property', 'og:url', v) // og:url follows the canonical unless the view sets its own
+      if (seo['og:url'] == null) meta('property', 'og:url', url) // og:url follows the canonical unless the view sets its own
     } else if (k === 'jsonld') h = h.replace('</head>', () => `<script type="application/ld+json">${jsonInHtml(v)}</script></head>`)
     else if (/^(og|twitter|article):/.test(k)) meta('property', k, v)
     else if (typeof v === 'string') meta('name', k, v)

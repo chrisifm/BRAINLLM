@@ -20,6 +20,9 @@ export default function Post($p) { const r = t(); insert(null, () => $p.name, r.
 `)
 w('_server/post.mjs', `export async function load(ctx) { return { name: ctx.params.slug } }
 export const seo = p => ({ title: 'Post ' + p.name, description: 'All about ' + p.name, schema: 'Article', 'og:image': '/c.png', lastmod: '2026-10-01' })`)
+w('_server/place.mjs', `export async function load(ctx) { return { name: ctx.params.id } }
+export const seo = p => ({ title: 'Place ' + p.name, canonical: '/places' })`)
+w('_server/pages/place.html', '<!doctype html><html><head><title>Place</title><link rel="canonical" href="https://x.test/places"></head><body><div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
 w('_server/thing.mjs', `export async function load(ctx) { return { name: ctx.params.id } }
 export const seo = p => ({ title: 'Thing ' + p.name, schema: 'Product', jsonld: { '@type': 'Product', name: 'Own' } })`)
 // the build already wrote the static schema node (prerender seo_head) into the SSR page template
@@ -34,6 +37,7 @@ w('_server/manifest.json', JSON.stringify({
   v: 1, build: 'b1', core: '/_b/core.js',
   routes: [
     { path: '/posts/:slug', rx: '^/posts/(?<slug>[^/]+)/?$', view: '/_b/post.js', layouts: [], server: '_server/post.mjs', page: '_server/pages/post.html' },
+    { path: '/places/:id', rx: '^/places/(?<id>[^/]+)/?$', view: '/_b/post.js', layouts: [], server: '_server/place.mjs', page: '_server/pages/place.html' },
     { path: '/things/:id', rx: '^/things/(?<id>[^/]+)/?$', view: '/_b/post.js', layouts: [], server: '_server/thing.mjs', page: '_server/pages/thing.html' },
   ],
 }))
@@ -55,6 +59,12 @@ test('SSR: schema="Article" becomes one JSON-LD node with the request values, ne
     '@context': 'https://schema.org', '@type': 'Article', headline: 'Post hello', description: 'All about hello',
     url: 'https://x.test/posts/hello', image: 'https://x.test/c.png', dateModified: '2026-10-01',
   })
+})
+
+test('SSR: a literal root-relative canonical keeps the origin the build wrote into the template', async () => {
+  const h = await (await get('/places/a')).text()
+  assert.match(h, /<link rel="canonical" href="https:\/\/x\.test\/places">/)
+  assert.match(h, /<meta property="og:url" content="https:\/\/x\.test\/places">/)
 })
 
 test('SSR: an explicit jsonld wins over the schema shortcut', async () => {
