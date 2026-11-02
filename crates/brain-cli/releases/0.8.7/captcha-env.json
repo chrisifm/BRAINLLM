@@ -1,0 +1,9 @@
+{
+  "id": "captcha-env",
+  "kind": "fix",
+  "title": "Captcha secret from .brain_env",
+  "why": "A captcha secret kept in .brain_env was not found by the backend, so sign-in failed closed with no reason.",
+  "changelog": [
+    "a captcha secret written in `.brain_env` resolves like every backend setting; B0790 and a startup warning report one that is missing"
+  ]
+}

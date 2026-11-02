@@ -7,6 +7,13 @@ diagnostics that reject code an earlier version accepted.
 Every npm package (`@christianirack/brainllm`, its seven native platform packages, `brainllm-runtime`,
 `create-brainllm` and `create-brainll`) ships the same version as `[workspace.package]` in `Cargo.toml`.
 
+## [0.8.7] - 2026-11-01
+
+Upgrade with `npm install -D @christianirack/brainllm@0.8.7 --save-exact`.
+
+- a captcha secret written in `.brain_env` resolves like every backend setting; B0790 and a startup warning report one that is missing
+- `brain run` accepts an app session (`BRAIN_BACKEND_SESSION=app`) of any shape instead of answering 503 on every view with a `load`; the log keeps the cause of a 503; a leftover backend cookie no longer reaches the backend in development
+
 ## [0.8.6] - 2026-11-01
 
 Upgrade with `npm install -D @christianirack/brainllm@0.8.6 --save-exact`. The default limit per address is now 10 requests per second with a burst of 300: define `limits` in server/platform.jsbrain if you need another. Clients that write `readonly` or `private` fields through `/batch` or `/upsert` now get an error.

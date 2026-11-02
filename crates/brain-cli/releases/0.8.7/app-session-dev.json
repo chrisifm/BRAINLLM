@@ -1,0 +1,9 @@
+{
+  "id": "app-session-dev",
+  "kind": "fix",
+  "title": "App session in brain run",
+  "why": "Signed-in pages answered 503 in brain run when the app session held its own fields, while brain start answered 200.",
+  "changelog": [
+    "`brain run` accepts an app session (`BRAIN_BACKEND_SESSION=app`) of any shape instead of answering 503 on every view with a `load`; the log keeps the cause of a 503; a leftover backend cookie no longer reaches the backend in development"
+  ]
+}
