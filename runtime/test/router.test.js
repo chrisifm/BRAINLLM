@@ -1511,3 +1511,38 @@ test('a failed navigation neither moves focus nor announces', async () => {
   r.stop()
   delete globalThis.navigation
 })
+
+test('predictive prefetch: the rank map stays bounded across many navigations with distinct links', async () => {
+  globalThis.location = new URL('http://x.test/a')
+  const { predict } = await rt.sibling('brain-router.js')
+  const io = []
+  globalThis.IntersectionObserver = class {
+    constructor(f) { this.f = f; io.push(this) }
+    observe(el) { ;(this.els ||= []).push(el) }
+    unobserve() {}
+    disconnect() { this.els = [] }
+  }
+  globalThis.requestIdleCallback = f => setTimeout(f, 0)
+  const real = globalThis.fetch, RealMap = globalThis.Map, made = []
+  globalThis.fetch = async () => ({ ok: true, status: 200, headers: { get: k => (k === 'content-type' ? 'text/html' : null) }, text: async () => '<main></main>' })
+  // the maps predict() builds are counted from outside, without a hook in the router
+  globalThis.Map = class extends RealMap { constructor(...a) { super(...a); made.push(this) } }
+  let p
+  try { p = predict({}, () => true) } finally { globalThis.Map = RealMap }
+  try {
+    for (let round = 0; round < 40; round++) {
+      doc.body.innerHTML = '<main>' + Array.from({ length: 10 }, (_, i) => `<a href="/r${round}-${i}">L</a>`).join('') + '</main>'
+      p.scan()
+      io[0].f(io[0].els.map(target => ({ target, isIntersecting: true })))
+      await new Promise(r => setTimeout(r, 2))
+    }
+    await new Promise(r => setTimeout(r, 20))
+    const biggest = Math.max(...made.map(m => m.size))
+    assert.ok(biggest <= 24, `a prefetch map holds ${biggest} entries after 400 distinct links`)
+  } finally {
+    p.stop()
+    globalThis.fetch = real
+    delete globalThis.IntersectionObserver
+    delete globalThis.requestIdleCallback
+  }
+})

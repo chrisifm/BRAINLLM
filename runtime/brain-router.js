@@ -499,6 +499,7 @@ export function predict(o = {}, same = () => false) {
     if (dead || document.hidden || net?.saveData) return
     while (busy < PARALLEL && queue.length) {
       const k = queue.shift()
+      rank.delete(k) // rank only orders the queue: it leaves with the entry
       if (cache.has(k)) continue
       busy++
       get(k).finally(() => { busy--; pump() })
@@ -525,7 +526,7 @@ export function predict(o = {}, same = () => false) {
   const evs = ['pointerover', 'focusin', 'touchstart']
   for (const t of evs) document.addEventListener(t, intent, { passive: true, capture: true })
   const forget = () => {
-    epoch++; queue.length = 0; cache.clear(); bytes = 0; count = 0
+    epoch++; queue.length = 0; rank.clear(); cache.clear(); bytes = 0; count = 0
     for (const c of running.values()) c.abort()
     running.clear()
   }
@@ -535,13 +536,13 @@ export function predict(o = {}, same = () => false) {
     for (const { target: a, isIntersecting } of es) {
       const k = ok(a), i = queue.indexOf(k)
       if (isIntersecting) thin() || want(k, false, (a.closest('footer,aside') ? 1e7 : 0) + a.getBoundingClientRect().top)
-      else if (i >= 0) queue.splice(i, 1) // left the viewport before its turn
+      else if (i >= 0) queue.splice(i, 1), rank.delete(k) // left the viewport before its turn
     }
   }, { rootMargin: '200px' })
   return {
     scan() {
       if (dead) return
-      count = 0; queue.length = 0; planned.clear(); seen = new WeakSet(); io?.disconnect()
+      count = 0; queue.length = 0; rank.clear(); planned.clear(); seen = new WeakSet(); io?.disconnect()
       const anchors = document.querySelectorAll('a[href]'), allowed = new Set()
       for (const a of anchors) { const k = ok(a); if (k) allowed.add(k); if (io && !seen.has(a)) { seen.add(a); io.observe(a) } }
       // Compiler-generated graph, validated against the current DOM: hidden/opted-out links cannot sneak in.
