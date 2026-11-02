@@ -1548,8 +1548,16 @@ export function createServer(o = {}) {
     if (req.method !== 'POST') return fail(405, 'Use POST', { $h: { allow: 'POST' } })
     if (req.headers['x-brain-rpc'] !== '1') return fail(403, 'Missing X-Brain-RPC header')
     if (!sameOrigin(req)) return originRefused('B0741', req, rid, 'rpc'), fail(403, 'Cross-origin request', { brainCode: 'B0741' })
-    const modPath = mf.rpc[hash]
-    if (!modPath || !/^[A-Za-z_$][\w$]*$/.test(fn)) return fail(404, 'Unknown function')
+    const modPath = fnId(hash + '/' + fn) && Object.hasOwn(mf.rpc, hash) && mf.rpc[hash]
+    if (!modPath) return fail(404, 'Unknown function')
+    let f
+    try {
+      f = (await load(modPath))[fn]
+    } catch (e) {
+      log('error', 'rpc module failed to load', { rid, fn: hash + '/' + fn, ...trace(e) })
+      return fail(500, 'Internal error', { rid })
+    }
+    if (typeof f !== 'function') return fail(404, 'Unknown function') // a guessed name never gets a rate-limit key
     const ra = overLimit(ipOf(req) + ' ' + hash + '/' + fn, LIMIT) // before reading the body
     if (ra) return fail(429, 'Too many requests', { $h: { 'retry-after': String(ra) } })
     let raw
@@ -1561,13 +1569,6 @@ export function createServer(o = {}) {
     }
     if (native) await native.prepare(req, res, rid)
     const ctx = context(req, res, url, { params: {} })
-    let f
-    try {
-      f = (await load(modPath))[fn]
-    } catch (e) {
-      log('error', 'rpc module failed to load', { rid, fn: hash + '/' + fn, ...trace(e) })
-      return fail(500, 'Internal error', { rid })
-    }
     const r = await callRpc({ fn: f, args: raw, ctx, timeout: TIMEOUT })
     if (r.cause) log('error', r.status === 504 ? 'rpc timeout' : 'rpc failed', { rid, fn: hash + '/' + fn, ms: TIMEOUT, ...trace(r.cause) })
     const b = r.status >= 500 ? { ...r.body, rid } : r.body
@@ -1600,8 +1601,8 @@ export function createServer(o = {}) {
       if (e.aborted) return
       return plain(413, tooBig(rid, url.pathname))
     }
-    const id = new URLSearchParams(raw).get('_brain') || '', modPath = mf.rpc[id.split('/')[0]]
-    if (!modPath) return plain(400, 'Unknown form')
+    const id = new URLSearchParams(raw).get('_brain') || '', fid = fnId(id), modPath = fid && Object.hasOwn(mf.rpc, fid.hash) && mf.rpc[fid.hash]
+    if (!modPath) return plain(400, 'Unknown form') // only `<hash>/<name>`: no rate-limit key for anything else
     if (native) await native.prepare(req, res, rid)
     const ctx = context(req, res, url, { params })
     let module, rules
@@ -1613,7 +1614,7 @@ export function createServer(o = {}) {
       log('error', 'form module failed to load', { rid, fn: id, ...trace(e) })
       return failPage(res, 500, rid)
     }
-    const r = await callForm({ module, raw, ctx, rules, key: ipOf(req) + ' ' + id, limit: LIMIT, timeout: TIMEOUT, locale: route.locale })
+    const r = await callForm({ module, raw, ctx, rules, key: ipOf(req) + ' ' + fid.hash + '/' + fid.fn, limit: LIMIT, timeout: TIMEOUT, locale: route.locale })
     if (r.cause) log('error', 'form failed', { rid, fn: id, ...trace(r.cause) })
     if (r.status === 303) return send(res, 303, '', { location: withBase(r.location), 'cache-control': 'no-store', ...ctx.session.headers() })
     if (r.status === 422) return ssr(req, res, route, params, url, rid, r.state, 422)
@@ -2142,19 +2143,42 @@ export async function runChain({ guards = [], middleware = [], ctx }) {
 }
 
 // ---------- shared request logic (server.mjs handlers and the dev server's sidecar call the same code, §11.1) ----------
-const HITS = new Map() // `${key}` → [windowStart, count]
+// Fixed 60 s window per key (ip + the validated `hash/fn`). Callers count only a function that exists, so the keys are
+// bounded by clients × real functions; HITS_MAX is the hard cap anyway (the oldest window goes first, like REVOKED) and a
+// key past HITS_KEY_MAX characters is stored as its digest. The map stays ordered by window start: a new window is
+// re-inserted at the end, so the expired entries are always the first ones.
+const HITS = new Map() // key → [windowStart, count]
+export const HITS_MAX = 50000, HITS_KEY_MAX = 256
+export const rateLimitKeys = () => HITS.size
+const WINDOW = 60000
+const dropExpired = now => {
+  for (const [k, [t]] of HITS) {
+    if (now - t <= WINDOW) break
+    HITS.delete(k)
+  }
+}
 let sweeping = null
-// Fixed 60 s window per key (ip + function). Returns 0, or the seconds to wait (Retry-After).
+// Returns 0, or the seconds to wait (Retry-After).
 export function overLimit(key, max = 60) {
-  if (!sweeping)
-    (sweeping = setInterval(() => {
-      const now = Date.now()
-      for (const [k, [t]] of HITS) if (now - t > 60000) HITS.delete(k)
-    }, 60000)).unref()
+  if (!sweeping) (sweeping = setInterval(() => dropExpired(Date.now()), WINDOW)).unref()
+  key = String(key)
+  if (key.length > HITS_KEY_MAX) key = createHash('sha256').update(key).digest('base64url')
   const now = Date.now()
   let h = HITS.get(key)
-  if (!h || now - h[0] > 60000) HITS.set(key, (h = [now, 0]))
-  return ++h[1] > max ? Math.ceil((h[0] + 60000 - now) / 1000) : 0
+  if (!h || now - h[0] > WINDOW) {
+    if (h) HITS.delete(key)
+    dropExpired(now)
+    while (HITS.size >= HITS_MAX) HITS.delete(HITS.keys().next().value)
+    HITS.set(key, (h = [now, 0]))
+  }
+  return ++h[1] > max ? Math.ceil((h[0] + WINDOW - now) / 1000) : 0
+}
+// A server function's id, `<hash>/<name>`: the RPC path and a form's `_brain` field. Anything else is refused before
+// it reaches the rate limit (a suffix such as `hash/login/1` would otherwise run `login` under a fresh budget).
+const FN_ID = /^([\w-]{1,64})\/([A-Za-z_$][\w$]{0,127})$/
+export const fnId = id => {
+  const m = typeof id === 'string' ? FN_ID.exec(id) : null
+  return m ? { hash: m[1], fn: m[2] } : null
 }
 // t(), fmt and locale() read globalThis.__brainLocale. A render sets it while nothing else runs (renders are serialized);
 // load(), guards and form handlers overlap across awaits, so each carries its page's language in the async context.
@@ -2195,11 +2219,11 @@ export function parseArgs(raw) {
 // Runs one `server:` function → { status, body, headers?, cause? }. `args`: raw body string or an array. With `key`, the
 // rate limit applies here too. `cause` (500/504) is the real error, for the caller's log; the body stays generic.
 export async function callRpc({ fn, args, ctx, key, limit = 60, timeout = 10000 }) {
+  if (typeof fn !== 'function') return { status: 404, body: { error: 'Unknown function' } } // never counted: no key per guess
   if (key) {
     const ra = overLimit(key, limit)
     if (ra) return { status: 429, body: { error: 'Too many requests' }, headers: { 'retry-after': String(ra) } }
   }
-  if (typeof fn !== 'function') return { status: 404, body: { error: 'Unknown function' } }
   let a
   try {
     a = typeof args === 'string' || args == null ? parseArgs(args || '') : args
@@ -2230,12 +2254,13 @@ export async function callRpc({ fn, args, ctx, key, limit = 60, timeout = 10000 
 // English text for the server's log: a form or a server function never shows it to a visitor
 const NATIVE_FAILED = 'Native resource request failed'
 export async function callForm({ module, raw, ctx, rules, key, limit = 60, timeout = 10000, locale }) {
-  const q = new URLSearchParams(raw || ''), id = q.get('_brain') || '', fn = id.split('/')[1] || ''
+  const q = new URLSearchParams(raw || ''), id = q.get('_brain') || '', fn = fnId(id)?.fn
+  // exactly `<hash>/<name>` naming an exported function, checked before the rate limit counts anything
+  if (!fn || typeof (module && module[fn]) !== 'function') return { status: 400, body: { error: 'Unknown form' } }
   if (key) {
     const ra = overLimit(key, limit)
     if (ra) return { status: 429, body: { error: 'Too many requests' }, headers: { 'retry-after': String(ra) } }
   }
-  if (!/^[A-Za-z_$][\w$]*$/.test(fn) || typeof (module && module[fn]) !== 'function') return { status: 400, body: { error: 'Unknown form' } }
   const schema = module.$forms && module.$forms[fn]
   const G = globalThis, had = '__brainLocale' in G, prev = G.__brainLocale
   let values, errors, generic
