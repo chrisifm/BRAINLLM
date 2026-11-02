@@ -497,6 +497,53 @@ fn run_headless(
     files: &[PathBuf],
     timeout: Duration,
 ) -> Result<Vec<FileReport>, String> {
+    transport_retry(|| run_headless_once(base, root, files, timeout), Duration::from_secs(2), load_average)
+}
+
+/// A browser that dies on its pipe ("Broken pipe", "Chrome did not respond") is usually starved by machine load, not a
+/// failed test: run the whole pass once more after `wait`, then name the probable cause with the 1-minute load average.
+/// Any other error is returned as it is, without a retry.
+fn transport_retry<T>(mut attempt: impl FnMut() -> Result<T, String>, wait: Duration, load: impl Fn() -> Option<f64>) -> Result<T, String> {
+    let transport = |e: &str| e.contains("CDP transport write failed") || e.contains("Chrome did not respond") || e.starts_with("pipe CDP:");
+    match attempt() {
+        Err(first) if transport(&first) => {
+            std::thread::sleep(wait);
+            attempt().map_err(|again| {
+                if !transport(&again) {
+                    return again;
+                }
+                let cores = std::thread::available_parallelism().map_or(0, |n| n.get());
+                let busy = match load() {
+                    Some(avg) => format!("the 1-minute load average is {avg:.1} on {cores} cores"),
+                    None => "the load average could not be read".to_string(),
+                };
+                format!("{again}. The browser connection failed twice; the probable cause is machine load ({busy}); fix: rerun when the machine is less busy, or raise --timeout")
+            })
+        }
+        other => other,
+    }
+}
+
+fn load_average() -> Option<f64> {
+    #[cfg(unix)]
+    {
+        unsafe extern "C" {
+            fn getloadavg(loadavg: *mut f64, nelem: i32) -> i32;
+        }
+        let mut avg = [0f64; 1];
+        if unsafe { getloadavg(avg.as_mut_ptr(), 1) } == 1 {
+            return Some(avg[0]);
+        }
+    }
+    None
+}
+
+fn run_headless_once(
+    base: &str,
+    root: &Path,
+    files: &[PathBuf],
+    timeout: Duration,
+) -> Result<Vec<FileReport>, String> {
     let mut chrome = Chrome::launch(timeout).map_err(|e| e.to_string())?;
     let mut reports = Vec::new();
     for f in files {
@@ -656,6 +703,28 @@ fn run_headless(
         reports.push(rep);
     }
     Ok(reports)
+}
+
+#[cfg(test)]
+mod transport_tests {
+    use super::*;
+
+    #[test]
+    fn a_broken_browser_pipe_is_retried_once_then_blamed_on_load() {
+        let broken = || Err::<(), _>("CDP transport write failed: Broken pipe (os error 32); the owned browser session was stopped".to_string());
+        let mut calls = 0;
+        let again = transport_retry(|| { calls += 1; if calls == 1 { broken() } else { Ok(()) } }, Duration::ZERO, || Some(75.0));
+        assert_eq!((again, calls), (Ok(()), 2), "one retry recovers");
+        let mut calls = 0;
+        let failed = transport_retry(|| { calls += 1; broken() }, Duration::ZERO, || Some(75.4)).unwrap_err();
+        assert_eq!(calls, 2, "never more than one retry");
+        assert!(failed.contains("Broken pipe") && failed.contains("machine load") && failed.contains("75.4"), "{failed}");
+        let silent = transport_retry(|| Err::<(), _>("timed out: Chrome did not respond; fix: raise --timeout".to_string()), Duration::ZERO, || None).unwrap_err();
+        assert!(silent.contains("could not be read"), "{silent}");
+        let mut calls = 0;
+        let other = transport_retry(|| { calls += 1; Err::<(), _>("the test page did not load".to_string()) }, Duration::ZERO, || Some(1.0));
+        assert_eq!((other, calls), (Err("the test page did not load".to_string()), 1), "a test failure is not retried");
+    }
 }
 
 #[cfg(test)]
