@@ -1162,15 +1162,19 @@ export function createServer(o = {}) {
   let ssrBytes = 0
   async function cached(req, res, route, params, url, rid) {
     const n = +route.cache, ms = n * 1000, key = (route.locale || '') + url.pathname + cacheSearch(url)
-    const fill = () => {
+    // `kept.answer`: what this render answered when it was not a 200 (an error page, a redirect, a not-found), so the
+    // request that started it replays that answer instead of running load() and its backend reads a second time
+    const fill = (kept = {}) => {
       let failed = false
+      const set = {}
       return new Promise(ok => {
         const cap = { req, $capture: (out, h, st) => {
           const headers = Object.fromEntries(Object.entries(h).map(([k, v]) => [k.toLowerCase(), v]))
           const privateResponse = headers['set-cookie'] || headers['vary'] || /private|no-store|no-cache/i.test(headers['cache-control'] || '')
           if (st >= 500) failed = true
+          if (st !== 200) kept.answer = { page: out, h, st, set }
           ok(st === 200 ? { out, h, cacheable: !privateResponse, etag: 'W/"' + tag(out) + '"', t: Date.now(), bytes: Buffer.byteLength(out) } : null)
-        }, writeHead(st) { if (st >= 500) failed = true }, end: () => ok(null), setHeader() {}, getHeader: name => (name === 'x-request-id' ? rid : undefined), once() {}, removeListener() {} }
+        }, writeHead(st, h) { if (st >= 500) failed = true; kept.answer = { st, h: h || {}, set } }, end: body => { if (kept.answer && kept.answer.page === undefined) kept.answer.body = body; ok(null) }, setHeader(k, v) { set[k] = v }, getHeader: name => (name === 'x-request-id' ? rid : set[name]), once() {}, removeListener() {} }
         ssr(req, cap, route, params, url, rid, null, 200, null, true).catch(() => ok(null))
       }).then(c => {
         // A failed revalidation keeps the copy until 2N, which is what `stale-if-error` promises downstream.
@@ -1208,14 +1212,23 @@ export function createServer(o = {}) {
       if (c?.cacheable) return serve(c)
       return ssr(req, res, route, params, url, rid, null, 200, null, true)
     }
-    const filling = fill().finally(() => FILLING.delete(key))
+    const kept = {}
+    const filling = fill(kept).finally(() => FILLING.delete(key))
     FILLING.set(key, filling)
     c = await filling
     if (c) return serve(c)
     // the first render already asked the backend and logged why; another would only spend more of a limit it just hit
     if (req.$brainFailedReads?.temporary) return comeBackPage(req, res, route, params, url, rid)
     delete req.$brainFailedReads
-    return ssr(req, res, route, params, url, rid, null, 200, null, true) // a redirect or an error: as usual
+    // a redirect, a not-found or an error page: the answer that render produced, not a second load() (and its reads)
+    const a = kept.answer
+    if (a && !res.headersSent) {
+      for (const [k, v] of Object.entries(a.set)) res.setHeader(k, v)
+      if (a.page !== undefined) return html(res, a.st, a.page, a.h)
+      res.writeHead(a.st, a.h)
+      return void res.end(a.body)
+    }
+    return ssr(req, res, route, params, url, rid, null, 200, null, true) // nothing to replay (the render threw): as usual
   }
   const comeBackPage = (req, res, route, params, url, rid) => {
     res.setHeader('retry-after', String(Math.min(Math.ceil(req.$brainFailedReads.retryAfter) || 5, 3600)))
