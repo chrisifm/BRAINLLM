@@ -756,12 +756,20 @@ pub fn validate_props(props: &str) -> Result<String, String> {
         let Some((name, ty)) = decl.split_once(':') else {
             return Err(format!("prop `{p}` has no type; fix: `{decl}:str` (types: {})", TYPES.join(" ")));
         };
-        let base = ty.trim_end_matches('?');
-        if !TYPES.contains(&base) {
-            return Err(format!("unknown type `{base}` in `{p}`; fix: use one of {}", TYPES.join(" ")));
+        // `type`, then `~` (bindable: the child may write it), then `?` (optional): the order `<meta props>` parses.
+        let optional = ty.ends_with('?');
+        let rest = ty.trim_end_matches('?');
+        let bindable = rest.ends_with('~');
+        let base = rest.trim_end_matches('~');
+        if base.contains(['~', '?']) || ty.matches('?').count() > 1 || ty.matches('~').count() > 1 {
+            return Err(format!("`{p}`: write the marks after the type, `~` before `?`; fix: `{name}:{}{}{}`", base.trim_matches(['~', '?']), if ty.contains('~') { "~" } else { "" }, if ty.contains('?') { "?" } else { "" }));
         }
-        if ty.ends_with('?') && default.is_some() {
-            return Err(format!("`{p}`: a prop with a default is already optional; fix: `{name}:{base}={}`", default.unwrap_or("")));
+        if !TYPES.contains(&base) {
+            return Err(format!("unknown type `{base}` in `{p}`; fix: use one of {} (add `~` for a bindable prop, `?` for an optional one)", TYPES.join(" ")));
+        }
+        let mark = if bindable { "~" } else { "" };
+        if optional && default.is_some() {
+            return Err(format!("`{p}`: a prop with a default is already optional; fix: `{name}:{base}{mark}={}`", default.unwrap_or("")));
         }
         if !valid_ident(name) || name.contains('-') {
             return Err(format!("invalid prop name `{name}`; fix: camelCase, starting with a letter"));
@@ -1025,5 +1033,26 @@ mod tests {
         assert!(validate_props("n").unwrap_err().contains("n:str"));
         assert_eq!(validate_props(" a:num=0  b:str? ").unwrap(), "a:num=0 b:str?");
         assert!(validate_props("a:bool?=false").unwrap_err().contains("a:bool=false"));
+        // SPEC: `value:str~` is a bindable prop; `~` goes before `?` and before a default, as `<meta props>` parses it.
+        assert_eq!(validate_props("value:str~ open:bool~=false note:str~?").unwrap(), "value:str~ open:bool~=false note:str~?");
+        assert!(validate_props("value:str?~").unwrap_err().contains("value:str~?"));
+        assert!(validate_props("value:str~~").is_err());
+        assert!(validate_props("v:bool~?=false").unwrap_err().contains("v:bool~=false"));
+    }
+
+    /// A component generated with a bindable prop passes its own check (the prop is accepted by `<meta props>`).
+    #[test]
+    fn add_comp_with_a_bindable_prop() {
+        let app = tmp("bindable");
+        new_app(&app).unwrap();
+        let p = add(&app, "comp", "Captcha", "value:str~").unwrap();
+        let body = fs::read_to_string(&p).unwrap();
+        assert!(body.starts_with("<meta props=\"value:str~\">"), "{body}");
+        let c = brain_parse::parse(&body, Path::new("comp/captcha.brain")).unwrap();
+        assert!(c.props.iter().any(|p| p.name == "value" && p.bindable));
+        let (ctx, _) = brain_check::load_ctx(&p, &c);
+        let errors: Vec<_> = brain_check::check(&c, &ctx).into_iter().filter(|d| !d.is_warning()).collect();
+        assert!(errors.is_empty(), "{errors:?}");
+        fs::remove_dir_all(&app).unwrap();
     }
 }

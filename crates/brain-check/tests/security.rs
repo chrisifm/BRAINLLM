@@ -126,3 +126,96 @@ fn b0737_credentials_in_the_signed_session_cookie() {
         assert!(!d.iter().any(|d| d.code == "B0737"), "{call}: {d:?}");
     }
 }
+
+// B1311 warned on the very escape its fix proposes, alone or concatenated with literal parts.
+#[test]
+fn b1311_accepts_the_escape_its_fix_proposes() {
+    let wrap = |expr: &str| format!("<script>let q = sig('')\nlet re = drv(() => {expr})</script><input aria-label=\"q\" bind:value={{q}} /><p>{{re}}</p>");
+    for ok in [
+        r"new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))",
+        r"new RegExp('\\b' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i')",
+        r"new RegExp(`^${q.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)",
+        r"RegExp(q.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'))",
+    ] {
+        assert!(codes(&wrap(ok)).is_empty(), "{ok}: {:?}", codes(&wrap(ok)));
+    }
+    for bad in [
+        r"new RegExp('\\b' + q + '\\b')",
+        r"new RegExp(q.replace(/[.*]/g, '\\$&'))",
+        r"new RegExp(q.replace(/[.*+?^${}()|[\]\\]/, '\\$&'))",
+        r"new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, ''))",
+        r"new RegExp(`^${q}$`)",
+    ] {
+        assert_eq!(codes(&wrap(bad)), ["B1311"], "{bad}");
+    }
+}
+
+// B0710 rejected `redirect(helper(x), 301)` even when the helper only returns same-origin paths.
+#[test]
+fn b0710_accepts_helpers_that_only_return_same_origin_paths() {
+    let module = |helper: &str, arg: &str| format!("{helper}\nexport default (ctx) => ctx.user ? true : redirect({arg}, 301)");
+    let ok = [
+        ("const pathOf = (r) => '/items/' + r.slug", "pathOf(ctx.params)"),
+        ("function pathOf(r) { if (r.old) return `/archive/${r.slug}`\n  return '/items/' + r.slug }", "pathOf(ctx.params)"),
+        ("const base = (r) => '/items/' + r.slug\nconst pathOf = (r) => base(r) + '/edit'", "pathOf(ctx.params)"),
+        ("const pathOf = (r) => r.old ? '/archive' : '/items/' + r.slug", "pathOf(ctx.params) + '?from=old'"),
+    ];
+    for (helper, arg) in ok {
+        assert!(codes_in("views/_guard.jsbrain", &module(helper, arg), &Ctx::default()).is_empty(), "{helper}");
+    }
+    let bad = [
+        ("const pathOf = (r) => r.next", "pathOf(ctx.query)"),
+        ("const pathOf = (r) => r.old ? '//evil.example' : '/items'", "pathOf(ctx.params)"),
+        ("const pathOf = (r) => `${r.host}/items`", "pathOf(ctx.query)"),
+        ("const pathOf = (r) => '/items'", "other(ctx.query)"),
+    ];
+    for (helper, arg) in bad {
+        assert_eq!(codes_in("views/_guard.jsbrain", &module(helper, arg), &Ctx::default()), ["B0710"], "{helper}");
+    }
+    // Helpers imported from a `.jsbrain` module, default or named.
+    let dir = std::env::temp_dir().join(format!("brain-b0710-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("lib")).unwrap();
+    std::fs::create_dir_all(dir.join("views")).unwrap();
+    std::fs::write(dir.join("app.brain"), "<slot />").unwrap();
+    std::fs::write(dir.join("lib/paths.jsbrain"), "const item = (r) => '/items/' + r.slug\nconst raw = (r) => r.next\nexport default { item, raw, edit: (r) => item(r) + '/edit' }").unwrap();
+    let check = |src: &str| {
+        let file = dir.join("views/_guard.jsbrain");
+        std::fs::write(&file, src).unwrap();
+        let c = brain_parse::parse(src, Path::new("views/_guard.jsbrain")).unwrap();
+        let (ctx, _) = brain_check::load_ctx(&file, &c);
+        brain_check::check(&c, &ctx).into_iter().map(|d| d.code).filter(|c| *c == "B0710").collect::<Vec<_>>()
+    };
+    assert!(check("import paths from '../lib/paths.jsbrain'\nexport default (ctx) => ctx.user ? true : redirect(paths.item(ctx.params), 301)").is_empty());
+    assert!(check("import paths from '../lib/paths.jsbrain'\nexport default (ctx) => ctx.user ? true : redirect(paths.edit(ctx.params))").is_empty());
+    assert_eq!(check("import paths from '../lib/paths.jsbrain'\nexport default (ctx) => ctx.user ? true : redirect(paths.raw(ctx.query))"), ["B0710"]);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// B0710 accepted `redirect('/' + runtime)`: the runtime part can start with `/` or `\`, which turns the path into a
+// protocol-relative URL (`//evil.example`, `/\evil.example`) that leaves the site.
+#[test]
+fn b0710_rejects_a_bare_slash_followed_by_a_runtime_value() {
+    let guard = |arg: &str| format!("export default (ctx) => ctx.user ? true : redirect({arg})");
+    for arg in [
+        "'/' + ctx.query.next",
+        "`/${ctx.query.next}`",
+        "'/' + '/evil.example'",
+        "'/\\\\evil.example'",
+        "'/\\t/evil.example'",
+        "'https://allowed.example' + ctx.query.rest",
+    ] {
+        let ctx = Ctx { redirect_hosts: vec!["allowed.example".into()], ..Ctx::default() };
+        assert_eq!(codes_in("views/_guard.jsbrain", &guard(arg), &ctx), ["B0710"], "{arg}");
+    }
+    let module = |helper: &str, arg: &str| format!("{helper}\nexport default (ctx) => ctx.user ? true : redirect({arg})");
+    for (helper, arg) in [
+        ("const pathOf = (r) => '/' + r.slug", "pathOf(ctx.query)"),
+        ("const pathOf = (r) => r.home ? '/' : '/items/' + r.slug", "pathOf(ctx.query) + ctx.query.rest"),
+    ] {
+        assert_eq!(codes_in("views/_guard.jsbrain", &module(helper, arg), &Ctx::default()), ["B0710"], "{helper}");
+    }
+    for arg in ["'/'", "'/login'", "'/items/' + ctx.params.slug", "`/items/${ctx.params.slug}`", "'https://allowed.example/' + ctx.query.rest", "ctx.query.home ? '/' : '/login'"] {
+        let ctx = Ctx { redirect_hosts: vec!["allowed.example".into()], ..Ctx::default() };
+        assert!(codes_in("views/_guard.jsbrain", &guard(arg), &ctx).is_empty(), "{arg}");
+    }
+}

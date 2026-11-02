@@ -50,6 +50,9 @@ pub struct Page {
     pub view: Option<String>,
     /// Read from a server template (`dist/_server/pages/…`): only the `<head>` is audited.
     pub ssr: bool,
+    /// `<meta seo>` keys of a server template whose value comes from `load` per request (`title={props.name}`): the
+    /// template cannot show it, so the audit does not report it missing or duplicated.
+    pub request_seo: Vec<String>,
 }
 
 /// `(path without leading slash, size in bytes)` of every non-page file served from `dist/`.
@@ -163,7 +166,35 @@ impl ServerHead {
             locale_alternates: &[],
         };
         let (start, end) = social::head(cfg, &doc, &facts);
-        dedupe_head(&inject_head(&inject_head(&page, &start, false), &end, true))
+        let page = dedupe_head(&inject_head(&inject_head(&page, &start, false), &end, true));
+        // The WebSite + WebPage graph a prerendered page gets. The URL keeps the route pattern (`/posts/:slug`) and the
+        // server writes the request path into it, as it does for the canonical; the page name and description are the
+        // request's (`head()` in server.mjs), so the template's shell title is not written. No breadcrumb: its names
+        // come from the prerendered pages.
+        let graph = jsonld::auto(cfg, route, &html::parse(&page), &Default::default(), &self.site_name, None, &[], None);
+        let tags: String = graph.into_iter().map(|mut j| {
+            server_graph(&mut j);
+            jsonld::script(&j)
+        }).collect();
+        inject_head(&page, &tags, true)
+    }
+}
+
+/// Removes from a per-request graph what only the request knows: the page name, description and image, and the
+/// breadcrumb.
+fn server_graph(j: &mut Json) {
+    let Json::Obj(kv) = j else { return };
+    let Some((_, Json::Arr(nodes))) = kv.iter_mut().find(|(k, _)| k == "@graph") else { return };
+    nodes.retain(|n| n.get("@type").and_then(Json::as_str) != Some("BreadcrumbList"));
+    for n in nodes.iter_mut() {
+        let page = match n.get("@type") {
+            Some(Json::Str(t)) => t == "WebPage",
+            Some(Json::Arr(ts)) => ts.iter().any(|t| t.as_str() == Some("WebPage")),
+            _ => false,
+        };
+        if let (true, Json::Obj(fields)) = (page, n) {
+            fields.retain(|(k, _)| !matches!(k.as_str(), "name" | "description" | "primaryImageOfPage" | "breadcrumb"));
+        }
     }
 }
 
@@ -347,6 +378,32 @@ const FEED_LINK: &str = "<link rel=\"alternate\" type=\"application/rss+xml\" ti
 /// The `brain build` step (INTERNALS §32): rewrites every page's `<head>` in place and returns the generated files.
 /// `assets` lists the other files of `dist/` (chunks, CSS); `public/` is added here. Fails on broken internal links
 /// or anchors (B1819/B1820), listing each one with its fix.
+/// Rewrites a page's canonical (and an `og:url` equal to it) to the trailing-slash form when it names the page itself.
+fn self_canonical(cfg: &Config, route: &str, page: &mut String) {
+    let Some(href) = html::parse(page).link("canonical").map(str::to_string) else { return };
+    let Some((target, _)) = audit::internal(cfg, route, &href) else { return };
+    if target != *route {
+        return;
+    }
+    let cut = href.find(['?', '#']).unwrap_or(href.len());
+    let path_start = if href.starts_with('/') { 0 } else { href.find("://").and_then(|i| href[i + 3..].find('/').map(|j| i + 3 + j)).unwrap_or(cut) };
+    if path_start >= cut {
+        return;
+    }
+    let (head, rest) = href.split_at(path_start);
+    let want = format!("{head}{}", cfg.redirect_policy.path_form(rest));
+    if want == href {
+        return;
+    }
+    let esc = |s: &str| s.replace('&', "&amp;").replace('"', "&quot;");
+    for (from, to) in [
+        (format!("rel=\"canonical\" href=\"{}\"", esc(&href)), format!("rel=\"canonical\" href=\"{}\"", esc(&want))),
+        (format!("property=\"og:url\" content=\"{}\"", esc(&href)), format!("property=\"og:url\" content=\"{}\"", esc(&want))),
+    ] {
+        *page = page.replacen(&from, &to, 1);
+    }
+}
+
 pub fn finish(
     cfg: &Config,
     root: &Path,
@@ -482,6 +539,9 @@ pub fn finish_with_og(
         if cfg.sections {
             tags.push_str("<link rel=\"alternate\" type=\"application/json\" title=\"Sections\" href=\"/sections.json\">");
         }
+        // The page's own canonical names the form the trailing-slash policy serves, the one the sitemap lists: a
+        // literal `canonical="/salarios/"` under `never` otherwise disagrees with the sitemap's `/salarios`.
+        self_canonical(cfg, &route, &mut p.html);
         // a view's literal `canonical="/x"` is rendered once per locale: on `/es/x` it means the page itself, not the
         // default-locale version (which B1828 reports as an error); an untranslated content fallback keeps its own
         if let Some(i) = &i18n
@@ -494,7 +554,7 @@ pub fn finish_with_og(
         {
             tags.push_str(&format!(
                 "<link rel=\"canonical\" href=\"{}\">",
-                cfg.abs(&files::encode_path(&route))
+                cfg.abs(&files::encode_path(&cfg.redirect_policy.path_form(&route)))
             ));
         }
         if let Some(e) = by_route.get(&route) {
@@ -701,7 +761,7 @@ pub fn finish_with_og(
         .map(|(p, d)| {
             let mut alt: Vec<(String, String)> = alternates.get(&p.route).map_or(vec![], |v| {
                 v.iter()
-                    .map(|(l, r)| (l.clone(), cfg.abs(&files::encode_path(r))))
+                    .map(|(l, r)| (l.clone(), cfg.abs(&files::encode_path(&cfg.redirect_policy.path_form(r)))))
                     .collect()
             });
             if let (Some(i), false) = (&i18n, alt.is_empty())
@@ -720,7 +780,7 @@ pub fn finish_with_og(
             let videos = video::collect(cfg, root, &p.route, d, page_date.as_deref()).0;
             files::Entry {
                 route: &p.route,
-                url: cfg.abs(&files::encode_path(&p.route)),
+                url: cfg.abs(&files::encode_path(&cfg.redirect_policy.path_form(&p.route))),
                 doc: d,
                 lastmod: p.lastmod.as_deref(),
                 indexable: audit::indexable(cfg, &p.route, d),
@@ -747,7 +807,7 @@ pub fn finish_with_og(
     let mut entries = entries;
     entries.extend(server_docs.iter().map(|(r, d)| files::Entry {
         route: r,
-        url: cfg.abs(&files::encode_path(r)),
+        url: cfg.abs(&files::encode_path(&cfg.redirect_policy.path_form(r))),
         doc: d,
         lastmod: None,
         indexable: audit::indexable(cfg, r, d),
@@ -1030,17 +1090,41 @@ pub fn read_dist(dist: &Path) -> Result<(Vec<Page>, Assets), String> {
                 continue;
             }
             if let Ok(html) = std::fs::read_to_string(dist.join(page)) {
+                let module = r.get("server").and_then(Json::as_str).and_then(|m| std::fs::read_to_string(dist.join(m)).ok());
                 pages.push(Page {
                     route: route.to_string(),
                     file: page.to_string(),
                     html,
                     ssr: true,
+                    request_seo: module.as_deref().map(request_seo_keys).unwrap_or_default(),
                     ..Page::default()
                 });
             }
         }
     }
     Ok((pages, assets))
+}
+
+/// Keys of the server module's `export const seo = (props) => ({ "title": …, … })` whose value is not a string
+/// literal: the server computes them from `load` on each request.
+fn request_seo_keys(module: &str) -> Vec<String> {
+    let Some(body) = module.lines().find_map(|l| l.strip_prefix("export const seo = (props) => ({")) else { return vec![] };
+    let body = body.trim_end().trim_end_matches(';').trim_end_matches(')').trim_end_matches('}');
+    let mut keys = Vec::new();
+    for key in ["title", "description"] {
+        let Some(at) = body.find(&format!("\"{key}\": ")) else { continue };
+        let rest = &body[at + key.len() + 4..];
+        // the value runs to the next `, "key": ` (keys are emitted as JSON strings) or the end of the object
+        let end = rest.find(", \"").unwrap_or(rest.len());
+        let value = rest[..end].trim();
+        let literal = value.len() >= 2
+            && ((value.starts_with('"') && value.ends_with('"')) || (value.starts_with('\'') && value.ends_with('\'')))
+            && !value[1..value.len() - 1].contains(['"', '\'']);
+        if !literal {
+            keys.push(key.to_string());
+        }
+    }
+    keys
 }
 
 /// `brain seo <audit|links|preview <route>> [--json]`, run in the app root. Returns `(exit code, stdout)`: 0 ok,
@@ -1402,14 +1486,67 @@ pub fn cli_with(root: &Path, args: &[String], keyword: &dyn Fn(&str) -> Option<S
         r.min_score = 0;
     }
     let code = if r.ok() { 0 } else { 1 };
+    // the audit reads the last build: a source edited after it is not in these findings yet
+    let stale = stale_source(root).map(|file| format!("dist/ was built before {file} changed, so this audit reads the previous build; fix: `brain build`, then audit again"));
     (
         code,
         if json {
-            r.to_json().stringify()
+            match (r.to_json(), &stale) {
+                (Json::Obj(mut kv), Some(w)) => {
+                    kv.push(("staleDist".into(), Json::str(w)));
+                    Json::Obj(kv).stringify()
+                }
+                (j, _) => j.stringify(),
+            }
         } else {
-            r.text()
+            match &stale {
+                Some(w) => format!("warning: {w}\n{}", r.text()),
+                None => r.text(),
+            }
         },
     )
+}
+
+/// The newest app source (views, components, content, `app.brain`, `brain.json`, ...) changed after `dist/` was built.
+fn stale_source(root: &Path) -> Option<String> {
+    let built = ["dist/_server/manifest.json", "dist/index.html", "dist/sitemap.xml"]
+        .iter()
+        .filter_map(|f| std::fs::metadata(root.join(f)).and_then(|m| m.modified()).ok())
+        .max()?;
+    fn newest(dir: &Path, out: &mut Option<(std::time::SystemTime, std::path::PathBuf)>, depth: usize) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let path = e.path();
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('.') || matches!(name.as_ref(), "node_modules" | "dist" | "target") {
+                continue;
+            }
+            let Ok(meta) = e.metadata() else { continue };
+            if meta.is_dir() {
+                if depth < 8 {
+                    newest(&path, out, depth + 1);
+                }
+            } else if let Ok(t) = meta.modified()
+                && out.as_ref().is_none_or(|(n, _)| t > *n)
+            {
+                *out = Some((t, path));
+            }
+        }
+    }
+    let mut found = None;
+    for dir in ["views", "comp", "ui", "content", "lib", "public"] {
+        newest(&root.join(dir), &mut found, 0);
+    }
+    for file in ["app.brain", "brain.json", "tokens.cssbrain", "redirects.json"] {
+        if let Ok(t) = std::fs::metadata(root.join(file)).and_then(|m| m.modified())
+            && found.as_ref().is_none_or(|(n, _)| t > *n)
+        {
+            found = Some((t, root.join(file)));
+        }
+    }
+    let (t, path) = found?;
+    (t > built).then(|| path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/"))
 }
 
 /// `brain seo indexnow`: the sitemap URLs (≥ `since`) as an IndexNow request; printed with `dry_run`, else sent.

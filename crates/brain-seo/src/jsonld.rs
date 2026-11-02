@@ -91,7 +91,7 @@ pub fn breadcrumb(cfg: &Config, route: &str, names: &BTreeMap<String, String>) -
                 ("@type", s("ListItem")),
                 ("position", Json::Num((i + 1) as f64)),
                 ("name", s(n)),
-                ("item", s(&cfg.abs(r))),
+                ("item", s(&cfg.page_url(r))),
             ])
         })
         .collect();
@@ -219,7 +219,7 @@ pub fn article(cfg: &Config, route: &str, a: &Article) -> Json {
     if !a.tags.is_empty() {
         kv.push(("keywords".into(), s(&a.tags.join(", "))));
     }
-    kv.push(("mainEntityOfPage".into(), s(&cfg.abs(route))));
+    kv.push(("mainEntityOfPage".into(), s(&cfg.page_url(route))));
     Json::Obj(kv)
 }
 
@@ -247,7 +247,7 @@ pub fn schema_shortcut(cfg: &Config, route: &str, doc: &Doc, lastmod: Option<&st
         kv.push(("description".into(), s(d)));
     }
     if cfg.site.is_some() {
-        kv.push(("url".into(), s(&cfg.abs(route))));
+        kv.push(("url".into(), s(&cfg.page_url(route))));
     }
     if let Some(i) = doc.meta("og:image") {
         kv.push(("image".into(), s(&cfg.abs(i))));
@@ -344,7 +344,7 @@ pub fn auto(
     let mut out = Vec::new();
     let home = cfg.abs("/");
     if cfg.site.is_some() && home.contains("://") {
-        let url = cfg.abs(route);
+        let url = cfg.page_url(route);
         let (site_id, org_id) = (format!("{home}#website"), format!("{home}#organization"));
         let (page_id, crumb_id) = (format!("{url}#webpage"), format!("{url}#breadcrumb"));
         let mut graph = Vec::new();
@@ -362,9 +362,12 @@ pub fn auto(
         if let Some(o) = org.clone() {
             graph.push(graph_node(o, Some(&org_id)));
         }
-        let crumb = breadcrumb(cfg, route, names).filter(|_| !declared("BreadcrumbList"));
-        let faq = faq_page(doc).filter(|_| !declared("FAQPage"));
-        let own_page = PAGE_TYPES.iter().any(|t| declared(t));
+        // a page with no address of its own (the `*` not-found page answers any URL) gets the site nodes only:
+        // a WebPage `*#webpage` with `"url":"*"` names no page
+        let addressed = route.starts_with('/');
+        let crumb = breadcrumb(cfg, route, names).filter(|_| addressed && !declared("BreadcrumbList"));
+        let faq = faq_page(doc).filter(|_| addressed && !declared("FAQPage"));
+        let own_page = !addressed || PAGE_TYPES.iter().any(|t| declared(t));
         let mut faq_left = faq.clone();
         if !own_page {
             let mut kv: Vec<(String, Json)> = vec![
@@ -418,7 +421,7 @@ pub fn auto(
         if let Some(f) = faq_left {
             graph.push(graph_node(f, None));
         }
-        if let Some(a) = art
+        if let Some(a) = art.filter(|_| addressed)
             && !have.iter().any(|h| matches!(h.as_str(), "Article" | "BlogPosting" | "NewsArticle"))
         {
             let mut node = graph_node(article(cfg, route, a), Some(&format!("{url}#article")));
@@ -565,6 +568,12 @@ fn google_rules(t: &str, n: &Json, out: &mut Vec<Issue>) {
             let description = str_of(n.get("description")).unwrap_or_default();
             if !description.is_empty() && description.trim() == str_of(n.get("title")).unwrap_or_default().trim() {
                 warn("JobPosting description is the same as its title".into(), "write the full description: responsibilities, qualifications, skills, hours, education and experience".into());
+            }
+            // Google: the title of the job, not of the posting; no company name, address, code, date or salary in it
+            let title = str_of(n.get("title")).unwrap_or_default().to_lowercase();
+            let company = list("hiringOrganization").iter().filter_map(|o| str_of(o.get("name"))).map(|c| c.trim().to_string()).find(|c| c.chars().count() >= 3 && title.contains(&c.to_lowercase()));
+            if let Some(c) = company {
+                warn(format!("JobPosting title names the company `{c}`"), "keep `title` to the job itself (\"Senior data engineer\"); the company goes in hiringOrganization and the place in jobLocation, and the page <title> can still name both".into());
             }
             if (1..=6).any(|h| description.to_ascii_lowercase().contains(&format!("<h{h}"))) {
                 warn("JobPosting description uses heading tags".into(), "use <p>, <ul> and <li>: those are the tags Google recognizes in a job description".into());
@@ -1013,6 +1022,12 @@ mod tests {
         assert_eq!(check(r#","validThrough":"2999-01-01T00:00""#), "");
         assert!(check(r#","jobLocationType":"TELECOMMUTE""#).contains("applicantLocationRequirements"));
         assert_eq!(check(r#","jobLocationType":"TELECOMMUTE","applicantLocationRequirements":{"@type":"Country","name":"Mexico"}"#), "");
+        // Google: the title names the job, never the company (that is hiringOrganization)
+        let named = Json::parse(r#"{"title":"Engineer at Acme","description":"<p>Build things</p>","hiringOrganization":{"@type":"Organization","name":"Acme"}}"#).unwrap();
+        let mut out = Vec::new();
+        google_rules("JobPosting", &named, &mut out);
+        assert!(out.iter().any(|i| i.msg.contains("title names the company `Acme`")), "{:?}", out.iter().map(|i| &i.msg).collect::<Vec<_>>());
+        assert_eq!(check(r#","hiringOrganization":{"@type":"Organization","name":"Acme"}"#), "");
         let same = Json::parse(r#"{"title":"Engineer","description":"Engineer"}"#).unwrap();
         let heading = Json::parse(r#"{"title":"Engineer","description":"<h2>Role</h2><p>Build</p>"}"#).unwrap();
         for (node, expected) in [(same, "same as its title"), (heading, "heading tags")] {

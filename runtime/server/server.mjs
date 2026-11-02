@@ -1346,7 +1346,8 @@ export function createServer(o = {}) {
       .replace('<!--brain:props-->', () => jsonInHtml(props))
     // a page behind a guard passes it only for its visitor: it stays out of the index even when it renders (§33)
     if (route.guards && route.guards.length) res.setHeader('x-robots-tag', NOINDEX)
-    let out = head(page, seo, url.pathname, url.search)
+    // with seo.trailingSlash "ignore" both forms answer: the canonical takes the form the sitemap lists (no slash)
+    let out = head(page, seo, SLASH === 'always' || url.pathname === '/' ? url.pathname : url.pathname.replace(/\/+$/, '') || '/', url.search)
     // route params for route() in the browser (the client has no route table)
     if (params && Object.keys(params).length) out = out.replace('</head>', () => `<meta name="brain-params" content="${esc(JSON.stringify(params))}"></head>`)
     if (forms) out = out.replace('</body>', () => `<script type="application/json" id="brain-forms">${jsonInHtml(forms)}</script></body>`)
@@ -2415,11 +2416,11 @@ export function prefersMarkdown(accept) {
 function head(page, seo, path, search = '') {
   let h = page
   // `<meta seo query="page">`: these parameters make a different page; any other (a dialog, a tracking tag) does not
-  let identity = ''
+  let identity = '', query = ''
   h = h.replace(/<meta name="brain-query" content="([^"]*)">/, (_, keys) => {
     const given = new URLSearchParams(search), kept = new URLSearchParams()
     for (const key of keys.split(/[\s,]+/)) for (const value of key ? given.getAll(key) : []) kept.append(key, value)
-    if (kept.size) identity = esc('?' + kept)
+    if (kept.size) identity = esc((query = '?' + kept))
     return ''
   })
   if (path) {
@@ -2428,7 +2429,7 @@ function head(page, seo, path, search = '') {
     h = h.replace(/(<link[^>]*rel=["']canonical["'][^>]*href=")([^"]*)(")/i, (m, a, v, b) => a + real(v) + b)
     h = h.replace(/(<meta[^>]*property=["']og:url["'][^>]*content=")([^"]*)(")/i, (m, a, v, b) => a + real(v) + b)
   }
-  if (!seo) return h
+  if (!seo) return graph(h, path, query)
   const meta = (attr, key, val, escaped) => {
     const tag = `<meta ${attr}="${esc(key)}" content="${escaped ? val.replace(/"/g, '&quot;') : esc(val)}">`
     const rx = new RegExp(`<meta[^>]*\\b${attr}=["']${key.replace(/[.*+?^${}()|[\]\\:]/g, '\\$&')}["'][^>]*>`, 'i')
@@ -2439,9 +2440,13 @@ function head(page, seo, path, search = '') {
     if (v == null || k === '$head' || k === 'schema' || k === 'lastmod') continue
     if (k === 'title') h = /<title>[\s\S]*?<\/title>/i.test(h) ? h.replace(/<title>[\s\S]*?<\/title>/i, () => `<title>${esc(v)}</title>`) : h.replace('</head>', () => `<title>${esc(v)}</title></head>`)
     else if (k === 'canonical') {
-      const tag = `<link rel="canonical" href="${esc(v)}">`
+      // a root-relative canonical takes the origin the build wrote into the template (PUBLIC_SITE_URL), as it does on
+      // a prerendered page: a relative canonical is ignored by search engines
+      const built = /^\/(?!\/)/.test(v) && /<link[^>]*rel=["']canonical["'][^>]*href="(https?:\/\/[^/"]+)/i.exec(h)?.[1]
+      const url = built ? built + v : v
+      const tag = `<link rel="canonical" href="${esc(url)}">`
       h = /<link[^>]*rel=["']canonical["'][^>]*>/i.test(h) ? h.replace(/<link[^>]*rel=["']canonical["'][^>]*>/i, () => tag) : h.replace('</head>', () => tag + '</head>')
-      if (seo['og:url'] == null) meta('property', 'og:url', v) // og:url follows the canonical unless the view sets its own
+      if (seo['og:url'] == null) meta('property', 'og:url', url) // og:url follows the canonical unless the view sets its own
     } else if (k === 'jsonld') h = h.replace('</head>', () => `<script type="application/ld+json">${jsonInHtml(v)}</script></head>`)
     else if (/^(og|twitter|article):/.test(k)) meta('property', k, v)
     else if (typeof v === 'string') meta('name', k, v)
@@ -2478,7 +2483,26 @@ function head(page, seo, path, search = '') {
     if (/<link[^>]*rel=["']canonical["']/i.test(seo.$head)) h = h.replace(/<link[^>]*rel=["']canonical["'][^>]*>/gi, '')
     h = h.replace('</head>', () => seo.$head + '</head>')
   }
-  return h
+  return graph(h, path, query, seo)
+}
+// The WebSite + WebPage graph the build wrote into the template (brain-seo ServerHead::apply): its pattern URLs become
+// this request's, like the canonical, and the WebPage takes this request's title and description.
+function graph(h, path, query, seo) {
+  return h.replace(/(<script type="application\/ld\+json">)(\{"@context":"https:\/\/schema\.org","@graph"[\s\S]*?)(<\/script>)/, (m, a, body, b) => {
+    let g
+    try { g = JSON.parse(body) } catch { return m }
+    const url = v => (typeof v === 'string' && path ? v.replace(/^(https?:\/\/[^/#]+)(\/[^#]*)(#.*)?$/, (u, o, p, hash = '') => (/\/[:*]/.test(p) ? o + path + query + hash : u)) : v)
+    const title = /<title>([\s\S]*?)<\/title>/i.exec(h)?.[1]
+    for (const node of g['@graph'] ?? []) {
+      for (const k of ['@id', 'url']) if (k in node) node[k] = url(node[k])
+      if (node.isPartOf?.['@id']) node.isPartOf['@id'] = url(node.isPartOf['@id'])
+      if ([node['@type']].flat().includes('WebPage')) {
+        if (title && node.name == null) node.name = title.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+        if (seo?.description != null && node.description == null) node.description = String(seo.description)
+      }
+    }
+    return a + jsonInHtml(g) + b
+  })
 }
 // `/_b/<hash>.js` imports inside the chunks resolve to files in dist/ (same hook as the build's prerender)
 let hooked = false

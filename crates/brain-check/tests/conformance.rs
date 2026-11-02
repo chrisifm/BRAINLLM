@@ -66,10 +66,10 @@ fn row93_colors_and_spacing_from_tokens() {
     assert_eq!(got, [("B0304", Severity::Error), ("B0305", Severity::Info), ("B0305", Severity::Warning)], "{d:#?}");
     assert_eq!(d[0].edits[0].text, "var(--bad)");
     assert_eq!(d[1].edits.iter().map(|e| e.text.as_str()).collect::<Vec<_>>(), ["var(--space-1)", "var(--space-2)"]);
-    // Shorthands, named colors and the nearest token.
+    // Shorthands and named colors: the nearest token is named in the fix, never written (it changes the color).
     let d = diags("comp/x.brain", "<p class=\"a\">x</p><style>.a { border: 1px solid red; }</style>", &ctx);
     assert_eq!(d.iter().map(|d| d.code).collect::<Vec<_>>(), ["B0304"]);
-    assert_eq!(d[0].edits[0].text, "var(--bad)");
+    assert!(d[0].edits.is_empty() && d[0].fix.contains("var(--bad)"), "{:#?}", d[0]);
     // Allowed: tokens, keywords, 0/auto/%.
     assert!(diags("comp/x.brain", "<p class=\"a\">x</p><style>.a { color: var(--fg); background: transparent; margin: 0 auto; padding: 5%; border-color: currentColor; }</style>", &ctx).is_empty());
 }
@@ -79,4 +79,44 @@ fn row99_no_opacity_on_text_color() {
     let d = diags("comp/x.brain", "<p class=\"a\">x</p><style>.a { color: var(--fg); background: var(--bg); opacity: .5 }</style>", &tokens());
     assert_eq!(d.iter().map(|d| d.code).collect::<Vec<_>>(), ["B0408"]);
     assert!(diags("comp/x.brain", "<p class=\"a\">x</p><style>.a { opacity: .5 }</style>", &tokens()).is_empty());
+}
+
+// `brain fix` turned `padding: 2px` into `var(--focus-w)`: equal by value, not by meaning. B0305 substitutes only a
+// token named for spacing; any other match stays a warning without an edit.
+#[test]
+fn b0305_substitutes_only_spacing_tokens() {
+    let toks = |extra: &[(&str, &str)]| {
+        let mut t = vec![("--space-1".to_string(), "4px".to_string())];
+        t.extend(extra.iter().map(|(n, v)| (n.to_string(), v.to_string())));
+        brain_check::Ctx { tokens: Some(t), ..Default::default() }
+    };
+    let css = "<p class=\"a\">x</p><style>.a { padding: 2px; }</style>";
+    let d = diags("comp/x.brain", css, &toks(&[("--focus-w", "2px"), ("--radius-xs", "2px")]));
+    let b = d.iter().find(|d| d.code == "B0305").unwrap_or_else(|| panic!("{d:#?}"));
+    assert!(b.edits.is_empty() && b.level == Severity::Warning, "{b:#?}");
+    for name in ["--gap-xs", "--gutter", "--pad-tight", "--spacing-hair", "--space-0"] {
+        let d = diags("comp/x.brain", css, &toks(&[("--focus-w", "2px"), (name, "2px")]));
+        let b = d.iter().find(|d| d.code == "B0305").unwrap_or_else(|| panic!("{d:#?}"));
+        assert_eq!((b.level, b.edits.iter().map(|e| e.text.clone()).collect::<Vec<_>>()), (Severity::Info, vec![format!("var({name})")]), "{name}");
+    }
+}
+
+// B0304 wrote the *nearest* color token by RGB distance: `#1b1b1b` silently became `var(--fg)` (`#1a1a1a`), and
+// `red` became whatever token was closest. Only an exact value is substituted; the nearest one is a suggestion.
+#[test]
+fn b0304_substitutes_only_an_exact_color_token() {
+    let toks = brain_check::Ctx { tokens: Some(vec![("--fg".into(), "#1a1a1a".into()), ("--accent".into(), "#0071e3".into())]), ..Default::default() };
+    let b0304 = |css: &str| {
+        let d = diags("comp/x.brain", &format!("<p class=\"a\">x</p><style>.a {{ {css} }}</style>"), &toks);
+        d.into_iter().find(|d| d.code == "B0304").unwrap_or_else(|| panic!("no B0304 for {css}"))
+    };
+    let exact = b0304("color: #1A1A1A;");
+    assert_eq!(exact.edits.iter().map(|e| e.text.clone()).collect::<Vec<_>>(), ["var(--fg)"], "{exact:#?}");
+    let exact = b0304("color: rgb(0 113 227);");
+    assert_eq!(exact.edits.iter().map(|e| e.text.clone()).collect::<Vec<_>>(), ["var(--accent)"], "{exact:#?}");
+    for css in ["color: #1b1b1b;", "color: red;", "border-color: #1a1a1a #0070e3;", "color: rgb(26 26 26 / .5);"] {
+        let near = b0304(css);
+        assert!(near.edits.is_empty(), "{css}: {near:#?}");
+        assert!(near.fix.contains("nearest") && near.fix.contains("var(--"), "{css}: {}", near.fix);
+    }
 }

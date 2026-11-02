@@ -356,6 +356,17 @@ test('#65 client guards share the server shapes: {redirect} object and deny → 
   r.stop()
 })
 
+test('a client guard that redirects off the site (//host, /\\host, /<tab>/host) leaves the decision to the server (full load)', async () => {
+  for (const to of ['//evil.test/x', '/\\evil.test/x', '/\t/evil.test/x', 'https://evil.test/x']) {
+    const st = hist(), hard = []
+    page()
+    const r = router({ parse, hard: u => hard.push(u), guards: { '/next': () => ({ redirect: to }) } })
+    await r.go('/next')
+    assert.deepEqual(hard.map(u => new URL(u, location.href).pathname), ['/next'], to)
+    r.stop()
+  }
+})
+
 test('F12b: a guard that reads ctx.user leaves the decision to the server (full load) instead of redirecting a signed-in user', async () => {
   const st = hist(), hard = []
   page()

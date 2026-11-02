@@ -152,6 +152,31 @@ fn url_prefix(e: &Expr) -> Option<String> {
     }
 }
 
+/// The whole value when it is known at compile time (`'/a' + '/b'`, a template without expressions).
+fn literal_value(e: &Expr) -> Option<String> {
+    match e.unparen() {
+        Expr::Str { value, .. } => Some(value.clone()),
+        Expr::Template { tag: None, quasis, exprs, .. } if exprs.is_empty() => Some(quasis.concat()),
+        Expr::Binary { op: "+", left, right, .. } => Some(literal_value(left)? + &literal_value(right)?),
+        _ => None,
+    }
+}
+
+/// A same-site path: `/` and then a character that cannot turn it into another origin. Browsers read `//host` and
+/// `/\host` as protocol-relative and drop tabs and newlines first (`/\t/host`), so the second character decides.
+/// `complete` says the value ends here: the bare `/` is safe on its own but not as the start of a longer value.
+fn safe_path_start(p: &str, complete: bool) -> bool {
+    let mut c = p.chars();
+    c.next() == Some('/') && c.next().map_or(complete, |x| x != '/' && x != '\\' && !x.is_whitespace() && !x.is_control())
+}
+
+/// An allowed host only when the host part cannot grow: `'https://good.example' + rest` can become `good.example.evil`.
+fn fixed_host(p: &str, complete: bool) -> Option<&str> {
+    let h = host_of(p)?;
+    let start = p.find("//").map_or(0, |i| i + 2);
+    (complete || p.len() > start + h.len()).then_some(h)
+}
+
 /// `https://host/…` → `host`.
 fn host_of(url: &str) -> Option<&str> {
     let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://")).or_else(|| url.strip_prefix("//"))?;
@@ -371,6 +396,8 @@ impl Checker<'_> {
             }
         }
         let allowed: Vec<String> = self.ctx.redirect_hosts.clone();
+        let mut same_origin = same_origin_helpers(&c.script).0;
+        same_origin.extend(self.ctx.redirect_helpers.iter().cloned());
         let mut out: Vec<(&'static str, Span, String, String)> = Vec::new();
         walk(&c.script, module_server, &mut |e, server, rpc_args| match e {
             Expr::Call { callee, args, span, .. } => {
@@ -378,12 +405,10 @@ impl Checker<'_> {
                 if name == "redirect"
                     && let Some(a) = args.first()
                 {
-                    let prefix = url_prefix(a);
-                    let ok = match prefix.as_deref() {
-                        Some(p) if p.starts_with('/') && !p.starts_with("//") => true,
-                        Some(p) => host_of(p).is_some_and(|h| !h.is_empty() && allowed.iter().any(|x| x == h)),
-                        None => false,
-                    };
+                    let whole = literal_value(a);
+                    let prefix = whole.clone().or_else(|| url_prefix(a));
+                    let ok = same_origin_target(a, &same_origin, false)
+                        || prefix.as_deref().and_then(|p| fixed_host(p, whole.is_some())).is_some_and(|h| !h.is_empty() && allowed.iter().any(|x| x == h));
                     if !ok {
                         let what = match prefix.as_deref().and_then(host_of) {
                             Some(h) => format!("`redirect` to another origin (`{h}`)"),
@@ -431,18 +456,14 @@ impl Checker<'_> {
                 }
                 if name == "RegExp"
                     && let Some(a) = args.first()
-                    && !matches!(a.unparen(), Expr::Str { .. } | Expr::Regex { .. })
-                    && !matches!(a.unparen(), Expr::Template { exprs, .. } if exprs.is_empty())
-                    && !matches!(a.unparen(), Expr::Call { callee, .. } if path(callee).is_some_and(|p| p.to_ascii_lowercase().contains("escape")))
+                    && !regex_source_safe(a)
                 {
                     out.push(("B1311", *span, "`RegExp` built from a runtime value: a crafted pattern can freeze the page (ReDoS)".into(), "escape it first: `new RegExp(text.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&'))`, or use `includes()`".into()));
                 }
             }
             Expr::New { callee, args, span } if path(callee).as_deref() == Some("RegExp") => {
                 if let Some(a) = args.first()
-                    && !matches!(a.unparen(), Expr::Str { .. } | Expr::Regex { .. })
-                    && !matches!(a.unparen(), Expr::Template { exprs, .. } if exprs.is_empty())
-                    && !matches!(a.unparen(), Expr::Call { callee, .. } if path(callee).is_some_and(|p| p.to_ascii_lowercase().contains("escape")))
+                    && !regex_source_safe(a)
                 {
                     out.push(("B1311", *span, "`RegExp` built from a runtime value: a crafted pattern can freeze the page (ReDoS)".into(), "escape it first: `new RegExp(text.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&'))`, or use `includes()`".into()));
                 }
@@ -566,5 +587,241 @@ impl Checker<'_> {
                 self.push_info("B0215", t.span, "`target=\"_blank\"` without `rel=\"noopener noreferrer\"` (normalized)", "add `rel=\"noopener noreferrer\"`", vec![(t.span.end, t.span.end, " rel=\"noopener noreferrer\"".into())]);
             }
         }
+    }
+}
+
+/// B1311: a `RegExp` source that cannot carry a crafted pattern: literals, an `escape…(…)` helper, the escape the
+/// fix itself proposes (`x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')`, also `replaceAll`), and `+` or template
+/// concatenations made only of those parts.
+fn regex_source_safe(e: &Expr) -> bool {
+    match e.unparen() {
+        Expr::Str { .. } | Expr::Regex { .. } | Expr::Num { .. } => true,
+        Expr::Template { tag: None, exprs, .. } => exprs.iter().all(regex_source_safe),
+        Expr::Binary { op: "+", left, right, .. } => regex_source_safe(left) && regex_source_safe(right),
+        Expr::Call { callee, args, .. } => {
+            if path(callee).is_some_and(|p| p.to_ascii_lowercase().contains("escape")) {
+                return true;
+            }
+            let Expr::Member { prop: MemberProp::Name(m), .. } = callee.unparen() else { return false };
+            if !matches!(m.name.as_str(), "replace" | "replaceAll") {
+                return false;
+            }
+            let escapes_all = matches!(args.first().map(Expr::unparen), Some(Expr::Regex { raw, .. })
+                if raw.rsplit_once('/').is_some_and(|(_, flags)| flags.contains('g')) && ['.', '*', '+', '?', '^', '$', '{', '}', '(', ')', '|', '[', ']', '\\'].iter().all(|c| raw.contains(*c)));
+            let keeps_match = matches!(args.get(1).map(Expr::unparen), Some(Expr::Str { value, .. }) if value == "\\$&");
+            escapes_all && keeps_match
+        }
+        _ => false,
+    }
+}
+
+/// A `redirect` target that stays on this origin: a literal path prefix (`'/x' + …`, `` `/x/${…}` ``), a ternary of
+/// two such targets, or a call to a helper (in `known`, by its call path) whose every return is one.
+/// `strict`: the value may be followed by more text (a helper's return, the left side of `+`), so the bare `/` is not
+/// enough: `'/' + next` with `next = '/evil.example'` leaves the site.
+fn same_origin_target(e: &Expr, known: &HashSet<String>, strict: bool) -> bool {
+    if let Some(v) = literal_value(e) {
+        return safe_path_start(&v, !strict);
+    }
+    match e.unparen() {
+        Expr::Cond { cons, alt, .. } => same_origin_target(cons, known, strict) && same_origin_target(alt, known, strict),
+        Expr::Call { callee, .. } => path(callee).is_some_and(|p| known.contains(&p)),
+        Expr::Binary { op: "+", left, .. } if url_prefix(left).is_none() => same_origin_target(left, known, true),
+        Expr::Template { tag: None, quasis, exprs, .. } if quasis.first().is_some_and(|q| q.is_empty()) => exprs.first().is_some_and(|x| same_origin_target(x, known, true)),
+        _ => url_prefix(e).is_some_and(|p| safe_path_start(&p, false)),
+    }
+}
+
+fn func_returns_same_origin(f: &Func, known: &HashSet<String>) -> bool {
+    let mut answers = Vec::new();
+    match &f.body {
+        FnBody::Block(body) => returns(body, &mut answers),
+        FnBody::Expr(e) => answers.push(e),
+    }
+    !answers.is_empty() && answers.iter().all(|a| same_origin_target(a, known, true))
+}
+
+/// Helpers of a file whose every return is a same-origin path (B0710 accepts `redirect(helper(x))`).
+/// Returns the top-level names and the members of `export default { … }` that qualify.
+pub(crate) fn same_origin_helpers(stmts: &[Stmt]) -> (HashSet<String>, HashSet<String>) {
+    let mut funcs: Vec<(String, &Func)> = Vec::new();
+    fn top<'a>(s: &'a Stmt, funcs: &mut Vec<(String, &'a Func)>) {
+        match s {
+            Stmt::Func(f) => {
+                if let Some(n) = &f.name {
+                    funcs.push((n.name.clone(), f));
+                }
+            }
+            Stmt::Var(v) => {
+                for d in &v.decls {
+                    if let (Pat::Ident(id), Some(Expr::Func(f))) = (&d.pat, d.init.as_ref().map(Expr::unparen)) {
+                        funcs.push((id.name.clone(), f));
+                    }
+                }
+            }
+            Stmt::Export { decl, .. } => top(decl, funcs),
+            _ => {}
+        }
+    }
+    for s in stmts {
+        top(s, &mut funcs);
+    }
+    let mut members: Vec<(String, &Func)> = Vec::new();
+    let mut shorthand: Vec<(String, String)> = Vec::new();
+    for s in stmts {
+        let Stmt::ExportDefault { expr: Expr::Object { props, .. }, .. } = s else { continue };
+        for p in props {
+            match p {
+                ObjProp::KeyValue { key: PropKey::Ident(k), value, .. } => match value.unparen() {
+                    Expr::Func(f) => members.push((k.name.clone(), f)),
+                    Expr::Ident(i) => shorthand.push((k.name.clone(), i.name.clone())),
+                    _ => {}
+                },
+                ObjProp::Method { key: PropKey::Ident(k), func, .. } => members.push((k.name.clone(), func)),
+                ObjProp::Shorthand(i) => shorthand.push((i.name.clone(), i.name.clone())),
+                _ => {}
+            }
+        }
+    }
+    // Fixed point: a helper may build its path with another helper of the same file.
+    let mut known: HashSet<String> = HashSet::new();
+    loop {
+        let before = known.len();
+        for (name, f) in &funcs {
+            if !known.contains(name) && func_returns_same_origin(f, &known) {
+                known.insert(name.clone());
+            }
+        }
+        if known.len() == before {
+            break;
+        }
+    }
+    let mut exported: HashSet<String> = shorthand.into_iter().filter(|(_, local)| known.contains(local)).map(|(k, _)| k).collect();
+    exported.extend(members.into_iter().filter(|(_, f)| func_returns_same_origin(f, &known)).map(|(k, _)| k));
+    (known, exported)
+}
+
+/// Where a value is known to be on this origin: inside `if (new URL(x, location.origin).origin === location.origin) …`,
+/// or after `if (new URL(x, location.origin).origin !== location.origin) return` in the same block. B0814 accepts
+/// `location.href = x` there.
+fn origin_guarded(stmts: &[Stmt], out: &mut Vec<(String, Span)>) {
+    let own = |e: &Expr| path(e).is_some_and(|p| matches!(p.as_str(), "location.origin" | "window.location.origin" | "document.location.origin"));
+    let checked = |e: &Expr| match e.unparen() {
+        Expr::Member { obj, prop: MemberProp::Name(p), .. } if p.name == "origin" => match obj.unparen() {
+            Expr::New { callee, args, .. } if path(callee).as_deref() == Some("URL") && args.get(1).is_some_and(|b| own(b)) => args.first().and_then(path),
+            _ => None,
+        },
+        _ => None,
+    };
+    let guard = |t: &Expr| match t.unparen() {
+        Expr::Binary { op, left, right, .. } if matches!(*op, "===" | "!==" | "==" | "!=") => {
+            checked(left).filter(|_| own(right)).or_else(|| checked(right).filter(|_| own(left))).map(|p| (p, op.starts_with('=')))
+        }
+        _ => None,
+    };
+    let leaves = |s: &Stmt| match s {
+        Stmt::Return { .. } | Stmt::Throw { .. } => true,
+        Stmt::Block { body, .. } => matches!(body.last(), Some(Stmt::Return { .. } | Stmt::Throw { .. })),
+        _ => false,
+    };
+    let last = stmts.last().map(|x| x.span().end).unwrap_or(0);
+    for s in stmts {
+        if let Stmt::If { test, cons, span, .. } = s
+            && let Some((p, same)) = guard(test)
+        {
+            if same {
+                out.push((p, cons.span()));
+            } else if leaves(cons) {
+                out.push((p, Span { start: span.end, end: last, ..*span }));
+            }
+        }
+        match s {
+            Stmt::If { cons, alt, .. } => {
+                origin_guarded(std::slice::from_ref(cons.as_ref()), out);
+                if let Some(a) = alt {
+                    origin_guarded(std::slice::from_ref(a.as_ref()), out);
+                }
+            }
+            Stmt::Block { body, .. } => origin_guarded(body, out),
+            Stmt::Func(f) => func_guards(f, out),
+            Stmt::Export { decl, .. } => origin_guarded(std::slice::from_ref(decl.as_ref()), out),
+            Stmt::Var(v) => {
+                for d in &v.decls {
+                    if let Some(Expr::Func(f)) = d.init.as_ref().map(Expr::unparen) {
+                        func_guards(f, out);
+                    }
+                }
+            }
+            Stmt::Try { block, handler, finalizer, .. } => {
+                origin_guarded(block, out);
+                origin_guarded(handler.as_deref().unwrap_or(&[]), out);
+                origin_guarded(finalizer.as_deref().unwrap_or(&[]), out);
+            }
+            Stmt::ForOf { body, .. } => origin_guarded(std::slice::from_ref(body.as_ref()), out),
+            _ => {}
+        }
+    }
+}
+
+fn func_guards(f: &Func, out: &mut Vec<(String, Span)>) {
+    if let FnBody::Block(b) = &f.body {
+        origin_guarded(b, out);
+    }
+}
+
+impl Checker<'_> {
+    /// B0814 (warning): browser navigation to a URL built at runtime (`location.href = x`, `location.assign(x)`,
+    /// `location.replace(x)`, `window.open(x)`). Accepted: a literal, a value whose host cannot change, a same-origin
+    /// path (the B0710 rules, helpers included) and a value checked against `location.origin` in the same file.
+    pub(crate) fn client_redirect(&mut self, e: &Expr) {
+        if self.server_ctx {
+            return;
+        }
+        let shadowed = self.scopes.lookup("location").is_some();
+        let is_loc = |x: &Expr| match path(x).as_deref() {
+            Some("location") => !shadowed,
+            Some("window.location" | "document.location") => true,
+            _ => false,
+        };
+        let (sink, target, span) = match e {
+            Expr::Call { callee, args, span, .. } => {
+                let Some(a) = args.first() else { return };
+                match callee.unparen() {
+                    Expr::Member { obj, prop: MemberProp::Name(m), .. } if matches!(m.name.as_str(), "assign" | "replace") && is_loc(obj) => (format!("location.{}()", m.name), a, *span),
+                    c if path(c).as_deref() == Some("window.open") => ("window.open()".to_string(), a, *span),
+                    _ => return,
+                }
+            }
+            Expr::Assign { op: "=", target, value, span } => match target.unparen() {
+                Expr::Member { obj, prop: MemberProp::Name(p), .. } if p.name == "href" && is_loc(obj) => ("location.href".to_string(), value.as_ref(), *span),
+                t if is_loc(t) => ("location".to_string(), value.as_ref(), *span),
+                _ => return,
+            },
+            _ => return,
+        };
+        if literal_value(target).is_some() {
+            return;
+        }
+        let prefix = url_prefix(target);
+        let relative = prefix.as_deref().is_some_and(|p| p.starts_with('?') || p.starts_with('#') || p.starts_with("./") || p.starts_with("../"));
+        let fixed = prefix.as_deref().and_then(|p| fixed_host(p, false)).is_some_and(|h| !h.is_empty());
+        if relative || fixed {
+            return;
+        }
+        let mut known = same_origin_helpers(&self.c.script).0;
+        known.extend(self.ctx.redirect_helpers.iter().cloned());
+        let mut guarded = Vec::new();
+        origin_guarded(&self.c.script, &mut guarded);
+        let inside = |p: &String| guarded.iter().any(|(g, at)| g == p && at.start <= span.start && span.end <= at.end);
+        if same_origin_target(target, &known, false) || path(target).is_some_and(|p| inside(&p)) {
+            return;
+        }
+        let v = self.text(target.span()).to_string();
+        self.push(
+            "B0814",
+            span,
+            format!("`{sink}` gets a URL built at runtime: a crafted link can send the user to any site (open redirect)"),
+            format!("navigate to a same-origin path (`'/items/' + id`, or a helper whose every return starts with `/`), or check it first: `if (new URL({v}, location.origin).origin === location.origin)`"),
+        );
     }
 }

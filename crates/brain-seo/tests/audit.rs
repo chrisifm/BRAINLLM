@@ -307,6 +307,61 @@ fn cli_audit_reads_keywords_from_the_caller() {
 }
 
 #[test]
+fn a_per_request_title_and_description_are_not_reported_missing_or_duplicated() {
+    let dir = fresh_dir("ssr-bound");
+    for p in good_site() {
+        let f = dir.join("dist").join(&p.file);
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(f, p.html).unwrap();
+    }
+    std::fs::write(dir.join("brain.json"), r#"{"site":"https://acme.dev"}"#).unwrap();
+    std::fs::create_dir_all(dir.join("dist/_server/pages")).unwrap();
+    let home_title = brain_seo::html::parse(&std::fs::read_to_string(dir.join("dist/index.html")).unwrap()).title.unwrap();
+    // the template carries the shell title: the server replaces it with the `load` values on every request
+    let template = |t: &str, r: &str| format!("<!doctype html><html lang=\"en\"><head><title>{t}</title><link rel=\"canonical\" href=\"https://acme.dev{r}\"></head><body><main><h1>Compare</h1><a href=\"/\">Home</a></main></body></html>");
+    std::fs::write(dir.join("dist/_server/pages/c.html"), template(&home_title, "/compare")).unwrap();
+    std::fs::write(dir.join("dist/_server/c.mjs"), "export async function load(ctx) { return {} }\nexport const seo = (props) => ({ \"title\": \"\" + (props.title) + \" · Acme\", \"description\": props.description });\n").unwrap();
+    std::fs::write(dir.join("dist/_server/pages/f.html"), template("Fixed", "/fixed")).unwrap();
+    std::fs::write(dir.join("dist/_server/f.mjs"), "export const seo = (props) => ({ \"title\": \"Fixed\" });\n").unwrap();
+    std::fs::write(dir.join("dist/_server/manifest.json"), r#"{"v":1,"routes":[{"path":"/compare","page":"_server/pages/c.html","server":"_server/c.mjs"},{"path":"/fixed","page":"_server/pages/f.html","server":"_server/f.mjs"}]}"#).unwrap();
+    let (_, out) = brain_seo::cli(&dir, &["audit".into()]);
+    let section = |route: &str| out.split("\n\n").find(|b| b.starts_with(&format!("{route} —"))).unwrap_or_default().to_string();
+    let compare = section("/compare");
+    assert!(!compare.is_empty(), "{out}");
+    for code in ["B1801", "B1802", "B1803", "B1814"] {
+        assert!(!compare.contains(code), "{code}: {compare}");
+    }
+    assert!(!section("/").contains("/compare"), "{out}");
+    // a literal value is in the template and still audited
+    assert!(section("/fixed").contains("B1803"), "{out}");
+}
+
+#[test]
+fn cli_audit_warns_when_a_source_changed_after_the_build() {
+    let dir = fresh_dir("cli-stale");
+    std::fs::create_dir_all(dir.join("views")).unwrap();
+    std::fs::write(dir.join("brain.json"), r#"{"site":"https://acme.dev"}"#).unwrap();
+    std::fs::write(dir.join("views/pricing.brain"), "<main></main>").unwrap();
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+    for f in ["brain.json", "views/pricing.brain"] {
+        std::fs::File::options().write(true).open(dir.join(f)).unwrap().set_modified(old).unwrap();
+    }
+    for p in good_site() {
+        let f = dir.join("dist").join(&p.file);
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(f, p.html).unwrap();
+    }
+    let (_, fresh) = brain_seo::cli(&dir, &["audit".into()]);
+    assert!(!fresh.contains("previous build"), "{fresh}");
+    let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
+    std::fs::File::options().write(true).open(dir.join("views/pricing.brain")).unwrap().set_modified(later).unwrap();
+    let (_, stale) = brain_seo::cli(&dir, &["audit".into()]);
+    assert!(stale.starts_with("warning: dist/ was built before views/pricing.brain changed") && stale.contains("`brain build`"), "{stale}");
+    let (_, json) = brain_seo::cli(&dir, &["audit".into(), "--json".into()]);
+    assert!(json.contains("\"staleDist\""), "{json}");
+}
+
+#[test]
 fn noindex_and_canonicalized_pages_are_not_scored() {
     let c = cfg();
     let mut pages = good_site();
@@ -496,8 +551,17 @@ fn finish_adds_structured_data() {
         image: Some("/c.png".into()),
         ..Default::default()
     });
+    pages.push(page(
+        "*",
+        "Page not found — Acme offline task planner",
+        "This page does not exist; the home page lists what Acme offers for small teams.",
+        "<h1>Page not found</h1><p><a href=\"/\">Home</a></p>",
+    ));
     let built = finish(&c, &dir, &mut pages, &[], &[]).unwrap();
     let ld = |i: usize| brain_seo::html::parse(&pages[i].html).jsonld;
+    // the not-found page answers any URL: site nodes only, never `*#webpage` or `"url":"*"`
+    let missing = ld(pages.len() - 1).join("\n");
+    assert!(!missing.contains("*#webpage") && !missing.contains("\"url\":\"*\"") && missing.contains("#website"), "{missing}");
     assert_eq!(
         brain_seo::jsonld::declared_types(&brain_seo::html::parse(&pages[0].html)),
         vec!["WebSite", "Organization", "WebPage"]
@@ -2150,4 +2214,63 @@ fn a_later_page_with_its_canonical_at_page_one_is_an_error() {
     };
     assert_eq!(level("/blog"), Some(brain_seo::Level::Error));
     assert_eq!(level("/blog/page/2"), None, "its own canonical is the right answer");
+}
+
+// A view's literal `canonical="/pricing/"` disagreed with the sitemap (`/pricing`), and under `trailingSlash: always`
+// the sitemap listed URLs that redirect. The page's own canonical and its sitemap entry now follow the policy.
+#[test]
+fn self_canonical_and_sitemap_follow_the_trailing_slash_policy() {
+    use brain_seo::redirects::{Policy, Slash};
+    for (slash, want) in [(Slash::Never, "https://acme.dev/pricing"), (Slash::Ignore, "https://acme.dev/pricing"), (Slash::Always, "https://acme.dev/pricing/")] {
+        let dir = fresh_dir("slash");
+        let mut c = cfg();
+        c.redirect_policy = Policy { slash, host: None };
+        let mut pages = good_site();
+        for written in ["https://acme.dev/pricing", "https://acme.dev/pricing/", "/pricing/"] {
+            pages[1].html = pages[1].html.replace("<link rel=\"canonical\" href=\"https://acme.dev/pricing\">", &format!("<link rel=\"canonical\" href=\"{written}\">"));
+            let mut ps = pages.clone();
+            let built = finish(&c, &dir, &mut ps, &[], &[]).unwrap();
+            let canonical = brain_seo::html::parse(&ps[1].html).link("canonical").map(str::to_string);
+            let expect = if written.starts_with('/') { want.trim_start_matches("https://acme.dev") } else { want };
+            assert_eq!(canonical.as_deref(), Some(expect), "{slash:?} {written}");
+            let sitemap = &built.files.iter().find(|(p, _)| p == "sitemap.xml").expect("sitemap").1;
+            assert!(sitemap.contains(&format!("<loc>{want}</loc>")), "{slash:?}: {sitemap}");
+            let ld = brain_seo::html::parse(&ps[1].html).jsonld.join("\n");
+            assert!(ld.contains(&format!("\"@id\":\"{want}#webpage\"")), "{slash:?}: {ld}");
+            // the home page keeps its form
+            assert!(sitemap.contains("<loc>https://acme.dev/</loc>"), "{sitemap}");
+            pages[1].html = ps[1].html.replace(&format!("href=\"{expect}\""), "href=\"https://acme.dev/pricing\"");
+        }
+        // a canonical that names another page is that page's business, not this one's
+        let mut ps = good_site();
+        ps[1].html = ps[1].html.replace("href=\"https://acme.dev/pricing\"", "href=\"https://acme.dev/plans/\"");
+        finish(&c, &dir, &mut ps, &[], &[]).unwrap();
+        assert_eq!(brain_seo::html::parse(&ps[1].html).link("canonical"), Some("https://acme.dev/plans/"));
+    }
+    assert_eq!(Policy { slash: Slash::Always, host: None }.path_form("/feed.xml"), "/feed.xml");
+    assert_eq!(Policy { slash: Slash::Always, host: None }.path_form("/a?x=1"), "/a/?x=1");
+    assert_eq!(Policy { slash: Slash::Never, host: None }.path_form("/"), "/");
+}
+
+#[test]
+fn a_per_request_template_gets_the_website_and_webpage_graph_with_the_route_pattern() {
+    let dir = fresh_dir("server-graph");
+    let c = cfg();
+    let mut ps = good_site();
+    let built = finish(&c, &dir, &mut ps, &[], &[]).unwrap();
+    let template = "<!doctype html><html lang=\"en\"><head><title>Acme</title><link rel=\"canonical\" href=\"https://acme.dev/items/:slug\"></head><body><div id=\"brain-view\"><!--brain:ssr--></div></body></html>";
+    let out = built.server_head.apply(&c, "/items/:slug", template);
+    let ld = brain_seo::html::parse(&out).jsonld.join("\n");
+    assert!(ld.contains("\"@type\":\"WebSite\""), "{ld}");
+    assert!(ld.contains("\"@id\":\"https://acme.dev/items/:slug#webpage\""), "{ld}");
+    assert!(ld.contains("\"url\":\"https://acme.dev/items/:slug\""), "{ld}");
+    // the shell title is not the page's name, and the breadcrumb needs names only prerendered pages have
+    assert!(!ld.contains("\"name\":\"Acme\",\"isPartOf\"") && !ld.contains("BreadcrumbList") && !ld.contains("\"breadcrumb\""), "{ld}");
+    let webpage = ld.split("#webpage\"").nth(1).unwrap_or("");
+    assert!(!webpage.split('}').next().unwrap_or("").contains("\"name\""), "{ld}");
+    // a template that already carries its own graph is left alone
+    let again = built.server_head.apply(&c, "/items/:slug", &out);
+    assert_eq!(brain_seo::html::parse(&again).jsonld.len(), brain_seo::html::parse(&out).jsonld.len());
+    // not-found and error templates are not URLs
+    assert_eq!(built.server_head.apply(&c, "*", template), template);
 }

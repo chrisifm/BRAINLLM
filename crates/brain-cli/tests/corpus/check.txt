@@ -101,6 +101,48 @@ export default function guard(ctx) {
   return redirect(ctx.query.next)
 }
 
+### B0814 client navigation to a runtime URL
+@expect B0814 comp/x.brain 3:3
+@expect B0814 comp/x.brain 4:3
+@expect B0814 comp/x.brain 5:3
+@expect B0814 comp/x.brain 6:3
+@expect B0814 comp/x.brain 7:3
+@expect B0814 comp/x.brain 10:24
+@file comp/x.brain
+<script>
+function go(next) {
+  location.href = next
+  location.assign('/' + next)
+  window.location.replace(`//${next}`)
+  window.open('https://shop.example.org' + next)
+  location = next
+  // a check that does not gate the navigation proves nothing
+  const ok = new URL(next, location.origin).origin === location.origin
+  if (next.length > 1) location.href = next
+}
+</script>
+<button on:click={go(new URLSearchParams(location.search).get('next'))}>Go</button>
+
+### B0814 accepted: literals, fixed hosts, same-origin paths, helpers and origin guards
+@file comp/x.brain
+<script>
+const itemPath = id => '/items/' + id
+function go(id, next) {
+  location.href = '/home'
+  location.href = 'https://shop.example.org/items/' + id
+  location.assign('/items/' + id)
+  location.replace(itemPath(id))
+  location.href = '?page=' + id
+  window.open(`/items/${id}`)
+  if (new URL(next, location.origin).origin === location.origin) location.href = next
+}
+function back(next) {
+  if (new URL(next, location.origin).origin !== location.origin) return
+  location.assign(next)
+}
+</script>
+<button on:click={go('a', 'b')}>Go</button><button on:click={back('c')}>Back</button>
+
 ### B0711 request-built fetch
 @expect B0711 comp/x.brain 3:10
 @file comp/x.brain

@@ -765,11 +765,15 @@ fn page_checks(
     keyword: Option<&str>,
     suggest: &[(String, String)],
     body: bool,
+    request: &[String],
     s: &mut Scorer,
 ) {
+    // a value the server binds per request from `load` is not in the template: it cannot be read here
+    let bound = |k: &str| request.iter().any(|r| r == k);
     // title
     let title = doc.title.as_deref().unwrap_or("").trim();
-    s.check(10, !title.is_empty(), "B1801", Level::Error, || {
+    let title = if bound("title") { "" } else { title };
+    s.check(10, !title.is_empty() || bound("title"), "B1801", Level::Error, || {
         (
             "page has no <title>".into(),
             "add `title=\"…\"` to the view's <meta seo>".into(),
@@ -793,7 +797,8 @@ fn page_checks(
     }
     // description
     let desc = doc.meta("description").unwrap_or("").trim();
-    s.check(10, !desc.is_empty(), "B1803", Level::Warning, || {
+    let desc = if bound("description") { "" } else { desc };
+    s.check(10, !desc.is_empty() || bound("description"), "B1803", Level::Warning, || {
         (
             "page has no meta description".into(),
             "add `description=\"…\"`: one or two sentences on what the page offers".into(),
@@ -1218,9 +1223,10 @@ pub fn audit(site: &Site) -> Report {
         .enumerate()
         .filter(|(i, _)| idx[*i])
     {
+        let bound = |k: &str| p.request_seo.iter().any(|r| r == k);
         let keys = [
-            doc.title.as_deref(),
-            doc.meta("description"),
+            doc.title.as_deref().filter(|_| !bound("title")),
+            doc.meta("description").filter(|_| !bound("description")),
             p.keyword.as_deref(),
         ];
         for (g, k) in groups.iter_mut().zip(keys) {
@@ -1338,6 +1344,7 @@ pub fn audit(site: &Site) -> Report {
                 p.keyword.as_deref(),
                 &out,
                 !p.ssr,
+                &p.request_seo,
                 &mut s,
             );
             if !p.ssr {
@@ -1367,14 +1374,15 @@ pub fn audit(site: &Site) -> Report {
                 };
                 ("no other page links here".into(), fix)
             });
-            let dt = others(&groups[0], doc.title.as_deref(), i);
+            let bound = |k: &str| p.request_seo.iter().any(|r| r == k);
+            let dt = others(&groups[0], doc.title.as_deref().filter(|_| !bound("title")), i);
             s.check(6, dt.is_empty(), "B1814", Level::Warning, || {
                 (
                     format!("same title as {}", dt.join(", ")),
                     "name what makes this page different, using the data that sets it apart (company, place, date). If the pages are the same thing, keep one and point the others to it with `canonical`".into(),
                 )
             });
-            let dd = others(&groups[1], doc.meta("description"), i);
+            let dd = others(&groups[1], doc.meta("description").filter(|_| !bound("description")), i);
             s.check(4, dd.is_empty(), "B1815", Level::Warning, || {
                 (
                     format!("same description as {}", dd.join(", ")),

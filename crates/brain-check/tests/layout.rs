@@ -86,3 +86,32 @@ fn contrast_on_the_resolved_cascade() {
     // Plain body text on the page background is fine.
     assert!(run(".card { background: var(--bg); } .card p { color: var(--fg); }").is_empty());
 }
+
+// A background that the checker cannot resolve (a token holding a gradient, an image) still paints over the
+// ancestor's: B0408 measured the text against the ancestor's fill (1.00:1).
+#[test]
+fn an_unresolvable_background_hides_the_ancestor_fill_from_the_cascade() {
+    let tokens = vec![
+        ("--bg".to_string(), "#ffffff".to_string()),
+        ("--on-accent".to_string(), "#ffffff".to_string()),
+        ("--grad".to_string(), "linear-gradient(135deg, #0071e3, #004a99)".to_string()),
+        ("--muted".to_string(), "#f2f2f2".to_string()),
+    ];
+    let ctx = brain_check::Ctx { tokens: Some(tokens), ..Default::default() };
+    let run = |css: &str| {
+        let src = format!("<div class=\"card\"><section class=\"hero\"><p>Hi</p></section></div>\n<style>{css}</style>\n");
+        let c = brain_parse::parse(&src, Path::new("comp/card.brain")).unwrap();
+        brain_check::check(&c, &ctx).into_iter().filter(|d| d.code == "B0408").collect::<Vec<_>>()
+    };
+    for paint in ["var(--grad)", "linear-gradient(135deg, #0071e3, #004a99)", "url(/hero.webp) center / cover"] {
+        let d = run(&format!(".card {{ background: var(--bg); }} .hero {{ background: {paint}; }} .hero p {{ color: var(--on-accent); }}"));
+        assert!(d.is_empty(), "{paint}: {d:#?}");
+    }
+    // A background that paints nothing lets the ancestor's fill through: still reported.
+    for clear in ["transparent", "none"] {
+        let d = run(&format!(".card {{ background: var(--bg); }} .hero {{ background: {clear}; }} .hero p {{ color: var(--on-accent); }}"));
+        assert_eq!(d.len(), 1, "{clear}: {d:#?}");
+    }
+    // Without the painting rule the white text on the white card is reported.
+    assert_eq!(run(".card { background: var(--bg); } .hero p { color: var(--on-accent); }").len(), 1);
+}

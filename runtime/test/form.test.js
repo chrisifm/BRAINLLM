@@ -249,6 +249,11 @@ test('QA #157: with JS, form() matches the no-JS flow: a { redirect } navigates;
   const ext = form({ name: 'str' }, { submit: async () => ({ redirect: '//evil.test/x' }) })
   await ext.submit()
   assert.deepEqual(went, ['/about']) // only same-origin paths, like callForm
+  for (const to of ['/\\evil.test/x', '/\t/evil.test/x']) {
+    const bs = form({ name: 'str' }, { submit: async () => ({ redirect: to }) })
+    await bs.submit()
+    assert.deepEqual(went, ['/about'], to) // a backslash or a tab after the first / is read as //host
+  }
   delete globalThis.__brainNavigate
   const err = status => Object.assign(new Error(status >= 500 ? 'Internal error' : 'Email already used'), { code: 'rpc', status })
   const f500 = form({ name: 'str' }, { submit: async () => { throw err(500) } })

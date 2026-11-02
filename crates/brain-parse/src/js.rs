@@ -4,7 +4,11 @@
 //! their B01xx code and an exact fix; `this` and `var` are parsed and reported by the checker.
 
 use crate::ast::*;
+
 use brain_lex::{Diag, Lexer, Span, Tok, Token};
+
+/// Dynamic `import()` is not BrainScript: views and `lazy` components are already split (SPEC "BrainScript").
+const DYNAMIC_IMPORT_FIX: &str = "import the module statically at the top of the <script> (`import x from './a.jsbrain'`); each view already loads as its own chunk, and a component that should load later is written `<Comp lazy />`";
 
 pub struct JsParser<'a> {
     lx: Lexer<'a>,
@@ -308,7 +312,7 @@ impl<'a> JsParser<'a> {
                 let span = self.span_from(start);
                 Ok(if is_break { Stmt::Break { span } } else { Stmt::Continue { span } })
             }
-            "import" if !self.peek2()?.is_punct(".") => self.import(start),
+            "import" if !self.peek2()?.is_punct(".") && !self.peek2()?.is_punct("(") => self.import(start),
             "export" => {
                 self.bump()?;
                 if self.is_word("default") {
@@ -992,6 +996,7 @@ impl<'a> JsParser<'a> {
                     self.bump()?;
                     Ok(Expr::Ident(Ident { name: "import.meta".into(), span: self.span_from(start) }))
                 }
+                "import" if self.peek2()?.is_punct("(") => Err(self.err("B0002", start, "dynamic `import()` does not exist in BrainScript", DYNAMIC_IMPORT_FIX)),
                 "super" | "import" => Err(self.err("B0002", start, &format!("`{w}` cannot be used as an expression in BrainScript"), "use `import x from './a.js'` at the top of the <script>")),
                 _ => Ok(Expr::Ident(self.ident()?)),
             },

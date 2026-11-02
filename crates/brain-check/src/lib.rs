@@ -72,6 +72,8 @@ pub struct Ctx {
     pub provided: Option<HashSet<String>>,
     /// `brain.json` → `"redirects"`: external hosts `redirect()` may target (B0710).
     pub redirect_hosts: Vec<String>,
+    /// Call paths of imported helpers whose every return is a same-origin path (`jobs.path`): B0710 accepts them.
+    pub redirect_helpers: HashSet<String>,
     /// brain.json `"cache": { "data": false }`: `cache:` in `api()` is ignored (B1102 warning, §35).
     pub cache_data_off: bool,
     /// Languages of the app (`None` = no i18n setup): B1401, B1403, B1404, B0306 (§37).
@@ -220,6 +222,12 @@ pub fn load_ctx(disk_path: &Path, c: &Component) -> (Ctx, Vec<PathBuf>) {
         } else if i.source.ends_with(".jsbrain") {
             let module = infer::read_module(import_root.as_deref(), &target);
             if let Some(m) = &module {
+                let (top, members) = security::same_origin_helpers(&m.script);
+                for local in i.default.iter().chain(i.namespace.iter()) {
+                    let names = if i.namespace.as_ref() == Some(local) { &top } else { &members };
+                    ctx.redirect_helpers.extend(names.iter().map(|n| format!("{}.{n}", local.name)));
+                }
+                ctx.redirect_helpers.extend(i.named.iter().filter(|(imp, _)| top.contains(&imp.name)).map(|(_, l)| l.name.clone()));
                 // `export const Theme = key('theme', default?)`
                 for s in &m.script {
                     let Stmt::Export { decl, .. } = s else { continue };
@@ -1253,6 +1261,7 @@ impl<'a> Checker<'a> {
     fn expr(&mut self, e: &Expr) {
         self.llm_client(e);
         self.location_nav(e);
+        self.client_redirect(e);
         self.live_scope(e);
         self.form_replace(e);
         self.explicit_v(e);

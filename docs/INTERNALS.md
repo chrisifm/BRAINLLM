@@ -24,7 +24,7 @@ Level by folder: `ui/` micro (no `<script>` with state) · `comp/` component · 
 Allowed: `let` `const` · arrow `() =>` and `function` · `if/else` · `for (x of y)` · `return` · `await` · `try/catch/finally` · `throw` ·
 objects, arrays, spread, destructuring · template strings · JS operators · `import x from './a.brain'|'./a.jsbrain'|'./a.js'`. Exports: `export default expr` · `export const|function` (only in `.jsbrain`, and `load` in `views/`).
 Forbidden (error with fix): `class`, `this`, `var`, `with`, `eval`, `new Function`, generators, getters/setters,
-labels, `for in`.
+labels, `for in`, dynamic `import()` (B0002 names it in statement and expression position, 2026-11-02).
 
 Primitives (the only globals):
 
@@ -154,6 +154,7 @@ COMPILER assigns the next free code there in the same change that emits it, then
 - B0794 unique value any user can claim (warning, `backend.rs` `claimable_unique_warnings`): a `unique` field with no `access` on a resource whose `create` or `update` grants `user` or `public`; an explicit `access`, including `{ write: ['user'] }`, states who may and silences it.
 - B0797 internal-looking field returned to every reader (warning, `backend.rs` `public_field_warnings`): whole-word name heuristic; `private`, `writeonly` or any `visible` (including `['public']`) states the exposure and silences it; `api: false` resources have no readers. Never an error: a name is only a hint.
 - B0792 a job or route handler whose imports need the browser runtime (error, `brain-cli` `backend::handler_bundle_problems`, the same bundling the worker does at start)
+- B0814 browser navigation to a URL built at runtime (warning, `brain-check` `security::client_redirect`): `location.href = x`, `location = x`, `location.assign(x)`, `location.replace(x)`, `window.open(x)`. Accepted: a literal, a value whose host cannot grow, a same-origin path or helper (the B0710 rules) and a value inside `if (new URL(x, location.origin).origin === location.origin)` or after the `!==` form that returns.
 - B0811 literal iframe or script outside `csp.frameSrc` / `csp.scriptSrc` (warning, `brain-check` `origins::check_embeds`); invalid entries are B0796.
 - B0812 server route environment outside `ctx.env` (warning, `route_executor::env_warnings`): a global `process.env` in any `server/routes/**/*.jsbrain` (`brain_check::env::process_env_offsets`, so comments and strings never count), and a key a route reads that `.brain_env` declares only in `[production]`. Names only, never values.
 - B0813 operation debits a balance the caller chooses (warning, `backend.rs` `debit_subject_warnings`): a `debit` step whose `subject` is a `$` reference other than `$user.*` (`$input.*`, `$<step>.*`). `debit` is the only credit step operations have (no credit, refund or transfer step exists), and the contract only accepts `$` references as subjects.
@@ -521,8 +522,10 @@ data caching disabled. The checker never removes that endpoint privacy intent; w
 ## 15b. One SEO story with or without a server (2026-10-31)
 `brain_seo::Built.server_head` writes the site's request-independent head into the templates of pages rendered per request,
 through the same `social::head` and `inject_head` as prerendered pages. `head()` in server.mjs binds only request values:
-title-derived `og:*`, the absolute `og:image` and the card type. Not covered yet: the WebSite/WebPage JSON-LD graph, hreflang
-and image dimensions of a per-request page. A route with folder guards answers `x-robots-tag: noindex` even when it renders, and its template skips the site head: it is never indexed and the tags would only spend its view budget. `keyword` or `canonical` on such a view is warning B0505, because a guard cannot be read to learn whether it admits anonymous visitors. The optional credit line and the shared tokens sheet do not spend `budget.viewKB`, as when the sheet was a separate file; `htmlGz` in the report stays the exact emitted size.
+title-derived `og:*`, the absolute `og:image` and the card type. The template also carries the WebSite + WebPage JSON-LD
+graph with the route pattern as URL and without the page name, description, image or breadcrumb; `head()` writes the request
+path into its `@id`/`url` like the canonical and fills the WebPage name from the final `<title>` and the description from
+the view. Not covered yet: hreflang, the breadcrumb and image dimensions of a per-request page. A route with folder guards answers `x-robots-tag: noindex` even when it renders, and its template skips the site head: it is never indexed and the tags would only spend its view budget. `keyword` or `canonical` on such a view is warning B0505, because a guard cannot be read to learn whether it admits anonymous visitors. The optional credit line and the shared tokens sheet do not spend `budget.viewKB`, as when the sheet was a separate file; `htmlGz` in the report stays the exact emitted size.
 `query` is read by the build (`brain-query` marker in the template, removed per request). Canonical stays path-only unless a
 parameter is listed; `tests/seo_parity.rs` holds the parity and identity contract. A failed build is typed by
 `build_error.rs`: `phase` and `diagnostics` with `brain check` fields, `generated` on locations outside the app, no edits there.
@@ -539,7 +542,13 @@ Pin browser, OS, fonts and app data for stable comparisons. The accessibility ou
 it is not an AX-tree diff or a complete layout model. MCP `brain_shot` offers the same comparison for one viewport.
 PNG decoding is bounded by bytes, dimensions and a deadline. Output/baseline paths reject traversal and symlinks.
 Build `budget.viewKB` measures emitted JS + CSS + HTML per route (KiB=1024 bytes), including dynamic dependencies
-conservatively, excluding media/fonts. It uses gzip sizes when emitted and raw bytes otherwise. Invalid or unknown
+conservatively, excluding media/fonts. It uses gzip sizes when emitted and raw bytes otherwise; a page rendered per
+request (`_server/pages`) counts gzip-compressed, as the server compresses its response (2026-11-02). Every budget
+message names the document it measured: the environment, its `.brain_env` values on this machine, and whether pages
+carry absolute URLs (`brain doctor` builds with a placeholder site so SEO can score them, `brain build` without one,
+which is why the two can differ by the length of those URLs). A route within max(2% of the limit, 256 bytes) passes
+with a warning in the build and in doctor's `build.budget.warnings`: the HTML carries environment values, so the same
+commit can fail on another machine (2026-11-02). Invalid or unknown
 budget fields fail instead of silently disabling enforcement. `mountMs` p95 and `heapMB` remain planned and are
 rejected explicitly until a real browser measurement contract is implemented.
 
@@ -1107,13 +1116,15 @@ specified elsewhere; ➕ = new in this section.
 
 ### 8.1 Literal colors and spacing (fixed 2026-10-13)
 - Color properties (`color`, `background(-color)`, `border(-*)-color`, `outline-color`, `fill`, `stroke`, `caret-color`)
-  with a literal color: B0304 error; `edits` replace it with the token whose value matches exactly (or the nearest
-  token that keeps the AA pair). `filter`/`box-shadow` colors and SVG attributes in markup are free.
+  with a literal color: B0304 error; `edits` replace it only with the token whose value matches exactly (an opaque
+  literal; a translucent background becomes `--scrim`). Otherwise the fix names the nearest color token and its value
+  without writing it, because it changes the color (2026-11-02). `filter`/`box-shadow` colors and SVG attributes in
+  markup are free.
 - Spacing properties (`padding*`, `margin*`, `gap`, `row-gap`, `column-gap`, `inset*`) with a literal length equal to a
   token value: B0305 info, normalized to the token (§21); any other literal: B0305 warning. `0`, `auto` and
   percentages are always allowed. Sizes (`width`, `height`, `max-*`, `font-size`, `border-radius`, `line-height`) are free.
-- Implementation notes (#97, accepted): B0304's edit picks the exact-value token, else the nearest by RGB distance;
-  if that token breaks the AA pair, B0408 reports it on the next pass. B0125 (markup required) counts `<meta>` and
+- Implementation notes (#97, accepted; narrowed 2026-11-02): B0304's edit is the exact-value token only; the
+  nearest by RGB distance is a suggestion in the fix, so no write changes a color the author chose. B0125 (markup required) counts `<meta>` and
   `<script src|type>` in `app.brain`'s head as markup. B0126 exempts `*.test.brain`.
 
 ## 32. Dynamic metadata, generated SEO files and WebMCP (fixed 2026-10-13, dynamic sitemap 2026-10-29, imperative tools 2026-10-30)
@@ -1215,7 +1226,7 @@ time from the prerendered HTML, the route graph and the content collections — 
 | Structured data | plugin per type | JSON-LD from `jsonld`/`schema`, plus one automatic `@graph` per page (with `site`): `WebSite`+`SearchAction` (`<site>/#website`) and `Organization` (`<site>/#organization`) on every page, `WebPage` (`<url>#webpage`: name, description, `isPartOf`, `about`/`publisher`, `inLanguage`, `dateModified` from `lastmod` or the entry date, `primaryImageOfPage` from `og:image`, `breadcrumb`), typed `["WebPage","FAQPage"]` with `mainEntity` when `<details>` groups are marked `faq`, `BreadcrumbList` (`<url>#breadcrumb`) from the route tree and `BlogPosting` (`<url>#article`, `isPartOf`/`mainEntityOfPage` → the WebPage) for content collections. Every `@id` reference names a node of the same graph; an author-declared type replaces its automatic node (a declared page type such as `AboutPage` replaces `WebPage`). Without `site` only the self-contained `FAQPage`/`BlogPosting` blocks are emitted. Validated against required properties per type, including Google's nested rules (Search Central, fetched 2026-10-31): Product/SoftwareApplication offers need `price` (AggregateOffer: `lowPrice` + `priceCurrency`), SoftwareApplication needs `name` and a rating or review, JobPosting `jobLocation.address.addressCountry` and the `employmentType`/`unitText` enums, Event Place locations an `address`. Article, BlogPosting and NewsArticle have no required property (Google lists only recommended ones), so a missing `headline` is info, like `image`, `datePublished` and `author` |
 | Social images | manual upload | `views/_og.brain` template rendered per page to PNG at build (headless Chrome via the CDP client) with title/description; cached by content hash |
 | Links | plugin, partial | broken internal links and anchors fail the build; external links checked on `brain seo links --external`; orphan pages and internal-link suggestions by shared keywords |
-| Redirects | plugin + DB | `redirects.json` (`from`, `to`, `301|302|307|308`, `:param`, trailing `*`) emitted into nginx/_headers/Caddy/server.mjs; renamed routes detected from the journal propose a redirect automatically. One hop (2026-10-31, `redirects::resolve`): server.mjs `canonicalOf` and the Rust static server (`prod.rs`, reading `_redirects` and its `# brain trailingSlash=… host=…` line) apply the rule, then `seo.trailingSlash` (`never` default: `/a/` → `/a`; `always`; `ignore`) on its target, then `seo.canonicalHost` (other non-loopback `Host` → `site`), as one response; the query is kept unless the rule's target has one. Guard redirects and 403 answers carry `X-Robots-Tag: noindex, nofollow`. `gone()` in `load` compiles to `{ notFound: true, gone: true, status: 410 }` (410 page, else the 404 page; dev server too). Streamed routes wait `STREAM_WAIT` (50 ms) for `load()` before the 200 head, so a quick notFound/gone/redirect keeps its status; a later redirect becomes `location.replace` behind `<meta name="robots" content="noindex">` |
+| Redirects | plugin + DB | `redirects.json` (`from`, `to`, `301|302|307|308`, `:param`, trailing `*`) emitted into nginx/_headers/Caddy/server.mjs; renamed routes detected from the journal propose a redirect automatically. One hop (2026-10-31, `redirects::resolve`): server.mjs `canonicalOf` and the Rust static server (`prod.rs`, reading `_redirects` and its `# brain trailingSlash=… host=…` line) apply the rule, then `seo.trailingSlash` (`never` default: `/a/` → `/a`; `always`; `ignore`) on its target, then `seo.canonicalHost` (other non-loopback `Host` → `site`), as one response; the build names pages in the form the policy serves (`Policy::path_form`, 2026-11-02): sitemap `<loc>`, hreflang, JSON-LD `url`/`@id`, and a page's own canonical (a literal `canonical="/a/"` becomes `/a` under `never`/`ignore`, `/a/` under `always`; the root and file-like paths keep their form); the query is kept unless the rule's target has one. Guard redirects and 403 answers carry `X-Robots-Tag: noindex, nofollow`. `gone()` in `load` compiles to `{ notFound: true, gone: true, status: 410 }` (410 page, else the 404 page; dev server too). Streamed routes wait `STREAM_WAIT` (50 ms) for `load()` before the 200 head, so a quick notFound/gone/redirect keeps its status; a later redirect becomes `location.replace` behind `<meta name="robots" content="noindex">` |
 | i18n | plugin | `hreflang` + `x-default` from `i18n/` languages and localized routes |
 | Content | posts in a DB | content collections: `content/blog/*.md` with frontmatter (title, description, date, tags, cover) → typed pages through a `views/blog/[slug].brain` template; tag/category pages, pagination with `rel` links, reading time |
 | Feeds & sitemaps | plugin | RSS 2.0 + Atom per collection, sitemap index + image sitemap, robots.txt, llms.txt, llms-full.txt (§32) |

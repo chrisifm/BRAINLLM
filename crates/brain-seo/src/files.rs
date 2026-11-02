@@ -103,7 +103,7 @@ pub fn news_sitemap(cfg: &Config, cols: &[crate::content::Collection]) -> Option
             .to_ascii_lowercase();
         o.push_str(&format!(
             "  <url><loc>{}</loc><news:news><news:publication><news:name>{}</news:name><news:language>{}</news:language></news:publication><news:publication_date>{}</news:publication_date><news:title>{}</news:title></news:news></url>\n",
-            xml(&cfg.abs(&encode_path(&e.route()))),
+            xml(&cfg.abs(&encode_path(&cfg.redirect_policy.path_form(&e.route())))),
             xml(&news.name),
             xml(&lang),
             xml(e.date.as_deref().unwrap_or_default()),
@@ -373,6 +373,16 @@ pub(crate) fn section_title(route: &str, entries: &[Entry], site: &str) -> Strin
 
 /// A page title without the site suffix a title template adds (`Pricing · Acme` → `Pricing`): llms.txt already
 /// names the site once, so repeating it on every line is noise for the model reading it.
+/// A readable name from a route's last segment: `/price-list` → `Price list`.
+fn route_name(route: &str) -> String {
+    let last = route.trim_end_matches('/').rsplit('/').next().unwrap_or("").replace(['-', '_'], " ");
+    let mut c = last.trim().chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().chain(c).collect(),
+        None => route.to_string(),
+    }
+}
+
 pub fn strip_site(title: &str, site_name: &str) -> String {
     for sep in [" · ", " | ", " — ", " – ", " - ", " :: "] {
         if let Some(t) = title
@@ -411,9 +421,12 @@ pub fn llms_txt(cfg: &Config, entries: &[Entry]) -> String {
     for (g, list) in groups {
         o.push_str(&format!("\n## {g}\n\n"));
         for e in list {
+            let per_request = cfg.server_pages.iter().any(|(r, _)| r == e.route);
             let title = strip_site(&e.doc.title.clone().unwrap_or_else(|| e.route.to_string()), &site);
+            // a title bound per request leaves the shell's site name in the template: name the page by its route
+            let title = if per_request && (title.trim().is_empty() || title.trim() == site.trim()) { route_name(e.route) } else { title };
             // a page rendered per request has no Markdown copy
-            let link = if cfg.markdown && !cfg.server_pages.iter().any(|(r, _)| r == e.route) {
+            let link = if cfg.markdown && !per_request {
                 cfg.abs(&format!("/{}", encode_path(&md_path(e.route))))
             } else {
                 e.url.clone()
@@ -829,6 +842,18 @@ mod tests {
         assert!(!crate::audit::indexable(&cfg, "*", &d));
         assert!(!crate::audit::indexable(&cfg, "!error:views/_error.brain", &d));
         assert!(crate::audit::indexable(&cfg, "/lost", &d));
+    }
+
+    #[test]
+    fn llms_names_a_per_request_page_by_its_route_when_its_title_is_bound_per_request() {
+        let shell = "<html><head><title>Acme</title></head><body><main><!--brain:ssr--></main></body></html>";
+        let mut cfg = Config { site: Some("https://acme.dev".into()), ..Config::default() };
+        cfg.server_pages = vec![("/price-list".into(), shell.into()), ("/team".into(), "<html><head><title>Our team · Acme</title></head></html>".into())];
+        let mut d = docs();
+        d.push(("/price-list".into(), parse(shell)));
+        d.push(("/team".into(), parse(&cfg.server_pages[1].1)));
+        let out = llms_txt(&cfg, &entries(&cfg, &d));
+        assert!(out.contains("- [Price list](https://acme.dev/price-list)\n") && out.contains("- [Our team](https://acme.dev/team)\n"), "{out}");
     }
 
     #[test]

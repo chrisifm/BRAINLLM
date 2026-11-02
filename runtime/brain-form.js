@@ -305,7 +305,7 @@ function createForm(schema, o, readRule, validateRule, remote) {
         else {
           saved.v = untrack(now) // saved: no longer dirty
           // `return { redirect: '/x' }` from the server function: the same page the 303 reaches without JS (§38)
-          if (typeof r?.redirect === 'string' && r.redirect[0] === '/' && r.redirect[1] !== '/') go(r.redirect)
+          if (typeof r?.redirect === 'string' && /^\/(?![\/\\])/.test(r.redirect) && !/[\\\x00-\x20\x7f]/.test(r.redirect)) go(r.redirect)
         }
         return r
       } catch (x) {
