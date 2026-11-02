@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sqlx::PgPool;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     sync::{Arc, Mutex},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -279,26 +279,58 @@ fn referrer_host(raw: &str, origins: &[String]) -> Option<String> {
     url.host_str().map(|h| h.chars().take(253).collect())
 }
 
-/// Per-visitor token window. Bounded: at most 50 000 tracked visitors; the oldest windows are dropped first.
+/// Per-visitor token window. Bounded: at most 50 000 tracked visitors; when full, the oldest window is dropped first.
+/// `order` lists window starts oldest first, so expiry and eviction pop from its front instead of scanning the map.
 #[derive(Clone)]
 pub struct Limiter {
     per_minute: u32,
-    windows: Arc<Mutex<HashMap<Uuid, (Instant, u32)>>>,
+    max_visitors: usize,
+    windows: Arc<Mutex<Windows>>,
 }
+#[derive(Default)]
+struct Windows {
+    map: HashMap<Uuid, (Instant, u32)>,
+    order: VecDeque<(Uuid, Instant)>,
+}
+impl Windows {
+    /// Pops the front entry; removes the visitor only when that entry is still its current window.
+    fn pop_front(&mut self) {
+        if let Some((id, start)) = self.order.pop_front()
+            && self.map.get(&id).is_some_and(|(s, _)| *s == start)
+        {
+            self.map.remove(&id);
+        }
+    }
+}
+const WINDOW: Duration = Duration::from_secs(60);
 impl Limiter {
     pub fn new(per_minute: u32) -> Self {
-        Self { per_minute, windows: Arc::new(Mutex::new(HashMap::new())) }
+        Self::with_capacity(per_minute, 50_000)
+    }
+    /// A limiter that tracks at most `max_visitors` windows (the visitor id is chosen by the browser).
+    pub fn with_capacity(per_minute: u32, max_visitors: usize) -> Self {
+        Self { per_minute, max_visitors: max_visitors.max(1), windows: Arc::new(Mutex::new(Windows::default())) }
+    }
+    /// How many visitor windows are held right now.
+    pub fn tracked(&self) -> usize {
+        self.windows.lock().unwrap_or_else(|e| e.into_inner()).map.len()
     }
     pub fn admit(&self, visitor: Uuid, events: u32) -> bool {
         let now = Instant::now();
-        let mut map = self.windows.lock().unwrap_or_else(|e| e.into_inner());
-        if map.len() > 50_000 {
-            map.retain(|_, (start, _)| now.duration_since(*start) < Duration::from_secs(60));
+        let mut w = self.windows.lock().unwrap_or_else(|e| e.into_inner());
+        while w.order.front().is_some_and(|(_, start)| now.duration_since(*start) >= WINDOW) {
+            w.pop_front();
         }
-        let entry = map.entry(visitor).or_insert((now, 0));
-        if now.duration_since(entry.0) >= Duration::from_secs(60) {
-            *entry = (now, 0);
+        let current = w.map.get(&visitor).is_some_and(|(start, _)| now.duration_since(*start) < WINDOW);
+        if !current {
+            w.map.remove(&visitor);
+            while w.map.len() >= self.max_visitors && !w.order.is_empty() {
+                w.pop_front();
+            }
+            w.map.insert(visitor, (now, 0));
+            w.order.push_back((visitor, now));
         }
+        let entry = w.map.get_mut(&visitor).expect("window inserted above");
         if entry.1.saturating_add(events) > self.per_minute {
             return false;
         }

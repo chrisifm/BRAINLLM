@@ -146,6 +146,21 @@ const ISOLATION: &[(&str, &str)] = &[
 ];
 /// Inspector batches kept for `GET /@brain/metrics` and `brain_inspect` (§9: a 5-minute circular buffer).
 const METRICS_MS: u64 = 5 * 60 * 1000;
+/// The same buffer is also capped by size: a chatty client cannot hold more than this many batches or bytes.
+const METRICS_MAX: usize = 1000;
+const METRICS_BYTES: usize = 32 * 1024 * 1024;
+
+/// Appends one inspector batch, dropping the oldest ones past the age, count or byte cap.
+fn push_metric(m: &mut VecDeque<(u64, String)>, now: u64, text: String) {
+    while m.front().is_some_and(|(at, _)| now.saturating_sub(*at) > METRICS_MS) {
+        m.pop_front();
+    }
+    let mut bytes = m.iter().map(|(_, t)| t.len()).sum::<usize>() + text.len();
+    while !m.is_empty() && (m.len() >= METRICS_MAX || bytes > METRICS_BYTES) {
+        bytes -= m.pop_front().map_or(0, |(_, t)| t.len());
+    }
+    m.push_back((now, text));
+}
 
 /// Set by `brain run` in rich mode: the terminal view draws the events itself, so the server stops printing them.
 static QUIET: AtomicBool = AtomicBool::new(false);
@@ -234,15 +249,7 @@ impl Ctx {
             return;
         }
         if text.starts_with("{\"t\":\"m\"") {
-            let now = now_ms();
-            let mut m = self.metrics.lock().unwrap();
-            while m
-                .front()
-                .is_some_and(|(at, _)| now.saturating_sub(*at) > METRICS_MS)
-            {
-                m.pop_front();
-            }
-            m.push_back((now, text));
+            push_metric(&mut self.metrics.lock().unwrap(), now_ms(), text);
             return;
         }
         if text.contains("\"t\":\"brain:net\"") {
@@ -2868,6 +2875,23 @@ fn on_change(ctx: &Ctx, path: &Path) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn inspector_metrics_are_capped_by_count_and_bytes_not_only_age() {
+        let mut m = std::collections::VecDeque::new();
+        for i in 0..(super::METRICS_MAX * 3) {
+            super::push_metric(&mut m, 1_000, format!("{{\"t\":\"m\",\"i\":{i}}}"));
+        }
+        assert_eq!(m.len(), super::METRICS_MAX);
+        assert!(m.back().unwrap().1.ends_with(&format!("{}}}", super::METRICS_MAX * 3 - 1)), "the newest batch is kept");
+        let big = "x".repeat(super::METRICS_BYTES / 4 + 1);
+        for _ in 0..10 {
+            super::push_metric(&mut m, 1_000, big.clone());
+        }
+        assert!(m.iter().map(|(_, t)| t.len()).sum::<usize>() <= super::METRICS_BYTES);
+        assert_eq!(m.back().unwrap().1.len(), big.len());
+        super::push_metric(&mut m, 1_000 + super::METRICS_MS + 1, "late".into());
+        assert_eq!(m.len(), 1, "older than the window is dropped");
+    }
     #[test]
     fn the_watcher_skips_what_the_framework_writes_but_not_app_files() {
         use std::path::Path;

@@ -1,0 +1,9 @@
+{
+  "id": "analytics-visitor-cap",
+  "kind": "fix",
+  "title": "The analytics visitor limiter keeps its cap",
+  "why": "The per-visitor limiter documented 50 000 visitors but only dropped expired windows, so fresh browser-chosen visitor ids grew it past the cap and each event then scanned the whole map.",
+  "changelog": [
+    "the native analytics limiter tracks at most 50 000 visitors and evicts the oldest window first, in constant time"
+  ]
+}

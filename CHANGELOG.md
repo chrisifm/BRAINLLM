@@ -43,6 +43,12 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `brain seo` warns when a JobPosting title names the hiring company
 - B0710 rejects a redirect target built as `'/'` plus a runtime value, `//host` or `/\host`, and client guards and `form()` refuse the same targets; B0814 warns when browser navigation goes to a URL built at runtime
 - `brain fix` writes only inside its target and skips files with uncommitted changes unless `--force`, and a relative target works
+- a form's `_brain` id must be exactly `<hash>/<name>`; anything else answers 400 and never runs the function
+- RPC and form rate limits count only a function that exists, keyed by `<hash>/<name>` and the client address; unknown names answer 404/400 without a rate-limit entry
+- the rate-limit map is capped at 50 000 entries (oldest window first) and long keys are stored as a digest
+- the native analytics limiter tracks at most 50 000 visitors and evicts the oldest window first, in constant time
+- the browser router drops a prefetch rank when its link leaves the queue and on every new page
+- `brain run` keeps at most 1000 inspector batches and 32 MiB in /@brain/metrics, besides the 5-minute window
 
 ## [0.8.9] - 2026-11-02
 

@@ -1,0 +1,9 @@
+{
+  "id": "dev-metrics-cap",
+  "kind": "fix",
+  "title": "Dev inspector metrics are capped by size",
+  "why": "The development buffer behind /@brain/metrics was pruned by age only, so a chatty client could hold minutes of 1 MiB frames.",
+  "changelog": [
+    "`brain run` keeps at most 1000 inspector batches and 32 MiB in /@brain/metrics, besides the 5-minute window"
+  ]
+}

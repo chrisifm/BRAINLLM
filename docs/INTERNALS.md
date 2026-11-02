@@ -676,7 +676,8 @@ be turned off.
 - `Output` gains `server_js: String` (ESM with `load` + server functions + their imports) and `server_fns: Vec<String>`.
 - **RPC contract:** `POST /_r/<hash>/<name>`, JSON body = array of arguments, JSON response. Default defenses:
   same origin only (`Origin` + header `X-Brain-RPC: 1`, rejects CSRF), body limit (`server.maxBodyKB`), rate limit per IP
-  and function (`server.rpcPerMinute`), call deadline, unexpected error → generic 500 to the client and full log on the
+  and function (`server.rpcPerMinute`; counted only for an exported function, keyed by the exact `<hash>/<name>`, which is
+  also the only accepted shape of a form's `_brain` field; the key map holds at most 50 000 windows), call deadline, unexpected error → generic 500 to the client and full log on the
   server. Public failures (2026-10-31, `publicError` in server.mjs): a plain `{ message }` without `status` → 400
   `{error: message}`, an Error subclass outside the built-ins with an integer 4xx `status` → that status and message
   (≤500 characters). `callRpc` and `callForm` share it, so `f.error` reads the same with and without JS. Plain
