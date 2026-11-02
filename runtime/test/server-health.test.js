@@ -77,3 +77,25 @@ test('it stays at the root under a base, and an app page at that path wins', asy
   const own = await frontend({}, {}, { 'health/index.html': '<h1>status board</h1>' })
   assert.match(await (await fetch(own + '/health')).text(), /status board/)
 })
+
+test('/_brain/health answers on this port and maps to the backend probe instead of a backend 404', async () => {
+  const seen = []
+  const backend = http.createServer((req, res) => {
+    seen.push(req.url)
+    const known = ['/health', '/health/live', '/health/ready'].includes(req.url)
+    res.writeHead(known ? 200 : 404, { 'content-type': 'application/json' })
+    res.end(JSON.stringify(known ? { ok: true } : { code: 'NOT_FOUND' }))
+  })
+  const port = await listen(backend)
+  const base = await frontend({ backendURL: `http://127.0.0.1:${port}` }, { base: '/app/' })
+  for (const [path, upstream] of [['/_brain/health', '/health'], ['/app/_brain/health/ready', '/health/ready'], ['/_brain/health/live', '/health/live']]) {
+    const response = await fetch(base + path)
+    assert.equal(response.status, 200, path)
+    assert.deepEqual(await response.json(), { ok: true })
+    assert.equal(seen.at(-1), upstream, path)
+  }
+  assert.equal(seen.length, 3)
+  const alone = await frontend({})
+  assert.deepEqual(await (await fetch(alone + '/_brain/health')).json(), { ok: true })
+  assert.equal((await fetch(alone + '/_brain/health/other')).status, 404)
+})

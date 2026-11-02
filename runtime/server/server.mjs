@@ -7,6 +7,7 @@
 // It serves, in this order:
 //   GET  /_health                → 200 {"ok":true,"build":"<sig>"}
 //   GET  /health[/live|/ready]   → forwarded to the native backend, or 200 {"ok":true} without one
+//   GET  /_brain/health[/live|/ready] → the same probe (mapped to /health…), never forwarded as a /_brain call
 //   POST /_r/<hash>/<fn>         → RPC to a `server:` function (same origin + X-Brain-RPC; body, rate and time limits from brain.json `server`)
 //   GET  routes in the manifest  → SSR: load(ctx) → render the view on the DOM shim → page with props and SEO head
 //   GET  files in dist/          → static (the smallest accepted .zst/.br/.gz sibling; /_b/* immutable), clean URLs
@@ -1800,6 +1801,9 @@ export function createServer(o = {}) {
   // /health is reserved for the backend (B0735), so an app cannot declare it and deploy gates ask this port for it. An app
   // page at that path still wins: this only runs where the answer would have been a 404. Nothing here names the backend.
   const isProbe = path => path === '/health' || path === '/health/live' || path === '/health/ready'
+  // /_brain/health[/live|/ready] is the same probe under the framework prefix; the backend only serves /health, so it is
+  // answered here (mapped to that route) instead of being forwarded with the rest of /_brain and coming back a 404.
+  const brainProbe = path => path.startsWith('/_brain/health') && isProbe(path.slice(7)) ? path.slice(7) : null
   const answerProbe = async (req, res, url, rid) => {
     const headers = { 'content-type': MIME['.json'], 'cache-control': 'no-store' }
     if (req.method !== 'GET' && req.method !== 'HEAD') return notFound(req, res)
@@ -1884,10 +1888,15 @@ export function createServer(o = {}) {
       let url = full
       if (BASE !== '/') {
         if (full.pathname === BASE.slice(0, -1)) return send(res, 301, '', { location: BASE + full.search })
-        if (!full.pathname.startsWith(BASE)) return isProbe(full.pathname) ? await answerProbe(req, res, full, rid) : notFound(req, res)
+        if (!full.pathname.startsWith(BASE)) {
+          const probe = isProbe(full.pathname) ? full.pathname : brainProbe(full.pathname)
+          return probe ? await answerProbe(req, res, new URL(probe, full), rid) : notFound(req, res)
+        }
         url = new URL('/' + full.pathname.slice(BASE.length) + full.search, full) // the app path
       }
       req.$brainPath = url.pathname
+      const probe = brainProbe(url.pathname)
+      if (probe) return await answerProbe(req, res, new URL(probe, url), rid)
       if (native && /^\/_brain\/files(?:\/|$)/.test(url.pathname)) return await native.fileStream(req,res,url,rid)
       if (native && /^\/(?:api(?:\/|$)|_brain(?:\/|$)|s\/)/.test(url.pathname)) return await native.proxy(req,res,url,rid,send)
       const declaredRoute = native && nativeRoutes.find(route => route.rx.test(url.pathname))
