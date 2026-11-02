@@ -1,0 +1,9 @@
+{
+  "id": "root-param-files",
+  "kind": "fix",
+  "title": "Real files ahead of a root parameter",
+  "why": "A root route parameter swallowed real public files.",
+  "changelog": [
+    "a real file or prerendered page wins over a route parameter at the root, so `views/[code].brain` no longer answers 404 for `/favicon.svg` or `/login`"
+  ]
+}

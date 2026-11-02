@@ -1,0 +1,9 @@
+{
+  "id": "unthrown-answers",
+  "kind": "fix",
+  "title": "Answers built but not thrown",
+  "why": "A bare notFound() was discarded and the page answered 200.",
+  "changelog": [
+    "B0810 rejects `notFound()`, `gone()`, `redirect()` and `deny()` called without `throw`; existing code with that mistake stops building"
+  ]
+}

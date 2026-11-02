@@ -1,0 +1,9 @@
+{
+  "id": "declared-port",
+  "kind": "fix",
+  "title": "Declared port",
+  "why": "A second start moved to another port and left the old server running.",
+  "changelog": [
+    "a declared `PORT` is kept: `brain` stops only this project's previous brain, and names any other owner of the port and leaves it running"
+  ]
+}

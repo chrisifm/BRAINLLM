@@ -1,0 +1,9 @@
+{
+  "id": "doctor-failures",
+  "kind": "fix",
+  "title": "Doctor names failed tests",
+  "why": "An intermittent test failure left only a count.",
+  "changelog": [
+    "`brain doctor` names each failed test with its file and first error line"
+  ]
+}

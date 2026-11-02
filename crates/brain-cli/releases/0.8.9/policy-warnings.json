@@ -1,0 +1,9 @@
+{
+  "id": "policy-warnings",
+  "kind": "fix",
+  "title": "Read policy warnings",
+  "why": "An update without read and an anonymous denied read failed in confusing ways.",
+  "changelog": [
+    "B0808 warns on `update` without `read`, B0809 on an operation step that reaches rows its role cannot read, and an anonymous denied read answers `401 SIGN_IN_REQUIRED` instead of 403"
+  ]
+}

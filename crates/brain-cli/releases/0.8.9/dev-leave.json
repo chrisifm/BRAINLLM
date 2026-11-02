@@ -1,0 +1,9 @@
+{
+  "id": "dev-leave",
+  "kind": "fix",
+  "title": "Dirty forms under brain run",
+  "why": "leave() did not ask under the dev server.",
+  "changelog": [
+    "`leave()` asks before leaving a dirty form under `brain run` too"
+  ]
+}

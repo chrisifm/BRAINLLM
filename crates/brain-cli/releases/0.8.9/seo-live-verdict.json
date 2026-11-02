@@ -1,0 +1,9 @@
+{
+  "id": "seo-live-verdict",
+  "kind": "fix",
+  "title": "Failed live SEO audits",
+  "why": "A failed live audit could close as if it passed.",
+  "changelog": [
+    "a failed live SEO audit closes as failed and names a fix that exists"
+  ]
+}

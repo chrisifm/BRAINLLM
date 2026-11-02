@@ -1,0 +1,9 @@
+{
+  "id": "owner-filter",
+  "kind": "fix",
+  "title": "Owner filter for system keys",
+  "why": "A job had to read every page to find one account's rows.",
+  "changelog": [
+    "a system key may list one account's rows with `?owner=<id>`; any other caller still gets 422"
+  ]
+}

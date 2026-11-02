@@ -7,6 +7,25 @@ diagnostics that reject code an earlier version accepted.
 Every npm package (`@christianirack/brainllm`, its seven native platform packages, `brainllm-runtime`,
 `create-brainllm` and `create-brainll`) ships the same version as `[workspace.package]` in `Cargo.toml`.
 
+## [0.8.9] - 2026-11-01
+
+Upgrade with `npm install -D @christianirack/brainllm@0.8.9 --save-exact`.
+
+- `brain run` no longer reloads the browser when `logs/` or `docs/app` change
+- a real file or prerendered page wins over a route parameter at the root, so `views/[code].brain` no longer answers 404 for `/favicon.svg` or `/login`
+- B0808 warns on `update` without `read`, B0809 on an operation step that reaches rows its role cannot read, and an anonymous denied read answers `401 SIGN_IN_REQUIRED` instead of 403
+- a native 503 says why it happened instead of always blaming authentication
+- B0810 rejects `notFound()`, `gone()`, `redirect()` and `deny()` called without `throw`; existing code with that mistake stops building
+- a rebuild keeps the previous chunks for one day, so a running server and open tabs survive it
+- `leave()` asks before leaving a dirty form under `brain run` too
+- a failed live SEO audit closes as failed and names a fix that exists
+- a declared `PORT` is kept: `brain` stops only this project's previous brain, and names any other owner of the port and leaves it running
+- `csp.frameSrc` and `csp.scriptSrc` in `brain.json` add origins to the policy, and B0811 warns on a literal iframe or script outside them
+- `brain doctor` names each failed test with its file and first error line
+- `job-failed` logs the backend's status, code and field messages when the backend client raised the failure
+- a job may declare an empty schema, `{}`, and take no payload
+- a system key may list one account's rows with `?owner=<id>`; any other caller still gets 422
+
 ## [0.8.8] - 2026-11-01
 
 Upgrade with `npm install -D @christianirack/brainllm@0.8.8 --save-exact`.

@@ -1,0 +1,9 @@
+{
+  "id": "empty-job-schema",
+  "kind": "fix",
+  "title": "Jobs without a payload",
+  "why": "A job schema of {} was refused.",
+  "changelog": [
+    "a job may declare an empty schema, `{}`, and take no payload"
+  ]
+}

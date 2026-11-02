@@ -1,0 +1,9 @@
+{
+  "id": "native-503",
+  "kind": "fix",
+  "title": "Named native failures",
+  "why": "Every native 503 was labeled as an authentication problem.",
+  "changelog": [
+    "a native 503 says why it happened instead of always blaming authentication"
+  ]
+}

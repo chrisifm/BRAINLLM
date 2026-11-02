@@ -1,0 +1,9 @@
+{
+  "id": "stale-chunks",
+  "kind": "fix",
+  "title": "Chunk grace after a rebuild",
+  "why": "A rebuild removed chunks a running server and open tabs still needed.",
+  "changelog": [
+    "a rebuild keeps the previous chunks for one day, so a running server and open tabs survive it"
+  ]
+}

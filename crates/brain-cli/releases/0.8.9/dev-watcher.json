@@ -1,0 +1,9 @@
+{
+  "id": "dev-watcher",
+  "kind": "fix",
+  "title": "Dev reload noise",
+  "why": "Log and generated-doc writes reloaded the browser.",
+  "changelog": [
+    "`brain run` no longer reloads the browser when `logs/` or `docs/app` change"
+  ]
+}

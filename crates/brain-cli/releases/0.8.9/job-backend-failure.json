@@ -1,0 +1,9 @@
+{
+  "id": "job-backend-failure",
+  "kind": "fix",
+  "title": "Backend failures of a job",
+  "why": "job-failed did not say what the backend answered.",
+  "changelog": [
+    "`job-failed` logs the backend's status, code and field messages when the backend client raised the failure"
+  ]
+}

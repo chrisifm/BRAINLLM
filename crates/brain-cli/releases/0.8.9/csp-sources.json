@@ -1,0 +1,9 @@
+{
+  "id": "csp-sources",
+  "kind": "fix",
+  "title": "Frame and script origins",
+  "why": "An app could not embed a video or load a measurement script.",
+  "changelog": [
+    "`csp.frameSrc` and `csp.scriptSrc` in `brain.json` add origins to the policy, and B0811 warns on a literal iframe or script outside them"
+  ]
+}
