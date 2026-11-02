@@ -371,6 +371,8 @@ impl Checker<'_> {
             }
         }
         let allowed: Vec<String> = self.ctx.redirect_hosts.clone();
+        let mut same_origin = same_origin_helpers(&c.script).0;
+        same_origin.extend(self.ctx.redirect_helpers.iter().cloned());
         let mut out: Vec<(&'static str, Span, String, String)> = Vec::new();
         walk(&c.script, module_server, &mut |e, server, rpc_args| match e {
             Expr::Call { callee, args, span, .. } => {
@@ -379,7 +381,7 @@ impl Checker<'_> {
                     && let Some(a) = args.first()
                 {
                     let prefix = url_prefix(a);
-                    let ok = match prefix.as_deref() {
+                    let ok = same_origin_target(a, &same_origin) || match prefix.as_deref() {
                         Some(p) if p.starts_with('/') && !p.starts_with("//") => true,
                         Some(p) => host_of(p).is_some_and(|h| !h.is_empty() && allowed.iter().any(|x| x == h)),
                         None => false,
@@ -588,4 +590,85 @@ fn regex_source_safe(e: &Expr) -> bool {
         }
         _ => false,
     }
+}
+
+/// A `redirect` target that stays on this origin: a literal path prefix (`'/x' + …`, `` `/x/${…}` ``), a ternary of
+/// two such targets, or a call to a helper (in `known`, by its call path) whose every return is one.
+fn same_origin_target(e: &Expr, known: &HashSet<String>) -> bool {
+    match e.unparen() {
+        Expr::Cond { cons, alt, .. } => same_origin_target(cons, known) && same_origin_target(alt, known),
+        Expr::Call { callee, .. } => path(callee).is_some_and(|p| known.contains(&p)),
+        Expr::Binary { op: "+", left, .. } if url_prefix(left).is_none() => same_origin_target(left, known),
+        Expr::Template { tag: None, quasis, exprs, .. } if quasis.first().is_some_and(|q| q.is_empty()) => exprs.first().is_some_and(|x| same_origin_target(x, known)),
+        _ => url_prefix(e).is_some_and(|p| p.starts_with('/') && !p.starts_with("//")),
+    }
+}
+
+fn func_returns_same_origin(f: &Func, known: &HashSet<String>) -> bool {
+    let mut answers = Vec::new();
+    match &f.body {
+        FnBody::Block(body) => returns(body, &mut answers),
+        FnBody::Expr(e) => answers.push(e),
+    }
+    !answers.is_empty() && answers.iter().all(|a| same_origin_target(a, known))
+}
+
+/// Helpers of a file whose every return is a same-origin path (B0710 accepts `redirect(helper(x))`).
+/// Returns the top-level names and the members of `export default { … }` that qualify.
+pub(crate) fn same_origin_helpers(stmts: &[Stmt]) -> (HashSet<String>, HashSet<String>) {
+    let mut funcs: Vec<(String, &Func)> = Vec::new();
+    fn top<'a>(s: &'a Stmt, funcs: &mut Vec<(String, &'a Func)>) {
+        match s {
+            Stmt::Func(f) => {
+                if let Some(n) = &f.name {
+                    funcs.push((n.name.clone(), f));
+                }
+            }
+            Stmt::Var(v) => {
+                for d in &v.decls {
+                    if let (Pat::Ident(id), Some(Expr::Func(f))) = (&d.pat, d.init.as_ref().map(Expr::unparen)) {
+                        funcs.push((id.name.clone(), f));
+                    }
+                }
+            }
+            Stmt::Export { decl, .. } => top(decl, funcs),
+            _ => {}
+        }
+    }
+    for s in stmts {
+        top(s, &mut funcs);
+    }
+    let mut members: Vec<(String, &Func)> = Vec::new();
+    let mut shorthand: Vec<(String, String)> = Vec::new();
+    for s in stmts {
+        let Stmt::ExportDefault { expr: Expr::Object { props, .. }, .. } = s else { continue };
+        for p in props {
+            match p {
+                ObjProp::KeyValue { key: PropKey::Ident(k), value, .. } => match value.unparen() {
+                    Expr::Func(f) => members.push((k.name.clone(), f)),
+                    Expr::Ident(i) => shorthand.push((k.name.clone(), i.name.clone())),
+                    _ => {}
+                },
+                ObjProp::Method { key: PropKey::Ident(k), func, .. } => members.push((k.name.clone(), func)),
+                ObjProp::Shorthand(i) => shorthand.push((i.name.clone(), i.name.clone())),
+                _ => {}
+            }
+        }
+    }
+    // Fixed point: a helper may build its path with another helper of the same file.
+    let mut known: HashSet<String> = HashSet::new();
+    loop {
+        let before = known.len();
+        for (name, f) in &funcs {
+            if !known.contains(name) && func_returns_same_origin(f, &known) {
+                known.insert(name.clone());
+            }
+        }
+        if known.len() == before {
+            break;
+        }
+    }
+    let mut exported: HashSet<String> = shorthand.into_iter().filter(|(_, local)| known.contains(local)).map(|(k, _)| k).collect();
+    exported.extend(members.into_iter().filter(|(_, f)| func_returns_same_origin(f, &known)).map(|(k, _)| k));
+    (known, exported)
 }

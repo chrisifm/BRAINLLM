@@ -149,3 +149,44 @@ fn b1311_accepts_the_escape_its_fix_proposes() {
         assert_eq!(codes(&wrap(bad)), ["B1311"], "{bad}");
     }
 }
+
+// B0710 rejected `redirect(helper(x), 301)` even when the helper only returns same-origin paths.
+#[test]
+fn b0710_accepts_helpers_that_only_return_same_origin_paths() {
+    let module = |helper: &str, arg: &str| format!("{helper}\nexport default (ctx) => ctx.user ? true : redirect({arg}, 301)");
+    let ok = [
+        ("const pathOf = (r) => '/items/' + r.slug", "pathOf(ctx.params)"),
+        ("function pathOf(r) { if (r.old) return `/archive/${r.slug}`\n  return '/items/' + r.slug }", "pathOf(ctx.params)"),
+        ("const base = (r) => '/items/' + r.slug\nconst pathOf = (r) => base(r) + '/edit'", "pathOf(ctx.params)"),
+        ("const pathOf = (r) => r.old ? '/archive' : '/items/' + r.slug", "pathOf(ctx.params) + '?from=old'"),
+    ];
+    for (helper, arg) in ok {
+        assert!(codes_in("views/_guard.jsbrain", &module(helper, arg), &Ctx::default()).is_empty(), "{helper}");
+    }
+    let bad = [
+        ("const pathOf = (r) => r.next", "pathOf(ctx.query)"),
+        ("const pathOf = (r) => r.old ? '//evil.example' : '/items'", "pathOf(ctx.params)"),
+        ("const pathOf = (r) => `${r.host}/items`", "pathOf(ctx.query)"),
+        ("const pathOf = (r) => '/items'", "other(ctx.query)"),
+    ];
+    for (helper, arg) in bad {
+        assert_eq!(codes_in("views/_guard.jsbrain", &module(helper, arg), &Ctx::default()), ["B0710"], "{helper}");
+    }
+    // Helpers imported from a `.jsbrain` module, default or named.
+    let dir = std::env::temp_dir().join(format!("brain-b0710-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("lib")).unwrap();
+    std::fs::create_dir_all(dir.join("views")).unwrap();
+    std::fs::write(dir.join("app.brain"), "<slot />").unwrap();
+    std::fs::write(dir.join("lib/paths.jsbrain"), "const item = (r) => '/items/' + r.slug\nconst raw = (r) => r.next\nexport default { item, raw, edit: (r) => item(r) + '/edit' }").unwrap();
+    let check = |src: &str| {
+        let file = dir.join("views/_guard.jsbrain");
+        std::fs::write(&file, src).unwrap();
+        let c = brain_parse::parse(src, Path::new("views/_guard.jsbrain")).unwrap();
+        let (ctx, _) = brain_check::load_ctx(&file, &c);
+        brain_check::check(&c, &ctx).into_iter().map(|d| d.code).filter(|c| *c == "B0710").collect::<Vec<_>>()
+    };
+    assert!(check("import paths from '../lib/paths.jsbrain'\nexport default (ctx) => ctx.user ? true : redirect(paths.item(ctx.params), 301)").is_empty());
+    assert!(check("import paths from '../lib/paths.jsbrain'\nexport default (ctx) => ctx.user ? true : redirect(paths.edit(ctx.params))").is_empty());
+    assert_eq!(check("import paths from '../lib/paths.jsbrain'\nexport default (ctx) => ctx.user ? true : redirect(paths.raw(ctx.query))"), ["B0710"]);
+    std::fs::remove_dir_all(&dir).ok();
+}
