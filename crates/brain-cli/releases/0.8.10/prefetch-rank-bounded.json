@@ -1,0 +1,9 @@
+{
+  "id": "prefetch-rank-bounded",
+  "kind": "fix",
+  "title": "Prefetch ordering no longer grows with every link",
+  "why": "The router's prefetch rank map kept one entry per distinct link for the whole tab lifetime.",
+  "changelog": [
+    "the browser router drops a prefetch rank when its link leaves the queue and on every new page"
+  ]
+}

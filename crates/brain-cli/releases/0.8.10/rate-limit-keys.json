@@ -1,0 +1,11 @@
+{
+  "id": "rate-limit-keys",
+  "kind": "fix",
+  "title": "Rate limits key on real server functions only",
+  "why": "The RPC and form rate-limit map was keyed by client-chosen text: unknown or megabyte-long function names grew it by hundreds of megabytes, and a form id with a suffix (`hash/login/1`) ran `login` under a fresh 60-per-minute budget.",
+  "changelog": [
+    "a form's `_brain` id must be exactly `<hash>/<name>`; anything else answers 400 and never runs the function",
+    "RPC and form rate limits count only a function that exists, keyed by `<hash>/<name>` and the client address; unknown names answer 404/400 without a rate-limit entry",
+    "the rate-limit map is capped at 50 000 entries (oldest window first) and long keys are stored as a digest"
+  ]
+}
