@@ -9,7 +9,7 @@ import { createServer } from '../server/server.mjs'
 
 const dist = mkdtempSync(join(tmpdir(), 'brain-hostile-'))
 mkdirSync(join(dist, '_server'))
-writeFileSync(join(dist, '_server/data.mjs'), `export async function read(ctx) { return ctx.cookies }`)
+writeFileSync(join(dist, '_server/data.mjs'), `export async function read(ctx) { return ctx.cookies }\nexport const $server = ['read']`)
 writeFileSync(join(dist, '_server/manifest.json'), JSON.stringify({ routes: [], rpc: { data: '_server/data.mjs' } }))
 const logs = []
 const server = createServer({ dist, secret: 'synthetic-hostile-secret', log: (level, msg, extra) => logs.push({ level, msg, ...extra }) })

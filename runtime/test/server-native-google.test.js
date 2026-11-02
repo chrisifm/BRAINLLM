@@ -21,7 +21,7 @@ const backend=http((req,res)=>{
  })
 })
 await new Promise(resolve=>backend.listen(0,'127.0.0.1',resolve))
-writeFileSync(join(dist,'_server/account.mjs'),`export async function challenge(ctx){return ctx.backend.google.challenge()};export async function google(ctx,values){return ctx.backend.google.login(values)};export const $forms=[];`)
+writeFileSync(join(dist,'_server/account.mjs'),`export async function challenge(ctx){return ctx.backend.google.challenge()};export async function google(ctx,values){return ctx.backend.google.login(values)};export const $forms=[];export const $server=['challenge','google'];`)
 writeFileSync(join(dist,'_server/manifest.json'),JSON.stringify({base:'/',routes:[],rpc:{account:'_server/account.mjs'}}))
 const frontend=createServer({dist,backendURL:`http://127.0.0.1:${backend.address().port}`,log(){}})
 await new Promise(resolve=>frontend.listen(0,'127.0.0.1',resolve));const base=`http://127.0.0.1:${frontend.address().port}`

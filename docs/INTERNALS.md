@@ -674,9 +674,14 @@ be turned off.
 - B0703: literals shaped like keys in client code; `brain_check::scan_secrets(&str)` also scans the final output
   in brain-pack.
 - `Output` gains `server_js: String` (ESM with `load` + server functions + their imports) and `server_fns: Vec<String>`.
+- **Callable names (2026-11-02):** only `server:` functions answer RPC and form posts. The server module exports
+  `$server`, a frozen array of their names, and `serverFn(module, name)` in server.mjs is the one check: `rpc()`,
+  `callForm` and the dev sidecar's RPC go through it. `load`, `paths`, `sitemap`, `seo`, `head`, `$forms` and any other
+  export answer exactly as an unknown name (RPC 404 `Unknown function`, form 400) and never create a rate-limit key, so
+  a view's `load()` data stays behind its guards and middleware. A module without `$server` exposes nothing.
 - **RPC contract:** `POST /_r/<hash>/<name>`, JSON body = array of arguments, JSON response. Default defenses:
   same origin only (`Origin` + header `X-Brain-RPC: 1`, rejects CSRF), body limit (`server.maxBodyKB`), rate limit per IP
-  and function (`server.rpcPerMinute`; counted only for an exported function, keyed by the exact `<hash>/<name>`, which is
+  and function (`server.rpcPerMinute`; counted only for a `server:` function, keyed by the exact `<hash>/<name>`, which is
   also the only accepted shape of a form's `_brain` field; the key map holds at most 50 000 windows), call deadline, unexpected error → generic 500 to the client and full log on the
   server. Public failures (2026-10-31, `publicError` in server.mjs): a plain `{ message }` without `status` → 400
   `{error: message}`, an Error subclass outside the built-ins with an integer 4xx `status` → that status and message

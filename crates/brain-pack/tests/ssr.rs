@@ -168,6 +168,9 @@ fn ssr_and_rpc_through_the_real_server() {
     let call = |args: &str| http(port, &format!("POST /_r/{rpc_hash}/rename HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nX-Brain-RPC: 1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{args}", args.len()));
     let (st_ok, ok) = call("[\"bo\"]");
     let (st_bad, bad) = call("[\"\"]");
+    // only `server:` functions answer: the view's load()/seo/head are not callable over RPC
+    let other = |f: &str| http(port, &format!("POST /_r/{rpc_hash}/{f} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nX-Brain-RPC: 1\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n[]"));
+    let refused: Vec<(String, u16, String)> = ["load", "seo", "head", "$forms", "$server"].iter().map(|f| { let (s, b) = other(f); (f.to_string(), s, b) }).collect();
     let _ = child.kill();
     let _ = child.wait();
     let _ = std::fs::remove_dir_all(&root);
@@ -181,4 +184,8 @@ fn ssr_and_rpc_through_the_real_server() {
     assert!(ok.contains("\"User BO\""), "chunked body: {ok}");
     assert_eq!(st_bad, 422, "{bad}");
     assert!(bad.contains("\"errors\":{\"name\":\"required\"}"), "{bad}");
+    for (f, st, body) in &refused {
+        assert_eq!(*st, 404, "{f} must not be callable: {body}");
+        assert!(body.contains("Unknown function") && !body.contains("User"), "{f}: {body}");
+    }
 }

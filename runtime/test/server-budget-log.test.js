@@ -17,7 +17,7 @@ copyFileSync(join(here, '../shim/dom.js'), join(dist, '_server/dom.js'))
 const budget = `Object.assign(new Error('B0910: ms budget exceeded'), { code: 'B0910', kind: 'budget', budget: 'ms', limit: 200, file: 'views/posts.brain', component: 'Posts', line: 3, column: 5, fix: 'Bound the work or move it to an owned worker.' })`
 w('_b/v.js', `import { tpl } from '/_b/brain.js'\nexport default function V(p) { return tpl('<h1>' + p.msg + '</h1>')() }\n`)
 w('_server/v.server.mjs', `export async function load() { throw ${budget} }\n`)
-w('_server/items.mjs', `export async function heavy() { throw ${budget} }\nexport async function plain() { throw new Error('secret value 42') }\n`)
+w('_server/items.mjs', `export async function heavy() { throw ${budget} }\nexport async function plain() { throw new Error('secret value 42') }\nexport const $server = ['heavy', 'plain']\n`)
 w('_b/hang.js', `export default function V() { return document.createTextNode('x') }\n`)
 w('_server/hang.server.mjs', `export function load(ctx) { globalThis.__hang(ctx.signal); return new Promise(() => {}) }\n`)
 w('_server/fine.server.mjs', `export function load(ctx) { globalThis.__fine = ctx.signal; return {} }\n`)

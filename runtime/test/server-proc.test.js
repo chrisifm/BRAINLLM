@@ -30,7 +30,7 @@ copyFileSync(join(here, '../server/server.mjs'), join(dist, 'server.mjs'))
 copyFileSync(join(here, '../server/native-sockets.mjs'), join(dist, 'native-sockets.mjs'))
 copyFileSync(join(here, '../server/llm.mjs'), join(dist, 'llm.mjs'))
 writeFileSync(join(dist, 'index.html'), '<!doctype html><title>x</title><main><h1>Home</h1></main>')
-writeFileSync(join(dist, '_server/slow.mjs'), 'export async function wait(ctx, ms) { await new Promise(r => setTimeout(r, ms)); return { waited: ms, pid: process.pid } }\n')
+writeFileSync(join(dist, '_server/slow.mjs'), 'export async function wait(ctx, ms) { await new Promise(r => setTimeout(r, ms)); return { waited: ms, pid: process.pid } }\nexport const $server = [\'wait\']\n')
 writeFileSync(join(dist, '_server/manifest.json'), JSON.stringify({ v: 1, routes: [], rpc: { s: '_server/slow.mjs' } }))
 
 // bind like the supervisor, start the child with the socket as fd 3, then close the parent's copy (only the child accepts)

@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { createServer, sessionFrom } from '../server/server.mjs'
 const user = { id: '00000000-0000-4000-8000-000000000001', email: 'member@example.test', role: 'user', verified: true }
 const dist = mkdtempSync(join(tmpdir(), 'brain-native-ssr-')); mkdirSync(join(dist, '_server'))
-writeFileSync(join(dist, '_server/native.mjs'), `export function who(ctx) { return { user:ctx.user, sessionUser:ctx.session.user } } export function set(ctx) { ctx.session.set({role:'admin'});return 'changed' } export function logout(ctx) { ctx.session.clear();return 'signed out' }`)
+writeFileSync(join(dist, '_server/native.mjs'), `export function who(ctx) { return { user:ctx.user, sessionUser:ctx.session.user } } export function set(ctx) { ctx.session.set({role:'admin'});return 'changed' } export function logout(ctx) { ctx.session.clear();return 'signed out' } export const $server = ['who','set','logout']`)
 writeFileSync(join(dist, '_server/guard.mjs'), `export default ctx => ctx.user?.role==='admin' ? {redirect:'/permitted'} : false`)
 writeFileSync(join(dist, '_server/read.mjs'), `export function load(ctx) { return {redirect:ctx.user ? '/signed-in' : '/anonymous'} }`)
 writeFileSync(join(dist, '_server/manifest.json'), JSON.stringify({ routes: [{path:'/guarded',guards:['_server/guard.mjs']},{path:'/read',server:'_server/read.mjs'}], rpc:{native:'_server/native.mjs'} }))

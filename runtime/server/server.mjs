@@ -1552,7 +1552,7 @@ export function createServer(o = {}) {
     if (!modPath) return fail(404, 'Unknown function')
     let f
     try {
-      f = (await load(modPath))[fn]
+      f = serverFn(await load(modPath), fn)
     } catch (e) {
       log('error', 'rpc module failed to load', { rid, fn: hash + '/' + fn, ...trace(e) })
       return fail(500, 'Internal error', { rid })
@@ -2183,6 +2183,14 @@ export const fnId = id => {
   const m = typeof id === 'string' ? FN_ID.exec(id) : null
   return m ? { hash: m[1], fn: m[2] } : null
 }
+// The only functions RPC and form posts may run: the ones a view declares with `server:`, which the generated server
+// module lists in `$server`. Its other exports (`load`, `paths`, `sitemap`, `seo`, `head`, `$forms`) run behind the
+// route's guards or at render time and are never callable by name; a module without the list exposes nothing.
+export const serverFn = (module, name) => {
+  const list = module && module.$server
+  const f = Array.isArray(list) && typeof name === 'string' && list.includes(name) ? module[name] : undefined
+  return typeof f === 'function' ? f : undefined
+}
 // t(), fmt and locale() read globalThis.__brainLocale. A render sets it while nothing else runs (renders are serialized);
 // load(), guards and form handlers overlap across awaits, so each carries its page's language in the async context.
 const pageLocale = new AsyncLocalStorage()
@@ -2258,8 +2266,9 @@ export async function callRpc({ fn, args, ctx, key, limit = 60, timeout = 10000 
 const NATIVE_FAILED = 'Native resource request failed'
 export async function callForm({ module, raw, ctx, rules, key, limit = 60, timeout = 10000, locale }) {
   const q = new URLSearchParams(raw || ''), id = q.get('_brain') || '', fn = fnId(id)?.fn
-  // exactly `<hash>/<name>` naming an exported function, checked before the rate limit counts anything
-  if (!fn || typeof (module && module[fn]) !== 'function') return { status: 400, body: { error: 'Unknown form' } }
+  // exactly `<hash>/<name>` naming a `server:` function, checked before the rate limit counts anything
+  const run = fn && serverFn(module, fn)
+  if (!run) return { status: 400, body: { error: 'Unknown form' } }
   if (key) {
     const ra = overLimit(key, limit)
     if (ra) return { status: 429, body: { error: 'Too many requests' }, headers: { 'retry-after': String(ra) } }
@@ -2280,7 +2289,7 @@ export async function callForm({ module, raw, ctx, rules, key, limit = 60, timeo
   let r
   try {
     ctx.signal ||= newSignal()
-    r = await withTimeout(pageLocale.run(locale, () => Promise.resolve(module[fn](ctx, values))), timeout, ctx)
+    r = await withTimeout(pageLocale.run(locale, () => Promise.resolve(run(ctx, values))), timeout, ctx)
   } catch (e) {
     if (e && e.errors && typeof e.errors === 'object') return again(e.errors, '')
     if (e instanceof HttpError && e.status >= 400 && e.status < 500) return again({}, e.message === NATIVE_FAILED ? generic : e.message)

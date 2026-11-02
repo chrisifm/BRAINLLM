@@ -206,7 +206,7 @@ for await (const line of createInterface({ input: process.stdin })) {
       const m = await import(file)
       const c = await withSession(S, ctx, secret, false, nativeRequired)
       try {
-        const r = await S.callRpc({ fn: m[fn], args: raw, ctx: c, key, timeout, limit })
+        const r = await S.callRpc({ fn: S.serverFn(m, fn), args: raw, ctx: c, key, timeout, limit })
         if (r.cause) failure(r.cause, 'rpc')
         out(`RES ${id} ${JSON.stringify({ status: r.status, body: JSON.stringify(r.body ?? null), headers: flat({ ...(r.headers || {}), ...await contextHeaders(c) }) })}\n`)
       } finally { finishContext(c) }
@@ -1337,11 +1337,32 @@ mod tests {
         std::fs::remove_dir_all(d).unwrap();
     }
     #[test]
+    fn rpc_runs_only_the_functions_the_module_lists_as_server_functions() {
+        let d = std::env::temp_dir().join(format!("brain-sidecar-server-only-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("page.mjs");
+        std::fs::write(&f, "export async function load() { return 'LOAD-DATA' }\nexport const seo = () => ({ title: 'x' })\nexport async function save() { return 'saved' }\nexport const $server = Object.freeze([\"save\"])\n").unwrap();
+        let bare = d.join("bare.mjs");
+        std::fs::write(&bare, "export async function save() { return 'saved' }\n").unwrap();
+        let server = file_url(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime/server/server.mjs"));
+        let mut sc = Sidecar::spawn(&d, &[]).unwrap();
+        let mut call = |file: &Path, func: &str| sc.rpc(&file_url(file), func, "{\"headers\":{}}", "[]", &server, "127.0.0.1 h/f", "test-secret-0123456789").unwrap();
+        for func in ["load", "seo", "$server"] {
+            let (status, body, _) = call(&f, func);
+            assert_eq!((status, body.as_str()), (404, "{\"error\":\"Unknown function\"}"), "{func}");
+        }
+        assert_eq!(call(&bare, "save").0, 404, "a module without $server exposes nothing");
+        let (status, body, _) = call(&f, "save");
+        assert_eq!((status, body.as_str()), (200, "\"saved\""), "control");
+        drop(sc);
+        std::fs::remove_dir_all(d).unwrap();
+    }
+    #[test]
     fn rpc_uses_the_configured_deadline_and_carries_bodies_past_the_default_frame() {
         let d = std::env::temp_dir().join(format!("brain-sidecar-limits-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
         let f = d.join("items.mjs");
-        std::fs::write(&f, "export async function wait() { await new Promise(r => setTimeout(r, 400)); return 1 }\nexport async function size(ctx, s) { return s.length }\n").unwrap();
+        std::fs::write(&f, "export async function wait() { await new Promise(r => setTimeout(r, 400)); return 1 }\nexport async function size(ctx, s) { return s.length }\nexport const $server = Object.freeze([\"wait\", \"size\"])\n").unwrap();
         let server = file_url(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime/server/server.mjs"));
         let mut sc = Sidecar::spawn(&d, &[]).unwrap();
         let call = |sc: &mut Sidecar, func: &str, raw: &str| sc.rpc(&file_url(&f), func, "{\"headers\":{}}", raw, &server, "127.0.0.1 h/f", "test-secret-0123456789").unwrap();

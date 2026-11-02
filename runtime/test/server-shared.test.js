@@ -36,6 +36,7 @@ test('callRpc: 200, 422 {errors}, 4xx HttpError, 504 and 500 with the real error
 test('callForm: validated with the schema → 303 (PRG or redirect), 422 state with values and messages, 400 unknown', async () => {
   let got
   const module = {
+    $server: ['save'],
     $forms: { save: { email: 'email!', age: 'num>=18' } },
     save: async (c, v) => ((got = v), v.email === 'go@x.dev' ? { redirect: '/done' } : 'ok'),
   }
@@ -55,7 +56,7 @@ test('callForm: a form posted without JS is validated in the page locale (§37)'
   // Tagged English stand-ins for a second locale (the repository is English only).
   globalThis.__brainDict = { es: { 'form.email': 'Bad email [es]', 'form.error': 'Failed [es]' } }
   try {
-    const module = { $forms: { save: { email: 'email!' } }, save: async () => { throw new Error('db down') } }
+    const module = { $server: ['save'], $forms: { save: { email: 'email!' } }, save: async () => { throw new Error('db down') } }
     const bad = await callForm({ module, raw: '_brain=h%2Fsave&email=a%40', ctx, rules, locale: 'es' })
     assert.equal(bad.state['h/save'].errors.email, 'Bad email [es]')
     const failed = await callForm({ module, raw: '_brain=h%2Fsave&email=a%40x.dev', ctx, rules, locale: 'es' })

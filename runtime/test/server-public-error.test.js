@@ -31,10 +31,10 @@ test('callRpc: arbitrary exceptions, built-in errors, 5xx and oversized messages
 })
 
 test('callForm without JS: the public message reaches the re-rendered form error', async () => {
-  const module = { $forms: { save: { title: 'str!' } }, save: async () => { throw { message: 'Title already used' } } }
+  const module = { $server: ['save'], $forms: { save: { title: 'str!' } }, save: async () => { throw { message: 'Title already used' } } }
   const r = await callForm({ module, raw: '_brain=h%2Fsave&title=Hello', ctx, rules })
   assert.equal(r.status, 422)
   assert.equal(r.state['h/save'].error, 'Title already used')
-  const typed = { $forms: { save: { title: 'str!' } }, save: async () => { throw new Conflict('Post was edited elsewhere') } }
+  const typed = { $server: ['save'], $forms: { save: { title: 'str!' } }, save: async () => { throw new Conflict('Post was edited elsewhere') } }
   assert.equal((await callForm({ module: typed, raw: '_brain=h%2Fsave&title=Hello', ctx, rules })).state['h/save'].error, 'Post was edited elsewhere')
 })
