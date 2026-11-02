@@ -142,8 +142,26 @@ fn budget() -> bool {
     COUNT.fetch_add(1, Ordering::Relaxed) < LOGS_PER_MINUTE
 }
 
+/// Distinct (code, origin) pairs already logged by this process; past the cap, only the per-minute budget applies.
+const REMEMBERED_ORIGINS: usize = 256;
+
+/// True the first time this process refuses `origin` under `code`. A browser that keeps sending from the same origin
+/// (an analytics beacon cannot read the 403) repeats one fact, so later refusals add nothing to the log.
+fn first_refusal(memory: &std::sync::Mutex<std::collections::HashSet<String>>, code: &str, origin: Option<&str>) -> bool {
+    let Ok(mut memory) = memory.lock() else { return true };
+    let key = format!("{code} {}", origin.map_or_else(|| "-".to_string(), seen));
+    if memory.contains(&key) {
+        return false;
+    }
+    if memory.len() < REMEMBERED_ORIGINS {
+        memory.insert(key);
+    }
+    true
+}
+
 pub(crate) fn log_refusal(code: &str, phase: &str, method: &str, path: &str, origin: Option<&str>, allowed: &[String]) {
-    if !budget() {
+    static MEMORY: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::LazyLock::new(Default::default);
+    if !first_refusal(&MEMORY, code, origin) || !budget() {
         return;
     }
     crate::log_line!(
@@ -156,6 +174,7 @@ pub(crate) fn log_refusal(code: &str, phase: &str, method: &str, path: &str, ori
             "path": seen(path),
             "rid": crate::http::request_reference(),
             "detail": detail(code, origin, allowed),
+            "repeats": "later refusals of this origin are not logged until the server restarts",
         })
     );
 }
@@ -188,6 +207,21 @@ mod tests {
         assert!(invalid.contains("B0748") && invalid.contains("not a url") && invalid.contains("https://shop.example.test"), "{invalid}");
     }
     use super::*;
+
+    #[test]
+    fn a_refused_origin_is_logged_once_per_process() {
+        let seen = std::sync::Mutex::new(std::collections::HashSet::new());
+        assert!(first_refusal(&seen, "B0740", Some("http://localhost:5192")));
+        assert!(!first_refusal(&seen, "B0740", Some("http://localhost:5192")));
+        assert!(first_refusal(&seen, "B0743", Some("http://localhost:5192")), "another code is another fact");
+        assert!(first_refusal(&seen, "B0740", Some("https://other.example.test")));
+        assert!(first_refusal(&seen, "B0740", None) && !first_refusal(&seen, "B0740", None));
+        for n in 0..REMEMBERED_ORIGINS * 2 {
+            first_refusal(&seen, "B0740", Some(&format!("https://n{n}.example.test")));
+        }
+        assert!(seen.lock().unwrap().len() <= REMEMBERED_ORIGINS, "the memory is bounded");
+        assert!(first_refusal(&seen, "B0740", Some("https://late.example.test")), "past the cap, a new origin still logs");
+    }
 
     #[test]
     fn canonical_origins_have_no_problem() {
