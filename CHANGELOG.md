@@ -12,7 +12,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 ## [0.8.11] - 2026-11-02
 
 - the dev server's `/sitemap.xml` and `llms.txt` stop rendering pages after 3 seconds and list the remaining URLs without their head, and the log says how many pages were rendered
-- the B0710 fix says that a same-origin path with a fixed first segment, such as `redirect('/jobs/' + slug)`, passes, and that a bare `'/' + value` can become `/\host`
+- the B0710 fix says that a same-origin path with a fixed first segment, such as `redirect('/posts/' + slug)`, passes, and that a bare `'/' + value` can become `/\host`
 
 ## [0.8.10] - 2026-11-02
 

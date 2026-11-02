@@ -4,6 +4,6 @@
   "title": "B0710 fix names a fixed path prefix",
   "why": "The B0710 fix only named `redirect('/home')` and the host list, not that a fixed first segment passes.",
   "changelog": [
-    "the B0710 fix says that a same-origin path with a fixed first segment, such as `redirect('/jobs/' + slug)`, passes, and that a bare `'/' + value` can become `/\\host`"
+    "the B0710 fix says that a same-origin path with a fixed first segment, such as `redirect('/posts/' + slug)`, passes, and that a bare `'/' + value` can become `/\\host`"
   ]
 }
