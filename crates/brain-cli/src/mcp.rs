@@ -610,11 +610,12 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
     tools.push(Tool {
         name: "brain_fix",
         description: "Applies every machine fix that brain_check proposes (`edits`), re-checks and returns what was applied plus the errors left (fix those by hand with their `fix`). Reversible with brain_undo.",
-        input_schema: schema([("path", "string", ".brain file or folder; defaults to the current app")], &[]),
-        output_schema: out([("applied", "array"), ("errors", "number"), ("remaining", "array")]),
+        input_schema: schema([("path", "string", ".brain file or folder; defaults to the current app. Only files inside it are written"), ("force", "boolean", "also write files that had uncommitted changes before the run (they may be someone else's work)")], &[]),
+        output_schema: out([("applied", "array"), ("errors", "number"), ("remaining", "array"), ("skipped", "array")]),
         run: Box::new(|a| {
             let root = crate::app_root().ok();
-            let j = crate::run_fix_with(arg(a, "path").map(PathBuf::from), &mut |p, prev| {
+            let force = matches!(a.get("force"), Some(Json::Bool(true)));
+            let j = crate::run_fix_scoped(arg(a, "path").map(PathBuf::from), force, false, &mut |p, prev| {
                 if let Some(r) = &root {
                     journal_record(r, p, Some(prev));
                 }

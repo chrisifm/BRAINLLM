@@ -302,16 +302,19 @@ pub fn example_for(root: &Path, src: &str) -> String {
 
 /// Writes the pending `.brain_env.example` change; `Ok(true)` when the file changed. Only explicit commands call it.
 pub fn sync_example(root: &Path, before_write: &mut dyn FnMut(&Path, &str)) -> Result<bool, String> {
-    let Ok(src) = std::fs::read_to_string(root.join(FILE)) else { return Ok(false) };
-    let want = example_for(root, &src);
+    let Some((have, want)) = stale_example(root) else { return Ok(false) };
     let path = root.join(EXAMPLE);
-    let have = std::fs::read_to_string(&path).unwrap_or_default();
-    if declared(&have) == declared(&want) {
-        return Ok(false);
-    }
     before_write(&path, &have);
     std::fs::write(&path, want).map_err(|e| format!("{EXAMPLE}: {e}"))?;
     Ok(true)
+}
+
+/// `(current, wanted)` when the example file no longer lists the keys of `.brain_env`.
+pub fn stale_example(root: &Path) -> Option<(String, String)> {
+    let src = std::fs::read_to_string(root.join(FILE)).ok()?;
+    let want = example_for(root, &src);
+    let have = std::fs::read_to_string(root.join(EXAMPLE)).unwrap_or_default();
+    (declared(&have) != declared(&want)).then_some((have, want))
 }
 
 /// The example file for `src`: the same comments, keys and sections, with every value removed.

@@ -119,7 +119,8 @@ granular:
   brain add <kind> <name> [--props \"a:num=0 b:str?\"]   creates a file from its template; `brain add` lists every kind
   brain check [path]                 errors and warnings with an exact fix
   brain explain <code>               what a diagnostic code means, why, and a minimal correct example
-  brain fix [path]                   applies the mechanical fixes and checks again
+  brain fix [path] [--force]         applies the mechanical fixes inside path and checks again; without a path, no
+                                     info-level normalizations; files with uncommitted changes are skipped unless --force
   brain edit <operation> <file> ...  checked AST edits: add-prop, remove-prop, rename, move, extract
   brain shot [route] [--text] [--baseline name] [--update-baseline]  Chrome screenshot and accessibility outline
   brain test [path] [--timeout 60] [--heap] [--viewer]   *.test.brain in headless Chrome + accessibility audit (+ leaks); --viewer opts in to Claude/Codex Viewer
@@ -963,32 +964,111 @@ fn stuck_counts() -> brain_mcp::Json {
 /// `brain fix`: applies the `Diag.edits` (mechanical fixes from COMPILER), checks again and repeats until
 /// nothing applicable is left (max. 10 rounds). Per file it applies non-overlapping edits together; if they overlap,
 /// it applies the first Diag's and leaves the rest for the next round.
-pub(crate) fn run_fix(target: Option<PathBuf>) -> Result<brain_mcp::Json, String> {
-    run_fix_with(target, &mut |_, _| {})
-}
-
-/// `run_fix` that reports every file it is about to overwrite (path, previous content) — the MCP journal uses it.
-pub(crate) fn run_fix_with(target: Option<PathBuf>, before_write: &mut dyn FnMut(&Path, &str)) -> Result<brain_mcp::Json, String> {
-    run_fix_only(target, None, before_write)
-}
-
-/// `run_fix_with` limited to the diagnostics whose code is in `only` (`None` = every code).
+/// `run_fix_only` (every code unless `only`) is the unscoped form for generators and migrations, which write files
+/// they own; `run_fix_scoped` is what people and agents run. `before_write` gets each file about to be overwritten.
+///
+/// Limited to the diagnostics whose code is in `only` (`None` = every code).
 pub(crate) fn run_fix_only(target: Option<PathBuf>, only: Option<&[&str]>, before_write: &mut dyn FnMut(&Path, &str)) -> Result<brain_mcp::Json, String> {
+    let target = absolute_target(target)?;
     let lock_root = scaffold::outer_root(&target.clone().unwrap_or_else(cwd));
     let _writer = lock_root.as_ref().map(|root|edit::writer_lock(root)).transpose()?;
-    run_fix_only_body(target, only, before_write)
+    run_fix_only_body(target, only, before_write, None)
 }
 /// Internal generator continuation. The caller keeps this exact project's writer/lease guard alive.
 pub(crate) fn run_fix_only_with_writer(target: Option<PathBuf>, only: Option<&[&str]>, before_write: &mut dyn FnMut(&Path, &str), _writer: &std::fs::File) -> Result<brain_mcp::Json, String> {
-    run_fix_only_body(target, only, before_write)
+    run_fix_only_body(target, only, before_write, None)
 }
-fn run_fix_only_body(target: Option<PathBuf>, only: Option<&[&str]>, before_write: &mut dyn FnMut(&Path, &str)) -> Result<brain_mcp::Json, String> {
+/// `brain fix` as a person or an agent runs it (CLI, MCP, `doctor --fix`), where the files may hold someone else's
+/// work: with a target it writes only inside it; without one it leaves info-level normalizations alone (unless
+/// `all_levels`: `doctor --fix` applies every mechanical edit); and it never writes a file that had uncommitted changes
+/// before it started, unless `force` (those files are listed in `skipped`).
+pub(crate) fn run_fix_scoped(target: Option<PathBuf>, force: bool, all_levels: bool, before_write: &mut dyn FnMut(&Path, &str)) -> Result<brain_mcp::Json, String> {
+    let target = absolute_target(target)?;
+    let lock_root = scaffold::outer_root(&target.clone().unwrap_or_else(cwd));
+    let _writer = lock_root.as_ref().map(|root|edit::writer_lock(root)).transpose()?;
+    let start = match &target {
+        Some(t) => std::path::absolute(t).map_err(|e| e.to_string())?,
+        None => app_root()?,
+    };
+    let dirty = if force { std::collections::HashSet::new() } else { dirty_files(&start) };
+    let scope = FixScope { inside: target.as_ref().map(|_| canonical(&start)), dirty, skip_info: target.is_none() && !all_levels };
+    run_fix_only_body(target, None, before_write, Some(&scope))
+}
+
+/// A relative target (`brain fix comp/x.brain`) failed with "No such file or directory": the project lock walked up
+/// from a relative path. Every fix entry point works from the absolute path.
+fn absolute_target(target: Option<PathBuf>) -> Result<Option<PathBuf>, String> {
+    target.map(|t| std::path::absolute(&t).map_err(|e| e.to_string())).transpose()
+}
+
+const OUTSIDE: &str = "outside the target";
+
+struct FixScope {
+    /// The target the user named: nothing outside it is written.
+    inside: Option<PathBuf>,
+    /// Files with uncommitted changes (or untracked) when the run started: they may hold someone else's work.
+    dirty: std::collections::HashSet<PathBuf>,
+    /// Leave info-level normalizations alone (`brain fix` without a target).
+    skip_info: bool,
+}
+
+/// The real path, also for a file an edit is about to create (its folder exists, or an ancestor does).
+fn canonical(p: &Path) -> PathBuf {
+    if let Ok(c) = p.canonicalize() {
+        return c;
+    }
+    match (p.parent(), p.file_name()) {
+        (Some(d), Some(n)) => canonical(d).join(n),
+        _ => p.to_path_buf(),
+    }
+}
+
+/// Every file git reports as changed or untracked in the repository that holds `at` (empty outside a repository).
+fn dirty_files(at: &Path) -> std::collections::HashSet<PathBuf> {
+    let dir = if at.is_dir() { at } else { at.parent().unwrap_or(at) };
+    let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(dir).args(args).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().ok().filter(|o| o.status.success()).map(|o| o.stdout);
+    let (Some(top), Some(status)) = (git(&["rev-parse", "--show-toplevel"]), git(&["status", "--porcelain=v1", "-z", "--untracked-files=all"])) else { return Default::default() };
+    let top = PathBuf::from(String::from_utf8_lossy(&top).trim());
+    let mut out = std::collections::HashSet::new();
+    let mut items = status.split(|b| *b == 0).filter(|i| !i.is_empty());
+    while let Some(item) = items.next() {
+        if item.len() < 4 {
+            continue;
+        }
+        out.insert(canonical(&top.join(String::from_utf8_lossy(&item[3..]).as_ref())));
+        // A rename or copy is followed by its original path.
+        if matches!(item[0], b'R' | b'C') {
+            items.next();
+        }
+    }
+    out
+}
+
+fn run_fix_only_body(target: Option<PathBuf>, only: Option<&[&str]>, before_write: &mut dyn FnMut(&Path, &str), scope: Option<&FixScope>) -> Result<brain_mcp::Json, String> {
     use brain_mcp::Json;
     let mut applied: Vec<Json> = Vec::new();
+    let mut skipped: Vec<(String, &'static str)> = Vec::new();
+    // Why a file is not written in a scoped run (`None` = it may be written).
+    let refuse = |path: &Path| -> Option<&'static str> {
+        let s = scope?;
+        let real = canonical(path);
+        if s.inside.as_ref().is_some_and(|t| !real.starts_with(t)) {
+            return Some(OUTSIDE);
+        }
+        s.dirty.contains(&real).then_some("has uncommitted changes from before this run (commit them or pass --force)")
+    };
     for _round in 0..10 {
         let (_, diags, base) = run_check_base(target.clone())?;
         let mut by_file: Vec<(String, Vec<&compiler::Diag>)> = Vec::new();
-        for d in diags.iter().filter(|d| !d.edits.is_empty() && only.is_none_or(|o| o.contains(&d.code))) {
+        // Without a target a scoped run fixes problems, not style: info-level normalizations wait for a target.
+        let wanted = |d: &&compiler::Diag| !(scope.is_some_and(|s| s.skip_info) && d.is_info());
+        for d in diags.iter().filter(|d| !d.edits.is_empty() && only.is_none_or(|o| o.contains(&d.code))).filter(wanted) {
+            if let Some(why) = refuse(&base.join(&d.file)) {
+                if !skipped.iter().any(|(f, _)| *f == d.file) {
+                    skipped.push((d.file.clone(), why));
+                }
+                continue;
+            }
             match by_file.iter_mut().find(|(f, _)| *f == d.file) {
                 Some((_, v)) => v.push(d),
                 None => by_file.push((d.file.clone(), vec![d])),
@@ -1049,7 +1129,13 @@ fn run_fix_only_body(target: Option<PathBuf>, only: Option<&[&str]>, before_writ
     // The template follows the edits above; a `only` run was asked for specific codes.
     if only.is_none() || only.is_some_and(|o| o.contains(&"B0727")) {
         let app = target.as_deref().map(|p| std::path::absolute(p).unwrap_or(p.to_path_buf())).and_then(|p| scaffold::find_root(&p)).or_else(|| if target.is_none() { app_root().ok() } else { None });
-        if let Some(app) = app
+        let refused = app.as_ref().and_then(|a| refuse(&a.join(env::EXAMPLE)));
+        if let Some(why) = refused {
+            // Outside the target is simply not this run's business; a dirty example that needs the update is reported.
+            if why != OUTSIDE && app.as_deref().and_then(env::stale_example).is_some() {
+                skipped.push((env::EXAMPLE.to_string(), why));
+            }
+        } else if let Some(app) = app
             && env::sync_example(&app, before_write)?
         {
             applied.push(Json::obj([("code", Json::str("B0727")), ("file", Json::str(env::EXAMPLE)), ("line", Json::Num(1.0)), ("fix", Json::str("updated with the current keys (no values); commit it"))]));
@@ -1057,15 +1143,20 @@ fn run_fix_only_body(target: Option<PathBuf>, only: Option<&[&str]>, before_writ
     }
     let (_, remaining) = run_check(target)?;
     let errors = remaining.iter().filter(|d| !d.is_warning()).count();
-    Ok(Json::obj([
+    let mut out = vec![
         ("applied", Json::Arr(applied)),
         ("errors", Json::Num(errors as f64)),
         ("remaining", Json::parse(&diags_json(&remaining)).unwrap_or(Json::Arr(vec![]))),
-    ]))
+    ];
+    if scope.is_some() {
+        out.push(("skipped", Json::Arr(skipped.iter().map(|(f, why)| Json::obj([("file", Json::str(f)), ("reason", Json::str(*why))])).collect())));
+    }
+    Ok(Json::Obj(out.into_iter().map(|(k, v)| (k.to_string(), v)).collect()))
 }
 
 fn cmd_fix(args: &[String]) -> ExitCode {
-    match run_fix(positional(args, &[]).first().map(PathBuf::from)) {
+    let force = args.iter().any(|a| a == "--force");
+    match run_fix_scoped(positional(args, &[]).first().map(PathBuf::from), force, false, &mut |_, _| {}) {
         Err(e) => {
             if want_json(args) { println!("{}", error_json(&e)) } else { eprintln!("error: {e}") }
             ExitCode::from(2)
@@ -1079,6 +1170,12 @@ fn cmd_fix(args: &[String]) -> ExitCode {
                     for d in a {
                         let s = |k: &str| d.get(k).and_then(brain_mcp::Json::as_str).unwrap_or("").to_string();
                         println!("✓ {} {} — {}", s("code"), s("file"), s("fix"));
+                    }
+                    if let Some(brain_mcp::Json::Arr(k)) = j.get("skipped") {
+                        for d in k {
+                            let s = |key: &str| d.get(key).and_then(brain_mcp::Json::as_str).unwrap_or("").to_string();
+                            eprintln!("skipped {}: {}", s("file"), s("reason"));
+                        }
                     }
                     eprintln!("{} fix(es) applied; {errors} error(s) left{}", a.len(), if errors > 0 { ": fix them with the `fix` from `brain check`" } else { "" });
                 }
@@ -2502,7 +2599,7 @@ fn cmd_doctor(args: &[String]) -> ExitCode {
     #[cfg(unix)]
     testrun::set_viewer(testrun::viewer_requested(args, std::env::var("BRAIN_VIEWER").ok().as_deref()));
     let checked = if args.iter().any(|a| a == "--fix") {
-        run_fix(target.clone()).and_then(|fix| run_doctor(target).map(|(ok, mut report)| {
+        run_fix_scoped(target.clone(), args.iter().any(|a| a == "--force"), true, &mut |_, _| {}).and_then(|fix| run_doctor(target).map(|(ok, mut report)| {
             if let brain_mcp::Json::Obj(ref mut fields) = report { fields.push(("fix".into(), fix)); }
             (ok, report)
         }))
