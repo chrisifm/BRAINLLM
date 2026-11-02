@@ -1,0 +1,9 @@
+{
+  "id": "dev-sitemap-render-budget",
+  "kind": "fix",
+  "title": "Dev sitemap within a time budget",
+  "why": "`brain run` rendered up to 300 pages one after another to build `/sitemap.xml`; with slow loads the request ran past two minutes.",
+  "changelog": [
+    "the dev server's `/sitemap.xml` and `llms.txt` stop rendering pages after 3 seconds and list the remaining URLs without their head, and the log says how many pages were rendered"
+  ]
+}
