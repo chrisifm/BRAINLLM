@@ -417,7 +417,7 @@ pub fn apply(root: &Path, cfg: &CacheCfg, pages: &[PageRef], extra_csp: &[(Strin
 }
 
 /// First lines of `_headers` when dist/ holds server code (`server.mjs`, `_server/`).
-pub const SERVER_CODE_NOTE: &str = "# This dist/ holds server code (server.mjs, _server/). Do not upload it to a static host: it would publish\n# that code as files, and _headers cannot refuse a path. Serve it with `brain start` behind _brain/nginx.conf or\n# _brain/Caddyfile, which refuse every private path.\n";
+pub const SERVER_CODE_NOTE: &str = "# This dist/ holds server code (server.mjs, _server/). Do not upload it to a static host: it would publish\n# that code as files, and _headers cannot refuse a path. Serve it with `brain start` (alone or behind the proxy\n# `brain deploy config nginx` writes); it and every generated host config refuse these paths.\n";
 
 /// Precache list: core and router (every `_b/*.js` the shell pages load first), each route's entry chunks and CSS,
 /// then the offline page, while the total raw size stays under `budget` bytes. Pages themselves are not precached

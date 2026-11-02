@@ -1,0 +1,9 @@
+{
+  "id": "json-in-script",
+  "kind": "fix",
+  "title": "JSON in script elements escapes every <",
+  "why": "Prerendered JSON-LD and page props escaped only `</`, so `<!--<script` in author data could confuse the HTML parser.",
+  "changelog": [
+    "Prerendered JSON-LD, page props and route data escape `<`, `>`, `&`, U+2028 and U+2029, as SSR already did"
+  ]
+}
