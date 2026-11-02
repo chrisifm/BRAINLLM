@@ -49,12 +49,15 @@ test('docs that git ignores (local notes) stay out of the index', () => {
     execFileSync('git', ['init', '-q', dir], { stdio: 'ignore' })
     mkdirSync(join(dir, 'docs'), { recursive: true })
     writeFileSync(join(dir, 'SPEC.md'), '# Spec\n')
-    writeFileSync(join(dir, '.git/info/exclude'), 'docs/LOCAL.md\n')
+    writeFileSync(join(dir, '.git/info/exclude'), 'docs/LOCAL.md\ndocs/backend/draft.md\n')
+    mkdirSync(join(dir, 'docs/backend'), { recursive: true })
+    writeFileSync(join(dir, 'docs/backend/draft.md'), '# Draft\n\nUnlinked on purpose.\n')
     writeFileSync(join(dir, 'docs/GUIDE.md'), '# Guide\n\nShared page.\n')
     writeFileSync(join(dir, 'docs/LOCAL.md'), '# Local notes\n\nNever published.\n')
     const index = buildIndex(dir)
     assert.match(index, /\[Guide\]\(GUIDE\.md\)/)
-    assert.doesNotMatch(index, /LOCAL\.md/)
+    assert.doesNotMatch(index, /LOCAL\.md|draft\.md/)
+    assert.deepEqual(unlinkedBackendPages(dir), [])
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

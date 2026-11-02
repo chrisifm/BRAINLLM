@@ -149,7 +149,8 @@ export function buildIndex(root) {
 
 // docs/backend/*.md pages that docs/BACKEND.md does not link.
 export function unlinkedBackendPages(root) {
-  const files = mdFiles(join(root, 'docs/backend'))
+  const ignored = ignoredDocs(root)
+  const files = mdFiles(join(root, 'docs/backend')).filter((f) => !ignored.has(`docs/backend/${f}`))
   if (!files.length) return []
   const hub = existsSync(join(root, 'docs/BACKEND.md')) ? readFileSync(join(root, 'docs/BACKEND.md'), 'utf8') : ''
   return files.filter((f) => !hub.includes(`backend/${f}`)).map((f) => `docs/backend/${f}`)
