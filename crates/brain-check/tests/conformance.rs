@@ -80,3 +80,23 @@ fn row99_no_opacity_on_text_color() {
     assert_eq!(d.iter().map(|d| d.code).collect::<Vec<_>>(), ["B0408"]);
     assert!(diags("comp/x.brain", "<p class=\"a\">x</p><style>.a { opacity: .5 }</style>", &tokens()).is_empty());
 }
+
+// `brain fix` turned `padding: 2px` into `var(--focus-w)`: equal by value, not by meaning. B0305 substitutes only a
+// token named for spacing; any other match stays a warning without an edit.
+#[test]
+fn b0305_substitutes_only_spacing_tokens() {
+    let toks = |extra: &[(&str, &str)]| {
+        let mut t = vec![("--space-1".to_string(), "4px".to_string())];
+        t.extend(extra.iter().map(|(n, v)| (n.to_string(), v.to_string())));
+        brain_check::Ctx { tokens: Some(t), ..Default::default() }
+    };
+    let css = "<p class=\"a\">x</p><style>.a { padding: 2px; }</style>";
+    let d = diags("comp/x.brain", css, &toks(&[("--focus-w", "2px"), ("--radius-xs", "2px")]));
+    let b = d.iter().find(|d| d.code == "B0305").unwrap_or_else(|| panic!("{d:#?}"));
+    assert!(b.edits.is_empty() && b.level == Severity::Warning, "{b:#?}");
+    for name in ["--gap-xs", "--gutter", "--pad-tight", "--spacing-hair", "--space-0"] {
+        let d = diags("comp/x.brain", css, &toks(&[("--focus-w", "2px"), (name, "2px")]));
+        let b = d.iter().find(|d| d.code == "B0305").unwrap_or_else(|| panic!("{d:#?}"));
+        assert_eq!((b.level, b.edits.iter().map(|e| e.text.clone()).collect::<Vec<_>>()), (Severity::Info, vec![format!("var({name})")]), "{name}");
+    }
+}

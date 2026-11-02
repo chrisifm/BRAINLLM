@@ -54,6 +54,13 @@ fn is_spacing(prop: &str) -> bool {
     matches!(prop, "gap" | "row-gap" | "column-gap") || ["padding", "margin", "inset", "scroll-padding", "scroll-margin"].iter().any(|p| prop == *p || prop.starts_with(&format!("{p}-")))
 }
 
+/// A token named for spacing (`--space-2`, `--gap`, `--gutter-lg`, `--pad-x`, `--inset`): the only kind B0305 may
+/// substitute for a literal length.
+fn spacing_token(name: &str) -> bool {
+    let n = name.trim_start_matches("--");
+    ["space", "spacing", "gap", "gutter", "pad", "padding", "inset", "margin"].iter().any(|p| n == *p || n.starts_with(&format!("{p}-")))
+}
+
 /// One literal found in a declaration value: byte range inside the value and its text.
 struct Lit {
     start: usize,
@@ -213,7 +220,8 @@ impl Checker<'_> {
             let lits: Vec<Lit> = words(value.trim()).into_iter().filter(|w| is_length_literal(&w.text)).collect();
             let Some(first) = lits.first() else { return };
             let tokens = tokens.unwrap_or(&[]);
-            let matched: Vec<Option<&str>> = lits.iter().map(|l| tokens.iter().find(|(n, v)| n.starts_with("--space") && v.trim() == l.text).or_else(|| tokens.iter().find(|(_, v)| v.trim() == l.text)).map(|(n, _)| n.as_str())).collect();
+            // Only a token whose name says it is spacing: `--focus-w: 2px` equals `padding: 2px` by value, not by meaning.
+            let matched: Vec<Option<&str>> = lits.iter().map(|l| tokens.iter().find(|(n, v)| n.starts_with("--space") && v.trim() == l.text).or_else(|| tokens.iter().find(|(n, v)| spacing_token(n) && v.trim() == l.text)).map(|(n, _)| n.as_str())).collect();
             if matched.iter().all(Option::is_some) {
                 let edits: Vec<(u32, u32, String)> = lits.iter().zip(&matched).map(|(l, t)| ((base + l.start) as u32, (base + l.end) as u32, format!("var({})", t.unwrap_or_default()))).collect();
                 let t = matched[0].unwrap_or_default();
