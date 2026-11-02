@@ -700,3 +700,128 @@ pub(crate) fn same_origin_helpers(stmts: &[Stmt]) -> (HashSet<String>, HashSet<S
     exported.extend(members.into_iter().filter(|(_, f)| func_returns_same_origin(f, &known)).map(|(k, _)| k));
     (known, exported)
 }
+
+/// Where a value is known to be on this origin: inside `if (new URL(x, location.origin).origin === location.origin) …`,
+/// or after `if (new URL(x, location.origin).origin !== location.origin) return` in the same block. B0814 accepts
+/// `location.href = x` there.
+fn origin_guarded(stmts: &[Stmt], out: &mut Vec<(String, Span)>) {
+    let own = |e: &Expr| path(e).is_some_and(|p| matches!(p.as_str(), "location.origin" | "window.location.origin" | "document.location.origin"));
+    let checked = |e: &Expr| match e.unparen() {
+        Expr::Member { obj, prop: MemberProp::Name(p), .. } if p.name == "origin" => match obj.unparen() {
+            Expr::New { callee, args, .. } if path(callee).as_deref() == Some("URL") && args.get(1).is_some_and(|b| own(b)) => args.first().and_then(path),
+            _ => None,
+        },
+        _ => None,
+    };
+    let guard = |t: &Expr| match t.unparen() {
+        Expr::Binary { op, left, right, .. } if matches!(*op, "===" | "!==" | "==" | "!=") => {
+            checked(left).filter(|_| own(right)).or_else(|| checked(right).filter(|_| own(left))).map(|p| (p, op.starts_with('=')))
+        }
+        _ => None,
+    };
+    let leaves = |s: &Stmt| match s {
+        Stmt::Return { .. } | Stmt::Throw { .. } => true,
+        Stmt::Block { body, .. } => matches!(body.last(), Some(Stmt::Return { .. } | Stmt::Throw { .. })),
+        _ => false,
+    };
+    let last = stmts.last().map(|x| x.span().end).unwrap_or(0);
+    for s in stmts {
+        if let Stmt::If { test, cons, span, .. } = s
+            && let Some((p, same)) = guard(test)
+        {
+            if same {
+                out.push((p, cons.span()));
+            } else if leaves(cons) {
+                out.push((p, Span { start: span.end, end: last, ..*span }));
+            }
+        }
+        match s {
+            Stmt::If { cons, alt, .. } => {
+                origin_guarded(std::slice::from_ref(cons.as_ref()), out);
+                if let Some(a) = alt {
+                    origin_guarded(std::slice::from_ref(a.as_ref()), out);
+                }
+            }
+            Stmt::Block { body, .. } => origin_guarded(body, out),
+            Stmt::Func(f) => func_guards(f, out),
+            Stmt::Export { decl, .. } => origin_guarded(std::slice::from_ref(decl.as_ref()), out),
+            Stmt::Var(v) => {
+                for d in &v.decls {
+                    if let Some(Expr::Func(f)) = d.init.as_ref().map(Expr::unparen) {
+                        func_guards(f, out);
+                    }
+                }
+            }
+            Stmt::Try { block, handler, finalizer, .. } => {
+                origin_guarded(block, out);
+                origin_guarded(handler.as_deref().unwrap_or(&[]), out);
+                origin_guarded(finalizer.as_deref().unwrap_or(&[]), out);
+            }
+            Stmt::ForOf { body, .. } => origin_guarded(std::slice::from_ref(body.as_ref()), out),
+            _ => {}
+        }
+    }
+}
+
+fn func_guards(f: &Func, out: &mut Vec<(String, Span)>) {
+    if let FnBody::Block(b) = &f.body {
+        origin_guarded(b, out);
+    }
+}
+
+impl Checker<'_> {
+    /// B0814 (warning): browser navigation to a URL built at runtime (`location.href = x`, `location.assign(x)`,
+    /// `location.replace(x)`, `window.open(x)`). Accepted: a literal, a value whose host cannot change, a same-origin
+    /// path (the B0710 rules, helpers included) and a value checked against `location.origin` in the same file.
+    pub(crate) fn client_redirect(&mut self, e: &Expr) {
+        if self.server_ctx {
+            return;
+        }
+        let shadowed = self.scopes.lookup("location").is_some();
+        let is_loc = |x: &Expr| match path(x).as_deref() {
+            Some("location") => !shadowed,
+            Some("window.location" | "document.location") => true,
+            _ => false,
+        };
+        let (sink, target, span) = match e {
+            Expr::Call { callee, args, span, .. } => {
+                let Some(a) = args.first() else { return };
+                match callee.unparen() {
+                    Expr::Member { obj, prop: MemberProp::Name(m), .. } if matches!(m.name.as_str(), "assign" | "replace") && is_loc(obj) => (format!("location.{}()", m.name), a, *span),
+                    c if path(c).as_deref() == Some("window.open") => ("window.open()".to_string(), a, *span),
+                    _ => return,
+                }
+            }
+            Expr::Assign { op: "=", target, value, span } => match target.unparen() {
+                Expr::Member { obj, prop: MemberProp::Name(p), .. } if p.name == "href" && is_loc(obj) => ("location.href".to_string(), value.as_ref(), *span),
+                t if is_loc(t) => ("location".to_string(), value.as_ref(), *span),
+                _ => return,
+            },
+            _ => return,
+        };
+        if literal_value(target).is_some() {
+            return;
+        }
+        let prefix = url_prefix(target);
+        let relative = prefix.as_deref().is_some_and(|p| p.starts_with('?') || p.starts_with('#') || p.starts_with("./") || p.starts_with("../"));
+        let fixed = prefix.as_deref().and_then(|p| fixed_host(p, false)).is_some_and(|h| !h.is_empty());
+        if relative || fixed {
+            return;
+        }
+        let mut known = same_origin_helpers(&self.c.script).0;
+        known.extend(self.ctx.redirect_helpers.iter().cloned());
+        let mut guarded = Vec::new();
+        origin_guarded(&self.c.script, &mut guarded);
+        let inside = |p: &String| guarded.iter().any(|(g, at)| g == p && at.start <= span.start && span.end <= at.end);
+        if same_origin_target(target, &known, false) || path(target).is_some_and(|p| inside(&p)) {
+            return;
+        }
+        let v = self.text(target.span()).to_string();
+        self.push(
+            "B0814",
+            span,
+            format!("`{sink}` gets a URL built at runtime: a crafted link can send the user to any site (open redirect)"),
+            format!("navigate to a same-origin path (`'/items/' + id`, or a helper whose every return starts with `/`), or check it first: `if (new URL({v}, location.origin).origin === location.origin)`"),
+        );
+    }
+}

@@ -38,7 +38,7 @@ fn parse(src: &str) -> (Vec<Case>, Vec<(String, String)>) {
 
 fn in_scope(d: &Value) -> bool {
     let code = d["code"].as_str().unwrap_or("");
-    code.starts_with("B07") || matches!(code, "B0808" | "B0809" | "B0810" | "B0811") || code.starts_with("B14") || code.starts_with("B18") || d["level"] == "error"
+    code.starts_with("B07") || matches!(code, "B0808" | "B0809" | "B0810" | "B0811" | "B0814") || code.starts_with("B14") || code.starts_with("B18") || d["level"] == "error"
 }
 
 fn run(root: &Path, case: &Case) -> Vec<String> {
@@ -102,7 +102,7 @@ fn every_code_of_the_families_has_a_case_or_a_reason() {
     let excused: BTreeSet<String> = unreachable.iter().map(|(c, _)| c.clone()).collect();
     let mut missing = vec![];
     for (code, ..) in brain_parse::codes::CODES {
-        if (code.starts_with("B07") || matches!(*code, "B0808" | "B0809" | "B0810" | "B0811") || code.starts_with("B14")) && !covered.contains(*code) && !excused.contains(*code) {
+        if (code.starts_with("B07") || matches!(*code, "B0808" | "B0809" | "B0810" | "B0811" | "B0814") || code.starts_with("B14")) && !covered.contains(*code) && !excused.contains(*code) {
             missing.push(*code);
         }
     }

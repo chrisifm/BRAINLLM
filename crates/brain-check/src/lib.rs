@@ -1261,6 +1261,7 @@ impl<'a> Checker<'a> {
     fn expr(&mut self, e: &Expr) {
         self.llm_client(e);
         self.location_nav(e);
+        self.client_redirect(e);
         self.live_scope(e);
         self.form_replace(e);
         self.explicit_v(e);
