@@ -77,6 +77,9 @@ pub(crate) fn check(args: &[String]) -> Result<(), String> {
             if !inline {
                 tokens.next();
             }
+        } else if *command == "seo" && name == "--site" {
+            // the audit reads dist/: its absolute URLs were fixed when it was built, a flag here could not change them
+            return Err("unknown flag `--site` for brain seo: it audits dist/, whose URLs were made absolute when it was built; fix: `brain build --site https://your-domain` (or set PUBLIC_SITE_URL in .brain_env) and audit again, or `brain seo audit --url https://your-domain` for the deployed site".into());
         } else if !switches.contains(&name) && !GLOBAL.contains(&name) {
             let known: Vec<&str> = valued.iter().chain(switches.iter()).copied().collect();
             let accepted = if known.is_empty() { "it takes no flags besides --json".to_string() } else { format!("it accepts {}", known.join(", ")) };
@@ -95,6 +98,14 @@ mod tests {
     }
 
     /// Commands the documentation shows must parse; a flag added to a command but not to `TABLE` stops working silently.
+    #[test]
+    fn seo_site_points_at_the_build_that_fixes_the_domain() {
+        for args in [&["seo", "audit", "--site", "https://example.dev"][..], &["seo", "--site=https://example.dev"]] {
+            let e = run(args).unwrap_err();
+            assert!(e.contains("brain build --site https://your-domain") && e.contains("--url"), "{e}");
+        }
+    }
+
     #[test]
     fn every_flag_the_documentation_shows_is_accepted() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
