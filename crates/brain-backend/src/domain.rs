@@ -1281,9 +1281,9 @@ impl<'a> Engine<'a> {
                     if step.owned && !owns(&existing, self.user) {
                         return Err(Failure::Denied { resource: r.name.clone(), id, label: label.into() });
                     }
-                    // A read step answers what the resource's read policy shows this caller: a row it may not read is
-                    // missing, so an operation is no oracle for other users' records.
-                    if kind == Kind::Read && !self.may_read(tx, r, id).await.map_err(located(&r.name, Some(label)))? {
+                    // A keyed step reaches only what the resource's read policy shows this caller: a row it may not read
+                    // is missing, so an operation neither changes, returns nor confirms other users' records.
+                    if !self.may_read(tx, r, id).await.map_err(located(&r.name, Some(label)))? {
                         return Err(Failure::Missing(label.into()));
                     }
                     match kind {
@@ -1317,7 +1317,14 @@ impl<'a> Engine<'a> {
                     let user = self.user;
                     let owned = step.owned;
                     let can = move |row: &Value| !owned || owns(row, user);
-                    self.upsert(tx, r, &data, &step.key, true, Some(label), &can).await?.0
+                    let (row, created) = self.upsert(tx, r, &data, &step.key, true, Some(label), &can).await?;
+                    // The key matched a row this caller may not read: refuse as the upsert endpoint refuses a row it may
+                    // not update. The failure rolls the whole operation back, so the write never lands.
+                    let row_id = row["id"].as_str().and_then(|s| Uuid::parse_str(s).ok()).ok_or_else(|| Failure::Missing(label.into()))?;
+                    if !created && !self.may_read(tx, r, row_id).await.map_err(located(&r.name, Some(label)))? {
+                        return Err(Failure::Forbidden);
+                    }
+                    row
                 }
                 Kind::Action | Kind::Transition => {
                     let member = target.split_once('.').map(|(_, m)| m).unwrap_or_default();
@@ -1329,8 +1336,12 @@ impl<'a> Engine<'a> {
                         let t = domain.transitions.as_ref().ok_or_else(|| Failure::Missing(label.into()))?;
                         (t.transitions.get(member).ok_or_else(|| Failure::Missing(label.into()))?.action(&t.field), Some(member))
                     };
+                    let id = id.expect("validated id");
+                    if !self.may_read(tx, r, id).await.map_err(located(&r.name, Some(label)))? {
+                        return Err(Failure::Missing(label.into()));
+                    }
                     let steps_now = steps.clone();
-                    self.act(tx, r, &action, id.expect("validated id"), &step_input, authority, Some(label), &steps_now, state).await?
+                    self.act(tx, r, &action, id, &step_input, authority, Some(label), &steps_now, state).await?
                 }
             };
             steps.insert(step.name.clone(), record);

@@ -36,6 +36,11 @@ fn shop_domain() -> Domain {
     domain["operations"]["paid_order"] = paid;
     // A read step by an id from the input, without `owned: true`, on a resource whose rows only their owner reads.
     domain["operations"]["peek_order"] = json!({"input":{"order_id":"str!"},"roles":["user","admin"],"steps":[{"as":"order","read":"shop_orders","id":"$input.order_id"}]});
+    // Keyed writes without `owned: true` on rows only their owner reads: each must answer as if the row were absent.
+    domain["operations"]["claim_task"] = json!({"input":{"code":"str!","title":"str!"},"roles":["user"],"steps":[{"as":"task","upsert":"task_items","key":["code"],"data":{"code":"$input.code","title":"$input.title"}}]});
+    domain["operations"]["rename_task"] = json!({"input":{"task":"str!","title":"str!"},"roles":["user"],"steps":[{"as":"task","update":"task_items","id":"$input.task","data":{"title":"$input.title"}}]});
+    domain["operations"]["drop_task"] = json!({"input":{"task":"str!"},"roles":["user"],"steps":[{"as":"task","delete":"task_items","id":"$input.task"}]});
+    domain["operations"]["pay_order"] = json!({"input":{"order":"str!"},"roles":["user"],"steps":[{"as":"order","transition":"shop_orders.pay","id":"$input.order"}]});
     serde_json::from_value(domain).unwrap()
 }
 
@@ -333,6 +338,41 @@ async fn postgres_operation_read_step_applies_the_resource_read_policy() {
     assert_eq!((status, &body["result"]["order"]["id"]), (200, &order["id"]), "the owner reads it: {body}");
     let (status, body) = peek(s.admin.clone(), id(&order)).await;
     assert_eq!(status, 200, "a role with a read grant reads it: {body}");
+}
+
+/// Every keyed write step answers only for rows the caller could read: an update, delete, action or transition by id
+/// on another user's private row is missing, and an upsert whose key matches one is refused, so an operation never
+/// changes or returns a row its caller cannot see. The owner still reaches the same row through the same operation.
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn postgres_operation_write_steps_never_reach_rows_the_caller_cannot_read() {
+    let s = shop().await;
+    let code = format!("w-{}", s.run);
+    let (status, task) = call(&s.app, "POST", "/api/task_items", &s.alice, Some(json!({"code":code,"title":"Alice's"}))).await;
+    assert_eq!(status, 200, "{task}");
+    let (status, order) = call(&s.app, "POST", "/api/shop_orders", &s.alice, Some(json!({"product":"p","quantity":1}))).await;
+    assert_eq!(status, 200, "{order}");
+    let op = |token: &str, name: &str, input: Value| {
+        let (app, token, uri) = (s.app.clone(), token.to_string(), format!("/_brain/operations/{name}"));
+        async move { call(&app, "POST", &uri, &token, Some(input)).await }
+    };
+    let (status, body) = op(&s.bob, "claim_task", json!({"code":code,"title":"Bob's"})).await;
+    assert_eq!(status, 403, "an upsert onto another user's private row is refused: {body}");
+    assert!(body.to_string().find("Alice's").is_none(), "the refused row is not returned: {body}");
+    let (status, body) = op(&s.bob, "rename_task", json!({"task":id(&task),"title":"Bob's"})).await;
+    assert_eq!((status, &body["error"]["fields"]["task"]), (404, &json!("Not found")), "update: {body}");
+    let (status, body) = op(&s.bob, "pay_order", json!({"order":id(&order)})).await;
+    assert_eq!((status, &body["error"]["fields"]["order"]), (404, &json!("Not found")), "transition: {body}");
+    let (status, body) = op(&s.bob, "drop_task", json!({"task":id(&task)})).await;
+    assert_eq!((status, &body["error"]["fields"]["task"]), (404, &json!("Not found")), "delete: {body}");
+    let (status, body) = call(&s.app, "GET", &format!("/api/task_items/{}", id(&task)), &s.alice, None).await;
+    assert_eq!((status, &body["data"]["title"]), (200, &json!("Alice's")), "the row is unchanged: {body}");
+    let (status, body) = op(&s.alice, "rename_task", json!({"task":id(&task),"title":"Renamed"})).await;
+    assert_eq!((status, &body["result"]["task"]["data"]["title"]), (200, &json!("Renamed")), "the owner reaches it: {body}");
+    let (status, body) = op(&s.alice, "claim_task", json!({"code":code,"title":"Again"})).await;
+    assert_eq!((status, &body["result"]["task"]["data"]["title"]), (200, &json!("Again")), "the owner upserts it: {body}");
+    let (status, body) = op(&s.alice, "drop_task", json!({"task":id(&task)})).await;
+    assert_eq!(status, 200, "the owner deletes it: {body}");
 }
 
 /// A malformed id is the caller's mistake on every record route, including the action and transition routes.

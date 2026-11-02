@@ -337,7 +337,7 @@ export default { title: 'str!' }
 <meta server>
 export default { read: ['owner'], create: ['admin'], update: ['admin'], delete: ['admin'] }
 
-### B0809 operation step reaches rows its role cannot read
+### B0809 operation step cannot reach rows its role cannot read
 @expect B0809 server/operations/touch.jsbrain 1:1
 @file server/resources/items/schema.jsbrain
 <meta server>
@@ -348,6 +348,19 @@ export default { read: ['owner'], create: ['user'], update: ['owner'], delete: [
 @file server/operations/touch.jsbrain
 <meta server>
 export default { roles: ['user'], input: { item: 'str!' }, steps: [{ as: 'item', update: 'items', id: '$input.item', data: { title: 'seen' } }] }
+
+### B0809 operation upsert step cannot reach rows its role cannot read
+@expect B0794 server/resources/items/schema.jsbrain 1:1
+@expect B0809 server/operations/claim.jsbrain 1:1
+@file server/resources/items/schema.jsbrain
+<meta server>
+export default { title: 'str!', code: { type: 'str!', unique: true } }
+@file server/resources/items/policy.jsbrain
+<meta server>
+export default { read: ['owner'], create: ['user'], update: ['owner'], delete: ['owner'] }
+@file server/operations/claim.jsbrain
+<meta server>
+export default { roles: ['user'], input: { code: 'str!' }, steps: [{ as: 'item', upsert: 'items', key: ['code'], data: { code: '$input.code', title: 'claimed' } }] }
 
 ### B0810 answer built but not thrown
 @expect B0501 views/item.brain 1:1
