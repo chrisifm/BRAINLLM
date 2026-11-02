@@ -339,6 +339,18 @@ export default { read: ['owner'], create: ['user'], update: ['owner'], delete: [
 <meta server>
 export default { roles: ['user'], input: { item: 'str!' }, steps: [{ as: 'item', read: 'items', id: '$input.item' }] }
 
+### B0810 answer built but not thrown
+@expect B0501 views/item.brain 1:1
+@expect B0810 views/item.brain 3:5
+@file views/item.brain
+<script>
+  export async function load(ctx) {
+    notFound()
+    return {}
+  }
+</script>
+<main><h1>Item</h1></main>
+
 ### B0772 handler default export
 @expect B0772 server/routes/pay/handler.jsbrain 1:1
 @file server/routes/pay/route.jsbrain

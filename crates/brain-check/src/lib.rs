@@ -841,7 +841,19 @@ impl<'a> Checker<'a> {
                     self.pat_defaults(&d.pat);
                 }
             }
-            Stmt::Expr { expr, .. } | Stmt::Throw { arg: expr, .. } => self.expr(expr),
+            Stmt::Throw { arg: expr, .. } => self.expr(expr),
+            Stmt::Expr { expr, .. } => {
+                // `notFound()` and friends only build the answer: as a bare statement nothing leaves the function.
+                if let Expr::Call { callee, span, .. } = expr.unparen()
+                    && let Expr::Ident(id) = callee.unparen()
+                    && matches!(id.name.as_str(), "notFound" | "gone" | "redirect" | "deny")
+                    && self.scopes.frames[1..].iter().all(|f| !f.contains_key(id.name.as_str()))
+                {
+                    let name = id.name.clone();
+                    self.push("B0810", *span, format!("`{name}()` does nothing without `throw`: the code after it runs and the page answers 200"), format!("write `throw {name}(...)`"));
+                }
+                self.expr(expr)
+            }
             Stmt::If { test, cons, alt, .. } => {
                 self.expr(test);
                 self.stmt(cons);

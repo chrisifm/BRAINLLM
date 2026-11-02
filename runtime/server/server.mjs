@@ -1891,6 +1891,7 @@ export function createServer(o = {}) {
     } catch (e) {
       const busy = e instanceof HttpError && e.code === 'BRIDGE_BUSY'
       if (busy) log('warn', 'backend bridge busy', { rid, path: req.$brainPath || String(req.url || '').split('?')[0], fix: e.fix })
+      else if (e instanceof HttpError && OWN_CAUSES.has(e.message)) log('warn', 'backend unavailable', { rid, path: req.$brainPath || String(req.url || '').split('?')[0], status: e.status, cause: e.message })
       else log('error', 'unhandled', { rid, path: req.url, ...trace(e) })
       try {
         if (busy && !res.headersSent) { res.setHeader('retry-after', String(e.retryAfter)); failPage(res, 503, rid, { code: e.code, message: 'Service Unavailable', fix: e.fix }) }

@@ -198,7 +198,7 @@ for await (const line of createInterface({ input: process.stdin })) {
     else if (e && typeof e.redirect === 'string') { const bad = redirectProblem(e); out(bad ? `ERR ${id} ${JSON.stringify(bad)}\n` : `OK ${id} ${JSON.stringify({ redirect: e.redirect, status: e.status ?? 303 })}\n`) } // `throw redirect(url, s)`: as server.mjs
     else if (e && e.errors && typeof e.errors === 'object') out(`BAD ${id} ${JSON.stringify({ error: e.message || 'Invalid input', errors: e.errors })}\n`)
     else if (contextServer && e?.status === 404 && e?.constructor?.name === 'HttpError') out(`OK ${id} {"notFound":true,"status":404}\n`) // as server.mjs: the 404 page
-    else if (contextServer && e?.status === 503) out(`STATUS ${id} ${JSON.stringify({status:503,message:String(e.message || 'Native authentication is temporarily unavailable')})}\n`) // the visitor reads a fixed message; the log keeps the cause
+    else if (contextServer && e?.status === 503) out(`STATUS ${id} ${JSON.stringify({status:503,message:typeof e.message === 'string' && e.message ? e.message : e.message ? JSON.stringify(e.message) : 'The service is temporarily unavailable'})}\n`) // the visitor reads a fixed message; the log keeps the cause
     else if (contextServer && e?.constructor?.name === 'HttpError' && Number.isInteger(e.status) && e.status >= 400 && e.status < 600) out(`STATUS ${id} ${JSON.stringify({status:e.status,message:'The request could not complete'})}\n`) // as server.mjs: a deliberate status never shows its message
     else { trace('exception', 'error', { title: `${e?.name || 'Error'}: ${e?.message ?? e}`, data: { stack: String(e?.stack ?? e), where: fn } })
     out(`ERR ${id} ${JSON.stringify(String(e?.stack ?? (e && typeof e === 'object' ? JSON.stringify(e) : e)))}\n`) }
