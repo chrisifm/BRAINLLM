@@ -187,7 +187,7 @@ export default { roles: ['admin', 'member', 'editor'], signup_role: 'member' }
 export default { title: 'str!', status: 'str!' }
 @file server/resources/notes/policy.jsbrain
 <meta server>
-export default { read: ['editor'], create: ['admin'], update: ['admin'], delete: ['admin'] }
+export default { read: ['editor', 'admin'], create: ['admin'], update: ['admin'], delete: ['admin'] }
 
 ### B0739 implicit roles
 @expect B0738 server/auth/roles.jsbrain 1:1
@@ -197,7 +197,7 @@ export default { read: ['editor'], create: ['admin'], update: ['admin'], delete:
 export default { title: 'str!', status: 'str!' }
 @file server/resources/notes/policy.jsbrain
 <meta server>
-export default { read: ['company'], create: ['admin'], update: ['admin'], delete: ['admin'] }
+export default { read: ['company', 'admin'], create: ['admin'], update: ['admin'], delete: ['admin'] }
 
 ### B0744 origin shape
 @expect B0744 brain.json 1:47
@@ -317,6 +317,27 @@ export default { title: 'str!', password_hash: 'str' }
 @file server/resources/items/policy.jsbrain
 <meta server>
 export default { read: ['admin'], create: ['admin'], update: ['admin'], delete: ['admin'] }
+
+### B0808 update granted without read
+@expect B0808 server/resources/items/policy.jsbrain 1:1
+@file server/resources/items/schema.jsbrain
+<meta server>
+export default { title: 'str!' }
+@file server/resources/items/policy.jsbrain
+<meta server>
+export default { read: ['owner'], create: ['admin'], update: ['admin'], delete: ['admin'] }
+
+### B0809 operation step reaches rows its role cannot read
+@expect B0809 server/operations/touch.jsbrain 1:1
+@file server/resources/items/schema.jsbrain
+<meta server>
+export default { title: 'str!' }
+@file server/resources/items/policy.jsbrain
+<meta server>
+export default { read: ['owner'], create: ['user'], update: ['owner'], delete: ['owner'] }
+@file server/operations/touch.jsbrain
+<meta server>
+export default { roles: ['user'], input: { item: 'str!' }, steps: [{ as: 'item', read: 'items', id: '$input.item' }] }
 
 ### B0772 handler default export
 @expect B0772 server/routes/pay/handler.jsbrain 1:1

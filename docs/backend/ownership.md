@@ -18,6 +18,8 @@ export default { read: ['owner', 'owner.product.shop'], create: ['user'], update
 
 - **Lists, counts, aggregates and includes** apply the scope as one SQL predicate
   (`ref_product IN (SELECT id FROM products WHERE ref_shop IN (SELECT id FROM shops WHERE owner = $user))`).
+- **A read with no grant for this identity** answers `401 SIGN_IN_REQUIRED` to an anonymous caller and
+  `403 POLICY_DENIED` to a signed-in one, for any id.
 - **Read by id** answers `404` when the row is outside the scope, so ids of other tenants are not confirmed.
 - **A write the policy does not grant** on an existing row answers `403 POLICY_DENIED` when the writer may read that
   row, and exactly like a missing row when they may not. This holds for update, patch, delete, batch, actions,

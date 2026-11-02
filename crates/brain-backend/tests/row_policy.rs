@@ -213,7 +213,7 @@ async fn includes_counts_and_relational_filters_apply_the_target_rows() {
     // A reader who may not read the target at all gets a denial that depends on no row.
     let closed = call(&f.http, "GET", "/api/reviews?shop.status=closed", None, None).await;
     let open = call(&f.http, "GET", "/api/reviews?shop.status=open", None, None).await;
-    assert_eq!((closed.0, open.0), (403, 403), "{closed:?} {open:?}");
+    assert_eq!((closed.0, open.0), (401, 401), "{closed:?} {open:?}");
     assert_eq!(without_rid(closed.1), without_rid(open.1));
     // Per-record counts only see the rows of the counted resource this reader may read.
     let all = resources();

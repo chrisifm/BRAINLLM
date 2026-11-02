@@ -414,6 +414,43 @@ pub fn claimable_unique_warnings(root: &Path) -> Vec<(String, String, String)> {
     }
     out
 }
+/// B0808: a role that may `update` a resource without being able to read it: PATCH answers 200 on a row that same role
+/// reads as 404. `public` and conditioned read grants count as reading; `api: false` resources have no such endpoint.
+pub fn blind_update_warnings(root: &Path) -> Vec<(String, String, String)> {
+    let resources = contracts(root, "resources").unwrap_or_default();
+    let mut out = Vec::new();
+    for r in resources.iter().filter(|r| r.policy.api) {
+        for grant in r.policy.update.iter().filter(|g| !r.policy.read.iter().any(|read| read == *g || read == "public")) {
+            out.push((
+                format!("server/resources/{}/policy.jsbrain", r.name),
+                format!("`{grant}` may update `{}` but not read it, so it writes rows it reads as missing", r.name),
+                format!("add '{grant}' to `read`, or remove it from `update`"),
+            ));
+        }
+    }
+    out
+}
+/// B0809: an operation step that takes a row id from the caller, on a resource one of its roles cannot read in full. An
+/// operation's roles replace the resource policy, so without `owned: true` the answer confirms rows that role reads as missing.
+pub fn operation_reach_warnings(root: &Path) -> Vec<(String, String, String)> {
+    let resources = contracts(root, "resources").unwrap_or_default();
+    let Ok(d) = domain::load(root, &resources) else { return Vec::new() };
+    let mut out = Vec::new();
+    for (name, op) in &d.operations {
+        for step in op.steps.iter().filter(|s| !s.owned && s.id.as_deref().is_some_and(|id| id.starts_with("$input."))) {
+            let target = [&step.read, &step.update, &step.delete, &step.action, &step.transition].into_iter().find_map(|t| t.as_deref());
+            let Some(resource) = target.and_then(|t| t.split('.').next()).and_then(|t| resources.iter().find(|r| r.name == t)) else { continue };
+            if let Some(role) = op.roles.iter().find(|role| !resource.policy.allows("read", Some(role.as_str()), false)) {
+                out.push((
+                    format!("server/operations/{name}.jsbrain"),
+                    format!("step `{}` reaches any row of `{}` by id, including rows `{role}` reads as missing", step.name, resource.name),
+                    "add `owned: true` to the step, or check the row in the operation and keep this warning only if every row is meant to be reachable".to_string(),
+                ));
+            }
+        }
+    }
+    out
+}
 /// B0790: secrets a declared route or webhook needs and the development environment does not hold: `(file, message, fix)`.
 /// Absent, serve starts with that route disabled; too short, it refuses to start. Names only, never values.
 pub fn secret_warnings(root: &Path) -> Vec<(String, String, String)> {

@@ -808,6 +808,16 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
                 let mut diag = compiler::Diag::new("B0797", &file, brain_parse::Span::default(), message, fix);
                 diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
             }
+            // B0808: a role that updates rows it cannot read; advisory
+            for (file, message, fix) in backend::blind_update_warnings(&app) {
+                let mut diag = compiler::Diag::new("B0808", &file, brain_parse::Span::default(), message, fix);
+                diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
+            }
+            // B0809: an operation step that confirms rows its role cannot read; advisory
+            for (file, message, fix) in backend::operation_reach_warnings(&app) {
+                let mut diag = compiler::Diag::new("B0809", &file, brain_parse::Span::default(), message, fix);
+                diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
+            }
             // B1709: one page's files registering the same tool, which no single file can see
             for (file, tool, other, view) in brain_check::webmcp::duplicates(&app) {
                 let mut diag = compiler::Diag::new("B1709", &file, brain_parse::Span::default(), format!("tool `{tool}` is also registered by {other}, and {view} loads both, so the browser refuses the second"), "give each tool a name unique on the page, or render one of the two components");

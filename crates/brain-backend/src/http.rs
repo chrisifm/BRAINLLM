@@ -244,6 +244,13 @@ impl Error {
             "The declared policy does not grant this operation to this identity (rules evaluated: role, owner, owner.<ref>, organization membership and row conditions); sign in if anonymous, otherwise use an account those rules allow",
         )
     }
+    /// A read the policy does not grant: an anonymous caller is told to sign in, like every write and operation does.
+    fn read_denied(signed_in: bool) -> Self {
+        if signed_in {
+            return Self::forbidden();
+        }
+        Self::new(StatusCode::UNAUTHORIZED, "SIGN_IN_REQUIRED", "Sign in before making this request")
+    }
     fn missing() -> Self {
         Self::new(
             StatusCode::NOT_FOUND,
@@ -1485,7 +1492,7 @@ async fn list(
         .await
         .map_err(|error| match error {
             crate::query::ListError::Invalid(fields) => Error::validation(fields),
-            crate::query::ListError::Denied(_) => Error::forbidden(),
+            crate::query::ListError::Denied(_) => Error::read_denied(u.is_some()),
             crate::query::ListError::SignInRequired => Error::new(StatusCode::UNAUTHORIZED, "SIGN_IN_REQUIRED", "Sign in, or send a project API key, to use owner=me"),
             crate::query::ListError::Database { error, at, branch } => {
                 Error::database_in(&error, at, json!({"resource": name, "operation": if req.search.trim().is_empty() { "list" } else { "list.search" }, "branch": branch}))
@@ -1566,7 +1573,7 @@ async fn read(
     }
     // No read grant for this identity answers the same for every id, before anything looks the id up.
     if crate::ownership::scope(r, "read", viewer(u.as_ref())).is_none() {
-        return Err(Error::forbidden());
+        return Err(Error::read_denied(u.is_some()));
     }
     let (mut row, revision) = db::timed(db::get_version(&app.pool, r, id))
         .await

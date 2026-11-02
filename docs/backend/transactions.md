@@ -80,7 +80,8 @@ otherwise).
 
 - `roles` lists configured role names (not `owner` or `public`); the caller must have one of them. The operation's
   roles replace the resource policies for its steps, so keep each operation narrow and use `owned: true` for
-  per-user rows.
+  per-user rows. A step with an id from the input and no `owned: true` answers for rows the role could not read, which
+  confirms they exist; `brain check` warns B0809.
 - Resources with a mandatory before-hook cannot be a step target (the contract is rejected at load); their writes stay
   on the single-record endpoints.
 - 1–32 steps, at most 64 operations, input of up to 32 typed fields (`int!`, `str`, `decimal(10,2)!`, ...).
