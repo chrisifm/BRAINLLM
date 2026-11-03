@@ -752,6 +752,14 @@ pub async fn undeclared_fields(pool: &PgPool, resources: &[Resource]) -> Result<
 /// `migrate`, recording the new contract of the named resources (see `contract_review`). Everything stays one
 /// transaction: a stored row that violates the new contract rolls all of it back.
 pub async fn migrate_approving(pool: &PgPool, resources: &[Resource], approved: &[String]) -> Result<(), String> {
+    migrate_reviewed(pool, resources, approved, false).await.map(|_| ())
+}
+/// `migrate_approving` for `approve-contract --only`: a changed resource outside `approved` is left exactly as it is
+/// (recorded contract, constraints, indexes and triggers) instead of refusing the whole run. Returns those names.
+pub async fn migrate_approving_only(pool: &PgPool, resources: &[Resource], approved: &[String]) -> Result<Vec<String>, String> {
+    migrate_reviewed(pool, resources, approved, true).await
+}
+async fn migrate_reviewed(pool: &PgPool, resources: &[Resource], approved: &[String], leave_pending: bool) -> Result<Vec<String>, String> {
     if resources.len() > 128 {
         return Err("backend migration supports at most 128 resources per invocation".into());
     }
@@ -789,6 +797,7 @@ pub async fn migrate_approving(pool: &PgPool, resources: &[Resource], approved: 
             .await
             .map_err(safe)?;
     }
+    let mut pending = Vec::new();
     for r in resources {
         let fields = r.recorded_fields();
         let old =
@@ -802,13 +811,19 @@ pub async fn migrate_approving(pool: &PgPool, resources: &[Resource], approved: 
                 || row.get::<Value, _>("search_fields") != json!(r.search)
         }) {
             if !approved.contains(&r.name) {
+                if leave_pending {
+                    pending.push(r.name.clone());
+                    continue;
+                }
                 return Err(format!(
                     "BDB_SCHEMA_DRIFT (B0787): resource {} contract changed; no rows were removed; fix: review it with `brain backend approve-contract`",
                     r.name
                 ));
             }
+            let recorded: Value = old.as_ref().map(|row| row.get("fields")).unwrap_or(Value::Null);
             sqlx::query("UPDATE _brain_resource_schemas SET fields=$2,search_fields=$3 WHERE name=$1").bind(&r.name).bind(&fields).bind(json!(r.search)).execute(&mut *tx).await.map_err(safe)?;
             drop_retired_constraints(&mut tx, r).await?;
+            backfill_added_defaults(&mut tx, r, &recorded).await?;
         }
         let table = table(r);
         // The legacy generated `search` column is preserved for existing data but removed from indexing/use.
@@ -841,7 +856,7 @@ pub async fn migrate_approving(pool: &PgPool, resources: &[Resource], approved: 
         resource_shape(&mut tx, r).await?;
     }
     // Second pass: every table exists, so references (including self references and cycles) can be keyed.
-    for r in resources {
+    for r in resources.iter().filter(|r| !pending.contains(&r.name)) {
         crate::relations::install(&mut tx, r).await?;
         crate::organizations::install(&mut tx, r, resources).await?;
         crate::audit::install(&mut tx, r).await?;
@@ -852,7 +867,27 @@ pub async fn migrate_approving(pool: &PgPool, resources: &[Resource], approved: 
         crate::audit::verify(&mut tx, r).await?;
     }
     foundation(&mut tx).await?;
-    tx.commit().await.map_err(safe)
+    tx.commit().await.map_err(safe)?;
+    Ok(pending)
+}
+/// A field the approved contract adds with a default takes that default in every stored row that lacks it, in the
+/// migration transaction and before the new checks are installed, so a required field never leaves a row without it.
+async fn backfill_added_defaults(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, r: &Resource, recorded: &Value) -> Result<(), String> {
+    let table = table(r);
+    for (name, field) in &r.fields {
+        if recorded.get(name).is_some() {
+            continue;
+        }
+        let Some(value) = field.ty().zip(field.default.as_ref()).and_then(|(ty, default)| ty.normalize(default, field.required)) else {
+            continue;
+        };
+        sqlx::raw_sql("SET LOCAL statement_timeout=0").execute(&mut **tx).await.map_err(safe)?;
+        // Audited SQL: the table name comes from a validated identifier; the field name and its default are bound.
+        let update = format!("UPDATE {table} SET data=data||jsonb_build_object($1::text,$2::jsonb) WHERE data->($1::text) IS NULL OR data->($1::text)='null'::jsonb");
+        sqlx::query(sqlx::AssertSqlSafe(update)).bind(name).bind(&value).execute(&mut **tx).await.map_err(safe)?;
+        sqlx::raw_sql("SET LOCAL statement_timeout='60s'").execute(&mut **tx).await.map_err(safe)?;
+    }
+    Ok(())
 }
 fn table(r: &Resource) -> String {
     // Resource is validated at service startup; keep this assertion next to every dynamic SQL identifier.

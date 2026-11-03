@@ -9,6 +9,10 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- `brain backend approve-contract` classifies a wider enum as safe, and a narrower enum as safe when no stored row holds a removed value
+- `brain backend approve-contract --only <resource>` approves and applies just the named resources and reports the other changed ones as pending
+- `brain backend approve-contract --apply` writes the default of an added field into every stored row that lacks it, so an added required field with a default no longer fails
+
 ## [0.8.11] - 2026-11-02
 
 - the dev server's `/sitemap.xml` and `llms.txt` stop rendering pages after 3 seconds and list the remaining URLs without their head, and the log says how many pages were rendered

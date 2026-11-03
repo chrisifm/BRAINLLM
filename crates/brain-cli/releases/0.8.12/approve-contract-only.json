@@ -1,0 +1,9 @@
+{
+  "id": "approve-contract-only",
+  "kind": "fix",
+  "title": "Approve one resource at a time",
+  "why": "With two changed resources, approving one refused with B0787 until both were reviewed; `--only` applies the named ones and leaves the rest pending.",
+  "changelog": [
+    "`brain backend approve-contract --only <resource>` approves and applies just the named resources and reports the other changed ones as pending"
+  ]
+}

@@ -66,6 +66,7 @@ first, and restore it if you return to the previous version.
 
 A contract change that removes fields stops `migrate` with B0787 until it is reviewed. Automate it in the deploy only
 after you have read it: `brain backend approve-contract --accept <resource> --apply`, then `brain backend migrate`.
+To apply one reviewed resource while another stays pending, add `--only <resource>`.
 
 ## What is preserved
 

@@ -26,7 +26,7 @@ Each process listens or works alone: `brain start`, `brain backend serve` and `b
 
 `/health`, `/health/live` and `/health/ready` belong to the framework: a route declared on them is refused (B0735). Point the load balancer at `/health/ready`.
 
-Applying a backend contract change in CI has no prompt: `brain backend approve-contract [--accept <resource>] --apply` records the approval (B0787) and exits non-zero if it cannot.
+Applying a backend contract change in CI has no prompt: `brain backend approve-contract [--accept <resource>] [--only <resource>] --apply` records the approval (B0787) and exits non-zero if it cannot.
 
 ## Checking the build output
 
