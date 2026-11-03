@@ -223,6 +223,7 @@ Behavior analytics (collector, privacy, `brain analytics report`) is described i
 General active-content/file formats are not implicitly treated as safe images.
 Files of any type (documents, archives, audio, video) use declared buckets: [backend/files.md](backend/files.md).
 Running behind a proxy, extra CORS origins and preflight caching: [backend/proxy-cors.md](backend/proxy-cors.md).
+Optional request budgets and own-host access (`platform.access`, open by default): [backend/access.md](backend/access.md).
 Database TLS and boot retry, health probes, backpressure and graceful shutdown: [backend/lifecycle.md](backend/lifecycle.md).
 Several processes or machines (shared rate windows, socket fan-out through LISTEN/NOTIFY): [backend/cluster.md](backend/cluster.md).
 ETag and 304 on API reads, public cache lifetimes for anonymous reads, If-Match on writes: [backend/caching.md](backend/caching.md).
