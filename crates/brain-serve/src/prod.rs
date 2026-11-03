@@ -4,7 +4,7 @@
 //! the build signature on HTML (304 on `If-None-Match`) and `GET /_health` → `{"ok":true,"build":"<sig>"}`.
 
 use crate::server::native_proxy;
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -385,6 +385,23 @@ impl Static {
                 return write(&mut s, status, &hs, with_analytics(&page, &self.pre).as_bytes(), head);
             }
         }
+        // Range: media players ask for byte spans (Safari plays no video without them). The span is of the plain file,
+        // so a ranged request skips the precompressed siblings; If-Range has no validator to match here, so it gets it all.
+        if status == 200 && !html {
+            let size = std::fs::metadata(&file).map_or(0, |m| m.len());
+            match req.header("range").filter(|_| req.header("if-range").is_none()).and_then(|r| byte_range(r, size)) {
+                Some(Err(())) => {
+                    let hs = [("Content-Range".to_string(), format!("bytes */{size}")), ("Cache-Control".to_string(), "no-store".to_string())];
+                    return write(&mut s, 416, &hs, b"", head);
+                }
+                Some(Ok((start, end))) => {
+                    hs.push(("Accept-Ranges".into(), "bytes".into()));
+                    hs.push(("Content-Range".into(), format!("bytes {start}-{end}/{size}")));
+                    return write_file_span(&mut s, 206, &hs, &file, Some((start, end - start + 1)), head);
+                }
+                None => {}
+            }
+        }
         let variants = [
             ("br", PathBuf::from(format!("{name}.br"))),
             ("zstd", PathBuf::from(format!("{name}.zst"))),
@@ -403,6 +420,9 @@ impl Static {
             hs.push(("Content-Encoding".into(), (*encoding).into()));
             path
         } else {
+            if status == 200 && !html {
+                hs.push(("Accept-Ranges".into(), "bytes".into()));
+            }
             &file
         };
         if variants.iter().any(|(_, p)| regular_output(&self.dist, p)) {
@@ -542,11 +562,41 @@ impl Write for TimedWriter<'_> {
         self.stream.flush()
     }
 }
+/// One `bytes=` span of a file of `size` bytes (RFC 9110 §14): `Some(Ok((start, end)))` inclusive, `Some(Err(()))`
+/// when it cannot be satisfied (416), `None` when the header is not one well-formed span (several, another unit,
+/// reversed): the whole file is sent then, which the RFC allows.
+pub fn byte_range(header: &str, size: u64) -> Option<Result<(u64, u64), ()>> {
+    let (a, b) = header.trim().strip_prefix("bytes=")?.split_once('-')?;
+    let num = |v: &str| if !v.is_empty() && v.bytes().all(|c| c.is_ascii_digit()) { v.parse::<u64>().ok() } else { None };
+    if a.is_empty() {
+        let n = num(b)?;
+        return Some(if n > 0 && size > 0 { Ok((size.saturating_sub(n), size - 1)) } else { Err(()) });
+    }
+    let start = num(a)?;
+    let end = if b.is_empty() { None } else { Some(num(b)?) };
+    if end.is_some_and(|e| e < start) {
+        return None;
+    }
+    Some(if start < size { Ok((start, end.map_or(size - 1, |e| e.min(size - 1)))) } else { Err(()) })
+}
+
 fn write_file(
     s: &mut TcpStream,
     status: u16,
     headers: &[(String, String)],
     path: &Path,
+    head: bool,
+) -> io::Result<()> {
+    write_file_span(s, status, headers, path, None, head)
+}
+
+/// `write_file` of `span` = (start, length) only, or of the whole file.
+fn write_file_span(
+    s: &mut TcpStream,
+    status: u16,
+    headers: &[(String, String)],
+    path: &Path,
+    span: Option<(u64, u64)>,
     head: bool,
 ) -> io::Result<()> {
     let mut options = std::fs::OpenOptions::new();
@@ -565,10 +615,16 @@ fn write_file(
         stream: s,
         end: Instant::now() + Duration::from_secs(10),
     };
-    write_headers(&mut writer, status, headers, metadata.len())?;
+    let (start, length) = span.unwrap_or((0, metadata.len()));
+    if start.saturating_add(length) > metadata.len() {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "static output changed during transfer"));
+    }
+    write_headers(&mut writer, status, headers, length)?;
     if !head {
-        let copied = io::copy(&mut file.take(metadata.len()), &mut writer)?;
-        if copied != metadata.len() {
+        let mut file = file;
+        file.seek(SeekFrom::Start(start))?;
+        let copied = io::copy(&mut file.take(length), &mut writer)?;
+        if copied != length {
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 "static output changed during transfer",
@@ -602,6 +658,7 @@ fn write_headers<W: Write>(
 ) -> io::Result<()> {
     let reason = match status {
         200 => "OK",
+        206 => "Partial Content",
         301 => "Moved Permanently",
         302 => "Found",
         307 => "Temporary Redirect",
@@ -609,6 +666,7 @@ fn write_headers<W: Write>(
         304 => "Not Modified",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        416 => "Range Not Satisfiable",
         _ => "",
     };
     let mut h = format!(
@@ -1125,6 +1183,47 @@ mod encoding_tests {
         let no_zstd = get("gzip, br");
         assert!(no_zstd.contains("Content-Encoding: br") && no_zstd.contains("Vary: Accept-Encoding"), "{no_zstd}");
         assert!(get("gzip").ends_with(&"g".repeat(40)));
+        let _ = std::fs::remove_dir_all(&dist);
+    }
+    #[test]
+    fn static_files_answer_one_byte_range_of_the_plain_file() {
+        use std::io::{Read, Write};
+        // Safari plays no video without Range: it asks for bytes=0-1 first and gives up on a 200
+        let dist = std::env::temp_dir().join(format!("brain-prod-range-{}", std::process::id()));
+        std::fs::create_dir_all(dist.join("_b")).unwrap();
+        let body: String = (0..100).map(|i| char::from(b'a' + (i % 26) as u8)).collect();
+        std::fs::write(dist.join("_b/clip.mp4"), &body).unwrap();
+        std::fs::write(dist.join("_b/clip.mp4.br"), "b".repeat(10)).unwrap();
+        let ask = |extra: &str, method: &str, enc: &str| {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = listener.local_addr().unwrap();
+            let handler = super::Static::load(&dist, "/");
+            let task = std::thread::spawn(move || handler.handle(listener.accept().unwrap().0).unwrap());
+            let mut client = std::net::TcpStream::connect(addr).unwrap();
+            write!(client, "{method} /_b/clip.mp4 HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: {enc}\r\n{extra}\r\n").unwrap();
+            let mut response = String::new();
+            client.read_to_string(&mut response).unwrap();
+            task.join().unwrap();
+            response
+        };
+        for (range, from, to) in [("bytes=0-1", 0, 1), ("bytes=90-", 90, 99), ("bytes=-5", 95, 99), ("bytes=50-500", 50, 99)] {
+            let r = ask(&format!("Range: {range}\r\n"), "GET", "br");
+            assert!(r.starts_with("HTTP/1.1 206 Partial Content"), "{range}: {r}");
+            assert!(r.contains(&format!("Content-Range: bytes {from}-{to}/100")) && r.contains(&format!("Content-Length: {}", to - from + 1)), "{range}: {r}");
+            assert!(!r.contains("Content-Encoding") && r.ends_with(&body[from..=to]), "the span is of the plain file: {r}");
+        }
+        for range in ["bytes=100-", "bytes=-0"] {
+            let r = ask(&format!("Range: {range}\r\n"), "GET", "br");
+            assert!(r.starts_with("HTTP/1.1 416") && r.contains("Content-Range: bytes */100") && !r.contains("immutable"), "{range}: {r}");
+        }
+        // several spans, another unit, a reversed span or If-Range (no validator to compare): the whole file
+        for extra in ["Range: bytes=0-1,5-6\r\n", "Range: items=0-1\r\n", "Range: bytes=9-2\r\n", "Range: bytes=0-1\r\nIf-Range: \"x\"\r\n"] {
+            assert!(ask(extra, "GET", "br").starts_with("HTTP/1.1 200"), "{extra}");
+        }
+        let plain = ask("", "GET", "identity");
+        assert!(plain.contains("Accept-Ranges: bytes"), "{plain}");
+        let head = ask("Range: bytes=0-1\r\n", "HEAD", "br");
+        assert!(head.starts_with("HTTP/1.1 206") && head.contains("Content-Length: 2") && head.ends_with("\r\n\r\n"), "{head}");
         let _ = std::fs::remove_dir_all(&dist);
     }
     #[test]
