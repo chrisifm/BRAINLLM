@@ -1595,7 +1595,7 @@ pub(crate) fn warn_queues_in_background(root: &Path, environment: &str) {
     let (root, environment) = (root.to_path_buf(), environment.to_string());
     std::thread::spawn(move || {
         let mut findings = queue_findings(&root, &environment);
-        if findings.iter().any(|(code, ..)| *code == "B0765") {
+        if waits_for_siblings(&findings) {
             std::thread::sleep(std::time::Duration::from_secs(WORKER_START_GRACE_SECONDS));
             findings = queue_findings(&root, &environment);
         }
@@ -1638,8 +1638,14 @@ pub fn handler_bundle_problems(root: &Path) -> Vec<(String, String)> {
 /// A worker restarted with the server needs a moment to report in: no warning until it has had that moment.
 const WORKER_START_GRACE_SECONDS: u64 = 10;
 
-fn first_read_waits(rows: &[Value], graced: bool, own_workers: bool) -> bool {
-    !graced && !own_workers && rows.iter().any(|row| row["declared"] == json!(true) && row["workers"].as_i64().unwrap_or(0) == 0)
+/// A deploy restarts the server, its workers and its scheduler together: a queue with no worker (B0765) or schedules with
+/// no scheduler (B0767) on the first read may only mean the sibling has not reported yet.
+fn waits_for_siblings(findings: &[Finding]) -> bool {
+    findings.iter().any(|(code, ..)| matches!(*code, "B0765" | "B0767"))
+}
+
+fn first_read_waits(rows: &[Value], schedules: &[String], schedulers: i64, graced: bool, own_workers: bool) -> bool {
+    !graced && !own_workers && waits_for_siblings(&liveness_findings(rows, schedules, schedulers))
 }
 
 /// Backend startup list, then a periodic `queue-stalled` line for each queue not being drained. Counts and ages only:
@@ -1660,7 +1666,7 @@ async fn monitor_queues(queue: brain_backend::jobs::Queue, queues: Vec<String>, 
         match read.await {
             Ok((rows, schedulers)) => {
                 unknown = false;
-                if first && first_read_waits(&rows, graced, own_workers) {
+                if first && first_read_waits(&rows, &schedules, schedulers, graced, own_workers) {
                     graced = true;
                     tokio::time::sleep(std::time::Duration::from_secs(WORKER_START_GRACE_SECONDS)).await;
                     continue;
@@ -2241,10 +2247,18 @@ mod tests {
     #[test]
     fn a_first_read_without_workers_waits_once_for_a_worker_started_beside_the_server() {
         let row = |workers: i64| json!({"queue":"mail","declared":true,"pending":0,"oldestWaitSeconds":0,"workers":workers});
-        assert!(first_read_waits(&[row(0)], false, false), "the worker may be starting in this same second");
-        assert!(!first_read_waits(&[row(1)], false, false));
-        assert!(!first_read_waits(&[row(0)], true, false), "only one grace period");
-        assert!(!first_read_waits(&[row(0)], false, true), "own workers already had theirs");
+        assert!(first_read_waits(&[row(0)], &[], 0, false, false), "the worker may be starting in this same second");
+        assert!(!first_read_waits(&[row(1)], &[], 0, false, false));
+        assert!(!first_read_waits(&[row(0)], &[], 0, true, false), "only one grace period");
+        assert!(!first_read_waits(&[row(0)], &[], 0, false, true), "own workers already had theirs");
+        // a deploy restarts the scheduler beside the server too: no B0767 before it had the same moment
+        let daily = ["daily".to_string()];
+        assert!(first_read_waits(&[], &daily, 0, false, false), "the scheduler may be starting in this same second");
+        assert!(!first_read_waits(&[], &daily, 1, false, false));
+        assert!(!first_read_waits(&[row(1)], &[], 0, false, false), "nothing to wait for");
+        let finding = |code: &'static str| (code, String::new(), String::new(), String::new());
+        assert!(waits_for_siblings(&[finding("B0767")]) && waits_for_siblings(&[finding("B0765")]));
+        assert!(!waits_for_siblings(&[finding("B0768")]) && !waits_for_siblings(&[finding("B0766")]), "an undeclared queue or an unreachable database does not fix itself in 10 s");
     }
 
     #[test]
