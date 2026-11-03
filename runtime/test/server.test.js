@@ -79,6 +79,9 @@ w('_b/app.js', 'console.log("app")')
 w('sw.js', 'self.BRAIN_BUILD={}')
 writeFileSync(join(dist, '_b/app.js.gz'), gzipSync('console.log("app")'))
 writeFileSync(join(dist, '_b/app.js.br'), brotliCompressSync(Buffer.from('console.log("app")')))
+// a 100-byte media file (bytes 0..99) and its smaller precompressed sibling, which a ranged request must not use
+writeFileSync(join(dist, '_b/clip.mp4'), Buffer.from(Array.from({ length: 100 }, (_, i) => i)))
+writeFileSync(join(dist, '_b/clip.mp4.br'), brotliCompressSync(Buffer.from(Array.from({ length: 100 }, (_, i) => i))))
 w('_server/manifest.json', JSON.stringify({
   v: 1, build: 'b7c1', core: '/_b/core.js',
   routes: [
@@ -452,6 +455,39 @@ test('sitemap.xml: dynamic URLs are split by serialized bytes too, and a URL ove
   } finally {
     s3.close()
   }
+})
+
+test('static Range: one byte span of the plain file (Safari plays no video without it); 416 past the end', async () => {
+  const get = (range, extra = {}) => fetch(base + '/_b/clip.mp4', { headers: { 'accept-encoding': 'br', ...(range ? { range } : {}), ...extra } })
+  const bytes = async r => [...new Uint8Array(await r.arrayBuffer())]
+  const whole = await get(null, { 'accept-encoding': 'identity' })
+  assert.equal(whole.status, 200)
+  assert.equal(whole.headers.get('accept-ranges'), 'bytes')
+  assert.equal((await bytes(whole)).length, 100)
+  for (const [range, from, to] of [['bytes=0-1', 0, 1], ['bytes=90-', 90, 99], ['bytes=-5', 95, 99], ['bytes=50-500', 50, 99]]) {
+    const r = await get(range)
+    assert.equal(r.status, 206, range)
+    assert.equal(r.headers.get('content-range'), `bytes ${from}-${to}/100`, range)
+    assert.equal(r.headers.get('content-length'), String(to - from + 1), range)
+    assert.equal(r.headers.get('content-encoding'), null, `${range}: the span is of the plain file`)
+    assert.match(r.headers.get('cache-control'), /immutable/)
+    assert.deepEqual(await bytes(r), Array.from({ length: to - from + 1 }, (_, i) => from + i), range)
+  }
+  for (const range of ['bytes=100-', 'bytes=-0']) {
+    const r = await get(range)
+    assert.equal(r.status, 416, range)
+    assert.equal(r.headers.get('content-range'), 'bytes */100', range)
+    await r.arrayBuffer()
+  }
+  // several spans, another unit, a reversed span or If-Range (no validator to compare): the whole file, as RFC 9110 allows
+  for (const [range, extra] of [['bytes=0-1,5-6', {}], ['items=0-1', {}], ['bytes=9-2', {}], ['bytes=0-1', { 'if-range': '"x"' }]]) {
+    const r = await get(range, extra)
+    assert.equal(r.status, 200, range)
+    await r.arrayBuffer()
+  }
+  const head = await fetch(base + '/_b/clip.mp4', { method: 'HEAD', headers: { range: 'bytes=0-1' } })
+  assert.equal(head.status, 206)
+  assert.equal(head.headers.get('content-length'), '2')
 })
 
 test('static Brotli: q weights, explicit exclusions and identity keep the immutable asset contract', async () => {

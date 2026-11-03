@@ -28,7 +28,7 @@ import { BlockList, isIP } from 'node:net'
 import { Readable } from 'node:stream'
 import zlib from 'node:zlib'
 import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
-import { existsSync, readFileSync, realpathSync, statSync, lstatSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readFileSync, readSync, realpathSync, statSync, lstatSync } from 'node:fs'
 import * as Module from 'node:module'
 import { basename, dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -200,6 +200,17 @@ const varyEncoding = v => (/accept-encoding/i.test(v || '') ? v : [v, 'Accept-En
 function bodyEncoding(req, status, headers) {
   if (status < 200 || status === 204 || status === 206 || status === 304 || headers['content-encoding'] || !COMPRESSIBLE.test(headers['content-type'] || '') || /no-transform/i.test(headers['cache-control'] || '')) return null
   return acceptedEncodings(req.headers['accept-encoding'], DYNAMIC)[0] || ''
+}
+// One `bytes=` span of a file of `size` bytes (RFC 9110 §14): { start, end } inclusive, false when it cannot be
+// satisfied (416), or null when the header is not one well-formed span (several, another unit, reversed): the whole
+// file is sent then, which the RFC allows.
+function byteRange(header, size) {
+  const m = /^bytes=(\d*)-(\d*)$/.exec(String(header).trim())
+  if (!m || (m[1] === '' && m[2] === '')) return null
+  if (m[1] === '') return Number(m[2]) > 0 && size > 0 ? { start: Math.max(0, size - Number(m[2])), end: size - 1 } : false
+  const start = Number(m[1])
+  if (m[2] !== '' && Number(m[2]) < start) return null
+  return start < size ? { start, end: m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1) } : false
 }
 const encodeBody = (enc, buf) => enc === 'zstd' ? zlib.zstdCompressSync(buf) : enc === 'br' ? zlib.brotliCompressSync(buf, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: buf.length } }) : zlib.gzipSync(buf)
 const encodeStream = enc => enc === 'zstd' ? zlib.createZstdCompress() : enc === 'br' ? zlib.createBrotliCompress({ params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5 } }) : zlib.createGzip()
@@ -1833,6 +1844,19 @@ export function createServer(o = {}) {
         'cache-control': p.startsWith('/_b/') ? 'public, max-age=31536000, immutable' : p === '/sw.js' ? 'no-cache' : 'public, max-age=3600',
         vary: 'accept-encoding',
       }
+      // Range: media players ask for byte spans (Safari plays no video without them). The span is of the plain file, so
+      // a ranged request skips the precompressed siblings; If-Range has no validator to match here, so it gets it all.
+      const span = req.headers.range && !req.headers['if-range'] ? byteRange(req.headers.range, statSync(f).size) : null
+      if (span === false) return send(res, 416, '', { 'content-range': `bytes */${statSync(f).size}` }), true
+      if (span) {
+        const len = span.end - span.start + 1, buf = Buffer.alloc(req.method === 'HEAD' ? 0 : len)
+        if (buf.length) {
+          const fd = openSync(f, 'r')
+          try { readSync(fd, buf, 0, len, span.start) } finally { closeSync(fd) }
+        }
+        send(res, 206, buf, { ...headers, 'accept-ranges': 'bytes', 'content-range': `bytes ${span.start}-${span.end}/${statSync(f).size}`, 'content-length': String(len) })
+        return true
+      }
       // the smallest precompressed sibling the client accepts (the build keeps only those smaller than the file)
       let best = null
       for (const enc of acceptedEncodings(req.headers['accept-encoding'])) {
@@ -1844,7 +1868,7 @@ export function createServer(o = {}) {
         send(res, 200, req.method === 'HEAD' ? '' : readFileSync(best.encoded), { ...headers, 'content-encoding': best.enc })
         return true
       }
-      send(res, 200, req.method === 'HEAD' ? '' : readFileSync(f), headers)
+      send(res, 200, req.method === 'HEAD' ? '' : readFileSync(f), { ...headers, 'accept-ranges': 'bytes' })
       return true
     }
     return false
