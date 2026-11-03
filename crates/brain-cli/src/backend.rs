@@ -946,7 +946,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         operation,
         "schema" | "migrate" | "approve-contract" | "serve" | "bootstrap-admin" | "rename-role" | "users" | "import" | "data"
     ) {
-        return Err("usage: brain backend capabilities|schema|migrate|approve-contract [--accept <resource>] [--apply]|import users|<resource> --file <rows.jsonl> [--apply]|serve|bootstrap-admin|rename-role --from <role> --to <role> [--apply]|logs [rid]|users|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182] [--with-workers]".into());
+        return Err("usage: brain backend capabilities|schema|migrate|approve-contract [--accept <resource>] [--only <resource>] [--apply]|import users|<resource> --file <rows.jsonl> [--apply]|serve|bootstrap-admin|rename-role --from <role> --to <role> [--apply]|logs [rid]|users|keys --user <uuid> [--env development] [--port 5182] [--origin http://127.0.0.1:5182] [--with-workers]".into());
     }
     let snapshot = inspect(&root)?;
     if operation == "schema" {
@@ -1053,10 +1053,18 @@ pub fn run(args: &[String]) -> Result<(), String> {
         if operation=="approve-contract" {
             let reviewed=brain_backend::contract_review::review(&pool,&resources).await?;
             let accepted=crate::flag(args,"--accept").map(|list|list.split(',').map(str::to_string).collect::<Vec<_>>()).unwrap_or_default();
-            let decision=brain_backend::contract_review::approved(&reviewed,&accepted);
             let apply=args.iter().any(|a|a=="--apply");
+            // `--only a,b` approves just those resources; every other changed one stays pending with its recorded contract.
+            if let Some(only)=crate::flag(args,"--only").map(|list|list.split(',').map(str::to_string).collect::<Vec<_>>()) {
+                let (names,pending)=brain_backend::contract_review::approved_only(&reviewed,&only,&accepted)?;
+                if apply {brain_backend::db::migrate_approving_only(&pool,&resources,&names).await?;}
+                pool.close().await;
+                let next=if apply&&pending.is_empty(){Value::Null}else if apply{json!(format!("Review the pending resources, then: brain backend approve-contract --only {} --apply",pending.join(",")))}else{json!(format!("brain backend approve-contract --only {}{} --apply",only.join(","),if accepted.is_empty(){String::new()}else{format!(" --accept {}",accepted.join(","))}))};
+                println!("{}",json!({"schemaVersion":1,"ok":true,"applied":apply&&!names.is_empty(),"approved":names,"pending":pending,"changes":reviewed,"needsAccept":[],"next":next}));return Ok(());
+            }
+            let decision=brain_backend::contract_review::approved(&reviewed,&accepted);
             if apply {
-                let names=decision.as_ref().map_err(|blocked|format!("B0787: nothing was changed: {} has changes that can invalidate stored rows; fix: review them without --apply, then pass --accept {}",blocked.join(", "),blocked.join(",")))?;
+                let names=decision.as_ref().map_err(|blocked|format!("B0787: nothing was changed: {} has changes that can invalidate stored rows; fix: review them without --apply, then pass --accept {}, or apply only the others with --only <resource>",blocked.join(", "),blocked.join(",")))?;
                 brain_backend::db::migrate_approving(&pool,&resources,names).await?;
             }
             pool.close().await;

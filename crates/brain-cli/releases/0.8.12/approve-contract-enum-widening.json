@@ -1,0 +1,9 @@
+{
+  "id": "approve-contract-enum-widening",
+  "kind": "fix",
+  "title": "Wider enums approve without --accept",
+  "why": "Adding a value to an enum was reported unsafe and needed `--accept`, though no stored row can become invalid.",
+  "changelog": [
+    "`brain backend approve-contract` classifies a wider enum as safe, and a narrower enum as safe when no stored row holds a removed value"
+  ]
+}

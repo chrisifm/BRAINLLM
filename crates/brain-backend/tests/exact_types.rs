@@ -280,11 +280,12 @@ async fn postgres_enforces_exact_types_constraints_and_exposes_timestamps() {
     changed.fields.get_mut("currency").unwrap().kind = "enum(MXN|USD|EUR)".into();
     assert!(db::migrate(&pool, &[changed.clone()]).await.unwrap_err().contains("BDB_SCHEMA_DRIFT"));
     assert!(db::verify(&pool, &[changed.clone()]).await.is_err());
-    // The reviewed path: the preview writes nothing, a wider enum needs naming, and the old check no longer refuses it.
+    // The reviewed path: the preview writes nothing, a wider enum is safe, and the old check no longer refuses it.
     let reviewed = brain_backend::contract_review::review(&pool, std::slice::from_ref(&changed)).await.unwrap();
-    assert_eq!(reviewed[0]["safe"], false, "{reviewed:?}");
+    assert_eq!(reviewed[0]["safe"], true, "{reviewed:?}");
+    assert_eq!(reviewed[0]["changes"][0]["change"], "enum-widened", "{reviewed:?}");
     assert!(db::verify(&pool, &[changed.clone()]).await.is_err(), "the preview changes nothing");
-    assert_eq!(brain_backend::contract_review::approved(&reviewed, &[]).unwrap_err(), [changed.name.clone()]);
+    assert_eq!(brain_backend::contract_review::approved(&reviewed, &[]).unwrap(), [changed.name.clone()]);
     db::migrate_approving(&pool, &[changed.clone()], &[changed.name.clone()]).await.unwrap();
     db::verify(&pool, &[changed.clone()]).await.unwrap();
     assert!(brain_backend::contract_review::review(&pool, std::slice::from_ref(&changed)).await.unwrap().is_empty());
@@ -306,4 +307,60 @@ async fn postgres_enforces_exact_types_constraints_and_exposes_timestamps() {
     assert!(db::verify(&pool, &[typed.clone()]).await.unwrap_err().contains("BDB_SCHEMA_DRIFT"));
     db::migrate(&pool, &[typed.clone()]).await.unwrap();
     db::verify(&pool, &[typed]).await.unwrap();
+}
+
+fn ledger(kinds: &str, extra: &[(&str, Field)]) -> Resource {
+    let mut fields = BTreeMap::from([("kind".into(), field(kinds, true))]);
+    fields.extend(extra.iter().map(|(name, f)| (name.to_string(), f.clone())));
+    Resource { name: "ledger_lines".into(), search: vec![], fields, ..legacy() }
+}
+fn memos(extra: &[(&str, Field)]) -> Resource {
+    let mut fields = BTreeMap::from([("title".into(), field("str", true))]);
+    fields.extend(extra.iter().map(|(name, f)| (name.to_string(), f.clone())));
+    Resource { name: "review_memos".into(), search: vec![], fields, ..legacy() }
+}
+
+/// Requires PostgreSQL: run through scripts/backend-check.mjs (owned disposable cluster, no Docker).
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn reviewed_contracts_widen_enums_backfill_defaults_and_apply_one_resource_at_a_time() {
+    use brain_backend::contract_review::{approved, review};
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Use scripts/backend-check.mjs; no developer database is selected implicitly");
+    let pool = db::connect(&url).await.unwrap();
+    let user = uuid::Uuid::new_v4();
+    sqlx::query("INSERT INTO _brain_users(id,email,password_hash,role) VALUES($1,$2,'x','admin')").bind(user).bind(format!("{user}@example.test")).execute(&pool).await.unwrap();
+    let (lines, notes) = (ledger("enum(credits|plan|renewal)", &[]), memos(&[]));
+    db::migrate(&pool, &[lines.clone(), notes.clone()]).await.unwrap();
+    db::create(&pool, &lines, user, json!({"kind":"credits"})).await.unwrap();
+    db::create(&pool, &notes, user, json!({"title":"First"})).await.unwrap();
+
+    // A wider enum and a new field with a default, even a required one, are safe and need no --accept.
+    let status = Field { default: Some(json!("open")), ..field("enum(open|closed)", true) };
+    let (wider, with_status) = (ledger("enum(credits|plan|renewal|marketing)", &[]), memos(&[("status", status.clone())]));
+    let reviewed = review(&pool, &[wider.clone(), with_status.clone()]).await.unwrap();
+    assert!(reviewed.iter().all(|item| item["safe"] == true), "{reviewed:?}");
+    let names = approved(&reviewed, &[]).unwrap();
+    db::migrate_approving(&pool, &[wider.clone(), with_status.clone()], &names).await.unwrap();
+    db::verify(&pool, &[wider.clone(), with_status.clone()]).await.unwrap();
+    let missing: i64 = sqlx::query_scalar("SELECT count(*) FROM _brain_res_review_memos WHERE data->>'status' IS DISTINCT FROM 'open'").fetch_one(&pool).await.unwrap();
+    assert_eq!(missing, 0, "existing rows take the default of an added field");
+
+    // Narrowing counts the rows holding a removed value: none is safe, one is not.
+    let unused = review(&pool, &[ledger("enum(credits|plan|renewal)", &[]), with_status.clone()]).await.unwrap();
+    assert_eq!(unused[0]["safe"], true, "{unused:?}");
+    assert_eq!(unused[0]["changes"][0]["rowsAffected"], 0, "{unused:?}");
+    let used = review(&pool, &[ledger("enum(plan|renewal|marketing)", &[]), with_status.clone()]).await.unwrap();
+    assert_eq!(used[0]["safe"], false, "{used:?}");
+    assert_eq!(used[0]["changes"][0]["rowsAffected"], 1, "{used:?}");
+
+    // One resource can be approved while another stays pending with its recorded contract.
+    let (narrow, pages) = (ledger("enum(plan|renewal|marketing)", &[]), memos(&[("status", status), ("pages", field("int", false))]));
+    let refused = db::migrate_approving(&pool, &[narrow.clone(), pages.clone()], &[pages.name.clone()]).await.unwrap_err();
+    assert!(refused.contains("B0787"), "{refused}");
+    let pending = db::migrate_approving_only(&pool, &[narrow.clone(), pages.clone()], &[pages.name.clone()]).await.unwrap();
+    assert_eq!(pending, [narrow.name.clone()]);
+    db::verify(&pool, &[wider.clone(), pages.clone()]).await.unwrap();
+    let left = review(&pool, &[narrow.clone(), pages.clone()]).await.unwrap();
+    assert_eq!(left.len(), 1, "{left:?}");
+    assert_eq!(left[0]["resource"], narrow.name);
 }

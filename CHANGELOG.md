@@ -13,6 +13,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Sign In with LinkedIn: `BRAIN_AUTH_LINKEDIN_CLIENT_ID` and `BRAIN_AUTH_LINKEDIN_CLIENT_SECRET` enable `/_brain/auth/linkedin/start` and `/_brain/auth/linkedin/callback`, a server-side OpenID Connect code flow that works over http on localhost; `BRAIN_AUTH_LINKEDIN_REDIRECT_URI` may be the native callback or a page of the app that relays `code` and `state` to it; a LinkedIn address never links an existing account
 - `platform.access` in `brain start`: nothing is limited by default; `perMinute` budgets page renders, form posts and `/api`, `/_brain`, `/s` per client address (429 + Retry-After) and `concurrency` caps them in flight (503, no queue), both checked before the body is read or the backend is asked; static and cached answers carry no budget; `mode: 'own-host'` makes the native API answer its own site only (B0752): other sites, foreign host names and scripts without browser evidence are refused while pages, API keys, provider callbacks, signed webhooks and short links pass, with `origins`, `hosts`, `ips` and `local`; refusals and limited requests are logged with their source and `/_access/sources` on the machine lists the refused addresses (`docs/backend/access.md`)
 - migration 0026 admits the `apple` and `linkedin` identity providers and stores the display name a provider shares; run `brain backend migrate` before serving
+- `brain backend approve-contract` classifies a wider enum as safe, and a narrower enum as safe when no stored row holds a removed value
+- `brain backend approve-contract --only <resource>` approves and applies just the named resources and reports the other changed ones as pending
+- `brain backend approve-contract --apply` writes the default of an added field into every stored row that lacks it, so an added required field with a default no longer fails
 
 ## [0.8.11] - 2026-11-02
 

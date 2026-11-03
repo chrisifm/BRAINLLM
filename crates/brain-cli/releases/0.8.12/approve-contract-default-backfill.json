@@ -1,0 +1,9 @@
+{
+  "id": "approve-contract-default-backfill",
+  "kind": "fix",
+  "title": "Added defaults fill existing rows",
+  "why": "An added field with a `default` left stored rows without the value, so an added required field failed its check on apply.",
+  "changelog": [
+    "`brain backend approve-contract --apply` writes the default of an added field into every stored row that lacks it, so an added required field with a default no longer fails"
+  ]
+}
