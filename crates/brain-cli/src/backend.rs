@@ -225,6 +225,25 @@ fn job_backend_failure(raw: &Value) -> Value {
         .filter_map(|(name, text)| Some((name.chars().take(64).collect(), json!(text.as_str()?.chars().take(160).collect::<String>())))).collect();
     json!({"status":status,"code":code,"fields":fields})
 }
+/// A job that succeeded after its handler caught backend failures (job-runner.mjs `JOB_BACKEND`): keep only status,
+/// code, resource and identifier-shaped field names, so a swallowed 422 reaches the worker log without any value.
+fn job_caught_failures(raw: &Value) -> Option<Value> {
+    let ident = |s: &str| (1..=48).contains(&s.len()) && s.as_bytes()[0].is_ascii_lowercase() && s.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_');
+    let count = raw["count"].as_u64().filter(|n| *n > 0)?;
+    let failures: Vec<Value> = raw["failures"].as_array()?.iter().take(8).filter_map(|failure| {
+        let status = failure["status"].as_u64().filter(|status| (400..600).contains(status))?;
+        let code = failure["code"].as_str().filter(|code| (1..=64).contains(&code.len()) && code.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_'));
+        let resource = failure["target"].as_str().filter(|target| match target.split_once('.') {
+            Some((area, name)) => matches!(area, "files" | "operation") && ident(name),
+            None => ident(target),
+        });
+        let fields: Vec<&str> = failure["fields"].as_array().into_iter().flatten().take(8)
+            .filter_map(Value::as_str).filter(|field| brain_backend::http::loggable_field(field)).collect();
+        let times = failure["count"].as_u64().unwrap_or(1).clamp(1, count);
+        Some(json!({"status":status,"code":code,"resource":resource,"fields":fields,"count":times}))
+    }).collect();
+    Some(json!({"count":count,"failures":failures}))
+}
 
 pub fn auth_roles(root: &Path) -> Result<brain_backend::auth_flows::RolesConfig, String> {
     use brain_backend::auth_flows::RolesConfig;
@@ -2111,6 +2130,21 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
                             );
                             Err("Job handler failed".into())
                         } else {
+                            // A succeeded job whose handler caught backend failures: name them, or a swallowed 422
+                            // never shows up anywhere (the worker does not echo application stderr).
+                            let caught = retained.split(|b| *b == b'\n')
+                                .filter_map(|line| line.strip_prefix(b"JOB_BACKEND "))
+                                .take(16)
+                                .filter_map(|bytes| serde_json::from_slice::<Value>(bytes).ok())
+                                .filter(|raw| raw["schemaVersion"] == 1 && raw["event"] == "job-backend-failures" && raw["jobId"].as_str() == Some(job_id.as_str()))
+                                .last()
+                                .and_then(|raw| job_caught_failures(&raw));
+                            if let Some(caught) = caught {
+                                brain_backend::log_line!(
+                                    "{}",
+                                    json!({"schemaVersion":1,"event":"job-backend-failures","jobId":job_id,"queue":queue_name,"count":caught["count"],"failures":caught["failures"]})
+                                );
+                            }
                             Ok(())
                         }
                     }
@@ -2196,6 +2230,24 @@ impl Drop for HandlerGroup {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_succeeded_job_names_the_backend_failures_it_caught_and_never_a_value() {
+        let raw = json!({"count":3,"failures":[
+            {"status":422,"code":null,"target":"subscriptions","fields":["status[gte]","name with spaces"],"count":2,"message":"dropped"},
+            {"status":503,"code":"DATABASE_BUSY","target":"files.reports","fields":[],"count":9},
+            {"status":200,"target":"orders"},
+            {"status":404,"code":"lower","target":"../auth","fields":["id"]}
+        ]});
+        let kept = super::job_caught_failures(&raw).unwrap();
+        assert_eq!(kept["count"], json!(3));
+        assert_eq!(kept["failures"], json!([
+            {"status":422,"code":null,"resource":"subscriptions","fields":["status[gte]"],"count":2},
+            {"status":503,"code":"DATABASE_BUSY","resource":"files.reports","fields":[],"count":3},
+            {"status":404,"code":null,"resource":null,"fields":["id"],"count":1}
+        ]));
+        assert!(super::job_caught_failures(&json!({"count":0,"failures":[]})).is_none());
+        assert!(super::job_caught_failures(&json!({"count":2})).is_none());
+    }
     #[test]
     fn a_job_backend_failure_keeps_only_its_validated_shape() {
         use serde_json::json;

@@ -91,6 +91,19 @@ function trace(error, jobId) {
   while (Buffer.byteLength(JSON.stringify(result)) > LIMIT.outputBytes && result.frames.length > 1) { result.frames.pop(); result.truncated.output = result.truncated.frames = true }
   return result
 }
+// Backend failures the handler caught: a job that swallows a 422 still succeeds, so the worker log would never show it.
+// Kept by shape (status, code, resource and the rejected field names, never a message or a value), at most eight.
+const caught = { count: 0, failures: [] }
+function observe(error, path) {
+  caught.count++
+  const [, area, name] = /^\/(?:api|_brain\/(files|operations))\/([a-z][a-z0-9_]{0,47})(?:[/?]|$)/.exec(String(path)) || []
+  const target = name ? (area === 'files' ? 'files.' : area === 'operations' ? 'operation.' : '') + name : null
+  const fields = error.errors && typeof error.errors === 'object' ? Object.keys(error.errors).slice(0, 8).map(field => field.slice(0, 64)) : []
+  const entry = { status: error.status, code: error.code ?? null, target, fields }
+  const same = caught.failures.find(f => f.status === entry.status && f.code === entry.code && f.target === entry.target && f.fields.join() === entry.fields.join())
+  if (same) same.count++
+  else if (caught.failures.length < 8) caught.failures.push({ ...entry, count: 1 })
+}
 let jobId = null
 try {
   let input = '', bytes = 0
@@ -104,13 +117,14 @@ try {
   if (typeof ctx.jobId === 'string' && /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(ctx.jobId)) jobId = ctx.jobId
   // The key the queue declares (queue.jsbrain runAs); a system queue never falls back to the ordinary key.
   const system = process.env.BRAIN_JOB_RUN_AS === 'system'
-  ctx.backend = keyBackend(process.env, system ? 'BRAIN_JOBS_SYSTEM_KEY' : 'BRAIN_JOBS_API_KEY', 'job')
+  ctx.backend = keyBackend(process.env, system ? 'BRAIN_JOBS_SYSTEM_KEY' : 'BRAIN_JOBS_API_KEY', 'job', observe)
   for (const name of ['BRAIN_JOBS_API_KEY', 'BRAIN_JOBS_SYSTEM_KEY', 'BRAIN_ROUTES_API_KEY', 'BRAIN_ROUTES_SYSTEM_KEY', 'BRAIN_SERVICE_API_KEY', 'BRAIN_JOB_RUN_AS']) delete process.env[name]
   ctx.env = Object.freeze(Object.assign({}, process.env))
   ctx.llm = llmClient(ctx.env)
   const module = await import(pathToFileURL(entry).href)
   if (typeof module.default !== 'function') throw Error()
   await module.default(ctx)
+  if (caught.count) try { emit(`JOB_BACKEND ${JSON.stringify({ schemaVersion: 1, event: 'job-backend-failures', jobId, count: caught.count, failures: caught.failures })}\n`) } catch {}
 } catch (error) {
   process.exitCode = 1
   try { emit(`JOB_TRACE ${JSON.stringify(trace(error, jobId))}\n`) } catch {}

@@ -78,6 +78,28 @@ test('backend failures reach the handler as status and field errors, never as re
   assert.equal(r.code,0,r.stderr)
   assert.deepEqual(r.value,{invalid:[422,{status:'Expected one of: pending, paid'}],denied:[403,'API_KEY_SCOPE_DENIED',false],name:400,malformed:404})
 })
+test('a job that catches backend failures still succeeds and reports their shape once, never a message or a value',async()=>{
+  const r=await run(`
+    for(let i=0;i<3;i++)await ctx.backend.resource('orders').list({filter:{status:'bad'}}).catch(()=>null)
+    await ctx.backend.resource('secret').list().catch(()=>null)
+    try{ctx.backend.resource('orders').get('nope')}catch{}
+    return 'done'
+  `,{BRAIN_BACKEND_URL:url,BRAIN_JOBS_API_KEY:key})
+  assert.equal(r.code,0,r.stderr)
+  assert.equal(r.value,'done')
+  const lines=r.stderr.split('\n').filter(line=>line.startsWith('JOB_BACKEND '))
+  assert.equal(lines.length,1,r.stderr)
+  assert.deepEqual(JSON.parse(lines[0].slice('JOB_BACKEND '.length)),{schemaVersion:1,event:'job-backend-failures',jobId:'00000000-0000-4000-8000-000000000009',count:4,failures:[
+    {status:422,code:null,target:'orders',fields:['status'],count:3},
+    {status:403,code:'API_KEY_SCOPE_DENIED',target:'secret',fields:[],count:1}
+  ]})
+  assert.ok(!r.stderr.includes('Expected one of')&&!r.stderr.includes('bad'))
+})
+test('a job without backend failures writes no report line',async()=>{
+  const r=await run(`await ctx.backend.resource('orders').list();return 1`,{BRAIN_BACKEND_URL:url,BRAIN_JOBS_API_KEY:key})
+  assert.equal(r.code,0,r.stderr)
+  assert.ok(!r.stderr.includes('JOB_BACKEND'),r.stderr)
+})
 test('without a backend URL and key, ctx.backend explains what to configure',async()=>{
   const before=seen.length
   const r=await run(`try{ctx.backend.resource('orders')}catch(e){return e.message}`,{BRAIN_BACKEND_URL:url})

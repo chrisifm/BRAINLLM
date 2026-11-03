@@ -2,11 +2,14 @@
 // over the fixed loopback BRAIN_BACKEND_URL, authenticated by one project API key. The key's scopes and identity decide
 // what the handler may read or write; the option mapping matches the runtime's ctx.backend.
 // A hoisted function with everything inside: the route sidecar's top-level loop starts before later consts initialize.
-function keyBackend(env, keyName, kind) {
+// `observe(error, path)`, when given, hears every failure the backend answered (or never answered), even one the
+// handler later catches: the job runner reports those for a job that still succeeds.
+function keyBackend(env, keyName, kind, observe) {
   const LIST_OPTIONS = ['search', 'limit', 'offset', 'filter', 'sort', 'cursor', 'after', 'include', 'aggregate', 'count', 'facets', 'fields', 'owner']
   const FILTER_OPS = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'between', 'in', 'exists', 'prefix', 'iprefix', 'has']
   const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
   const fail = (status, message, extra) => Object.defineProperty(Object.assign(new Error(message), { status }, extra), Symbol.for('brain.backendError'), { value: true })
+  const answered = (path, error) => { try { observe?.(error, path) } catch {} return error }
   let target = null, problem = null
   const key = env[keyName] || ''
   try {
@@ -25,21 +28,21 @@ function keyBackend(env, keyName, kind) {
     let response
     try {
       response = await fetch(new URL(path, target), { method, redirect: 'error', signal: AbortSignal.timeout(10000), headers: { accept: 'application/json', 'x-api-key': key, ...(bytes ? { 'content-type': 'application/json' } : {}) }, body: bytes })
-    } catch { throw fail(503, 'Native backend is unavailable') }
-    if (Number(response.headers.get('content-length')) > 2 * 1024 * 1024) { await response.body?.cancel(); throw fail(502, 'Native resource response exceeds its budget') }
+    } catch { throw answered(path, fail(503, 'Native backend is unavailable')) }
+    if (Number(response.headers.get('content-length')) > 2 * 1024 * 1024) { await response.body?.cancel(); throw answered(path, fail(502, 'Native resource response exceeds its budget')) }
     const raw = Buffer.from(await response.arrayBuffer())
-    if (raw.length > 2 * 1024 * 1024) throw fail(502, 'Native resource response exceeds its budget')
+    if (raw.length > 2 * 1024 * 1024) throw answered(path, fail(502, 'Native resource response exceeds its budget'))
     let value = null
-    if (raw.length) { try { value = JSON.parse(raw.toString('utf8')) } catch { if (response.ok) throw fail(502, 'Native resource response is invalid') } }
+    if (raw.length) { try { value = JSON.parse(raw.toString('utf8')) } catch { if (response.ok) throw answered(path, fail(502, 'Native resource response is invalid')) } }
     if (response.status === 404 && notFound) return notFound()
     if (response.status === 422) {
       const fields = value?.error?.fields
       const errors = fields && typeof fields === 'object' && !Array.isArray(fields) ? Object.fromEntries(Object.entries(fields).filter(([k, v]) => typeof v === 'string' && k.length <= 128).slice(0, 64).map(([k, v]) => [k, v.slice(0, 512)])) : {}
-      throw fail(422, 'Invalid input', { errors })
+      throw answered(path, fail(422, 'Invalid input', { errors }))
     }
     if (!response.ok) {
       const code = typeof value?.error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(value.error.code) ? value.error.code : undefined
-      throw fail(response.status >= 400 && response.status < 500 ? response.status : 503, `Native backend request failed with ${response.status}`, { code })
+      throw answered(path, fail(response.status >= 400 && response.status < 500 ? response.status : 503, `Native backend request failed with ${response.status}`, { code }))
     }
     return response.status === 204 ? null : value
   }
@@ -137,10 +140,10 @@ function keyBackend(env, keyName, kind) {
       let response
       try {
         response = await fetch(new URL(path, target), { method, redirect: 'error', signal: AbortSignal.timeout(timeout), headers: { 'x-api-key': key }, body })
-      } catch { throw fail(503, 'Native backend is unavailable') }
+      } catch { throw answered(path, fail(503, 'Native backend is unavailable')) }
       if (response.ok) return response
       await response.body?.cancel()
-      throw fail(response.status >= 400 && response.status < 500 ? response.status : 503, `Native file request failed with ${response.status}`)
+      throw answered(path, fail(response.status >= 400 && response.status < 500 ? response.status : 503, `Native file request failed with ${response.status}`))
     }
     const json = async response => { try { return await response.json() } catch { throw fail(502, 'Native file response is invalid') } }
     return Object.freeze({

@@ -308,8 +308,9 @@ pub(crate) struct ErrorCode(pub(crate) &'static str);
 /// caller must change. At most eight, and only names of the identifier shape a contract declares: never a value.
 #[derive(Clone, Debug)]
 pub(crate) struct ErrorFields(pub(crate) Vec<String>);
-/// `field`, `group.field` or either with `[op]`, each part lowercase ASCII of at most 48 bytes.
-fn loggable_field(key: &str) -> bool {
+/// `field`, `group.field` or either with `[op]`, each part lowercase ASCII of at most 48 bytes. The job worker uses it too
+/// for the field names a job reports from failures its handler caught.
+pub fn loggable_field(key: &str) -> bool {
     let ident = |s: &str| (1..=48).contains(&s.len()) && s.as_bytes()[0].is_ascii_lowercase() && s.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_');
     let (path, op) = match key.strip_suffix(']').and_then(|k| k.split_once('[')) {
         Some((path, op)) => (path, Some(op)),

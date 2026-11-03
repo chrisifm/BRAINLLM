@@ -106,8 +106,15 @@ does the same for a state transition. The key needs `<resource>:write`, and the 
 An uncaught error fails the attempt; the job retries with the queue's backoff and becomes `dead` after its attempts.
 Request bodies are limited to 64 KiB and responses to 2 MiB.
 
+A handler that catches a backend failure and still finishes leaves a `job-backend-failures` line in the worker log:
+the total `count` and up to eight distinct failures, each with its `status`, `code`, `resource` (`orders`,
+`files.reports`, `operation.renew`), the rejected field names (`status[gte]`) and how many times it happened. It never
+carries a message or a submitted value. A `catch` that only calls `console.error` no longer hides a call the backend
+rejects on every run (application stderr is not echoed to the worker log). Errors the client raises before calling the
+backend (invalid options, a malformed id) are not counted.
+
 ## Tested
 
 `runtime/test/job-backend.test.js` runs the real job runner against a loopback backend (query mapping, the key header,
-no cookies or `Origin`, field errors, missing configuration). `crates/brain-backend/tests/api_keys.rs`
+no cookies or `Origin`, field errors, caught failures reported by shape, missing configuration). `crates/brain-backend/tests/api_keys.rs`
 (`api_keys_authenticate_scope_quota_trace_rotate_and_revoke`, helper `slug_redirects_and_patch_with_key`) checks a key on PATCH and on slug redirects against Postgres.
