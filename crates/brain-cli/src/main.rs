@@ -41,6 +41,7 @@ mod analytics;
 mod api_key_config;
 mod webhook_config;
 mod origin_check;
+mod list_options;
 mod lighthouse;
 mod asset_check;
 mod release_check;
@@ -786,6 +787,8 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
             diags.extend(view_links::check(&app));
             // declared origins and the origins a page calls (B0744, B0745, B0746)
             diags.extend(origin_check::check(&app));
+            // literal list options the resource does not declare, which the backend answers 422 on every call (B0815)
+            diags.extend(list_options::check(&app));
             for (code, file, message, fix) in backend::role_warnings(&app).into_iter().chain(backend::job_warnings(&app)) {
                 let mut diag = compiler::Diag::new(code, &file, brain_parse::Span::default(), message, fix);
                 diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);

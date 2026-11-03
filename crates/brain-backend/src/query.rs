@@ -655,6 +655,29 @@ pub fn without_declared_names(problems: Problems) -> Problems {
         .collect()
 }
 
+/// Why a list request may not filter `field` with `op`, or `None` when the contract declares it. The one rule `parse`
+/// answers 422 with; `brain check` applies it to the literal options of a native `list()` call (B0815).
+pub fn filter_problem(r: &Resource, field: &str, op: &str) -> Option<String> {
+    if let Some((group, name)) = field.split_once('.').filter(|(group, _)| r.query.or.contains_key(*group)) {
+        let declared = r.query.or[group].get(name).is_some_and(|ops| ops.iter().any(|o| o == op)) && kind(r, name).is_some();
+        return (!declared).then(|| format!("`{name}` with `{op}` is not an alternative of `{group}`; declared: {}", r.query.or[group].keys().cloned().collect::<Vec<_>>().join(", ")));
+    }
+    if r.query.filter.get(field).is_some_and(|ops| ops.iter().any(|o| o == op)) {
+        return None;
+    }
+    Some(match r.query.filter.get(field).map(|ops| ops.join(", ")) {
+        Some(ops) => format!("Operator `{op}` is not declared for `{field}`; declared: {ops}"),
+        None if RESERVED.contains(&field) => "Malformed parameter".to_string(),
+        None => format!("Unknown query parameter; filterable: {}", r.query.filter.keys().cloned().collect::<Vec<_>>().join(", ")),
+    })
+}
+
+/// Why a list request may not sort by `field`, or `None` when it may (`created_at` always may).
+pub fn sort_problem(r: &Resource, field: &str) -> Option<String> {
+    let declared = r.query.sort.iter().any(|e| e.field() == field) && kind(r, field).is_some();
+    (!declared && field != "created_at").then(|| format!("`{field}` is not sortable; declared: {}", sort_names(r)))
+}
+
 /// Parses raw query pairs against the contract. Every undeclared key, operator or malformed value is a problem.
 pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(String, String)]) -> Result<ListRequest, Problems> {
     let mut problems = Problems::new();
@@ -700,7 +723,9 @@ pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(Str
                         (Some(entry), Some(k)) => keys.push(SortKey { field: field.into(), kind: k, desc, nulls_first: entry.nulls_first() }),
                         _ if field == "created_at" => keys.push(SortKey { field: field.into(), kind: Kind::Stamp, desc, nulls_first: false }),
                         _ => {
-                            bad(&format!("`{field}` is not sortable; declared: {}", sort_names(r)));
+                            if let Some(message) = sort_problem(r, field) {
+                                bad(&message);
+                            }
                         }
                     }
                 }
@@ -779,11 +804,12 @@ pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(Str
                     },
                     None => (key.as_str(), "eq"),
                 };
+                if let Some(message) = filter_problem(r, field, op) {
+                    bad(&message);
+                    continue;
+                }
                 if let Some((group, name)) = field.split_once('.').filter(|(group, _)| r.query.or.contains_key(*group)) {
-                    let Some(k) = r.query.or[group].get(name).filter(|ops| ops.iter().any(|o| o == op)).and_then(|_| kind(r, name)) else {
-                        bad(&format!("`{name}` with `{op}` is not an alternative of `{group}`; declared: {}", r.query.or[group].keys().cloned().collect::<Vec<_>>().join(", ")));
-                        continue;
-                    };
+                    let Some(k) = kind(r, name) else { continue };
                     let raws = if matches!(op, "in" | "between") { split(raw) } else { vec![raw.as_str()] };
                     if op == "in" && !(1..=MAX_IN).contains(&raws.len()) || op == "between" && raws.len() != 2 {
                         bad(if op == "in" { "in takes 1..50 comma-separated values" } else { "between takes two comma-separated values: low,high" });
@@ -796,16 +822,6 @@ pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(Str
                     }
                     continue;
                 }
-                let Some(ops) = r.query.filter.get(field).filter(|ops| ops.iter().any(|o| o == op)) else {
-                    let declared = r.query.filter.get(field).map(|ops| ops.join(", "));
-                    bad(&match declared {
-                        Some(ops) => format!("Operator `{op}` is not declared for `{field}`; declared: {ops}"),
-                        None if RESERVED.contains(&field) => "Malformed parameter".to_string(),
-                        None => format!("Unknown query parameter; filterable: {}", r.query.filter.keys().cloned().collect::<Vec<_>>().join(", ")),
-                    });
-                    continue;
-                };
-                let _ = ops;
                 let (via, target, name) = match field.split_once('.') {
                     Some((local, inner)) => {
                         let Some(t) = crate::relations::target(r, local).and_then(|t| resources.get(&t)) else { continue };

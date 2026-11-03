@@ -143,6 +143,60 @@ function back(next) {
 </script>
 <button on:click={go('a', 'b')}>Go</button><button on:click={back('c')}>Back</button>
 
+### B0815 list options the resource does not declare
+@expect B0815 server/routes/sweep/handler.jsbrain 4:33
+@expect B0815 server/routes/sweep/handler.jsbrain 5:80
+@expect B0815 server/routes/sweep/handler.jsbrain 5:101
+@expect B0815 server/routes/sweep/handler.jsbrain 6:76
+@expect B0815 server/routes/sweep/handler.jsbrain 6:89
+@file server/resources/orders/schema.jsbrain
+<meta server>
+export default { title: 'str!', status: 'str!', channel: 'str' }
+@file server/resources/orders/policy.jsbrain
+<meta server>
+export default { read: ['admin'], create: ['admin'], update: ['admin'], delete: ['admin'] }
+@file server/resources/orders/query.jsbrain
+<meta server>
+export default { filter: { status: ['eq', 'in'] }, sort: ['title'] }
+@file server/routes/sweep/route.jsbrain
+<meta server>
+export default { method: 'GET', path: '/sweep', auth: 'public' }
+@file server/routes/sweep/handler.jsbrain
+<meta server>
+export default async function handle(ctx) {
+  const orders = ctx.backend.resource('orders')
+  await orders.list({ filter: { channel: 'web' } })
+  const late = await ctx.backend.resource('orders').list({ filter: { status: { gte: 'a' } }, sort: ['-channel'] })
+  await orders.list({ filter: { status: 'open' }, sort: 'title', include: ['customer'], limit: 500 })
+  return { ok: Boolean(late) }
+}
+
+### B0815 accepted: declared options, computed keys and operators, spreads and unknown names
+@file server/resources/orders/schema.jsbrain
+<meta server>
+export default { title: 'str!', status: 'str!', channel: 'str' }
+@file server/resources/orders/policy.jsbrain
+<meta server>
+export default { read: ['admin'], create: ['admin'], update: ['admin'], delete: ['admin'] }
+@file server/resources/orders/query.jsbrain
+<meta server>
+export default { filter: { status: ['eq', 'in'] }, sort: ['title'] }
+@file server/routes/sweep/route.jsbrain
+<meta server>
+export default { method: 'GET', path: '/sweep', auth: 'public' }
+@file server/routes/sweep/handler.jsbrain
+<meta server>
+export default async function handle(ctx) {
+  const orders = ctx.backend.resource('orders')
+  const pick = ctx.query
+  await orders.list({ filter: { status: 'open', [pick.field]: 'x' }, sort: ['-title', 'created_at'], limit: 100, offset: 0 })
+  await orders.list({ filter: { status: { in: ['a', 'b'] } } })
+  await orders.list({ ...pick, filter: { channel: 'web' } })
+  await orders.list({ filter: { status: { [pick.op]: 'x' } }, limit: pick.limit })
+  await ctx.backend.resource('missing').list({ filter: { channel: 'web' } })
+  return { ok: true }
+}
+
 ### B0711 request-built fetch
 @expect B0711 comp/x.brain 3:10
 @file comp/x.brain
