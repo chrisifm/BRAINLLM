@@ -275,6 +275,8 @@ test('ETag: SSR HTML weak, static HTML strong (stable across nonces) → 304 wit
   const b = await get('/users/7', { 'if-none-match': et })
   assert.equal(b.status, 304)
   assert.equal(await b.text(), '')
+  // a shared cache keeps the stored body and its CSP together: a 304 with a fresh nonce would break the cached page
+  assert.equal(b.headers.get('content-security-policy'), null)
   assert.equal((await get('/users/8', { 'if-none-match': et })).status, 200) // other content, other tag
   const h = await get('/about')
   const st = h.headers.get('etag')
