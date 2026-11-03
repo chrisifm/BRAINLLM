@@ -1030,13 +1030,23 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
                 ISOLATION,
             )
         }
-        Ok(body) => http::respond(
-            &mut s,
-            200,
-            http::mime(&file.to_string_lossy()),
-            &body,
-            head,
-        ),
+        // Safari plays video only from byte ranges: one span of the file, as `brain start` answers it
+        Ok(body) => {
+            let ctype = http::mime(&file.to_string_lossy());
+            let size = body.len() as u64;
+            match req.header("range").filter(|_| req.header("if-range").is_none()).and_then(|r| crate::prod::byte_range(r, size)) {
+                Some(Err(())) => http::respond_with(&mut s, 416, "text/plain", b"", head, &[("Content-Range", &format!("bytes */{size}"))]),
+                Some(Ok((start, end))) => http::respond_with(
+                    &mut s,
+                    206,
+                    ctype,
+                    &body[start as usize..=end as usize],
+                    head,
+                    &[("Accept-Ranges", "bytes"), ("Content-Range", &format!("bytes {start}-{end}/{size}"))],
+                ),
+                None => http::respond_with(&mut s, 200, ctype, &body, head, &[("Accept-Ranges", "bytes")]),
+            }
+        }
         Err(_) => http::respond(&mut s, 404, "text/plain", b"not found", head),
     }
 }
@@ -3131,6 +3141,51 @@ mod admission_tests {
         assert!(llms.contains("(http://shop.local:5180/about)") && !llms.contains("/es/about"), "{llms}");
         let es = get("/es/llms.txt");
         assert!(es.contains("(http://shop.local:5180/es/about)"), "{es}");
+        drop(dev);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dev_answers_one_byte_range_of_a_public_file() {
+        let root = std::env::temp_dir().join(format!("brain-dev-range-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("public")).unwrap();
+        std::fs::create_dir_all(root.join("views")).unwrap();
+        std::fs::write(root.join("views/home.brain"), "<p></p>").unwrap();
+        std::fs::write(root.join("public/clip.mp4"), (0u8..100).collect::<Vec<u8>>()).unwrap();
+        let root = root.canonicalize().unwrap();
+        let compiler: CompileFn = Arc::new(|src, _| Ok(Compiled { js: String::new(), css: String::new(), deps: vec![], server_js: src.into() }));
+        let opts = Options {
+            root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: String::new(),
+            runtime: vec![], env: None, base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None,
+        };
+        let dev = start_dev(opts, compiler, false, None).unwrap();
+        let ask = |method: &str, extra: &str| {
+            use std::io::{Read, Write};
+            let addr = dev.url().trim_start_matches("http://").trim_end_matches('/').to_string();
+            let mut c = TcpStream::connect(&addr).unwrap();
+            write!(c, "{method} /clip.mp4 HTTP/1.1\r\nHost: localhost\r\n{extra}Connection: close\r\n\r\n").unwrap();
+            let mut out = Vec::new();
+            c.read_to_end(&mut out).unwrap();
+            let split = out.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+            (String::from_utf8_lossy(&out[..split]).to_lowercase(), out[split + 4..].to_vec())
+        };
+        let (h, body) = ask("GET", "Range: bytes=2-4\r\n");
+        assert!(h.starts_with("http/1.1 206") && h.contains("content-range: bytes 2-4/100") && h.contains("accept-ranges: bytes"), "{h}");
+        assert_eq!(body, vec![2, 3, 4]);
+        let (h, body) = ask("GET", "Range: bytes=-3\r\n");
+        assert!(h.contains("content-range: bytes 97-99/100"), "{h}");
+        assert_eq!(body, vec![97, 98, 99]);
+        let (h, _) = ask("GET", "Range: bytes=100-\r\n");
+        assert!(h.starts_with("http/1.1 416") && h.contains("content-range: bytes */100"), "{h}");
+        for extra in ["Range: bytes=0-1, 5-6\r\n", "Range: bytes=0-1\r\nIf-Range: \"x\"\r\n", ""] {
+            let (h, body) = ask("GET", extra);
+            assert!(h.starts_with("http/1.1 200") && h.contains("accept-ranges: bytes"), "{extra}: {h}");
+            assert_eq!(body.len(), 100, "{extra}");
+        }
+        let (h, body) = ask("HEAD", "Range: bytes=0-1\r\n");
+        assert!(h.starts_with("http/1.1 206") && h.contains("content-length: 2"), "{h}");
+        assert!(body.is_empty());
         drop(dev);
         let _ = std::fs::remove_dir_all(&root);
     }
