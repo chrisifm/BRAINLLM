@@ -70,6 +70,12 @@ target/debug/brain doctor              # inside any app
     data included), diagnostics (`msg`, `fix`), CLI/MCP output, test names, templates and docs.
     `scripts/check-english.sh` must pass.
 11. **BRAINLLM is a general-purpose framework.** A report from a real app is evidence, not a spec: understand its context, find the general defect or missing capability, and make the adjustment for every app. Never build for one app: no app names, or tables, fields, functions, roles or rules from one app's domain, in defaults, generated code, messages or docs. If nothing general remains, the change stays in that app. `scripts/check-general.sh` enforces the names.
+12. **This repository is public; nothing private enters it.** Every change, test, fixture, example, doc, commit message
+    and release note uses generic placeholders (`example.com`, `com.example.web`, `ABCDE12345`, synthetic keys). Never
+    commit an app's or account's identifiers (team, client, service or app ids, key ids, domains, return URLs), hosts or
+    IP addresses, emails, phone numbers, addresses, tokens or data copied from a real deployment, even when a report
+    quotes them. `node scripts/privacy-audit.mjs --history` must pass before every push, tag or release; it also checks
+    the private terms each maintainer lists in the untracked `.git/info/private-terms` of their clone.
 
 ## Compatibility review
 

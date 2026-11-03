@@ -16,8 +16,17 @@ const rules = [
 ]
 const forbidden = p => /(^|\/)(?:\.env(?:\..*)?|\.brain_env|\.npmrc|\.netrc|id_rsa|id_ed25519|credentials(?:\.json)?|\.claude|\.codex)(\/|$)|\.(?:pem|p12|pfx|key|sqlite|sqlite3)$/i.test(p)
 const digest = s => createHash('sha256').update(s).digest('hex')
+// The repository is public. Identifiers of a private app, account or person (team and client ids, domains, emails,
+// addresses) are listed one per line in this clone's untracked `.git/info/private-terms` (or the file named by
+// BRAIN_PRIVATE_TERMS), so the list itself never ships. Matching is literal and case-insensitive; `#` starts a comment.
+export function privateTerms(root, file = process.env.BRAIN_PRIVATE_TERMS) {
+  let path = file
+  if (!path) { try { path = join(resolve(root, git(root, 'rev-parse', '--git-common-dir')), 'info/private-terms') } catch { return [] } }
+  if (!existsSync(path)) return []
+  return readFileSync(path, 'utf8').split('\n').map(line => line.replace(/#.*/, '').trim().toLowerCase()).filter(term => term.length >= 4)
+}
 
-export function inspect(path, data, exceptions = []) {
+export function inspect(path, data, exceptions = [], terms = []) {
   const out = []
   if (forbidden(path)) out.push({ path, rule: 'private-file' })
   if (data.length > MAX) return [...out, { path, rule: 'oversized-unreviewed-file' }]
@@ -29,10 +38,16 @@ export function inspect(path, data, exceptions = []) {
       out.push({ path, rule, line: text.slice(0, m.index).split('\n').length })
     }
   }
+  // A private term reports its position in the local list, never the term.
+  const lower = text.toLowerCase()
+  terms.forEach((term, index) => {
+    for (let at = lower.indexOf(term); at !== -1; at = lower.indexOf(term, at + term.length))
+      out.push({ path, rule: 'private-term', term: index + 1, line: text.slice(0, at).split('\n').length })
+  })
   return out
 }
 
-export function audit(root, { history = false, exceptions = [] } = {}) {
+export function audit(root, { history = false, exceptions = [], terms = privateTerms(root) } = {}) {
   const findings = [], seen = new Set()
   let files = 0, blobs = 0
   const paths = git(root, 'ls-files', '--cached', '--others', '--exclude-standard', '-z').split('\0').filter(Boolean)
@@ -43,7 +58,7 @@ export function audit(root, { history = false, exceptions = [] } = {}) {
     if (!stat.isFile()) { findings.push({ path: p, rule: 'nonregular-file' }); continue }
     files++
     if (stat.size > MAX) findings.push({ path: p, rule: 'oversized-unreviewed-file' })
-    else findings.push(...inspect(p, readFileSync(full), exceptions))
+    else findings.push(...inspect(p, readFileSync(full), exceptions, terms))
   }
   if (history) {
     // Scan every reachable blob, including removed files. Commit messages and identities matter as well.
@@ -58,11 +73,11 @@ export function audit(root, { history = false, exceptions = [] } = {}) {
       if (size > MAX) { findings.push({ path, object: oid, rule: 'oversized-unreviewed-file' }); continue }
       const data = execFileSync('git', ['cat-file', kind, oid], { cwd: root, maxBuffer: MAX + 1, timeout: 30_000 })
       blobs++
-      findings.push(...inspect(path, data, exceptions).map(f => ({ ...f, object: oid })))
+      findings.push(...inspect(path, data, exceptions, terms).map(f => ({ ...f, object: oid })))
     }
   }
-  return { schemaVersion: 1, ok: findings.length === 0, files, historyObjects: blobs, findings,
-    coverage: 'Known credential patterns, private paths and reachable Git objects. Public author identity is intentional. Not proof that arbitrary secrets or personal data are absent.' }
+  return { schemaVersion: 1, ok: findings.length === 0, files, historyObjects: blobs, privateTerms: terms.length, findings,
+    coverage: 'Known credential patterns, private paths, the private terms listed locally and reachable Git objects. Public author identity is intentional. Not proof that arbitrary secrets or personal data are absent.' }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

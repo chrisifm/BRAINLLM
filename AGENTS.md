@@ -1,5 +1,8 @@
 # AGENTS.md — working on the BRAINLLM repository
 
+- **This repository is public.** Every change must be general (CONTRIBUTING invariants 11 and 12): generic placeholders
+  only, never an app's or person's ids, domains, hosts, emails, keys or data, in code, tests, docs or commit messages.
+  `node scripts/privacy-audit.mjs --history` must pass before any push, tag or release.
 - Changing the framework: read `CONTRIBUTING.md` fully, then the `docs/INTERNALS.md` section you touch.
 - Writing an app with BRAINLLM: read `SPEC.md` (or run `brain spec`); nothing outside it exists.
 - Before finishing: `cargo test --workspace && npm test --prefix runtime && node bench/fixtures-check.mjs && scripts/check-english.sh`.
