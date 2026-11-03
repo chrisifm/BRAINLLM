@@ -271,6 +271,10 @@ impl Error {
 }
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
+        let rejected: Vec<String> = match &self.fields {
+            Some(Value::Object(fields)) if self.status == StatusCode::UNPROCESSABLE_ENTITY => fields.keys().filter(|k| loggable_field(k)).take(8).cloned().collect(),
+            _ => Vec::new(),
+        };
         let mut error=json!({"code":self.code,"fix":self.fix,"fields":self.fields});
         if let Some(code)=self.brain_code { error["brainCode"]=json!(code); }
         if let Some(detail)=self.detail { error["origin"]=detail; }
@@ -279,6 +283,9 @@ impl IntoResponse for Error {
             .extensions_mut()
             .insert(crate::response::DefaultError);
         response.extensions_mut().insert(ErrorCode(self.code));
+        if !rejected.is_empty() {
+            response.extensions_mut().insert(ErrorFields(rejected));
+        }
         if self.code == "DATABASE_BUSY" {
             response.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
         }
@@ -297,6 +304,19 @@ impl IntoResponse for Error {
 /// the client read. A fixed constant, never request text.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ErrorCode(pub(crate) &'static str);
+/// The names of the fields a 422 answer rejected (`provider`, `status[gte]`), so the request log line says what the
+/// caller must change. At most eight, and only names of the identifier shape a contract declares: never a value.
+#[derive(Clone, Debug)]
+pub(crate) struct ErrorFields(pub(crate) Vec<String>);
+/// `field`, `group.field` or either with `[op]`, each part lowercase ASCII of at most 48 bytes.
+fn loggable_field(key: &str) -> bool {
+    let ident = |s: &str| (1..=48).contains(&s.len()) && s.as_bytes()[0].is_ascii_lowercase() && s.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_');
+    let (path, op) = match key.strip_suffix(']').and_then(|k| k.split_once('[')) {
+        Some((path, op)) => (path, Some(op)),
+        None => (key, None),
+    };
+    path.split('.').count() <= 2 && path.split('.').all(ident) && op.is_none_or(|op| op.len() <= 16 && ident(op))
+}
 /// Whether a captured backtrace names this crate's code, which a stripped binary cannot do.
 fn stack_is_symbolized(stack: &str) -> bool {
     stack.contains("brain_backend") && !stack.contains("__mh_execute_header")
@@ -1044,6 +1064,7 @@ async fn response_headers(req: Request, next: Next) -> Response {
     crate::dev_trace::request(&rid, method.as_str(), &route, response.status().as_u16(), started.elapsed().as_secs_f64() * 1000.0);
     let log_policy = response.extensions().get::<edge_http::LogPolicy>().copied();
     let error_code = response.extensions().get::<ErrorCode>().map(|code| code.0);
+    let error_fields = response.extensions().get::<ErrorFields>().map(|fields| fields.0.clone());
     let mut response = crate::response::finalize(&method, &path, accept.as_deref(), &rid, response);
     let cacheable = response.status().is_success() || response.status() == StatusCode::NOT_MODIFIED;
     let declared = response.extensions().get::<cache_http::Declared>().filter(|_| cacheable).map(|d| d.0.clone());
@@ -1074,7 +1095,8 @@ async fn response_headers(req: Request, next: Next) -> Response {
         headers.insert(header::CACHE_CONTROL, declared);
     }
     headers.insert("x-request-id", rid.parse().unwrap());
-    // Lines carry the matched route template, never the raw path, query, headers or body.
+    // Lines carry the matched route template and the names of rejected fields, never the raw path, query, headers, body
+    // or a value.
     if let Some(event) = edge_http::request_event(log_policy.as_ref(), response.status(), started.elapsed()) {
         let mut line = json!({"event":event,"rid":rid,"route":route,"method":method.as_str(),"status":response.status().as_u16(),"ms":started.elapsed().as_millis()});
         // The template alone hides which resource was slow; only a name of the declared shape is written.
@@ -1083,6 +1105,9 @@ async fn response_headers(req: Request, next: Next) -> Response {
         }
         if let Some(code) = error_code.filter(|_| !response.status().is_success()) {
             line["code"] = json!(code);
+        }
+        if let Some(fields) = error_fields.filter(|_| !response.status().is_success()) {
+            line["fields"] = json!(fields);
         }
         if let Some((db_ms, wait_ms)) = db_time.fields() {
             line["dbMs"] = json!(db_ms);
@@ -2724,6 +2749,19 @@ mod stack_note_tests {
         use axum::response::IntoResponse;
         let response = super::Error::new(axum::http::StatusCode::SERVICE_UNAVAILABLE, "OVERLOADED", "retry").into_response();
         assert_eq!(response.extensions().get::<super::ErrorCode>().map(|c| c.0), Some("OVERLOADED"));
+        assert!(response.extensions().get::<super::ErrorFields>().is_none());
+    }
+    #[test]
+    fn a_rejected_input_names_its_fields_for_the_request_log_and_never_free_text() {
+        use axum::response::IntoResponse;
+        let fields = serde_json::json!({"provider": "Unknown query parameter", "status[gte]": "Operator `gte` is not declared", "shop.country": "x", "Bad Key": "x", "a@b.example": "x", "x[ne ]": "x"});
+        let response = super::Error::validation(fields).into_response();
+        let mut logged = response.extensions().get::<super::ErrorFields>().map(|f| f.0.clone()).unwrap_or_default();
+        logged.sort();
+        assert_eq!(logged, ["provider", "shop.country", "status[gte]"]);
+        let many: serde_json::Map<String, serde_json::Value> = (0..20).map(|i| (format!("f{i:02}"), serde_json::json!("x"))).collect();
+        let response = super::Error::validation(many).into_response();
+        assert_eq!(response.extensions().get::<super::ErrorFields>().map(|f| f.0.len()), Some(8));
     }
     #[test]
     fn the_note_about_a_binary_without_symbols_is_kept_once_per_process() {
