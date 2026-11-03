@@ -45,6 +45,10 @@ brain jobs dead order_receipts
 brain jobs retry order_receipts --id 6b1f…        # one dead job; without --id, up to 1000
 ```
 
+The payload is JSON in `--payload '<json>'`; a single JSON argument right after the queue name is the same payload
+(`brain jobs enqueue order_receipts '{"order_id":"A-19","email":"cy@example.com"}'`). Without either the payload is
+`{}`, which the job's schema still validates; a rejected or unparsable payload names `--payload` as the fix.
+
 ```json
 {"schemaVersion":1,"stats":{"queue":"order_receipts","pending":3,"delayed":1,"running":2,"succeeded":40,"dead":1}}
 {"schemaVersion":1,"dead":[{"id":"6b1f…","queue":"order_receipts","attempts":5,"maxAttempts":5,"priority":10,"lastError":"Handler failed or timed out; inspect the queue handler.jsbrain","finishedAt":"2026-10-31T01:02:03.4+00:00"}]}

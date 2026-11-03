@@ -1291,13 +1291,20 @@ function admin(ctx) {{
   if (!ctx.backend) throw Error('Native backend is not configured')
   if (!ctx.user || ctx.user.role !== 'admin') throw {{status:403,message:'Administrator access required'}}
 }}
+// A field is `'str!'`, `'str! private'` or `{{ type: 'str!', ... }}`; `!` (or `required: true`) marks it required.
+function field(key) {{
+  const spec=schema[key]
+  const shape=spec && typeof spec === 'object' ? spec.type : spec
+  const text=String(shape == null ? '' : shape).trim().split(' ')[0]
+  return {{kind:text.replace(/!$/,''),required:text.endsWith('!') || Boolean(spec && typeof spec === 'object' && spec.required === true)}}
+}}
 function values(input) {{
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw {{errors:{{form:'Use a resource object'}}}}
   for (const key of Object.keys(input)) {{
     if (!Object.prototype.hasOwnProperty.call(schema,key)) throw {{errors:{{form:'Remove undeclared resource fields'}}}}
   }}
   for (const key of Object.keys(schema)) {{
-    if (schema[key].endsWith('!') && input[key] == null) {{
+    if (field(key).required && input[key] == null) {{
       let errors = {{}}
       errors[key] = 'Required'
       throw {{errors}}
@@ -1318,7 +1325,7 @@ async function editor(ctx,id) {{
   const source=id ? (await repository(ctx).get(id)).data : {{}}
   let result={{}}
   for (const key of Object.keys(schema)) {{
-    const kind=schema[key].replace('!','')
+    const kind=field(key).kind
     const value=source[key]
     result[key]=kind === 'obj' ? (value == null ? '' : JSON.stringify(value)) : kind === 'bool' ? Boolean(value) : kind === 'num' ? (value == null ? '' : value) : value == null ? '' : String(value)
   }}
@@ -1328,7 +1335,7 @@ async function saveForm(ctx,id,input) {{
   admin(ctx)
   const payload=values(input)
   for (const key of Object.keys(payload)) {{
-    const kind=schema[key].replace('!','')
+    const kind=field(key).kind
     const value=payload[key]
     let invalid=false
     if (kind === 'obj') {{
@@ -1342,7 +1349,7 @@ async function saveForm(ctx,id,input) {{
       else if (typeof value !== 'string' || !/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(value) || !Number.isFinite(Number(value))) invalid=true
       else payload[key]=Number(value)
     }} else if ((kind === 'str' || kind === 'email') && value != null) {{
-      if (typeof value !== 'string' || (schema[key].endsWith('!') && !value.trim())) invalid=true
+      if (typeof value !== 'string' || (field(key).required && !value.trim())) invalid=true
     }}
     if (invalid) {{let errors={{}};errors[key]='Use a valid field value';throw {{errors}}}}
   }}
@@ -1762,12 +1769,35 @@ async fn owner_gone() {
     }
 }
 
+/// The validated payload of `brain jobs enqueue <queue>`: `--payload '<json>'`, or a single positional JSON argument
+/// after the queue (`brain jobs enqueue mail '{"to":"a@example.com"}'`). Nothing given is `{}`, which the job's schema
+/// still validates. Every refusal names `--payload` as the fix.
+fn enqueue_payload(args: &[String], name: &str, job: &Resource) -> Result<Value, String> {
+    let valued = crate::flags::TABLE.iter().find(|(command, ..)| *command == "jobs").map_or(&[][..], |(_, valued, _)| *valued);
+    let extra: Vec<String> = crate::positional(args, valued).into_iter().skip(2).collect();
+    let example = format!("brain jobs enqueue {name} --payload '{{\"field\":\"value\"}}'");
+    let given = match (crate::flag(args, "--payload"), extra.as_slice()) {
+        (Some(_), [first, ..]) => return Err(format!("`brain jobs enqueue` got both --payload and a positional argument `{first}`; fix: pass the JSON with --payload only, e.g. {example}")),
+        (_, [_, _, ..]) => return Err(format!("`brain jobs enqueue` takes one queue and one payload; fix: pass the JSON with --payload, e.g. {example}")),
+        (Some(text), []) => Some(text),
+        (None, [text]) => Some(text.clone()),
+        (None, []) => None,
+    };
+    let supplied = given.is_some();
+    let text = given.unwrap_or_else(|| "{}".to_string());
+    let value: Value = serde_json::from_str(&text).map_err(|e| format!("Invalid payload JSON ({e}); fix: pass the JSON with --payload, quoted for the shell, e.g. {example}"))?;
+    job.input(&value).map_err(|fields| {
+        let error = json!({"code":"INVALID_JOB_PAYLOAD","fields":fields}).to_string();
+        if supplied { error } else { format!("{error}; fix: pass the JSON with --payload, e.g. {example}") }
+    })
+}
+
 pub fn jobs(args: &[String]) -> Result<(), String> {
     let root = crate::app_root()?;
     let environment = crate::env::name(args, "development");
     let op = args.first().map(String::as_str).unwrap_or("");
     if !matches!(op, "enqueue" | "status" | "work" | "prune" | "dead" | "retry" | "stats" | "cron") {
-        return Err("usage: brain jobs enqueue <queue> [--payload '<json>'] [--key K] [--priority N] [--delay S] | status <id> | work <queue> [--concurrency 2] | dead <queue> | retry <queue> [--id <uuid>] | stats [queue] | cron [--once] | prune".into());
+        return Err("usage: brain jobs enqueue <queue> [--payload '<json>'] [--key K] [--priority N] [--delay S] (example: brain jobs enqueue order_receipts --payload '{\"order_id\":\"A-17\"}') | status <id> | work <queue> [--concurrency 2] | dead <queue> | retry <queue> [--id <uuid>] | stats [queue] | cron [--once] | prune".into());
     }
     let snapshot = inspect(&root)?;
     let long_running = matches!(op, "work" | "cron");
@@ -1794,6 +1824,8 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
     } else {
         None
     };
+    // Resolved before any database connection: a payload mistake needs no Postgres to be reported.
+    let enqueued = if op == "enqueue" { Some(enqueue_payload(args, &name, job_contract.as_ref().unwrap())?) } else { None };
     let module = if op == "work" {
         Some(worker_module(&root, &name)?)
     } else {
@@ -1818,14 +1850,7 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
 
         match op {
             "enqueue" => {
-                let payload = crate::flag(args, "--payload").unwrap_or_else(|| "{}".to_string());
-                let payload: Value =
-                    serde_json::from_str(&payload).map_err(|_| "Invalid payload JSON")?;
-                let payload = job_contract
-                    .as_ref()
-                    .unwrap()
-                    .input(&payload)
-                    .map_err(|e| json!({"code":"INVALID_JOB_PAYLOAD","fields":e}).to_string())?;
+                let payload = enqueued.clone().unwrap();
                 let policy = policy.as_ref().unwrap();
                 let number = |flag: &str, default: i64| -> Result<i64, String> {
                     crate::flag(args, flag).map_or(Ok(default), |v| v.parse().map_err(|_| format!("{flag} must be an integer")))
@@ -2201,6 +2226,26 @@ mod tests {
     }
 
     #[test]
+    fn enqueue_takes_the_payload_from_the_flag_or_one_positional_json_and_names_the_fix() {
+        use serde_json::json;
+        let job: brain_backend::Resource = serde_json::from_value(json!({"name":"mail","fields":{"to":{"kind":"str","required":true}},"policy":{"read":[],"create":[],"update":[],"delete":[]}})).unwrap();
+        let args = |list: &[&str]| list.iter().map(|a| a.to_string()).collect::<Vec<String>>();
+        let payload = |list: &[&str]| super::enqueue_payload(&args(list), "mail", &job);
+        assert_eq!(payload(&["enqueue", "mail", "--payload", r#"{"to":"a@example.com"}"#]).unwrap(), json!({"to":"a@example.com"}));
+        assert_eq!(payload(&["enqueue", "mail", r#"{"to":"a@example.com"}"#, "--key", "k1"]).unwrap(), json!({"to":"a@example.com"}));
+        assert_eq!(payload(&["enqueue", "mail", "--env", "development", r#"{"to":"a@example.com"}"#]).unwrap(), json!({"to":"a@example.com"}));
+        let missing = payload(&["enqueue", "mail"]).unwrap_err();
+        assert!(missing.contains("INVALID_JOB_PAYLOAD") && missing.contains("; fix: pass the JSON with --payload"), "{missing}");
+        let invalid = payload(&["enqueue", "mail", "{to:"]).unwrap_err();
+        assert!(invalid.starts_with("Invalid payload JSON") && invalid.contains("fix: pass the JSON with --payload"), "{invalid}");
+        let both = payload(&["enqueue", "mail", "{}", "--payload", "{}"]).unwrap_err();
+        assert!(both.contains("both --payload and a positional"), "{both}");
+        assert!(payload(&["enqueue", "mail", "{}", "{}"]).unwrap_err().contains("fix: pass the JSON with --payload"));
+        let rejected = payload(&["enqueue", "mail", "--payload", "{}"]).unwrap_err();
+        assert!(rejected.contains("INVALID_JOB_PAYLOAD") && !rejected.contains("fix:"), "{rejected}");
+    }
+
+    #[test]
     fn a_configuration_exit_is_the_one_a_worker_supervisor_does_not_restart() {
         assert!(!super::restart_worker(Some(i32::from(super::CONFIG_EXIT))));
         assert!(super::restart_worker(Some(1)) && super::restart_worker(Some(2)) && super::restart_worker(None));
@@ -2422,6 +2467,51 @@ mod tests {
         );
         fs::create_dir_all(&root.0).unwrap();
         root
+    }
+    /// The generated service reads every field shape `fields()` accepts: `'str!'`, `'str! private'` and the object
+    /// form `{ type: 'str!', ... }`; it used to call `schema[key].endsWith('!')` and threw on an object.
+    #[test]
+    fn generated_service_reads_object_form_and_modifier_fields() {
+        let root = fixture_root("resource-object-fields");
+        crate::scaffold::new_app(&root.0).unwrap();
+        add(&root.0, "resource", "notes", "title:str! body:str").unwrap();
+        let service = fs::read_to_string(root.0.join("server/services/notes.jsbrain")).unwrap();
+        let body: String = service
+            .lines()
+            .filter(|l| !l.starts_with("<meta server>") && !l.starts_with("import "))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .replace("export default {", "const service = {");
+        let harness = format!(
+            r#"const schema = {{ title: {{ type: 'str!', unique: true }}, body: {{ type: 'str' }}, count: {{ type: 'num' }}, secret: 'str! private', flag: 'bool' }}
+const saved = []
+function repository() {{ return {{ create: async (p) => (saved.push(p), {{ id: 'n1', data: p }}), update: async (id, p) => ({{ id, data: p }}), get: async () => ({{ data: {{ title: 'Hello', count: 2 }} }}) }} }}
+{body}
+const ctx = {{ backend: {{}}, user: {{ role: 'admin' }} }}
+const assert = (ok, what) => {{ if (!ok) throw new Error(what) }}
+let missing
+try {{ await service.save(ctx, null, {{ body: 'x', secret: 's' }}) }} catch (e) {{ missing = e }}
+assert(missing && missing.errors && missing.errors.title === 'Required', 'object-form required field is enforced')
+let modifier
+try {{ await service.save(ctx, null, {{ title: 't' }}) }} catch (e) {{ modifier = e }}
+assert(modifier && modifier.errors && modifier.errors.secret === 'Required', 'a field with an access modifier keeps its !')
+const form = await service.editor(ctx, 'n1')
+assert(form.title === 'Hello' && form.count === 2 && form.body === '' && form.flag === false, 'editor reads object-form kinds: ' + JSON.stringify(form))
+await service.saveForm(ctx, null, {{ title: 'T', body: '', count: '3', secret: 's', flag: true }})
+assert(saved.at(-1).count === 3, 'saveForm converts an object-form num field')
+let blank
+try {{ await service.saveForm(ctx, null, {{ title: '  ', secret: 's' }}) }} catch (e) {{ blank = e }}
+assert(blank && blank.errors && blank.errors.title, 'a blank required object-form str is refused')
+console.log('object-form service: PASS')
+"#
+        );
+        let output = std::process::Command::new("node")
+            .args(["--input-type=module", "-e", &harness])
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success() && stdout.contains("object-form service: PASS"), "{stdout}\n{}", String::from_utf8_lossy(&output.stderr));
     }
     #[test]
     fn resource_support_preserves_the_default_budget_without_adding_admin_routes() {

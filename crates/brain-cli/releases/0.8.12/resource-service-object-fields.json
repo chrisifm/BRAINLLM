@@ -1,0 +1,9 @@
+{
+  "id": "resource-service-object-fields",
+  "kind": "fix",
+  "title": "Generated resource service reads object-form fields",
+  "why": "A resource whose schema declared a field as an object, or with an access modifier, made the service from `brain add resource` throw or skip the required check.",
+  "changelog": [
+    "the server service `brain add resource` generates reads object-form fields"
+  ]
+}

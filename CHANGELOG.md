@@ -9,6 +9,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- the server service `brain add resource` generates reads object-form fields such as `{ type: 'str!', unique: true }` and fields with an access modifier such as `'str! private'`, instead of throwing on `endsWith`
+- `brain jobs enqueue <queue> '<json>'` takes a single positional JSON argument as the payload, `brain jobs --help` shows `--payload '<json>'` with an example, and a payload error names the fix (pass the JSON with --payload)
+
 ## [0.8.11] - 2026-11-02
 
 - the dev server's `/sitemap.xml` and `llms.txt` stop rendering pages after 3 seconds and list the remaining URLs without their head, and the log says how many pages were rendered
