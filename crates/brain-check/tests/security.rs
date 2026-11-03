@@ -242,3 +242,50 @@ fn b0710_rejects_a_bare_slash_followed_by_a_runtime_value() {
         assert!(codes_in("views/_guard.jsbrain", &guard(arg), &ctx).is_empty(), "{arg}");
     }
 }
+
+// B0814 flagged `location.assign(url)` for an external payment checkout, and its only fix (same origin) broke payment.
+// An app now lists the external host in `brain.json` → `"redirects"` and checks the URL against it, or navigates to a
+// URL its own server answered; anything else still warns.
+#[test]
+fn b0814_accepts_declared_external_hosts_and_own_server_answers() {
+    let b0814 = |src: &str, hosts: &[&str]| {
+        let ctx = Ctx { redirect_hosts: hosts.iter().map(|h| h.to_string()).collect(), ..Ctx::default() };
+        diags_with("comp/x.brain", src, &ctx).into_iter().filter(|d| d.code == "B0814").map(|d| d.msg).collect::<Vec<_>>()
+    };
+    let page = |body: &str| format!("<script>\nserver: async function checkout(ctx) {{\n  return {{ url: 'https://checkout.example.com/s/1' }}\n}}\nasync function go(next) {{\n{body}\n}}\n</script>\n<button on:click={{go('a')}}>Pay</button>");
+    let declared = ["checkout.example.com"];
+    for body in [
+        "  if (new URL(next).host === 'checkout.example.com') location.assign(next)",
+        "  if (new URL(next).hostname !== 'Checkout.Example.com') return\n  location.href = next",
+        "  if (new URL(next).origin === 'https://checkout.example.com') window.open(next)",
+        "  const { url } = await checkout()\n  location.assign(url)",
+        "  const session = await checkout()\n  location.assign(session.url)",
+        "  location.assign((await checkout()).url)",
+        "  const res = await fetch('/api/checkout', { method: 'POST' })\n  const { url } = await res.json()\n  location.assign(url)",
+        "  const data = await (await fetch('/api/checkout')).json()\n  location.href = data.url",
+    ] {
+        assert!(b0814(&page(body), &declared).is_empty(), "{body}");
+    }
+    // Not declared: the message names the host and the key.
+    let unlisted = b0814(&page("  if (new URL(next).host === 'checkout.example.com') location.assign(next)"), &[]);
+    assert!(unlisted.len() == 1 && unlisted[0].contains("checkout.example.com") && unlisted[0].contains("redirects"), "{unlisted:?}");
+    // Another host, a guard that does not gate the navigation, a looser check, a binding that can change, a fetch of
+    // another origin or of a built path, a function that is not a server function, a value the browser supplied.
+    for body in [
+        "  if (new URL(next).host === 'evil.example') location.assign(next)",
+        "  const ok = new URL(next).host === 'checkout.example.com'\n  location.assign(next)",
+        "  if (new URL(next).host.endsWith('checkout.example.com')) location.assign(next)",
+        "  let { url } = await checkout()\n  url = next\n  location.assign(url)",
+        "  const { url } = await (await fetch('https://evil.example/x')).json()\n  location.assign(url)",
+        "  const { url } = await (await fetch('/' + next)).json()\n  location.assign(url)",
+        "  const res = await fetch(next)\n  const { url } = await res.json()\n  location.assign(url)",
+        "  const { url } = await other()\n  location.assign(url)",
+        "  location.assign(next)",
+    ] {
+        assert_eq!(b0814(&page(body), &declared).len(), 1, "{body}");
+    }
+    let (_, _, _, why, example) = brain_lex::codes::CODES.iter().find(|c| c.0 == "B0814").copied().expect("B0814 is cataloged");
+    assert!(why.contains("redirects") && why.contains("server") && example.contains("redirects"), "{why}");
+    let fix = diags_with("comp/x.brain", &page("  location.assign(next)"), &Ctx::default()).into_iter().find(|d| d.code == "B0814").expect("B0814").fix;
+    assert!(fix.contains("\"redirects\"") && fix.contains("server"), "{fix}");
+}

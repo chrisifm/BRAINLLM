@@ -745,21 +745,33 @@ pub(crate) fn same_origin_helpers(stmts: &[Stmt]) -> (HashSet<String>, HashSet<S
     (known, exported)
 }
 
-/// Where a value is known to be on this origin: inside `if (new URL(x, location.origin).origin === location.origin) …`,
-/// or after `if (new URL(x, location.origin).origin !== location.origin) return` in the same block. B0814 accepts
-/// `location.href = x` there.
-fn origin_guarded(stmts: &[Stmt], out: &mut Vec<(String, Span)>) {
+/// Where a value is known to go to an origin the app chose: inside `if (new URL(x, location.origin).origin ===
+/// location.origin) …`, or after `if (new URL(x, location.origin).origin !== location.origin) return` in the same block.
+/// The same two forms against a literal external origin (`new URL(x).host === 'checkout.example.com'`, `.hostname`, or
+/// `.origin === 'https://checkout.example.com'`) carry that host; B0814 accepts them when `brain.json` → `"redirects"`
+/// lists it. Each entry: (value path, `None` for this origin or `Some(host)`, where the guarantee holds).
+fn origin_guarded(stmts: &[Stmt], out: &mut Vec<(String, Option<String>, Span)>) {
     let own = |e: &Expr| path(e).is_some_and(|p| matches!(p.as_str(), "location.origin" | "window.location.origin" | "document.location.origin"));
+    // `new URL(x, base).<prop>` → (x, prop, base is this origin).
     let checked = |e: &Expr| match e.unparen() {
-        Expr::Member { obj, prop: MemberProp::Name(p), .. } if p.name == "origin" => match obj.unparen() {
-            Expr::New { callee, args, .. } if path(callee).as_deref() == Some("URL") && args.get(1).is_some_and(|b| own(b)) => args.first().and_then(path),
+        Expr::Member { obj, prop: MemberProp::Name(p), .. } if matches!(p.name.as_str(), "origin" | "host" | "hostname") => match obj.unparen() {
+            Expr::New { callee, args, .. } if path(callee).as_deref() == Some("URL") => args.first().and_then(path).map(|x| (x, p.name.clone(), args.get(1).is_some_and(own))),
             _ => None,
         },
         _ => None,
     };
+    let against = |(x, prop, own_base): (String, String, bool), other: &Expr| -> Option<(String, Option<String>)> {
+        if own(other) {
+            return (prop == "origin" && own_base).then_some((x, None));
+        }
+        let lit = literal_value(other)?.to_ascii_lowercase();
+        let host = if prop == "origin" { lit.strip_prefix("https://").or_else(|| lit.strip_prefix("http://"))? } else { lit.as_str() };
+        let host = host.split(':').next().unwrap_or("");
+        (!host.is_empty() && !host.contains(['/', '?', '#', '@', '\\'])).then(|| (x, Some(host.to_string())))
+    };
     let guard = |t: &Expr| match t.unparen() {
         Expr::Binary { op, left, right, .. } if matches!(*op, "===" | "!==" | "==" | "!=") => {
-            checked(left).filter(|_| own(right)).or_else(|| checked(right).filter(|_| own(left))).map(|p| (p, op.starts_with('=')))
+            checked(left).and_then(|c| against(c, right)).or_else(|| checked(right).and_then(|c| against(c, left))).map(|(p, h)| (p, h, op.starts_with('=')))
         }
         _ => None,
     };
@@ -771,12 +783,12 @@ fn origin_guarded(stmts: &[Stmt], out: &mut Vec<(String, Span)>) {
     let last = stmts.last().map(|x| x.span().end).unwrap_or(0);
     for s in stmts {
         if let Stmt::If { test, cons, span, .. } = s
-            && let Some((p, same)) = guard(test)
+            && let Some((p, host, same)) = guard(test)
         {
             if same {
-                out.push((p, cons.span()));
+                out.push((p, host, cons.span()));
             } else if leaves(cons) {
-                out.push((p, Span { start: span.end, end: last, ..*span }));
+                out.push((p, host, Span { start: span.end, end: last, ..*span }));
             }
         }
         match s {
@@ -807,16 +819,106 @@ fn origin_guarded(stmts: &[Stmt], out: &mut Vec<(String, Span)>) {
     }
 }
 
-fn func_guards(f: &Func, out: &mut Vec<(String, Span)>) {
+fn func_guards(f: &Func, out: &mut Vec<(String, Option<String>, Span)>) {
     if let FnBody::Block(b) = &f.body {
         origin_guarded(b, out);
+    }
+}
+
+/// A fetch of a fixed same-origin path: `fetch('/api/checkout', …)`, awaited or not.
+fn own_fetch(e: &Expr) -> bool {
+    match e.unparen() {
+        Expr::Await { arg, .. } => own_fetch(arg),
+        Expr::Call { callee, args, .. } => {
+            path(callee).as_deref().is_some_and(|c| matches!(c, "fetch" | "window.fetch"))
+                && args.first().is_some_and(|a| url_prefix(a).is_some_and(|p| safe_path_start(&p, literal_value(a).is_some())))
+        }
+        _ => false,
+    }
+}
+
+/// What the app's own server answered: `await f(…)` where `f` is a `server:` function of this file, `await r.json()`
+/// where `responses(r)` (an own fetch), or `await (await fetch('/api/…')).json()`.
+fn server_answer(e: &Expr, server_fns: &HashSet<String>, responses: &dyn Fn(&str) -> bool) -> bool {
+    let Expr::Await { arg, .. } = e.unparen() else { return false };
+    let Expr::Call { callee, .. } = arg.unparen() else { return false };
+    match callee.unparen() {
+        Expr::Ident(i) => server_fns.contains(&i.name),
+        Expr::Member { obj, prop: MemberProp::Name(m), .. } if m.name == "json" => own_fetch(obj) || matches!(obj.unparen(), Expr::Ident(i) if responses(&i.name)),
+        _ => false,
+    }
+}
+
+/// `const` bindings that hold what the app's own server answered (`const r = await pay(…)`, `const { url } = await
+/// pay(…)`, `const res = await fetch('/api/pay'); const { url } = await res.json()`), each with the rest of its block,
+/// where the binding is visible and cannot change.
+fn server_answers(stmts: &[Stmt], server_fns: &HashSet<String>, out: &mut Vec<(String, Span)>) {
+    let last = stmts.last().map(|x| x.span().end).unwrap_or(0);
+    let mut fetched: Vec<(String, Span)> = Vec::new();
+    let nested = |f: &Func, out: &mut Vec<(String, Span)>| {
+        if let FnBody::Block(b) = &f.body {
+            server_answers(b, server_fns, out);
+        }
+    };
+    for s in stmts {
+        match s {
+            Stmt::Var(v) => {
+                for d in &v.decls {
+                    let Some(init) = d.init.as_ref() else { continue };
+                    if let Expr::Func(f) = init.unparen() {
+                        nested(f, out);
+                        continue;
+                    }
+                    if v.kind != VarKind::Const {
+                        continue;
+                    }
+                    let visible = Span { start: d.span.end, end: last, ..d.span };
+                    if let Pat::Ident(i) = &d.pat
+                        && matches!(init.unparen(), Expr::Await { arg, .. } if own_fetch(arg))
+                    {
+                        fetched.push((i.name.clone(), visible));
+                        continue;
+                    }
+                    let at = d.span.start;
+                    let responses = |n: &str| fetched.iter().any(|(r, sp)| r == n && sp.start <= at && at <= sp.end);
+                    if !server_answer(init, server_fns, &responses) {
+                        continue;
+                    }
+                    match &d.pat {
+                        Pat::Ident(i) => out.push((i.name.clone(), visible)),
+                        Pat::Object { props, .. } => out.extend(props.iter().filter_map(|p| match &p.value {
+                            Pat::Ident(i) => Some((i.name.clone(), visible)),
+                            _ => None,
+                        })),
+                        _ => {}
+                    }
+                }
+            }
+            Stmt::Func(f) | Stmt::Server { func: f, .. } => nested(f, out),
+            Stmt::Block { body, .. } => server_answers(body, server_fns, out),
+            Stmt::If { cons, alt, .. } => {
+                server_answers(std::slice::from_ref(cons.as_ref()), server_fns, out);
+                if let Some(a) = alt {
+                    server_answers(std::slice::from_ref(a.as_ref()), server_fns, out);
+                }
+            }
+            Stmt::Export { decl, .. } => server_answers(std::slice::from_ref(decl.as_ref()), server_fns, out),
+            Stmt::Try { block, handler, finalizer, .. } => {
+                server_answers(block, server_fns, out);
+                server_answers(handler.as_deref().unwrap_or(&[]), server_fns, out);
+                server_answers(finalizer.as_deref().unwrap_or(&[]), server_fns, out);
+            }
+            _ => {}
+        }
     }
 }
 
 impl Checker<'_> {
     /// B0814 (warning): browser navigation to a URL built at runtime (`location.href = x`, `location.assign(x)`,
     /// `location.replace(x)`, `window.open(x)`). Accepted: a literal, a value whose host cannot change, a same-origin
-    /// path (the B0710 rules, helpers included) and a value checked against `location.origin` in the same file.
+    /// path (the B0710 rules, helpers included), a value checked against `location.origin` in the same file, a value
+    /// checked against a host that `brain.json` → `"redirects"` lists (an external checkout), and a value the app's own
+    /// server answered (`await` of a `server:` function of the file, or `.json()` of a fetch of a fixed same-origin path).
     pub(crate) fn client_redirect(&mut self, e: &Expr) {
         if self.server_ctx {
             return;
@@ -856,16 +958,37 @@ impl Checker<'_> {
         known.extend(self.ctx.redirect_helpers.iter().cloned());
         let mut guarded = Vec::new();
         origin_guarded(&self.c.script, &mut guarded);
-        let inside = |p: &String| guarded.iter().any(|(g, at)| g == p && at.start <= span.start && span.end <= at.end);
-        if same_origin_target(target, &known, false) || path(target).is_some_and(|p| inside(&p)) {
+        let covers = |at: &Span| at.start <= span.start && span.end <= at.end;
+        let listed = |h: &str| self.ctx.redirect_hosts.iter().any(|x| x.eq_ignore_ascii_case(h));
+        let target_path = path(target);
+        let guard_of = |p: &String| guarded.iter().filter(|(g, _, at)| g == p && covers(at)).map(|(_, h, _)| h.clone()).collect::<Vec<_>>();
+        let guards = target_path.as_ref().map(guard_of).unwrap_or_default();
+        if guards.iter().any(|h| h.as_deref().is_none_or(listed)) {
+            return;
+        }
+        // A value the app's own server answered: a `server:` function of this file, or a fetch of a fixed same-origin path.
+        let mut answers = Vec::new();
+        server_answers(&self.c.script, &self.server_fns, &mut answers);
+        let mut base = target.unparen();
+        let mut answered = false;
+        while let Expr::Member { obj, prop: MemberProp::Name(_), .. } = base {
+            base = obj.unparen();
+            answered |= server_answer(base, &self.server_fns, &|_| false);
+        }
+        answered |= target_path.is_some() && matches!(base, Expr::Ident(i) if answers.iter().any(|(n, at)| *n == i.name && covers(at)));
+        if answered || same_origin_target(target, &known, false) {
             return;
         }
         let v = self.text(target.span()).to_string();
+        let msg = match guards.iter().flatten().next() {
+            Some(h) => format!("`{sink}` gets a URL checked against `{h}`, which `brain.json` → `\"redirects\"` does not list"),
+            None => format!("`{sink}` gets a URL built at runtime: a crafted link can send the user to any site (open redirect)"),
+        };
         self.push(
             "B0814",
             span,
-            format!("`{sink}` gets a URL built at runtime: a crafted link can send the user to any site (open redirect)"),
-            format!("navigate to a same-origin path (`'/items/' + id`, or a helper whose every return starts with `/`), or check it first: `if (new URL({v}, location.origin).origin === location.origin)`"),
+            msg,
+            format!("navigate to a same-origin path (`'/items/' + id`, or a helper whose every return starts with `/`), use the URL your own server answered (`const {{ url }} = await checkout()`), check it first: `if (new URL({v}, location.origin).origin === location.origin)`, or, for an external destination such as a payment checkout, list its host in `brain.json` → `\"redirects\": [\"checkout.example.com\"]` and check `if (new URL({v}).host === 'checkout.example.com')`"),
         );
     }
 }

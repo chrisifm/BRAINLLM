@@ -1,0 +1,9 @@
+{
+  "id": "role-only-filters",
+  "kind": "change",
+  "title": "Filters on role-only fields",
+  "why": "B0735 refused a filter on a field `visible: ['admin']`, so the admins who can read the field could not filter by it either.",
+  "changelog": [
+    "a field visible to named roles only (`visible: ['admin']`) can be a declared query filter (B0735 no longer refuses it)"
+  ]
+}

@@ -2,8 +2,10 @@
 //!
 //! A field with `visible: [...]` is serialized only for a reader matching one of those grants: `public` (every reader
 //! of the record), `owner` (the authenticated owner of that row, or a relational owner, see `ownership.rs`) or a role
-//! name. There is no implicit administrator bypass: list `admin` explicitly. Restricted fields cannot be filtered,
-//! sorted, searched or aggregated, so a reader cannot infer hidden values through the query surface.
+//! name. There is no implicit administrator bypass: list `admin` explicitly. Restricted fields cannot be sorted,
+//! searched or aggregated, so a reader cannot infer hidden values through the query surface. A field visible to named
+//! roles only (no `public`, no `owner`) may be a declared filter: only those roles can use it, and any other reader
+//! gets the answer of an undeclared filter (`filterable_by`, `query::parse`).
 use crate::{Field, Resource, contract::FieldAccess};
 use serde_json::Value;
 use uuid::Uuid;
@@ -51,6 +53,18 @@ pub fn unrestricted(field: &Field) -> bool {
         .visible
         .as_ref()
         .is_none_or(|grants| grants.iter().any(|g| g == "public"))
+}
+
+/// Readable by named roles only (`visible: ['admin']`): the same for every row, so the query surface can be opened
+/// to exactly those roles. `owner` grants differ per row and `private`/`writeonly` fields nobody reads: never.
+pub fn role_gated(field: &Field) -> bool {
+    !hidden(field) && field.visible.as_ref().is_some_and(|grants| !grants.is_empty() && grants.iter().all(|g| g != "public" && g != "owner"))
+}
+
+/// Whether a reader with `role` may filter by a field: every field but a role-gated one, which only its roles (and a
+/// system key, which reads every readable field) may use. Anyone else gets the answer of an undeclared filter.
+pub fn filterable_by(field: &Field, role: Option<&str>) -> bool {
+    !role_gated(field) || crate::api_keys::system_active() || role.is_some_and(|role| field.visible.as_ref().is_some_and(|g| g.iter().any(|g| g == role)))
 }
 
 fn sees(field: &Field, viewer: Viewer<'_>, owns: bool) -> bool {

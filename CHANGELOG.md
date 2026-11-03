@@ -18,6 +18,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `brain backend approve-contract --apply` writes the default of an added field into every stored row that lacks it, so an added required field with a default no longer fails
 - the server service `brain add resource` generates reads object-form fields such as `{ type: 'str!', unique: true }` and fields with an access modifier such as `'str! private'`, instead of throwing on `endsWith`
 - `brain jobs enqueue <queue> '<json>'` takes a single positional JSON argument as the payload, `brain jobs --help` shows `--payload '<json>'` with an example, and a payload error names the fix (pass the JSON with --payload)
+- B0814 accepts browser navigation to an external destination, such as a payment checkout, when the URL is checked against a host that `brain.json` → `"redirects"` lists (`if (new URL(url).host === 'checkout.example.com')`), and to a URL the app's own server answered (`const { url } = await checkout()`, or `.json()` of a fetch of a fixed same-origin path); every other runtime URL still warns, and an unlisted host is named in the message
+- a field visible to named roles only (`visible: ['admin']`) can be a declared query filter (B0735 no longer refuses it): those roles filter by it, and any other caller, signed in or not, gets the same 422 as for an undeclared filter
 
 ## [0.8.11] - 2026-11-02
 

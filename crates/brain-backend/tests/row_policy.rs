@@ -349,6 +349,44 @@ async fn related_files_follow_the_get_rule_for_relational_owners_and_hidden_rows
     f.pool.close().await;
 }
 
+// B0735 refused `filter: { priority: ['eq'] }` on a field `visible: ['admin']`, so admins could not filter by it.
+#[tokio::test]
+#[ignore = "requires scripts/backend-check.mjs disposable Postgres"]
+async fn a_filter_on_a_role_only_field_serves_its_role_and_looks_undeclared_to_everyone_else() {
+    let pool = database().await;
+    let tickets: Resource = serde_json::from_value(json!({"name":"tickets",
+        "fields":{"title":{"kind":"str","required":true},"priority":{"kind":"enum(low|high)","required":true,"visible":["admin"]}},
+        "policy":{"read":["public"],"create":["admin"],"update":["admin"],"delete":["admin"]},
+        "query":{"filter":{"priority":["eq"],"title":["prefix"]}}}))
+    .unwrap();
+    tickets.validate().unwrap();
+    let all = vec![tickets.clone()];
+    db::migrate(&pool, &all).await.unwrap();
+    roles().register(&pool).await.unwrap();
+    let (admin, member) = (actor(&pool, "admin").await, actor(&pool, "member").await);
+    let (http, _) = brain_backend::http::router_with_platform(pool.clone(), config(all, "role-filter"), Platform::default()).await.unwrap();
+    let high = db::create(&pool, &tickets, admin.id, json!({"title":"Outage","priority":"high"})).await.unwrap();
+    db::create(&pool, &tickets, admin.id, json!({"title":"Typo","priority":"low"})).await.unwrap();
+    let (status, list) = call(&http, "GET", "/api/tickets?priority=high", Some(&admin), None).await;
+    assert_eq!((status, ids(&list)), (200, vec![high["id"].as_str().unwrap().to_string()]), "{list}");
+    for who in [Some(&member), None] {
+        let (_, undeclared) = call(&http, "GET", "/api/tickets?nothing=high", who, None).await;
+        for path in ["/api/tickets?priority=high", "/api/tickets?priority[ne]=low"] {
+            let (status, error) = call(&http, "GET", path, who, None).await;
+            let key = path.split('?').nth(1).unwrap().split('=').next().unwrap();
+            assert_eq!(status, 422, "{path}: {error}");
+            assert_eq!(error["error"]["code"], undeclared["error"]["code"], "{path}: {error}");
+            assert_eq!(error["error"]["fields"][key], undeclared["error"]["fields"]["nothing"], "{path}: {error}");
+            assert!(!error["error"]["fields"][key].as_str().unwrap().contains("priority"), "{error}");
+        }
+        // The rows are still listed, without the field.
+        let (status, list) = call(&http, "GET", "/api/tickets", who, None).await;
+        assert_eq!((status, list["total"].clone()), (200, json!(2)), "{list}");
+        assert!(list["items"].as_array().unwrap().iter().all(|item| item["data"].get("priority").is_none()), "{list}");
+    }
+    pool.close().await;
+}
+
 #[tokio::test]
 #[ignore = "requires scripts/backend-check.mjs disposable Postgres"]
 async fn server_only_resources_have_no_public_surface_but_a_named_key_reaches_them() {
