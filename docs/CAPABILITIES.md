@@ -70,6 +70,12 @@ Policy grants: `public` `owner` `owner.<ref>` `org` `org.<role>` `org.own` `<rol
 
 ## Added by release
 
+### 0.8.12
+
+- Sign in with Apple (`docs/APPLE-LINKEDIN.md`)
+- Sign In with LinkedIn (`docs/APPLE-LINKEDIN.md`)
+- Optional request budgets and own-host mode in brain start (`docs/backend/access.md`)
+
 ### 0.8.6
 
 - Captcha contract and recipe (`docs/backend/captcha.md`)
