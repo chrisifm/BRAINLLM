@@ -193,7 +193,7 @@
       "properties": {
         "minScores": {
           "type": "object",
-          "description": "Minimum score per category for `brain lighthouse`. A category left out is reported and not checked.",
+          "description": "Minimum score per category for `brain lighthouse`. Accessibility and SEO default to 100 because they depend only on the page; performance and best-practices are checked only when set.",
           "properties": {
             "performance": { "type": "number", "minimum": 0, "maximum": 100 },
             "accessibility": { "type": "number", "minimum": 0, "maximum": 100 },
