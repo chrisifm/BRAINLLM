@@ -693,8 +693,10 @@ pub fn config_problems(setting: &dyn Fn(&str) -> Option<String>) -> Vec<(String,
             }
         }
         None => {
-            if setting("GOOGLE_CLIENT_ID").is_some() {
-                report("GOOGLE_CLIENT_ID needs native JWT sessions, and BRAIN_JWT_SECRET is not set".into(), secret_fix);
+            for key in ["GOOGLE_CLIENT_ID", "APPLE_CLIENT_ID", "BRAIN_AUTH_LINKEDIN_CLIENT_ID"] {
+                if setting(key).is_some() {
+                    report(format!("{key} needs native JWT sessions, and BRAIN_JWT_SECRET is not set"), secret_fix);
+                }
             }
         }
     }
@@ -702,6 +704,22 @@ pub fn config_problems(setting: &dyn Fn(&str) -> Option<String>) -> Vec<(String,
         && brain_backend::google::Config::new(id).is_err()
     {
         report("GOOGLE_CLIENT_ID is not a web OAuth client id".into(), "use the web client id that ends in .apps.googleusercontent.com");
+    }
+    // Return URLs default to the site origin at startup; a placeholder origin keeps the shape check honest here.
+    if let Some(client) = setting("APPLE_CLIENT_ID")
+        && let Err(error) = brain_backend::apple::Config::new(client, setting("APPLE_APP_ID"), setting("APPLE_REDIRECT_URI").unwrap_or_else(|| "https://example.com/".into()))
+    {
+        report(format!("APPLE_CLIENT_ID, APPLE_APP_ID or APPLE_REDIRECT_URI is invalid: {error}"), "use the Services ID (com.example.web), the primary App ID and the https Return URL registered with Apple");
+    }
+    match (setting("BRAIN_AUTH_LINKEDIN_CLIENT_ID"), setting("BRAIN_AUTH_LINKEDIN_CLIENT_SECRET")) {
+        (Some(client), Some(secret)) => {
+            let redirect = setting("BRAIN_AUTH_LINKEDIN_REDIRECT_URI").unwrap_or_else(|| "https://example.com/_brain/auth/linkedin/callback".into());
+            if let Err(error) = brain_backend::linkedin::Config::new(client, secret, redirect) {
+                report(format!("LinkedIn sign-in setting is invalid: {error}"), "use the app's Client ID and Primary Client Secret, and a redirect URL registered in the LinkedIn app");
+            }
+        }
+        (None, None) => {}
+        _ => report("LinkedIn sign-in needs both BRAIN_AUTH_LINKEDIN_CLIENT_ID and BRAIN_AUTH_LINKEDIN_CLIENT_SECRET".into(), "set both in the private server environment, or remove both"),
     }
     if setting("BRAIN_AUTH_REFRESH_GRACE_SECONDS").is_some_and(|v| !v.parse::<u32>().is_ok_and(|n| n <= 60)) {
         report("BRAIN_AUTH_REFRESH_GRACE_SECONDS must be 0..60".into(), "set whole seconds (0 turns the grace off), or remove it to use 10");
@@ -724,7 +742,7 @@ pub fn config_diagnostics(root: &Path) -> Vec<(String, String)> {
     config_problems(&|key| crate::env::value(root, "development", key).filter(|v| !v.is_empty()))
 }
 fn operator(args: &[String], url: &str, production: bool) -> Result<(), String> {
-    let usage = "usage: brain backend users disable|enable|revoke-sessions|disable-identity|enable-identity --user <uuid>|--email <address> [--provider google] [--env development]";
+    let usage = "usage: brain backend users disable|enable|revoke-sessions|disable-identity|enable-identity --user <uuid>|--email <address> [--provider google|apple|linkedin] [--env development]";
     let action = args.get(1).map(String::as_str).ok_or(usage)?;
     if !matches!(action, "disable" | "enable" | "revoke-sessions" | "disable-identity" | "enable-identity") {
         return Err(usage.into());
@@ -1087,6 +1105,15 @@ pub fn run(args: &[String]) -> Result<(), String> {
         if let Some(seconds)=setting("BRAIN_AUTH_IDLE_SECONDS") {brain_backend::sessions::configure_idle_seconds(seconds.parse().map_err(|_|"BRAIN_AUTH_IDLE_SECONDS must be 300..31536000")?)?;}
         let google=setting("GOOGLE_CLIENT_ID").map(brain_backend::google::Config::new).transpose()?;
         if google.is_some() && jwt.is_none() {return Err("Google Sign-In requires configured native JWT sessions; set BRAIN_JWT_SECRET, issuer and audience".into());}
+        // Apple and LinkedIn default their return URLs to this origin; set the variable when the registered URL differs.
+        let apple=setting("APPLE_CLIENT_ID").map(|client|brain_backend::apple::Config::new(client,setting("APPLE_APP_ID"),setting("APPLE_REDIRECT_URI").unwrap_or_else(||format!("{}/",origin.trim_end_matches('/'))))).transpose()?;
+        if apple.is_some() && jwt.is_none() {return Err("Sign in with Apple requires configured native JWT sessions; set BRAIN_JWT_SECRET, issuer and audience".into());}
+        let linkedin=match (setting("BRAIN_AUTH_LINKEDIN_CLIENT_ID"),setting("BRAIN_AUTH_LINKEDIN_CLIENT_SECRET")) {
+            (Some(client),Some(secret))=>Some(brain_backend::linkedin::Config::new(client,secret,setting("BRAIN_AUTH_LINKEDIN_REDIRECT_URI").unwrap_or_else(||format!("{}/_brain/auth/linkedin/callback",origin.trim_end_matches('/'))))?),
+            (None,None)=>None,
+            _=>return Err("LinkedIn sign-in needs both BRAIN_AUTH_LINKEDIN_CLIENT_ID and BRAIN_AUTH_LINKEDIN_CLIENT_SECRET".into()),
+        };
+        if linkedin.is_some() && jwt.is_none() {return Err("LinkedIn sign-in requires configured native JWT sessions; set BRAIN_JWT_SECRET, issuer and audience".into());}
         let gcs=match setting("BRAIN_GCS_BUCKET") {
             Some(bucket)=>Some(brain_backend::media::GcsConfig::new(bucket,setting("BRAIN_GCS_PREFIX").unwrap_or_else(||"brain-media".into()),std::path::PathBuf::from(setting("BRAIN_GCS_ADAPTER").ok_or("B0761: BRAIN_GCS_BUCKET is set without BRAIN_GCS_ADAPTER; fix: point BRAIN_GCS_ADAPTER at the absolute path of the private .mjs SDK adapter, or remove the bucket")?))?),
             None=>None,
@@ -1099,7 +1126,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
             }
             mail
         });
-        let config=brain_backend::Config{api_keys:crate::api_key_config::load(&root)?,sockets:sockets.native_config()?,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,resources,jobs,uploads:root.join(".brain/uploads"),origins:sockets.http_origins,production:environment=="production"};
+        let config=brain_backend::Config{api_keys:crate::api_key_config::load(&root)?,sockets:sockets.native_config()?,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,apple,linkedin,resources,jobs,uploads:root.join(".brain/uploads"),origins:sockets.http_origins,production:environment=="production"};
         brain_backend::analytics::configure(analytics_settings(&root)?)?;
         brain_backend::log_line!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
         if let Some((msg,fix))=anonymous_catalog_warning(args,&environment){brain_backend::log_line!("{}",json!({"schemaVersion":1,"event":"backend-warning","code":"B0771","msg":msg,"fix":fix}));}

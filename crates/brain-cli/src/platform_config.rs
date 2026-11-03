@@ -26,6 +26,11 @@ pub fn trust_proxy(root: &Path) -> Vec<String> {
     edge(root).map(|(edge, _)| edge.trust_proxy.iter().map(ToString::to_string).collect()).unwrap_or_default()
 }
 
+/// `platform.access` for the build manifest, as JSON.
+pub fn access(root: &Path) -> Option<String> {
+    edge(root).ok().and_then(|(edge, _)| edge.access).map(|access| access.to_string())
+}
+
 /// B0784: what `brain doctor`, `brain check` and a production `brain backend serve` say about `platform.trustProxy`.
 /// (message, fix); `refuse` marks the public range a production start stops on.
 pub fn proxy_findings(root: &Path, site: Option<&str>) -> Vec<(String, String, bool)> {

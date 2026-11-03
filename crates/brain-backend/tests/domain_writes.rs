@@ -198,7 +198,7 @@ async fn shop() -> Shop {
         sockets: None,
         gcs: None,
         jwt: None,
-        google: None,
+        google: None, apple: None, linkedin: None,
         resources: resources(),
         jobs: Vec::new(),
         uploads: std::env::temp_dir().join(format!("brain-domain-test-{}", std::process::id())),
@@ -725,7 +725,7 @@ async fn postgres_patterns_state_locks_and_relational_actions_hold_on_every_writ
     db::migrate(&s.pool, &resources).await.unwrap();
     let config = brain_backend::Config {
         api_keys: None, roles: Default::default(), mail: None, auth_public_base_url: None, webhooks: None, before_hooks: None, sockets: None,
-        gcs: None, jwt: None, google: None, resources, jobs: Vec::new(),
+        gcs: None, jwt: None, google: None, apple: None, linkedin: None, resources, jobs: Vec::new(),
         uploads: std::env::temp_dir().join(format!("brain-notice-test-{}", std::process::id())),
         origins: vec!["http://localhost:5182".into()], production: true,
     };

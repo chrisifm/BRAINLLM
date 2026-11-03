@@ -235,7 +235,7 @@ pub(crate) fn classify(path: &str, status: u16, native: bool) -> Option<&'static
 /// The report-only policy of a dev page: the production directives (`brain_pack::cache::csp`), with what only the dev
 /// server needs (inline bootstrap scripts, local APIs). It never blocks; it shows what production would.
 pub(crate) fn report_only_policy(root: &Path) -> String {
-    // what a build adds when a page needs it (wasm, Google sign-in) is allowed here: a dev server cannot know it per page
+    // what a build adds when a page needs it (wasm, Google or Apple sign-in) is allowed here: a dev server cannot know it per page
     let mut dev: Vec<(String, String)> = vec![
         ("script-src".into(), "'unsafe-inline'".into()),
         ("script-src".into(), "'wasm-unsafe-eval'".into()),
@@ -243,6 +243,7 @@ pub(crate) fn report_only_policy(root: &Path) -> String {
         ("connect-src".into(), "http://127.0.0.1:*".into()),
     ];
     dev.extend(brain_pack::cache::google_csp());
+    dev.extend(brain_pack::cache::apple_csp());
     dev.extend(brain_pack::cache::captcha_csp(root));
     brain_pack::cache::app_csp(root, &[], &dev)
 }

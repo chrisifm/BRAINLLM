@@ -7,6 +7,8 @@ pub struct BuildOptions {
     pub native_routes: Vec<(String, Vec<String>)>,
     /// `platform.trustProxy`, so the Node gateway resolves a client address the way the backend does.
     pub trust_proxy: Vec<String>,
+    /// `platform.access` as JSON, so the Node gateway answers the site only (docs/backend/access.md).
+    pub access: Option<String>,
 }
 
 #[derive(Clone, Debug)]

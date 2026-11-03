@@ -1,0 +1,20 @@
+{
+  "id": "apple-signin",
+  "kind": "capability",
+  "title": "Sign in with Apple",
+  "why": "Apps can offer Sign in with Apple through the native backend without writing the token exchange or the server-to-server notifications.",
+  "changelog": [
+    "Sign in with Apple: `APPLE_CLIENT_ID` (Services ID)"
+  ],
+  "guide": "docs/APPLE-LINKEDIN.md",
+  "adopt": {
+    "file": ".env",
+    "snippet": "APPLE_CLIENT_ID=com.example.web"
+  },
+  "uses": [
+    {
+      "glob": "{.env*,server/**/*}",
+      "contains": "APPLE_CLIENT_ID"
+    }
+  ]
+}

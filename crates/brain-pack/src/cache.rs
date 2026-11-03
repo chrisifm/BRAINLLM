@@ -153,7 +153,12 @@ pub struct PageRef<'a> {
 }
 
 /// Explicit document-head opt-in; comments, raw text, attribute values and inert templates cannot enable an SDK.
-pub fn google_signin(html:&str)->bool {
+pub fn google_signin(html:&str)->bool {signin_meta(html,"brain-google-signin")}
+/// Sign in with Apple JS opt-in: the same head-only meta rule as Google.
+pub fn apple_signin(html:&str)->bool {signin_meta(html,"brain-apple-signin")}
+/// Pages whose sign-in opens a provider popup that must keep its opener.
+pub fn popup_signin(html:&str)->bool {google_signin(html) || apple_signin(html)}
+fn signin_meta(html:&str,meta:&str)->bool {
     let lower=html.to_ascii_lowercase();let bytes=lower.as_bytes();let mut at=0;let mut head=false;let mut templates=0usize;
     while let Some(offset)=lower[at..].find('<') {
         let start=at+offset;
@@ -178,14 +183,15 @@ pub fn google_signin(html:&str)->bool {
             if matches!(first,'\''|'"') {let Some(end)=rest[1..].find(first) else{break};value=&rest[1..1+end];rest=&rest[end+2..];}else {let end=rest.find(char::is_whitespace).unwrap_or(rest.len());value=&rest[..end];rest=&rest[end..];}
             values.entry(key).or_insert(value);
         }
-        if values.get("name")==Some(&"brain-google-signin") && values.get("content")==Some(&"1") {return true}
+        if values.get("name")==Some(&meta) && values.get("content")==Some(&"1") {return true}
     }false
 }
 pub fn google_csp()->Vec<(String,String)> {[("script-src","https://accounts.google.com/gsi/client"),("style-src","https://accounts.google.com/gsi/style"),("frame-src","https://accounts.google.com/gsi/"),("connect-src","https://accounts.google.com/gsi/")].into_iter().map(|(key,value)|(key.into(),value.into())).collect()}
+pub fn apple_csp()->Vec<(String,String)> {vec![("script-src".into(),"https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/".into())]}
 fn google_paths(pages:&[PageRef],files:&BTreeMap<String,String>)->BTreeMap<String,String> {
     let mut paths=BTreeMap::new();
     for page in pages.iter().filter(|page|!crate::routes::is_dynamic(page.route) && page.route!="*" && !page.file.starts_with("_server/")) {
-        if !files.get(page.file).is_some_and(|html|google_signin(html)) {continue}
+        if !files.get(page.file).is_some_and(|html|popup_signin(html)) {continue}
         let route=page.route.trim_end_matches('/');let route=if route.is_empty() {"/"}else{route};
         for path in [route.to_string(),format!("{}/",route.trim_end_matches('/')),format!("/{}",page.file)] {if path.starts_with('/') && path.len()<=4096 && !path.chars().any(|ch|ch.is_whitespace() || matches!(ch,'"'|'\''|'\\'|'$'|';'|'{'|'}')) {paths.insert(path,format!("/{}",page.file));}}
     }paths

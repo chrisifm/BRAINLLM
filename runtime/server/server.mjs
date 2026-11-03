@@ -231,11 +231,14 @@ function googleSignInPage(page) {
     for (const item of tag.slice(5, -1).matchAll(/([^\s=/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g)) {
       const key = item[1].toLowerCase(); if (!attrs.has(key)) attrs.set(key, item[2] ?? item[3] ?? item[4] ?? '')
     }
-    if (attrs.get('name')?.toLowerCase() === 'brain-google-signin' && attrs.get('content') === '1') return true
+    // Google's and Apple's sign-in popups both answer through window.opener.
+    if (['brain-google-signin', 'brain-apple-signin'].includes(attrs.get('name')?.toLowerCase()) && attrs.get('content') === '1') return true
   }
   return false
 }
 
+// One-use provider cookies (Google nonce, Apple nonce, LinkedIn state): relayed to the backend and cleared at logout.
+const PROVIDER_COOKIES = ['__Host-brain-google', '__Host-brain-apple', '__Host-brain-linkedin']
 // One configured loopback authority. No user-controlled target, proxy, redirect, auth cache or pending queue.
 // ctx.backend.files(bucket): the same file calls as job and route handlers (docs/backend/files.md).
 function bucketClient(target, key, bucket, readBudgetMs = () => 0) {
@@ -376,7 +379,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession, r
             for (const value of backend.headers['set-cookie'] || []) {
               if (value.length > 8192 || /[\r\n]/.test(value)) return finish(true)
               const name = value.split('=', 1)[0]
-              if (names.has(name) || name === '__Host-brain-google') cleared.push(value)
+              if (names.has(name) || PROVIDER_COOKIES.includes(name)) cleared.push(value)
             }
             finish(false, { 'set-cookie': cleared, 'clear-site-data': '"storage"' })
           })
@@ -450,14 +453,14 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession, r
     const selected = []
     for (const part of String(req.headers.cookie || '').split(';')) {
       const name = part.trim().split('=')[0]
-      if (['__Host-brain','__Host-brain-access','__Host-brain-refresh','__Host-brain-google'].includes(name)) selected.push(part.trim())
+      if (['__Host-brain','__Host-brain-access','__Host-brain-refresh',...PROVIDER_COOKIES].includes(name)) selected.push(part.trim())
     }
     if (selected.length) headers.cookie = selected.join('; ')
     const client = forwardedFor(req)
     if (client) headers['x-forwarded-for'] = client
     return headers
   }
-  const nativeCookies = values => (values || []).filter(value => /^(?:__Host-brain(?:-access|-refresh|-google)?)=/.test(value) && value.length <= 8192).slice(0,8)
+  const nativeCookies = values => (values || []).filter(value => /^(?:__Host-brain(?:-access|-refresh|-google|-apple|-linkedin)?)=/.test(value) && value.length <= 8192).slice(0,8)
   // /_brain/files: both directions stream with backpressure. The bucket enforces its own maxBytes and access checks.
   function fileStream(req, res, url, rid) {
     if (stopped || streams >= 32) throw bridgeBusy('Backend stream capacity is unavailable')
@@ -1037,6 +1040,48 @@ export function createServer(o = {}) {
       log('warn', 'trust-proxy-not-configured', { fix: 'a local proxy is forwarding client addresses and they are ignored, so all clients share one rate-limit key; set trustProxy in server/platform.jsbrain or BRAIN_TRUST_PROXY=127.0.0.1,::1' })
     }
     return resolveClient(req.socket.remoteAddress, forwarded, proxies)
+  }
+  // platform.access (docs/backend/access.md): /api, /_brain and /s answer this site only. Refused sources are counted
+  // per client address (at most 512, the oldest dropped) for `brain access sources`, and logged at most 16 a minute.
+  const access = accessPolicy(o.access ?? mf.access ?? {}, mf.site || env.PUBLIC_SITE_URL)
+  const refusedSources = new Map()
+  const budgetKey = `edge ${++servers} `
+  let accessWindow = 0, accessLogs = 0, inFlight = 0, limitedWindow = 0, limited = 0, limitedLogs = 0
+  // the dynamic budget (accessBudget) and the in-flight cap: past either the answer is an immediate 429 or 503 with
+  // Retry-After, no queue, and one log line per minute sums what was turned away
+  const overBudget = (req, res, path, client) => {
+    const wait = access ? accessBudget(path, client, access, budgetKey) : 0
+    const busy = !wait && access.concurrency !== null && !ACCESS_EXEMPT.test(path) && inFlight >= access.concurrency
+    if (!wait && !busy) {
+      if (access.concurrency !== null) { inFlight++; res.once('close', () => inFlight--) }
+      return false
+    }
+    const minute = Math.floor(Date.now() / 60000)
+    if (limitedWindow !== minute) {
+      if (limited) log('warn', 'requests limited', { count: limited, minute: new Date(limitedWindow * 60000).toISOString(), fix: 'raise platform.access.perMinute or concurrency if real visitors are among them' })
+      limitedWindow = minute; limited = 0; limitedLogs = 0
+    }
+    limited++
+    if (limitedLogs++ < 4) log('warn', 'request limited', { ip: client, path: String(path).slice(0, 256), reason: busy ? 'concurrency' : 'perMinute', userAgent: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'].slice(0, 256) : null })
+    send(res, busy ? 503 : 429, busy ? 'Busy, try again shortly' : 'Too many requests', { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store', 'retry-after': String(busy ? 2 : wait) })
+    return true
+  }
+  const accessRefused = (req, rid, path, client, reason) => {
+    const bound = v => typeof v === 'string' ? v.slice(0, 256) : null
+    const now = new Date().toISOString()
+    let entry = refusedSources.get(client)
+    if (entry) refusedSources.delete(client)
+    else {
+      if (refusedSources.size >= 512) refusedSources.delete(refusedSources.keys().next().value)
+      entry = { ip: client, count: 0, first: now, reasons: {} }
+    }
+    entry.count++; entry.last = now; entry.reasons[reason] = (entry.reasons[reason] || 0) + 1
+    Object.assign(entry, { path: bound(path), origin: bound(req.headers.origin), referer: bound(req.headers.referer), host: bound(req.headers['x-forwarded-host'] || req.headers.host), userAgent: bound(req.headers['user-agent']), country: bound(req.headers['cf-ipcountry']) })
+    refusedSources.set(client, entry)
+    const minute = Math.floor(Date.now() / 60000)
+    if (accessWindow !== minute) { accessWindow = minute; accessLogs = 0 }
+    if (accessLogs++ >= 16) return
+    log('warn', 'access refused', { code: 'B0752', reason, rid, ip: client, path: entry.path, origin: entry.origin, referer: entry.referer, secFetchSite: bound(req.headers['sec-fetch-site']), host: entry.host, userAgent: entry.userAgent, fix: 'the native API answers this site only; a page of the site, an API key, or an address in platform.access.ips passes. Run brain explain B0752' })
   }
   // server/routes/* of the native backend, listed by the build: only these exact shapes cross the bridge
   const nativeRoutes = (Array.isArray(mf.nativeRoutes) ? mf.nativeRoutes : []).map(route => {
@@ -1960,6 +2005,11 @@ export function createServer(o = {}) {
       let full
       try { full = new URL(req.url, 'http://' + host) } catch { return send(res, 400, 'Bad Request') }
       // /_health stays at the root: the supervisor calls it there whatever the base
+      // refused API sources, for an operator on this machine only (a loopback socket and no forwarded hop)
+      if (full.pathname === '/_access/sources' && req.method === 'GET') {
+        if (!LOOPBACK(plainIp(req.socket.remoteAddress ?? '') || '') || req.headers['x-forwarded-for']) return notFound(req, res)
+        return send(res, 200, json({ sources: [...refusedSources.values()].sort((a, b) => b.count - a.count) }), { 'content-type': MIME['.json'], 'cache-control': 'no-store' })
+      }
       if (full.pathname === '/_health' || full.pathname === BASE + '_health') return send(res, 200, json({ ok: true, build: mf.build || null }), { 'content-type': MIME['.json'], 'cache-control': 'no-store' })
       let url = full
       if (BASE !== '/') {
@@ -1974,9 +2024,20 @@ export function createServer(o = {}) {
       const probe = brainProbe(url.pathname)
       if (probe) return await answerProbe(req, res, new URL(probe, url), rid)
       if (native && /^\/_brain\/files(?:\/|$)/.test(url.pathname)) return await native.fileStream(req,res,url,rid)
-      if (native && /^\/(?:api(?:\/|$)|_brain(?:\/|$)|s\/)/.test(url.pathname)) return await native.proxy(req,res,url,rid,send)
+      if (native && /^\/(?:api(?:\/|$)|_brain(?:\/|$)|s\/)/.test(url.pathname)) {
+        const client = ipOf(req), refused = accessRefusal(req, url.pathname, client, access)
+        if (refused) {
+          accessRefused(req, rid, url.pathname, client, refused)
+          return send(res, 403, json({ error: 'This API answers its own site only', code: 'B0752' }), { 'content-type': MIME['.json'], 'cache-control': 'no-store', 'x-brain-code': 'B0752' })
+        }
+        if (overBudget(req, res, url.pathname, client)) return
+        return await native.proxy(req,res,url,rid,send)
+      }
       const declaredRoute = native && nativeRoutes.find(route => route.rx.test(url.pathname))
-      if (declaredRoute) return await native.proxy(req,res,url,rid,send,undefined,declaredRoute)
+      if (declaredRoute) {
+        if (overBudget(req, res, url.pathname, ipOf(req))) return
+        return await native.proxy(req,res,url,rid,send,undefined,declaredRoute)
+      }
       // redirects.json (manifest `redirects`, brain-seo server_json): exact sources first, then patterns, on the app path;
       // same-site targets get the base, the query is kept when the target has none; slash policy and host in the same hop
       const to = (req.method === 'GET' || req.method === 'HEAD') && canonicalOf(req, url)
@@ -2009,6 +2070,7 @@ export function createServer(o = {}) {
         const paged = post ? null : pageParameter(route, url)
         if (paged === 404) return notFound(req, res)
         if (paged) return send(res, 301, '', { location: withBase(paged), 'cache-control': 'public, max-age=3600' })
+        if (overBudget(req, res, url.pathname, ipOf(req))) return
         return await (post ? formPost : ssr)(req, res, route, m.groups ? { ...m.groups } : {}, url, rid)
       }
       if (post) return send(res, 405, 'Method not allowed', { allow: 'GET, HEAD' })
@@ -2227,6 +2289,7 @@ export async function runChain({ guards = [], middleware = [], ctx }) {
 // key past HITS_KEY_MAX characters is stored as its digest. The map stays ordered by window start: a new window is
 // re-inserted at the end, so the expired entries are always the first ones.
 const HITS = new Map() // key → [windowStart, count]
+let servers = 0 // each createServer keeps its own dynamic budget (accessBudget) in HITS
 export const HITS_MAX = 50000, HITS_KEY_MAX = 256
 export const rateLimitKeys = () => HITS.size
 const WINDOW = 60000
@@ -2448,6 +2511,94 @@ export function trustedProxies(list = []) {
  * The client is the right-most forwarded hop that is not a trusted proxy, and only when the TCP peer is trusted: hops
  * left of it are client-supplied and never consulted. Same walk as resolve_client (brain-backend/src/edge_http.rs).
  */
+/**
+ * platform.access (docs/backend/access.md): who may reach the dynamic answers and how much each client may take.
+ * `mode` "open" (default) lets any client in, scripts and headless browsers included; "own-host" refuses /api, /_brain
+ * and /s to anything without evidence of this site. Nothing is limited unless the app sets `perMinute` (dynamic
+ * requests per client and minute) or `concurrency` (dynamic requests in flight for the whole process). Normalizes `{ mode, perMinute, concurrency, origins, hosts, ips,
+ * local }`; `site` is the site origin (PUBLIC_SITE_URL), whose host is always one of the hosts.
+ * Same limits as the backend's parse_access (brain-backend/src/platform.rs).
+ */
+export function accessPolicy(raw = {}, site) {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw Error('platform.access must be an object')
+  for (const key of Object.keys(raw)) if (!['mode', 'perMinute', 'concurrency', 'origins', 'hosts', 'ips', 'local'].includes(key)) throw Error(`platform.access.${key} is not a setting; use mode, perMinute, concurrency, origins, hosts, ips or local`)
+  const list = (key, max) => {
+    const value = raw[key] ?? []
+    if (!Array.isArray(value) || value.length > max || value.some(v => typeof v !== 'string' || !v || v.length > 256)) throw Error(`platform.access.${key} must be an array of at most ${max} strings`)
+    return value
+  }
+  const origins = new Set()
+  for (const origin of list('origins', 32)) {
+    let parsed
+    try { parsed = new URL(origin) } catch { throw Error(`platform.access.origins entry \`${origin}\` must be an origin such as https://admin.example.com`) }
+    if (parsed.origin !== origin || !/^https?:$/.test(parsed.protocol)) throw Error(`platform.access.origins entry \`${origin}\` must be exactly scheme://host[:port], without a path or a trailing slash`)
+    origins.add(origin)
+  }
+  const hosts = new Set()
+  for (const host of list('hosts', 32)) {
+    if (!/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/.test(host)) throw Error(`platform.access.hosts entry \`${host}\` must be a lowercase host name without scheme, port or wildcard`)
+    hosts.add(host)
+  }
+  try { if (site) hosts.add(new URL(site).hostname) } catch {}
+  const ips = list('ips', 64)
+  const nets = ips.length ? trustedProxies(ips) : null
+  if (raw.local !== undefined && typeof raw.local !== 'boolean') throw Error('platform.access.local must be true or false')
+  const mode = raw.mode ?? 'open'
+  if (mode !== 'open' && mode !== 'own-host') throw Error('platform.access.mode must be "open" or "own-host"')
+  const count = (key, max) => {
+    const value = raw[key] ?? null
+    if (value !== null && (!Number.isInteger(value) || value < 1 || value > max)) throw Error(`platform.access.${key} must be a whole number from 1 to ${max}`)
+    return value
+  }
+  return Object.freeze({ mode, perMinute: count('perMinute', 100000), concurrency: count('concurrency', 10000), origins, hosts, nets, local: raw.local !== false })
+}
+// Paths a third party reaches on purpose: links, the analytics script, signed inbound webhooks and Apple's
+// server-to-server notifications. Each carries its own check.
+const ACCESS_EXEMPT = /^\/(?:s\/|_brain\/analytics\.js$|_brain\/webhooks\/in\/[a-z][a-z0-9_]{0,47}$|_brain\/auth\/apple\/notifications$)/
+const LOOPBACK = ip => /^(?:127\.|::1$)/.test(ip)
+/**
+ * Why a request to /api, /_brain or /s may not reach the backend, or null when it may. It passes with browser evidence
+ * of this site (an Origin of this host or of access.origins, Sec-Fetch-Site same-origin, a same-host Referer), a
+ * non-ambient credential the backend verifies (Authorization, X-Api-Key), a client address in access.ips, or a
+ * loopback client while access.local is on. Headers can be forged: this keeps other sites' pages, foreign hosts and
+ * plain scripts out, and the per-client rate limits bound what a forger reads.
+ */
+export function accessRefusal(req, path, client, policy) {
+  if (!policy || policy.mode !== 'own-host' || ACCESS_EXEMPT.test(path) || req.method === 'OPTIONS') return null
+  const h = req.headers
+  const host = String(h['x-forwarded-host'] || h.host || '').toLowerCase()
+  const hostname = host.replace(/:\d+$/, '').replace(/^\[|\]$/g, '')
+  const local = policy.local && LOOPBACK(client)
+  if (policy.hosts.size && !policy.hosts.has(hostname) && !(local && ['localhost', '127.0.0.1', '::1'].includes(hostname))) return 'host'
+  if (local) return null
+  if (h.authorization || h['x-api-key']) return null
+  if (policy.nets && client !== '?' && policy.nets.check(client, isIP(client) === 4 ? 'ipv4' : 'ipv6')) return null
+  const own = value => {
+    try {
+      const url = new URL(value)
+      return url.host === host || policy.origins.has(url.origin)
+    } catch { return false }
+  }
+  if (h.origin) return own(h.origin) ? null : 'origin'
+  const site = h['sec-fetch-site']
+  const navigation = (req.method === 'GET' || req.method === 'HEAD') && h['sec-fetch-mode'] === 'navigate'
+  if (site === 'same-origin') return null
+  // a person who opened the URL, or a sign-in provider sending the browser back to its callback
+  if (navigation && (site === 'none' || path.startsWith('/_brain/auth/'))) return null
+  if (h.referer && own(h.referer)) return null
+  return site ? 'cross-site' : 'no-browser-evidence'
+}
+/**
+ * Whether a dynamic request (a page render, a form post, /api, /_brain, /s) stays inside its budget: 0, or the seconds
+ * to wait. Checked before any body is read or the backend is asked, so a refused client costs one map lookup. A
+ * loopback client while access.local is on, an address in access.ips and the exempt callbacks are not counted.
+ */
+export function accessBudget(path, client, policy, key = 'edge ') {
+  if (!policy || !policy.perMinute || ACCESS_EXEMPT.test(path)) return 0
+  if (policy.local && LOOPBACK(client)) return 0
+  if (policy.nets && client !== '?' && policy.nets.check(client, isIP(client) === 4 ? 'ipv4' : 'ipv6')) return 0
+  return overLimit(key + client, policy.perMinute)
+}
 export function resolveClient(peer, forwarded, nets) {
   const socketPeer = plainIp(peer ?? '')
   const trusted = ip => nets.check(ip, isIP(ip) === 4 ? 'ipv4' : 'ipv6')

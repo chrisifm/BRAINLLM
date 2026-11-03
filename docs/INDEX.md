@@ -95,6 +95,7 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [BRAINLLM INTERNALS — contracts between compiler, toolchain and runtime (not for the LLM that writes apps)](INTERNALS.md) | Internal team contracts; same section numbers as SPEC v0. |
 | [Foreign widget interoperability](INTEROP.md) | `interop` gives an application-supplied DOM widget a dedicated subtree. |
 | [Native JWT sessions and Google Sign-In](JWT-GOOGLE.md) | The experimental Rust backend supports short access JWTs and rotating opaque refresh cookies alongside its existing opaque session endpoint. |
+| [Sign in with Apple and LinkedIn](APPLE-LINKEDIN.md) | Apple (popup ID token and account notifications) and LinkedIn (server-side OpenID Connect code flow) sign in to the same native JWT session as Google. |
 | [Native slugs and short links](LINKS.md) | The Rust backend exposes authenticated `POST /_brain/slugs` with `{title,limit?}`. |
 | [Native private media library](MEDIA.md) | The experimental Rust backend keeps a validated original and generates versioned image renditions with the maintained `image` crate (0.25.10). |
 | [Incremental migration from React, Angular, Vue and related frameworks](MIGRATION.md) | This mode is an inventory and an LLM-guided workflow, not a JSX/TypeScript/template transpiler. |
@@ -126,6 +127,7 @@ Every framework document with a one-line summary. Apps get their own generated d
 |---|---|
 | [Totals, aggregates and related counts (B-13)](backend/aggregates.md) | — |
 | [Behavior analytics (experimental backend)](backend/analytics.md) | Every app with a native backend records how visitors use it: which elements they click, where they are and how long they stay. |
+| [Access and budgets (B0752)](backend/access.md) | Nothing is limited by default; opt-in per-client and in-flight budgets, and an own-host mode that refuses other sites and plain scripts. |
 | [Project API keys](backend/api-keys.md) | A project can issue its own API keys so other services, scripts and partners call the resource API without a browser session. |
 | [Atomic updates: guarded increments, compare-and-set and upserts](backend/atomic-updates.md) | Read-modify-write from the client (`GET`, change, `PUT`) loses updates under concurrency. |
 | [Audit log](backend/audit.md) | `audit: true` in a resource's `policy.jsbrain` records every insert, update and delete of its rows, whichever path wrote them. |

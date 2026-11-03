@@ -49,7 +49,7 @@ fn config(resources: Vec<Resource>) -> brain_backend::Config {
         origins: vec![ORIGIN.into()],
         production: true,
         jwt: None,
-        google: None,
+        google: None, apple: None, linkedin: None,
         gcs: None,
     }
 }

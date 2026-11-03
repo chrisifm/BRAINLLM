@@ -166,7 +166,7 @@ async fn api(pool: &sqlx::PgPool, resources: Vec<Resource>) -> Api {
             sockets: None,
             gcs: None,
             jwt: None,
-            google: None,
+            google: None, apple: None, linkedin: None,
             resources,
             jobs: Vec::new(),
             uploads: std::env::temp_dir().join(format!("brain-data-queries-{}", Uuid::new_v4().simple())),
@@ -679,7 +679,7 @@ async fn search_language_weights_and_legacy_numeric_ids() {
         pool.clone(),
         brain_backend::Config {
             api_keys: None, roles: Default::default(), mail: None, auth_public_base_url: None, webhooks: None,
-            before_hooks: None, sockets: None, gcs: None, jwt: None, google: None, resources: vec![english],
+            before_hooks: None, sockets: None, gcs: None, jwt: None, google: None, apple: None, linkedin: None, resources: vec![english],
             jobs: Vec::new(), uploads: std::env::temp_dir().join(format!("brain-data-queries-{}", Uuid::new_v4().simple())),
             origins: vec![ORIGIN.into()], production: false,
         },

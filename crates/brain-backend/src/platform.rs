@@ -66,6 +66,8 @@ pub struct Edge {
     pub request_log: RequestLog,
     /// Successful requests slower than this are logged as `slow` even in `errors` mode.
     pub slow: Option<Duration>,
+    /// `access`: who reaches the dynamic answers and each client's budget (docs/backend/access.md); the gateways enforce it.
+    pub access: Option<Value>,
 }
 
 impl Default for Edge {
@@ -83,6 +85,7 @@ impl Default for Edge {
             drain: DEFAULT_DRAIN,
             request_log: RequestLog::Errors,
             slow: None,
+            access: None,
         }
     }
 }
@@ -172,8 +175,11 @@ impl Edge {
     /// Reads the `server/platform.jsbrain` literal. Unknown keys are rejected so typos never
     /// silently fall back to defaults.
     pub fn from_contract(value: &Value) -> Result<Self, String> {
-        let map = object(value, "platform", &["trustProxy", "trustPublicProxy", "cors", "limits", "shutdown", "logging", "cluster"])?;
+        let map = object(value, "platform", &["trustProxy", "trustPublicProxy", "cors", "limits", "shutdown", "logging", "cluster", "access"])?;
         let mut edge = Edge::default();
+        if let Some(access) = map.get("access") {
+            edge.access = Some(parse_access(access)?);
+        }
         if let Some(list) = map.get("trustProxy") {
             let list = list.as_array().ok_or("platform.trustProxy must be an array of IPs or CIDR ranges")?;
             if list.len() > MAX_TRUSTED_PROXIES {
@@ -318,6 +324,54 @@ pub(crate) fn database_limit() -> Option<DatabaseLimit> {
     DATABASE_LIMIT.try_with(Cell::get).ok().flatten()
 }
 
+/// `platform.access` with the limits of the Node gateway's accessPolicy (runtime/server/server.mjs).
+fn parse_access(value: &Value) -> Result<Value, String> {
+    let map = object(value, "platform.access", &["mode", "perMinute", "concurrency", "origins", "hosts", "ips", "local"])?;
+    let list = |key: &str, max: usize| -> Result<Vec<String>, String> {
+        let Some(value) = map.get(key) else { return Ok(Vec::new()) };
+        let items = value.as_array().filter(|items| items.len() <= max).ok_or(format!("platform.access.{key} must be an array of at most {max} strings"))?;
+        items.iter().map(|item| item.as_str().filter(|text| !text.is_empty() && text.len() <= 256).map(str::to_string).ok_or(format!("platform.access.{key} must be an array of at most {max} strings"))).collect()
+    };
+    let origins = list("origins", 32)?;
+    for origin in &origins {
+        let parsed = url::Url::parse(origin).map_err(|_| format!("platform.access.origins entry `{origin}` must be an origin such as https://admin.example.com"))?;
+        if !matches!(parsed.scheme(), "http" | "https") || parsed.origin().ascii_serialization() != *origin {
+            return Err(format!("platform.access.origins entry `{origin}` must be exactly scheme://host[:port], without a path or a trailing slash"));
+        }
+    }
+    let hosts = list("hosts", 32)?;
+    for host in &hosts {
+        let label = |part: &str| !part.is_empty() && part.len() <= 63 && !part.starts_with('-') && !part.ends_with('-') && part.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+        if host.len() > 253 || !host.split('.').all(label) {
+            return Err(format!("platform.access.hosts entry `{host}` must be a lowercase host name without scheme, port or wildcard"));
+        }
+    }
+    let ips = list("ips", 64)?;
+    for ip in &ips {
+        parse_proxy(ip).map_err(|e| e.replace("trustProxy", "access.ips"))?;
+    }
+    let local = match map.get("local") {
+        None => true,
+        Some(Value::Bool(local)) => *local,
+        Some(_) => return Err("platform.access.local must be true or false".into()),
+    };
+    let mode = match map.get("mode") {
+        None => "open",
+        Some(Value::String(mode)) if mode == "open" || mode == "own-host" => mode.as_str(),
+        Some(_) => return Err("platform.access.mode must be \"open\" or \"own-host\"".into()),
+    };
+    // nothing is limited unless the app sets these
+    let count = |key: &str, max: u64| -> Result<Option<u64>, String> {
+        match map.get(key) {
+            None => Ok(None),
+            Some(value) => value.as_u64().filter(|n| (1..=max).contains(n)).map(Some).ok_or(format!("platform.access.{key} must be a whole number from 1 to {max}")),
+        }
+    };
+    let per_minute = count("perMinute", 100_000)?;
+    let concurrency = count("concurrency", 10_000)?;
+    Ok(serde_json::json!({"mode": mode, "perMinute": per_minute, "concurrency": concurrency, "origins": origins, "hosts": hosts, "ips": ips, "local": local}))
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -368,6 +422,26 @@ mod tests {
             json!({"logging": {"requests": "verbose"}}),
             json!({"logging": {"slow": "0s"}}),
             json!({"logging": {"bodies": true}}),
+        ] {
+            assert!(Edge::from_contract(&bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn access_is_open_by_default_and_validated() {
+        let open = Edge::from_contract(&json!({"access": {}})).unwrap().access.unwrap();
+        assert_eq!((open["mode"].as_str(), open["perMinute"].is_null(), open["concurrency"].is_null()), (Some("open"), true, true));
+        let own = Edge::from_contract(&json!({"access": {"mode": "own-host", "origins": ["https://admin.example.com"], "hosts": ["shop.example.com"], "ips": ["203.0.113.0/24"], "local": false, "perMinute": 30}})).unwrap().access.unwrap();
+        assert_eq!((own["mode"].as_str(), own["perMinute"].as_u64(), own["local"].as_bool()), (Some("own-host"), Some(30), Some(false)));
+        for bad in [
+            json!({"access": {"mode": "closed"}}),
+            json!({"access": {"perMinute": 0}}),
+            json!({"access": {"concurrency": 1.5}}),
+            json!({"access": {"origins": ["https://admin.example.com/"]}}),
+            json!({"access": {"hosts": ["*.example.com"]}}),
+            json!({"access": {"ips": ["0.0.0.0/0"]}}),
+            json!({"access": {"open": true}}),
+            json!({"access": []}),
         ] {
             assert!(Edge::from_contract(&bad).is_err(), "{bad}");
         }

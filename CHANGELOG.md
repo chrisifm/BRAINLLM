@@ -9,6 +9,11 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- Sign in with Apple: `APPLE_CLIENT_ID` (Services ID), optional `APPLE_APP_ID` and `APPLE_REDIRECT_URI` enable `/_brain/auth/apple/challenge`, `/_brain/auth/apple` and `/_brain/auth/apple/notifications`, and `brain recipe apple-signin` prepares a popup adapter; a verified address Apple hosts links an existing account, a private relay address never does, and consent revocation or account deletion ends the account's sessions (docs/APPLE-LINKEDIN.md)
+- Sign In with LinkedIn: `BRAIN_AUTH_LINKEDIN_CLIENT_ID` and `BRAIN_AUTH_LINKEDIN_CLIENT_SECRET` enable `/_brain/auth/linkedin/start` and `/_brain/auth/linkedin/callback`, a server-side OpenID Connect code flow that works over http on localhost; `BRAIN_AUTH_LINKEDIN_REDIRECT_URI` may be the native callback or a page of the app that relays `code` and `state` to it; a LinkedIn address never links an existing account
+- `platform.access` in `brain start`: nothing is limited by default; `perMinute` budgets page renders, form posts and `/api`, `/_brain`, `/s` per client address (429 + Retry-After) and `concurrency` caps them in flight (503, no queue), both checked before the body is read or the backend is asked; static and cached answers carry no budget; `mode: 'own-host'` makes the native API answer its own site only (B0752): other sites, foreign host names and scripts without browser evidence are refused while pages, API keys, provider callbacks, signed webhooks and short links pass, with `origins`, `hosts`, `ips` and `local`; refusals and limited requests are logged with their source and `/_access/sources` on the machine lists the refused addresses (`docs/backend/access.md`)
+- migration 0026 admits the `apple` and `linkedin` identity providers and stores the display name a provider shares; run `brain backend migrate` before serving
+
 ## [0.8.11] - 2026-11-02
 
 - the dev server's `/sitemap.xml` and `llms.txt` stop rendering pages after 3 seconds and list the remaining URLs without their head, and the log says how many pages were rendered

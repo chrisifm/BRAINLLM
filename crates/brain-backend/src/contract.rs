@@ -818,7 +818,7 @@ pub fn openapi_with_roles(resources: &[Resource], roles: &crate::auth_flows::Rol
         paths.insert(format!("/api/{}/{{id}}",r.name),json!({"parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}],"get":op("read",false),"put":op("update",true),"patch":crate::domain::patch_operation(r, op("update",false)),"delete":op("delete",false)}));
     }
     paths.extend(native_paths(roles));
-    json!({"openapi":"3.1.0","info":{"title":"BRAINLLM resource API (experimental)","version":env!("CARGO_PKG_VERSION")},"paths":paths,"components":{"securitySchemes":{"session":{"type":"apiKey","in":"cookie","name":"__Host-brain"},"accessCookie":{"type":"apiKey","in":"cookie","name":"__Host-brain-access"},"refreshCookie":{"type":"apiKey","in":"cookie","name":"__Host-brain-refresh"},"googleNonce":{"type":"apiKey","in":"cookie","name":"__Host-brain-google"},"bearer":{"type":"http","scheme":"bearer","bearerFormat":"JWT"}}}})
+    json!({"openapi":"3.1.0","info":{"title":"BRAINLLM resource API (experimental)","version":env!("CARGO_PKG_VERSION")},"paths":paths,"components":{"securitySchemes":{"session":{"type":"apiKey","in":"cookie","name":"__Host-brain"},"accessCookie":{"type":"apiKey","in":"cookie","name":"__Host-brain-access"},"refreshCookie":{"type":"apiKey","in":"cookie","name":"__Host-brain-refresh"},"googleNonce":{"type":"apiKey","in":"cookie","name":"__Host-brain-google"},"appleNonce":{"type":"apiKey","in":"cookie","name":"__Host-brain-apple"},"linkedinState":{"type":"apiKey","in":"cookie","name":"__Host-brain-linkedin"},"bearer":{"type":"http","scheme":"bearer","bearerFormat":"JWT"}}}})
 }
 
 fn native_security() -> Value {
@@ -1013,13 +1013,71 @@ fn native_paths(roles: &crate::auth_flows::RolesConfig) -> Map<String, Value> {
         "Verify configured GIS ID token and nonce; link an existing account only when Google is authoritative for its email",
         json!([{"googleNonce":[]}]),
         200,
-        Some(tokens),
+        Some(tokens.clone()),
         Some(body(object(
             json!({"credential":{"type":"string","maxLength":16384,"writeOnly":true}}),
             &["credential"],
             true,
         ))),
         &[400, 401, 403, 413, 415, 422, 429, 500, 503, 504],
+    );
+    add(
+        "/_brain/auth/apple/challenge",
+        "post",
+        "Configured public Apple Services ID, registered Return URL and one-use browser-bound five-minute nonce",
+        open.clone(),
+        200,
+        Some(object(
+            json!({"client_id":{"type":"string"},"redirect_uri":{"type":"string","format":"uri"},"nonce":{"type":"string","pattern":"^[a-f0-9]{64}$"},"expires_in":{"const":300}}),
+            &["client_id", "redirect_uri", "nonce", "expires_in"],
+            true,
+        )),
+        None,
+        &[403, 429, 500, 503, 504],
+    );
+    add(
+        "/_brain/auth/apple",
+        "post",
+        "Verify an Apple JS ID token and nonce; link an existing account only for a verified non-relay email; the unsigned first-authorization name is a display hint",
+        json!([{"appleNonce":[]}]),
+        200,
+        Some(tokens),
+        Some(body(object(
+            json!({"id_token":{"type":"string","maxLength":16384,"writeOnly":true},"name":{"type":"string","maxLength":200}}),
+            &["id_token"],
+            true,
+        ))),
+        &[400, 401, 403, 413, 415, 422, 429, 500, 503, 504],
+    );
+    add(
+        "/_brain/auth/apple/notifications",
+        "post",
+        "Apple server-to-server account notifications (signed JWT payload): consent revoked and account deleted end sessions",
+        json!([]),
+        200,
+        Some(object(json!({"ok":{"const":true}}), &["ok"], true)),
+        Some(body(object(json!({"payload":{"type":"string","maxLength":16384}}), &["payload"], true))),
+        &[400, 413, 415, 422, 429, 500, 503, 504],
+    );
+    add(
+        "/_brain/auth/linkedin/start",
+        "get",
+        "Redirect (303) to LinkedIn OpenID Connect with a one-use state cookie",
+        open.clone(),
+        303,
+        None,
+        None,
+        &[429, 500, 503, 504],
+    );
+    add(
+        "/_brain/auth/linkedin/callback",
+        "get",
+        "Exchange the code server-side, verify the ID token and redirect (303) to / with the session; a LinkedIn email never links an existing account",
+        json!([{"linkedinState":[]}]),
+        303,
+        None,
+        None,
+        &[429, 500, 503, 504],
     );
     add(
         "/_brain/analytics",

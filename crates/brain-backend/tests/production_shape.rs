@@ -68,7 +68,7 @@ async fn long_text_tables_search_without_errors_and_list_through_their_index() {
     db::migrate(&pool, &resources).await.unwrap();
     RolesConfig::default().register(&pool).await.unwrap();
     let http = brain_backend::http::router(pool.clone(), brain_backend::Config {
-        api_keys: None, roles: Default::default(), mail: None, auth_public_base_url: None, webhooks: None, before_hooks: None, sockets: None, gcs: None, jwt: None, google: None,
+        api_keys: None, roles: Default::default(), mail: None, auth_public_base_url: None, webhooks: None, before_hooks: None, sockets: None, gcs: None, jwt: None, google: None, apple: None, linkedin: None,
         resources, jobs: Vec::new(), uploads: std::env::temp_dir().join(format!("brain-production-shape-{}", Uuid::new_v4().simple())), origins: vec![ORIGIN.into()], production: false,
     }).await.unwrap();
     let author = Auth::new(pool.clone()).await.unwrap().signup(Credentials { email: "author@example.test".into(), password: "correct horse battery".into() }).await.unwrap();

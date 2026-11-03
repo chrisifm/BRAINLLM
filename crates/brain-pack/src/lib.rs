@@ -2103,6 +2103,11 @@ fn build_inner_with_options(
             .or_insert_with(|| "{\"v\":1,\"routes\":[],\"rpc\":{}}\n".into());
         *manifest = manifest.replacen("{\"v\":1,", &format!("{{\"v\":1,\"nativeSockets\":true,\"publicOrigin\":{},", prerender_json(socket.public_origin())), 1);
     }
+    if let Some(access) = &options.access {
+        let manifest = files.entry("_server/manifest.json".into())
+            .or_insert_with(|| "{\"v\":1,\"routes\":[],\"rpc\":{}}\n".into());
+        *manifest = manifest.replacen("{\"v\":1,", &format!("{{\"v\":1,\"access\":{access},"), 1);
+    }
     if !options.native_routes.is_empty() || !options.trust_proxy.is_empty() {
         let strings = |list: &[String]| list.iter().map(|text| prerender_json(text)).collect::<Vec<_>>().join(",");
         let routes = options.native_routes.iter().map(|(path, headers)| format!("{{\"path\":{},\"headers\":[{}]}}", prerender_json(path), strings(headers))).collect::<Vec<_>>().join(",");
@@ -2112,8 +2117,9 @@ fn build_inner_with_options(
     }
     // A packaged Wasm module is an explicit compile feature; never grant general JavaScript eval.
     if emitted_assets.keys().any(|path|path.ends_with(".wasm")) {post_csp.push(("script-src".into(),"'wasm-unsafe-eval'".into()));}
-    // Explicit compiled-page feature opt-in: exact Google SDK sources, never a token-controlled URL.
+    // Explicit compiled-page feature opt-in: exact Google and Apple SDK sources, never a token-controlled URL.
     if pages.iter().any(|page|cache::google_signin(&page.html)) {post_csp.extend(cache::google_csp());}
+    if pages.iter().any(|page|cache::apple_signin(&page.html)) {post_csp.extend(cache::apple_csp());}
     post_csp.extend(cache::captcha_csp(&input.root));
     // #148: root-relative links of every page (the author's and SEO's) go under the base, after SEO checked them
     if !pre.is_empty() {

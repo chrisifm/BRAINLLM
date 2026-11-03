@@ -362,6 +362,8 @@ fn cookie(header: &str) -> Result<String, Failure> {
             "__Host-brain-access",
             "__Host-brain-refresh",
             "__Host-brain-google",
+            "__Host-brain-apple",
+            "__Host-brain-linkedin",
         ],
     )
 }
@@ -511,7 +513,7 @@ const FILE_RESPONSE_HEADERS: [&str; 7] = [
     "referrer-policy",
 ];
 fn auth_cookie_reply(value: &str) -> bool {
-    ["__Host-brain", "__Host-brain-access", "__Host-brain-refresh", "__Host-brain-google"].contains(&value.split('=').next().unwrap_or(""))
+    ["__Host-brain", "__Host-brain-access", "__Host-brain-refresh", "__Host-brain-google", "__Host-brain-apple", "__Host-brain-linkedin"].contains(&value.split('=').next().unwrap_or(""))
 }
 #[cfg(test)]
 fn fetch(

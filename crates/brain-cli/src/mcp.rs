@@ -1203,8 +1203,8 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
     });
     tools.push(Tool {
         name: "brain_recipe",
-        description: "List recipes or prepare schema-derived resource-ui/auth-ui/google-signin/captcha/password-reset/email-verification file operations. Preview only; acquire leases and pass operations through brain_changes plan/apply to validate and write. Experimental backend must be configured separately.",
-        input_schema: schema([("name","string","omit to list; resource-ui, auth-ui, google-signin, captcha, password-reset or email-verification"),("params","object","resource and optional view")], &[]),
+        description: "List recipes or prepare schema-derived resource-ui/auth-ui/google-signin/apple-signin/captcha/password-reset/email-verification file operations. Preview only; acquire leases and pass operations through brain_changes plan/apply to validate and write. Experimental backend must be configured separately.",
+        input_schema: schema([("name","string","omit to list; resource-ui, auth-ui, google-signin, apple-signin, captcha, password-reset or email-verification"),("params","object","resource and optional view")], &[]),
         output_schema: out([("schemaVersion","number")]),
         run: Box::new(|a| match arg(a,"name") {
             None=>Ok(crate::recipes::list().to_string()),

@@ -45,7 +45,7 @@ fn config() -> brain_backend::Config {
         sockets: None,
         gcs: None,
         jwt: None,
-        google: None,
+        google: None, apple: None, linkedin: None,
         resources: Vec::new(),
         jobs: Vec::new(),
         uploads: std::env::temp_dir().join(format!("brain-sessions-{}", Uuid::new_v4().simple())),

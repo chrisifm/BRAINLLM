@@ -1822,6 +1822,7 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
     let mut socket_options = socket_settings.build_options(site).map_err(|e| format!("{e}. This `{env_name}` build took the site from --site or PUBLIC_SITE_URL in the [{env_name}] section of .brain_env"))?;
     socket_options.native_routes = route_executor::gateway_routes(root)?;
     socket_options.trust_proxy = platform_config::trust_proxy(root);
+    socket_options.access = platform_config::access(root);
     let out = brain_pack::build_with_options(&input, &views, &|v| layouts_of(root, v), &seo_of, &socket_options)?;
     // write only what changed and drop stale hashed chunks: an unchanged rebuild touches no file
     on_phase("write", 0, out.files.len() + out.binary.len());

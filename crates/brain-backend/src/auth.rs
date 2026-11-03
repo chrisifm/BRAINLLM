@@ -38,6 +38,29 @@ pub struct Credentials {
     pub email: String,
     pub password: String,
 }
+/// A browser identity provider whose verified ID tokens `Auth::identity_login` accepts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Provider {
+    Google,
+    Apple,
+    LinkedIn,
+}
+impl Provider {
+    pub fn name(self) -> &'static str {
+        match self {
+            Provider::Google => "google",
+            Provider::Apple => "apple",
+            Provider::LinkedIn => "linkedin",
+        }
+    }
+    fn nonce(self) -> &'static str {
+        match self {
+            Provider::Google => "google_nonce",
+            Provider::Apple => "apple_nonce",
+            Provider::LinkedIn => "linkedin_state",
+        }
+    }
+}
 #[derive(Clone)]
 pub struct Auth {
     pool: PgPool,
@@ -347,36 +370,52 @@ impl Auth {
     }
     /// App-origin POST creates a browser-bound one-use GIS nonce; the plaintext is never stored.
     pub async fn google_challenge(&self) -> Result<String, String> {
+        self.identity_challenge(Provider::Google).await
+    }
+    /// One-use nonce for an identity provider's browser sign-in, bounded per provider; the plaintext is never stored.
+    pub async fn identity_challenge(&self, provider: Provider) -> Result<String, String> {
         let nonce = crate::jwt::opaque();
         let mut tx = self.pool.begin().await.map_err(crate::db::safe)?;
-        sqlx::query("SELECT pg_advisory_xact_lock(hashtext('brain:google:challenge'))")
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
+            .bind(format!("brain:{}:challenge", provider.name()))
             .execute(&mut *tx)
             .await
             .map_err(crate::db::safe)?;
-        sqlx::query("DELETE FROM _brain_auth_challenges WHERE token_hash IN (SELECT token_hash FROM _brain_auth_challenges WHERE purpose='google_nonce' AND expires_at<=now() ORDER BY expires_at LIMIT 100)").execute(&mut *tx).await.map_err(crate::db::safe)?;
-        let retained:i64=sqlx::query_scalar("SELECT count(*)::bigint FROM (SELECT 1 FROM _brain_auth_challenges WHERE purpose='google_nonce' LIMIT 10000) retained").fetch_one(&mut *tx).await.map_err(crate::db::safe)?;
+        sqlx::query("DELETE FROM _brain_auth_challenges WHERE token_hash IN (SELECT token_hash FROM _brain_auth_challenges WHERE purpose=$1 AND expires_at<=now() ORDER BY expires_at LIMIT 100)").bind(provider.nonce()).execute(&mut *tx).await.map_err(crate::db::safe)?;
+        let retained:i64=sqlx::query_scalar("SELECT count(*)::bigint FROM (SELECT 1 FROM _brain_auth_challenges WHERE purpose=$1 LIMIT 10000) retained").bind(provider.nonce()).fetch_one(&mut *tx).await.map_err(crate::db::safe)?;
         if retained >= 10000 {
             return Err("Identity challenge budget reached; retry shortly".into());
         }
-        sqlx::query("INSERT INTO _brain_auth_challenges(token_hash,purpose,provider,expires_at) VALUES ($1,'google_nonce','google',now()+interval '5 minutes')").bind(digest(&nonce)).execute(&mut *tx).await.map_err(crate::db::safe)?;
+        sqlx::query("INSERT INTO _brain_auth_challenges(token_hash,purpose,provider,expires_at) VALUES ($1,$2,$3,now()+interval '5 minutes')").bind(digest(&nonce)).bind(provider.nonce()).bind(provider.name()).execute(&mut *tx).await.map_err(crate::db::safe)?;
         tx.commit().await.map_err(crate::db::safe)?;
         Ok(nonce)
     }
-    /// Identity fields come only from Google::verify. An existing email account links only as `link_google` allows.
+    /// Identity fields come only from Google::verify. An existing email account links only as `link_identity` allows.
     pub async fn google_login(
         &self,
-        identity: &crate::google::Identity,
+        identity: &crate::oidc::Identity,
+        nonce: &str,
+    ) -> Result<Option<(User, String)>, String> {
+        self.identity_login(Provider::Google, identity, nonce).await
+    }
+    /// Identity fields come only from the provider's verifier. A linked subject signs in; otherwise its email creates
+    /// the account, or links an existing one only as `link_identity` allows. A subject without an email signs in only
+    /// once linked.
+    pub async fn identity_login(
+        &self,
+        provider: Provider,
+        identity: &crate::oidc::Identity,
         nonce: &str,
     ) -> Result<Option<(User, String)>, String> {
         if !crate::jwt::valid_opaque(nonce) {
             return Ok(None);
         }
         let mut tx = self.pool.begin().await.map_err(crate::db::safe)?;
-        let consumed=sqlx::query("UPDATE _brain_auth_challenges SET consumed_at=now() WHERE token_hash=$1 AND purpose='google_nonce' AND provider='google' AND expires_at>now() AND consumed_at IS NULL").bind(digest(nonce)).execute(&mut *tx).await.map_err(crate::db::safe)?.rows_affected();
+        let consumed=sqlx::query("UPDATE _brain_auth_challenges SET consumed_at=now() WHERE token_hash=$1 AND purpose=$2 AND provider=$3 AND expires_at>now() AND consumed_at IS NULL").bind(digest(nonce)).bind(provider.nonce()).bind(provider.name()).execute(&mut *tx).await.map_err(crate::db::safe)?.rows_affected();
         if consumed != 1 {
             return Ok(None);
         }
-        let existing=sqlx::query("SELECT u.id,u.email,u.role,u.verified,u.disabled_at IS NOT NULL OR i.disabled_at IS NOT NULL AS disabled FROM _brain_users u JOIN _brain_identities i ON i.user_id=u.id WHERE i.provider='google' AND i.subject=$1").bind(&identity.subject).fetch_optional(&mut *tx).await.map_err(crate::db::safe)?;
+        let existing=sqlx::query("SELECT u.id,u.email,u.role,u.verified,u.disabled_at IS NOT NULL OR i.disabled_at IS NOT NULL AS disabled FROM _brain_users u JOIN _brain_identities i ON i.user_id=u.id WHERE i.provider=$2 AND i.subject=$1").bind(&identity.subject).bind(provider.name()).fetch_optional(&mut *tx).await.map_err(crate::db::safe)?;
         let user = if let Some(row) = existing {
             if row.get::<bool, _>("disabled") {
                 tx.commit().await.map_err(crate::db::safe)?;
@@ -389,60 +428,69 @@ impl Auth {
                 verified: row.get("verified"),
             }
         } else {
+            let Some(email) = identity.email.as_deref() else {
+                tx.commit().await.map_err(crate::db::safe)?;
+                return Ok(None);
+            };
             let holder = sqlx::query("SELECT id,email,role,verified,disabled_at IS NOT NULL AS disabled FROM _brain_users WHERE email=$1 FOR UPDATE")
-                .bind(&identity.email)
+                .bind(email)
                 .fetch_optional(&mut *tx)
                 .await
                 .map_err(crate::db::safe)?;
             if let Some(row) = holder {
-                let Some(user) = self.link_google(&mut tx, identity, &row).await? else {
+                let Some(user) = self.link_identity(&mut tx, provider, identity, email, &row).await? else {
                     tx.commit().await.map_err(crate::db::safe)?;
                     return Ok(None);
                 };
-                return self.finish_google(tx, user).await;
+                return self.finish_identity(tx, provider, user).await;
             }
             let id = Uuid::new_v4();
-            sqlx::query("INSERT INTO _brain_users(id,email,password_hash,role,verified) VALUES ($1,$2,$3,$4,$5)").bind(id).bind(&identity.email).bind(&self.dummy).bind(self.signup_role()).bind(identity.authoritative_email).execute(&mut *tx).await.map_err(|_|"Cannot create identity account")?;
-            sqlx::query("INSERT INTO _brain_identities(provider,subject,user_id,issuer,verified_email) VALUES ('google',$1,$2,$3,$4)").bind(&identity.subject).bind(id).bind(&identity.issuer).bind(&identity.email).execute(&mut *tx).await.map_err(crate::db::safe)?;
+            sqlx::query("INSERT INTO _brain_users(id,email,password_hash,role,verified) VALUES ($1,$2,$3,$4,$5)").bind(id).bind(email).bind(&self.dummy).bind(self.signup_role()).bind(identity.verified).execute(&mut *tx).await.map_err(|_|"Cannot create identity account")?;
+            sqlx::query("INSERT INTO _brain_identities(provider,subject,user_id,issuer,verified_email,display_name) VALUES ($1,$2,$3,$4,$5,$6)").bind(provider.name()).bind(&identity.subject).bind(id).bind(&identity.issuer).bind(email).bind(&identity.name).execute(&mut *tx).await.map_err(crate::db::safe)?;
             User {
                 id,
-                email: identity.email.clone(),
+                email: email.to_owned(),
                 role: self.signup_role().into(),
-                verified: identity.authoritative_email,
+                verified: identity.verified,
             }
         };
-        self.finish_google(tx, user).await
+        self.finish_identity(tx, provider, user).await
     }
-    async fn finish_google(
+    async fn finish_identity(
         &self,
         mut tx: sqlx::Transaction<'_, sqlx::Postgres>,
+        provider: Provider,
         user: User,
     ) -> Result<Option<(User, String)>, String> {
         reserve_session(&mut tx, user.id).await?;
         let token = token();
         sqlx::query("INSERT INTO _brain_sessions(token_hash,user_id,expires_at) VALUES ($1,$2,now()+make_interval(secs=>$3))").bind(digest(&token)).bind(user.id).bind(f64::from(self.session_length(&user.role))).execute(&mut *tx).await.map_err(crate::db::safe)?;
-        sqlx::query("INSERT INTO _brain_auth_events(user_id,event,outcome) VALUES ($1,'google-login','success')").bind(user.id).execute(&mut *tx).await.map_err(crate::db::safe)?;
+        sqlx::query("INSERT INTO _brain_auth_events(user_id,event,outcome) VALUES ($1,$2,'success')").bind(user.id).bind(format!("{}-login", provider.name())).execute(&mut *tx).await.map_err(crate::db::safe)?;
         tx.commit().await.map_err(crate::db::safe)?;
         Ok(Some((user, token)))
     }
-    /// The email already has an account and this Google subject has none. Link only when Google is authoritative for
+    /// The email already has an account and this subject has none. Link only when the provider is authoritative for
     /// the address. An account that never proved it holds nothing to preserve: its password, sessions, recovery links
     /// and API keys may belong to whoever typed the address first, so the proven owner annuls them all.
     /// A linked identity is never replaced, and a disabled account stays disabled.
-    async fn link_google(
+    async fn link_identity(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        identity: &crate::google::Identity,
+        provider: Provider,
+        identity: &crate::oidc::Identity,
+        email: &str,
         row: &sqlx::postgres::PgRow,
     ) -> Result<Option<User>, String> {
         let id: Uuid = row.get("id");
-        let linked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM _brain_identities WHERE user_id=$1 AND provider='google')")
+        let event = format!("{}-link", provider.name());
+        let linked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM _brain_identities WHERE user_id=$1 AND provider=$2)")
             .bind(id)
+            .bind(provider.name())
             .fetch_one(&mut **tx)
             .await
             .map_err(crate::db::safe)?;
-        if row.get::<bool, _>("disabled") || linked || !identity.authoritative_email {
-            sqlx::query("INSERT INTO _brain_auth_events(user_id,event,outcome) VALUES ($1,'google-link','denied')").bind(id).execute(&mut **tx).await.map_err(crate::db::safe)?;
+        if row.get::<bool, _>("disabled") || linked || !identity.linkable {
+            sqlx::query("INSERT INTO _brain_auth_events(user_id,event,outcome) VALUES ($1,$2,'denied')").bind(id).bind(&event).execute(&mut **tx).await.map_err(crate::db::safe)?;
             return Ok(None);
         }
         if !row.get::<bool, _>("verified") {
@@ -460,21 +508,74 @@ impl Auth {
                 .map_err(crate::db::safe)?;
             sqlx::query("INSERT INTO _brain_auth_events(user_id,event,outcome) VALUES ($1,'unproven-credentials-annulled','success')").bind(id).execute(&mut **tx).await.map_err(crate::db::safe)?;
         }
-        sqlx::query("INSERT INTO _brain_identities(provider,subject,user_id,issuer,verified_email) VALUES ('google',$1,$2,$3,$4)")
+        sqlx::query("INSERT INTO _brain_identities(provider,subject,user_id,issuer,verified_email,display_name) VALUES ($1,$2,$3,$4,$5,$6)")
+            .bind(provider.name())
             .bind(&identity.subject)
             .bind(id)
             .bind(&identity.issuer)
-            .bind(&identity.email)
+            .bind(email)
+            .bind(&identity.name)
             .execute(&mut **tx)
             .await
             .map_err(crate::db::safe)?;
-        sqlx::query("INSERT INTO _brain_auth_events(user_id,event,outcome) VALUES ($1,'google-link','success')").bind(id).execute(&mut **tx).await.map_err(crate::db::safe)?;
+        sqlx::query("INSERT INTO _brain_auth_events(user_id,event,outcome) VALUES ($1,$2,'success')").bind(id).bind(&event).execute(&mut **tx).await.map_err(crate::db::safe)?;
         Ok(Some(User {
             id,
             email: row.get("email"),
             role: row.get("role"),
             verified: true,
         }))
+    }
+    /// Applies a verified Sign in with Apple account notification once (keyed by its id). `consent-revoked` ends every
+    /// session of the linked account and keeps the link, so signing in with Apple again grants consent anew;
+    /// `account-deleted` disables the identity for good; address-forwarding changes are recorded. Unknown subjects and
+    /// event types are acknowledged without effect.
+    pub async fn apple_notification(&self, notice: &crate::apple::Notification) -> Result<(), String> {
+        let mut tx = self.pool.begin().await.map_err(crate::db::safe)?;
+        sqlx::query("DELETE FROM _brain_auth_challenges WHERE token_hash IN (SELECT token_hash FROM _brain_auth_challenges WHERE purpose='apple_event' AND expires_at<=now() ORDER BY expires_at LIMIT 100)").execute(&mut *tx).await.map_err(crate::db::safe)?;
+        let fresh = sqlx::query("INSERT INTO _brain_auth_challenges(token_hash,purpose,provider,expires_at,consumed_at) VALUES ($1,'apple_event','apple',now()+make_interval(secs=>$2),now()) ON CONFLICT (token_hash) DO NOTHING")
+            .bind(digest(&format!("apple-event:{}", notice.id)))
+            .bind(crate::apple::EVENT_WINDOW_SECS as f64 + 86400.0)
+            .execute(&mut *tx)
+            .await
+            .map_err(crate::db::safe)?
+            .rows_affected();
+        let user: Option<Uuid> = if fresh == 1 {
+            sqlx::query_scalar("SELECT user_id FROM _brain_identities WHERE provider='apple' AND subject=$1 FOR UPDATE")
+                .bind(&notice.subject)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(crate::db::safe)?
+        } else {
+            None
+        };
+        let event = match notice.kind.as_str() {
+            "consent-revoked" => Some(("apple-consent-revoked", false)),
+            "account-deleted" => Some(("apple-account-deleted", true)),
+            "email-disabled" => Some(("apple-email-disabled", false)),
+            "email-enabled" => Some(("apple-email-enabled", false)),
+            _ => None,
+        };
+        if let (Some(user), Some((event, delete))) = (user, event) {
+            if delete {
+                sqlx::query("UPDATE _brain_identities SET disabled_at=COALESCE(disabled_at,now()),updated_at=now() WHERE provider='apple' AND subject=$1")
+                    .bind(&notice.subject)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(crate::db::safe)?;
+            }
+            if delete || event == "apple-consent-revoked" {
+                sqlx::query("UPDATE _brain_users SET auth_version=auth_version+1,updated_at=now() WHERE id=$1")
+                    .bind(user)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(crate::db::safe)?;
+                crate::auth_flows::revoke(&mut tx, user).await.map_err(|error| error.to_string())?;
+            }
+            sqlx::query("INSERT INTO _brain_auth_events(user_id,event,outcome) VALUES ($1,$2,'success')").bind(user).bind(event).execute(&mut *tx).await.map_err(crate::db::safe)?;
+        }
+        tx.commit().await.map_err(crate::db::safe)?;
+        Ok(())
     }
     pub async fn user(&self, token: Option<&str>) -> Result<Option<User>, String> {
         let Some(token) =
@@ -579,8 +680,10 @@ mod identity_tests {
         let identity = crate::google::Identity {
             subject: Uuid::new_v4().simple().to_string(),
             issuer: "https://accounts.google.com".into(),
-            email: format!("disabled-{}@example.test", Uuid::new_v4().simple()),
-            authoritative_email: true,
+            email: Some(format!("disabled-{}@example.test", Uuid::new_v4().simple())),
+            linkable: true,
+            verified: true,
+            name: None,
         };
         let sign_in = || async { auth.google_login(&identity, &auth.google_challenge().await.unwrap()).await.unwrap().map(|(user, _)| user) };
         let user = sign_in().await.expect("first sign-in creates the account");
@@ -609,8 +712,10 @@ mod identity_tests {
         let mut identity = crate::google::Identity {
             subject: Uuid::new_v4().simple().to_string(),
             issuer: "https://accounts.google.com".into(),
-            email,
-            authoritative_email: false,
+            email: Some(email),
+            linkable: false,
+            verified: false,
+            name: None,
         };
         let nonce = auth.google_challenge().await.unwrap();
         assert!(
@@ -632,7 +737,7 @@ mod identity_tests {
                 .await
                 .unwrap();
         assert_eq!(count, 0);
-        identity.email = format!("new-{}@example.test", Uuid::new_v4().simple());
+        identity.email = Some(format!("new-{}@example.test", Uuid::new_v4().simple()));
         let nonce = auth.google_challenge().await.unwrap();
         let (user, token) = auth.google_login(&identity, &nonce).await.unwrap().unwrap();
         assert_eq!(user.role, "user");
@@ -675,8 +780,10 @@ mod identity_tests {
         crate::google::Identity {
             subject: subject.into(),
             issuer: "https://accounts.google.com".into(),
-            email: email.into(),
-            authoritative_email: true,
+            email: Some(email.into()),
+            linkable: true,
+            verified: true,
+            name: None,
         }
     }
     fn account(email: &str) -> Credentials {
@@ -699,7 +806,8 @@ mod identity_tests {
         let subject = Uuid::new_v4().simple().to_string();
         // Not authoritative: Google only observed this address once, so it proves nothing about it today.
         let mut weak = gmail(&subject, &email);
-        weak.authoritative_email = false;
+        weak.linkable = false;
+        weak.verified = false;
         let nonce = auth.google_challenge().await.unwrap();
         assert!(auth.google_login(&weak, &nonce).await.unwrap().is_none());
         let nonce = auth.google_challenge().await.unwrap();

@@ -114,7 +114,7 @@ async fn declared_routes_verify_signatures_type_input_and_shape_responses() {
             origins: vec![ORIGIN.into()],
             production: true,
             jwt: None,
-            google: None,
+            google: None, apple: None, linkedin: None,
             gcs: None,
         },
         Platform { routes: routes(), handlers: Some(Arc::new(Echo)), disabled_webhooks: vec!["orders".into()], ..Default::default() },
@@ -228,7 +228,7 @@ async fn routes_without_compiled_handlers_fail_before_serving() {
         origins: vec![ORIGIN.into()],
         production: true,
         jwt: None,
-        google: None,
+        google: None, apple: None, linkedin: None,
         gcs: None,
     };
     let err = brain_backend::http::router_with_platform(pool.clone(), config(), Platform { routes: routes(), handlers: None, ..Default::default() })

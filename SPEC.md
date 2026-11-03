@@ -338,9 +338,9 @@ a field from other readers and from the query surface. Modifiers `'str writeonly
 client writes and reads; `access: { write: ['admin'] }` limits writes by role. Constraint `unique: [['$owner']]` allows one record per owner. `owner` is returned only to owners and named read roles unless `expose_owner: true`.
 See `docs/backend/*.md`.
 Set `BRAIN_BACKEND_URL` to the fixed loopback native backend URL to connect native API requests and SSR session verification.
-Native JWT accounts use short-lived access and rotating refresh cookies, persisted revocation, configured roles and Google Sign-In.
+Native JWT accounts use short-lived access and rotating refresh cookies, persisted revocation, configured roles and Google, Apple or LinkedIn sign-in (`docs/APPLE-LINKEDIN.md`).
 Roles: `admin` and `user` by default, signup role `user`; `brain add roles` writes `server/auth/roles.jsbrain` for your own names (only `admin` is required). A role grant admits only that role; route `auth: 'user'` means any signed-in account.
-`brain recipe auth-ui|password-reset|email-verification|google-signin|captcha` prepares project-owned account UI;
+`brain recipe auth-ui|password-reset|email-verification|google-signin|apple-signin|captcha` prepares project-owned account UI;
 mail needs private `BRAIN_MAIL_RESEND_KEY`, `BRAIN_MAIL_FROM` and `PUBLIC_SITE_URL` (HTTPS, optional hosting prefix). The emails are in English unless the default locale defines `auth.email.verify`, `auth.email.reset` and `auth.email.notice` (B0941).
 `brain backend bootstrap-admin --user <existing-uuid>` (or `--email <address>`) explicitly assigns the first administrator; signup never grants it.
 API keys: add `server/api-keys.jsbrain` `{enabled:true}`; signed-in users manage keys at `/_brain/keys` (secret shown once; `selfService:false` closes those routes and leaves only the operator CLI), callers send `X-API-Key: bk_live_...` to `/api/<resource>` only; scopes `posts:read|write|*` never exceed the owner. See `docs/backend/api-keys.md`.
@@ -367,7 +367,7 @@ with a shared eight-request cap and ten-second total deadline; no automatic muta
 Files of any type: `server/files/invoices.jsbrain` `export default {types:['application/pdf'],maxBytes:'10mb',create:['user']}`
 → multipart `POST /_brain/files/invoices` (field `file`), `GET /_brain/files/invoices/<id>` (Range, ETag). Type comes
 from content, not the name; empty `types` accepts any type. See `docs/backend/files.md`.
-Edge: `server/platform.jsbrain` `export default {trustProxy:['127.0.0.1'],cors:{origins:[...],maxAge:600},limits:{maxInFlight:256},shutdown:{readyDelay:'5s',drain:'25s'},logging:{requests:'errors'|'all'|'off',slow:'1s'}}`.
+Edge: `server/platform.jsbrain` `export default {trustProxy:['127.0.0.1'],cors:{origins:[...],maxAge:600},limits:{maxInFlight:256},shutdown:{readyDelay:'5s',drain:'25s'},access:{perMinute:300,concurrency:128,mode:'open'|'own-host',origins:[...],hosts:[...],ips:[...],local:true},logging:{requests:'errors'|'all'|'off',slow:'1s'}}`. Nothing is limited by default; `access.perMinute` (429) and `access.concurrency` (503) budget page renders, form posts and the native API, and `mode:'own-host'` refuses the native API to other sites and plain scripts with 403 B0752 (`docs/backend/access.md`).
 Probes `GET /health/live` and `GET /health/ready`, also answered on the `brain start` port; overload answers `503 OVERLOADED` + `Retry-After`. Production
 requires `sslmode=verify-full` for a remote `DATABASE_URL`. See `docs/backend/proxy-cors.md`, `docs/backend/lifecycle.md`.
 Several processes: `cluster:{shared:true}` in `server/platform.jsbrain` (automatic when `BRAIN_BACKEND_PROCESSES>1`) keeps route/API-key rate windows in Postgres and relays socket events between processes. See `docs/backend/cluster.md`.

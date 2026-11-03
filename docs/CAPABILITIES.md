@@ -38,6 +38,7 @@ What an app author can use, generated from the tables the compiler dispatches on
 | `password-reset` | `request` `sent` `confirm` `complete` `error` `busy` |
 | `email-verification` | `anonymous` `request` `sent` `verify` `complete` `error` `busy` |
 | `google-signin` | `checking` `anonymous` `authenticated` `error` `busy` |
+| `apple-signin` | `checking` `anonymous` `authenticated` `error` `busy` |
 | `captcha` | `loading` `ready` `verified` `expired` `error` `busy` |
 
 ## Native backend (`brain backend capabilities`)

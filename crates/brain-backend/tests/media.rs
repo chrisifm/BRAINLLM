@@ -83,7 +83,7 @@ async fn originals_versions_library_metadata_owner_isolation_and_durable_cleanup
             origins: vec!["https://media.example.test".into()],
             production: true,
             jwt: None,
-            google: None,
+            google: None, apple: None, linkedin: None,
             gcs: None,
         },
     )

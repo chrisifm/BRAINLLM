@@ -1,0 +1,20 @@
+{
+  "id": "linkedin-signin",
+  "kind": "capability",
+  "title": "Sign In with LinkedIn",
+  "why": "Apps can offer Sign In with LinkedIn (OpenID Connect) through the native backend, with the redirect on a page of the app if they prefer.",
+  "changelog": [
+    "Sign In with LinkedIn: `BRAIN_AUTH_LINKEDIN_CLIENT_ID` and `BRAIN_AUTH_LINKEDIN_CLIENT_SECRET`"
+  ],
+  "guide": "docs/APPLE-LINKEDIN.md",
+  "adopt": {
+    "file": ".env",
+    "snippet": "BRAIN_AUTH_LINKEDIN_CLIENT_ID=\nBRAIN_AUTH_LINKEDIN_CLIENT_SECRET="
+  },
+  "uses": [
+    {
+      "glob": "{.env*,server/**/*}",
+      "contains": "BRAIN_AUTH_LINKEDIN_CLIENT_ID"
+    }
+  ]
+}

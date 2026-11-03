@@ -69,7 +69,7 @@ async fn reads_carry_validators_public_lifetimes_and_writes_honor_if_match() {
         api_keys: None, roles: Default::default(), mail: None, auth_public_base_url: None, webhooks: None, before_hooks: None,
         sockets: None, resources: resources(), jobs: vec![],
         uploads: std::env::temp_dir().join(format!("brain-caching-{}", Uuid::new_v4())),
-        origins: vec![ORIGIN.into()], production: true, jwt: None, google: None, gcs: None,
+        origins: vec![ORIGIN.into()], production: true, jwt: None, google: None, apple: None, linkedin: None, gcs: None,
     };
     let (http, _) = brain_backend::http::router_with_platform(pool.clone(), config, Platform { cache, ..Default::default() }).await.unwrap();
 

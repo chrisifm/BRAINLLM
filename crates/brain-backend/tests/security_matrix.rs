@@ -142,7 +142,7 @@ async fn every_role_resource_operation_and_row_state_answers_what_the_contract_d
     ];
     let (owner, parent_owner) = (identities[1].id.unwrap(), identities[2].id.unwrap());
     let config = brain_backend::Config {
-        api_keys: None, roles, mail: None, auth_public_base_url: None, webhooks: None, before_hooks: None, sockets: None, gcs: None, jwt: None, google: None,
+        api_keys: None, roles, mail: None, auth_public_base_url: None, webhooks: None, before_hooks: None, sockets: None, gcs: None, jwt: None, google: None, apple: None, linkedin: None,
         resources: all.clone(), jobs: Vec::new(), uploads: std::env::temp_dir().join(format!("brain-security-matrix-{}", Uuid::new_v4().simple())),
         origins: vec![ORIGIN.into()], production: false,
     };

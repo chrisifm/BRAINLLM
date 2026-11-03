@@ -1,0 +1,11 @@
+{
+  "id": "identity-providers-migration",
+  "kind": "change",
+  "title": "Migration 0026 for Apple and LinkedIn identities",
+  "why": "The identity table admits the `apple` and `linkedin` providers and keeps the display name a provider shares.",
+  "changelog": [
+    "migration 0026 admits the `apple` and `linkedin` identity providers"
+  ],
+  "steps": ["Run `brain backend migrate` before serving the new version"],
+  "finds": [{ "glob": "server/**/*" }]
+}

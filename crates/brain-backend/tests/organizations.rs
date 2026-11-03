@@ -62,7 +62,7 @@ fn roles() -> brain_backend::auth_flows::RolesConfig {
 fn config(resources: Vec<Resource>) -> brain_backend::Config {
     brain_backend::Config {
         api_keys: Some(Default::default()), roles: roles(), mail: None, auth_public_base_url: None, webhooks: None, before_hooks: None,
-        sockets: None, gcs: None, jwt: None, google: None, resources, jobs: Vec::new(),
+        sockets: None, gcs: None, jwt: None, google: None, apple: None, linkedin: None, resources, jobs: Vec::new(),
         uploads: std::env::temp_dir().join(format!("brain-orgs-{}", Uuid::new_v4().simple())),
         origins: vec![ORIGIN.into()], production: false,
     }

@@ -171,7 +171,7 @@ async fn postgres_auth_policy_crud_transactional_hooks_and_leased_jobs() {
             webhooks: None,before_hooks:None,sockets:None,
             gcs: None,
             jwt: None,
-            google: None,
+            google: None, apple: None, linkedin: None,
             resources: vec![exposed],
             jobs: vec![Resource {
                 name: "article_created".into(),

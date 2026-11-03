@@ -51,7 +51,7 @@ Refresh tokens have 244 random bits from two UUIDv4 values. Only SHA-256 digests
 
 ## Google verification and identity policy
 
-Google tokens must use RS256, one configured audience, an accepted Google issuer, an unexpired lifetime, an acceptable issued-at, the exact browser nonce and a verified email. Multi-audience tokens require the configured authorized party. The stable identity key is Google's `sub`, never email. An existing local email account cannot be linked by this flow; sign in using its existing method. New identities receive only the configured `signup_role` (`server/auth/roles.jsbrain`). The local verified flag is enabled automatically only when Google is authoritative for the address: Gmail or a verified Google Workspace hosted-domain claim. A third-party address can authenticate its stable Google subject without being marked locally verified.
+Google tokens must use RS256, one configured audience, an accepted Google issuer, an unexpired lifetime, an acceptable issued-at, the exact browser nonce and a verified email. Multi-audience tokens require the configured authorized party. The stable identity key is Google's `sub`, never email. An existing local email account links only under the rules in [Linking an existing account](#linking-an-existing-account); otherwise sign in using its existing method. New identities receive only the configured `signup_role` (`server/auth/roles.jsbrain`). The local verified flag is enabled automatically only when Google is authoritative for the address: Gmail or a verified Google Workspace hosted-domain claim. A third-party address can authenticate its stable Google subject without being marked locally verified.
 
 ## Linking an existing account
 
@@ -82,8 +82,10 @@ The recipe emits an explicit document-head `brain-google-signin` opt-in. Builds 
 
 ## Verification
 
-Unit tests create disposable synthetic RSA material in memory using Node's native crypto, validate positive RS256/JWKS cases and reject wrong signature/algorithm, issuer, audience, authorized party, nonce, expiry and unknown key IDs without contacting Google. Disposable Postgres tests cover refresh rotation/reuse revocation, auth_version/disabled state, one-use Google nonces and absence of implicit email linking. Frontend tests use an SDK stub and verify credential single-submit, cleanup, session reload and safe public status messages.
+Unit tests create disposable synthetic RSA material in memory using Node's native crypto, validate positive RS256/JWKS cases and reject wrong signature/algorithm, issuer, audience, authorized party, nonce, expiry and unknown key IDs without contacting Google. Disposable Postgres tests cover refresh rotation/reuse revocation, auth_version/disabled state, one-use Google nonces and linking only when Google is authoritative for the address. Frontend tests use an SDK stub and verify credential single-submit, cleanup, session reload and safe public status messages.
 
 Actual Google sign-in requires an operator-configured OAuth web client and HTTPS deployment; synthetic tests do not claim an external account login happened. Keep app-author SPEC claims planned until the compiled recipe and backend gates pass.
 
 Sources checked against current official documentation: [jsonwebtoken 11.1.0](https://docs.rs/jsonwebtoken/latest/jsonwebtoken/), [reqwest 0.13.5](https://docs.rs/reqwest/latest/reqwest/), [Google ID-token verification](https://developers.google.com/identity/gsi/web/guides/verify-google-id-token), and [GIS setup/CSP](https://developers.google.com/identity/gsi/web/guides/client-library).
+
+Sign in with Apple and Sign In with LinkedIn use the same native session and identity table: see [APPLE-LINKEDIN.md](APPLE-LINKEDIN.md).

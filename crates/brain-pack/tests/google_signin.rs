@@ -89,3 +89,12 @@ fn generated_hosts_keep_opener_policy_on_google_pages_and_preserve_default_every
     assert!(caddy.contains("@google_signin path /app/signin /app/signin.html /app/signin/"));
     assert!(caddy.contains("header @ordinary_opener Cross-Origin-Opener-Policy same-origin"));
 }
+#[test]
+fn apple_marker_follows_the_same_head_rule_and_adds_only_the_apple_sdk_source() {
+    let page = "<html><head><meta name='brain-apple-signin' content='1'></head></html>";
+    assert!(cache::apple_signin(page) && cache::popup_signin(page) && !cache::google_signin(page));
+    for source in ["<head><!-- <meta name='brain-apple-signin' content='1'> --></head>", "<head><template><meta name='brain-apple-signin' content='1'></template></head>", "<head></head><body><meta name='brain-apple-signin' content='1'></body>"] {
+        assert!(!cache::apple_signin(source), "{source}")
+    }
+    assert_eq!(cache::apple_csp(), vec![("script-src".to_string(), "https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/".to_string())]);
+}

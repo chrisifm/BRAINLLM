@@ -53,7 +53,7 @@ async fn process(pool: &sqlx::PgPool, shared: bool) -> (String, http::SocketCont
         origins: vec![ORIGIN.into()],
         production: true,
         jwt: None,
-        google: None,
+        google: None, apple: None, linkedin: None,
         gcs: None,
     };
     let quote = Route::from_contract("quote", &json!({"method": "GET", "path": "/quotes", "auth": "public", "rate": "3/min"}), &|_: &str| None).unwrap();

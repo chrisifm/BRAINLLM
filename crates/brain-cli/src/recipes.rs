@@ -9,6 +9,7 @@ pub fn list() -> Value {
         {"name":"password-reset","params":{"view":"fixed reset-password callback"},"states":["request","sent","confirm","complete","error","busy"],"experimental":true},
         {"name":"email-verification","params":{"view":"fixed verify-email callback"},"states":["anonymous","request","sent","verify","complete","error","busy"],"experimental":true},
         {"name":"google-signin","params":{"view":"optional view filename"},"states":["checking","anonymous","authenticated","error","busy"],"experimental":true},
+        {"name":"apple-signin","params":{"view":"optional view filename"},"states":["checking","anonymous","authenticated","error","busy"],"experimental":true},
         {"name":"captcha","params":{"view":"optional view filename"},"states":["loading","ready","verified","expired","error","busy"],"experimental":true}
     ]})
 }
@@ -40,6 +41,7 @@ pub fn generate(root: &Path, name: &str, params: &Value, dry_run: bool) -> Resul
         }
         "auth-ui" => ("account-access".into(), auth_view().into(), None),
         "google-signin" => ("google-access".into(), String::new(), None),
+        "apple-signin" => ("apple-access".into(), String::new(), None),
         "captcha" => ("create-account".into(), String::new(), None),
         "password-reset" => (
             "reset-password".into(),
@@ -83,7 +85,7 @@ pub fn generate(root: &Path, name: &str, params: &Value, dry_run: bool) -> Resul
         "resource-ui" => &["button", "field", "input", "checkbox", "error-state"],
         "auth-ui" | "password-reset" => &["button", "field", "input", "error-state"],
         "email-verification" => &["button", "error-state"],
-        "google-signin" => &["button"],
+        "google-signin" | "apple-signin" => &["button"],
         "captcha" => &["button", "field", "input"],
         _ => &[],
     };
@@ -101,17 +103,19 @@ pub fn generate(root: &Path, name: &str, params: &Value, dry_run: bool) -> Resul
             operations.push(json!({"path":path,"expectedRevision":null,"content":basics.get(&path).ok_or("Native recipe control source is unavailable")?}));
         }
     }
-    if name == "google-signin" {
-        let module = format!("lib/{view}-google.jsbrain");
-        let adapter = format!("public/{view}-google.js");
+    if name == "google-signin" || name == "apple-signin" {
+        let provider = if name == "apple-signin" { "apple" } else { "google" };
+        let module = format!("lib/{view}-{provider}.jsbrain");
+        let adapter = format!("public/{view}-{provider}.js");
         for candidate in [&module, &adapter] {
             if root.join(candidate).symlink_metadata().is_ok() {
                 return Err(format!("Recipe refuses to overwrite {candidate}"));
             }
         }
-        operations[0]["content"] = json!(google_view(&module));
+        operations[0]["content"] = json!(if provider == "apple" { apple_view(&module) } else { google_view(&module) });
         operations.push(json!({"path":module,"expectedRevision":null,"content":format!("import adapter from '../{adapter}'\nexport default adapter\n")}));
-        operations.push(json!({"path":adapter,"expectedRevision":null,"content":include_str!("../../../runtime/templates/google-signin.js")}));
+        let source = if provider == "apple" { include_str!("../../../runtime/templates/apple-signin.js") } else { include_str!("../../../runtime/templates/google-signin.js") };
+        operations.push(json!({"path":adapter,"expectedRevision":null,"content":source}));
     }
     if name == "captcha" {
         let module = format!("lib/{view}-captcha.jsbrain");
@@ -128,7 +132,7 @@ pub fn generate(root: &Path, name: &str, params: &Value, dry_run: bool) -> Resul
     Ok(
         json!({"schemaVersion":1,"recipe":name,"dryRun":dry_run,"previewOnly":dry_run,
         "operations":operations,
-        "contract":contract,"requirements":["Experimental Rust backend must be running and migrated","Expose /api and /_brain/auth on the frontend origin; a separate backend port alone is insufficient","Configure fixed loopback BRAIN_BACKEND_URL for native API proxy and SSR session verification; enforce policy on the backend","Native account endpoints stay same-origin under the app base; resource API paths require an appropriate HTTP policy base","auth-ui and google-signin require configured BRAIN_JWT_SECRET/ISSUER/AUDIENCE and GOOGLE_CLIENT_ID, HTTPS, and the documented Google GIS CSP allowlist"],
+        "contract":contract,"requirements":["Experimental Rust backend must be running and migrated","Expose /api and /_brain/auth on the frontend origin; a separate backend port alone is insufficient","Configure fixed loopback BRAIN_BACKEND_URL for native API proxy and SSR session verification; enforce policy on the backend","Native account endpoints stay same-origin under the app base; resource API paths require an appropriate HTTP policy base","auth-ui and google-signin require configured BRAIN_JWT_SECRET/ISSUER/AUDIENCE and GOOGLE_CLIENT_ID, HTTPS, and the documented Google GIS CSP allowlist","apple-signin requires configured JWT sessions, APPLE_CLIENT_ID (a Services ID) and a registered https Return URL (APPLE_REDIRECT_URI, default the site origin)"],
         "nativeAccountFlows":{"passwordReset":"brain recipe password-reset","emailVerification":"brain recipe email-verification","administrator":"brain backend bootstrap-admin --user <existing-uuid>","mail":"Configure private BRAIN_MAIL_RESEND_KEY/BRAIN_MAIL_FROM and PUBLIC_SITE_URL; no email is sent by this preview"},"deployment":"brain deploy config pm2|nginx prepares optional guarded native topology configuration"}),
     )
 }
@@ -157,6 +161,15 @@ pub fn apply(root: &Path, mut plan: Value) -> Result<Value, String> {
         o.remove("operations");
     }
     Ok(plan)
+}
+
+/// The Google view with Apple's opt-in meta and labels; both adapters share the same state and logout contract.
+fn apple_view(module: &str) -> String {
+    google_view(module)
+        .replace("Sign in with Google", "Sign in with Apple")
+        .replace("brain-google-signin", "brain-apple-signin")
+        .replace("google-heading", "apple-heading")
+        .replace("Google sign-in", "Apple sign-in")
 }
 
 fn google_view(module: &str) -> String {
@@ -577,6 +590,18 @@ mod tests {
         )
         .unwrap_or_else(|diags| panic!("{}", crate::diags_json(&diags)));
         assert!(generate(&scratch.0, "google-signin", &json!({}), true).is_err());
+    }
+    #[test]
+    fn generated_apple_view_has_owned_adapter_and_compiles_in_real_scaffold() {
+        let scratch = scaffold_fixture("apple");
+        let plan = generate(&scratch.0, "apple-signin", &json!({}), true).unwrap();
+        assert_eq!(plan["operations"].as_array().unwrap().len(), 3);
+        write_plan(&scratch.0, &plan);
+        assert_compiles(&scratch.0, "apple-signin");
+        let source = std::fs::read_to_string(scratch.0.join("views/apple-access.brain")).unwrap();
+        assert!(source.contains("brain-apple-signin") && !source.contains("google"));
+        assert!(scratch.0.join("public/apple-access-apple.js").is_file());
+        assert!(generate(&scratch.0, "apple-signin", &json!({}), true).is_err());
     }
     #[test]
     fn generated_captcha_view_has_owned_adapter_and_compiles_in_real_scaffold() {

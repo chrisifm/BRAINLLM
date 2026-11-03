@@ -93,7 +93,7 @@ async fn api(prefix: &str, resources: Vec<Resource>) -> Api {
     db::migrate(&pool, &resources).await.unwrap();
     brain_backend::auth_flows::RolesConfig::default().register(&pool).await.unwrap();
     let http = brain_backend::http::router(pool.clone(), brain_backend::Config {
-        api_keys: Some(Default::default()), roles: Default::default(), mail: None, auth_public_base_url: None, webhooks: None, before_hooks: None, sockets: None, gcs: None, jwt: None, google: None,
+        api_keys: Some(Default::default()), roles: Default::default(), mail: None, auth_public_base_url: None, webhooks: None, before_hooks: None, sockets: None, gcs: None, jwt: None, google: None, apple: None, linkedin: None,
         resources, jobs: Vec::new(), uploads: std::env::temp_dir().join(format!("brain-query-shape-{}", Uuid::new_v4().simple())), origins: vec![ORIGIN.into()], production: false,
     }).await.unwrap();
     Api { http, auth: Auth::new(pool.clone()).await.unwrap(), keys: Keys::new(pool.clone(), Default::default()).unwrap(), pool }
@@ -325,7 +325,7 @@ async fn a_guard_can_require_that_the_field_changes() {
         "roles": ["owner"], "input": {"price": "int!"}, "when": {"price": {"ne": "$input.price"}}, "set": {"price": "$input.price"}
     }}}}})).unwrap();
     let (http, _) = brain_backend::http::router_with_domain(a.pool.clone(), brain_backend::Config {
-        api_keys: None, roles: Default::default(), mail: None, auth_public_base_url: None, webhooks: None, before_hooks: None, sockets: None, gcs: None, jwt: None, google: None,
+        api_keys: None, roles: Default::default(), mail: None, auth_public_base_url: None, webhooks: None, before_hooks: None, sockets: None, gcs: None, jwt: None, google: None, apple: None, linkedin: None,
         resources: vec![items], jobs: Vec::new(), uploads: std::env::temp_dir().join(format!("brain-query-shape-{}", Uuid::new_v4().simple())), origins: vec![ORIGIN.into()], production: false,
     }, domain).await.unwrap();
     let a = Api { http, auth: Auth::new(a.pool.clone()).await.unwrap(), keys: Keys::new(a.pool.clone(), Default::default()).unwrap(), pool: a.pool };

@@ -121,7 +121,7 @@ async fn ingestion_reports_segments_exports_and_retention_on_owned_postgres() {
         origins: vec![ORIGIN.into()],
         production: false,
         jwt: None,
-        google: None,
+        google: None, apple: None, linkedin: None,
         gcs: None,
         roles: Default::default(),
         mail: None,

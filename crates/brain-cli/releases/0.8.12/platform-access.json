@@ -1,0 +1,21 @@
+{
+  "id": "platform-access",
+  "kind": "capability",
+  "title": "Optional request budgets and own-host mode in brain start",
+  "why": "Nothing is limited by default; an app can budget dynamic requests per client address, cap them in flight, or make the native API answer its own site only.",
+  "changelog": [
+    "`platform.access` in `brain start`: nothing is limited by default"
+  ],
+  "guide": "docs/backend/access.md",
+  "codes": ["B0752"],
+  "adopt": {
+    "file": "brain.config.jsbrain",
+    "snippet": "platform: { access: { perMinute: 600 } }"
+  },
+  "uses": [
+    {
+      "glob": "{brain.config.*,brain.platform.*}",
+      "contains": "access"
+    }
+  ]
+}

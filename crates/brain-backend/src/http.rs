@@ -83,6 +83,8 @@ pub struct Config {
     pub production: bool,
     pub jwt: Option<crate::jwt::Config>,
     pub google: Option<crate::google::Config>,
+    pub apple: Option<crate::apple::Config>,
+    pub linkedin: Option<crate::linkedin::Config>,
     pub gcs: Option<crate::media::GcsConfig>,
     pub roles: crate::auth_flows::RolesConfig,
     pub mail: Option<crate::auth_flows::MailConfig>,
@@ -101,6 +103,8 @@ pub struct App {
     auth: Auth,
     jwt: Option<crate::jwt::Jwt>,
     google: Option<crate::google::Google>,
+    apple: Option<crate::apple::Apple>,
+    linkedin: Option<crate::linkedin::LinkedIn>,
     auth_flows: crate::auth_flows::Flows,
     webhooks: Option<crate::webhooks::Webhooks>,
     disabled_webhooks: Arc<Vec<String>>,
@@ -621,6 +625,14 @@ pub async fn router_full(
     if google.is_some() && jwt.is_none() {
         return Err("Google sign-in requires configured JWT sessions".into());
     }
+    let apple = config.apple.map(crate::apple::Apple::new).transpose()?;
+    if apple.is_some() && jwt.is_none() {
+        return Err("Apple sign-in requires configured JWT sessions".into());
+    }
+    let linkedin = config.linkedin.map(crate::linkedin::LinkedIn::new).transpose()?;
+    if linkedin.is_some() && jwt.is_none() {
+        return Err("LinkedIn sign-in requires configured JWT sessions".into());
+    }
     let registered = sqlx::query_scalar::<_, String>(
         "SELECT role FROM public._brain_auth_roles WHERE role=ANY($1)",
     )
@@ -700,6 +712,8 @@ pub async fn router_full(
         auth_flows,
         jwt,
         google,
+        apple,
+        linkedin,
         queue: Queue::new(pool.clone()),
         pool,
         resources: Arc::new(resources),
@@ -772,6 +786,11 @@ pub async fn router_full(
         .route("/_brain/auth/refresh", post(token_refresh))
         .route("/_brain/auth/google/challenge", post(google_challenge))
         .route("/_brain/auth/google", post(google_login))
+        .route("/_brain/auth/apple/challenge", post(apple_challenge))
+        .route("/_brain/auth/apple", post(apple_login))
+        .route("/_brain/auth/apple/notifications", post(apple_notifications))
+        .route("/_brain/auth/linkedin/start", get(linkedin_start))
+        .route("/_brain/auth/linkedin/callback", get(linkedin_callback))
         .route(
             "/_brain/auth/password/request",
             post(request_password_reset),
@@ -1160,7 +1179,9 @@ async fn protect(State(app): State<App>, req: Request, next: Next) -> Response {
             .uri()
             .path()
             .strip_prefix("/_brain/webhooks/in/")
-            .is_some_and(|name| name.len() <= 48 && crate::contract::identifier(name));
+            .is_some_and(|name| name.len() <= 48 && crate::contract::identifier(name))
+        // Apple posts account notifications server to server; the handler verifies Apple's signature.
+        || req.method() == Method::POST && req.uri().path() == "/_brain/auth/apple/notifications";
     // A presented API key on /api is a non-ambient credential; the key gate verifies or rejects it.
     let keyed = http_api_keys::keyed_resource_request(&req);
     let signed_route = routes_http::matched(&req).is_some_and(|m| app.routes.signed(req.method(), m));
@@ -1307,6 +1328,8 @@ async fn logout(State(app): State<App>, h: HeaderMap) -> Result<Response> {
         crate::jwt::ACCESS_COOKIE,
         crate::jwt::REFRESH_COOKIE,
         "__Host-brain-google",
+        "__Host-brain-apple",
+        "__Host-brain-linkedin",
     ] {
         response.headers_mut().append(
             header::SET_COOKIE,
@@ -1319,7 +1342,7 @@ fn auth_disabled() -> Error {
     Error::new(
         StatusCode::SERVICE_UNAVAILABLE,
         "AUTH_NOT_CONFIGURED",
-        "Configure native JWT/Google identity in the private server environment",
+        "Configure native JWT sessions and the identity provider (Google, Apple or LinkedIn) in the private server environment",
     )
 }
 fn auth_denied() -> Error {
@@ -1413,22 +1436,33 @@ async fn google_login(
     Strict(body): Strict<GoogleCredential>,
 ) -> Result<Response> {
     let google = app.google.as_ref().ok_or_else(auth_disabled)?;
-    let jwt = app.jwt.as_ref().ok_or_else(auth_disabled)?;
     let nonce = crate::jwt::cookie(&headers, "__Host-brain-google").ok_or_else(auth_denied)?;
     let identity = google
         .verify(&body.credential, nonce)
         .await
-        .map_err(|_| {
-            Error::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "IDENTITY_UNAVAILABLE",
-                "Retry sign-in shortly; identity verification is temporarily unavailable",
-            )
-        })?
+        .map_err(|_| identity_unavailable())?
         .ok_or_else(auth_denied)?;
+    identity_session(&app, auth::Provider::Google, &identity, nonce, "__Host-brain-google").await
+}
+fn identity_unavailable() -> Error {
+    Error::new(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "IDENTITY_UNAVAILABLE",
+        "Retry sign-in shortly; identity verification is temporarily unavailable",
+    )
+}
+/// Issues the session for a verified identity and clears the provider's one-use cookie.
+async fn identity_session(
+    app: &App,
+    provider: auth::Provider,
+    identity: &crate::oidc::Identity,
+    nonce: &str,
+    cookie: &str,
+) -> Result<Response> {
+    let jwt = app.jwt.as_ref().ok_or_else(auth_disabled)?;
     let (user, opaque) = app
         .auth
-        .google_login(&identity, nonce)
+        .identity_login(provider, identity, nonce)
         .await
         .map_err(|error| Error::internal(error))?
         .ok_or_else(auth_denied)?;
@@ -1439,10 +1473,137 @@ async fn google_login(
     let mut response = jwt_response(tokens);
     response.headers_mut().append(
         header::SET_COOKIE,
-        crate::jwt::cookie_header("__Host-brain-google", "", 0)
-            .parse()
-            .unwrap(),
+        crate::jwt::cookie_header(cookie, "", 0).parse().unwrap(),
     );
+    Ok(response)
+}
+async fn apple_challenge(State(app): State<App>) -> Result<Response> {
+    let apple = app.apple.as_ref().ok_or_else(auth_disabled)?;
+    let nonce = app
+        .auth
+        .identity_challenge(auth::Provider::Apple)
+        .await
+        .map_err(|error| Error::internal(error))?;
+    let cookie = crate::jwt::cookie_header("__Host-brain-apple", &nonce, 300);
+    let mut response = Json(json!({"client_id":apple.client_id(),"redirect_uri":apple.redirect_uri(),"nonce":nonce,"expires_in":300}))
+        .into_response();
+    response
+        .headers_mut()
+        .append(header::SET_COOKIE, cookie.parse().unwrap());
+    Ok(response)
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AppleCredential {
+    id_token: String,
+    /// Apple shares the name once, unsigned, on the first authorization: a display hint only.
+    #[serde(default)]
+    name: Option<String>,
+}
+async fn apple_login(
+    State(app): State<App>,
+    headers: HeaderMap,
+    Strict(body): Strict<AppleCredential>,
+) -> Result<Response> {
+    let apple = app.apple.as_ref().ok_or_else(auth_disabled)?;
+    let nonce = crate::jwt::cookie(&headers, "__Host-brain-apple").ok_or_else(auth_denied)?;
+    let identity = apple
+        .verify(&body.id_token, nonce)
+        .await
+        .map_err(|_| identity_unavailable())?
+        .ok_or_else(auth_denied)?
+        .with_name(body.name.as_deref());
+    identity_session(&app, auth::Provider::Apple, &identity, nonce, "__Host-brain-apple").await
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AppleNotice {
+    payload: String,
+}
+/// Apple's server-to-server account notifications: a valid one is applied once, an unknown type is acknowledged.
+async fn apple_notifications(State(app): State<App>, Strict(body): Strict<AppleNotice>) -> Result<Response> {
+    let apple = app.apple.as_ref().ok_or_else(auth_disabled)?;
+    if body.payload.len() > 16384 {
+        return Err(auth_denied());
+    }
+    let notice = apple
+        .notification(&body.payload)
+        .await
+        .map_err(|_| identity_unavailable())?
+        .ok_or_else(auth_denied)?;
+    app.auth
+        .apple_notification(&notice)
+        .await
+        .map_err(|error| Error::internal(error))?;
+    Ok(Json(json!({"ok":true})).into_response())
+}
+fn see_other(location: &str, cookie: String) -> Response {
+    let mut response = StatusCode::SEE_OTHER.into_response();
+    response
+        .headers_mut()
+        .insert(header::LOCATION, HeaderValue::from_str(location).unwrap());
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+        .headers_mut()
+        .append(header::SET_COOKIE, cookie.parse().unwrap());
+    response
+}
+/// Starts LinkedIn's authorization-code flow: a one-use state bound to this browser, then a redirect to LinkedIn.
+async fn linkedin_start(State(app): State<App>) -> Result<Response> {
+    let linkedin = app.linkedin.as_ref().ok_or_else(auth_disabled)?;
+    let state = app
+        .auth
+        .identity_challenge(auth::Provider::LinkedIn)
+        .await
+        .map_err(|error| Error::internal(error))?;
+    Ok(see_other(
+        &linkedin.authorize_url(&state),
+        crate::jwt::cookie_header("__Host-brain-linkedin", &state, 600),
+    ))
+}
+#[derive(Deserialize)]
+struct LinkedInCallback {
+    #[serde(default)]
+    code: Option<String>,
+    #[serde(default)]
+    state: Option<String>,
+}
+/// LinkedIn returns here with a code; the session is set and the browser goes home. A refusal, a stale state or
+/// a cancelled consent returns home with `?signin=failed`, never an error page.
+async fn linkedin_callback(
+    State(app): State<App>,
+    headers: HeaderMap,
+    Query(query): Query<LinkedInCallback>,
+) -> Result<Response> {
+    let linkedin = app.linkedin.as_ref().ok_or_else(auth_disabled)?;
+    let cleared = crate::jwt::cookie_header("__Host-brain-linkedin", "", 0);
+    let failed = || Ok(see_other("/?signin=failed", cleared.clone()));
+    let (Some(code), Some(state), Some(bound)) = (
+        query.code.as_deref(),
+        query.state.as_deref(),
+        crate::jwt::cookie(&headers, "__Host-brain-linkedin"),
+    ) else {
+        return failed();
+    };
+    if !bool::from(subtle::ConstantTimeEq::ct_eq(state.as_bytes(), bound.as_bytes())) {
+        return failed();
+    }
+    let identity = match linkedin.sign_in(code, state).await {
+        Ok(Some(identity)) => identity,
+        Ok(None) => return failed(),
+        Err(_) => return Err(identity_unavailable()),
+    };
+    let session = match identity_session(&app, auth::Provider::LinkedIn, &identity, state, "__Host-brain-linkedin").await {
+        Ok(session) => session,
+        Err(error) if error.status == StatusCode::UNAUTHORIZED => return failed(),
+        Err(error) => return Err(error),
+    };
+    let mut response = see_other("/", cleared);
+    for cookie in session.headers().get_all(header::SET_COOKIE) {
+        response.headers_mut().append(header::SET_COOKIE, cookie.clone());
+    }
     Ok(response)
 }
 /// The caller's own session: only a session credential names one, so an API key never manages sessions.
@@ -2510,6 +2671,8 @@ async fn complete_password_reset(
         crate::jwt::ACCESS_COOKIE,
         crate::jwt::REFRESH_COOKIE,
         "__Host-brain-google",
+        "__Host-brain-apple",
+        "__Host-brain-linkedin",
     ] {
         response.headers_mut().append(
             header::SET_COOKIE,
