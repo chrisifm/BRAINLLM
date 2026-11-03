@@ -315,7 +315,7 @@ An error response carries a `rid`; `brain backend logs <rid>` returns its cause 
 `transitions.jsbrain { field, initial, transitions }` makes an `enum` field a state machine changed only by `POST /api/<r>/<uuid>/transitions/<name>`; see `docs/backend/state-machines.md`.
 `server/jobs/<name>/queue.jsbrain { priority, attempts, backoff, timeout, lease, drain, concurrency }` tunes one queue; `brain jobs dead|retry|stats <queue>`; see `docs/backend/queues.md`.
 `server/cron/<name>.jsbrain { schedule: '0 7 * * *', job, payload?, catchUp?, priority? }` enqueues once per slot (UTC); run `brain jobs cron`; see `docs/backend/cron.md`.
-`brain jobs enqueue|status|work|prune` manages persistent, at-least-once work. Handlers must be idempotent by `ctx.jobId`. Each queue needs a running `brain jobs work <queue>` (or `brain backend serve --with-workers`); `brain jobs stats` lists every queue with its live workers.
+`brain jobs enqueue|status|work|prune` manages persistent, at-least-once work; `brain jobs enqueue <queue> --payload '<json>'` takes the payload. Handlers must be idempotent by `ctx.jobId`. Each queue needs a running `brain jobs work <queue>` (or `brain backend serve --with-workers`); `brain jobs stats` lists every queue with its live workers.
 After-write hooks commit `{resource,operation,record}` with their mutation. `brain add hook validate_order` creates
 `server/hooks/validate_order.jsbrain`; reference it as `before_create`, `before_update` or `before_delete` in a resource's
 hooks contract. Its default function receives `{resource,operation,payload,existing,user,rid}` and must return the

@@ -138,6 +138,7 @@ granular:
   brain feedback query|watch         bounded compiler events for agents (watch: NDJSON)
   brain agent setup [--hooks]        project MCP registration and optional Claude Code edit feedback
   brain jobs <enqueue|status|work|stats|prune>  persistent Postgres jobs; workers run server/jobs handlers (`stats` alone lists every queue)
+  brain jobs enqueue <queue> --payload '<json>' [--key K] [--priority N] [--delay S]  the payload is JSON in --payload, e.g. brain jobs enqueue order_receipts --payload '{\"order_id\":\"A-17\"}'
   brain design [blueprint|query|check|seed|configure|gallery]  project-owned Design System
   brain manifest query|refresh        bounded component contracts and revisions
   brain quality [refresh]             persistent agent improvement JSON/Markdown/panel

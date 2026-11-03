@@ -1,0 +1,9 @@
+{
+  "id": "job-payload-positional",
+  "kind": "fix",
+  "title": "Job payload as a positional argument",
+  "why": "A JSON payload passed after the queue name was ignored and failed as INVALID_JOB_PAYLOAD without saying that it belongs in `--payload`.",
+  "changelog": [
+    "`brain jobs enqueue <queue> '<json>'` takes a single positional JSON argument as the payload"
+  ]
+}

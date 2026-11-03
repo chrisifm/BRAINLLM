@@ -16,6 +16,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - `brain backend approve-contract` classifies a wider enum as safe, and a narrower enum as safe when no stored row holds a removed value
 - `brain backend approve-contract --only <resource>` approves and applies just the named resources and reports the other changed ones as pending
 - `brain backend approve-contract --apply` writes the default of an added field into every stored row that lacks it, so an added required field with a default no longer fails
+- the server service `brain add resource` generates reads object-form fields such as `{ type: 'str!', unique: true }` and fields with an access modifier such as `'str! private'`, instead of throwing on `endsWith`
+- `brain jobs enqueue <queue> '<json>'` takes a single positional JSON argument as the payload, `brain jobs --help` shows `--payload '<json>'` with an example, and a payload error names the fix (pass the JSON with --payload)
 
 ## [0.8.11] - 2026-11-02
 
