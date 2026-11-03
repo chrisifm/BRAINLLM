@@ -9,6 +9,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- B0814 accepts browser navigation to an external destination, such as a payment checkout, when the URL is checked against a host that `brain.json` → `"redirects"` lists (`if (new URL(url).host === 'checkout.example.com')`), and to a URL the app's own server answered (`const { url } = await checkout()`, or `.json()` of a fetch of a fixed same-origin path); every other runtime URL still warns, and an unlisted host is named in the message
+- a field visible to named roles only (`visible: ['admin']`) can be a declared query filter (B0735 no longer refuses it): those roles filter by it, and any other caller, signed in or not, gets the same 422 as for an undeclared filter
+
 ## [0.8.11] - 2026-11-02
 
 - the dev server's `/sitemap.xml` and `llms.txt` stop rendering pages after 3 seconds and list the remaining URLs without their head, and the log says how many pages were rendered

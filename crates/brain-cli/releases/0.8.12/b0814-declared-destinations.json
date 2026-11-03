@@ -1,0 +1,9 @@
+{
+  "id": "b0814-declared-destinations",
+  "kind": "fix",
+  "title": "B0814 accepts declared external destinations",
+  "why": "B0814 warned on `location.assign(url)` for a payment checkout on another origin, and its only fix, a same-origin check, would break payment.",
+  "changelog": [
+    "B0814 accepts browser navigation to an external destination, such as a payment checkout, when the URL is checked against a host that `brain.json` → `\"redirects\"` lists"
+  ]
+}

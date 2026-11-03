@@ -61,8 +61,8 @@ import that runs twice cannot create duplicates.
 
 ## Keeping an old id private
 
-A field with `visible` limited to some readers, `private` or `writeonly` cannot be a filter: readers could infer its
-value. To resolve old ids without showing them, keep the pairs in a server-only resource and look them up from the
+A field `private`, `writeonly` or with `visible` including `owner` cannot be a filter, and one visible to named roles
+only filters for those roles alone ([visibility](visibility.md)): other readers could infer its value. To resolve old ids without showing them, keep the pairs in a server-only resource and look them up from the
 server:
 
 ```js

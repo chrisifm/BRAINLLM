@@ -287,8 +287,10 @@ pub fn validate(r: &Resource) -> Result<(), String> {
             continue;
         }
         let kind = kind(r, local).ok_or_else(|| at(format!("filter `{key}` is not a declared field of a filterable type (num and obj cannot be filtered)")))?;
-        if restricted(r, local) {
-            return Err(at(format!("filter `{key}` names a field with restricted visibility; fix: remove the filter or make the field public")));
+        // A field visible to named roles only may be filtered by those roles (`parse` gates each request); one that
+        // differs per row (`owner`) or that nobody reads would let a filter reveal what the reader cannot see.
+        if restricted(r, local) && !r.fields.get(local).is_some_and(crate::visibility::role_gated) {
+            return Err(at(format!("filter `{key}` names a field whose visibility includes `owner` or that no reader receives; fix: remove the filter, or list only role names in `visible` (e.g. ['admin']) so those roles can filter by it")));
         }
         if let Some(op) = ops.iter().find(|op| !kind.ops().contains(&op.as_str())) {
             return Err(at(format!("filter `{key}` does not support `{op}`; allowed: {}", kind.ops().join(", "))));
@@ -655,8 +657,19 @@ pub fn without_declared_names(problems: Problems) -> Problems {
         .collect()
 }
 
+/// Whether the reader with `role` may use the declared filter `key`: a filter on a field visible to named roles only
+/// (on this resource, or on the referenced one for `ref.field`) exists for those roles alone.
+fn filter_open(r: &Resource, resources: &BTreeMap<String, Resource>, key: &str, role: Option<&str>) -> bool {
+    let open = |res: &Resource, name: &str| res.fields.get(name).is_none_or(|f| crate::visibility::filterable_by(f, role));
+    match key.split_once('.') {
+        Some((local, inner)) => open(r, local) && crate::relations::target(r, local).and_then(|t| resources.get(&t)).is_none_or(|t| open(t, inner)),
+        None => open(r, key),
+    }
+}
+
 /// Parses raw query pairs against the contract. Every undeclared key, operator or malformed value is a problem.
-pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(String, String)]) -> Result<ListRequest, Problems> {
+/// `role` is the reader's: a filter on a role-gated field answers, for anyone else, exactly like an undeclared one.
+pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(String, String)], role: Option<&str>) -> Result<ListRequest, Problems> {
     let mut problems = Problems::new();
     let mut req = ListRequest { limit: 25, ..Default::default() };
     let mut seen = BTreeSet::new();
@@ -796,12 +809,14 @@ pub fn parse(r: &Resource, resources: &BTreeMap<String, Resource>, pairs: &[(Str
                     }
                     continue;
                 }
-                let Some(ops) = r.query.filter.get(field).filter(|ops| ops.iter().any(|o| o == op)) else {
-                    let declared = r.query.filter.get(field).map(|ops| ops.join(", "));
+                let open = |key: &str| filter_open(r, resources, key, role);
+                let filters = r.query.filter.iter().filter(|(key, _)| open(key));
+                let Some(ops) = r.query.filter.get(field).filter(|_| open(field)).filter(|ops| ops.iter().any(|o| o == op)) else {
+                    let declared = r.query.filter.get(field).filter(|_| open(field)).map(|ops| ops.join(", "));
                     bad(&match declared {
                         Some(ops) => format!("Operator `{op}` is not declared for `{field}`; declared: {ops}"),
                         None if RESERVED.contains(&field) => "Malformed parameter".to_string(),
-                        None => format!("Unknown query parameter; filterable: {}", r.query.filter.keys().cloned().collect::<Vec<_>>().join(", ")),
+                        None => format!("Unknown query parameter; filterable: {}", filters.map(|(key, _)| key.clone()).collect::<Vec<_>>().join(", ")),
                     });
                     continue;
                 };

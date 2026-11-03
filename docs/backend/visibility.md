@@ -33,9 +33,23 @@ The shop owner:
 
 ## Closed query surface
 
-Restricted fields cannot be declared as filters, sort keys, search fields, aggregate inputs or group keys; the
-contract fails to load with a fix message. A reader therefore cannot infer hidden values by filtering or sorting on
-them.
+Restricted fields cannot be declared as sort keys, search fields, aggregate inputs or group keys; the contract fails
+to load with a fix message (B0735). A reader therefore cannot infer hidden values by sorting or searching on them.
+
+A field visible to named roles only (`visible: ['admin']`, no `public` and no `owner`) may be a declared filter. Only
+those roles (and a system key) can use it: anyone else, signed in or not, gets the same 422 as for an undeclared filter,
+and the list of filters in that answer leaves it out, so the request learns nothing about the field. A filter on a
+field whose `visible` includes `owner`, or on a `private` or `writeonly` field, is still refused (B0735).
+
+```js
+export default { query: { filter: { priority: ['eq'] } } }   // fields: priority: { kind: 'enum(low|high)', visible: ['admin'] }
+```
+
+```text
+GET /api/tickets?priority=high   admin   → 200, only the high-priority tickets
+GET /api/tickets?priority=high   member  → 422, like ?nothing=high
+GET /api/tickets?priority=high   public  → 422, like ?nothing=high
+```
 
 ## Access modifiers
 

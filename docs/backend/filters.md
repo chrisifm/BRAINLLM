@@ -40,7 +40,7 @@ GET /api/products?created_at[gte]=now-7d
 | `list` | `has exists` |
 | `geo` ([details](geo.md)) | `near bbox exists` |
 
-`brain backend capabilities` prints this table from the code of the installed version. `num`, `obj` and fields with restricted [visibility](visibility.md) cannot be filtered. `in` takes 1–50 values,
+`brain backend capabilities` prints this table from the code of the installed version. `num` and `obj` cannot be filtered; a field with restricted [visibility](visibility.md) only when it is visible to named roles alone, and then only those roles can use the filter. `in` takes 1–50 values,
 `between` exactly two (inclusive). `exists` takes `true` or `false`; a stored `null` and a missing value both count as not existing.
 `ne` keeps records without a value, as action guards do: `stock[ne]=1` also returns a product with no `stock`; add `stock[exists]=true` to leave those out.
 

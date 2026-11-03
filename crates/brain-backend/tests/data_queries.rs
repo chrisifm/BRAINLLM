@@ -450,7 +450,12 @@ fn contracts_reject_unknown_targets_unsafe_actions_and_restricted_query_fields()
     assert!(brain_backend::contract::validate_graph(&r, &[]).unwrap_err().contains("unknown resource"));
     let mut r = catalog();
     r[1].query.filter.insert("cost".into(), vec!["eq".into()]);
-    assert!(r[1].validate().unwrap_err().contains("restricted visibility"));
+    assert!(r[1].validate().unwrap_err().contains("visibility includes `owner`"));
+    // Visible to named roles only: a declared filter, which only those roles can use (`role_filters_open_only_to_their_roles`).
+    r[1].fields.get_mut("cost").unwrap().visible = Some(vec!["admin".into()]);
+    assert!(r[1].validate().is_ok());
+    r[1].fields.get_mut("cost").unwrap().access = Some(brain_backend::contract::FieldAccess::Mode("private".into()));
+    assert!(r[1].validate().is_err(), "a field no reader receives stays unfilterable");
     let mut r = catalog();
     r[1].query.filter.insert("price".into(), vec!["prefix".into()]);
     assert!(r[1].validate().is_err());
@@ -460,6 +465,39 @@ fn contracts_reject_unknown_targets_unsafe_actions_and_restricted_query_fields()
     let mut r = catalog();
     r[1].query.filter.insert("shop.name".into(), vec!["eq".into()]);
     assert!(brain_backend::contract::validate_graph(&r, &[]).unwrap_err().contains("query filter"));
+}
+
+/// B0735 refused a filter on a field `visible: ['admin']`, so admins could not filter by it either. The filter is now
+/// declarable; a reader without the role gets exactly the answer of an undeclared filter, never a hint that it exists.
+#[test]
+fn role_filters_open_only_to_their_roles() {
+    let mut r = catalog();
+    r[1].fields.get_mut("cost").unwrap().visible = Some(vec!["admin".into()]);
+    r[1].query.filter.insert("cost".into(), vec!["gte".into()]);
+    r[0].fields.insert("tier".into(), Field { visible: Some(vec!["admin".into()]), ..field("str", false) });
+    r[0].query.filter.insert("tier".into(), vec!["eq".into()]);
+    r[1].query.filter.insert("shop.tier".into(), vec!["eq".into()]);
+    assert!(brain_backend::contract::validate_graph(&r, &[]).is_ok());
+    let resources: BTreeMap<String, Resource> = r.iter().map(|x| (x.name.clone(), x.clone())).collect();
+    let parse = |pairs: &[(&str, &str)], role: Option<&str>| {
+        let pairs: Vec<(String, String)> = pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        brain_backend::query::parse(&r[1], &resources, &pairs, role)
+    };
+    for key in ["cost[gte]", "shop.tier"] {
+        assert!(parse(&[(key, "5")], Some("admin")).is_ok(), "{key}");
+        for role in [Some("user"), None] {
+            let hidden = parse(&[(key, "5")], role).unwrap_err();
+            let undeclared = parse(&[("nothing", "5")], role).unwrap_err();
+            assert_eq!(hidden[key], undeclared["nothing"], "{key} {role:?}");
+            assert!(!hidden[key].contains("cost") && !hidden[key].contains("tier"), "{}", hidden[key]);
+        }
+    }
+    // An operator the contract does not declare answers like an undeclared filter too, instead of naming the declared ones.
+    let wrong_op = parse(&[("cost[eq]", "5")], Some("user")).unwrap_err();
+    assert_eq!(wrong_op["cost[eq]"], parse(&[("nothing", "5")], Some("user")).unwrap_err()["nothing"]);
+    assert!(parse(&[("cost[eq]", "5")], Some("admin")).unwrap_err()["cost[eq]"].contains("declared: gte"));
+    // The admin's list names the filter; nobody else's does.
+    assert!(parse(&[("nothing", "5")], Some("admin")).unwrap_err()["nothing"].contains("cost"));
 }
 
 /// P3/P4: per-workload pools carry their timeouts as startup options (pooler-safe, no session SET) and the declared
