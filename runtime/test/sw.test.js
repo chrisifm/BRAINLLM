@@ -41,12 +41,20 @@ const caches = {
   },
 }
 
-let net = {}, netCalls = [], netInits = [], offline = false, slow = 0
+let net = {}, netCalls = [], netInits = [], offline = false, slow = 0, inFlight = 0, peak = 0
 const fetch = async (req, o) => {
   const u = abs(req)
   netCalls.push(u)
   netInits.push(o)
-  if (slow) await new Promise(r => setTimeout(r, slow))
+  peak = Math.max(peak, ++inFlight)
+  try {
+    if (slow) await new Promise(r => setTimeout(r, slow))
+    return answer(u)
+  } finally {
+    inFlight--
+  }
+}
+const answer = u => {
   if (offline) throw new TypeError('Failed to fetch')
   const e = net[new URL(u).pathname]
   return e ? new Response(e.body, { status: 200, headers: { 'content-type': e.type || 'text/html', ...(e.cc ? { 'cache-control': e.cc } : {}) } }) : new Response('nf', { status: 404 })
@@ -253,4 +261,43 @@ test('B03: apps sharing an origin and unrelated caches survive another app\'s ac
   }
   const after = [...storage.keys()]
   assert.ok(after.includes('brain-root0003') && after.includes('brain-root0002') && !after.includes('brain/shop-shop0001'), after.join(' '))
+})
+
+test('install downloads at most a few precache files at once (a burst of hundreds tripped per-IP rate limits)', async () => {
+  storage.clear()
+  const list = Array.from({ length: 40 }, (_, i) => `/_b/p${i}.js`)
+  for (const u of list) net[u] = { body: u, type: 'text/javascript' }
+  slow = 5
+  peak = 0
+  const w = boot({ hash: 'pool0001', precache: list, offline: null })
+  await w.life('install')
+  slow = 0
+  assert.ok(peak > 1 && peak <= 4, `peak ${peak}`)
+  assert.equal(storage.get('brain-pool0001').size, 40)
+})
+
+test('an update reuses the hashed files the previous build already cached; only what changed downloads', async () => {
+  storage.clear()
+  net = {
+    '/_b/same.js': { body: 'same', type: 'text/javascript' },
+    '/_b/old.js': { body: 'old', type: 'text/javascript' },
+    '/_b/new.js': { body: 'new', type: 'text/javascript' },
+    '/_offline.html': { body: '<h1>Offline</h1>' },
+  }
+  const v1 = boot({ hash: 'keep0001', precache: ['/_b/same.js', '/_b/old.js', '/_offline.html'], offline: '/_offline.html' })
+  await v1.life('install')
+  await v1.life('activate')
+  netCalls = []
+  const v2 = boot({ hash: 'keep0002', precache: ['/_b/same.js', '/_b/new.js', '/_offline.html'], offline: '/_offline.html' })
+  await v2.life('install')
+  assert.deepEqual(netCalls.sort(), [ORIGIN + '/_b/new.js', ORIGIN + '/_offline.html'], 'the unhashed offline page is fetched again')
+  const c = storage.get('brain-keep0002')
+  assert.equal(c.get(ORIGIN + '/_b/same.js').body, 'same')
+  assert.ok(c.has(ORIGIN + '/_b/new.js') && !c.has(ORIGIN + '/_b/old.js'))
+  // another app on the origin is not a source: its /shop/_b/ files are not this app's
+  storage.set('brain/shop-x', new Map([[ORIGIN + '/_b/other.js', { body: 'shop', headers: [], status: 200 }]]))
+  net['/_b/other.js'] = { body: 'mine', type: 'text/javascript' }
+  const v3 = boot({ hash: 'keep0003', precache: ['/_b/other.js'], offline: null })
+  await v3.life('install')
+  assert.equal(storage.get('brain-keep0003').get(ORIGIN + '/_b/other.js').body, 'mine')
 })

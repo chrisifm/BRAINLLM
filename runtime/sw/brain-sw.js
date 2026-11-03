@@ -18,6 +18,8 @@ const BASE = B.base || '/' // app served under a base path (§23 #148); precache
 const NS = 'brain' + BASE.replace(/\/$/, '') // `brain` at the root, `brain/app` under /app/
 const BUILD = NS + '-' + B.hash, META = NS + ':meta'
 const NAV_TIMEOUT = 3000
+// precache downloads at once: hundreds in one burst tripped per-IP proxy rate limits (429) and competed with the page
+const PRECACHE_PARALLEL = 4
 // responses marked personal or uncacheable are never stored
 const storable = r => r.ok && !/no-store|private/i.test(r.headers.get('cache-control') || '')
 const ROUTES = (B.routes || []).map(r => ({ ...r, cache: NS + ':route:' + r.match + (r.prefix ? '*' : '') }))
@@ -34,9 +36,28 @@ self.addEventListener('install', e => {
   e.waitUntil(
     (async () => {
       const c = await caches.open(BUILD)
+      // a _b/ file is content-hashed: the same URL in an earlier build of this app holds the same bytes, so an
+      // update downloads only what changed
+      const olds = (await caches.keys()).filter(k => k.startsWith(NS + '-') && k !== BUILD)
+      const kept = async u => {
+        if (!u.startsWith(BASE + '_b/')) return null
+        for (const k of olds) {
+          const r = await (await caches.open(k)).match(u)
+          if (r) return r
+        }
+        return null
+      }
+      // default cache mode: the page may have just filled the HTTP cache with these immutable files
+      const one = async u => {
+        const r = (await kept(u)) || (await fetch(u))
+        if (r.ok) await c.put(u, r)
+      }
       // one failing URL must not abort the install: cache what answers, the rest is cached on first use
-      // default cache mode: the page just filled the HTTP cache with these immutable files, so this costs no bytes
-      await Promise.allSettled(B.precache.map(u => fetch(u).then(r => r.ok && c.put(u, r))))
+      const queue = [...B.precache]
+      const lane = async () => {
+        while (queue.length) await one(queue.shift()).catch(() => {})
+      }
+      await Promise.all(Array.from({ length: Math.min(PRECACHE_PARALLEL, queue.length) }, lane))
       // update: 'prompt' → an update waits for the page (appUpdate); the first install has nothing to replace
       if (B.update !== 'prompt' || !self.registration.active) await self.skipWaiting()
     })()

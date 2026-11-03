@@ -1419,7 +1419,9 @@ impossible while developing.
 
 **2. Service worker** (RUNTIME writes `runtime/sw/brain-sw.js`; TOOLCHAIN emits `dist/sw.js` with the build manifest)
 - Precache on install: the runtime core, the app shell, every route's entry chunk and CSS, up to `precacheKB`
-  (default 2048 KB); the rest is cached on first use.
+  (default 2048 KB); the rest is cached on first use. At most 4 downloads run at once (a burst of hundreds tripped
+  per-IP proxy rate limits after a deploy), and an update copies every `_b/` file the previous build of the same app
+  already cached instead of downloading it again: the URL is content-hashed, so only what changed reaches the network.
 - Strategies: `/_b/*` cache-first (immutable) · page navigations network-first with a 3 s timeout, then the cached
   page, then the offline page (`views/_offline.brain` if present, else a minimal built-in one) · unhashed `public/`
   assets stale-while-revalidate · `/_r/`, non-GET requests and other origins are never touched.
