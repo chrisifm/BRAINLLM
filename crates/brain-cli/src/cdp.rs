@@ -303,6 +303,37 @@ impl Chrome {
     }
 
     /// Opens a tab and returns its sessionId (flatten mode).
+    /// Confirm only the caller's captured target disappears; Chrome's close acknowledgement is asynchronous.
+    pub fn close_target(&mut self,target:&str,budget:Duration)->Result<(),String> {
+        let previous=self.deadline;let end=std::time::Instant::now()+budget;
+        let result=(|| {
+            self.deadline=Some(budget);
+            let closed=self.call(None,"Target.closeTarget",Json::obj([("targetId",Json::str(target))]))?;
+            if closed.get("success")==Some(&Json::Bool(false)) {return Err("Chrome refused to close the owned tab".into())}
+            loop {
+                let left=end.checked_duration_since(std::time::Instant::now()).filter(|left|!left.is_zero()).ok_or("owned tab did not close within its cleanup deadline")?;
+                self.deadline=Some(left);
+                let current=self.call(None,"Target.getTargets",Json::Obj(vec![]))?;
+                let Some(Json::Arr(targets))=current.get("targetInfos") else {return Err("Chrome returned no target list".into())};
+                if !targets.iter().any(|t|t.get("targetId").and_then(Json::as_str)==Some(target)) {return Ok(())}
+                std::thread::sleep(Duration::from_millis(10).min(left));
+            }
+        })();
+        self.deadline=previous;result
+    }
+
+    pub fn close_page(&mut self,session:&str,budget:Duration)->Result<(),String> {
+        let previous=self.deadline;let end=std::time::Instant::now()+budget;
+        let result=(|| {
+            self.deadline=Some(budget);
+            let info=self.call(Some(session),"Target.getTargetInfo",Json::Obj(vec![]))?;
+            let target=info.get("targetInfo").and_then(|t|t.get("targetId")).and_then(Json::as_str).ok_or("Chrome returned no owned target")?;
+            let left=end.checked_duration_since(std::time::Instant::now()).filter(|left|!left.is_zero()).ok_or("owned tab cleanup deadline expired")?;
+            self.close_target(target,left)
+        })();
+        self.deadline=previous;result
+    }
+
     pub fn new_page(&mut self) -> Result<String, String> {
         let t = self.call(None, "Target.createTarget", Json::obj([("url", Json::str("about:blank"))]))?;
         let target = t.get("targetId").cloned().ok_or("Target.createTarget without targetId")?;

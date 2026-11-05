@@ -1,0 +1,20 @@
+{
+  "id": "localized-breadcrumb-root",
+  "kind": "fix",
+  "title": "Localized breadcrumb roots",
+  "why": "Automatic breadcrumbs start at one language-specific home while shared WebSite and Organization graph identities remain stable.",
+  "changelog": [
+    "Automatic breadcrumbs start at one language-specific home while shared"
+  ],
+  "guide": "brain guide seo",
+  "codes": [],
+  "apis": [
+    "brain build",
+    "brain doctor",
+    "brain start"
+  ],
+  "affects": [
+    "dist/**/*.html",
+    "dist/server.mjs"
+  ]
+}

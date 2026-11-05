@@ -1667,6 +1667,23 @@ recognizes `.brain` documents and `.jsbrain`/`.cssbrain` assets alongside ordina
 canonical lookup. Decoded error aliases keep their HTTP status. Production host error routing still requires the
 host configuration described in the deployment guide.
 
+Own script execution: the Node production resolver gives `module` format only to compiler-owned `.jsbrain` URLs
+under the build's `_b/` directory. Direct file URLs, mounted root imports and relative chunk imports share the same
+resolver in synchronous `registerHooks` and asynchronous `register`; outside-build files and ordinary Node imports
+retain their normal loader. Real HTTP regressions cover SSR, streaming, dictionaries and transitive chunks under
+root and base paths with each hook implementation.
+
+Generated SEO facts (2026-11-05): finish passes the configured locale home to breadcrumb generation, avoiding a
+default-home/localized-home duplicate while retaining global WebSite and Organization identities. Blank optional
+strings are absent in runtime SEO overrides and generated schema/article facts; explicit author JSON-LD is untouched.
+Social image URLs share app-base and canonical-page semantics across prerender and SSR, including already-prefixed
+paths, relative paths, protocol-relative URLs and existing percent escapes. Rust packaging and SEO share canonical
+slash formatting; Rust and Node image resolution use the same regression vectors. Generated SSR WebPage graph identities include the mounted base even when there is no SEO callback; primary image
+objects follow the request's normalized social image. Explicit JSON-LD remains authoritative, and authored Twitter
+name/property overrides replace generated counterparts without duplicate tags. Literal SEO callbacks are not
+evidence of load dependency: the compiler already streams only static SEO, and a held-load real build regression
+requires the head to arrive before load is released. No unconditional SEO wait was added.
+
 Nonce metadata and cache updates: Node HTML HEAD and 304 omit a newly generated CSP nonce policy while retaining
 stable ETag, opener and cache metadata. RFC 9111 sections 4.3.5 and 3.2 allow a matching HEAD to update a stored GET's
 headers without replacing its body; sending a new nonce would deny that body's scripts after later revalidation.
@@ -2659,3 +2676,8 @@ Lists never open the stored document to filter, sort, count, facet or aggregate 
 
 List counts read a document once per row with `Ctx::push_counted` when `decide_read_once` finds two or more data reads, a seq scan and TOAST larger than the heap; pages stay plain so they can use indexes. `?fields=` is trimmed in SQL by `ListRequest::stored_keys`. `reject_server_fields` also runs on batch and upsert, and takes the role for `access: { write }`.
 
+
+Owned browser cleanup (2026-11-05): test/recovery tabs and screenshot comparison tabs share CDP target cleanup.
+The captured target alone is closed, and its disappearance is confirmed through the inventory before returning.
+A finite total cleanup budget covers requests/polling and restores the caller deadline on success or error. A
+Chrome acknowledgement is not proof that the target has already disappeared; other tabs remain usable.

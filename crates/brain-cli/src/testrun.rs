@@ -594,9 +594,7 @@ fn test_navigation(error: &str) -> bool {
 
 /// Close only a tab attached by this owned headless Chrome, including failed recovery tabs.
 fn close_test_page(chrome: &mut Chrome, session: &str) {
-    if let Ok(info) = chrome.call(Some(session), "Target.getTargetInfo", Json::Obj(vec![]))
-        && let Some(target) = info.get("targetInfo").and_then(|info|info.get("targetId")).cloned()
-    { let _ = chrome.call(None,"Target.closeTarget",Json::obj([("targetId",target)])); }
+    let _=chrome.close_page(session,Duration::from_secs(2));
 }
 
 fn open_test_page(chrome: &mut Chrome, base: &str, file: &str) -> Result<(String, Json), String> {
@@ -799,10 +797,18 @@ mod transport_tests {
         let mut chrome=Chrome::launch(Duration::from_secs(20)).unwrap();
         let other=chrome.new_page().unwrap();
         let before=targets(&mut chrome);
-        let test=chrome.new_page().unwrap();
-        assert_eq!(targets(&mut chrome).len(),before.len()+1);
-        close_test_page(&mut chrome,&test);
-        assert_eq!(targets(&mut chrome),before,"closing a finished test cannot close another tab");
+        chrome.deadline=Some(Duration::from_secs(5));
+        for _ in 0..8 {
+            let test=chrome.new_page().unwrap();
+            assert_eq!(targets(&mut chrome).len(),before.len()+1);
+            close_test_page(&mut chrome,&test);
+            assert_eq!(targets(&mut chrome),before,"closing a finished test cannot close another tab");
+            assert_eq!(chrome.deadline,Some(Duration::from_secs(5)),"cleanup must restore the caller's deadline");
+            assert_eq!(chrome.eval(&other,"1 + 1").unwrap(),Json::Num(2.0));
+        }
+        assert!(chrome.close_target("missing-owned-target",Duration::from_secs(2)).is_err());
+        assert_eq!(chrome.deadline,Some(Duration::from_secs(5)));
+        assert_eq!(targets(&mut chrome),before);
         assert_eq!(chrome.eval(&other,"1 + 1").unwrap(),Json::Num(2.0));
     }
 

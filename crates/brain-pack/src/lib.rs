@@ -1860,6 +1860,7 @@ fn build_inner_with_options(
     // (RUNTIME #132; the island never imports the core: that would be a hash cycle). The island is preloaded.
     let hydrate_tag = format!("<script type=\"module\">{http_import}import{{h}}from\"{core}\";h()</script>");
     let island_preload = url_of.get(&Node::Runtime("brain-island.js".into())).map(|u| format!("<link rel=\"modulepreload\" href=\"{u}\">")).unwrap_or_default();
+    let seo_always=std::fs::read_to_string(input.root.join("brain.json")).ok().and_then(|s|brain_lex::Json::parse(&s).ok()).and_then(|j|j.get("seo").and_then(|j|j.get("trailingSlash")).and_then(brain_lex::Json::as_str).map(|s|s=="always")).unwrap_or(false);
     let mut pages = Vec::new();
     for p in plans {
         let r = rendered.get(&p.route).and_then(|r| r.as_ref().ok());
@@ -1899,7 +1900,7 @@ fn build_inner_with_options(
         if let Some(links) = &links {
             for (key, value) in &mut seo { if key == "canonical" && let Some(local) = links.to(value) { *value = local; } }
         }
-        let (title, seo_html) = prerender::seo_head(&seo, site.as_deref(), &p.route, &input.generator);
+        let (title, seo_html) = prerender::seo_head(&seo, site.as_deref(), &brain_lex::url_path::page_path(&p.route,seo_always), &input.generator);
         let props = r.map_or("{}".to_string(), |r| brain_lex::json::in_html(&r.props));
         let mut head = format!("{seo_html}{}{}", p.head, r.map_or("", |r| r.head.as_str()));
         // `query="page"`: the request parameters that are part of the page's identity. The server reads the marker,

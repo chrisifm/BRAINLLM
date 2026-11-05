@@ -1,0 +1,20 @@
+{
+  "id": "optional-seo-facts",
+  "kind": "fix",
+  "title": "Blank optional SEO facts",
+  "why": "Blank optional SEO strings are omitted from SSR and generated schema/article facts without filtering numeric or boolean values or rewriting author JSON-LD.",
+  "changelog": [
+    "Blank optional SEO strings are omitted from SSR and generated schema/a"
+  ],
+  "guide": "brain guide seo",
+  "codes": [],
+  "apis": [
+    "brain build",
+    "brain doctor",
+    "brain start"
+  ],
+  "affects": [
+    "dist/**/*.html",
+    "dist/server.mjs"
+  ]
+}

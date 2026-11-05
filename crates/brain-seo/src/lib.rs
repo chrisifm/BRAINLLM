@@ -726,8 +726,9 @@ pub fn finish_with_og(
             }
             a
         });
+        let home=i18n.as_ref().map(|i|i.prefixed(i.locale_of(&route),"/")).unwrap_or_else(||"/".into());
         let mut end_tags: String =
-            jsonld::auto(cfg, &route, d, &names, &name, article.as_ref(), &vids, p.lastmod.as_deref())
+            jsonld::auto_from(cfg, &route, d, &names, &name, article.as_ref(), &vids, p.lastmod.as_deref(), &home)
                 .iter()
                 .map(jsonld::script)
                 .collect();

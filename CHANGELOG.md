@@ -11,6 +11,18 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [0.9.0] - 2026-11-05
 
+- Owned browser tab cleanup waits for confirmed target removal within a bounded deadline, preserving other tabs and the caller timeout instead of racing Chrome close acknowledgements.
+
+- Generated SSR WebPage graph URLs retain the app base, and request image overrides update generated primary images while authored JSON-LD and legacy Twitter head overrides remain authoritative.
+
+- Automatic breadcrumbs start at one language-specific home while shared WebSite and Organization graph identities remain stable.
+
+- Blank optional SEO strings are omitted from SSR and generated schema/article facts without filtering numeric or boolean values or rewriting author JSON-LD.
+
+- Social image URLs preserve app bases and existing escapes, resolve relative references against the canonical page, and agree across prerender and SSR.
+
+- Node SSR executes compiler-owned `.jsbrain` chunks through both module-hook implementations, including direct, mounted and relative imports, while external modules retain their normal loader.
+
 - Static error fallbacks and direct document aliases retain their selected page CSP, opener and cache policy, including encoded names and own output extensions; asset policies remain separate.
 
 - Node serves `.brain`, `.jsbrain` and `.cssbrain` with document security and correct MIME types, including clean routes, Markdown canonical twins and encoded error aliases.

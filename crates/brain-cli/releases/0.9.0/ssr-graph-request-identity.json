@@ -1,0 +1,17 @@
+{
+  "id": "ssr-graph-request-identity",
+  "kind": "fix",
+  "title": "Request identity in generated SSR graphs",
+  "why": "Generated SSR WebPage graph URLs retain the app base, and request image overrides update generated primary images while authored JSON-LD and legacy Twitter head overrides remain authoritative.",
+  "changelog": [
+    "Generated SSR WebPage graph URLs retain the app base, and request imag"
+  ],
+  "guide": "brain guide seo",
+  "codes": [],
+  "apis": [
+    "brain start"
+  ],
+  "affects": [
+    "dist/server.mjs"
+  ]
+}

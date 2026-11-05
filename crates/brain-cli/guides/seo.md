@@ -1,8 +1,7 @@
 # guide: seo — classic search and AI answers (GEO)
 
 ## When
-Every view that should be found: landing pages, articles, docs, product and profile pages. Do this before writing the
-page text, not after.
+For every indexable landing, article, docs, product or profile page; plan discovery before writing its text.
 
 ## 1. Pick the target query FIRST (one primary query per page)
 1. Write the user's intent in one sentence: who arrives, what they want to know or do.
@@ -41,6 +40,9 @@ page text, not after.
 - `schema="Type"` writes JSON-LD with that `@type` plus name, description and url. A full object:
   `jsonld={{ '@type': 'Article', headline: props.post.title, datePublished: props.post.date }}` (B1603/B1818 without `@type`).
 - Keep each attribute value on one line (newlines are kept in the output). Values may be expressions from `load` props: `title={props.user.name}`.
+- Optional empty or whitespace-only SEO strings are absent, including derived description, image and date facts; explicit JSON-LD objects remain authored data.
+- Social images starting with `/` follow the configured app base without duplicating it; bare relative images resolve against the canonical page URL, including its trailing-slash policy. Absolute URLs and existing percent escapes are preserved.
+- Automatic breadcrumbs start at the page's language home, with no repeated default-language home; WebSite and Organization identities remain global.
 - Site defaults once in `app.brain`: `<meta seo titleTemplate="%s · Acme" og:image="/og.png" twitter="@acme">`.
 - Status codes from `load`: `throw notFound()` → 404, `throw gone()` → 410 (deleted for good), a renamed record
   `throw redirect('/posts/' + post.slug, 301)`. Never render an empty page with 200 (a soft 404; not machine-checked, it depends on the data).
@@ -103,27 +105,22 @@ brain seo audit --url https://beta.example.com --sample 30   # the same rules ov
 brain lighthouse https://beta.example.com/ --preset mobile   # scores and Core Web Vitals, against lighthouse.minScores
 ```
 `brain seo audit` and `brain build` fail under `seo.minScore`. Audit dynamic routes with `--url`: the build cannot see them.
-It also reports what only a live response shows: a listed page that answers an error or 200 + noindex (B1856), a
-security header sent twice (B1857), a site-wide noindex (B1858), a soft 404 (B1859), the same link text for different
-pages (B1860), a listed URL that redirects (B1867), a canonical other than the sitemap's (B1868), a URL variant answering 200
-(B1869), declared against observed caching and encoding (B1870), a blocked `noindex` (B1871). On staging pass `--expect-noindex` or set `seo.staging`: pages stay `noindex` and crawlable, because
-`Disallow` would hide that `noindex`. Titles are never shortened for you: a long one is reported, and keeping it is your
-decision. Pixel widths (B1802, B1804) are display widths, not Google limits. Each `[id]` page needs its own title (B0504). A page behind `_guard.jsbrain` is never indexed; a public page that redirects some visitors does it in `load()` (B0505).
-`brain explain B1830` (or any B18xx) prints why and a correct example. GEO hints (B1830-B1835) are info: they never change the score but they decide whether an AI answer quotes the page.
+Live checks: listed error/noindex responses (B1856), duplicate security headers (B1857), site-wide noindex (B1858), soft 404 (B1859), ambiguous link text (B1860), listed redirects (B1867), canonical/sitemap mismatch (B1868), duplicate URL variants (B1869), caching/encoding mismatch (B1870), blocked noindex (B1871).
+On staging use `--expect-noindex` or `seo.staging`: noindex pages must stay crawlable so robots can read that directive.
+Long titles are reported, never shortened. Pixel widths (B1802/B1804) are display measurements, not Google limits. Every `[id]` page needs its own title (B0504).
+A guarded page is never indexed; conditional redirects belong in `load()` (B0505). `brain explain B1830` (or another B18xx) gives the rationale and a correct example.
+GEO hints B1830-B1835 are informational and do not change the score.
 
 ## Minimal correct example
 ```html
-<meta seo title="Split a bill offline" keyword="split a bill offline" schema="Article"
-  description="Split a restaurant bill between friends with no network: add the items, tap who had what, done.">
+<meta seo title="Split a bill offline" keyword="split a bill offline" schema="Article" description="Split a restaurant bill between friends with no network: add the items, tap who had what, done.">
 <main class="page">
   <h1>Split a bill offline</h1>
   <p>To split a bill offline, add each item, tap who had it, and the app shows every share without network.</p>
   <h2>How to split a bill offline</h2>
-  <ol><li>Add the items from the receipt.</li><li>Tap the people who shared each item.</li><li>Read each share.</li></ol>
-  <section faq>
-    <details><summary>Does it need an account?</summary>No, everything stays on the phone.</details>
-    <details><summary>Can I add a tip?</summary>Yes, as a percentage or a fixed amount.</details>
-  </section>
+  <ol><li>Add the receipt items.</li><li>Select who shared each item.</li><li>Read each share.</li></ol>
+  <section faq><details><summary>Does it need an account?</summary>No, everything stays on the phone.</details>
+    <details><summary>Can I add a tip?</summary>Yes, as a percentage or a fixed amount.</details></section>
   <p>More tools to share costs: <a href="/">all calculators</a>.</p>
   <p><time datetime="2026-10-01">Updated October 1, 2026</time></p>
 </main>

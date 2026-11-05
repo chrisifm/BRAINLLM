@@ -65,18 +65,21 @@ pub(crate) fn types(n: &Json) -> Vec<String> {
 
 /// Breadcrumb trail of `route`: home, every ancestor that is a page, the page itself. `names` maps route → name.
 pub fn breadcrumb(cfg: &Config, route: &str, names: &BTreeMap<String, String>) -> Option<Json> {
-    if route == "/" || cfg.site.is_none() {
+    breadcrumb_from(cfg,route,names,"/")
+}
+fn breadcrumb_from(cfg: &Config, route: &str, names: &BTreeMap<String, String>, home:&str) -> Option<Json> {
+    if route == home || cfg.site.is_none() {
         return None;
     }
     let mut trail = vec![(
-        "/".to_string(),
+        home.to_string(),
         names.get("/").cloned().unwrap_or_else(|| "Home".into()),
     )];
     let mut prefix = String::new();
     for seg in route.split('/').filter(|x| !x.is_empty()) {
         prefix.push('/');
         prefix.push_str(seg);
-        if let Some(n) = names.get(&prefix) {
+        if prefix != home && (home=="/" || prefix.starts_with(&format!("{home}/"))) && let Some(n) = names.get(&prefix) {
             trail.push((prefix.clone(), n.clone()));
         }
     }
@@ -189,19 +192,19 @@ pub fn article(cfg: &Config, route: &str, a: &Article) -> Json {
             s(&a.headline.chars().take(110).collect::<String>()),
         ),
     ];
-    if let Some(d) = &a.description {
+    if let Some(d) = a.description.as_deref().filter(|v|!v.trim().is_empty()) {
         kv.push(("description".into(), s(d)));
     }
-    if let Some(i) = &a.image {
-        kv.push(("image".into(), s(&cfg.abs(i))));
+    if let Some(i) = a.image.as_deref().filter(|v|!v.trim().is_empty()) {
+        kv.push(("image".into(), s(&brain_lex::url_path::metadata_image(cfg.root().as_deref(),&cfg.page_url(route),i))));
     }
-    if let Some(d) = &a.published {
+    if let Some(d) = a.published.as_deref().filter(|v|!v.trim().is_empty()) {
         kv.push(("datePublished".into(), s(d)));
     }
-    if let Some(d) = a.modified.as_ref().or(a.published.as_ref()) {
+    if let Some(d) = a.modified.as_deref().filter(|v|!v.trim().is_empty()).or(a.published.as_deref().filter(|v|!v.trim().is_empty())) {
         kv.push(("dateModified".into(), s(d)));
     }
-    if let Some(au) = &a.author {
+    if let Some(au) = a.author.as_deref().filter(|v|!v.trim().is_empty()) {
         let mut p = vec![("@type".to_string(), s("Person")), ("name".into(), s(au))];
         if let Some(prof) = cfg.authors.iter().find(|x| x.name.eq_ignore_ascii_case(au)) {
             if let Some(u) = &prof.url {
@@ -243,16 +246,16 @@ pub fn schema_shortcut(cfg: &Config, route: &str, doc: &Doc, lastmod: Option<&st
         let key = if ARTICLES.contains(&t) { "headline" } else { "name" };
         kv.push((key.into(), s(&title.chars().take(110).collect::<String>())));
     }
-    if let Some(d) = doc.meta("description") {
+    if let Some(d) = doc.meta("description").filter(|v|!v.trim().is_empty()) {
         kv.push(("description".into(), s(d)));
     }
     if cfg.site.is_some() {
         kv.push(("url".into(), s(&cfg.page_url(route))));
     }
-    if let Some(i) = doc.meta("og:image") {
-        kv.push(("image".into(), s(&cfg.abs(i))));
+    if let Some(i) = doc.meta("og:image").filter(|v|!v.trim().is_empty()) {
+        kv.push(("image".into(), s(&brain_lex::url_path::metadata_image(cfg.root().as_deref(),&cfg.page_url(route),i))));
     }
-    if let Some(d) = lastmod {
+    if let Some(d) = lastmod.filter(|v|!v.trim().is_empty()) {
         kv.push(("dateModified".into(), s(d)));
     }
     Some(Json::Obj(kv))
@@ -339,6 +342,11 @@ pub fn auto(
     videos: &[crate::video::Video],
     lastmod: Option<&str>,
 ) -> Vec<Json> {
+    auto_from(cfg,route,doc,names,site_name,art,videos,lastmod,"/")
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn auto_from(cfg:&Config, route:&str, doc:&Doc, names:&BTreeMap<String,String>, site_name:&str, art:Option<&Article>, videos:&[crate::video::Video], lastmod:Option<&str>, breadcrumb_home:&str)->Vec<Json> {
     let have = declared_types(doc);
     let declared = |t: &str| have.iter().any(|h| h == t);
     let mut out = Vec::new();
@@ -365,7 +373,7 @@ pub fn auto(
         // a page with no address of its own (the `*` not-found page answers any URL) gets the site nodes only:
         // a WebPage `*#webpage` with `"url":"*"` names no page
         let addressed = route.starts_with('/');
-        let crumb = breadcrumb(cfg, route, names).filter(|_| addressed && !declared("BreadcrumbList"));
+        let crumb = breadcrumb_from(cfg, route, names, breadcrumb_home).filter(|_| addressed && !declared("BreadcrumbList"));
         let faq = faq_page(doc).filter(|_| addressed && !declared("FAQPage"));
         let own_page = !addressed || PAGE_TYPES.iter().any(|t| declared(t));
         let mut faq_left = faq.clone();
@@ -395,15 +403,15 @@ pub fn auto(
                 kv.push(("inLanguage".into(), s(l)));
             }
             let modified = art
-                .and_then(|a| a.modified.as_deref().or(a.published.as_deref()))
-                .or(lastmod);
+                .and_then(|a| a.modified.as_deref().filter(|v|!v.trim().is_empty()).or(a.published.as_deref().filter(|v|!v.trim().is_empty())))
+                .or(lastmod.filter(|v|!v.trim().is_empty()));
             if let Some(d) = modified {
                 kv.push(("dateModified".into(), s(d)));
             }
-            if let Some(i) = doc.meta("og:image").filter(|i| !i.is_empty()) {
+            if let Some(i) = doc.meta("og:image").filter(|i| !i.trim().is_empty()) {
                 kv.push((
                     "primaryImageOfPage".into(),
-                    Json::obj([("@type", s("ImageObject")), ("url", s(&cfg.abs(i)))]),
+                    Json::obj([("@type", s("ImageObject")), ("url", s(&brain_lex::url_path::metadata_image(cfg.root().as_deref(),&cfg.page_url(route),i)))]),
                 ));
             }
             if crumb.is_some() {
@@ -768,6 +776,28 @@ mod tests {
         .iter()
         .map(|(a, b)| (a.to_string(), b.to_string()))
         .collect()
+    }
+
+    #[test]
+    fn localized_breadcrumb_starts_at_one_localized_home_and_keeps_the_global_site() {
+        let mut c=cfg();c.base="/app/".into();
+        let mut n=names();n.insert("/es-MX".into(),"Localized home".into());n.insert("/es-MX/docs".into(),"Localized docs".into());
+        let b=breadcrumb_from(&c,"/es-MX/docs",&n,"/es-MX").unwrap().stringify();
+        assert!(b.contains("https://acme.dev/app/es-MX") && !b.contains("https://acme.dev/app/\""),"{b}");
+        assert_eq!(b.matches("ListItem").count(),2,"{b}");
+        assert!(breadcrumb_from(&c,"/es-MX",&n,"/es-MX").is_none());
+        let d=parse("<html lang=\"es-MX\"><head><title>Example</title></head></html>");
+        let graph=auto_from(&c,"/es-MX/docs",&d,&n,"Acme",None,&[],None,"/es-MX").iter().map(Json::stringify).collect::<String>();
+        assert!(graph.contains("https://acme.dev/app/#website"),"global site identity stays stable: {graph}");
+    }
+    #[test]
+    fn empty_generated_optional_schema_and_article_facts_are_absent() {
+        let d=parse("<html><head><meta name=\"schema\" content=\"Article\"><meta name=\"description\" content=\" \"><meta property=\"og:image\" content=\"\"></head></html>");
+        let node=schema_shortcut(&cfg(),"/example",&d,Some(" ")).unwrap().stringify();
+        for key in ["description","dateModified","image"] {assert!(!node.contains(&format!("\"{key}\":")),"{node}");}
+        let a=Article{headline:"Example".into(),description:Some("".into()),image:Some(" ".into()),published:Some("".into()),modified:Some(" ".into()),author:Some("".into()),..Default::default()};
+        let node=article(&cfg(),"/example",&a).stringify();
+        for key in ["description","image","datePublished","dateModified","author"] {assert!(!node.contains(&format!("\"{key}\":")),"{node}");}
     }
 
     #[test]

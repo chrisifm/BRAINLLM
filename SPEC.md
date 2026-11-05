@@ -154,6 +154,7 @@ has `title` · no tabindex > 0. Warnings: generic link text ("click here", "read
 
 ## SEO
 Every view: `<meta seo keyword="…" title="…" description="…" canonical? og:image? schema? robots?>`.
+Optional blank SEO strings are omitted. Root-relative social images follow `base`; bare relative images resolve against the final canonical page URL. Existing percent escapes are preserved.
 Pick the query first; put it in the title, H1, first sentence and description. `keyword` is never rendered; an
 indexable view without it is B0502 (guarded, `robots="noindex"`, `_x`, `[id]` and error views are exempt). A guarded route is never indexed; a public page that only redirects some visitors does it in `load()` (B0505).
 A page rendered per request can list the parameters that make a different page, such as real pagination: `query="page"`

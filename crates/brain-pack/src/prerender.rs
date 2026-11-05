@@ -479,7 +479,7 @@ mod brain_min_json {
 /// robots and JSON-LD. `site` makes canonical/og:url absolute.
 pub fn seo_head(seo: &[(String, String)], site: Option<&str>, route: &str, generator: &str) -> (Option<String>, String) {
     let esc = |s: &str| s.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;").replace('>', "&gt;");
-    let get = |k: &str| seo.iter().find(|(a, _)| a == k).map(|(_, v)| v.as_str()).filter(|v| !v.is_empty());
+    let get = |k: &str| seo.iter().find(|(a, _)| a == k).map(|(_, v)| v.as_str()).filter(|v| !v.trim().is_empty());
     // URLs from seo(props) may carry raw params (`/post/b c`): percent-encode what is not legal in a URL
     let url = |p: &str| {
         p.bytes()
@@ -529,7 +529,7 @@ pub fn seo_head(seo: &[(String, String)], site: Option<&str>, route: &str, gener
         h.push_str(&format!("<meta name=\"twitter:site\" content=\"{}\">", esc(x)));
     }
     if let Some(img) = get("og:image") {
-        h.push_str(&format!("<meta property=\"og:image\" content=\"{}\">", esc(&abs(img))));
+        h.push_str(&format!("<meta property=\"og:image\" content=\"{}\">", esc(&brain_lex::url_path::metadata_image(site,canonical.as_deref().unwrap_or(""),img))));
     }
     h.push_str("<meta property=\"og:type\" content=\"website\">");
     // `jsonld={…}` (INTERNALS §32): the object as given, with a default @context
@@ -553,7 +553,7 @@ pub fn seo_head(seo: &[(String, String)], site: Option<&str>, route: &str, gener
             ld.push_str(&format!(",\"url\":{}", json_str(c)));
         }
         if let Some(img) = get("og:image") {
-            ld.push_str(&format!(",\"image\":{}", json_str(&abs(img))));
+            ld.push_str(&format!(",\"image\":{}", json_str(&brain_lex::url_path::metadata_image(site,canonical.as_deref().unwrap_or(""),img))));
         }
         if let Some(d) = get("lastmod") {
             ld.push_str(&format!(",\"dateModified\":{}", json_str(d)));

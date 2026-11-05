@@ -1,0 +1,20 @@
+{
+  "id": "metadata-image-urls",
+  "kind": "fix",
+  "title": "Social image URL consistency",
+  "why": "Social image URLs preserve app bases and existing escapes, resolve relative references against the canonical page, and agree across prerender and SSR.",
+  "changelog": [
+    "Social image URLs preserve app bases and existing escapes, resolve rel"
+  ],
+  "guide": "brain guide seo",
+  "codes": [],
+  "apis": [
+    "brain build",
+    "brain doctor",
+    "brain start"
+  ],
+  "affects": [
+    "dist/**/*.html",
+    "dist/server.mjs"
+  ]
+}

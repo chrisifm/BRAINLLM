@@ -1,0 +1,19 @@
+{
+  "id": "node-own-module-loading",
+  "kind": "fix",
+  "title": "SSR execution for own script extensions",
+  "why": "Own output script chunks execute in Node SSR and streaming through both supported module hooks without assigning a custom format to foreign files.",
+  "changelog": [
+    "Node SSR executes compiler-owned `.jsbrain` chunks"
+  ],
+  "guide": "brain guide server",
+  "codes": [],
+  "apis": [
+    "brain build",
+    "brain start"
+  ],
+  "affects": [
+    "dist/server.mjs",
+    "dist/_b/**"
+  ]
+}

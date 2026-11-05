@@ -1,0 +1,18 @@
+{
+  "id": "owned-tab-cleanup",
+  "kind": "fix",
+  "title": "Confirmed owned browser tab cleanup",
+  "why": "Owned browser tab cleanup waits for confirmed target removal within a bounded deadline, preserving other tabs and the caller timeout instead of racing Chrome close acknowledgements.",
+  "changelog": [
+    "Owned browser tab cleanup waits for confirmed target removal within a "
+  ],
+  "guide": "brain guide tests",
+  "codes": [],
+  "apis": [
+    "brain test",
+    "brain doctor"
+  ],
+  "affects": [
+    "*.test.brain"
+  ]
+}

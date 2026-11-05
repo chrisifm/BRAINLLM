@@ -2762,6 +2762,19 @@ export function prefersMarkdown(accept) {
   if (html < 0) (html = any), (htmlAt = Infinity) // an explicit type beats a wildcard of the same weight
   return md > 0 && (md > html || (md === html && mdAt < htmlAt))
 }
+// Root-relative image metadata follows the app base; bare references follow the canonical document URL.
+export function metadataImage(root, canonical, value) {
+  const encode = s => encodeURI(s.toWellFormed()).replaceAll('%25', '%')
+  value = value.trim()
+  if (!value) return ''
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(value) || !root) return encode(value)
+  try {
+    const home = new URL(root.endsWith('/') ? root : root + '/')
+    const prefix = home.pathname.replace(/\/$/, '')
+    if (/^\/(?!\/)/.test(value)) value = new URL(value === prefix || value.startsWith(prefix + '/') ? value : prefix + value, home.origin).href
+    return new URL(value, canonical || home).href
+  } catch { return encode(value) }
+}
 // SEO head from View.seo(props): title, description, canonical, og:*/twitter:*, JSON-LD and the view's <head> block
 // F5: the build writes an SSR route's canonical/og:url from its pattern (/posts/:slug); the request has the real path.
 // A view's own <head> tags replace the generated ones with the same name/property (one tag per key, SPEC «SEO»).
@@ -2781,7 +2794,9 @@ function head(page, seo, path, search = '', route, base = '') {
     h = h.replace(/(<link[^>]*rel=["']canonical["'][^>]*href=")([^"]*)(")/i, (m, a, v, b) => a + real(v) + b)
     h = h.replace(/(<meta[^>]*property=["']og:url["'][^>]*content=")([^"]*)(")/i, (m, a, v, b) => a + real(v) + b)
   }
-  if (!seo) return graph(h, path, query)
+  if (!seo) return graph(h, path ? base + path : path, query)
+  // Match prerendering: blank optional fields are absent; zero and false remain distinct values.
+  seo = Object.fromEntries(Object.entries(seo).filter(([, v]) => v != null && !(typeof v === 'string' && !v.trim())))
   const meta = (attr, key, val, escaped) => {
     const tag = `<meta ${attr}="${esc(key)}" content="${escaped ? val.replace(/"/g, '&quot;') : esc(val)}">`
     const rx = new RegExp(`<meta[^>]*\\b${attr}=["']${key.replace(/[.*+?^${}()|[\]\\:]/g, '\\$&')}["'][^>]*>`, 'i')
@@ -2803,14 +2818,18 @@ function head(page, seo, path, search = '', route, base = '') {
       h = /<link[^>]*rel=["']canonical["'][^>]*>/i.test(h) ? h.replace(/<link[^>]*rel=["']canonical["'][^>]*>/i, () => tag) : h.replace('</head>', () => tag + '</head>')
       if (seo['og:url'] == null) meta('property', 'og:url', url) // og:url follows the canonical unless the view sets its own
     } else if (k === 'jsonld') h = h.replace('</head>', () => `<script type="application/ld+json">${jsonInHtml(v)}</script></head>`)
-    else if (/^(og|twitter|article):/.test(k)) meta('property', k, v)
+    else if (/^(og|twitter|article):/.test(k)) meta(k.startsWith('twitter:') ? 'name' : 'property', k, v)
     else if (typeof v === 'string') meta('name', k, v)
   }
   // What the build writes for a prerendered page and can only be known here: the social card of this request's values
   // (brain-seo social::head, prerender seo_head). The view's own value always wins.
   const shared = /<title>([\s\S]*?)<\/title>/i.exec(h)?.[1]
   const origin = /<link[^>]*rel=["']canonical["'][^>]*href="(https?:\/\/[^/"]+)/i.exec(h)?.[1]
-  if (typeof seo['og:image'] === 'string' && origin && /^\/(?!\/)/.test(seo['og:image'])) meta('property', 'og:image', encodeURI(origin + seo['og:image']))
+  const canonical = /<link[^>]*rel=["']canonical["'][^>]*href="([^"]+)"/i.exec(h)?.[1].replaceAll('&amp;', '&')
+  for (const key of ['og:image', 'og:image:url', 'og:image:secure_url', 'twitter:image', 'twitter:image:src']) if (typeof seo[key] === 'string') {
+    seo[key] = metadataImage(origin ? origin + base : null, canonical, seo[key])
+    meta(key.startsWith('twitter:') ? 'name' : 'property', key, seo[key])
+  }
   if (seo.title != null && seo['og:title'] == null) meta('property', 'og:title', shared, true)
   if (seo.description != null && seo['og:description'] == null) meta('property', 'og:description', seo.description)
   if (seo['og:image'] != null) {
@@ -2826,19 +2845,21 @@ function head(page, seo, path, search = '', route, base = '') {
     if (seo.title != null) node[/^(Article|BlogPosting|NewsArticle|TechArticle|Report)$/.test(T) ? 'headline' : 'name'] = String(seo.title).slice(0, 110)
     if (seo.description != null) node.description = String(seo.description)
     if (canon) node.url = canon[1].replace(/&amp;/g, '&')
-    if (seo['og:image'] != null) node.image = String(seo['og:image']).replace(/^\/(?!\/)/, () => (canon && /^https?:\/\/[^/]+/.exec(node.url) || [''])[0] + '/')
+    if (seo['og:image'] != null) node.image = seo['og:image']
     if (seo.lastmod != null) node.dateModified = String(seo.lastmod)
     const own = new RegExp(`<script[^>]*type=["']application/ld\\+json["'][^>]*>\\s*\\{"@context":"https://schema\\.org","@type":"${T}"[\\s\\S]*?</script>`, 'i')
     const tag = `<script type="application/ld+json">${jsonInHtml(node)}</script>`
     h = own.test(h) ? h.replace(own, () => tag) : h.replace('</head>', () => tag + '</head>')
   }
   if (seo.$head) {
-    for (const [, attr, key] of seo.$head.matchAll(/<meta[^>]*\b(property|name)=["']([^"']+)["'][^>]*>/gi))
-      h = h.replace(new RegExp(`<meta[^>]*\\b${attr}=["']${key.replace(/[.*+?^${}()|[\]\\:]/g, '\\$&')}["'][^>]*>`, 'gi'), '')
+    for (const [, attr, key] of seo.$head.matchAll(/<meta[^>]*\b(property|name)=["']([^"']+)["'][^>]*>/gi)) {
+      const attributes = key.startsWith('twitter:') ? '(?:property|name)' : attr
+      h = h.replace(new RegExp(`<meta[^>]*\\b${attributes}=["']${key.replace(/[.*+?^${}()|[\]\\:]/g, '\\$&')}["'][^>]*>`, 'gi'), '')
+    }
     if (/<link[^>]*rel=["']canonical["']/i.test(seo.$head)) h = h.replace(/<link[^>]*rel=["']canonical["'][^>]*>/gi, '')
     h = h.replace('</head>', () => seo.$head + '</head>')
   }
-  return graph(h, path, query, seo)
+  return graph(h, path ? base + path : path, query, seo)
 }
 // The WebSite + WebPage graph the build wrote into the template (brain-seo ServerHead::apply): its pattern URLs become
 // this request's, like the canonical, and the WebPage takes this request's title and description.
@@ -2854,27 +2875,32 @@ function graph(h, path, query, seo) {
       if ([node['@type']].flat().includes('WebPage')) {
         if (title && node.name == null) node.name = title.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&')
         if (seo?.description != null && node.description == null) node.description = String(seo.description)
+        if (typeof seo?.['og:image'] === 'string' && seo.jsonld == null) {
+          const image = node.primaryImageOfPage
+          if (!image || (image['@type'] === 'ImageObject' && !image['@id'])) node.primaryImageOfPage = { '@type': 'ImageObject', ...image, url: seo['og:image'] }
+        }
       }
     }
     return a + jsonInHtml(g) + b
   })
 }
-// `/_b/<hash>.js` imports inside the chunks resolve to files in dist/ (same hook as the build's prerender)
+// Only compiler-owned chunks receive the own-extension module format; ordinary Node imports keep their loader.
+function resolveChunk(s, c, next, base, app) {
+  if (app !== '/' && s.startsWith(app + '_b/')) s = s.slice(app.length - 1)
+  const mapped = s.startsWith('/_b/')
+  const url = mapped ? new URL('.' + s, base) : s.startsWith('file:') ? new URL(s) : s.startsWith('.') && c.parentURL?.startsWith('file:') ? new URL(s, c.parentURL) : null
+  const owned = new URL('_b/', base).href
+  if (url?.href.startsWith(owned) && url.pathname.endsWith('.jsbrain')) return { url: url.href, format: 'module', shortCircuit: true }
+  if (mapped) return { url: url.href, shortCircuit: true }
+  return next(s, c)
+}
 let hooked = false
 function hook(base, app = '/') {
   if (hooked) return
   hooked = true
-  // chunks import '/_b/x.js', or '/app/_b/x.js' under a base path: both are dist/_b/x.js
-  const own = s => {
-    if (app !== '/' && s.startsWith(app + '_b/')) s = s.slice(app.length - 1)
-    return s.startsWith('/_b/') && { url: new URL('.' + s, base).href, shortCircuit: true }
-  }
-  // registerHooks (Node 22.15+, in-thread) replaces the deprecated register (DEP0205)
-  if (Module.registerHooks) return void Module.registerHooks({ resolve: (s, c, next) => own(s) || next(s, c) })
-  Module.register(
-    'data:text/javascript,' +
-      encodeURIComponent(`export async function resolve(s, c, n) { const a = ${json(app)}; if (a !== '/' && s.startsWith(a + '_b/')) s = s.slice(a.length - 1); return s.startsWith('/_b/') ? { url: new URL('.' + s, ${json(base)}).href, shortCircuit: true } : n(s, c) }`)
-  )
+  // registerHooks (Node 22.15+, in-thread) and the compatibility loader share exactly the same resolver.
+  if (Module.registerHooks) return void Module.registerHooks({ resolve: (s, c, next) => resolveChunk(s, c, next, base, app) })
+  Module.register('data:text/javascript,' + encodeURIComponent(`${resolveChunk.toString()};export async function resolve(s,c,n){return resolveChunk(s,c,n,${json(base)},${json(app)})}`))
 }
 
 const LISTEN_WAIT_MS = 10000

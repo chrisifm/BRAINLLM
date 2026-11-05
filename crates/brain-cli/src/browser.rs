@@ -188,22 +188,8 @@ impl Browser {
             .ok().and_then(|v|v.get("targetInfo").and_then(|v|v.get("targetId")).cloned());
         let result = self.chrome.eval(&session, &expr);
         if let Some(target) = target {
-            let previous = self.chrome.deadline;
-            let deadline = std::time::Instant::now()+Duration::from_secs(2);
-            let cleanup = (|| -> Result<(),String> {
-                self.chrome.deadline=Some(Duration::from_secs(2));
-                self.chrome.call(None,"Target.closeTarget",Json::obj([("targetId",target.clone())]))?;
-                loop {
-                    let left=deadline.checked_duration_since(std::time::Instant::now()).ok_or("comparison tab did not close within 2 seconds")?;
-                    self.chrome.deadline=Some(left);
-                    let current=self.chrome.call(None,"Target.getTargets",Json::Obj(vec![]))?;
-                    let Some(Json::Arr(targets))=current.get("targetInfos") else {return Err("Chrome returned no target list".into())};
-                    if !targets.iter().any(|t|t.get("targetId")==Some(&target)){return Ok(())}
-                    std::thread::sleep(Duration::from_millis(10).min(left));
-                }
-            })();
-            self.chrome.deadline=previous;
-            cleanup.map_err(|e|format!("comparison tab cleanup failed: {e}"))?;
+            let target=target.as_str().ok_or("Chrome returned no comparison target")?;
+            self.chrome.close_target(target,Duration::from_secs(2)).map_err(|e|format!("comparison tab cleanup failed: {e}"))?;
         } else {
             let _=self.chrome.call(Some(&session),"Page.close",Json::Obj(vec![]));
             return Err("could not verify comparison tab ownership/cleanup".into());

@@ -24,7 +24,7 @@ w('_server/place.mjs', `export async function load(ctx) { return { name: ctx.par
 export const seo = p => ({ title: 'Place ' + p.name, canonical: '/places' })`)
 w('_server/pages/place.html', '<!doctype html><html><head><title>Place</title><link rel="canonical" href="https://x.test/places"></head><body><div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
 w('_server/thing.mjs', `export async function load(ctx) { return { name: ctx.params.id } }
-export const seo = p => ({ title: 'Thing ' + p.name, schema: 'Product', jsonld: { '@type': 'Product', name: 'Own' } })`)
+export const seo = p => p.name === 'graph' ? {title:'Own graph', 'og:image':'/override.svg', jsonld:{'@context':'https://schema.org','@graph':[{'@type':'WebPage',name:'Own',description:'',url:'https://example.test/authored',primaryImageOfPage:{'@type':'ImageObject',url:'authored-relative.svg'}}]}} : p.name === 'head' ? {'twitter:image':'/override.svg',$head:'<meta property="twitter:image" content="https://cdn.example.test/authored.svg">'} : ({ title: 'Thing ' + p.name, schema: 'Product', jsonld: { '@type': 'Product', name: 'Own' } })`)
 // the build already wrote the static schema node (prerender seo_head) into the SSR page template
 w('_server/pages/post.html', '<!doctype html><html><head><title>Post</title><link rel="canonical" href="https://x.test/posts/:slug"><script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Post"}</script></head><body><div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
 w('_server/pages/thing.html', '<!doctype html><html><head><title>Thing</title></head><body><div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
@@ -119,4 +119,23 @@ test('prefersMarkdown: explicit text/markdown above text/html; wildcards alone k
     assert.equal(prefersMarkdown(a), true, a)
   for (const a of [undefined, '', '*/*', 'text/html', 'text/html, text/markdown', 'text/markdown;q=0', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'text/markdown;q=0.5, */*'])
     assert.equal(prefersMarkdown(a), false, String(a))
+})
+
+test('metadata image resolution follows the same app-base/canonical vectors as prerendering', async () => {
+  const { readFileSync } = await import('node:fs')
+  const { metadataImage } = await import('../server/server.mjs')
+  const vectors = JSON.parse(readFileSync(new URL('../../crates/brain-lex/tests/metadata-image.json', import.meta.url), 'utf8'))
+  for (const [root, canonical, value, expected] of vectors) assert.equal(metadataImage(root, canonical, value), expected, value)
+  assert.equal(metadataImage(null, '', '\ud800.svg'), '%EF%BF%BD.svg', 'malformed runtime UTF-16 must not turn an optional image into a server error')
+})
+
+
+test('authored JSON-LD graph values remain authoritative over generated image defaults', async () => {
+  const h = await (await get('/things/graph')).text()
+  assert.deepEqual(ld(h), [{ '@context': 'https://schema.org', '@graph': [{ '@type': 'WebPage', name: 'Own', description: '', url: 'https://example.test/authored', primaryImageOfPage: { '@type': 'ImageObject', url: 'authored-relative.svg' } }] }])
+})
+test('an authored legacy Twitter property replaces generated image metadata without a duplicate name tag', async () => {
+  const h = await (await get('/things/head')).text()
+  assert.equal((h.match(/<meta[^>]*(?:name|property)="twitter:image"/g) || []).length, 1, h)
+  assert.ok(h.includes('content="https://cdn.example.test/authored.svg"'), h)
 })
