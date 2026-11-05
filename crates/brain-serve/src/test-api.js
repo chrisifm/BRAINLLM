@@ -1,8 +1,13 @@
 // SPEC §8 test API for `brain test`. The Rust runner drives it over CDP:
-// __brainLoad(url) → { names } | { error }, then __brainStep(i) → { name, ok, ms, error? } for each test.
+// __brainLoad(url) returns a document/registration identity; steps and audits must remain bound to it.
 import { mount as rtMount } from '/@brain/brain.js';
 
 const tests = [];
+const documentID = globalThis.crypto?.randomUUID?.() ?? `${performance.timeOrigin}.${Math.random().toString(36).slice(2)}`;
+let registration = 0, planID, registered = [], navigating = false;
+for (const event of ['beforeunload', 'pagehide']) addEventListener(event, e => { if (e.isTrusted) navigating = true }, true);
+// A correctness marker for the owned harness, not an authentication token.
+window.__brainMatches = id => typeof id === 'string' && id === planID && !navigating;
 let root;
 let dispose;
 // Background Viewer tabs may suspend animation frames. Flush state without requiring foreground focus.
@@ -135,19 +140,26 @@ Object.assign(globalThis, {
 
 window.__brainLoad = async url => {
   root = document.getElementById('root');
+  planID = `${documentID}.${++registration}`;
+  registered = [];
+  const id = planID;
   try {
     await import(url);
   } catch (e) {
     return { error: String(e?.message ?? e) };
   }
-  return { names: tests.map(t => t.name) };
+  if (!window.__brainMatches(id)) return { error: 'The test document navigated while registering its scenarios' };
+  registered = tests.slice();
+  return { id, names: registered.map(t => t.name) };
 };
 
-window.__brainStep = async i => {
-  const t = tests[i];
+window.__brainStep = async (i, id = planID) => {
+  const t = Number.isInteger(i) && i >= 0 ? registered[i] : null;
+  if (!window.__brainMatches(id) || !t || typeof t.fn !== 'function') return { documentChanged: true, started: false, ok: false, error: 'The registered test document changed before this scenario started' };
   const t0 = performance.now();
   try {
     await t.fn();
+    if (!window.__brainMatches(id)) return { documentChanged: true, started: true, name: t.name, ok: false, ms: performance.now() - t0, error: 'The scenario navigated away from its registered test document' };
     const idle = stubs.find(s => !s.record.calls.length);
     if (idle) fail(`stub('${idle.target}') was never called; fix: check the name, or remove the stub`);
     return { name: t.name, ok: true, ms: performance.now() - t0 };

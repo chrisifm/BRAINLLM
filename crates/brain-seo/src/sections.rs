@@ -70,7 +70,7 @@ pub fn rss(cfg: &Config, title: &str, description: &str, home: &str, path: &str,
     if let Some(l) = &cfg.lang {
         o.push_str(&format!("<language>{}</language>\n", xml(l)));
     }
-    if let Some((g, ..)) = &cfg.built_with {
+    if let Some((g, ..)) = &cfg.built_with && cfg.compiler_branding {
         o.push_str(&format!("<generator>{}</generator>\n", xml(g)));
     }
     if let Some(d) = items.iter().filter_map(|e| e.lastmod).max().and_then(rfc822) {
@@ -137,7 +137,7 @@ pub fn manifest(cfg: &Config, entries: &[Entry], secs: &[Section], feeds: &[Stri
         kv.push(("description".into(), Json::str(d)));
     }
     kv.push(("url".into(), url("/")));
-    if let Some((g, home, source)) = &cfg.built_with {
+    if let Some((g, home, source)) = &cfg.built_with && cfg.compiler_branding {
         kv.push(("generator".into(), Json::obj([("name", Json::str(g)), ("home", Json::str(home)), ("source", Json::str(source))])));
     }
     let mut discover = vec![("feed".to_string(), feed("rss.xml".into()))];

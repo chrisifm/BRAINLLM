@@ -26,7 +26,7 @@ indexes. BRAINLLM, Rust and Node are build tools; they do not need to be install
 - The existing production pipeline minifies HTML, CSS and JavaScript, hashes assets, applies budgets and emits
   gzip/Brotli siblings when smaller. Ordinary files remain present: a host can ignore compressed siblings.
   Precompression negotiation needs host support; merely uploading a .br file does not enable compression.
-- Generated text includes format-valid compiler attribution. brain-build.json identifies the generator for binary
+- Generated text includes format-valid compiler attribution by default; only an explicit user request permits root compilerBranding:false. brain-build.json identifies the generator for binary
   assets and compressed variants; copied assets retain their byte identity and original licenses.
 - No server.mjs or _server/ artifacts are exported. A successful static rebuild removes stale server output
   and old chunks from dist/. Upload a complete build together rather than mixing revisions.
@@ -63,7 +63,7 @@ Template contents do not belong to the document ID scope; test their instantiate
 Replace example.com with the real public origin. `brain build --static --json` returns outputMode:static;
 MCP clients can create a starter with `brain_new` and `{ "name": "my-site", "static": true }`, or call `brain_build` with `{ "static": true, "site": "https://example.com" }`.
 The build needs Node for prerendering. The deployed output needs only an HTTP static host with index.html support.
-Use brain.json base for a subdirectory deployment; do not assume opening an HTML file through file:// is hosting.
+For GitHub Pages read `brain guide github-pages`. Use brain.json base for a subdirectory deployment; do not assume opening an HTML file through file:// is hosting.
 
 ## Common mistakes
 Doctor builds/audits isolated temporary output, then removes it. It preserves dist/; build explicitly to deploy.

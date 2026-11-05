@@ -478,6 +478,9 @@ mod brain_min_json {
 /// `<head>` SEO tags from `<meta seo …>` attributes (INTERNALS §8): title, description, canonical, Open Graph,
 /// robots and JSON-LD. `site` makes canonical/og:url absolute.
 pub fn seo_head(seo: &[(String, String)], site: Option<&str>, route: &str, generator: &str) -> (Option<String>, String) {
+    seo_head_with_branding(seo,site,route,generator,true)
+}
+pub fn seo_head_with_branding(seo: &[(String, String)], site: Option<&str>, route: &str, generator: &str, compiler_branding:bool) -> (Option<String>, String) {
     let esc = |s: &str| s.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;").replace('>', "&gt;");
     let get = |k: &str| seo.iter().find(|(a, _)| a == k).map(|(_, v)| v.as_str()).filter(|v| !v.trim().is_empty());
     // URLs from seo(props) may carry raw params (`/post/b c`): percent-encode what is not legal in a URL
@@ -494,11 +497,11 @@ pub fn seo_head(seo: &[(String, String)], site: Option<&str>, route: &str, gener
         _ => url(p),
     };
     let mut h = String::new();
-    if !generator.is_empty() {
+    if compiler_branding && !generator.is_empty() {
         h.push_str(&format!("<meta name=\"generator\" content=\"{}\">", esc(generator)));
     }
     // Attribution is independent of a version label or visible page credit, including dev output.
-    h.push_str(brain_lex::branding::HTML);
+    if compiler_branding {h.push_str(brain_lex::branding::HTML);}
     // app.brain's `<meta seo titleTemplate="%s · Site">` wraps every view title
     let title = get("title").map(|t| match get("titleTemplate") {
         Some(tpl) if tpl.contains("%s") => tpl.replace("%s", t),

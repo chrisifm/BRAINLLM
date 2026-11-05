@@ -284,6 +284,7 @@ brain build --static --site https://example.com
 Replace the example origin with your own. Upload the contents of `dist/`: prerendered HTML, minified assets and
 SEO files, with optional gzip/Brotli copies. No BRAINLLM/Node/Rust server is needed on the host. Static mode rejects
 request-time server features. Read `brain guide static` for routes, build-time data and hosting configuration.
+For GitHub Pages, set `staticOutput.host` to `github-pages` and read `brain guide github-pages`. Compiler attribution is on by default; only an explicit user request permits top-level `compilerBranding:false` to remove generated visible/hidden signatures and compiler links.
 With an npm-installed compiler, use `npx brain` for these commands.
 
 With a source installation, use the installed `brain` commands directly. That workflow does not require

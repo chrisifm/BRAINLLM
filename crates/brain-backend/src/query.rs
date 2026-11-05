@@ -1433,7 +1433,7 @@ async fn resolve_search(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &mut Ctx<
             Ok((false, capped))
         }
         None => {
-            crate::db::diagnostic(&json!({"schemaVersion":1,"event":"search-degraded","rid":crate::http::request_reference(),"resource":ctx.r.name,"operation":"list.search","branch":"search.fuzzy","budget":FUZZY_BUDGET,"private":true,"valuesCaptured":false}));
+            crate::db::diagnostic(&json!({"schemaVersion":1,"event":"search-degraded","rid":crate::http::request_reference(),"resource":ctx.r.name,"operation":"list.search","branch":"search.fuzzy","budget":FUZZY_BUDGET,"reason":"query-canceled","sqlstate":"57014","fix":"Inspect the search query plan, trigram index and current database load; the bounded fuzzy branch was canceled, not proven to have no matches","private":true,"valuesCaptured":false}));
             ctx.matches = Matches::Nothing;
             Ok((true, true))
         }

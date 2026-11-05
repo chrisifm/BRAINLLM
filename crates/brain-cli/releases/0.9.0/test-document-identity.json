@@ -1,0 +1,18 @@
+{
+  "id": "test-document-identity",
+  "kind": "fix",
+  "title": "Bind component test observations to their registered document",
+  "why": "Navigation between registration, steps and audits must not erase named failures or turn a fresh empty document into a successful measurement.",
+  "changelog": [
+    "Component test steps, accessibility audits and runtime feedback stay bound to their registered document"
+  ],
+  "guide": "brain guide tests",
+  "codes": [],
+  "apis": [
+    "brain test",
+    "brain doctor"
+  ],
+  "affects": [
+    "**/*.test.brain"
+  ]
+}

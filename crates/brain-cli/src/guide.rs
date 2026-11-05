@@ -17,6 +17,7 @@ pub const GUIDES: &[(&str, &str, &str)] = &[
     ("server", "sessions, server-only code, .brain_env, errors, deploy with brain start", include_str!("../guides/server.md")),
     ("seo", "pick the target query first; answer-first pages for search and AI answers (GEO)", include_str!("../guides/seo.md")),
     ("static", "portable HTML/CSS/JS sites: no server, build-time data, generic hosting", include_str!("../guides/static.md")),
+    ("github-pages", "static Pages artifact: no Jekyll, correct repository base and reviewed deployment workflow", include_str!("../guides/github-pages.md")),
     ("a11y", "accessibility rules the build enforces and how to pass them first time", include_str!("../guides/a11y.md")),
     ("webmcp", "exposing page actions to browser AI agents: when, names, descriptions", include_str!("../guides/webmcp.md")),
     ("tests", "colocated *.test.brain: mount, interact, assert every state", include_str!("../guides/tests.md")),
@@ -140,7 +141,7 @@ mod tests {
     /// The topics the owner asked for (2026-10-29); removing one is a decision, not a refactor.
     #[test]
     fn every_required_topic_exists_and_is_a_dense_playbook() {
-        for t in ["start", "brandbook", "views", "data", "sockets", "forms", "server", "seo", "static", "a11y", "webmcp", "tests", "i18n", "performance", "llm", "ai", "backend", "analytics", "migrate"] {
+        for t in ["start", "brandbook", "views", "data", "sockets", "forms", "server", "seo", "static", "github-pages", "a11y", "webmcp", "tests", "i18n", "performance", "llm", "ai", "backend", "analytics", "migrate"] {
             let (_, sum, body) = find(t).unwrap_or_else(|e| panic!("{e}"));
             assert!(!sum.trim().is_empty(), "{t}: empty summary");
             assert!(body.starts_with(&format!("# guide: {t} ")), "{t}: must open with `# guide: {t} — …`");

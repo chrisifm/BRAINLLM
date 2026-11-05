@@ -128,6 +128,7 @@ pub struct Config {
     pub server_pages: Vec<(String, String)>,
     /// `seo.credit`: the "By BRAINLLM <version>" line at the bottom of every page (default true).
     pub credit: bool,
+    pub compiler_branding: bool,
     /// `seo.feed`: site-wide `rss.xml` and `<section>/rss.xml` (default true).
     pub feed: bool,
     /// `seo.sections`: `sections.json`, the manifest of every section (default true).
@@ -170,6 +171,7 @@ impl Default for Config {
             built_with: None,
             server_pages: vec![],
             credit: true,
+            compiler_branding: true,
             feed: true,
             sections: true,
             redirect_policy: crate::redirects::Policy::default(),
@@ -245,7 +247,9 @@ pub fn origin(site: &str) -> Result<String, String> {
 impl Config {
     /// Reads the SEO-relevant keys of a parsed `brain.json`. Unknown keys are ignored (other modules own them).
     pub fn from_json(j: &Json) -> Result<Config, String> {
+        let compiler_branding=brain_lex::branding::enabled(j)?;
         let mut c = Config {
+            compiler_branding,
             site: s(j, "site").map(|v| origin(&v)).transpose()?,
             name: s(j, "name"),
             description: s(j, "description"),

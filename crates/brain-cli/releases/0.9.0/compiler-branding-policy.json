@@ -1,0 +1,27 @@
+{
+  "id": "compiler-branding-policy",
+  "kind": "capability",
+  "title": "Explicit per-project compiler attribution policy",
+  "why": "Attribution remains enabled by default. Only an explicit user request may disable generated visible/hidden compiler signatures and links; authored content and foreign assets retain their bytes.",
+  "changelog": [
+    "Explicit compilerBranding:false removes generated visible and hidden compiler attribution"
+  ],
+  "guide": "brain guide seo",
+  "codes": [],
+  "apis": [
+    "compilerBranding"
+  ],
+  "affects": [
+    "brain.json"
+  ],
+  "adopt": {
+    "file": "brain.json",
+    "snippet": "{\"compilerBranding\":true}"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "\"compilerBranding\""
+    }
+  ]
+}

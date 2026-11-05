@@ -2,6 +2,8 @@
 
 `deployment::preview(root, target, options)` prepares revision-checked public configuration source for pm2 or nginx. It does not install software, acquire certificates, migrate a database, publish a service, run a command or restart anything. The native production path remains brain build followed by brain start; PM2 is an optional host integration.
 
+PM2 defaults to the absolute native executable running the preview, avoiding the npm Node launcher. Generate/review it on the destination host or explicitly set brainBinary to its native executable path; regenerate after changing the installed binary location. Explicit overrides are not proof of native execution.
+
 Options include topology (static/node/rust-node/rust-static), name, frontend port, backendPort, memoryMb, brainBinary, domain, certificate, certificateKey and expectedRevision. Ports remain loopback upstreams. Names, DNS names and certificate paths are validated; PM2 values are JSON-serialized literal values, never interpolated shell commands. Configuration operations target deploy/ecosystem.brain.config.cjs or deploy/nginx.brain.conf. An existing file is preserved and returned as a separate proposed comparison, with no replacement operation.
 
 ## Installing the compiler on the server
@@ -143,3 +145,13 @@ configuration and authenticated browser verification.
 ## Port ownership
 
 `--port` or `PORT` (process, then `.brain_env`) is the project's port. `brain run` and `brain start` stop a previous brain of the same project on it (SIGTERM, then SIGKILL after 10 s) and never move to another port. A process from another project, another program, or a brain that PM2 manages from outside this command is left running and named in the error. On Windows no process is stopped: the command waits 10 s and reports the owner to look for.
+
+## GitHub Pages static workflow
+
+Set output:static, staticOutput.host:github-pages and the actual base in brain.json. `brain deploy config github-pages`
+previews deploy/github-pages.yml without activation. It preserves an existing proposal and accepts expectedRevision
+for a stale-preview guard; other server topology options are rejected. Review and copy it into .github/workflows/pages.yml,
+commit the npm lockfile and explicitly select GitHub Actions in repository Pages settings. The generated workflow verifies
+the configured base against configure-pages metadata, builds with its HTTPS origin, uploads dist only and deploys with
+scoped Pages/OIDC permissions. Account/custom-domain root and repository-prefix sites share the same artifact root.
+See `brain guide github-pages`. No site or GitHub settings are changed by preparing the preview.

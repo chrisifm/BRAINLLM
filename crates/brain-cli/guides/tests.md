@@ -93,3 +93,5 @@ Over MCP: `brain_test`, then `brain_doctor`.
 Generated component tests use type samples for required `<meta props>` and leave optional/defaulted props omitted.
 Replace empty object/list samples with representative nested data and add interaction/error cases; the generator
 does not infer an application-specific shape or prove a component correct with a single render assertion.
+
+Component tests do not automatically install a locale dictionary: runtime `t()` falls back to its key. Assert that fallback explicitly or verify translated content on a built locale route; `mount` has no locale option.

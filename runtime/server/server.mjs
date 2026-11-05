@@ -49,7 +49,7 @@ const MIME = {
 }
 // feeds are .xml files with their own type (SEO, §32)
 const FEEDS = { 'rss.xml': 'application/rss+xml; charset=utf-8', 'atom.xml': 'application/atom+xml; charset=utf-8' }
-const SECURITY = {
+const DEFAULT_SECURITY = {
   'strict-transport-security': 'max-age=63072000; includeSubDomains',
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'strict-origin-when-cross-origin',
@@ -201,7 +201,9 @@ const cacheSearch = url => {
   return kept.size ? '?' + kept : ''
 }
 // Messages this file writes itself, safe to log as the cause; anything else in an error message may hold private data.
-const OWN_CAUSES = new Set(['Backend request unavailable', 'Backend request timed out', 'Backend response exceeds its byte budget', 'Backend request capacity is unavailable', 'Backend stream capacity is unavailable', 'Native file request failed', 'Native file response is invalid', 'Native resource response must be JSON', 'Native resource response is invalid', 'Native resource request failed', 'Invalid final response status', 'Invalid configured redirect location', 'timeout'])
+const AUTH_UNAVAILABLE_CAUSES = new Set(['the backend did not answer', 'the server is shutting down', '8 session checks are already in flight', 'the backend took more than 2 s'].map(why => `Native authentication is unavailable: ${why}`))
+const BACKEND_UNAVAILABLE_CAUSES = new Set(['Backend request unavailable', 'Backend request timed out', 'Backend response exceeds its byte budget', 'Native backend is unavailable', 'Native file request failed', 'Native file response is invalid', 'Native resource response must be JSON', 'Native resource response is invalid', 'Native resource request failed', 'Native authentication response is unavailable', ...AUTH_UNAVAILABLE_CAUSES])
+const OWN_CAUSES = new Set([...BACKEND_UNAVAILABLE_CAUSES, 'Backend request capacity is unavailable', 'Backend stream capacity is unavailable', 'Invalid same-site redirect location', 'Invalid redirect status', 'Invalid final response status', 'Invalid configured redirect location', 'Static file validators are busy; retry shortly', 'Static file validator deadline exceeded; retry shortly', 'Static file changed; retry shortly', 'Static file changed while computing its validator', 'timeout'])
 const CODE_SHAPE = /^[A-Z][A-Z0-9_]{0,63}$/
 const varyEncoding = v => (/accept-encoding/i.test(v || '') ? v : [v, 'Accept-Encoding'].filter(Boolean).join(', '))
 function bodyEncoding(req, status, headers) {
@@ -1022,7 +1024,7 @@ export function createServer(o = {}) {
     // a thrown plain object, string or undefined has no stack: say what kind of value it was (never the value itself)
     if (!(e instanceof Error)) out.thrown = e === null ? 'null' : Array.isArray(e) ? 'array' : typeof e
     if (e && typeof e === 'object' && (e.temporary === true || e.status === 429 || e.status === 503)) out.temporary = true
-    if (e instanceof HttpError && (OWN_CAUSES.has(e.message) || e.message.startsWith('Native authentication is unavailable:'))) out.cause = e.message
+    if (e instanceof HttpError && OWN_CAUSES.has(e.message)) out.cause = e.message
     if (e && e.code === 'ERR_MODULE_NOT_FOUND') out.fix = 'this process runs an older build whose files are gone; restart it after brain build'
     if (e && CODE_SHAPE.test(e.transport || '')) out.transport = e.transport
     if (e && typeof e.code === 'string' && CODE_SHAPE.test(e.code)) out.backendCode = e.code
@@ -1033,6 +1035,11 @@ export function createServer(o = {}) {
     return out
   }
   const mf = readManifest(dist)
+  // The build policy controls attribution independently of CSP and other security headers.
+  let compilerBranding=mf.compilerBranding!==false
+  try {const path=join(dist,'brain-build.json'),meta=lstatSync(path);if(meta.isFile()&&!meta.isSymbolicLink()&&meta.size<=16384&&JSON.parse(readFileSync(path,'utf8')).compilerBranding===false)compilerBranding=false}catch{}
+  const SECURITY={...DEFAULT_SECURITY}
+  if(!compilerBranding)delete SECURITY['x-generated-by']
   // brain.json `server` (§11.1), written into the manifest by the build; createServer options and env still win
   const SL = mf.server || {}
   const TIMEOUT = +(o.timeout ?? env.BRAIN_TIMEOUT_MS ?? SL.timeoutMs ?? 10000)
@@ -1823,7 +1830,7 @@ export function createServer(o = {}) {
   }
   // §33 S01: every sitemap file holds at most 50 000 URLs and SITEMAP_BYTES bytes of UTF-8 XML; the dynamic URLs fill
   // /sitemap-dynamic.xml, /sitemap-dynamic-2.xml, … in sitemap() order, so the split is deterministic
-  const XML_SIGNATURE = '<!-- by BRAINLLM https://chrisifm.github.io/BRAINLLM/ -->'
+  const XML_SIGNATURE = compilerBranding ? '<!-- by BRAINLLM https://chrisifm.github.io/BRAINLLM/ -->' : ''
   const XML_HEADER = `<?xml version="1.0" encoding="UTF-8"?>\n${XML_SIGNATURE}\n`
   const SET_HEAD = XML_HEADER + '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
   const SET_FOOT = '</urlset>\n'
@@ -1845,7 +1852,7 @@ export function createServer(o = {}) {
     if (!f) return false
     const original = readFileSync(f, 'utf8')
     const declaration = original.startsWith('<?xml') ? original.indexOf('?>') + 2 : 0
-    const text = original.includes(XML_SIGNATURE) ? original : declaration > 1 ? original.slice(0, declaration) + '\n' + XML_SIGNATURE + original.slice(declaration) : XML_SIGNATURE + '\n' + original
+    const text = !XML_SIGNATURE || original.includes(XML_SIGNATURE) ? original : declaration > 1 ? original.slice(0, declaration) + '\n' + XML_SIGNATURE + original.slice(declaration) : XML_SIGNATURE + '\n' + original
     const origin = mf.site || [...text.matchAll(/<loc>(https?:\/\/[^<]+)<\/loc>/g)].map(m => URL.canParse(m[1]) && new URL(m[1]).origin).find(Boolean)
     if (!origin) return false
     const index = text.includes('<sitemapindex')
@@ -1885,7 +1892,7 @@ export function createServer(o = {}) {
       while (offset < stat.size) {
         if (performance.now() > until) throw new HttpError(503, 'Static file validator deadline exceeded; retry shortly')
         const { bytesRead } = await handle.read(buf, 0, Math.min(buf.length, stat.size - offset), offset)
-        if (!bytesRead) throw new Error('Static file changed while computing its validator')
+        if (!bytesRead) throw new HttpError(503, 'Static file changed while computing its validator')
         hash.update(buf.subarray(0, bytesRead)); offset += bytesRead
       }
       const after = await handle.stat()
@@ -2168,7 +2175,7 @@ export function createServer(o = {}) {
     } catch (e) {
       const busy = e instanceof HttpError && e.code === 'BRIDGE_BUSY'
       if (busy) log('warn', 'backend bridge busy', { rid, path: req.$brainPath || String(req.url || '').split('?')[0], fix: e.fix })
-      else if (e instanceof HttpError && OWN_CAUSES.has(e.message)) log('warn', 'backend unavailable', { rid, path: req.$brainPath || String(req.url || '').split('?')[0], status: e.status, cause: e.message, ...(CODE_SHAPE.test(e.transport || '') ? { transport: e.transport } : {}) })
+      else if (e instanceof HttpError && e.status >= 500 && BACKEND_UNAVAILABLE_CAUSES.has(e.message)) log('warn', 'backend unavailable', { rid, path: req.$brainPath || String(req.url || '').split('?')[0], status: e.status, cause: e.message, ...(CODE_SHAPE.test(e.transport || '') ? { transport: e.transport } : {}) })
       else log('error', 'unhandled', { rid, path: req.url, ...trace(e) })
       try {
         if (busy && !res.headersSent) { res.setHeader('retry-after', String(e.retryAfter)); failPage(res, 503, rid, { code: e.code, message: 'Service Unavailable', fix: e.fix }) }

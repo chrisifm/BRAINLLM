@@ -11,6 +11,16 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [0.9.0] - 2026-11-05
 
+- Explicit compilerBranding:false removes generated visible and hidden compiler attribution, links and headers while defaults stay enabled and authored/third-party bytes remain unchanged.
+
+- GitHub Pages static preset emits a root .nojekyll and 404 fallback, validates the origin/base contract and prepares a reviewed deployment workflow that uploads dist only.
+
+- Production diagnostics preserve fixed framework causes separately from backend availability; PM2 previews supervise the native executable directly and fuzzy-search cancellation logs actionable metadata without query values.
+
+- Lighthouse process failures and incomplete category reports fail explicitly; quoted Chrome flags and CHROME_PATH support explicit container setup, including both valued-option spellings.
+
+- Component test steps, accessibility audits and runtime feedback stay bound to their registered document in headless Chrome and Viewer; navigation preserves named failures, discards interrupted measurements and restores only assertions that have not run.
+
 - Owned browser tab cleanup waits for confirmed target removal within a bounded deadline, preserving other tabs and the caller timeout instead of racing Chrome close acknowledgements.
 
 - Generated SSR WebPage graph URLs retain the app base, and request image overrides update generated primary images while authored JSON-LD and legacy Twitter head overrides remain authoritative.

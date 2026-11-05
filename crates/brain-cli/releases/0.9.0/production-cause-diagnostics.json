@@ -1,0 +1,15 @@
+{
+  "id": "production-cause-diagnostics",
+  "kind": "fix",
+  "title": "Preserve fixed production causes and native process supervision",
+  "why": "A safe fixed error cause is not a backend outage classification. Supervisors must observe the native process instead of an npm launcher, and canceled fuzzy search needs actionable metadata without query values.",
+  "changelog": [
+    "Production diagnostics preserve fixed framework causes separately from backend availability"
+  ],
+  "guide": "brain guide server",
+  "codes": [],
+  "apis": [
+    "brain deploy config pm2"
+  ],
+  "affects": []
+}

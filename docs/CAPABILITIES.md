@@ -16,6 +16,7 @@ What an app author can use, generated from the tables the compiler dispatches on
 | `server` | sessions, server-only code, .brain_env, errors, deploy with brain start |
 | `seo` | pick the target query first; answer-first pages for search and AI answers (GEO) |
 | `static` | portable HTML/CSS/JS sites: no server, build-time data, generic hosting |
+| `github-pages` | static Pages artifact: no Jekyll, correct repository base and reviewed deployment workflow |
 | `a11y` | accessibility rules the build enforces and how to pass them first time |
 | `webmcp` | exposing page actions to browser AI agents: when, names, descriptions |
 | `tests` | colocated *.test.brain: mount, interact, assert every state |
@@ -74,8 +75,10 @@ Policy grants: `public` `owner` `owner.<ref>` `org` `org.<role>` `org.own` `<rol
 
 ### 0.9.0
 
+- Explicit per-project compiler attribution policy (`brain guide seo`)
 - Explicit bounded repair of missing declared defaults (`docs/backend/import.md`)
 - Native forms to declared external services (`brain guide forms`)
+- GitHub Pages static artifact and workflow preview (`brain guide github-pages`)
 - Bounded native integer ranges and text matching (`docs/NATIVE-LIBRARIES.md`)
 - Living public brandbooks for new sites (`brain guide brandbook`)
 - Explicit media and worker CSP sources (`docs/MEDIA.md`)

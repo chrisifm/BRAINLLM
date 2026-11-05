@@ -1335,7 +1335,7 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
     tools.push(Tool {
         name: "brain_deployment",
         description: "Prepare optional PM2/nginx deployment configuration as guarded file operations. No services are installed, activated or deployed. Explicit topology and production settings remain reviewable.",
-        input_schema: schema([("target","string","pm2 or nginx"),("options","object","deployment topology and public settings; never secret values")], &["target","options"]),
+        input_schema: schema([("target","string","pm2, nginx or github-pages"),("options","object","deployment topology and public settings; never secret values")], &["target","options"]),
         output_schema: out([("schemaVersion","number")]),
         run: Box::new(|a| {
             let request=serde_json::from_str(&a.get("options").ok_or("options are required")?.stringify()).map_err(|_|"deployment options must be JSON")?;

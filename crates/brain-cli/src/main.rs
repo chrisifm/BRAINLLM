@@ -272,7 +272,7 @@ fn main() -> ExitCode {
         }
         Some("deploy") => {
             app_root().and_then(|root| {
-                if args.get(1).map(String::as_str)!=Some("config") {return Err("usage: brain deploy config pm2|nginx --request '<json>' (preview only) | brain deploy check --url <origin>".into());}
+                if args.get(1).map(String::as_str)!=Some("config") {return Err("usage: brain deploy config pm2|nginx|github-pages --request '<json>' (preview only) | brain deploy check --url <origin>".into());}
                 let target=args.get(2).ok_or("deployment target is required")?;
                 let request=serde_json::from_str(&flag(&args,"--request").unwrap_or_else(||"{}".into())).map_err(|_|"deployment request must be JSON")?;
                 println!("{}",deployment::preview(&root,target,&request)?);Ok(())
@@ -1747,7 +1747,7 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
     if seo_cfg.name.is_none() {
         seo_cfg.name = env::value(root, env_name, "PUBLIC_SITE_NAME");
     }
-    seo_cfg.built_with = Some((format!("BRAINLLM {}", env!("CARGO_PKG_VERSION")), brain_pack::HOME.into(), brain_pack::REPO.into()));
+    seo_cfg.built_with = seo_cfg.compiler_branding.then(||(format!("BRAINLLM {}", env!("CARGO_PKG_VERSION")), brain_pack::HOME.into(), brain_pack::REPO.into()));
     let seo_range: std::cell::Cell<Option<(u32, u32)>> = std::cell::Cell::new(None);
     let mut all_views = Vec::new();
     brain_files(&root.join("views"), &mut all_views);
@@ -1805,7 +1805,7 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
         for p in pages.iter_mut().filter(|p| p.file.starts_with("_server/") && !guarded(&p.view)) {
             p.html = built.server_head.apply(&seo_cfg, &p.route, &p.html);
         }
-        if seo_cfg.credit {
+        if seo_cfg.credit && seo_cfg.compiler_branding {
             let credit = format!(
                 "<p data-brain-credit style=\"padding:8px 16px calc(8px + env(safe-area-inset-bottom));text-align:right;font:12px system-ui\">By <a href=\"{}\" rel=\"nofollow\">BRAINLLM</a> {}</p>",
                 brain_pack::HOME,
@@ -1855,7 +1855,7 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
         minify: true,
         site: site.map(str::to_string),
         shim,
-        generator: format!("BRAINLLM {}", env!("CARGO_PKG_VERSION")),
+        generator: if seo_cfg.compiler_branding {format!("BRAINLLM {}", env!("CARGO_PKG_VERSION"))}else{String::new()},
     };
     let mut files = Vec::new();
     brain_files(&root.join("views"), &mut files);
@@ -1904,6 +1904,8 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
         }
     }
     if rep.static_export { static_export::check_destinations(dist, out.files.keys().chain(out.binary.keys()))?; }
+    let previous_branding=std::fs::read_to_string(dist.join("brain-build.json")).ok().and_then(|source|brain_mcp::Json::parse(&source).ok()).is_none_or(|old|old.get("compilerBranding")!=Some(&brain_mcp::Json::Bool(false)));
+    let branding_changed=previous_branding!=seo_cfg.compiler_branding;
     // write only what changed and drop stale hashed chunks: an unchanged rebuild touches no file
     on_phase("write", 0, out.files.len() + out.binary.len());
     let (mut written, mut unchanged) = (0, 0);
@@ -1944,7 +1946,7 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
         }
     }
     // Only deployment builds own old-chunk grace; an isolated doctor build must not reset that ledger.
-    let graced = if rep.static_export || dist != root.join("dist") { std::collections::BTreeSet::new() } else { previous_chunks(root, dist, &|rel| out.files.contains_key(rel) || out.binary.contains_key(rel)) };
+    let graced = if branding_changed || rep.static_export || dist != root.join("dist") { std::collections::BTreeSet::new() } else { previous_chunks(root, dist, &|rel| out.files.contains_key(rel) || out.binary.contains_key(rel)) };
     let keep = |rel: &str| out.files.contains_key(rel) || out.binary.contains_key(rel) || graced.contains(rel);
     sweep(dist, dist, &keep);
     rep.report = out

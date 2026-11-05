@@ -117,3 +117,5 @@ brain shot /users --text    # outline: one main, one h1, links reachable
 // views/admin/_guard.jsbrain
 export default (ctx) => (ctx.user ? true : redirect('/login?next=' + ctx.url.pathname))
 ```
+
+Quote bracketed route filenames in shell commands, for example `brain check 'views/[slug].brain'`; shells such as zsh otherwise interpret brackets as a glob. The route syntax stays unchanged.

@@ -5,6 +5,18 @@ pub const HASH: &str = "# by BRAINLLM https://chrisifm.github.io/BRAINLLM/";
 pub const CODE: &str = "/* by BRAINLLM https://chrisifm.github.io/BRAINLLM/ */";
 pub const XML: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!-- by BRAINLLM https://chrisifm.github.io/BRAINLLM/ -->\n";
 
+/// Attribution is on unless an author explicitly sets the project boolean to false.
+pub fn enabled(config:&crate::Json)->Result<bool,String> {
+    let crate::Json::Obj(fields)=config else {return Err("brain.json must be an object".into())};
+    let values:Vec<_>=fields.iter().filter(|(key,_)|key=="compilerBranding").collect();
+    if values.len()>1 {return Err("compilerBranding must be declared once".into())}
+    match values.first().map(|(_,value)|value) {
+        None|Some(crate::Json::Bool(true))=>Ok(true),Some(crate::Json::Bool(false))=>Ok(false),
+        _=>Err("compilerBranding must be true or false; attribution stays enabled unless explicitly disabled".into()),
+    }
+}
+pub fn code_with(source:&str,enabled:bool)->String {if enabled {code(source)} else {source.into()}}
+
 /// Add a valid JS/CSS comment after minification, retaining shebang/@charset placement.
 pub fn code(source: &str) -> String {
     if source.trim().is_empty() || source.trim_end().ends_with(CODE) { return source.into(); }
@@ -22,6 +34,14 @@ pub fn xml(source: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_an_explicit_boolean_disables_project_attribution() {
+        for (source,wanted) in [("{}",true),(r#"{"compilerBranding":true}"#,true),(r#"{"compilerBranding":false}"#,false)] {assert_eq!(enabled(&crate::Json::parse(source).unwrap()).unwrap(),wanted);}
+        for source in [r#"{"compilerBranding":"false"}"#,r#"{"compilerBranding":null}"#,r#"{"compilerBranding":0}"#,r#"{"compilerBranding":false,"compilerBranding":true}"#] {assert!(enabled(&crate::Json::parse(source).unwrap()).is_err());}
+        assert_eq!(code_with("export const value=1",false),"export const value=1");
+        let authored=format!("const example={:?}",CODE);assert_eq!(code_with(&authored,false),authored);
+    }
+
     #[test]
     fn attribution_keeps_special_prefixes_and_is_idempotent_without_reviving_empty_modules() {
         assert_eq!(code(""), "");

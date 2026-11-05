@@ -23,7 +23,7 @@ function bridge({ failScenario = false, failClose = false, failAPI = false, load
     assert.match(command.code, /location\.origin/)
     assert.match(command.code, /location\.pathname/)
     if (failAPI) return json({ ok: false, error: 'private-browser-message' })
-    if (command.code.includes('const result=await window.__brainLoad')) return json({ ok: true, result: { failed: loadFailure, names: ['Declared action'] } })
+    if (command.code.includes('const result=await window.__brainLoad')) return json({ ok: true, result: { failed: loadFailure, id: 'fixture-document.1', names: ['Declared action'] } })
     if (command.code.includes('const result=await window.__brainStep')) return json({ ok: true, result: { name: 'Declared action', ok: !failScenario, ms: 2 } })
     if (command.code.includes('const rules=')) return json({ ok: true, result: { items: [], truncated: false } })
     if (command.code.includes('m.errors.slice')) return json({ ok: true, result: [] })
@@ -153,4 +153,88 @@ test('a lost open response is never retried on another service', async () => {
   assert.equal(result.ok, false)
   assert.equal(result.code, 'VIEWER_EXECUTION_FAILED')
   assert.ok(mock.seen.every(s => s[0] === 'codex'))
+})
+
+// Drive each boundary deterministically; the bridge never exposes unrelated tabs or profile details.
+function navigationBridge(phase, { mismatch = false, loseReopen = false, repeat = false } = {}) {
+  const calls=[], executions=[], closed=[], documents=new Map()
+  let opened=0
+  const fetch=async(url,options)=>{
+    if(url.startsWith('http://127.0.0.1:4315/'))throw Error('unavailable fixture service')
+    if(url.endsWith('/health'))return json(health)
+    if(url.includes('/api/bridge/result/'))throw Error('lost exact recovery result')
+    const command=JSON.parse(options.body);calls.push(command)
+    const reply=value=>json({ok:true,result:value})
+    if(command.action==='open'){
+      opened++
+      if(loseReopen&&opened===2)throw Error('lost recovery open response')
+      const id=400+opened;documents.set(id,{id:`document-${opened}.1`,valid:true,first:opened===1})
+      return reply({id})
+    }
+    const id=Number(command.target),doc=documents.get(id)
+    assert.ok(doc,'only a known owned tab may be targeted')
+    if(command.action==='close'){closed.push(id);return reply({closed:id})}
+    assert.equal(command.action,'run')
+    const code=command.code
+    if(code.includes('const result=await window.__brainLoad'))return reply({id:doc.id,names:mismatch&&!doc.first?['changed']:['first','second']})
+    if(code.includes('const result=await window.__brainStep')){
+      const index=Number(/__brainStep\((\d+),/.exec(code)?.[1]);assert.ok(Number.isInteger(index))
+      assert.ok(code.includes(JSON.stringify(doc.id)))
+      if((doc.first||repeat)&&phase==='before'&&index===1){doc.valid=false;return reply({documentChanged:true,started:false})}
+      executions.push(index)
+      if(doc.first&&phase==='during'&&index===0){doc.valid=false;return reply({documentChanged:true,started:true})}
+      return reply({ok:true,ms:1})
+    }
+    if(code.includes('__brainMatches'))return reply(doc.valid)
+    if(code.includes('const rules=')){
+      if(doc.first&&phase==='audit'){doc.valid=false;return reply({items:[{code:'B0406',role:'button',node:'button',msg:'interrupted observation'}],truncated:true})}
+      return reply({items:[],truncated:false})
+    }
+    if(code.includes('m.errors.slice')){if(phase==='feedback')doc.valid=false;return reply([])}
+    return reply(true)
+  }
+  return {fetch,calls,executions,closed,get opened(){return opened}}
+}
+for(const phase of ['before','during','audit','feedback'])test(`Viewer retains original test identity when navigation occurs at ${phase}`,async()=>{
+  const mock=navigationBridge(phase),result=await viewerClient(suite,mock.fetch)
+  assert.equal(result.ok,true,JSON.stringify(result))
+  const report=result.reports[0]
+  assert.deepEqual(report.tests.map(t=>t.name),['first','second'])
+  const failed=phase==='feedback'?1:0
+  assert.equal(report.tests[failed].ok,false)
+  assert.match(report.tests[failed].error,/registered document.*navigation/)
+  assert.equal(report.tests[1-failed].ok,true)
+  assert.deepEqual(mock.executions,[0,1],'a failed or completed assertion is never replayed')
+  assert.deepEqual(report.a11y,[],'interrupted observations are discarded')
+  assert.equal(report.auditTruncated,undefined)
+  assert.equal(mock.opened,phase==='feedback'?1:2)
+  assert.deepEqual(mock.closed,phase==='feedback'?[401]:[401,402])
+  if(phase==='feedback')assert.match(report.error,/not measured/)
+})
+test('Viewer refuses a changed registry after recovery without executing another assertion',async()=>{
+  const mock=navigationBridge('during',{mismatch:true}),result=await viewerClient(suite,mock.fetch)
+  assert.equal(result.ok,true)
+  assert.match(result.reports[0].error,/same registered scenarios/)
+  assert.deepEqual(mock.executions,[0])
+  assert.deepEqual(mock.closed,[401,402])
+})
+test('a lost recovery open is never retried and retains the original failed scenario',async()=>{
+  const mock=navigationBridge('during',{loseReopen:true}),result=await viewerClient(suite,mock.fetch)
+  assert.equal(result.ok,false)
+  assert.equal(result.stage,'reopen')
+  assert.match(result.cleanup,/unknown.*open response/)
+  assert.equal(mock.opened,2)
+  assert.deepEqual(mock.closed,[401],'the previously closed tab is never closed again')
+  assert.deepEqual(mock.executions,[0])
+  assert.equal(result.completedReports[0].tests[0].name,'first')
+  assert.equal(result.completedReports[0].tests[0].ok,false)
+})
+
+test('a second pre-step navigation makes remaining unexecuted scenarios explicit',async()=>{
+  const mock=navigationBridge('before',{repeat:true}),result=await viewerClient(suite,mock.fetch)
+  assert.equal(result.ok,true)
+  assert.match(result.reports[0].error,/remaining scenarios and feedback were not measured/)
+  assert.deepEqual(mock.executions,[0])
+  assert.equal(mock.opened,2,'one recovery only for a not-yet-started assertion')
+  assert.deepEqual(mock.closed,[401,402])
 })

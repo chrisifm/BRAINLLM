@@ -293,7 +293,7 @@ pub(crate) fn apply_with_layout(root: &Path, cfg: &CacheCfg, pages: &[PageRef], 
     }
 
     // Separate deterministic metadata attributes binary/protocol assets without modifying their bytes or schemas.
-    files.insert("brain-build.json".into(),format!("{{\"schemaVersion\":1,\"generator\":{{\"name\":\"BRAINLLM\",\"version\":{},\"url\":{}}},\"scope\":\"This generated build, including binary assets and compressed variants. Copied assets retain their own licenses and byte identity.\"}}\n",js(env!("CARGO_PKG_VERSION")),js(brain_lex::branding::HOME)));
+    files.insert("brain-build.json".into(),if layout.compiler_branding {format!("{{\"schemaVersion\":1,\"compilerBranding\":true,\"generator\":{{\"name\":\"BRAINLLM\",\"version\":{},\"url\":{}}},\"scope\":\"This generated build, including binary assets and compressed variants. Copied assets retain their own licenses and byte identity.\"}}\n",js(env!("CARGO_PKG_VERSION")),js(brain_lex::branding::HOME))}else{"{\"schemaVersion\":1,\"compilerBranding\":false}\n".into()});
     // 2. Build signature (§35.7): a hash of every file that ships, paths and bytes, sorted. ORDER MATTERS for a
     //    stable signature: it is computed here, BEFORE writing what carries it (the brain-build meta, the sw.js
     //    header, _headers, nginx.conf, the manifest's `build`) and before the registration snippet; those parts are
@@ -319,7 +319,7 @@ pub(crate) fn apply_with_layout(root: &Path, cfg: &CacheCfg, pages: &[PageRef], 
                 let built_offline = files.contains_key(&format!("_offline/index.{}", ext.html()));
                 let offline_url = if built_offline { "/_offline/".to_string() } else { format!("/{offline_file}") };
                 if cfg.offline && !built_offline && !files.contains_key(&offline_file) {
-                    files.insert(offline_file.clone(), OFFLINE_HTML.into());
+                    files.insert(offline_file.clone(), if layout.compiler_branding {OFFLINE_HTML.into()}else{OFFLINE_HTML.replace(brain_lex::branding::HTML,"")});
                 }
                 let list = precache_with_assets(pages, files, binary, cfg.precache_kb * 1024, pre, ext, &immutable);
                 // routes/update only when declared: the default worker stays byte-identical
@@ -339,7 +339,7 @@ pub(crate) fn apply_with_layout(root: &Path, cfg: &CacheCfg, pages: &[PageRef], 
                     list.iter().map(|u| js(u)).collect::<Vec<_>>().join(","),
                     if cfg.offline { js(&format!("{pre}{offline_url}")) } else { "null".into() }
                 );
-                files.insert("sw.js".into(), brain_lex::branding::code(&format!("{manifest}{tpl}")));
+                files.insert("sw.js".into(), brain_lex::branding::code_with(&format!("{manifest}{tpl}"),layout.compiler_branding));
                 let reg = register(&cfg.base);
                 for p in pages {
                     if let Some(html) = files.get_mut(p.file) {
@@ -356,7 +356,7 @@ pub(crate) fn apply_with_layout(root: &Path, cfg: &CacheCfg, pages: &[PageRef], 
         }
     } else {
         // opt-out that reaches past visitors: their registered worker fetches this one and removes itself
-        files.insert("sw.js".into(), kill_sw(&cfg.base));
+        files.insert("sw.js".into(),if layout.compiler_branding {kill_sw(&cfg.base)}else{kill_sw(&cfg.base).replace(brain_lex::branding::CODE,"")});
     }
 
     // 4. the signature in every page (the router and the missing-chunk reload compare it), and the data switch
@@ -453,7 +453,10 @@ pub(crate) fn apply_with_layout(root: &Path, cfg: &CacheCfg, pages: &[PageRef], 
     }
     files.insert("_brain/Caddyfile".into(), if redir_caddy.is_empty() { c } else { insert_after_first_line(&c, &format!("# redirects.json\n{redir_caddy}")) });
     for path in ["_headers","_redirects","_brain/nginx.conf","_brain/Caddyfile"] {
-        if let Some(source)=files.get_mut(path) { source.push_str(&format!("\n{}\n",brain_lex::branding::HASH)); }
+        if let Some(source)=files.get_mut(path) {
+            if layout.compiler_branding {source.push_str(&format!("\n{}\n",brain_lex::branding::HASH));}
+            else {*source=source.lines().filter(|line|!line.contains("X-Generated-By") && line.trim()!=brain_lex::branding::HASH).map(|line|line.replacen("# BRAINLLM build ","# Build ",1)).collect::<Vec<_>>().join("\n");source.push('\n');}
+        }
     }
     Applied { warnings, build_hash }
 }

@@ -52,14 +52,17 @@ pub fn xml(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 
+fn xml_header(cfg:&Config)->&'static str {if cfg.compiler_branding {brain_lex::branding::XML} else {"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"}}
+fn text_signature(cfg:&Config)->&'static str {if cfg.compiler_branding {brain_lex::branding::HASH} else {""}}
+
 /// robots.txt. A `noindex` page stays crawlable on purpose: blocking it here would hide its `noindex` from crawlers
 /// (Google keeps listing blocked URLs it finds through links). For the same reason a staging build, whose pages are all
 /// `noindex`, stays crawlable.
 pub fn robots(cfg: &Config) -> String {
     if cfg.staging {
-        return format!("{}\nUser-agent: *\nAllow: /\n", brain_lex::branding::HASH);
+        return format!("{}\nUser-agent: *\nAllow: /\n", text_signature(cfg));
     }
-    let mut o = format!("{}\nUser-agent: *\nAllow: /\n", brain_lex::branding::HASH);
+    let mut o = format!("{}\nUser-agent: *\nAllow: /\n", text_signature(cfg));
     o.push_str(&crate::social::ai_robots(cfg));
     if let (Some(_), true) = (&cfg.site, cfg.sitemap) {
         o.push_str(&format!("\nSitemap: {}\n", cfg.abs("/sitemap.xml")));
@@ -89,7 +92,7 @@ pub fn news_sitemap(cfg: &Config, cols: &[crate::content::Collection]) -> Option
     items.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.route().cmp(&b.route())));
     items.truncate(NEWS_MAX);
     let mut o = String::from(
-        format!("{}<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\" xmlns:news=\"http://www.google.com/schemas/sitemap-news/0.9\">\n", brain_lex::branding::XML),
+        format!("{}<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\" xmlns:news=\"http://www.google.com/schemas/sitemap-news/0.9\">\n", xml_header(cfg)),
     );
     for e in items {
         let lang = e
@@ -205,7 +208,7 @@ pub fn sitemaps_with(
     };
     let head = |chunk: &[(&Entry, String)]| {
         let mut o = String::from(
-            format!("{}<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\"", brain_lex::branding::XML),
+            format!("{}<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\"", xml_header(cfg)),
         );
         if chunk.iter().any(|(e, _)| !images(cfg, e).is_empty()) {
             o.push_str(" xmlns:image=\"http://www.google.com/schemas/sitemap-image/1.1\"");
@@ -252,7 +255,7 @@ pub fn sitemaps_with(
     }
     let mut out = Vec::new();
     let mut index = String::from(
-        format!("{}<sitemapindex xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n", brain_lex::branding::XML),
+        format!("{}<sitemapindex xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n", xml_header(cfg)),
     );
     for (i, chunk) in chunks.iter().enumerate() {
         let name = format!("sitemap-{}.xml", i + 1);
@@ -442,12 +445,13 @@ pub fn llms_txt(cfg: &Config, entries: &[Entry]) -> String {
         }
     }
     o.push_str(&built_with(cfg));
-    o.push_str(&format!("\n{}\n",brain_lex::branding::HTML));
+    if cfg.compiler_branding {o.push_str(&format!("\n{}\n",brain_lex::branding::HTML));}
     o
 }
 
 /// Closing `## Built with` section of llms.txt and llms-full.txt: the generator, its home and its source.
 fn built_with(cfg: &Config) -> String {
+    if !cfg.compiler_branding {return String::new()}
     match &cfg.built_with {
         Some((generator, home, source)) => format!(
             "\n## Built with\n\n- [{generator}]({home}): the web compiler for LLMs, written in Rust. Source: {source}\n"
@@ -474,7 +478,7 @@ pub fn llms_full(cfg: &Config, entries: &[Entry]) -> String {
         o.push_str("\n---\n");
         o.push_str(&built_with(cfg));
     }
-    o.push_str(&format!("\n{}\n", brain_lex::branding::HTML));
+    if cfg.compiler_branding {o.push_str(&format!("\n{}\n", brain_lex::branding::HTML));}
     o
 }
 
@@ -624,7 +628,7 @@ gtag('consent','default',{ad_storage:'denied',ad_user_data:'denied',ad_personali
         js.push_str("dataLayer.push({'gtm.start':new Date().getTime(),event:'gtm.js'});");
     }
     js.push('\n');
-    let js=brain_lex::branding::code(&js);
+    let js=brain_lex::branding::code_with(&js,cfg.compiler_branding);
     let path = format!("_b/g.{}.js", hash(&js));
     head.push_str(&format!("<script src=\"/{path}\"></script>"));
     if let Some(id) = &g.analytics {

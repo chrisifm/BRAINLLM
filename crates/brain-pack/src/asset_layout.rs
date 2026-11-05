@@ -11,11 +11,13 @@ pub(crate) struct AssetLayout {
     pub fonts: Option<String>,
     pub precompressed: bool,
     pub host_files: bool,
+    pub github_pages: bool,
+    pub compiler_branding: bool,
     pub inline_css: bool,
     pub fast_compression: bool,
 }
 impl Default for AssetLayout {
-    fn default() -> Self { Self { js: "_b".into(), css: "_b".into(), images: "_b".into(), assets: "_b".into(), fonts: None, precompressed: true, host_files: true, inline_css: true, fast_compression: false } }
+    fn default() -> Self { Self { js: "_b".into(), css: "_b".into(), images: "_b".into(), assets: "_b".into(), fonts: None, precompressed: true, host_files: true, github_pages: false, compiler_branding: true, inline_css: true, fast_compression: false } }
 }
 impl AssetLayout {
     pub fn load(root: &Path, static_export: bool) -> Result<Self, String> {
@@ -30,16 +32,25 @@ impl AssetLayout {
         fs::File::open(path).map_err(|_| "cannot open brain.json output layout")?.take(2 * 1024 * 1024 + 1).read_to_string(&mut source).map_err(|_| "cannot read brain.json output layout")?;
         if source.len() > 2 * 1024 * 1024 { return Err("brain.json exceeds the output-layout read limit".into()); }
         let config = Json::parse(&source).map_err(|_| "brain.json output layout requires valid JSON")?;
+        let compiler_branding=brain_lex::branding::enabled(&config)?;
+        let mut out=Self{compiler_branding,..Self::default()};
         let Json::Obj(config) = config else { return Err("brain.json must be an object".into()); };
         let found: Vec<_> = config.iter().filter(|(name, _)| name == "staticOutput").collect();
         if found.len() > 1 { return Err("brain.json must declare staticOutput once".into()); }
-        let Some((_, layout)) = found.first() else { return Ok(Self::default()); };
+        let Some((_, layout)) = found.first() else { return Ok(out); };
         if !static_export { return Err("staticOutput requires static export; fix: set output to static or build with --static".into()); }
         let Json::Obj(fields) = layout else { return Err("staticOutput must be an object with js, css, images and/or assets directories".into()); };
-        let mut out = Self::default();
+        if let Some((_,host))=fields.iter().find(|(name,_)|name=="host") {
+            match host.as_str() {
+                Some("generic")=>{},
+                Some("github-pages")=>{out.github_pages=true;out.host_files=false;},
+                _=>return Err("staticOutput.host must be generic or github-pages".into()),
+            }
+        }
         let mut seen = std::collections::HashSet::new();
         for (name, value) in fields {
             if !seen.insert(name) { return Err(format!("staticOutput.{name} is declared twice")); }
+            if name == "host" {continue}
             if name == "compression" {
                 out.fast_compression = match value.as_str() {
                     Some("small") => false,
@@ -62,7 +73,7 @@ impl AssetLayout {
                 out.fonts = Some(directory(value.as_str().ok_or("staticOutput directories must be strings")?)?);
                 continue;
             }
-            let slot = match name.as_str() { "js" => &mut out.js, "css" => &mut out.css, "images" => &mut out.images, "assets" => &mut out.assets, _ => return Err("staticOutput supports only js, css, images, fonts, assets, inlineCss, compression, precompressed and hostFiles".into()) };
+            let slot = match name.as_str() { "js" => &mut out.js, "css" => &mut out.css, "images" => &mut out.images, "assets" => &mut out.assets, _ => return Err("staticOutput supports only js, css, images, fonts, assets, inlineCss, compression, precompressed, hostFiles and host".into()) };
             let value = value.as_str().ok_or("staticOutput directories must be strings")?;
             *slot = directory(value)?;
         }
@@ -120,6 +131,24 @@ fn directory(value: &str) -> Result<String, String> {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn github_pages_defaults_are_order_independent_and_explicit_overrides_win() {
+        let root=std::env::temp_dir().join(format!("brain-pages-layout-{}",std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        for source in [r#"{"staticOutput":{"host":"github-pages"}}"#,r#"{"staticOutput":{"css":"css","host":"github-pages"}}"#] {
+            std::fs::write(root.join("brain.json"),source).unwrap();let layout=super::AssetLayout::load(&root,true).unwrap();
+            assert!(layout.github_pages);assert!(!layout.host_files);assert!(layout.precompressed);
+            assert!(super::AssetLayout::load(&root,false).is_err());
+        }
+        for source in [r#"{"staticOutput":{"hostFiles":true,"precompressed":true,"host":"github-pages"}}"#,r#"{"staticOutput":{"host":"github-pages","precompressed":true,"hostFiles":true}}"#] {
+            std::fs::write(root.join("brain.json"),source).unwrap();let layout=super::AssetLayout::load(&root,true).unwrap();assert!(layout.host_files&&layout.precompressed);
+        }
+        for source in [r#"{"staticOutput":{"host":false}}"#,r#"{"staticOutput":{"host":"unknown"}}"#,r#"{"staticOutput":{"host":"github-pages","host":"generic"}}"#] {
+            std::fs::write(root.join("brain.json"),source).unwrap();assert!(super::AssetLayout::load(&root,true).is_err());
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn output_directories_are_bounded_and_confined() {
         for bad in ["", "/js", "../js", "src/../js", "src//js", "src/", "src/./js", "C:js", "src\\js", "src?x", "src#x", "_server/code", "API/code", "src/%2e%2e", "src/white space"] { assert!(super::directory(bad).is_err(), "{bad}"); }

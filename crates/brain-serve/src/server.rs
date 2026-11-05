@@ -1299,7 +1299,7 @@ fn dev_seo(ctx: &Ctx, req: &http::Request) -> Option<(&'static str, String)> {
         return Some(("text/plain; charset=utf-8", brain_seo::files::llms_txt(&cfg, &list)));
     }
     let files = brain_seo::files::sitemaps(&cfg, &entries);
-    let empty = format!("{}<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n</urlset>\n", brain_lex::branding::XML);
+    let empty = format!("{}<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n</urlset>\n",if cfg.compiler_branding {brain_lex::branding::XML}else{"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"});
     match files.into_iter().find(|(n, _)| n == name) {
         Some((_, body)) => Some(("application/xml; charset=utf-8", body)),
         None if name == "sitemap.xml" => Some(("application/xml; charset=utf-8", empty.into())),
@@ -1632,12 +1632,13 @@ fn app_page(ctx: &Ctx, req: &http::Request) -> (u16, String, Option<String>) {
             }
         }
     }
+    let compiler_branding=brain_seo::Config::load(&ctx.root).map(|cfg|cfg.compiler_branding).unwrap_or(true);
     if let Some((seo, head)) = &view_seo {
-        let (t, tags) = brain_pack::prerender::seo_head(seo, None, &req.path, "");
+        let (t, tags) = brain_pack::prerender::seo_head_with_branding(seo, None, &req.path, "",compiler_branding);
         title = t.or(title);
         head_extra = format!("{tags}{head_extra}{head}");
     }
-    if !head_extra.contains(brain_lex::branding::HTML) && !body.contains(brain_lex::branding::HTML) {
+    if compiler_branding && !head_extra.contains(brain_lex::branding::HTML) && !body.contains(brain_lex::branding::HTML) {
         head_extra.push_str(brain_lex::branding::HTML);
     }
     if let Some(title) = title {

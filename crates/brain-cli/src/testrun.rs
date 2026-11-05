@@ -589,7 +589,7 @@ fn load_average() -> Option<f64> {
 }
 
 fn test_navigation(error: &str) -> bool {
-    error.contains("context destroyed by navigation") || error.contains("context was destroyed") || error.contains("navigated or closed")
+    error.contains("context destroyed by navigation") || error.contains("context was destroyed") || error.contains("navigated or closed") || error.contains("Cannot find context with specified id") || error.contains("Session with given id not found")
 }
 
 /// Close only a tab attached by this owned headless Chrome, including failed recovery tabs.
@@ -615,6 +615,47 @@ fn open_test_page(chrome: &mut Chrome, base: &str, file: &str) -> Result<(String
         chrome.eval(&session,&format!("window.__brainLoad({})",Json::str(format!("/{file}")).stringify()))
     })();
     match loaded { Ok(loaded)=>Ok((session,loaded)),Err(error)=>{close_test_page(chrome,&session);Err(error)} }
+}
+
+fn plan_id(plan:&Json)->Result<&str,String> {
+    plan.get("id").and_then(Json::as_str).filter(|id|!id.is_empty() && id.len()<=128 && id.bytes().all(|b|b.is_ascii_alphanumeric() || matches!(b,b'-'|b'.')))
+        .ok_or_else(||"the local test API has no compatible document identity; fix: restart brain run with the current compiler before testing".into())
+}
+fn plan_matches(chrome:&mut Chrome,session:&str,plan:&Json)->Result<bool,String> {
+    let id=plan_id(plan)?;
+    match chrome.eval(session,&format!("typeof window.__brainMatches==='function' && window.__brainMatches({})",Json::str(id).stringify())) {
+        Ok(Json::Bool(value))=>Ok(value),Ok(_)=>Ok(false),Err(error) if test_navigation(&error)=>Ok(false),Err(error)=>Err(error),
+    }
+}
+fn navigation_message(file:&str,name:&str)->String {
+    format!("{file}: test `{name}` lost its registered document during navigation; fix: do not reload or leave /@brain/test.html from mounted hooks or component actions; stub navigation in a component test and verify real navigation on an actual app page. Interrupted post-assertion audits and feedback are not measurements.")
+}
+fn fail_last_navigation(report:&mut FileReport) {
+    if let Some(last)=report.tests.last_mut() {last.ok=false;last.error=Some(navigation_message(&report.file,&last.name));}
+    else {report.load_error=Some(format!("{}: the test document navigated before its first registered scenario; fix: remove navigation from module initialization",report.file));}
+}
+#[derive(Debug)]
+enum BoundStepError { Navigation { started:bool }, Other(String) }
+fn bound_step<F>(chrome:&mut Chrome,session:&str,plan:&Json,index:usize,name:&str,audit_step:F)->Result<(Json,Vec<AxIssue>),BoundStepError>
+where F:FnOnce(&mut Chrome,&str,&str,&mut Vec<AxIssue>)->Result<(),String> {
+    let valid=|chrome:&mut Chrome|plan_matches(chrome,session,plan).map_err(BoundStepError::Other);
+    if !valid(chrome)? {return Err(BoundStepError::Navigation{started:false})}
+    let id=plan_id(plan).map_err(BoundStepError::Other)?;
+    let expression=format!("typeof window.__brainStep==='function' ? window.__brainStep({index},{}) : ({{documentChanged:true,started:false}})",Json::str(id).stringify());
+    let result=match chrome.eval(session,&expression) {Ok(value)=>value,Err(error) if test_navigation(&error)=>return Err(BoundStepError::Navigation{started:true}),Err(error)=>return Err(BoundStepError::Other(error))};
+    if result.get("documentChanged")==Some(&Json::Bool(true)) {return Err(BoundStepError::Navigation{started:result.get("started")==Some(&Json::Bool(true))})}
+    if !valid(chrome)? {return Err(BoundStepError::Navigation{started:true})}
+    let mut issues=Vec::new();let audited=audit_step(chrome,session,name,&mut issues);
+    if !valid(chrome)? {return Err(BoundStepError::Navigation{started:true})}
+    audited.map_err(BoundStepError::Other)?;
+    Ok((result,issues))
+}
+fn restore_test_page(chrome:&mut Chrome,base:&str,file:&str,names:&Json,heap:bool)->Result<Option<(String,Json)>,String> {
+    let (session,plan)=open_test_page(chrome,base,file)?;
+    if plan.get("error").is_some() || plan.get("names")!=Some(names) || plan_id(&plan).is_err() {
+        close_test_page(chrome,&session);return Ok(None)
+    }
+    instrument_test_page(chrome,&session,heap);Ok(Some((session,plan)))
 }
 
 fn instrument_test_page(chrome: &mut Chrome, session: &str, heap: bool) {
@@ -653,7 +694,7 @@ fn run_headless_once(
             },
             lanes: Vec::new(),
         };
-        let (mut session,loaded)=match open_test_page(&mut chrome,base,&rel) {
+        let (mut session,mut loaded)=match open_test_page(&mut chrome,base,&rel) {
             Ok(page)=>page,
             Err(error) if test_navigation(&error)=>{rep.load_error=Some(format!("{rel}: the test module navigated while loading; fix: keep test-document navigation out of module initialization"));reports.push(rep);continue;},
             Err(error)=>return Err(error),
@@ -666,50 +707,44 @@ fn run_headless_once(
         }
         let heap = HEAP.load(std::sync::atomic::Ordering::SeqCst);
         instrument_test_page(&mut chrome,&session,heap);
-        let count = match loaded.get("names") {
-            Some(Json::Arr(a)) => a.len(),
-            _ => 0,
-        };
+        let names=loaded.get("names").cloned().unwrap_or_else(||Json::Arr(vec![]));
+        let count=match &names {Json::Arr(names)=>names.len(),_=>0};
+        plan_id(&loaded)?;
         for i in 0..count {
-            let began=Instant::now();
-            let r=match chrome.eval(&session,&format!("window.__brainStep({i})")) {
-                Ok(result)=>result,
-                Err(error) if test_navigation(&error)=>{
-                    let name=match loaded.get("names") {Some(Json::Arr(names))=>names.get(i).and_then(Json::as_str).unwrap_or("?"),_=>"?"};
-                    rep.tests.push(TestResult {name:name.into(),ok:false,ms:began.elapsed().as_secs_f64()*1000.0,error:Some(format!("{rel}: test `{name}` lost its document during navigation; fix: do not reload or leave /@brain/test.html from mounted hooks or component actions; stub navigation in a component test and verify real navigation on an actual app page. The interrupted test could not complete its post-assertion audits."))});
-                    close_test_page(&mut chrome,&session);
-                    if i+1==count { reports.push(rep); continue 'files; }
-                    match open_test_page(&mut chrome,base,&rel) {
-                        Ok((next,reloaded))=>{
-                            session=next;
-                            if reloaded.get("error").is_some() || reloaded.get("names")!=loaded.get("names") {
-                                rep.load_error=Some(format!("{rel}: could not restore the same test list after navigation; remaining tests were not run"));
-                                close_test_page(&mut chrome,&session);reports.push(rep);continue 'files;
-                            }
-                            instrument_test_page(&mut chrome,&session,heap);
-                        }
-                        Err(error) if test_navigation(&error)=>{rep.load_error=Some(format!("{rel}: the test module navigated again during recovery; remaining tests were not run; fix: remove navigation from module initialization"));reports.push(rep);continue 'files;},
-                        Err(error)=>return Err(format!("{error}; while restoring {rel} after a test-document navigation")),
+            let name=match &names {Json::Arr(names)=>names.get(i).and_then(Json::as_str).unwrap_or("?"),_=>"?"}.to_string();
+            let began=Instant::now();let mut unstarted_recovery=false;
+            loop {
+                match bound_step(&mut chrome,&session,&loaded,i,&name,audit) {
+                    Ok((result,issues))=>{
+                        rep.tests.push(TestResult {name:name.clone(),ok:result.get("ok")==Some(&Json::Bool(true)),ms:result.get("ms").and_then(|v|if let Json::Num(n)=v{Some(*n)}else{None}).unwrap_or(0.0),error:result.get("error").and_then(Json::as_str).map(str::to_string)});
+                        for issue in issues {if !rep.a11y.iter().any(|old|old.code==issue.code && old.role==issue.role && old.node==issue.node){rep.a11y.push(issue)}}
+                        break;
                     }
-                    continue;
+                    Err(BoundStepError::Other(error))=>return Err(error),
+                    Err(BoundStepError::Navigation{started})=>{
+                        if started {rep.tests.push(TestResult {name:name.clone(),ok:false,ms:began.elapsed().as_secs_f64()*1000.0,error:Some(navigation_message(&rel,&name))});}
+                        else {fail_last_navigation(&mut rep);}
+                        close_test_page(&mut chrome,&session);
+                        if (started && i+1==count) || (!started && (unstarted_recovery || i==0)) {
+                            if !started {rep.load_error=Some(format!("{rel}: navigation prevented the next registered scenario from starting; remaining tests and feedback were not measured"));}
+                            rep.heap_mode="not-measured";reports.push(rep);continue 'files;
+                        }
+                        match restore_test_page(&mut chrome,base,&rel,&names,heap) {
+                            Ok(Some((next,plan)))=>{session=next;loaded=plan;}
+                            Ok(None)=>{rep.load_error=Some(format!("{rel}: could not restore the same registered test list after navigation; remaining tests were not run"));reports.push(rep);continue 'files;}
+                            Err(error) if test_navigation(&error)=>{rep.load_error=Some(format!("{rel}: the test module navigated again during recovery; remaining tests were not run; fix: remove navigation from module initialization"));reports.push(rep);continue 'files;}
+                            Err(error)=>return Err(format!("{error}; while restoring {rel} after a test-document navigation")),
+                        }
+                        if started {break;}
+                        // The current assertion never began. Restore it once; the failed previous scenario is not replayed.
+                        unstarted_recovery=true;
+                    }
                 }
-                Err(error)=>return Err(error),
-            };
-            let name = r
-                .get("name")
-                .and_then(Json::as_str)
-                .unwrap_or("?")
-                .to_string();
-            rep.tests.push(TestResult {
-                ok: r.get("ok") == Some(&Json::Bool(true)),
-                ms: match r.get("ms") {
-                    Some(Json::Num(n)) => *n,
-                    _ => 0.0,
-                },
-                error: r.get("error").and_then(Json::as_str).map(str::to_string),
-                name: name.clone(),
-            });
-            audit(&mut chrome, &session, &name, &mut rep.a11y)?;
+            }
+        }
+        if !plan_matches(&mut chrome,&session,&loaded)? {
+            fail_last_navigation(&mut rep);rep.load_error=Some(format!("{rel}: post-test feedback was not measured because the registered document navigated"));rep.heap_mode="not-measured";
+            close_test_page(&mut chrome,&session);reports.push(rep);continue 'files;
         }
         if heap {
             // unmount, then give requests still on the way a bounded time to settle: a pending `.then` retains its
@@ -776,6 +811,9 @@ fn run_headless_once(
                 rep.leaks = ls;
             }
         }
+        if !plan_matches(&mut chrome,&session,&loaded)? {
+            fail_last_navigation(&mut rep);rep.load_error=Some(format!("{rel}: runtime/heap feedback was interrupted by navigation and was not measured"));rep.errors.clear();rep.leaks.clear();rep.heap_mode="not-measured";
+        }
         close_test_page(&mut chrome,&session);
         reports.push(rep);
     }
@@ -810,6 +848,57 @@ mod transport_tests {
         assert_eq!(chrome.deadline,Some(Duration::from_secs(5)));
         assert_eq!(targets(&mut chrome),before);
         assert_eq!(chrome.eval(&other,"1 + 1").unwrap(),Json::Num(2.0));
+    }
+
+    // Exercise real context replacement at deterministic protocol boundaries, without an HTTP race.
+    #[test]
+    fn registered_document_guards_steps_and_discards_interrupted_audits() {
+        fn open(chrome:&mut Chrome)->(String,Json) {
+            let api=include_str!("../../brain-serve/src/test-api.js")
+                .replace("import { mount as rtMount } from '/@brain/brain.js';","const rtMount=()=>()=>{};");
+            let html=format!("<div id='root'></div><script type='module'>{api}</script>");
+            let session=chrome.new_page().unwrap();
+            chrome.call(Some(&session),"Page.navigate",Json::obj([("url",Json::str(format!("data:text/html;base64,{}",crate::shot::base64(html.as_bytes()))))])).unwrap();
+            let end=std::time::Instant::now()+Duration::from_secs(3);
+            loop {
+                if chrome.eval(&session,"typeof window.__brainLoad==='function'")==Ok(Json::Bool(true)){break}
+                assert!(std::time::Instant::now()<end,"test API did not become ready");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let module="globalThis.__called=[];test('first',()=>__called.push('first'));test('second',()=>__called.push('second'));test('during',async()=>{__called.push('during');location.replace('about:blank');await new Promise(()=>{})});";
+            let url=format!("data:text/javascript;base64,{}",crate::shot::base64(module.as_bytes()));
+            let plan=chrome.eval(&session,&format!("window.__brainLoad({})",Json::str(url).stringify())).unwrap();
+            assert!(plan_id(&plan).is_ok(),"{}",plan.stringify());(session,plan)
+        }
+        fn reload(chrome:&mut Chrome,session:&str,plan:&Json) {
+            chrome.call(Some(session),"Page.reload",Json::Obj(vec![])).unwrap();
+            let end=std::time::Instant::now()+Duration::from_secs(3);
+            while plan_matches(chrome,session,plan).unwrap() {
+                assert!(std::time::Instant::now()<end,"document identity survived reload");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        fn no_audit(_: &mut Chrome,_:&str,_:&str,_:&mut Vec<AxIssue>)->Result<(),String>{Ok(())}
+        let mut chrome=Chrome::launch(Duration::from_secs(25)).unwrap();
+        let (session,plan)=open(&mut chrome);
+        assert_eq!(bound_step(&mut chrome,&session,&plan,0,"first",no_audit).unwrap().0.get("ok"),Some(&Json::Bool(true)));
+        reload(&mut chrome,&session,&plan);
+        assert!(matches!(bound_step(&mut chrome,&session,&plan,1,"second",no_audit),Err(BoundStepError::Navigation{started:false})));
+        close_test_page(&mut chrome,&session);
+        let (session,plan)=open(&mut chrome);
+        assert_eq!(bound_step(&mut chrome,&session,&plan,1,"second",no_audit).unwrap().0.get("ok"),Some(&Json::Bool(true)));
+        assert_eq!(chrome.eval(&session,"__called").unwrap(),Json::Arr(vec![Json::str("second")]));
+        let result=bound_step(&mut chrome,&session,&plan,0,"first",|chrome,session,_,issues|{
+            issues.push(AxIssue{code:"B0406",role:"button".into(),node:"button".into(),test:"first".into(),msg:"partial observation".into(),fix:"add text",engine:"test"});
+            reload(chrome,session,&plan);Ok(())
+        });
+        assert!(matches!(result,Err(BoundStepError::Navigation{started:true})),"partial audit cannot become a measured result");
+        close_test_page(&mut chrome,&session);
+        let (session,plan)=open(&mut chrome);
+        let result=bound_step(&mut chrome,&session,&plan,2,"during",no_audit);
+        if let Err(BoundStepError::Other(ref error))=result {panic!("unexpected navigation error: {error}")}
+        assert!(matches!(result,Err(BoundStepError::Navigation{started:true})),"pending assertion must retain its navigation failure");
+        close_test_page(&mut chrome,&session);
     }
 
     #[test]

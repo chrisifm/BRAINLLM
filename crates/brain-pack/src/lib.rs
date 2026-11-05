@@ -964,6 +964,17 @@ fn build_inner_with_options(
     // brain.json `base` (#148): every URL the build writes starts with `pre` (`/app`, or empty at the root); dist/
     // file paths never do
     let base = read_base(&input.root);
+    if asset_layout.github_pages {
+        let site=input.site.as_deref().ok_or("GitHub Pages requires its public origin; fix: set PUBLIC_SITE_URL or build with --site https://example.github.io and set brain.json base separately")?;
+        let site=url::Url::parse(site).map_err(|_|"GitHub Pages requires a valid absolute HTTPS origin")?;
+        if site.scheme()!="https" || site.host_str().is_none() || !site.username().is_empty() || site.password().is_some() || site.port().is_some() || site.path()!="/" || site.query().is_some() || site.fragment().is_some() {
+            return Err("GitHub Pages site must be an HTTPS origin without credentials, port, path, query or fragment; fix: use --site https://example.github.io and brain.json base /repository/ for a project site".into());
+        }
+        if base.len()>512 || base.split('/').any(|p|matches!(p,"."|"..")) || !base.bytes().all(|b|b.is_ascii_alphanumeric() || b"/_-.".contains(&b)) {
+            return Err("GitHub Pages base must be a literal URL path without traversal; fix: use / for an account/custom-domain site or /repository/ for a project site".into());
+        }
+    }
+
     // `ext` (#26): `brain build --ext` (cache.ext) wins over brain.json; `web` by default
     let ext = if input.cache.ext.is_empty() { read_ext(&input.root) } else { Ext::from_name(&input.cache.ext) };
     if options.static_export && ext != Ext::Web {
@@ -1343,7 +1354,7 @@ fn build_inner_with_options(
             last = b;
         }
         js.push_str(&src[last..]);
-        if !matches!(n,Node::File(file) if dependencies::is_foreign(file)) { js=brain_lex::branding::code(&js); }
+        if !matches!(n,Node::File(file) if dependencies::is_foreign(file)) { js=brain_lex::branding::code_with(&js,asset_layout.compiler_branding); }
         let key=match n {Node::File(file) if dependencies::is_foreign(file)=>format!("{foreign_namespace}/{file}"),_=>asset_layout.js(&format!("{}.{jsx}",content_hash(&js)))};
         let url = format!("{pre}/{key}");
         files.insert(key, js);
@@ -1364,7 +1375,7 @@ fn build_inner_with_options(
     let tokens_head = if tokens.trim().is_empty() {
         String::new()
     } else {
-        let css = brain_lex::branding::code(&minify_css(&format!("@layer tokens{{{tokens}}}")));
+        let css = brain_lex::branding::code_with(&minify_css(&format!("@layer tokens{{{tokens}}}")),asset_layout.compiler_branding);
         if asset_layout.inline_css && css.len() <= INLINE_TOKENS_CSS {
             format!("<style>{css}</style>")
         } else {
@@ -1637,7 +1648,7 @@ fn build_inner_with_options(
         // are immutable assets: their compression/cache does not include personalized HTML or props.
         let mut view_css = String::new();
         if !css.trim().is_empty() {
-            let css = brain_lex::branding::code(&minify_css(&css));
+            let css = brain_lex::branding::code_with(&minify_css(&css),asset_layout.compiler_branding);
             if asset_layout.inline_css && !*ssr && css.len() <= INLINE_CSS {
                 view_css = format!("<style>{css}</style>");
             } else {
@@ -1699,7 +1710,7 @@ fn build_inner_with_options(
             }
             if !keys.is_empty() || !entries.is_empty() {
                 let js = format!("import{{add}}from\"{rt}\";add({},{{{}}});\n", prerender_json(loc), entries.join(","));
-                let js = brain_lex::branding::code(&js);
+                let js = brain_lex::branding::code_with(&js,asset_layout.compiler_branding);
                 let key = asset_layout.js(&format!("i18n-{}-{loc}.{}.{}", view_slug(view), content_hash(&js), ext.js()));
                 dict_url = Some(format!("{pre}/{key}"));
                 dicts.insert(route.clone(), format!("{pre}/{key}"));
@@ -1900,7 +1911,7 @@ fn build_inner_with_options(
         if let Some(links) = &links {
             for (key, value) in &mut seo { if key == "canonical" && let Some(local) = links.to(value) { *value = local; } }
         }
-        let (title, seo_html) = prerender::seo_head(&seo, site.as_deref(), &brain_lex::url_path::page_path(&p.route,seo_always), &input.generator);
+        let (title, seo_html) = prerender::seo_head_with_branding(&seo, site.as_deref(), &brain_lex::url_path::page_path(&p.route,seo_always), if asset_layout.compiler_branding {&input.generator}else{""},asset_layout.compiler_branding);
         let props = r.map_or("{}".to_string(), |r| brain_lex::json::in_html(&r.props));
         let mut head = format!("{seo_html}{}{}", p.head, r.map_or("", |r| r.head.as_str()));
         // `query="page"`: the request parameters that are part of the page's identity. The server reads the marker,
@@ -1981,7 +1992,7 @@ fn build_inner_with_options(
         // a page outside the default language keeps it in the links its views mount (§37)
         if let (Some(t), Some(l), Some(rt), true) = (&links, &p.locale, url_of.get(&Node::Runtime("brain-links.js".into())), p.interactive && script.starts_with("<script type=\"module\">")) {
             let js = format!("import l from\"{rt}\";l({},{},{},{},{});\n", prerender_json(l), prerender_json(&pre), prerender_json(&t.prefix), prerender_json(&t.pattern()), t.slugs_json());
-            let js = brain_lex::branding::code(&js);
+            let js = brain_lex::branding::code_with(&js,asset_layout.compiler_branding);
             let key = asset_layout.js(&format!("links-{l}.{}.{}", content_hash(&js), ext.js()));
             // after the dictionary: the page's first import stays the one its first render needs
             script = match &p.dict {
@@ -2290,6 +2301,13 @@ fn build_inner_with_options(
     navigation::apply(&mut pages, &mut files, &pre);
     // Format-valid attribution for framework-owned documents. Copied assets retain their original byte identity.
     for (path, source) in &mut files {
+        if !asset_layout.compiler_branding {
+            // Specialize only the owned runtime source; other generators already omit their own attribution.
+            if path=="server.mjs" {
+                *source=source.lines().filter(|line|!line.trim_start().starts_with("'x-generated-by':") && !line.starts_with("// BRAINLLM production server")).collect::<Vec<_>>().join("\n").replace(brain_lex::branding::HTML,"");
+            }
+            continue;
+        }
         if path.ends_with(".xml") { *source=brain_lex::branding::xml(source); }
         else if path.ends_with(".md") || (path.ends_with(".txt") && !source.contains(brain_lex::branding::HOME)) {
             source.push_str(&format!("\n{}\n",if path.ends_with(".md") || path.ends_with("llms.txt") || path.ends_with("llms-full.txt") {brain_lex::branding::HTML}else{brain_lex::branding::HASH}));
@@ -2318,6 +2336,15 @@ fn build_inner_with_options(
             }
         }
     }
+    if asset_layout.github_pages {
+        if !files.contains_key("index.html") {return Err("GitHub Pages requires index.html at the artifact root; fix: add views/index.brain".into())}
+        // Host control files stay at the artifact root, even for /repository/ hosting.
+        files.insert(".nojekyll".into(),String::new());
+        if !files.contains_key("404.html") && !input.root.join("public/404.html").is_file() {
+            files.insert("404.html".into(),format!("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex\"><title>Page not found</title></head><body><main><h1>Page not found</h1><a href=\"{base}\">Home</a></main></body></html>"));
+            if asset_layout.compiler_branding && let Some(html)=files.get_mut("404.html") {let at=html.find("</head>").unwrap_or(0);html.insert_str(at,brain_lex::branding::HTML);}
+        }
+    }
     let mut public_bin: BTreeMap<String, Vec<u8>> = post_bin;
     public_bin.extend(emitted_assets);
     // measuring skips it: the signature changes on every edit and would show as noise in every page's bytes
@@ -2329,7 +2356,7 @@ fn build_inner_with_options(
         // `csp`: the site policy without inline hashes; server.mjs adds its per-response nonce to script-src (RUNTIME)
         let policy = prerender_json(&cache::app_csp(&input.root, &[], &post_csp));
         // `base` (#148): server.mjs strips it before routing; routes stay as the app writes them
-        m = m.replacen("{\"v\":1,", &format!("{{\"v\":1,\"build\":\"{signature}\",\"base\":{},\"csp\":{policy},", prerender_json(&base)), 1);
+        m = m.replacen("{\"v\":1,", &format!("{{\"v\":1,\"compilerBranding\":{},\"build\":\"{signature}\",\"base\":{},\"csp\":{policy},",asset_layout.compiler_branding, prerender_json(&base)), 1);
         // `server` (§11.1): brain.json body/time/rate limits; an invalid value keeps the defaults (brain check: B0707)
         let limits = read_server_limits(&input.root).unwrap_or_else(|e| { warnings.push(e); ServerLimits::default() });
         m = m.replacen("{\"v\":1,", &format!("{{\"v\":1,\"server\":{},", limits.to_json()), 1);

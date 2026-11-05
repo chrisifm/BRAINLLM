@@ -1,0 +1,15 @@
+{
+  "id": "lighthouse-failure-report",
+  "kind": "fix",
+  "title": "Reject failed and incomplete Lighthouse measurements",
+  "why": "A failed browser audit must not be reported as a successful empty set of scores. Explicit Chrome flags allow container setup without automatically disabling browser protection.",
+  "changelog": [
+    "Lighthouse process failures and incomplete category reports fail explicitly"
+  ],
+  "guide": "brain guide seo",
+  "codes": [],
+  "apis": [
+    "brain lighthouse"
+  ],
+  "affects": []
+}

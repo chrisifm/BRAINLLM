@@ -87,6 +87,20 @@ fn socket_routes(
 }
 /// target: pm2 or nginx. Configuration remains optional; the native manager is `brain start`.
 pub fn preview(root: &Path, target: &str, options: &Value) -> Result<Value, String> {
+    if target=="github-pages" {
+        let fields=options.as_object().ok_or("GitHub Pages options must be an object")?;
+        if fields.keys().any(|key|key!="expectedRevision") {return Err("GitHub Pages preview accepts only expectedRevision; configure output, base and staticOutput.host in brain.json".into())}
+        if !crate::static_export::enabled(root,false)? {return Err("GitHub Pages requires output:static in brain.json".into())}
+        let config:Value=serde_json::from_str(&std::fs::read_to_string(root.join("brain.json")).map_err(|_|"cannot read brain.json")?).map_err(|_|"invalid brain.json")?;
+        if config.pointer("/staticOutput/host").and_then(Value::as_str)!=Some("github-pages") {return Err("set staticOutput.host to github-pages before preparing its workflow".into())}
+        let path="deploy/github-pages.yml";
+        let existing=crate::changes::read(root,path)?;
+        if options.get("expectedRevision").is_some_and(|revision|revision!=&existing["revision"]) {return Err("deployment configuration changed; inspect it and prepare a new preview".into())}
+        let content=include_str!("templates/deployment/github-pages.yml");
+        let content=if config.get("compilerBranding")==Some(&Value::Bool(false)) {content.replacen("# by BRAINLLM https://chrisifm.github.io/BRAINLLM/\n","",1)}else{content.to_string()};
+        let preserved=!existing["revision"].is_null();
+        return Ok(json!({"schemaVersion":1,"dryRun":true,"target":target,"topology":"static","operations":if preserved{vec![]}else{vec![json!({"path":path,"expectedRevision":null,"content":content})]},"existingRevision":existing["revision"],"preservedExisting":preserved,"proposed":if preserved{Some(json!({"path":path,"content":content}))}else{None},"recipe":["Review and apply the proposed deploy/github-pages.yml without overwriting an existing workflow","Copy the reviewed workflow into .github/workflows/pages.yml and commit the npm lockfile","Set repository Settings > Pages > Source to GitHub Actions; review github-pages environment protection","Push the reviewed source to main or run the workflow manually; upload only the contents of dist","Wait for deployment and verify the public root, nested pages, assets and a missing URL"],"activation":{"installed":false,"started":false,"published":false},"warnings":["Preview only; no GitHub settings, files or deployments were changed","GitHub Pages does not apply _headers or _redirects; use directory-index routes and its 404.html support"]}));
+    }
     if !options.is_object()
         || options.as_object().unwrap().keys().any(|k| {
             ![
@@ -192,9 +206,13 @@ pub fn preview(root: &Path, target: &str, options: &Value) -> Result<Value, Stri
     let (path, content) = match target {
         "pm2" => {
             let memory = bounded(options, "memoryMb", 512, 64, 4096)?;
+            // This Rust process is the actual native executable even when npm's Node launcher spawned it.
+            // Supervising the launcher would hide native RSS from PM2's max_memory_restart check.
+            let native=std::env::current_exe().map_err(|_|"cannot resolve the native executable; supply an explicit brainBinary path")?;
+            let native=native.to_str().ok_or("native executable path is not UTF-8; supply an explicit brainBinary path")?;
             let binary = options
                 .get("brainBinary")
-                .map_or(Some("brain"), Value::as_str)
+                .map_or(Some(native), Value::as_str)
                 .filter(|s| {
                     !s.is_empty()
                         && s.len() <= 512
@@ -202,6 +220,7 @@ pub fn preview(root: &Path, target: &str, options: &Value) -> Result<Value, Stri
                         && !s.contains(['\n', '\r'])
                 })
                 .ok_or("brainBinary must be one literal executable path, not a shell command")?;
+            if options.get("brainBinary").is_some() {warnings.push("brainBinary overrides native executable discovery: verify it is the deployed native binary, not an npm/Node/shell launcher; PM2 memory restart thresholds do not measure a launcher's native child.".into());}
             let common = |app_name: String, args: Vec<String>| json!({"name":app_name,"cwd":root.to_string_lossy(),"script":binary,"args":args,"interpreter":"none","instances":1,"exec_mode":"fork","watch":false,"autorestart":true,"stop_exit_codes":[crate::backend::CONFIG_EXIT],"min_uptime":10000,"max_restarts":10,"exp_backoff_restart_delay":1000,"kill_timeout":20000,"listen_timeout":30000,"wait_ready":false,"max_memory_restart":format!("{memory}M"),"time":true,"merge_logs":true});
             let mut apps = vec![common(
                 name.to_owned(),
@@ -341,7 +360,7 @@ pub fn preview(root: &Path, target: &str, options: &Value) -> Result<Value, Stri
             warnings.push("Forwarded client identity is overwritten at this edge, never appended from untrusted request headers. Keep upstream ports loopback-only and review any additional proxy hop explicitly.".into());
             ("deploy/nginx.brain.conf", content)
         }
-        _ => return Err("deployment target must be pm2 or nginx".into()),
+        _ => return Err("deployment target must be pm2, nginx or github-pages".into()),
     };
     if native_sockets {
         warnings.push("Build with the same public origin and explicit backend.sockets declaration before activation. brain start consumes the compiled nativeSockets manifest; PM2 does not enable sockets independently. The backend remains the authentication and row-policy authority.".into());
@@ -426,6 +445,30 @@ mod tests {
             let _ = std::fs::remove_dir_all(&self.0);
         }
     }
+    #[test]
+    fn github_pages_previews_only_static_workflow_and_preserves_custom_source() {
+        let app=App::new();std::fs::write(app.0.join("brain.json"),r#"{"output":"static","staticOutput":{"host":"github-pages"}}"#).unwrap();
+        let plan=preview(&app.0,"github-pages",&json!({})).unwrap();
+        assert_eq!(plan["activation"]["published"],false);assert_eq!(plan["operations"][0]["path"],"deploy/github-pages.yml");
+        let source=plan["operations"][0]["content"].as_str().unwrap();
+        assert!(source.contains("path: dist")&&source.contains("PAGES_BASE_PATH")&&source.contains("needs: build"));
+        assert!(!app.0.join("deploy").exists(),"preview cannot write files");
+        std::fs::create_dir(app.0.join("deploy")).unwrap();std::fs::write(app.0.join("deploy/github-pages.yml"),"custom workflow").unwrap();
+        let preserved=preview(&app.0,"github-pages",&json!({})).unwrap();assert_eq!(preserved["operations"],json!([]));assert_eq!(preserved["preservedExisting"],true);
+        assert!(preview(&app.0,"github-pages",&json!({"expectedRevision":"stale"})).is_err());
+        assert!(preview(&app.0,"github-pages",&json!({"topology":"rust-node"})).is_err());
+        std::fs::write(app.0.join("brain.json"),"{}").unwrap();assert!(preview(&app.0,"github-pages",&json!({})).is_err());
+    }
+
+    #[test]
+    fn pm2_default_targets_native_executable_not_npm_launcher() {
+        let app=App::new();let plan=preview(&app.0,"pm2",&json!({"topology":"rust-node","domain":"example.test"})).unwrap();
+        let source=plan["operations"][0]["content"].as_str().unwrap();
+        let value:Value=serde_json::from_str(source.split_once("module.exports = ").unwrap().1.trim().trim_end_matches(';')).unwrap();
+        let native=std::env::current_exe().unwrap();
+        for process in value["apps"].as_array().unwrap() {assert_eq!(process["script"],native.to_string_lossy().as_ref());assert_eq!(process["interpreter"],"none");}
+    }
+
     #[test]
     fn pm2_is_literal_safe_single_instance_and_preserves_existing() {
         let app = App::new();

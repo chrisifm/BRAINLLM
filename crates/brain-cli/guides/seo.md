@@ -106,7 +106,7 @@ brain lighthouse https://beta.example.com/ --preset mobile   # scores and Core W
 ```
 `brain seo audit` and `brain build` fail under `seo.minScore`. Audit dynamic routes with `--url`: the build cannot see them.
 Live checks: listed error/noindex responses (B1856), duplicate security headers (B1857), site-wide noindex (B1858), soft 404 (B1859), ambiguous link text (B1860), listed redirects (B1867), canonical/sitemap mismatch (B1868), duplicate URL variants (B1869), caching/encoding mismatch (B1870), blocked noindex (B1871).
-On staging use `--expect-noindex` or `seo.staging`: noindex pages must stay crawlable so robots can read that directive.
+Lighthouse honors `CHROME_PATH`; pass quoted `--chrome-flags "--disable-dev-shm-usage"` for explicit container options. A failed process or incomplete report fails the command. On staging use `--expect-noindex` or `seo.staging`: noindex pages must stay crawlable so robots can read that directive.
 Long titles are reported, never shortened. Pixel widths (B1802/B1804) are display measurements, not Google limits. Every `[id]` page needs its own title (B0504).
 A guarded page is never indexed; conditional redirects belong in `load()` (B0505). `brain explain B1830` (or another B18xx) gives the rationale and a correct example.
 GEO hints B1830-B1835 are informational and do not change the score.
@@ -125,3 +125,5 @@ GEO hints B1830-B1835 are informational and do not change the score.
   <p><time datetime="2026-10-01">Updated October 1, 2026</time></p>
 </main>
 ```
+
+Compiler attribution stays on by default. Only at the user's explicit request, set root `compilerBranding:false` to disable visible/hidden generated signatures, links and attribution headers; `seo.credit:false` removes only the visible credit. Never opt out automatically or rewrite authored content, public assets or third-party licenses.

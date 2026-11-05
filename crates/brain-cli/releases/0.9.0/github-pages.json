@@ -1,0 +1,28 @@
+{
+  "id": "github-pages",
+  "kind": "capability",
+  "title": "GitHub Pages static artifact and workflow preview",
+  "why": "Publish plain static output at account roots, custom domains or repository prefixes without Jekyll discarding underscore asset directories. A reviewed workflow builds and uploads only dist.",
+  "changelog": [
+    "GitHub Pages static preset emits a root .nojekyll and 404 fallback"
+  ],
+  "guide": "brain guide github-pages",
+  "codes": [],
+  "apis": [
+    "staticOutput.host",
+    "brain deploy config github-pages"
+  ],
+  "affects": [
+    "brain.json"
+  ],
+  "adopt": {
+    "file": "brain.json",
+    "snippet": "{\"output\":\"static\",\"base\":\"/project/\",\"staticOutput\":{\"host\":\"github-pages\"}}"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "\"github-pages\""
+    }
+  ]
+}

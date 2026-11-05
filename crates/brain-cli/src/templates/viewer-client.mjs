@@ -83,9 +83,9 @@ export async function viewerClient(input, fetcher = globalThis.fetch) {
     if (!out?.ok || out.pending) throw Error('VIEWER_BRIDGE_CALL_FAILED')
     return out.result
   }
-  const guard = `if(location.origin!==${JSON.stringify(base)}||location.pathname!=='/@brain/test.html')throw Error('VIEWER_OWNED_PAGE_MOVED');`
+  const guard = `if(location.origin!==${JSON.stringify(base)}||location.pathname!=='/@brain/test.html')return {documentChanged:true,started:false};`
   const run = (id, body) => { if (!owned.has(id)) throw Error('VIEWER_TAB_NOT_OWNED'); return call({ action: 'run', target: String(id), world: 'MAIN', code: guard + body }) }
-  let stage = 'open', cleanupFailed = false
+  let stage = 'open', cleanupFailed = false, activeReport = null
   try {
     for (const file of files) {
       stage = 'open'
@@ -96,40 +96,97 @@ export async function viewerClient(input, fetcher = globalThis.fetch) {
         catch (error) { if (error?.message !== 'VIEWER_BRIDGE_REFUSED' || owned.size || reports.length || !ready[i + 1]) throw error; useService(ready[i + 1].service) }
       }
       if (!Number.isSafeInteger(opened?.id) || opened.id < 1) throw Error('VIEWER_NO_OWNED_TAB')
-      const id = opened.id; owned.add(id)
+      let id = opened.id; owned.add(id)
       try {
-        stage = 'ready'
-        await run(id, "const end=Date.now()+10000;while(typeof window.__brainLoad!=='function'){if(Date.now()>end)throw Error('VIEWER_TEST_API_NOT_READY');await new Promise(r=>setTimeout(r,20))}return true;")
-        stage = 'load'
-        const loaded = await run(id, `const result=await window.__brainLoad(${JSON.stringify('/' + file)});return {failed:typeof result?.error==='string',names:Array.isArray(result?.names)?result.names.slice(0,257):[]};`)
-        if (loaded?.failed) { reports.push({ file, error: 'Declared test module failed to load; inspect compiler feedback.', tests: [], a11y: [], errors: [], leaks: [], engine: 'viewer', a11yMode: 'DOM-label-heuristic', heapMode: 'not-measured' }) } else {
+        const validID = id => typeof id === 'string' && /^[A-Za-z0-9.-]{1,128}$/.test(id)
+        async function loadOwned() {
+          stage = 'ready'
+          const ready = await run(id, "const end=Date.now()+10000;while(typeof window.__brainLoad!=='function'){if(Date.now()>end)throw Error('VIEWER_TEST_API_NOT_READY');await new Promise(r=>setTimeout(r,20))}return true;")
+          if (ready !== true) return { failed: true, names: [] }
+          stage = 'load'
+          const result = await run(id, `const result=await window.__brainLoad(${JSON.stringify('/' + file)});return {failed:typeof result?.error==='string',id:typeof result?.id==='string'?result.id:null,names:Array.isArray(result?.names)?result.names.slice(0,257):[]};`)
+          return result && validID(result.id) ? result : { failed: true, names: [] }
+        }
+        let loaded = await loadOwned()
+        if (loaded?.failed) { reports.push({ file, error: 'Declared test module or document identity failed to load; restart the current compiler and inspect its feedback.', tests: [], a11y: [], errors: [], leaks: [], engine: 'viewer', a11yMode: 'DOM-label-heuristic', heapMode: 'not-measured' }) } else {
         if (!Array.isArray(loaded?.names) || loaded.names.length > 256) throw Error('VIEWER_SCENARIO_LIMIT')
+        const names = loaded.names
         const report = { file, tests: [], a11y: [], errors: [], leaks: [], engine: 'viewer', a11yMode: 'DOM-label-heuristic', heapMode: 'not-measured' }
+        activeReport=report
+        const message = name => `${file}: test ${safeName(name)} lost its registered document during navigation; stub navigation in component tests. Interrupted audits and feedback were not measured.`
+        const failPrevious = () => { const last=report.tests.at(-1);if(last){last.ok=false;last.error=message(last.name)}else report.error='The test document navigated before its first scenario; remove navigation from module initialization.' }
+        const matches = async () => (await run(id, `return typeof window.__brainMatches==='function'&&window.__brainMatches(${JSON.stringify(loaded.id)});`)) === true
+        async function restore() {
+          stage = 'recover'
+          await call({ action: 'close', target: String(id) }, true); owned.delete(id)
+          stage='reopen'
+          let next
+          try { next=await call({ action: 'open', url: base + '/@brain/test.html', active: false }) }
+          catch(error){if(error?.message==='VIEWER_BRIDGE_REFUSED')stage='reopen-refused';throw error}
+          if (!Number.isSafeInteger(next?.id) || next.id < 1) throw Error('VIEWER_NO_OWNED_TAB')
+          id=next.id;owned.add(id)
+          const plan=await loadOwned()
+          if (plan.failed || JSON.stringify(plan.names)!==JSON.stringify(names)) {report.error='Could not restore the same registered scenarios after navigation; remaining scenarios were not run.';return false}
+          loaded=plan
+          await run(id, "await import('/@brain/brain-err.js').then(m=>m.capture({log:false}));return true;")
+          return true
+        }
         await run(id, "await import('/@brain/brain-err.js').then(m=>m.capture({log:false}));return true;")
-        for (let i = 0; i < loaded.names.length; i++) {
-          stage = 'scenario'
-          const result = await run(id, `const result=await window.__brainStep(${i});return {name:result?.name,ok:result?.ok===true,ms:result?.ms};`)
-          report.tests.push({ name: safeName(result?.name), ok: result?.ok === true, ms: Number.isFinite(result?.ms) ? Math.min(180000, Math.max(0, result.ms)) : 0, ...(result?.ok === true ? {} : { error: 'Declared scenario assertion failed; inspect its source and compiler feedback.' }) })
-          // DOM labels only: never claims Accessibility.getFullAXTree or computed accessibility parity.
-          const issues = await run(id, `const rules={button:['B0406','control without accessible text'],link:['B0406','control without accessible text'],textbox:['B0403','form control without an accessible name'],checkbox:['B0403','form control without an accessible name'],radio:['B0403','form control without an accessible name'],combobox:['B0403','form control without an accessible name'],img:['B0401','image without alternative text']};const out=[];const elements=document.querySelectorAll('#root button,#root a[href],#root input,#root textarea,#root select,#root img,#root [role]');let visited=0;for(const el of elements){if(++visited>4096)break;if(el.hidden||el.getAttribute('aria-hidden')==='true')continue;const tag=el.localName;const role=el.getAttribute('role')||(tag==='a'?'link':tag==='input'?(['checkbox','radio'].includes(el.type)?el.type:el.type==='hidden'?'':el.type==='button'||el.type==='submit'?'button':'textbox'):tag==='textarea'?'textbox':tag==='select'?'combobox':tag);const rule=rules[role];if(!rule)continue;if(tag==='img'&&el.hasAttribute('alt')&&el.alt==='')continue;const labelled=(el.getAttribute('aria-labelledby')||'').split(/\\s+/).filter(Boolean).map(id=>document.getElementById(id)?.textContent||'').join(' ');const label=el.getAttribute('aria-label')||labelled||el.alt||Array.from(el.labels||[]).map(l=>l.textContent).join(' ')||(['button','link'].includes(role)?el.textContent:'');if(!label.trim())out.push({code:rule[0],role,node:tag,msg:rule[1]});if(out.length>=128)break}return {items:out,truncated:visited>4096||out.length>=128};`)
-          for (const issue of issues?.items || []) if (!report.a11y.some(old => old.code === issue.code && old.role === issue.role && old.node === issue.node)) report.a11y.push({ code: issue.code, role: issue.role, node: issue.node, test: safeName(result?.name), msg: issue.msg, fix: issue.code === 'B0401' ? 'add alt (or alt="" for a decorative image)' : 'add a visible or associated accessible label' })
-          if (issues?.truncated) report.auditTruncated = true
+        scenarios: for (let i = 0; i < names.length; i++) {
+          let restoredUnstarted = false
+          for (;;) {
+            stage = 'scenario'
+            let result, issues, changed=false, started=false
+            try {
+              result = await run(id, `if(typeof window.__brainStep!=='function')return {documentChanged:true,started:false};const result=await window.__brainStep(${i},${JSON.stringify(loaded.id)});return {ok:result?.ok===true,ms:result?.ms,documentChanged:result?.documentChanged===true,started:result?.started===true};`)
+              changed=result?.documentChanged===true;started=changed?result.started===true:true
+              if (!changed && !(await matches())) changed=true
+              if (!changed) {
+                stage='audit'
+                issues = await run(id, `const rules={button:['B0406','control without accessible text'],link:['B0406','control without accessible text'],textbox:['B0403','form control without an accessible name'],checkbox:['B0403','form control without an accessible name'],radio:['B0403','form control without an accessible name'],combobox:['B0403','form control without an accessible name'],img:['B0401','image without alternative text']};const out=[];const elements=document.querySelectorAll('#root button,#root a[href],#root input,#root textarea,#root select,#root img,#root [role]');let visited=0;for(const el of elements){if(++visited>4096)break;if(el.hidden||el.getAttribute('aria-hidden')==='true')continue;const tag=el.localName;const role=el.getAttribute('role')||(tag==='a'?'link':tag==='input'?(['checkbox','radio'].includes(el.type)?el.type:el.type==='hidden'?'':el.type==='button'||el.type==='submit'?'button':'textbox'):tag==='textarea'?'textbox':tag==='select'?'combobox':tag);const rule=rules[role];if(!rule)continue;if(tag==='img'&&el.hasAttribute('alt')&&el.alt==='')continue;const labelled=(el.getAttribute('aria-labelledby')||'').split(/\\s+/).filter(Boolean).map(id=>document.getElementById(id)?.textContent||'').join(' ');const label=el.getAttribute('aria-label')||labelled||el.alt||Array.from(el.labels||[]).map(l=>l.textContent).join(' ')||(['button','link'].includes(role)?el.textContent:'');if(!label.trim())out.push({code:rule[0],role,node:tag,msg:rule[1]});if(out.length>=128)break}return {items:out,truncated:visited>4096||out.length>=128};`)
+                if (!(await matches())) changed=true
+              }
+            } catch (error) {
+              const same = await matches().catch(()=>null)
+              if (same !== false) throw error
+              changed=true;started=true
+            }
+            if (changed) {
+              if (started) report.tests.push({ name:safeName(names[i]),ok:false,ms:0,error:message(names[i]) })
+              else failPrevious()
+              if ((started && i+1===names.length) || (!started && (restoredUnstarted || i===0))) {
+                if(!started)report.error='Navigation prevented the next registered scenario from starting; remaining scenarios and feedback were not measured.'
+                break scenarios
+              }
+              if (!(await restore())) break scenarios
+              if (started) continue scenarios
+              restoredUnstarted=true;continue
+            }
+            report.tests.push({ name: safeName(names[i]), ok: result?.ok === true, ms: Number.isFinite(result?.ms) ? Math.min(180000, Math.max(0, result.ms)) : 0, ...(result?.ok === true ? {} : { error: 'Declared scenario assertion failed; inspect its source and compiler feedback.' }) })
+            for (const issue of issues?.items || []) if (!report.a11y.some(old => old.code === issue.code && old.role === issue.role && old.node === issue.node)) report.a11y.push({ code: issue.code, role: issue.role, node: issue.node, test: safeName(names[i]), msg: issue.msg, fix: issue.code === 'B0401' ? 'add alt (or alt="" for a decorative image)' : 'add a visible or associated accessible label' })
+            if (issues?.truncated) report.auditTruncated = true
+            break
+          }
         }
         stage = 'runtime-feedback'
-        const errors = await run(id, "const m=await import('/@brain/brain-err.js');return m.errors.slice(0,128).map(e=>({type:typeof e.type==='string'?e.type:'runtime',line:Number.isSafeInteger(e.line)?e.line:null,n:Number.isSafeInteger(e.n)?e.n:1}));")
-        report.errors = Array.isArray(errors) ? errors.map(e => ({ type: safeName(e.type), line: e.line, n: e.n, msg: 'Runtime failure captured in the owned test page; inspect compiler feedback.' })) : []
-        await run(id, "globalThis.__brainDispose?.();return true;")
-        reports.push(report)
+        if (!report.error && await matches()) {
+          const errors = await run(id, "const m=await import('/@brain/brain-err.js');return m.errors.slice(0,128).map(e=>({type:typeof e.type==='string'?e.type:'runtime',line:Number.isSafeInteger(e.line)?e.line:null,n:Number.isSafeInteger(e.n)?e.n:1}));")
+          await run(id, "globalThis.__brainDispose?.();return true;")
+          if (await matches()) report.errors = Array.isArray(errors) ? errors.map(e => ({ type: safeName(e.type), line: e.line, n: e.n, msg: 'Runtime failure captured in the owned test page; inspect compiler feedback.' })) : []
+          else {failPrevious();report.error='Runtime feedback was interrupted by document navigation and was not measured.'}
+        } else if(!report.error) {failPrevious();report.error='Runtime feedback was interrupted by document navigation and was not measured.'}
+        reports.push(report);activeReport=null
         }
       } finally {
-        try { await call({ action: 'close', target: String(id) }, true); owned.delete(id) } catch { cleanupFailed = true; stage = 'close' }
+        try { if(owned.has(id)){await call({ action: 'close', target: String(id) }, true); owned.delete(id)} } catch { cleanupFailed = true; stage = 'close' }
       }
       if (cleanupFailed) throw Error('VIEWER_OWNED_TAB_CLEANUP_FAILED')
     }
     return { ok: true, ...projection, reports, capabilities: { scenarios: 'same declared native test API', accessibility: 'DOM-label-heuristic; not Chrome AX tree', forcedGC: false }, cleanup: 'owned-tabs-closed' }
   } catch (error) {
+    if(activeReport&&!reports.includes(activeReport)){activeReport.error ||= 'Viewer transport interrupted this file; remaining scenarios and feedback were not measured.';reports.push(activeReport)}
     if (error?.message === 'VIEWER_BRIDGE_REFUSED' && stage === 'open' && !owned.size) return { ok: false, ...projection, code: 'VIEWER_OPEN_REFUSED', stage, completedReports: reports, cleanup: 'none; no tab was opened', fix: 'Every connected Viewer refused to open the test tab. Set BRAIN_VIEWER_PROFILE to a profile connected to that Viewer (and BRAIN_VIEWER_SERVICE=claude-viewer|codex-viewer when both run), and close leftover Viewer tabs if its tab limit is reached', fallbackEligible: false }
-    return { ok: false, ...projection, code: cleanupFailed ? 'VIEWER_OWNED_TAB_CLEANUP_FAILED' : 'VIEWER_EXECUTION_FAILED', stage, completedReports: reports, cleanup: owned.size ? 'unknown; owned tab close failed or open result lost' : stage === 'open' ? 'unknown if open response was lost' : 'owned-tabs-closed', fallbackEligible: false }
+    return { ok: false, ...projection, code: cleanupFailed ? 'VIEWER_OWNED_TAB_CLEANUP_FAILED' : 'VIEWER_EXECUTION_FAILED', stage, completedReports: reports, cleanup: owned.size ? 'unknown; owned tab close failed or open result lost' : ['open','reopen'].includes(stage) ? 'unknown if open response was lost' : 'owned-tabs-closed', fallbackEligible: false }
   }
 }
 export async function viewerMain() {

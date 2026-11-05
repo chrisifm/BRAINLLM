@@ -302,6 +302,10 @@ The runner closes the owned tab, reloads the same file in a new tab and checks i
 continuing later tests. Recovery navigation or a changed test list makes remaining tests explicitly unavailable;
 other files continue. Interrupted runtime/heap diagnostics cannot be complete. Restored pages reinstall inspector
 and error capture; completed/load-failed/recovery tabs close through their own attached target identity only.
+The test API snapshots scenario registration and returns an opaque document/registration identity. Both runners
+bind each step, accessibility observation and final feedback to that identity; trusted unload invalidates it before
+a new document can answer. Interrupted observations are discarded. Navigation between steps fails the preceding
+scenario and restores only the not-yet-started next one, once. A changed registry cannot execute a stale index.
 Transport failures retain the existing one-retry policy and do not become ordinary assertion failures.
 
 `brain-cli::testrun::preflight` runs before test-server reuse/start. It compiles current application sources with dev
@@ -1117,6 +1121,12 @@ component edit, ≤ 20 ms to the browser (excluding the OS file-event latency), 
 
 ## 29. Opinionated architecture and generators (fixed 2026-10-13, Chris: "like the Angular CLI, but for LLMs")
 
+GitHub Pages static host preset (2026-11-05): AssetLayout chooses host defaults independent of field order, requires
+a valid HTTPS origin separate from base, and emits root .nojekyll plus a fallback404 only when absent. Pages never
+move below the URL base on disk. CLI/MCP deployment preview proposes a preserved/CAS-checked workflow under deploy/,
+then requires review before installing it in .github/workflows/. The workflow validates configure-pages base metadata
+and uploads dist only; it does not mutate Pages configuration or publish during preview.
+
 `scaffold::AddOptions.blank` selects minimal noninteractive component markup with a slot, typed props and the normal
 colocated test. CLI `brain add comp --blank` and MCP `brain_add` share this path; all other kinds reject the option
 before mutation, and ordinary component generation retains its existing example template.
@@ -1129,6 +1139,14 @@ against sitemap header reservations. Dynamic runtime split headers use the same 
 `brain-build.json` carries deterministic generator/version/home metadata for all output, including original binary
 and protocol assets whose bytes/schemas stay unchanged; it is reserved and inserted before build-signature/SW work.
 Host hints and cleanup workers retain the signature. Page credit/version-label options do not remove build attribution.
+Explicit project opt-out (2026-11-05): brain-lex::branding::enabled validates root compilerBranding as a unique
+boolean, default true. Only false disables attribution; SEO credit/version labels are independent. The shared policy
+reaches code emission before hashes, SEO text/metadata, SW/offline, protocol metadata, host hints and both HTTP
+gateways. Node's owned emitted source omits its attribution URL literals; dev HTML/XML and deployment workflow
+previews also honor the policy. Copied public/foreign bytes are never filtered. Ordinary build grace is disabled
+on policy transitions so obsolete branded chunks are removed, never rewritten under an existing content hash.
+LLM-facing adoption examples preserve true; false requires an explicit end-user request.
+
 
 Living brandbooks (2026-11-04): `brain-cli::brandbook` owns a bounded declarative section structure and the
 explicit `design.brain.json.brandbook` editorial contract. A structural AST marker in the real brandbook route is
