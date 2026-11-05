@@ -9,6 +9,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-05
+
 - Static error fallbacks and direct document aliases retain their selected page CSP, opener and cache policy, including encoded names and own output extensions; asset policies remain separate.
 
 - Node serves `.brain`, `.jsbrain` and `.cssbrain` with document security and correct MIME types, including clean routes, Markdown canonical twins and encoded error aliases.
@@ -1370,7 +1372,8 @@ These checkout snapshots are not release-binary performance benchmarks.
 - First public npm release for seven native platforms (macOS arm64/x64, Linux x64/arm64/musl, Windows x64/arm64),
   the runtime and the `npm create @christianirack/brainllm` and `npm create @christianirack/brainll` initializers (#5).
 
-[Unreleased]: https://github.com/chrisifm/BRAINLLM/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/chrisifm/BRAINLLM/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/chrisifm/BRAINLLM/compare/v0.8.12...v0.9.0
 [0.4.0]: https://github.com/chrisifm/BRAINLLM/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/chrisifm/BRAINLLM/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/chrisifm/BRAINLLM/compare/v0.2.0...v0.3.0
