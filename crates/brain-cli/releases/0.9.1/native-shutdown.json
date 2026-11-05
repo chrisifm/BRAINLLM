@@ -1,0 +1,11 @@
+{
+  "id": "native-shutdown",
+  "kind": "fix",
+  "title": "Bound native backend shutdown cleanup",
+  "why": "Stopping admission is not a completed shutdown when sockets, worker cleanup, checked-out database connections or runtime blocking tasks can still hold the process. Supervisor timeouts must cover each service's declared drain.",
+  "changelog": ["Native backend shutdown bounds socket, worker and pool cleanup by the drain deadline"],
+  "guide": "docs/DEPLOYMENT.md",
+  "codes": [],
+  "apis": ["brain backend serve", "brain deploy config pm2"],
+  "affects": ["server/platform.jsbrain", "server/jobs/**", "deploy/ecosystem.brain.config.cjs"]
+}

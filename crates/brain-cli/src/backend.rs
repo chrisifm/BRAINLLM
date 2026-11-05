@@ -678,12 +678,37 @@ pub(crate) fn analytics_settings(root: &Path) -> Result<Option<brain_backend::an
     cfg.validate().map_err(|error| format!("brain.json: {error}"))?;
     Ok(Some(cfg))
 }
-fn runtime() -> Result<tokio::runtime::Runtime, String> {
+struct CommandRuntime(Option<tokio::runtime::Runtime>);
+impl CommandRuntime {
+    fn block_on<F: std::future::Future>(&self, future: F) -> F::Output {
+        self.0.as_ref().expect("owned runtime exists until drop").block_on(future)
+    }
+}
+impl Drop for CommandRuntime {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.0.take() {
+            // Tokio's ordinary Drop waits indefinitely for blocking tasks after async shutdown finished.
+            runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+        }
+    }
+}
+fn runtime() -> Result<CommandRuntime, String> {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
         .build()
+        .map(|runtime| CommandRuntime(Some(runtime)))
         .map_err(|e| e.to_string())
+}
+/// Preserve the resource-only legacy `applied` field while reporting observed framework advancement separately.
+fn framework_migration_outcome(mut before: Value, after: Option<Value>) -> Value {
+    let apply = after.is_some();
+    let after = after.unwrap_or_else(|| before.clone());
+    before["applied"] = json!(apply && after["installed"].as_u64() > before["installed"].as_u64());
+    before["installedAfter"] = after["installed"].clone();
+    before["pendingAfter"] = after["pending"].clone();
+    before["outcomeScope"] = json!("Observed ledger after the command; concurrent migration ownership is not inferred");
+    before
 }
 /// Every setting the backend refuses at startup, as (problem, fix). Values never reach a message: only variable names.
 pub fn config_problems(setting: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
@@ -1060,12 +1085,14 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let pool=brain_backend::boot::connect(&url,&boot).await?;
         config_phase(operation=="serve");
         if operation=="migrate"{
+            let framework_migration=brain_backend::db::migration_plan(&pool).await?;
             brain_backend::db::migrate(&pool,&resources).await?;
             roles.register(&pool).await?;
             let undeclared=brain_backend::auth_flows::undeclared_accounts(&pool,&roles).await?;
             let stale=brain_backend::db::undeclared_fields(&pool,&resources).await?;
+            let framework_migration=framework_migration_outcome(framework_migration,Some(brain_backend::db::migration_plan(&pool).await?));
             pool.close().await;
-            let mut report=json!({"schemaVersion":1,"ok":true,"resources":resources.len()});
+            let mut report=json!({"schemaVersion":1,"ok":true,"resources":resources.len(),"frameworkMigration":framework_migration});
             if !stale.is_empty() {
                 report["undeclaredFields"]=json!(stale.iter().map(|(resource,field,rows)|json!({"resource":resource,"field":field,"rows":rows})).collect::<Vec<_>>());
                 report["undeclaredFieldsNote"]=json!("These stored fields left the schema; each one is dropped from its row when that row is next written. Copy the data first if you still need it, or declare the field again.");
@@ -1114,6 +1141,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
             return Ok(());
         }
         if operation=="approve-contract" {
+            let framework_migration=brain_backend::db::migration_plan(&pool).await?;
             let reviewed=brain_backend::contract_review::review(&pool,&resources).await?;
             let accepted=crate::flag(args,"--accept").map(|list|list.split(',').map(str::to_string).collect::<Vec<_>>()).unwrap_or_default();
             let apply=args.iter().any(|a|a=="--apply");
@@ -1121,19 +1149,23 @@ pub fn run(args: &[String]) -> Result<(), String> {
             if let Some(only)=crate::flag(args,"--only").map(|list|list.split(',').map(str::to_string).collect::<Vec<_>>()) {
                 let (names,pending)=brain_backend::contract_review::approved_only(&reviewed,&only,&accepted)?;
                 if apply {brain_backend::db::migrate_approving_only(&pool,&resources,&names).await?;}
+                let after=if apply {Some(brain_backend::db::migration_plan(&pool).await?)}else{None};
+                let framework_migration=framework_migration_outcome(framework_migration,after);
                 pool.close().await;
                 let next=if apply&&pending.is_empty(){Value::Null}else if apply{json!(format!("Review the pending resources, then: brain backend approve-contract --only {} --apply",pending.join(",")))}else{json!(format!("brain backend approve-contract --only {}{} --apply",only.join(","),if accepted.is_empty(){String::new()}else{format!(" --accept {}",accepted.join(","))}))};
-                println!("{}",json!({"schemaVersion":1,"ok":true,"applied":apply&&!names.is_empty(),"approved":names,"pending":pending,"changes":reviewed,"needsAccept":[],"next":next}));return Ok(());
+                println!("{}",json!({"schemaVersion":1,"ok":true,"applied":apply&&!names.is_empty(),"approved":names,"pending":pending,"changes":reviewed,"needsAccept":[],"frameworkMigration":framework_migration,"next":next}));return Ok(());
             }
             let decision=brain_backend::contract_review::approved(&reviewed,&accepted);
             if apply {
                 let names=decision.as_ref().map_err(|blocked|format!("B0787: nothing was changed: {} has changes that can invalidate stored rows; fix: review them without --apply, then pass --accept {}, or apply only the others with --only <resource>",blocked.join(", "),blocked.join(",")))?;
                 brain_backend::db::migrate_approving(&pool,&resources,names).await?;
             }
+            let after=if apply {Some(brain_backend::db::migration_plan(&pool).await?)}else{None};
+            let framework_migration=framework_migration_outcome(framework_migration,after);
             pool.close().await;
             let needs:Vec<String>=decision.err().unwrap_or_default();
             let next=if apply||reviewed.is_empty(){Value::Null}else if needs.is_empty(){json!("brain backend approve-contract --apply")}else{json!(format!("Review the rows each change touches, then: brain backend approve-contract --accept {} --apply",needs.join(",")))};
-            println!("{}",json!({"schemaVersion":1,"ok":true,"applied":apply&&!reviewed.is_empty(),"changes":reviewed,"needsAccept":needs,"next":next}));return Ok(());
+            println!("{}",json!({"schemaVersion":1,"ok":true,"applied":apply&&!reviewed.is_empty(),"changes":reviewed,"needsAccept":needs,"frameworkMigration":framework_migration,"next":next}));return Ok(());
         }
         if operation=="rename-role" {
             let from=crate::flag(args,"--from").ok_or("rename-role requires --from <role> --to <role>")?;
@@ -1536,7 +1568,7 @@ pub(crate) fn server_module(root: &Path, rel: &str) -> Result<(Scratch, PathBuf)
         .filter(|(name, _)| {
             matches!(
                 name.as_str(),
-                "brain.js" | "brain-budget.js" | "brain-time.js" | "brain-hash.js" | "brain-outbound.js"
+                "brain.js" | "brain-budget.js" | "brain-list.js" | "brain-text.js" | "brain-time.js" | "brain-hash.js" | "brain-outbound.js"
             )
         })
         .collect();
@@ -2497,6 +2529,67 @@ mod tests {
         assert_eq!(codes(&[], &daily, 0), ["B0767"]);
         // Negative: a worker and a scheduler silence them.
         assert!(codes(&[row("mail", 78, 1, true)], &daily, 1).is_empty());
+    }
+
+    #[test]
+    fn command_runtime_drop_does_not_wait_forever_for_blocking_tasks() {
+        let runtime = runtime().unwrap();
+        let (release, blocked) = std::sync::mpsc::channel::<()>();
+        let (cancel_guard, guard_wait) = std::sync::mpsc::channel::<()>();
+        let (started, ready) = std::sync::mpsc::channel::<()>();
+        let (done, finished) = std::sync::mpsc::channel::<()>();
+        // The guard releases only this test's blocking task even if the old unbounded Drop returns late.
+        let guard = std::thread::spawn(move || {
+            let _ = guard_wait.recv_timeout(std::time::Duration::from_secs(6));
+            let _ = release.send(());
+        });
+        runtime.block_on(async {
+            tokio::task::spawn_blocking(move || {
+                let _ = started.send(());
+                let _ = blocked.recv();
+                let _ = done.send(());
+            });
+        });
+        ready.recv_timeout(std::time::Duration::from_secs(3)).unwrap();
+        let begin = std::time::Instant::now();
+        drop(runtime);
+        let elapsed = begin.elapsed();
+        let _ = cancel_guard.send(());
+        guard.join().unwrap();
+        finished.recv_timeout(std::time::Duration::from_secs(3)).unwrap();
+        assert!(elapsed < std::time::Duration::from_secs(5), "CLI runtime drop exhausted its blocking-task guard: {elapsed:?}");
+    }
+
+    #[test]
+    fn pure_native_helpers_execute_in_job_and_route_handler_graphs() {
+        let helpers = "<meta server>\nexport default async function values() { return { list: range(0, 3), folded: text.fold('HELLO'), distance: text.distance('ab', 'ba'), fuzzy: text.fuzzy('book', ['book']), date: dateParse('2024-01-01'), added: dateAdd('2024-01-01', 1), difference: dateDiff('2024-01-02', '2024-01-01'), dates: dateRange('2024-01-01', '2024-01-01'), zone: dateZone('2024-01-01', 'UTC'), hash: await hashText('example'), short: await shortHash('example'), outbound: typeof httpCall } }\n";
+        let (root, _) = roles_app(&[("server/lib/helpers.jsbrain", helpers)]);
+        let _cleanup = Scratch(root.clone());
+        for kind in ["jobs", "routes"] {
+            for indirect in [false, true] {
+                let rel = format!("server/{kind}/sample/handler.jsbrain");
+                let path = root.join(&rel);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                let source = if indirect {
+                    "<meta server>\nimport values from '../../lib/helpers.jsbrain'\nexport default async function handle(ctx) { return await values() }\n"
+                } else { helpers };
+                fs::write(&path, source).unwrap();
+                let (_bundle, entry) = server_module(&root, &rel).unwrap();
+                assert!(handler_bundle_problems(&root).is_empty());
+                let output = std::process::Command::new("node")
+                    .args(["--input-type=module", "--eval", "import {pathToFileURL} from 'node:url'; const m = await import(pathToFileURL(process.argv[1])); console.log(JSON.stringify(await m.default({})))"])
+                    .arg(entry).output().unwrap();
+                assert!(output.status.success(), "{kind}/{indirect}: {}", String::from_utf8_lossy(&output.stderr));
+                let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(value["list"], json!([0, 1, 2]));
+                assert_eq!(value["folded"], "hello");
+                assert_eq!(value["distance"], 1);
+                assert_eq!(value["fuzzy"], json!(["book"]));
+                assert_eq!(value["outbound"], "function");
+                assert_eq!(value["hash"].as_str().unwrap().len(), 64);
+                assert_eq!(value["short"].as_str().unwrap().len(), 32);
+            }
+        }
     }
 
     #[test]

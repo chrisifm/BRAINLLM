@@ -835,7 +835,8 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
                 diag.line=1;diag.col=1;diag.level=brain_parse::Severity::Warning;diags.push(diag);
             }
             for (file, message) in backend::handler_bundle_problems(&app) {
-                let mut diag = compiler::Diag::new("B0792", &file, brain_parse::Span::default(), message, "add `<meta server>` to the imported module, or import a plain .js file");
+                let (text, fix) = message.split_once("; fix: ").unwrap_or((message.as_str(), "keep the imported graph server-compatible; move browser-only helpers into browser modules"));
+                let mut diag = compiler::Diag::new("B0792", &file, brain_parse::Span::default(), text.to_string(), fix.to_string());
                 diag.line=1;diag.col=1;diags.push(diag);
             }
             for (file, message) in route_executor::gateway_conflicts(&app) {

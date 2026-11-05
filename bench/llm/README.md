@@ -170,3 +170,13 @@ and matched comparison against the published reference passed without changing b
 `results/codex-gpt-6.1-sol-medium-static-export-candidate-20261104.json`. This snapshot predates the later internal
 impact-measurement filename correction; it verifies source authoring, not that correction or release readiness.
 Generic static HTTP/Chrome and stdio MCP acceptance are separate tests in scripts/test/static-export.test.mjs.
+
+## 0.9.1 field-fix candidate (2026-11-05)
+
+The fresh `codex/gpt-6.1-sol/medium/spec` cohort generated the same twenty briefs with concurrency one and zero
+repair rounds: **20/20 first pass**, zero infrastructure failures and stable SPEC `3e0c0b7e46b2`, scaffold tokens
+`97cdbb891450` and binary `7ebd9a0e9b10`. The release gate passed against the accepted 20/20 reference without
+changing `baseline.json`. Local artifact: `results/codex-gpt-6.1-sol-medium-diagnostic-adoption-final-20261105.json`.
+The earlier owned-canceled partial candidate is not acceptance evidence. This cohort measures source authoring;
+handler execution, shutdown, migration integrity, browser route reachability and public npm consumption require
+their separate regression and release gates. The CLI provider does not supply a verified monetary charge.

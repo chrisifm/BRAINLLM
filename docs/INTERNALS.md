@@ -712,6 +712,25 @@ New families in addition to B00–B11:
 be turned off.
 
 ### 11.1 Server code and RPC (fixed 2026-10-13, COMPILER proposal approved)
+- Native shutdown (2026-11-05): serve_full records one absolute ready-delay/drain deadline on the signal. It drops
+  the owned HTTP future before cleanup and bounds socket, webhook worker and pool cleanup by that same deadline.
+  db::close_until refuses to wait forever on checked-out connections. CLI-owned CommandRuntime allows at most one
+  additional second for blocking-task teardown; this is not a library-wide claim that Rust can cancel arbitrary CPU
+  work. Supervised job children retain their own separately bounded queue drain. PM2 backend/queue previews derive
+  kill_timeout from their declared budgets plus a margin instead of reusing the frontend's twenty-second value.
+- Migration boundaries (2026-11-05): db::migration_plan reads and validates the existing migration ledger without
+  executing SQL migrations. approve-contract includes it before apply; migrate includes the pre-apply plan in its
+  report. The phase is explicitly before-apply; CLI output separately reports observed framework applied,
+  installedAfter and pendingAfter, preserving the legacy resource-only top-level applied meaning. The transactional
+  migrator logs a fixed migration-rollback-boundary warning before advancing an existing
+  framework ledger. Additive columns do not exempt an unknown migration from older-binary startup refusal. No
+  published SQL/checksum or drift guard is changed.
+- Handler native helpers (2026-11-05): backend::server_module admits the pure list/text/date/hash modules and the
+  bounded outbound module, alongside the existing core/budget dependencies. Job and route graphs share this list,
+  including indirect server imports. Browser-only imports still fail B0792. Runtime execution tests cover every
+  documented pure helper; actual CLI/ledger acceptance keeps list/text modules out of routes that do not use them.
+  The server emitter distinguishes existing server output from a browser module missing metadata. CLI B0792 keeps
+  its message and actionable fix separate; an already server-only source is never told to add the same metadata.
 - Server `.jsbrain`: first line `<meta server>` (or `<meta protect>`) → `Component.meta`.
 - Server function in a `.brain`: `server: async function save(ctx, data) { … }` (reserved label; normal labels
   remain forbidden, B0108). Must be async (B0704). `ctx` is injected by the server (`ctx.req`, `ctx.cookies`,
@@ -1146,6 +1165,10 @@ gateways. Node's owned emitted source omits its attribution URL literals; dev HT
 previews also honor the policy. Copied public/foreign bytes are never filtered. Ordinary build grace is disabled
 on policy transitions so obsolete branded chunks are removed, never rewritten under an existing content hash.
 LLM-facing adoption examples preserve true; false requires an explicit end-user request.
+Generator discovery copy (2026-11-05) appends branding::DESCRIPTION to the escaped HTML generator version label.
+It names the Rust frontend/full-stack compiler without adding site-topic keywords or changing authored metadata.
+The entire tag still follows compilerBranding. npm descriptions/keywords separately name actual JavaScript,
+Node.js, SSR, static-site and SEO capabilities; those search terms do not change application output.
 
 
 Living brandbooks (2026-11-04): `brain-cli::brandbook` owns a bounded declarative section structure and the

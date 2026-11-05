@@ -1,0 +1,11 @@
+{
+  "id": "server-pure-helpers",
+  "kind": "fix",
+  "title": "Pure native helpers in job and route handlers",
+  "why": "Server handlers and their imported server helpers must be able to use the documented bounded range and text functions without a false browser-import diagnostic. Unsupported browser helpers still fail, with a fix that does not repeat metadata already present.",
+  "changelog": ["Pure range and text helpers work in job and route handler graphs"],
+  "guide": "docs/NATIVE-LIBRARIES.md",
+  "codes": ["B0792"],
+  "apis": ["range", "text.fold", "text.distance", "text.fuzzy"],
+  "affects": ["server/jobs/**", "server/routes/**", "server/lib/**"]
+}

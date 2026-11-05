@@ -186,11 +186,53 @@ try {
       if(cli(['data','defaults','--resource','items','--include-null','--apply','--json'],repairApp).fieldWrites!==0||sql("SELECT count(*) FROM _brain_res_items WHERE data->>'label'='Custom'")!=='1')throw Error('Default repair must preserve custom values and become idempotent')
       console.log('Backend CLI defaults smoke: PASS (preview, bounded apply, explicit-null opt-in, preserved values and idempotence)')
     }
+    // Reconstruct only the prior profile schema in a separate owned database; never change published SQL bytes.
+    run(exe('createdb'),['-h','127.0.0.1','-p',String(port),'-U','brain_test','backend_framework_boundary'])
+    {
+      const migrationEnv={...cliEnv,DATABASE_URL:`postgres://brain_test@127.0.0.1:${port}/backend_framework_boundary`}
+      let lastStderr=''
+      const cli=(args,cwd)=>{
+        const result=spawnSync(binary,args,{cwd,env:migrationEnv,encoding:'utf8',timeout:20000,maxBuffer:1024*1024})
+        if(result.status!==0)throw Error('Migration boundary CLI failed: '+(result.stderr||result.stdout).slice(0,1000))
+        lastStderr=result.stderr
+        return JSON.parse(result.stdout)
+      }
+      const sql=text=>{
+        const result=spawnSync(exe('psql'),['-X','-h','127.0.0.1','-p',String(port),'-U','brain_test','-d','backend_framework_boundary','-At','-v','ON_ERROR_STOP=1','-c',text],{encoding:'utf8',timeout:10000,maxBuffer:256*1024})
+        if(result.status!==0)throw Error('Migration boundary owned SQL failed')
+        return result.stdout.trim()
+      }
+      cli(['new','migration-boundary','--json'],dir)
+      const app=join(dir,'migration-boundary')
+      cli(['add','resource','sample','--fields','title:str!','--json'],app)
+      cli(['backend','migrate','--json'],app)
+      const previous=()=>sql('ALTER TABLE public._brain_users DROP COLUMN display_name, DROP COLUMN picture_url; DELETE FROM public._brain_migrations WHERE version=27')
+      const check=(report,applied,after)=>{
+        const state=report.frameworkMigration
+        if(state?.phase!=='before-apply'||state.installed!==26||state.pending?.[0]?.version!==27||state.applied!==applied||state.installedAfter!==after||state.pendingAfter?.length!==(applied?0:1))throw Error('Framework migration result must distinguish its plan and observed outcome')
+      }
+      previous()
+      check(cli(['backend','approve-contract','--json'],app),false,26)
+      if(sql('SELECT max(version) FROM public._brain_migrations')!=='26')throw Error('Read-only framework preview applied SQL')
+      const applied=cli(['backend','approve-contract','--apply','--json'],app)
+      check(applied,true,27)
+      if(applied.applied!==false||!lastStderr.includes('MIGRATION_ROLLBACK_BOUNDARY'))throw Error('Framework-only apply needs a separate outcome and advance warning')
+      const repeated=cli(['backend','approve-contract','--apply','--json'],app).frameworkMigration
+      if(repeated.applied!==false||repeated.installed!==27||repeated.installedAfter!==27||repeated.pendingAfter.length!==0)throw Error('Repeated framework apply must report no advancement')
+      previous()
+      writeFileSync(join(app,'server/resources/sample/schema.jsbrain'),"<meta server>\nexport default { title: 'str!', note: 'str' }\n")
+      check(cli(['backend','approve-contract','--only','sample','--json'],app),false,26)
+      check(cli(['backend','approve-contract','--only','sample','--apply','--json'],app),true,27)
+      console.log('Backend CLI framework migration smoke: PASS (read-only preview, framework-only apply, explicit outcome, idempotence and selected-resource apply)')
+    }
     brain(['new','app','--json'],dir)
     const app=join(dir,'app')
     brain(['add','job','deliver','--fields','message:str!','--json'],app)
     writeFileSync(join(app,'server/jobs/deliver/handler.jsbrain'),"<meta server>\nexport default async function handle(ctx) { const digest = await hashText(ctx.payload.message); if (digest.length !== 64 || dateAdd(0, 1, 'day') !== 86400000) throw new Error('Native helpers failed'); return digest }\n")
-    brain(['backend','migrate','--json'],app)
+    const migration = brain(['backend','migrate','--json'],app)
+    if (!Number.isInteger(migration.frameworkMigration?.target) || migration.frameworkMigration.rollbackAfterApply?.minimumKnownMigration !== migration.frameworkMigration.target || migration.frameworkMigration.rollbackAfterApply.schemaDowngradeSupported !== false) throw Error('Migrate must report the framework rollback boundary')
+    const migrationPreview = brain(['backend','approve-contract','--json'],app)
+    if (migrationPreview.applied || migrationPreview.frameworkMigration?.installed !== migration.frameworkMigration.target || migrationPreview.frameworkMigration?.pending?.length !== 0) throw Error('Contract preview must expose the current framework migration boundary without applying changes')
     const queued=brain(['jobs','enqueue','deliver','--payload','{"message":"Hello"}','--key','smoke-event','--json'],app)
     assertId(queued.id)
     const duplicate=brain(['jobs','enqueue','deliver','--payload','{"message":"Hello"}','--key','smoke-event','--json'],app)
@@ -320,6 +362,14 @@ try {
         console.log('Backend CLI webhook smoke: PASS (signed HTTP, encrypted durable job, authorized decryption, compiled handler and acknowledgement)')
       } finally {await terminateOwned(webhookWorker,'SIGINT')}
 
+      // A successful idle shutdown must exit itself, rather than merely passing cleanup after the harness used KILL.
+      process.kill(-test.pid, 'SIGTERM')
+      await waitExit(test, 5000)
+      if (running(test) || test.exitCode !== 0) throw Error('Owned native backend did not exit cleanly after SIGTERM; forced termination is not a passing shutdown')
+      let listening = false
+      try { const response = await fetch(backendURL + '/health', { signal: AbortSignal.timeout(500) }); await response.text(); listening = true } catch {}
+      if (listening) throw Error('Owned native backend listener survived shutdown')
+      console.log('Backend CLI shutdown smoke: PASS (SIGTERM, process exit, closed listener; no forced KILL)')
     } finally {await terminateOwned(test,'SIGINT')}
   }
   if(process.exitCode===0||process.exitCode===undefined)for(const name of selectedGates) {

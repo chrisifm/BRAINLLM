@@ -256,6 +256,8 @@ pub fn preview(root: &Path, target: &str, options: &Value) -> Result<Value, Stri
                         "production".into(),
                     ],
                 ));
+                let (edge, _) = crate::platform_config::edge(&root)?;
+                apps.last_mut().unwrap()["kill_timeout"] = json!(((edge.ready_delay + edge.drain).as_millis() as u64 + 5000).max(20000));
             }
             if native_sockets {
                 // Do not replace a configured multi-origin allowlist with one CLI --origin.
@@ -278,6 +280,8 @@ pub fn preview(root: &Path, target: &str, options: &Value) -> Result<Value, Stri
                         "production".into(),
                     ],
                 ));
+                let policy = crate::backend::domain::queue_policy(&root, queue)?;
+                apps.last_mut().unwrap()["kill_timeout"] = json!((policy.drain * 1000 + 5000).max(20000));
             }
             // PM2 hands every app its daemon's environment, secrets of other apps and stale NODE_OPTIONS included, and
             // `filter_env` would drop PATH too. So brain drops what it was not told to keep before it reads anything.
@@ -445,6 +449,21 @@ mod tests {
             let _ = std::fs::remove_dir_all(&self.0);
         }
     }
+    #[test]
+    fn pm2_native_and_worker_timeouts_cover_their_declared_shutdown_budgets() {
+        let app = App::new();
+        std::fs::create_dir_all(app.0.join("server/jobs/sample")).unwrap();
+        std::fs::write(app.0.join("server/platform.jsbrain"), "<meta server>\nexport default { shutdown: { readyDelay: '5s', drain: '30s' } }\n").unwrap();
+        std::fs::write(app.0.join("server/jobs/sample/queue.jsbrain"), "<meta server>\nexport default { drain: 45 }\n").unwrap();
+        let plan = preview(&app.0, "pm2", &json!({"topology":"rust-node","domain":"example.test","workers":[{"queue":"sample","concurrency":1}]})).unwrap();
+        let content = plan["operations"][0]["content"].as_str().unwrap();
+        let config: Value = serde_json::from_str(content.split_once("module.exports = ").unwrap().1.trim().trim_end_matches(';')).unwrap();
+        let apps = config["apps"].as_array().unwrap();
+        assert_eq!(apps[0]["kill_timeout"], 20000);
+        assert_eq!(apps[1]["kill_timeout"], 40000);
+        assert_eq!(apps[2]["kill_timeout"], 50000);
+    }
+
     #[test]
     fn github_pages_previews_only_static_workflow_and_preserves_custom_source() {
         let app=App::new();std::fs::write(app.0.join("brain.json"),r#"{"output":"static","staticOutput":{"host":"github-pages"}}"#).unwrap();

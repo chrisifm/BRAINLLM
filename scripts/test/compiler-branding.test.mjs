@@ -36,6 +36,7 @@ for(const mode of ['static','ordinary'])test(`explicit branding policy covers ${
     const build=()=>{writeFileSync(join(app,'brain.json'),JSON.stringify(cfg));return ok(['build','--site','https://example.test','--json'],app)}
     build()
     assert.ok(readFileSync(join(dist,'index.html'),'utf8').includes(home),'default branding remains enabled')
+    assert.ok(readFileSync(join(dist,'index.html'),'utf8').includes('Ultrafast frontend and full-stack web compiler written in Rust'),'default generator describes the compiler in English')
     assert.ok(JSON.parse(readFileSync(join(dist,'brain-build.json'),'utf8')).generator.url===home)
     cfg.compilerBranding=false;build()
     const output=walk(dist)

@@ -133,13 +133,13 @@ if (missing.length && requireAll) {
   process.exit(1)
 }
 
-// npm search ranks keywords: who we want to reach (LLM/agent builders, frontend and fullstack devs, React/Vite users)
+// npm search matches package descriptions, README content and relevant capability keywords.
 const KEYWORDS = [
   'llm', 'ai', 'ai-agents', 'coding-agent', 'agentic', 'claude-code', 'cursor', 'mcp', 'model-context-protocol',
   'frontend', 'front-end', 'backend', 'back-end', 'fullstack', 'full-stack',
-  'cli', 'command-line', 'developer-tools', 'design-system', 'css', 'testing', 'e2e', 'postgresql', 'jwt',
+  'javascript', 'nodejs', 'html', 'css', 'cli', 'command-line', 'developer-tools', 'design-system', 'testing', 'e2e', 'postgresql', 'jwt',
   'web-framework', 'framework', 'compiler', 'rust', 'fast', 'performance',
-  'react-alternative', 'vite-alternative', 'signals', 'reactive', 'components', 'ssr', 'spa', 'web',
+  'react-alternative', 'vite-alternative', 'signals', 'reactive', 'components', 'ssr', 'ssg', 'static-site-generator', 'static-site', 'seo', 'spa', 'web',
 ]
 
 // 2. launcher package
@@ -148,7 +148,7 @@ cpSync(join(here, 'brainllm'), main, { recursive: true })
 copyFileSync(join(root, 'crates/brain-cli/schema/brain.schema.json'), join(main, 'brain.schema.json'))
 writePkg(main, {
   name: `${SCOPE}/brainllm`,
-  description: 'BRAINLLM: the Rust-powered full-stack web compiler for LLMs and AI agents. Native brain CLI, dev server, optimized builds, PostgreSQL backend and MCP server.',
+  description: 'BRAINLLM: a Rust-powered frontend and full-stack web compiler. Optimized JavaScript, SSR, SEO-ready static sites, a PostgreSQL backend and MCP tools for LLMs and AI agents.',
   bin: { brain: 'bin/brain.js' },
   files: ['bin', 'brain.schema.json', 'README.md'],
   engines: { node: '>=22' },

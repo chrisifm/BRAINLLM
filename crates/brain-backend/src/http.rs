@@ -973,7 +973,9 @@ pub async fn serve_full(
     let retention = crate::analytics::settings()
         .map(|cfg| tokio::spawn(crate::analytics::retention_loop(pool.clone(), cfg.retention_days)));
     let socket_stop = sockets.clone();
-    let (signalled_tx, signalled_rx) = tokio::sync::oneshot::channel::<()>();
+    let (signalled_tx, signalled_rx) = tokio::sync::oneshot::channel::<tokio::time::Instant>();
+    let shutdown_deadline = Arc::new(std::sync::OnceLock::new());
+    let deadline_on_signal = shutdown_deadline.clone();
     let draining = edge.clone();
     let server = axum::serve(
         listener,
@@ -984,17 +986,18 @@ pub async fn serve_full(
         // Readiness fails first so load balancers stop routing here, then the listener closes.
         draining.drain();
         crate::log_line!("{}", json!({"schemaVersion":1,"event":"backend-draining","readyDelayMs":ready_delay.as_millis() as u64,"drainMs":drain_budget.as_millis() as u64}));
-        let _ = signalled_tx.send(());
+        let deadline = tokio::time::Instant::now() + ready_delay + drain_budget;
+        let _ = deadline_on_signal.set(deadline);
+        let _ = signalled_tx.send(deadline);
         tokio::time::sleep(ready_delay).await;
         socket_stop.shutdown();
     });
-    let server = std::future::IntoFuture::into_future(server);
-    tokio::pin!(server);
+    let mut server = Box::pin(std::future::IntoFuture::into_future(server));
     let result = tokio::select! {
         result = &mut server => result.map_err(|_| "Backend HTTP server failed".into()),
         _ = async {
-            if signalled_rx.await.is_ok() {
-                tokio::time::sleep(ready_delay + drain_budget).await;
+            if let Ok(deadline) = signalled_rx.await {
+                tokio::time::sleep_until(deadline).await;
             } else {
                 std::future::pending::<()>().await;
             }
@@ -1003,27 +1006,32 @@ pub async fn serve_full(
             Ok(())
         }
     };
+    // The HTTP future must not keep its router/requests alive while the pool is closing.
+    drop(server);
     file_sweep.abort();
     if let Some(retention) = retention {
         retention.abort();
     }
     sockets.shutdown();
-    let sockets_closed = sockets.closed().await;
-    if sockets_closed.is_err() {
+    let deadline = shutdown_deadline.get().copied().unwrap_or_else(|| tokio::time::Instant::now() + drain_budget);
+    let sockets_closed = tokio::time::timeout_at(deadline, sockets.closed()).await;
+    if !matches!(sockets_closed, Ok(Ok(()))) {
         crate::log_line!("{}", json!({"schemaVersion":1,"event":"socket-shutdown-incomplete","code":"SOCKET_SHUTDOWN_TIMEOUT","valuesCaptured":false}));
     }
     let _ = stop_tx.send(true);
     if let Some(ref mut worker) = worker {
-        if tokio::time::timeout(Duration::from_secs(6), &mut *worker)
+        if tokio::time::timeout_at(deadline.min(tokio::time::Instant::now() + Duration::from_secs(6)), &mut *worker)
             .await
             .is_err()
         {
             worker.abort();
-            let _ = worker.await;
         }
     }
-    pool.close().await;
-    if sockets_closed.is_err() { return Err("Native sockets did not close within their shutdown budget".into()); }
+    if !db::close_until(&pool, deadline).await {
+        crate::log_line!("{}", json!({"schemaVersion":1,"event":"backend-shutdown-incomplete","code":"DRAIN_TIMEOUT","phase":"pool","valuesCaptured":false,"fix":"Inspect private in-flight work and platform.shutdown.drain; shutdown will not wait beyond its budget"}));
+        return Err("Native backend pool cleanup exceeded platform.shutdown.drain".into());
+    }
+    if !matches!(sockets_closed, Ok(Ok(()))) { return Err("Native sockets did not close within their shutdown budget".into()); }
     if worker_failed.load(std::sync::atomic::Ordering::Relaxed) {
         return Err("Native webhook worker stopped; inspect private backend diagnostics".into());
     }

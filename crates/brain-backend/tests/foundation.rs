@@ -81,6 +81,22 @@ async fn database(base: &sqlx::PgPool, url: &str) -> sqlx::PgPool {
 }
 #[tokio::test]
 #[ignore = "Run with the explicitly owned disposable Postgres harness"]
+async fn postgres_shutdown_pool_close_is_bounded_while_a_connection_is_checked_out() {
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("owned disposable harness URL required");
+    let pool = db::connect(&url).await.unwrap();
+    let held = pool.acquire().await.unwrap();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(10);
+    let closed = tokio::time::timeout(std::time::Duration::from_millis(500), db::close_until(&pool, deadline)).await;
+    drop(held);
+    pool.close().await;
+    assert!(matches!(closed, Ok(false)), "a checked-out connection must yield a bounded incomplete cleanup: {closed:?}");
+    let idle = db::connect(&url).await.unwrap();
+    assert!(db::close_until(&idle, tokio::time::Instant::now() + std::time::Duration::from_secs(1)).await);
+    assert!(idle.is_closed());
+}
+
+#[tokio::test]
+#[ignore = "Run with the explicitly owned disposable Postgres harness"]
 async fn postgres_migrations_search_scope_session_serialization_and_storage_outbox() {
     let url =
         std::env::var("BRAIN_BACKEND_TEST_URL").expect("owned disposable harness URL required");
@@ -368,9 +384,20 @@ async fn provider_profile_migration_backfills_names_from_the_previous_schema() {
     // Reconstruct only the previous profile schema in this test-owned database. Published migration bytes stay intact.
     sqlx::raw_sql("ALTER TABLE public._brain_users DROP COLUMN display_name, DROP COLUMN picture_url; DELETE FROM public._brain_migrations WHERE version=27")
         .execute(&pool).await.unwrap();
+    let preview = db::migration_plan(&pool).await.unwrap();
+    assert_eq!(preview["installed"], 26);
+    assert_eq!(preview["target"], 27);
+    assert_eq!(preview["pending"], serde_json::json!([{"version":27,"name":"provider_profile"}]));
+    assert_eq!(preview["rollbackAfterApply"]["minimumKnownMigration"], 27);
+    assert_eq!(preview["rollbackAfterApply"]["schemaDowngradeSupported"], false);
+    let still_absent: bool = sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='_brain_users' AND column_name='display_name')").fetch_one(&pool).await.unwrap();
+    assert!(still_absent, "preview must not execute the pending migration");
     db::migrate(&pool, &[]).await.unwrap();
     db::migrate(&pool, &[]).await.unwrap();
     db::verify(&pool, &[]).await.unwrap();
+    let after = db::migration_plan(&pool).await.unwrap();
+    assert_eq!(after["installed"], 27);
+    assert_eq!(after["pending"], serde_json::json!([]));
     let hints: (Option<String>, Option<String>) = sqlx::query_as("SELECT display_name,picture_url FROM public._brain_users WHERE id=$1")
         .bind(id).fetch_one(&pool).await.unwrap();
     assert_eq!(hints, (Some("Legacy Person".into()), None));

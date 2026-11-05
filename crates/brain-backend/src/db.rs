@@ -51,6 +51,10 @@ fn checksum(sql: &str) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect()
 }
+/// Close an owned pool within the shutdown deadline. Checked-out connections must not hold process exit forever.
+pub async fn close_until(pool: &PgPool, deadline: tokio::time::Instant) -> bool {
+    tokio::time::timeout_at(deadline, pool.close()).await.is_ok()
+}
 /// `brain:<app>:<role>` (role `http`, `worker:<queue>`, `migrate`, `cli`) so `pg_stat_activity` and audits attribute load.
 /// Kept to Postgres' 63-byte NAMEDATALEN with only `[A-Za-z0-9_.:-]`; anything else becomes `-`.
 pub fn application_name(app: &str, role: &str) -> String {
@@ -736,6 +740,19 @@ async fn ledger(conn: &mut sqlx::PgConnection) -> Result<Vec<i32>, String> {
     }
     Ok(installed)
 }
+/// Read-only framework migration boundary. An additive SQL change is not proof that an older binary can start.
+pub async fn migration_plan(pool: &PgPool) -> Result<Value, String> {
+    let mut connection = pool.acquire().await.map_err(safe)?;
+    let installed = if exists(&mut connection, "_brain_migrations").await? {
+        ledger(&mut connection).await?.len()
+    } else { 0 };
+    Ok(json!({
+        "schemaVersion":1,"phase":"before-apply","installed":installed,"target":MIGRATIONS.len(),
+        "pending":MIGRATIONS.iter().enumerate().skip(installed).map(|(index,(name,_))|json!({"version":index+1,"name":name})).collect::<Vec<_>>(),
+        "rollbackAfterApply":{"minimumKnownMigration":MIGRATIONS.len(),"schemaDowngradeSupported":false,
+            "advice":"Keep a tested binary that knows this migration level and a verified backup. Additive fields do not make an older binary rollback-compatible; never retry an incompatible binary in a restart loop."}
+    }))
+}
 /// Explicit transactional migrations; history, schema drift and resource contracts fail closed.
 pub async fn migrate(pool: &PgPool, resources: &[Resource]) -> Result<(), String> {
     migrate_approving(pool, resources, &[]).await
@@ -779,6 +796,12 @@ async fn migrate_reviewed(pool: &PgPool, resources: &[Resource], approved: &[Str
         .map_err(safe)?;
     sqlx::raw_sql("CREATE TABLE IF NOT EXISTS public._brain_migrations(version integer PRIMARY KEY,name text NOT NULL,checksum text NOT NULL,applied_at timestamptz NOT NULL DEFAULT now())").execute(&mut *tx).await.map_err(safe)?;
     let installed = ledger(&mut tx).await?;
+    if !installed.is_empty() && installed.len() < MIGRATIONS.len() {
+        crate::log_line!("{}", json!({"schemaVersion":1,"event":"migration-rollback-boundary","code":"MIGRATION_ROLLBACK_BOUNDARY",
+            "installedMigration":installed.len(),"targetMigration":MIGRATIONS.len(),"valuesCaptured":false,
+            "warning":"A binary that does not know the target migration will refuse to start after this transaction commits, including additive migrations",
+            "fix":"Keep a tested binary that knows the target migration and a verified backup before applying; inspect frameworkMigration in brain backend approve-contract output"}));
+    }
     for (index, (name, sql)) in MIGRATIONS.iter().enumerate() {
         if index < installed.len() {
             continue;
@@ -1535,7 +1558,13 @@ mod failure_log_tests {
         log_values(true);
         log_failure(&error, at, json!({"resource": "shop"}));
         let kept = std::fs::read_to_string(&file).unwrap();
-        let lines: Vec<Value> = kept.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        // Other tests emit diagnostics concurrently to the process-wide sink. Match this call site rather than
+        // treating an unrelated driver event as either of the two events under test.
+        let lines: Vec<Value> = kept.lines().map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .filter(|event| event["resource"] == "shop" && event["location"]["file"] == at.file()
+                && event["location"]["line"] == at.line() && event["location"]["column"] == at.column())
+            .collect();
+        assert_eq!(lines.len(), 2, "both development and production events must be present");
         assert_eq!((lines[0]["sqlstate"].as_str(), lines[0]["resource"].as_str()), (Some("22P02"), Some("shop")));
         assert!(lines[0]["message"].as_str().unwrap().contains("private-value"), "development keeps the full cause");
         assert_eq!((lines[1]["sqlstate"].as_str(), lines[1].get("message")), (Some("22P02"), None));

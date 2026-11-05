@@ -4,6 +4,8 @@
 store/bus, environment selection and Intl formatting remain the established implementations. New pure date and hash
 functions use platform APIs and are auto-imported by the compiler; app authors do not install a date or crypto package.
 They run in browser modules and Node server modules. Web Crypto requires a secure browser context or Node 22+.
+This includes job and route handlers and their imported `<meta server>` helpers; `range` and `text.*` use the same
+bounded implementations there. Browser-only primitives remain unsupported in those handler graphs.
 
 | Function | Result and constraints |
 |---|---|
@@ -30,6 +32,11 @@ Functions are named exports in `brain-list.js`, `brain-time.js` and `brain-hash.
 primitives and the bundler removes unused exports and their dependencies. These modules add no dependency to the core; `text` is an explicit matching namespace. Shared chunks still follow the existing bundler policy: per-component duplication must be
 justified by measured compressed bytes rather than promised as universally smaller. `brain build --json` exposes the
 emitted byte ledger. Compare a fixture before/after each helper; source-module gzip is not a network measurement.
+Default compiler signatures also add bytes to each generated file, including its compressed representation.
+A route reaching many small modules pays that per-file cost; the signatures are comments, not an extra runtime
+download. Attribute changes using identical source inputs and final emitted bytes. Never disable attribution or
+raise a project's budget automatically to make that comparison pass; `compilerBranding:false` requires an explicit
+request from the project's user.
 
 ## Authoring and contributing
 

@@ -7,7 +7,7 @@ use std::{fs, path::Path};
 const FILES: &str = "server/files";
 const EDGE: &str = "server/platform.jsbrain";
 
-fn edge(root: &Path) -> Result<(Edge, Cluster), String> {
+pub(crate) fn edge(root: &Path) -> Result<(Edge, Cluster), String> {
     let path = root.join(EDGE);
     if !path.exists() {
         return Ok((Edge::default(), Cluster::default()));

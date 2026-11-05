@@ -9,6 +9,20 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-05
+
+- Pure range and text helpers work in job and route handler graphs, including imported server helpers, without false B0792 diagnostics or browser-only runtime admission. Already server-only sources receive a browser-only usage fix instead of redundant metadata advice.
+- Generated HTML describes BRAINLLM as an ultrafast frontend and full-stack web compiler written in Rust; npm discovery metadata names JavaScript, Node.js, SSR, static sites and SEO while explicit compiler branding opt-out remains respected.
+- Native backend shutdown bounds socket, worker and pool cleanup by the drain deadline; CLI runtime teardown cannot wait indefinitely for blocking tasks, and PM2 previews cover declared backend and queue shutdown budgets.
+- Framework migration previews expose the rollback boundary and pending versions; applying a newer framework migration warns before SQL changes, while checksum and newer-schema startup refusals stay enforced.
+
+### Tests
+
+- Execute every documented pure native helper in direct and indirect job/route graphs; check real CLI acceptance and verify list/text runtimes load only on browser routes that use them.
+- Reconcile compressed route growth with identical synthetic inputs on 0.8.12 and 0.9.0; keep project budgets and default signatures unchanged.
+- Reproduce held-connection pool shutdown and undersized PM2 timeouts before the fixes; verify migration previews do not execute pending SQL and real native shutdown exits without forced termination.
+- Match production diagnostic privacy assertions to their own call site when database tests log concurrently.
+
 ## [0.9.0] - 2026-11-05
 
 - Explicit compilerBranding:false removes generated visible and hidden compiler attribution, links and headers while defaults stay enabled and authored/third-party bytes remain unchanged.
@@ -1394,7 +1408,8 @@ These checkout snapshots are not release-binary performance benchmarks.
 - First public npm release for seven native platforms (macOS arm64/x64, Linux x64/arm64/musl, Windows x64/arm64),
   the runtime and the `npm create @christianirack/brainllm` and `npm create @christianirack/brainll` initializers (#5).
 
-[Unreleased]: https://github.com/chrisifm/BRAINLLM/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/chrisifm/BRAINLLM/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/chrisifm/BRAINLLM/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/chrisifm/BRAINLLM/compare/v0.8.12...v0.9.0
 [0.4.0]: https://github.com/chrisifm/BRAINLLM/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/chrisifm/BRAINLLM/compare/v0.3.0...v0.3.1

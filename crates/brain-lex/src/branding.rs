@@ -1,5 +1,6 @@
 //! Format-valid attribution shared by compiler output generators.
 pub const HOME: &str = "https://chrisifm.github.io/BRAINLLM/";
+pub const DESCRIPTION: &str = "Ultrafast frontend and full-stack web compiler written in Rust";
 pub const HTML: &str = "<!-- by BRAINLLM https://chrisifm.github.io/BRAINLLM/ -->";
 pub const HASH: &str = "# by BRAINLLM https://chrisifm.github.io/BRAINLLM/";
 pub const CODE: &str = "/* by BRAINLLM https://chrisifm.github.io/BRAINLLM/ */";

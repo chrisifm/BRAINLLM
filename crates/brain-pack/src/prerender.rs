@@ -498,7 +498,7 @@ pub fn seo_head_with_branding(seo: &[(String, String)], site: Option<&str>, rout
     };
     let mut h = String::new();
     if compiler_branding && !generator.is_empty() {
-        h.push_str(&format!("<meta name=\"generator\" content=\"{}\">", esc(generator)));
+        h.push_str(&format!("<meta name=\"generator\" content=\"{}; {}\">", esc(generator), brain_lex::branding::DESCRIPTION));
     }
     // Attribution is independent of a version label or visible page credit, including dev output.
     if compiler_branding {h.push_str(brain_lex::branding::HTML);}
@@ -689,7 +689,7 @@ mod tests {
         assert!(h.contains("<link rel=\"canonical\" href=\"https://example.dev/tasks\">"));
         assert!(h.contains("content=\"Manage &quot;tasks&quot;\""));
         assert!(h.contains("\"@type\":\"WebApplication\""));
-        assert!(h.contains("<meta name=\"generator\" content=\"BRAINLLM 0.1.0\">"));
+        assert!(h.contains("<meta name=\"generator\" content=\"BRAINLLM 0.1.0; Ultrafast frontend and full-stack web compiler written in Rust\">"));
         assert!(h.contains("<!-- by BRAINLLM https://chrisifm.github.io/BRAINLLM/ -->"), "{h}");
         let (_, bare) = seo_head(&seo, None, "/tasks", "");
         assert!(bare.contains(brain_lex::branding::HTML) && !bare.contains("generator"), "empty labels never remove mandatory attribution: {bare}");

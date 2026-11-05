@@ -30,11 +30,11 @@ pub fn emit(
     let out = format!("_server/{}.mjs", crate::content_hash(rel));
     written.insert(rel.to_string(), out.clone());
     let src = std::fs::read_to_string(root.join(rel)).map_err(|e| format!("{rel}: {e}"))?;
-    let code = if rel.ends_with(".js") || rel.ends_with(".mjs") {
-        src
+    let (code, server_only) = if rel.ends_with(".js") || rel.ends_with(".mjs") {
+        (src, true)
     } else {
         let u = compile(&src, Path::new(rel))?;
-        if u.server_js.trim().is_empty() { u.js } else { u.server_js }
+        if u.server_js.trim().is_empty() { (u.js, false) } else { (u.server_js, true) }
     };
     let dir = Path::new(rel).parent().unwrap_or(Path::new("")).to_path_buf();
     let res = crate::rewrite_imports(&code, &mut |spec| {
@@ -47,7 +47,14 @@ pub fn emit(
             return Ok(Some("./content.mjs".to_string()));
         }
         if let Some(name) = spec.strip_prefix("/@brain/") {
-            return runtime_url(name).map(Some).ok_or_else(|| format!("{rel}: imports `{spec}`, which the build did not emit; fix: add `<meta server>` to {rel}, because code that runs on the server cannot use browser runtime modules"));
+            return runtime_url(name).map(Some).ok_or_else(|| {
+                let fix = if server_only {
+                    "replace the browser-only helper with a supported server helper, or move that call into a browser module".to_string()
+                } else {
+                    format!("add `<meta server>` to {rel}, because code that runs on the server cannot use browser runtime modules")
+                };
+                format!("{rel}: imports `{spec}`, which the build did not emit; fix: {fix}")
+            });
         }
         if spec.starts_with("./") || spec.starts_with("../") {
             let target = normalize(&dir.join(spec)).ok_or_else(|| format!("{rel}: `{spec}` points outside the app"))?;

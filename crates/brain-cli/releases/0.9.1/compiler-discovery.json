@@ -1,0 +1,11 @@
+{
+  "id": "compiler-discovery",
+  "kind": "internal",
+  "title": "Accurate compiler discovery metadata",
+  "why": "Generated HTML identifies the Rust frontend and full-stack compiler in English; public package search metadata names supported developer workflows. Explicit project attribution opt-out still removes the generated tag.",
+  "changelog": ["Generated HTML describes BRAINLLM as an ultrafast frontend and full-stack web compiler written in Rust"],
+  "guide": "docs/NATIVE-LIBRARIES.md",
+  "codes": [],
+  "apis": [],
+  "affects": []
+}

@@ -1,0 +1,11 @@
+{
+  "id": "migration-rollback-boundary",
+  "kind": "fix",
+  "title": "Report framework migration rollback boundaries",
+  "why": "An additive migration can still prevent an older binary from starting. Read the pending framework versions before applying and retain a tested compatible binary plus a verified backup; never bypass drift validation.",
+  "changelog": ["Framework migration previews expose the rollback boundary and pending versions"],
+  "guide": "docs/DEPLOYMENT.md",
+  "codes": [],
+  "apis": ["brain backend migrate", "brain backend approve-contract"],
+  "affects": ["server/resources/**"]
+}
