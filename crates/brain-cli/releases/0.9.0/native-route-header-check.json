@@ -1,0 +1,16 @@
+{
+  "id": "native-route-header-check",
+  "kind": "fix",
+  "title": "Native route header allowlist diagnostics",
+  "why": "B0816 detects a literal request-header read that the route never forwards, including proven aliases. It is an advisory warning with explicit safe-header guidance and no automatic forwarding.",
+  "changelog": [
+    "B0816 warns when a native route handler reads an undeclared"
+  ],
+  "guide": "docs/backend/routes.md",
+  "codes": [
+    "B0816"
+  ],
+  "apis": [
+    "ctx.headers"
+  ]
+}

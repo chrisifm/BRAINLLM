@@ -25,6 +25,7 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [Errors at runtime](../SPEC.md#errors-at-runtime) | Errors in `fx`, `drv` and handlers are caught: the app stays alive and the error is reported. |
 | [Server and secrets](../SPEC.md#server-and-secrets) | `load` runs only on the server. |
 | [Tests (`*.test.brain`)](../SPEC.md#tests-testbrain) | `test(name, async () => {…})` · `await mount(Comp, props, { slot, slots, provide }?)` (`slot`: default slot text; `slots: { name: text }`: named slots) · `awai… |
+| [Living brandbook](../SPEC.md#living-brandbook) | Every new site includes `/brandbook` and public editorial entries in `design.brain.json.brandbook.sections`. |
 | [CLI (also MCP: `brain mcp`; every command accepts `--json`)](../SPEC.md#cli-also-mcp-brain-mcp-every-command-accepts---json) | Main: `brain new <app>` · `brain run` (dev server with hot reload, app :5180; views render in the browser, so judge SEO and the no-JS HTML on `brain build` + `… |
 | [Loop](../SPEC.md#loop) | 1 `brain add` · 2 edit · 3 `brain fix` then `brain check --json` → apply each remaining `fix` literally, repeat until `[]` · 4 `brain doctor`. |
 | [Reference component](../SPEC.md#reference-component) | — |
@@ -37,6 +38,7 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [ai](../crates/brain-cli/guides/ai.md) | Chrome's built-in AI (Gemini Nano) on the device, when the browser has it |
 | [analytics](../crates/brain-cli/guides/analytics.md) | what visitors actually do, stored in the project's own Postgres |
 | [backend](../crates/brain-cli/guides/backend.md) | resources, policies, accounts and jobs on the native Rust/Postgres backend |
+| [brandbook](../crates/brain-cli/guides/brandbook.md) | a living public reference for every site |
 | [data](../crates/brain-cli/guides/data.md) | load, server functions, resources, channels, caching |
 | [forms](../crates/brain-cli/guides/forms.md) | validation, submit, server errors, edit forms |
 | [i18n](../crates/brain-cli/guides/i18n.md) | a site in several languages |
@@ -47,6 +49,7 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [server](../crates/brain-cli/guides/server.md) | sessions, errors, environment, deploy with brain start |
 | [sockets](../crates/brain-cli/guides/sockets.md) | live updates with liveResource |
 | [start](../crates/brain-cli/guides/start.md) | the working loop for any BRAINLLM task |
+| [static](../crates/brain-cli/guides/static.md) | portable HTML sites without a server |
 | [tests](../crates/brain-cli/guides/tests.md) | colocated *.test.brain in real Chrome |
 | [views](../crates/brain-cli/guides/views.md) | routes, layouts, guards, navigation |
 | [webmcp](../crates/brain-cli/guides/webmcp.md) | expose what a page can do to browser AI agents |
@@ -97,7 +100,7 @@ Every framework document with a one-line summary. Apps get their own generated d
 | [Foreign widget interoperability](INTEROP.md) | `interop` gives an application-supplied DOM widget a dedicated subtree. |
 | [Native JWT sessions and Google Sign-In](JWT-GOOGLE.md) | The experimental Rust backend supports short access JWTs and rotating opaque refresh cookies alongside its existing opaque session endpoint. |
 | [Native slugs and short links](LINKS.md) | The Rust backend exposes authenticated `POST /_brain/slugs` with `{title,limit?}`. |
-| [Native private media library](MEDIA.md) | The experimental Rust backend keeps a validated original and generates versioned image renditions with the maintained `image` crate (0.25.10). |
+| [Native private media library](MEDIA.md) | Browser playback is controlled independently by `brain.json` CSP. |
 | [Incremental migration from React, Angular, Vue and related frameworks](MIGRATION.md) | This mode is an inventory and an LLM-guided workflow, not a JSX/TypeScript/template transpiler. |
 | [Native backend authority in production SSR](NATIVE-AUTH-SSR.md) | Set `BRAIN_BACKEND_URL=http://127.0.0.1:<backend-port>` in the Node production server's private environment to make the Rust backend authoritative for `ctx.use… |
 | [Native capabilities without dependency setup](NATIVE-LIBRARIES.md) | `brain lib list` and MCP `brain_lib` return the current function catalog. |

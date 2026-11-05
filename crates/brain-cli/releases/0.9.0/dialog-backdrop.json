@@ -1,0 +1,12 @@
+{
+  "id": "dialog-backdrop",
+  "kind": "change",
+  "title": "Native dialog backdrop dismissal",
+  "why": "Authors can opt into backdrop dismissal without attaching inaccessible click handlers or requiring unsupported dialog attributes.",
+  "changelog": ["Dialog dismissible"],
+  "guide": "brain guide forms",
+  "codes": [],
+  "apis": ["Dialog dismissible"],
+  "steps": ["Use Dialog dismissible when backdrop dismissal is appropriate. Its default remains false; provide meaningful title/content and keep native Escape, focus and close behavior."],
+  "finds": [{"glob": "views/**/*.brain"}, {"glob": "comp/**/*.brain"}]
+}

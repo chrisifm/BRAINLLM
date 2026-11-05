@@ -143,3 +143,43 @@ fn slot_content_keeps_the_writers_scope() {
     // The slotted <p> carries the parent's data-b: the child's `@scope (…) to ([data-b])` stops before it.
     assert!(o.js.contains(&format!("<p data-b=\\\"{parent}\\\" class=\\\"title\\\">Hello</p>")), "{}", o.js);
 }
+
+#[test]
+fn inline_id_references_do_not_inherit_parent_dynamic_ids_or_defaulted_prop_names() {
+    let source = r#"<meta props="heading:str='fallback'">
+<script>import Label from '../ui/label.brain'</script>
+<div id={heading}><Label heading="public-title"><p id={'row-' + heading} aria-controls={'row-' + heading}>Slot</p></Label><p id={'tail-' + heading}>Tail</p></div>"#;
+    let root = app("inline-id-scope", &[
+        ("ui/label.brain", "<meta props=\"heading:str\"><p aria-labelledby={heading}>Label</p><slot />"),
+        ("comp/parent.brain", source),
+    ]);
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
+    let options = brain_codegen::Options { root: Some(root), runtime: format!("file://{}/runtime/brain.js", repo.display()), ..Default::default() };
+    let output = brain_codegen::compile_with(source, Path::new("comp/parent.brain"), &options).unwrap_or_else(|d|panic!("{d:#?}"));
+    assert!(!output.js.contains("Label("), "child must really be inlined: {}", output.js);
+    let reference = output.js.lines().find(|line|line.contains("\"aria-labelledby\"")).unwrap();
+    assert!(reference.contains("public-title") && !reference.contains("$p") && !reference.contains("$sx"), "{reference}");
+    for attribute in ["\"id\"", "\"aria-controls\""] {
+        let slot = output.js.lines().find(|line|line.contains(attribute) && line.contains("row-")).unwrap();
+        assert!(slot.contains("$sx"), "slot must keep the parent's dynamic-ID scope: {slot}");
+    }
+    let tail = output.js.lines().find(|line|line.contains("\"id\"") && line.contains("tail-")).unwrap();
+    assert!(tail.contains("$sx"), "{tail}");
+    let js = brain_lex::json::Json::str(output.js).stringify();
+    let script = format!(r#"
+import assert from 'node:assert/strict';
+import {{install}} from 'file://{repo}/runtime/shim/dom.js';
+const doc=install();
+const {{mount}}=await import('file://{repo}/runtime/brain.js');
+const C=(await import('data:text/javascript,'+encodeURIComponent({js}))).default;
+const first=mount(C,doc.body,{{}}),second=mount(C,doc.body,{{}});
+const walk=n=>Array.from(n.childNodes).flatMap(c=>(c.nodeType===1?[c]:[]).concat(walk(c)));
+const nodes=walk(doc.body);
+assert.deepEqual(nodes.filter(n=>n.hasAttribute('aria-labelledby')).map(n=>n.getAttribute('aria-labelledby')),['public-title','public-title']);
+assert.deepEqual(nodes.filter(n=>n.hasAttribute('aria-controls')).map(n=>n.getAttribute('aria-controls')),['row-fallback','row-fallback~2']);
+assert.deepEqual(nodes.filter(n=>n.getAttribute('id')?.startsWith('tail-')).map(n=>n.getAttribute('id')),['tail-fallback','tail-fallback~2']);
+first();second();
+"#,repo=repo.display());
+    let result=Command::new("node").args(["--input-type=module","--eval",&script]).output().unwrap();
+    assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
+}

@@ -1,0 +1,28 @@
+{
+  "id": "static-export",
+  "kind": "capability",
+  "title": "Portable static HTML websites",
+  "why": "Build fully prerendered websites for ordinary HTTP file hosting without deploying an application server. Static mode rejects request-time dependencies instead of silently removing them.",
+  "changelog": [
+    "Portable static export with `brain new --static`"
+  ],
+  "guide": "brain guide static",
+  "codes": [],
+  "apis": [
+    "brain new --static",
+    "brain build --static",
+    "brain_build static:true",
+    "brain.json output:static"
+  ],
+  "adopt": {
+    "file": "brain.json",
+    "snippet": "{ \"output\": \"static\" }",
+    "command": "brain new my-site --static"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "\"static\""
+    }
+  ]
+}

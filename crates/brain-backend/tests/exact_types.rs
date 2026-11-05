@@ -364,3 +364,89 @@ async fn reviewed_contracts_widen_enums_backfill_defaults_and_apply_one_resource
     assert_eq!(left.len(), 1, "{left:?}");
     assert_eq!(left[0]["resource"], narrow.name);
 }
+
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs with its explicitly owned disposable Postgres cluster"]
+async fn declared_default_repairs_preview_bound_batches_preserve_nulls_and_are_idempotent() {
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Disposable Postgres only");
+    let pool = db::connect(&url).await.unwrap();
+    let owner = uuid::Uuid::new_v4();
+    let mut resource = legacy();
+    resource.name = "repair_defaults".into();
+    resource.search.clear();
+    resource.fields = BTreeMap::from([
+        ("title".into(), field("str", true)),
+        ("label".into(), Field {default:Some(json!("Default")),..field("str",false)}),
+        ("enabled".into(), Field {default:Some(json!(false)),..field("bool",false)}),
+    ]);
+    db::migrate(&pool, &[resource.clone()]).await.unwrap();
+    sqlx::query("INSERT INTO _brain_users(id,email,password_hash,role) VALUES($1,$2,'synthetic-unused-hash','admin')")
+        .bind(owner).bind(format!("defaults-{owner}@example.test")).execute(&pool).await.unwrap();
+    let ids: Vec<_> = (1..=4).map(uuid::Uuid::from_u128).collect();
+    for (id, data) in ids.iter().zip([
+        json!({"title":"Old"}),
+        json!({"title":"Cleared","label":null,"enabled":false}),
+        json!({"title":"Custom","label":"Custom","enabled":true}),
+        json!({"title":"Another","enabled":true}),
+    ]) {
+        // Models rows approved by an older release, before default backfill existed.
+        sqlx::query("INSERT INTO public._brain_res_repair_defaults(id,owner,data) VALUES($1,$2,$3)")
+            .bind(id).bind(owner).bind(data).execute(&pool).await.unwrap();
+    }
+    let run = |apply, include_null, limit| brain_backend::defaults::fill(&pool,std::slice::from_ref(&resource),apply,include_null,limit);
+    let preview = run(false,false,1).await.unwrap();
+    let fields = preview["resources"][0]["fields"].as_array().unwrap();
+    let label = fields.iter().find(|field|field["field"]=="label").unwrap();
+    assert_eq!(label["absentRows"],2);assert_eq!(label["nullRows"],1);
+    assert_eq!(preview["fieldWrites"],0);assert_eq!(preview["hasMore"],true);
+    let first = run(true,false,1).await.unwrap();
+    assert_eq!(first["fieldWrites"],2);assert_eq!(first["hasMore"],true);
+    let cleared: serde_json::Value = sqlx::query_scalar("SELECT data FROM public._brain_res_repair_defaults WHERE id=$1")
+        .bind(ids[1]).fetch_one(&pool).await.unwrap();
+    assert!(cleared["label"].is_null());
+    let custom: serde_json::Value = sqlx::query_scalar("SELECT data FROM public._brain_res_repair_defaults WHERE id=$1")
+        .bind(ids[2]).fetch_one(&pool).await.unwrap();
+    assert_eq!(custom["label"],"Custom");assert_eq!(custom["enabled"],true);
+    let second = run(true,false,1).await.unwrap();
+    assert_eq!(second["fieldWrites"],1);assert_eq!(second["hasMore"],false);
+    assert_eq!(run(true,false,1).await.unwrap()["fieldWrites"],0);
+    assert_eq!(run(true,true,1).await.unwrap()["fieldWrites"],1);
+    assert_eq!(run(true,true,1).await.unwrap()["fieldWrites"],0);
+    assert!(run(true,false,0).await.is_err());assert!(run(true,false,10001).await.is_err());
+    let mut invalid = resource.clone();
+    invalid.fields.get_mut("label").unwrap().default = Some(serde_json::Value::Null);
+    assert!(brain_backend::defaults::fill(&pool,&[invalid],true,false,1).await.is_err(),"null declarations are invalid before any write");
+    let mut rollback = resource.clone();
+    rollback.name = "repair_atomic".into();
+    rollback.fields = BTreeMap::from([
+        ("title".into(), field("str",true)),
+        ("active".into(), Field {default:Some(json!(true)),..field("bool",false)}),
+        ("code".into(), Field {default:Some(json!("fixed")),unique:true,..field("str",false)}),
+    ]);
+    db::migrate(&pool,&[resource.clone(),rollback.clone()]).await.unwrap();
+    for id in ids.iter().take(2) {
+        sqlx::query("INSERT INTO public._brain_res_repair_atomic(id,owner,data) VALUES($1,$2,$3)")
+            .bind(id).bind(owner).bind(json!({"title":"Old"})).execute(&pool).await.unwrap();
+    }
+    assert!(brain_backend::defaults::fill(&pool,&[rollback],true,false,1000).await.is_err(),"duplicate unique defaults fail");
+    let changed: i64 = sqlx::query_scalar("SELECT count(*) FROM public._brain_res_repair_atomic WHERE data ? 'active' OR data ? 'code'")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(changed,0,"a later field failure rolls back earlier field writes");
+    pool.close().await;
+}
+
+#[test]
+fn declared_defaults_must_match_patterns_for_text_lists_and_object_keys() {
+    for (kind, good, bad) in [
+        ("str",json!("valid"),json!("INVALID")),
+        ("list<str,4>",json!(["one","two"]),json!(["one","2"])),
+        ("obj",json!({"key":1}),json!({"bad-key":1})),
+    ] {
+        let mut resource=legacy();resource.search.clear();
+        resource.fields=BTreeMap::from([("value".into(),Field {default:Some(good),pattern:Some("[a-z]+".into()),..field(kind,false)})]);
+        resource.validate().unwrap();
+        resource.fields.get_mut("value").unwrap().default=Some(bad);
+        let error=resource.validate().expect_err("a default outside its field pattern must be refused before a backfill");
+        assert!(error.contains("default") && error.contains("pattern"),"{kind}: {error}");
+    }
+}

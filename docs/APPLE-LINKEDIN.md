@@ -44,6 +44,13 @@ The browser uses Sign in with Apple JS in popup mode: `brain recipe apple-signin
 that asks the backend for the challenge, initializes Apple's script with the returned client ID, Return URL and nonce,
 and posts the resulting `id_token` once. Closing the popup is a choice, not an error. The form-post flow is not used.
 
+The generated `brain-apple-signin` document-head marker selects `Cross-Origin-Opener-Policy:
+same-origin-allow-popups`, as `brain-google-signin` does for Google. The router performs a full document navigation
+when entering or leaving this policy: swapping a view cannot change HTTP document headers. Moving between two
+popup-enabled pages keeps client navigation. Conditional GET and HEAD responses preserve the same opener policy
+on 304 without issuing a new CSP nonce. Application reload shims for this policy transition are unnecessary after
+rebuilding with this fix. Real provider sign-in still requires registered credentials and return URLs.
+
 Verification accepts only RS256 tokens signed with a key from `https://appleid.apple.com/auth/keys`, issuer
 `https://appleid.apple.com`, the configured Services ID as audience, an unexpired lifetime and the exact raw nonce. The
 key, cache and concurrency limits are the same as Google's.
@@ -65,7 +72,27 @@ can sign in again; `account-deleted` disables the Apple identity and ends the se
 Not handled: exchanging Apple's authorization code, revoking Apple tokens on account deletion, and `transfer_sub` team
 transfers. An Apple-only account always needs an address, because native accounts require one.
 
+## Profile hints returned to the app
+
+After `brain backend migrate` applies migration 0027, native session users include optional `name` and `picture`
+when the verified Google or LinkedIn ID token shares them. Apple supplies only its first-authorization name through
+the adapter; it supplies no profile photo. The initial sign-in JSON, `/_brain/auth/me`, refreshed sessions and native
+SSR `ctx.user` keep these hints. LinkedIn's redirect callback sets the session and redirects; read `me` or `ctx.user`
+after that redirect rather than expecting a JSON callback body.
+
+Names are plain text, trimmed and capped at 200 characters. Picture URLs must be credential-free HTTPS and at most
+2048 bytes. Missing or invalid hints do not deny sign-in or erase previously shared hints; a later valid value updates
+them. Migration 0027 preserves names already stored with identities. These hints never establish identity, verify an
+email, choose a role or enter access-token claims. The framework does not fetch or copy the image, retain provider
+access tokens or call `userinfo`. Treat the URL as provider-managed and handle image load failure; no lifetime is
+promised. Apps that need a durable avatar can independently store an authorized copy under their own media policy.
+
 ## LinkedIn
+
+The Node gateway relays the native start's 303 only for GET/HEAD on `/_brain/auth/linkedin/start` and the exact
+HTTPS destination `https://www.linkedin.com/oauth/v2/authorization`, without credentials or a fragment. Other
+paths, methods, statuses and destinations retain same-site redirect validation. Google and Apple use token/challenge
+endpoints, not this redirect exception; arbitrary OIDC authorization redirects are not enabled by it.
 
 LinkedIn uses the OpenID Connect authorization-code flow of a confidential web client: `/start` redirects the browser
 to `https://www.linkedin.com/oauth/v2/authorization` with scope `openid profile email`, a one-use state and a nonce

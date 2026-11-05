@@ -172,7 +172,7 @@ impl Apple {
             subject: claims.sub,
             issuer: claims.iss,
             email,
-            name: None,
+            name: None, picture: None,
         })
     }
     /// Verifies the signed `payload` of a server-to-server notification. `Ok(None)`: not a notification Apple signed

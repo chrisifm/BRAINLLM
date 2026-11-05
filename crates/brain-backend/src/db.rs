@@ -6,6 +6,7 @@ use sqlx::{Connection, PgConnection, PgPool, Row, postgres::PgPoolOptions};
 use std::time::Duration;
 use uuid::Uuid;
 
+pub(crate) const MIGRATION_LOCK: i64 = 728196410;
 const MIGRATIONS: &[(&str, &str)] = &[
     ("backend", include_str!("../migrations/0001_backend.sql")),
     ("jobs", include_str!("../migrations/0002_jobs.sql")),
@@ -42,6 +43,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     ("session_controls", include_str!("../migrations/0024_session_controls.sql")),
     ("per_owner", include_str!("../migrations/0025_per_owner.sql")),
     ("identity_providers", include_str!("../migrations/0026_identity_providers.sql")),
+    ("provider_profile", include_str!("../migrations/0027_provider_profile.sql")),
 ];
 fn checksum(sql: &str) -> String {
     Sha256::digest(sql.as_bytes())
@@ -770,7 +772,8 @@ async fn migrate_reviewed(pool: &PgPool, resources: &[Resource], approved: &[Str
     crate::relations::validate_graph(resources)?;
     let mut tx = pool.begin().await.map_err(safe)?;
     sqlx::raw_sql("SET LOCAL statement_timeout='60s'; SET LOCAL lock_timeout='5s'; SET LOCAL idle_in_transaction_session_timeout='60s';").execute(&mut *tx).await.map_err(safe)?;
-    sqlx::query("SELECT pg_advisory_xact_lock(728196410)")
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(MIGRATION_LOCK)
         .execute(&mut *tx)
         .await
         .map_err(safe)?;
@@ -825,6 +828,10 @@ async fn migrate_reviewed(pool: &PgPool, resources: &[Resource], approved: &[Str
             sqlx::query("UPDATE _brain_resource_schemas SET fields=$2,search_fields=$3 WHERE name=$1").bind(&r.name).bind(&fields).bind(json!(r.search)).execute(&mut *tx).await.map_err(safe)?;
             drop_retired_constraints(&mut tx, r).await?;
             backfill_added_defaults(&mut tx, r, &recorded).await?;
+        } else if old.is_some() {
+            // A previous release may already have recorded the removal without retiring its generated mirrors.
+            // Only unchanged, approved contracts reach here; pending contract changes above are left untouched.
+            crate::relations::retire(&mut tx, r).await?;
         }
         let table = table(r);
         // The legacy generated `search` column is preserved for existing data but removed from indexing/use.

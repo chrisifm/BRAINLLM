@@ -96,6 +96,10 @@ export function router(o = {}) {
   const region = o.region || 'main'
   const parse = o.parse || (h => new DOMParser().parseFromString(h, 'text/html'))
   const fullLoad = new Set((o.fullLoad || []).map(p => new URL(p, location.href).pathname.replace(/\/+$/, '') || '/'))
+  // COOP belongs to the document, not the swapped view. Only real head markers opt into provider popups.
+  const popup = d => [...((d.head || d.querySelector('head'))?.querySelectorAll('meta') || [])].some(m =>
+    /^(brain-google-signin|brain-apple-signin)$/i.test(m.getAttribute('name') || '') && m.getAttribute('content') === '1')
+  const popupDocument = popup(document)
   let seq = 0, through = null, stale = false
   const ahead = predict(o, (u, p = true) => same(u, p))
   // Build signature (§35.7): the page's <meta name="brain-build">. A navigation response from another build, or the
@@ -205,6 +209,7 @@ export function router(o = {}) {
       if (!r.ok || !/html/.test(hd('content-type') || 'html')) throw Error(r.status)
       const doc = parse(await r.text())
       if (my !== seq) return // a newer navigation won
+      if (popup(doc) !== popupDocument) return hard(url) // entering or leaving a popup page needs fresh HTTP headers
       // another language (§37): a full load brings its own dictionaries, `lang` and `dir`; locales never mix in memory
       const lang = d => d?.documentElement?.getAttribute('lang')
       if (lang(doc) && lang(document) && lang(doc) !== lang(document)) return hard(url)
@@ -308,7 +313,7 @@ export function router(o = {}) {
     const h = e => {
       if (through && e.destination.url === through) return void (through = null)
       if (e.navigationType === 'reload') return // a reload is always a real full load (e.g. after a deploy deleted a chunk)
-      if (!e.canIntercept || e.hashChange || e.downloadRequest || e.formData || !same(e.destination.url)) return
+      if (!e.canIntercept || e.hashChange || e.downloadRequest || e.formData || externalLink(e.sourceElement) || !same(e.destination.url)) return
       if (e.cancelable && !leave()) return e.preventDefault()
       const to = e.destination.url, from = nav.currentEntry?.url
       if (G.__brainURLOnly?.(from || location.href, to)) return e.intercept({ focusReset: 'manual', handler: () => G.__brainURLRestore?.() })
@@ -362,7 +367,7 @@ export function router(o = {}) {
     if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
     let a = e.target
     while (a && a.tagName !== 'A') a = a.parentNode
-    if (!a || !a.getAttribute('href') || a.getAttribute('target') || a.hasAttribute('download') || !same(a.href || a.getAttribute('href'))) return
+    if (!a || !a.getAttribute('href') || a.getAttribute('target') || a.hasAttribute('download') || externalLink(a) || !same(a.href || a.getAttribute('href'))) return
     const u = new URL(a.href || a.getAttribute('href'), location.href)
     if (u.pathname === location.pathname && u.hash) return // in-page anchor: native
     e.preventDefault()
@@ -416,7 +421,7 @@ export function predict(o = {}, same = () => false) {
     return !NOPE.test(u.pathname) && !FILE.test(u.pathname) && !SECRET.test(u.search)
   }
   const ok = a => {
-    if (!a?.getAttribute?.('href') || a.getAttribute('target') || a.hasAttribute('download')) return null
+    if (!a?.getAttribute?.('href') || a.getAttribute('target') || a.hasAttribute('download') || externalLink(a)) return null
     for (let n = a; n?.getAttribute; n = n.parentNode) if (n.getAttribute('data-prefetch') === 'false') return null
     const k = key(a.href || a.getAttribute('href'))
     return safe(k) ? k : null
@@ -426,7 +431,7 @@ export function predict(o = {}, same = () => false) {
     let n = 0
     for (const href of list) {
       const u = key(href)
-      if (!u || pre.has(u) || pre.size > 47 || !same(u) || !new URL(u).pathname.includes('/_b/') || ++n > 8) continue
+      if (!u || pre.has(u) || pre.size > 47 || !same(u) || !(new URL(u).pathname.includes('/_b/') || /\/[a-z0-9]{8}\.(?:js|mjs|jsbrain|css|cssbrain)$/.test(new URL(u).pathname)) || ++n > 8) continue
       const l = document.createElement('link')
       l.setAttribute('rel', /\.(js|jsbrain)(\?|$)/.test(u) ? 'modulepreload' : 'prefetch')
       l.setAttribute('href', u)
@@ -619,3 +624,5 @@ function hold(el) {
     },
   })
 }
+// An absolute navigation can intentionally belong to another site on the same origin.
+const externalLink = a => (a?.getAttribute?.('rel') || '').split(/\s+/).some(token => token.toLowerCase() === 'external') && /^https?:\/\//i.test((a?.getAttribute?.('href') || '').trim())

@@ -57,9 +57,9 @@ pub fn xml(s: &str) -> String {
 /// `noindex`, stays crawlable.
 pub fn robots(cfg: &Config) -> String {
     if cfg.staging {
-        return "User-agent: *\nAllow: /\n".into();
+        return format!("{}\nUser-agent: *\nAllow: /\n", brain_lex::branding::HASH);
     }
-    let mut o = String::from("User-agent: *\nAllow: /\n");
+    let mut o = format!("{}\nUser-agent: *\nAllow: /\n", brain_lex::branding::HASH);
     o.push_str(&crate::social::ai_robots(cfg));
     if let (Some(_), true) = (&cfg.site, cfg.sitemap) {
         o.push_str(&format!("\nSitemap: {}\n", cfg.abs("/sitemap.xml")));
@@ -89,7 +89,7 @@ pub fn news_sitemap(cfg: &Config, cols: &[crate::content::Collection]) -> Option
     items.sort_by(|a, b| b.date.cmp(&a.date).then_with(|| a.route().cmp(&b.route())));
     items.truncate(NEWS_MAX);
     let mut o = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\" xmlns:news=\"http://www.google.com/schemas/sitemap-news/0.9\">\n",
+        format!("{}<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\" xmlns:news=\"http://www.google.com/schemas/sitemap-news/0.9\">\n", brain_lex::branding::XML),
     );
     for e in items {
         let lang = e
@@ -205,7 +205,7 @@ pub fn sitemaps_with(
     };
     let head = |chunk: &[(&Entry, String)]| {
         let mut o = String::from(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\"",
+            format!("{}<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\"", brain_lex::branding::XML),
         );
         if chunk.iter().any(|(e, _)| !images(cfg, e).is_empty()) {
             o.push_str(" xmlns:image=\"http://www.google.com/schemas/sitemap-image/1.1\"");
@@ -221,7 +221,7 @@ pub fn sitemaps_with(
     };
     const FOOT: &str = "</urlset>\n";
     // the widest header (every namespace) is reserved, so a chunk never grows past the limit once its header is known
-    const HEAD_MAX: usize = 360;
+    const HEAD_MAX: usize = 360 + brain_lex::branding::HTML.len() + 1;
     let mut rejected = Vec::new();
     let mut chunks: Vec<Vec<(&Entry, String)>> = vec![vec![]];
     let mut size = 0;
@@ -252,7 +252,7 @@ pub fn sitemaps_with(
     }
     let mut out = Vec::new();
     let mut index = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<sitemapindex xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n",
+        format!("{}<sitemapindex xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n", brain_lex::branding::XML),
     );
     for (i, chunk) in chunks.iter().enumerate() {
         let name = format!("sitemap-{}.xml", i + 1);
@@ -442,6 +442,7 @@ pub fn llms_txt(cfg: &Config, entries: &[Entry]) -> String {
         }
     }
     o.push_str(&built_with(cfg));
+    o.push_str(&format!("\n{}\n",brain_lex::branding::HTML));
     o
 }
 
@@ -473,6 +474,7 @@ pub fn llms_full(cfg: &Config, entries: &[Entry]) -> String {
         o.push_str("\n---\n");
         o.push_str(&built_with(cfg));
     }
+    o.push_str(&format!("\n{}\n", brain_lex::branding::HTML));
     o
 }
 
@@ -622,6 +624,7 @@ gtag('consent','default',{ad_storage:'denied',ad_user_data:'denied',ad_personali
         js.push_str("dataLayer.push({'gtm.start':new Date().getTime(),event:'gtm.js'});");
     }
     js.push('\n');
+    let js=brain_lex::branding::code(&js);
     let path = format!("_b/g.{}.js", hash(&js));
     head.push_str(&format!("<script src=\"/{path}\"></script>"));
     if let Some(id) = &g.analytics {
@@ -689,11 +692,12 @@ mod tests {
         let e = entries(&cfg, &d);
         assert_eq!(
             robots(&cfg),
-            "User-agent: *\nAllow: /\nContent-Signal: search=yes, ai-input=yes, ai-train=yes\n\nSitemap: https://acme.dev/sitemap.xml\n"
+            format!("{}\nUser-agent: *\nAllow: /\nContent-Signal: search=yes, ai-input=yes, ai-train=yes\n\nSitemap: https://acme.dev/sitemap.xml\n",brain_lex::branding::HASH)
         );
         let sm = sitemaps(&cfg, &e);
         assert_eq!(sm.len(), 1);
         let x = &sm[0].1;
+        assert!(x.starts_with(brain_lex::branding::XML), "the signature follows the XML declaration: {x}");
         assert!(x.contains("<url><loc>https://acme.dev/</loc><image:image><image:loc>https://acme.dev/hero.png</image:loc></image:image></url>"));
         assert!(x.contains("<loc>https://acme.dev/blog/a</loc><lastmod>2026-10-01</lastmod>"));
         assert!(!x.contains("admin"));
@@ -701,7 +705,7 @@ mod tests {
             staging: true,
             ..cfg.clone()
         };
-        assert_eq!(robots(&staging), "User-agent: *\nAllow: /\n");
+        assert_eq!(robots(&staging), format!("{}\nUser-agent: *\nAllow: /\n",brain_lex::branding::HASH));
         assert!(sitemaps(&staging, &e).is_empty());
         assert!(sitemaps(&Config::default(), &e).is_empty());
     }
@@ -857,6 +861,22 @@ mod tests {
     }
 
     #[test]
+    fn assistant_files_use_the_display_name_and_html_when_markdown_is_disabled() {
+        let cfg = Config::from_json(&brain_lex::json::Json::parse(r#"{"name":"internal-package","site":"https://example.com","seo":{"siteName":"Public site","markdown":false}}"#).unwrap()).unwrap();
+        assert_eq!(cfg.name.as_deref(), Some("Public site"));
+        let d = docs();
+        let e = entries(&cfg, &d);
+        let index = llms_txt(&cfg, &e);
+        assert!(index.starts_with("# Public site\n"), "{index}");
+        assert!(llms_full(&cfg, &e).starts_with("# Public site\n"));
+        assert!(index.contains("https://example.com/blog/a)"), "{index}");
+        assert!(!index.contains(".md)") && !index.contains("internal-package"), "{index}");
+        for value in ["null", "true", "1", "[]", "\"\"", "\"   \""] {
+            assert!(Config::from_json(&brain_lex::json::Json::parse(&format!("{{\"seo\":{{\"siteName\":{value}}}}}")).unwrap()).is_err(), "{value}");
+        }
+    }
+
+    #[test]
     fn llms_files() {
         let cfg = Config {
             site: Some("https://acme.dev".into()),
@@ -866,7 +886,7 @@ mod tests {
         let e = entries(&cfg, &d);
         assert_eq!(
             llms_txt(&cfg, &e),
-            "# Acme\n\n> Tools for teams\n\n## Pages\n\n- [Acme](https://acme.dev/index.md): Tools for teams\n\n## Blog\n\n- [First post](https://acme.dev/blog/a.md): The first one\n"
+            format!("# Acme\n\n> Tools for teams\n\n## Pages\n\n- [Acme](https://acme.dev/index.md): Tools for teams\n\n## Blog\n\n- [First post](https://acme.dev/blog/a.md): The first one\n\n{}\n", brain_lex::branding::HTML)
         );
         let full = llms_full(&cfg, &e);
         assert!(
@@ -887,8 +907,8 @@ mod tests {
         };
         let d = docs();
         let e = entries(&cfg, &d);
-        let tail = "\n## Built with\n\n- [BRAINLLM 0.3.0](https://brain.example/): the web compiler for LLMs, written in Rust. Source: https://git.example/brain\n";
-        assert!(llms_txt(&cfg, &e).ends_with(tail));
+        let tail = format!("\n## Built with\n\n- [BRAINLLM 0.3.0](https://brain.example/): the web compiler for LLMs, written in Rust. Source: https://git.example/brain\n\n{}\n", brain_lex::branding::HTML);
+        assert!(llms_txt(&cfg, &e).ends_with(&tail));
         assert!(llms_full(&cfg, &e).ends_with(&format!("\n---\n{tail}")));
     }
 

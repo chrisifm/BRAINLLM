@@ -51,7 +51,7 @@ try {
  if(version?.schemaVersion!==1||version.version!==expected)throw Error('Native release binary does not match its source version')
  await execute(['new','native-release-app'])
  const app=join(directory,'native-release-app')
- if(JSON.parse(readFileSync(join(app,'package.json'),'utf8')).devDependencies?.['@christianirack/brainllm']!==expected)throw Error('Native scaffold must pin this exact release')
+ if(JSON.parse(readFileSync(join(app,'package.json'),'utf8')).dependencies?.['@christianirack/brainllm']!==expected)throw Error('Native scaffold must pin this exact release')
  await execute(['check','--json'],app)
  await execute(['build','--json'],app)
  const line=readFileSync(join(directory,'command.log'),'utf8').trim().split('\n').findLast(value=>value.startsWith('{'))

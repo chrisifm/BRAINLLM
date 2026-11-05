@@ -12,6 +12,11 @@ import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { codexGenerate, codexPins } from './codex.mjs'
 
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+  console.log('Usage: node bench/llm/run.mjs [--provider claude|qwen|codex] [--model MODEL] [--effort EFFORT] [--spec-file FILE] [--briefs FILE] [--mode spec|mcp] [--fix 0..10] [--conc 1..8] [--only ID] [--stage LABEL] [--brain FILE]')
+  process.exit(0)
+}
+
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '../..')
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d }
@@ -70,7 +75,11 @@ async function qwen(prompt) {
     return { text, input: j.prompt_eval_count || 0, output: j.eval_count || 0, cost: 0 }
   } finally { clearTimeout(t) }
 }
-const generate = (prompt) => PROVIDER === 'codex' ? codexGenerate(SYS, prompt, { model: MODEL, effort: EFFORT }) : PROVIDER === 'qwen' ? qwen(prompt) : claude(prompt)
+let codexTransportFailed = false
+const generate = (prompt) => {
+  if (PROVIDER === 'codex' && codexTransportFailed) throw Error('codex: generation stopped after infrastructure failure')
+  return PROVIDER === 'codex' ? codexGenerate(SYS, prompt, { model: MODEL, effort: EFFORT }) : PROVIDER === 'qwen' ? qwen(prompt) : claude(prompt)
+}
 
 // App map for mcp mode. Prefers the real one; the substitute lists what SPEC promises ("routes, components,
 // props, channels, tests") by reading the scaffold files.
@@ -141,7 +150,24 @@ async function one(b) {
 
 async function pool(items, n, fn) {
   const out = []; let i = 0
-  await Promise.all(Array.from({ length: n }, async () => { while (i < items.length) { const k = i++; try { out[k] = await fn(items[k]) } catch (e) { out[k] = { id: items[k].id, infraFail: String(e).slice(0, 300) } ; console.error(items[k].id, e.message) } } }))
+  await Promise.all(Array.from({ length: n }, async () => {
+    while (i < items.length) {
+      const k = i++
+      try { out[k] = await fn(items[k]) }
+      catch (e) {
+        out[k] = { id: items[k].id, infraFail: String(e).slice(0, 300) }
+        console.error(items[k].id, e.message)
+        // Drain already-started owned generations, but never spend another Codex call on a broken transport.
+        if (PROVIDER === 'codex') {
+          codexTransportFailed = true
+          while (i < items.length) {
+            const pending = i++
+            out[pending] = { id: items[pending].id, infraFail: 'not attempted after infrastructure failure' }
+          }
+        }
+      }
+    }
+  }))
   return out
 }
 
@@ -166,3 +192,4 @@ writeFileSync(join(here, 'results', `${TAG}${ONLY ? '-' + ONLY : ''}.json`), JSO
 console.log(JSON.stringify(sum, null, 1))
 console.log('| view | 1st try | iterations | final | 1st-try codes |\n|---|---|---:|---|---|')
 for (const r of rows) console.log(r.infraFail ? `| ${r.id} | infra | | | ${r.infraFail.slice(0, 80)} |` : `| ${r.id} | ${r.firstPass ? '✅' : '❌'} | ${r.iterations} | ${r.finalPass ? '✅' : '❌'} | ${r.tries[0].diags.map((d) => d.code + ':' + d.kind).join(' ')} |`)
+if (sum.infraFail) process.exitCode = 1

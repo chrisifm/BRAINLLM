@@ -135,6 +135,7 @@ fn doctor_warns_when_docs_are_stale() {
     touch_price(&dir);
     let j = String::from_utf8_lossy(&brain(&dir, &["doctor", "--json"]).stdout).to_string();
     assert!(j.contains("generated docs are stale: docs/app/components.md") && j.contains("\"level\":\"warning\""), "{j}");
+    assert!(!j.contains("commit docs/app") && j.contains("project Git policy"), "stale advice respects generated-file ignore policy: {j}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

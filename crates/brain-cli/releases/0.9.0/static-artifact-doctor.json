@@ -1,0 +1,25 @@
+{
+  "id": "static-artifact-doctor",
+  "kind": "capability",
+  "title": "Static output artifact validation",
+  "why": "Static projects receive a fresh output consistency gate in doctor, alongside source and browser scenario validation.",
+  "changelog": [
+    "Static doctor audits fresh emitted"
+  ],
+  "guide": "brain guide static",
+  "codes": [],
+  "apis": [
+    "brain doctor",
+    "staticArtifact"
+  ],
+  "adopt": {
+    "file": "brain.json",
+    "snippet": "{\"output\":\"static\"}"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "\"static\""
+    }
+  ]
+}

@@ -26,20 +26,25 @@ import { installNativeSockets } from './native-sockets.mjs'
 import { llmClient } from './llm.mjs'
 import { BlockList, isIP } from 'node:net'
 import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import zlib from 'node:zlib'
 import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
-import { closeSync, existsSync, openSync, readFileSync, readSync, realpathSync, statSync, lstatSync } from 'node:fs'
+import { constants as FS, existsSync, readFileSync, realpathSync, statSync, lstatSync } from 'node:fs'
+import { open } from 'node:fs/promises'
 import * as Module from 'node:module'
 import { basename, dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
+  '.brain': 'text/html; charset=utf-8', '.jsbrain': 'text/javascript; charset=utf-8', '.cssbrain': 'text/css; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png',
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.avif': 'image/avif', '.gif': 'image/gif',
   '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.woff': 'font/woff', '.txt': 'text/plain; charset=utf-8',
   '.xml': 'application/xml', '.webmanifest': 'application/manifest+json', '.map': 'application/json',
   '.mp4': 'video/mp4', '.webm': 'video/webm', '.pdf': 'application/pdf', '.wasm': 'application/wasm',
+  '.m3u8': 'application/vnd.apple.mpegurl', '.m3u': 'application/vnd.apple.mpegurl', '.m4s': 'video/iso.segment',
+  '.mpd': 'application/dash+xml', '.ts': 'video/mp2t', '.vtt': 'text/vtt; charset=utf-8', '.mp3': 'audio/mpeg',
   '.md': 'text/markdown; charset=utf-8', // llms.txt copies of the pages (§33), as brain start's static server sends them
 }
 // feeds are .xml files with their own type (SEO, §32)
@@ -114,8 +119,10 @@ function safeLocation(value) {
 function linkTo(route, path) {
   const t = route && route.hrefs
   if (!t || typeof path !== 'string' || path[0] !== '/' || path[1] === '/') return path
-  const m = /^[^?#]*/.exec(path)[0]
-  const n = t.s[m] || (new RegExp(t.re).test(m) && (m === '/' ? t.p : t.p + m))
+  const m = /^[^?#]*/.exec(path)[0], key = m.replace(/\/+$/, '') || '/'
+  if (key === t.p || key.startsWith(t.p + '/')) return path
+  let n = t.s[key] || (new RegExp(t.re).test(key) && (key === '/' ? t.p : t.p + key))
+  if (n && key !== '/' && m.endsWith('/') && !n.endsWith('/')) n += '/'
   return n ? n + path.slice(m.length) : path
 }
 function localizeLinks(route, html) {
@@ -239,6 +246,14 @@ function googleSignInPage(page) {
 
 // One-use provider cookies (Google nonce, Apple nonce, LinkedIn state): relayed to the backend and cleared at logout.
 const PROVIDER_COOKIES = ['__Host-brain-google', '__Host-brain-apple', '__Host-brain-linkedin']
+// The native backend owns state, nonce and provider configuration. Only this fixed protocol destination is external.
+function providerStartRedirect(method, path, status, location) {
+  if (!['GET', 'HEAD'].includes(method) || path !== '/_brain/auth/linkedin/start' || status !== 303 || typeof location !== 'string' || /[\\\x00-\x20\x7f]/.test(location)) return false
+  try {
+    const target = new URL(location)
+    return target.origin === 'https://www.linkedin.com' && target.pathname === '/oauth/v2/authorization' && !target.username && !target.password && !target.hash
+  } catch { return false }
+}
 // One configured loopback authority. No user-controlled target, proxy, redirect, auth cache or pending queue.
 // ctx.backend.files(bucket): the same file calls as job and route handlers (docs/backend/files.md).
 function bucketClient(target, key, bucket, readBudgetMs = () => 0) {
@@ -341,7 +356,15 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession, r
   }
   const safeUser = user => {
     if (!user || typeof user.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(user.id) || typeof user.email !== 'string' || user.email.length > 254 || typeof user.role !== 'string' || !/^[a-z][a-z0-9_]{0,47}$/.test(user.role) || ['public','owner'].includes(user.role) || typeof user.verified !== 'boolean') throw new HttpError(503,'Native authentication response is unavailable')
-    return Object.freeze({id:user.id,email:user.email,role:user.role,verified:user.verified})
+    const clean = {id:user.id,email:user.email,role:user.role,verified:user.verified}
+    if (typeof user.name === 'string' && user.name.trim() && user.name.length <= 400 && [...user.name].length <= 200 && !/[\u0000-\u001f\u007f-\u009f]/.test(user.name)) clean.name = user.name.trim()
+    if (typeof user.picture === 'string' && Buffer.byteLength(user.picture) <= 2048 && !/[\u0000-\u001f\u007f-\u009f]/.test(user.picture)) {
+      try {
+        const url = new URL(user.picture)
+        if (url.protocol === 'https:' && url.hostname && !url.username && !url.password) clean.picture = user.picture
+      } catch {}
+    }
+    return Object.freeze(clean)
   }
   const unavailable = (why = 'the backend did not answer') => new HttpError(503, `Native authentication is unavailable: ${why}`)
   const call = (incoming, response, path, method, rid, origin) => {
@@ -540,7 +563,7 @@ export function nativeAuthBridge(raw, refused, serviceKey, report, ownSession, r
         const cookies = nativeCookies(backend.headers['set-cookie'])
         if (cookies.length) safe['set-cookie'] = cookies
         if (backend.statusCode >= 500 && !res.$capture) res.$brainCause = 'answered by the native backend'
-        try { reply(res,backend.statusCode || 502,req.method === 'HEAD' ? '' : Buffer.concat(chunks,bytes),safe); resolve() } catch (e) { reject(e) }
+        try { reply(res,backend.statusCode || 502,req.method === 'HEAD' ? '' : Buffer.concat(chunks,bytes),safe,providerStartRedirect(req.method,url.pathname,backend.statusCode,safe.location)); resolve() } catch (e) { reject(e) }
       }
       const cancel = () => { outgoing?.destroy(); finish(true) }
       const data = chunk => {
@@ -1183,17 +1206,22 @@ export function createServer(o = {}) {
   // HTML: `no-cache` + ETag (strong for files, weak for SSR) → a repeat visit gets 304 with no body (§35); the ETag is
   // taken before the per-response nonce is injected, so it is stable
   const html = (res, status, page, headers = {}, etag) => {
+    // A 304 updates the cached document's policy too; keep it identical to its 200 without minting a CSP nonce.
+    headers = { 'cache-control': 'no-cache', ...(googleSignInPage(page) ? { 'cross-origin-opener-policy': 'same-origin-allow-popups' } : {}), ...(mf.build ? { 'x-brain-build': mf.build } : {}), ...headers }
     if (etag && status === 200) {
       headers = { etag, ...headers }
       const inm = res.req.headers['if-none-match']
       if (inm && inm.split(',').some(t => t.trim().replace(/^W\//, '') === etag.replace(/^W\//, ''))) return send(res, 304, '', headers)
     }
+    // RFC 9111 section 4.3.5 lets HEAD update cached GET headers without replacing its body.
+    // As with 304, omit a new body-bound policy so the cached script nonce remains authorized.
+    if (res.req.method === 'HEAD') return send(res, status, '', { 'content-type': MIME['.html'], ...headers })
     const nonce = randomBytes(16).toString('base64')
     // behavior analytics (docs/backend/analytics.md): with a native backend every page loads its collector as an async
     // module served by that backend, outside the build and the route budgets; BRAIN_ANALYTICS=off skips the tag
     if (analyticsTag && !page.includes(analyticsTag)) page = page.includes('</head>') ? page.replace('</head>', analyticsTag + '</head>') : page + analyticsTag
     const body = page.replace(/<script(?![^>]*\bnonce=)/g, `<script nonce="${nonce}"`)
-    send(res, status, body, { 'content-type': MIME['.html'], 'content-security-policy': withNonce(mf.csp || CSP0, nonce), 'cache-control': 'no-cache', ...(googleSignInPage(page) ? { 'cross-origin-opener-policy': 'same-origin-allow-popups' } : {}), ...(mf.build ? { 'x-brain-build': mf.build } : {}), ...headers })
+    send(res, status, body, { 'content-type': MIME['.html'], 'content-security-policy': withNonce(mf.csp || CSP0, nonce), ...headers })
   }
   const notFound = (req, res) => failPage(res, 404, res.getHeader('x-request-id'))
   // `gone()` from load (§33): 410 tells crawlers the URL was removed for good; views/410.brain, else the 404 page
@@ -1206,7 +1234,7 @@ export function createServer(o = {}) {
   }
   // `/403`, `/404.html`, `/503`…: the status when the app has that page, else 0 and the path is an ordinary one
   const reservedStatus = pathname => {
-    const m = /^\/(403|404|410|5\d\d)(?:\.html)?$/.exec(pathname)
+    const m = /^\/(403|404|410|5\d\d)(?:\.(?:html|brain))?$/.exec(pathname)
     if (!m) return 0
     const n = +m[1]
     return file(`${n}.html`) || (mf.errors && mf.errors[n]) || (n === 403 && mf.forbidden) || (n === 404 && mf.notFound) ? n : 0
@@ -1357,16 +1385,30 @@ export function createServer(o = {}) {
   }
   const anonymous = req => (req.method === 'GET' || req.method === 'HEAD') && !req.headers.authorization && !req.headers.cookie
 
+  const preloadHints = new WeakMap()
   async function ssr(req, res, route, params, url, rid, forms = null, status = 200, fixed = null, nocache = false) {
     // the route's preloads (the same Link values as _headers): on the response, where hosts turn them into early hints,
     // capped so a long list cannot trip a proxy's header buffer. A 103 (#232) only when opted in, and never to HTTP/1.0.
     if (route.links && route.links.length && !res.$capture && !res.$hinted) {
       res.$hinted = true
-      const link = route.links.join(', ')
-      if (link.length <= 2048 && !res.headersSent) res.setHeader('link', link)
-      if (EARLY_HINTS && res.writeEarlyHints && req.httpVersion !== '1.0') {
+      let selected = preloadHints.get(route)
+      if (!selected) {
+        selected = []
+        let bytes = 0
+        // Preserve graph order within a priority; render-blocking styles and fonts precede script hints.
+        const priority = value => /(?:^|;)\s*as=(?:style|font)(?:;|$)/.test(value) ? 0 : 1
+        for (const value of [...route.links].sort((a, b) => priority(a) - priority(b))) {
+          const size = Buffer.byteLength(value) + (selected.length ? 2 : 0)
+          if (bytes + size > 2048) continue
+          selected.push(value); bytes += size
+        }
+        preloadHints.set(route, selected)
+        if (selected.length < route.links.length) log('warn', 'preload hints trimmed to 2048 bytes; fix: reduce the route preload graph', { route: route.path, kept: selected.length, dropped: route.links.length - selected.length })
+      }
+      if (selected.length && !res.headersSent) res.setHeader('link', selected.join(', '))
+      if (selected.length && EARLY_HINTS && res.writeEarlyHints && req.httpVersion !== '1.0') {
         try {
-          res.writeEarlyHints({ link: route.links })
+          res.writeEarlyHints({ link: selected })
         } catch {}
       }
     }
@@ -1445,7 +1487,7 @@ export function createServer(o = {}) {
     // a page behind a guard passes it only for its visitor: it stays out of the index even when it renders (§33)
     if (route.guards && route.guards.length) res.setHeader('x-robots-tag', NOINDEX)
     // with seo.trailingSlash "ignore" both forms answer: the canonical takes the form the sitemap lists (no slash)
-    let out = head(page, seo, SLASH === 'always' || url.pathname === '/' ? url.pathname : url.pathname.replace(/\/+$/, '') || '/', url.search)
+    let out = head(page, seo, SLASH === 'always' || url.pathname === '/' ? url.pathname : url.pathname.replace(/\/+$/, '') || '/', url.search, route, BASE.slice(0, -1))
     // route params for route() in the browser (the client has no route table)
     if (params && Object.keys(params).length) out = out.replace('</head>', () => `<meta name="brain-params" content="${esc(JSON.stringify(params))}"></head>`)
     if (forms) out = out.replace('</body>', () => `<script type="application/json" id="brain-forms">${jsonInHtml(forms)}</script></body>`)
@@ -1483,16 +1525,6 @@ export function createServer(o = {}) {
     const seoF = sm.seo || (await load(route.view)).default.seo
     if (route.i18n) await load(route.i18n)
     const nonce = randomBytes(16).toString('base64'), n = h => h.replace(/<script(?![^>]*\bnonce=)/g, `<script nonce="${nonce}"`)
-    const enc = COMPRESS && req.method !== 'HEAD' ? acceptedEncodings(req.headers['accept-encoding'], DYNAMIC)[0] : null
-    res.writeHead(200, {
-      ...SECURITY, 'content-type': MIME['.html'], 'content-security-policy': withNonce(mf.csp || CSP0, nonce), 'cache-control': 'no-cache',
-      ...(mf.build ? { 'x-brain-build': mf.build } : {}), ...extra, ...ctx.session.headers(),
-      ...(COMPRESS ? { vary: varyEncoding(extra.vary) } : {}), ...(enc ? { 'content-encoding': enc } : {}),
-    })
-    // each chunk is flushed through the encoder, so the head still reaches the browser before load() ends
-    const zs = enc ? encodeStream(enc) : null
-    if (zs) zs.pipe(res)
-    const write = s => (zs ? (zs.write(s), zs.flush()) : res.write(s))
     globalThis.__brainLocale = route.locale || null
     let seo0 = null
     try {
@@ -1500,8 +1532,20 @@ export function createServer(o = {}) {
     } finally {
       globalThis.__brainLocale = null
     }
+    const initialHead = head(top, seo0, url.pathname, url.search, route, BASE.slice(0, -1))
+    const enc = COMPRESS && req.method !== 'HEAD' ? acceptedEncodings(req.headers['accept-encoding'], DYNAMIC)[0] : null
+    res.writeHead(200, {
+      ...SECURITY, 'content-type': MIME['.html'], ...(req.method === 'HEAD' ? {} : { 'content-security-policy': withNonce(mf.csp || CSP0, nonce) }), 'cache-control': 'no-cache',
+      ...(googleSignInPage(initialHead) ? { 'cross-origin-opener-policy': 'same-origin-allow-popups' } : {}),
+      ...(mf.build ? { 'x-brain-build': mf.build } : {}), ...extra, ...ctx.session.headers(),
+      ...(COMPRESS ? { vary: varyEncoding(extra.vary) } : {}), ...(enc ? { 'content-encoding': enc } : {}),
+    })
+    // each chunk is flushed through the encoder, so the head still reaches the browser before load() ends
+    const zs = enc ? encodeStream(enc) : null
+    if (zs) zs.pipe(res)
+    const write = s => (zs ? (zs.write(s), zs.flush()) : res.write(s))
     const at = { path: url.pathname, params: params || {}, query: Object.fromEntries(url.searchParams) }
-    write(n(head(top, seo0, url.pathname, url.search)))
+    write(n(initialHead))
     // QA #253: the folder's _loading.brain goes in the region with the first chunk (SPEC: shows while load runs),
     // between two marker comments; the last chunk starts with a script that removes them and what is between
     let clear = ''
@@ -1779,7 +1823,9 @@ export function createServer(o = {}) {
   }
   // §33 S01: every sitemap file holds at most 50 000 URLs and SITEMAP_BYTES bytes of UTF-8 XML; the dynamic URLs fill
   // /sitemap-dynamic.xml, /sitemap-dynamic-2.xml, … in sitemap() order, so the split is deterministic
-  const SET_HEAD = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+  const XML_SIGNATURE = '<!-- by BRAINLLM https://chrisifm.github.io/BRAINLLM/ -->'
+  const XML_HEADER = `<?xml version="1.0" encoding="UTF-8"?>\n${XML_SIGNATURE}\n`
+  const SET_HEAD = XML_HEADER + '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
   const SET_FOOT = '</urlset>\n'
   const bytes = t => Buffer.byteLength(t)
   function pages(urls) {
@@ -1797,7 +1843,9 @@ export function createServer(o = {}) {
   async function serveSitemap(req, res, url) {
     const f = file('/sitemap.xml')
     if (!f) return false
-    const text = readFileSync(f, 'utf8')
+    const original = readFileSync(f, 'utf8')
+    const declaration = original.startsWith('<?xml') ? original.indexOf('?>') + 2 : 0
+    const text = original.includes(XML_SIGNATURE) ? original : declaration > 1 ? original.slice(0, declaration) + '\n' + XML_SIGNATURE + original.slice(declaration) : XML_SIGNATURE + '\n' + original
     const origin = mf.site || [...text.matchAll(/<loc>(https?:\/\/[^<]+)<\/loc>/g)].map(m => URL.canParse(m[1]) && new URL(m[1]).origin).find(Boolean)
     if (!origin) return false
     const index = text.includes('<sitemapindex')
@@ -1817,13 +1865,47 @@ export function createServer(o = {}) {
       index
         ? text.replace('</sitemapindex>', `${kids}</sitemapindex>`)
         : split
-          ? `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${child('/sitemap-static.xml')}${kids}</sitemapindex>\n`
+          ? `${XML_HEADER}<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${child('/sitemap-static.xml')}${kids}</sitemapindex>\n`
           : text.replace('</urlset>', sets[0] + '</urlset>'),
     )
     return true
   }
 
   // ---------- static ----------
+  // Content validators use bounded buffers and a bounded metadata cache; a full media file never enters the heap.
+  const fileTags = new Map(), hashingFiles = new Map()
+  async function fileTag(handle, stat) {
+    const key = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`
+    if (fileTags.has(key)) return fileTags.get(key)
+    if (hashingFiles.has(key)) return hashingFiles.get(key)
+    if (hashingFiles.size >= 8) throw new HttpError(503, 'Static file validators are busy; retry shortly')
+    const task = (async () => {
+      const hash = createHash('sha256'), buf = Buffer.alloc(65536), until = performance.now() + 30000
+      let offset = 0
+      while (offset < stat.size) {
+        if (performance.now() > until) throw new HttpError(503, 'Static file validator deadline exceeded; retry shortly')
+        const { bytesRead } = await handle.read(buf, 0, Math.min(buf.length, stat.size - offset), offset)
+        if (!bytesRead) throw new Error('Static file changed while computing its validator')
+        hash.update(buf.subarray(0, bytesRead)); offset += bytesRead
+      }
+      const after = await handle.stat()
+      if (after.size !== stat.size || after.mtimeMs !== stat.mtimeMs || after.ctimeMs !== stat.ctimeMs) throw new HttpError(503, 'Static file changed; retry shortly')
+      const etag = '"' + hash.digest('base64url') + '"'
+      fileTags.set(key, etag)
+      if (fileTags.size > 256) fileTags.delete(fileTags.keys().next().value)
+      return etag
+    })()
+    hashingFiles.set(key, task)
+    try { return await task } finally { hashingFiles.delete(key) }
+  }
+  async function streamFile(req, res, handle, status, headers, span) {
+    if (req.method === 'HEAD') return send(res, status, '', headers)
+    res.writeHead(status, { ...SECURITY, ...(server.draining ? { connection: 'close' } : {}), ...headers })
+    // The descriptor stays pinned from stat and hashing through transmission, including atomic deployments.
+    const length = Number(headers['content-length'])
+    if (!length) return res.end()
+    await pipeline(handle.createReadStream({ start: 0, end: length - 1, ...span, autoClose: false }), res)
+  }
   // Never served (brain-pack private.rs holds the same list for the Rust handler and every generated host config).
   const PRIVATE_PREFIXES = ['_server', '_brain', 'server.mjs']
   const PRIVATE_FILES = ['_headers', '_redirects']
@@ -1851,7 +1933,7 @@ export function createServer(o = {}) {
   // site configured) or with a per-request pattern gets no header, so this never invents a URL.
   function twinCanonical(path) {
     const stem = path.replace(/\.md$/, '').replace(/\/+$/, '')
-    const page = file(stem ? stem + '.html' : 'index.html') || file(stem + '/index.html')
+    const page = file(stem ? stem + '.html' : 'index.html') || file(stem + '/index.html') || file(stem ? stem + '.brain' : 'index.brain') || file(stem + '/index.brain')
     if (!page) return {}
     const tag = /<link\b[^>]*\brel=["']canonical["'][^>]*>/i.exec(readFileSync(page, 'utf8'))?.[0]
     const href = tag && /\bhref="(https?:\/\/[^"<>\s]+)"/.exec(tag)?.[1].replaceAll('&amp;', '&')
@@ -1860,21 +1942,21 @@ export function createServer(o = {}) {
   // What exists whatever the routes say: generated sitemaps, built files and the icon browsers ask for by habit.
   async function serveFixed(req, res, url) {
     if (DYN.length && /^\/sitemap(-static|-dynamic(-\d+)?)?\.xml$/.test(url.pathname) && (await serveSitemap(req, res, url))) return true
-    if (serveStatic(req, res, url)) return true
+    if (await serveStatic(req, res, url)) return true
     if (url.pathname !== '/favicon.ico' || !file('favicon.svg')) return false
     send(res, 301, '', { location: withBase('/favicon.svg'), 'cache-control': 'public, max-age=86400' })
     return true
   }
 
-  function serveStatic(req, res, url) {
+  async function serveStatic(req, res, url) {
     const p = publicStaticPath(url.pathname)
     if (p === null) return false
-    const candidates = p.endsWith('/') ? [p + 'index.html', ...(p.length > 1 ? [p.slice(0, -1) + '.html'] : [])] : [p, p + '.html', p + '/index.html']
+    const candidates = p.endsWith('/') ? [p + 'index.html', p + 'index.brain', ...(p.length > 1 ? [p.slice(0, -1) + '.html', p.slice(0, -1) + '.brain'] : [])] : [p, p + '.html', p + '/index.html', p + '.brain', p + '/index.brain']
     for (const c of candidates) {
       const f = file(c)
       if (!f) continue
       const ext = extname(f), type = FEEDS[basename(f)] || MIME[ext] || 'application/octet-stream'
-      if (ext === '.html') {
+      if (ext === '.html' || ext === '.brain') {
         // §33: the page's Markdown twin (`/pricing` → pricing.md) when the client prefers text/markdown
         if (serveTwin(req, res, url)) return true
         const md = file(mdPath(p))
@@ -1886,34 +1968,39 @@ export function createServer(o = {}) {
         ...(ext === '.md' ? twinCanonical(p) : {}),
         'content-type': type,
         // the worker script must be revalidated on every check, or a CDN could keep an old worker for an hour (§35.7)
-        'cache-control': p.startsWith('/_b/') ? 'public, max-age=31536000, immutable' : p === '/sw.js' ? 'no-cache' : 'public, max-age=3600',
+        'cache-control': p.startsWith('/_b/') ? 'public, max-age=31536000, immutable' : p === '/sw.js' || /\.(m3u8?|mpd)$/i.test(p) ? 'no-cache' : 'public, max-age=3600',
         vary: 'accept-encoding',
-      }
-      // Range: media players ask for byte spans (Safari plays no video without them). The span is of the plain file, so
-      // a ranged request skips the precompressed siblings; If-Range has no validator to match here, so it gets it all.
-      const span = req.headers.range && !req.headers['if-range'] ? byteRange(req.headers.range, statSync(f).size) : null
-      if (span === false) return send(res, 416, '', { 'content-range': `bytes */${statSync(f).size}` }), true
-      if (span) {
-        const len = span.end - span.start + 1, buf = Buffer.alloc(req.method === 'HEAD' ? 0 : len)
-        if (buf.length) {
-          const fd = openSync(f, 'r')
-          try { readSync(fd, buf, 0, len, span.start) } finally { closeSync(fd) }
-        }
-        send(res, 206, buf, { ...headers, 'accept-ranges': 'bytes', 'content-range': `bytes ${span.start}-${span.end}/${statSync(f).size}`, 'content-length': String(len) })
-        return true
       }
       // the smallest precompressed sibling the client accepts (the build keeps only those smaller than the file)
       let best = null
-      for (const enc of acceptedEncodings(req.headers['accept-encoding'])) {
+      for (const enc of req.headers.range ? [] : acceptedEncodings(req.headers['accept-encoding'])) {
         const encoded = file(c + (enc === 'br' ? '.br' : enc === 'zstd' ? '.zst' : '.gz'))
         const size = encoded ? statSync(encoded).size : Infinity
         if (encoded && (!best || size < best.size)) best = { enc, encoded, size }
       }
-      if (best) {
-        send(res, 200, req.method === 'HEAD' ? '' : readFileSync(best.encoded), { ...headers, 'content-encoding': best.enc })
-        return true
+      const selected = best ? best.encoded : f
+      const handle = await open(selected, FS.O_RDONLY | (FS.O_NOFOLLOW || 0) | (FS.O_NONBLOCK || 0))
+      try {
+        const stat = await handle.stat()
+        if (!stat.isFile()) throw new Error('Static output must be a regular file')
+        headers.etag = await fileTag(handle, stat)
+        if (res.destroyed) return true
+        if (!best) headers['accept-ranges'] = 'bytes'
+        const inm = req.headers['if-none-match']
+        if (inm && inm.split(',').some(t => t.trim() === '*' || t.trim().replace(/^W\//, '') === headers.etag)) return send(res, 304, '', headers), true
+        const span = req.headers.range && (!req.headers['if-range'] || req.headers['if-range'] === headers.etag) ? byteRange(req.headers.range, stat.size) : null
+        if (span === false) return send(res, 416, '', { ...headers, 'content-range': `bytes */${stat.size}` }), true
+        if (span) {
+          headers['content-range'] = `bytes ${span.start}-${span.end}/${stat.size}`
+          headers['content-length'] = String(span.end - span.start + 1)
+        } else {
+          headers['content-length'] = String(stat.size)
+          if (best) headers['content-encoding'] = best.enc
+        }
+        await streamFile(req, res, handle, span ? 206 : 200, headers, span)
+      } finally {
+        await handle.close()
       }
-      send(res, 200, req.method === 'HEAD' ? '' : readFileSync(f), { ...headers, 'accept-ranges': 'bytes' })
       return true
     }
     return false
@@ -2049,7 +2136,7 @@ export function createServer(o = {}) {
       const post = req.method === 'POST'
       if (!post && req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'Method not allowed', { allow: 'GET, HEAD, POST' })
       // a status page opened directly answers its own status: `/403` is never a 200 that a crawler or a probe can trust
-      const reserved = post ? 0 : reservedStatus(url.pathname)
+      const reserved = post ? 0 : reservedStatus(publicStaticPath(url.pathname) ?? url.pathname)
       if (reserved === 403) return forbidden(req, res, url, rid, '')
       if (reserved) {
         // Anyone can open it, so the note about it is bounded and is not an error.
@@ -2062,11 +2149,12 @@ export function createServer(o = {}) {
       for (const route of routes) {
         const m = route.rx.exec(url.pathname)
         if (!m) continue
+        const protectedRoute = route.guards?.length || route.middleware?.length
         // a form page without load is prerendered: GET serves that file (build ETag); only its POST needs the server
-        if (!post && route.forms && serveStatic(req, res, url)) return
+        if (!post && !protectedRoute && route.forms && (await serveStatic(req, res, url))) return
         // a parameter never hides a real file: `/[code]` must not swallow /favicon.svg, /sitemap.xml or a prerendered /login
-        if (!post && m.groups && (await serveFixed(req, res, url))) return
-        if (!post && serveTwin(req, res, url)) return
+        if (!post && !protectedRoute && m.groups && (await serveFixed(req, res, url))) return
+        if (!post && !protectedRoute && serveTwin(req, res, url)) return
         const paged = post ? null : pageParameter(route, url)
         if (paged === 404) return notFound(req, res)
         if (paged) return send(res, 301, '', { location: withBase(paged), 'cache-control': 'public, max-age=3600' })
@@ -2677,7 +2765,7 @@ export function prefersMarkdown(accept) {
 // SEO head from View.seo(props): title, description, canonical, og:*/twitter:*, JSON-LD and the view's <head> block
 // F5: the build writes an SSR route's canonical/og:url from its pattern (/posts/:slug); the request has the real path.
 // A view's own <head> tags replace the generated ones with the same name/property (one tag per key, SPEC «SEO»).
-function head(page, seo, path, search = '') {
+function head(page, seo, path, search = '', route, base = '') {
   let h = page
   // `<meta seo query="page">`: these parameters make a different page; any other (a dialog, a tracking tag) does not
   let identity = '', query = ''
@@ -2689,7 +2777,7 @@ function head(page, seo, path, search = '') {
   })
   if (path) {
     // the attribute is already escaped HTML: only the request path that replaces a pattern is escaped
-    const real = v => v.replace(/^(https?:\/\/[^/]+)?(\/[^"]*)$/, (m, o = '', p) => (/\/[:*]/.test(p) ? o + esc(path) : m)) + identity
+    const real = v => v.replace(/^(https?:\/\/[^/]+)?(\/[^"]*)$/, (m, o = '', p) => (/\/[:*]/.test(p) ? o + esc(base + path) : m)) + identity
     h = h.replace(/(<link[^>]*rel=["']canonical["'][^>]*href=")([^"]*)(")/i, (m, a, v, b) => a + real(v) + b)
     h = h.replace(/(<meta[^>]*property=["']og:url["'][^>]*content=")([^"]*)(")/i, (m, a, v, b) => a + real(v) + b)
   }
@@ -2706,8 +2794,11 @@ function head(page, seo, path, search = '') {
     else if (k === 'canonical') {
       // a root-relative canonical takes the origin the build wrote into the template (PUBLIC_SITE_URL), as it does on
       // a prerendered page: a relative canonical is ignored by search engines
-      const built = /^\/(?!\/)/.test(v) && /<link[^>]*rel=["']canonical["'][^>]*href="(https?:\/\/[^/"]+)/i.exec(h)?.[1]
-      const url = built ? built + v : v
+      const relative = base && (v + '/').startsWith(base + '/') ? v.slice(base.length) || '/' : v
+      const translated = linkTo(route, relative)
+      const local = /^\/(?!\/)/.test(translated) ? base + translated : translated
+      const built = /^\/(?!\/)/.test(local) && /<link[^>]*rel=["']canonical["'][^>]*href="(https?:\/\/[^/"]+)/i.exec(h)?.[1]
+      const url = built ? built + local : local
       const tag = `<link rel="canonical" href="${esc(url)}">`
       h = /<link[^>]*rel=["']canonical["'][^>]*>/i.test(h) ? h.replace(/<link[^>]*rel=["']canonical["'][^>]*>/i, () => tag) : h.replace('</head>', () => tag + '</head>')
       if (seo['og:url'] == null) meta('property', 'og:url', url) // og:url follows the canonical unless the view sets its own

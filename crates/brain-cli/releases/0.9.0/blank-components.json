@@ -1,0 +1,12 @@
+{
+  "id": "blank-components",
+  "kind": "change",
+  "title": "Minimal component generation without example behavior",
+  "why": "Authors can start from typed minimal markup instead of deleting example controls and state.",
+  "changelog": ["brain add comp --blank"],
+  "guide": "brain guide start",
+  "codes": [],
+  "apis": ["brain add comp --blank", "brain_add blank"],
+  "steps": ["Use --blank for comp only, or blank:true in brain_add. Keep the generated typed props/test and replace sample data with representative fixtures."],
+  "finds": [{"glob": "comp/**/*.brain"}]
+}

@@ -1,0 +1,12 @@
+{
+  "id": "intentional-external-navigation",
+  "kind": "change",
+  "title": "Explicit navigation to a separate site on the same origin",
+  "why": "An absolute link can intentionally target a live site outside the generated artifact even when its origin is shared.",
+  "changelog": ["Absolute HTTP(S) anchors marked"],
+  "guide": "brain guide seo",
+  "codes": ["B1819"],
+  "apis": ["rel=external"],
+  "steps": ["Use rel=external only on deliberate absolute HTTP(S) navigation to a site outside this build. Relative links and assets remain validated; external destinations are not verified."],
+  "finds": [{"glob": "views/**/*.brain"}]
+}

@@ -105,7 +105,9 @@ try {
   if(onlyCLI)console.log('Backend integration explicitly skipped: CLI resume only; no Rust test pass is inferred')
   else console.log('Backend integration targets: '+(selection<0?'library + ':'')+selected.join(', ')+(selection<0?'':' (focused; other targets are not rerun)'))
   const gatesOnly=selection>=0&&!selectedTests.length
-  const code=onlyCLI||gatesOnly?0:await phase('cargo',['test','--locked','-p','brain-backend','--jobs','2',...(selection<0?['--lib','--test','session_idle']:[]),'--test','integration','--','--include-ignored','--nocapture','--test-threads=2',...targets.filter(name=>!selectedTests.includes(name)).flatMap(name=>['--skip',name+'::'])],
+  const code=onlyCLI||gatesOnly?0:await phase('cargo',['test','--locked','-p','brain-backend','--jobs','2',...(selection<0?['--lib','--test','session_idle']:[]),'--test','integration','--','--include-ignored','--nocapture','--test-threads=2',
+    // This explicitly ignored release-profile measurement is not a database acceptance test. Keep every DB assertion.
+    '--skip','media::avif_cost::encode_time_by_size',...targets.filter(name=>!selectedTests.includes(name)).flatMap(name=>['--skip',name+'::'])],
     {...process.env,BRAIN_BACKEND_TEST_URL:`postgres://brain_test@127.0.0.1:${port}/postgres`},15*60*1000,'Backend integration')
   process.exitCode=code
   if(code===0&&!process.env.BRAIN_BIN&&(!gatesOnly||selectedGates.length)) {
@@ -154,6 +156,36 @@ try {
       console.log('Backend CLI roles upgrade smoke: PASS (implicit roles kept, omitted names compile, accounts preserved, explicit move)')
     }
     // check-general: end 0.6.1 upgrade fixture
+    // Each default repair smoke owns a separate database and app; no queue/auth fixture state is changed.
+    run(exe('createdb'),['-h','127.0.0.1','-p',String(port),'-U','brain_test','backend_defaults'])
+    {
+      const repairEnv={...cliEnv,DATABASE_URL:`postgres://brain_test@127.0.0.1:${port}/backend_defaults`}
+      const cli=(args,cwd)=>{
+        const result=spawnSync(binary,args,{cwd,env:repairEnv,encoding:'utf8',timeout:20000,maxBuffer:1024*1024})
+        if(result.status!==0)throw Error('Defaults CLI smoke failed at '+args[0]+': '+(result.stderr||result.stdout).slice(0,1000))
+        return JSON.parse(result.stdout)
+      }
+      const sql=text=>{
+        const result=spawnSync(exe('psql'),['-X','-h','127.0.0.1','-p',String(port),'-U','brain_test','-d','backend_defaults','-At','-v','ON_ERROR_STOP=1','-c',text],{encoding:'utf8',timeout:10000,maxBuffer:256*1024})
+        if(result.status!==0)throw Error('Defaults CLI smoke SQL failed: '+(result.stderr||'').slice(0,1000))
+        return result.stdout.trim()
+      }
+      cli(['new','defaults-app','--json'],dir)
+      const repairApp=join(dir,'defaults-app'),resource=join(repairApp,'server/resources/items')
+      mkdirSync(resource,{recursive:true})
+      writeFileSync(join(resource,'schema.jsbrain'),"<meta server>\nexport default { title: 'str!', label: { type: 'str', default: 'Default' } }\n")
+      writeFileSync(join(resource,'policy.jsbrain'),"<meta server>\nexport default { read: ['admin'], create: ['admin'], update: ['admin'], delete: ['admin'] }\n")
+      cli(['backend','migrate','--json'],repairApp)
+      sql("INSERT INTO _brain_users(id,email,password_hash,role) VALUES(gen_random_uuid(),'defaults-owner@example.test','synthetic-unused-hash','admin')")
+      sql(`INSERT INTO _brain_res_items(id,owner,data) SELECT gen_random_uuid(),u.id,v.data FROM _brain_users u CROSS JOIN (VALUES ('{"title":"Old"}'::jsonb),('{"title":"Cleared","label":null}'::jsonb),('{"title":"Custom","label":"Custom"}'::jsonb)) v(data) WHERE u.email='defaults-owner@example.test'`)
+      const preview=cli(['data','defaults','--resource','items','--json'],repairApp)
+      if(preview.applied||preview.fieldWrites!==0||preview.resources[0].fields[0].absentRows!==1||sql("SELECT count(*) FROM _brain_res_items WHERE NOT(data ? 'label')")!=='1')throw Error('Default preview changed rows or omitted counts')
+      const applied=cli(['data','defaults','--resource','items','--limit','1','--apply','--json'],repairApp)
+      if(applied.fieldWrites!==1||applied.hasMore||sql("SELECT count(*) FROM _brain_res_items WHERE data->'label'='null'::jsonb")!=='1')throw Error('Default apply must preserve explicit nulls')
+      if(cli(['data','defaults','--resource','items','--include-null','--apply','--json'],repairApp).fieldWrites!==1)throw Error('Explicit null repair must fill only the remaining null')
+      if(cli(['data','defaults','--resource','items','--include-null','--apply','--json'],repairApp).fieldWrites!==0||sql("SELECT count(*) FROM _brain_res_items WHERE data->>'label'='Custom'")!=='1')throw Error('Default repair must preserve custom values and become idempotent')
+      console.log('Backend CLI defaults smoke: PASS (preview, bounded apply, explicit-null opt-in, preserved values and idempotence)')
+    }
     brain(['new','app','--json'],dir)
     const app=join(dir,'app')
     brain(['add','job','deliver','--fields','message:str!','--json'],app)
@@ -195,8 +227,8 @@ try {
     writeFileSync(join(app,'server/api-keys.jsbrain'),"export default { enabled: true, dailyQuota: 100 }\n")
     writeFileSync(join(app,'server/webhooks/config.jsbrain'),"export default { encryptionKeys: ['BRAIN_WEBHOOK_ENCRYPTION_KEY'], inbound: { smoke: { queue: 'deliver', signingKeys: ['BRAIN_WEBHOOK_SMOKE_KEY'] } } }\n")
     brain(['backend','migrate','--json'],app)
-    let backendURL='',line='',captured=0
-    const authEnv={...cliEnv,BRAIN_WEBHOOK_ENCRYPTION_KEY:'11'.repeat(32),BRAIN_WEBHOOK_SMOKE_KEY:'22'.repeat(32),PUBLIC_SITE_URL:'https://app.example.test/project/app',BRAIN_MAIL_RESEND_KEY:'',BRAIN_MAIL_FROM:'',GOOGLE_CLIENT_ID:'',BRAIN_JWT_SECRET:'synthetic-cli-jwt-signing-key-over-32-bytes',BRAIN_GCS_BUCKET:''}
+    let backendURL='',googleSetup,line='',captured=0
+    const authEnv={...cliEnv,BRAIN_WEBHOOK_ENCRYPTION_KEY:'11'.repeat(32),BRAIN_WEBHOOK_SMOKE_KEY:'22'.repeat(32),PUBLIC_SITE_URL:'https://app.example.test/project/app',BRAIN_MAIL_RESEND_KEY:'',BRAIN_MAIL_FROM:'',GOOGLE_CLIENT_ID:'synthetic-client-id-0001.apps.googleusercontent.com',BRAIN_JWT_SECRET:'synthetic-cli-jwt-signing-key-over-32-bytes',BRAIN_GCS_BUCKET:''}
     test=spawn(binary,['backend','serve','--port','0','--origin','https://app.example.test'],{cwd:app,env:authEnv,stdio:['ignore','pipe','pipe'],detached:true})
     test.once('error',()=>{})
     const capture=(chunk)=>{
@@ -206,7 +238,7 @@ try {
       let end
       while((end=line.indexOf('\n'))!==-1) {
         const text=line.slice(0,end);line=line.slice(end+1)
-        try {const event=JSON.parse(text);if(event.event==='backend-starting'&&/^http:\/\/127\.0\.0\.1:\d+$/.test(event.url)) backendURL=event.url}catch{}
+        try {const event=JSON.parse(text);if(event.event==='backend-starting'&&/^http:\/\/127\.0\.0\.1:\d+$/.test(event.url)) backendURL=event.url;if(event.event==='google-origin-setup') googleSetup=event.setup}catch{}
       }
     }
     test.stderr.on('data',capture);test.stdout.on('data',capture)
@@ -218,6 +250,7 @@ try {
         await sleep(100)
       }
       if(!ready) throw Error('Owned native auth server was not ready within its bounded startup check')
+      if(!googleSetup || JSON.stringify(googleSetup.authorizedJavaScriptOrigins)!==JSON.stringify(['https://app.example.test']) || googleSetup.providerVerified!==false) throw Error('Google origin startup hints must use the selected browser origin without claiming provider verification')
       const http=async(path,body,cookie)=>{
         const response=await fetch(backendURL+path,{method:body===undefined?'GET':'POST',headers:{Origin:'https://app.example.test',Accept:'application/json',...(body!==undefined?{'Content-Type':'application/json'}:{}),...(cookie?{Cookie:cookie}:{})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(3000),redirect:'manual'})
         const reader=response.body.getReader();let length=0,parts=[]

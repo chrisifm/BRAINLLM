@@ -1,0 +1,17 @@
+{
+  "id": "check-targets",
+  "kind": "fix",
+  "title": "Check every selected BRAINLLM source",
+  "why": "Multiple positional check targets no longer silently ignore every file after the first. Plain JavaScript is refused as an unsupported check target.",
+  "changelog": [
+    "`brain check` checks every positional target"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "codes": [],
+  "apis": [],
+  "affects": [
+    "**/*.brain",
+    "**/*.jsbrain",
+    "**/*.cssbrain"
+  ]
+}

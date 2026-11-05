@@ -29,7 +29,7 @@ export async function prefetchPage(url, signal) {
     let hit
     while ((hit = pattern.exec(text)) && assets.length < 16) {
       const asset = new URL(hit[1] || hit[2] || hit[3], base)
-      if (asset.origin === base.origin && asset.pathname.includes('/_b/')) assets.push(asset.href)
+      if (asset.origin === base.origin && (asset.pathname.includes('/_b/') || /\/[a-z0-9]{8}\.(?:js|mjs|jsbrain|css|cssbrain)$/.test(asset.pathname))) assets.push(asset.href)
     }
     return { ok: true, status: r.status, url: r.url, headers: r.headers, text, bytes, assets }
   } catch { return null }

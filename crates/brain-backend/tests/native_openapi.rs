@@ -20,6 +20,10 @@ fn backend_selected_login_modes_preserve_custom_roles_and_closed_request_shapes(
     }));
     for schema in schemas {
         assert_eq!(schema["additionalProperties"], false);
+        let user = &schema["properties"]["user"];
+        assert_eq!(user["properties"]["name"]["maxLength"], 200);
+        assert_eq!(user["properties"]["picture"]["x-brain-maxBytes"], 2048);
+        assert!(!user["required"].as_array().unwrap().iter().any(|field| field == "name" || field == "picture"));
         assert_eq!(
             schema["properties"]["user"]["properties"]["role"]["enum"],
             json!(roles.roles)

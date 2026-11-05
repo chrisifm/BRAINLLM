@@ -40,3 +40,17 @@ test('a page in another language is left alone', () => {
   doc.documentElement.setAttribute('lang', 'en')
   assert.equal(globalThis.__brainHref('/about'), '/about')
 })
+
+test('translated slash-terminated links resolve their source key and already-localized dynamic paths stay stable', () => {
+  doc.documentElement.setAttribute('lang', 'fr')
+  mod.default('fr', '', '/fr', '^(?:|/[^/]+|/posts/[^/]+)/?$', { '/contact': '/fr/contact-page' })
+  const to = globalThis.__brainHref
+  assert.equal(to('/contact/?q=1#part'), '/fr/contact-page/?q=1#part')
+  for (const path of ['/fr', '/fr/', '/fr/contact-page/', '/fr/posts/one/?q=1#part']) assert.equal(to(path), path)
+  assert.equal(to('/friend'), '/fr/friend', 'the language prefix is a full path segment')
+  mod.default('it', '/app', '/it', '^(?:|/[^/]+)/?$', { '/contact': '/it/contact-page' })
+  doc.documentElement.setAttribute('lang', 'it')
+  assert.equal(to('/app/contact/?q=1#part'), '/app/it/contact-page/?q=1#part')
+  assert.equal(to('/app/it'), '/app/it')
+  assert.equal(to('/app/it/contact-page/'), '/app/it/contact-page/')
+})

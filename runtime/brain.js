@@ -350,20 +350,26 @@ export function _ev(e) {
         // a data property, not a getter: V8 keeps accessors in the event's shared hidden class, so a getter closure
         // would keep the first event (and its component) alive for the life of the page
         Object.defineProperty(e, 'currentTarget', { configurable: true, value: n })
-        try {
-          // n moves on with the loop: keep the element for a later rejection
-          const r = h.call(n, e), el = n
-          if (r && r.then) r.then(null, x => oops(x, el, 'on:' + e.type)) // async handler: a rejected await too
-        } catch (x) {
-          oops(x, n, 'on:' + e.type)
-        }
+        eventCall(n, h, e)
         if (e.cancelBubble) break
       }
     }
   })
 }
+function eventCall(el, h, e) {
+  try {
+    const r = h.call(el, e)
+    if (r && r.then) r.then(null, x => oops(x, el, 'on:' + e.type))
+  } catch (x) { oops(x, el, 'on:' + e.type) }
+}
 export function on(el, t, h) {
-  if (/^(focus|blur|mouseenter|mouseleave|load|error|scroll)$/.test(t)) return el.addEventListener(t, e => batch(() => h(e)))
+  if (/^(focus|blur|mouseenter|mouseleave|pointerenter|pointerleave|load|error|scroll|scrollend|resize|close|cancel|toggle|beforetoggle|invalid|abort|canplay|canplaythrough|durationchange|emptied|ended|loadeddata|loadedmetadata|loadstart|pause|play|playing|progress|ratechange|seeked|seeking|stalled|suspend|timeupdate|volumechange|waiting|encrypted|waitingforkey)$/.test(t)) {
+    const listener = e => batch(() => eventCall(el, h, e))
+    return fx(() => {
+      el.addEventListener(t, listener)
+      return () => el.removeEventListener(t, listener)
+    })
+  }
   el['$' + t] = h
   document.addEventListener(t, _ev) // once per type: the DOM ignores the same listener added again
 }

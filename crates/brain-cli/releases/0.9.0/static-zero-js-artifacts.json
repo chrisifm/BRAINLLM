@@ -1,0 +1,14 @@
+{
+  "id": "static-zero-js-artifacts",
+  "kind": "fix",
+  "title": "Remove unused framework code from zero-JS static exports",
+  "why": "Build-time prerender dependencies do not belong in the final folder when no page executes them.",
+  "changelog": [
+    "Wholly zero-JavaScript static sites omit unused"
+  ],
+  "guide": "brain guide static",
+  "codes": [],
+  "apis": [
+    "brain build --static"
+  ]
+}

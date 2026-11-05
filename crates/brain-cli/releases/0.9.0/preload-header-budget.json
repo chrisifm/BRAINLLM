@@ -1,0 +1,15 @@
+{
+  "id": "preload-header-budget",
+  "kind": "fix",
+  "title": "Bound preload headers while retaining critical resources",
+  "why": "Long preload graphs no longer discard every final response hint or overflow the 103 header budget.",
+  "changelog": [
+    "Long preload lists retain critical styles"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "codes": [],
+  "apis": [],
+  "affects": [
+    "**/*.brain"
+  ]
+}

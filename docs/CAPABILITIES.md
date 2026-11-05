@@ -8,12 +8,14 @@ What an app author can use, generated from the tables the compiler dispatches on
 | Topic | What it covers |
 |---|---|
 | `start` | the working loop: spec → map → add → fix/check → test → doctor → build, which command when |
+| `brandbook` | living brand reference: sections, voice, evidence, current design and public governance |
 | `views` | routes from files, layouts, guards, 404/403, navigation |
 | `data` | load, server functions, api() + resource(), channels, caching |
 | `sockets` | liveResource: who can connect, its states, public pages, session changes |
 | `forms` | form() schema, submit, server field errors, edit forms |
 | `server` | sessions, server-only code, .brain_env, errors, deploy with brain start |
 | `seo` | pick the target query first; answer-first pages for search and AI answers (GEO) |
+| `static` | portable HTML/CSS/JS sites: no server, build-time data, generic hosting |
 | `a11y` | accessibility rules the build enforces and how to pass them first time |
 | `webmcp` | exposing page actions to browser AI agents: when, names, descriptions |
 | `tests` | colocated *.test.brain: mount, interact, assert every state |
@@ -69,6 +71,18 @@ Policy operations: `read` `create` `update` `delete`.
 Policy grants: `public` `owner` `owner.<ref>` `org` `org.<role>` `org.own` `<role>`.
 
 ## Added by release
+
+### 0.9.0
+
+- Explicit bounded repair of missing declared defaults (`docs/backend/import.md`)
+- Native forms to declared external services (`brain guide forms`)
+- Bounded native integer ranges and text matching (`docs/NATIVE-LIBRARIES.md`)
+- Living public brandbooks for new sites (`brain guide brandbook`)
+- Explicit media and worker CSP sources (`docs/MEDIA.md`)
+- Public SEO display name (`brain guide static`)
+- Static output artifact validation (`brain guide static`)
+- Portable static HTML websites (`brain guide static`)
+- Configurable static build layout and encoding effort (`brain guide static`)
 
 ### 0.8.12
 

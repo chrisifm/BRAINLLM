@@ -15,7 +15,7 @@ pub fn unlisted(root: &Path) -> Vec<(String, String)> {
             continue;
         }
         let Ok(src) = std::fs::read_to_string(root.join(&r.view)) else { continue };
-        if declares_noindex(&src, &r.view) || src.contains("function paths(") || src.contains("function sitemap(") {
+        if declares_noindex(&src, &r.view) || brain_parse::parse(&src, Path::new(&r.view)).is_ok_and(|c| c.script.iter().any(|s| brain_check::exports_fn(s,"paths") || brain_check::exports_fn(s,"sitemap"))) {
             continue;
         }
         out.push((r.path, r.view));
@@ -61,4 +61,28 @@ pub fn warning(route: &str, view: &str) -> String {
     format!(
         "B1837 {view}:1:1 dynamic route `{route}` renders per request but no sitemap lists its pages, so crawlers only reach them through links; fix: export `async function sitemap({{ env }})` returning the params of the pages to index (or `paths()` to prerender them), or add `<meta seo robots=\"noindex\">` if they should stay out of search"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn sitemap_examples_and_private_or_nested_functions_do_not_list_dynamic_routes() {
+        let root = std::env::temp_dir().join(format!("brain-unlisted-{}", std::process::id()));
+        let view = root.join("views/items/[id].brain");
+        std::fs::create_dir_all(view.parent().unwrap()).unwrap();
+        for body in [
+            "// function paths(\n// function sitemap(\nconst example = 'function paths( function sitemap('",
+            "function paths() { return [] }\nfunction sitemap() { return [] }",
+            "export function helper() { function paths() { return [] }; function sitemap() { return [] }; return paths() }",
+        ] {
+            std::fs::write(&view, format!("<script>{body}</script><h1>Item</h1>")).unwrap();
+            assert_eq!(unlisted(&root).len(), 1, "{body}");
+        }
+        for name in ["paths", "sitemap"] {
+            std::fs::write(&view, format!("<script>export async function {name}\n() {{ return [] }}</script><h1>Item</h1>")).unwrap();
+            assert!(unlisted(&root).is_empty(), "{name}");
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

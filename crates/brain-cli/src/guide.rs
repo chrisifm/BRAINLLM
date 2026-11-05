@@ -9,12 +9,14 @@ use brain_mcp::Json;
 /// `(topic, one-line summary, markdown)`, in the order a new session reads them.
 pub const GUIDES: &[(&str, &str, &str)] = &[
     ("start", "the working loop: spec → map → add → fix/check → test → doctor → build, which command when", include_str!("../guides/start.md")),
+    ("brandbook", "living brand reference: sections, voice, evidence, current design and public governance", include_str!("../guides/brandbook.md")),
     ("views", "routes from files, layouts, guards, 404/403, navigation", include_str!("../guides/views.md")),
     ("data", "load, server functions, api() + resource(), channels, caching", include_str!("../guides/data.md")),
     ("sockets", "liveResource: who can connect, its states, public pages, session changes", include_str!("../guides/sockets.md")),
     ("forms", "form() schema, submit, server field errors, edit forms", include_str!("../guides/forms.md")),
     ("server", "sessions, server-only code, .brain_env, errors, deploy with brain start", include_str!("../guides/server.md")),
     ("seo", "pick the target query first; answer-first pages for search and AI answers (GEO)", include_str!("../guides/seo.md")),
+    ("static", "portable HTML/CSS/JS sites: no server, build-time data, generic hosting", include_str!("../guides/static.md")),
     ("a11y", "accessibility rules the build enforces and how to pass them first time", include_str!("../guides/a11y.md")),
     ("webmcp", "exposing page actions to browser AI agents: when, names, descriptions", include_str!("../guides/webmcp.md")),
     ("tests", "colocated *.test.brain: mount, interact, assert every state", include_str!("../guides/tests.md")),
@@ -138,7 +140,7 @@ mod tests {
     /// The topics the owner asked for (2026-10-29); removing one is a decision, not a refactor.
     #[test]
     fn every_required_topic_exists_and_is_a_dense_playbook() {
-        for t in ["start", "views", "data", "sockets", "forms", "server", "seo", "a11y", "webmcp", "tests", "i18n", "performance", "llm", "ai", "backend", "analytics", "migrate"] {
+        for t in ["start", "brandbook", "views", "data", "sockets", "forms", "server", "seo", "static", "a11y", "webmcp", "tests", "i18n", "performance", "llm", "ai", "backend", "analytics", "migrate"] {
             let (_, sum, body) = find(t).unwrap_or_else(|e| panic!("{e}"));
             assert!(!sum.trim().is_empty(), "{t}: empty summary");
             assert!(body.starts_with(&format!("# guide: {t} ")), "{t}: must open with `# guide: {t} — …`");
@@ -149,7 +151,7 @@ mod tests {
             }
             assert!(!body.contains("<!--planned"), "{t}: guides mark planned features in prose, not with SPEC markers");
         }
-        assert!(text(Some("nope")).unwrap_err().contains("start views data"));
+        assert!(text(Some("nope")).unwrap_err().contains("start brandbook views data"));
     }
 
     #[test]
@@ -276,7 +278,7 @@ mod tests {
 
 #[cfg(test)]
 mod deploy_install_tests {
-    // `NODE_ENV=production` makes `npm ci` skip devDependencies, and the scaffold pins the compiler there.
+    // Legacy app pins may still be devDependencies; deployment guidance preserves their explicit install path.
     #[test]
     fn the_deploy_guide_names_the_install_a_production_shell_needs() {
         let guide = include_str!("../guides/server.md");

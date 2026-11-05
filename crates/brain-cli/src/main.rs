@@ -16,9 +16,12 @@ mod shot;
 mod seo_routes;
 mod card;
 mod brand;
+mod brandbook;
 mod edit;
 mod budget;
 mod build_assessment;
+mod static_export;
+mod static_audit;
 mod build_error;
 use build_error::BuildError;
 #[cfg(unix)]
@@ -100,13 +103,13 @@ main:
   brain seo urls [--write]           the committed list of published URLs: a listed one that disappears fails the build
   brain seo audit --url <origin> [--expect-noindex]     the same audit over a running site, with its sitemap, status codes and headers
   brain lighthouse <url>             Lighthouse scores and Core Web Vitals, checked against lighthouse.minScores
-  brain new <app> [--backend]        creates the app (app.brain, tokens.cssbrain, views/, comp/, ui/, AGENTS.md); --backend adds accounts on the native backend
+  brain new <app> [--static | --backend]        creates the app (app.brain, tokens.cssbrain, views/, comp/, ui/, AGENTS.md); --backend adds accounts on the native backend
   brain run [--port 5180] [--backend] [--base /app/] [--mock[=seed]] [--profile] [--no-trace] [--inspect-port N | --no-inspect]  dev server with hot reload; the debugger on port+1; --backend also runs `brain backend serve`
-  brain build [--site https://…] [--report] [--strict] [--ext web|brain]   production (--report: bytes per page before/after each pass; --strict: a page shipped without its content or a route left out fails the build)
+  brain build [--site https://…] [--report] [--strict] [--static] [--ext web|brain]   production (--report: bytes per page before/after each pass; --strict: a page shipped without its content or a route left out fails the build)
   brain preview [--port 4173]         temporary local preview of dist/; Ctrl+C to stop
   brain doctor [--fix]                everything at once: check + tests + overengineering + leaks; exit ≠ 0 on any error
   brain start [--port 3000] [--instances N] [--install]   serves dist/ in production (static or server.mjs)
-  brain stop | reload | status       control the running `brain start` (zero-downtime reload)
+  brain stop | reload | status [path] control the selected project (zero-downtime reload)
 
 granular:
   brain changes <operation> <json>   leased revision-checked file plans and commits
@@ -117,7 +120,7 @@ granular:
   brain upgrade [--from V] [--to V] [--dry-run|--apply] [--no-doctor]  migration report from the app's recorded version to this compiler (--apply runs the safe codemods)
   brain upgrade <exact-version>      preview package pin changes and remaining decisions
   brain capabilities                 what an app can use, generated from the compiler's own tables (docs/CAPABILITIES.md)
-  brain add <kind> <name> [--props \"a:num=0 b:str?\"]   creates a file from its template; `brain add` lists every kind
+  brain add <kind> <name> [--props \"a:num=0 b:str?\"] [--blank (comp only)]   creates a file from its template; `brain add` lists every kind
   brain check [path]                 errors and warnings with an exact fix
   brain explain <code>               what a diagnostic code means, why, and a minimal correct example
   brain fix [path] [--force]         applies the mechanical fixes inside path and checks again; without a path, no
@@ -152,6 +155,7 @@ granular:
   brain media setup-gcs|list|cleanup  private media provisioning/library/owned cleanup
   brain e2e probe|run                 opt-in Claude/Codex Viewer scenarios plus AX/heap gates
   brain backend <serve|migrate|approve-contract|capabilities|schema|bootstrap-admin|keys|logs>  experimental Rust/Postgres resource API (loopback); serve --with-workers also runs the queues
+  brain data defaults [--resource <name>] [--limit <1..10000>] [--include-null] [--apply] preview or fill missing declared defaults in bounded batches
   brain data prepare|maintain [--apply] after an import or periodically: statistics on declared filters, lz4 storage, vacuum, warm-up and a buffers-per-row gate; prepare also rewrites stored rows
   brain analytics <report|funnel|segment>  usage reports over the behavior events the backend stores
   brain risk <name> [--measure]       what changing a symbol can break, with its evidence
@@ -396,7 +400,7 @@ fn main() -> ExitCode {
         Some("start") => return cmd_start(&args[1..]),
         #[cfg(unix)]
         Some(c @ ("stop" | "reload" | "status")) => {
-            let r = app_root().and_then(|root| start::send(&root, c));
+            let r = control_root(c, &args[1..]).and_then(|root| start::send(&root, c));
             return match r {
                 Ok(j) => {
                     let ok = !j.contains("\"ok\":false");
@@ -619,11 +623,18 @@ fn flag(args: &[String], name: &str) -> Option<String> {
 fn positional(args: &[String], valued: &[&str]) -> Vec<String> {
     let mut out = Vec::new();
     let mut skip = false;
+    let mut ended = false;
     for a in args {
-        if skip {
+        if ended {
+            out.push(a.clone());
+        } else if skip {
             skip = false;
+        } else if a == "--" {
+            ended = true;
+        } else if a == "-q" {
+            continue;
         } else if a.starts_with("--") {
-            skip = valued.contains(&a.as_str());
+            skip = valued.contains(&a.as_str()) || a == "--progress";
         } else {
             out.push(a.clone());
         }
@@ -636,13 +647,34 @@ pub(crate) fn cwd() -> PathBuf {
 }
 
 pub(crate) fn app_root() -> Result<PathBuf, String> {
-    scaffold::find_root(&cwd()).ok_or_else(|| "not inside a BRAINLLM app (tokens.cssbrain is missing); fix: `brain new <app>` or cd into its folder".into())
+    scaffold::find_root(&cwd()).ok_or_else(|| "not inside a BRAINLLM app (tokens.cssbrain is missing); fix: `brain new <app> [--static | --backend]` or cd into its folder".into())
+}
+
+/// Explicit lifecycle targets never fall back to the current app on an invalid path.
+#[cfg(unix)]
+fn control_root(command: &str, args: &[String]) -> Result<PathBuf, String> {
+    let paths = positional(args, &[]);
+    let path = match paths.as_slice() {
+        [] => return app_root(),
+        [path] => Path::new(path),
+        _ => return Err(format!("usage: brain {command} [path] [--json]; fix: pass at most one project directory")),
+    };
+    let directory = std::fs::canonicalize(path)
+        .map_err(|_| format!("project directory `{}` does not exist or cannot be read; fix: pass an existing BRAINLLM project directory", path.display()))?;
+    if !directory.is_dir() {
+        return Err("the lifecycle target must be a directory; fix: pass the project root or one of its subdirectories".into());
+    }
+    scaffold::find_root(&directory).ok_or_else(|| "the target is not inside a BRAINLLM app (tokens.cssbrain is missing); fix: pass the project root or one of its subdirectories".into())
 }
 
 fn cmd_new(args: &[String]) -> Result<(), String> {
-    let [name] = <[String; 1]>::try_from(positional(args, &[])).map_err(|_| "usage: brain new <app>".to_string())?;
+    let [name] = <[String; 1]>::try_from(positional(args, &[])).map_err(|_| "usage: brain new <app> [--static | --backend]".to_string())?;
     let dir = cwd().join(&name);
-    let mut files = scaffold::new_app(&dir)?;
+    let static_export = args.iter().any(|a| a == "--static");
+    if static_export && args.iter().any(|a| a == "--backend") {
+        return Err("--static and --backend are incompatible; fix: choose a static site or a server app".into());
+    }
+    let mut files = if static_export { scaffold::new_static_app(&dir)? } else { scaffold::new_app(&dir)? };
     let backend_report = if args.iter().any(|a| a == "--backend") { Some(auth_setup::add(&dir)?) } else { None };
     if let Some(report) = &backend_report {
         files.extend(report["written"].as_array().into_iter().flatten().filter_map(|f| f.as_str()).map(|f| dir.join(f)).filter(|f| !files.contains(f)).collect::<Vec<_>>());
@@ -688,6 +720,9 @@ fn cmd_edit(args: &[String]) -> Result<(), String> {
 
 fn cmd_add(args: &[String]) -> Result<(), String> {
     let pos = positional(args, &["--props", "--store", "--get", "--post", "--fields", "--policy"]);
+    if args.iter().any(|arg| arg == "--blank") && pos.first().is_none_or(|kind| kind != "comp") {
+        return Err("--blank is only supported by brain add comp; fix: omit it for other file kinds".into());
+    }
     if pos.len() == 1 && scaffold::add_route(&pos[0]) == Some(scaffold::AddRoute::NoName) {
         if pos[0] == "auth" {
             let report = auth_setup::add(&app_root()?)?;
@@ -706,6 +741,7 @@ fn cmd_add(args: &[String]) -> Result<(), String> {
     }
     let options = scaffold::AddOptions {
         props: flag(args, "--props").unwrap_or_default(), store: flag(args, "--store"),
+        blank: args.iter().any(|arg| arg == "--blank"),
         bus: args.iter().any(|a| a == "--bus"), key: args.iter().any(|a| a == "--key"),
         get: flag(args, "--get"), post: flag(args, "--post"), fields: flag(args, "--fields"),
     };
@@ -736,8 +772,7 @@ fn brain_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Compiles every `.brain` under `target` (file or folder; defaults to the app root).
-/// Compiles every `.brain` under `target` (file or folder; defaults to the app root).
+/// Checks supported BRAINLLM source files under `target` (file or folder; defaults to the app root).
 /// `Diag.file` is relative to the outermost root (highest ancestor with `tokens.cssbrain`); when walking a
 /// folder, sub-apps (subfolders with their own `tokens.cssbrain`) are skipped and checked separately.
 pub(crate) fn run_check(target: Option<PathBuf>) -> Result<(usize, Vec<compiler::Diag>), String> {
@@ -750,8 +785,12 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
         Some(t) => std::path::absolute(&t).map_err(|e| e.to_string())?,
         None => app_root()?,
     };
+    if let Some(app) = scaffold::find_root(&target) { brain_pack::cache::validate_public(&app)?; }
     let mut files = Vec::new();
     if target.is_file() {
+        if !target.extension().is_some_and(|ext| ext == "brain" || ext == "jsbrain" || ext == "cssbrain") {
+            return Err(format!("`{}` is not a BRAINLLM source; fix: pass a .brain, .jsbrain or .cssbrain file, or an app directory", target.display()));
+        }
         files.push(target.clone())
     } else if target.is_dir() {
         brain_files_app(&target, &target, &mut files)
@@ -769,6 +808,7 @@ pub(crate) fn run_check_base(target: Option<PathBuf>) -> Result<(usize, Vec<comp
     if target.is_dir() {
         if let Some(app) = scaffold::find_root(&target) {
             diags.extend(env::check(&app));
+            if app.join(design::FILE).is_file() { diags.extend(brandbook::missing(&app)); }
             let contract_errors = match backend::inspect(&app) {
                 Ok(_) => backend::startup_contract_errors(&app),
                 Err(message) => vec![message],
@@ -1255,7 +1295,14 @@ pub(crate) fn diags_json(diags: &[compiler::Diag]) -> String {
 fn cmd_check(args: &[String]) -> ExitCode {
     let identity = brand::Session::start(args, "Checking your frontend against its contract.");
     let json = args.iter().any(|a| a == "--json");
-    let (n, diags) = match run_check(positional(args, &[]).first().map(PathBuf::from)) {
+    let paths = positional(args, &[]);
+    let inputs = if paths.is_empty() { vec![None] } else { paths.into_iter().map(|path| Some(PathBuf::from(path))).collect() };
+    let checked = inputs.into_iter().try_fold((0, Vec::new()), |(count, mut diagnostics), target| {
+        let (files, found) = run_check(target)?;
+        diagnostics.extend(found);
+        Ok::<_, String>((count + files, diagnostics))
+    });
+    let (n, diags) = match checked {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error: {e}");
@@ -1318,6 +1365,7 @@ fn previous_chunks(root: &Path, dist: &Path, current: &dyn Fn(&str) -> bool) -> 
 }
 
 pub(crate) struct BuildReport {
+    pub static_export: bool,
     pub files: Vec<String>,
     pub warnings: Vec<String>,
     pub ledger: Vec<brain_mcp::Json>,
@@ -1336,7 +1384,7 @@ pub(crate) struct BuildReport {
     pub metrics: brain_metrics::Report,
 }
 
-/// `brain build` (today: sitemap.xml + robots.txt; bundling, minification and prerender arrive with #9/#26).
+/// Build bundled production assets, prerendered pages and SEO, honoring the project output policy.
 pub(crate) fn run_build(root: &Path, site: Option<String>) -> Result<BuildReport, BuildError> {
     run_build_with(root, site, "production", None)
 }
@@ -1349,6 +1397,16 @@ pub(crate) fn run_build_with(root: &Path, site: Option<String>, env_name: &str, 
 // An assessment retains fresh output and measured payloads when only the budget fails. Normal builds still
 // require into_report(); doctor can audit that exact output while keeping its build gate red.
 fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, progress: Option<&term::Progress>) -> Result<build_assessment::Assessment, BuildError> {
+    run_build_mode(root, site, env_name, progress, false)
+}
+
+fn run_build_mode(root: &Path, site: Option<String>, env_name: &str, progress: Option<&term::Progress>, force_static: bool) -> Result<build_assessment::Assessment, BuildError> {
+    run_build_mode_to(root, site, env_name, progress, force_static, &root.join("dist"))
+}
+
+fn run_build_mode_to(root: &Path, site: Option<String>, env_name: &str, progress: Option<&term::Progress>, force_static: bool, dist: &Path) -> Result<build_assessment::Assessment, BuildError> {
+    let static_export = static_export::enabled(root, force_static)?;
+    if static_export { static_export::validate(root)?; }
     let metrics = brain_metrics::Build::new();
     let _observed = brain_metrics::attach(&metrics);
     // environment (§36): PUBLIC_* become constants; a key with no value in it stops the build (B0720)
@@ -1372,7 +1430,7 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
     // the author's intent): no sitemap, no robots Sitemap line, no absolute URL pointing at it
     let placeholder = site.clone().filter(|s| !explicit && env_name != "development" && env::placeholder_origin(s));
     let site = if placeholder.is_some() { None } else { site };
-    let mut rep = BuildReport { files: vec![], warnings: vec![], ledger: vec![], build_cache:brain_mcp::Json::Null, optimizations:vec![], report: vec![], written: 0, unchanged: 0, signature: String::new(), seo: None, metrics: brain_metrics::Report::default() };
+    let mut rep = BuildReport { static_export, files: vec![], warnings: vec![], ledger: vec![], build_cache:brain_mcp::Json::Null, optimizations:vec![], report: vec![], written: 0, unchanged: 0, signature: String::new(), seo: None, metrics: brain_metrics::Report::default() };
     // the native linter (INTERNALS §20): the same diagnostics as `brain check`; errors stop the build with a summary,
     // warnings are listed with their count (info stays in `brain check`)
     if let Some(p) = progress {
@@ -1387,11 +1445,10 @@ fn run_build_assessed_with(root: &Path, site: Option<String>, env_name: &str, pr
         return Err(BuildError::with("check", errors, &format!("build stopped: {failed} error(s), {warns} warning(s); fix them (`brain check` lists the same) and build again")));
     }
     rep.warnings.extend(diags.iter().filter(|d| d.level == brain_parse::Severity::Warning).map(build_error::line));
-    let dist = root.join("dist");
-    std::fs::create_dir_all(&dist).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(dist).map_err(|e| e.to_string())?;
     // robots.txt, sitemap.xml, llms.txt, manifest and the head rewrite come from brain-seo's finish (inside bundle)
-    bundle(root, &dist, site.as_deref(), env_name, &mut rep, progress)?;
-    rep.warnings.extend(asset_check::check(&dist));
+    bundle(root, dist, site.as_deref(), env_name, &mut rep, progress)?;
+    rep.warnings.extend(asset_check::check(dist));
     for (route, view) in seo_routes::unlisted(root) {
         // a static host already reports the route as left out of dist/
         if !rep.warnings.iter().any(|w| w.starts_with(&format!("{view}: dynamic route"))) {
@@ -1439,7 +1496,10 @@ fn hash_lengths(root: &Path) -> Result<HashMap<String, usize>,String> {
     for file in files {
         let rel=file.strip_prefix(root).unwrap_or(&file).to_string_lossy().replace('\\',"/");
         let source=map::read_source(root,&rel)?;
-        identities.insert(brain_codegen::component_scope_key(&rel,&source));
+        if [brandbook::VIEW,"views/brandbook/index.brain"].contains(&rel.as_str()) {
+            let prepared = brandbook::prepare(&source,Path::new(&rel),root).map_err(|d|format!("{}:{}:{} {} {}; fix: {}",d.file,d.line,d.col,d.code,d.msg,d.fix))?;
+            identities.insert(brain_codegen::component_scope_key(&rel,&prepared.source));
+        } else { identities.insert(brain_codegen::component_scope_key(&rel,&source)); }
         rels.push(rel);
     }
     for (name,source) in RUNTIME.iter().filter(|(name,_)|name.starts_with("ui/") && name.ends_with(".brain")) {
@@ -1614,7 +1674,7 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
             failed.lock().unwrap_or_else(|e| e.into_inner()).extend(ds.iter().cloned());
             format!("{key} does not compile: {}; fix: run `brain check`", ds.iter().map(|d| format!("{} {}", d.code, d.msg)).collect::<Vec<_>>().join("; "))
         })?;
-        Ok(brain_pack::Unit { js: o.js, css: o.css, server_js: o.server_js, server_fns: o.server_fns })
+        Ok(brain_pack::Unit { js: o.js, css: o.css, server_js: o.server_js, server: o.server, server_fns: o.server_fns })
     };
     // Server modules for build-time evaluation (paths, load on paths() routes, seo, head): server_js with its
     // relative imports pointing at the server modules of the files it imports, under .brain/build/server/.
@@ -1716,7 +1776,7 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
                     route: p.route.clone(),
                     file: p.file.clone(),
                     html: p.html.clone(),
-                    lastmod: text("lastmod"),
+                    lastmod: p.lastmod.clone().or_else(||text("lastmod")).filter(|value|!value.trim().is_empty()),
                     keyword: info.as_ref().and_then(|i| i.keyword.clone()),
                     article: None,
                     view: Some(p.view.clone()),
@@ -1747,7 +1807,7 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
         }
         if seo_cfg.credit {
             let credit = format!(
-                "<p data-brain-credit style=\"margin:8px 16px;text-align:right;font:12px system-ui\">By <a href=\"{}\" rel=\"nofollow\">BRAINLLM</a> {}</p>",
+                "<p data-brain-credit style=\"padding:8px 16px calc(8px + env(safe-area-inset-bottom));text-align:right;font:12px system-ui\">By <a href=\"{}\" rel=\"nofollow\">BRAINLLM</a> {}</p>",
                 brain_pack::HOME,
                 env!("CARGO_PKG_VERSION")
             );
@@ -1775,6 +1835,10 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
     let mut cache = cache_cfg(root)?;
     // empty = brain.json "ext" (brain-pack reads it), else web
     cache.ext = BUILD_EXT.get().cloned().unwrap_or_default();
+    if rep.static_export {
+        if cache.ext == "brain" { return Err("static output requires --ext web; fix: remove --ext brain / BRAIN_EXT=brain".into()); }
+        cache.ext = "web".into();
+    }
     let offline = cache.offline;
     cache.sw_template = runtime_files().into_iter().find(|(n, _)| n == "sw/brain-sw.js").map(|(_, s)| s);
     let input = brain_pack::Input {
@@ -1821,10 +1885,25 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
     let site = declared.as_deref();
     let socket_settings: backend::SocketSettings = backend::socket_settings(root, site, None)?;
     let mut socket_options = socket_settings.build_options(site).map_err(|e| format!("{e}. This `{env_name}` build took the site from --site or PUBLIC_SITE_URL in the [{env_name}] section of .brain_env"))?;
+    socket_options.static_export = rep.static_export;
     socket_options.native_routes = route_executor::gateway_routes(root)?;
     socket_options.trust_proxy = platform_config::trust_proxy(root);
     socket_options.access = platform_config::access(root);
     let out = brain_pack::build_with_options(&input, &views, &|v| layouts_of(root, v), &seo_of, &socket_options)?;
+    for path in out.files.keys().chain(out.binary.keys()) {
+        brain_pack::validate_output_path(path)?;
+        let mut at = dist.to_path_buf();
+        for component in std::iter::once("").chain(path.split('/')) {
+            if !component.is_empty() { at.push(component); }
+            match std::fs::symlink_metadata(&at) {
+                Ok(meta) if meta.file_type().is_symlink() => return Err("dist/ contains a symbolic link on an output path; fix: replace it with an ordinary output directory/file and rebuild".into()),
+                Ok(_) => (),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+                Err(_) => return Err("cannot inspect dist/ output path; fix: check its permissions".into()),
+            }
+        }
+    }
+    if rep.static_export { static_export::check_destinations(dist, out.files.keys().chain(out.binary.keys()))?; }
     // write only what changed and drop stale hashed chunks: an unchanged rebuild touches no file
     on_phase("write", 0, out.files.len() + out.binary.len());
     let (mut written, mut unchanged) = (0, 0);
@@ -1853,7 +1932,7 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
         let Ok(rd) = std::fs::read_dir(dir) else { return };
         for e in rd.flatten() {
             let p = e.path();
-            if p.is_dir() {
+            if e.file_type().is_ok_and(|kind| kind.is_dir()) {
                 sweep(&p, dist, keep);
                 let _ = std::fs::remove_dir(&p); // only succeeds when empty
             } else {
@@ -1864,7 +1943,8 @@ fn bundle_files(root: &Path, dist: &Path, site: Option<&str>, env_name: &str, re
             }
         }
     }
-    let graced = previous_chunks(root, dist, &|rel| out.files.contains_key(rel) || out.binary.contains_key(rel));
+    // Only deployment builds own old-chunk grace; an isolated doctor build must not reset that ledger.
+    let graced = if rep.static_export || dist != root.join("dist") { std::collections::BTreeSet::new() } else { previous_chunks(root, dist, &|rel| out.files.contains_key(rel) || out.binary.contains_key(rel)) };
     let keep = |rel: &str| out.files.contains_key(rel) || out.binary.contains_key(rel) || graced.contains(rel);
     sweep(dist, dist, &keep);
     rep.report = out
@@ -1919,6 +1999,7 @@ pub(crate) fn build_json(r: &BuildReport) -> brain_mcp::Json {
     Json::obj([
         ("schemaVersion",Json::Num(1.0)),
         ("build", Json::str(&r.signature)),
+        ("outputMode", Json::str(if r.static_export { "static" } else { "auto" })),
         ("files", Json::Arr(r.files.iter().map(Json::str).collect())),
         ("warnings", Json::Arr(r.warnings.iter().map(Json::str).collect())),
         ("ledger", Json::Arr(r.ledger.clone())),
@@ -1974,13 +2055,13 @@ fn cmd_build(args: &[String]) -> Result<(), BuildError> {
     if mode == term::Mode::Rich {
         eprintln!("{}", term::header(pr.paint(), &format!("build · {}", root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())));
     }
-    let res = run_build_with(&root, flag(args, "--site"), &env::name(args, "production"), Some(&pr));
+    let res = if args.iter().any(|a| a == "--static") { run_build_mode(&root, flag(args, "--site"), &env::name(args, "production"), Some(&pr), true).and_then(|a| a.into_report().map_err(BuildError::from)) } else { run_build_with(&root, flag(args, "--site"), &env::name(args, "production"), Some(&pr)) };
     pr.end();
     let rep = match res {
         Ok(rep) => rep,
         Err(error) => { identity.finish("Build stopped. Resolve the diagnostic and try again."); return Err(error); }
     };
-    identity.finish("Build complete. Your intent, compiled.");
+    identity.finish(if rep.static_export { "Static build complete. Upload the contents of dist/ to an HTTP static host." } else { "Build complete. Your intent, compiled." });
     if docs::enabled(&root) {
         match docs::write(&root, docs::DEFAULT_OUT) {
             Ok((_, updated)) if !updated.is_empty() => eprintln!("docs: updated {}", updated.join(", ")),
@@ -2033,7 +2114,7 @@ fn strict_build_failure(args: &[String], warnings: &[String]) -> Result<(), Stri
 #[cfg(unix)]
 const START_USAGE: &str = "usage: brain start [--port 3000] [--host 127.0.0.1] [--instances 1] [--max-memory 300M] [--env production]
        brain start --install [same flags]   write a systemd unit / launchd plist for this app
-       brain stop | reload | status [--json]
+       brain stop | reload | status [path] [--json]
 
 Serves dist/ in production: static apps from Rust, apps with dist/server.mjs under a supervisor (zero-downtime
 reload, restart with backoff, crash-loop exit 1, /_health, RSS limit, logs/app.log). Environment: PORT, HOST,
@@ -2114,7 +2195,7 @@ pub(crate) fn compile_fn(root: PathBuf, dev: bool) -> brain_serve::CompileFn {
     // path. No change → previous output; style only → recompile CSS (no codegen); anything else → full compile
     // (through the persistent content cache).
     // + the PUBLIC_* constants it was compiled with: a changed .brain_env makes every file compile again
-    type Last = (brain_codegen::blocks::Blocks, String, String, String, Vec<PathBuf>, Vec<(String, String)>, Option<Vec<String>>);
+    type Last = (brain_codegen::blocks::Blocks, String, String, String, Vec<PathBuf>, Vec<(String, String)>, Option<Vec<String>>, brain_lex::ServerMetadata);
     let last: Arc<std::sync::Mutex<HashMap<PathBuf, Last>>> = Arc::default();
     Arc::new(move |src: &str, path: &Path| {
         use brain_codegen::blocks::{blocks, change, compile_style, Change};
@@ -2124,9 +2205,9 @@ pub(crate) fn compile_fn(root: PathBuf, dev: bool) -> brain_serve::CompileFn {
         // clone out first: an `if let` keeps the MutexGuard alive for its whole block (re-locking inside deadlocked)
         let prev = last.lock().unwrap().get(path).cloned();
         let public = env::public();
-        if let Some((ob, js, css, server_js, deps, _, stamps)) = prev.filter(|p| p.5 == public && p.6.is_some() && compiler::dependency_hashes(&p.4) == p.6) {
+        if let Some((ob, js, css, server_js, deps, _, stamps, server)) = prev.filter(|p| p.5 == public && p.6.is_some() && compiler::dependency_hashes(&p.4) == p.6) {
             match change(&ob, &b) {
-                Change::None => return Ok(brain_serve::Compiled { js, css, deps, server_js }),
+                Change::None => return Ok(brain_serve::Compiled { js, css, deps, server_js, server }),
                 Change::Style => {
                     let opts = brain_codegen::Options { dev, root: Some(root.clone()), ..Default::default() };
                     let css = compile_style(src, rel, &opts).map_err(to_json)?;
@@ -2136,9 +2217,9 @@ pub(crate) fn compile_fn(root: PathBuf, dev: bool) -> brain_serve::CompileFn {
                     if size <= 1024 * 1024 {
                         let bytes: usize = cache.values().map(|v| v.1.len() + v.2.len() + v.3.len()).sum();
                         if cache.len() >= 256 || bytes.saturating_add(size) > 64 * 1024 * 1024 { cache.clear(); }
-                        cache.insert(path.to_path_buf(), (b, js.clone(), css.clone(), server_js.clone(), deps.clone(), public.clone(), stamps));
+                        cache.insert(path.to_path_buf(), (b, js.clone(), css.clone(), server_js.clone(), deps.clone(), public.clone(), stamps, server.clone()));
                     }
-                    return Ok(brain_serve::Compiled { js, css, deps, server_js });
+                    return Ok(brain_serve::Compiled { js, css, deps, server_js, server });
                 }
                 _ => {}
             }
@@ -2151,9 +2232,9 @@ pub(crate) fn compile_fn(root: PathBuf, dev: bool) -> brain_serve::CompileFn {
         let size = o.js.len() + o.css.len() + o.server_js.len();
         if cache.len() >= 256 || bytes.saturating_add(size) > 64 * 1024 * 1024 { cache.clear(); }
         if size <= 1024 * 1024 {
-            cache.insert(path.to_path_buf(), (b, o.js.clone(), o.css.clone(), o.server_js.clone(), o.deps.clone(), public, stamps));
+            cache.insert(path.to_path_buf(), (b, o.js.clone(), o.css.clone(), o.server_js.clone(), o.deps.clone(), public, stamps, o.server.clone()));
         }
-        Ok(brain_serve::Compiled { js: o.js, css: o.css, deps: o.deps, server_js: o.server_js })
+        Ok(brain_serve::Compiled { js: o.js, css: o.css, deps: o.deps, server_js: o.server_js, server: o.server })
     })
 }
 
@@ -2318,6 +2399,7 @@ pub(crate) fn run_tests(target: Option<PathBuf>, timeout: u64) -> Result<Vec<tes
     if files.is_empty() {
         return Ok(vec![]);
     }
+    testrun::preflight(&root, &files)?;
     let (host, port) = project_test_address(&root)?;
     // native sockets fix the port, so the app's own `brain run` may already hold it: test against that server
     if port != 0 && std::net::TcpStream::connect((host.as_str(), port)).is_ok() {
@@ -2421,6 +2503,31 @@ fn cmd_explain(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Owned private output for doctor; it never replaces an app's active artifact.
+struct DoctorOutput(PathBuf);
+impl DoctorOutput {
+    fn create() -> Result<Self, String> {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        for _ in 0..64 {
+            let path = std::env::temp_dir().join(format!("brain-doctor-{}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+            let mut builder = std::fs::DirBuilder::new();
+            #[cfg(unix)] {
+                use std::os::unix::fs::DirBuilderExt;
+                builder.mode(0o700);
+            }
+            match builder.create(&path) {
+                Ok(()) => return Ok(Self(path)),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(_) => return Err("cannot create private doctor output; inspect the temporary directory permissions".into()),
+            }
+        }
+        Err("cannot reserve private doctor output; retry after inspecting owned temporary directories".into())
+    }
+}
+impl Drop for DoctorOutput {
+    fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+}
+
 /// `brain doctor`: check (errors + B10xx overengineering warnings) → tests in Chrome with accessibility → leaks.
 /// A single summary; `ok` is false on any check error or failed test.
 pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json), String> {
@@ -2471,24 +2578,34 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
     };
     #[cfg(not(unix))]
     let (test_ok, leaks_ok, test) = (true, true, Json::obj([("skipped", Json::str("brain test needs macOS or Linux"))]));
-    // the app folder (a file target checks its app); SEO audits the last build, advice reads the sources
+    // The app folder (a file target checks its app); output gates share one private fresh build, advice reads sources.
     let app = root.as_deref().map(|p| std::path::absolute(p).unwrap_or(p.to_path_buf())).and_then(|p| scaffold::find_root(&p)).or_else(|| app_root().ok());
     // the production build (§25: done = doctor exit 0 = the app ships): what fails `brain build` fails doctor too —
     // empty production keys (B0720), broken links and anchors (B1819/B1820)… — and SEO then audits that dist/
     // a placeholder production origin is reported once (B0736 below); the audit still scores the pages as they would
     // ship with a real domain, so one missing domain does not also fail SEO through relative canonical/og:image URLs
     let doctor_site = app.as_deref().and_then(|a| env::value(a, "production", "PUBLIC_SITE_URL")).filter(|s| env::placeholder_origin(s));
-    let (build_ok, fresh_output, build) = match &app {
-        Some(a) if check.get("errors") == Some(&Json::Num(0.0)) => match run_build_assessed_with(a, doctor_site.clone(), "production", None) {
-            Ok(assessment) => (assessment.budget_error.is_none(), true, assessment.doctor_json()),
-            Err(e) => (false, false, Json::obj([("ok", Json::Bool(false)), ("freshOutput", Json::Bool(false)), ("error", Json::str(&e.message))])),
+    let mut doctor_output = None;
+    let (build_ok, fresh_output, mut build) = match &app {
+        Some(a) if check.get("errors") == Some(&Json::Num(0.0)) => {
+            let output = DoctorOutput::create()?;
+            let result = run_build_mode_to(a, doctor_site.clone(), "production", None, false, &output.0);
+            doctor_output = Some(output);
+            match result {
+                Ok(assessment) => (assessment.budget_error.is_none(), true, assessment.doctor_json()),
+                Err(e) => (false, false, Json::obj([("ok", Json::Bool(false)), ("freshOutput", Json::Bool(false)), ("error", Json::str(&e.message))])),
+            }
         },
         Some(_) => (true, false, Json::obj([("freshOutput", Json::Bool(false)), ("skipped", Json::str("check has errors; fix them first"))])),
         None => (true, false, Json::obj([("freshOutput", Json::Bool(false)), ("skipped", Json::str("no app"))])),
     };
+    if let Json::Obj(fields) = &mut build {
+        fields.push(("outputScope".into(), Json::str("isolated-doctor-output")));
+        fields.push(("outputRetained".into(), Json::Bool(false)));
+    }
     let (seo_ok, seo) = match &app {
-        Some(a) if fresh_output && a.join("dist").is_dir() => {
-            let (code, out) = brain_seo::cli(a, &["audit".into(), "--json".into()]);
+        Some(a) if fresh_output && doctor_output.is_some() => {
+            let (code, out) = brain_seo::audit_output(a, &doctor_output.as_ref().unwrap().0);
             // no .brain_env value in doctor's output (§36): the audit's absolute URLs carry PUBLIC_SITE_URL, so they
             // become paths (`https://example.com/about` → `/about`)
             let out = match env::value(a, "production", "PUBLIC_SITE_URL") {
@@ -2499,6 +2616,14 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
         }
         _ if !fresh_output => (true, Json::obj([("skipped", Json::str("no fresh build output from this doctor run; fix check/build errors before SEO can audit the current pages"))])),
         _ => (true, Json::obj([("skipped", Json::str("no dist/ yet; run `brain build` to audit SEO"))])),
+    };
+    let (static_ok, static_artifact) = match app.as_deref() {
+        Some(a) if fresh_output && static_export::enabled(a, false)? => match doctor_output.as_ref().map_or_else(|| static_audit::audit(a), |output| static_audit::audit_output(a, &output.0)) {
+            Ok(report) => (report.get("ok") == Some(&Json::Bool(true)), report),
+            Err(error) => (false, Json::obj([("ok", Json::Bool(false)), ("error", Json::str(error))])),
+        },
+        Some(a) if !fresh_output && static_export::enabled(a, false).unwrap_or(false) => (true, Json::obj([("skipped", Json::str("no fresh static output; fix check/build errors first"))])),
+        _ => (true, Json::obj([("skipped", Json::str("ordinary dynamic output; static artifact audit does not apply"))])),
     };
     let mut advice: Vec<Json> = app.as_deref().map(brain_check::doctor::doctor).unwrap_or_default().iter().filter_map(|d| Json::parse(&d.to_json()).ok()).collect();
     if let Some(a) = &app {
@@ -2562,6 +2687,15 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
             }
         }
     }
+    if let Some(root) = &app {
+        for (environment, setup) in backend::google_origin_advice(root) {
+            advice.push(Json::obj([
+                ("code", Json::str("google-origins")), ("level", Json::str("info")), ("file", Json::str(env::FILE)),
+                ("msg", Json::str(format!("Google Sign-In {environment}: configured browser origins {}", setup["authorizedJavaScriptOrigins"]))),
+                ("fix", Json::str(setup["fix"].as_str().unwrap_or_default())),
+            ]));
+        }
+    }
     // a quality bar lowered below its default does not count as passing: an agent must fix the pages, not the bar
     // (QA #153: a model reached doctor 0 by setting seo.minScore to 60)
     let mut bar_ok = true;
@@ -2588,11 +2722,11 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
     if let Some(root) = app.as_deref().filter(|r| r.join(docs::DEFAULT_OUT).join("index.md").is_file()) {
         let stale = docs::stale(root, docs::DEFAULT_OUT);
         if !stale.is_empty() {
-            advice.push(Json::obj([("code", Json::str("docs")), ("level", Json::str("warning")), ("file", Json::str(docs::DEFAULT_OUT)), ("msg", Json::str(format!("generated docs are stale: {}", stale.join(", ")))), ("fix", Json::str("run `brain docs` (or `brain build`) and commit docs/app"))]));
+            advice.push(Json::obj([("code", Json::str("docs")), ("level", Json::str("warning")), ("file", Json::str(docs::DEFAULT_OUT)), ("msg", Json::str(format!("generated docs are stale: {}", stale.join(", ")))), ("fix", Json::str("run `brain docs` (or `brain build` when docs:true); keep authored prose in docs/app/notes and follow the project Git policy"))]));
         }
     }
     // the gates that failed, so the summary says what happened
-    let failed: Vec<&str> = [("check", errors.is_empty()), ("tests", test_ok), ("leaks", leaks_ok), ("build", build_ok), ("seo", seo_ok), ("env", env_ok), ("seoBar", bar_ok)]
+    let failed: Vec<&str> = [("check", errors.is_empty()), ("tests", test_ok), ("leaks", leaks_ok), ("build", build_ok), ("seo", seo_ok), ("env", env_ok), ("seoBar", bar_ok), ("staticArtifact", static_ok)]
         .into_iter()
         .filter(|(_, passed)| !passed)
         .map(|(gate, _)| gate)
@@ -2612,7 +2746,7 @@ pub(crate) fn run_doctor(root: Option<PathBuf>) -> Result<(bool, brain_mcp::Json
         )]),
         _ => Json::obj([("skipped", Json::str("the tests did not run"))]),
     };
-    Ok((ok, Json::obj([("ok", Json::Bool(ok)), ("failed", Json::Arr(failed.iter().map(|g| Json::str(*g)).collect())), ("check", check), ("test", test), ("build", build), ("seo", seo), ("advice", Json::Arr(advice)), ("heap", heap), ("compatibility", compatibility(app.as_deref()))])))
+    Ok((ok, Json::obj([("ok", Json::Bool(ok)), ("failed", Json::Arr(failed.iter().map(|g| Json::str(*g)).collect())), ("check", check), ("test", test), ("build", build), ("seo", seo), ("staticArtifact", static_artifact), ("advice", Json::Arr(advice)), ("heap", heap), ("compatibility", compatibility(app.as_deref()))])))
 }
 
 fn cmd_doctor(args: &[String]) -> ExitCode {
@@ -2643,6 +2777,15 @@ fn cmd_doctor(args: &[String]) -> ExitCode {
                         let s = |k: &str| d.get(k).and_then(brain_mcp::Json::as_str).unwrap_or("").to_string();
                         let num = |k: &str| match d.get(k) { Some(brain_mcp::Json::Num(v)) => *v as u64, _ => 0 };
                         println!("{}:{}:{} {} {}\n  fix: {}", s("file"), num("line"), num("col"), s("code"), s("msg"), s("fix"));
+                    }
+                }
+                if let Some(report) = j.get("staticArtifact") {
+                    if let Some(error) = report.get("error").and_then(brain_mcp::Json::as_str) { println!("static artifact: {error}"); }
+                    if let Some(brain_mcp::Json::Arr(issues)) = report.get("issues") {
+                        for issue in issues {
+                            let s = |key| issue.get(key).and_then(brain_mcp::Json::as_str).unwrap_or("");
+                            println!("static artifact {} {}: {}\n  fix: {}", s("file"), s("reference"), s("message"), s("fix"));
+                        }
                     }
                 }
                 let test_err = j.get("test").and_then(|t| t.get("error")).and_then(brain_mcp::Json::as_str);
@@ -2974,6 +3117,22 @@ fn project_metadata(args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn doctor_output_is_private_unique_and_removed_on_drop() {
+        let first = DoctorOutput::create().unwrap();
+        let path = first.0.clone();
+        let second = DoctorOutput::create().unwrap();
+        assert_ne!(path, second.0);
+        #[cfg(unix)] {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o700);
+        }
+        std::fs::write(path.join("index.html"), "private output").unwrap();
+        drop(first);
+        assert!(!path.exists());
+        assert!(second.0.is_dir());
+    }
 
     #[test]
     fn unchanged_blocks_revalidate_dependencies_before_hmr_reuse() {

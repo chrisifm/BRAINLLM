@@ -123,9 +123,18 @@ fn captcha(root: &Path, environment: &str) -> Result<brain_backend::captcha::Cap
 
 /// B0790: the captcha secret an environment does not hold. A development server answers 503 without it; production refuses to start.
 pub(crate) fn captcha_secret_problem(root: &Path, environment: &str) -> Option<(String, String, bool)> {
+    if let Some(problem) = captcha_public_test_secret_problem(root, environment) { return Some(problem); }
     use brain_backend::captcha::CONTRACT;
     let name = captcha(root, environment).ok()?.missing_secret()?.to_string();
     Some((CONTRACT.to_string(), format!("{CONTRACT}: {name} is not set, so every protected action fails while the captcha cannot be verified"), environment != "production"))
+}
+
+pub(crate) fn captcha_public_test_secret_problem(root: &Path, environment: &str) -> Option<(String, String, bool)> {
+    if environment != "production" { return None; }
+    let config = captcha(root, environment).ok()?;
+    let name = config.public_test_secret()?;
+    let file = brain_backend::captcha::CONTRACT;
+    Some((file.into(), format!("{file}: [production] {name} holds a public provider test secret; `brain backend serve --env production` refuses to start"), false))
 }
 
 pub fn load(root: &Path, environment: &str, resources: &[Resource], roles: &RolesConfig) -> Result<Platform, String> {
@@ -170,6 +179,16 @@ mod tests {
         assert!(!captcha_secret_problem(&root, "production").unwrap().2);
         fs::write(root.join(crate::env::FILE), "BRAIN_TEST_CAPTCHA_FILE_ONLY=from-the-file\n").unwrap();
         assert_eq!(captcha_secret_problem(&root, "development"), None);
+        let dummy = "1x0000000000000000000000000000000AA";
+        fs::write(root.join(crate::env::FILE), format!("BRAIN_TEST_CAPTCHA_FILE_ONLY={dummy}\n")).unwrap();
+        assert!(captcha_secret_problem(&root, "development").is_none());
+        let (_, message, disables) = captcha_secret_problem(&root, "production").unwrap();
+        assert!(!disables && message.contains("[production]") && !message.contains(dummy));
+        let warnings = crate::backend::secret_warnings(&root);
+        assert!(warnings.iter().any(|(_, message, fix)| message.contains("public provider test secret") && fix.contains("provider-issued")));
+        fs::write(root.join(crate::env::FILE), format!("[development]\nBRAIN_TEST_CAPTCHA_FILE_ONLY={dummy}\n[production]\nBRAIN_TEST_CAPTCHA_FILE_ONLY=synthetic-production-provider-secret\n")).unwrap();
+        assert!(captcha_secret_problem(&root, "production").is_none());
+        assert!(!crate::backend::secret_warnings(&root).iter().any(|(_, message, _)| message.contains("public provider test secret")));
         let _ = fs::remove_dir_all(&root);
     }
     #[test]

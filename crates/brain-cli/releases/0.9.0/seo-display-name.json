@@ -1,0 +1,24 @@
+{
+  "id": "seo-display-name",
+  "kind": "capability",
+  "title": "Public SEO display name",
+  "why": "SEO and assistant discovery can use a human-readable name without renaming the project package.",
+  "changelog": [
+    "`seo.siteName` sets the public display name"
+  ],
+  "guide": "brain guide static",
+  "codes": [],
+  "apis": [
+    "seo.siteName"
+  ],
+  "adopt": {
+    "file": "brain.json",
+    "snippet": "{\"seo\":{\"siteName\":\"Example site\",\"markdown\":false}}"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "\"siteName\""
+    }
+  ]
+}

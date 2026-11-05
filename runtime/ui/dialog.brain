@@ -1,10 +1,10 @@
-<meta props="title:str closeLabel:str='Close' urlKey:str=''" emits="close" expose="open close">
+<meta props="title:str closeLabel:str='Close' urlKey:str='' dismissible:bool=false" emits="close" expose="open close">
 <script>
   let dlg = ref()
   // native modal <dialog>: focus moves inside, the rest of the page is inert, Escape closes
   const open = () => { if (!dlg.open) dlg.showModal() }
   const close = () => { if (dlg.open) dlg.close() }
-  fx(() => { if (dlg) return urlDialog(dlg, urlKey) })
+  fx(() => { if (dlg) return urlDialog(dlg, urlKey, { dismissible }) })
 </script>
 <dialog bind:ref={dlg} aria-labelledby="dlg-title" on:close={emit('close')}>
   <header>

@@ -53,10 +53,19 @@ test('earlyHints sends the 103 to HTTP/1.1 and never to HTTP/1.0', async () => {
   assert.match(old, /^HTTP\/1\.1 200 /)
 })
 
-test('a long preload list stays out of the header', async () => {
+test('long preload lists retain critical styles and bound final and 103 headers', async () => {
   const many = Array.from({ length: 200 }, (_, i) => `</_b/f${i}.js>; rel=modulepreload`)
+  many.push(link)
   w('_server/manifest.json', manifest(many))
-  const text = await raw(await start({}), '1.1')
-  assert.match(text, /^HTTP\/1\.1 200 /)
-  assert.doesNotMatch(text, /\r\nlink:/i)
+  const logs = []
+  const port = await start({ earlyHints: true, log: (...args) => logs.push(args) })
+  const text = await raw(port, '1.1')
+  const values = [...text.matchAll(/\r\nlink: ([^\r\n]+)\r\n/gi)].map(m => m[1])
+  assert.equal(values.length, 2, text)
+  assert.equal(values[0], values[1], '103 and final response select the same resources')
+  assert.ok(Buffer.byteLength(values[0]) <= 2048)
+  assert.ok(values[0].startsWith(link), values[0])
+  assert.ok(values[0].includes('</_b/f0.js>'))
+  assert.ok(!values[0].includes('</_b/f199.js>'))
+  assert.equal(logs.filter(args => /preload.*trimmed/.test(args[1])).length, 1)
 })

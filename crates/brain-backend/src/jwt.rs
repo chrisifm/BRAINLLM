@@ -198,7 +198,7 @@ impl Jwt {
         let Some(claims) = token.and_then(|token| self.decode(token)) else {
             return Ok(None);
         };
-        let row=sqlx::query("SELECT u.id,u.email,u.role,u.verified,s.last_used_at<now()-interval '60 seconds' AS stale FROM _brain_users u JOIN _brain_sessions s ON s.user_id=u.id WHERE u.id=$1 AND s.session_id=$2 AND u.auth_version=$3 AND u.disabled_at IS NULL AND s.revoked_at IS NULL AND s.expires_at>now() AND ($4::float8 IS NULL OR s.last_used_at>now()-make_interval(secs=>$4))")
+        let row=sqlx::query("SELECT u.id,u.email,u.role,u.verified,u.display_name,u.picture_url,s.last_used_at<now()-interval '60 seconds' AS stale FROM _brain_users u JOIN _brain_sessions s ON s.user_id=u.id WHERE u.id=$1 AND s.session_id=$2 AND u.auth_version=$3 AND u.disabled_at IS NULL AND s.revoked_at IS NULL AND s.expires_at>now() AND ($4::float8 IS NULL OR s.last_used_at>now()-make_interval(secs=>$4))")
             .bind(claims.sub).bind(claims.sid).bind(claims.ver).bind(crate::sessions::idle_seconds()).fetch_optional(&self.pool).await.map_err(crate::db::safe)?;
         if row.as_ref().is_some_and(|row| row.get::<bool, _>("stale")) {
             crate::sessions::touch(&self.pool, claims.sid).await;
@@ -208,6 +208,7 @@ impl Jwt {
             email: row.get("email"),
             role: row.get("role"),
             verified: row.get("verified"),
+            name: row.get("display_name"), picture: row.get("picture_url"),
         }))
     }
     /// The session named by a valid access token; the caller still identifies the user against the database.
@@ -264,7 +265,7 @@ impl Jwt {
             .fetch_one(&mut *tx)
             .await
             .map_err(crate::db::safe)?;
-        let row=sqlx::query("SELECT u.id,u.email,u.role,u.verified,u.auth_version,s.session_id,f.id AS family_id,t.used_at IS NOT NULL AS used, t.used_at>now()-make_interval(secs=>$2) AND t.grace_uses<$3 AND COALESCE((SELECT r.used_at IS NULL FROM _brain_refresh_tokens r WHERE r.token_hash=t.replacement_hash),false) AS in_grace, f.revoked_at IS NULL AND f.expires_at>now() AND t.expires_at>now() AND s.expires_at>now() AND s.revoked_at IS NULL AND u.disabled_at IS NULL AND f.auth_version=u.auth_version AND ($4::float8 IS NULL OR s.last_used_at>now()-make_interval(secs=>$4)) AS live, GREATEST(EXTRACT(EPOCH FROM s.expires_at-now()),0)::float8 AS remaining FROM _brain_refresh_tokens t JOIN _brain_refresh_families f ON f.id=t.family_id JOIN _brain_sessions s ON s.session_id=f.session_id JOIN _brain_users u ON u.id=s.user_id WHERE t.token_hash=$1 FOR UPDATE OF t,f,s")
+        let row=sqlx::query("SELECT u.id,u.email,u.role,u.verified,u.display_name,u.picture_url,u.auth_version,s.session_id,f.id AS family_id,t.used_at IS NOT NULL AS used, t.used_at>now()-make_interval(secs=>$2) AND t.grace_uses<$3 AND COALESCE((SELECT r.used_at IS NULL FROM _brain_refresh_tokens r WHERE r.token_hash=t.replacement_hash),false) AS in_grace, f.revoked_at IS NULL AND f.expires_at>now() AND t.expires_at>now() AND s.expires_at>now() AND s.revoked_at IS NULL AND u.disabled_at IS NULL AND f.auth_version=u.auth_version AND ($4::float8 IS NULL OR s.last_used_at>now()-make_interval(secs=>$4)) AS live, GREATEST(EXTRACT(EPOCH FROM s.expires_at-now()),0)::float8 AS remaining FROM _brain_refresh_tokens t JOIN _brain_refresh_families f ON f.id=t.family_id JOIN _brain_sessions s ON s.session_id=f.session_id JOIN _brain_users u ON u.id=s.user_id WHERE t.token_hash=$1 FOR UPDATE OF t,f,s")
             .bind(&hash).bind(f64::from(self.config.refresh_grace)).bind(REFRESH_GRACE_USES).bind(crate::sessions::idle_seconds()).fetch_optional(&mut *tx).await.map_err(crate::db::safe)?;
         let Some(row) = row else { return Ok(None) };
         let family: Uuid = row.get("family_id");
@@ -274,7 +275,7 @@ impl Jwt {
             // token and no refresh token, so the family keeps one head and a real replay still revokes it.
             sqlx::query("UPDATE _brain_refresh_tokens SET grace_uses=grace_uses+1 WHERE token_hash=$1").bind(&hash).execute(&mut *tx).await.map_err(crate::db::safe)?;
             let access_token = self.sign(user, sid, row.get("auth_version"))?;
-            let signed = User { id: row.get("id"), email: row.get("email"), role: row.get("role"), verified: row.get("verified") };
+            let signed = User { id: row.get("id"), email: row.get("email"), role: row.get("role"), verified: row.get("verified"), name: row.get("display_name"), picture: row.get("picture_url") };
             tx.commit().await.map_err(crate::db::safe)?;
             return Ok(Some(Tokens { user: signed, access_token, refresh_token: String::new(), refresh_age: 0, token_type: "Bearer", expires_in: ACCESS_SECONDS }));
         }
@@ -316,6 +317,7 @@ impl Jwt {
             email: row.get("email"),
             role: row.get("role"),
             verified: row.get("verified"),
+            name: row.get("display_name"), picture: row.get("picture_url"),
         };
         let access_token = self.sign(user.id, sid, row.get("auth_version"))?;
         sqlx::query("UPDATE _brain_sessions SET last_used_at=now() WHERE session_id=$1").bind(sid).execute(&mut *tx).await.map_err(crate::db::safe)?;

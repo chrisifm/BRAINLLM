@@ -6,12 +6,12 @@ const GLOBAL: &[&str] = &["--json", "--quiet", "-q", "--progress"];
 
 /// `(command, flags that take a value, switches)`.
 pub(crate) const TABLE: &[(&str, &[&str], &[&str])] = &[
-    ("new", &[], &["--backend"]),
-    ("add", &["--props", "--store", "--get", "--post", "--fields", "--policy"], &["--bus", "--key", "--admin-ui"]),
+    ("new", &[], &["--backend", "--static"]),
+    ("add", &["--props", "--store", "--get", "--post", "--fields", "--policy"], &["--bus", "--key", "--admin-ui", "--blank"]),
     ("check", &[], &[]),
     ("fix", &[], &["--force"]),
     ("doctor", &[], &["--fix", "--force", "--viewer"]),
-    ("build", &["--site", "--ext", "--env"], &["--report", "--strict"]),
+    ("build", &["--site", "--ext", "--env"], &["--report", "--strict", "--static"]),
     ("run", &["--port", "--host", "--base", "--inspect-port", "--env"], &["--mock", "--profile", "--no-inspect", "--no-trace", "--backend"]),
     ("dev", &["--port", "--host", "--base", "--inspect-port", "--env"], &["--mock", "--profile", "--no-inspect", "--no-trace", "--backend"]),
     ("test", &["--timeout"], &["--heap", "--viewer"]),
@@ -50,10 +50,11 @@ pub(crate) const TABLE: &[(&str, &[&str], &[&str])] = &[
         "backend",
         &[
             "--env", "--port", "--origin", "--from", "--to", "--user", "--email", "--provider", "--name", "--scopes", "--expires-days", "--daily",
-            "--monthly", "--status", "--resource", "--before", "--limit", "--days", "--accept", "--file",
+            "--monthly", "--status", "--resource", "--before", "--limit", "--days", "--accept", "--only", "--file",
         ],
-        &["--apply", "--with-workers", "--system", "--create-db"],
+        &["--apply", "--with-workers", "--system", "--create-db", "--include-null"],
     ),
+    ("data", &["--env", "--resource", "--limit"], &["--apply", "--include-null"]),
     ("jobs", &["--env", "--payload", "--key", "--priority", "--delay", "--id", "--concurrency"], &["--once"]),
     ("analytics", &["--env", "--since", "--days", "--viewed", "--min-views", "--within", "--not-viewed", "--tracked", "--signed-in", "--limit", "--user"], &["--csv"]),
     ("media", &["--env", "--owner", "--limit", "--offset"], &[]),
@@ -73,9 +74,14 @@ pub(crate) fn check(args: &[String]) -> Result<(), String> {
             continue;
         }
         let (name, inline) = token.split_once('=').map_or((token.as_str(), false), |(name, _)| (name, true));
-        if valued.contains(&name) {
+        if valued.contains(&name) || name == "--progress" {
             if !inline {
-                tokens.next();
+                if tokens.next().is_none_or(|value| {
+                    let next = value.split('=').next().unwrap_or(value);
+                    value == "--" || valued.contains(&next) || switches.contains(&next) || GLOBAL.contains(&next)
+                }) {
+                    return Err(format!("missing value for `{name}` in brain {command}; fix: pass its value immediately after the flag"));
+                }
             }
         } else if *command == "seo" && name == "--site" {
             // the audit reads dist/: its absolute URLs were fixed when it was built, a flag here could not change them
@@ -109,7 +115,7 @@ mod tests {
     #[test]
     fn every_flag_the_documentation_shows_is_accepted() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let mut files = vec![root.join("SPEC.md")];
+        let mut files = vec![root.join("SPEC.md"), root.join("docs/BACKEND.md"), root.join("docs/DEPLOYMENT.md")];
         for dir in ["crates/brain-cli/guides", "docs/backend"] {
             for entry in std::fs::read_dir(root.join(dir)).unwrap() {
                 files.push(entry.unwrap().path());
@@ -150,6 +156,8 @@ mod tests {
             &["add", "comp", "x", "--props", "--looks-like-a-flag"],
             &["find", "x", "--", "--anything"],
             &["seo", "indexnow", "--dry-run", "--since", "2026-01-01"],
+            &["backend", "approve-contract", "--only", "items", "--apply"],
+            &["backend", "approve-contract", "--only=items", "--json"],
             &["map", "-1"],
             &["changes", "--anything"],
         ] {

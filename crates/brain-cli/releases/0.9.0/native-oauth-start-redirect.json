@@ -1,0 +1,11 @@
+{
+  "id": "native-oauth-start-redirect",
+  "kind": "fix",
+  "title": "Narrow native OAuth start redirect relay",
+  "why": "The native LinkedIn start can reach its fixed authorization endpoint without weakening general open-redirect protection.",
+  "changelog": ["Native OAuth start relays the exact LinkedIn HTTPS authorization 303"],
+  "guide": "docs/APPLE-LINKEDIN.md",
+  "codes": [],
+  "apis": ["/_brain/auth/linkedin/start"],
+  "affects": ["server/auth/**"]
+}

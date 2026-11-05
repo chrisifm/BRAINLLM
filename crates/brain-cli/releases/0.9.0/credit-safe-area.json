@@ -1,0 +1,14 @@
+{
+  "id": "credit-safe-area",
+  "kind": "fix",
+  "title": "Safe-area-aware page credit",
+  "why": "The generated attribution uses safe-area-aware padding and leaves page margins to the app. The existing credit opt-out is preserved.",
+  "changelog": [
+    "Generated credit signatures preserve app margins"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "codes": [],
+  "apis": [
+    "seo.credit"
+  ]
+}

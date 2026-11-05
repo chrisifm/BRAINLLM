@@ -70,6 +70,26 @@ fn good_site() -> Vec<Page> {
 }
 
 #[test]
+fn isolated_output_audit_uses_candidate_pages_without_reading_or_mutating_live_output() {
+    let root = fresh_dir("isolated-audit");
+    std::fs::write(root.join("brain.json"), r#"{"site":"https://acme.dev","name":"Acme"}"#).unwrap();
+    let candidate = root.join("candidate");
+    for page in good_site() {
+        let path = candidate.join(&page.file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, page.html).unwrap();
+    }
+    std::fs::create_dir_all(root.join("dist")).unwrap();
+    let live = "<a href='/live-output-missing'>Old live output</a>";
+    std::fs::write(root.join("dist/index.html"), live).unwrap();
+    let (code, out) = brain_seo::audit_output(&root, &candidate);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("live-output-missing") && !out.contains("staleDist"), "{out}");
+    assert_eq!(std::fs::read_to_string(root.join("dist/index.html")).unwrap(), live);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn a_complete_page_scores_100() {
     let c = cfg();
     let pages = good_site();
@@ -118,6 +138,19 @@ fn missing_basics_lower_the_score() {
     assert!(score < 85, "{score}");
     assert!(!r.ok(), "B1801 is an error");
     assert!(r.text().contains("B1801"));
+}
+
+#[test]
+fn intentional_absolute_external_navigation_can_share_the_site_origin() {
+    let c = cfg();
+    let mut pages = good_site();
+    pages[0].html = pages[0].html.replace("</main>", "<a rel='noopener EXTERNAL' href='https://acme.dev/live-only/'>Live site</a><a rel='external' href='/relative-missing/'>Broken relative</a><a href='https://acme.dev/absolute-missing/'>Broken absolute</a></main>");
+    let report = audit(&Site { cfg: &c, pages: &pages, routes: &[], assets: &[], redirects: &[], images: &[], i18n: None });
+    let broken: Vec<_> = report.errors().filter(|(_, finding)| finding.code == "B1819").map(|(_, finding)| finding.msg.clone()).collect();
+    assert_eq!(broken.len(), 2, "{broken:?}");
+    assert!(broken.iter().any(|message| message.contains("/relative-missing/")));
+    assert!(broken.iter().any(|message| message.contains("/absolute-missing/")));
+    assert!(!broken.iter().any(|message| message.contains("live-only")));
 }
 
 #[test]
@@ -486,7 +519,7 @@ fn finish_rewrites_heads_and_generates_files() {
             .contains("<meta name=\"robots\" content=\"noindex, nofollow\">")
             && p.html.matches("name=\"robots\"").count() == 1
     }));
-    assert_eq!(built.files[0].1, "User-agent: *\nAllow: /\n");
+    assert_eq!(built.files[0].1, format!("{}\nUser-agent: *\nAllow: /\n", brain_lex::branding::HASH));
     assert!(!built.files.iter().any(|(p, _)| p == "sitemap.xml"));
     assert!(built.report.pages.iter().all(|p| p.score.is_none()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -2164,6 +2197,15 @@ fn a_term_in_nearly_every_title_is_braked_and_never_an_error() {
     let r = focus_report(&["task planner"], &pages);
     assert!(r.site.iter().any(|f| f.code == "B1866" && f.msg.contains("5 of 5")), "{:?}", r.site);
     assert!(r.errors().next().is_none());
+}
+
+#[test]
+fn intentional_external_links_never_count_as_inbound_for_a_local_focus_hub() {
+    let home = focus_page("/", "Home", "Home", "<a rel='external' href='https://acme.dev/small-teams'>Small teams</a>");
+    let hub = focus_page("/small-teams", "Small teams guide", "Small teams", "A useful guide for small teams.");
+    let report = focus_report(&["small teams"], &[home, hub]);
+    assert_eq!(report.focus[0].inbound, 0);
+    assert!(report.site.iter().any(|finding| finding.code == "B1865"));
 }
 
 #[test]

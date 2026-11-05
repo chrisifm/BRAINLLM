@@ -1,0 +1,12 @@
+{
+  "id": "doctor-isolated-output",
+  "kind": "change",
+  "title": "Doctor preserves deployment output",
+  "why": "Validation must not replace the artifact a running site may be serving.",
+  "changelog": ["Doctor validates a fresh isolated production build"],
+  "guide": "brain guide static",
+  "codes": [],
+  "apis": ["brain doctor", "brain_doctor"],
+  "steps": ["Doctor keeps all source/test/build/SEO/static acceptance gates but removes its private temporary output. Run brain build explicitly to write deployment dist/ after validation; build.outputScope identifies isolated evidence."],
+  "finds": [{"glob": "brain.json"}]
+}

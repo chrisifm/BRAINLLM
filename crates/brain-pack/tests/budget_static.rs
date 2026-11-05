@@ -69,7 +69,7 @@ fn static_and_constant_pages_keep_zero_js_while_real_handlers_keep_execution_bud
             js: output.js,
             css: output.css,
             server_js: output.server_js,
-            server_fns: output.server_fns,
+            server: output.server, server_fns: output.server_fns,
         })
     };
     let input = brain_pack::Input {

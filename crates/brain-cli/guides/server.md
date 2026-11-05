@@ -1,7 +1,7 @@
 # guide: server — sessions, errors, environment, deploy with brain start
 
 ## When
-Sign-in and sessions, server-only code and secrets, per-environment configuration, error pages, production deploys.
+Sign-in and sessions, server-only code and secrets, per-environment configuration, error pages, production deploys. RPC endpoints do not run page `_guard.jsbrain` or `_middleware.jsbrain`: validate input and authorize `ctx.user` inside each protected server function, with native resource policies for row access. Same-origin transport is not authentication.
 
 ## Experimental resource backend
 For typed CRUD resources and durable jobs, read `brain spec --topic server` and the backend part of `brain map`.
@@ -91,7 +91,7 @@ brain reload                      # zero-downtime: new instances ready before th
 brain stop
 brain start --install             # writes a systemd unit (Linux) or launchd plist (macOS) and prints the enable command
 ```
-An npm-created app pins the compiler in devDependencies, which `NODE_ENV=production` skips: install with `npm ci --include=dev` or `npm run build` stops with `brain: command not found`, and do not prune it afterwards (`brain start` is the same package). Logs go to `logs/app.log` (rotated). Hosted under a sub-path: `brain.json` `"base": "/app/"`. `brain preview` serves `dist/` on a temporary loopback port to look before deploying. Backend deploys run `brain backend migrate` before serving. It does not run backwards, so back up first. A contract change that removes fields stops it with B0787 until `brain backend approve-contract --accept <resource> --apply` records the review: an unattended deploy stops there on purpose. Under PM2, `pm2 restart` keeps the saved `args` and environment: after changing `node_args`, `stop_exit_codes` or `NODE_OPTIONS`, run `pm2 delete <name>` and start it again.
+New npm starters pin the compiler in dependencies, so production-only installs retain build/start/backend/worker commands. Older apps with the compiler in devDependencies need `npm ci --include=dev` without later pruning, or an explicit move of the same exact pin to dependencies plus a refreshed lockfile. Logs go to `logs/app.log` (rotated). Hosted under a sub-path: `brain.json` `"base": "/app/"`. `brain preview` serves `dist/` on a temporary loopback port to look before deploying. Backend deploys run `brain backend migrate` before serving. Even an added optional field is a changed recorded contract: migrate deliberately stops with B0787. Preview with `brain backend approve-contract` (read-only by default), then use `brain backend approve-contract --only <resource> --apply` for a safe change; unsafe changes additionally require `--accept <resource>`. `migrate --dry-run` and `migrate --resource` are not supported; use that approval preview and `--only` instead. It does not run backwards, so back up first. A contract change that removes fields stops it with B0787 until `brain backend approve-contract --accept <resource> --apply` records the review: an unattended deploy stops there on purpose. Under PM2, `pm2 restart` keeps the saved `args` and environment: after changing `node_args`, `stop_exit_codes` or `NODE_OPTIONS`, run `pm2 delete <name>` and start it again. Reload never compiles source: build first, or use brain run during development. Successful reload JSON can include BUILD_SOURCES_NEWER or BUILD_FRESHNESS_INCOMPLETE timestamp advice; it is bounded, read-only and not source-hash verification.
 
 ## Verify
 ```bash

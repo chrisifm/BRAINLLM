@@ -35,6 +35,10 @@ struct Claims {
     azp: Option<String>,
     #[serde(default)]
     hd: Option<String>,
+    #[serde(default, deserialize_with = "crate::oidc::profile_text")]
+    name: Option<String>,
+    #[serde(default, deserialize_with = "crate::oidc::profile_text")]
+    picture: Option<String>,
 }
 #[derive(Clone)]
 pub struct Google {
@@ -100,8 +104,8 @@ impl Google {
             subject: claims.sub,
             issuer: claims.iss,
             email: Some(email),
-            name: None,
-        })
+            name: None, picture: None,
+        }.with_name(claims.name.as_deref()).with_picture(claims.picture.as_deref()))
     }
 }
 
@@ -119,13 +123,25 @@ mod tests {
         google.keys.preload(set).await;
         let nonce = crate::jwt::opaque();
         let now = crate::jwt::now();
-        let claims = serde_json::json!({"sub":"12345678901234567890","iss":"https://accounts.google.com","aud":google.client_id(),"exp":now+3600,"iat":now,"nonce":nonce,"email":"synthetic@example.test","email_verified":true});
+        let claims = serde_json::json!({"sub":"12345678901234567890","iss":"https://accounts.google.com","aud":google.client_id(),"exp":now+3600,"iat":now,"nonce":nonce,"email":"synthetic@example.test","email_verified":true,"name":"Synthetic Person","picture":"https://images.example.test/profile.png"});
         let mut header = Header::new(Algorithm::RS256);
         header.kid = Some("synthetic-key".into());
         let token = encode(&header, &claims, &encoding).unwrap();
         let identity = google.verify(&token, &nonce).await.unwrap().unwrap();
         assert_eq!(identity.subject, "12345678901234567890");
         assert_eq!(identity.email.as_deref(), Some("synthetic@example.test"));
+        assert_eq!(identity.name.as_deref(), Some("Synthetic Person"));
+        assert_eq!(identity.picture.as_deref(), Some("https://images.example.test/profile.png"));
+        for hint in [serde_json::json!(123), serde_json::json!(true), serde_json::json!({"unexpected":"value"}), serde_json::json!(["value"])] {
+            let mut decorated = claims.clone();
+            decorated["name"] = hint.clone();
+            decorated["picture"] = hint;
+            let accepted = google.verify(&encode(&header, &decorated, &encoding).unwrap(), &nonce).await.unwrap().expect("optional display claim types do not reject identity");
+            assert!(accepted.name.is_none() && accepted.picture.is_none());
+            assert_eq!(accepted.subject, identity.subject);
+            assert_eq!(accepted.email, identity.email);
+        }
+
         let mut tampered = token.clone();
         let at = tampered.rfind('.').unwrap() + 1;
         let replacement = if tampered.as_bytes()[at] == b'A' {

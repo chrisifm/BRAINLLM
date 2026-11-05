@@ -335,7 +335,7 @@ pub fn build(root: &Path) -> Json {
                 }
             })
             .collect();
-        let has_load = src.contains("function load");
+        let has_load = c.script.iter().any(|s| brain_check::exports_fn(s, "load"));
         let server_fns: Vec<Json> = c
             .script
             .iter()

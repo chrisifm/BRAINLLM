@@ -1,0 +1,18 @@
+{
+  "id": "node-own-extension-serving",
+  "kind": "fix",
+  "title": "Node serving parity for own output extensions",
+  "why": "Node serves Brain document aliases as secured HTML and its script and style extensions with executable MIME types; encoded error aliases preserve their status.",
+  "changelog": [
+    "Node serves `.brain`, `.jsbrain` and `.cssbrain` with document securit"
+  ],
+  "guide": "brain guide static",
+  "codes": [],
+  "apis": [
+    "brain build",
+    "brain start"
+  ],
+  "affects": [
+    "dist/**"
+  ]
+}

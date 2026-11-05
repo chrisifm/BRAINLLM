@@ -8,6 +8,56 @@ use brain_mcp::Json;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+/// Validate the selected source import graph before reusing a dev server or opening a browser.
+/// Watcher dependency lists include discovery inventories and unrelated provider readers, so do not crawl them.
+pub fn preflight(root: &Path, files: &[PathBuf]) -> Result<(), String> {
+    use brain_parse::ast::Stmt;
+    use brain_check::discover::Resolution;
+    use std::collections::{BTreeSet, VecDeque};
+    use std::io::Read;
+    let root = root.canonicalize().map_err(|error| format!("test preflight: {error}"))?;
+    let mut queue: VecDeque<PathBuf> = files.iter().cloned().collect();
+    let mut seen = BTreeSet::new();
+    let mut bytes = 0usize;
+    while let Some(path) = queue.pop_front() {
+        let path = path.canonicalize().map_err(|error| format!("test preflight could not read {}: {error}", path.display()))?;
+        if !path.starts_with(&root) { return Err("test preflight: an imported source is outside the app; fix: keep test imports inside the project".into()); }
+        if !seen.insert(path.clone()) { continue; }
+        if seen.len() > 4096 { return Err("test preflight: source graph exceeds 4096 files; fix: select a smaller test folder".into()); }
+        let rel = path.strip_prefix(&root).unwrap();
+        let mut source = String::new();
+        if !std::fs::metadata(&path).is_ok_and(|meta| meta.is_file()) { return Err(format!("test preflight: {} is not a regular source file", rel.display())); }
+        let file = std::fs::File::open(&path).map_err(|error| format!("test preflight: {}: {error}", rel.display()))?;
+        if !file.metadata().is_ok_and(|meta| meta.is_file()) { return Err(format!("test preflight: {} is not a regular source file", rel.display())); }
+        file.take(16 * 1024 * 1024 + 1).read_to_string(&mut source).map_err(|error| format!("test preflight: {}: {error}", rel.display()))?;
+        bytes = bytes.saturating_add(source.len());
+        if source.len() > 16 * 1024 * 1024 || bytes > 128 * 1024 * 1024 { return Err("test preflight: source size limit exceeded; fix: select a smaller test graph".into()); }
+        if rel.extension().is_some_and(|ext| ext == "cssbrain") {
+            let (diags, _) = crate::compiler::check(&source, rel, &path);
+            let errors: Vec<_> = diags.into_iter().filter(|diag| !diag.is_warning()).collect();
+            if !errors.is_empty() { return Err(format!("test preflight failed: {}", crate::compiler::Diag::list_to_json(&errors))); }
+            continue;
+        }
+        // Test scripts are served directly with browser-provided test globals; application modules use dev codegen.
+        if !rel.to_string_lossy().ends_with(".test.brain") {
+            crate::compiler::compile(&source, rel, &root, true).map_err(|diags| format!("test preflight failed on current source; fix these diagnostics before running browser assertions: {}", crate::compiler::Diag::list_to_json(&diags)))?;
+        }
+        let component = brain_parse::parse(&source, rel).map_err(|diags| crate::compiler::Diag::list_to_json(&diags))?;
+        let dir = path.parent().unwrap();
+        for statement in &component.script {
+            if let Stmt::Import(import) = statement
+                && (import.source.starts_with("./") || import.source.starts_with("../"))
+                && matches!(Path::new(&import.source).extension().and_then(|ext| ext.to_str()), Some("brain" | "jsbrain" | "cssbrain"))
+            { queue.push_back(dir.join(&import.source)); }
+        }
+        let (context, _) = brain_check::load_ctx(&path, &component);
+        for resolution in context.auto_components.resolutions.values() {
+            if let Resolution::Unique { source } = resolution { queue.push_back(dir.join(source)); }
+        }
+    }
+    Ok(())
+}
+
 pub struct TestResult {
     pub name: String,
     pub ok: bool,
@@ -538,6 +588,42 @@ fn load_average() -> Option<f64> {
     None
 }
 
+fn test_navigation(error: &str) -> bool {
+    error.contains("context destroyed by navigation") || error.contains("context was destroyed") || error.contains("navigated or closed")
+}
+
+/// Close only a tab attached by this owned headless Chrome, including failed recovery tabs.
+fn close_test_page(chrome: &mut Chrome, session: &str) {
+    if let Ok(info) = chrome.call(Some(session), "Target.getTargetInfo", Json::Obj(vec![]))
+        && let Some(target) = info.get("targetInfo").and_then(|info|info.get("targetId")).cloned()
+    { let _ = chrome.call(None,"Target.closeTarget",Json::obj([("targetId",target)])); }
+}
+
+fn open_test_page(chrome: &mut Chrome, base: &str, file: &str) -> Result<(String, Json), String> {
+    let session=chrome.new_page()?;
+    let loaded=(|| {
+        for domain in ["Runtime.enable","Page.enable","Accessibility.enable"] { chrome.call(Some(&session),domain,Json::Obj(vec![]))?; }
+        chrome.call(Some(&session),"Page.navigate",Json::obj([("url",Json::str(format!("{base}/@brain/test.html")))]))?;
+        let mut ready=false;
+        for _ in 0..200 {
+            match chrome.eval(&session,"typeof window.__brainLoad === 'function'") {
+                Ok(Json::Bool(true)) => { ready=true; break; }
+                Err(error) if !test_navigation(&error) => return Err(error),
+                _ => {}
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if !ready { return Ok(Json::obj([("error",Json::str("the test page did not load /@brain/test-api.js"))])); }
+        chrome.eval(&session,&format!("window.__brainLoad({})",Json::str(format!("/{file}")).stringify()))
+    })();
+    match loaded { Ok(loaded)=>Ok((session,loaded)),Err(error)=>{close_test_page(chrome,&session);Err(error)} }
+}
+
+fn instrument_test_page(chrome: &mut Chrome, session: &str, heap: bool) {
+    if heap { let _=chrome.eval(session,"import('/@brain/brain-inspect.js').then(m => (m.inspect({ noPanel: true }).holdVerdict(true), true), () => false)"); }
+    let _=chrome.eval(session,"import('/@brain/brain-err.js').then(m => (m.capture({ log: false }), true), () => false)");
+}
+
 fn run_headless_once(
     base: &str,
     root: &Path,
@@ -546,32 +632,12 @@ fn run_headless_once(
 ) -> Result<Vec<FileReport>, String> {
     let mut chrome = Chrome::launch(timeout).map_err(|e| e.to_string())?;
     let mut reports = Vec::new();
-    for f in files {
+    'files: for f in files {
         let rel = f
             .strip_prefix(root)
             .unwrap_or(f)
             .to_string_lossy()
             .replace('\\', "/");
-        let session = chrome.new_page()?;
-        for d in ["Runtime.enable", "Page.enable", "Accessibility.enable"] {
-            chrome.call(Some(&session), d, Json::Obj(vec![]))?;
-        }
-        chrome.call(
-            Some(&session),
-            "Page.navigate",
-            Json::obj([("url", Json::str(format!("{base}/@brain/test.html")))]),
-        )?;
-        // Waits until the API module has defined __brainLoad.
-        let mut ready = false;
-        for _ in 0..200 {
-            if chrome.eval(&session, "typeof window.__brainLoad === 'function'")?
-                == Json::Bool(true)
-            {
-                ready = true;
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
         let mut rep = FileReport {
             file: rel.clone(),
             load_error: None,
@@ -589,36 +655,48 @@ fn run_headless_once(
             },
             lanes: Vec::new(),
         };
-        if !ready {
-            rep.load_error = Some("the test page did not load /@brain/test-api.js".into());
-            reports.push(rep);
-            continue;
-        }
-        let loaded = chrome.eval(
-            &session,
-            &format!(
-                "window.__brainLoad({})",
-                Json::str(format!("/{rel}")).stringify()
-            ),
-        )?;
+        let (mut session,loaded)=match open_test_page(&mut chrome,base,&rel) {
+            Ok(page)=>page,
+            Err(error) if test_navigation(&error)=>{rep.load_error=Some(format!("{rel}: the test module navigated while loading; fix: keep test-document navigation out of module initialization"));reports.push(rep);continue;},
+            Err(error)=>return Err(error),
+        };
         if let Some(e) = loaded.get("error").and_then(Json::as_str) {
             rep.load_error = Some(e.to_string());
+            close_test_page(&mut chrome,&session);
             reports.push(rep);
             continue;
         }
         let heap = HEAP.load(std::sync::atomic::Ordering::SeqCst);
-        if heap {
-            // the inspector watches every unmounted instance (FinalizationRegistry) and fx timers/listeners
-            let _ = chrome.eval(&session, "import('/@brain/brain-inspect.js').then(m => (m.inspect({ noPanel: true }).holdVerdict(true), true), () => false)");
-        }
-        // capture runtime errors (without console noise) while this file's tests run
-        let _ = chrome.eval(&session, "import('/@brain/brain-err.js').then(m => (m.capture({ log: false }), true), () => false)");
+        instrument_test_page(&mut chrome,&session,heap);
         let count = match loaded.get("names") {
             Some(Json::Arr(a)) => a.len(),
             _ => 0,
         };
         for i in 0..count {
-            let r = chrome.eval(&session, &format!("window.__brainStep({i})"))?;
+            let began=Instant::now();
+            let r=match chrome.eval(&session,&format!("window.__brainStep({i})")) {
+                Ok(result)=>result,
+                Err(error) if test_navigation(&error)=>{
+                    let name=match loaded.get("names") {Some(Json::Arr(names))=>names.get(i).and_then(Json::as_str).unwrap_or("?"),_=>"?"};
+                    rep.tests.push(TestResult {name:name.into(),ok:false,ms:began.elapsed().as_secs_f64()*1000.0,error:Some(format!("{rel}: test `{name}` lost its document during navigation; fix: do not reload or leave /@brain/test.html from mounted hooks or component actions; stub navigation in a component test and verify real navigation on an actual app page. The interrupted test could not complete its post-assertion audits."))});
+                    close_test_page(&mut chrome,&session);
+                    if i+1==count { reports.push(rep); continue 'files; }
+                    match open_test_page(&mut chrome,base,&rel) {
+                        Ok((next,reloaded))=>{
+                            session=next;
+                            if reloaded.get("error").is_some() || reloaded.get("names")!=loaded.get("names") {
+                                rep.load_error=Some(format!("{rel}: could not restore the same test list after navigation; remaining tests were not run"));
+                                close_test_page(&mut chrome,&session);reports.push(rep);continue 'files;
+                            }
+                            instrument_test_page(&mut chrome,&session,heap);
+                        }
+                        Err(error) if test_navigation(&error)=>{rep.load_error=Some(format!("{rel}: the test module navigated again during recovery; remaining tests were not run; fix: remove navigation from module initialization"));reports.push(rep);continue 'files;},
+                        Err(error)=>return Err(format!("{error}; while restoring {rel} after a test-document navigation")),
+                    }
+                    continue;
+                }
+                Err(error)=>return Err(error),
+            };
             let name = r
                 .get("name")
                 .and_then(Json::as_str)
@@ -700,6 +778,7 @@ fn run_headless_once(
                 rep.leaks = ls;
             }
         }
+        close_test_page(&mut chrome,&session);
         reports.push(rep);
     }
     Ok(reports)
@@ -708,6 +787,24 @@ fn run_headless_once(
 #[cfg(test)]
 mod transport_tests {
     use super::*;
+
+    #[test]
+    fn closing_a_test_session_preserves_other_owned_browser_tabs() {
+        fn targets(chrome: &mut Chrome) -> std::collections::BTreeSet<String> {
+            let result=chrome.call(None,"Target.getTargets",Json::Obj(vec![])).unwrap();
+            let Some(Json::Arr(rows))=result.get("targetInfos") else { panic!("Target.getTargets returned no inventory") };
+            rows.iter().filter(|row|row.get("type").and_then(Json::as_str)==Some("page"))
+                .filter_map(|row|row.get("targetId").and_then(Json::as_str).map(str::to_string)).collect()
+        }
+        let mut chrome=Chrome::launch(Duration::from_secs(20)).unwrap();
+        let other=chrome.new_page().unwrap();
+        let before=targets(&mut chrome);
+        let test=chrome.new_page().unwrap();
+        assert_eq!(targets(&mut chrome).len(),before.len()+1);
+        close_test_page(&mut chrome,&test);
+        assert_eq!(targets(&mut chrome),before,"closing a finished test cannot close another tab");
+        assert_eq!(chrome.eval(&other,"1 + 1").unwrap(),Json::Num(2.0));
+    }
 
     #[test]
     fn a_broken_browser_pipe_is_retried_once_then_blamed_on_load() {
@@ -729,6 +826,44 @@ mod transport_tests {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn preflight_rechecks_current_transitive_sources_without_unrelated_components() {
+        let root = std::env::temp_dir().join(format!("brain-test-preflight-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("comp")).unwrap();
+        std::fs::write(root.join("tokens.cssbrain"), ":root{--space-2:8px}").unwrap();
+        std::fs::write(root.join("brain.json"), "{}").unwrap();
+        let test = root.join("comp/parent.test.brain");
+        std::fs::write(&test, "<script>import Parent from './parent.brain'\ntest('renders', async () => { await mount(Parent) })</script>").unwrap();
+        std::fs::write(root.join("comp/parent.brain"), "<script>import Child from './child.brain'</script><Child />").unwrap();
+        let child = root.join("comp/child.brain");
+        std::fs::write(&child, "<button>Continue</button>").unwrap();
+        std::fs::write(root.join("comp/unrelated.brain"), "<button></button>").unwrap();
+        let selected = [test];
+        super::preflight(&root, &selected).unwrap();
+        // A successful previous compile must not make the now-invalid child look testable.
+        std::fs::write(&child, "<button></button>").unwrap();
+        let error = super::preflight(&root, &selected).unwrap_err();
+        assert!(error.contains("B0406") && error.contains("comp/child.brain"), "{error}");
+        std::fs::write(&child, "<button>Continue</button>").unwrap();
+        super::preflight(&root, &selected).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn preflight_checks_automatically_discovered_components() {
+        let root = std::env::temp_dir().join(format!("brain-test-preflight-auto-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("comp")).unwrap();
+        std::fs::write(root.join("tokens.cssbrain"), ":root{--space-2:8px}").unwrap();
+        std::fs::write(root.join("brain.json"), "{}").unwrap();
+        let test = root.join("comp/parent.test.brain");
+        std::fs::write(&test, "<script>import Parent from './parent.brain'\ntest('renders', async () => { await mount(Parent) })</script>").unwrap();
+        std::fs::write(root.join("comp/parent.brain"), "<Child />").unwrap();
+        std::fs::write(root.join("comp/child.brain"), "<button></button>").unwrap();
+        let error = super::preflight(&root, &[test]).unwrap_err();
+        assert!(error.contains("B0406") && error.contains("comp/child.brain"), "{error}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn viewer_lane_is_opt_in_only() {
         let none: Vec<String> = vec![];

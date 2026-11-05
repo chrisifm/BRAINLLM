@@ -1,6 +1,6 @@
 //! Page checks that report and never score (INTERNALS §33): each one states what Google documents, not a folk rule.
 
-use crate::audit::{Finding, Level, internal, norm, url_path};
+use crate::audit::{Finding, Level, anchor_internal, internal, norm, url_path};
 use crate::focus::{fold, tokens};
 use crate::html::Doc;
 use crate::jsonld::{ARTICLES, typed_nodes, types};
@@ -72,7 +72,7 @@ fn generic_anchors(cfg: &Config, route: &str, doc: &Doc) -> Option<Finding> {
     let mut seen: BTreeSet<String> = BTreeSet::new();
     for a in doc.anchors.iter().filter(|a| a.in_content) {
         let text = a.text.trim();
-        if internal(cfg, route, &a.href).is_some() && GENERIC.contains(&tokens(text).join(" ").as_str()) {
+        if anchor_internal(cfg, route, a).is_some() && GENERIC.contains(&tokens(text).join(" ").as_str()) {
             seen.insert(fold(text));
         }
     }
@@ -141,7 +141,7 @@ fn url_form(cfg: &Config, route: &str, doc: &Doc) -> Vec<Finding> {
         let lower = u.to_ascii_lowercase();
         lower.contains(";jsessionid=") || lower.split_once('?').is_some_and(|(_, q)| q.split('&').any(|kv| SESSION_PARAMS.contains(&kv.split('=').next().unwrap_or(""))))
     };
-    let linked = doc.anchors.iter().find(|a| internal(cfg, route, &a.href).is_some() && session(&a.href));
+    let linked = doc.anchors.iter().find(|a| anchor_internal(cfg, route, a).is_some() && session(&a.href));
     if session(route) || linked.is_some() {
         out.push(note("B1877", Level::Info, format!("`{}` carries a session parameter", linked.map_or(route, |a| a.href.as_str())), "keep the session in a cookie: each session otherwise makes a new address to crawl"));
     }
@@ -158,7 +158,7 @@ fn listing_value(cfg: &Config, route: &str, doc: &Doc, body: bool) -> Option<Fin
         return None;
     }
     let me = norm(route);
-    let entries: BTreeSet<String> = doc.anchors.iter().filter(|a| a.in_content).filter_map(|a| internal(cfg, route, &a.href)).map(|(p, _)| p).filter(|p| *p != me).collect();
+    let entries: BTreeSet<String> = doc.anchors.iter().filter(|a| a.in_content).filter_map(|a| anchor_internal(cfg, route, a)).map(|(p, _)| p).filter(|p| *p != me).collect();
     (entries.len() <= 1).then(|| note("B1878", Level::Info, format!("this listing links to {} page(s)", entries.len()), "wait until the listing has several entries, or mark it robots=\"noindex\" until then"))
 }
 

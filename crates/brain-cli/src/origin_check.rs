@@ -85,6 +85,9 @@ pub fn check(app: &Path) -> Vec<Diag> {
     problems.extend(frame_problems);
     let (scripts, script_problems) = brain_pack::read_script_src(app);
     problems.extend(script_problems);
+    problems.extend(brain_pack::read_media_src(app).1);
+    problems.extend(brain_pack::read_worker_src(app).1);
+    problems.extend(brain_pack::read_form_action(app).1);
     let at = span_of(&source, "\"csp\"");
     for problem in problems {
         let (msg, fix) = problem.split_once("; fix: ").unwrap_or((problem.as_str(), "list exact origins"));
@@ -111,6 +114,17 @@ pub fn check(app: &Path) -> Vec<Diag> {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn media_and_worker_sources_report_b0796_without_admitting_header_injection() {
+        let root = app(&[("brain.json", r#"{"csp":{"connectSrc":[],"mediaSrc":["blob:","https://media.example.com"],"workerSrc":["blob:"]}}"#)]);
+        assert!(!check(&root).iter().any(|d| d.code == "B0796"));
+        fs::write(root.join("brain.json"), r#"{"csp":{"connectSrc":[],"mediaSrc":["https:"],"workerSrc":["data:"]}}"#).unwrap();
+        let errors: Vec<_> = check(&root).into_iter().filter(|d| d.code == "B0796").collect();
+        assert_eq!(errors.len(), 2);
+        assert!(errors.iter().all(|d| d.level == Severity::Error));
+        fs::remove_dir_all(root).unwrap();
+    }
 
     fn app(files: &[(&str, &str)]) -> std::path::PathBuf {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

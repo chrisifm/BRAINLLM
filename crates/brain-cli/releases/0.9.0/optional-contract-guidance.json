@@ -1,0 +1,16 @@
+{
+  "id": "optional-contract-guidance",
+  "kind": "fix",
+  "title": "Explicit optional contract migration workflow",
+  "why": "Deployment guidance explains that even safe optional-field changes require explicit recorded-contract approval, with a read-only preview and per-resource --only application. It names unsupported migrate flags rather than implying they exist.",
+  "changelog": [
+    "Backend deployment guidance explains optional-field contract approval"
+  ],
+  "guide": "brain guide server",
+  "codes": [
+    "B0787"
+  ],
+  "apis": [
+    "brain backend approve-contract"
+  ]
+}

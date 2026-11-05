@@ -1,0 +1,12 @@
+{
+  "id": "captcha-test-environment",
+  "kind": "change",
+  "title": "Production captcha test-key diagnostics",
+  "why": "Public test fixtures must remain usable locally without silently reaching a production configuration that refuses startup.",
+  "changelog": ["Captcha diagnostics detect public test secrets"],
+  "guide": "brain guide backend",
+  "codes": ["B0790"],
+  "apis": ["brain doctor", "server/auth/captcha.jsbrain"],
+  "steps": ["Keep public test keys in development/testing and configure the real provider-issued secret for production. Omit hostname pinning for dummy keys rather than assuming a sample response hostname."],
+  "finds": [{"glob": "server/auth/captcha.jsbrain"}]
+}

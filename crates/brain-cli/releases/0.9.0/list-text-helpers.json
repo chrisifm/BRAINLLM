@@ -1,0 +1,39 @@
+{
+  "id": "list-text-helpers",
+  "kind": "capability",
+  "title": "Bounded native integer ranges and text matching",
+  "why": "Common iteration, Unicode folding and typo matching no longer need app-owned helper implementations.",
+  "changelog": [
+    "Bounded native `range(from,to)` and `text.fold/distance/fuzzy`"
+  ],
+  "guide": "docs/NATIVE-LIBRARIES.md",
+  "codes": [],
+  "apis": [
+    "range",
+    "text.fold",
+    "text.distance",
+    "text.fuzzy"
+  ],
+  "adopt": {
+    "file": "lib/matching.jsbrain",
+    "snippet": "export const indices = range(0, 3)\nexport const matches = text.fuzzy('compiler', ['compiler', 'compielr'])\n"
+  },
+  "uses": [
+    {
+      "glob": "**/*.brain",
+      "contains": "range("
+    },
+    {
+      "glob": "**/*.jsbrain",
+      "contains": "range("
+    },
+    {
+      "glob": "**/*.brain",
+      "contains": "text."
+    },
+    {
+      "glob": "**/*.jsbrain",
+      "contains": "text."
+    }
+  ]
+}

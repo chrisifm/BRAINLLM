@@ -1,0 +1,15 @@
+{
+  "id": "rpc-authorization-guidance",
+  "kind": "fix",
+  "title": "Explicit server function authorization boundary",
+  "why": "SPEC and the embedded server guide state that RPC endpoints do not inherit page guards or middleware. Same-origin transport is not authentication; each protected function checks ctx.user and resource policies. Runtime compatibility is preserved.",
+  "changelog": [
+    "Server function documentation explicitly states that page guards"
+  ],
+  "guide": "brain guide server",
+  "codes": [],
+  "apis": [
+    "server:",
+    "ctx.user"
+  ]
+}

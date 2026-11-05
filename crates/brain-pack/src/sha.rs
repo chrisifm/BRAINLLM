@@ -108,48 +108,73 @@ fn pad(data: &[u8], block: usize, len_bytes: usize) -> Vec<u8> {
 }
 
 pub fn sha256(data: &[u8]) -> [u8; 32] {
+    sha256_reader(std::io::Cursor::new(data)).expect("reading an in-memory byte slice")
+}
+
+/// SHA-256 with bounded working memory. Wrap file readers in BufReader to amortize block reads.
+pub fn sha256_reader(mut reader: impl std::io::Read) -> std::io::Result<[u8; 32]> {
     let mut h: [u32; 8] = [
         0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
         0x5be0cd19,
     ];
-    for c in pad(data, 64, 8).chunks(64) {
-        let mut w = [0u32; 64];
-        for i in 0..16 {
-            w[i] = u32::from_be_bytes([c[4 * i], c[4 * i + 1], c[4 * i + 2], c[4 * i + 3]]);
-        }
-        for i in 16..64 {
-            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
-            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
-            w[i] = w[i - 16]
-                .wrapping_add(s0)
-                .wrapping_add(w[i - 7])
-                .wrapping_add(s1);
-        }
-        let [mut a, mut b, mut c2, mut d, mut e, mut f, mut g, mut hh] = h;
-        for i in 0..64 {
-            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-            let ch = (e & f) ^ (!e & g);
-            let t1 = hh
-                .wrapping_add(s1)
-                .wrapping_add(ch)
-                .wrapping_add(K256[i])
-                .wrapping_add(w[i]);
-            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-            let maj = (a & b) ^ (a & c2) ^ (b & c2);
-            let t2 = s0.wrapping_add(maj);
-            (hh, g, f, e, d, c2, b, a) =
-                (g, f, e, d.wrapping_add(t1), c2, b, a, t1.wrapping_add(t2));
-        }
-        for (x, y) in h.iter_mut().zip([a, b, c2, d, e, f, g, hh]) {
-            *x = x.wrapping_add(y);
-        }
+    let mut block = [0u8; 64];
+    let mut used = 0;
+    let mut length = 0u64;
+    loop {
+        let n = match reader.read(&mut block[used..]) {
+            Ok(n) => n,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        };
+        if n == 0 { break; }
+        used += n;
+        length = length.wrapping_add(n as u64);
+        if used == 64 { sha256_block(&mut h, &block); used = 0; }
     }
+    let mut tail = pad(&block[..used], 64, 8);
+    let end = tail.len();
+    tail[end - 8..].copy_from_slice(&length.wrapping_mul(8).to_be_bytes());
+    for block in tail.chunks(64) { sha256_block(&mut h, block); }
     let mut out = [0u8; 32];
     for (i, v) in h.iter().enumerate() {
         out[4 * i..4 * i + 4].copy_from_slice(&v.to_be_bytes());
     }
-    out
+    Ok(out)
 }
+
+fn sha256_block(h: &mut [u32; 8], c: &[u8]) {
+    let mut w = [0u32; 64];
+    for i in 0..16 {
+        w[i] = u32::from_be_bytes([c[4 * i], c[4 * i + 1], c[4 * i + 2], c[4 * i + 3]]);
+    }
+    for i in 16..64 {
+        let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+        let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
+        w[i] = w[i - 16]
+            .wrapping_add(s0)
+            .wrapping_add(w[i - 7])
+            .wrapping_add(s1);
+    }
+    let [mut a, mut b, mut c2, mut d, mut e, mut f, mut g, mut hh] = *h;
+    for i in 0..64 {
+        let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+        let ch = (e & f) ^ (!e & g);
+        let t1 = hh
+            .wrapping_add(s1)
+            .wrapping_add(ch)
+            .wrapping_add(K256[i])
+            .wrapping_add(w[i]);
+        let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+        let maj = (a & b) ^ (a & c2) ^ (b & c2);
+        let t2 = s0.wrapping_add(maj);
+        (hh, g, f, e, d, c2, b, a) =
+            (g, f, e, d.wrapping_add(t1), c2, b, a, t1.wrapping_add(t2));
+    }
+    for (x, y) in h.iter_mut().zip([a, b, c2, d, e, f, g, hh]) {
+        *x = x.wrapping_add(y);
+    }
+}
+
 
 pub fn sha384(data: &[u8]) -> [u8; 48] {
     let mut h: [u64; 8] = [
@@ -243,6 +268,28 @@ mod tests {
 
     fn hex(b: &[u8]) -> String {
         b.iter().map(|x| format!("{x:02x}")).collect()
+    }
+
+    #[test]
+    fn sha256_streaming_handles_short_reads_interruptions_and_block_boundaries() {
+        struct Short { data: std::io::Cursor<Vec<u8>>, interrupted: bool }
+        impl std::io::Read for Short {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if !self.interrupted { self.interrupted = true; return Err(std::io::ErrorKind::Interrupted.into()); }
+                let len = buf.len().min(3);
+                std::io::Read::read(&mut self.data, &mut buf[..len])
+            }
+        }
+        for len in [0, 1, 55, 56, 63, 64, 65, 127, 128, 65537] {
+            let data: Vec<u8> = (0..len).map(|n| (n % 251) as u8).collect();
+            let digest = sha256_reader(Short { data: std::io::Cursor::new(data.clone()), interrupted: false }).unwrap();
+            assert_eq!(digest, sha256(&data), "{len}");
+        }
+        struct Broken;
+        impl std::io::Read for Broken {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> { Err(std::io::ErrorKind::PermissionDenied.into()) }
+        }
+        assert_eq!(sha256_reader(Broken).unwrap_err().kind(), std::io::ErrorKind::PermissionDenied);
     }
 
     #[test]

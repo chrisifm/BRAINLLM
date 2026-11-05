@@ -11,6 +11,30 @@ fn text(o: &Output) -> String {
 const WRITES: &str = "create: ['admin'], update: ['admin'], delete: ['admin']";
 
 #[test]
+fn ordinary_enums_do_not_imply_a_publication_state() {
+    let tmp = std::env::temp_dir().join(format!("brain-row-exposure-enums-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    assert!(brain(&tmp, &["new", "app"]).status.success());
+    let dir = tmp.join("app");
+    assert!(brain(&dir, &["add", "resource", "items", "--fields", "title:str!"]).status.success());
+    let resource = dir.join("server/resources/items");
+    std::fs::write(resource.join("policy.jsbrain"), format!("<meta server>\nexport default {{ read: ['public'], {WRITES} }}\n")).unwrap();
+    for required in ["", "!"] {
+        std::fs::write(resource.join("schema.jsbrain"), format!("<meta server>\nexport default {{ title: 'str!', category: 'enum(red|blue){required}' }}\n")).unwrap();
+        let output = brain(&dir, &["check", "--json"]);
+        let report = text(&output);
+        assert!(output.status.success(), "{report}");
+        assert!(!report.contains("B0749"), "a category is not a publication state: {report}");
+    }
+    // Optional state fields still warrant the warning: optionality does not establish safe public access.
+    std::fs::write(resource.join("schema.jsbrain"), "<meta server>\nexport default { title: 'str!', status: 'enum(draft|published)' }\n").unwrap();
+    let report = text(&brain(&dir, &["check", "--json"]));
+    assert!(report.contains("B0749"), "{report}");
+    std::fs::remove_dir_all(tmp).unwrap();
+}
+
+#[test]
 fn public_read_of_a_resource_with_state_warns_until_it_is_conditioned_or_declared() {
     let tmp = std::env::temp_dir().join(format!("brain-row-exposure-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);

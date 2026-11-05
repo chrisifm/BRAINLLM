@@ -57,7 +57,9 @@ fn budget_failure_reports_current_seo_but_never_reuses_stale_pages_after_source_
     assert!(!report["build"]["ledger"].as_array().unwrap().is_empty());
     assert!(!report["seo"]["pages"].as_array().unwrap().is_empty(), "fresh SEO must run despite budget failure: {output}");
     assert!(report["heap"]["skipped"].is_string(), "no test files is not a measured zero-leak result");
-    assert_ne!(fs::read_to_string(app.join("dist/index.html")).unwrap(), stale);
+    assert_eq!(report["build"]["outputScope"], "isolated-doctor-output");
+    assert_eq!(report["build"]["outputRetained"], false);
+    assert_eq!(fs::read_to_string(app.join("dist/index.html")).unwrap(), stale, "fresh candidate SEO must not replace deployment output");
     assert_eq!(fs::read_to_string(app.join("brain.json")).unwrap(), config, "doctor must never raise a budget");
     let (ok, output) = command(&app, &["build", "--json"]);
     assert!(!ok && output.contains("budget.viewKB exceeded"), "normal builds remain gated: {output}");

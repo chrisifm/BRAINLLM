@@ -1,0 +1,11 @@
+{
+  "id": "legacy-reference-retirement",
+  "kind": "fix",
+  "title": "Retire legacy reference mirrors under unchanged approved contracts",
+  "why": "Older releases could record a removed reference while leaving its generated column and foreign key; explicit migration now cleans those derived objects without editing stored JSON.",
+  "changelog": ["Explicit backend migration retires obsolete generated reference mirrors"],
+  "guide": "docs/INTERNALS.md",
+  "codes": [],
+  "apis": [],
+  "affects": ["server/resources/**"]
+}

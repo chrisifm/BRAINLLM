@@ -4,6 +4,11 @@ A policy grant `owner` means "the authenticated user created this row". A grant 
 the record this row references"; `owner.<ref>.<ref>` follows two references. Paths are limited to two hops and every
 hop must be a `ref:` field.
 
+`create: ['owner']` is invalid because the new row has no existing owner. Grant a declared role from
+`server/auth/roles.jsbrain`, or choose `owner.<ref>` when creation requires ownership of an existing referenced row.
+Validation names the schema's available reference grants; project-level diagnostics also list actual roles when an explicit roles file is valid.
+These are repair choices, never automatic permission changes.
+
 ## Contract
 
 ```js
@@ -72,8 +77,11 @@ of hidden rows away from roles that should not learn them by not granting them `
 
 ## Warning B0749 and intentional public rows
 
-`brain check` warns when `read: ['public']` has no condition on a resource with a state field (an `enum`, or a field
-such as `status`, `published` or `visibility`). Add a condition, or declare that every row is public on purpose:
+`brain check` warns when `read: ['public']` has no condition on a resource with a state-like field name:
+`status`, `state`, `published`, `draft`, `visibility` or `approved` (also with `is_`/`has_` prefixes or an `_at` suffix).
+An ordinary enum such as a category does not imply a publication state. Required and optional state fields both warn.
+The warning is a naming heuristic, not proof that other public resources are safe. Add a condition, or declare that
+every row is public on purpose:
 
 ```js
 export default { read: ['public'], expose_all_rows: true, create: ['admin'], update: ['admin'], delete: ['admin'] }

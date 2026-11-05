@@ -42,7 +42,7 @@ fn build(app: &App) -> brain_pack::Output {
             js: o.js,
             css: o.css,
             server_js: o.server_js,
-            server_fns: o.server_fns,
+            server: o.server, server_fns: o.server_fns,
         })
     };
     let input = brain_pack::Input {

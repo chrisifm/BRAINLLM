@@ -1,0 +1,14 @@
+{
+  "id": "static-gateway-rebuild",
+  "kind": "fix",
+  "title": "Refresh static output metadata after rebuilding",
+  "why": "A running static server must not answer a new HTML build with an old validator or old policy.",
+  "changelog": [
+    "Running static gateways refresh build validators"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "codes": [],
+  "apis": [
+    "brain start"
+  ]
+}

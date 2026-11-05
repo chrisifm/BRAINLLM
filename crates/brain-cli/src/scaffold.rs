@@ -13,6 +13,19 @@ pub fn new_app(dir: &Path) -> Result<Vec<PathBuf>, String> {
 
 /// Creates the app exactly in `dir` (which may exist but must be empty); `name` only names it (title, APP.md).
 pub fn new_app_named(dir: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    new_app_mode(dir, name, false)
+}
+
+pub fn new_static_app(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    new_static_app_named(dir, &name)
+}
+
+pub fn new_static_app_named(dir: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
+    new_app_mode(dir, name, true)
+}
+
+fn new_app_mode(dir: &Path, name: &str, static_export: bool) -> Result<Vec<PathBuf>, String> {
     let name = name.to_string();
     if !valid_ident(&name) {
         return Err(format!("invalid app name `{name}`; fix: use letters, digits and hyphens, starting with a letter"));
@@ -24,7 +37,7 @@ pub fn new_app_named(dir: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
     // Validate and merge registrations before writing app files; preserve other MCP servers.
     let registrations = crate::mcp_setup::registrations(dir)?;
     // a random dev-only session key (BRAIN_SECRET in [development]; production gets its own from the host)
-    let secret: String = {
+    let secret: String = if static_export { String::new() } else {
         let mut b = [0u8; 24];
         if let Ok(mut f) = fs::File::open("/dev/urandom") {
             use std::io::Read;
@@ -33,15 +46,20 @@ pub fn new_app_named(dir: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
         b.iter().map(|x| format!("{x:02x}")).collect()
     };
     let fill = |t: &str| t.replace("{{name}}", &name).replace("{{secret}}", &secret);
-    let text: Vec<(&str, String)> = vec![
+    let mut text: Vec<(&str, String)> = vec![
         ("app.brain", fill(include_str!("templates/new/app.brain"))),
         (TOKENS_FILE, TOKENS_CSS.into()),
-        (crate::design::FILE, format!("{}\n", serde_json::to_string_pretty(&crate::design::baseline(TOKENS_CSS, TOKENS_FILE, None)).map_err(|_| "could not create design baseline")?)),
+        (crate::design::FILE, {
+            let mut baseline=crate::design::baseline(TOKENS_CSS,TOKENS_FILE,None);
+            baseline["brandbook"]=crate::brandbook::defaults();
+            format!("{}\n",serde_json::to_string_pretty(&baseline).map_err(|_|"could not create design baseline")?)
+        }),
+        (crate::brandbook::VIEW, crate::brandbook::TEMPLATE.into()),
         // brainVersion: the version this source targets; `brain upgrade` reads it and `--apply` advances it
         ("brain.json", fill(include_str!("templates/new/brain.json")).replace("{{version}}", env!("CARGO_PKG_VERSION"))),
         (".brain_env", fill(include_str!("templates/new/brain_env"))),
         (".brain_env.example", include_str!("templates/new/brain_env.example").into()),
-        (".gitignore", "dist/\n.brain/\n.brain_env\nnode_modules/\n.DS_Store\n".into()),
+        (".gitignore", "dist/\n.brain/\n.brain_env\nnode_modules/\n.DS_Store\n# Reproducible app documentation; keep authored notes as source.\ndocs/app/*\n!docs/app/notes/\n".into()),
         // the brain version this app was made with, pinned exactly: a global `brain` delegates to it (INTERNALS §23)
         ("package.json", PACKAGE_JSON.replace("{{name}}", &name.to_ascii_lowercase()).replace("{{version}}", env!("CARGO_PKG_VERSION"))),
         ("APP.md", APP_MD.replace("{{name}}", &name)),
@@ -69,8 +87,29 @@ pub fn new_app_named(dir: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
         ("ui/badge.brain", BADGE.into()),
         ("public/favicon.svg", crate::icons::FAVICON_SVG.into()),
     ];
+    if static_export {
+        // Select source templates in memory; never create then delete a server-enabled app on disk.
+        text.retain(|(path, _)| !matches!(*path, "views/_offline.brain" | "views/_loading.brain" | "views/_error.brain" | "views/403.brain" | "views/posts/index.brain" | "views/posts/[id].brain" | "views/account/_guard.jsbrain" | "views/account/index.brain" | "views/login.brain" | "views/login.test.brain" | "lib/posts.jsbrain" | "channels/session.jsbrain" | "server/auth.jsbrain"));
+        for (path, body) in &mut text {
+            *body = match *path {
+                "brain.json" => {
+                    let mut config: serde_json::Value = serde_json::from_str(body).map_err(|_| "invalid static scaffold configuration")?;
+                    config["output"] = serde_json::json!("static");
+                    config["cache"]["sw"] = serde_json::json!(false);
+                    config["cache"]["offline"] = serde_json::json!(false);
+                    format!("{}\n", serde_json::to_string_pretty(&config).map_err(|_| "cannot serialize static configuration")?)
+                }
+                ".brain_env" | ".brain_env.example" => "# Public build-time configuration. No server secret is needed.\nPUBLIC_SITE_URL=https://example.com\n".into(),
+                "views/home.brain" => fill(include_str!("templates/static/home.brain")),
+                "views/_layout.brain" => fill(include_str!("templates/static/layout.brain")),
+                "APP.md" => format!("# {name}\n\nA portable static site built with BRAINLLM. Read `brain guide static`.\n\n1. Replace the page copy and public site URL.\n2. Run `brain check`, `brain test`, then `brain build --static --site https://example.com`.\n3. Preview dist/ with a generic HTTP file server; check nested URLs and navigation.\n4. Upload only the contents of dist/ to a static host.\n"),
+                "AGENTS.md" => format!("# Static BRAINLLM site\n\nRead `brain spec` and `brain guide static` before editing. Keep brain.json output set to static.\nUse views/ for routes, comp/ and ui/ for components, content/ for build-time collections, public/ for assets.\nUse plain links and browser state. Dynamic routes must export paths(); load() may run for those build-time pages.\nNever add guards, middleware, server: functions, native backend contracts or live sitemap().\nRun brain check, brain test and brain build --static. Preview the exported dist/ through generic HTTP hosting.\nDeploy dist/ only. Never upload source, .brain_env, node_modules or .brain.\n{}", crate::capabilities::summary()),
+                _ => continue,
+            };
+        }
+    }
     // folders without code yet hold only a README: what goes there and the command that creates it (§29)
-    let readmes = FOLDERS.iter().map(|(d, body)| (format!("{d}/README.md"), body.to_string()));
+    let readmes = FOLDERS.iter().filter(|(dir, _)| !static_export || *dir != "server").map(|(d, body)| (format!("{d}/README.md"), body.to_string()));
     let mut written = Vec::new();
     for (rel, body) in text.into_iter().map(|(a, b)| (a.to_string(), b)).chain(readmes).chain(registrations).chain(crate::design::new_basics().into_iter().map(|(path,source)|(path.to_string(),source))) {
         let p = dir.join(&rel);
@@ -84,6 +123,7 @@ pub fn new_app_named(dir: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
         fs::write(&p, bytes).map_err(|e| e.to_string())?;
         written.push(p);
     }
+    link_in_nav(dir,"/brandbook","Brandbook");
     Ok(written)
 }
 
@@ -151,13 +191,14 @@ fn add_kind_names() -> String {
 }
 
 pub fn add_usage() -> String {
-    format!("usage: brain add <kind> <name> [--props \"...\"]; kinds: {}; `roles` and `auth` take no name", add_kind_names())
+    format!("usage: brain add <kind> <name> [--props \"...\"] [--blank (comp only)]; kinds: {}; `roles` and `auth` take no name", add_kind_names())
 }
 
 /// Options shared by the CLI and MCP generators. Flags outside their kind are rejected.
 #[derive(Default)]
 pub struct AddOptions {
     pub props: String,
+    pub blank: bool,
     pub store: Option<String>,
     pub bus: bool,
     pub key: bool,
@@ -168,10 +209,11 @@ pub struct AddOptions {
 
 pub fn add_with_options(root: &Path, kind: &str, name: &str, o: &AddOptions) -> Result<PathBuf, String> {
     if (o.store.is_some() || o.bus || o.key) && kind != "channel"
+        || o.blank && kind != "comp"
         || (o.get.is_some() || o.post.is_some()) && kind != "api"
         || o.fields.is_some() && kind != "type"
         || !o.props.is_empty() && !matches!(kind, "view" | "comp" | "ui" | "micro")
-    { return Err("options do not match the file kind; fix: use channel store/bus/key, api get/post, type fields or component props".into()); }
+    { return Err("options do not match the file kind; fix: use channel store/bus/key, api get/post, type fields, component props or comp blank".into()); }
     let Some(route) = add_route(kind) else { return Err(format!("unknown kind `{kind}`; fix: use {}", add_kind_names())) };
     if matches!(route, AddRoute::Backend | AddRoute::NoName) {
         return Err(format!("kind `{kind}` is created by the `brain add` command; fix: run `brain add {kind}{}`", if route == AddRoute::NoName { "" } else { " <name> --fields \"...\"" }));
@@ -186,7 +228,8 @@ pub fn add_with_options(root: &Path, kind: &str, name: &str, o: &AddOptions) -> 
         return Ok(path);
     }
     if route == AddRoute::Template {
-        return add(root, kind, name, &o.props);
+        return if o.blank { add_template(root, kind, name, &o.props, true) }
+            else { add(root, kind, name, &o.props) };
     }
     let _writer = crate::edit::writer_lock(root)?;
     if !valid_ident(name) { return Err("invalid name; fix: letters, digits, underscores or hyphens, starting with a letter".into()); }
@@ -314,6 +357,10 @@ fn append_type(root: &Path, path: &Path, name: &str, body: &str) -> Result<PathB
 }
 
 pub fn add(root: &Path, kind: &str, name: &str, props: &str) -> Result<PathBuf, String> {
+    add_template(root, kind, name, props, false)
+}
+
+fn add_template(root: &Path, kind: &str, name: &str, props: &str, blank: bool) -> Result<PathBuf, String> {
     let _writer = crate::edit::writer_lock(root)?;
     match kind {
         "test" => return add_test(root, name),
@@ -352,11 +399,13 @@ pub fn add(root: &Path, kind: &str, name: &str, props: &str) -> Result<PathBuf, 
     let uses = if names.is_empty() { String::new() } else { format!("  <p>{}</p>\n", names.iter().map(|n| format!("{{{n}}}")).collect::<Vec<_>>().join(" · ")) };
     let route = crate::map::route_of(&rel);
     let body = match kind {
+        "view" if stem == "brandbook" && props.is_empty() => crate::brandbook::TEMPLATE.into(),
         "view" => {
             // a guard keeps the page out of search (B0505): no query or canonical to declare
             let guarded = Path::new(&rel).ancestors().skip(1).any(|d| root.join(d).join("_guard.jsbrain").is_file());
             view_body(&meta, &uses, &class, &comp, route.as_deref(), &stem, guarded)
         }
+        "comp" if blank => format!("{meta}<div class=\"{class}\">\n{uses}  <slot />\n</div>\n"),
         "comp" => format!(
             "{meta}<script>\n  let open = sig(false)\n  let query = sig('')\n</script>\n\n<section class=\"{class}\">\n  <button type=\"button\" on:click={{open = !open}}>{comp}</button>\n  <label>Search <input bind:value={{query}} placeholder=\"Type to filter\"></label>\n{uses}  {{#if open}}<slot />{{/if}}\n</section>\n\n<style>\n  .{class} {{ display: grid; gap: var(--space-2); }}\n</style>\n"
         ),
@@ -741,8 +790,21 @@ fn write_test(root: &Path, comp: &Path) -> Result<PathBuf, String> {
         return Err(format!("`{}` already exists; fix: edit it", path.display()));
     }
     let comp_name = brain_parse::component_name(&comp.strip_prefix(root).unwrap_or(comp).to_path_buf());
+    let source = fs::read_to_string(comp).map_err(|_| "cannot generate a test without its component; fix: create the component first")?;
+    let parsed = brain_parse::parse(&source, comp.strip_prefix(root).unwrap_or(comp)).map_err(|_| "cannot read the component props; fix: correct its syntax before generating a test")?;
+    use brain_parse::ast::PropType;
+    let required: Vec<String> = parsed.props.iter().filter(|prop| !prop.optional && prop.default.is_none()).map(|prop| {
+        let sample = match prop.ty {
+            PropType::Str | PropType::Any => "'Example'",
+            PropType::Num => "0", PropType::Bool => "false", PropType::List => "[]",
+            PropType::Obj => "{}", PropType::Fn => "() => {}",
+        };
+        format!("{}: {sample}", prop.name)
+    }).collect();
+    let props = if required.is_empty() { "{}".into() } else { format!("{{ {} }}", required.join(", ")) };
+    let note = if required.is_empty() { "" } else { "    // Replace type samples with representative data for nested object/list contracts.\n" };
     let body = format!(
-        "<script>\n  import {comp_name} from './{file}'\n\n  test('renders', async () => {{\n    await mount({comp_name}, {{}})\n    expect(count('*') > 0).toBeTruthy()\n  }})\n</script>\n"
+        "<script>\n  import {comp_name} from './{file}'\n\n  test('renders', async () => {{\n{note}    await mount({comp_name}, {props})\n    expect(count('*') > 0).toBeTruthy()\n  }})\n</script>\n"
     );
     fs::write(&path, body).map_err(|e| e.to_string())?;
     Ok(path)
@@ -813,10 +875,11 @@ const BADGE: &str = r#"<span class="badge"><slot /></span>
 pub(crate) const AGENTS_MD: &str = r#"# AGENTS.md — app BRAINLLM
 For an npm-created app, prefix shell commands below with `npx` (for example `npx brain spec`). A source installation provides a global `brain` command.
 Before each kind of task run `brain guide <topic>` (the playbook: steps, verify commands, common mistakes, example):
-`start` first, then `views` `data` `forms` `server` `backend` `analytics` `seo` `a11y` `webmcp` `tests` `i18n` `performance`. After a framework upgrade: `brain guide whats-new` and `brain guide migrate`. Every reference page ships with the binary: `brain guide docs`.
+`start` first, then `brandbook` `views` `data` `forms` `server` `backend` `analytics` `seo` `a11y` `webmcp` `tests` `i18n` `performance`. After a framework upgrade: `brain guide whats-new` and `brain guide migrate`. Every reference page ships with the binary: `brain guide docs`.
 1. Before writing code read `brain spec` (or `brain spec --topic <topic>`); what is not there does not exist.
 2. Start with `docs/app/index.md` (generated app docs: routes, components, data, backend, env, SEO; `brain build` refreshes them, `brain docs` regenerates them on demand and `brain docs --check` reports stale pages; add prose only in `docs/app/notes/<page>.md`). Read `brain map --json` to see existing routes, components, props and modules; import only what it lists. To use a component read `brain card <name>` (its contract), never its body; `brain map --reads cart.total` lists who reads a store field. A component over 150 lines gets B1010: run the `brain split` it suggests.
-3. Every UI change MUST follow `design.brain.json` and the native token stylesheet. First run `brain design --json`, `brain design check --json` and `brain manifest --json`; reuse project components through their contracts and explicit imports. Extend the foundation through revision-checked design plans; never install a CSS framework, fetch fonts automatically, duplicate existing primitives or bypass the baseline with arbitrary colors/spacing. Build mobile first, then verify tablet/desktop, safe areas, 16px inputs, 44px touch targets, keyboard/focus, reduced motion and permission/loading/error/empty/success/disabled states. Regenerate `brain design gallery --json` after adding UI contracts.
+3. Maintain `/brandbook` alongside every brand, content or UI change. Read `brain guide brandbook`; edit only public editorial decisions in `design.brain.json.brandbook.sections`, with explicit status/evidence and concrete voice examples. The owned view placeholder derives live tokens and UI inventory at check/dev/build time. Never invent approval, analytics, research, contact data or legal claims.
+4. Every UI change MUST follow `design.brain.json` and the native token stylesheet. First run `brain design --json`, `brain design check --json` and `brain manifest --json`; reuse project components through their contracts and explicit imports. Extend the foundation through revision-checked design plans; never install a CSS framework, fetch fonts automatically, duplicate existing primitives or bypass the baseline with arbitrary colors/spacing. Build mobile first, then verify tablet/desktop, safe areas, 16px inputs, 44px touch targets, keyboard/focus, reduced motion and permission/loading/error/empty/success/disabled states. Regenerate `brain design gallery --json` after adding UI contracts.
 4. Create files with `brain add view|comp|ui <name> --props "…"` and complete them; do not write them from scratch.
 5. Loop: edit → `brain check --json` → apply `brain fix`, then each remaining error's `fix` → repeat until `[]`.
 6. A diag with `"stuck": true` failed the same way 3 checks in a row: stop patching, read its `explain` (why + correct example) or `brain explain <code>`, and rewrite that part.
@@ -841,7 +904,7 @@ const PACKAGE_JSON: &str = r#"{
     "doctor": "brain doctor",
     "start": "brain start"
   },
-  "devDependencies": {
+  "dependencies": {
     "@christianirack/brainllm": "{{version}}"
   }
 }
@@ -882,10 +945,32 @@ mod tests {
     }
 
     #[test]
+    fn blank_components_keep_props_tests_and_existing_files_without_example_state() {
+        let app = tmp("blank-components");
+        new_app(&app).unwrap();
+        let options = AddOptions { props: "title:str count:num=0".into(), blank: true, ..Default::default() };
+        let path = add_with_options(&app, "comp", "ContentPanel", &options).unwrap();
+        let source = fs::read_to_string(&path).unwrap();
+        assert!(source.contains("<slot />") && source.contains("{title}") && source.contains("{count}"));
+        assert!(!source.contains("<script>") && !source.contains("<button") && !source.contains("<input") && !source.contains("<style>"));
+        let (diags, _) = crate::compiler::check(&source, Path::new("comp/content-panel.brain"), &path);
+        assert!(diags.is_empty(), "{}", crate::compiler::Diag::list_to_json(&diags));
+        let test = fs::read_to_string(path.with_extension("test.brain")).unwrap();
+        assert!(test.contains("title: 'Example'") && !test.contains("count: 0"));
+        assert!(add_with_options(&app, "comp", "ContentPanel", &options).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+        for kind in ["view", "ui", "channel", "locale", "auth", "resource"] {
+            assert!(add_with_options(&app, kind, "rejected", &AddOptions { blank: true, ..Default::default() }).is_err(), "{kind}");
+        }
+        assert!(!app.join("views/rejected.brain").exists() && !app.join("channels/rejected.jsbrain").exists());
+        fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
     fn new_then_add() {
         let app = tmp("demo");
         let files = new_app(&app).unwrap();
-        assert_eq!(files.len(), 54);
+        assert_eq!(files.len(), 55);
         assert!(app.join("design.brain.json").is_file());
         assert!(app.join("ui/card.brain").is_file());
         assert!(app.join("ui/header.brain").is_file());
@@ -902,6 +987,21 @@ mod tests {
         fs::remove_dir_all(&app).unwrap();
     }
 
+    #[test]
+    fn generated_tests_supply_required_metadata_types_and_leave_defaults_and_optional_props_alone() {
+        let app = tmp("required-test-props");
+        new_app(&app).unwrap();
+        let component = add(&app, "comp", "RequiredProps", "label:str count:num active:bool items:list options:obj done:fn data:any optional:str? defaulted:num=42").unwrap();
+        let test = fs::read_to_string(component.with_extension("test.brain")).unwrap();
+        assert!(test.contains("{ label: 'Example', count: 0, active: false, items: [], options: {}, done: () => {}, data: 'Example' }"), "{test}");
+        assert!(!test.contains("optional:") && !test.contains("defaulted:"));
+        assert!(brain_parse::parse(&test, Path::new("comp/required-props.test.brain")).is_ok());
+        let missing = app.join("comp/missing.brain");
+        assert!(write_test(&app, &missing).is_err());
+        assert!(!missing.with_extension("test.brain").exists());
+        fs::remove_dir_all(app).unwrap();
+    }
+
     /// What the CLI generates must pass its own `brain check`: the LLM copies the example's defects (QA, Phase 0).
     #[test]
     fn templates_pass_check() {
@@ -916,7 +1016,7 @@ mod tests {
         let mut files = Vec::new();
         crate::brain_files(&app, &mut files);
         files.retain(|f| !f.to_string_lossy().ends_with(".test.brain")); // tests are not components (brain check skips them too)
-        assert_eq!(files.len(), 29, "app.brain + the scaffold's views/components + 3 added");
+        assert_eq!(files.len(), 30, "app.brain + the scaffold's views/components (including brandbook) + 3 added");
         for f in &files {
             let src = fs::read_to_string(f).unwrap();
             let rel = f.strip_prefix(&app).unwrap();

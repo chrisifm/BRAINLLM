@@ -32,3 +32,17 @@ fn outbound_calls_auto_import_in_server_modules() {
     let output=brain_codegen::compile("<script>const httpCall = (url) => url</script><p>{httpCall('local')}</p>",Path::new("comp/local.brain")).unwrap();
     assert!(!output.js.contains("brain-outbound.js"));
 }
+
+#[test]
+fn bounded_list_and_text_helpers_import_for_client_and_server_without_capturing_locals() {
+    let body = "const values = range(1, 4); const name = text.fold('LOUD')";
+    let output = brain_codegen::compile(&format!("<script>{body}</script><p>{{name}}:{{values.join(',')}}</p>"), Path::new("comp/helpers.brain")).unwrap();
+    assert!(output.js.contains("from \"/@brain/brain-list.js\""), "{}", output.js);
+    assert!(output.js.contains("from \"/@brain/brain-text.js\""), "{}", output.js);
+    let output = brain_codegen::compile("<meta server>\nexport async function values() { return { values: range(1, 4), name: text.fold('LOUD') } }", Path::new("server/helpers.jsbrain")).unwrap();
+    let code = output.js + &output.server_js;
+    assert!(code.contains("from \"/@brain/brain-list.js\""), "{code}");
+    assert!(code.contains("from \"/@brain/brain-text.js\""), "{code}");
+    let output = brain_codegen::compile("<script>const range = (a,b) => [a,b]; const text = { fold: (value) => value }</script><p>{text.fold(range(1,2).join(','))}</p>", Path::new("comp/local-helpers.brain")).unwrap();
+    assert!(!output.js.contains("brain-list.js") && !output.js.contains("brain-text.js"), "{}", output.js);
+}

@@ -1,0 +1,17 @@
+{
+  "id": "head-document-policy",
+  "kind": "fix",
+  "title": "Cache-safe HTML HEAD security metadata",
+  "why": "HTML HEAD retains stable metadata without minting a nonce policy for a body it does not send, preserving cached GET script authorization through revalidation.",
+  "changelog": [
+    "HTML HEAD responses preserve cached GET nonce policies through subsequ"
+  ],
+  "guide": "brain guide static",
+  "codes": [],
+  "apis": [
+    "brain start"
+  ],
+  "affects": [
+    "dist/**"
+  ]
+}

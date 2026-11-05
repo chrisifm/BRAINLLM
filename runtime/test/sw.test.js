@@ -22,6 +22,7 @@ const cacheOf = name => {
       if (putFails) throw new DOMException('Quota exceeded', 'QuotaExceededError')
       m.set(abs(k), { body, headers: [...r.headers], status: r.status })
     },
+    keys: async () => [...m.keys()].map(url => new Request(url)),
     match: async k => {
       const e = m.get(abs(k))
       return e && new Response(e.body, { status: e.status, headers: e.headers })
@@ -79,16 +80,31 @@ function boot(build) {
     await Promise.all(waits)
   }
   // dispatch a fetch; resolves to the Response, or null if the worker did not call respondWith
-  const get = async (path, { method = 'GET', mode = 'cors', destination = '', preloadResponse } = {}) => {
+  const get = async (path, { method = 'GET', mode = 'cors', destination = '', preloadResponse, headers = {} } = {}) => {
     let resp = null
     const waits = []
-    on.fetch({ request: { url: ORIGIN + path, method, mode, destination }, respondWith: p => (resp = p), waitUntil: p => waits.push(p), preloadResponse: Promise.resolve(preloadResponse) })
+    on.fetch({ request: { url: ORIGIN + path, method, mode, destination, headers: new Headers(headers) }, respondWith: p => (resp = p), waitUntil: p => waits.push(p), preloadResponse: Promise.resolve(preloadResponse) })
     const r = resp && (await resp)
     await Promise.all(waits)
     return r
   }
   return { life, get, stats: () => ({ claimed, preload }), msgs }
 }
+
+test('ranges and streaming manifests bypass even a cached full file and explicit cache routes', async () => {
+  const w = boot({ hash: 'media-network', precache: [], offline: '/_offline.html', routes: [{ match: '/video/', prefix: true, strategy: 'cache-first', maxEntries: 10 }] })
+  const cached = await caches.open('brain-media-network')
+  const explicit = await caches.open('brain:route:/video/*')
+  await explicit.put(ORIGIN + '/video/control.mp4', new Response('explicit route control'))
+  assert.equal(await (await w.get('/video/control.mp4')).text(), 'explicit route control')
+  for (const path of ['/_b/clip.mp4', '/video/clip.mp4', '/video/index.m3u8', '/video/audio.m3u', '/video/index.mpd', '/video/MASTER.M3U8']) {
+    await cached.put(ORIGIN + path, new Response('stale complete file'))
+    await explicit.put(ORIGIN + path, new Response('stale explicit route'))
+    const options = path.endsWith('.mp4') ? { headers: { range: 'bytes=0-1' }, destination: 'video' } : { destination: 'video' }
+    assert.ok((await w.get(path, options)) === null, path)
+    assert.ok((await w.get(path, { ...options, destination: '' })) === null, `${path}: explicit route only`)
+  }
+})
 
 test('install precaches (a failing URL does not abort it); activate enables preload and claims clients', async () => {
   net = { '/_b/core.js': { body: 'core1', type: 'text/javascript' }, '/_offline.html': { body: '<h1>Offline page</h1>' } }
@@ -300,4 +316,55 @@ test('an update reuses the hashed files the previous build already cached; only 
   const v3 = boot({ hash: 'keep0003', precache: ['/_b/other.js'], offline: null })
   await v3.life('install')
   assert.equal(storage.get('brain-keep0003').get(ORIGIN + '/_b/other.js').body, 'mine')
+})
+
+test('custom immutable inventories retain old layout assets for exactly one previous generation', async () => {
+  storage.clear(); offline = false; slow = 0
+  net = {
+    '/site/js/old.js': { body: 'old module', type: 'text/javascript' },
+    '/site/assets/old.bin': { body: 'old binary', type: 'application/octet-stream' },
+    '/site/src/new.js': { body: 'new module', type: 'text/javascript' },
+    '/site/lib/third.js': { body: 'third module', type: 'text/javascript' },
+    '/site/js/unhashed.js': { body: 'unhashed one', type: 'text/javascript' },
+  }
+  const first = boot({ hash: 'layout01', base: '/site/', immutable: ['/site/js/old.js', '/site/assets/old.bin'], precache: ['/site/js/old.js', '/site/assets/old.bin'], offline: null })
+  await first.life('install'); await first.life('activate')
+  const second = boot({ hash: 'layout02', base: '/site/', immutable: ['/site/src/new.js'], precache: ['/site/src/new.js'], offline: null })
+  await second.life('install'); await second.life('activate')
+  offline = true
+  assert.equal(await (await second.get('/site/js/old.js', { destination: 'script' })).text(), 'old module', 'open tabs keep their exact prior module after the layout changes')
+  assert.equal(await second.get('/site/js/old.js', { mode: 'navigate' }), null, 'prior asset bytes never answer a navigation')
+  assert.equal(await (await second.get('/site/assets/old.bin')).text(), 'old binary', 'programmatic binary loads use the exact retained inventory without extension guesses')
+  await assert.rejects(second.get('/site/assets/not-in-inventory.bin'), /Failed to fetch/)
+  offline = false
+  assert.equal(await (await second.get('/site/js/unhashed.js', { destination: 'script' })).text(), 'unhashed one')
+  net['/site/js/unhashed.js'].body = 'unhashed two'; netCalls = []
+  await second.get('/site/js/unhashed.js', { destination: 'script' })
+  assert.ok(netCalls.includes(ORIGIN + '/site/js/unhashed.js'), 'directory membership never makes a public original cache-first')
+  const third = boot({ hash: 'layout03', base: '/site/', immutable: ['/site/lib/third.js'], precache: ['/site/lib/third.js'], offline: null })
+  await third.life('install'); await third.life('activate')
+  assert.ok(!storage.has('brain/site-layout01'))
+  const metadata = await (await cacheOf('brain/site:meta').match('/__brain_immutable')).json()
+  assert.deepEqual(Object.keys(metadata).sort(), ['brain/site-layout02', 'brain/site-layout03'])
+  assert.ok(!JSON.stringify(metadata).includes('/site/js/old.js'))
+  offline = true
+  await assert.rejects(third.get('/site/js/old.js', { destination: 'script' }), /Failed to fetch/)
+  offline = false
+})
+
+
+test('inventory workers preserve legacy hashed chunks without promoting arbitrary cached responses', async () => {
+  storage.clear(); offline = false; slow = 0
+  net = { '/_b/legacy.js': { body: 'legacy code', type: 'text/javascript' }, '/js/current.js': { body: 'current code', type: 'text/javascript' } }
+  const legacy = boot({ hash: 'before-layout', precache: ['/_b/legacy.js'], offline: null })
+  await legacy.life('install'); await legacy.life('activate')
+  await cacheOf('brain-before-layout').put('/api/private.json', new Response('never an immutable asset'))
+  const next = boot({ hash: 'after-layout', immutable: ['/js/current.js'], precache: ['/js/current.js'], offline: null })
+  await next.life('install'); await next.life('activate')
+  offline = true
+  assert.equal(await (await next.get('/_b/legacy.js', { destination: 'script' })).text(), 'legacy code')
+  await assert.rejects(next.get('/api/private.json'), /Failed to fetch/)
+  const metadata = await (await cacheOf('brain:meta').match('/__brain_immutable')).json()
+  assert.deepEqual(metadata['brain-before-layout'], ['/_b/legacy.js'])
+  offline = false
 })

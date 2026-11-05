@@ -6,28 +6,19 @@ const VOID = new Set(['area', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link'
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 const unesc = s => s.replace(/&(amp|lt|gt|quot|#39);/g, (_, e) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" })[e])
 
-export class Event {
+// Keep Node's native event brand: SSR and its test DOM share a process with fetch/WebSocket EventTargets.
+const NativeEvent = globalThis.Event
+export class Event extends NativeEvent {
   constructor(type, init = {}) {
-    this.type = type
-    this.bubbles = !!init.bubbles
-    this.cancelable = !!init.cancelable
-    this.target = null
-    this.currentTarget = null
-    this.cancelBubble = false
-    this.defaultPrevented = false
+    super(type, init)
     this._p = []
   }
   composedPath() {
-    return this._p
+    return this._p.length ? this._p : super.composedPath()
   }
   stopImmediatePropagation() {
-    this.cancelBubble = this._stop = true
-  }
-  stopPropagation() {
-    this.cancelBubble = true
-  }
-  preventDefault() {
-    this.defaultPrevented = true
+    this._stop = true
+    super.stopImmediatePropagation()
   }
 }
 export class MouseEvent extends Event {}
@@ -162,7 +153,7 @@ class Node {
     if (i >= 0) a.splice(i, 1)
   }
   dispatchEvent(e) {
-    e.target = this
+    Object.defineProperty(e, 'target', { configurable: true, writable: true, value: this })
     const path = []
     for (let n = this; n; n = n.parentNode || n.host) path.push(n)
     if (path[path.length - 1].nodeType === 9 && path[path.length - 1].defaultView) path.push(path[path.length - 1].defaultView)

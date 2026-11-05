@@ -491,6 +491,11 @@ pub const THIN_WORDS: usize = 300;
 pub const TITLE_MIN: usize = 10;
 pub const LCP_BYTES: u64 = 200 * 1024;
 
+pub(crate) fn anchor_internal(cfg: &Config, from: &str, anchor: &crate::html::Anchor) -> Option<(String, String)> {
+    if crate::html::intentional_external(&anchor.href, &anchor.rel) { None }
+    else { internal(cfg, from, &anchor.href) }
+}
+
 /// Internal target of `href` on page `from`: `(path, fragment)`; `None` for external or non-HTTP links.
 pub fn internal(cfg: &Config, from: &str, href: &str) -> Option<(String, String)> {
     let h = href.trim();
@@ -990,7 +995,7 @@ fn page_checks(
         .anchors
         .iter()
         .filter(|a| a.in_content)
-        .filter(|a| internal(cfg, route, &a.href).is_some_and(|(p, _)| p != norm(route)))
+        .filter(|a| anchor_internal(cfg, route, a).is_some_and(|(p, _)| p != norm(route)))
         .count();
     s.check(4, out > 0, "B1812", Level::Info, || {
         let fix = if suggest.is_empty() {
@@ -1152,7 +1157,7 @@ fn geo_checks(cfg: &Config, route: &str, doc: &Doc, s: &mut Scorer) {
     }
     if words >= THIN_WORDS
         && !doc.anchors.iter().any(|a| {
-            a.in_content && internal(cfg, route, &a.href).is_none() && a.href.starts_with("http")
+            a.in_content && anchor_internal(cfg, route, a).is_none() && a.href.starts_with("http")
         })
     {
         s.note(
@@ -1207,7 +1212,7 @@ pub fn audit(site: &Site) -> Report {
         let targets: BTreeSet<String> = doc
             .anchors
             .iter()
-            .filter_map(|a| internal(cfg, &p.route, &a.href))
+            .filter_map(|a| anchor_internal(cfg, &p.route, a))
             .map(|(t, _)| t)
             .filter(|t| *t != me)
             .collect();
@@ -1250,7 +1255,7 @@ pub fn audit(site: &Site) -> Report {
             d.anchors
                 .iter()
                 .filter(|a| a.in_content)
-                .filter_map(|a| internal(cfg, &p.route, &a.href))
+                .filter_map(|a| anchor_internal(cfg, &p.route, a))
                 .map(|(t, _)| t)
                 .collect()
         })
@@ -1450,7 +1455,7 @@ pub fn audit(site: &Site) -> Report {
         }
         // links: checked on every page, indexable or not
         for a in &doc.anchors {
-            let Some((path, frag)) = internal(cfg, &p.route, &a.href) else {
+            let Some((path, frag)) = anchor_internal(cfg, &p.route, a) else {
                 continue;
             };
             let target = if path == norm(&p.route) {

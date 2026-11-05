@@ -1,0 +1,16 @@
+{
+  "id": "generated-docs-ignore",
+  "kind": "fix",
+  "title": "Keep generated app documentation out of source control",
+  "why": "New starters ignore reproducible docs/app output while keeping authored notes visible to Git. Existing projects retain their own ignore policy. Stale-document guidance follows the project Git policy rather than requiring ignored generated files to be committed.",
+  "changelog": [
+    "New app and static starters keep reproducible docs/app pages out of Git"
+  ],
+  "guide": "brain guide start",
+  "codes": [],
+  "apis": [],
+  "affects": [
+    ".gitignore",
+    "docs/app/**"
+  ]
+}

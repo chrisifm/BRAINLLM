@@ -858,7 +858,7 @@ pub fn finish_with_og(
     }
     if cfg.markdown {
         for e in entries.iter().filter(|e| e.indexable) {
-            files.push((files::md_path(e.route), files::page_markdown(cfg, e)));
+            files.push((brain_lex::url_path::decode_relative(&files::md_path(e.route))?, files::page_markdown(cfg, e)));
         }
     }
     if manifest {
@@ -1166,6 +1166,16 @@ pub fn cli(root: &Path, args: &[String]) -> (i32, String) {
 /// [`cli`] with the `keyword` of each route (it is never rendered, so `dist/` alone cannot tell B1816/B1836 apart):
 /// `brain seo` reads it from the view sources, like the build does.
 pub fn cli_with(root: &Path, args: &[String], keyword: &dyn Fn(&str) -> Option<String>) -> (i32, String) {
+    cli_with_output(root, args, keyword, &root.join("dist"), true)
+}
+
+/// Audit an isolated freshly compiled artifact using the original app configuration and sources.
+/// This entry point never writes or consults the app's existing output directory.
+pub fn audit_output(root: &Path, dist: &Path) -> (i32, String) {
+    cli_with_output(root, &["audit".into(), "--json".into()], &|_| None, dist, false)
+}
+
+fn cli_with_output(root: &Path, args: &[String], keyword: &dyn Fn(&str) -> Option<String>, dist: &Path, report_stale: bool) -> (i32, String) {
     let json = args.iter().any(|a| a == "--json");
     let flag = |name: &str| {
         let inline = format!("{name}=");
@@ -1208,7 +1218,7 @@ pub fn cli_with(root: &Path, args: &[String], keyword: &dyn Fn(&str) -> Option<S
     };
     let load = || -> Result<(Config, Vec<Page>, Report), String> {
         let mut cfg = Config::load(root)?;
-        let (mut pages, mut assets) = read_dist(&root.join("dist"))?;
+        let (mut pages, mut assets) = read_dist(dist)?;
         for p in &mut pages {
             p.keyword = keyword(&p.route);
         }
@@ -1226,10 +1236,10 @@ pub fn cli_with(root: &Path, args: &[String], keyword: &dyn Fn(&str) -> Option<S
         }
         assets.extend(public_assets(root));
         let rules = redirects::load(root).unwrap_or_default();
-        let mut images = image_dims_in(&root.join("dist"));
+        let mut images = image_dims_in(dist);
         images.extend(image_dims_in(&root.join("public")));
         let (i18n, _) = hreflang::I18n::load(&cfg, root);
-        let routes = server_routes(&root.join("dist"));
+        let routes = server_routes(dist);
         let report = audit::audit(&Site {
             cfg: &cfg,
             pages: &pages,
@@ -1241,7 +1251,7 @@ pub fn cli_with(root: &Path, args: &[String], keyword: &dyn Fn(&str) -> Option<S
         });
         let mut report = report;
         // robots.txt is what the build published (or what the app put in public/)
-        if let Ok(robots) = std::fs::read_to_string(root.join("dist/robots.txt")) {
+        if let Ok(robots) = std::fs::read_to_string(dist.join("robots.txt")) {
             for (route, finding) in checks::robots_conflicts(&pages, &robots) {
                 if let Some(page) = report.pages.iter_mut().find(|p| p.route == route) {
                     page.findings.push(finding);
@@ -1306,7 +1316,7 @@ pub fn cli_with(root: &Path, args: &[String], keyword: &dyn Fn(&str) -> Option<S
             .map(|(p, d)| (p.route.as_str(), d, audit::indexable(&cfg, &p.route, d)))
             .collect();
         let jobs = og::plan(&cfg, cfg.og, &list, &files::site_name(&cfg, &entries), &tpl);
-        let mut images = image_dims_in(&root.join("dist"));
+        let mut images = image_dims_in(dist);
         images.extend(image_dims_in(&root.join("public")));
         let mut rows = Vec::new();
         let mut text = format!(
@@ -1391,13 +1401,13 @@ pub fn cli_with(root: &Path, args: &[String], keyword: &dyn Fn(&str) -> Option<S
             Ok(r) => r,
             Err((m, f)) => return fail(format!("B1825 redirects.json: {m}; fix: {f}")),
         };
-        let (_, mut assets) = match read_dist(&root.join("dist")) {
+        let (_, mut assets) = match read_dist(dist) {
             Ok(x) => x,
             Err(e) => return fail(e),
         };
         assets.extend(public_assets(root));
         let routes: Vec<String> = pages.iter().map(|p| p.route.clone()).collect();
-        let ssr = server_routes(&root.join("dist"));
+        let ssr = server_routes(dist);
         let exists = |p: &str| {
             routes.iter().any(|r| audit::norm(r) == p)
                 || ssr.iter().any(|r| audit::matches_pattern(r, p))
@@ -1487,7 +1497,7 @@ pub fn cli_with(root: &Path, args: &[String], keyword: &dyn Fn(&str) -> Option<S
     }
     let code = if r.ok() { 0 } else { 1 };
     // the audit reads the last build: a source edited after it is not in these findings yet
-    let stale = stale_source(root).map(|file| format!("dist/ was built before {file} changed, so this audit reads the previous build; fix: `brain build`, then audit again"));
+    let stale = (if report_stale { stale_source(root) } else { None }).map(|file| format!("dist/ was built before {file} changed, so this audit reads the previous build; fix: `brain build`, then audit again"));
     (
         code,
         if json {

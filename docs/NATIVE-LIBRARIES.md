@@ -7,6 +7,10 @@ They run in browser modules and Node server modules. Web Crypto requires a secur
 
 | Function | Result and constraints |
 |---|---|
+| `range(from,to)` | Safe-integer half-open range `[from,to)`, at most 10000 values. Equal/reversed endpoints yield an empty list; non-integer, non-finite, unsafe or oversized input throws RangeError. |
+| `text.fold(value)` | NFD, remove U+0300–U+036F combining marks, then lowercase. No locale state; input and result at most 4096 Unicode code points. |
+| `text.distance(a,b,max=2)` | Case-sensitive optimal string alignment distance over Unicode code points; adjacent transpositions cost one. Returns `max+1` past the cutoff, including length mismatch. Integer cutoff 0..64, inputs at most 4096 code points. |
+| `text.fuzzy(word,list)` | Fold needle and candidates, then keep original candidate strings in stable input order, including duplicates. Folded needle length controls the budget: 0 below 4, 1 from 4, 2 from 8 code points. At most 10000 indexed candidates and 1048576 UTF-16 code units across their text; each must satisfy the text bounds. |
 | `dateParse(value)` | Epoch milliseconds from a valid Date, finite epoch or four-digit-year ISO date. Datetime strings require Z or an explicit offset; ambiguous and invalid calendar dates are rejected. Date-only strings mean UTC. |
 | `dateAdd(value, amount, unit='day')` | New epoch. Elapsed units: ms/second/minute/hour/day/week. Integer month/year arithmetic uses UTC and clamps the original day to the destination month. Inputs are never mutated. |
 | `dateDiff(left, right, unit='day')` | Signed fractional elapsed difference, left minus right. Calendar month/year differences are intentionally unsupported. A day means 24 hours, not a local DST calendar day. |
@@ -21,9 +25,9 @@ annotations or fetch browser data during a build. Unsupported timezone identifie
 
 ## Inclusion and measurement
 
-Functions are named exports in `brain-time.js` and `brain-hash.js`; the existing compiler imports only referenced
-primitives and the bundler removes unused exports and their dependencies. There is no runtime library namespace or
-new dependency in the core. Shared chunks still follow the existing bundler policy: per-component duplication must be
+Functions are named exports in `brain-list.js`, `brain-time.js` and `brain-hash.js`; the `text` namespace lives in
+`brain-text.js` and includes all three matching helpers when imported. The existing compiler imports only referenced
+primitives and the bundler removes unused exports and their dependencies. These modules add no dependency to the core; `text` is an explicit matching namespace. Shared chunks still follow the existing bundler policy: per-component duplication must be
 justified by measured compressed bytes rather than promised as universally smaller. `brain build --json` exposes the
 emitted byte ledger. Compare a fixture before/after each helper; source-module gzip is not a network measurement.
 

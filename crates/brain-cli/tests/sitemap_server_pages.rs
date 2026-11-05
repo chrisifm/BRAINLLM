@@ -114,6 +114,9 @@ fn every_page_closes_with_the_credit_unless_the_app_turns_it_off() {
     let line = format!("By <a href=\"https://chrisifm.github.io/BRAINLLM/\" rel=\"nofollow\">BRAINLLM</a> {}</p>", env!("CARGO_PKG_VERSION"));
     let about = std::fs::read_to_string(dir.join("dist/about.html")).or_else(|_| std::fs::read_to_string(dir.join("dist/about/index.html"))).unwrap();
     assert!(about.contains(&line), "{about}");
+    let credit = about.split("<p data-brain-credit").nth(1).expect("credit signature").split("</p>").next().unwrap();
+    assert!(!credit.contains("margin:"), "the signature leaves margins to the app: {credit}");
+    assert!(credit.contains("padding:8px 16px calc(8px + env(safe-area-inset-bottom))"), "the signature clears the device home indicator: {credit}");
     let served = std::fs::read_dir(dir.join("dist/_server/pages")).unwrap().flatten().map(|f| std::fs::read_to_string(f.path()).unwrap()).collect::<Vec<_>>();
     assert!(served.iter().any(|p| p.contains(&line)), "a page rendered per request has it too");
     let json = std::fs::read_to_string(dir.join("brain.json")).unwrap();

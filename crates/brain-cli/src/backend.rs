@@ -212,7 +212,15 @@ pub fn contracts(root: &Path, kind: &str) -> Result<Vec<Resource>, String> {
             query,
         };
         if kind == "jobs" { r.validate_job() } else { r.validate() }
-            .map_err(|message| format!("server/{kind}/{}: {message}", r.name))?;
+            .map_err(|mut message| {
+                // The validator knows the schema; only this project boundary knows its declared roles.
+                // Implicit legacy role discovery itself reads contracts; only explicit roles avoid that cycle.
+                if message.starts_with("invalid ") && message.contains(" policy `")
+                    && root.join("server/auth/roles.jsbrain").symlink_metadata().is_ok()
+                    && let Ok(roles) = auth_roles(root)
+                { message.push_str(&format!("; declared roles: {}", roles.roles.join(", "))); }
+                format!("server/{kind}/{}: {message}", r.name)
+            })?;
         out.push(r);
     }
     Ok(out)
@@ -383,16 +391,16 @@ pub fn add_roles(root: &Path) -> Result<String, String> {
 }
 /// B0749: resources whose unconditioned public read also serves rows a state-like field marks as not ready.
 pub fn row_exposure(root: &Path) -> Vec<(String, String, String)> {
-    let state_like = |name: &str, field: &brain_backend::Field| {
+    let state_like = |name: &str| {
         let name = name.strip_prefix("is_").or_else(|| name.strip_prefix("has_")).unwrap_or(name);
         let name = name.strip_suffix("_at").unwrap_or(name);
-        matches!(field.ty(), Some(brain_backend::types::Ty::Enum(_))) || ["status", "state", "published", "draft", "visibility", "approved"].contains(&name)
+        ["status", "state", "published", "draft", "visibility", "approved"].contains(&name)
     };
     let resources = contracts(root, "resources").unwrap_or_default();
     resources.iter()
         .filter(|r| r.policy.api && !r.policy.expose_all_rows && r.policy.read.iter().any(|g| g == "public") && !r.policy.read_where.contains_key("public"))
         .filter_map(|r| {
-            let (field, _) = r.fields.iter().find(|(name, field)| state_like(name, field))?;
+            let (field, _) = r.fields.iter().find(|(name, _)| state_like(name))?;
             Some((
                 format!("server/resources/{}/policy.jsbrain", r.name),
                 format!("read: ['public'] on `{}` serves every row to anonymous visitors, whatever its `{field}` says", r.name),
@@ -518,14 +526,20 @@ pub fn debit_subject_warnings(root: &Path) -> Vec<(String, String, String)> {
 /// Absent, serve starts with that route disabled; too short, it refuses to start. Names only, never values.
 pub fn secret_warnings(root: &Path) -> Vec<(String, String, String)> {
     let fix = "set it to a generated value in .brain_env or the host environment; a secret held only on the deployed host may keep this warning on other machines";
-    secret_findings(root, "development")
+    let mut findings: Vec<_> = secret_findings(root, "development")
         .into_iter()
         .map(|(file, message, disables)| {
             let message = message.strip_prefix(&format!("{file}: ")).unwrap_or(&message).to_string();
             let effect = if disables { "`brain backend serve` starts with this disabled (503, no handler runs)" } else { "`brain backend serve` refuses to start" };
+            let fix = if file == brain_backend::captcha::CONTRACT { "configure the provider-issued secret in .brain_env or the host environment; use public dummy keys only under development/testing" } else { fix };
             (file, format!("{effect}: {message}"), fix.to_string())
         })
-        .collect()
+        .collect();
+    if let Some((file, message, _)) = crate::platform_config::captcha_public_test_secret_problem(root, "production") {
+        let message = message.strip_prefix(&format!("{file}: ")).unwrap_or(&message).to_string();
+        findings.push((file, message, "keep public test keys in development/testing only; set the real provider-issued secret under [production] or in the production host environment".into()));
+    }
+    findings
 }
 /// Every route and webhook secret problem of an environment: `(file, message, disables)`.
 pub(crate) fn secret_findings(root: &Path, environment: &str) -> Vec<(String, String, bool)> {
@@ -741,6 +755,27 @@ pub fn config_diagnostics(root: &Path) -> Vec<(String, String)> {
     }
     config_problems(&|key| crate::env::value(root, "development", key).filter(|v| !v.is_empty()))
 }
+/// Provider setup hints contain validated public origins only, never provider credentials.
+pub fn google_origin_setup(origins: &[String]) -> Value {
+    let mut required = origins.to_vec();
+    if required.iter().any(|origin| origin.starts_with("http://localhost:")) && !required.iter().any(|origin| origin == "http://localhost") {
+        required.push("http://localhost".into());
+    }
+    required.sort();
+    required.dedup();
+    json!({"authorizedJavaScriptOrigins":required,"providerVerified":false,
+        "fix":"Add these exact browser origins to the Google web client's Authorized JavaScript origins; keep the frontend origin in the native HTTP allowlist. This report does not inspect Google Cloud configuration. See docs/JWT-GOOGLE.md."})
+}
+pub fn google_origin_advice(root: &Path) -> Vec<(String, Value)> {
+    let native = root.join("server/resources").is_dir() || root.join("server/jobs").is_dir() || root.join("server/routes").is_dir();
+    ["development", "production"].into_iter().filter_map(|environment| {
+        if !native && crate::env::value(root, environment, "BRAIN_BACKEND_URL").is_none() { return None; }
+        crate::env::value(root, environment, "GOOGLE_CLIENT_ID")?;
+        let site = crate::env::value(root, environment, "PUBLIC_SITE_URL");
+        let settings = socket_settings(root, site.as_deref(), None).ok()?;
+        (!settings.http_origins.is_empty()).then(|| (environment.into(), google_origin_setup(&settings.http_origins)))
+    }).collect()
+}
 fn operator(args: &[String], url: &str, production: bool) -> Result<(), String> {
     let usage = "usage: brain backend users disable|enable|revoke-sessions|disable-identity|enable-identity --user <uuid>|--email <address> [--provider google|apple|linkedin] [--env development]";
     let action = args.get(1).map(String::as_str).ok_or(usage)?;
@@ -840,9 +875,12 @@ pub struct DevBackend {
 }
 impl Drop for DevBackend {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        stop_owned_child(&mut self.child);
     }
+}
+fn stop_owned_child(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn backend_ready(address: &std::net::SocketAddr) -> bool {
@@ -916,7 +954,7 @@ pub fn start_for_dev(root: &Path, environment: &str, dev_port: u16) -> Result<De
             return Ok(DevBackend { child, page_origin });
         }
         if std::time::Instant::now() > deadline {
-            let _ = child.kill();
+            stop_owned_child(&mut child);
             return Err(format!("the backend did not answer on port {port} within 30 s; run `brain backend serve` alone to see why"));
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -931,6 +969,12 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let root = crate::app_root()?;
     let environment = crate::env::name(args, "development");
     let operation = args.first().map(String::as_str).unwrap_or("schema");
+    if operation != "approve-contract" && crate::flag(args, "--only").is_some() {
+        return Err("--only applies only to brain backend approve-contract; fix: preview contract changes with that command before applying selected resources".into());
+    }
+    if operation == "migrate" && crate::flag(args, "--resource").is_some() {
+        return Err("brain backend migrate does not select resources with --resource; fix: preview with brain backend approve-contract, then use --only <resource> --apply".into());
+    }
     if operation == "logs" {
         let rid = args.get(1).filter(|a| !a.starts_with("--")).map(String::as_str);
         println!("{}", failure_logs(&root, rid));
@@ -939,9 +983,25 @@ pub fn run(args: &[String]) -> Result<(), String> {
     if operation == "keys" {
         return crate::api_key_config::run(&root, &args[1..], stated_database(args, &root, &environment)?);
     }
-    if operation == "data" && !matches!(args.get(1).map(String::as_str), Some("prepare" | "maintain")) {
-        return Err("usage: brain data prepare|maintain [--apply] [--resource <name>] [--env <environment>]".into());
+    if operation == "data" && !matches!(args.get(1).map(String::as_str), Some("prepare" | "maintain" | "defaults")) {
+        return Err("usage: brain data prepare|maintain|defaults [--apply] [--resource <name>] [--env <environment>]; defaults also accepts --limit <1..10000> and --include-null".into());
     }
+    if args.iter().any(|arg| arg == "--include-null") && !(operation == "data" && args.get(1).is_some_and(|arg| arg == "defaults")) {
+        return Err("--include-null applies only to brain data defaults".into());
+    }
+    if operation == "data" && args.get(1).is_some_and(|arg| arg != "defaults") && crate::flag(args,"--limit").is_some() {
+        return Err("--limit applies only to brain data defaults".into());
+    }
+    let default_fill_limit = if operation == "data" && args.get(1).is_some_and(|arg| arg == "defaults") {
+        if args.iter().any(|arg| arg.starts_with("--apply=") || arg.starts_with("--include-null=")) {
+            return Err("default fill --apply and --include-null are switches without =values".into());
+        }
+        if args.iter().any(|arg|arg=="--limit") && crate::flag(args,"--limit").is_none() {
+            return Err("default fill --limit needs a value from 1..10000".into());
+        }
+        crate::flag(args,"--limit").map(|value|value.parse::<u32>().ok().filter(|limit|(1..=10000).contains(limit))
+            .ok_or("default fill --limit must be 1..10000".to_string())).transpose()?.unwrap_or(1000)
+    } else { 1000 };
     if !matches!(
         operation,
         "schema" | "migrate" | "approve-contract" | "serve" | "bootstrap-admin" | "rename-role" | "users" | "import" | "data"
@@ -1045,7 +1105,10 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 Some(name)=>vec![resources.iter().find(|r|r.name==name).cloned().ok_or_else(||format!("no resource is named `{name}`; fix: use a resource from server/resources"))?],
                 None=>resources.clone(),
             };
-            let report=brain_backend::maintenance::run_all(&pool,&chosen,mode,args.iter().any(|a|a=="--apply")).await?;
+            let apply=args.iter().any(|arg|arg=="--apply");
+            let report=if args.get(1).is_some_and(|arg|arg=="defaults") {
+                brain_backend::defaults::fill(&pool,&chosen,apply,args.iter().any(|arg|arg=="--include-null"),default_fill_limit).await?
+            } else { brain_backend::maintenance::run_all(&pool,&chosen,mode,apply).await? };
             pool.close().await;
             println!("{report}");
             return Ok(());
@@ -1134,6 +1197,10 @@ pub fn run(args: &[String]) -> Result<(), String> {
             }
             mail
         });
+        if google.is_some() {
+            let setup = google_origin_setup(&sockets.http_origins);
+            brain_backend::log_line!("{}",json!({"schemaVersion":1,"event":"google-origin-setup","environment":environment,"setup":setup}));
+        }
         let config=brain_backend::Config{api_keys:crate::api_key_config::load(&root)?,sockets:sockets.native_config()?,before_hooks:crate::hooks_executor::load(&root,&environment,&resources)?,webhooks:crate::webhook_config::load(&root,&environment)?,roles,mail,auth_public_base_url:Some(public_base),gcs,jwt,google,apple,linkedin,resources,jobs,uploads:root.join(".brain/uploads"),origins:sockets.http_origins,production:environment=="production"};
         brain_backend::analytics::configure(analytics_settings(&root)?)?;
         brain_backend::log_line!("{}",json!({"schemaVersion":1,"event":"backend-starting","url":format!("http://{addr}"),"experimental":true}));
@@ -1460,7 +1527,7 @@ pub(crate) fn server_module(root: &Path, rel: &str) -> Result<(Scratch, PathBuf)
                 js: o.js,
                 css: o.css,
                 server_js: o.server_js,
-                server_fns: o.server_fns,
+                server: o.server, server_fns: o.server_fns,
             })
             .map_err(|d| crate::diags_json(&d))
     };
@@ -2291,6 +2358,29 @@ impl Drop for HandlerGroup {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn google_origin_setup_preserves_native_trust_and_names_local_provider_entries() {
+        let origins = vec!["http://localhost:5280".to_string(), "https://example.test".into()];
+        let setup = super::google_origin_setup(&origins);
+        assert_eq!(setup["authorizedJavaScriptOrigins"], serde_json::json!(["http://localhost", "http://localhost:5280", "https://example.test"]));
+        assert_eq!(setup["providerVerified"], false);
+        assert_eq!(origins.len(), 2, "provider-only localhost entry does not widen native HTTP trust");
+        let selected = super::google_origin_setup(&["https://override.example.test".into()]);
+        assert_eq!(selected["authorizedJavaScriptOrigins"], serde_json::json!(["https://override.example.test"]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stopping_a_dev_startup_child_reaps_its_process() {
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let pid = child.id() as libc::pid_t;
+        super::stop_owned_child(&mut child);
+        let mut status = 0;
+        // A second wait cannot reap it: the owner already consumed the exit status.
+        assert_eq!(unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) }, -1);
+        assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::ECHILD));
+    }
+
+    #[test]
     fn a_succeeded_job_names_the_backend_failures_it_caught_and_never_a_value() {
         let raw = json!({"count":3,"failures":[
             {"status":422,"code":null,"target":"subscriptions","fields":["status[gte]","name with spaces"],"count":2,"message":"dropped"},
@@ -2487,6 +2577,26 @@ mod tests {
         let (root, warnings) = roles_app(&[("server/resources/posts/schema.jsbrain", "<meta server>\nexport default { title: { type: 'str', visible: ['ghost', 'owner'] } }\n"), ("server/resources/posts/policy.jsbrain", &open)]);
         assert!(inspect(&root).is_ok());
         assert_eq!(warnings, vec!["B0738"]);
+    }
+
+    #[test]
+    fn create_owner_policy_error_lists_the_projects_actual_roles_and_reference_alternatives() {
+        let source=policy("['owner']");
+        let (root,_)=roles_app(&[
+            ("server/auth/roles.jsbrain","<meta server>\nexport default {roles:['admin','member'],signup_role:'member'}\n"),
+            ("server/resources/items/schema.jsbrain","<meta server>\nexport default { title:'str!', parent:'ref:parents!' }\n"),
+            ("server/resources/items/policy.jsbrain",&source),
+        ]);
+        let error=contracts(&root,"resources").unwrap_err();
+        assert!(error.contains("; fix:") && error.contains("owner.parent"),"{error}");
+        assert!(error.contains("declared roles: admin, member") && !error.contains("declared roles: admin, user"),"{error}");
+        assert_eq!(fs::read_to_string(root.join("server/resources/items/policy.jsbrain")).unwrap(),source);
+        fs::remove_file(root.join("server/auth/roles.jsbrain")).unwrap();
+        let error=contracts(&root,"resources").unwrap_err();
+        assert!(error.contains("; fix:") && error.contains("owner.parent"),"{error}");
+        assert!(!error.contains("declared roles:"),"implicit legacy roles are not explicit declarations: {error}");
+        assert_eq!(fs::read_to_string(root.join("server/resources/items/policy.jsbrain")).unwrap(),source);
+        fs::remove_dir_all(root).unwrap();
     }
     use super::*;
     #[test]

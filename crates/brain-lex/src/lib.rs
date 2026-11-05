@@ -5,6 +5,7 @@
 pub mod codes;
 mod diag;
 pub mod json;
+pub mod url_path;
 mod lexer;
 mod span;
 
@@ -22,3 +23,8 @@ pub fn write_stderr_line(line: &str) {
     text.push('\n');
     let _ = std::io::stderr().lock().write_all(text.as_bytes());
 }
+
+pub mod branding;
+
+pub mod server_metadata;
+pub use server_metadata::ServerMetadata;

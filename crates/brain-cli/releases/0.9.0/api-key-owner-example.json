@@ -1,0 +1,11 @@
+{
+  "id": "api-key-owner-example",
+  "kind": "fix",
+  "title": "Clarify owner visibility in the API-key response example",
+  "why": "A read scope alone does not expose other owners' identifiers; the sample now states that the key owner owns its returned row.",
+  "changelog": ["The API-key response example now states its row-ownership assumption"],
+  "guide": "docs/backend/api-keys.md",
+  "codes": [],
+  "apis": [],
+  "affects": ["server/api-keys.jsbrain"]
+}

@@ -1,0 +1,11 @@
+{
+  "id": "native-direct-events",
+  "kind": "fix",
+  "title": "Owned handlers for native non-bubbling events",
+  "why": "Dialog closure, validation, disclosure, pointer and media events reach their declared handler and release it when its component is disposed.",
+  "changelog": ["Native non-bubbling event handlers run on their element"],
+  "guide": "SPEC.md",
+  "codes": [],
+  "apis": ["on:close", "on:cancel", "on:toggle", "on:invalid", "on"],
+  "affects": ["**/*.brain"]
+}

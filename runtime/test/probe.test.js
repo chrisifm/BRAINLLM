@@ -17,8 +17,8 @@ const view = (h, body) => {
   return root => mount(C, root, {})
 }
 
-test('a list that grows forever from an interval: B0907 for the nodes and for the list, in ~200 ms real', async () => {
-  const t = Date.now()
+test('a list that grows forever from an interval: B0907 for nodes and lists within the CPU budget', async () => {
+  const cpuStart = process.cpuUsage()
   const items = sig([])
   const f = await probe({
     core,
@@ -30,7 +30,8 @@ test('a list that grows forever from an interval: B0907 for the nodes and for th
       insert(r.firstChild, () => items.v.map(i => tpl(`<li>${i}</li>`)()), null)
     }),
   })
-  assert.ok(Date.now() - t < 2000, `${Date.now() - t} ms`)
+  const cpu = process.cpuUsage(cpuStart)
+  assert.ok(cpu.user + cpu.system < 2000000, `${cpu.user + cpu.system} microseconds of CPU`)
   const nodes = f.find(x => x.what === 'nodes'), list = f.find(x => x.what === 'list')
   assert.ok(nodes && list, JSON.stringify(f))
   assert.deepEqual([nodes.code, nodes.comp], ['B0907', 'grow1'])

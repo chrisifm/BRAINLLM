@@ -1,0 +1,15 @@
+{
+  "id": "google-origin-guidance",
+  "kind": "fix",
+  "title": "Exact Google browser origin setup hints",
+  "why": "Doctor lists configured browser origins per environment and backend startup logs its selected origins, including overrides. Setup hints never print credentials or claim to inspect Google Cloud; localhost provider-only entries do not widen native trust.",
+  "changelog": [
+    "Google Sign-In setup reports configured browser origins"
+  ],
+  "guide": "docs/JWT-GOOGLE.md",
+  "codes": [],
+  "apis": [
+    "brain doctor",
+    "brain backend serve"
+  ]
+}

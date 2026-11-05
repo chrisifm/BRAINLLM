@@ -66,6 +66,11 @@ x-quota-reset: 41211
 {"items":[{"id":"6a1d...","owner":"0b7e...","data":{"title":"Hello"}}],"limit":2,"offset":0}
 ```
 
+This example assumes the key's owner owns the returned row. An ordinary key keeps its user's response projection:
+`owner` is visible to the row owner, relational owners and readers whose role is named in the resource's read policy.
+Declaring `expose_owner: true` in `query.jsbrain` exposes it to every reader of the row. A read scope alone does not
+expose other rows' owner identifiers. System keys have the separate privileged behavior described below.
+
 | Status | `error.code` | Meaning |
 |---|---|---|
 | 401 | `API_KEY_INVALID` | Malformed key, unknown prefix or wrong secret |

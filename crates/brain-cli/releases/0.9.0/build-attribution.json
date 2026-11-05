@@ -1,0 +1,24 @@
+{
+  "id": "build-attribution",
+  "kind": "change",
+  "title": "Mandatory format-valid compiler build attribution",
+  "why": "Generated artifacts retain the compiler landing link without corrupting protocol formats, binary identity or final content hashes.",
+  "changelog": [
+    "Generated build attribution links the compiler landing"
+  ],
+  "guide": "brain guide static",
+  "codes": [],
+  "apis": [
+    "brain-build.json",
+    "robots.txt",
+    "sitemap.xml"
+  ],
+  "steps": [
+    "Keep generated attribution when packaging a build. Copied binary and protocol assets retain their own bytes and licenses; brain-build.json covers their build attribution. Visible page-credit settings do not remove the compiler signature."
+  ],
+  "finds": [
+    {
+      "glob": "brain.json"
+    }
+  ]
+}

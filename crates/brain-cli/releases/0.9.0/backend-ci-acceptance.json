@@ -1,0 +1,12 @@
+{
+  "id": "backend-ci-acceptance",
+  "kind": "internal",
+  "title": "Run owned Postgres and backend HTTP acceptance in CI",
+  "why": "Workspace tests alone leave the database integration tests ignored; the required verification workflow now runs the disposable database harness and binary gates.",
+  "changelog": [
+    "CI runs the disposable-Postgres backend integration",
+    "Disposable backend acceptance excludes the explicitly manual release-profile AVIF cost measurement"
+  ],
+  "codes": [],
+  "apis": []
+}

@@ -18,6 +18,8 @@ pub struct Identity {
     pub(crate) verified: bool,
     /// Display name the provider shared, stored with a new link; a hint for the app, never an identity.
     pub(crate) name: Option<String>,
+    /// Provider-managed display URL; never fetched by the framework or used to identify an account.
+    pub(crate) picture: Option<String>,
 }
 impl Identity {
     /// Keeps a display name only when it is plain, bounded text.
@@ -28,7 +30,23 @@ impl Identity {
             .map(str::to_owned);
         self
     }
+    /// Only bounded credential-free HTTPS URLs may become profile hints.
+    pub fn with_picture(mut self, picture: Option<&str>) -> Self {
+        self.picture = picture.map(str::trim).filter(|value| {
+            value.len() <= 2048 && !value.chars().any(char::is_control)
+                && reqwest::Url::parse(value).is_ok_and(|url| url.scheme() == "https"
+                    && url.host().is_some() && url.username().is_empty() && url.password().is_none())
+        }).map(str::to_owned);
+        self
+    }
 }
+/// Display claims are optional decoration; a non-string hint must not reject a verified identity.
+pub(crate) fn profile_text<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
+    use serde::Deserialize;
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value.as_str().map(str::to_owned))
+}
+
 struct Keys {
     set: JwkSet,
     until: Instant,
@@ -240,5 +258,32 @@ pub(crate) mod synthetic {
         let set =
             serde_json::from_value(serde_json::json!({"keys":[value["jwk"].clone()]})).unwrap();
         (encoding, set)
+    }
+}
+
+#[cfg(test)]
+mod profile_tests {
+    use super::Identity;
+    fn identity() -> Identity {
+        Identity { subject: "synthetic".into(), issuer: "https://example.test".into(), email: None,
+            linkable: false, verified: false, name: None, picture: None }
+    }
+    #[test]
+    fn profile_hints_are_bounded_and_do_not_change_identity_authority() {
+        let valid = identity().with_name(Some("  Synthetic Person  "))
+            .with_picture(Some("https://images.example.test/profile.png"));
+        assert_eq!(valid.name.as_deref(), Some("Synthetic Person"));
+        assert_eq!(valid.picture.as_deref(), Some("https://images.example.test/profile.png"));
+        assert!(!valid.linkable && !valid.verified && valid.email.is_none());
+        for bad in ["", "http://example.test/p.png", "data:image/png;base64,AA==", "javascript:alert(1)",
+            "https://example.test/\nphoto", "//example.test/p"] {
+            assert!(identity().with_picture(Some(bad)).picture.is_none(), "{bad:?}");
+        }
+        let userinfo = format!("https://{}@example.test/p", ["synthetic-user", "synthetic-password"].join(":"));
+        assert!(identity().with_picture(Some(&userinfo)).picture.is_none());
+        assert!(identity().with_picture(Some(&format!("https://example.test/{}", "x".repeat(2048)))).picture.is_none());
+        for bad in ["".to_string(), "x".repeat(201), "Name\nSuffix".into()] {
+            assert!(identity().with_name(Some(&bad)).name.is_none());
+        }
     }
 }

@@ -42,6 +42,28 @@ const page = () => {
   return { m, disposed: () => disposed }
 }
 
+test('absolute rel=external navigation stays native on both router paths', () => {
+  for (const native of [false, true]) {
+    globalThis.location = new URL('http://x.test/a')
+    let onNavigate
+    globalThis.navigation = native ? { addEventListener: (_, handler) => { onNavigate = handler }, removeEventListener() {} } : undefined
+    page()
+    const anchor = doc.createElement('a')
+    anchor.setAttribute('href', 'http://x.test/live-only/')
+    anchor.setAttribute('rel', 'noopener ExTeRnAl')
+    doc.body.appendChild(anchor)
+    const r = router({ parse, hard: () => assert.fail('the browser owns this navigation') })
+    if (native) onNavigate({ sourceElement: anchor, canIntercept: true, destination: { url: 'http://x.test/live-only/' }, intercept: () => assert.fail('external link intercepted') })
+    else {
+      const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })
+      anchor.dispatchEvent(event)
+      assert.equal(event.defaultPrevented, false)
+    }
+    r.stop()
+  }
+  delete globalThis.navigation
+})
+
 test('Navigation API: intercepts same-origin navigations, swaps main inside a view transition, disposes islands', async () => {
   globalThis.location = new URL('http://x.test/a')
   let h, vt = 0
@@ -669,7 +691,7 @@ test('predictive prefetch: visible links load while idle, intent jumps the queue
   doc.body.textContent = ''
   doc.body.innerHTML =
     '<main><a href="/b">B</a><a href="/c">C</a><a href="/logout">Out</a><div data-prefetch="false"><a href="/m">M</a></div>' +
-    '<a href="https://other.test/x">X</a><a href="/a">Here</a><a href="/v" download>V</a></main>'
+    '<a href="https://other.test/x">X</a><a href="/a">Here</a><a href="/v" download>V</a><a href="http://x.test/live-only/" rel="noopener ExTeRnAl">Live</a></main>'
   const p = predict({}, u => new URL(u).origin === 'http://x.test')
   p.scan()
   const links = io[0].els
@@ -854,6 +876,64 @@ test('prefetch keeps static build HTML but revalidates private/dynamic pages and
     const now=Date.now
     try {Date.now=()=>now()+2000;assert.equal(await publicPage.take('http://x.test/b'),null)} finally {Date.now=now;publicPage.stop()}
   } finally {globalThis.fetch=real}
+})
+
+test('sign-in document policies force full navigation in both directions and preserve same-policy swaps', async () => {
+  delete globalThis.navigation
+  const oldFetch = globalThis.fetch
+  const originalHead = doc.head.innerHTML
+  const marker = provider => `<meta name="brain-${provider}-signin" content="1">`
+  try {
+    for (const [from, to, reload] of [['', 'apple', true], ['', 'google', true], ['apple', '', true], ['google', '', true], ['apple', 'google', false], ['', '', false]]) {
+      hist()
+      const { m, disposed } = page()
+      doc.head.innerHTML = from ? marker(from) : ''
+      globalThis.fetch = async () => ({ ok: true, status: 200, headers: new Headers({ 'content-type': 'text/html' }), text: async () => `<head>${to ? marker(to) : ''}</head><main><h1>Target</h1></main>` })
+      const hard = [], instance = router({ parse, prefetch: false, hard: u => hard.push(u) })
+      try {
+        await instance.go('/b')
+        assert.deepEqual(hard, reload ? ['/b'] : [], `${from} -> ${to}`)
+        assert.equal(m.textContent, reload ? 'Page Aisland' : 'Target')
+        assert.equal(disposed(), reload ? 0 : 1)
+      } finally { instance.stop() }
+    }
+  } finally { globalThis.fetch = oldFetch; doc.head.innerHTML = originalHead }
+})
+
+test('Navigation API reloads a sign-in redirect before disposing or mounting the current view', async () => {
+  const oldFetch = globalThis.fetch, originalHead = doc.head.innerHTML
+  hist()
+  const { m, disposed } = page()
+  doc.head.innerHTML = ''
+  let listener, handler
+  globalThis.navigation = { addEventListener: (_, f) => { listener = f }, removeEventListener() {} }
+  globalThis.fetch = async () => ({ ok: true, status: 200, redirected: true, url: 'http://x.test/login', headers: new Headers({ 'content-type': 'text/html' }), text: async () => '<head><meta name="brain-apple-signin" content="1"></head><main>Sign in</main>' })
+  const hard = [], instance = router({ parse, prefetch: false, hard: u => hard.push(u) })
+  try {
+    listener({ canIntercept: true, destination: { url: 'http://x.test/b' }, intercept: o => { handler = o.handler } })
+    await handler()
+    assert.deepEqual(hard, ['http://x.test/b'])
+    assert.equal(m.textContent, 'Page Aisland')
+    assert.equal(disposed(), 0)
+  } finally { instance.stop(); delete globalThis.navigation; globalThis.fetch = oldFetch; doc.head.innerHTML = originalHead }
+})
+
+test('inert and body-only sign-in markers cannot change the document policy', async () => {
+  delete globalThis.navigation
+  const oldFetch = globalThis.fetch, originalHead = doc.head.innerHTML
+  try {
+    for (const content of [
+      '<head><!-- <meta name="brain-apple-signin" content="1"> --></head><main>Target</main>',
+      '<head><template><meta name="brain-google-signin" content="1"></template></head><main>Target</main>',
+      '<head><meta name="brain-apple-signin" content="0"></head><main>Target</main>',
+      '<head></head><main><meta name="brain-google-signin" content="1">Target</main>',
+    ]) {
+      hist(); page(); doc.head.innerHTML = ''
+      globalThis.fetch = async () => ({ ok: true, status: 200, headers: new Headers({ 'content-type': 'text/html' }), text: async () => content })
+      const hard = [], instance = router({ parse, prefetch: false, hard: u => hard.push(u) })
+      try { await instance.go('/b'); assert.deepEqual(hard, [], content) } finally { instance.stop() }
+    }
+  } finally { globalThis.fetch = oldFetch; doc.head.innerHTML = originalHead }
 })
 
 test('zero-JS destinations keep intent prefetch but use full document navigation', async () => {

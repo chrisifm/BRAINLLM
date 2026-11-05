@@ -14,8 +14,10 @@ export default function links(lang, b, p, re, s) {
     const t = tables[document.documentElement.getAttribute('lang')]
     if (!t || !h || h[0] !== '/' || h[1] === '/') return h
     const a = t.b && (h + '/').startsWith(t.b + '/') ? h.slice(t.b.length) || '/' : h
-    const m = /^[^?#]*/.exec(a)[0]
-    const n = t.s[m] || (t.re.test(m) && (m === '/' ? t.p : t.p + m))
+    const m = /^[^?#]*/.exec(a)[0], key = m.replace(/\/+$/, '') || '/'
+    if (key === t.p || key.startsWith(t.p + '/')) return h
+    let n = t.s[key] || (t.re.test(key) && (key === '/' ? t.p : t.p + key))
+    if (n && key !== '/' && m.endsWith('/') && !n.endsWith('/')) n += '/'
     return n ? t.b + n + a.slice(m.length) : h
   }
   G.__brainHref = to

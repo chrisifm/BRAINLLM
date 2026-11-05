@@ -1,0 +1,15 @@
+{
+  "id": "dev-startup-reaping",
+  "kind": "fix",
+  "title": "Reap dev backend children after startup timeout",
+  "why": "The startup deadline now consumes the killed child exit status instead of leaving a zombie until the caller exits.",
+  "changelog": [
+    "A dev backend that misses its startup deadline"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "codes": [],
+  "apis": [],
+  "affects": [
+    "server/**"
+  ]
+}

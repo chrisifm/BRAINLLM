@@ -22,6 +22,11 @@ already creates the test file; fill it before calling the task done.
 6. Cover the states, not only the happy path: empty list, validation errors, server error, disabled while busy.
 7. Run `brain test` (or `brain test comp/user-card.test.brain`). Each test also gets an accessibility audit of the
    mounted tree; `--heap` adds the leak watch that `brain doctor` always runs.
+   Before opening Chrome or reusing dev, current imported Brain sources are compiled, including transitive and
+   automatically discovered components. Fix those diagnostics first; unrelated components do not block a selected test.
+   Keep component tests on `/@brain/test.html`; stub navigation from mounted hooks or actions. A pending test that
+   destroys this document fails with its file/name, then headless restores the same test list for later tests.
+   Interrupted audits are incomplete; verify real navigation on an actual app page.
 
 ## What to test (in this order)
 1. What the user sees for given props (rendering and text).
@@ -84,3 +89,7 @@ Over MCP: `brain_test`, then `brain_doctor`.
   })
 </script>
 ```
+
+Generated component tests use type samples for required `<meta props>` and leave optional/defaulted props omitted.
+Replace empty object/list samples with representative nested data and add interaction/error cases; the generator
+does not infer an application-specific shape or prove a component correct with a single render assertion.

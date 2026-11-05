@@ -21,12 +21,14 @@ const TEST_HTML: &str = include_str!("test.html");
 const TEST_API_JS: &str = include_str!("test-api.js");
 const CLIENT_TAG: &str = "<script type=\"module\" src=\"/@brain/client.js\"></script><script>navigator.serviceWorker&&navigator.serviceWorker.getRegistrations().then(r=>r.forEach(x=>x.unregister()))</script>";
 
+#[derive(Default)]
 pub struct Compiled {
     pub js: String,
     pub css: String,
     pub deps: Vec<PathBuf>,
     /// Server code (`load` + `server:` functions), empty if there is none.
     pub server_js: String,
+    pub server: brain_lex::ServerMetadata,
 }
 
 /// `(src, path) -> Ok(Compiled) | Err(diags as SPEC §5 JSON objects)`.
@@ -64,28 +66,8 @@ pub type ProblemsFn = Arc<dyn Fn() -> String + Send + Sync>;
 /// `() -> resolved variables` (the caller also refreshes its `PUBLIC_*` constants for the compiler).
 pub type EnvLoader = Arc<dyn Fn() -> Vec<(String, String)> + Send + Sync>;
 
-/// Cheap source identity for the compile cache: a timestamp alone misses an atomic replacement that keeps it.
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct Stamp {
-    modified: SystemTime,
-    len: u64,
-    #[cfg(unix)]
-    inode: u64,
-}
-
-impl Stamp {
-    fn of(file: &Path) -> Option<Stamp> {
-        let meta = std::fs::metadata(file).ok()?;
-        Some(Stamp {
-            modified: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
-            len: meta.len(),
-            #[cfg(unix)]
-            inode: std::os::unix::fs::MetadataExt::ino(&meta),
-        })
-    }
-}
-
-type Cache = Arc<Mutex<HashMap<PathBuf, (Option<Stamp>, Arc<Compiled>)>>>;
+/// Exact source bytes identify dev output even when an editor preserves file metadata.
+type Cache = Arc<Mutex<HashMap<PathBuf, ([u8; 32], Arc<Compiled>)>>>;
 type Clients = Arc<Mutex<Vec<TcpStream>>>;
 /// Receives every dev server event as JSON: `{"type":"update"|"error"|"reload"|"client-error"|"log", …}`.
 pub type EventFn = Arc<dyn Fn(&str) + Send + Sync>;
@@ -709,6 +691,17 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
     {
         return http::respond_with(&mut s, 200, ctype, body.as_bytes(), req.method == "HEAD", &[("Cache-Control", "no-store")]);
     }
+    if let Some(probe) = native_proxy::probe_alias(&req.path) {
+        if !matches!(req.method.as_str(), "GET" | "HEAD") {
+            return http::respond_with(&mut s, 405, "application/json", b"{\"error\":\"Health probes require GET or HEAD\"}", false, &[("Allow", "GET, HEAD"), ("Cache-Control", "no-store")]);
+        }
+        req.path = probe.to_string();
+        return match ctx.backend_target() {
+            Ok(Some(target)) => native_proxy::serve(&mut s, &target, &req, None),
+            Ok(None) => http::respond_with(&mut s, 200, "application/json", b"{\"ok\":true}", req.method == "HEAD", &[("Cache-Control", "no-store")]),
+            Err(_) => http::respond_with(&mut s, 503, "application/json", b"{\"ok\":false}", req.method == "HEAD", &[("Cache-Control", "no-store")]),
+        };
+    }
     if native_proxy::handles(&req.path) {
         match ctx.backend_target(){
             Ok(Some(target))=>return if req.upgrade.stream_body.is_some() {native_proxy::serve_files(&mut s,&target,&req)} else {native_proxy::serve(&mut s,&target,&req,None)},
@@ -967,8 +960,17 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
             head,
         );
     }
-    // Page route (no extension) in an app with app.brain: the server builds the document (INTERNALS §10).
-    if Path::new(&req.path).extension().is_none() && ctx.root.join("app.brain").is_file() {
+    let public_file = resolve(&ctx.root.join("public"), &req.path).filter(|path| path.is_file());
+    let static_file = if file.is_dir() { file.join("index.html") } else { file.clone() };
+    let i18n = brain_pack::read_i18n(&ctx.root);
+    let (_, route_path) = split_locale(&i18n, &req.path);
+    let has_security_chain = public_file.is_some() && crate::route::resolve(&ctx.root, &route_path)
+        .filter(|route| !route.not_found)
+        .is_some_and(|route| !chain_files(&ctx.root, &route.view, "_guard.jsbrain").is_empty()
+            || !chain_files(&ctx.root, &route.view, "_middleware.jsbrain").is_empty());
+    let public_first = !static_file.exists() && public_file.is_some() && !has_security_chain;
+    // Explicit public files win over page fallback, including extensionless verification files.
+    if !public_first && (has_security_chain || Path::new(&req.path).extension().is_none()) && ctx.root.join("app.brain").is_file() {
         let (status, html, location) = app_page(ctx, &req);
         if let Some(loc) = location {
             return http::respond_with(
@@ -990,14 +992,10 @@ fn handle(mut s: TcpStream, ctx: &Ctx) -> io::Result<()> {
             ISOLATION,
         );
     }
-    let file = if file.is_dir() {
-        file.join("index.html")
-    } else {
-        file
-    };
+    let file = static_file;
     // public/ is served at the root, as in dist/
-    let file = match resolve(&ctx.root.join("public"), &req.path) {
-        Some(p) if !file.exists() && p.is_file() => p,
+    let file = match public_file {
+        Some(p) if !file.exists() => p,
         _ => file,
     };
     // browsers still ask for /favicon.ico: the app's SVG icon answers it, as in production
@@ -1168,7 +1166,7 @@ fn dev_seo(ctx: &Ctx, req: &http::Request) -> Option<(&'static str, String)> {
             continue;
         }
         let Ok(c) = compile_cached(ctx, &ctx.root.join(&r.view)) else { continue };
-        let func = ["sitemap", "paths"].into_iter().find(|f| c.server_js.contains(&format!("function {f}(")));
+        let func = if c.server.sitemap { Some("sitemap") } else if c.server.paths { Some("paths") } else { None };
         let Some(func) = func else { continue };
         let listed = (|| -> Result<String, String> {
             let url = server_module(ctx, &r.view, 0)?;
@@ -1301,7 +1299,7 @@ fn dev_seo(ctx: &Ctx, req: &http::Request) -> Option<(&'static str, String)> {
         return Some(("text/plain; charset=utf-8", brain_seo::files::llms_txt(&cfg, &list)));
     }
     let files = brain_seo::files::sitemaps(&cfg, &entries);
-    let empty = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n</urlset>\n";
+    let empty = format!("{}<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n</urlset>\n", brain_lex::branding::XML);
     match files.into_iter().find(|(n, _)| n == name) {
         Some((_, body)) => Some(("application/xml; charset=utf-8", body)),
         None if name == "sitemap.xml" => Some(("application/xml; charset=utf-8", empty.into())),
@@ -1389,7 +1387,7 @@ fn run_load(
 ) -> Result<String, String> {
     let c = compile_cached(ctx, &ctx.root.join(view))
         .map_err(|d| format!("{view} does not compile: {}", d.join(", ")))?;
-    if !(c.server_js.contains("function load(") || c.server_js.contains("const load =")) {
+    if !c.server.load {
         return Ok("{}".into());
     }
     let url = server_module(ctx, view, 0)?;
@@ -1638,6 +1636,9 @@ fn app_page(ctx: &Ctx, req: &http::Request) -> (u16, String, Option<String>) {
         let (t, tags) = brain_pack::prerender::seo_head(seo, None, &req.path, "");
         title = t.or(title);
         head_extra = format!("{tags}{head_extra}{head}");
+    }
+    if !head_extra.contains(brain_lex::branding::HTML) && !body.contains(brain_lex::branding::HTML) {
+        head_extra.push_str(brain_lex::branding::HTML);
     }
     if let Some(title) = title {
         let t = html_escape(&title);
@@ -1944,18 +1945,22 @@ fn rpc(ctx: &Ctx, req: &http::Request, id: &str) -> (u16, String, Vec<(String, S
     if raw.len() > limits.max_body_bytes() {
         return fail(413, &format!("Body larger than {} KB; raise brain.json server.maxBodyKB", limits.max_body_kb));
     }
-    // the module whose client stub calls "<hash>/<fn>"
-    let stub = format!("\"{hash}/{func}\"");
+    // Only compiler-owned RPC capabilities may select the module.
     let mut files = Vec::new();
-    rpc_candidates(&ctx.root, &mut files);
-    let Some(rel) = files.into_iter().find_map(|f| {
-        let c = compile_cached(ctx, &f).ok()?;
-        (c.js.contains(&stub) && c.server_js.contains(&format!("function {func}("))).then(|| {
-            f.strip_prefix(&ctx.root)
-                .ok()
-                .map(|r| r.to_string_lossy().replace('\\', "/"))
-        })?
-    }) else {
+    if !rpc_candidates(&ctx.root, &mut files) {
+        return fail(503, "RPC module inventory is incomplete; reduce the project tree or fix unreadable directories");
+    }
+    let mut owner = None;
+    for file in files {
+        let Ok(compiled) = compile_cached(ctx, &file) else { continue };
+        if compiled.server.rpc.iter().any(|rpc| rpc == id) {
+            let Ok(relative) = file.strip_prefix(&ctx.root) else { continue };
+            if owner.replace(relative.to_string_lossy().replace('\\', "/")).is_some() {
+                return fail(404, "Ambiguous function; resolve the component namespace collision");
+            }
+        }
+    }
+    let Some(rel) = owner else {
         return fail(404, "Unknown function");
     };
     let (url, server) = match (server_module(ctx, &rel, 0), runtime_server(ctx)) {
@@ -2213,26 +2218,25 @@ fn runtime_server(ctx: &Ctx) -> Option<String> {
 }
 
 /// .brain/.jsbrain files that may hold `server:` functions (the app tree minus build output and dot folders).
-fn rpc_candidates(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for e in rd.flatten() {
-        let p = e.path();
-        let name = p.file_name().unwrap_or_default().to_string_lossy();
-        if name.starts_with('.') || name == "dist" || name == "node_modules" || name == "public" {
-            continue;
+fn rpc_candidates(dir: &Path, out: &mut Vec<PathBuf>) -> bool {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>, entries: &mut usize, depth: usize) -> Option<()> {
+        if depth > 32 { return None; }
+        for entry in std::fs::read_dir(dir).ok()? {
+            let entry = entry.ok()?;
+            *entries += 1;
+            if *entries > 20000 { return None; }
+            let name = entry.file_name(); let name = name.to_string_lossy();
+            if name.starts_with('.') || matches!(name.as_ref(), "dist" | "node_modules" | "public" | "target") { continue; }
+            let kind = entry.file_type().ok()?;
+            if kind.is_dir() { walk(&entry.path(), out, entries, depth + 1)?; }
+            else if kind.is_file() && entry.path().extension().is_some_and(|x| x == "brain" || x == "jsbrain") && !name.ends_with(".test.brain") {
+                if out.len() >= 4096 { return None; }
+                out.push(entry.path());
+            }
         }
-        if p.is_dir() {
-            rpc_candidates(&p, out);
-        } else if p
-            .extension()
-            .is_some_and(|x| x == "brain" || x == "jsbrain")
-            && !name.ends_with(".test.brain")
-        {
-            out.push(p);
-        }
+        Some(())
     }
+    walk(dir, out, &mut 0, 0).is_some()
 }
 
 /// `seo(props)` as pairs and `head(props)` HTML of a view, evaluated in the load sidecar; None if the view has
@@ -2473,15 +2477,8 @@ impl Ctx {
 }
 
 fn compile_cached(ctx: &Ctx, file: &Path) -> Result<Arc<Compiled>, Vec<String>> {
-    let stamp = Stamp::of(file);
-    // Single-flight: concurrent requests cannot compile and publish the same stale entry twice.
+    // Serialize reads and compilation so concurrent requests cannot publish stale entries out of order.
     let mut cache = ctx.cache.lock().unwrap();
-    if let Some((t, c)) = cache.get(file)
-        && stamp.is_some()
-        && *t == stamp
-    {
-        return Ok(c.clone());
-    }
     let src = match std::fs::read_to_string(file) {
         Ok(src) => src,
         Err(error) => {
@@ -2490,10 +2487,13 @@ fn compile_cached(ctx: &Ctx, file: &Path) -> Result<Arc<Compiled>, Vec<String>> 
             return Err(diagnostics);
         }
     };
-    let source_hash = brain_pack::sha::sha256(src.as_bytes())
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<String>();
+    let digest = brain_pack::sha::sha256(src.as_bytes());
+    if let Some((cached_digest, compiled)) = cache.get(file)
+        && *cached_digest == digest
+    {
+        return Ok(compiled.clone());
+    }
+    let source_hash = digest.iter().map(|b| format!("{b:02x}")).collect::<String>();
     let out = match (ctx.compile)(&src, file) {
         Ok(compiled) => {
             compiler_feedback(ctx, file, Some(&source_hash), None);
@@ -2513,7 +2513,7 @@ fn compile_cached(ctx: &Ctx, file: &Path) -> Result<Arc<Compiled>, Vec<String>> 
         cache.clear();
     }
     if size <= 16 * 1024 * 1024 {
-        cache.insert(file.to_path_buf(), (stamp, out.clone()));
+        cache.insert(file.to_path_buf(), (digest, out.clone()));
     }
     Ok(out)
 }
@@ -2931,6 +2931,69 @@ mod tests {
     use super::*;
 
     #[test]
+    fn dev_health_aliases_map_get_and_head_to_native_probes() {
+        use std::io::{Read, Write};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!("brain-dev-health-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir(&root).unwrap();
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+        let _cleanup = Cleanup(root.clone());
+        let opts = || Options { root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: String::new(),
+            runtime: vec![], env: None, base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None };
+        let compile: CompileFn = Arc::new(|_, _| Ok(Compiled { server: Default::default(), js: String::new(), css: String::new(), deps: vec![], server_js: String::new() }));
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let target = format!("http://{}", listener.local_addr().unwrap());
+        let backend = std::thread::spawn(move || {
+            let start = std::time::Instant::now();
+            let mut seen = Vec::new();
+            while seen.len() < 6 && start.elapsed() < Duration::from_secs(10) {
+                match listener.accept() {
+                    Ok((mut socket, _)) => {
+                        socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                        let request = http::read_request(socket.try_clone().unwrap()).unwrap();
+                        let known = native_proxy::is_probe(&request.path);
+                        http::respond_with(&mut socket, if known { 503 } else { 404 }, "application/json", b"{\"code\":\"DRAINING\"}", request.method == "HEAD", &[]).unwrap();
+                        seen.push((request.method, request.path));
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(1)),
+                    Err(error) => panic!("owned backend accept failed: {error}"),
+                }
+            }
+            seen
+        });
+        let proxy = native_proxy::NativeProxy::new(&target).unwrap();
+        let mut dev = start_dev_with_native_proxy(opts(), compile.clone(), false, None, Some(proxy)).unwrap();
+        let ask = |address, method: &str, path: &str| {
+            let mut socket = std::net::TcpStream::connect(address).unwrap();
+            socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            socket.write_all(format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").as_bytes()).unwrap();
+            let mut response = String::new(); socket.read_to_string(&mut response).unwrap(); response
+        };
+        let mut responses = Vec::new();
+        let mut expected = Vec::new();
+        for path in ["/health", "/health/live", "/health/ready"] {
+            for method in ["GET", "HEAD"] {
+                responses.push((method, ask(dev.addr, method, &format!("/_brain{path}"))));
+                expected.push((method.to_string(), path.to_string()));
+            }
+        }
+        dev.stop();
+        assert_eq!(backend.join().unwrap(), expected);
+        for (method, response) in responses {
+            assert!(response.starts_with("HTTP/1.1 503") && response.contains("no-store"), "{response}");
+            if method == "HEAD" { assert!(response.ends_with("\r\n\r\n"), "{response}"); }
+        }
+        let mut alone = start_dev(opts(), compile, false, None).unwrap();
+        let response = ask(alone.addr, "GET", "/_brain/health");
+        let unknown = ask(alone.addr, "GET", "/_brain/health/other");
+        alone.stop();
+        assert!(response.starts_with("HTTP/1.1 200") && response.contains("no-store"), "{response}");
+        assert!(unknown.starts_with("HTTP/1.1 404"), "{unknown}");
+    }
+
+    #[test]
     fn dev_rpc_and_form_refusals_name_the_seen_origin_host_and_exact_fix() {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!("brain-dev-origin-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
@@ -2942,7 +3005,7 @@ mod tests {
             root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: String::new(),
             runtime: vec![], env: None, base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None,
         };
-        let compile: CompileFn = Arc::new(|_, _| Ok(Compiled { js: String::new(), css: String::new(), deps: vec![], server_js: String::new() }));
+        let compile: CompileFn = Arc::new(|_, _| Ok(Compiled { server: Default::default(), js: String::new(), css: String::new(), deps: vec![], server_js: String::new() }));
         let mut dev = start_dev(opts, compile, false, None).unwrap();
         let post = |path: &str, headers: &str| {
             use std::io::{Read, Write};
@@ -2973,7 +3036,7 @@ mod tests {
             root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: String::new(),
             runtime: vec![], env: None, base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None,
         };
-        let compile: CompileFn = Arc::new(|_, _| Ok(Compiled { js: String::new(), css: String::new(), deps: vec![], server_js: String::new() }));
+        let compile: CompileFn = Arc::new(|_, _| Ok(Compiled { server: Default::default(), js: String::new(), css: String::new(), deps: vec![], server_js: String::new() }));
         let mut legacy = start_dev(opts(), compile.clone(), false, None).unwrap();
         assert!(legacy.ctx.env_vars().is_empty(), "An absent loader must not expose ambient process variables");
         legacy.stop();
@@ -3050,6 +3113,127 @@ mod admission_tests {
     use super::*;
 
     #[test]
+    fn rpc_inventory_skips_links_and_reports_incomplete_scans() {
+        let root = std::env::temp_dir().join(format!("brain-rpc-inventory-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("comp")).unwrap();
+        std::fs::write(root.join("comp/real.brain"), "").unwrap();
+        std::fs::write(root.join("comp/ignored.test.brain"), "").unwrap();
+        #[cfg(unix)] {
+            std::os::unix::fs::symlink(&root, root.join("comp/loop")).unwrap();
+            std::os::unix::fs::symlink(root.join("comp/real.brain"), root.join("linked.brain")).unwrap();
+        }
+        let mut files=Vec::new(); assert!(rpc_candidates(&root, &mut files));
+        assert_eq!(files, [root.join("comp/real.brain")]);
+        let mut deep=root.clone(); for _ in 0..34 { deep=deep.join("nested"); }
+        std::fs::create_dir_all(deep).unwrap();
+        assert!(!rpc_candidates(&root, &mut Vec::new()));
+        assert!(!rpc_candidates(&root.join("missing"), &mut Vec::new()));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn dev_rpc_uses_exact_owned_metadata_and_invalidates_changed_candidates() {
+        let root = std::env::temp_dir().join(format!("brain-rpc-metadata-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("comp")).unwrap();
+        let candidate = root.join("comp/candidate.brain");
+        std::fs::write(&candidate, "decoy").unwrap();
+        let compiler: CompileFn = Arc::new(|source, _| Ok(Compiled {
+            js: "const example = \"abc123/save\";".into(), css: String::new(), deps: vec![],
+            server_js: "export function save() { return 'saved' }\nexport const $server=['save'];".into(),
+            server: brain_lex::ServerMetadata { rpc: if source == "owned" { vec!["abc123/save".into()] } else { vec![] }, ..Default::default() },
+        }));
+        let opts = Options { root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: String::new(),
+            runtime: vec![("server/server.mjs".into(), include_str!("../../../runtime/server/server.mjs").into()), ("server/native-sockets.mjs".into(), include_str!("../../../runtime/server/native-sockets.mjs").into()), ("server/llm.mjs".into(), include_str!("../../../runtime/server/llm.mjs").into())], env: None, base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None };
+        let dev = start_dev(opts, compiler, false, None).unwrap();
+        let call = |name: &str| {
+            let mut client = TcpStream::connect(dev.addr).unwrap();
+            client.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+            client.write_all(format!("POST /_r/abc123/{name} HTTP/1.1\r\nHost: {}\r\nOrigin: http://{}\r\nX-Brain-RPC: 1\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n[]", dev.addr, dev.addr).as_bytes()).unwrap();
+            let mut response=String::new(); client.read_to_string(&mut response).unwrap(); response
+        };
+        let response=call("save"); assert!(response.starts_with("HTTP/1.1 404"), "{response}");
+        std::fs::write(&candidate, "owned").unwrap();
+        let response=call("save"); assert!(response.starts_with("HTTP/1.1 200") && response.contains("saved"), "{response}");
+        let response=call("load"); assert!(response.starts_with("HTTP/1.1 404"), "{response}");
+        std::fs::write(root.join("comp/duplicate.brain"), "owned").unwrap();
+        let response=call("save"); assert!(response.starts_with("HTTP/1.1 404") && response.contains("Ambiguous"), "{response}");
+        std::fs::remove_file(root.join("comp/duplicate.brain")).unwrap();
+        std::fs::write(&candidate, "decoy").unwrap();
+        let response=call("save"); assert!(response.starts_with("HTTP/1.1 404"), "{response}");
+        drop(dev);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn dev_pages_without_seo_still_include_compiler_attribution() {
+        let root = std::env::temp_dir().join(format!("brain-dev-attribution-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("views")).unwrap();
+        std::fs::write(root.join("app.brain"), "<html><head><title>Example</title></head><body><slot /></body></html>").unwrap();
+        std::fs::write(root.join("views/index.brain"), "<main>Example</main>").unwrap();
+        let compiler: CompileFn = Arc::new(|_, _| Ok(Compiled { server: Default::default(), js: String::new(), css: String::new(), deps: vec![], server_js: String::new() }));
+        let opts = Options { root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: String::new(), runtime: vec![], env: None, base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None };
+        let dev = start_dev(opts, compiler, false, None).unwrap();
+        let mut client = TcpStream::connect(dev.addr).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        client.write_all(format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n", dev.addr.port()).as_bytes()).unwrap();
+        let mut response = String::new(); client.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        assert_eq!(response.matches(brain_lex::branding::HTML).count(), 1, "{response}");
+        assert!(response.find(brain_lex::branding::HTML).unwrap() < response.find("</head>").unwrap());
+        drop(dev);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn explicit_public_files_precede_dev_app_page_fallback() {
+        let root = std::env::temp_dir().join(format!("brain-dev-public-priority-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("public/.well-known")).unwrap();
+        std::fs::write(root.join("app.brain"), "<html><head><title>App</title></head><body><slot /></body></html>").unwrap();
+        std::fs::write(root.join("public/verification"), "public-verification").unwrap();
+        std::fs::write(root.join("public/.well-known/verification"), "well-known-verification").unwrap();
+        let compiler: CompileFn = Arc::new(|src, path| Ok(Compiled { server: Default::default(),js: String::new(), css: String::new(), deps: vec![], server_js: if path.extension().is_some_and(|ext|ext=="jsbrain") {src.into()} else {String::new()}}));
+        let opts = Options { root: root.clone(), host: "127.0.0.1".into(), port:0, head_prepend:String::new(),
+            runtime:vec![("server/server.mjs".into(), include_str!("../../../runtime/server/server.mjs").into()), ("server/native-sockets.mjs".into(), include_str!("../../../runtime/server/native-sockets.mjs").into()), ("server/llm.mjs".into(), include_str!("../../../runtime/server/llm.mjs").into())], env:None, base:"/".into(), diagnose:None, problems:None, upstream:None, mock:None };
+        let dev = start_dev(opts, compiler, false, None).unwrap();
+        for (path, value) in [("/verification", "public-verification"), ("/.well-known/verification", "well-known-verification")] {
+            for method in ["GET", "HEAD"] {
+                let mut client = TcpStream::connect(dev.addr).unwrap();
+                client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                client.write_all(format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",dev.addr.port()).as_bytes()).unwrap();
+                let mut response = String::new(); client.read_to_string(&mut response).unwrap();
+                assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+                let body = response.split_once("\r\n\r\n").unwrap().1;
+                assert_eq!(body, if method == "HEAD" { "" } else { value });
+            }
+        }
+        std::fs::create_dir_all(root.join("views/secure")).unwrap();
+        std::fs::write(root.join("views/secure/index.brain"),"<main>Private</main>").unwrap();
+        std::fs::write(root.join("views/secure/_guard.jsbrain"),"export default () => false").unwrap();
+        std::fs::write(root.join("public/secure"),"stale-private-output").unwrap();
+        std::fs::write(root.join("brain.json"),r#"{"i18n":{"default":"en","locales":["en","es"]}}"#).unwrap();
+        std::fs::write(root.join("views/secure/[slug].brain"),"<main>Private item</main>").unwrap();
+        std::fs::create_dir_all(root.join("public/es")).unwrap();
+        std::fs::write(root.join("public/es/secure"),"stale-private-output").unwrap();
+        // Replace the colliding extensionless file with a directory for the dynamic case.
+        std::fs::remove_file(root.join("public/secure")).unwrap();
+        std::fs::create_dir_all(root.join("public/secure")).unwrap();
+        std::fs::write(root.join("public/secure/report.txt"),"stale-private-output").unwrap();
+        for path in ["/secure", "/es/secure", "/secure/report.txt"] {
+            for method in ["GET", "HEAD"] {
+                let mut client = TcpStream::connect(dev.addr).unwrap();
+                client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                client.write_all(format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",dev.addr.port()).as_bytes()).unwrap();
+                let mut response=String::new();client.read_to_string(&mut response).unwrap();
+                assert!(response.starts_with("HTTP/1.1 403"),"{path}: {response}");
+                assert!(!response.contains("stale-private-output"));
+            }
+        }
+        drop(dev);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn connection_admission_is_bounded_and_releases_slots_on_unwind() {
         let active = Arc::new(AtomicUsize::new(0));
         let permits: Vec<_> = (0..MAX_CONNECTIONS)
@@ -3115,7 +3299,7 @@ mod admission_tests {
             std::fs::write(p, src).unwrap();
         }
         let root = root.canonicalize().unwrap();
-        let compiler: CompileFn = Arc::new(|src, _| Ok(Compiled { js: String::new(), css: String::new(), deps: vec![], server_js: src.into() }));
+        let compiler: CompileFn = Arc::new(|src, _| Ok(Compiled { server: Default::default(), js: String::new(), css: String::new(), deps: vec![], server_js: src.into() }));
         let opts = Options {
             root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: String::new(),
             runtime: vec![], env: None, base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None,
@@ -3154,7 +3338,7 @@ mod admission_tests {
         std::fs::write(root.join("views/home.brain"), "<p></p>").unwrap();
         std::fs::write(root.join("public/clip.mp4"), (0u8..100).collect::<Vec<u8>>()).unwrap();
         let root = root.canonicalize().unwrap();
-        let compiler: CompileFn = Arc::new(|src, _| Ok(Compiled { js: String::new(), css: String::new(), deps: vec![], server_js: src.into() }));
+        let compiler: CompileFn = Arc::new(|src, _| Ok(Compiled { server: Default::default(), js: String::new(), css: String::new(), deps: vec![], server_js: src.into() }));
         let opts = Options {
             root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: String::new(),
             runtime: vec![], env: None, base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None,
@@ -3208,7 +3392,7 @@ mod admission_tests {
             std::fs::write(p, src).unwrap();
         }
         let root = root.canonicalize().unwrap();
-        let compiler: CompileFn = Arc::new(|src, _| Ok(Compiled { js: String::new(), css: String::new(), deps: vec![], server_js: src.into() }));
+        let compiler: CompileFn = Arc::new(|src, path| Ok(Compiled { server: brain_lex::ServerMetadata { sitemap: path.ends_with("blog/[slug].brain"), load: path.ends_with("users/[id].brain"), ..Default::default() }, js: String::new(), css: String::new(), deps: vec![], server_js: src.into() }));
         let opts = Options {
             root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: String::new(),
             runtime: vec![], env: None, base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None,
@@ -3261,7 +3445,7 @@ mod admission_tests {
         std::fs::write(&source, "first").unwrap();
         let stamp = std::fs::metadata(&source).unwrap().modified().unwrap();
         let compiler: CompileFn = Arc::new(|src, _| {
-            Ok(Compiled { js: String::new(), css: String::new(), deps: vec![], server_js: src.into() })
+            Ok(Compiled { server: Default::default(), js: String::new(), css: String::new(), deps: vec![], server_js: src.into() })
         });
         let opts = Options {
             root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: String::new(),
@@ -3276,6 +3460,18 @@ mod admission_tests {
         std::fs::rename(&staged, &source).unwrap();
         assert_eq!(std::fs::metadata(&source).unwrap().modified().unwrap(), stamp);
         assert_eq!(compile_cached(&dev.ctx, &source).unwrap().server_js, "second edit");
+        // Equal-length in-place writes can preserve every metadata field used by a cache stamp.
+        let previous = compile_cached(&dev.ctx, &source).unwrap();
+        assert!(Arc::ptr_eq(&previous, &compile_cached(&dev.ctx, &source).unwrap()));
+        std::fs::write(&source, "third  edit").unwrap();
+        std::fs::File::options().write(true).open(&source).unwrap().set_modified(stamp).unwrap();
+        assert_eq!(std::fs::metadata(&source).unwrap().modified().unwrap(), stamp);
+        assert_eq!(compile_cached(&dev.ctx, &source).unwrap().server_js, "third  edit");
+        // A timestamp-only save should keep the compiled value when the content is identical.
+        let current = compile_cached(&dev.ctx, &source).unwrap();
+        std::fs::File::options().write(true).open(&source).unwrap()
+            .set_modified(stamp + std::time::Duration::from_secs(10)).unwrap();
+        assert!(Arc::ptr_eq(&current, &compile_cached(&dev.ctx, &source).unwrap()));
         drop(dev);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -3296,7 +3492,7 @@ mod admission_tests {
         let compiler: CompileFn = Arc::new(move |src, _| {
             count.fetch_add(1, Ordering::SeqCst);
             std::thread::sleep(Duration::from_millis(5));
-            Ok(Compiled {
+            Ok(Compiled { server: Default::default(),
                 js: "export default function(){}".into(),
                 css: String::new(),
                 deps: vec![dep.clone()],
@@ -3394,7 +3590,7 @@ mod admission_tests {
         std::fs::write(root.join("lib/rank.jsbrain"),"server").unwrap();
         std::fs::write(root.join("lib/plain.jsbrain"),"client").unwrap();
         let root=root.canonicalize().unwrap();
-        let compiler:CompileFn=Arc::new(|source,_|Ok(if source=="server"{Compiled{js:String::new(),css:String::new(),deps:Vec::new(),server_js:"export default {}".into()}}else{Compiled{js:"export default {}".into(),css:String::new(),deps:Vec::new(),server_js:String::new()}}));
+        let compiler:CompileFn=Arc::new(|source,_|Ok(if source=="server"{Compiled{server:Default::default(),js:String::new(),css:String::new(),deps:Vec::new(),server_js:"export default {}".into()}}else{Compiled{server:Default::default(),js:"export default {}".into(),css:String::new(),deps:Vec::new(),server_js:String::new()}}));
         let options=Options{root:root.clone(),host:"127.0.0.1".into(),port:0,head_prepend:String::new(),runtime:Vec::new(),env:None,base:"/".into(),diagnose:None,problems:None,upstream:None,mock:None};
         let mut dev=start_dev(options,compiler,false,None).unwrap();
         let request=|address,path:&str|{let mut socket=TcpStream::connect(address).unwrap();socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();socket.write_all(format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").as_bytes()).unwrap();let mut bytes=Vec::new();socket.read_to_end(&mut bytes).unwrap();String::from_utf8(bytes).unwrap()};
@@ -3432,7 +3628,7 @@ mod admission_tests {
                 assert!(matches!(error.kind(),io::ErrorKind::WouldBlock|io::ErrorKind::TimedOut),"websocket data reached the browser before the agent callback");
             }
         });
-        let compiler:CompileFn=Arc::new(|source,_|if source=="bad"{Err(vec!["{\"code\":\"B0201\",\"file\":\"comp/example.brain\",\"line\":1,\"col\":1,\"msg\":\"private-diagnostic-value\",\"fix\":\"private-source-value\"}".into()])}else{Ok(Compiled{js:"export default function(){}".into(),css:String::new(),deps:Vec::new(),server_js:String::new()})});
+        let compiler:CompileFn=Arc::new(|source,_|if source=="bad"{Err(vec!["{\"code\":\"B0201\",\"file\":\"comp/example.brain\",\"line\":1,\"col\":1,\"msg\":\"private-diagnostic-value\",\"fix\":\"private-source-value\"}".into()])}else{Ok(Compiled{server:Default::default(),js:"export default function(){}".into(),css:String::new(),deps:Vec::new(),server_js:String::new()})});
         let options=Options{root:root.clone(),host:"127.0.0.1".into(),port:0,head_prepend:String::new(),runtime:Vec::new(),env:None,base:"/".into(),diagnose:None,problems:None,upstream:None,mock:None};
         let mut dev=start_dev(options,compiler,false,Some(callback)).unwrap();
         let request=|address|{let mut socket=TcpStream::connect(address).unwrap();socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();socket.write_all(b"GET /comp/example.brain HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").unwrap();let mut bytes=Vec::new();socket.read_to_end(&mut bytes).unwrap();String::from_utf8(bytes).unwrap()};
@@ -3450,7 +3646,7 @@ mod admission_tests {
         let root = std::env::temp_dir().join(format!("brain-dev-body-limit-{}-{}", std::process::id(), now_ms()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("brain.json"), r#"{"name":"x","server":{"maxBodyKB":2}}"#).unwrap();
-        let compiler: CompileFn = Arc::new(|_, _| Ok(Compiled { js: String::new(), css: String::new(), deps: vec![], server_js: String::new() }));
+        let compiler: CompileFn = Arc::new(|_, _| Ok(Compiled { server: Default::default(), js: String::new(), css: String::new(), deps: vec![], server_js: String::new() }));
         let opts = Options { root: root.clone(), host: "127.0.0.1".into(), port: 0, head_prepend: String::new(), runtime: vec![], env: None, base: "/".into(), diagnose: None, problems: None, upstream: None, mock: None };
         let mut dev = start_dev(opts, compiler, false, None).unwrap();
         let connect = || { let s = TcpStream::connect(dev.addr).unwrap(); s.set_read_timeout(Some(Duration::from_secs(3))).unwrap(); s };

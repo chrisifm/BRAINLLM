@@ -1,0 +1,12 @@
+{
+  "id": "reload-source-advice",
+  "kind": "change",
+  "title": "Reload source freshness advice",
+  "why": "Reload serves the existing output and must not imply that edited source was recompiled.",
+  "changelog": ["Successful reloads advise when source timestamps"],
+  "guide": "brain guide server",
+  "codes": [],
+  "apis": ["brain reload"],
+  "steps": ["Run brain build before brain reload after source changes; use brain run during source development. Reload timestamp advice is bounded and is not a source-hash verification."],
+  "finds": [{"glob": "brain.json"}]
+}

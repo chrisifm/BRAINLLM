@@ -17,7 +17,7 @@ const VOID: &[&str] = &["area", "base", "br", "col", "embed", "hr", "img", "inpu
 /// when it settles, only this table changes.
 const WEBMCP_ATTRS: &[(&str, &str)] = &[("tool", "toolname"), ("tool-description", "tooldescription"), ("tool-param-description", "toolparamdescription")];
 
-const ID_REFS: &[&str] = &["for", "aria-labelledby", "aria-describedby", "aria-controls", "aria-owns", "popovertarget", "list", "form"];
+const ID_REFS: &[&str] = &["for", "aria-labelledby", "aria-describedby", "aria-controls", "aria-owns", "aria-activedescendant", "aria-details", "aria-errormessage", "aria-flowto", "popovertarget", "list", "form", "headers", "itemref", "commandfor"];
 
 enum Item<'n> {
     Text(String),
@@ -165,11 +165,21 @@ impl Gen<'_> {
 
     /// JS for an attribute value computed at run time (`s`), as `() => …` when `dynamic`. An `id` or ID reference
     /// (`for`, `aria-controls`…) goes through `$sx` so the instance suffix reaches it like a static one (#308).
-    fn id_wrap(&mut self, name: &str, s: String, dynamic: bool) -> String {
+    fn id_wrap(&mut self, name: &str, s: String, dynamic: bool, caller_prop: Option<&str>) -> String {
         let wrap = (name == "id" && self.dyn_ids) || (ID_REFS.contains(&name) && (self.dyn_ids || !self.ids.is_empty()));
         let s = if wrap {
-            self.uses_sx = true;
-            format!("$sx({s}, $u)")
+            match caller_prop {
+                Some(prop) if !self.prop_defaults.contains_key(prop) => s,
+                Some(prop) => {
+                    // A nullish/omitted value selects the component's own default, which remains local.
+                    self.uses_sx = true;
+                    format!("($p[{}] == null ? $sx({s}, $u) : {s})", js_str(prop))
+                }
+                None => {
+                    self.uses_sx = true;
+                    format!("$sx({s}, $u)")
+                }
+            }
         } else {
             s
         };
@@ -187,11 +197,14 @@ impl Gen<'_> {
                 None => false,
             },
             Expr::Num { .. } | Expr::Str { .. } | Expr::Bool { .. } | Expr::Null(_) | Expr::Regex { .. } | Expr::This(_) | Expr::Func(_) => false,
-            // `t('key')` resolved at build is a constant (§37).
+            // A literal dictionary lookup has no reactive inputs. Locale switches are full document loads;
+            // evaluate at component creation (never module initialization, which would capture another SSR job).
             Expr::Call { callee, args, .. }
                 if matches!(callee.unparen(), Expr::Ident(i) if i.name == "t" && self.scopes.lookup("t").is_none())
-                    && matches!(args.first().map(Expr::unparen), Some(Expr::Str { value, .. }) if self.opts.i18n.as_ref().is_some_and(|(_, m)| m.contains_key(value)))
-                    && args.get(1).is_none_or(|a| !self.is_dynamic(a)) =>
+                    && self.frames.last().is_none_or(|frame|!frame.props.contains_key("t"))
+                    && matches!(args.first().map(Expr::unparen), Some(Expr::Str { .. }))
+                    && (args.len()==1 || (matches!(args.first().map(Expr::unparen), Some(Expr::Str { value, .. }) if self.opts.i18n.as_ref().is_some_and(|(_,texts)|texts.contains_key(value)))
+                        && args.iter().skip(1).all(|argument|!self.is_dynamic(argument)))) =>
             {
                 false
             }
@@ -342,7 +355,11 @@ impl Gen<'_> {
         let needs_var = e.attrs.iter().any(|a| match (a.kind, &a.value) {
             (AttrKind::Plain, AttrValue::Text(t)) => (a.name == "id" && self.ids.contains(t)) || self.id_ref(&a.name, t).is_some(),
             (AttrKind::Plain, AttrValue::None) => false,
-            (AttrKind::Plain, AttrValue::Expr(x)) => !matches!(x.unparen(), Expr::Str { .. } | Expr::Num { .. } | Expr::Bool { .. } | Expr::Null(_)),
+            (AttrKind::Plain, AttrValue::Expr(x)) => match x.unparen() {
+                Expr::Str { value, .. } => (a.name == "id" && self.ids.contains(value)) || self.id_ref(&a.name, value).is_some(),
+                Expr::Num { .. } | Expr::Bool { .. } | Expr::Null(_) => false,
+                _ => true,
+            },
             _ => true,
         });
         let el = if needs_var { f.var(self, path) } else { String::new() };
@@ -363,14 +380,30 @@ impl Gen<'_> {
                 (AttrKind::Plain, AttrValue::Text(t)) => f.html.push_str(&format!(" {}=\"{}\"", a.name, esc_attr(t))),
                 (AttrKind::Plain, AttrValue::None) => f.html.push_str(&format!(" {}", a.name)),
                 (AttrKind::Plain, AttrValue::Expr(x)) => match x.unparen() {
+                    Expr::Str { value, .. } if a.name == "id" && self.ids.contains(value) => {
+                        let attr = self.rt("attr");
+                        actions.push(format!("{attr}({el}, \"id\", {} + $u);", js_str(value)));
+                    }
+                    Expr::Str { value, .. } if self.id_ref(&a.name, value).is_some() => {
+                        let v = self.id_ref(&a.name, value).unwrap_or_default();
+                        let name = if a.name == "xlink:href" { "href" } else { a.name.as_str() };
+                        let attr = self.rt("attr");
+                        actions.push(format!("{attr}({el}, {}, {v});", js_str(name)));
+                    }
                     Expr::Str { value, .. } => f.html.push_str(&format!(" {}=\"{}\"", a.name, esc_attr(&html_escape(value)))),
                     Expr::Num { raw, .. } => f.html.push_str(&format!(" {}=\"{raw}\"", a.name)),
                     Expr::Bool { value: true, .. } => f.html.push_str(&format!(" {}", a.name)),
                     Expr::Bool { value: false, .. } | Expr::Null(_) => {}
                     _ => {
                         let dynamic = self.is_dynamic(x);
+                        // A direct prop is an explicit document identity supplied by the caller. A local with
+                        // the same spelling (for example an each item) remains component-owned.
+                        let caller_prop = match x.unparen() {
+                            Expr::Ident(id) if self.scopes.lookup(&id.name) == Some(Kind::Prop) => Some(id.name.as_str()),
+                            _ => None,
+                        };
                         let s = self.expr(x);
-                        let v = self.id_wrap(&a.name, s, dynamic);
+                        let v = self.id_wrap(&a.name, s, dynamic, caller_prop);
                         let attr = self.rt("attr");
                         actions.push(format!("{attr}({el}, {}, {v});", js_str(&a.name)));
                     }
@@ -388,7 +421,14 @@ impl Gen<'_> {
                         }
                     }
                     tpl.push('`');
-                    let v = self.id_wrap(&a.name, tpl, dynamic);
+                    let caller_prop = match parts.as_slice() {
+                        [AttrPart::Expr(x)] => match x.unparen() {
+                            Expr::Ident(id) if self.scopes.lookup(&id.name) == Some(Kind::Prop) => Some(id.name.as_str()),
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    let v = self.id_wrap(&a.name, tpl, dynamic, caller_prop);
                     let attr = self.rt("attr");
                     actions.push(format!("{attr}({el}, {}, {v});", js_str(&a.name)));
                 }
@@ -520,6 +560,7 @@ impl Gen<'_> {
                 let Some(frame) = self.frames.pop() else { return String::new() };
                 let child_hash = std::mem::replace(&mut self.hash, frame.parent_hash.clone());
                 let child_ids = std::mem::replace(&mut self.ids, frame.parent_ids.clone());
+                let child_dyn_ids = std::mem::replace(&mut self.dyn_ids, frame.parent_dyn_ids);
                 let code = if normalize(&frame.children, false).is_empty() {
                     String::new()
                 } else {
@@ -528,6 +569,7 @@ impl Gen<'_> {
                 };
                 self.hash = child_hash;
                 self.ids = child_ids;
+                self.dyn_ids = child_dyn_ids;
                 self.frames.push(frame);
                 code
             }
@@ -793,7 +835,10 @@ impl Gen<'_> {
         self.inlined_sources.insert(source);
         let parent_hash = std::mem::replace(&mut self.hash, child_hash);
         let parent_ids = std::mem::take(&mut self.ids);
-        self.frames.push(inline::Frame { props, children: r.children.clone(), parent_hash, parent_ids });
+        // Eligible inline UI has no IDs. Its references must behave like a separately compiled child,
+        // even when the parent owns computed IDs or has a same-named defaulted prop.
+        let parent_dyn_ids = std::mem::replace(&mut self.dyn_ids, false);
+        self.frames.push(inline::Frame { props, children: r.children.clone(), parent_hash, parent_ids, parent_dyn_ids });
         self.indent += 1;
         let body = self.fragment(&comp.template, true);
         self.indent -= 1;
@@ -801,6 +846,7 @@ impl Gen<'_> {
         if let Some(f) = frame {
             self.hash = f.parent_hash;
             self.ids = f.parent_ids;
+            self.dyn_ids = f.parent_dyn_ids;
         }
         // `fragment` ends in `return <root>;`: mount it at the anchor instead.
         let body = match body.rfind("return ") {

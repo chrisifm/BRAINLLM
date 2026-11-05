@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile, readdir, rm, readFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, copyFile, writeFile, readdir, rm, readFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -51,6 +51,23 @@ ${complete};});`)
   const result = await codexGenerate('Synthetic SPEC', 'Synthetic brief', { ...pins, ...f })
   assert.deepEqual(result, { text: '<p>Generated</p>\n', input: 120, output: 40, cachedInput: 20, cost: null })
   assert.deepEqual(await readdir(f.dir), ['fake-codex'])
+})
+
+test('non-terminal diagnostic items do not masquerade as tools or bypass completion and tool checks', async (t) => {
+  const notice = `console.log(JSON.stringify({type:'item.completed',item:{type:'error',message:'synthetic-private-marker'}}));`
+  const f = await fixture(t, `${notice}require('node:fs').writeFileSync(${last},'<p>Generated</p>');${complete}`)
+  const result = await codexGenerate('spec', 'brief', { ...pins, ...f })
+  assert.equal(result.text, '<p>Generated</p>')
+  assert(!JSON.stringify(result).includes('synthetic-private-marker'))
+  for (const [body, expected] of [
+    [notice, /no successful completed turn/],
+    [`${notice}console.log(JSON.stringify({type:'turn.failed',error:{message:'synthetic-private-marker'}}));`, /generation failed/],
+    [`${notice}console.log(JSON.stringify({type:'item.started',item:{type:'command_execution',command:'synthetic-private-marker'}}));${complete}`, /tools are forbidden/],
+    [`console.log(JSON.stringify({type:'item.started',item:{type:'error',message:'notice',command:'synthetic-private-marker'}}));${complete}`, /tools are forbidden/],
+  ]) {
+    const failed = await fixture(t, body)
+    await assert.rejects(codexGenerate('spec','brief',{...pins,...failed}), error => expected.test(error.message) && !error.message.includes('synthetic-private-marker'))
+  }
 })
 
 test('failed, malformed, missing-usage and tool-using generations fail without leaking stderr or transcripts', async (t) => {
@@ -143,7 +160,7 @@ test('frozen run artifacts compose with the existing gate and preserve unknown c
   const stage=`adapter-test-${process.pid}-${Date.now()}`
   const dottedModel='synthetic-model.v1'
   const tag=`codex-${dottedModel}-medium-${stage}`
-  t.after(async()=>{await rm(join(here,'results',tag),{recursive:true,force:true});await rm(join(here,'results',`${tag}-03-login.json`),{force:true})})
+  t.after(async()=>{await rm(join(here,'results',tag),{recursive:true,force:true});await rm(join(here,'results',`${tag}.json`),{force:true})})
   const f = await fixture(t, `require('node:fs').writeFileSync(${last},'<p>Generated</p>\\n');${complete}`)
   const brain=join(f.dir,'brain')
   await writeFile(brain, `
@@ -161,14 +178,69 @@ const originalSpawn=cp.spawn,originalExec=cp.execFileSync;
 cp.spawn=function(bin,args,options){return bin===${JSON.stringify(f.script)}?originalSpawn(process.execPath,[bin,...args],options):originalSpawn(bin,args,options)};
 cp.execFileSync=function(bin,args,options){const fake=bin===${JSON.stringify(brain)}||(dirname(bin)===${JSON.stringify(join(work,'bin'))}&&basename(bin).startsWith('brain-'));return fake?originalExec(process.execPath,[bin,...args],options):originalExec(bin,args,options)};
 syncBuiltinESMExports();`)
-  const r=await exec(process.execPath,['--import',preload,join(here,'run.mjs'),'--provider','codex','--model',dottedModel,'--effort',pins.effort,'--brain',brain,'--fix','0','--only','03-login','--stage',stage],{...process.env,BRAIN_CODEX_BIN:f.script,QA_LLM_WORK:work})
+  const r=await exec(process.execPath,['--import',preload,join(here,'run.mjs'),'--provider','codex','--model',dottedModel,'--effort',pins.effort,'--brain',brain,'--fix','0','--stage',stage],{...process.env,BRAIN_CODEX_BIN:f.script,QA_LLM_WORK:work})
   assert.equal(r.code,0,r.err)
-  const artifact=join(here,'results',`${tag}-03-login.json`)
+  const artifact=join(here,'results',`${tag}.json`)
   const {summary,rows}=JSON.parse(await readFile(artifact,'utf8'))
   assert.equal(summary.provider,'codex');assert.equal(summary.effort,'medium');assert.equal(summary.costUSD,null)
-  assert.equal(summary.stable,true);assert.equal(summary.n,1);assert.equal(summary.firstPass,'1/1');assert.equal(summary.infraFail,0)
+  assert.equal(summary.stable,true);assert.equal(summary.n,20);assert.equal(summary.firstPass,'20/20');assert.equal(summary.infraFail,0)
   assert.equal(rows[0].tries[0].cost,null);assert.equal(rows[0].tries[0].cachedInput,20)
-  const gate=await exec(process.execPath,[join(here,'gate.mjs'),artifact])
+  const gateDir=join(f.dir,'gate')
+  await mkdir(gateDir)
+  for(const file of ['gate.mjs','compare.mjs','codex.mjs']) await copyFile(join(here,file),join(gateDir,file))
+  await writeFile(join(gateDir,'baseline.json'),JSON.stringify({[`codex|${dottedModel}|medium|spec`]:{firstPass:20,n:20,specSha:summary.specSha}}))
+  const gate=await exec(process.execPath,[join(gateDir,'gate.mjs'),artifact])
   assert.equal(gate.code,0,gate.out+gate.err)
-  assert.match(gate.out,/baseline none → PASS/)
+  assert.match(gate.out,/baseline 20\/20 .* → PASS/)
+
+  // A CLI startup failure must not trigger the remaining paid generations in the cohort.
+  const failedStage=stage+'-infra',failedTag=tag+'-infra',calls=join(f.dir,'calls')
+  t.after(async()=>{await rm(join(here,'results',failedTag),{recursive:true,force:true});await rm(join(here,'results',failedTag+'.json'),{force:true})})
+  await writeFile(f.script, `const fs=require('node:fs'),file=${JSON.stringify(calls)};
+fs.writeFileSync(file,String((fs.existsSync(file)?Number(fs.readFileSync(file,'utf8')):0)+1));
+console.log(JSON.stringify({type:'turn.failed',error:{message:'synthetic-private-marker'}}));`)
+  const failed=await exec(process.execPath,['--import',preload,join(here,'run.mjs'),'--provider','codex','--model',dottedModel,'--effort',pins.effort,'--brain',brain,'--fix','0','--conc','1','--stage',failedStage],{...process.env,BRAIN_CODEX_BIN:f.script,QA_LLM_WORK:work})
+  assert.equal(Number(await readFile(calls,'utf8')),1,'stop the paid queue after the first infrastructure failure')
+  assert.equal(failed.code,1,failed.err)
+  const failedArtifact=join(here,'results',failedTag+'.json')
+  const incomplete=JSON.parse(await readFile(failedArtifact,'utf8'))
+  assert.equal(incomplete.summary.n,0);assert.equal(incomplete.summary.infraFail,20)
+  assert.equal(incomplete.rows.length,20)
+  assert.equal(incomplete.rows.filter(row=>row.infraFail==='not attempted after infrastructure failure').length,19)
+  const refused=await exec(process.execPath,[join(here,'gate.mjs'),failedArtifact])
+  assert.equal(refused.code,1,refused.out+refused.err)
+
+  // Synchronize two real worker slots: A fails, then B's already-running call returns source needing a fix.
+  const concurrentStage=stage+'-concurrent',concurrentTag=tag+'-concurrent'
+  const started=join(f.dir,'started'),observed=join(f.dir,'observed'),concurrentCalls=join(f.dir,'concurrent-calls')
+  t.after(async()=>{await rm(join(here,'results',concurrentTag),{recursive:true,force:true});await rm(join(here,'results',concurrentTag+'.json'),{force:true})})
+  await writeFile(preload,(await readFile(preload,'utf8'))+`
+import fs from 'node:fs';const reportError=console.error;
+console.error=(...args)=>{if(args[0]==='01-counter')fs.writeFileSync(${JSON.stringify(observed)},'seen');reportError(...args)};
+`)
+  await writeFile(brain,(await readFile(brain,'utf8')).replace("else if(a[0]==='check') console.log('[]');", "else if(a[0]==='check'){console.log(JSON.stringify([{code:'B0101',msg:'Synthetic source needs correction'}]));process.exitCode=1;}"))
+  await writeFile(f.script,`const fs=require('node:fs');
+fs.appendFileSync(${JSON.stringify(concurrentCalls)},'call\\n');
+let input='';process.stdin.setEncoding('utf8');process.stdin.on('data',part=>input+=part);
+process.stdin.on('end',async()=>{
+const first=input.includes('Write the file views/counter.brain.');
+if(!first)fs.writeFileSync(${JSON.stringify(started)},'started');
+const barrier=first?${JSON.stringify(started)}:${JSON.stringify(observed)};
+for(let i=0;!fs.existsSync(barrier);i++){if(i===500)process.exit(2);await new Promise(resolve=>setTimeout(resolve,10));}
+if(first)console.log(JSON.stringify({type:'turn.failed'}));
+else {fs.writeFileSync(${last},'<p>Generated</p>');${complete};}
+});`)
+  const concurrent=await exec(process.execPath,['--import',preload,join(here,'run.mjs'),'--provider','codex','--model',dottedModel,'--effort',pins.effort,'--brain',brain,'--fix','3','--conc','2','--stage',concurrentStage],{...process.env,BRAIN_CODEX_BIN:f.script,QA_LLM_WORK:work})
+  assert.equal((await readFile(concurrentCalls,'utf8')).trim().split('\n').length,2,'no correction call may start after another worker fails infrastructure')
+  assert.equal(concurrent.code,1,concurrent.err)
+})
+
+
+test('generation runner help exits before binary or provider access', async () => {
+  for (const flag of ['--help', '-h']) {
+    const result = await exec(process.execPath, [join(here, 'run.mjs'), flag, '--provider', 'invalid', '--brain', '/missing-brain'])
+    assert.equal(result.code, 0)
+    assert.match(result.out, /^Usage: node bench\/llm\/run\.mjs/)
+    assert.equal(result.err, '')
+  }
 })

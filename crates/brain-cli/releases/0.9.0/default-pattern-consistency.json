@@ -1,0 +1,18 @@
+{
+  "id": "default-pattern-consistency",
+  "kind": "fix",
+  "title": "Validate default values against field patterns",
+  "why": "A declared default must pass the same field pattern as any submitted value before a migration or explicit repair can write it.",
+  "changelog": [
+    "Defaults must satisfy their field patterns"
+  ],
+  "guide": "docs/backend/import.md",
+  "codes": [
+    "B0735"
+  ],
+  "apis": [],
+  "affects": [
+    "server/resources/*/schema.jsbrain",
+    "server/jobs/*/schema.jsbrain"
+  ]
+}

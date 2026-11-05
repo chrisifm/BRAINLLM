@@ -10,6 +10,7 @@ pub struct Session {
 pub fn enabled(args: &[String], terminals: bool, env: &dyn Fn(&str) -> Option<String>) -> bool {
     terminals
         && !args.iter().any(|a| matches!(a.as_str(), "--json" | "--profile" | "--quiet" | "-q" | "--progress=off" | "--progress=plain"))
+        && !args.windows(2).any(|pair| pair[0] == "--progress" && matches!(pair[1].as_str(), "off" | "plain"))
         && !["CI", "BRAIN_MCP"].iter().any(|k| env(k).is_some_and(|v| !v.is_empty()))
         && env("TERM").as_deref() != Some("dumb")
 }
@@ -50,6 +51,8 @@ mod tests {
         let args = |a: &[&str]| a.iter().map(|v| v.to_string()).collect::<Vec<_>>();
         assert!(enabled(&[], true, &|_| None));
         assert!(!enabled(&args(&["--progress=rich"]), false, &|_| None));
+        assert!(!enabled(&args(&["--progress", "off"]), true, &|_| None));
+        assert!(!enabled(&args(&["--progress", "plain"]), true, &|_| None));
         for flag in ["--json", "--profile", "--quiet", "-q", "--progress=off", "--progress=plain"] {
             assert!(!enabled(&args(&[flag, "--progress=rich"]), true, &|_| None), "{flag}");
         }

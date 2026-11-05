@@ -117,12 +117,12 @@ pub fn register(base: &str) -> String {
 /// `brain/app-*`/`brain/app:*` under `/app/`), never another app's or unrelated caches on the same origin.
 pub fn kill_sw(base: &str) -> String {
     let ns = format!("brain{}", base.trim_end_matches('/'));
-    format!("self.addEventListener('install',()=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(n=>n.startsWith('{ns}-')||n.startsWith('{ns}:')).map(n=>caches.delete(n)))).then(()=>self.registration.unregister()).then(()=>self.clients.matchAll({{type:'window'}})).then(c=>c.forEach(w=>w.navigate(w.url)))))\n")
+    brain_lex::branding::code(&format!("self.addEventListener('install',()=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(n=>n.startsWith('{ns}-')||n.startsWith('{ns}:')).map(n=>caches.delete(n)))).then(()=>self.registration.unregister()).then(()=>self.clients.matchAll({{type:'window'}})).then(c=>c.forEach(w=>w.navigate(w.url)))))\n"))
 }
 
 /// Minimal built-in offline page (used when the app has no `views/_offline.brain`).
 /// No inline event handler: the CSP allows inline scripts by hash only.
-const OFFLINE_HTML: &str = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Offline</title><style>body{font:16px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;padding:16px}</style></head><body><main><h1>You are offline</h1><p>This page has not been visited yet. Reconnect and try again.</p><button id=\"retry\">Retry</button></main><script>retry.onclick=()=>location.reload()</script></body></html>";
+const OFFLINE_HTML: &str = "<!doctype html><!-- by BRAINLLM https://chrisifm.github.io/BRAINLLM/ --><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Offline</title><style>body{font:16px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;padding:16px}</style></head><body><main><h1>You are offline</h1><p>This page has not been visited yet. Reconnect and try again.</p><button id=\"retry\">Retry</button></main><script>retry.onclick=()=>location.reload()</script></body></html>";
 
 /// Security headers on every response (INTERNALS §31); with `SECURITY_DOC` the same set runtime/server/server.mjs sends.
 pub const SECURITY: &[(&str, &str)] = &[
@@ -190,10 +190,14 @@ pub fn google_csp()->Vec<(String,String)> {[("script-src","https://accounts.goog
 pub fn apple_csp()->Vec<(String,String)> {vec![("script-src".into(),"https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/".into())]}
 fn google_paths(pages:&[PageRef],files:&BTreeMap<String,String>)->BTreeMap<String,String> {
     let mut paths=BTreeMap::new();
-    for page in pages.iter().filter(|page|!crate::routes::is_dynamic(page.route) && page.route!="*" && !page.file.starts_with("_server/")) {
+    for page in pages.iter().filter(|page|!crate::routes::is_dynamic(page.route) && (!page.route.contains('*') || page.route=="*") && !page.file.contains('*') && !page.file.starts_with("_server/")) {
         if !files.get(page.file).is_some_and(|html|popup_signin(html)) {continue}
-        let route=page.route.trim_end_matches('/');let route=if route.is_empty() {"/"}else{route};
-        for path in [route.to_string(),format!("{}/",route.trim_end_matches('/')),format!("/{}",page.file)] {if path.starts_with('/') && path.len()<=4096 && !path.chars().any(|ch|ch.is_whitespace() || matches!(ch,'"'|'\''|'\\'|'$'|';'|'{'|'}')) {paths.insert(path,format!("/{}",page.file));}}
+        let error=page.route.strip_prefix('!').filter(|status|matches!(*status,"403"|"404"|"410") || status.len()==3 && status.starts_with('5') && status.bytes().all(|ch|ch.is_ascii_digit())).map(|status|format!("/{status}"));
+        let route=if page.route=="*" {"/404"} else if let Some(error)=error.as_deref() {error} else {page.route.trim_end_matches('/')};let route=if route.is_empty() {"/"}else{route};
+        let file=format!("/{}",brain_lex::url_path::encode_path(page.file));
+        let mut aliases=vec![route.to_string(),format!("{}/",route.trim_end_matches('/')),file.clone()];
+        if page.route=="*" {aliases.push("/404.html".into());}
+        for path in aliases {if path.starts_with('/') && path.len()<=4096 && !path.chars().any(|ch|ch.is_whitespace() || matches!(ch,'"'|'\''|'\\'|'$'|';'|'{'|'}')) {paths.insert(path,file.clone());}}
     }paths
 }
 fn google_static_headers(headers:String,paths:&BTreeMap<String,String>,build:&str,http:bool,csp:&str)->String {
@@ -212,6 +216,12 @@ fn google_nginx(paths:&BTreeMap<String,String>,pre:&str,build:&str,http:bool,csp
 /// Applies §35 to the built files. `files` holds text files, `binary` raw ones (copied `public/` assets).
 /// `extra_csp`: `(directive, source)` pairs third-party tags need (brain-seo's Google tags).
 pub fn apply(root: &Path, cfg: &CacheCfg, pages: &[PageRef], extra_csp: &[(String, String)], files: &mut BTreeMap<String, String>, binary: &mut BTreeMap<String, Vec<u8>>) -> Applied {
+    let immutable = files.keys().chain(binary.keys()).filter(|path| path.starts_with("_b/")).cloned().collect();
+    apply_with_layout(root, cfg, pages, extra_csp, files, binary, &crate::asset_layout::AssetLayout::default(), &immutable)
+}
+
+pub(crate) fn apply_with_layout(root: &Path, cfg: &CacheCfg, pages: &[PageRef], extra_csp: &[(String, String)], files: &mut BTreeMap<String, String>, binary: &mut BTreeMap<String, Vec<u8>>, layout: &crate::asset_layout::AssetLayout, generated: &BTreeSet<String>) -> Applied {
+    let mut immutable = generated.clone();
     let mut warnings = Vec::new();
     let pre = cfg.base.trim_end_matches('/'); // `/app` or empty: prefix of every URL (never of dist/ paths)
     let ext = crate::Ext::from_name(&cfg.ext);
@@ -220,23 +230,26 @@ pub fn apply(root: &Path, cfg: &CacheCfg, pages: &[PageRef], extra_csp: &[(Strin
     let public = root.join("public");
     let mut assets: BTreeMap<String, Vec<u8>> = BTreeMap::new(); // "/logo.svg" → bytes
     walk(&public, &public, &mut assets);
-    // every public file also gets an immutable copy; references in HTML, CSS, the web manifest and (before their
+    // every relocatable public file also gets an immutable copy; references in HTML, CSS, the web manifest and (before their
     // hash, in lib.rs) JS chunks point at it, while the original path stays published for URLs that live outside
     // the build (og:image in social caches, the manifest icons, favicon requests, /.well-known)
-    let hashed: BTreeMap<String, String> = if cfg.http { assets.iter().map(|(p, b)| (p.clone(), hashed_url(p, b))).collect() } else { BTreeMap::new() };
+    let hashed: BTreeMap<String, String> = if cfg.http { assets.iter().filter(|(p, _)| hashable_public(p)).map(|(p, b)| (p.clone(), hashed_url_with_layout(p, b, layout))).collect() } else { BTreeMap::new() };
+    immutable.extend(hashed.values().map(|url| url.trim_start_matches('/').to_string()));
     // what references point at: the hashed copy under the base
     // (links already moved under the base are `{pre}/logo.svg`: both spellings point at the copy)
     let hashed_ref: BTreeMap<String, String> =
         hashed.iter().flat_map(|(p, u)| [(p.clone(), format!("{pre}{u}")), (format!("{pre}{p}"), format!("{pre}{u}"))]).collect();
     if cfg.http && !assets.is_empty() {
         // CSS first: a rewritten stylesheet changes its own hash, so its URL changes in the pages too
-        let css: Vec<String> = files.keys().filter(|f| f.starts_with("_b/") && f.ends_with(&format!(".{}", ext.css()))).cloned().collect();
+        let css: Vec<String> = files.keys().filter(|f| generated.contains(*f) && f.ends_with(&format!(".{}", ext.css()))).cloned().collect();
         let mut renamed: Vec<(String, String)> = Vec::new();
         for f in css {
             let src = files[&f].clone();
             let out = rewrite(&src, &hashed_ref);
             if out != src {
-                let new = format!("_b/{}.{}", crate::content_hash(&out), ext.css());
+                let new = layout.css(&format!("{}.{}", crate::content_hash(&out), ext.css()));
+                immutable.remove(&f);
+                immutable.insert(new.clone());
                 files.remove(&f);
                 files.insert(new.clone(), out);
                 renamed.push((format!("{pre}/{f}"), format!("{pre}/{new}")));
@@ -260,7 +273,7 @@ pub fn apply(root: &Path, cfg: &CacheCfg, pages: &[PageRef], extra_csp: &[(Strin
         let rel = p.trim_start_matches('/').to_string();
         // files the build writes after this point (the service worker, host configs, the offline page) are reserved:
         // a public/ copy would silently replace them (QA #101, conformance 186)
-        let reserved = rel == "sw.js" || rel == "_headers" || rel == "_redirects" || rel.starts_with("_brain/") || rel.starts_with("_server/") || rel == offline_file;
+        let reserved = rel == "brain-build.json" || rel == "sw.js" || rel == "_headers" || rel == "_redirects" || rel.starts_with("_brain/") || rel.starts_with("_server/") || rel == offline_file;
         if reserved {
             warnings.push(format!("public{p} is ignored: the build generates {rel} itself (never write your own service worker or host config there); fix: delete public{p}"));
         } else if files.contains_key(&rel) || binary.contains_key(&rel) {
@@ -279,6 +292,8 @@ pub fn apply(root: &Path, cfg: &CacheCfg, pages: &[PageRef], extra_csp: &[(Strin
         }
     }
 
+    // Separate deterministic metadata attributes binary/protocol assets without modifying their bytes or schemas.
+    files.insert("brain-build.json".into(),format!("{{\"schemaVersion\":1,\"generator\":{{\"name\":\"BRAINLLM\",\"version\":{},\"url\":{}}},\"scope\":\"This generated build, including binary assets and compressed variants. Copied assets retain their own licenses and byte identity.\"}}\n",js(env!("CARGO_PKG_VERSION")),js(brain_lex::branding::HOME)));
     // 2. Build signature (§35.7): a hash of every file that ships, paths and bytes, sorted. ORDER MATTERS for a
     //    stable signature: it is computed here, BEFORE writing what carries it (the brain-build meta, the sw.js
     //    header, _headers, nginx.conf, the manifest's `build`) and before the registration snippet; those parts are
@@ -306,13 +321,14 @@ pub fn apply(root: &Path, cfg: &CacheCfg, pages: &[PageRef], extra_csp: &[(Strin
                 if cfg.offline && !built_offline && !files.contains_key(&offline_file) {
                     files.insert(offline_file.clone(), OFFLINE_HTML.into());
                 }
-                let list = precache_ext(pages, files, binary, cfg.precache_kb * 1024, pre, ext);
+                let list = precache_with_assets(pages, files, binary, cfg.precache_kb * 1024, pre, ext, &immutable);
                 // routes/update only when declared: the default worker stays byte-identical
                 let mut extra = String::new();
                 if !cfg.routes.is_empty() {
                     let r: Vec<String> = cfg.routes.iter().map(|r| format!("{{match:{},prefix:{},strategy:{},maxEntries:{},maxAge:{},timeout:{}}}", js(&format!("{pre}{}", r.path)), r.prefix, js(r.strategy), r.max_entries, r.max_age, r.timeout_ms)).collect();
                     extra.push_str(&format!(",routes:[{}]", r.join(",")));
                 }
+                extra.push_str(&format!(",immutable:[{}]", immutable.iter().map(|path| js(&format!("{pre}/{path}"))).collect::<Vec<_>>().join(",")));
                 if cfg.update_prompt {
                     extra.push_str(",update:\"prompt\"");
                 }
@@ -323,7 +339,7 @@ pub fn apply(root: &Path, cfg: &CacheCfg, pages: &[PageRef], extra_csp: &[(Strin
                     list.iter().map(|u| js(u)).collect::<Vec<_>>().join(","),
                     if cfg.offline { js(&format!("{pre}{offline_url}")) } else { "null".into() }
                 );
-                files.insert("sw.js".into(), format!("{manifest}{tpl}"));
+                files.insert("sw.js".into(), brain_lex::branding::code(&format!("{manifest}{tpl}")));
                 let reg = register(&cfg.base);
                 for p in pages {
                     if let Some(html) = files.get_mut(p.file) {
@@ -394,6 +410,10 @@ pub fn apply(root: &Path, cfg: &CacheCfg, pages: &[PageRef], extra_csp: &[(Strin
     }
     let google=google_paths(pages,files);
     let mut h = headers_with_links(pages, &unhashed, files.contains_key(&offline_file), &build_hash, cfg.http, &policy, &links);
+    if layout.custom() && cfg.http {
+        h = h.replace(&format!("/_b/*\n  Cache-Control: {IMMUTABLE}\n  Vary: Accept-Encoding\n"), "");
+        for path in &immutable { h.push_str(&format!("/{path}\n  Cache-Control: {IMMUTABLE}\n  Vary: Accept-Encoding\n")); }
+    }
     if !google.is_empty() {h=google_static_headers(h,&google,&build_hash,cfg.http,&policy);}
     if ext == crate::Ext::Brain {
         h = h.replace("\n/404.html\n", "\n/404.brain\n").replace("\n/_offline.html\n", "\n/_offline.brain\n");
@@ -409,16 +429,32 @@ pub fn apply(root: &Path, cfg: &CacheCfg, pages: &[PageRef], extra_csp: &[(Strin
     let redir_nginx = files.remove("_brain/redirects.nginx").map(|r| base_redirects(&r, pre)).unwrap_or_default();
     let redir_caddy = files.remove("_brain/redirects.caddy").map(|r| base_redirects(&r, pre)).unwrap_or_default();
     let mut n = nginx_at(&build_hash, cfg.http, &policy, pre);
+    if layout.custom() && cfg.http {
+        if let Some(start) = n.find(&format!("location {pre}/_b/ {{")) {
+            if let Some(end) = n[start..].find("\n}\n") { n.replace_range(start..start+end+3, ""); }
+        }
+        let mut sec = String::new();
+        for (key, value) in SECURITY { sec.push_str(&format!("    add_header {key} \"{value}\" always;\n")); }
+        for path in &immutable { n.push_str(&format!("location = \"{pre}/{}\" {{\n{sec}    add_header Cache-Control \"{IMMUTABLE}\";\n    add_header Vary Accept-Encoding;\n    try_files $uri =404;\n}}\n", path.replace('\"', "\\\"").replace('$', "\\$"))); }
+    }
     if !google.is_empty() {n.push_str(&google_nginx(&google,pre,&build_hash,cfg.http,&policy));}
     let n = if redir_nginx.is_empty() { n } else { insert_after_first_line(&n, &format!("# redirects.json\n{redir_nginx}")) };
     files.insert("_brain/nginx.conf".into(), if ext == crate::Ext::Brain { nginx_brain(&n) } else { n });
     let mut c = caddy(&build_hash, cfg.http, &policy, pre, ext);
+    if layout.custom() && cfg.http {
+        let paths = immutable.iter().map(|path| format!("\"{pre}/{}\"", path.replace('\"', "\\\""))).collect::<Vec<_>>().join(" ");
+        c = c.replace(&format!("@chunks path {pre}/_b/*"), &format!("@chunks path {paths}"));
+        c = c.replace(&format!("@pages not path {pre}/_b/*"), &format!("@pages not path {paths}"));
+    }
     if !google.is_empty() {
         c=c.replace("    Cross-Origin-Opener-Policy \"same-origin\"\n", "");
         let paths=google.keys().map(|path|format!("{pre}{path}")).collect::<Vec<_>>().join(" ");
         c.push_str(&format!("@google_signin path {paths}\nheader @google_signin Cross-Origin-Opener-Policy same-origin-allow-popups\n@ordinary_opener not path {paths}\nheader @ordinary_opener Cross-Origin-Opener-Policy same-origin\n"));
     }
     files.insert("_brain/Caddyfile".into(), if redir_caddy.is_empty() { c } else { insert_after_first_line(&c, &format!("# redirects.json\n{redir_caddy}")) });
+    for path in ["_headers","_redirects","_brain/nginx.conf","_brain/Caddyfile"] {
+        if let Some(source)=files.get_mut(path) { source.push_str(&format!("\n{}\n",brain_lex::branding::HASH)); }
+    }
     Applied { warnings, build_hash }
 }
 
@@ -439,6 +475,10 @@ pub fn precache_at(pages: &[PageRef], files: &BTreeMap<String, String>, binary: 
 
 /// `precache_at` for the dist/ extensions `ext` (#26).
 pub fn precache_ext(pages: &[PageRef], files: &BTreeMap<String, String>, binary: &BTreeMap<String, Vec<u8>>, budget: usize, pre: &str, ext: crate::Ext) -> Vec<String> {
+    let immutable = files.keys().chain(binary.keys()).filter(|path| path.starts_with("_b/")).cloned().collect();
+    precache_with_assets(pages, files, binary, budget, pre, ext, &immutable)
+}
+fn precache_with_assets(pages: &[PageRef], files: &BTreeMap<String, String>, binary: &BTreeMap<String, Vec<u8>>, budget: usize, pre: &str, ext: crate::Ext, immutable: &BTreeSet<String>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut used = 0usize;
     let size = |u: &str| {
@@ -463,7 +503,7 @@ pub fn precache_ext(pages: &[PageRef], files: &BTreeMap<String, String>, binary:
         let Some(html) = files.get(p.file) else { continue };
         for u in attr_urls(html) {
             // dictionaries are per locale: only the visited language's ever downloads (§37), so none is precached
-            if u.starts_with(&format!("{pre}/_b/")) && !u.contains("/_b/i18n-") && (u.ends_with(&format!(".{}", ext.js())) || u.ends_with(&format!(".{}", ext.css()))) {
+            if immutable.contains(crate::url_key(&u, pre)) && !crate::url_key(&u, pre).rsplit('/').next().unwrap_or("").starts_with("i18n-") && (u.ends_with(&format!(".{}", ext.js())) || u.ends_with(&format!(".{}", ext.css()))) {
                 add(u, &mut out);
             }
         }
@@ -498,21 +538,45 @@ fn attr_urls(html: &str) -> Vec<String> {
 /// matching rules never combine two Cache-Control values.
 /// `/logo.svg` + bytes → `/_b/<hash>.svg` (the same name lib.rs uses when it rewrites JS chunks).
 pub fn hashed_url(path: &str, bytes: &[u8]) -> String {
+    hashed_url_with_layout(path, bytes, &crate::asset_layout::AssetLayout::default())
+}
+fn hashed_url_with_layout(path: &str, bytes: &[u8], layout: &crate::asset_layout::AssetLayout) -> String {
     let ext = path.rsplit_once('.').filter(|(a, _)| !a.ends_with('/')).map_or(String::new(), |(_, e)| format!(".{e}"));
-    format!("/_b/{}{ext}", crate::bytes_hash(bytes))
+    format!("/{}", layout.asset(&format!("{}{ext}", crate::bytes_hash(bytes))))
 }
 
-/// Every `public/` file → its immutable URL.
+// Raw public modules/styles and streaming manifests resolve dependencies relative to their own URL.
+// Preserve their authored location; compiler-owned graph resources already rewrite their imports before hashing.
+fn hashable_public(path: &str) -> bool {
+    if path.trim_start_matches('/') == "brain-build.json" { return false; }
+    !matches!(path.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str(), "m3u8" | "m3u" | "mpd" | "js" | "mjs" | "css")
+}
+
+/// Every relocatable `public/` file → its immutable URL.
 pub fn public_urls(root: &Path) -> BTreeMap<String, String> {
+    public_urls_with_layout(root, &crate::asset_layout::AssetLayout::default())
+}
+pub(crate) fn public_urls_with_layout(root: &Path, layout: &crate::asset_layout::AssetLayout) -> BTreeMap<String, String> {
     let public = root.join("public");
     let mut assets = BTreeMap::new();
     walk(&public, &public, &mut assets);
-    assets.iter().map(|(p, b)| (p.clone(), hashed_url(p, b))).collect()
+    assets.iter().filter(|(p, _)| hashable_public(p)).map(|(p, b)| (p.clone(), hashed_url_with_layout(p, b, layout))).collect()
 }
 
 /// `Link` value with the page's preloads: `<…/_b/x.js>; rel=modulepreload, <…/_b/y.css>; rel=preload; as=style`.
 pub fn early_links(html: &str, pre: &str) -> String {
-    early_link_list(html, pre).join(", ")
+    let mut links = early_link_list(html, pre);
+    // Match the SSR header budget; preserve graph order within each priority.
+    links.sort_by_key(|value| !value.contains("; as=style"));
+    let mut out = String::new();
+    for value in links {
+        let separator = if out.is_empty() { "" } else { ", " };
+        if out.len() + separator.len() + value.len() <= 2048 {
+            out.push_str(separator);
+            out.push_str(&value);
+        }
+    }
+    out
 }
 
 /// The `Link` values of a page, one per preload (server.mjs sends them as 103 Early Hints, RUNTIME #232).
@@ -522,7 +586,7 @@ pub fn early_link_list(html: &str, pre: &str) -> Vec<String> {
     while let Some(i) = rest.find("<link") {
         let Some(end) = rest[i..].find('>') else { break };
         let tag = &rest[i..i + end];
-        let href = attr(tag, "href").filter(|h| h.starts_with(&format!("{pre}/_b/")));
+        let href = attr(tag, "href").filter(|h| h.starts_with(&format!("{pre}/_b/")) || h.starts_with(&format!("{pre}/")) && attr(tag, "integrity").is_some());
         // the same integrity as the tag: a preload without it does not match the SRI request, so the browser
         // would discard it and download the file twice (QA #21 F5)
         let sri = attr(tag, "integrity").map_or(String::new(), |i| format!("; integrity=\"{i}\""));
@@ -549,10 +613,12 @@ pub fn headers_with_links(pages: &[PageRef], unhashed_public: &[String], offline
     for (k, v) in SECURITY {
         o.push_str(&format!("  {k}: {v}\n"));
     }
+    let mut emitted=BTreeSet::new();
     let mut rule = |path: &str, cc: &str, html: bool, link: Option<&String>| {
         if !http && !html {
             return;
         }
+        if !emitted.insert(path.to_string()) {return;}
         o.push_str(&format!("{path}\n"));
         if http {
             o.push_str(&format!("  Cache-Control: {cc}\n  Vary: Accept-Encoding\n"));
@@ -577,13 +643,18 @@ pub fn headers_with_links(pages: &[PageRef], unhashed_public: &[String], offline
     }
     for p in pages.iter().filter(|p| !crate::routes::is_dynamic(p.route) && p.route != "*" && !p.file.starts_with("_server/")) {
         let link = links.get(p.route);
-        rule(p.route, REVALIDATE, true, link);
-        if p.route != "/" {
-            rule(&format!("{}/", p.route.trim_end_matches('/')), REVALIDATE, true, link);
+        let route=p.route.replace('*',"%2A");
+        if p.route.starts_with('/') {rule(&route, REVALIDATE, true, link);}
+        if p.route.starts_with('/') && p.route != "/" {
+            rule(&format!("{}/", route.trim_end_matches('/')), REVALIDATE, true, link);
         }
+        rule(&format!("/{}",brain_lex::url_path::encode_path(p.file)), REVALIDATE, true, link);
     }
     if pages.iter().any(|p| p.route == "*") {
         rule("/404.html", REVALIDATE, true, links.get("*"));
+        for page in pages.iter().filter(|page|page.route=="*" && !page.file.starts_with("_server/")) {
+            rule(&format!("/{}",brain_lex::url_path::encode_path(page.file)),REVALIDATE,true,links.get("*"));
+        }
     }
     for p in unhashed_public {
         rule(p, PUBLIC_SWR, false, None);
@@ -779,14 +850,22 @@ pub fn csp(inline_hashes: &[String], extra: &[(String, String)]) -> String {
 }
 
 /// The policy of one app: `brain.json` `csp.connectSrc`, when declared, replaces the broad `https: wss:` of `connect-src`;
-/// `csp.frameSrc` and `csp.scriptSrc` add origins to `frame-src` and `script-src`.
+/// `csp.frameSrc` and `csp.scriptSrc` add origins; explicit media/worker lists override their directive's fallback.
 /// An invalid entry is dropped, never widened into the broad form (`brain check` reports it as B0796).
 pub fn app_csp(root: &Path, inline_hashes: &[String], extra: &[(String, String)]) -> String {
     let declared = crate::read_connect_src(root).0;
     let frames = crate::read_frame_src(root).0.into_iter().map(|source| ("frame-src".to_string(), source));
     let scripts = crate::read_script_src(root).0.into_iter().map(|source| ("script-src".to_string(), source));
-    let extra: Vec<(String, String)> = extra.iter().cloned().chain(frames).chain(scripts).collect();
-    csp_with(inline_hashes, &extra, declared.as_deref())
+    let forms = crate::read_form_action(root).0.into_iter().map(|source| ("form-action".to_string(), source));
+    let extra: Vec<(String, String)> = extra.iter().cloned().chain(frames).chain(scripts).chain(forms).collect();
+    let mut policy = csp_with(inline_hashes, &extra, declared.as_deref());
+    for (directive, sources) in [("media-src", crate::read_media_src(root).0), ("worker-src", crate::read_worker_src(root).0)] {
+        if let Some(sources) = sources {
+            policy.push_str(&format!("; {directive} 'self'"));
+            for source in sources { policy.push(' '); policy.push_str(&source); }
+        }
+    }
+    policy
 }
 
 /// `connect`: the sources the app declared; sources the build derives itself (sockets, analytics tags) stay in `extra`.
@@ -916,7 +995,7 @@ pub fn add_integrity_at(html: &str, files: &BTreeMap<String, String>, binary: &B
         } else {
             attr(tag, "src")
         };
-        let sum = url.filter(|u| u.starts_with(&format!("{pre}/_b/"))).and_then(|u| {
+        let sum = url.filter(|u| u.starts_with(&format!("{pre}/")) && !u.starts_with("//")).and_then(|u| {
             if let Some(v) = memo.get(&u) {
                 return Some(v.clone());
             }
@@ -953,13 +1032,13 @@ pub fn rewrite(src: &str, hashed: &BTreeMap<String, String>) -> String {
     let mut out = src.to_string();
     for (p, url) in hashed {
         // `=`: unquoted attribute values in minified template markup (`<img src=/logo.svg>`, QA #124)
-        for b in ["\"", "'", "`", "(", " ", ",", "="] {
+        for b in ["\"", "'", "`", "(", " ", ",", "=", ">"] {
             let pat = format!("{b}{p}");
             let mut res = String::with_capacity(out.len());
             let mut last = 0;
             for (i, _) in out.match_indices(&pat) {
                 let end = i + pat.len();
-                if out[end..].chars().next().is_none_or(|c| matches!(c, '"' | '\'' | '`' | ')' | ' ' | ',' | '?' | '#' | '>' | '\\')) {
+                if out[end..].chars().next().is_none_or(|c| matches!(c, '"' | '\'' | '`' | ')' | ' ' | ',' | '?' | '#' | '>' | '<' | '\\')) {
                     res.push_str(&out[last..i]);
                     res.push_str(b);
                     res.push_str(url);
@@ -973,17 +1052,46 @@ pub fn rewrite(src: &str, hashed: &BTreeMap<String, String>) -> String {
     out
 }
 
+/// Public input must be an ordinary contained tree, including for builds that emit no server.
+pub fn validate_public(root: &Path) -> Result<(), String> {
+    fn visit(base: &Path, at: &Path, depth: usize, count: &mut usize) -> Result<(), String> {
+        *count += 1;
+        if depth > 64 || *count > 200_000 { return Err("public/ exceeds the input depth or entry limit; fix: simplify the public asset tree".into()); }
+        let meta = match std::fs::symlink_metadata(at) {
+            Ok(meta) => meta,
+            Err(error) if at == base && error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err("cannot inspect public assets; fix: check public/ permissions".into()),
+        };
+        if meta.file_type().is_symlink() || !(meta.is_file() || meta.is_dir()) {
+            return Err("public/ contains a symlink or non-regular asset; fix: copy the intended ordinary file into public/ so a build cannot read outside assets or block on a special file".into());
+        }
+        if meta.is_dir() {
+            for entry in std::fs::read_dir(at).map_err(|_| "cannot read public assets")? {
+                let entry = entry.map_err(|_| "cannot read public asset entry")?;
+                let name = entry.file_name(); let name = name.to_string_lossy();
+                if name.starts_with('.') && !(at == base && name == ".well-known") { continue; }
+                visit(base, &entry.path(), depth + 1, count)?;
+            }
+        }
+        Ok(())
+    }
+    let public = root.join("public");
+    visit(&public, &public, 0, &mut 0)
+}
+
 fn walk(base: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
     for e in rd.flatten() {
         let p = e.path();
+        let Ok(kind) = e.file_type() else { continue; };
+        if kind.is_symlink() || !(kind.is_file() || kind.is_dir()) { continue; }
         let name = p.file_name().unwrap_or_default().to_string_lossy();
         // dotfiles stay private (.DS_Store, .env…); `.well-known/` is public by definition (RFC 8615: security.txt,
         // assetlinks.json, apple-app-site-association)
         if name.starts_with('.') && !(name == ".well-known" && p.is_dir() && dir == base) {
             continue;
         }
-        if p.is_dir() {
+        if kind.is_dir() {
             walk(base, &p, out);
         } else if let Ok(b) = std::fs::read(&p) {
             let rel = p.strip_prefix(base).unwrap_or(&p).to_string_lossy().replace('\\', "/");
@@ -994,6 +1102,21 @@ fn walk(base: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn static_preload_headers_retain_styles_within_the_byte_budget() {
+        let mut html = String::new();
+        for i in 0..200 {
+            html.push_str(&format!("<link rel=\"modulepreload\" href=\"/_b/f{i}.js\">"));
+        }
+        html.push_str("<link rel=\"stylesheet\" href=\"/_b/app.css\">");
+        assert_eq!(early_link_list(&html, "").len(), 201, "the manifest retains the complete graph");
+        let link = early_links(&html, "");
+        assert!(link.len() <= 2048);
+        assert!(link.starts_with("</_b/app.css>; rel=preload; as=style"));
+        assert!(link.contains("</_b/f0.js>"));
+        assert!(!link.contains("</_b/f199.js>"));
+    }
+
     #[test]
     fn every_generated_host_config_refuses_the_private_paths() {
         for http in [true, false] {
@@ -1077,6 +1200,117 @@ mod tests {
     }
 
     #[test]
+    fn external_form_destinations_are_explicit_and_do_not_expand_other_directives() {
+        let root = tmp("csp-external-form");
+        let baseline = app_csp(&root, &[], &[]);
+        assert!(baseline.contains("form-action 'self';"));
+        std::fs::write(root.join("brain.json"), r#"{"csp":{"connectSrc":[],"formAction":["https://forms.example.com","http://localhost:8080","https://forms.example.com"]}}"#).unwrap();
+        assert!(crate::read_connect_src(&root).1.is_empty());
+        assert!(crate::read_form_action(&root).1.is_empty());
+        let policy = app_csp(&root, &[], &[]);
+        assert_eq!(policy, baseline.replace("connect-src 'self' https: wss:", "connect-src 'self'").replace("form-action 'self'", "form-action 'self' https://forms.example.com http://localhost:8080"));
+        for source in ["*", "https:", "blob:", "data:", "https://*.example.com", "https://forms.example.com:*", "https://forms.example.com/path", "http://forms.example.com", "wss://forms.example.com", "https://forms.example.com; script-src *"] {
+            let escaped = brain_lex::json::Json::str(source).stringify();
+            std::fs::write(root.join("brain.json"), format!("{{\"csp\":{{\"formAction\":[{escaped}]}}}}")).unwrap();
+            assert!(!crate::read_form_action(&root).1.is_empty(), "{source}");
+            assert_eq!(app_csp(&root, &[], &[]), baseline, "invalid origins never broaden the default: {source}");
+        }
+        for value in ["[]", "[1]", "\"https://forms.example.com\""] {
+            std::fs::write(root.join("brain.json"), format!("{{\"csp\":{{\"formAction\":{value}}}}}")).unwrap();
+            assert_eq!(app_csp(&root, &[], &[]), baseline);
+            assert_eq!(crate::read_form_action(&root).1.is_empty(), value == "[]");
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn media_and_worker_csp_are_explicit_bounded_and_independent_of_script_sources() {
+        let root = tmp("csp-media-worker");
+        let baseline = app_csp(&root, &[], &[]);
+        assert!(!baseline.contains("media-src") && !baseline.contains("worker-src"));
+        std::fs::write(root.join("brain.json"), r#"{"csp":{"mediaSrc":["blob:","https://media.example.com"],"workerSrc":["blob:"]}}"#).unwrap();
+        assert!(crate::read_connect_src(&root).1.is_empty());
+        assert!(crate::read_media_src(&root).1.is_empty() && crate::read_worker_src(&root).1.is_empty());
+        let policy = app_csp(&root, &[], &[]);
+        assert!(policy.contains("media-src 'self' blob: https://media.example.com"), "{policy}");
+        assert!(policy.contains("worker-src 'self' blob:"), "{policy}");
+        assert!(!policy.split(';').find(|s| s.trim_start().starts_with("script-src")).unwrap().contains("blob:"));
+        std::fs::write(root.join("brain.json"), r#"{"csp":{"mediaSrc":[],"workerSrc":[]}}"#).unwrap();
+        let restricted = app_csp(&root, &[], &[]);
+        assert!(restricted.ends_with("media-src 'self'; worker-src 'self'"), "{restricted}");
+        for source in ["*", "https:", "data:", "javascript:", "https://*.example.com", "https://media.example.com:*", "https://media.example.com/path", "http://media.example.com", "wss://media.example.com", "https://media.example.com; script-src *"] {
+            let escaped = brain_lex::json::Json::str(source).stringify();
+            std::fs::write(root.join("brain.json"), format!("{{\"csp\":{{\"mediaSrc\":[{escaped}],\"workerSrc\":[{escaped}]}}}}")).unwrap();
+            assert!(!crate::read_media_src(&root).1.is_empty(), "{source}");
+            assert!(!crate::read_worker_src(&root).1.is_empty(), "{source}");
+            assert!(app_csp(&root, &[], &[]).ends_with("media-src 'self'; worker-src 'self'"), "{source}");
+        }
+        std::fs::write(root.join("brain.json"), r#"{"csp":{"mediaSrc":"blob:","workerSrc":[1]}}"#).unwrap();
+        assert!(!crate::read_media_src(&root).1.is_empty() && !crate::read_worker_src(&root).1.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn streaming_manifests_keep_their_directory_for_html_and_script_references() {
+        let root = tmp("streaming-manifests");
+        std::fs::create_dir_all(root.join("public/video")).unwrap();
+        let playlist = "#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\ns000.m4s\n";
+        for name in ["index.m3u8", "master.M3U8", "audio.m3u", "index.mpd"] {
+            std::fs::write(root.join("public/video").join(name), playlist).unwrap();
+        }
+        std::fs::write(root.join("public/video/init.mp4"), b"init").unwrap();
+        std::fs::write(root.join("public/video/s000.m4s"), b"segment").unwrap();
+        let urls = public_urls(&root);
+        assert!(!urls.keys().any(|p| p.ends_with("m3u8") || p.ends_with("M3U8") || p.ends_with("m3u") || p.ends_with("mpd")));
+        assert!(urls["/video/init.mp4"].starts_with("/_b/"));
+        let mut files = BTreeMap::from([("index.html".into(), "<head></head><body><video src=\"/video/index.m3u8\"></video><a href=\"/video/index.mpd\">Stream</a></body>".into())]);
+        let mut bin = BTreeMap::new();
+        apply(&root, &CacheCfg::default(), &[PageRef { route: "/", file: "index.html" }], &[], &mut files, &mut bin);
+        assert!(files["index.html"].contains("\"/video/index.m3u8\""));
+        assert!(files["index.html"].contains("\"/video/index.mpd\""));
+        assert_eq!(bin["video/index.m3u8"], playlist.as_bytes());
+        assert_eq!(bin["video/init.mp4"], b"init");
+        assert_eq!(bin["video/s000.m4s"], b"segment");
+        assert!(!bin.keys().any(|p| p.starts_with("_b/") && p.ends_with("m3u8")));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn raw_public_modules_and_styles_keep_the_directory_their_dependencies_resolve_against() {
+        let root = tmp("public-relative-graph");
+        std::fs::create_dir_all(root.join("public/vendor")).unwrap();
+        let entry = "import {value} from './dep.mjs'; document.title=value;";
+        let css = ".logo{background:url('../img/logo.svg')}";
+        for (path, source) in [("vendor/main.js", entry), ("vendor/dep.mjs", "export const value='Ready'"), ("vendor/site.css", css), ("img/logo.svg", "<svg/>")] {
+            std::fs::write(root.join("public").join(path), source).unwrap();
+        }
+        let urls = public_urls(&root);
+        assert!(!urls.contains_key("/vendor/main.js") && !urls.contains_key("/vendor/dep.mjs") && !urls.contains_key("/vendor/site.css"));
+        let mut files = BTreeMap::from([("index.html".into(), "<head><link rel='stylesheet' href='/vendor/site.css'></head><body><script type='module' src='/vendor/main.js'></script></body>".into())]);
+        let mut binary = BTreeMap::new();
+        apply(&root, &CacheCfg::default(), &[PageRef { route:"/", file:"index.html" }], &[], &mut files, &mut binary);
+        assert!(files["index.html"].contains("/vendor/main.js") && files["index.html"].contains("/vendor/site.css"));
+        assert_eq!(binary["vendor/main.js"], entry.as_bytes());
+        assert_eq!(binary["vendor/site.css"], css.as_bytes());
+        assert!(binary.contains_key("vendor/dep.mjs") && binary.contains_key("img/logo.svg"));
+        assert!(!binary.iter().any(|(path,bytes)| path.starts_with("_b/") && (bytes == entry.as_bytes() || bytes == css.as_bytes())));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn public_symlinks_cannot_copy_outside_files_or_recurse_into_cycles() {
+        let root = tmp("public-input-confinement");
+        std::fs::write(root.join("outside.txt"), "synthetic private marker").unwrap();
+        std::os::unix::fs::symlink(root.join("outside.txt"), root.join("public/exposed.txt")).unwrap();
+        std::os::unix::fs::symlink(root.join("public"), root.join("public/cycle")).unwrap();
+        assert!(validate_public(&root).unwrap_err().contains("symlink"));
+        let urls = public_urls(&root);
+        assert!(!urls.contains_key("/exposed.txt") && !urls.keys().any(|p| p.contains("cycle")));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn public_assets_are_hashed_and_rewritten() {
         let root = tmp("public");
         std::fs::write(root.join("public/img/logo.svg"), "<svg/>").unwrap();
@@ -1099,6 +1333,20 @@ mod tests {
         assert!(files["_headers"].contains("/robots-extra.txt\n  Cache-Control: no-cache"));
         assert!(a.warnings.iter().any(|w| w.contains("RUNTIME #122")), "no template given: {:?}", a.warnings);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn popup_error_documents_have_bounded_explicit_aliases() {
+        let pages=[PageRef{route:"*",file:"404.brain"},PageRef{route:"!403",file:"403.brain"},PageRef{route:"/literal*",file:"literal*.html"}];
+        let files=pages.iter().map(|page|(page.file.into(),"<html><head><meta name=\"brain-google-signin\" content=\"1\"></head></html>".into())).collect();
+        let paths=google_paths(&pages,&files);
+        for path in ["/404","/404/","/404.html","/404.brain","/403","/403/","/403.brain"] {assert!(paths.contains_key(path),"{path}: {paths:?}");}
+        assert!(!paths.keys().any(|path|path.contains('*') || path.starts_with('!') || path=="/"));
+        let plain=headers(&pages,&[],true,"example",true,"default-src 'self'");
+        let h=google_static_headers(plain,&paths,"example",true,"default-src 'self'");
+        assert!(h.starts_with("/*\n  Strict-Transport-Security:"));
+        assert!(!h.split("\n/").next().unwrap().contains("same-origin-allow-popups"));
+        assert!(h.contains("/403.brain\n"));
     }
 
     #[test]
@@ -1139,7 +1387,7 @@ mod tests {
         let (mut files, mut bin) = (built(), BTreeMap::new());
         apply(&root, &cfg, &pages, &[], &mut files, &mut bin);
         let sw = &files["sw.js"];
-        assert!(sw.contains(",routes:[{match:\"/app/api/products/\",prefix:true,strategy:\"stale-while-revalidate\",maxEntries:50,maxAge:3600,timeout:3000}],update:\"prompt\"};"), "{sw}");
+        assert!(sw.contains(",routes:[{match:\"/app/api/products/\",prefix:true,strategy:\"stale-while-revalidate\",maxEntries:50,maxAge:3600,timeout:3000}],immutable:[\"/app/_b/aaaa.css\",\"/app/_b/core.js\"],update:\"prompt\"};"), "{sw}");
         let plain = CacheCfg { sw_template: Some("/*T*/".into()), ..Default::default() };
         let (mut f2, mut b2) = (built(), BTreeMap::new());
         apply(&root, &plain, &pages, &[], &mut f2, &mut b2);
@@ -1154,7 +1402,7 @@ mod tests {
         let (mut files, mut bin) = (built(), BTreeMap::new());
         let a = apply(&root, &cfg, &pages, &[], &mut files, &mut bin);
         let sw = &files["sw.js"];
-        assert!(sw.starts_with(&format!("self.BRAIN_BUILD={{hash:\"{}\",base:\"/\",precache:[", a.build_hash)) && sw.ends_with("/*TEMPLATE*/"), "{sw}");
+        assert!(sw.starts_with(&format!("self.BRAIN_BUILD={{hash:\"{}\",base:\"/\",precache:[", a.build_hash)) && sw.ends_with(&format!("/*TEMPLATE*/\n{}\n",brain_lex::branding::CODE)), "{sw}");
         assert!(sw.contains("\"/_offline.html\"") && sw.contains("\"/_b/core.js\""), "{sw}");
         assert!(files["index.html"].contains(REGISTER) && files.contains_key("_offline.html"));
         // budget: nothing fits in 0 KB
@@ -1221,12 +1469,17 @@ mod tests {
         let root = tmp("reserved");
         std::fs::create_dir_all(root.join("public")).unwrap();
         std::fs::write(root.join("public/sw.js"), "self.evil = 1").unwrap();
+        std::fs::write(root.join("public/brain-build.json"), r#"{"generator":"untrusted"}"#).unwrap();
         let pages = [PageRef { route: "/", file: "index.html" }];
         let cfg = CacheCfg { sw_template: Some("/*T*/".into()), ..Default::default() };
         let (mut files, mut bin) = (built(), BTreeMap::new());
         let a = apply(&root, &cfg, &pages, &[], &mut files, &mut bin);
-        assert!(files["sw.js"].ends_with("/*T*/") && !bin.contains_key("sw.js"), "the generated worker wins");
+        assert!(files["sw.js"].ends_with(&format!("/*T*/\n{}\n",brain_lex::branding::CODE)) && !bin.contains_key("sw.js"), "the generated worker wins");
         assert!(a.warnings.iter().any(|w| w.contains("public/sw.js is ignored")), "{:?}", a.warnings);
+        assert!(a.warnings.iter().any(|w| w.contains("public/brain-build.json is ignored")));
+        let metadata=brain_mcp::Json::parse(&files["brain-build.json"]).unwrap();
+        assert_eq!(metadata.get("generator").and_then(|g|g.get("url")).and_then(brain_mcp::Json::as_str),Some(brain_lex::branding::HOME));
+        assert!(!bin.contains_key("brain-build.json"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1280,5 +1533,17 @@ mod tests {
             assert!(policy.contains(&crate::sha::csp_hash(&s)));
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod static_layout_xml_tests {
+    #[test]
+    fn whole_xml_asset_urls_follow_relocation_without_rewriting_url_prefixes() {
+        let urls = std::collections::BTreeMap::from([("https://example.test/og/page.png".into(), "https://example.test/img/og/page.png".into())]);
+        let source = "<image:loc>https://example.test/og/page.png</image:loc><url>https://example.test/og/page.png.backup</url>";
+        let out = super::rewrite(source, &urls);
+        assert!(out.contains("<image:loc>https://example.test/img/og/page.png</image:loc>"));
+        assert!(out.contains("<url>https://example.test/og/page.png.backup</url>"));
     }
 }

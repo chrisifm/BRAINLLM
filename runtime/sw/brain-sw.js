@@ -14,9 +14,16 @@
 // cache that survives builds, bounded by entries and age; personal responses are never stored. `cache.update:
 // "prompt"` keeps a new worker waiting (while an older one controls tabs) until a page posts `brain:skip-waiting`.
 const B = self.BRAIN_BUILD || { hash: 'dev', precache: [], offline: null }
+const IMMUTABLE = Array.isArray(B.immutable) ? new Set(B.immutable) : null
+const isHashed = path => IMMUTABLE ? IMMUTABLE.has(path) : path.startsWith(BASE + '_b/')
 const BASE = B.base || '/' // app served under a base path (§23 #148); precache/offline URLs already carry it
 const NS = 'brain' + BASE.replace(/\/$/, '') // `brain` at the root, `brain/app` under /app/
 const BUILD = NS + '-' + B.hash, META = NS + ':meta'
+let priorImmutable
+const previousAssets = () => priorImmutable ||= caches.open(META).then(cache => cache.match('/__brain_immutable')).then(async response => {
+  const manifests = response ? await response.json() : {}
+  return new Set(Object.values(manifests).filter(Array.isArray).flat().filter(path => typeof path === 'string'))
+}).catch(() => new Set())
 const NAV_TIMEOUT = 3000
 // precache downloads at once: hundreds in one burst tripped per-IP proxy rate limits (429) and competed with the page
 const PRECACHE_PARALLEL = 4
@@ -40,7 +47,7 @@ self.addEventListener('install', e => {
       // update downloads only what changed
       const olds = (await caches.keys()).filter(k => k.startsWith(NS + '-') && k !== BUILD)
       const kept = async u => {
-        if (!u.startsWith(BASE + '_b/')) return null
+        if (!isHashed(u)) return null
         for (const k of olds) {
           const r = await (await caches.open(k)).match(u)
           if (r) return r
@@ -74,6 +81,24 @@ self.addEventListener('activate', e => {
       const gens = r ? await r.json() : []
       const keep = [...gens.filter(g => g !== BUILD).slice(-1), BUILD]
       await meta.put('/__brain_generations', new Response(JSON.stringify(keep)))
+      // Keep exact custom asset identities for the same two generations as their bytes, including old open tabs.
+      const stored = await meta.match('/__brain_immutable')
+      if (IMMUTABLE || stored) {
+        const decoded = stored ? await stored.json().catch(() => ({})) : {}
+        const old = decoded && typeof decoded === 'object' ? decoded : {}
+        const manifests = {}
+        for (const generation of keep) {
+          if (generation === BUILD) manifests[generation] = [...(IMMUTABLE || [])]
+          else if (Array.isArray(old[generation])) manifests[generation] = old[generation]
+          else if (generation.startsWith(NS + '-')) {
+            // A pre-inventory worker treated only its historical namespace as immutable; infer no other cached URL.
+            const entries = await (await caches.open(generation)).keys()
+            manifests[generation] = entries.map(entry => new URL(entry.url, self.location.origin)).filter(url => url.origin === self.location.origin && url.pathname.startsWith(BASE + '_b/')).map(url => url.pathname)
+          }
+        }
+        await meta.put('/__brain_immutable', new Response(JSON.stringify(manifests)))
+        priorImmutable = Promise.resolve(new Set(Object.values(manifests).flat()))
+      }
       for (const k of await caches.keys())
         if ((k.startsWith(NS + '-') && !keep.includes(k)) || (k.startsWith(NS + ':route:') && !ROUTES.some(r => r.cache === k))) await caches.delete(k)
       await self.clients.claim()
@@ -91,10 +116,18 @@ self.addEventListener('fetch', e => {
   if (req.method !== 'GET') return
   const url = new URL(req.url)
   if (url.origin !== self.location.origin || url.pathname.startsWith(BASE + '_r/') || url.pathname === BASE + 'sw.js') return
+  // A cached whole response cannot satisfy a byte range; live manifests must never lag one revalidation behind.
+  if (req.headers?.has?.('range') || /\.(m3u8?|mpd)$/i.test(url.pathname)) return
   // offline: false (B.offline null) → navigations go straight to the network: no page cache, no offline page
   if (req.mode === 'navigate') return B.offline ? e.respondWith(navigate(e)) : undefined
-  if (url.pathname.startsWith(BASE + '_b/')) return e.respondWith(hashed(e))
+  if (isHashed(url.pathname)) return e.respondWith(hashed(e))
   const rt = route(url.pathname)
+  // A custom layout can change between builds; only exact retained inventory entries use old immutable bytes.
+  if (IMMUTABLE) return e.respondWith((async () => {
+    if ((await previousAssets()).has(url.pathname)) return hashed(e)
+    if (rt) return rt.strategy === 'network-only' ? fetch(req) : data(e, rt)
+    return req.destination ? revalidate(e) : fetch(req)
+  })())
   if (rt) return e.respondWith(rt.strategy === 'network-only' ? fetch(req) : data(e, rt))
   // only files the page itself loads (img, style, script, font, manifest…); fetch()/XHR data is never touched (§35:
   // data is not cached by default)

@@ -303,6 +303,11 @@ pub fn preview(root: &Path, target: &str, options: &Value) -> Result<Value, Stri
                 None => (String::new(), String::new()),
             };
             if native_backend {
+                // These aliases belong to the frontend gateway, which maps them to native /health probes.
+                // Exact locations take precedence over the general /_brain/ backend prefix below.
+                for alias in ["/_brain/health", "/_brain/health/live", "/_brain/health/ready"] {
+                    routes.push_str(&format!("    location = {alias} {{\n{}    }}\n", proxy(port)));
+                }
                 for route in [
                     "^~ /api/",
                     "= /api",
@@ -528,6 +533,29 @@ mod tests {
             assert!(source.contains("127.0.0.1:3100"));
             assert_eq!(source.contains("127.0.0.1:5200"), native);
             assert!(!source.contains("DATABASE_URL"));
+        }
+    }
+    #[test]
+    fn nginx_health_aliases_reach_the_frontend_gateway_in_every_topology() {
+        let app = App::new();
+        for topology in ["static", "node", "rust-static", "rust-node"] {
+            let result = preview(&app.0, "nginx", &nginx_options(topology)).unwrap();
+            let source = result["operations"][0]["content"].as_str().unwrap();
+            for alias in ["/_brain/health", "/_brain/health/live", "/_brain/health/ready"] {
+                if topology.starts_with("rust-") {
+                    let location = format!("location = {alias} {{\n");
+                    let block = source.split_once(&location).unwrap_or_else(|| panic!("missing exact health alias {alias}: {source}"))
+                        .1.split_once("    }").unwrap().0;
+                    assert!(block.contains("proxy_pass http://127.0.0.1:3100;"), "{topology}: {alias}: {block}");
+                    assert!(!block.contains("127.0.0.1:5200"), "the resource backend has no /_brain/health alias");
+                }
+            }
+            if topology.starts_with("rust-") {
+                let api = source.split_once("location ^~ /api/ {").unwrap().1.split_once("    }").unwrap().0;
+                assert!(api.contains("proxy_pass http://127.0.0.1:5200;"), "ordinary native APIs retain their backend upstream");
+            } else {
+                assert!(!source.contains("127.0.0.1:5200"), "frontend-only topologies keep every route on their own server");
+            }
         }
     }
     #[test]

@@ -37,6 +37,7 @@ pub struct PageLedger {
     pub entry_js: Bytes,
     pub deferred_js: Bytes,
     pub conservative_js: Bytes,
+    pub service_worker: Bytes,
     pub assets: Vec<Asset>,
 }
 impl PageLedger {
@@ -60,13 +61,14 @@ impl PageLedger {
             .collect::<Vec<_>>()
             .join(",");
         format!(
-            "{{\"schemaVersion\":1,\"route\":{},\"scope\":\"emitted-asset-graph; not measured network\",\"html\":{},\"inlineJsBytes\":{},\"entryJs\":{},\"deferredJs\":{},\"conservativeJs\":{},\"assets\":[{}]}}",
+            "{{\"schemaVersion\":1,\"route\":{},\"scope\":\"emitted-asset-graph; not measured network\",\"html\":{},\"inlineJsBytes\":{},\"entryJs\":{},\"deferredJs\":{},\"conservativeJs\":{},\"serviceWorker\":{},\"assets\":[{}]}}",
             prerender_json(&self.route),
             self.html.json(),
             self.inline_js_bytes,
             self.entry_js.json(),
             self.deferred_js.json(),
             self.conservative_js.json(),
+            self.service_worker.json(),
             assets
         )
     }
@@ -88,22 +90,36 @@ fn sizes(path: &str, content: &[u8], binary: &BTreeMap<String, Vec<u8>>) -> Byte
     }
 }
 fn key(spec: &str, base: &str) -> Option<String> {
-    let path = spec
-        .strip_prefix(base.trim_end_matches('/'))
-        .unwrap_or(spec);
-    path.starts_with("/_b/")
-        .then(|| path.trim_start_matches('/').to_string())
+    let path = spec.split(['?', '#']).next()?.strip_prefix(base.trim_end_matches('/'))?;
+    if !path.starts_with('/') || path.starts_with("//") { return None; }
+    brain_lex::url_path::decode_relative(path.trim_start_matches('/')).ok()
+}
+pub(crate) fn asset_key(spec: &str, from: &str, base: &str) -> Option<String> {
+    if spec.starts_with('/') { return key(spec, base); }
+    if !spec.starts_with("./") && !spec.starts_with("../") { return None; }
+    let mut origin = url::Url::parse("https://ledger.invalid").ok()?;
+    origin.set_path(base);
+    {
+        let mut segments = origin.path_segments_mut().ok()?;
+        segments.pop_if_empty();
+        for segment in from.split('/') { segments.push(segment); }
+    }
+    let resolved = origin.join(spec).ok()?;
+    key(resolved.path(), base)
+}
+fn document_key(spec: &str, from: &str, base: &str) -> Option<String> {
+    if spec.starts_with('/') || spec.starts_with('.') || spec.contains(':') { asset_key(spec, from, base) }
+    else { asset_key(&format!("./{spec}"), from, base) }
+}
+pub(crate) fn emitted_text<'a>(path: &str, files: &'a BTreeMap<String, String>, binary: &'a BTreeMap<String, Vec<u8>>) -> Option<&'a str> {
+    files.get(path).map(String::as_str).or_else(|| binary.get(path).and_then(|bytes| std::str::from_utf8(bytes).ok()))
 }
 fn references(text: &str, base: &str) -> Vec<String> {
-    text.match_indices("/_b/")
-        .map(|(at, _)| {
-            text[at + 1..]
-                .chars()
-                .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
-                .collect::<String>()
-        })
-        .filter_map(|p| key(&format!("/{p}"), base))
-        .collect()
+    text.match_indices('/').filter_map(|(at, _)| {
+        if at > 0 && !matches!(text.as_bytes()[at-1], b'\"' | b'\'' | b'`' | b'(' | b'=' | b' ' | b'\n' | b'\t') { return None; }
+        let url: String = text[at..].chars().take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '%')).collect();
+        key(&url, base)
+    }).collect()
 }
 // Both the legacy conservative report and the detailed ledger use indices from this stripped string.
 pub(crate) fn html_asset_refs(html: &str, base: &str) -> Vec<String> {
@@ -111,19 +127,19 @@ pub(crate) fn html_asset_refs(html: &str, base: &str) -> Vec<String> {
 }
 
 // Static imports/reexports only. Dynamic imports and worker URLs belong to deferred graph accounting.
-fn static_refs(source: &str, base: &str) -> Result<Vec<String>, String> {
+fn static_refs(source: &str, from: &str, base: &str) -> Result<Vec<String>, String> {
     let tokens = brain_min::lex::lex(source)?;
     Ok(tokens
         .windows(2)
         .filter_map(|pair| {
             (pair[1].kind == brain_min::lex::Kind::Str
                 && (pair[0].ident("from") || pair[0].ident("import")))
-            .then(|| key(&pair[1].text[1..pair[1].text.len() - 1], base))
+            .then(|| asset_key(&pair[1].text[1..pair[1].text.len() - 1], from, base))
             .flatten()
         })
         .collect())
 }
-fn initial_refs(html: &str, base: &str) -> Result<BTreeSet<String>, String> {
+pub(crate) fn initial_refs(html: &str, from: &str, base: &str) -> Result<BTreeSet<String>, String> {
     let mut seeds = BTreeSet::new();
     let mut cursor = 0;
     while let Some(at) = html[cursor..].find('<') {
@@ -139,12 +155,12 @@ fn initial_refs(html: &str, base: &str) -> Result<BTreeSet<String>, String> {
                 .split_whitespace()
                 .any(|v| matches!(v, "stylesheet" | "modulepreload" | "preload"))
             {
-                if let Some(href) = cache::attr(tag, "href").and_then(|href| key(&href, base)) {
+                if let Some(href) = cache::attr(tag, "href").and_then(|href| document_key(&href, from, base)) {
                     seeds.insert(href);
                 }
             }
         } else if tag.starts_with("<script") {
-            if let Some(path) = cache::attr(tag, "src").and_then(|src| key(&src, base)) {
+            if let Some(path) = cache::attr(tag, "src").and_then(|src| document_key(&src, from, base)) {
                 seeds.insert(path);
             }
             if let Some(close) = html[cursor..].find("</script") {
@@ -157,7 +173,7 @@ fn initial_refs(html: &str, base: &str) -> Result<BTreeSet<String>, String> {
         }
     }
     for script in cache::inline_javascript(html) {
-        seeds.extend(static_refs(&script, base)?);
+        seeds.extend(static_refs(&script, from, base)?);
     }
     Ok(seeds)
 }
@@ -171,11 +187,11 @@ pub fn page(
     sources: &HashMap<String, String>,
 ) -> Result<PageLedger, String> {
     let clean = navigation::without_plan(html);
-    let mut initial = initial_refs(&clean, base)?;
+    let mut initial = initial_refs(&clean, file, base)?;
     let mut queue: Vec<_> = initial.iter().cloned().collect();
     while let Some(path) = queue.pop() {
-        if let Some(source) = files.get(&path).filter(|_| javascript(&path)) {
-            for dependency in static_refs(source, base)? {
+        if let Some(source) = emitted_text(&path, files, binary).filter(|_| javascript(&path) && path != "sw.js") {
+            for dependency in static_refs(source, &path, base)? {
                 if initial.insert(dependency.clone()) {
                     queue.push(dependency);
                 }
@@ -189,12 +205,12 @@ pub fn page(
         if !seen.insert(path.clone()) {
             continue;
         }
-        let Some(source) = files.get(&path) else {
+        let Some(source) = emitted_text(&path, files, binary) else {
             continue;
         };
-        if javascript(&path) {
+        if javascript(&path) && path != "sw.js" {
             for (_, _, spec) in specifiers(source)? {
-                if let Some(path) = key(&spec, base) {
+                if let Some(path) = asset_key(&spec, &path, base) {
                     graph.push(path);
                 }
             }
@@ -207,10 +223,12 @@ pub fn page(
         ..Default::default()
     };
     for path in seen {
-        let Some(source) = files.get(&path) else {
+        let Some(source) = emitted_text(&path, files, binary) else {
             continue;
         };
-        let kind = if javascript(&path) {
+        let kind = if path == "sw.js" {
+            "service-worker"
+        } else if javascript(&path) {
             "js"
         } else if path.ends_with(".css") || path.ends_with(".cssbrain") {
             "css"
@@ -227,6 +245,7 @@ pub fn page(
                 result.deferred_js.add(&bytes)
             }
         }
+        if kind == "service-worker" { result.service_worker.add(&bytes); }
         result.assets.push(Asset {
             source: sources.get(&path).cloned(),
             path,
@@ -241,6 +260,32 @@ pub fn page(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn service_worker_is_visible_separately_without_becoming_page_javascript() {
+        let files = BTreeMap::from([("sw.js".into(), "self.addEventListener('install',()=>self.skipWaiting())".into()), ("js/main.js".into(), "export const x=1".into())]);
+        let html = "<script type='module' src='/js/main.js'></script><script>navigator.serviceWorker.register('/sw.js')</script>";
+        let ledger = page("/", "index.html", html, "/", &files, &BTreeMap::new(), &HashMap::new()).unwrap();
+        assert_eq!(ledger.conservative_js.raw, files["js/main.js"].len());
+        assert_eq!(ledger.service_worker.raw, files["sw.js"].len());
+        assert!(ledger.assets.iter().any(|asset| asset.path == "sw.js" && asset.kind == "service-worker" && !asset.initial));
+        assert!(ledger.to_json().contains("\"serviceWorker\""));
+    }
+    #[test]
+    fn public_binary_map_javascript_css_and_relative_dependencies_are_fully_charged() {
+        let binary: BTreeMap<String, Vec<u8>> = BTreeMap::from([
+            ("vendor/main.js".into(), b"import {value} from './dep.js';value();".to_vec()),
+            ("vendor/dep.js".into(), b"export const value=()=>42;".to_vec()),
+            ("styles/theme.css".into(), b"main{color:blue}".to_vec()),
+        ]);
+        let html = "<script type='module' src='vendor/main.js'></script><link rel='stylesheet' href='./styles/theme.css'>";
+        let ledger = page("/docs", "docs/index.html", html, "/site/", &BTreeMap::new(), &binary.iter().map(|(path,bytes)| (format!("docs/{path}"),bytes.clone())).collect(), &HashMap::new()).unwrap();
+        assert_eq!(ledger.assets.len(), 3);
+        assert!(ledger.assets.iter().all(|asset| asset.initial));
+        assert_eq!(ledger.entry_js.raw, binary["vendor/main.js"].len() + binary["vendor/dep.js"].len());
+        assert!(ledger.assets.iter().any(|asset| asset.path == "docs/styles/theme.css" && asset.bytes.raw == binary["styles/theme.css"].len()));
+        assert_eq!(asset_key("../../../outside.js", "vendor/main.js", "/site/"), None);
+        assert_eq!(asset_key("//other.example.com/code.js", "vendor/main.js", "/site/"), None);
+    }
     #[test]
     fn mjs_payloads_and_their_static_dependencies_are_counted_as_javascript() {
         let files: BTreeMap<String, String> = [

@@ -1,0 +1,12 @@
+{
+  "id": "test-source-preflight",
+  "kind": "change",
+  "title": "Browser tests validate current imported sources",
+  "why": "Current compile failures must stop assertions instead of letting dev fallbacks hide an invalid component.",
+  "changelog": ["Browser tests preflight their current local Brain import graph"],
+  "guide": "brain guide tests",
+  "codes": [],
+  "apis": ["brain test"],
+  "steps": ["Fix current source compilation diagnostics before browser assertions. Selected tests validate explicit local Brain imports, transitive imports and automatic components without checking unrelated components."],
+  "finds": [{"glob": "**/*.test.brain"}]
+}

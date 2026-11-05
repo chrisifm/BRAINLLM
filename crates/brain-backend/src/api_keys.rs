@@ -403,7 +403,7 @@ impl Keys {
         let Some((prefix, secret)) = parse(raw) else {
             return Ok(Err(Denied::Invalid));
         };
-        let row = sqlx::query("SELECT k.id,k.secret_hash,k.scopes,k.system,k.daily_quota,k.monthly_quota,k.revoked_at IS NOT NULL AS revoked,coalesce(k.expires_at<=now(),false) AS expired,u.id AS user_id,u.email,u.role,u.verified FROM public._brain_api_keys k JOIN public._brain_users u ON u.id=k.user_id WHERE k.prefix=$1 AND u.disabled_at IS NULL")
+        let row = sqlx::query("SELECT k.id,k.secret_hash,k.scopes,k.system,k.daily_quota,k.monthly_quota,k.revoked_at IS NOT NULL AS revoked,coalesce(k.expires_at<=now(),false) AS expired,u.id AS user_id,u.email,u.role,u.verified,u.display_name,u.picture_url FROM public._brain_api_keys k JOIN public._brain_users u ON u.id=k.user_id WHERE k.prefix=$1 AND u.disabled_at IS NULL")
             .bind(prefix).fetch_optional(&self.pool).await.map_err(crate::db::safe)?;
         let presented = digest(secret);
         let stored: String = row
@@ -435,6 +435,7 @@ impl Keys {
                 email: row.get("email"),
                 role: row.get("role"),
                 verified: row.get("verified"),
+            name: row.get("display_name"), picture: row.get("picture_url"),
             },
         }))
     }

@@ -492,26 +492,35 @@ fn lits(e: &Expr, src: &str, out: &mut Vec<Found>) {
         Expr::Binary { op: "||" | "??", right, .. } => lits(right, src, out),
         Expr::Binary { op: "+", span, .. } => {
             let mut parts = Vec::new();
-            fn flat<'a>(e: &'a Expr, parts: &mut Vec<&'a Expr>) {
+            // Flatten only string-valued additions. Splitting a numeric/unknown prefix changes 0+1 into "01".
+            fn flat<'a>(e: &'a Expr, parts: &mut Vec<&'a Expr>) -> bool {
                 match e.unparen() {
                     Expr::Binary { op: "+", left, right, .. } => {
-                        flat(left, parts);
-                        flat(right, parts);
+                        let start = parts.len();
+                        let left_string = flat(left, parts);
+                        let right_string = flat(right, parts);
+                        if left_string || right_string { return true; }
+                        parts.truncate(start);
+                        parts.push(e);
+                        false
                     }
-                    x => parts.push(x),
+                    value => {
+                        parts.push(e);
+                        matches!(value, Expr::Str { .. } | Expr::Template { tag: None, .. })
+                    }
                 }
             }
             flat(e.unparen(), &mut parts);
-            if !parts.iter().any(|p| matches!(p, Expr::Str { value, .. } if translatable(value))) {
+            if !parts.iter().any(|p| matches!(p.unparen(), Expr::Str { value, .. } if translatable(value))) {
                 return;
             }
             let mut msg = String::new();
             let mut vars = Vec::new();
             for p in parts {
-                match p {
+                match p.unparen() {
                     Expr::Str { value, .. } => msg.push_str(value),
-                    x => {
-                        let name = var(&mut vars, x, src);
+                    _ => {
+                        let name = var(&mut vars, p, src);
                         msg.push_str(&format!("{{{name}}}"));
                     }
                 }
@@ -557,6 +566,10 @@ impl Keys<'_> {
 
     /// The `t()` call for `f` (keys allocated depth first) and the new (key, text) pairs it needs.
     fn render(&mut self, f: &Found, src: &str, new: &mut Vec<(String, String)>) -> String {
+        self.render_key(f, src, new).0
+    }
+
+    fn render_key(&mut self, f: &Found, src: &str, new: &mut Vec<(String, String)>) -> (String, String) {
         let words = f.words.map(str::to_string).unwrap_or_else(|| key_words(&f.msg, 4));
         let (key, fresh) = self.alloc(&words, &f.msg);
         if fresh {
@@ -573,12 +586,45 @@ impl Keys<'_> {
             args.push(if text == v.name { text } else { format!("{}: {text}", v.name) });
         }
         let call = if args.is_empty() { format!("t('{key}')") } else { format!("t('{key}', {{ {} }})", args.join(", ")) };
-        match &f.shape {
+        let rendered = match &f.shape {
             Shape::Markup => format!("{{{call}}}"),
             Shape::Attr(name) => format!("{name}={{{call}}}"),
             Shape::Expr => call,
+        };
+        (rendered, key)
+    }
+}
+
+/// Replace generated literal messages only when B1403's exact key/text already exists in the default dictionary.
+/// This is read-only: new text retains its ordinary extraction diagnostics and dictionary edits. Expressions with
+/// placeholders are intentionally left to the authored-source extractor.
+pub fn known_literal_edits(c: &Component, i18n: &crate::i18n::I18n) -> Vec<brain_parse::Edit> {
+    known_literal_messages(c,i18n,&BTreeMap::new()).into_iter().map(|message|message.0).collect()
+}
+
+/// A managed generator may persist each original message's key so editing the default translation does not
+/// allocate a new key. Returned tuples contain (source edit, dictionary key, original message).
+pub fn known_literal_messages(c: &Component, i18n: &crate::i18n::I18n, aliases: &BTreeMap<String,String>) -> Vec<(brain_parse::Edit,String,String)> {
+    if !i18n.multi() || crate::scope::top_bindings(c).contains_key("t") { return Vec::new(); }
+    let Some(default) = i18n.default_file().filter(|file|file.error.is_none()) else { return Vec::new() };
+    let mut keys = Keys { scope: key_scope(&c.file), default: Some(default), mine: BTreeMap::new() };
+    let mut edits = Vec::new();
+    for found in fixed_texts(c) {
+        let (mut text, mut key) = keys.render_key(&found, &c.src, &mut Vec::new());
+        if let Some(alias) = aliases.get(&found.msg) {
+            key = alias.clone();
+            let call = format!("t({})",brain_lex::Json::str(&key).stringify());
+            text = match &found.shape {
+                Shape::Markup => format!("{{{call}}}"),
+                Shape::Attr(name) => format!("{name}={{{call}}}"),
+                Shape::Expr => call,
+            };
+        }
+        if found.vars.is_empty() && (aliases.contains_key(&found.msg) || default.entries.get(&key).and_then(|entry|entry.0.as_plain()) == Some(found.msg.as_str())) {
+            edits.push((brain_parse::Edit { start:found.span.start, end:found.span.end, line:found.span.line, text, ..Default::default() },key,found.msg));
         }
     }
+    edits
 }
 /// `<meta route es="/es/about-us" pt="/pt/about-us">` → `[("es", "/es/about-us"), …]`.
 pub fn route_slugs(c: &Component) -> Vec<(String, String, Span)> {

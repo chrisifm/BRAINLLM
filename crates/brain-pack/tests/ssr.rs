@@ -51,6 +51,7 @@ fn ssr_and_rpc_through_the_real_server() {
         return;
     }
     let root = app();
+    std::fs::write(root.join("brain.json"), r#"{"csp":{"formAction":["https://forms.example.com"]}}"#).unwrap();
     let rt = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime");
     let Ok(server_mjs) = std::fs::read_to_string(rt.join("server/server.mjs")) else {
         eprintln!("skipped: runtime/server/server.mjs missing");
@@ -68,7 +69,7 @@ fn ssr_and_rpc_through_the_real_server() {
     let compile = move |src: &str, rel: &Path| -> Result<brain_pack::Unit, String> {
         let opts = brain_codegen::Options { dev: false, root: Some(r2.clone()), ..Default::default() };
         let o = brain_codegen::compile_with(src, rel, &opts).map_err(|d| format!("{}: {:?}", rel.display(), d.iter().map(|x| &x.msg).collect::<Vec<_>>()))?;
-        Ok(brain_pack::Unit { js: o.js, css: o.css, server_js: o.server_js, server_fns: o.server_fns })
+        Ok(brain_pack::Unit { js: o.js, css: o.css, server_js: o.server_js, server: o.server, server_fns: o.server_fns })
     };
     // the CLI's post step passes brain-seo's redirect table for server.mjs (#219)
     let post = |_: &mut [brain_pack::Page], _: &[(String, u64)]| -> Result<brain_pack::PostOut, String> {
@@ -83,7 +84,7 @@ fn ssr_and_rpc_through_the_real_server() {
         minify: true,
         site: None,
         shim: std::fs::read_to_string(rt.join("shim/dom.js")).ok(),
-        generator: String::new(),
+        generator: "BRAINLLM 0.1.0".into(),
         server_module: None,
         cache: Default::default(),
         server_mjs: Some(server_mjs),
@@ -94,7 +95,11 @@ fn ssr_and_rpc_through_the_real_server() {
     let out = brain_pack::build(&input, &views, &|_| vec![], &|_| vec![]).unwrap_or_else(|e| panic!("{e}"));
 
     assert!(out.files["server.mjs"].contains("from './_server/native-sockets.mjs'"));
-    assert_eq!(out.files["_server/native-sockets.mjs"], include_str!("../../../runtime/server/native-sockets.mjs"));
+    assert_eq!(out.files["_server/native-sockets.mjs"], brain_lex::branding::code(include_str!("../../../runtime/server/native-sockets.mjs")));
+
+    for (path, html) in out.files.iter().filter(|(path, _)| path.ends_with(".html") && (path.starts_with("_server/pages/") || path.as_str() == "index.html")) {
+        assert_eq!(html.matches("<!-- by BRAINLLM https://chrisifm.github.io/BRAINLLM/ -->").count(), 1, "production attribution in {path}");
+    }
 
     // shape of dist/
     // form posts: server.mjs loads _server/brain-form.js, which imports ./brain.js and ./brain-schema.js (raw names)
@@ -164,6 +169,11 @@ fn ssr_and_rpc_through_the_real_server() {
 
     let (st, body) = http(port, "GET /users/ada HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
     let (st_home, home) = http(port, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    for response in [&body, &home] {
+        let headers = response.split("\r\n\r\n").next().unwrap();
+        assert!(headers.contains("form-action 'self' https://forms.example.com"), "{headers}");
+        assert!(!headers.contains("script-src 'self' https://forms.example.com"));
+    }
     let rpc_hash = mf.split("\"rpc\":{\"").nth(1).unwrap().split('"').next().unwrap().to_string();
     let call = |args: &str| http(port, &format!("POST /_r/{rpc_hash}/rename HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nX-Brain-RPC: 1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{args}", args.len()));
     let (st_ok, ok) = call("[\"bo\"]");

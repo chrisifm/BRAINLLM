@@ -39,6 +39,12 @@ against official CLI 0.166.0 help. The prompt forbids tools/delegation; any obse
 This is a CLI-backed generation lane: built-in Codex instructions still apply, so it is not a raw API system-prompt
 equivalence claim with the Claude or Ollama adapters. Read-only sandboxing alone is not a universal tool prohibition.
 
+The CLI may emit a non-terminal `error` diagnostic item before a successful turn. Only the message-only item shape
+(`id`, `type`, `message`) is discarded; its private text is never logged or retained. Actual tool items, terminal
+errors, missing completion/usage and unsafe output still fail. On an infrastructure failure, queued Codex briefs
+are marked unattempted and no new generation starts; already-running generations drain within their deadlines.
+The run writes its incomplete evidence and exits 1, so it cannot be mistaken for a valid release-gate run.
+
 Each generation has an absolute 180-second deadline, 2 MiB stdin/stdout/final-message limits and a 64 KiB stderr
 limit. Deadline, interruption and limit failures terminate only the owned process group, escalate after 150 ms,
 reap the direct child and remove owned scratch. SIGINT/SIGTERM also prevent later Codex generations in that run.
@@ -49,10 +55,13 @@ usage is validated; cached input is recorded separately and is already included 
 not provide a verified USD charge, so each Codex cost and the aggregate `costUSD` are `null`, never a free-run claim.
 
 Codex artifacts include provider and effort in their filename and summary. Spec, binary and scaffold token hashes
-retain the existing frozen-run checks. `gate.mjs` remains unchanged and keys baselines by model plus mode; review
-provider/effort/context provenance before comparing runs, and do not mix different efforts into an accepted baseline.
-A new model with no accepted baseline reports `baseline none`; passing that structural gate establishes no historical
-regression comparison. Do not use `--accept` without a reviewed fresh run. The fake-CLI tests exercise transport,
+retain the existing frozen-run checks. The release gate and matched comparison share validation: at least twenty
+complete, uniquely identified generations, matching measured first-pass counts and valid frozen binary/spec/token
+hashes are required. A single `--only` smoke is not release evidence. Codex baseline keys include provider, model,
+explicit effort and mode; historical non-Codex model/mode keys remain unchanged. Different efforts never share an
+accepted Codex baseline.
+A cohort with no accepted reference reports `baseline none` and fails; review a complete reference run before
+initializing it explicitly with `--accept`. Do not accept an unreviewed candidate as its own reference. The fake-CLI tests exercise transport,
 cleanup and actual run/gate composition without contacting a model or changing a baseline.
 Transport tests launch their synthetic CLI through the existing Node executable and a bounded structured argument
 prefix, rather than asking the OS to execute newly created temporary shebang files. The run/gate integration test
@@ -131,8 +140,33 @@ Both runs used `gpt-6.1-sol`, `medium`, specification-only context, concurrency 
 Artifacts: `results/codex-gpt-6.1-sol-medium-before-031-native.json` and
 `results/codex-gpt-6.1-sol-medium-after-040-url-fix.json` (local benchmark outputs, not packaged).
 The final run includes the Windows file-URL correction; the earlier 0.4.0 snapshot also passed 20/20.
+
+### Backlog syntax checkpoint (2026-11-04)
+
+Two actual frozen specification-only runs used `gpt-6.1-sol`, explicit `medium` effort, concurrency one and zero
+fix iterations. Both generated the same twenty brief IDs without infrastructure failures:
+
+| Compiler snapshot | Binary SHA prefix | Served spec SHA prefix | First pass |
+|---|---|---|---|
+| Published npm 0.8.12 | `92b1599bc6de` | `4df8ceaca9cc` | 20/20 |
+| Unreleased local syntax snapshot (debug binary) | `cf70ec03813d` | `fd1dc76b1663` | 20/20 |
+| Unreleased static-export contract snapshot (debug binary) | `d26e427a5e79` | `06b5e2a8d839` | 20/20 |
+
+After cold review, the published run initialized only `codex|gpt-6.1-sol|medium|spec`; historical baselines were
+preserved. The hardened release gate and matched-cohort comparison passed. Artifacts are the local
+`results/codex-gpt-6.1-sol-medium-audit-published-retry-20261104.json` and
+`results/codex-gpt-6.1-sol-medium-audit-candidate-20261104.json` outputs. The initial transport-failed attempt is not
+acceptance evidence. These results measure source generation; they do not establish backend/browser workflow
+coverage, production performance or correctness of later health-routing changes. The backlog remains in progress.
 `compare.mjs before.json after.json` checks both complete runs, matching cohort settings, consistent measured
 counts and the existing one-view tolerance without replacing accepted historical baseline entries.
 Compiler crashes, empty/malformed diagnostics and failures in unrelated scaffold files are infrastructure failures;
 they cannot count as passing generations. App directory names are safe deterministic hashes, independently from
 model identifiers containing dots or slashes. Monetary cost remains unknown when the provider supplies no cost.
+
+The static-export contract snapshot used the same twenty IDs, provider/model/effort/mode, concurrency one and
+zero fixes: all twenty passed first try with stable spec/token hashes and zero infrastructure failures. Its gate
+and matched comparison against the published reference passed without changing baseline.json. Local artifact:
+`results/codex-gpt-6.1-sol-medium-static-export-candidate-20261104.json`. This snapshot predates the later internal
+impact-measurement filename correction; it verifies source authoring, not that correction or release readiness.
+Generic static HTTP/Chrome and stdio MCP acceptance are separate tests in scripts/test/static-export.test.mjs.

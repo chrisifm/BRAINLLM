@@ -42,7 +42,7 @@ fn paths_seo_and_head_reach_every_page() {
     let compile = move |src: &str, rel: &Path| -> Result<brain_pack::Unit, String> {
         let opts = brain_codegen::Options { dev: false, root: Some(r2.clone()), ..Default::default() };
         let o = brain_codegen::compile_with(src, rel, &opts).map_err(|d| format!("{}: {:?}", rel.display(), d.iter().map(|x| &x.msg).collect::<Vec<_>>()))?;
-        Ok(brain_pack::Unit { js: o.js, css: o.css, server_js: o.server_js, server_fns: o.server_fns })
+        Ok(brain_pack::Unit { js: o.js, css: o.css, server_js: o.server_js, server: o.server, server_fns: o.server_fns })
     };
     // Resolve generated runtime imports for server evaluation; budget instrumentation is a real dependency.
     let r3 = root.clone();
@@ -109,7 +109,8 @@ fn paths_seo_and_head_reach_every_page() {
     // `<meta seo twitter>`: app.brain's default on every page, the view's value wins (QA conformance 165)
     assert!(a.contains("<meta name=\"twitter:site\" content=\"@app\">"), "{a}");
     assert!(home.contains("<meta name=\"twitter:site\" content=\"@home\">") && !home.contains("@app"), "{home}");
-    let bc = &out.files["post/b%20c/index.html"];
+    assert!(!out.files.contains_key("post/b%20c/index.html"), "URLs remain encoded, physical files are decoded for ordinary HTTP hosts");
+    let bc = &out.files["post/b c/index.html"];
     assert!(bc.contains("<p id=\"rp\">b c<"), "{bc}");
     assert!(bc.contains("<title>Post b c</title>") && bc.contains("href=\"https://example.dev/post/b%20c\""), "{bc}");
     let _ = std::fs::remove_dir_all(&root);

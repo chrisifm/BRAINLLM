@@ -74,7 +74,7 @@ fn client_widget_autoimports_interop_and_mounts_without_an_event() {
             js: output.js,
             css: output.css,
             server_js: output.server_js,
-            server_fns: output.server_fns,
+            server: output.server, server_fns: output.server_fns,
         })
     };
     let input = brain_pack::Input {

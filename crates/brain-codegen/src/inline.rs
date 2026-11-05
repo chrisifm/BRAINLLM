@@ -22,6 +22,7 @@ pub(crate) struct Frame {
     pub children: Vec<Node>,
     pub parent_hash: String,
     pub parent_ids: std::collections::HashSet<String>,
+    pub parent_dyn_ids: bool,
 }
 
 /// Default imports of `ui/*.brain` files that can be inlined, by local name. `disk` is the parent's file on disk.

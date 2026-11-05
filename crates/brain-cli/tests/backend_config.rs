@@ -53,3 +53,20 @@ fn an_app_without_the_native_backend_may_use_the_same_key_for_itself() {
     let _ = std::fs::remove_dir_all(dir.join("server/routes"));
     assert!(!text(&brain(&dir, &["check"])).contains("B0751"));
 }
+
+#[test]
+fn doctor_lists_google_origins_for_each_environment_without_provider_values() {
+    let dir = app("google-origins");
+    std::fs::create_dir_all(dir.join("server/resources")).unwrap();
+    std::fs::write(dir.join(".brain_env"), format!("[development]\nPUBLIC_SITE_URL=http://localhost:5280\nGOOGLE_CLIENT_ID={CLIENT}\n[production]\nPUBLIC_SITE_URL=https://example.test\nGOOGLE_CLIENT_ID={CLIENT}\n")).unwrap();
+    let response = text(&brain(&dir, &["doctor", "--json"]));
+    let report: serde_json::Value = serde_json::from_str(&response).unwrap();
+    let hints: Vec<_> = report["advice"].as_array().unwrap().iter().filter(|hint| hint["code"] == "google-origins").collect();
+    assert_eq!(hints.len(), 2, "{response}");
+    let all = serde_json::to_string(&hints).unwrap();
+    for expected in ["development", "production", "http://localhost:5280", "http://localhost", "https://example.test", "Authorized JavaScript origins", "does not inspect Google Cloud"] {
+        assert!(all.contains(expected), "{expected}: {all}");
+    }
+    assert!(!response.contains(CLIENT), "provider values must remain private: {response}");
+    let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+}

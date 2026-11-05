@@ -23,6 +23,7 @@ pub mod doctor;
 pub mod origins;
 pub mod types;
 mod infer;
+mod route_headers;
 mod design_system;
 mod baseline_data;
 pub mod browser_compat;
@@ -36,6 +37,7 @@ pub mod scope;
 pub mod discover;
 
 pub use catalog::{explain, CATALOG};
+pub use i18n_rules::{known_literal_edits, known_literal_messages};
 pub use infer::{ApiContract, MethodContract};
 
 use brain_parse::ast::*;
@@ -46,6 +48,13 @@ use std::path::{Path, PathBuf};
 
 /// Token file names, preferred first (`tokens.brain.css` is the pre-§10 name).
 pub const TOKEN_FILES: &[&str] = &["tokens.cssbrain", "tokens.brain.css"];
+
+/// Header names explicitly forwarded to a native route handler; no request values or signing secrets.
+#[derive(Clone, Debug, Default)]
+pub struct RouteHeaders {
+    pub declared: HashSet<String>,
+    pub file: String,
+}
 
 /// What the checker knows beyond the file itself.
 #[derive(Clone, Debug, Default)]
@@ -101,6 +110,8 @@ pub struct Ctx {
     /// A `_guard.jsbrain` protects this view's folder (or an ancestor up to the app root): the page sits behind a
     /// login, so it is not asked for a search `keyword` (B0502).
     pub guarded: bool,
+    /// Literal sibling route contract for a native handler, absent when not proven.
+    pub route_headers: Option<RouteHeaders>,
 }
 
 /// What a parent may use of a child component besides its props (INTERNALS §12).
@@ -148,6 +159,7 @@ pub fn load_ctx(disk_path: &Path, c: &Component) -> (Ctx, Vec<PathBuf>) {
     let mut ctx = Ctx::default();
     let dir = disk_path.parent().unwrap_or(Path::new("."));
     let project = app_root(dir);
+    if let Some(root) = &project { ctx.route_headers = route_headers::load(disk_path, root, &mut deps); }
     let import_root=project.clone().or_else(||infer::component_root(disk_path,&c.file));
     if let Some(root)=&project {
         let design=root.join("design.brain.json"); deps.push(design.clone());
@@ -469,6 +481,7 @@ pub fn check(c: &Component, ctx: &Ctx) -> Vec<Diag> {
     ck.seo();
     let mut d = ck.diags;
     d.extend(infer::check(c, ctx));
+    d.extend(infer::check_route_headers(c, ctx));
     d.extend(design_system::check(c,ctx));
     d.extend(browser_compat::check(c, ctx));
     // B0721: keys read here but missing from .brain_env; the diagnostic and its edit belong to .brain_env.
@@ -2971,7 +2984,7 @@ fn ends_a_session(src: &str) -> bool {
 }
 
 /// `export [async] function <name>(…)` at the top of a script.
-fn exports_fn(s: &Stmt, name: &str) -> bool {
+pub fn exports_fn(s: &Stmt, name: &str) -> bool {
     matches!(s, Stmt::Export { decl, .. } if matches!(decl.as_ref(), Stmt::Func(f) if f.name.as_ref().is_some_and(|n| n.name == name)))
 }
 

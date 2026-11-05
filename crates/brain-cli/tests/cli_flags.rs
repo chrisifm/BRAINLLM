@@ -140,3 +140,88 @@ fn a_doctor_whose_tests_did_not_run_does_not_claim_no_errors() {
     assert!(text.contains("did not run"), "{text}");
     assert!(!text.contains("none captured"), "{text}");
 }
+
+#[test]
+fn check_reads_every_selected_source_and_rejects_plain_javascript() {
+    let dir = app("check-targets");
+    for name in ["first", "second"] {
+        std::fs::write(dir.join(format!("comp/{name}.brain")), "<script>const = ;</script>\n<p>Invalid</p>\n").unwrap();
+    }
+    let output = brain(&dir, &["check", "comp/first.brain", "comp/second.brain", "--json"]);
+    assert_eq!(output.status.code(), Some(1));
+    let diagnostics: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    for name in ["first", "second"] {
+        assert!(diagnostics.as_array().unwrap().iter().any(|d| d["file"] == format!("comp/{name}.brain")), "{diagnostics}");
+    }
+    std::fs::write(dir.join("plain.js"), "export const value = 1;\n").unwrap();
+    let output = brain(&dir, &["check", "plain.js"]);
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    assert!(stderr(&output).contains(".brain, .jsbrain or .cssbrain"));
+    assert!(!stderr(&output).contains("B0001"), "plain JavaScript is not component markup");
+    let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+}
+
+#[test]
+fn default_fill_refuses_invalid_options_before_a_database_connection() {
+    let dir = app("default-options");
+    for args in [
+        vec!["data","defaults","--limit","0"],
+        vec!["data","defaults","--limit"],
+        vec!["data","defaults","--resource"],
+        vec!["data","defaults","--limit","10001"],
+        vec!["data","defaults","--limit","1.5"],
+        vec!["data","prepare","--include-null"],
+        vec!["data","maintain","--limit","5"],
+        vec!["data","defaults","--apply=true"],
+    ] {
+        let output = brain(&dir,&args);
+        assert!(!output.status.success());
+        let error = stderr(&output);
+        assert!((error.contains("default") || error.contains("brain data")) && (error.contains("--limit") || error.contains("--resource") || error.contains("--include-null") || error.contains("switches")),"{args:?}: {error}");
+        assert!(!error.contains("B0762") && !error.contains("DATABASE_URL"),"options fail before selecting a database: {error}");
+    }
+    let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+}
+
+#[test]
+fn shared_global_options_are_not_positional_files_and_missing_values_fail_before_work() {
+    let dir=app("global-values");
+    std::fs::write(dir.join("comp/plain.brain"),"<p>Ready</p>\n").unwrap();
+    for args in [
+        vec!["check","-q","comp/plain.brain","--json"],
+        vec!["check","--progress","off","comp/plain.brain","--json"],
+        vec!["check","--","comp/plain.brain"],
+    ] {
+        let out=brain(&dir,&args);
+        assert!(out.status.success(),"{args:?}: {}",stderr(&out));
+    }
+    for args in [vec!["build","--site"],vec!["run","--port","--json"],vec!["backend","migrate","--env"],vec!["check","--progress"]] {
+        let out=brain(&dir,&args);
+        assert_eq!(out.status.code(),Some(2),"{args:?}");
+        let text=format!("{}{}",String::from_utf8_lossy(&out.stdout),stderr(&out));
+        assert!(text.contains("missing value"),"{args:?}: {text}");
+        assert!(!text.contains("DATABASE_URL") && !text.contains("B0762"),"{text}");
+    }
+    assert!(!dir.join("dist").exists(),"a refused build writes no output");
+    let _=std::fs::remove_dir_all(dir.parent().unwrap());
+}
+
+#[test]
+fn backend_contract_selection_reaches_the_command_and_is_never_silently_ignored() {
+    let dir = app("contract-selection");
+    let preview = Command::new(env!("CARGO_BIN_EXE_brain")).args(["backend", "approve-contract", "--only", "items", "--json"])
+        .current_dir(&dir).env("DATABASE_URL", "not-a-database-url").stdin(Stdio::null()).output().unwrap();
+    let response = format!("{}{}", String::from_utf8_lossy(&preview.stdout), stderr(&preview));
+    assert!(!preview.status.success() && !response.contains("unknown flag"), "{response}");
+    assert!(response.contains("DATABASE_URL") || response.contains("database") || response.contains("postgres"), "selection reached backend configuration: {response}");
+    for args in [
+        &["backend", "migrate", "--resource", "items"][..],
+        &["backend", "migrate", "--only=items"],
+        &["backend", "schema", "--only", "items"],
+    ] {
+        let out = brain(&dir, args);
+        let response = format!("{}{}", String::from_utf8_lossy(&out.stdout), stderr(&out));
+        assert!(!out.status.success() && response.contains("approve-contract") && response.contains("fix:"), "{args:?}: {response}");
+    }
+    let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+}

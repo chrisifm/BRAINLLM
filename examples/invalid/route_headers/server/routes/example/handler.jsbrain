@@ -1,0 +1,5 @@
+<meta server>
+export default function handle(ctx) {
+  const h = ctx.headers
+  return { body: h['x-missing'] }
+}

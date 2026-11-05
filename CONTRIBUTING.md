@@ -39,7 +39,8 @@ Browser integration tests also need Chrome.
 CI ensures ripgrep is available; fixture discovery uses Node without a separate file-search tool.
 
 ```bash
-cargo test --workspace                 # all Rust crates
+cargo test --workspace                 # all Rust crates (database tests need the separate harness)
+node scripts/backend-check.mjs         # owned temporary Postgres + backend/CLI/HTTP acceptance; PG_BIN may select its bin folder
 npm test --prefix runtime              # runtime (Node 22+)
 node bench/fixtures-check.mjs          # every invalid fixture yields exactly its expected Diag
 node bench/llm/gate.mjs                # first-pass rate must not drop vs bench/llm/baseline.json
@@ -47,6 +48,17 @@ scripts/check-english.sh               # no Spanish anywhere (accents or common 
 node scripts/gen-docs-index.mjs        # regenerate docs/INDEX.md after adding or retitling a doc (--check in scripts/test)
 target/debug/brain doctor              # inside any app
 ```
+
+`bash scripts/verify.sh` runs noninteractively on POSIX. A kernel file lock serializes gates sharing the same
+physical Cargo target (from CARGO_TARGET_DIR or Cargo configuration); a competing gate exits 75 before compilation.
+The lock uses an empty inherited stdin and follows exec/ordinary children, so an interrupted leader cannot admit a
+second gate while a child still holds that target. It adds no supervisor or new process-cancellation behavior.
+Use the native Windows diagnostic workflow for its separate supported smoke journey.
+
+The required verify workflow runs the regular suite and a separate disposable-Postgres backend job.
+The harness never uses an existing DATABASE_URL; install local Postgres tools or set PG_BIN to their bin folder.
+It includes database-dependent ignored tests, but excludes the explicitly manual AVIF cost measurement; run that
+separately with `cargo test --release -p brain-backend --lib avif_cost -- --ignored --nocapture`.
 
 ## Invariants (a change that breaks one is rejected)
 1. **No third-party parsers, bundlers, minifiers or compressors.** Rust deps only for low-level I/O (`notify`).

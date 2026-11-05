@@ -1,0 +1,31 @@
+{
+  "id": "media-worker-csp",
+  "kind": "capability",
+  "title": "Explicit media and worker CSP sources",
+  "why": "MediaSource players and blob workers can run with narrowly declared sources without allowing blob script execution.",
+  "changelog": [
+    "Explicit `csp.mediaSrc` and `csp.workerSrc`"
+  ],
+  "guide": "docs/MEDIA.md",
+  "codes": [
+    "B0796"
+  ],
+  "apis": [
+    "csp.mediaSrc",
+    "csp.workerSrc"
+  ],
+  "adopt": {
+    "file": "brain.json",
+    "snippet": "{\"csp\":{\"mediaSrc\":[\"blob:\"],\"workerSrc\":[\"blob:\"]}}"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "\"mediaSrc\""
+    },
+    {
+      "glob": "brain.json",
+      "contains": "\"workerSrc\""
+    }
+  ]
+}

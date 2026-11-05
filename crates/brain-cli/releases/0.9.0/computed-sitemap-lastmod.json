@@ -1,0 +1,11 @@
+{
+  "id": "computed-sitemap-lastmod",
+  "kind": "fix",
+  "title": "Evaluated lastmod in prerender discovery metadata",
+  "why": "A lastmod expression from loaded page data reaches that page's sitemap entry instead of being lost after head generation.",
+  "changelog": ["Computed prerender lastmod metadata reaches each sitemap entry"],
+  "guide": "brain guide seo",
+  "codes": [],
+  "apis": ["meta seo lastmod", "load"],
+  "affects": ["views/**"]
+}

@@ -20,6 +20,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
 
 pub fn list() -> Value {
     json!({"schemaVersion":1,"libraries":[
+        {"name":"list","functions":["range"],"module":"brain-list.js","contract":"Half-open safe-integer ranges with at most 10000 values; no runtime core dependency"},
+        {"name":"text","functions":["text.fold","text.distance","text.fuzzy"],"module":"brain-text.js","contract":"Bounded Unicode folding, OSA distance with cutoff, and stable fuzzy matches using length-based typo budgets"},
         {"name":"http","functions":["api","http","resource"],"module":"brain-data.js","contract":"Typed requests, cancellation, retries and policy-aware data caching"},
         {"name":"validation","functions":["form"],"module":"brain-form.js","contract":"Shared literal schemas and field errors"},
         {"name":"state","functions":["store","bus","provide","use","key"],"module":"brain-ch.js","contract":"Scoped state and explicit dependency injection"},

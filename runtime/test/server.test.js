@@ -343,6 +343,8 @@ test('sitemap.xml: a dynamic view without paths() adds the pages its sitemap() l
   assert.equal(r.status, 200)
   assert.match(r.headers.get('content-type'), /xml/)
   const x = await r.text()
+  assert.ok(x.startsWith('<?xml version="1.0" encoding="UTF-8"?>\n<!-- by BRAINLLM https://chrisifm.github.io/BRAINLLM/ -->\n'), x)
+  assert.equal((x.match(/<!-- by BRAINLLM/g) || []).length, 1)
   assert.ok(x.includes('<url><loc>https://x.test/about</loc></url>'), x)
   assert.ok(x.includes('<url><loc>https://x.test/offers/a%20b</loc><lastmod>2026-10-01</lastmod></url>'), x)
   assert.ok(x.includes('<url><loc>https://x.test/offers/shop</loc></url>'), x) // sitemap() gets ctx.env
@@ -418,7 +420,7 @@ test('sitemap.xml: past 50 000 URLs in total it becomes an index of the static a
     assert.ok(x1.includes('<sitemapindex'), x1)
     assert.ok(x1.includes('<sitemap><loc>https://big.test/sitemap-static.xml</loc></sitemap>'), x1)
     assert.ok(x1.includes('<sitemap><loc>https://big.test/sitemap-dynamic.xml</loc></sitemap>'), x1)
-    assert.equal(await (await fetch(b2 + '/sitemap-static.xml')).text(), staticXml)
+    assert.equal(await (await fetch(b2 + '/sitemap-static.xml')).text(), staticXml.replace('?>\n', '?>\n<!-- by BRAINLLM https://chrisifm.github.io/BRAINLLM/ -->\n'))
     const dyn = await (await fetch(b2 + '/sitemap-dynamic.xml')).text()
     assert.equal((dyn.match(/<url>/g) || []).length, 50000) // one file holds at most 50 000 URLs
     assert.ok(logs2.some(l => l.level === 'warn' && l.dropped === 5), JSON.stringify(logs2))

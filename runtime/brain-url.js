@@ -45,10 +45,35 @@ export function urlState(initial, options) {
 }
 
 // A native UI primitive stays stateless in author source; its DOM adapter owns navigation state and cleanup.
-export function urlDialog(element, key) {
-  if (!element || !key || G.__brainSSR || G.__brainRoute || !G.location) return
+export function urlDialog(element, key, options) {
+  if (!element || G.__brainSSR || G.__brainRoute || !G.location) return
   return I.root(dispose => {
     let alive = true
+    if (options?.dismissible === true) {
+      let startedOutside = false
+      const outside = event => {
+        if (event.target !== element || !element.open) return false
+        const bounds = element.getBoundingClientRect()
+        return event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom
+      }
+      const down = event => { startedOutside = !event.defaultPrevented && event.button === 0 && event.isPrimary !== false && outside(event) }
+      const cancel = () => { startedOutside = false }
+      const click = event => {
+        const dismiss = alive && !event.defaultPrevented && startedOutside && event.button === 0 && outside(event)
+        startedOutside = false
+        if (dismiss) { event.preventDefault(); event.stopPropagation(); element.close() }
+      }
+      element.addEventListener('pointerdown', down)
+      element.addEventListener('pointercancel', cancel)
+      element.addEventListener('click', click)
+      fx(() => () => {
+        alive = false
+        element.removeEventListener('pointerdown', down)
+        element.removeEventListener('pointercancel', cancel)
+        element.removeEventListener('click', click)
+      })
+    }
+    if (!key) return dispose
     const opened = urlState(!!element.open, {key})
     const read = () => { if (alive) opened.v = !!element.open }
     const apply = value => {
@@ -59,7 +84,15 @@ export function urlDialog(element, key) {
     fx(() => {
       const value = opened.v
       if (element.isConnected) apply(value)
-      else queueMicrotask(() => apply(value))
+      else {
+        const wasOpen = !!element.open
+        queueMicrotask(() => {
+          // An exposed open() may run immediately after mount, before this initial deferred sync.
+          // Preserve that newer DOM action instead of applying the old initial state over it.
+          if (alive && !!element.open !== wasOpen) read()
+          else apply(value)
+        })
+      }
     })
     const observer = G.MutationObserver ? new G.MutationObserver(read) : null
     observer?.observe(element, {attributes:true,attributeFilter:['open']})

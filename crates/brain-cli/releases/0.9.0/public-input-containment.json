@@ -1,0 +1,14 @@
+{
+  "id": "public-input-containment",
+  "kind": "fix",
+  "title": "Confined ordinary public inputs",
+  "why": "Public assets cannot alias outside files, recurse through directory links or block on special files.",
+  "changelog": [
+    "Builds reject symlinked or special public assets"
+  ],
+  "guide": "brain guide static",
+  "codes": [],
+  "apis": [
+    "brain build"
+  ]
+}

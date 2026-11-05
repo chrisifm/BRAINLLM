@@ -57,7 +57,11 @@ export async function codexGenerate(system, prompt, { model, effort, bin = proce
         if (!event || typeof event !== 'object' || typeof event.type !== 'string') { stop('codex: invalid event'); return }
         // Never persist transcripts, reasoning, thread IDs, tool arguments or CLI stderr.
         if (event.type === 'error' || event.type === 'turn.failed') { stop('codex: generation failed'); return }
-        if (event.type?.startsWith('item.') && event.item && !['agent_message', 'reasoning'].includes(event.item.type)) {
+        // The CLI may emit a non-terminal diagnostic item during startup. It is not a tool call or a completed turn;
+        // discard its private message, still requiring turn.completed, valid usage, exit 0 and the owned output file.
+        const diagnostic = event.item?.type === 'error' && typeof event.item.message === 'string'
+          && Object.keys(event.item).every(key => ['id', 'type', 'message'].includes(key))
+        if (event.type?.startsWith('item.') && event.item && !diagnostic && !['agent_message', 'reasoning'].includes(event.item.type)) {
           stop('codex: tools are forbidden in source-generation runs'); return
         }
         if (event.type === 'turn.completed') {

@@ -1,0 +1,15 @@
+{
+  "id": "cli-option-values",
+  "kind": "fix",
+  "title": "Reject missing option values and preserve positional scope",
+  "why": "Missing selector or limit values must not silently choose a broader default. Shared global options no longer look like file paths.",
+  "changelog": [
+    "CLI options that require values reject missing ones"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "codes": [],
+  "apis": [],
+  "affects": [
+    "**/*"
+  ]
+}

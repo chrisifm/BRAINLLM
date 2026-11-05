@@ -50,6 +50,23 @@ fn search_contract_never_infers_fields_or_accepts_unknown_objects_or_duplicates(
     let decoded: Resource = serde_json::from_value(encoded).unwrap();
     assert!(decoded.search.is_empty());
 }
+
+#[test]
+fn invalid_create_policy_guidance_names_real_reference_alternatives_without_changing_permissions() {
+    let mut r=resource();
+    r.policy.create=vec!["owner".into()];
+    let error=r.validate().unwrap_err();
+    assert!(error.contains("; fix:") && error.contains("server/auth/roles.jsbrain"),"{error}");
+    assert!(error.contains("existing rows, not creation") && !error.contains("owner.parent"),"{error}");
+    r.fields.insert("parent".into(),Field{kind:"ref:parents".into(),..Default::default()});
+    let error=r.validate().unwrap_err();
+    assert!(error.contains("if creation requires ownership") && error.contains("owner.parent"),"{error}");
+    assert_eq!(r.policy.create,["owner"],"diagnostics never broaden a policy");
+    r.policy.create=vec!["owner.parent".into()];
+    assert!(r.validate().is_ok(),"an explicit relational owner grant remains supported");
+    r.policy.create=vec!["public".into()];
+    assert!(r.validate().unwrap_err().contains("public is read-only"));
+}
 async fn database(base: &sqlx::PgPool, url: &str) -> sqlx::PgPool {
     // Audited generated identifier: fixed ASCII prefix and UUID hex, never a request value.
     let name = format!("brain_foundation_{}", Uuid::new_v4().simple());
@@ -77,7 +94,7 @@ async fn postgres_migrations_search_scope_session_serialization_and_storage_outb
             .fetch_one(&pool)
             .await
             .unwrap(),
-        26
+        27
     );
     assert_eq!(
         sqlx::query_as::<_, (i32, String)>(
@@ -112,7 +129,8 @@ async fn postgres_migrations_search_scope_session_serialization_and_storage_outb
             (23, "credits".into()),
             (24, "session_controls".into()),
             (25, "per_owner".into()),
-            (26, "identity_providers".into())
+            (26, "identity_providers".into()),
+            (27, "provider_profile".into())
         ]
     );
     assert_eq!(
@@ -326,6 +344,42 @@ async fn postgres_migrations_search_scope_session_serialization_and_storage_outb
     );
     bad.close().await;
     legacy.close().await;
+    pool.close().await;
+    base.close().await;
+}
+
+#[tokio::test]
+#[ignore = "Run with the explicitly owned disposable Postgres harness"]
+async fn provider_profile_migration_backfills_names_from_the_previous_schema() {
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("owned disposable harness URL required");
+    let base = db::connect(&url).await.unwrap();
+    let pool = database(&base, &url).await;
+    db::migrate(&pool, &[]).await.unwrap();
+    let id = Uuid::new_v4();
+    sqlx::query("INSERT INTO public._brain_users(id,email,password_hash,role) VALUES($1,'legacy-profile@example.test','unused-synthetic-hash','user')")
+        .bind(id).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO public._brain_identities(provider,subject,user_id,issuer,display_name) VALUES('apple','synthetic-legacy-subject',$1,'https://appleid.apple.com','Legacy Person')")
+        .bind(id).execute(&pool).await.unwrap();
+    let untouched = Uuid::new_v4();
+    sqlx::query("INSERT INTO public._brain_users(id,email,password_hash,role) VALUES($1,'no-profile@example.test','unused-synthetic-hash','user')")
+        .bind(untouched).execute(&pool).await.unwrap();
+    let before: String = sqlx::query_scalar("SELECT xmin::text FROM public._brain_users WHERE id=$1")
+        .bind(untouched).fetch_one(&pool).await.unwrap();
+    // Reconstruct only the previous profile schema in this test-owned database. Published migration bytes stay intact.
+    sqlx::raw_sql("ALTER TABLE public._brain_users DROP COLUMN display_name, DROP COLUMN picture_url; DELETE FROM public._brain_migrations WHERE version=27")
+        .execute(&pool).await.unwrap();
+    db::migrate(&pool, &[]).await.unwrap();
+    db::migrate(&pool, &[]).await.unwrap();
+    db::verify(&pool, &[]).await.unwrap();
+    let hints: (Option<String>, Option<String>) = sqlx::query_as("SELECT display_name,picture_url FROM public._brain_users WHERE id=$1")
+        .bind(id).fetch_one(&pool).await.unwrap();
+    assert_eq!(hints, (Some("Legacy Person".into()), None));
+    let after: String = sqlx::query_scalar("SELECT xmin::text FROM public._brain_users WHERE id=$1")
+        .bind(untouched).fetch_one(&pool).await.unwrap();
+    assert_eq!(before, after, "migration must not rewrite accounts without a provider name");
+    let identities: i64 = sqlx::query_scalar("SELECT count(*) FROM public._brain_identities WHERE user_id=$1")
+        .bind(id).fetch_one(&pool).await.unwrap();
+    assert_eq!(identities, 1, "profile migration never replaces the identity");
     pool.close().await;
     base.close().await;
 }

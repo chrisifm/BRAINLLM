@@ -283,7 +283,7 @@ impl Chrome {
         write_until(&mut self.w,bytes,deadline).map_err(|e|{
             // A timed-out partial JSON frame cannot be retried on this stream. Stop only this session.
             unsafe{kill(-(self.child.id() as i32),9);}
-            format!("CDP transport write failed: {e}; the owned browser session was stopped")
+            format!("CDP transport write failed: {}; the owned browser session was stopped", self.io_err(e))
         })
     }
 
@@ -295,6 +295,8 @@ impl Chrome {
     fn io_err(&self, e: io::Error) -> String {
         if self.timed_out.load(Ordering::SeqCst) {
             "timed out: Chrome did not respond; fix: raise --timeout or make sure the test finishes".into()
+        } else if matches!(e.kind(), io::ErrorKind::BrokenPipe | io::ErrorKind::UnexpectedEof | io::ErrorKind::ConnectionReset | io::ErrorKind::ConnectionAborted) {
+            format!("Chrome closed the CDP transport ({e}); fix: retry the command; if the machine is under load, reduce concurrent browser tasks first")
         } else {
             format!("pipe CDP: {e}")
         }
@@ -395,6 +397,34 @@ mod lifecycle_tests {
             drop(chrome);
             assert!(!profile.exists());
             assert_eq!(unsafe{kill(pid as i32,0)},-1,"owned child must be reaped");
+        }
+    }
+
+    #[test]
+    fn closed_pipe_names_browser_load_and_reaps_only_the_owned_transport() {
+        for mode in ["call", "send", "receive"] {
+            let fds = os_pipe().unwrap();
+            let mut reader = Some(unsafe { File::from_raw_fd(fds[0]) });
+            let writer = unsafe { File::from_raw_fd(fds[1]) };
+            if mode != "receive" { drop(reader.take()); }
+            let mut command = Command::new("/bin/sh");
+            command.args(["-c", "sleep 60"]).process_group(0);
+            let child = command.spawn().unwrap();
+            let pid = child.id();
+            let (sender, rx) = mpsc::channel();
+            drop(sender);
+            let profile = std::env::temp_dir().join(format!("brain-cdp-closed-{}-{mode}-{}", std::process::id(), nanos()));
+            std::fs::create_dir_all(&profile).unwrap();
+            let mut chrome = Chrome { child, w: writer, rx, next: 0, timed_out: Arc::new(AtomicBool::new(false)), watchdog: None, deadline: Some(Duration::from_millis(300)), dialogs: vec![], _profile: TempDir(profile.clone()) };
+            let error = if mode == "send" {
+                chrome.send(None, "Page.handleJavaScriptDialog", Json::Obj(vec![]), std::time::Instant::now() + Duration::from_millis(300)).unwrap_err()
+            } else {
+                chrome.call(None, "Target.createTarget", Json::Obj(vec![])).unwrap_err()
+            };
+            assert!(error.contains("Chrome") && error.contains("load") && error.contains("fix:"), "{mode}: {error}");
+            drop(chrome);
+            assert!(!profile.exists());
+            assert_eq!(unsafe { kill(pid as i32, 0) }, -1, "owned child must be reaped");
         }
     }
 

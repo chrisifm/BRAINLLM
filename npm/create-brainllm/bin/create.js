@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // `npm create @christianirack/brainllm <name>` (also `npx @christianirack/create-brainllm <name>`): runs `brain new`
-// with the brain this package depends on (same version), then installs the app's pinned devDependency.
+// with the brain this package depends on (same version), then installs the app's pinned runtime dependency.
 // Flags after the name go to `brain new`; `--no-install` skips `npm install`.
 'use strict'
 const { spawnSync } = require('node:child_process')

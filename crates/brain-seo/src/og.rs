@@ -144,7 +144,7 @@ pub fn render(
                 b
             }
         };
-        out.push((j.path.clone(), bytes));
+        out.push((brain_lex::url_path::decode_relative(&j.path)?, bytes));
     }
     Ok(out)
 }
@@ -161,6 +161,25 @@ pub fn head_tags(cfg: &Config, job: &Job) -> String {
 mod tests {
     use super::*;
     use crate::html::parse;
+
+    #[test]
+    fn encoded_urls_have_decoded_physical_destinations_without_changing_tags() {
+        let root = std::env::temp_dir().join(format!("brain-seo-og-encoded-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let cfg = Config { site: Some("https://example.com".into()), ..Default::default() };
+        let doc = parse("<head><title>Portable image</title></head>");
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        png.extend(WIDTH.to_be_bytes()); png.extend(HEIGHT.to_be_bytes());
+        for (route, path) in [("/items/a%20b", "og/items/a b.png"), ("/items/caf%C3%A9", "og/items/caf\u{00e9}.png"), ("/items/percent%252F", "og/items/percent%2F.png")] {
+            let jobs = plan(&cfg, Mode::Always, &[(route, &doc, true)], "Example", DEFAULT_TEMPLATE);
+            let out = render(&root, &jobs, DEFAULT_TEMPLATE, &|_, _| Ok(png.clone())).unwrap();
+            assert_eq!(out[0].0, path);
+            assert!(head_tags(&cfg, &jobs[0]).contains(&format!("https://example.com/og{route}.png")), "{}", head_tags(&cfg, &jobs[0]));
+        }
+        let jobs = plan(&cfg, Mode::Always, &[("/items/a%2Fb", &doc, true)], "Example", DEFAULT_TEMPLATE);
+        assert!(render(&root, &jobs, DEFAULT_TEMPLATE, &|_, _| Ok(png.clone())).is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn plans_and_caches() {

@@ -1,0 +1,12 @@
+{
+  "id": "html-source-attribution",
+  "kind": "fix",
+  "title": "Concise production HTML attribution",
+  "why": "Generated HTML identifies BRAINLLM and links to its landing page with a concise source comment. The existing branding opt-out remains supported.",
+  "changelog": [
+    "Production HTML uses the concise"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "codes": [],
+  "apis": []
+}

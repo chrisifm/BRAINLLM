@@ -30,6 +30,22 @@ that cookie with the credential and relays the session cookies. Both need a same
 
 The signing secret is server-only. The Google web client ID is public and is returned by the nonce endpoint; no Google client secret is used for this ID-token flow. Configure the exact browser origin in Google Cloud's authorized JavaScript origins and the backend origin allowlist. Google sign-in refuses to start without JWT configuration. Existing unconfigured applications keep their opaque session behavior.
 
+## Register the browser origins
+
+1. Select the Google OAuth client of type Web application used by this environment.
+2. Add each frontend origin, including its scheme and non-default port, to **Authorized JavaScript origins**.
+   `brain doctor` lists configured development/production origins when Google is enabled; `brain backend serve`
+   logs `google-origin-setup` for the actual selected origins, including a `--origin` override. These are setup hints,
+   not verification of the provider configuration. They do not print the client ID or signing secrets.
+3. For HTTP localhost development, Google requires both `http://localhost` and the exact port origin such as
+   `http://localhost:5180`. The extra provider entry does not widen the backend allowlist. A different browser host
+   or port is a different origin; configure the actual frontend, not merely the backend's loopback listener.
+4. Keep the frontend origin in the native HTTP allowlist, then test sign-in from that exact browser address.
+   The backend cannot inspect or update the provider's console settings.
+
+Source: [Google Identity Services setup](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid),
+checked 2026-11-04. The GIS ID-token callback flow does not require a client secret.
+
 Run reviewed database migrations first. Migration 0003 adds revocation/version fields, Google identities, refresh families/tokens and one-use challenges. It does not link existing accounts on its own or silently migrate their authentication method.
 
 ## Endpoints

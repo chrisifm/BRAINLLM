@@ -36,10 +36,15 @@ The page sends the widget's token in the `X-Brain-Captcha` header. `protect` tak
 
 It fails closed: nothing runs without an explicit `success: true`. Tokens are single use, so verification never retries.
 Production refuses to start without the secret or with a non-https `verify_url`; `http` is accepted on loopback only, for a local fake.
+Known public provider test secrets remain local-only; pass, fail and already-spent Turnstile fixtures are refused in
+production. `brain check`/`brain doctor` warn B0790 if the production environment resolves to a public fixture, without
+printing its value. Put dummy keys under development/testing and the real provider-issued secret under production.
 Provider-specific checks (action names, scores) are not read.
 
 `hostname` is optional. Set it when one site uses the key; omit it for a widget shared by several hosts (production and a
-preview) and for test keys, which answer with their own hostname (Turnstile's say `localhost`).
+preview) and for test keys, whose verification hostname is controlled by the provider and may differ from the local
+host. Do not copy a sample response's hostname into the test configuration. See the provider's
+[official Turnstile testing guidance](https://developers.cloudflare.com/turnstile/troubleshooting/testing/).
 
 ## Signup, then login
 

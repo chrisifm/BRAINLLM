@@ -1,0 +1,11 @@
+{
+  "id": "public-prop-identities",
+  "kind": "fix",
+  "title": "Caller-owned component IDs and static document associations",
+  "why": "Direct props keep public IDs and references unchanged across instances; local IDs remain encapsulated, and static doctor rejects missing document ID targets or duplicate IDs.",
+  "changelog": ["Direct component prop IDs and ID references preserve caller identity"],
+  "guide": "brain guide static",
+  "codes": [],
+  "apis": ["meta props", "brain doctor"],
+  "affects": ["comp/**", "ui/**", "views/**"]
+}

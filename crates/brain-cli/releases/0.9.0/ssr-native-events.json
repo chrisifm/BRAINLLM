@@ -1,0 +1,15 @@
+{
+  "id": "ssr-native-events",
+  "kind": "fix",
+  "title": "Preserve native event compatibility after SSR",
+  "why": "The DOM shim no longer breaks native Node EventTargets and WebSocket after a render installs its globals.",
+  "changelog": [
+    "The SSR DOM shim preserves the native Node event brand"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "codes": [],
+  "apis": [],
+  "affects": [
+    "**/*.brain"
+  ]
+}

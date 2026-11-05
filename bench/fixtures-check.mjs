@@ -3,15 +3,18 @@
 // Usage: node bench/fixtures-check.mjs [path to brain]
 import { execFileSync } from 'node:child_process'
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
-import { join, sep } from 'node:path'
+import { dirname, basename, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const BRAIN = process.argv[2] ?? process.env.BRAIN_BIN ?? join(ROOT, 'target/debug/brain')
 const run = (p) => { try { return execFileSync(BRAIN, ['check', '--json', p], { cwd: join(ROOT, 'examples') }).toString() } catch (e) { if (!e.stdout) throw e; return e.stdout.toString() } }
-const got = JSON.parse(run('invalid') || '[]')
-const files = readdirSync(join(ROOT, 'examples/invalid'), { recursive: true })
-  .filter(f => f.endsWith('.expected.json')).map(f => `invalid/${f.split(sep).join('/')}`).sort()
+const inventory = readdirSync(join(ROOT, 'examples/invalid'), { recursive: true })
+// check deliberately skips child apps; check each fixture app too, rather than silently omitting its sources.
+const roots = [...new Set(inventory.filter(f => ['app.brain', 'tokens.cssbrain', 'tokens.brain.css'].includes(basename(f)))
+  .map(f => dirname(f)).filter(dir => dir !== '.'))].sort()
+const got = ['invalid', ...roots.map(dir => `invalid/${dir.split(sep).join('/')}`)].flatMap(root => JSON.parse(run(root) || '[]'))
+const files = inventory.filter(f => f.endsWith('.expected.json')).map(f => `invalid/${f.split(sep).join('/')}`).sort()
 if (!files.length) throw new Error('No expected diagnostic fixtures found')
 let fail = 0
 for (const f of files) {

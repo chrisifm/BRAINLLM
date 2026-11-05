@@ -1,0 +1,16 @@
+{
+  "id": "generated-test-props",
+  "kind": "fix",
+  "title": "Required props in generated test fixtures",
+  "why": "A new component test should not mount missing required inputs that its metadata already declares.",
+  "changelog": [
+    "Generated component tests provide typed required-prop samples"
+  ],
+  "guide": "brain guide tests",
+  "codes": [],
+  "apis": [
+    "brain add test",
+    "brain add comp",
+    "brain add ui"
+  ]
+}

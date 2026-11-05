@@ -121,7 +121,7 @@ fn invalid_value_module_import_rejects_with_original_checker_diagnostics_and_rec
         if !errors.is_empty() {
             return Err(errors);
         }
-        Ok(Compiled {
+        Ok(Compiled { server: Default::default(),
             js: "export default {get(){return 'fixed'}}".into(),
             css: String::new(),
             deps: vec![],

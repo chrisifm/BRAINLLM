@@ -345,7 +345,7 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
     tools.push(Tool {
         name: "brain_guide",
         description: "Task playbooks: what to do for one kind of task, in which order, the commands that verify it, the diagnostic codes that catch common mistakes and a minimal correct example. Call it without `topic` for the list; read `start` first, then the topic of the task (e.g. `seo` before writing a page that must be found).",
-        input_schema: schema([("topic", "string", "start | views | data | forms | server | backend | analytics | seo | a11y | webmcp | tests | i18n | performance | whats-new | migrate | docs/<path>; omit for the list")], &[]),
+        input_schema: schema([("topic", "string", "start | static | views | data | forms | server | backend | analytics | seo | a11y | webmcp | tests | i18n | performance | whats-new | migrate | docs/<path>; omit for the list")], &[]),
         output_schema: None,
         run: Box::new(|a| crate::guide::text(arg(a, "topic").as_deref())),
     });
@@ -390,7 +390,7 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
         name: "brain_new",
         description: "Creates a new BRAINLLM app (app.brain, tokens.cssbrain, views/, comp/, ui/, AGENTS.md). With `dir`, the app is created EXACTLY in that folder (use \".\" for the current one; it must be empty apart from dot files) and `name` only names it. Without `dir`, it creates the folder `<name>` inside the current one.",
         input_schema: schema(
-            [("name", "string", "app name (letters, digits, hyphens); also the folder name when `dir` is omitted"), ("dir", "string", "exact app root, e.g. \".\"")],
+            [("name", "string", "app name (letters, digits, hyphens); also the folder name when `dir` is omitted"), ("dir", "string", "exact app root, e.g. \".\""), ("static", "boolean", "create a portable static-site starter without server/login examples")],
             &["name"],
         ),
         output_schema: out([("app", "string"), ("files", "array")]),
@@ -401,7 +401,7 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
                 None => crate::cwd().join(&name),
             };
             let name = if name == "." { dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default() } else { name };
-            let files = scaffold::new_app_named(&dir, &name)?;
+            let files = if a.get("static") == Some(&Json::Bool(true)) { scaffold::new_static_app_named(&dir, &name)? } else { scaffold::new_app_named(&dir, &name)? };
             Ok(Json::obj([
                 ("app", Json::str(dir.display().to_string())),
                 ("files", Json::Arr(files.iter().map(|f| Json::str(f.strip_prefix(&dir).unwrap_or(f).display().to_string())).collect())),
@@ -419,6 +419,7 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
                 ("kind", "string", "view | comp | ui | test | layout | lib | locale | collection | channel | service | api | type | guard | server | hook"),
                 ("name", "string", "component name (kebab or PascalCase)"),
                 ("props", "string", "typed props, e.g. \"user:obj active:bool=false note:str?\""),
+                ("blank", "boolean", "comp only: minimal noninteractive markup, retaining typed props and a colocated test"),
                 ("store", "string", "channel literal object initializer"),
                 ("bus", "boolean", "generate an event bus channel"),
                 ("key", "boolean", "generate a context key channel (default)"),
@@ -435,13 +436,14 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
             for key in ["props", "store", "get", "post", "fields"] {
                 if a.get(key).is_some_and(|v| v.as_str().is_none()) { return Err(format!("`{key}` must be a string")); }
             }
-            for key in ["bus", "key"] {
+            for key in ["bus", "key", "blank"] {
                 if a.get(key).is_some_and(|v| !matches!(v, Json::Bool(_))) { return Err(format!("`{key}` must be a boolean")); }
             }
             let kind = need(a, "kind")?;
             let before = if kind == "type" { std::fs::read_to_string(root.join("types.jsbrain")).ok() } else { None };
             let options = scaffold::AddOptions {
                 props: arg(a, "props").unwrap_or_default(), store: arg(a, "store"),
+                blank: a.get("blank") == Some(&Json::Bool(true)),
                 bus: a.get("bus") == Some(&Json::Bool(true)), key: a.get("key") == Some(&Json::Bool(true)),
                 get: arg(a, "get"), post: arg(a, "post"), fields: arg(a, "fields"),
             };
@@ -704,9 +706,9 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
     }
     tools.push(Tool {
         name: "brain_doctor",
-        description: "Everything at once: check (errors + over-engineering warnings), tests in headless Chrome with an accessibility audit, and leaks. Returns a single summary with `ok`; use it before calling a task done.",
+        description: "Everything at once: check, tests in headless Chrome with accessibility/leak checks, and a fresh isolated production build with SEO. Static builds also audit emitted resource paths, fragments and SHA-384 integrity in staticArtifact. Preserves deployment dist/ and removes private temporary output; run brain_build explicitly to deploy. Dynamic JavaScript and external services still require browser tests. Returns a single summary with ok.",
         input_schema: schema([("path", "string", "app or folder; defaults to the current app"), ("cursor", "number", "index of the first check diag to return (from `nextCursor`)")], &[]),
-        output_schema: out([("ok", "boolean"), ("check", "object"), ("test", "object"), ("heap", "object")]),
+        output_schema: out([("ok", "boolean"), ("check", "object"), ("test", "object"), ("heap", "object"), ("staticArtifact", "object")]),
         run: Box::new(|a| {
             let (ok, j) = crate::run_doctor(arg(a, "path").map(PathBuf::from))?;
             let j = paged(j.stringify(), num(a, "cursor").unwrap_or(0.0) as usize);
@@ -1102,11 +1104,11 @@ pub fn run_profile(profile: &str) -> Result<(), String> {
     tools.push(Tool {
         name: "brain_build",
         description: "Build production assets, prerendered pages and SEO into dist/. Returns conservative route budgets and a final-asset raw/gzip/Brotli ledger separating initial and deferred references; not measured network traffic.",
-        input_schema: schema([("site", "string", "absolute origin for the sitemap, e.g. https://example.dev")], &[]),
-        output_schema: out([("files", "array"), ("warnings", "array"), ("ledger", "array"), ("metrics", "object")]),
+        input_schema: schema([("site", "string", "absolute origin for the sitemap, e.g. https://example.dev"), ("static", "boolean", "require portable HTML output with no server; brain.json output:static is also honored")], &[]),
+        output_schema: out([("outputMode", "string"), ("files", "array"), ("warnings", "array"), ("ledger", "array"), ("metrics", "object")]),
         run: Box::new(|a| {
             let root = crate::app_root()?;
-            let r = crate::run_build(&root, arg(a, "site")).map_err(|e| e.json(Some(&root)))?;
+            let r = if a.get("static") == Some(&Json::Bool(true)) { crate::run_build_mode(&root, arg(a, "site"), "production", None, true).and_then(|r| r.into_report().map_err(crate::BuildError::from)) } else { crate::run_build(&root, arg(a, "site")) }.map_err(|e| e.json(Some(&root)))?;
             Ok(crate::build_json(&r).stringify())
         }),
     });

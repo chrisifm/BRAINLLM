@@ -31,11 +31,15 @@ pub fn parse_headers(src: &str) -> Rules {
 
 /// Headers for `path`: every matching rule in file order (exact path, or `prefix*`); a later value of the same
 /// header replaces an earlier one, so a page rule overrides `/*`.
+/// The HTTP parser already decoded the request path. Decode each pattern after identifying its wildcard;
+/// an encoded literal star therefore never becomes a wildcard, and literal percent filenames remain distinct.
 pub fn headers_for(rules: &Rules, path: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     for (pat, hs) in rules {
         let hit = match pat.strip_suffix('*') {
+            Some(prefix) if prefix.contains('%') => path.starts_with(&crate::http::percent_decode(prefix)),
             Some(prefix) => path.starts_with(prefix),
+            None if pat.contains('%') => crate::http::percent_decode(pat)==path,
             None => pat == path,
         };
         if hit {
@@ -46,6 +50,10 @@ pub fn headers_for(rules: &Rules, path: &str) -> Vec<(String, String)> {
         }
     }
     out
+}
+
+fn exact_rule_path(pattern:&str,path:&str)->bool {
+    if pattern.contains('%') {crate::http::percent_decode(pattern)==path} else {pattern==path}
 }
 
 // Every served candidate, including gzip and fallback pages, must be a regular file
@@ -213,7 +221,7 @@ impl Static {
         let analytics = target.is_some() && std::env::var("BRAIN_ANALYTICS").as_deref() != Ok("off");
         let probe_target = target.clone();
         if let (Some(target), Some(native_path)) = (target, native_path) {
-            if native_proxy::handles(native_path) {
+            if native_proxy::handles(native_path) && native_proxy::probe_alias(native_path).is_none() {
                 req.path = native_path.to_string();
                 return if req.upgrade.stream_body.is_some() {
                     native_proxy::serve_files(&mut s, &target, &req)
@@ -294,6 +302,7 @@ impl Static {
         // `/health` is reserved for the backend (B0735), as in server.mjs: an app file at that path wins, otherwise the
         // backend answers, or a plain healthy response without one. It also answers at the root under a base.
         let probe_path = inner.as_deref().unwrap_or(&path);
+        let probe_path = native_proxy::probe_alias(probe_path).unwrap_or(probe_path);
         if native_proxy::is_probe(probe_path) && inner.as_deref().is_none_or(|p| self.resolve(p).is_none()) {
             let Some(target) = probe_target else {
                 return write(&mut s, 200, &[("Content-Type".into(), "application/json".into()), ("Cache-Control".into(), "no-store".into())], b"{\"ok\":true}", head);
@@ -347,6 +356,15 @@ impl Static {
             _ => file,
         };
         let mut hs = headers_for(&self.rules, &path);
+        if html && (status>=400 || !hs.iter().any(|(key,_)|key.eq_ignore_ascii_case("Content-Security-Policy")) || brain_pack::cache::SECURITY_DOC.iter().any(|(required,_)|!hs.iter().any(|(key,_)|key.eq_ignore_ascii_case(required)))) {
+            let document=self.document_headers(&file);
+            if status>=400 {hs=document;}
+            else {
+                for (key,value) in document {
+                    if !hs.iter().any(|(existing,_)|existing.eq_ignore_ascii_case(&key)) {hs.push((key,value));}
+                }
+            }
+        }
         // A Markdown copy names the canonical its page declares; no canonical in the page, no header (never an invented URL).
         let markdown_of = if name.ends_with(".md") {
             inner.as_deref().map(|p| p.trim_end_matches(".md")).and_then(|p| self.resolve(if p.is_empty() || p == "/index" { "/" } else { p }))
@@ -385,22 +403,8 @@ impl Static {
                 return write(&mut s, status, &hs, with_analytics(&page, &self.pre).as_bytes(), head);
             }
         }
-        // Range: media players ask for byte spans (Safari plays no video without them). The span is of the plain file,
-        // so a ranged request skips the precompressed siblings; If-Range has no validator to match here, so it gets it all.
         if status == 200 && !html {
-            let size = std::fs::metadata(&file).map_or(0, |m| m.len());
-            match req.header("range").filter(|_| req.header("if-range").is_none()).and_then(|r| byte_range(r, size)) {
-                Some(Err(())) => {
-                    let hs = [("Content-Range".to_string(), format!("bytes */{size}")), ("Cache-Control".to_string(), "no-store".to_string())];
-                    return write(&mut s, 416, &hs, b"", head);
-                }
-                Some(Ok((start, end))) => {
-                    hs.push(("Accept-Ranges".into(), "bytes".into()));
-                    hs.push(("Content-Range".into(), format!("bytes {start}-{end}/{size}")));
-                    return write_file_span(&mut s, 206, &hs, &file, Some((start, end - start + 1)), head);
-                }
-                None => {}
-            }
+            return serve_asset(&mut s, &req, hs, &file, head);
         }
         let variants = [
             ("br", PathBuf::from(format!("{name}.br"))),
@@ -440,6 +444,34 @@ impl Static {
             }
         }
         write_file(&mut s, status, &hs, selected_file, head)
+    }
+
+    fn document_headers(&self,file:&Path)->Vec<(String,String)> {
+        let Ok(relative)=file.strip_prefix(&self.dist) else {return Vec::new()};
+        let relative=relative.to_string_lossy().replace('\\',"/");
+        let actual=format!("{}/{}",self.pre,relative);
+        let mut candidates=vec![actual.clone()];
+        if let Some(stem)=relative.strip_suffix(".brain") {candidates.push(format!("{}/{stem}.html",self.pre));}
+        for suffix in ["index.html","index.brain"] {
+            if relative==suffix {candidates.push(format!("{}/",self.pre));}
+            else if let Some(directory)=relative.strip_suffix(&format!("/{suffix}")) {candidates.push(format!("{}/{directory}/",self.pre));}
+        }
+        if let Some(stem)=relative.strip_suffix(".html").or_else(||relative.strip_suffix(".brain")) {candidates.push(format!("{}/{stem}",self.pre));}
+        // Prefer an explicit policy of the selected file, with canonical aliases for builds made by older compilers.
+        let identity=candidates.iter().find(|candidate| {
+            let explicit=self.rules.iter().any(|(pattern,headers)|!pattern.ends_with('*') && exact_rule_path(pattern,candidate) && headers.iter().any(|(key,_)|key.eq_ignore_ascii_case("Content-Security-Policy")));
+            if !explicit {return false;}
+            if **candidate==actual {return true;}
+            let Some(inner)=candidate.strip_prefix(&self.pre).filter(|inner|inner.starts_with('/')) else {return false;};
+            let selected=self.resolve(inner);
+            selected.as_deref()==Some(file) || (selected.is_none() && matches!(relative.as_str(),"404.brain"|"_offline.brain") && **candidate==format!("{}/{}.html",self.pre,relative.trim_end_matches(".brain")))
+        }).unwrap_or(&actual);
+        let mut headers=headers_for(&self.rules,identity);
+        // A file's exact partial override (for example its own-extension MIME or opener policy) stays authoritative.
+        for (_,fields) in self.rules.iter().filter(|(pattern,_)|!pattern.ends_with('*') && exact_rule_path(pattern,&actual)) {
+            for (key,value) in fields {headers.retain(|(existing,_)|!existing.eq_ignore_ascii_case(key));headers.push((key.clone(),value.clone()));}
+        }
+        headers
     }
 }
 
@@ -493,7 +525,8 @@ fn canonical_link(page: &str) -> Option<String> {
 
 /// `/403`, `/404.html`, `/503`…: the status of a page named after one (a file is only served when it exists).
 fn reserved_status(path: &str) -> Option<u16> {
-    let code: u16 = path.strip_prefix('/')?.trim_end_matches(".html").parse().ok()?;
+    let path=path.strip_prefix('/')?;
+    let code: u16 = path.strip_suffix(".html").or_else(||path.strip_suffix(".brain")).unwrap_or(path).parse().ok()?;
     matches!(code, 403 | 404 | 410 | 500..=599).then_some(code)
 }
 
@@ -580,6 +613,81 @@ pub fn byte_range(header: &str, size: u64) -> Option<Result<(u64, u64), ()>> {
     Some(if start < size { Ok((start, end.map_or(size - 1, |e| e.min(size - 1)))) } else { Err(()) })
 }
 
+fn asset_stamp(path: &Path, metadata: &std::fs::Metadata) -> String {
+    let stamp = format!("{path:?}:{}:{:?}:{:?}", metadata.len(), metadata.modified(), metadata.created());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        return format!("{stamp}:{}:{}:{}:{}", metadata.dev(), metadata.ino(), metadata.ctime(), metadata.ctime_nsec());
+    }
+    #[cfg(not(unix))]
+    stamp
+}
+
+fn asset_tag(path: &Path, file: &mut std::fs::File) -> io::Result<String> {
+    static TAGS: std::sync::OnceLock<std::sync::Mutex<Vec<(String, String)>>> = std::sync::OnceLock::new();
+    let tags = TAGS.get_or_init(Default::default);
+    let stamp = asset_stamp(path, &file.metadata()?);
+    if let Some((_, tag)) = tags.lock().map_err(|_| io::Error::other("static validator cache unavailable"))?.iter().find(|(key, _)| key == &stamp) {
+        return Ok(tag.clone());
+    }
+    struct Reader<'a> { file: std::io::BufReader<&'a mut std::fs::File>, end: Instant }
+    impl Read for Reader<'_> {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            if Instant::now() > self.end { return Err(io::Error::new(io::ErrorKind::TimedOut, "static validator deadline exceeded")); }
+            self.file.read(buffer)
+        }
+    }
+    let hash = brain_pack::sha::sha256_reader(Reader { file: std::io::BufReader::with_capacity(65536, &mut *file), end: Instant::now() + Duration::from_secs(30) })?;
+    if asset_stamp(path, &file.metadata()?) != stamp { return Err(io::Error::other("static file changed while computing its validator")); }
+    let tag = format!("\"{}\"", brain_pack::sha::base64(&hash));
+    let mut cache = tags.lock().map_err(|_| io::Error::other("static validator cache unavailable"))?;
+    cache.push((stamp, tag.clone()));
+    if cache.len() > 256 { cache.remove(0); }
+    Ok(tag)
+}
+
+fn serve_asset(s: &mut TcpStream, req: &crate::http::Request, mut hs: Vec<(String, String)>, path: &Path, head: bool) -> io::Result<()> {
+    let mut selected = path.to_path_buf();
+    // Byte ranges and If-Range always describe the identity representation.
+    if req.header("range").is_none() {
+        let variants: Vec<_> = accepted_encodings(req.header("accept-encoding").unwrap_or("")).into_iter().filter_map(|enc| {
+            let suffix = match enc { "br" => "br", "zstd" => "zst", _ => "gz" };
+            let candidate = PathBuf::from(format!("{}.{suffix}", path.display()));
+            let meta = std::fs::symlink_metadata(&candidate).ok()?;
+            meta.is_file().then_some((enc, candidate, meta.len()))
+        }).collect();
+        if let Some((enc, candidate, _)) = variants.into_iter().min_by_key(|(_, _, size)| *size) {
+            selected = candidate;
+            hs.push(("Content-Encoding".into(), enc.into()));
+        }
+    }
+    if let Some((_, vary)) = hs.iter_mut().find(|(key, _)| key.eq_ignore_ascii_case("vary")) {
+        if !vary.split(',').any(|v| v.trim().eq_ignore_ascii_case("accept-encoding")) { vary.push_str(", Accept-Encoding"); }
+    } else { hs.push(("Vary".into(), "Accept-Encoding".into())); }
+    if path.extension().and_then(|e| e.to_str()).is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "m3u8" | "m3u" | "mpd")) {
+        hs.retain(|(key, _)| !key.eq_ignore_ascii_case("cache-control"));
+        hs.push(("Cache-Control".into(), "no-cache".into()));
+    }
+    let mut file = open_output(&selected)?;
+    let tag = asset_tag(&selected, &mut file)?;
+    let size = file.metadata()?.len();
+    hs.retain(|(key, _)| !key.eq_ignore_ascii_case("etag"));
+    hs.push(("ETag".into(), tag.clone()));
+    if selected == path { hs.push(("Accept-Ranges".into(), "bytes".into())); }
+    if req.header("if-none-match").is_some_and(|v| v.split(',').any(|v| v.trim() == "*" || v.trim().trim_start_matches("W/") == tag)) {
+        return write(s, 304, &hs, b"", true);
+    }
+    match req.header("range").filter(|_| req.header("if-range").is_none_or(|v| v == tag)).and_then(|v| byte_range(v, size)) {
+        Some(Err(())) => write(s, 416, &[("Content-Range".into(), format!("bytes */{size}")), ("Cache-Control".into(), "no-store".into())], b"", head),
+        Some(Ok((start, end))) => {
+            hs.push(("Content-Range".into(), format!("bytes {start}-{end}/{size}")));
+            write_open_file_span(s, 206, &hs, file, Some((start, end - start + 1)), head)
+        }
+        None => write_open_file_span(s, 200, &hs, file, None, head),
+    }
+}
+
 fn write_file(
     s: &mut TcpStream,
     status: u16,
@@ -599,6 +707,10 @@ fn write_file_span(
     span: Option<(u64, u64)>,
     head: bool,
 ) -> io::Result<()> {
+    write_open_file_span(s, status, headers, open_output(path)?, span, head)
+}
+
+fn open_output(path: &Path) -> io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -607,6 +719,18 @@ fn write_file_span(
         options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
     let file = options.open(path)?;
+    if !file.metadata()?.is_file() { return Err(io::Error::other("static output must be regular")); }
+    Ok(file)
+}
+
+fn write_open_file_span(
+    s: &mut TcpStream,
+    status: u16,
+    headers: &[(String, String)],
+    file: std::fs::File,
+    span: Option<(u64, u64)>,
+    head: bool,
+) -> io::Result<()> {
     let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(io::Error::other("static output must be regular"));
@@ -669,10 +793,10 @@ fn write_headers<W: Write>(
         416 => "Range Not Satisfiable",
         _ => "",
     };
-    let mut h = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n",
-        length
-    );
+    // A 304 has no body; its length would describe the stored 200, never an empty representation.
+    let mut h = format!("HTTP/1.1 {status} {reason}\r\n");
+    if status != 304 { h.push_str(&format!("Content-Length: {length}\r\n")); }
+    h.push_str("Connection: close\r\n");
     for (k, v) in headers {
         h.push_str(&format!("{k}: {v}\r\n"));
     }
@@ -684,10 +808,27 @@ fn write_headers<W: Write>(
 /// Managed static gateway. Its authority is fixed for HTTP and sockets at construction.
 /// Clone an `Arc<StaticGateway>` across request workers; dropping the last owner reaps tunnels.
 pub struct StaticGateway {
-    files: Static,
+    files: std::sync::Mutex<OutputSnapshot>,
     backend: Option<String>,
     sockets: Option<crate::NativeSocketProxy>,
     routes: native_proxy::NativeRoutes,
+}
+// Refresh cached policy/validators after a rebuild, without parsing host configuration on every request.
+// Request handlers clone the snapshot and release the lock before reading bodies or doing network I/O.
+struct OutputSnapshot {
+    files: Arc<Static>,
+    stamp: OutputStamp,
+}
+type OutputStamp = Vec<Option<(Option<std::time::SystemTime>, u64, u64)>>;
+fn output_stamp(dist: &Path) -> OutputStamp {
+    ["", "index.html", "index.brain", "404.html", "404.brain", "_headers", "_redirects"].iter().map(|path| {
+        let metadata = std::fs::symlink_metadata(dist.join(path)).ok()?;
+        #[cfg(unix)]
+        let identity = { use std::os::unix::fs::MetadataExt; metadata.ino() };
+        #[cfg(not(unix))]
+        let identity = 0;
+        Some((metadata.modified().ok(), metadata.len(), identity))
+    }).collect()
 }
 impl StaticGateway {
     pub fn load(dist: &Path, base: &str, backend: Option<&str>) -> io::Result<Self> {
@@ -769,16 +910,26 @@ impl StaticGateway {
             .map_err(io::Error::other)?
             .start_sockets()?,
         };
+        // Stamp first: a concurrent rebuild can then only trigger another refresh, never pin stale policy to a newer stamp.
+        let stamp = output_stamp(dist);
         Ok(Self {
-            files: Static::load(dist, base),
+            files: std::sync::Mutex::new(OutputSnapshot { files: Arc::new(Static::load(dist, base)), stamp }),
             backend,
             sockets,
             routes,
         })
     }
     pub fn handle(&self, stream: TcpStream) -> io::Result<()> {
-        self.files
-            .handle_native(stream, self.backend.as_deref(), self.sockets.as_ref(), &self.routes)
+        let files = {
+            let mut state = self.files.lock().map_err(|_| io::Error::other("static output snapshot lock failed"))?;
+            let stamp = output_stamp(&state.files.dist);
+            if stamp != state.stamp {
+                state.files = Arc::new(Static::load(&state.files.dist, &format!("{}/", state.files.pre)));
+                state.stamp = stamp;
+            }
+            state.files.clone()
+        };
+        files.handle_native(stream, self.backend.as_deref(), self.sockets.as_ref(), &self.routes)
     }
     pub fn stop(&self) -> io::Result<()> {
         self.sockets.as_ref().map_or(Ok(()), |proxy| proxy.stop())
@@ -855,6 +1006,39 @@ pub fn serve_static_with_gateway(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn running_static_gateway_recovers_from_recreated_dist_and_refreshes_validators_and_headers() {
+        let dist = std::env::temp_dir().join(format!("brain-static-recreated-dist-{}", std::process::id()));
+        std::fs::create_dir_all(&dist).unwrap();
+        std::fs::write(dist.join("index.html"), "<meta name=\"brain-build\" content=\"first\"><h1>First</h1>").unwrap();
+        std::fs::write(dist.join("_headers"), "/*\n  X-Example-Revision: first\n").unwrap();
+        let gateway = StaticGateway::load(&dist, "/", None).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            for _ in 0..3 { gateway.handle(listener.accept().unwrap().0).unwrap(); }
+        });
+        let get = |extra: &str| {
+            let mut socket = TcpStream::connect(address).unwrap();
+            socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            socket.write_all(format!("GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n{extra}\r\n").as_bytes()).unwrap();
+            let mut response = String::new(); socket.read_to_string(&mut response).unwrap(); response
+        };
+        let first = get("");
+        std::fs::remove_dir_all(&dist).unwrap();
+        let absent = get("");
+        std::fs::create_dir_all(&dist).unwrap();
+        std::fs::write(dist.join("index.html"), "<meta name=\"brain-build\" content=\"second\"><h1>Second</h1>").unwrap();
+        std::fs::write(dist.join("_headers"), "/*\n  X-Example-Revision: second\n").unwrap();
+        let rebuilt = get("If-None-Match: \"first\"\r\n");
+        server.join().unwrap();
+        std::fs::remove_dir_all(dist).unwrap();
+        assert!(first.starts_with("HTTP/1.1 200") && first.contains("<h1>First</h1>"), "{first}");
+        assert!(absent.starts_with("HTTP/1.1 404"), "{absent}");
+        assert!(rebuilt.starts_with("HTTP/1.1 200") && rebuilt.contains("<h1>Second</h1>"), "{rebuilt}");
+        assert!(rebuilt.contains("X-Example-Revision: second\r\n") && rebuilt.contains("ETag: \"second\"\r\n"), "{rebuilt}");
+    }
 
     #[test]
     fn private_files_and_compressed_server_sources_are_never_public() {
@@ -952,6 +1136,17 @@ mod tests {
         std::fs::write(dist.join("favicon.ico"), "ico").unwrap();
         assert!(get("/favicon.ico").starts_with("HTTP/1.1 200"), "a real .ico wins");
         std::fs::remove_dir_all(&dist).unwrap();
+    }
+
+    #[test]
+    fn encoded_document_patterns_preserve_literal_percent_and_star() {
+        let rules=parse_headers("/*\n  X-Global: yes\n/rate%25\n  X-Exact: percent\n/sample-%C3%A9\n  X-Exact: unicode\n/literal%2A\n  X-Exact: star\n/assets%20dir/*\n  X-Prefix: yes\n");
+        for (path,value) in [("/rate%","percent"),("/sample-\u{e9}","unicode"),("/literal*","star")] {
+            assert!(headers_for(&rules,path).iter().any(|(k,v)|k=="X-Exact" && v==value));
+        }
+        assert!(!headers_for(&rules,"/literal-other").iter().any(|(k,_)|k=="X-Exact"));
+        assert!(!headers_for(&rules,"/rate%25").iter().any(|(k,_)|k=="X-Exact"));
+        assert!(headers_for(&rules,"/assets dir/a.js").iter().any(|(k,_)|k=="X-Prefix"));
     }
 
     #[test]
@@ -1142,6 +1337,37 @@ mod confinement_tests {
 #[cfg(test)]
 mod encoding_tests {
     #[test]
+    fn conditional_static_html_and_encoded_assets_omit_body_length_on_304() {
+        use std::{io::{Read, Write}, net::{TcpListener, TcpStream}};
+        let dist = std::env::temp_dir().join(format!("brain-prod-conditional-{}", std::process::id()));
+        std::fs::create_dir_all(&dist).unwrap();
+        std::fs::write(dist.join("index.html"), "<head><meta name=\"brain-build\" content=\"synthetic-build\"></head><body>Home</body>").unwrap();
+        std::fs::write(dist.join("clip.mp4"), b"media bytes").unwrap();
+        std::fs::write(dist.join("clip.mp4.br"), b"encoded").unwrap();
+        let ask = |path: &str, method: &str, encoding: &str, condition: &str| {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+            let app = super::Static::load(&dist, "/");
+            let worker = std::thread::spawn(move || app.handle(listener.accept().unwrap().0).unwrap());
+            client.write_all(format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: {encoding}\r\n{condition}\r\n").as_bytes()).unwrap();
+            let mut response = String::new();
+            client.read_to_string(&mut response).unwrap();
+            worker.join().unwrap();
+            response
+        };
+        for (path, encoding) in [("/", "identity"), ("/clip.mp4", "identity"), ("/clip.mp4", "br")] {
+            let first = ask(path, "GET", encoding, "");
+            let tag = first.lines().find_map(|line| line.strip_prefix("ETag: ")).unwrap().trim();
+            for method in ["GET", "HEAD"] {
+                let cached = ask(path, method, encoding, &format!("If-None-Match: {tag}\r\n"));
+                assert!(cached.starts_with("HTTP/1.1 304") && cached.ends_with("\r\n\r\n"), "{cached}");
+                assert!(!cached.contains("Content-Length:"), "{cached}");
+            }
+        }
+        std::fs::remove_dir_all(dist).unwrap();
+    }
+
+    #[test]
     fn encodings_respect_weight_and_explicit_exclusion() {
         assert_eq!(super::accepted_encodings("gzip, br"), vec!["br", "gzip"]);
         assert_eq!(
@@ -1186,6 +1412,31 @@ mod encoding_tests {
         let _ = std::fs::remove_dir_all(&dist);
     }
     #[test]
+    fn atomic_replacement_keeps_static_headers_and_bytes_on_the_open_descriptor() {
+        use std::{io::Read, net::{TcpListener, TcpStream}};
+        let dist = std::env::temp_dir().join(format!("brain-prod-atomic-{}", std::process::id()));
+        std::fs::create_dir_all(&dist).unwrap();
+        let path = dist.join("clip.mp4");
+        std::fs::write(&path, b"before").unwrap();
+        let mut file = super::open_output(&path).unwrap();
+        let tag = super::asset_tag(&path, &mut file).unwrap();
+        std::fs::write(dist.join("next.mp4"), b"after!").unwrap();
+        std::fs::rename(dist.join("next.mp4"), &path).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let response_tag = tag.clone();
+        let worker = std::thread::spawn(move || {
+            let mut stream = listener.accept().unwrap().0;
+            super::write_open_file_span(&mut stream, 200, &[("ETag".into(), response_tag)], file, None, false).unwrap();
+        });
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        worker.join().unwrap();
+        assert!(response.contains(&format!("ETag: {tag}")) && response.contains("Content-Length: 6") && response.ends_with("before"), "{response}");
+        std::fs::remove_dir_all(dist).unwrap();
+    }
+
+    #[test]
     fn static_files_answer_one_byte_range_of_the_plain_file() {
         use std::io::{Read, Write};
         // Safari plays no video without Range: it asks for bytes=0-1 first and gives up on a 200
@@ -1222,6 +1473,21 @@ mod encoding_tests {
         }
         let plain = ask("", "GET", "identity");
         assert!(plain.contains("Accept-Ranges: bytes"), "{plain}");
+        let tag = plain.lines().find_map(|line| line.strip_prefix("ETag: ")).unwrap().trim();
+        assert!(tag.starts_with('"') && !tag.starts_with("W/"));
+        let cached = ask(&format!("If-None-Match: W/{tag}\r\n"), "GET", "identity");
+        assert!(cached.starts_with("HTTP/1.1 304") && cached.ends_with("\r\n\r\n"), "{cached}");
+        assert!(!cached.contains("Content-Length:"), "{cached}");
+        for (validator, status) in [(tag.to_string(), 206), (format!("W/{tag}"), 200), ("\"stale\"".into(), 200)] {
+            let response = ask(&format!("Range: bytes=0-1\r\nIf-Range: {validator}\r\n"), "GET", "br");
+            assert!(response.starts_with(&format!("HTTP/1.1 {status}")), "{response}");
+            assert!(response.contains(&format!("ETag: {tag}")), "{response}");
+        }
+        let encoded = ask("", "GET", "br");
+        let encoded_tag = encoded.lines().find_map(|line| line.strip_prefix("ETag: ")).unwrap().trim();
+        assert_ne!(encoded_tag, tag);
+        let head = ask("", "HEAD", "identity");
+        assert!(head.contains(&format!("ETag: {tag}")) && head.contains("Content-Length: 100"), "{head}");
         let head = ask("Range: bytes=0-1\r\n", "HEAD", "br");
         assert!(head.starts_with("HTTP/1.1 206") && head.contains("Content-Length: 2") && head.ends_with("\r\n\r\n"), "{head}");
         let _ = std::fs::remove_dir_all(&dist);
@@ -1319,35 +1585,46 @@ mod encoding_tests {
         let dist = std::env::temp_dir().join(format!("brain-prod-health-{}", std::process::id()));
         std::fs::create_dir_all(&dist).unwrap();
         std::fs::write(dist.join("index.html"), "<h1>Home</h1>").unwrap();
-        let ask = |pre: &str, backend: Option<String>, path: &str| {
+        let ask_method = |pre: &str, backend: Option<String>, path: &str, method: &str| {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let address = listener.local_addr().unwrap();
             let handler = Static::load(&dist, pre);
             let task = std::thread::spawn(move || handler.handle_with_backend(listener.accept().unwrap().0, backend.as_deref()).unwrap());
             let mut client = TcpStream::connect(address).unwrap();
-            write!(client, "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").unwrap();
+            client.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+            client.write_all(format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").as_bytes()).unwrap();
             let mut response = String::new();
             client.read_to_string(&mut response).unwrap();
             task.join().unwrap();
             response
         };
-        for path in ["/health", "/health/live", "/health/ready"] {
+        let ask = |pre, backend, path| ask_method(pre, backend, path, "GET");
+        for path in ["/health", "/health/live", "/health/ready", "/_brain/health", "/_brain/health/live", "/_brain/health/ready"] {
             let plain = ask("", None, path);
             assert!(plain.starts_with("HTTP/1.1 200") && plain.ends_with("{\"ok\":true}") && plain.contains("no-store"), "{plain}");
         }
         assert!(ask("/app", None, "/health").starts_with("HTTP/1.1 200"));
         assert!(ask("", None, "/health/other").starts_with("HTTP/1.1 404"));
-        let authority = TcpListener::bind("127.0.0.1:0").unwrap();
-        let target = format!("http://{}", authority.local_addr().unwrap());
-        let backend = std::thread::spawn(move || {
-            let (mut socket, _) = authority.accept().unwrap();
-            let req = crate::http::read_request(socket.try_clone().unwrap()).unwrap();
-            assert_eq!(req.path, "/health/ready");
-            crate::http::respond_with(&mut socket, 503, "application/json", b"{\"code\":\"DRAINING\"}", false, &[]).unwrap();
-        });
-        let forwarded = ask("", Some(target), "/health/ready");
-        assert!(forwarded.starts_with("HTTP/1.1 503") && forwarded.contains("DRAINING"), "{forwarded}");
-        backend.join().unwrap();
+        assert!(ask("/app", None, "/_brain/health").starts_with("HTTP/1.1 200"));
+        assert!(ask("", None, "/_brain/health/other").starts_with("HTTP/1.1 404"));
+        for (pre, path, canonical) in [("", "/health/ready", "/health/ready"), ("", "/_brain/health", "/health"),
+            ("/app", "/app/_brain/health/live", "/health/live"), ("/app", "/_brain/health/ready", "/health/ready")] {
+            for method in ["GET", "HEAD"] {
+                let authority = TcpListener::bind("127.0.0.1:0").unwrap();
+                let target = format!("http://{}", authority.local_addr().unwrap());
+                let backend = std::thread::spawn(move || {
+                    let (mut socket, _) = authority.accept().unwrap();
+                    let req = crate::http::read_request(socket.try_clone().unwrap()).unwrap();
+                    assert_eq!((req.path.as_str(), req.method.as_str()), (canonical, method));
+                    crate::http::respond_with(&mut socket, 503, "application/json", b"{\"code\":\"DRAINING\"}", method == "HEAD", &[]).unwrap();
+                });
+                let forwarded = ask_method(pre, Some(target), path, method);
+                backend.join().unwrap();
+                assert!(forwarded.starts_with("HTTP/1.1 503") && forwarded.contains("no-store"), "{forwarded}");
+                if method == "HEAD" { assert!(forwarded.ends_with("\r\n\r\n"), "HEAD must carry no body: {forwarded}"); }
+                else { assert!(forwarded.contains("DRAINING"), "{forwarded}"); }
+            }
+        }
         std::fs::create_dir_all(dist.join("health")).unwrap();
         std::fs::write(dist.join("health/index.html"), "<h1>status board</h1>").unwrap();
         assert!(ask("", None, "/health").contains("status board"));

@@ -1,0 +1,11 @@
+{
+  "id": "verification-target-lock",
+  "kind": "internal",
+  "title": "Serialize full verification by the actual Cargo target",
+  "why": "Competing POSIX gates cannot compile or regenerate fixtures against the same Cargo target concurrently; the kernel lease follows the executed noninteractive command.",
+  "changelog": [
+    "Complete POSIX verification uses a nonblocking kernel lease per physical Cargo target"
+  ],
+  "codes": [],
+  "apis": []
+}

@@ -1,0 +1,13 @@
+<meta seo title="Static website" keyword="static website" description="A static website built with BRAINLLM: accessible pages, useful metadata and portable HTML, CSS and JavaScript ready for ordinary web hosting." canonical="/">
+<main class="page">
+  <h1>Your static website</h1>
+  <p>Welcome to {{name}}, a static website built with BRAINLLM. Replace this introduction with a clear answer to the question your visitors came to ask. Explain what you offer, who it helps and how they can take the next step.</p>
+  <h2>Content that is ready to read</h2>
+  <p>Every page is generated as HTML before you publish it. Visitors and search engines can read the content directly. Add useful headings, descriptive links and accessible images as you turn this starter into your own website.</p>
+  <p>Start with the <a href="/about">about page</a> to describe your project. Add more pages in views/ and rebuild when the content changes.</p>
+</main>
+<style>
+  .page { max-width: 68ch; margin: 0 auto; padding: var(--space-6) var(--space-4); display: grid; gap: var(--space-4); }
+  h1 { font-size: clamp(2rem, 5vw, 3rem); }
+  p { margin: 0; color: var(--muted); }
+</style>

@@ -15,6 +15,7 @@ writeFileSync(join(dist, '.brain_env'), 'private environment marker')
 writeFileSync(join(dist, '410.html'), '<!doctype html><title>Custom gone</title><main><h1>Custom gone</h1></main>')
 writeFileSync(join(dist, '404.html'), '<!doctype html><title>Custom missing</title><main><h1>Custom missing</h1></main>')
 writeFileSync(join(dist, 'google.html'), "<html><head><meta name='brain-google-signin' content='1'></head><body>Sign in</body></html>")
+writeFileSync(join(dist, 'apple.html'), "<html><head><meta name='brain-apple-signin' content='1'></head><body>Sign in</body></html>")
 writeFileSync(join(dist, 'ordinary.html'), "<html><head><!-- <meta name='brain-google-signin' content='1'> --></head><body>Ordinary</body></html>")
 const server = createServer({ dist, log() {} })
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
@@ -90,6 +91,26 @@ test('every registered HTTP error has a safe fallback, with explicit custom stat
 test('Google opener policy is limited to actual document-head opt-in', async () => {
   const google = await request('/google'); assert.equal(google.headers.get('cross-origin-opener-policy'), 'same-origin-allow-popups')
   const ordinary = await request('/ordinary'); assert.equal(ordinary.headers.get('cross-origin-opener-policy'), 'same-origin')
+})
+
+test('sign-in opener policy survives conditional GET and HEAD without replacing the cached CSP nonce', async () => {
+  for (const [path, policy] of [['/google', 'same-origin-allow-popups'], ['/apple', 'same-origin-allow-popups'], ['/ordinary', 'same-origin']]) {
+    const first = await request(path)
+    assert.equal(first.status, 200)
+    assert.equal(first.headers.get('cross-origin-opener-policy'), policy)
+    const etag = first.headers.get('etag')
+    assert.ok(etag, path)
+    await first.text()
+    for (const method of ['GET', 'HEAD']) {
+      const cached = await request(path, { method, headers: { 'if-none-match': etag } })
+      assert.equal(cached.status, 304, path)
+      assert.equal(cached.headers.get('cross-origin-opener-policy'), policy, path)
+      assert.equal(cached.headers.get('etag'), etag)
+      assert.equal(cached.headers.get('cache-control'), 'no-cache')
+      assert.equal(cached.headers.get('content-security-policy'), null)
+      assert.equal(await cached.text(), '')
+    }
+  }
 })
 
 test('static dispatch cannot expose encoded server modules, deployment files or dotfiles',async()=>{

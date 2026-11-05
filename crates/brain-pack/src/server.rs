@@ -92,7 +92,7 @@ mod tests {
         std::fs::write(root.join(CONTENT), "export const page = () => []\n").unwrap();
         std::fs::write(root.join("views/blog.brain"), "x").unwrap();
         let compile = |_: &str, _: &Path| -> Result<crate::Unit, String> {
-            Ok(crate::Unit { js: String::new(), css: String::new(), server_js: "import { page } from \"brain:content\";\nexport async function load() { return { posts: page(1) } }\n".into(), server_fns: vec![] })
+            Ok(crate::Unit { js: String::new(), css: String::new(), server_js: "import { page } from \"brain:content\";\nexport async function load() { return { posts: page(1) } }\n".into(), server: brain_lex::ServerMetadata { load: true, ..Default::default() }, server_fns: vec![] })
         };
         let (mut written, mut files) = (BTreeMap::new(), BTreeMap::new());
         let m = emit(&root, "views/blog.brain", &compile, &|_| None, &mut written, &mut files, 0).unwrap();
@@ -110,7 +110,7 @@ mod tests {
         std::fs::write(root.join("lib/db.js"), "import fs from 'node:fs'\nexport default { fs }\n").unwrap();
         let compile = |_: &str, rel: &Path| -> Result<crate::Unit, String> {
             assert_eq!(rel, Path::new("views/a.brain"));
-            Ok(crate::Unit { js: String::new(), css: String::new(), server_js: "import db from \"../lib/db.js\";\nimport { sig } from \"/@brain/brain.js\";\nexport async function load() { return db }\n".into(), server_fns: vec![] })
+            Ok(crate::Unit { js: String::new(), css: String::new(), server_js: "import db from \"../lib/db.js\";\nimport { sig } from \"/@brain/brain.js\";\nexport async function load() { return db }\n".into(), server: brain_lex::ServerMetadata { load: true, ..Default::default() }, server_fns: vec![] })
         };
         let rt = |n: &str| (n == "brain.js").then(|| "/_b/core.js".to_string());
         let (mut written, mut files) = (BTreeMap::new(), BTreeMap::new());

@@ -1,0 +1,24 @@
+{
+  "id": "declared-default-repair",
+  "kind": "capability",
+  "title": "Explicit bounded repair of missing declared defaults",
+  "why": "Fields approved by older releases can be inspected and repaired without silently rewriting existing values. Preview first; apply is bounded and explicit, and null replacement is separately opted in.",
+  "changelog": [
+    "`brain data defaults` previews and explicitly fills defaults"
+  ],
+  "guide": "docs/backend/import.md",
+  "codes": [],
+  "apis": [
+    "brain data defaults"
+  ],
+  "adopt": {
+    "file": "server/resources/items/schema.jsbrain",
+    "snippet": "<meta server>\nexport default { title: 'str!', label: { type: 'str', default: 'Default' } }\n"
+  },
+  "uses": [
+    {
+      "glob": "server/resources/*/schema.jsbrain",
+      "contains": "default:"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "id": "public-route-priority",
+  "kind": "fix",
+  "title": "Static shortcuts preserve route security",
+  "why": "Node static, form and Markdown shortcuts run matching guards and middleware. Dev extensionless public files precede page fallback without bypassing security chains.",
+  "changelog": [
+    "Static/form/Markdown fast paths retain matching Node route guards and middleware"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "codes": [],
+  "apis": [],
+  "affects": [
+    "views/**/*.brain",
+    "public/**"
+  ]
+}

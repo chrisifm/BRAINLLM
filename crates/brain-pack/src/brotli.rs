@@ -1,9 +1,10 @@
 //! Brotli is generated once at build time, never on a static request. Cache keys include codec version and settings.
-pub fn compress(bytes: &[u8]) -> Result<Vec<u8>, String> {
+pub fn compress(bytes: &[u8]) -> Result<Vec<u8>, String> { compress_with_quality(bytes, 11) }
+pub fn compress_with_quality(bytes: &[u8], quality: u32) -> Result<Vec<u8>, String> {
     use std::io::Write;
     let mut out = Vec::new();
     {
-        let mut writer = ::brotli::CompressorWriter::new(&mut out, 65536, 11, 22);
+        let mut writer = ::brotli::CompressorWriter::new(&mut out, 65536, quality, 22);
         writer
             .write_all(bytes)
             .map_err(|_| "Brotli compression failed")?;

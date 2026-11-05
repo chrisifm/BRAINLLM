@@ -1,0 +1,14 @@
+{
+  "id": "backend-contract-selection",
+  "kind": "fix",
+  "title": "Working explicit contract selection",
+  "why": "The global CLI validator admits approve-contract --only and other backend operations reject selectors they cannot honor, before opening the database.",
+  "changelog": [
+    "Backend contract approval admits its documented --only selector"
+  ],
+  "guide": "brain guide server",
+  "codes": [],
+  "apis": [
+    "brain backend approve-contract --only"
+  ]
+}

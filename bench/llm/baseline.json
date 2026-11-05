@@ -19,5 +19,14 @@
   "specSha": "b351664c21d8",
   "run": "results/claude-sonnet-5-5-served.json",
   "at": "2026-10-13T07:08:27.619Z"
+ },
+ "codex|gpt-6.1-sol|medium|spec": {
+  "firstPass": 20,
+  "n": 20,
+  "provider": "codex",
+  "effort": "medium",
+  "specSha": "4df8ceaca9cc",
+  "run": "results/codex-gpt-6.1-sol-medium-audit-published-retry-20261104.json",
+  "at": "2026-11-04T21:41:51.503Z"
  }
 }

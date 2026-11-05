@@ -194,7 +194,7 @@ mod tests {
     }
     #[test]
     fn plans_keep_destination_assets_but_omit_already_preloaded_immutable_urls() {
-        let mut pages=vec![Page{route:"/".into(),file:"index.html".into(),view:"views/home.brain".into(),html:"<link rel='modulepreload' href='/_b/shared.js'><link rel='stylesheet' href='/_b/shared.css'><body><a href='/next'>Next</a></body>".into()},Page{route:"/next".into(),file:"next/index.html".into(),view:"views/next.brain".into(),html:"<link rel='modulepreload' href='/_b/shared.js'><link rel='stylesheet' href='/_b/shared.css'><link rel='modulepreload' href='/_b/next.js'><body>Next</body>".into()}];
+        let mut pages=vec![Page{lastmod:None,route:"/".into(),file:"index.html".into(),view:"views/home.brain".into(),html:"<link rel='modulepreload' href='/_b/shared.js'><link rel='stylesheet' href='/_b/shared.css'><body><a href='/next'>Next</a></body>".into()},Page{lastmod:None,route:"/next".into(),file:"next/index.html".into(),view:"views/next.brain".into(),html:"<link rel='modulepreload' href='/_b/shared.js'><link rel='stylesheet' href='/_b/shared.css'><link rel='modulepreload' href='/_b/next.js'><body>Next</body>".into()}];
         apply(&mut pages, &mut BTreeMap::new(), "");
         let marker = "<script type=\"application/json\" id=\"brain-next\">";
         let plan = pages[0]
@@ -211,14 +211,14 @@ mod tests {
     }
     #[test]
     fn graph_follows_real_links_and_base_and_ignores_script_text() {
-        let mut pages=vec![Page{route:"/".into(),file:"index.html".into(),view:"views/home.brain".into(),html:"<body><a href='/app/posts/'>Posts</a><a href='https://other.test/'>External</a><script>const x=\"<a href='/app/secret/'>\"</script></body>".into()},Page{route:"/posts/".into(),file:"posts/index.html".into(),view:"views/posts.brain".into(),html:"<link rel='modulepreload' href='/app/_b/p.js'><body>Posts</body>".into()}];
+        let mut pages=vec![Page{lastmod:None,route:"/".into(),file:"index.html".into(),view:"views/home.brain".into(),html:"<body><a href='/app/posts/'>Posts</a><a href='https://other.test/'>External</a><script>const x=\"<a href='/app/secret/'>\"</script></body>".into()},Page{lastmod:None,route:"/posts/".into(),file:"posts/index.html".into(),view:"views/posts.brain".into(),html:"<link rel='modulepreload' href='/app/_b/p.js'><body>Posts</body>".into()}];
         let mut files = BTreeMap::new();
         apply(&mut pages, &mut files, "/app");
         assert!(pages[0].html.contains("\"url\":\"/app/posts/\""));
         assert!(pages[0].html.contains("\"assets\":[\"/app/_b/p.js\"]"));
         assert!(!pages[0].html.contains("\"url\":\"/app/secret"));
         let first = pages[0].html.clone();
-        let mut other=vec![Page{route:"/".into(),file:"index.html".into(),view:"views/home.brain".into(),html:"<body><a href='/app/posts/'>Posts</a><a href='https://other.test/'>External</a><script>const x=\"<a href='/app/secret/'>\"</script></body>".into()},Page{route:"/posts/".into(),file:"posts/index.html".into(),view:"views/posts.brain".into(),html:"<link rel='modulepreload' href='/app/_b/p.js'><body>Posts</body>".into()}];
+        let mut other=vec![Page{lastmod:None,route:"/".into(),file:"index.html".into(),view:"views/home.brain".into(),html:"<body><a href='/app/posts/'>Posts</a><a href='https://other.test/'>External</a><script>const x=\"<a href='/app/secret/'>\"</script></body>".into()},Page{lastmod:None,route:"/posts/".into(),file:"posts/index.html".into(),view:"views/posts.brain".into(),html:"<link rel='modulepreload' href='/app/_b/p.js'><body>Posts</body>".into()}];
         apply(&mut other, &mut BTreeMap::new(), "/app");
         assert_eq!(first, other[0].html);
     }

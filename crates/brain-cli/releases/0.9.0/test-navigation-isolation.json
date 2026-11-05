@@ -1,0 +1,11 @@
+{
+  "id": "test-navigation-isolation",
+  "kind": "fix",
+  "title": "Attribute and isolate pending test-document navigation",
+  "why": "A component reload cannot erase other test results; the interrupted test remains failed and later tests get a restored owned document.",
+  "changelog": ["Headless test-document navigation fails the named test"],
+  "guide": "brain guide tests",
+  "codes": [],
+  "apis": ["brain test", "brain doctor"],
+  "affects": ["**/*.test.brain"]
+}

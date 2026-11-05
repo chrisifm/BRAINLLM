@@ -1,0 +1,12 @@
+{
+  "id": "document-media-fixes",
+  "kind": "fix",
+  "title": "Preserve sign-in document policies and streaming media paths",
+  "why": "Sign-in popup policy transitions require a document load, and cached pages must retain their opener policy. Streaming manifests retain relative references and media responses expose validators and bounded streaming.",
+  "changelog": [
+    "Google and Apple sign-in preserve their popup opener policy",
+    "Public media responses stream with Content-Length",
+    "HLS and DASH manifests keep their public directory"
+  ],
+  "guide": "docs/APPLE-LINKEDIN.md"
+}

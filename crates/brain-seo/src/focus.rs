@@ -2,7 +2,7 @@
 //! each term lives and how pages link to it. Every finding is advice: crawlable links and descriptive anchors are what
 //! Google documents, this scheme is not a documented ranking factor, and a page about another subject owes the term nothing.
 
-use crate::audit::{Finding, Level, internal, norm, percent_decode};
+use crate::audit::{Finding, Level, anchor_internal, norm, percent_decode};
 use crate::html::Doc;
 use crate::{Page, Site};
 
@@ -161,7 +161,7 @@ pub fn analyze(site: &Site, docs: &[Doc], idx: &[bool], paired: &dyn Fn(&str, &s
         if let [hub] = hubs[..] {
             let target = norm(&site.pages[hub].route);
             for (i, (p, d)) in site.pages.iter().zip(docs).enumerate().filter(|(i, _)| *i != hub) {
-                let links: Vec<_> = d.anchors.iter().filter(|a| internal(site.cfg, &p.route, &a.href).is_some_and(|(to, _)| to == target)).collect();
+                let links: Vec<_> = d.anchors.iter().filter(|a| anchor_internal(site.cfg, &p.route, a).is_some_and(|(to, _)| to == target)).collect();
                 if links.is_empty() {
                     if mentioned.contains(&i) {
                         row.unlinked.push(p.route.clone());

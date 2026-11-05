@@ -1,0 +1,11 @@
+{
+  "id": "nginx-health-aliases",
+  "kind": "fix",
+  "title": "Route native nginx health aliases through the frontend gateway",
+  "why": "The resource backend owns /health, while the frontend owns the /_brain/health aliases; exact nginx locations and the Rust production/dev alias mapping now preserve that boundary for GET and HEAD.",
+  "changelog": ["Generated native nginx configurations route exact health aliases"],
+  "guide": "docs/DEPLOYMENT.md",
+  "codes": [],
+  "apis": [],
+  "affects": ["deploy/nginx.brain.conf"]
+}

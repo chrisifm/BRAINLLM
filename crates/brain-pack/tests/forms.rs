@@ -60,11 +60,13 @@ fn form_pages_are_static_for_get_and_served_for_post() {
         let opts = brain_codegen::Options { dev: false, root: Some(r2.clone()), ..Default::default() };
         let o = brain_codegen::compile_with(src, rel, &opts).map_err(|d| format!("{}: {:?}", rel.display(), d.iter().map(|x| &x.msg).collect::<Vec<_>>()))?;
         let mut server_js = o.server_js;
+        let mut metadata = o.server;
         // what COMPILER #154 emits for a `<form>` bound to `save` (contract with RUNTIME #156)
         if rel.ends_with("contact.brain") && !server_js.contains("$forms") {
             server_js.push_str("\nexport const $forms = { save: { name: 'str!' } }\n");
         }
-        Ok(brain_pack::Unit { js: o.js, css: o.css, server_js, server_fns: o.server_fns })
+        if rel == Path::new("views/contact.brain") { metadata.forms = true; }
+        Ok(brain_pack::Unit { js: o.js, css: o.css, server_js, server: metadata, server_fns: o.server_fns })
     };
     let input = brain_pack::Input {
         root: root.clone(),

@@ -1,0 +1,30 @@
+{
+  "id": "static-output-layout",
+  "kind": "capability",
+  "title": "Configurable static build layout and encoding effort",
+  "why": "Static sites can choose generated JS/CSS/image/other directories, keep small CSS external and choose fast or small precompression. Output remains plain portable files, with references, integrity and measured budgets updated. LLM discovery files remain enabled by default.",
+  "changelog": [
+    "Static output supports configurable JavaScript, CSS, image",
+    "Static packaging can separate fonts"
+  ],
+  "guide": "brain guide static",
+  "codes": [],
+  "apis": [
+    "staticOutput",
+    "staticOutput.inlineCss",
+    "staticOutput.compression"
+  ],
+  "affects": [
+    "brain.json"
+  ],
+  "adopt": {
+    "file": "brain.json",
+    "snippet": "{\"output\":\"static\",\"staticOutput\":{\"js\":\"js\",\"css\":\"css\",\"images\":\"img\",\"assets\":\"src\",\"inlineCss\":false,\"compression\":\"small\"}}"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "\"staticOutput\""
+    }
+  ]
+}

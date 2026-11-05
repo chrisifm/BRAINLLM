@@ -6,7 +6,7 @@ Options include topology (static/node/rust-node/rust-static), name, frontend por
 
 ## Installing the compiler on the server
 
-An app created with npm pins `@christianirack/brainllm` in `devDependencies`. With `NODE_ENV=production` in the shell, `npm ci` skips those packages and `npm run build` then stops with `brain: command not found`. Install with `npm ci --include=dev`. `brain start`, `brain backend serve` and `brain jobs work` come from the same package, so do not run `npm prune --omit=dev` afterwards. A source installation with `cargo install` has no such step.
+New npm app and static starters pin `@christianirack/brainllm` in `dependencies`, because the generated build/start scripts require its executable. Production-only installs retain it (`npm ci --omit=dev`). Older apps may still pin it in `devDependencies`: use `npm ci --include=dev` and do not prune it, or move the same exact package pin to `dependencies` and regenerate the lockfile. The compiler is also used by `brain backend serve` and `brain jobs work`. Static hosting only receives `dist/` and needs no Node or compiler installation. A source installation with `cargo install` has no npm dependency step.
 
 ## Starting, stopping and the environment
 
@@ -74,6 +74,11 @@ Native image ingestion has a thirty-second processing budget. Generated nginx re
 
 
 ## Native sockets and verification
+
+Generated native nginx configurations include exact locations for `/_brain/health`, `/_brain/health/live` and
+`/_brain/health/ready`, pointing to the frontend gateway rather than the general native backend upstream. For an older
+generated file, request a new `brain deploy config nginx` preview and review its proposed comparison before applying
+and validating it with `nginx -t`; existing files are preserved.
 
 Native sockets are opt-in through the same `brain.json` declaration used by the backend and build:
 

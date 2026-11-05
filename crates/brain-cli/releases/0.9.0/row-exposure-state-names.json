@@ -1,0 +1,11 @@
+{
+  "id": "row-exposure-state-names",
+  "kind": "fix",
+  "title": "Keep ordinary enums out of publication-state warnings",
+  "why": "A category enum does not imply hidden draft rows; B0749 now uses state-like names and still warns for optional state fields.",
+  "changelog": ["B0749 no longer mistakes ordinary public enum categories"],
+  "guide": "docs/backend/ownership.md",
+  "codes": ["B0749"],
+  "apis": [],
+  "affects": ["server/resources/**"]
+}

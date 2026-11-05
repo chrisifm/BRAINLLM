@@ -33,6 +33,10 @@ Each feature has a page served by the binary: `brain guide docs/backend/filters.
 them. Start with `docs/backend/ownership.md`, `docs/backend/visibility.md` and `docs/backend/server-queries.md`.
 
 ## Verify
+For captcha, keep public test keys in development/testing; production needs the real provider-issued secret.
+Check/doctor report B0790 when production selects a public fixture. Dummy hostname responses belong to the provider;
+omit hostname pinning for test keys instead of assuming the sample hostname. See `docs/backend/captcha.md`.
+
 ```bash
 brain check --json                 # [] (contract errors are B0735)
 brain backend migrate              # applies pending migrations

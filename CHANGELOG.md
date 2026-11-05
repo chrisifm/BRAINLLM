@@ -9,6 +9,163 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+- Static error fallbacks and direct document aliases retain their selected page CSP, opener and cache policy, including encoded names and own output extensions; asset policies remain separate.
+
+- Node serves `.brain`, `.jsbrain` and `.cssbrain` with document security and correct MIME types, including clean routes, Markdown canonical twins and encoded error aliases.
+
+- HTML HEAD responses preserve cached GET nonce policies through subsequent revalidation instead of issuing a policy for an unsent body.
+
+- Literal translation calls without placeholder arguments do not retain unnecessary reactive effects; reactive placeholders and user-defined helpers retain tracking, and each render reads its current locale.
+
+- Managed brandbook messages participate in locale extraction with stable dictionary identities and read-only builds; untouched draft prompts stay in the editable contract while public drafts use a concise pending notice. Technical token categories and CSS contexts retain their source values.
+
+- Direct component prop IDs and ID references preserve caller identity, while local IDs, grouped literal IDs and ARIA/HTML references retain per-instance encapsulation; static doctor detects duplicate IDs and missing document ID targets.
+
+- Locale extraction preserves numeric addition as one placeholder instead of changing sums into string concatenation, including grouped expressions in visible attributes.
+
+- Computed prerender lastmod metadata reaches each sitemap entry as well as the page head and JSON-LD, with empty dates omitted and no file-time inference.
+
+- Headless test-document navigation fails the named test with its file and relevant repair, restores the same test list for remaining assertions, and closes owned tabs without discarding other files.
+
+- Native OAuth start relays the exact LinkedIn HTTPS authorization 303 through the Node gateway while retaining same-site protection for other methods, paths, statuses and redirect targets.
+
+- Invalid creation policy guidance names the project's declared roles and conditional relational-owner alternatives from its real reference fields, without modifying permissions.
+
+- Localized links normalize trailing-slash lookup and preserve existing language prefixes across build, browser and SSR; root-relative canonicals use the same translation table.
+
+- Prerender load initializes its page locale and runtime dictionary before server imports or data loading, preventing previous/default-language content from leaking into localized static pages.
+
+- Native non-bubbling event handlers run on their element with owned cleanup and shared error handling, restoring dialog close/cancel, disclosure, validation, pointer and media behavior.
+
+- Server capabilities use compiler-owned AST metadata for build/dev load, route enumeration, forms and exact RPC mapping; comments, strings and nested functions cannot activate hooks, and ambiguous or incomplete dev RPC inventories fail closed.
+
+- Lifecycle control commands accept an explicit project directory from any working directory, rejecting invalid targets without falling back to the current app.
+
+- Doctor validates a fresh isolated production build and its SEO/static assets without replacing a site's active dist/; temporary output is private and removed on success or failure, with all acceptance gates retained.
+
+- Successful reloads advise when source timestamps are newer than the compiled output or freshness analysis is incomplete; reload stays read-only and never silently builds production source.
+
+- Captcha diagnostics detect public test secrets selected for production without exposing their values, including Turnstile pass/fail/spent fixtures; testing guidance no longer assumes the provider's dummy hostname matches localhost.
+
+- `Dialog dismissible` optionally closes on deliberate primary backdrop clicks while preserving native focus/Escape, URL state, drag containment and listener cleanup; deferred initial URL sync preserves immediate open actions.
+
+- `brain add comp --blank` creates minimal noninteractive markup while retaining typed props and a colocated test; MCP supports the same option and rejects it for unrelated kinds.
+
+- Absolute HTTP(S) anchors marked `rel="external"` can target a separate site on the same origin without a false broken-build link; navigation remains native and static doctor reports the destination as unchecked.
+
+- Browser tests preflight their current local Brain import graph before starting or reusing dev, so a previous valid component cannot hide a new compilation error; unrelated components do not block selected tests.
+
+- Generated build attribution links the compiler landing across robots, static/dynamic sitemaps, own code/styles, documents, host hints and deterministic metadata for binary/protocol assets, before hashes/SRI/compression.
+
+- New sites include a living `/brandbook`: explicit editorial decisions and evidence, current source tokens/UI inventory, shared check/dev/build preparation and a complete LLM authoring guide.
+
+- Public raw JavaScript/CSS keep their authored directories so relative dependencies remain valid; SEO sees planned immutable public assets before link validation.
+- Builds reject symlinked or special public assets before output writes, preventing outside-file copies, directory cycles and blocking special-file reads.
+
+- Wholly zero-JavaScript static sites omit unused build-time framework modules while preserving explicit document resources and public downloads.
+
+- Generated component tests provide typed required-prop samples from metadata instead of mounting an empty object, while preserving component defaults and optional props.
+
+- Route ledgers expose service-worker bytes separately from page JavaScript and charge public JS/CSS plus relative module dependencies from the final artifact.
+
+- Running static gateways refresh build validators, headers and redirects after output replacement, preventing stale HTML 304 responses after a rebuild.
+
+- Static doctor audits fresh emitted HTML/SVG, CSS and literal module resources for missing files, broken anchors/symbols, server artifacts and final SHA-384 integrity; incomplete analysis fails explicitly.
+
+- Static packaging can separate fonts and omit precompressed siblings or host configuration hints without removing required runtime assets.
+
+- `seo.siteName` sets the public display name independently of the package identity; assistant discovery links to HTML when Markdown twins are disabled.
+
+- Explicit `csp.formAction` permits native forms to declared external HTTPS origins in static and SSR output, with fail-closed validation and a documented no-JavaScript pattern.
+
+- Static output supports configurable JavaScript, CSS, image and other asset folders, separate stylesheets and fast/small precompression profiles while preserving portable references, SRI, cache hints and measured payload budgets
+
+- New app and static starters keep the exact compiler pin in production dependencies, so npm ci --omit=dev retains the executable required by generated build/start/backend/worker commands; existing project manifests are preserved
+
+- Google Sign-In setup reports configured browser origins per environment in doctor and selected origins at backend startup, with explicit provider registration steps and no credential output or implied external verification
+
+- Server function documentation explicitly states that page guards and middleware do not authorize RPC endpoints; functions must check their authoritative identity and resource policies
+
+- Backend contract approval admits its documented --only selector, while migrate rejects ignored --resource and non-approval operations reject --only before database work
+
+- Backend deployment guidance explains optional-field contract approval, read-only preview and per-resource application instead of implying unsupported migrate dry-run flags
+
+- Generated credit signatures preserve app margins and add the bottom safe-area inset to their padding so device home indicators do not cover the attribution
+
+- Open-redirect guidance explicitly explains why a bare slash plus a runtime value is unsafe and recommends a fixed same-origin path prefix
+
+- B0816 warns when a native route handler reads an undeclared literal request header through a proven alias; unknown keys, mutations and escapes stay conservative and forwarding remains explicit
+
+- Production HTML uses the concise `<!-- by BRAINLLM https://chrisifm.github.io/BRAINLLM/ -->` source attribution next to the generator meta tag, including minified pages and server templates
+
+- Complete POSIX verification uses a nonblocking kernel lease per physical Cargo target, including Cargo configuration; competing runs exit 75 before compilation and the lease follows the actual command through exec
+
+- Chrome CDP disconnects now name the closed browser transport and provide bounded-concurrency retry guidance for call, send and receive failures; transport cleanup and no automatic replay are preserved
+
+- New app and static starters keep reproducible docs/app pages out of Git while preserving authored notes as source; explicit documentation generation and stale-document guidance preserve the project Git policy
+
+- Disposable backend acceptance excludes the explicitly manual release-profile AVIF cost measurement while retaining all database-dependent ignored tests
+
+- CI runs the disposable-Postgres backend integration and real-binary HTTP gates in a separate required verification job, rather than relying on ignored workspace tests
+
+- Static HTML, Markdown copies and generated social images keep encoded URLs separate from decoded physical filenames, so spaces, Unicode and literal percent signs work on ordinary HTTP hosts
+
+- Build output rejects unsafe route dot-segments and file/directory collisions, refuses symlinked destinations, and removes stale symlinks without traversing external directories
+
+- Portable static export with `brain new --static`, `brain build --static` and persistent `output:static`: ordinary minified HTML/CSS/JS and SEO files, with fail-closed server dependency checks and an embedded static-site guide
+
+- Google and Apple sign-in preserve their popup opener policy across client navigation, streamed SSR and conditional 304 responses; entering or leaving a popup-enabled document uses a full navigation, while 304 keeps the cached CSP nonce
+- Public media responses stream with Content-Length, strong content ETags and validated If-Range support in both production servers, including full GET, HEAD, partial responses and separately negotiated precompressed files; Node hashes asynchronously and both servers keep the validated descriptor through transmission
+- HLS and DASH manifests keep their public directory and revalidate so relative playlists and segments resolve without stale playlists; the service worker bypasses streaming manifests and Range requests, and Node and Rust servers send registered media types for playlists, fragmented MP4, DASH, transport streams and captions
+
+- Explicit `csp.mediaSrc` and `csp.workerSrc` permit blob playback and worker URLs or exact HTTPS origins independently; invalid entries remain B0796 and omission preserves existing CSP fallbacks
+
+- Dev compilation validates exact source content before cache hits, so equal-length edits with restored timestamps cannot serve stale code and metadata-only saves reuse compiled output
+
+- Long preload lists retain critical styles within a 2048-byte Link budget in static host headers and SSR; SSR uses the same bounded selection for 103 hints and logs omitted counts
+
+- Public unique slug fields accept explicit `access: { write: [roles] }`, making the B0794 fix usable while private and write-only slugs remain invalid
+
+- `brain check` checks every positional target and rejects unsupported file extensions with exit 2 instead of parsing plain JavaScript as component markup
+
+- Native sign-in keeps optional provider name and picture hints through session reads, refresh and SSR; Google and LinkedIn normalize signed token hints, Apple keeps its first-authorization name, and migration 0027 preserves existing identity names without changing account linking or JWT claims
+
+- Bounded native `range(from,to)` and `text.fold/distance/fuzzy` helpers work in browser and server code without imports, with explicit integer, Unicode, candidate and edit-distance limits
+
+- The SSR DOM shim preserves the native Node event brand, so native EventTargets and WebSocket remain usable after rendering; shim dispatch retains bubbling and cancelable-event semantics
+
+- Static/form/Markdown fast paths retain matching Node route guards and middleware; dev serves explicit extensionless public verification files before app-page fallback while preserving matching security chains
+
+- A dev backend that misses its startup deadline is killed and reaped before returning, matching normal owned-child shutdown
+
+- `brain data defaults` previews and explicitly fills defaults missing from already-approved stored rows in atomic bounded batches, preserving existing values and cleared nulls unless `--include-null` is selected
+
+- Defaults must satisfy their field patterns before a resource or job contract is accepted, protecting both migration backfills and explicit default repairs
+- CLI options that require values reject missing ones before work starts; shared `-q`, spaced `--progress` and `--` termination no longer become unintended positional targets
+- Full-text search probes stop at the first authorized filtered match before deciding whether typo fallback is needed, avoiding a redundant full count while preserving exact requested totals
+- B0749 no longer mistakes ordinary public enum categories for publication state; named state fields still warn whether required or optional
+- Explicit backend migration retires obsolete generated reference mirrors even when the recorded contract is unchanged, preserving stored JSON and leaving pending unapproved changes untouched
+- The API-key response example now states its row-ownership assumption and distinguishes ordinary response projection from system-key privileges
+- Generated native nginx configurations route exact health aliases through the frontend gateway, avoiding backend 404s under the general `/_brain/` prefix while preserving ordinary native API routing; Rust static and dev gateways translate those aliases to canonical probes for GET and HEAD
+
+### Upgrading
+
+- B0816 is advisory: use ctx.user for authentication, or explicitly declare a safe lowercase request header in its route contract. Existing handlers are not blocked and no headers are automatically forwarded.
+
+Correct any default that contradicts its field pattern before serving. Run `brain backend migrate` before starting the native backend; migration 0027 adds optional provider profile columns and preserves existing identity display names.
+
+### Tests
+
+- Generation benchmark help exits before binary, filesystem or provider work; both help flags are covered without invoking a model.
+
+- Codex generation benchmarks distinguish non-terminal CLI diagnostics from tool calls, retain strict completed-turn/output checks and stop queued generations after an infrastructure failure with exit 1
+- LLM release gates reject partial or inconsistent cohorts, share frozen-run validation with matched comparisons and isolate Codex baselines by provider, model, reasoning effort and mode
+
+- Browser benchmark CDP setup probes readiness before creating a target and bounds connection, pending commands and protocol waits; pending commands reject when the owned connection closes
+
+- The stage CPU accounting regression generates bounded per-thread CPU work instead of assuming a wall-clock busy loop receives uninterrupted CPU time; its accounting assertion is unchanged
+- The runaway probe regression keeps its two-second work ceiling in process CPU time, preserving functional growth assertions without charging host scheduling delays
+
 ## [0.8.12] - 2026-11-03
 
 Upgrade with `npm install -D @christianirack/brainllm@0.8.12 --save-exact`, then run `brain backend migrate` before serving: migration 0026 admits the `apple` and `linkedin` identity providers.

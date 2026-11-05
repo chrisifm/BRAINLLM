@@ -3,6 +3,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Serialize complete gates before compilation or fixture writes. Resolve Cargo config as well as environment.
+verify_target_args=(--cargo-target)
+if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then verify_target_args=(--target "$CARGO_TARGET_DIR"); fi
+if [[ "${BRAIN_VERIFY_LOCK_HELD:-}" != "1" ]] || ! python3 scripts/verify-lock.py "${verify_target_args[@]}" --check-held; then
+  exec python3 scripts/verify-lock.py "${verify_target_args[@]}" -- bash scripts/verify.sh "$@"
+fi
+unset BRAIN_VERIFY_LOCK_HELD
+
 # A syntax error in the launcher or the runtime stops every install: it fails here in seconds, before the long suites.
 git ls-files -z -- 'npm/*.js' 'npm/*.mjs' 'runtime/*.js' 'runtime/*.mjs' 'scripts/*.mjs' | while IFS= read -r -d '' script; do
   [ -f "$script" ] && node --check "$script"

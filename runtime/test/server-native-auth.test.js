@@ -119,3 +119,15 @@ test('native SSR preserves server-verified custom roles without treating them as
     assert.equal(guarded.status,403)
   } finally {user.role=previous}
 })
+
+test('native SSR carries only bounded profile hints and omits invalid decoration without changing authority', async () => {
+  try {
+    user.name = 'Synthetic Person'
+    user.picture = 'https://images.example.test/profile.png'
+    assert.deepEqual(await (await rpc('who')).json(), {user,sessionUser:user})
+    user.name = 'x'.repeat(201)
+    user.picture = 'javascript:alert(1)'
+    const expected = {id:user.id,email:user.email,role:user.role,verified:user.verified}
+    assert.deepEqual(await (await rpc('who')).json(), {user:expected,sessionUser:expected})
+  } finally { delete user.name; delete user.picture }
+})

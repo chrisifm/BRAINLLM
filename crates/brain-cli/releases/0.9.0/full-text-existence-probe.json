@@ -1,0 +1,11 @@
+{
+  "id": "full-text-existence-probe",
+  "kind": "fix",
+  "title": "Avoid counting every full-text match before typo fallback",
+  "why": "The fallback decision needs only one authorized filtered match; requested totals remain exact and are counted separately.",
+  "changelog": ["Full-text search probes stop at the first authorized filtered match"],
+  "guide": "docs/INTERNALS.md",
+  "codes": [],
+  "apis": [],
+  "affects": ["server/resources/**"]
+}

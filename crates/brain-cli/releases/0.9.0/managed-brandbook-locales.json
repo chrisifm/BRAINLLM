@@ -1,0 +1,11 @@
+{
+  "id": "managed-brandbook-locales",
+  "kind": "fix",
+  "title": "Managed brandbook locale extraction and stable message identity",
+  "why": "Adding a locale translates generated brandbook content through normal dictionaries without replacing the live placeholder; default-language edits retain their message keys and production budgets remain enforced.",
+  "changelog": ["Managed brandbook messages participate in locale extraction"],
+  "guide": "brain guide brandbook",
+  "codes": ["B1403"],
+  "apis": ["brain add locale", "brain fix", "brain doctor"],
+  "affects": ["views/brandbook.brain", "design.brain.json", "i18n/**"]
+}

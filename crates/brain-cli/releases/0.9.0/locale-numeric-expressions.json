@@ -1,0 +1,11 @@
+{
+  "id": "locale-numeric-expressions",
+  "kind": "fix",
+  "title": "Preserve numeric expressions during locale extraction",
+  "why": "Extracted messages keep numeric and unknown addition groups as single placeholders, preserving their evaluation before text interpolation.",
+  "changelog": ["Locale extraction preserves numeric addition as one placeholder"],
+  "guide": "brain guide i18n",
+  "codes": ["B1403"],
+  "apis": ["t", "brain add locale"],
+  "affects": ["views/**", "comp/**", "i18n/**"]
+}

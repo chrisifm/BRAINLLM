@@ -1,0 +1,15 @@
+{
+  "id": "static-layout-accounting",
+  "kind": "fix",
+  "title": "Accurate static layout payload categories",
+  "why": "Custom folders must preserve page-budget semantics while counting public JS/CSS and revealing the separate service-worker payload.",
+  "changelog": [
+    "Route ledgers expose service-worker bytes separately"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "codes": [],
+  "apis": [
+    "brain build --report",
+    "ledger.serviceWorker"
+  ]
+}

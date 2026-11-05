@@ -1,0 +1,26 @@
+{
+  "id": "external-form-csp",
+  "kind": "capability",
+  "title": "Native forms to declared external services",
+  "why": "Static and SSR pages can submit ordinary native forms to an existing service without opening script or network permissions.",
+  "changelog": [
+    "Explicit `csp.formAction`"
+  ],
+  "guide": "brain guide forms",
+  "codes": [
+    "B0796"
+  ],
+  "apis": [
+    "csp.formAction"
+  ],
+  "adopt": {
+    "file": "brain.json",
+    "snippet": "{\"csp\":{\"formAction\":[\"https://forms.example.com\"]}}"
+  },
+  "uses": [
+    {
+      "glob": "brain.json",
+      "contains": "\"formAction\""
+    }
+  ]
+}

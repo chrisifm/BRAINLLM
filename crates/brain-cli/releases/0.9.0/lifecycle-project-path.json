@@ -1,0 +1,11 @@
+{
+  "id": "lifecycle-project-path",
+  "kind": "fix",
+  "title": "Explicit project paths for lifecycle control",
+  "why": "Control a selected production project from another directory without silently targeting the current app.",
+  "changelog": ["Lifecycle control commands accept an explicit project directory"],
+  "guide": "SPEC.md",
+  "codes": [],
+  "apis": ["brain stop [path]", "brain reload [path]", "brain status [path]"],
+  "affects": ["brain.json"]
+}

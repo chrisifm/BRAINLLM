@@ -1,0 +1,17 @@
+{
+  "id": "slug-writer-access",
+  "kind": "fix",
+  "title": "Explicit role grants for public slug writes",
+  "why": "Unique slug fields can adopt the B0794 suggested write grants while remaining readable.",
+  "changelog": [
+    "Public unique slug fields accept explicit"
+  ],
+  "guide": "docs/backend/patch.md",
+  "codes": [
+    "B0794"
+  ],
+  "apis": [],
+  "affects": [
+    "server/resources/*/schema.jsbrain"
+  ]
+}

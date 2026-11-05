@@ -53,13 +53,36 @@ impl Drop for Fixture {
 }
 fn compiler() -> brain_serve::CompileFn {
     Arc::new(|_, _| {
-        Ok(brain_serve::Compiled {
+        Ok(brain_serve::Compiled { server: Default::default(),
             js: String::new(),
             css: String::new(),
             deps: vec![],
             server_js: String::new(),
         })
     })
+}
+
+#[test]
+fn compiler_server_metadata_survives_persistent_noop_and_style_only_caches() {
+    let fixture = Fixture::new("server-metadata");
+    std::fs::create_dir_all(fixture.0.join("views")).unwrap();
+    std::fs::write(fixture.0.join("tokens.cssbrain"), ":root {}\n").unwrap();
+    let path=fixture.0.join("views/probe.brain");
+    let source="<meta seo title=\"Probe\" description=\"Server capability probe\" robots=\"noindex\"><script>export async function load() { return {ready:true} }\nserver: async function save(ctx) { return 'saved' }</script><main><h1>Probe</h1></main><style>main{display:block}</style>";
+    std::fs::write(&path, source).unwrap();
+    let compile=compile_fn(fixture.0.clone(),true);
+    let first=compile(source,&path).unwrap();
+    assert!(first.server.load && first.server.rpc.len()==1);
+    let expected=first.server;
+    assert_eq!(compile(source,&path).unwrap().server,expected);
+    let styled=source.replace("display:block","display:flex");
+    std::fs::write(&path,&styled).unwrap();
+    assert_eq!(compile(&styled,&path).unwrap().server,expected);
+    let fresh=compile_fn(fixture.0.clone(),true);
+    assert_eq!(fresh(source,&path).unwrap().server,expected,"persistent output retains capabilities");
+    let plain="<meta seo title=\"Probe\" description=\"Client-only probe\" robots=\"noindex\"><main><h1>Probe</h1></main>";
+    std::fs::write(&path,plain).unwrap();
+    assert_eq!(compile(plain,&path).unwrap().server,brain_lex::ServerMetadata::default());
 }
 
 /// A closed listener can stay unbindable for milliseconds on a busy host with no process holding it, so the proof is a

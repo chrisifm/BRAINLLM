@@ -1,0 +1,14 @@
+{
+  "id": "public-relative-assets",
+  "kind": "fix",
+  "title": "Preserve raw public dependency resolution",
+  "why": "Unbundled public modules and styles must keep the location that their relative imports and resource URLs resolve against.",
+  "changelog": [
+    "Public raw JavaScript/CSS keep their authored directories"
+  ],
+  "guide": "brain guide static",
+  "codes": [],
+  "apis": [
+    "brain build"
+  ]
+}

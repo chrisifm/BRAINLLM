@@ -1,0 +1,2 @@
+<meta server>
+export default { method: 'GET', path: '/header-example', auth: 'public', headers: ['x-allowed'] }

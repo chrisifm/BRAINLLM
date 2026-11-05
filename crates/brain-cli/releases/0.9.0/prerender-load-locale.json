@@ -1,0 +1,11 @@
+{
+  "id": "prerender-load-locale",
+  "kind": "fix",
+  "title": "Correct locale and dictionary during prerender load",
+  "why": "Existing locale() and t() calls in build-time load use the page being generated, including when jobs alternate languages.",
+  "changelog": ["Prerender load initializes its page locale"],
+  "guide": "brain guide i18n",
+  "codes": [],
+  "apis": ["load", "locale", "t"],
+  "affects": ["views/**", "i18n/**"]
+}

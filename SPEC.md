@@ -35,6 +35,7 @@ Before each kind of task run `brain guide <topic>` (`brain guide` lists them): s
 - HTML first: use real `<a href>` and `<form>` (they work before JS loads and are enhanced after). Only a component
   that cannot render on the server (canvas, map) gets `<meta client>`.
 - `lib/*.jsbrain` logic, no markup. `tokens.cssbrain` design tokens (root).
+- `brain new --static` creates a portable site without server/login examples; read `brain guide static`.
 - `brain new` already creates the whole layout: `views/ comp/ ui/ channels/ services/ api/ lib/ server/ content/
   public/`, `brain.json`, `.brain_env`. Put each file in its folder (each holds a README saying what goes there);
   never create other top-level folders.
@@ -100,12 +101,17 @@ Signals are plain variables: `n++`, `items = [...items, x]`. Never mutate in pla
 · `bind:value|checked|ref={x}` · `{#if c}…{:else if d}…{:else}…{/if}` · `{#each list as it (it.id)}…{:empty}…{/each}`
 (key required; list of primitives → key by value: `{#each perks as perk (perk)}`) · `{#await p}…{:then v}…{:catch e}…{/await}`
 · `<slot />` `<slot name="x" />` · `<Comp a={b} on:ev={f} />`.
+Native non-bubbling element events (dialog close/cancel, disclosure toggle, validation invalid, pointer enter/leave
+and media events) listen on their element, preserve cancellation, and release listeners with the component owner.
 Lazy components: `<Chart lazy />` loads when visible · `lazy="idle"` · `lazy="interaction"`; `lazyLabel="…"` or `lazyLabel={text}` sets the placeholder's words (none by default, the button says "Load component"). Images: `<Img src alt width height>`
 (lazy, decoding async, LCP priority set by the compiler). Interaction mode renders an accessible load button;
 CSS remains eager to preserve styles when the deferred component appears.
 Text interpolation is escaped. `id`s in `comp/` and `ui/`, static or computed (`id={'faq-' + it.id}`), keep their name
 in the first instance (so `/page#id` links work); later instances get `~2`, `~3`… and their `for`, `aria-*` and
-`href="#…"` references follow. Ids in views and layouts stay as written.
+`href="#…"` references follow. A direct prop (`id={headingId}`, `aria-labelledby={labelId}`) is a caller-owned
+document identity and stays unchanged; callers must supply unique IDs. An omitted/nullish prop uses its local
+default with the instance suffix. Derived expressions and each-local IDs
+remain component-owned. Ids in views and layouts stay as written.
 `<pre raw>` and `<code raw>` keep their text literal (code samples with `{` `}`).
 `bind:value|checked` also accepts a field of a sig object: `bind:checked={prefs.email}`. `<select multiple bind:value={tags}>` binds an array of option values.
 Raw HTML only as `{@html sanitize(x)}`.
@@ -167,11 +173,30 @@ factor. `seo-urls.txt` (opt-in, `brain seo urls --write`): a listed URL that dis
 Sitemaps need the deployed origin (`PUBLIC_SITE_URL` in `.brain_env`): with none, or a placeholder (example.com, `*.test`,
 localhost), the build publishes no sitemap and warns B0736. Public pages rendered per request without params are listed
 too; a site whose sitemap would list no URL stops at B1900.
-Sitemap date: `<meta seo lastmod="2026-10-13">` or the collection's frontmatter `date`; without one it is omitted.
+Sitemap date: `<meta seo lastmod="2026-10-13">`, a loaded page expression such as `lastmod={props.updated}`,
+or the collection's frontmatter `date`. Evaluated prerender dates reach the corresponding sitemap URL; absent/empty
+dates are omitted, never inferred from file modification times.
 Collections: `brain add collection blog` turns `content/blog/*.md` (frontmatter `title description date updated? tags? cover?
 author? draft?`) into pages, tag pages, `/blog/rss.xml` and `/blog/atom.xml`. In `load()`/`paths()`, with no import:
 `entries('blog')` `entry('blog', slug)` `tags('blog')` `tagged('blog', tag)` `pages('blog')` `page('blog', n)`; an entry has
 `slug url title description date tags html`. Never on the client (B0705).
+**Portable static export:** `brain new my-site --static` creates a site with brain.json `"output":"static"`.
+`brain build --static` enforces the same policy for any project; normal build, doctor and MCP honor the saved policy.
+It emits ordinary HTML, CSS, JavaScript and SEO files into dist/ for an HTTP static host: index.html at the root,
+route/index.html for each route, and 404.html. No Node/Rust/BRAINLLM server is needed on the host. Assets are minified
+and get gzip/Brotli siblings when smaller; raw files remain for hosts without precompression support.
+Pure static pages need no page JS; browser interactions still work. Dynamic routes must enumerate paths(); their load,
+seo and head run at build time. Request-time load, guards/middleware, server: functions, server forms, live sitemap,
+native backend contracts and gateway policies stop the export instead of being silently omitted. Failed prerenders
+and invalid paths() parameters also fail. Static output always uses .html/.js/.css; --ext brain is incompatible.
+Static-only brain.json `staticOutput` optionally selects `js`, `css`, `images` and `assets` folders (safe relative URL
+paths; `.` means the export root). Defaults preserve the usual output. `inlineCss:false` emits small stylesheets too;
+`compression:'fast'|'small'` chooses encoding effort (small default), with actual-byte budgets. Original public/ URLs
+stay stable and packaged SDK trees retain their relative structure. llms.txt and llms-full.txt are generated by default.
+Upload dist/ only; optional generated host rules do not replace the host's routing, redirects, 404 status or HTTP
+security/cache configuration. For subdirectory hosting set brain.json base. This is not a file:// or single-file
+inline export. See `brain guide static` for the complete workflow; MCP `brain_build` accepts `static:true`.
+
 Generated by `brain build`: robots.txt, sitemap.xml, llms.txt, llms-full.txt, manifest.webmanifest, rss.xml (site feed;
 `<section>/rss.xml` per section) and sections.json (every section with its pages and feeds; `seo.feed` / `seo.sections`
 false turn them off). Every page names its generator, home and source, and closes with a small "By BRAINLLM x.y.z" line
@@ -192,6 +217,9 @@ value (or thrown message) is the agent's answer, and invalid arguments never rea
 ## Built-in ui/ kit (use before writing your own; no import needed)
 `<Button>` `<Input>` `<Select>` `<Checkbox>` `<Dialog>` `<Table>` `<Tabs>` `<Toast>` `<Menu>` `<Field>` — accessible,
 token-styled, every state (loading, disabled, error, empty) covered.
+`Dialog` accepts `dismissible:bool=false`: opt in to close on a primary pointer click that starts and ends on the
+backdrop. Content clicks, inside-to-outside drags and canceled pointer sequences keep it open. Native Escape,
+modal focus/restoration and the close event remain intact; `urlKey` history is updated on dismissal.
 Forms: `let f = form(schema, { submit: async (v) => … })` → `bind:value={f.v.email}`, `f.err.email`, `f.busy`,
 `f.error` (form-level), `on:submit={f.submit}`. A rejected submit puts focus on the first rejected field, or back on the control that held it. Leaving a dirty form asks first, unless it holds a password field. Schema: `{ email: 'email!', age: 'num>=18', name: 'str!<=80' }`
 (`!` required; types `str num bool email url date tel file`, `file(image/*,.pdf)!<=5000000` bytes and accepted types, `[T]` list, a nested type object). Cross-field: option `validate: v => ({ field: message })`, an empty message is valid; `docs/FORM-VALIDATION.md`. Server errors: return or
@@ -276,7 +304,9 @@ An empty key fails the build (B0720); `KEY?=` declares one the app works without
 Read them as `process.env.KEY` (server) or `process.env.PUBLIC_KEY` (anywhere; an undeclared one reads as `undefined`). Never create a `.env`.
 `.jsbrain` files starting with `<meta server>` run only on the server and may be used only inside `load` or server
 functions. Server function in a `.brain`: `server: async function save(ctx, data) {…}`; the client calls
-`await save(data)` (no `ctx`); only `server:` functions are callable from the browser, never `load`. Validate `data` inside. `throw { message: 'Title already used' }` (400) or an Error
+`await save(data)` (no `ctx`); only `server:` functions are callable from the browser, never `load`. Validate `data` inside.
+RPC calls do not run the page route's guards or middleware. Authorize each server function using ctx.user and its
+resource policies; a same-origin request is not authentication. `throw { message: 'Title already used' }` (400) or an Error
 subclass with a 4xx `status` reaches the calling form's `f.error` as is; other exceptions stay private.
 Server-only modules may signal a deliberate client failure with `throw {status:403}` (standard 4xx only); RPC returns
 the status with a generic public message. Arbitrary exception messages remain private and are excluded from server logs too.
@@ -294,6 +324,11 @@ Server limits (dev and production alike): brain.json `"server": { "maxBodyKB": 1
 per IP and function (429). Raise `maxBodyKB` to send a file as base64 in an RPC argument; invalid values are B0707. `"earlyHints": true` sends 103 responses (default off: nginx below 1.29 breaks on them; `Link` headers are always sent).
 
 ### Experimental Rust/Postgres backend
+`brain data defaults [--resource name]` previews missing declared defaults in stored rows; `--apply` fills bounded
+batches (`--limit` 1..10000, default 1000 per field), preserving existing values and explicit nulls. `--include-null`
+also fills nulls when explicitly requested. Inspect `hasMore`/`remainingRows` before another run. See `docs/backend/import.md`.
+Native session users expose optional `name` and `picture` profile hints when providers share them, including `ctx.user`
+and `/_brain/auth/me`; run `brain backend migrate` after upgrading. Hints never affect identity, roles or verification.
 `brain backend capabilities` lists what this version supports (field types, filter operators, policy grants, limits), generated from the code.
 First read `brain backend schema --json` (resolved resource/job contracts + resource OpenAPI); inspect one with
 `brain card resource:posts` / `brain card job:notify`. Generate with `brain add resource posts --fields "title:str! body:str"`
@@ -373,6 +408,7 @@ requires `sslmode=verify-full` for a remote `DATABASE_URL`. See `docs/backend/pr
 Several processes: `cluster:{shared:true}` in `server/platform.jsbrain` (automatic when `BRAIN_BACKEND_PROCESSES>1`) keeps route/API-key rate windows in Postgres and relays socket events between processes. See `docs/backend/cluster.md`.
 Caching: API GETs send `ETag` (304 on `If-None-Match`); `server/cache.jsbrain` `export default {products:{maxAge:'1m',staleWhileRevalidate:'10m'}}` sets a public `Cache-Control` for anonymous reads of public-read resources; `If-Match` on PUT/PATCH/DELETE → 412 `PRECONDITION_FAILED` when stale. See `docs/backend/caching.md`.
 Routes: `server/routes/<name>/route.jsbrain` `export default {method:'POST',path:'/orders/{id}/quote',auth:'user',params:{id:'uuid'},query:{currency:'str!'},bodyLimit:'16kb',timeout:'5s',rate:'20/min per user'}`
+B0816 warns on literal handler reads missing from the route's `headers` allowlist, including proven aliases. Read lowercase names; explicitly declare safe headers and use ctx.user for authentication.
 + `handler.jsbrain` `export default async (ctx) => ({status:201,body:{...}})`; throw `{errors:{field:'msg'}}` → 422.
 Signed: add `body:'raw',verify:{scheme:'timestamped'|'hmac',header,secret:'ENV_NAME',tolerance:'5m'}`. See `docs/backend/routes.md`, `docs/backend/webhooks.md`.
 Outbound: `await httpCall(url,{method:'POST',json,idempotencyKey:true,timeout:8000,retries:2})` → `{status,ok,json,text}`; throws `HttpCallError` (`TIMEOUT`, `HTTP_STATUS`, `UNSAFE_URL`, `REDIRECT`…). Every resolved address is checked: private, loopback, link-local, CGNAT and multicast targets are refused unless `allowPrivate` names the host; `redirects:n` follows n hops, each checked again. See `docs/backend/outbound.md`.
@@ -387,17 +423,47 @@ Keep existing production routes until their behavior and policies pass a tested 
 A `<meta server>` module cannot be imported by a test (it runs only on the server): test what calls it, with `stub`.
 No server is needed: `stub('save', { ok: true })` answers a `server:` function, `stub('GET /api/posts', [{ id: 1 }])` an endpoint (add `?query` to match it exactly). The answer is a value (200), `reply(422, { errors: { email: 'Taken' } })`, or a function of the call's arguments returning either; `stub()` returns `{ calls }`. It lasts one test, and one never called fails it. `mount`, `click` and `type` wait for stubbed answers.
 `brain test` fails on a path that selects no test. It runs beside `brain run`: each uses its own port, and with native sockets, whose port is fixed, tests use the running dev server.
+Before opening the browser or reusing dev, it compiles the selected tests' current local Brain import graph, including
+transitive and automatically discovered components. Current compilation errors stop assertions; unrelated components
+are outside a selected test's preflight. Test scripts retain their browser-provided test API globals.
+Component tests stay on `/@brain/test.html`: stub navigation instead of reloading or leaving that document.
+A navigation that destroys a pending headless test fails that named test; the runner restores the same registered
+test list in a fresh document for later tests and keeps later files running. Interrupted-document diagnostics are
+incomplete and never count as a passing test. Verify real page navigation on an actual app page.
+
+## Living brandbook
+Every new site includes `/brandbook` and public editorial entries in `design.brain.json.brandbook.sections`.
+Before brand/copy/UI changes, read `brain guide brandbook`. Keep strategy, voice, identity/product, assistant,
+channels/governance and research aligned; use explicit draft/proposed/approved/implemented/not-applicable statuses,
+concrete tone examples and traceable public evidence. Never invent approval, research, metrics or legal claims.
+The exact empty `<section data-brain-brandbook="content"></section>` on its own line in views/brandbook.brain
+(or views/brandbook/index.brain) is expanded consistently by check, dev and build. Current token declarations and
+UI inventory come from actual project sources; editorial entries remain untouched. Generated facts do not verify
+computed contrast, accessible behavior or editorial approval. Authored pages without the marker remain authored.
+An older design-enabled app missing the route gets B2202 (warning); `brain add view brandbook` adopts it without
+replacing existing routes. Invalid explicit managed content is B2203. Draft references start noindex; publish their
+indexing deliberately after review. The guide defines every stable section ID, limits and the authoring loop.
 
 ## CLI (also MCP: `brain mcp`; every command accepts `--json`)
 Main: `brain new <app>` · `brain run` (dev server with hot reload, app :5180; views render in the browser, so judge
 SEO and the no-JS HTML on `brain build` + `brain start`) · `brain build` (production) ·
 `brain doctor` (everything at once: check + tests + over-engineering + leaks; writes no versioned file; exits non-zero on any error; suspected leak B0601 is a warning unless `doctor.failOnSuspectedLeaks`).
+Doctor builds and audits fresh private temporary output, then removes it; the app's dist/ stays unchanged.
+Run `brain build` explicitly to produce deployment output after doctor passes.
 Production: `brain start` (serves `dist/`, restarts on crash, logs to `logs/app.log`) · `brain reload` (no downtime) ·
 `brain status` · `brain stop`. Optional PM2/nginx configurations: `brain deploy config pm2|nginx --request <JSON>`, and `brain deploy check --url <origin>` for what only the live server shows (headers sent twice, proxy, `/health`); `brain edge plan` lists what a CDN may keep; see `docs/DEPLOYMENT.md`. `brain release-check [--env production] [--url <origin>] [--json]` is the one gate before a release: it runs `brain doctor`, the secrets of that environment (a route left disabled by B0790 fails it), `brain build --env <env>` and `brain seo audit`, plus the live checks with `--url`, and exits non-zero if any fails.
+`brain stop`, `brain reload` and `brain status` accept an optional project directory from any working directory;
+relative/absolute paths and existing project subdirectories resolve the nearest app. An invalid explicit path fails
+without controlling the current app. Without a path, the current app is used.
+Reload never recompiles source. Run `brain build` first; successful reload JSON can include bounded timestamp advice
+for newer sources or incomplete freshness analysis. This is advisory, not a source-hash comparison.
 Hosted under a sub-path: `brain.json` `"base": "/app/"`; keep writing app-absolute links and paths (`<a href="/about">`,
 `redirect('/login')`); the build adds the base everywhere.
 Granular: `brain add view|comp|ui <name> --props "…"` · `brain check --json` · `brain test` · `brain spec [--topic x]` ·
 `brain guide [topic]`.
+`brain add comp <name> --blank` emits minimal noninteractive markup and a slot, preserving typed props and its
+colocated test while omitting example state, controls and CSS. Other kinds reject this switch. MCP `brain_add`
+accepts the equivalent `blank: true` only for kind `comp`.
 Also: `brain preview` (temporary loopback server for `dist/`, Unix) · `brain explain <code>` ·
 `brain doctor --fix` (apply mechanical fixes and update `.brain_env.example`, then run the full doctor). Config: `brain.json`.
 <!--planned:#68-->
@@ -409,7 +475,7 @@ the run, reached through a folder or the whole project, is listed in `skipped` a
 you name is always written).
 `brain trace [<requestId>|issues] [--since 5m] [--failed] [--module m] [--limit n] [--json]`: what `brain run` recorded (MCP `brain_trace`): requests with payload and response, errors at their `.brain` line, CSP, cross-origin and socket failures, backend queries, with B-codes and fixes. Development only and redacted; `brain run --no-trace` turns it off.
 `brain map --json`: whole project graph (routes, components, props, channels, tests); read it instead of opening files.
-`brain docs [--check] [--json] [--out docs/app]`: generated app docs (routes, components, data, backend, env keys, SEO); `brain build` refreshes them when `docs/app/index.md` exists or `brain.json` has `"docs": true`; prose goes in `docs/app/notes/<page>.md`.
+`brain docs [--check] [--json] [--out docs/app]`: generated app docs (routes, components, data, backend, env keys, SEO); `brain build` refreshes them when `docs/app/index.md` exists or `brain.json` has `"docs": true`; prose goes in `docs/app/notes/<page>.md`. New starters ignore generated docs/app output in Git and keep authored notes visible; existing ignore policies are preserved.
 `brain shot <route>` (Unix + Chrome): PNG and accessibility outline for mobile/desktop. Use `--viewport mobile|desktop|both`,
 `--text` for the outline, `--baseline <name>` to compare, and explicitly add `--update-baseline` to approve a new image.
 `--max-diff <0..1>` sets the allowed changed-pixel fraction (default 0). A mismatch or accessibility issue fails the check.
@@ -451,8 +517,29 @@ Worker/SDK URL resources, including reached Wasm assets, retain content-addresse
 Use `brain integration list` and `brain integration add|update <provider> --version <exact>` for official OpenAI, Claude,
 Gemini and Maps SDK adapter previews; backend SDK credentials stay private and frontend callers use server functions.
 See `docs/DEPENDENCIES.md` for the supported ESM/CDN subset and explicit graph limits.
+Generated builds retain the BRAINLLM landing attribution. HTML/XML/Markdown, own JS/CSS, robots and host hints use
+format-valid comments or existing generator links. Attribution precedes final content hashes, SRI and compression;
+XML declarations and sitemap limits remain valid. `brain-build.json` identifies the generator for the whole artifact,
+including binary assets and compressed variants, without changing copied assets or arbitrary JSON schemas. A visible
+page credit setting does not remove this source/build attribution.
+An absolute HTTP(S) `<a rel="external" href="https://example.com/live-only/">` may deliberately target a separate site
+on the same public origin. SEO does not require that navigation destination in this build; router interception and
+predictive prefetch leave it native. Relative links and resource assets keep their checks. Static doctor reports the
+external origin as unchecked, not verified reachable.
 `brain build` is production: minifies, mangles, obfuscates and removes dead code and `log()`. No flags needed. `--strict` fails the build when a page ships a component fallback or a route is left out of `dist/`.
 It also adds SRI and a strict CSP with the security headers to every page. `"csp": { "frameSrc": ["https://www.youtube-nocookie.com"] }` lists the origins an `<iframe>` may load, and `"scriptSrc"` the exact hosts scripts may load from (B0811 flags a literal one outside them). `brain.json` `"csp": { "connectSrc": ["https://api.example.com"] }` lists the origins pages may call besides the site's own; `[]` allows only the own origin, and omitting it allows any HTTPS origin and warns B0795.
+`seo.siteName` sets the public display name used by SEO, feeds, manifest and assistant discovery, independently of the root package `name`. It must be a nonempty string up to 512 bytes without control characters. `seo.markdown:false` omits Markdown twins and makes llms.txt link to HTML pages.
+`"csp": { "formAction": ["https://forms.example.com"] }` allows native `<form action="https://forms.example.com/contact" method="post">` submissions to exact HTTPS origins, in static and SSR output. The own origin stays allowed; omission or `[]` keeps own-origin only. HTTP is loopback-only; no wildcard, path, blob or socket entries (B0796). Keep named controls, browser constraints and server-side validation; omit `on:submit={f.submit}` for native submission. See `brain guide forms`.
+`"csp": { "mediaSrc": ["blob:", "https://media.example.com"], "workerSrc": ["blob:"] }` explicitly permits media and worker sources, independently of script sources. Both lists accept `blob:` and exact HTTPS origins (HTTP only on localhost/127.0.0.1); no wildcards, paths, broad schemes or `data:`. `[]` means the own origin only; omission preserves the standard directive fallback. Invalid entries are B0796 and never widen the policy. A player using MediaSource may need `mediaSrc: ["blob:"]`; add `workerSrc: ["blob:"]` only if it creates a blob worker.
+
+`range(from,to)` returns safe integers from inclusive `from` to exclusive `to` (at most 10000; reversed endpoints give
+`[]`). Use `for (const i of range(0,10))` for bounded numeric iteration. `text.fold(value)` applies NFD, removes
+U+0300–U+036F and lowercases; `text.distance(a,b,max=2)` gives case-sensitive Unicode OSA edit distance, counting an
+adjacent swap as one, or `max+1` when past the cutoff (`max` 0..64). `text.fuzzy(word,list)` returns original candidates
+in input order after folded comparison: 0 typos below 4 characters, 1 from 4, 2 from 8. Text inputs are bounded to 4096
+Unicode characters and candidate lists to 10000, with at most 1048576 UTF-16 code units across candidate text.
+Invalid inputs throw RangeError. These helpers work in client and
+server code without imports; see `docs/NATIVE-LIBRARIES.md`.
 
 Native helpers need no imports or packages: `dateParse/dateAdd/dateDiff/dateRange/dateZone` use UTC arithmetic and
 explicit timezone projection; `hashText/shortHash` are async Web Crypto. `brain lib list` (MCP `brain_lib`) gives the

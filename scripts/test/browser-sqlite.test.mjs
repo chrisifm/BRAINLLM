@@ -48,7 +48,7 @@ test('official SQLite Wasm uses preserved OPFS, atomic batches and one worker ow
         const reopened=(method,...args)=>new Promise((resolve,reject)=>{const id=++seq;waits.set(id,{resolve,reject});next.postMessage({id,method,args})});
         try{const persisted=await reopened('query','SELECT COUNT(*) AS n FROM entries');await reopened('close');return {rows,count,rolledBack,readonly,multiple,persisted,exclusive}}finally{next.terminate()}
       }finally{w.terminate()}
-    })().catch(e=>{throw Error(JSON.stringify(e))})`),25000)
+    })().catch(e=>{throw Error(JSON.stringify(e))})`,25000),25000)
     assert.deepEqual(result.rows,[{id:1,title:'First'},{id:2,title:'Second'}])
     assert.equal(result.count[0].n,2); assert.equal(result.persisted[0].n,2)
     assert.equal(result.exclusive,true);assert.equal(result.rolledBack,true);assert.equal(result.readonly,true);assert.equal(result.multiple,true)

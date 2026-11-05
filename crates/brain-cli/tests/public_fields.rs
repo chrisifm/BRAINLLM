@@ -75,6 +75,18 @@ fn a_unique_value_any_user_can_claim_warns_until_who_may_write_it_is_stated() {
     assert!(!text(&brain(&dir, &["check"])).contains("B0794"), "restricted");
     schema("{ type: 'str', unique: true, access: { write: ['user'] } }");
     assert!(!text(&brain(&dir, &["check"])).contains("B0794"), "stated");
+    // Slugs stay public even when only named roles may change them; the B0794 fix must be usable.
+    for role in ["admin", "user"] {
+        schema(&format!("{{ type: 'str', unique: true, slug: true, access: {{ write: ['{role}'] }} }}"));
+        let run = brain(&dir, &["check"]);
+        let out = text(&run);
+        assert!(run.status.success(), "slug writer {role}: {out}");
+        assert!(!out.contains("B0794"), "slug writer is explicit: {out}");
+    }
+    for mode in ["private", "writeonly"] {
+        schema(&format!("{{ type: 'str', unique: true, slug: true, access: '{mode}' }}"));
+        assert!(!brain(&dir, &["check"]).status.success(), "slugs cannot be hidden");
+    }
     schema("{ type: 'str', unique: true }");
     policy("admin");
     assert!(!text(&brain(&dir, &["check"])).contains("B0794"), "only admins write it");

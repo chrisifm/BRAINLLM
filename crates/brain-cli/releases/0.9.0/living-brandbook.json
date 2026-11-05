@@ -1,0 +1,32 @@
+{
+  "id": "living-brandbook",
+  "kind": "capability",
+  "title": "Living public brandbooks for new sites",
+  "why": "Brand, voice and product rules stay beside the site, with explicit editorial status and current source design facts.",
+  "changelog": [
+    "New sites include a living `/brandbook`"
+  ],
+  "guide": "brain guide brandbook",
+  "codes": [
+    "B2202",
+    "B2203"
+  ],
+  "apis": [
+    "/brandbook",
+    "design.brain.json.brandbook",
+    "brain add view brandbook"
+  ],
+  "adopt": {
+    "file": "views/brandbook.brain",
+    "command": "brain add view brandbook",
+    "snippet": "<section data-brain-brandbook=\"content\"></section>"
+  },
+  "uses": [
+    {
+      "glob": "views/brandbook.brain"
+    },
+    {
+      "glob": "views/brandbook/index.brain"
+    }
+  ]
+}

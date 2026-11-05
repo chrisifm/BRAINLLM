@@ -410,6 +410,7 @@ mod tests {
             );
             crate::env::select(root, "production");
             let mut report = crate::BuildReport {
+                static_export: false,
                 files: vec![],
                 warnings: vec![],
                 ledger: vec![],

@@ -5,6 +5,46 @@
   "description": "BRAINLLM app configuration. Precedence: flag > BRAIN_* variable > brain.json > defaults.",
   "type": "object",
   "properties": {
+    "output": {
+      "type": "string", "enum": ["auto", "static"], "default": "auto",
+      "description": "static requires portable .html/.js/.css output and rejects request-time server dependencies. Honored by build, doctor and MCP. auto preserves normal server selection."
+    },
+    "staticOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional generated asset folders for static output only. Defaults preserve the normal layout. Paths are safe relative URL directories; . means the output root. Public originals retain their source paths; packaged SDKs preserve their complete layout beneath the js folder.",
+      "properties": {
+        "fonts": { "type": "string", "minLength": 1, "maxLength": 192, "description": "Hashed public/imported fonts; defaults to the assets directory unless explicitly overridden. Packaged SDK relative trees stay intact." },
+        "precompressed": { "type": "boolean", "default": true, "description": "Emit useful .gz/.br/.zst variants. false emits ordinary raw web files only; does not remove authored public files." },
+        "hostFiles": { "type": "boolean", "default": true, "description": "Emit optional _headers/_redirects and nginx/Caddy configuration hints. false requires configuring headers and redirects on the host." },
+        "compression": { "type": "string", "enum": ["small", "fast"], "default": "small", "description": "Precompression profile: small preserves production size optimization; fast spends less build time encoding gzip/Brotli/zstd. Both retain raw files, useful compressed variants and actual-byte budget checks." },
+        "inlineCss": { "type": "boolean", "default": true, "description": "Allow small stylesheets inline; false emits generated CSS as separate hashed files in the css folder. Dynamic style attributes are unaffected." },
+        "js": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 192,
+          "description": "Generated JavaScript, workers and packaged SDK trees (default _b)."
+        },
+        "css": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 192,
+          "description": "Generated stylesheets (default _b)."
+        },
+        "images": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 192,
+          "description": "Generated hashed image copies (default _b); an override also places social images beneath this directory/og."
+        },
+        "assets": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 192,
+          "description": "Other generated assets such as fonts and imported binaries (default _b)."
+        }
+      }
+    },
     "trace": {
       "type": "object",
       "description": "`brain trace`, the development capture of `brain run`. It never reaches a production build.",
@@ -68,12 +108,39 @@
           "items": { "type": "string", "pattern": "^(https://[a-z0-9.-]+|http://(localhost|127\\.0\\.0\\.1))(:([0-9]+|\\*))?$" },
           "description": "Exact hosts pages may load scripts from, besides the site's own. A literal script outside this list is reported as B0811; a third-party script tag still needs integrity (B0123)."
         },
+        "mediaSrc": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(blob:|(https://[a-z0-9.-]+|http://(localhost|127\\.0\\.0\\.1))(:[0-9]+)?)$"
+          },
+          "description": "Sources for audio and video, besides the own origin. Allows blob: and exact HTTPS origins; HTTP is local-loopback only. Omitted keeps default-src fallback."
+        },
+        "workerSrc": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^(blob:|(https://[a-z0-9.-]+|http://(localhost|127\\.0\\.0\\.1))(:[0-9]+)?)$"
+          },
+          "description": "Sources for Worker, SharedWorker and ServiceWorker scripts, besides the own origin. Allows blob: and exact HTTPS origins; HTTP is local-loopback only. Omitted preserves the standard worker directive fallback."
+        },
         "frameSrc": {
           "type": "array",
           "maxItems": 64,
           "uniqueItems": true,
           "items": { "type": "string", "pattern": "^(https://(\\*\\.)?[a-z0-9.-]+|http://(localhost|127\\.0\\.0\\.1))(:([0-9]+|\\*))?$" },
           "description": "Origins pages may embed in an iframe, besides the site's own. A literal iframe outside this list is reported as B0811."
+        },
+        "formAction": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^(https://[a-z0-9.-]+|http://(localhost|127\\.0\\.0\\.1))(:[0-9]+)?$" },
+          "description": "Exact origins native forms may submit to, besides the own origin. HTTPS or local-loopback HTTP only; no wildcard, path, blob or socket sources. Omitted or [] keeps form-action own-origin only."
         },
         "connectSrc": {
           "type": "array",
@@ -206,6 +273,10 @@
     "seo": {
       "type": "object",
       "properties": {
+        "siteName": {
+          "type": "string", "minLength": 1, "maxLength": 512,
+          "description": "Public display name for SEO and discovery files. Overrides root name without renaming the package."
+        },
         "minScore": {
           "type": "number",
           "minimum": 0,

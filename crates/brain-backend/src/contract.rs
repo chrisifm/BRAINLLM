@@ -422,6 +422,11 @@ impl Resource {
                 if pattern.len() > 256 || whole_value(pattern).is_none() {
                     return Err(format!("{}.{name}: pattern must be a valid regular expression of at most 256 bytes", self.name));
                 }
+                if let Some(default) = field.default.as_ref().and_then(|value| field.ty()?.normalize(value, field.required))
+                    && !field.matches_pattern(&default)
+                {
+                    return Err(format!("{}.{name}: default does not match pattern; fix: choose a matching default or correct the pattern", self.name));
+                }
             }
         }
         for (op, grants) in [
@@ -446,9 +451,12 @@ impl Resource {
                     || role == "public" && op != "read"
                     || role == "owner" && op == "create"
                 {
-                    return Err(format!(
-                        "invalid {op} policy `{role}`; writes need an explicit role; owner applies to existing rows"
-                    ));
+                    let reference_grants = self.fields.iter().filter(|(_, field)| field.kind.starts_with("ref:"))
+                        .map(|(name, _)| format!("owner.{name}")).collect::<Vec<_>>();
+                    let related = if op == "create" && !reference_grants.is_empty() {
+                        format!("; if creation requires ownership of an existing referenced record, choose the matching reference grant: {}", reference_grants.join(", "))
+                    } else { String::new() };
+                    return Err(format!("invalid {op} policy `{role}`; fix: choose an explicit role declared in server/auth/roles.jsbrain; public is read-only and owner applies to existing rows, not creation{related}"));
                 }
             }
         }
@@ -838,7 +846,7 @@ fn native_paths(roles: &crate::auth_flows::RolesConfig) -> Map<String, Value> {
     let mut paths = Map::new();
     let id = json!({"type":"string","format":"uuid"});
     let user = object(
-        json!({"id":id,"email":{"type":"string","maxLength":254},"role":{"type":"string","enum":roles.roles},"verified":{"type":"boolean"}}),
+        json!({"id":id,"email":{"type":"string","maxLength":254},"role":{"type":"string","enum":roles.roles},"verified":{"type":"boolean"},"name":{"type":"string","maxLength":200},"picture":{"type":"string","format":"uri","pattern":"^https://","maxLength":2048,"x-brain-maxBytes":2048}}),
         &["id", "email", "role", "verified"],
         true,
     );

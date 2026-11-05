@@ -45,7 +45,7 @@ impl Drop for Fixture {
 }
 fn compiler() -> CompileFn {
     Arc::new(|_, _| {
-        Ok(Compiled {
+        Ok(Compiled { server: Default::default(),
             js: String::new(),
             css: String::new(),
             deps: vec![],

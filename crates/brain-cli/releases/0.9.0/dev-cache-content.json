@@ -1,0 +1,16 @@
+{
+  "id": "dev-cache-content",
+  "kind": "fix",
+  "title": "Dev cache validates exact source content",
+  "why": "Editors and checkout tools can preserve file metadata while changing source bytes. Dev cache hits now validate a content digest.",
+  "changelog": [
+    "Dev compilation validates exact source content"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "codes": [],
+  "apis": [],
+  "affects": [
+    "**/*.brain",
+    "**/*.jsbrain"
+  ]
+}

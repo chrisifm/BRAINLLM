@@ -256,6 +256,12 @@ impl Config {
             c.staging = env != "production";
         }
         if let Some(seo) = j.get("seo") {
+            if let Some(value) = seo.get("siteName") {
+                match value {
+                    Json::Str(name) if !name.trim().is_empty() && name.len() <= 512 && !name.chars().any(char::is_control) => c.name = Some(name.trim().to_string()),
+                    _ => return Err("brain.json: `seo.siteName` must be a nonempty display name up to 512 bytes without control characters; fix: use \"siteName\": \"Example site\"".into()),
+                }
+            }
             if let Some(v) = seo.get("minScore") {
                 match v {
                     Json::Num(n) if (0.0..=100.0).contains(n) => c.min_score = *n as u32,

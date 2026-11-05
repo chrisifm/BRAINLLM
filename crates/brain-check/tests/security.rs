@@ -289,3 +289,13 @@ fn b0814_accepts_declared_external_hosts_and_own_server_answers() {
     let fix = diags_with("comp/x.brain", &page("  location.assign(next)"), &Ctx::default()).into_iter().find(|d| d.code == "B0814").expect("B0814").fix;
     assert!(fix.contains("\"redirects\"") && fix.contains("server"), "{fix}");
 }
+
+#[test]
+fn b0814_explains_why_a_bare_slash_is_not_a_safe_prefix() {
+    let source = "<script>let next = sig(''); function go() { location.href = '/' + next }</script><button on:click={go}>Go</button>";
+    let warning = diags_with("comp/x.brain", source, &Ctx::default()).into_iter().find(|d| d.code == "B0814").expect("bare slash warning");
+    assert!(warning.msg.contains("bare `/`") && warning.msg.contains("//evil.example"), "{}", warning.msg);
+    assert!(warning.fix.contains("'/items/' + id") && warning.fix.contains("fixed same-origin path prefix"), "{}", warning.fix);
+    let accepted = source.replace("'/' + next", "'/items/' + next");
+    assert!(!diags_with("comp/x.brain", &accepted, &Ctx::default()).iter().any(|d| d.code == "B0814"));
+}

@@ -219,6 +219,15 @@ pub(crate) fn forwarded_for(req: &http::Request, peer: Option<SocketAddr>) -> Op
 pub(crate) fn is_probe(path: &str) -> bool {
     matches!(path, "/health" | "/health/live" | "/health/ready")
 }
+/// Framework aliases terminate at the gateway; the resource backend serves only the canonical probes.
+pub(crate) fn probe_alias(path: &str) -> Option<&'static str> {
+    match path {
+        "/_brain/health" => Some("/health"),
+        "/_brain/health/live" => Some("/health/live"),
+        "/_brain/health/ready" => Some("/health/ready"),
+        _ => None,
+    }
+}
 pub(crate) fn handles(path: &str) -> bool {
     // the one script the backend serves; other `.js` paths are the dev server's modules
     path == "/_brain/analytics.js" || (path.starts_with("/s/")

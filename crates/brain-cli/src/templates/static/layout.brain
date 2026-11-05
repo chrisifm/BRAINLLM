@@ -1,0 +1,8 @@
+<header class="nav">
+  <nav aria-label="Main navigation"><a href="/">Home</a><a href="/about">About</a></nav>
+</header>
+<slot />
+<style>
+  .nav { padding: var(--space-4); border-bottom: 1px solid var(--border); }
+  nav { display: flex; gap: var(--space-4); max-width: 68ch; margin: 0 auto; }
+</style>

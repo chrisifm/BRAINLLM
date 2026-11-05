@@ -44,6 +44,11 @@ Paths must not use the reserved prefixes `/_brain`, `/api`, `/health` and `/s`. 
 32 query parameters and 16 forwarded headers per route. `cookie` and `authorization` are never
 forwarded: the backend authenticates the request itself.
 
+`brain check` warns B0816 when a handler reads a literal header absent from its sibling contract,
+including proven aliases such as `const h = ctx.headers`. Use the lowercase header name and explicitly
+add a safe header to `headers` when needed; authentication uses `ctx.user`. The checker never forwards
+headers automatically and skips evidence obscured by unknown keys, mutation or escaping references.
+
 ## Handler
 
 ```js

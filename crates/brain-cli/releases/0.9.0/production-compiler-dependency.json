@@ -1,0 +1,14 @@
+{
+  "id": "production-compiler-dependency",
+  "kind": "fix",
+  "title": "Production installs retain the compiler executable",
+  "why": "Generated build/start scripts use the compiler at runtime, so new apps pin it in dependencies. Existing projects keep their chosen dependency section; legacy devDependency apps can include dev packages or explicitly move the exact pin and refresh their lockfile. Static hosting still only needs dist/.",
+  "changelog": [
+    "New app and static starters keep the exact compiler pin"
+  ],
+  "guide": "docs/DEPLOYMENT.md",
+  "codes": [],
+  "apis": [
+    "brain new"
+  ]
+}

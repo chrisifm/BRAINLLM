@@ -8,6 +8,16 @@ pub fn attr<'a>(a: &'a Attrs, k: &str) -> Option<&'a str> {
     a.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str())
 }
 
+/// Explicit navigation outside this artifact, even when another site shares its public origin.
+/// Relative URLs remain locally validated; the caller must restrict this to navigation anchors.
+pub fn intentional_external(href: &str, rel: &str) -> bool {
+    if !rel.split_ascii_whitespace().any(|token| token.eq_ignore_ascii_case("external")) { return false; }
+    let Some((scheme, rest)) = href.trim().split_once("://") else { return false; };
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") { return false; }
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    !authority.is_empty() && !authority.chars().any(|c| c.is_whitespace() || matches!(c, '\\' | '<' | '>' | '"' | '\''))
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Anchor {
     pub href: String,
@@ -96,6 +106,65 @@ enum Tok<'a> {
     Text(&'a str),
     /// script/style/textarea/title: raw content, no markup inside.
     Raw(String, Attrs, &'a str),
+}
+
+/// Opening elements, including raw script/style bodies. Reuses the same comment- and quote-aware scanner as SEO.
+/// Raw bodies are not recursively parsed as markup.
+pub fn elements(src: &str) -> Vec<(String, Attrs, Option<&str>)> {
+    tokens(src).into_iter().filter_map(|token| match token {
+        Tok::Open(name, attrs, _) => Some((name, attrs, None)),
+        Tok::Raw(name, attrs, body) => Some((name, attrs, Some(body))),
+        _ => None,
+    }).collect()
+}
+
+/// The fourth field is false inside template contents, including nested/declarative-shadow templates.
+/// The template element itself still belongs to its containing document. Resource scanners can inspect every
+/// element while document-ID analysis excludes inert fragment contents. This does not execute templates.
+pub fn elements_with_document_scope(src: &str) -> Vec<(String, Attrs, Option<&str>, bool)> {
+    let mut depth = 0usize;
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Ns { Html, Svg, Math }
+    // (name, namespace for children, this opens an inert HTML template). SVG/MathML elements named template
+    // are ordinary foreign elements; SVG HTML integration points restore HTML parsing for descendants.
+    let mut stack: Vec<(String, Ns, bool)> = Vec::new();
+    let mut out = Vec::new();
+    for token in tokens(src) {
+        match token {
+            Tok::Open(name, attrs, self_closing) => {
+                let document = depth == 0;
+                let parent = stack.last().map_or(Ns::Html, |(_, ns, _)| *ns);
+                let ns = match (parent, name.as_str()) {
+                    (Ns::Html, "svg") => Ns::Svg,
+                    (Ns::Html, "math") => Ns::Math,
+                    (Ns::Html, "mglyph" | "malignmark") if stack.last().is_some_and(|(name, _, _)| matches!(name.as_str(), "mi" | "mo" | "mn" | "ms" | "mtext")) => Ns::Math,
+                    _ => parent,
+                };
+                let html = ns == Ns::Html;
+                let inert = html && name == "template";
+                let children = match ns {
+                    Ns::Svg if matches!(name.as_str(), "foreignobject" | "desc" | "title") => Ns::Html,
+                    Ns::Math if matches!(name.as_str(), "mi" | "mo" | "mn" | "ms" | "mtext") => Ns::Html,
+                    Ns::Math if name == "annotation-xml" && attr(&attrs, "encoding").is_some_and(|value| value.eq_ignore_ascii_case("text/html") || value.eq_ignore_ascii_case("application/xhtml+xml")) => Ns::Html,
+                    _ => ns,
+                };
+                // HTML does not self-close a template, even when the start tag ends in />.
+                if !(html && VOID.contains(&name.as_str())) && (html || !self_closing) {
+                    if inert { depth += 1; }
+                    stack.push((name.clone(), children, inert));
+                }
+                out.push((name, attrs, None, document));
+            }
+            Tok::Raw(name, attrs, body) => out.push((name, attrs, Some(body), depth == 0)),
+            Tok::Close(name) => {
+                if let Some(index) = stack.iter().rposition(|(open, _, _)| open == &name) {
+                    for (_, _, inert) in stack.drain(index..) { if inert { depth -= 1; } }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 const VOID: &[&str] = &[

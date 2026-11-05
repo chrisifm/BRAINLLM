@@ -13,8 +13,8 @@ pub const LOGIN_GRANT_HEADER: &str = "x-brain-login-grant";
 /// Lets an operator's script sign accounts up in a batch. Never forwarded by the site's own proxies.
 pub const OPERATOR_HEADER: &str = "x-brain-operator-key";
 const OPERATOR_KEY_MIN: usize = 32;
-/// The providers' published always-pass secrets (docs read 2026-11-01): fine locally, an open door in production.
-const TEST_SECRETS: &[&str] = &["1x0000000000000000000000000000000AA", "0x0000000000000000000000000000000000000000", "6LeIxAcTAAAAAGG-vFI1TnRWxMZNFuojJ4WifJWe"];
+/// Published provider test secrets: local only; pass/fail/spent fixtures are not production configuration.
+const TEST_SECRETS: &[&str] = &["1x0000000000000000000000000000000AA", "2x0000000000000000000000000000000AA", "3x0000000000000000000000000000000AA", "0x0000000000000000000000000000000000000000", "6LeIxAcTAAAAAGG-vFI1TnRWxMZNFuojJ4WifJWe"];
 const AUTH_ACTIONS: &[&str] = &["signup", "login", "password_request"];
 const MAX_TOKEN: usize = 8192;
 const MAX_ANSWER: usize = 64 * 1024;
@@ -80,6 +80,10 @@ impl Captcha {
     pub fn missing_secret(&self) -> Option<&str> {
         (self.enabled() && self.secret.is_none()).then_some(self.secret_env.as_str())
     }
+    /// A known public test secret's variable name, never its value. Shared by boot and author diagnostics.
+    pub fn public_test_secret(&self) -> Option<&str> {
+        (self.enabled() && self.secret.as_deref().is_some_and(|secret| TEST_SECRETS.contains(&secret))).then_some(self.secret_env.as_str())
+    }
     pub fn protects(&self, action: &str) -> bool {
         self.protect.contains(action)
     }
@@ -106,8 +110,8 @@ impl Captcha {
         if production && self.secret.is_none() {
             return Err(format!("{CONTRACT}: {} is not set; fix: set it in the server environment", self.secret_env));
         }
-        if production && self.secret.as_deref().is_some_and(|s| TEST_SECRETS.contains(&s)) {
-            return Err(format!("{CONTRACT}: {} holds a provider's always-pass test secret; fix: set the real secret in the server environment", self.secret_env));
+        if production && let Some(name) = self.public_test_secret() {
+            return Err(format!("{CONTRACT}: {name} holds a public provider test secret; fix: set the real secret in the production server environment"));
         }
         if let Some(name) = &self.operator_env {
             if production && self.operator_key.as_ref().is_none_or(|key| key.len() < OPERATOR_KEY_MIN) {
@@ -211,7 +215,13 @@ mod tests {
         let plain = json!({"verify_url":https,"secret_env":"S","protect":["signup"]});
         let operated = json!({"verify_url":https,"secret_env":"S","protect":["signup"],"operator_key_env":"OPERATOR_KEY"});
         assert!(check(plain.clone(), "synthetic-captcha-secret", None).is_ok());
-        assert!(check(plain.clone(), "1x0000000000000000000000000000000AA", None).unwrap_err().contains("test secret"));
+        for secret in TEST_SECRETS {
+            let config = Captcha::from_contract(&plain, |_| Some(secret.to_string())).unwrap();
+            assert_eq!(config.public_test_secret(), Some("S"));
+            assert!(config.ready(&[], false).is_ok(), "public fixture remains usable locally");
+            let problem = check(plain.clone(), secret, None).unwrap_err();
+            assert!(problem.contains("test secret") && !problem.contains(secret), "{problem}");
+        }
         assert!(check(operated.clone(), "synthetic-captcha-secret", None).unwrap_err().contains("OPERATOR_KEY"));
         assert!(check(operated.clone(), "synthetic-captcha-secret", Some("short")).unwrap_err().contains("OPERATOR_KEY"));
         assert!(check(operated, "synthetic-captcha-secret", Some(KEY)).is_ok());

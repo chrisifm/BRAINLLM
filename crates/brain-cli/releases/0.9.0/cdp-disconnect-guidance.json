@@ -1,0 +1,12 @@
+{
+  "id": "cdp-disconnect-guidance",
+  "kind": "fix",
+  "title": "Actionable Chrome debugging transport failures",
+  "why": "Closed browser pipes include retry and system-load guidance instead of only a raw OS pipe error. Calls are not automatically replayed and cleanup remains limited to the owned transport.",
+  "changelog": [
+    "Chrome CDP disconnects now name the closed browser transport"
+  ],
+  "guide": "brain guide tests",
+  "codes": [],
+  "apis": []
+}

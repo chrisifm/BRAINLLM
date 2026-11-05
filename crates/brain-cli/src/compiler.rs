@@ -18,11 +18,37 @@ pub struct Output {
     pub server_js: String,
     /// Names of the `server:` functions (RPC endpoints).
     pub server_fns: Vec<String>,
+    pub server: brain_lex::ServerMetadata,
 }
 
 /// Parse + context (tokens, props of imports) + check. `rel` goes into `Diag.file`; `disk` is the real path.
 /// Returns every Diag (errors and warnings) and the dependencies read, for the watcher.
 pub fn check(src: &str, rel: &Path, disk: &Path) -> (Vec<Diag>, Vec<PathBuf>) {
+    let prepared = match prepare_brandbook(src, rel, &crate::scaffold::find_root(disk).unwrap_or_else(|| disk.parent().unwrap_or(Path::new(".")).into()), disk) {
+        Ok(prepared) => prepared,
+        Err(diagnostic) => return (vec![diagnostic], vec![]),
+    };
+    let (diags, mut deps) = check_source(prepared.as_ref().map(|p|p.source.as_str()).unwrap_or(src),rel,disk);
+    if let Some(prepared) = prepared {
+        deps.extend(prepared.deps.iter().cloned());
+        let mut diags:Vec<_>=diags.into_iter().map(|d|prepared.remap(d)).collect();
+        diags.extend(prepared.diagnostics);
+        (diags,deps)
+    } else { (diags,deps) }
+}
+fn prepare_brandbook(src: &str, rel: &Path, root: &Path, disk: &Path) -> Result<Option<crate::brandbook::Prepared>, Diag> {
+    let canonical = disk.strip_prefix(root).unwrap_or(rel).to_string_lossy().replace('\\',"/");
+    if ![crate::brandbook::VIEW,"views/brandbook/index.brain"].contains(&canonical.as_str()) { return Ok(None); }
+    let reported = rel.to_string_lossy().replace('\\',"/");
+    let prefix = reported.strip_suffix(&canonical).unwrap_or("");
+    let mut prepared = crate::brandbook::prepare_for(src,Path::new(&canonical),root,Path::new(&reported)).map_err(|mut diagnostic| {
+        diagnostic.file=format!("{prefix}{}",diagnostic.file); diagnostic
+    })?;
+    for diagnostic in &mut prepared.diagnostics { diagnostic.file=format!("{prefix}{}",diagnostic.file); }
+    prepared.file=reported;
+    Ok(Some(prepared))
+}
+fn check_source(src: &str, rel: &Path, disk: &Path) -> (Vec<Diag>, Vec<PathBuf>) {
     // A .cssbrain (tokens or a shared stylesheet) is plain CSS, not a component: only its syntax is checked here.
     if rel.extension().is_some_and(|e| e == "cssbrain") {
         let file = rel.to_string_lossy().replace('\\', "/");
@@ -60,6 +86,8 @@ pub fn compile_hash(
     dev: bool,
     hash_len: usize,
 ) -> Result<Output, Vec<Diag>> {
+    let prepared = prepare_brandbook(src, rel, root, &root.join(rel)).map_err(|diagnostic|vec![diagnostic])?;
+    let src = prepared.as_ref().map(|p|p.source.as_str()).unwrap_or(src);
     // brain.json "lint" (INTERNALS §20): codegen applies it to the quality families before deciding what blocks
     let lint: Vec<(String, Option<brain_parse::Severity>)> = crate::lint_rules(root)
         .unwrap_or_default()
@@ -86,22 +114,24 @@ pub fn compile_hash(
     // and every option; each dependency (imported file, tokens, inlined ui/) is stored with its content hash and
     // re-validated on a hit. A save without changes costs one hash.
     let key = brain_codegen::blocks::source_cache_key(src, rel, &opts);
-    // `-2`: entry format with server_fns (older entries lack it and are recomputed)
-    let entry = root.join(".brain/cache").join(format!("{key}-2.json"));
+    // `-3`: compiler-owned server metadata; older entries are recomputed.
+    let entry = root.join(".brain/cache").join(format!("{key}-3.json"));
     if let Some(o) = read_cache(&entry) {
         brain_metrics::count(brain_metrics::Counter::CompileCacheHits, 1);
         return Ok(o);
     }
     brain_metrics::count(brain_metrics::Counter::CompileCacheMisses, 1);
     brain_metrics::count(brain_metrics::Counter::CompileRuns, 1);
-    let o = brain_codegen::compile_with(src, rel, &opts)?;
-    let out = Output {
+    let o = brain_codegen::compile_with(src, rel, &opts).map_err(|diags| match &prepared { Some(p) => diags.into_iter().map(|d|p.remap(d)).collect(), None => diags })?;
+    let mut out = Output {
         js: o.js,
         css: o.css,
         deps: o.deps,
         server_js: o.server_js,
         server_fns: o.server_fns,
+        server: o.server,
     };
+    if let Some(prepared) = prepared { out.deps.extend(prepared.deps); out.deps.sort(); out.deps.dedup(); }
     write_cache(&entry, &out);
     Ok(out)
 }
@@ -280,6 +310,13 @@ fn read_cache(entry: &Path) -> Option<Output> {
     } else {
         return None;
     }
+    let server_value = j.get("server")?;
+    let server_bool = |key| match server_value.get(key)? { Json::Bool(value) => Some(*value), _ => None };
+    let Json::Arr(rpc_ids) = server_value.get("rpc")? else { return None };
+    let server = brain_lex::ServerMetadata {
+        load: server_bool("load")?, paths: server_bool("paths")?, sitemap: server_bool("sitemap")?, forms: server_bool("forms")?,
+        rpc: rpc_ids.iter().map(|id|id.as_str().map(str::to_string)).collect::<Option<Vec<_>>>()?,
+    };
     let server_fns = s("server_fns")
         .map(|x| {
             x.split(',')
@@ -294,6 +331,7 @@ fn read_cache(entry: &Path) -> Option<Output> {
         css: s("css")?,
         server_js: s("server_js").unwrap_or_default(),
         server_fns,
+        server,
         deps,
     })
 }
@@ -315,6 +353,7 @@ fn write_cache(entry: &Path, o: &Output) {
         ("css", Json::str(&o.css)),
         ("server_js", Json::str(&o.server_js)),
         ("server_fns", Json::str(o.server_fns.join(","))),
+        ("server", Json::obj([("load",Json::Bool(o.server.load)),("paths",Json::Bool(o.server.paths)),("sitemap",Json::Bool(o.server.sitemap)),("forms",Json::Bool(o.server.forms)),("rpc",Json::Arr(o.server.rpc.iter().map(Json::str).collect()))])),
         ("deps", Json::Arr(deps)),
     ]);
     if let Some(dir) = entry.parent() {
@@ -350,7 +389,7 @@ fn prune_for(dir: &Path, max_bytes: u64, max_entries: usize, slots: usize, size:
         let path = entry.path();
         if !path
             .file_name()
-            .is_some_and(|n| n.to_string_lossy().ends_with("-2.json"))
+            .is_some_and(|n| { let name=n.to_string_lossy(); name.ends_with("-2.json") || name.ends_with("-3.json") })
         {
             continue;
         }
@@ -501,7 +540,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for i in 0..5 {
-            std::fs::write(dir.join(format!("{i}-2.json")), b"12345678").unwrap();
+            std::fs::write(dir.join(format!("{i}-{}.json",if i % 2 == 0 {2} else {3})), b"12345678").unwrap();
         }
         std::fs::write(dir.join("other.json"), b"preserve").unwrap();
         std::fs::write(dir.join("active.tmp1-1"), b"preserve").unwrap();
@@ -509,7 +548,7 @@ mod tests {
         let kept = std::fs::read_dir(&dir)
             .unwrap()
             .flatten()
-            .filter(|e| e.file_name().to_string_lossy().ends_with("-2.json"))
+            .filter(|e| {let name=e.file_name(); let name=name.to_string_lossy(); name.ends_with("-2.json") || name.ends_with("-3.json")})
             .count();
         assert_eq!(kept, 2);
         assert!(dir.join("other.json").exists() && dir.join("active.tmp1-1").exists());
@@ -538,6 +577,7 @@ mod tests {
                         deps: vec![],
                         server_js: String::new(),
                         server_fns: vec![],
+                        server: Default::default(),
                     };
                     write_cache(entry, &out);
                 });

@@ -4,11 +4,12 @@
 //! Compilation is injected (`Compile`) so this crate does not depend on the compiler front end.
 
 /// Where BRAINLLM lives: every built page names it next to `<meta name="generator">` (INTERNALS §32).
-pub const HOME: &str = "https://chrisifm.github.io/BRAINLLM/";
+pub const HOME: &str = brain_lex::branding::HOME;
 pub const REPO: &str = "https://github.com/chrisifm/BRAINLLM";
 pub mod gzip;
 mod brotli;
 mod build_cache;
+mod asset_layout;
 mod feedback;
 pub use feedback::Optimization;
 pub use build_cache::Stats as BuildCacheStats;
@@ -42,6 +43,7 @@ pub struct Unit {
     pub server_js: String,
     /// Names of its `server:` functions (RPC endpoints `/_r/<hash>/<fn>`).
     pub server_fns: Vec<String>,
+    pub server: brain_lex::ServerMetadata,
 }
 
 pub type Compile<'a> = &'a dyn Fn(&str, &Path) -> Result<Unit, String>;
@@ -61,7 +63,7 @@ pub struct Input<'a> {
     pub site: Option<String>,
     /// Runtime DOM shim source; `Some` enables build-time prerender (needs Node).
     pub shim: Option<String>,
-    /// `<meta name="generator">` content (empty = none, `--no-brand`).
+    /// `<meta name="generator">` version label (empty omits that tag; build attribution remains).
     pub generator: String,
     /// Writes the server module of a view (its `server_js` with imports resolved) and returns its `file://` URL and
     /// content. Needed to evaluate `paths()`, build-time `load`, `seo(props)` and `head(props)` (INTERNALS §32).
@@ -83,6 +85,8 @@ pub struct Page {
     pub html: String,
     /// The view it comes from (`views/about.brain`).
     pub view: String,
+    /// Evaluated page metadata for discovery; never inferred from a file modification time.
+    pub lastmod: Option<String>,
 }
 
 /// What the post-pages step (SEO) returns: generated text and binary files plus warnings.
@@ -260,6 +264,24 @@ pub fn script_source_problem(source: &str) -> Option<&'static str> {
     frame_source_problem(source).map(|why| if why.starts_with("a frame") { "a script is a file, so its scheme must be https" } else { why })
 }
 
+/// Form submissions carry user input: opt in to exact document origins, never sockets, blobs or wildcards.
+pub fn form_action_problem(source: &str) -> Option<&'static str> {
+    if source.contains('*') { return Some("name an exact form destination origin, without a wildcard"); }
+    frame_source_problem(source)
+}
+
+pub fn read_form_action(root: &Path) -> (Vec<String>, Vec<String>) {
+    read_added_sources(root, "formAction", "write \"csp\": { \"formAction\": [\"https://forms.example.com\"] }", form_action_problem)
+}
+
+/// Media and worker opt-ins accept blob URLs or one exact origin, never a broad executable scheme or wildcard.
+pub fn media_source_problem(source: &str) -> Option<&'static str> {
+    if source == "blob:" { return None; }
+    if source.contains('*') { return Some("name an exact origin, without a wildcard"); }
+    if source.starts_with("wss://") || source.starts_with("ws://") { return Some("use blob: or an exact https origin; sockets are not media or worker sources"); }
+    connect_source_problem(source)
+}
+
 /// One `csp.<key>` list: `(declared valid sources, problems)`. An invalid entry is left out and reported (B0796), so a
 /// mistake narrows the policy and never widens it.
 fn read_csp_list(list: &brain_mcp::Json, key: &str, fix: &str, problem_of: fn(&str) -> Option<&'static str>) -> (Vec<String>, Vec<String>) {
@@ -291,7 +313,7 @@ pub fn read_connect_src(root: &Path) -> (Option<Vec<String>>, Vec<String>) {
     let Ok(json) = brain_mcp::Json::parse(&src) else { return (None, vec![]) }; // malformed brain.json is reported elsewhere
     let Some(csp) = json.get("csp") else { return (None, vec![]) };
     let brain_mcp::Json::Obj(entries) = csp else { return (Some(vec![]), vec![format!("brain.json `csp` must be an object; fix: {FIX}")]) };
-    let mut problems: Vec<String> = entries.iter().filter(|(k, _)| !matches!(k.as_str(), "connectSrc" | "frameSrc" | "scriptSrc")).map(|(k, _)| format!("brain.json `csp.{k}` is not a CSP setting; fix: {FIX}")).collect();
+    let mut problems: Vec<String> = entries.iter().filter(|(k, _)| !matches!(k.as_str(), "connectSrc" | "frameSrc" | "scriptSrc" | "mediaSrc" | "workerSrc" | "formAction")).map(|(k, _)| format!("brain.json `csp.{k}` is not a CSP setting; fix: {FIX}")).collect();
     let Some(list) = csp.get("connectSrc") else { return (None, problems) };
     let (sources, found) = read_csp_list(list, "connectSrc", FIX, connect_source_problem);
     problems.extend(found);
@@ -314,6 +336,18 @@ pub fn read_frame_src(root: &Path) -> (Vec<String>, Vec<String>) {
 pub fn read_script_src(root: &Path) -> (Vec<String>, Vec<String>) {
     read_added_sources(root, "scriptSrc", "write \"csp\": { \"scriptSrc\": [\"https://www.googletagmanager.com\"] }", script_source_problem)
 }
+
+fn read_blob_sources(root: &Path, key: &str) -> (Option<Vec<String>>, Vec<String>) {
+    let Ok(src) = std::fs::read_to_string(root.join("brain.json")) else { return (None, vec![]) };
+    let Ok(json) = brain_mcp::Json::parse(&src) else { return (None, vec![]) };
+    let Some(list) = json.get("csp").and_then(|csp| csp.get(key)) else { return (None, vec![]) };
+    let fix = format!("write \"csp\": {{ \"{key}\": [\"blob:\", \"https://media.example.com\"] }}, or [] for the site's own origin only");
+    let (sources, problems) = read_csp_list(list, key, &fix, media_source_problem);
+    (Some(sources), problems)
+}
+
+pub fn read_media_src(root: &Path) -> (Option<Vec<String>>, Vec<String>) { read_blob_sources(root, "mediaSrc") }
+pub fn read_worker_src(root: &Path) -> (Option<Vec<String>>, Vec<String>) { read_blob_sources(root, "workerSrc") }
 
 /// brain.json `"ext"` (#26): `"brain"` publishes `.brain`/`.jsbrain`/`.cssbrain`; anything else is `web`.
 pub fn read_ext(root: &Path) -> Ext {
@@ -586,12 +620,16 @@ impl LocaleLinks {
         }
         let end = href.find(['?', '#']).unwrap_or(href.len());
         let (path, rest) = href.split_at(end);
-        let new = match self.slugs.get(path) {
+        let key = path.trim_end_matches('/');
+        let key = if key.is_empty() { "/" } else { key };
+        if key == self.prefix || key.starts_with(&format!("{}/", self.prefix)) { return None; }
+        let mut new = match self.slugs.get(key) {
             Some(slug) => slug.clone(),
-            None if !self.routes.iter().any(|r| Self::matches(r, path)) => return None,
-            None if path == "/" => self.prefix.clone(),
-            None => format!("{}{path}", self.prefix),
+            None if !self.routes.iter().any(|r| Self::matches(r, key)) => return None,
+            None if key == "/" => self.prefix.clone(),
+            None => format!("{}{key}", self.prefix),
         };
+        if key != "/" && path.ends_with('/') && !new.ends_with('/') { new.push('/'); }
         Some(new + rest)
     }
 
@@ -632,6 +670,11 @@ impl LocaleLinks {
 
     /// `<a href>` and `<form action>` of a whole document, outside `<script>`; `hreflang` names a language on purpose.
     pub fn html(&self, doc: &str) -> String {
+        self.html_with_base(doc, "")
+    }
+
+    /// Compiled templates may already carry the app base before locale rewriting.
+    pub fn html_with_base(&self, doc: &str, base: &str) -> String {
         let mut out = String::with_capacity(doc.len() + 64);
         let mut rest = doc;
         while let Some(at) = rest.find('<') {
@@ -657,7 +700,10 @@ impl LocaleLinks {
                 let v = i + 1 + attr.len();
                 let q = tag[v..].chars().next().filter(|c| *c == '"' || *c == '\'')?;
                 let end = tag[v + 1..].find(q)? + v + 1;
-                let to = self.to(&tag[v + 1..end])?;
+                let href = &tag[v + 1..end];
+                let relative = if base.is_empty() { None } else { href.strip_prefix(base).filter(|suffix| suffix.is_empty() || suffix.starts_with('/')) };
+                let to = self.to(relative.filter(|value| !value.is_empty()).unwrap_or(if relative.is_some() { "/" } else { href }))?;
+                let to = if relative.is_some() { format!("{base}{to}") } else { to };
                 Some(format!("{}{to}{}", &tag[..v + 1], &tag[end..]))
             });
             out.push_str(new.as_deref().unwrap_or(tag));
@@ -905,6 +951,14 @@ fn build_inner_with_options(
     measure: bool,
     options: &BuildOptions,
 ) -> Result<Output, String> {
+    if options.static_export && (options.native_sockets.is_some() || !options.native_routes.is_empty() || !options.trust_proxy.is_empty() || options.access.is_some()) {
+        return Err("static output cannot enforce native sockets, routes, trustProxy or access policies; fix: remove the server feature or use automatic output mode".into());
+    }
+    if options.static_export && input.shim.is_none() {
+        return Err("static output requires the prerender DOM shim; fix: supply the embedded build runtime".into());
+    }
+    cache::validate_public(&input.root)?;
+    let asset_layout = asset_layout::AssetLayout::load(&input.root, options.static_export || measure)?;
     let cache_before=build_cache::stats();
     let mut warnings = Vec::new();
     // brain.json `base` (#148): every URL the build writes starts with `pre` (`/app`, or empty at the root); dist/
@@ -912,6 +966,9 @@ fn build_inner_with_options(
     let base = read_base(&input.root);
     // `ext` (#26): `brain build --ext` (cache.ext) wins over brain.json; `web` by default
     let ext = if input.cache.ext.is_empty() { read_ext(&input.root) } else { Ext::from_name(&input.cache.ext) };
+    if options.static_export && ext != Ext::Web {
+        return Err("static output requires ordinary .html/.js/.css extensions; fix: use --ext web".into());
+    }
     // languages (§37): brain.json `i18n`; the views compile once and t() resolves at runtime from a dictionary chunk
     // per view and locale (only the keys that view reads), loaded before the page mounts
     let i18n = read_i18n(&input.root);
@@ -935,6 +992,7 @@ fn build_inner_with_options(
     let mut content_load: HashSet<String> = HashSet::new();
     // rel → (client js, server js, server fns) of every compiled file with server code
     let mut server_src: BTreeMap<String, (String, String, Vec<String>)> = BTreeMap::new();
+    let mut server_metadata: BTreeMap<String, brain_lex::ServerMetadata> = BTreeMap::new();
     let mut server_runtime = server_runtime::Uses::default();
 
     let progress = input.progress;
@@ -985,6 +1043,9 @@ fn build_inner_with_options(
         stack.push(Node::File("app.brain".into()));
     }
     for (_, v) in views {
+        if options.static_export && protected(v) {
+            return Err(format!("{v}: guards and middleware require a server; fix: remove the protected route or use automatic output mode"));
+        }
         stack.push(Node::File(v.clone()));
         for l in layouts_of(v) {
             stack.push(Node::File(l));
@@ -1017,24 +1078,27 @@ fn build_inner_with_options(
                     (src, String::new())
                 } else {
                     let u = (input.compile)(&src, Path::new(rel))?;
+                    if options.static_export && !u.server_fns.is_empty() {
+                        return Err(format!("{rel}: server: functions require a server; fix: use browser-only behavior or automatic output mode"));
+                    }
                     // Only `load` needs the server to render the page: since #104 server_js also carries `seo`/`head`
                     // (evaluated at build time) and `paths`, which a static build handles itself.
-                    if u.server_js.contains("function load(") || u.server_js.contains("const load =") {
+                    if u.server.load {
                         needs_server.insert(rel.clone());
                     }
                     if !u.server_js.trim().is_empty() {
                         has_server.insert(rel.clone());
                     }
-                    if u.server_js.contains("function paths(") {
+                    if u.server.paths {
                         has_paths.insert(rel.clone());
                     }
-                    if u.server_js.contains("function sitemap(") {
+                    if u.server.sitemap {
                         has_sitemap.insert(rel.clone());
                     }
-                    if content_only_load(&u.server_js) {
+                    if u.server.load && content_only_load(&u.server_js) {
                         content_load.insert(rel.clone());
                     }
-                    if u.server_js.contains("const $forms") {
+                    if u.server.forms {
                         has_forms.insert(rel.clone());
                     }
                     if !u.server_js.trim().is_empty() {
@@ -1043,6 +1107,7 @@ fn build_inner_with_options(
                         stack.extend(server_runtime.exports.keys().cloned().map(Node::Runtime));
                         server_src.insert(rel.clone(), (u.js.clone(), u.server_js.clone(), u.server_fns.clone()));
                     }
+                    server_metadata.insert(rel.clone(), u.server);
                     (u.js, u.css)
                 }
             }
@@ -1106,6 +1171,19 @@ fn build_inner_with_options(
     }
 
     dependency_resolver.verify()?;
+    if options.static_export {
+        if let Some(module) = needs_server.iter().filter(|module| !views.iter().any(|(_, view)| view == *module)).min() {
+            return Err(format!("{module}: load() is supported only on statically listed route views; fix: move build-time data into its view or use automatic output mode"));
+        }
+        if let Some(view) = has_sitemap.iter().chain(has_forms.iter()).min() {
+            return Err(format!("{view}: live sitemap() or server forms require a server; fix: use paths() with static pages and browser-only forms, or automatic output mode"));
+        }
+        for name in ["brain-live.js", "brain-analytics.js"] {
+            if modules.contains_key(&Node::Runtime(name.into())) {
+                return Err(format!("{name}: this runtime feature requires BRAINLLM endpoints; fix: remove it for static output or use automatic output mode"));
+            }
+        }
+    }
 
     // 1b. Production: class names renamed everywhere the compiler wrote them (#260, INTERNALS §11.6)
     let shell_src = std::fs::read_to_string(input.root.join("app.brain")).unwrap_or_default();
@@ -1200,8 +1278,9 @@ fn build_inner_with_options(
     }
     // public/ assets named in JS (`"/og.png"`) point at their immutable copy, before the chunk is hashed, so the
     // chunk's name changes with the asset (QA #124). Same URLs as cache.rs (`hashed_url`).
+    let public_urls = if input.cache.http { cache::public_urls_with_layout(&input.root, &asset_layout) } else { BTreeMap::new() };
     if input.cache.http {
-        let public: BTreeMap<String, String> = cache::public_urls(&input.root).into_iter().map(|(k, v)| (k, format!("{pre}{v}"))).collect();
+        let public: BTreeMap<String, String> = public_urls.iter().map(|(k, v)| (k.clone(), format!("{pre}{v}"))).collect();
         if !public.is_empty() {
             for (n, src) in min_src.iter_mut() {
                 if matches!(n, Node::File(file) if !dependencies::is_foreign(file)) {
@@ -1225,11 +1304,11 @@ fn build_inner_with_options(
     for(file,source)in &foreign_code {foreign_snapshot.push_str(&format!("{}:{file}{}",file.len(),sha::sha256(source.as_bytes()).iter().map(|b|format!("{b:02x}")).collect::<String>()));}
     for(file,bytes)in &dependency_assets {foreign_snapshot.push_str(file);foreign_snapshot.push_str(&sha::sha256(bytes).iter().map(|b|format!("{b:02x}")).collect::<String>());}
     foreign_snapshot.push_str(env!("CARGO_PKG_VERSION"));
-    let foreign_namespace=format!("_b/npm/{}",sha::sha256(foreign_snapshot.as_bytes()).iter().take(16).map(|b|format!("{b:02x}")).collect::<String>());
+    let foreign_namespace=asset_layout.js(&format!("npm/{}",sha::sha256(foreign_snapshot.as_bytes()).iter().take(16).map(|b|format!("{b:02x}")).collect::<String>()));
     let mut asset_urls=BTreeMap::new();
     let mut emitted_assets=BTreeMap::new();
     for(file,bytes)in dependency_assets {
-        let key=if dependencies::is_foreign(&file){format!("{foreign_namespace}/{file}")}else{format!("_b/{}.{}",sha::sha256(&bytes).iter().map(|b|format!("{b:02x}")).collect::<String>(),Path::new(&file).extension().and_then(|e|e.to_str()).unwrap_or("bin"))};
+        let key=if dependencies::is_foreign(&file){format!("{foreign_namespace}/{file}")}else{asset_layout.asset(&format!("{}.{}",sha::sha256(&bytes).iter().map(|b|format!("{b:02x}")).collect::<String>(),Path::new(&file).extension().and_then(|e|e.to_str()).unwrap_or("bin")))};
         asset_urls.insert(file,format!("{pre}/{key}"));emitted_assets.insert(key,bytes);
     }
     let mut url_of: HashMap<Node, String> = HashMap::new();
@@ -1244,6 +1323,7 @@ fn build_inner_with_options(
         pre: &str,
         jsx: &str,
         foreign_namespace: &str,
+        asset_layout: &asset_layout::AssetLayout,
         asset_urls: &BTreeMap<String,String>,
     ) -> Result<String, String> {
         if let Some(u) = url_of.get(n) {
@@ -1257,13 +1337,14 @@ fn build_inner_with_options(
         let mut js = String::with_capacity(src.len());
         let mut last = 0;
         for (a, b, spec) in module_refs(src)? {
-            let u=if let Some((_,d))=m.deps.iter().find(|(s,_)|*s==spec) {emit(d,modules,min_src,url_of,visiting,files,pre,jsx,foreign_namespace,asset_urls)?}else if let Some((_,file))=m.assets.iter().find(|(s,_)|*s==spec){asset_urls.get(file).cloned().ok_or("URL asset was not emitted")?}else{continue};
+            let u=if let Some((_,d))=m.deps.iter().find(|(s,_)|*s==spec) {emit(d,modules,min_src,url_of,visiting,files,pre,jsx,foreign_namespace,asset_layout,asset_urls)?}else if let Some((_,file))=m.assets.iter().find(|(s,_)|*s==spec){asset_urls.get(file).cloned().ok_or("URL asset was not emitted")?}else{continue};
             js.push_str(&src[last..a]);
             js.push_str(&format!("\"{u}\""));
             last = b;
         }
         js.push_str(&src[last..]);
-        let key=match n {Node::File(file) if dependencies::is_foreign(file)=>format!("{foreign_namespace}/{file}"),_=>format!("_b/{}.{jsx}",content_hash(&js))};
+        if !matches!(n,Node::File(file) if dependencies::is_foreign(file)) { js=brain_lex::branding::code(&js); }
+        let key=match n {Node::File(file) if dependencies::is_foreign(file)=>format!("{foreign_namespace}/{file}"),_=>asset_layout.js(&format!("{}.{jsx}",content_hash(&js)))};
         let url = format!("{pre}/{key}");
         files.insert(key, js);
         visiting.remove(n);
@@ -1274,7 +1355,7 @@ fn build_inner_with_options(
     let mut nodes: Vec<Node> = modules.keys().cloned().collect();
     nodes.sort();
     for n in &nodes {
-        emit(n, &modules, &min_src, &mut url_of, &mut visiting, &mut files, &pre, ext.js(),&foreign_namespace,&asset_urls)?;
+        emit(n, &modules, &min_src, &mut url_of, &mut visiting, &mut files, &pre, ext.js(),&foreign_namespace,&asset_layout,&asset_urls)?;
     }
 
     // 3. Shared tokens CSS + one CSS file per view (styles of every module it reaches statically).
@@ -1283,11 +1364,11 @@ fn build_inner_with_options(
     let tokens_head = if tokens.trim().is_empty() {
         String::new()
     } else {
-        let css = minify_css(&format!("@layer tokens{{{tokens}}}"));
-        if css.len() <= INLINE_TOKENS_CSS {
+        let css = brain_lex::branding::code(&minify_css(&format!("@layer tokens{{{tokens}}}")));
+        if asset_layout.inline_css && css.len() <= INLINE_TOKENS_CSS {
             format!("<style>{css}</style>")
         } else {
-            let key = format!("_b/{}.{}", content_hash(&css), ext.css());
+            let key = asset_layout.css(&format!("{}.{}", content_hash(&css), ext.css()));
             files.insert(key.clone(), css);
             format!("<link rel=\"stylesheet\" href=\"{pre}/{key}\">")
         }
@@ -1403,14 +1484,21 @@ fn build_inner_with_options(
                 for params in list {
                     match concrete_route(route, params) {
                         Some(r) => pages_of.push((r, view.clone(), params_json(params), needs_server.contains(view), false)),
+                        None if options.static_export || params.iter().any(|(_, v)| v.split('/').any(|s| s == "." || s == "..")) => return Err(format!("{view}: paths() returned {params:?}, which does not fill every param of `{route}` safely; fix: supply every route parameter using nonempty segments other than . or ..")),
                         None => warnings.push(format!("{view}: paths() returned {params:?}, which does not fill every param of `{route}`")),
                     }
                 }
             }
             Some(Err(e)) => return Err(format!("{view}: paths() threw: {}", e.lines().next().unwrap_or(""))),
+            None if options.static_export => return Err(format!("{view}: dynamic route `{route}` needs paths() for static output; fix: enumerate its pages at build time or use automatic output mode")),
             None if can_ssr => pages_of.push((route.clone(), view.clone(), "{}".into(), false, true)),
             None if measure => pages_of.push((route.clone(), view.clone(), "{}".into(), false, false)),
             None => warnings.push(format!("{view}: dynamic route `{route}` has no paths() and the server runtime is not embedded; it is left out of dist/")),
+        }
+    }
+    if options.static_export {
+        if let Some((_, view, _, _, _)) = pages_of.iter().find(|p| p.4) {
+            return Err(format!("{view}: request-time load() requires a server; fix: use build-time content or a dynamic route with paths(), or automatic output mode"));
         }
     }
     // §37 routing: the default locale has no prefix, the others do (`/es/about`), or the view's translated slug
@@ -1432,6 +1520,14 @@ fn build_inner_with_options(
                 locale_of.insert(r.clone(), loc.clone());
                 pages_of.push((r, view.clone(), params.clone(), *bl, *ssr));
             }
+        }
+    }
+    if options.static_export {
+        let mut routes = HashSet::new();
+        for (route, view, _, _, _) in &pages_of {
+            let target = static_page_path(route, ext)?;
+            validate_output_path(&target)?;
+            if !routes.insert(target.to_lowercase()) { return Err(format!("{view}: duplicate static destination `{target}` for route `{route}`; fix: return each URL once and avoid normalized route collisions")); }
         }
     }
     // the same page in every locale (same view and params), for <LangSwitch> and the server manifest
@@ -1541,11 +1637,11 @@ fn build_inner_with_options(
         // are immutable assets: their compression/cache does not include personalized HTML or props.
         let mut view_css = String::new();
         if !css.trim().is_empty() {
-            let css = minify_css(&css);
-            if !*ssr && css.len() <= INLINE_CSS {
+            let css = brain_lex::branding::code(&minify_css(&css));
+            if asset_layout.inline_css && !*ssr && css.len() <= INLINE_CSS {
                 view_css = format!("<style>{css}</style>");
             } else {
-                let key = format!("_b/{}.{}", content_hash(&css), ext.css());
+                let key = asset_layout.css(&format!("{}.{}", content_hash(&css), ext.css()));
                 view_css = format!("<link rel=\"stylesheet\" href=\"{pre}/{key}\">");
                 files.insert(key, css);
             }
@@ -1603,7 +1699,8 @@ fn build_inner_with_options(
             }
             if !keys.is_empty() || !entries.is_empty() {
                 let js = format!("import{{add}}from\"{rt}\";add({},{{{}}});\n", prerender_json(loc), entries.join(","));
-                let key = format!("_b/i18n-{}-{loc}.{}.{}", view_slug(view), content_hash(&js), ext.js());
+                let js = brain_lex::branding::code(&js);
+                let key = asset_layout.js(&format!("i18n-{}-{loc}.{}.{}", view_slug(view), content_hash(&js), ext.js()));
                 dict_url = Some(format!("{pre}/{key}"));
                 dicts.insert(route.clone(), format!("{pre}/{key}"));
                 files.insert(key, js);
@@ -1798,6 +1895,10 @@ fn build_inner_with_options(
         }
         // canonical/og:url = site + base + route (#148; brain-seo builds its own absolute URLs the same way)
         let site = input.site.as_deref().map(|s| format!("{}{pre}", s.trim_end_matches('/')));
+        let links = p.locale.as_ref().filter(|l| i18n.as_ref().is_some_and(|(def, _)| def != *l)).map(|l| LocaleLinks::of(&input.root, l, true));
+        if let Some(links) = &links {
+            for (key, value) in &mut seo { if key == "canonical" && let Some(local) = links.to(value) { *value = local; } }
+        }
         let (title, seo_html) = prerender::seo_head(&seo, site.as_deref(), &p.route, &input.generator);
         let props = r.map_or("{}".to_string(), |r| brain_lex::json::in_html(&r.props));
         let mut head = format!("{seo_html}{}{}", p.head, r.map_or("", |r| r.head.as_str()));
@@ -1877,10 +1978,10 @@ fn build_inner_with_options(
             script = script.replacen("<script type=\"module\">", &format!("<script type=\"module\">import\"{d}\";"), 1);
         }
         // a page outside the default language keeps it in the links its views mount (§37)
-        let links = p.locale.as_ref().filter(|l| i18n.as_ref().is_some_and(|(def, _)| def != *l)).map(|l| LocaleLinks::of(&input.root, l, true));
         if let (Some(t), Some(l), Some(rt), true) = (&links, &p.locale, url_of.get(&Node::Runtime("brain-links.js".into())), p.interactive && script.starts_with("<script type=\"module\">")) {
             let js = format!("import l from\"{rt}\";l({},{},{},{},{});\n", prerender_json(l), prerender_json(&pre), prerender_json(&t.prefix), prerender_json(&t.pattern()), t.slugs_json());
-            let key = format!("_b/links-{l}.{}.{}", content_hash(&js), ext.js());
+            let js = brain_lex::branding::code(&js);
+            let key = asset_layout.js(&format!("links-{l}.{}.{}", content_hash(&js), ext.js()));
             // after the dictionary: the page's first import stays the one its first render needs
             script = match &p.dict {
                 Some(d) => script.replacen(&format!("import\"{d}\";"), &format!("import\"{d}\";import\"{pre}/{key}\";"), 1),
@@ -1913,20 +2014,20 @@ fn build_inner_with_options(
         };
         let html = prerender::dedupe_head(&html);
         let html = match &links {
-            Some(t) => t.html(&html),
+            Some(t) => t.html_with_base(&html, &pre),
             None => html,
         };
         let file = if p.ssr {
             format!("_server/pages/{}.html", content_hash(&p.route))
-        } else if p.route == "/" {
-            format!("index.{}", ext.html())
-        } else if p.route == "*" {
-            format!("404.{}", ext.html())
+        } else if measure && routes::is_dynamic(&p.route) {
+            // Impact measures a dynamic route pattern once; it is never a physical export destination.
+            format!("_measure/pages/{}.html", content_hash(&p.route))
         } else {
-            format!("{}/index.{}", p.route.trim_matches('/'), ext.html())
+            static_page_path(&p.route, ext)?
         };
         files.insert(file.clone(), html.clone());
-        pages.push(Page { route: p.route, file, html, view: p.view });
+        let lastmod=seo.iter().find(|(key,value)|key=="lastmod"&&!value.trim().is_empty()).map(|(_,value)|value.clone());
+        pages.push(Page { route: p.route, file, html, view: p.view, lastmod });
     }
     // 4a. Server output (#51): server modules, RPC map, manifest, server.mjs and the DOM shim for SSR
     let mut ssr_pages: Vec<(&Page, &String)> = pages.iter().filter(|p| p.file.starts_with("_server/")).filter_map(|p| pages_of.iter().find(|x| x.0 == p.route && x.4).map(|x| (p, &x.1))).collect();
@@ -2014,8 +2115,7 @@ fn build_inner_with_options(
                 }
                 let mut rpc_json = Vec::new();
                 for rel in &rpc_files {
-                    let (js, _, fns) = &server_src[*rel];
-                    let Some(hash) = fns.iter().find_map(|f| rpc_hash(js, f)) else {
+                    let Some(hash) = server_metadata.get(*rel).and_then(|metadata| metadata.rpc.first()).and_then(|id|id.split_once('/')).map(|(hash,_)|hash) else {
                         warnings.push(format!("{rel}: server functions without a client stub; they are not callable"));
                         continue;
                     };
@@ -2070,15 +2170,73 @@ fn build_inner_with_options(
             }
         }
     }
+    if options.static_export {
+        if let Some(warning) = warnings.iter().find(|w| ["prerender skipped", "prerender threw", "component failed during prerender", "left out of dist/", EMPTY_LISTED_PAGE, "static view rendered empty"].iter().any(|needle| w.contains(needle))) {
+            return Err(format!("static output requires complete prerendered pages: {warning}; fix: correct the render failure and rebuild"));
+        }
+    }
+    if options.static_export && !pages.is_empty() && pages.iter().all(|page| zero_routes.contains(&page.route)) {
+        // Prerender used this graph at build time, but a wholly zero-JS site never executes its framework modules.
+        // Keep explicit document references and their module dependencies; public originals are copied later.
+        let mut retained = HashSet::new();
+        let mut queue = Vec::new();
+        for page in &pages {
+            queue.extend(ledger::html_asset_refs(&page.html, &base));
+            queue.extend(ledger::initial_refs(&page.html, &page.file, &base)?);
+        }
+        while let Some(path) = queue.pop() {
+            if !retained.insert(path.clone()) { continue; }
+            if let Some(source) = files.get(&path).filter(|_| ledger::javascript(&path)) {
+                for (_, _, spec) in specifiers(source)?.into_iter().chain(url_refs(source)?) {
+                    if let Some(path) = ledger::asset_key(&spec, &path, &base) { queue.push(path); }
+                }
+            }
+        }
+        files.retain(|path, _| !ledger::javascript(path) || retained.contains(path));
+    }
     // 4a'. SEO (post step): head rewrite, robots/sitemap/llms/manifest/feeds, social images
+    let page_files: HashSet<&String> = pages.iter().map(|page| &page.file).collect();
+    let mut immutable: std::collections::BTreeSet<String> = files.keys().filter(|key| !page_files.contains(key) && !private::is_private(key)).cloned().collect();
+    immutable.extend(emitted_assets.keys().cloned());
     let mut post_bin: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     let mut post_csp: Vec<(String, String)> = Vec::new();
     if let Some(post) = input.post {
         report("SEO", 0, pages.len());
-        let assets: Vec<(String, u64)> = files.iter().filter(|(p, _)| !pages.iter().any(|x| &x.file == *p)).map(|(p, c)| (p.clone(), c.len() as u64)).collect();
-        let out = post(&mut pages, &assets)?;
+        let mut assets: Vec<(String, u64)> = files.iter().filter(|(p, _)| !pages.iter().any(|x| &x.file == *p)).map(|(p, c)| (p.clone(), c.len() as u64)).collect();
+        // Client constants already name these immutable public copies. SEO validates links before cache copies them.
+        for (original, url) in &public_urls {
+            let size = std::fs::metadata(input.root.join("public").join(original.trim_start_matches('/'))).map_err(|_| "public asset changed while planning the SEO artifact inventory")?.len();
+            assets.push((url.trim_start_matches('/').into(), size));
+        }
+        let mut out = post(&mut pages, &assets)?;
+        if asset_layout.custom() {
+            let mut urls = BTreeMap::new();
+            for (path, _) in &out.files {
+                if let Some(new) = asset_layout.post_key(path) {
+                    if path.starts_with("_b/") { immutable.insert(new.clone()); }
+                    urls.extend(asset_layout.relocation_urls(path, &new, &pre, out.site.as_deref()));
+                }
+            }
+            for (path, _) in &out.binary {
+                if let Some(new) = asset_layout.post_key(path) { urls.extend(asset_layout.relocation_urls(path, &new, &pre, out.site.as_deref())); }
+            }
+            for page in &mut pages { page.html = cache::rewrite(&page.html, &urls); }
+            for (path, source) in &mut out.files {
+                if let Some(new) = asset_layout.post_key(path) { *path = new; }
+                *source = cache::rewrite(source, &urls);
+            }
+            for (path, _) in &mut out.binary { if let Some(new) = asset_layout.post_key(path) { *path = new; } }
+        }
         for p in &pages {
             files.insert(p.file.clone(), p.html.clone());
+        }
+        if asset_layout.custom() {
+            let mut post_paths = HashSet::new();
+            for path in out.files.iter().map(|(path, _)| path).chain(out.binary.iter().map(|(path, _)| path)) {
+                if files.contains_key(path) || emitted_assets.contains_key(path) || !post_paths.insert(path.clone()) {
+                    return Err(format!("static output asset collision at `{path}`; fix: choose distinct asset folders and page names"));
+                }
+            }
         }
         files.extend(out.files);
         post_bin.extend(out.binary);
@@ -2129,21 +2287,40 @@ fn build_inner_with_options(
         }
     }
     navigation::apply(&mut pages, &mut files, &pre);
+    // Format-valid attribution for framework-owned documents. Copied assets retain their original byte identity.
+    for (path, source) in &mut files {
+        if path.ends_with(".xml") { *source=brain_lex::branding::xml(source); }
+        else if path.ends_with(".md") || (path.ends_with(".txt") && !source.contains(brain_lex::branding::HOME)) {
+            source.push_str(&format!("\n{}\n",if path.ends_with(".md") || path.ends_with("llms.txt") || path.ends_with("llms-full.txt") {brain_lex::branding::HTML}else{brain_lex::branding::HASH}));
+        } else if path.ends_with(".html") && !source.contains(brain_lex::branding::HTML) {
+            let position=source.find("</head>").unwrap_or(0); source.insert_str(position,brain_lex::branding::HTML);
+        } else if private::is_private(path) && ledger::javascript(path) { *source=brain_lex::branding::code(source); }
+    }
+
     // an empty chunk nobody references (its only importers lost the import to tree-shaking) is not written (QA #292)
-    let empty: Vec<String> = files.iter().filter(|(k, v)| k.starts_with("_b/") && k.ends_with(&format!(".{}", ext.js())) && v.trim().is_empty()).map(|(k, _)| k.clone()).collect();
+    let empty: Vec<String> = files.iter().filter(|(k, v)| immutable.contains(*k) && k.ends_with(&format!(".{}", ext.js())) && v.trim().is_empty()).map(|(k, _)| k.clone()).collect();
     for k in empty {
-        let name = k.trim_start_matches("_b/");
+        let name = k.rsplit('/').next().unwrap_or(&k);
         if !files.iter().any(|(o, v)| *o != k && v.contains(name)) {
             files.remove(&k);
+            immutable.remove(&k);
         }
     }
     report("cache/SW", 0, 1);
     // 4b. Caching (§35): public/ hashing, headers, service worker and its registration
     let refs: Vec<cache::PageRef> = pages.iter().map(|p| cache::PageRef { route: &p.route, file: &p.file }).collect();
+    if asset_layout.custom() {
+        for (original, url) in &public_urls {
+            let path = url.trim_start_matches('/');
+            if files.contains_key(path) || post_bin.contains_key(path) || emitted_assets.contains_key(path) || immutable.contains(original.trim_start_matches('/')) {
+                return Err(format!("static output asset collision at `{path}`; fix: choose distinct generated folders and public file names"));
+            }
+        }
+    }
     let mut public_bin: BTreeMap<String, Vec<u8>> = post_bin;
     public_bin.extend(emitted_assets);
     // measuring skips it: the signature changes on every edit and would show as noise in every page's bytes
-    let applied = if measure { cache::Applied { warnings: vec![], build_hash: String::new() } } else { cache::apply(&input.root, &cache::CacheCfg { base: base.clone(), ext: (if ext == Ext::Brain { "brain" } else { "web" }).into(), ..input.cache.clone() }, &refs, &post_csp, &mut files, &mut public_bin) };
+    let applied = if measure { cache::Applied { warnings: vec![], build_hash: String::new() } } else { cache::apply_with_layout(&input.root, &cache::CacheCfg { base: base.clone(), ext: (if ext == Ext::Brain { "brain" } else { "web" }).into(), ..input.cache.clone() }, &refs, &post_csp, &mut files, &mut public_bin, &asset_layout, &immutable) };
     warnings.extend(applied.warnings);
     let signature = applied.build_hash.clone();
     // server.mjs answers /_health and X-Brain-Build with it (written after the signature: see cache::apply)
@@ -2176,6 +2353,10 @@ fn build_inner_with_options(
             p.html = h.clone();
         }
     }
+    if !asset_layout.host_files {
+        // These optional deployment hints are never browser resources. Keep every authored public resource.
+        for path in ["_headers", "_redirects", "_brain/nginx.conf", "_brain/Caddyfile"] { files.remove(path); }
+    }
     // 5. Report and precompression (.gz and .br next to static text files, §26).
     // gzip with optimal parsing is the slowest pass: cached by content and spread over threads
     // host config files are read by the host, never downloaded: no .gz for them
@@ -2183,10 +2364,13 @@ fn build_inner_with_options(
     let compressible = |p: &str| p.rsplit_once('.').is_some_and(|(_, e)| matches!(e, "svg" | "json" | "txt" | "xml" | "webmanifest" | "ico" | "map" | "wasm" | "csv" | "md" | "css"));
     let entries: Vec<(&String, &[u8])> = files
         .iter()
-        .filter(|(p, _)| !private::is_private(p))
+        .filter(|(p, _)| asset_layout.precompressed && !private::is_private(p))
         .map(|(p, c)| (p, c.as_bytes()))
-        .chain(public_bin.iter().filter(|(p, b)| compressible(p) && b.len() > 256 && !p.ends_with(".gz")).map(|(p, b)| (p, b.as_slice())))
+        .chain(public_bin.iter().filter(|(p, b)| asset_layout.precompressed && compressible(p) && b.len() > 256 && !p.ends_with(".gz")).map(|(p, b)| (p, b.as_slice())))
         .collect();
+    let (gzip_key, gzip_iterations, brotli_key, brotli_quality, zstd_key, zstd_level) = if asset_layout.fast_compression {
+        ("gz-i1", 1, "br-9.1.1-q5-w22", 5, "zst-0.14-l3", 3)
+    } else { ("gz", 15, "br-9.1.1-q11-w22", 11, "zst-0.14-l19", 19) };
     let results: std::sync::Mutex<BTreeMap<String, Vec<u8>>> = Default::default();
     let next = std::sync::atomic::AtomicUsize::new(0);
     let compressed = std::sync::atomic::AtomicUsize::new(0);
@@ -2200,11 +2384,11 @@ fn build_inner_with_options(
                 let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let Some((p, c)) = entries.get(i) else { break };
                 brain_metrics::count(brain_metrics::Counter::Compressions, 1);
-                let z = cached_bytes(&root, "gz", c, || Ok(gzip::gzip(c, 15))).unwrap_or_else(|_| gzip::gzip(c, 15));
-                let br = cached_bytes(&root, "br-9.1.1-q11-w22", c, || brotli::compress(c));
+                let z = cached_bytes(&root, gzip_key, c, || Ok(gzip::gzip(c, gzip_iterations))).unwrap_or_else(|_| gzip::gzip(c, gzip_iterations));
+                let br = cached_bytes(&root, brotli_key, c, || if brotli_quality == 11 { brotli::compress(c) } else { brotli::compress_with_quality(c, brotli_quality) });
                 // zstd (Chrome 123+, Firefox 126+): kept only when it beats Brotli, because every client that accepts
                 // zstd also accepts br and servers (Caddy's `precompressed zstd br gzip` included) pick it first
-                let zst = cached_bytes(&root, "zst-0.14-l19", c, || zstd::bulk::compress(c, 19).map_err(|e| format!("zstd: {e}")));
+                let zst = cached_bytes(&root, zstd_key, c, || zstd::bulk::compress(c, zstd_level).map_err(|e| format!("zstd: {e}")));
                 let mut r = results.lock().unwrap();
                 let br_len = br.as_ref().map_or(c.len(), |b| b.len().min(c.len()));
                 if let Ok(br) = br { if br.len() < c.len() { r.insert(format!("{p}.br"), br); } }
@@ -2231,9 +2415,12 @@ fn build_inner_with_options(
         // Conservative route graph: count each emitted JS/CSS asset once, including lazy chunks.
         // Images/fonts are separate payloads, not view code. Incompressible files transfer raw bytes.
         let mut queue = ledger::html_asset_refs(&p.html, &base);
+        queue.extend(ledger::initial_refs(&navigation::without_plan(&p.html), &p.file, &base)?);
         while let Some(f) = queue.pop() {
             if !seen.insert(f.clone()) { continue; }
-            let Some(c) = files.get(&f) else { continue };
+            // Service workers have an independent lifecycle and an explicit ledger bucket, outside the view budget.
+            if f == "sw.js" { continue; }
+            let Some(c) = ledger::emitted_text(&f, &files, &binary) else { continue };
             let z = transfer_size(c.as_bytes(), binary.get(&format!("{f}.gz")).map(Vec::as_slice));
             if f.ends_with(".css") || f.ends_with(".cssbrain") {
                 css += c.len();
@@ -2243,7 +2430,7 @@ fn build_inner_with_options(
                 js_gz += z;
                 js_raw += raw_of.get(&f).copied().unwrap_or(c.len());
                 for (_, _, spec) in specifiers(c)? {
-                    if spec.starts_with(&format!("{pre}/_b/")) { queue.push(key_of(&spec)); }
+                    if let Some(path) = ledger::asset_key(&spec, &f, &base) { queue.push(path); }
                 }
             }
         }
@@ -2265,8 +2452,45 @@ fn build_inner_with_options(
             html_shared: shared_html_size(&p.html, page_gz.as_deref()),
         });
     }
+    let mut portable_names = HashSet::new();
+    for path in files.keys().chain(binary.keys()) {
+        validate_output_path(path)?;
+        if options.static_export && !portable_names.insert(path.to_lowercase()) {
+            return Err(format!("static output has a case-insensitive destination collision at `{path}`; fix: use distinct portable page and asset names"));
+        }
+        let mut ancestor = path.as_str();
+        while let Some((parent, _)) = ancestor.rsplit_once('/') {
+            if files.contains_key(parent) || binary.contains_key(parent) {
+                return Err(format!("build output file/directory collision at `{parent}`; fix: rename the conflicting page or asset"));
+            }
+            ancestor = parent;
+        }
+    }
+    if options.static_export {
+        if let Some(path) = files.keys().chain(binary.keys()).find(|p| p.as_str() == "server.mjs" || p.starts_with("_server/")) {
+            return Err(format!("static output unexpectedly contains private server artifact `{path}`; fix: remove server dependencies and rebuild"));
+        }
+    }
     optimizations.sort_by(|a,b|(&a.source,a.stage).cmp(&(&b.source,b.stage)));
     Ok(Output { files, binary, pages, warnings, report, signature, ledger, optimizations, build_cache:build_cache::stats().since(cache_before) })
+}
+
+pub use brain_lex::url_path::decode_relative as url_output_path;
+
+fn static_page_path(route: &str, ext: Ext) -> Result<String, String> {
+    match route {
+        "/" => Ok(format!("index.{}", ext.html())),
+        "*" => Ok(format!("404.{}", ext.html())),
+        _ => Ok(format!("{}/index.{}", url_output_path(route.trim_matches('/'))?, ext.html())),
+    }
+}
+
+/// Every published key is relative to dist/ on Unix and Windows, including post-step files.
+pub fn validate_output_path(path: &str) -> Result<(), String> {
+    if path.is_empty() || path.contains(['\\', '\0']) || path.split('/').any(|p| p.is_empty() || p == "." || p == "..") || path.split('/').next().is_some_and(|p| p.contains(':')) {
+        return Err(format!("unsafe build output path `{path}`; fix: use relative paths without empty, dot or parent segments"));
+    }
+    Ok(())
 }
 
 /// Match production serving: precompressed bytes exist only when smaller than raw output.
@@ -2370,16 +2594,6 @@ fn dynamic_import_of(src: &str, is_it: &dyn Fn(&str) -> bool) -> bool {
     t.windows(3).any(|w| w[0].ident("import") && w[1].punct("(") && w[2].kind == brain_min::lex::Kind::Str && is_it(&w[2].text[1..w[2].text.len() - 1]))
 }
 
-/// The `<hash>` of the client stub `"<hash>/<fn>"` for server function `f`.
-fn rpc_hash(js: &str, f: &str) -> Option<String> {
-    let pat = format!("/{f}\"");
-    js.match_indices(&pat).find_map(|(i, _)| {
-        let start = js[..i].rfind('"')? + 1;
-        let h = &js[start..i];
-        (!h.is_empty() && h.chars().all(|c| c.is_ascii_alphanumeric())).then(|| h.to_string())
-    })
-}
-
 /// Indentation in front of a tag is never rendered and is sent on every page. Lines stay, so inline spacing is the same;
 /// a shell with whitespace-sensitive or inline-script content is left as written.
 fn unindent_shell(shell: &str) -> String {
@@ -2423,9 +2637,6 @@ const LINKS: &str = "\u{1}links:";
 
 /// Collection readers may carry compiler execution checkpoints; other imports and request reads stay server-only (#273).
 fn content_only_load(server_js: &str) -> bool {
-    if !(server_js.contains("function load(") || server_js.contains("const load =")) {
-        return false;
-    }
     let Ok(specs) = specifiers(server_js) else { return false };
     if !specs.iter().any(|(_, _, s)| s == "brain:content")
         || specs.iter().any(|(_, _, s)| s != "brain:content" && s != "/@brain/brain-budget.js") {
@@ -2473,9 +2684,9 @@ fn concrete_route(route: &str, params: &[(String, String)]) -> Option<String> {
     let segs: Option<Vec<String>> = route
         .split('/')
         .map(|s| match (s.strip_prefix(':'), s.strip_prefix('*').filter(|k| !k.is_empty())) {
-            (Some(k), _) => params.iter().find(|(a, _)| a == k).map(|(_, v)| enc(v)),
+            (Some(k), _) => params.iter().find(|(a, _)| a == k).filter(|(_, v)| !v.is_empty() && v != "." && v != "..").map(|(_, v)| enc(v)),
             // a catch-all value keeps its `/` separators (each part encoded on its own)
-            (_, Some(k)) => params.iter().find(|(a, _)| a == k).filter(|(_, v)| !v.is_empty()).map(|(_, v)| v.split('/').map(enc).collect::<Vec<_>>().join("/")),
+            (_, Some(k)) => params.iter().find(|(a, _)| a == k).filter(|(_, v)| !v.is_empty() && v.split('/').all(|s| !s.is_empty() && s != "." && s != "..")).map(|(_, v)| v.split('/').map(enc).collect::<Vec<_>>().join("/")),
             _ => Some(s.to_string()),
         })
         .collect();
@@ -2685,6 +2896,11 @@ mod tests {
         assert_eq!(t.to("/about?a=1#x").as_deref(), Some("/es/about?a=1#x"));
         assert_eq!(t.to("/posts/7").as_deref(), Some("/es/posts/7"));
         assert_eq!(t.to("/contact").as_deref(), Some("/es/contacto"));
+        assert_eq!(t.to("/contact/?q=1#part").as_deref(), Some("/es/contacto/?q=1#part"));
+        let dynamic = LocaleLinks { prefix:"/es".into(), routes:vec!["/:slug".into()], slugs:BTreeMap::new() };
+        assert_eq!(dynamic.to("/es"), None, "a dynamic route must not relocalize its own locale prefix");
+        assert_eq!(dynamic.to("/es/"), None);
+        assert_eq!(t.html_with_base("<a href=\"/app/contact/\">Contact</a><a href=\"/app/es/\">Home</a>","/app"),"<a href=\"/app/es/contacto/\">Contact</a><a href=\"/app/es/\">Home</a>");
         for other in ["/favicon.svg", "/_b/a.js", "//cdn/x", "#top", "https://a.test/about", "/es/about"] {
             assert_eq!(t.to(other), None, "{other}");
         }
@@ -2846,6 +3062,14 @@ mod tests {
         assert_eq!(concrete_route("/docs/*rest", &p("rest", "guide/a b")).as_deref(), Some("/docs/guide/a%20b"));
         assert_eq!(concrete_route("/docs/*rest", &p("rest", "")), None);
         assert_eq!(concrete_route("/u/:id", &p("id", "a/b")).as_deref(), Some("/u/a%2Fb"));
+        for value in [".", "..", ""] { assert_eq!(concrete_route("/u/:id", &p("id", value)), None); }
+        for value in ["../outside", "a/../../outside", "a/./b", "/leading", "trailing/", "a//b"] { assert_eq!(concrete_route("/docs/*rest", &p("rest", value)), None); }
+        for path in ["../outside.html", "a/../../outside", "/absolute", "a\\b", "C:/outside", "a//b", "./index.html"] { assert!(validate_output_path(path).is_err(), "{path}"); }
+        assert!(validate_output_path("docs/start/index.html").is_ok());
+        assert_eq!(url_output_path("docs/a%20b").unwrap(), "docs/a b");
+        assert_eq!(url_output_path("docs/caf%C3%A9").unwrap(), "docs/caf\u{00e9}");
+        assert_eq!(url_output_path("docs/percent%252F").unwrap(), "docs/percent%2F");
+        for path in ["docs/%2e", "docs/%2E%2e", "docs/a%2Fb", "docs/a%5Cb", "docs/%00", "docs/%7F", "docs/%FF", "docs/%", "docs/a%3Ab"] { assert!(url_output_path(path).is_err(), "{path}"); }
     }
 
     #[test]

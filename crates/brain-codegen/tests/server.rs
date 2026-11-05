@@ -30,6 +30,8 @@ const go = async () => { users = await rename(1, 'x') }
     assert!(o.js.contains("import { up } from \"../lib/fmt.jsbrain\""), "{}", o.js);
     // Server: both functions exported with their imports (only the ones they use).
     assert_eq!(o.server_fns, ["rename"]);
+    assert!(o.server.load && !o.server.paths && !o.server.sitemap && !o.server.forms);
+    assert_eq!(o.server.rpc, [format!("{hash}/rename")]);
     assert!(o.server_js.contains("import db from \"../lib/db.jsbrain\";"), "{}", o.server_js);
     assert!(o.server_js.contains("import { up } from \"../lib/fmt.jsbrain\";"), "{}", o.server_js);
     assert!(o.server_js.contains("export async function load(ctx)"), "{}", o.server_js);
@@ -42,6 +44,31 @@ const go = async () => { users = await rename(1, 'x') }
     // Without server code nothing changes.
     let p = brain_codegen::compile("<script>let n = sig(0)</script><button on:click={n++}>{n}</button>", Path::new("comp/c.brain")).unwrap();
     assert!(p.server_js.is_empty() && p.server_fns.is_empty() && !p.js.contains("rpc"));
+    assert_eq!(p.server, brain_lex::ServerMetadata::default());
+}
+
+#[test]
+fn server_metadata_uses_exported_ast_declarations_and_the_actual_rpc_namespace() {
+    let source = r#"<meta seo title="Metadata" description="Owned server metadata" robots="noindex">
+<script>
+// function paths() and function sitemap() are examples, not declarations.
+server: async function inspect(ctx) {
+  function load() { return 'nested' }
+  return load() + 'function load( function paths( function sitemap( const $forms'
+}
+</script>
+<main><h1>Metadata</h1></main>"#;
+    for hash_len in [4, 5, 6] {
+        let options = brain_codegen::Options { hash_len, ..Default::default() };
+        let output = brain_codegen::compile_with(source, Path::new("views/metadata.brain"), &options).unwrap();
+        assert!(!output.server.load && !output.server.paths && !output.server.sitemap && !output.server.forms);
+        let id = format!("{}/inspect", brain_codegen::component_hash_len("views/metadata.brain", hash_len));
+        assert_eq!(output.server.rpc, [id.clone()]);
+        assert!(output.js.contains(&format!("rpc(\"{id}\"")));
+    }
+    let source = source.replace("server: async function inspect(ctx)", "export function paths()");
+    let output = brain_codegen::compile(&source, Path::new("views/metadata/[id].brain")).unwrap();
+    assert!(output.server.paths && !output.server.load && !output.server.sitemap && output.server.rpc.is_empty());
 }
 
 #[test]

@@ -660,7 +660,7 @@ pub fn cmd(args: &[String]) -> ExitCode {
         } else if s.is_empty() {
             println!("{out}: up to date");
         } else {
-            println!("{out}: {} stale page(s): {}\n  fix: run `brain docs` and commit {out}", s.len(), s.join(", "));
+            println!("{out}: {} stale page(s): {}\n  fix: run `brain docs`; keep authored prose in {out}/notes and follow the project Git policy", s.len(), s.join(", "));
         }
         return if s.is_empty() { ExitCode::SUCCESS } else { ExitCode::from(1) };
     }

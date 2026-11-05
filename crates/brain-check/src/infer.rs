@@ -28,6 +28,9 @@ enum Ty {
     List(Box<Ty>),
     Object(BTreeMap<String, Ty>),
     Record,
+    NativeContext,
+    NativeHeaders,
+    NativeUnknown,
     Api,
     Form,
     Chain(Box<Ty>),
@@ -94,14 +97,14 @@ fn rule(value: &str) -> Ty {
         maybe(ty, 3)
     }
 }
-fn key(key: &PropKey) -> Option<&str> {
+pub(crate) fn key(key: &PropKey) -> Option<&str> {
     match key {
         PropKey::Ident(i) => Some(&i.name),
         PropKey::Str { value, .. } => Some(value),
         _ => None,
     }
 }
-fn object(e: &Expr) -> Option<BTreeMap<String, &Expr>> {
+pub(crate) fn object(e: &Expr) -> Option<BTreeMap<String, &Expr>> {
     let Expr::Object { props, .. } = e.unparen() else {
         return None;
     };
@@ -560,7 +563,7 @@ fn label(ty: &Ty) -> &'static str {
         Ty::Num | Ty::Numeric => "num",
         Ty::Bool | Ty::BoolText => "bool",
         Ty::List(_) => "list",
-        Ty::Object(_) | Ty::Record | Ty::Api | Ty::Form => "obj",
+        Ty::Object(_) | Ty::Record | Ty::Api | Ty::Form | Ty::NativeContext | Ty::NativeHeaders | Ty::NativeUnknown => "obj",
         Ty::Func | Ty::Function(_) => "fn",
         Ty::Promise(_) => "promise",
         Ty::Maybe(..) | Ty::Chain(_) => "nullable value",
@@ -695,9 +698,12 @@ struct Analysis<'a> {
     shadowed: HashSet<String>,
     diagnostics: Vec<Diag>,
     poisoned: HashSet<String>,
+    header_mode: bool,
+    header_unsafe: bool,
 }
 impl Analysis<'_> {
     fn push(&mut self, code: &'static str, span: Span, msg: String, fix: String) -> bool {
+        if self.header_mode && code != "B0816" { return false; }
         if self.diagnostics.len() >= 128 {
             return false;
         }
@@ -813,6 +819,9 @@ impl Analysis<'_> {
             return Ty::Unknown;
         }
         let nested = |e: &Expr| self.value_in(e, env, depth + 1);
+        let join = |a: Ty, b: Ty| {
+            if self.header_mode && a != b && (header_provenance(&a) || header_provenance(&b)) { Ty::NativeUnknown } else { join(a, b) }
+        };
         if let Expr::Paren { expr, .. } = e {
             return materialize(nested(expr));
         }
@@ -846,6 +855,9 @@ impl Analysis<'_> {
                 None => Ty::Unknown,
             },
             Expr::Array { elems, .. } => {
+                if self.header_mode && elems.iter().flatten().any(|e| header_provenance(&nested(e))) {
+                    return Ty::List(Box::new(Ty::NativeUnknown));
+                }
                 let mut ts = elems.iter().flatten().map(nested);
                 let first = ts.next().unwrap_or(Ty::Unknown);
                 let ty = if ts.all(|t| t == first) {
@@ -855,6 +867,11 @@ impl Analysis<'_> {
                 };
                 Ty::List(Box::new(ty))
             }
+            Expr::Object { props, .. } if self.header_mode && object(e).is_none() && props.iter().any(|p| match p {
+                ObjProp::Spread { arg, .. } | ObjProp::KeyValue { value: arg, .. } => header_provenance(&nested(arg)),
+                ObjProp::Shorthand(i) => env.get(&i.name).is_some_and(header_provenance),
+                ObjProp::Method { func, .. } => header_provenance(&self.function_value(func, env, depth + 1)),
+            }) => Ty::NativeUnknown,
             Expr::Object { .. } => object(e)
                 .map(|o| {
                     Ty::Object(
@@ -892,6 +909,9 @@ impl Analysis<'_> {
                 }
                 let receiver = nested(obj);
                 let value = match underlying(&receiver) {
+                    Ty::NativeContext if p.name == "headers" => Ty::NativeHeaders,
+                    Ty::NativeContext | Ty::NativeHeaders if p.name == "__proto__" || p.name == "constructor" => Ty::NativeUnknown,
+                    Ty::NativeUnknown => Ty::NativeUnknown,
                     Ty::Object(fields) => fields.get(&p.name).cloned().unwrap_or(Ty::Unknown),
                     Ty::List(_) | Ty::Str if p.name == "length" => Ty::Num,
                     _ => Ty::Unknown,
@@ -902,6 +922,18 @@ impl Analysis<'_> {
                     value
                 }
             }
+            Expr::Member { obj, prop: MemberProp::Computed(prop), .. } if self.header_mode => {
+                let receiver = nested(obj);
+                match (underlying(&receiver), prop.unparen()) {
+                    (Ty::NativeContext, Expr::Str { value, .. }) if value == "headers" => Ty::NativeHeaders,
+                    (Ty::NativeContext | Ty::NativeHeaders, Expr::Str { value, .. }) if value == "__proto__" || value == "constructor" => Ty::NativeUnknown,
+                    (Ty::NativeContext, Expr::Str { .. }) | (Ty::NativeHeaders, _) => Ty::Unknown,
+                    (Ty::Object(fields), Expr::Str { value, .. }) => fields.get(value).cloned().unwrap_or(Ty::Unknown),
+                    _ if header_provenance(&receiver) => Ty::NativeUnknown,
+                    _ => Ty::Unknown,
+                }
+            }
+            Expr::Spread { arg, .. } if self.header_mode && header_provenance(&nested(arg)) => Ty::NativeUnknown,
             Expr::Unary { op: "!", .. } => Ty::Bool,
             Expr::Unary {
                 op: "+" | "-", arg, ..
@@ -1018,7 +1050,26 @@ impl Analysis<'_> {
             result
         }
     }
+    fn header_read(&mut self, name: &str, span: Span) {
+        if !self.header_mode || ["constructor", "toString", "toLocaleString", "valueOf", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "__proto__", "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__"].contains(&name) { return; }
+        let Some(contract) = &self.ctx.route_headers else { return };
+        if contract.declared.contains(name) { return; }
+        let file = contract.file.clone();
+        self.push("B0816", span, format!("header `{name}` is not forwarded by `{file}`; native ctx.headers contains only declared lowercase request headers"), format!("use ctx.user for authentication; for a safe request header, read its lowercase name and explicitly declare it in `{file}` headers if the backend permits it"));
+    }
     fn expression(&mut self, e: &Expr) {
+        if self.header_mode {
+            if self.header_unsafe { return; }
+            if let Expr::Call { callee, args, .. } | Expr::New { callee, args, .. } = e.unparen() {
+                if let Expr::Member { obj, prop, .. } = callee.unparen() {
+                    if header_provenance(&self.value(obj)) && !header_member(prop).is_some_and(|(name, _)| ["hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "toString", "toLocaleString"].contains(&name)) {
+                        self.header_unsafe = true;
+                        return;
+                    }
+                }
+                if args.iter().any(|arg| header_provenance(&self.value(arg))) { self.header_unsafe = true; return; }
+            }
+        }
         if self.diagnostics.len() >= 128 {
             return;
         }
@@ -1034,6 +1085,9 @@ impl Analysis<'_> {
                     self.expression(e)
                 }
                 let receiver = self.value(obj);
+                if self.header_mode && matches!(underlying(&receiver), Ty::NativeHeaders) {
+                    if let Some((name, span)) = header_member(prop) { self.header_read(name, span); }
+                }
                 if !*optional && nullable(&receiver) {
                     self.push(
                         "B2005",
@@ -1371,34 +1425,45 @@ impl Analysis<'_> {
     fn bind(&mut self, p: &Pat, ty: Ty) {
         match p {
             Pat::Ident(i) => {
-                self.env.insert(i.name.clone(), materialize(ty));
+                if self.header_mode && self.poisoned.contains(&i.name) {
+                    if header_provenance(&ty) { self.header_unsafe = true; }
+                    self.env.insert(i.name.clone(), Ty::Unknown);
+                } else { self.env.insert(i.name.clone(), materialize(ty)); }
             }
             Pat::Object { props, rest, .. } => {
                 for p in props {
                     let field = key(&p.key)
                         .and_then(|k| {
-                            if let Ty::Object(fields) = underlying(&ty) {
-                                fields.get(k).cloned()
-                            } else {
-                                None
+                            match underlying(&ty) {
+                                Ty::Object(fields) => fields.get(k).cloned(),
+                                Ty::NativeContext if k == "headers" => Some(Ty::NativeHeaders),
+                                Ty::NativeUnknown => Some(Ty::NativeUnknown),
+                                Ty::NativeHeaders => {
+                                    let span = match &p.key { PropKey::Ident(i) => i.span, PropKey::Str { span, .. } => *span, _ => p.value.span() };
+                                    self.header_read(k, span);
+                                    Some(Ty::Unknown)
+                                }
+                                _ => None,
                             }
                         })
-                        .unwrap_or(Ty::Unknown);
+                        .unwrap_or_else(|| if self.header_mode && key(&p.key).is_none() && header_provenance(&ty) { Ty::NativeUnknown } else { Ty::Unknown });
                     self.bind(&p.value, field)
                 }
                 if let Some(p) = rest {
-                    self.bind(p, Ty::Unknown)
+                    self.bind(p, if self.header_mode && header_provenance(&ty) { Ty::NativeUnknown } else { Ty::Unknown })
                 }
             }
             Pat::Array { elems, rest, .. } => {
+                let field = if self.header_mode && header_provenance(&ty) { Ty::NativeUnknown } else { Ty::Unknown };
                 for p in elems.iter().flatten() {
-                    self.bind(p, Ty::Unknown)
+                    self.bind(p, field.clone())
                 }
                 if let Some(p) = rest {
-                    self.bind(p, Ty::Unknown)
+                    self.bind(p, field)
                 }
             }
-            Pat::Default { pat, .. } | Pat::Rest { arg: pat, .. } => self.bind(pat, Ty::Unknown),
+            Pat::Default { pat, .. } if self.header_mode => self.bind(pat, ty),
+            Pat::Default { pat, .. } | Pat::Rest { arg: pat, .. } => self.bind(pat, if self.header_mode && header_provenance(&ty) { Ty::NativeUnknown } else { Ty::Unknown }),
         }
     }
     fn nodes(&mut self, nodes: &[Node]) {
@@ -1493,13 +1558,23 @@ impl Analysis<'_> {
         }
     }
     fn stmts(&mut self, stmts: &[Stmt], poisoned: &HashSet<String>) {
+        if self.header_mode {
+            for stmt in stmts {
+                match decl(stmt) {
+                    Stmt::Var(v) => for d in &v.decls { let mut names=vec![]; d.pat.bound_names(&mut names); for name in names { self.env.insert(name.name.clone(), Ty::Unknown); } },
+                    Stmt::Func(f) => if let Some(name) = &f.name { self.env.insert(name.name.clone(), Ty::Unknown); },
+                    _ => (),
+                }
+            }
+        }
         for s in stmts {
+            if self.header_mode && self.header_unsafe { break; }
             match decl(s) {
                 Stmt::Var(v) => {
                     for d in &v.decls {
                         if let Some(e) = &d.init {
                             self.expression(e);
-                            let ty = if matches!(&d.pat,Pat::Ident(i)if poisoned.contains(&i.name))
+                            let ty = if !self.header_mode && matches!(&d.pat,Pat::Ident(i)if poisoned.contains(&i.name))
                             {
                                 Ty::Unknown
                             } else {
@@ -1511,8 +1586,10 @@ impl Analysis<'_> {
                 }
                 Stmt::Expr { expr, .. } => self.expression(expr),
                 Stmt::Return { arg: Some(e), .. } | Stmt::Throw { arg: e, .. } => {
-                    self.expression(e)
+                    self.expression(e);
+                    if self.header_mode { break; }
                 }
+                Stmt::Return { arg: None, .. } if self.header_mode => break,
                 Stmt::If {
                     test, cons, alt, ..
                 } => {
@@ -1827,6 +1904,8 @@ pub(crate) fn check(c: &Component, ctx: &Ctx) -> Vec<Diag> {
         shadowed,
         diagnostics: vec![],
         poisoned: poisoned.clone(),
+        header_mode: false,
+        header_unsafe: false,
     };
     for statement in &c.script {
         if let Stmt::Import(import) = statement {
@@ -1877,4 +1956,52 @@ pub(crate) fn check(c: &Component, ctx: &Ctx) -> Vec<Diag> {
     a.nodes(&c.head);
     a.nodes(&c.template);
     a.diagnostics
+}
+
+
+fn header_member(prop: &MemberProp) -> Option<(&str, Span)> {
+    match prop {
+        MemberProp::Name(name) => Some((&name.name, name.span)),
+        MemberProp::Computed(expr) => if let Expr::Str { value, span, .. } = expr.unparen() { Some((value, *span)) } else { None },
+    }
+}
+fn header_provenance(ty: &Ty) -> bool {
+    match underlying(ty) {
+        Ty::NativeContext | Ty::NativeHeaders | Ty::NativeUnknown => true,
+        Ty::Object(fields) => fields.values().any(header_provenance),
+        Ty::List(t) | Ty::Promise(t) | Ty::Function(t) => header_provenance(t),
+        _ => false,
+    }
+}
+
+pub(crate) fn check_route_headers(c: &Component, ctx: &Ctx) -> Vec<Diag> {
+    if ctx.route_headers.is_none() || !c.meta.iter().any(|meta| meta.name == "server") { return vec![]; }
+    let Some(expr) = c.script.iter().find_map(|stmt| if let Stmt::ExportDefault { expr, .. } = stmt { Some(expr) } else { None }) else { return vec![] };
+    let function = match expr.unparen() {
+        Expr::Func(f) => Some(f.as_ref()),
+        Expr::Ident(name) => c.script.iter().find_map(|stmt| match decl(stmt) {
+            Stmt::Func(f) if f.name.as_ref().is_some_and(|id| id.name == name.name) => Some(f),
+            Stmt::Var(v) => v.decls.iter().find_map(|d| match (&d.pat, &d.init) { (Pat::Ident(id), Some(Expr::Func(f))) if id.name == name.name => Some(f.as_ref()), _ => None }),
+            _ => None,
+        }),
+        _ => None,
+    };
+    let Some(function) = function else { return vec![] };
+    let mut poisoned = HashSet::new();
+    let mut mutations = |expr: &Expr, _: bool, _: &[String]| {
+        if let Expr::Assign { target, .. } | Expr::Update { arg: target, .. } = expr.unparen() {
+            if let Some(name) = root(target) { poisoned.insert(name.to_owned()); }
+        }
+    };
+    match &function.body {
+        FnBody::Block(body) => security::walk(body, true, &mut mutations),
+        FnBody::Expr(expr) => security::expr(expr, true, &[], &mut mutations),
+    }
+    let mut analysis = Analysis { c, ctx, env: HashMap::new(), schemas: HashMap::new(), forms: HashMap::new(), apis: HashMap::new(), shadowed: HashSet::new(), diagnostics: vec![], poisoned: poisoned.clone(), header_mode: true, header_unsafe: false };
+    for (index, param) in function.params.iter().enumerate() { analysis.bind(param, if index == 0 { Ty::NativeContext } else { Ty::Unknown }); }
+    match &function.body {
+        FnBody::Block(body) => analysis.stmts(body, &poisoned),
+        FnBody::Expr(expr) => analysis.expression(expr),
+    }
+    if analysis.header_unsafe { vec![] } else { analysis.diagnostics }
 }

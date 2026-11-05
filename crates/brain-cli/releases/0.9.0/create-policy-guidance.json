@@ -1,0 +1,11 @@
+{
+  "id": "create-policy-guidance",
+  "kind": "fix",
+  "title": "Actionable invalid creation policy guidance",
+  "why": "A rejected create owner grant explains the actual declared-role choices and when a reference-owner rule is appropriate.",
+  "changelog": ["Invalid creation policy guidance names the project's declared roles"],
+  "guide": "docs/backend/ownership.md",
+  "codes": ["B0735"],
+  "apis": ["create policy", "owner.<ref>"],
+  "affects": ["server/resources/**/policy.jsbrain"]
+}

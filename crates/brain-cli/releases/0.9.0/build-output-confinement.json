@@ -1,0 +1,17 @@
+{
+  "id": "build-output-confinement",
+  "kind": "fix",
+  "title": "Confine build output and stale-file cleanup to dist",
+  "why": "Static route parameters cannot traverse parent directories, output destinations cannot alias external paths, and stale symlink cleanup never follows the link.",
+  "changelog": [
+    "Build output rejects unsafe route dot-segments",
+    "Static HTML, Markdown copies and generated social images keep encoded URLs separate"
+  ],
+  "guide": "brain guide static",
+  "codes": [],
+  "apis": [],
+  "affects": [
+    "views/**",
+    "public/**"
+  ]
+}

@@ -63,8 +63,10 @@ struct Claims {
     email: Option<String>,
     #[serde(default)]
     email_verified: Option<Flag>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::oidc::profile_text")]
     name: Option<String>,
+    #[serde(default, deserialize_with = "crate::oidc::profile_text")]
+    picture: Option<String>,
 }
 #[derive(Deserialize)]
 struct TokenResponse {
@@ -187,8 +189,8 @@ impl LinkedIn {
         };
         let email = claims.email.filter(|_| verified).and_then(|email| crate::auth::Auth::email(&email).ok());
         Some(
-            Identity { subject: claims.sub, issuer: claims.iss, email, linkable: false, verified: false, name: None }
-                .with_name(claims.name.as_deref()),
+            Identity { subject: claims.sub, issuer: claims.iss, email, linkable: false, verified: false, name: None, picture: None }
+                .with_name(claims.name.as_deref()).with_picture(claims.picture.as_deref()),
         )
     }
 }
@@ -210,10 +212,21 @@ mod tests {
         let state = crate::jwt::opaque();
         let nonce = LinkedIn::nonce(&state);
         let now = crate::jwt::now();
-        let claims = serde_json::json!({"sub":"AbC-123_xyz","iss":"https://www.linkedin.com/oauth","aud":"abcd1234efgh","exp":now+3600,"iat":now,"nonce":nonce,"email":"Person@Example.com","email_verified":true,"name":"Synthetic Person"});
+        let claims = serde_json::json!({"sub":"AbC-123_xyz","iss":"https://www.linkedin.com/oauth","aud":"abcd1234efgh","exp":now+3600,"iat":now,"nonce":nonce,"email":"Person@Example.com","email_verified":true,"name":"Synthetic Person","picture":"https://images.example.test/profile.png"});
         let identity = linkedin.verify(&encode(&header, &claims, &encoding).unwrap(), &nonce).await.unwrap().unwrap();
         assert_eq!(identity.email.as_deref(), Some("person@example.com"));
         assert_eq!(identity.name.as_deref(), Some("Synthetic Person"));
+        assert_eq!(identity.picture.as_deref(), Some("https://images.example.test/profile.png"));
+        for hint in [serde_json::json!(123), serde_json::json!(true), serde_json::json!({"unexpected":"value"}), serde_json::json!(["value"])] {
+            let mut decorated = claims.clone();
+            decorated["name"] = hint.clone();
+            decorated["picture"] = hint;
+            let accepted = linkedin.verify(&encode(&header, &decorated, &encoding).unwrap(), &nonce).await.unwrap().expect("optional display claim types do not reject identity");
+            assert!(accepted.name.is_none() && accepted.picture.is_none());
+            assert_eq!(accepted.subject, identity.subject);
+            assert_eq!(accepted.email, identity.email);
+        }
+
         assert!(!identity.linkable && !identity.verified, "LinkedIn hosts no mailbox");
         let mut unverified = claims.clone();
         unverified["email_verified"] = serde_json::json!("false");

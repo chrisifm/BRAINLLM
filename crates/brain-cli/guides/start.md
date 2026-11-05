@@ -53,12 +53,19 @@ brain fix && brain check --json   # → []
 brain doctor                      # exit 0
 ```
 
+Use `brain add comp content-panel --blank` for minimal markup and a slot without example state, controls or CSS.
+Typed props and the colocated test are still generated; MCP `brain_add` accepts `blank: true` for comp.
+
 ## App documentation
+Doctor validates fresh private output without replacing dist/. Run brain build explicitly before deployment.
+
 `brain docs` writes `docs/app/` from the source: `index.md` (summary and links), `routes.md`, `components.md` (props,
 events, slots, stores, a usage example), `data.md`, `backend.md`, `env.md` (key names only) and `seo.md`. Output is
 deterministic, so diffs show real changes. Never edit those pages: write prose in `docs/app/notes/<page>.md` and it is
-merged under "Notes". New apps set `"docs": true` in `brain.json`, so `brain build` refreshes the pages; `brain docs
---check` exits 1 when committed pages are stale and `brain doctor` warns. Over MCP: `brain_docs {check?}`.
+merged under "Notes". New starters ignore generated docs/app files in Git while keeping notes/ visible.
+For an existing project, add `docs/app/*` and `!docs/app/notes/` to .gitignore if generated pages should stay local.
+New apps set `"docs": true` in `brain.json`, so `brain build` refreshes the pages; `brain docs
+--check` exits 1 when generated pages are stale and `brain doctor` warns. Over MCP: `brain_docs {check?}`.
 ```bash
 brain docs                 # docs/app: 7 pages, N updated
 brain docs --check         # exit 1 lists stale pages
@@ -83,3 +90,5 @@ brain upgrade --apply          # codemods + gates; then `npm install` if the pin
 `i18n` languages · `performance`.
 Over MCP (`brain mcp`) the same steps are `brain_spec`, `brain_map`, `brain_add`, `brain_check`, `brain_fix`,
 `brain_test`, `brain_doctor`, and `brain_guide` for these playbooks.
+
+For a portable site with no application server, start with `brain new my-site --static` and read `brain guide static`.

@@ -1,0 +1,15 @@
+{
+  "id": "provider-profile-hints",
+  "kind": "fix",
+  "title": "Preserve provider profile hints in native sessions",
+  "why": "Apps can receive optional provider display names and photos after sign-in and subsequent session reads. Run brain backend migrate before serving to apply migration 0027.",
+  "changelog": [
+    "Native sign-in keeps optional provider name and picture hints"
+  ],
+  "guide": "docs/APPLE-LINKEDIN.md",
+  "codes": [],
+  "apis": [],
+  "affects": [
+    "server/auth/**"
+  ]
+}

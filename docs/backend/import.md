@@ -55,3 +55,21 @@ happened. An old numeric id belongs in a declared field, see [ids](ids.md).
 
 `brain data maintain` does the same without rewriting rows. Neither runs `VACUUM FULL`, `REINDEX` or `pg_prewarm`.
 Both print JSON with `schemaVersion`, accept `--resource <name>` and `--env <environment>`, and exit non-zero only on failure.
+
+## Repair defaults approved by older releases
+
+`brain data defaults --resource items` previews absent keys and explicit nulls for each non-null declared default in
+an already migrated resource. It reports counts and field names, never stored values. Preview does not modify rows.
+This covers fields approved before older releases backfilled existing documents; changing a default does not silently
+rewrite existing values.
+
+Review that plan, then add `--apply` to fill absent keys. Explicit nulls remain cleared; add `--include-null` only when
+those should also take the declared default. Existing non-null values are always preserved. A declaration with `default: null` is invalid; omit the default instead.
+
+Each application is atomic across its selected fields/resources and fills at most `--limit 1000` rows per field
+(default 1000, range 1..10000). `fieldWrites` counts field updates, not distinct records. `hasMore` and per-field
+`remainingRows` tell you whether another explicit run is needed. Row selection skips locks held by other writers;
+locked eligible rows can remain for a later run. There is no automatic unbounded retry. Schema-migration locks,
+recorded-contract validation, a 2s lock wait, 30s SQL deadlines and a 60s total deadline bound the operation. Storage
+constraints and triggers still apply; it is an operator data repair, not application-handler execution. A failure rolls
+back the selected batch. Use `--env production` explicitly for a production database, as for other backend commands.

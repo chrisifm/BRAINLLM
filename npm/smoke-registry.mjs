@@ -276,7 +276,7 @@ export async function smoke(config) {
       await run([npm, 'create', '--yes', `@christianirack/${initializer}@${config.version}`, name], root, `create-${initializer}`, 240000)
       phase=`validate-install-${initializer}`
       const app = join(root, name), dependency = '@christianirack/brainllm'
-      if (readJson(join(app, 'package.json')).devDependencies?.[dependency] !== config.version || readJson(join(app, 'node_modules', dependency, 'package.json')).version !== config.version) throw Error('Initializer did not install the exact version')
+      if (readJson(join(app, 'package.json')).dependencies?.[dependency] !== config.version || readJson(join(app, 'node_modules', dependency, 'package.json')).version !== config.version) throw Error('Initializer did not install the exact version')
       const launcher = join(app, 'node_modules', dependency, 'bin', 'brain.js')
       if (!realpathSync(launcher).startsWith(realpathSync(app) + (process.platform === 'win32' ? '\\' : '/'))) throw Error('Installed launcher escaped its own app')
       const version = await run([launcher, '--version'], app, `version-${initializer}`)

@@ -29,9 +29,13 @@ if (zstd) w('_b/app.js.zst', zlib.zstdCompressSync(asset))
 w('_b/v.js', `import { tpl } from '/_b/brain.js'\nexport default function V(p) { return tpl('<section>' + p.text + '</section>')() }\n`)
 w('_server/v.server.mjs', `export async function load(ctx) { if (ctx.url.searchParams.has('slow')) await new Promise(r => setTimeout(r, 30)); return { text: ${JSON.stringify('Server rendered order line. '.repeat(120))} } }\n`)
 w('_server/pages/p.html', `<!doctype html><html><head><title>t</title></head><body>${filler}<div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>`)
+for (const provider of ['google', 'apple']) {
+  w(`_server/pages/${provider}.html`, `<!doctype html><html><head><meta name="brain-${provider}-signin" content="1"></head><body><div id="brain-view"><!--brain:ssr--></div></body></html>`)
+}
 w('_server/manifest.json', JSON.stringify({
   v: 1, build: 'b1', core: '/_b/brain.js', rpc: {},
   routes: [
+    ...['google', 'apple'].flatMap(provider => [true, false].map(stream => ({ path: `/signin-${provider}${stream ? '' : '-ssr'}`, rx: `^/signin-${provider}${stream ? '' : '-ssr'}/?$`, view: '/_b/v.js', layouts: [], server: '_server/v.server.mjs', page: `_server/pages/${provider}.html`, stream }))),
     { path: '/ssr', rx: '^/ssr/?$', view: '/_b/v.js', layouts: [], server: '_server/v.server.mjs', page: '_server/pages/p.html' },
     { path: '/live', rx: '^/live/?$', view: '/_b/v.js', layouts: [], server: '_server/v.server.mjs', page: '_server/pages/p.html', stream: true },
   ],
@@ -50,8 +54,8 @@ const off = await start({ compress: false })
 after(async () => { for (const s of servers) await new Promise(r => s.close(r)); rmSync(dist, { recursive: true, force: true }) })
 
 // raw HTTP (fetch would decode the body and hide content-encoding)
-const raw = (path, enc, p = port, method = 'GET') => new Promise((ok, fail) => {
-  const req = request({ host: '127.0.0.1', port: p, path, method, headers: enc == null ? {} : { 'accept-encoding': enc } }, res => {
+const raw = (path, enc, p = port, method = 'GET', headers = {}) => new Promise((ok, fail) => {
+  const req = request({ host: '127.0.0.1', port: p, path, method, headers: { ...(enc == null ? {} : { 'accept-encoding': enc }), ...headers } }, res => {
     const parts = []
     res.on('data', c => parts.push(c))
     res.on('end', () => ok({ status: res.statusCode, headers: res.headers, body: Buffer.concat(parts) }))
@@ -121,6 +125,35 @@ test('small bodies, HEAD, 304 and compress:false stay identity', async () => {
   assert.match(offr.body.toString(), /well-compressible/)
 })
 
+test('streamed Google and Apple documents preserve opener policy on GET and HEAD', async () => {
+  for (const [path, policy] of [['/signin-google', 'same-origin-allow-popups'], ['/signin-apple', 'same-origin-allow-popups'], ['/live', 'same-origin']]) {
+    for (const method of ['GET', 'HEAD']) {
+      const r = await raw(path + '?slow=1', 'gzip', port, method)
+      assert.equal(r.status, 200)
+      assert.equal(r.headers['cross-origin-opener-policy'], policy, `${method} ${path}`)
+      if (method === 'HEAD') assert.equal(r.body.length, 0)
+      else assert.match(decode(r), /Server rendered order line/)
+    }
+  }
+})
+
+test('non-streamed provider SSR retains popup policy on conditional GET and HEAD', async () => {
+  for (const provider of ['google', 'apple']) {
+    const path = `/signin-${provider}-ssr`
+    const first = await raw(path, 'identity')
+    assert.equal(first.status, 200)
+    assert.equal(first.headers['cross-origin-opener-policy'], 'same-origin-allow-popups')
+    assert.ok(first.headers.etag)
+    for (const method of ['GET', 'HEAD']) {
+      const cached = await raw(path, 'identity', port, method, { 'if-none-match': first.headers.etag })
+      assert.equal(cached.status, 304)
+      assert.equal(cached.headers['cross-origin-opener-policy'], 'same-origin-allow-popups')
+      assert.equal(cached.headers['content-security-policy'], undefined)
+      assert.equal(cached.body.length, 0)
+    }
+  }
+})
+
 test('static assets use the precompressed sibling: br on ties, .zst when only zstd is accepted', async () => {
   const br = await raw('/_b/app.js', 'gzip, deflate, br, zstd')
   assert.equal(br.headers['content-encoding'], 'br')
@@ -134,4 +167,15 @@ test('static assets use the precompressed sibling: br on ties, .zst when only zs
   }
   const gz = await raw('/_b/app.js', 'gzip')
   assert.equal(gz.headers['content-encoding'], 'gzip')
+})
+
+test('streamed HEAD preserves the nonce policy of a stored GET body', async () => {
+  const get = await raw('/live?slow', null), head = await raw('/live?slow', null, port, 'HEAD')
+  assert.equal(get.status, 200)
+  assert.equal(head.status, 200)
+  const nonce = /<script nonce="([^"]+)"/.exec(get.body.toString())[1]
+  const updated = { ...get.headers, ...head.headers }
+  assert.ok(updated['content-security-policy'].includes(`'nonce-${nonce}'`))
+  assert.equal(head.headers['content-security-policy'], undefined)
+  assert.equal(head.body.length, 0)
 })

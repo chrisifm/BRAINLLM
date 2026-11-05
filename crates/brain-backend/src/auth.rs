@@ -31,6 +31,10 @@ pub struct User {
     pub email: String,
     pub role: String,
     pub verified: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub picture: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -276,6 +280,7 @@ impl Auth {
             email,
             role: self.signup_role().into(),
             verified: false,
+            name: None, picture: None,
         })
     }
     async fn login_attempt(&self, key: &str, cap: i32) -> Result<i32, String> {
@@ -302,7 +307,7 @@ impl Auth {
             return Ok(None);
         }
         let row = sqlx::query(
-            "SELECT id,email,role,verified,password_hash,auth_version FROM _brain_users WHERE email=$1 AND disabled_at IS NULL",
+            "SELECT id,email,role,verified,display_name,picture_url,password_hash,auth_version FROM _brain_users WHERE email=$1 AND disabled_at IS NULL",
         )
         .bind(email)
         .fetch_optional(&self.pool)
@@ -346,6 +351,7 @@ impl Auth {
             email: row.get("email"),
             role: row.get("role"),
             verified: row.get("verified"),
+                name: row.get("display_name"), picture: row.get("picture_url"),
         };
         let token = token();
         let mut tx = self.pool.begin().await.map_err(crate::db::safe)?;
@@ -415,7 +421,7 @@ impl Auth {
         if consumed != 1 {
             return Ok(None);
         }
-        let existing=sqlx::query("SELECT u.id,u.email,u.role,u.verified,u.disabled_at IS NOT NULL OR i.disabled_at IS NOT NULL AS disabled FROM _brain_users u JOIN _brain_identities i ON i.user_id=u.id WHERE i.provider=$2 AND i.subject=$1").bind(&identity.subject).bind(provider.name()).fetch_optional(&mut *tx).await.map_err(crate::db::safe)?;
+        let existing=sqlx::query("SELECT u.id,u.email,u.role,u.verified,u.display_name,u.picture_url,u.disabled_at IS NOT NULL OR i.disabled_at IS NOT NULL AS disabled FROM _brain_users u JOIN _brain_identities i ON i.user_id=u.id WHERE i.provider=$2 AND i.subject=$1").bind(&identity.subject).bind(provider.name()).fetch_optional(&mut *tx).await.map_err(crate::db::safe)?;
         let user = if let Some(row) = existing {
             if row.get::<bool, _>("disabled") {
                 tx.commit().await.map_err(crate::db::safe)?;
@@ -426,13 +432,14 @@ impl Auth {
                 email: row.get("email"),
                 role: row.get("role"),
                 verified: row.get("verified"),
+                name: row.get("display_name"), picture: row.get("picture_url"),
             }
         } else {
             let Some(email) = identity.email.as_deref() else {
                 tx.commit().await.map_err(crate::db::safe)?;
                 return Ok(None);
             };
-            let holder = sqlx::query("SELECT id,email,role,verified,disabled_at IS NOT NULL AS disabled FROM _brain_users WHERE email=$1 FOR UPDATE")
+            let holder = sqlx::query("SELECT id,email,role,verified,display_name,picture_url,disabled_at IS NOT NULL AS disabled FROM _brain_users WHERE email=$1 FOR UPDATE")
                 .bind(email)
                 .fetch_optional(&mut *tx)
                 .await
@@ -442,7 +449,7 @@ impl Auth {
                     tx.commit().await.map_err(crate::db::safe)?;
                     return Ok(None);
                 };
-                return self.finish_identity(tx, provider, user).await;
+                return self.finish_identity(tx, provider, user, identity).await;
             }
             let id = Uuid::new_v4();
             sqlx::query("INSERT INTO _brain_users(id,email,password_hash,role,verified) VALUES ($1,$2,$3,$4,$5)").bind(id).bind(email).bind(&self.dummy).bind(self.signup_role()).bind(identity.verified).execute(&mut *tx).await.map_err(|_|"Cannot create identity account")?;
@@ -452,16 +459,28 @@ impl Auth {
                 email: email.to_owned(),
                 role: self.signup_role().into(),
                 verified: identity.verified,
+                name: None, picture: None,
             }
         };
-        self.finish_identity(tx, provider, user).await
+        self.finish_identity(tx, provider, user, identity).await
     }
     async fn finish_identity(
         &self,
         mut tx: sqlx::Transaction<'_, sqlx::Postgres>,
         provider: Provider,
-        user: User,
+        mut user: User,
+        identity: &crate::oidc::Identity,
     ) -> Result<Option<(User, String)>, String> {
+        if identity.name.is_some() || identity.picture.is_some() {
+            // Display hints never affect linking, verification, roles or token claims. Missing claims retain hints
+            // already shared, including Apple's first-authorization name.
+            let profile = sqlx::query("UPDATE public._brain_users SET display_name=COALESCE($2,display_name),picture_url=COALESCE($3,picture_url) WHERE id=$1 RETURNING display_name,picture_url")
+                .bind(user.id).bind(&identity.name).bind(&identity.picture).fetch_one(&mut *tx).await.map_err(crate::db::safe)?;
+            user.name = profile.get("display_name");
+            user.picture = profile.get("picture_url");
+            sqlx::query("UPDATE public._brain_identities SET display_name=COALESCE($3,display_name) WHERE provider=$1 AND subject=$2")
+                .bind(provider.name()).bind(&identity.subject).bind(&identity.name).execute(&mut *tx).await.map_err(crate::db::safe)?;
+        }
         reserve_session(&mut tx, user.id).await?;
         let token = token();
         sqlx::query("INSERT INTO _brain_sessions(token_hash,user_id,expires_at) VALUES ($1,$2,now()+make_interval(secs=>$3))").bind(digest(&token)).bind(user.id).bind(f64::from(self.session_length(&user.role))).execute(&mut *tx).await.map_err(crate::db::safe)?;
@@ -524,6 +543,7 @@ impl Auth {
             email: row.get("email"),
             role: row.get("role"),
             verified: true,
+            name: row.get("display_name"), picture: row.get("picture_url"),
         }))
     }
     /// Applies a verified Sign in with Apple account notification once (keyed by its id). `consent-revoked` ends every
@@ -583,13 +603,13 @@ impl Auth {
         else {
             return Ok(None);
         };
-        let row = sqlx::query("SELECT u.id,u.email,u.role,u.verified,s.session_id,s.last_used_at<now()-interval '60 seconds' AS stale FROM _brain_users u JOIN _brain_sessions s ON s.user_id=u.id WHERE s.token_hash=$1 AND s.expires_at>now() AND s.revoked_at IS NULL AND u.disabled_at IS NULL AND ($2::float8 IS NULL OR s.last_used_at>now()-make_interval(secs=>$2))")
+        let row = sqlx::query("SELECT u.id,u.email,u.role,u.verified,u.display_name,u.picture_url,s.session_id,s.last_used_at<now()-interval '60 seconds' AS stale FROM _brain_users u JOIN _brain_sessions s ON s.user_id=u.id WHERE s.token_hash=$1 AND s.expires_at>now() AND s.revoked_at IS NULL AND u.disabled_at IS NULL AND ($2::float8 IS NULL OR s.last_used_at>now()-make_interval(secs=>$2))")
             .bind(digest(token)).bind(crate::sessions::idle_seconds()).fetch_optional(&self.pool).await.map_err(crate::db::safe)?;
         let Some(r) = row else { return Ok(None) };
         if r.get::<bool, _>("stale") {
             crate::sessions::touch(&self.pool, r.get("session_id")).await;
         }
-        Ok(Some(User { id: r.get("id"), email: r.get("email"), role: r.get("role"), verified: r.get("verified") }))
+        Ok(Some(User { id: r.get("id"), email: r.get("email"), role: r.get("role"), verified: r.get("verified"), name: r.get("display_name"), picture: r.get("picture_url") }))
     }
     /// The session behind an opaque cookie, for a caller already identified as `user`.
     pub async fn session_id(&self, token: Option<&str>, user: Uuid) -> Result<Option<Uuid>, String> {
@@ -683,7 +703,7 @@ mod identity_tests {
             email: Some(format!("disabled-{}@example.test", Uuid::new_v4().simple())),
             linkable: true,
             verified: true,
-            name: None,
+            name: None, picture: None,
         };
         let sign_in = || async { auth.google_login(&identity, &auth.google_challenge().await.unwrap()).await.unwrap().map(|(user, _)| user) };
         let user = sign_in().await.expect("first sign-in creates the account");
@@ -694,6 +714,46 @@ mod identity_tests {
         assert!(crate::auth_flows::set_identity_disabled(&pool, user.id, "google", false).await.unwrap());
         assert_eq!(sign_in().await.expect("enabled again").id, user.id);
     }
+    #[tokio::test]
+    #[ignore = "Use the disposable backend Postgres harness"]
+    async fn provider_profile_survives_opaque_jwt_refresh_and_silent_signins() {
+        let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Disposable Postgres only");
+        let pool = crate::db::connect(&url).await.unwrap();
+        crate::db::migrate(&pool, &[]).await.unwrap();
+        let auth = Auth::new(pool.clone()).await.unwrap();
+        let email = format!("profile-{}@example.test", Uuid::new_v4().simple());
+        let mut identity = gmail(&Uuid::new_v4().simple().to_string(), &email)
+            .with_name(Some("Synthetic Person"))
+            .with_picture(Some("https://images.example.test/profile.png"));
+        let (user, opaque) = auth.google_login(&identity, &auth.google_challenge().await.unwrap()).await.unwrap().unwrap();
+        let hints = |user: &User| {
+            assert_eq!(user.name.as_deref(), Some("Synthetic Person"));
+            assert_eq!(user.picture.as_deref(), Some("https://images.example.test/profile.png"));
+        };
+        hints(&user);
+        hints(&auth.user(Some(&opaque)).await.unwrap().unwrap());
+        let jwt = crate::jwt::Jwt::new(pool.clone(), crate::jwt::Config::new(
+            "synthetic-profile-signing-secret-32-bytes".into(), "test-issuer".into(), "test-audience".into()).unwrap());
+        let first = jwt.issue(user.clone(), &opaque).await.unwrap();
+        hints(&first.user);
+        hints(&jwt.user(Some(&first.access_token)).await.unwrap().unwrap());
+        let second = jwt.refresh(Some(&first.refresh_token)).await.unwrap().unwrap();
+        hints(&second.user);
+        hints(&jwt.refresh(Some(&first.refresh_token)).await.unwrap().unwrap().user);
+        identity.name = None;
+        identity.picture = None;
+        let returning = auth.google_login(&identity, &auth.google_challenge().await.unwrap()).await.unwrap().unwrap().0;
+        assert_eq!(returning.id, user.id);
+        hints(&returning);
+        identity = identity.with_name(Some("Updated Person")).with_picture(Some("https://images.example.test/new.png"));
+        let updated = auth.google_login(&identity, &auth.google_challenge().await.unwrap()).await.unwrap().unwrap().0;
+        assert_eq!(updated.id, user.id);
+        assert_eq!(updated.name.as_deref(), Some("Updated Person"));
+        assert_eq!(auth.user(Some(&opaque)).await.unwrap().unwrap().picture.as_deref(), Some("https://images.example.test/new.png"));
+        assert_eq!(updated.role, user.role);
+        assert_eq!(updated.verified, user.verified);
+    }
+
     #[tokio::test]
     #[ignore = "Use the disposable backend Postgres harness"]
     async fn google_nonces_are_single_use_and_existing_emails_never_link_implicitly() {
@@ -715,7 +775,7 @@ mod identity_tests {
             email: Some(email),
             linkable: false,
             verified: false,
-            name: None,
+            name: None, picture: None,
         };
         let nonce = auth.google_challenge().await.unwrap();
         assert!(
@@ -783,7 +843,7 @@ mod identity_tests {
             email: Some(email.into()),
             linkable: true,
             verified: true,
-            name: None,
+            name: None, picture: None,
         }
     }
     fn account(email: &str) -> Credentials {

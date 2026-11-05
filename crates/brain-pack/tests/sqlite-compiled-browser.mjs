@@ -70,7 +70,7 @@ try {
     button.click();
     for(let i=0;i<250;i++){if(button.textContent==='1')return {compiledWorker:true,value:1,isolated:crossOriginIsolated};await pause()}
     throw Error('Compiled SQLite worker did not produce its SQL row');
-  })()`), 40000)
+  })()`, 40000), 40000)
   assert.equal(result.compiledWorker, true); assert.equal(result.value, 1)
   result.coop = documentHeaders['Cross-Origin-Opener-Policy'] || null
   result.coep = documentHeaders['Cross-Origin-Embedder-Policy'] || null

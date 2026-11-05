@@ -1,0 +1,14 @@
+{
+  "id": "redirect-prefix-guidance",
+  "kind": "fix",
+  "title": "Explain ambiguous redirect path prefixes",
+  "why": "B0814 explains the protocol-relative URL risk of a bare slash plus runtime data and recommends an accepted fixed path prefix without weakening redirect validation.",
+  "changelog": [
+    "Open-redirect guidance explicitly explains why a bare slash"
+  ],
+  "guide": "SPEC.md",
+  "codes": [
+    "B0814"
+  ],
+  "apis": []
+}

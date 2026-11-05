@@ -22,17 +22,31 @@ w('_b/dict-en.js', `import { add } from '/_b/brain-i18n.js'\nadd('en', { 'home.h
 w('_b/late.js', `import { tpl } from '/_b/brain.js'\nexport default function Late(p) { return tpl('<h1>' + p.msg + '</h1>')() }\n`)
 w('_server/late.server.mjs', `import { t, locale } from './_rt/brain-i18n.js'\nexport async function load() { await new Promise(r => setTimeout(r, 5)); return { msg: t('home.hi') + ' ' + locale() } }\nconst redirect = to => ({ redirect: to, status: 303 })\nexport async function send() { await new Promise(r => setTimeout(r, 1)); return redirect('/late/nl?m=' + t('home.hi')) }\nexport const $forms = {}\nexport const $server = ['send']\n`)
 w('_server/pages/p.html', '<!doctype html><html lang="nl"><head><title>t</title></head><body><div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
+w('_b/link-proof.js', `import {tpl} from '/_b/brain.js';export default()=>tpl('<main><a href="/es">Home</a><a href="/contact/?q=1#part">Contact</a></main>')()`)
+w('_server/link-proof.mjs', `export const seo=()=>({canonical:'/contact/'});export function load(){return {}}`)
+w('_server/pages/links.html', '<!doctype html><html lang="es"><head><title>Links</title><link rel="canonical" href="https://example.test/"></head><body><div id="brain-view"><!--brain:ssr--></div><script type="application/json" id="brain-props"><!--brain:props--></script></body></html>')
 w('_server/manifest.json', JSON.stringify({
   v: 1, build: 'b1', core: '/_b/brain.js', rpc: { hf: '_server/late.server.mjs' },
   routes: [{ path: '/nl', rx: '^/nl/?$', view: '/_b/home.js', layouts: [], server: '_server/home.server.mjs', page: '_server/pages/p.html', locale: 'nl', i18n: '/_b/dict-nl.js' },
     { path: '/late/nl', rx: '^/late/nl/?$', view: '/_b/late.js', layouts: [], server: '_server/late.server.mjs', page: '_server/pages/p.html', locale: 'nl', i18n: '/_b/dict-nl.js' },
-    { path: '/late', rx: '^/late/?$', view: '/_b/late.js', layouts: [], server: '_server/late.server.mjs', page: '_server/pages/p.html', locale: 'en', i18n: '/_b/dict-en.js' }],
+    { path: '/late', rx: '^/late/?$', view: '/_b/late.js', layouts: [], server: '_server/late.server.mjs', page: '_server/pages/p.html', locale: 'en', i18n: '/_b/dict-en.js' },
+    { path: '/es/contact-page', rx: '^/es/contact-page/?$', view: '/_b/link-proof.js', layouts: [], server: '_server/link-proof.mjs', page: '_server/pages/links.html', locale: 'es', hrefs: { p: '/es', re: '^(?:|/[^/]+)/?$', s: { '/contact': '/es/contact-page' } } }],
 }))
 
 const { createServer } = await import('../server/server.mjs')
 const server = createServer({ dist, log() {} })
 await new Promise(r => server.listen(0, '127.0.0.1', r))
 after(() => server.close())
+
+test('SSR preserves localized dynamic prefixes and translates trailing-slash links and explicit canonicals', async () => {
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/es/contact-page/`)
+  const html=await response.text()
+  assert.equal(response.status,200)
+  assert.match(html, /href="\/es"/)
+  assert.match(html, /href="\/es\/contact-page\/\?q=1#part"/)
+  assert.match(html, /rel="canonical" href="https:\/\/example.test\/es\/contact-page\/"/)
+  assert.doesNotMatch(html, /\/es\/es/)
+})
 
 test('SSR in the route locale: the body and the <title> from <meta seo> are translated', async () => {
   const html = await (await fetch(`http://127.0.0.1:${server.address().port}/nl`)).text()

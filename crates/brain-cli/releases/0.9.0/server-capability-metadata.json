@@ -1,0 +1,11 @@
+{
+  "id": "server-capability-metadata",
+  "kind": "fix",
+  "title": "Compiler-owned server capabilities across build and dev",
+  "why": "Hook examples and unrelated string literals cannot change build classification or select an RPC handler.",
+  "changelog": ["Server capabilities use compiler-owned AST metadata"],
+  "guide": "docs/INTERNALS.md",
+  "codes": [],
+  "apis": ["load", "paths", "sitemap", "server:"],
+  "affects": ["views/**", "comp/**", "lib/**"]
+}

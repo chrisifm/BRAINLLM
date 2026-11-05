@@ -13,7 +13,7 @@ pub fn validate(r: &Resource) -> Result<(), String> {
         return Err(format!("{}: only one field can be the slug; fix: keep slug: true on one field", r.name));
     }
     if let Some((name, f)) = slugs.first()
-        && (f.kind != "str" || !f.unique || f.visible.is_some() || f.access_mode().is_some_and(|a| a != "readonly"))
+        && (f.kind != "str" || !f.unique || f.visible.is_some() || f.access_mode().is_some_and(|a| !matches!(a, "readonly" | "roles")))
     {
         return Err(format!(
             "{}: slug field `{name}` must be a public unique str; fix: {{ type: 'str!', unique: true, slug: true }}",

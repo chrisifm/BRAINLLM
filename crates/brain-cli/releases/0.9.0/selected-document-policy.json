@@ -1,0 +1,18 @@
+{
+  "id": "selected-document-policy",
+  "kind": "fix",
+  "title": "Selected document security for error pages and file aliases",
+  "why": "Static fallback and direct document aliases retain the selected page security and revalidation policy without applying document policies to successful asset responses.",
+  "changelog": [
+    "Static error fallbacks and direct document aliases retain their select"
+  ],
+  "guide": "brain guide static",
+  "codes": [],
+  "apis": [
+    "brain build",
+    "brain start"
+  ],
+  "affects": [
+    "dist/**"
+  ]
+}

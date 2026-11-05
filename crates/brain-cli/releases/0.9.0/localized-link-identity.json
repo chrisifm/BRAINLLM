@@ -1,0 +1,11 @@
+{
+  "id": "localized-link-identity",
+  "kind": "fix",
+  "title": "Stable localized links and canonicals",
+  "why": "Trailing slashes do not bypass translated route lookup, and dynamic route patterns cannot duplicate an existing locale prefix.",
+  "changelog": ["Localized links normalize trailing-slash lookup"],
+  "guide": "brain guide i18n",
+  "codes": [],
+  "apis": ["meta route", "meta seo canonical", "locale"],
+  "affects": ["views/**", "brain.json"]
+}

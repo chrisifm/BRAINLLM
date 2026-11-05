@@ -35,7 +35,12 @@ fn unknown_guide_is_a_usage_error_with_the_topics() {
     let o = brain(&["guide", "nope", "--json"]);
     assert_eq!(o.status.code(), Some(2));
     let j = String::from_utf8_lossy(&o.stdout);
-    assert!(j.contains("unknown guide") && j.contains("start views data"), "{j}");
+    let json: serde_json::Value = serde_json::from_str(&j).unwrap();
+    assert!(json["error"].as_str().unwrap().contains("unknown guide"), "{j}");
+    let fix = json["fix"].as_str().unwrap();
+    for topic in ["start", "brandbook", "views", "data", "static"] {
+        assert!(fix.split_whitespace().any(|word|word == topic), "missing suggested topic {topic}: {j}");
+    }
 }
 
 #[test]

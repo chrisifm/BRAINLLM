@@ -29,6 +29,23 @@ Any input the user submits: sign in, sign up, search, create or edit a record, s
    item number and `{error}` = that item's message; plural objects allowed). English otherwise.
 10. Expose the form to browser agents with `<form tool="…" tool-description="…">` (`brain guide webmcp`).
 
+## Native forms to an external service
+For static hosting or an SSR page that submits to an existing service, use ordinary browser submission:
+```html
+<form action="https://forms.example.com/contact" method="post">
+  <label>Email <input name="email" type="email" required></label>
+  <button type="submit">Send</button>
+</form>
+```
+Declare `"csp": { "formAction": ["https://forms.example.com"] }` in brain.json. This adds that exact origin to
+`form-action` alongside the site's own origin; it does not open fetch, scripts or framing. HTTPS is required except
+for local-loopback HTTP during testing. Wildcards, paths, broad schemes and socket origins fail B0796.
+Keep field `name` attributes and the receiving service's documented encoding. Native constraints run without JS;
+the receiving service must validate the data again. Do not attach `f.submit`, which prevents native submission,
+or use `form.submit()`, which bypasses native constraint validation. `requestSubmit()` preserves it when needed.
+Native navigation submission does not require CORS permission; JavaScript fetch and response reading do.
+Credentials, signed secrets and server functions stay on the receiving server. Static export provides no server.
+
 ## Verify
 ```bash
 brain check --json      # []
@@ -37,6 +54,10 @@ brain shot /signup --text   # every field has its label in the outline
 ```
 
 ## Common mistakes
+For a modal that closes on the backdrop, use `<Dialog title="Edit item" dismissible>`; the default remains false.
+Its native Escape/focus behavior and optional urlKey history remain intact. Clicks inside, drags from inside and
+canceled pointer sequences do not dismiss it. Use the kit instead of putting click handlers on a plain dialog.
+
 | Mistake | Code | Fix |
 |---|---|---|
 | `f.v = {…}` or `f.err = {}` | B0133 | `f.reset(values)` / `f.errors({…})` |

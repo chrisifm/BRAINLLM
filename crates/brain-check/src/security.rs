@@ -982,13 +982,13 @@ impl Checker<'_> {
         let v = self.text(target.span()).to_string();
         let msg = match guards.iter().flatten().next() {
             Some(h) => format!("`{sink}` gets a URL checked against `{h}`, which `brain.json` → `\"redirects\"` does not list"),
-            None => format!("`{sink}` gets a URL built at runtime: a crafted link can send the user to any site (open redirect)"),
+            None => format!("`{sink}` gets a URL built at runtime: a crafted link can send the user to any site (open redirect); a bare `/` plus a runtime value can become `//evil.example`"),
         };
         self.push(
             "B0814",
             span,
             msg,
-            format!("navigate to a same-origin path (`'/items/' + id`, or a helper whose every return starts with `/`), use the URL your own server answered (`const {{ url }} = await checkout()`), check it first: `if (new URL({v}, location.origin).origin === location.origin)`, or, for an external destination such as a payment checkout, list its host in `brain.json` → `\"redirects\": [\"checkout.example.com\"]` and check `if (new URL({v}).host === 'checkout.example.com')`"),
+            format!("navigate to a same-origin path (`'/items/' + id`, or a helper whose every return has a fixed same-origin path prefix such as `/items/`), use the URL your own server answered (`const {{ url }} = await checkout()`), check it first: `if (new URL({v}, location.origin).origin === location.origin)`, or, for an external destination such as a payment checkout, list its host in `brain.json` → `\"redirects\": [\"checkout.example.com\"]` and check `if (new URL({v}).host === 'checkout.example.com')`"),
         );
     }
 }

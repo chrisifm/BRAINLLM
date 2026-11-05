@@ -1,0 +1,11 @@
+{
+  "id": "literal-translation-effects",
+  "kind": "fix",
+  "title": "Avoid retained effects for literal translation lookups",
+  "why": "A literal t call without placeholder arguments reads the current dictionary at component creation without allocating an extra reactive effect; dynamic placeholders and user functions retain tracking.",
+  "changelog": ["Literal translation calls without placeholder arguments do not retain unnecessary reactive effects"],
+  "guide": "brain guide i18n",
+  "codes": [],
+  "apis": ["t"],
+  "affects": ["views/**", "comp/**", "ui/**"]
+}

@@ -54,14 +54,15 @@ const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 const SCRIPT: &str = r#"
 import * as M from 'node:module'
 import { pathToFileURL } from 'node:url'
+import { readFileSync } from 'node:fs'
 const [dist, shim, mode] = process.argv.slice(1)
 const base = pathToFileURL(dist + '/').href
-// `/_b/x.js` or, with brain.json `base`, `/app/_b/x.js` → dist/_b/x.js
-// `format: 'module'`: chunks may use the own extension `.jsbrain` (#26), which Node does not know
-const resolve = (s, c, n) => s.startsWith('/') && s.includes('/_b/') ? { url: new URL('.' + s.slice(s.indexOf('/_b/')), base).href, format: 'module', shortCircuit: true } : n(s, c)
-// registerHooks is synchronous and replaces register(), deprecated in Node 26 (DEP0205)
+// Exact emitted URLs, including custom folders and a hosting base, resolve only to owned temporary modules.
+const modules = JSON.parse(readFileSync(new URL('./modules.json', base), 'utf8'))
+const resolve = (s, c, n) => Object.hasOwn(modules, s) ? { url: new URL(modules[s], base).href, format: 'module', shortCircuit: true } : n(s, c)
+// registerHooks is synchronous and replaces register(), deprecated in Node 26 (DEP0205).
 if (M.registerHooks) M.registerHooks({ resolve })
-else M.register('data:text/javascript,' + encodeURIComponent(`export async function resolve(s, c, n) { return s.startsWith('/') && s.includes('/_b/') ? { url: new URL('.' + s.slice(s.indexOf('/_b/')), ${JSON.stringify(base)}).href, format: 'module', shortCircuit: true } : n(s, c) }`))
+else M.register('data:text/javascript,' + encodeURIComponent(`const modules=${JSON.stringify(modules)},base=${JSON.stringify(base)};export async function resolve(s,c,n){return Object.hasOwn(modules,s)?{url:new URL(modules[s],base).href,format:'module',shortCircuit:true}:n(s,c)}`))
 let input = ''
 for await (const c of process.stdin) input += c
 const out = []
@@ -85,6 +86,11 @@ for (const j of JSON.parse(input)) {
   const doc = install()
   const root = doc.createElement('div')
   try {
+    // Server imports and load() need the same page context as the later component render.
+    globalThis.__brainRoute = { path: j.route, params: j.params || {}, query: {} }
+    globalThis.__brainLocale = j.locale || null
+    globalThis.__brainAlternates = j.alternates || null
+    if (j.i18n) await import(j.i18n)
     const S = j.server ? await import(j.server) : {}
     let props = {}
     if (j.load && typeof S.load === 'function') {
@@ -97,12 +103,6 @@ for (const j of JSON.parse(input)) {
     let fetched = 0
     const realFetch = globalThis.fetch
     globalThis.fetch = () => (fetched++, new Promise(() => {}))
-    // route() reads the page's path and params from here while rendering (RUNTIME #169), as under server.mjs
-    globalThis.__brainRoute = { path: j.route, params: j.params || {}, query: {} }
-    // i18n (§37): the page's language and its dictionary, so t() renders in it; <LangSwitch> reads the alternates
-    globalThis.__brainLocale = j.locale || null
-    globalThis.__brainAlternates = j.alternates || null
-    if (j.i18n) await import(j.i18n)
     // components that fall back while rendering report here (the same contract server.mjs logs from, QA #176)
     globalThis.__brainIds = (globalThis.__brainIds || 0) + 1
     const failed = (globalThis.__brainSSR = [])
@@ -213,7 +213,18 @@ fn node_with(files: &BTreeMap<String, String>, shim: &str, aux: &Aux, mode: &str
     let run = RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let tmp = std::env::temp_dir().join(format!("brain-prerender-{}-{mode}-{run}-{}", std::process::id(), crate::content_hash(input)));
     let _ = std::fs::remove_dir_all(&tmp);
-    for (p, c) in files.iter().filter(|(p, _)| p.starts_with("_b/")) {
+    let chunks: Vec<_> = files.iter().filter(|(path, _)| crate::ledger::javascript(path)).collect();
+    let parsed = brain_mcp::Json::parse(input).ok();
+    let prefix = if let Some(brain_mcp::Json::Arr(jobs)) = &parsed {
+        jobs.iter().find_map(|job| {
+            let core = job.get("core")?.as_str()?;
+            chunks.iter().filter_map(|(path, _)| core.strip_suffix(path.as_str())).min_by_key(|prefix| prefix.len())
+        }).unwrap_or("/")
+    } else { "/" };
+    let manifest: Vec<String> = chunks.iter().map(|(path, _)| format!("{}:{}", crate::prerender_json(&format!("{prefix}{path}")), crate::prerender_json(&format!("./{path}")))).collect();
+    std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+    std::fs::write(tmp.join("modules.json"), format!("{{{}}}", manifest.join(","))).map_err(|e| e.to_string())?;
+    for (p, c) in chunks {
         let f = tmp.join(p);
         std::fs::create_dir_all(f.parent().unwrap()).map_err(|e| e.to_string())?;
         std::fs::write(&f, c).map_err(|e| e.to_string())?;
@@ -485,14 +496,9 @@ pub fn seo_head(seo: &[(String, String)], site: Option<&str>, route: &str, gener
     let mut h = String::new();
     if !generator.is_empty() {
         h.push_str(&format!("<meta name=\"generator\" content=\"{}\">", esc(generator)));
-        // read by crawlers and LLMs that look at the source: what built the page and where it lives
-        h.push_str(&format!(
-            "<!-- Built with {}, the web compiler for LLMs, written in Rust. Home: {} · Source: {} -->",
-            generator.replace("--", "-"),
-            crate::HOME,
-            crate::REPO
-        ));
     }
+    // Attribution is independent of a version label or visible page credit, including dev output.
+    h.push_str(brain_lex::branding::HTML);
     // app.brain's `<meta seo titleTemplate="%s · Site">` wraps every view title
     let title = get("title").map(|t| match get("titleTemplate") {
         Some(tpl) if tpl.contains("%s") => tpl.replace("%s", t),
@@ -639,6 +645,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn prerender_load_receives_its_locale_and_dictionary_before_any_server_execution() {
+        let files=BTreeMap::from([
+            ("_b/core.js".into(), format!("{}\nexport {{mount as m}};",include_str!("../../../runtime/brain.js"))),
+            ("_b/i18n.js".into(), include_str!("../../../runtime/brain-i18n.js").into()),
+            ("_b/default.js".into(), "import {add} from './i18n.js';add('en',{message:'Default content'});".into()),
+            ("_b/translated.js".into(), "import {add} from './i18n.js';add('es',{message:'Translated content'});".into()),
+            ("_b/server.js".into(), "import {locale,t} from './i18n.js';export async function load(ctx){await Promise.resolve();return{message:locale()+'|'+t('message')}}".into()),
+            ("_b/view.js".into(), "export default props=>{const p=document.createElement('p');p.textContent=props.message;return p}".into()),
+        ]);
+        let jobs=[("/post/a","en","default"),("/es/post/a","es","translated"),("/post/b","en","default")].into_iter().map(|(route,locale,dict)| Job {
+            route:route.into(), core:"/_b/core.js".into(),view:"/_b/view.js".into(),layouts:vec![],server:Some("/_b/server.js".into()),params:"{}".into(),load:true,
+            locale:Some(locale.into()),i18n:Some(format!("/_b/{dict}.js")),alternates:"[]".into(),probe:0,hydrate:false,
+        }).collect::<Vec<_>>();
+        let result=run(&files,include_str!("../../../runtime/shim/dom.js"),&jobs).unwrap();
+        for (route,text) in [("/post/a","en|Default content"),("/es/post/a","es|Translated content"),("/post/b","en|Default content")] {
+            let page=result[route].as_ref().unwrap();
+            assert!(page.html.contains(text),"{route}: {page:?}");
+            assert!(page.props.contains(text),"{route}: {page:?}");
+        }
+    }
+
+    #[test]
     fn twitter_site_from_meta_seo() {
         let kv = |v: &[(&str, &str)]| v.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect::<Vec<_>>();
         let (_, h) = seo_head(&kv(&[("title", "T"), ("twitter", "@h")]), None, "/", "");
@@ -659,9 +687,9 @@ mod tests {
         assert!(h.contains("content=\"Manage &quot;tasks&quot;\""));
         assert!(h.contains("\"@type\":\"WebApplication\""));
         assert!(h.contains("<meta name=\"generator\" content=\"BRAINLLM 0.1.0\">"));
-        assert!(h.contains("<!-- Built with BRAINLLM 0.1.0, the web compiler for LLMs, written in Rust. Home: https://chrisifm.github.io/BRAINLLM/ · Source: https://github.com/chrisifm/BRAINLLM -->"), "{h}");
+        assert!(h.contains("<!-- by BRAINLLM https://chrisifm.github.io/BRAINLLM/ -->"), "{h}");
         let (_, bare) = seo_head(&seo, None, "/tasks", "");
-        assert!(!bare.contains("Built with") && !bare.contains("generator"), "{bare}");
+        assert!(bare.contains(brain_lex::branding::HTML) && !bare.contains("generator"), "empty labels never remove mandatory attribution: {bare}");
     }
 
     #[test]

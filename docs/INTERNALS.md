@@ -84,6 +84,9 @@ No `serde`: the workspace accepts no serialization dependencies; JSON is written
 
 ## 5. Errors (mandatory format, output of `brain check --json`)
 
+B0749 uses state-like field names, not enum types: ordinary category/filter enums do not establish row publication
+state. Optional state fields still warn. This advisory is not a substitute for author-defined read conditions.
+
 ```json
 { "code": "B0102", "file": "comp/counter.brain", "line": 7, "col": 12,
   "msg": "`this` does not exist in BrainScript", "fix": "use the variable directly: `n` instead of `this.n`",
@@ -150,12 +153,15 @@ COMPILER assigns the next free code there in the same change that emits it, then
 - B0787 resource contract changed (error, 2026-10-31, `crates/brain-backend/src/contract_review.rs`, `db::migrate_approving`): `migrate` and `verify` refuse a recorded contract that differs from the code until `brain backend approve-contract` records it.
 - B0786 own session with a native backend (warning, 2026-10-31, `crates/brain-cli/src/env.rs` `own_session`): `ctx.session.set` in a file that does not branch on the backend, in an app whose `.brain_env` sets `BRAIN_BACKEND_URL` without `BRAIN_BACKEND_SESSION=app`.
 - B0785 backend environment not stated (error, 2026-10-31, `crates/brain-cli/src/backend.rs` `unstated_environment`): every `brain backend`, `brain jobs`, `brain media` and `brain analytics` operation that connects stops without `--env` on a remote database or NODE_ENV=production; NODE_ENV is checked before the database lookup, so B0762 cannot hide it. Outside production `/_brain/api` also needs admin for any proxied request.
-- B0795 no `csp.connectSrc` in brain.json (warning, `crates/brain-cli/src/origin_check.rs`) · B0796 invalid `csp.connectSrc` entry (error; the entry stays out of the policy, `brain_pack::read_connect_src`). `brain_pack::cache::app_csp` is the one place the list replaces `https: wss:`; the build's own sources (sockets, analytics tags, Google sign-in) stay as `extra`. The `_headers`, nginx, Caddy, `dist/server.mjs` manifest and the `brain run` report-only policy all come from it. `CSP0` in `runtime/server/server.mjs` only serves a manifest with no `csp`, which no current build writes.
+- B0795 no `csp.connectSrc` in brain.json (warning, `crates/brain-cli/src/origin_check.rs`) · B0796 invalid CSP source entry (error; the entry stays out of the policy). `brain_pack::cache::app_csp` is the one place the connect list replaces `https: wss:`; the build's own sources (sockets, analytics tags, Google sign-in) stay as `extra`. The `_headers`, nginx, Caddy, `dist/server.mjs` manifest and the `brain run` report-only policy all come from it. `CSP0` in `runtime/server/server.mjs` only serves a manifest with no `csp`, which no current build writes.
+- Explicit `csp.formAction` (2026-11-04) adds exact HTTPS document origins or local HTTP loopback origins to the existing own-origin form-action. `form_action_problem` rejects wildcard hosts/ports, paths, sockets, blobs and header injection; `read_form_action` shares bounded-list validation and B0796 with check/doctor. `cache::app_csp` adds only this directive, so static host configurations, SSR manifests and dev report-only policy stay aligned without widening connect/script/framing permissions.
+- Explicit `csp.mediaSrc` / `csp.workerSrc` (2026-11-04) accept `blob:` and exact TLS origins, plus plain HTTP loopback origins. Each is independently optional: omission preserves its CSP fallback, while a declared list emits `'self'` plus validated sources (an empty or wholly invalid list remains own-origin only). They do not add blob permission to script-src. Validation, the schema and both check/doctor use B0796; no wildcard host or port, data URL, path or header injection is accepted.
 - B0794 unique value any user can claim (warning, `backend.rs` `claimable_unique_warnings`): a `unique` field with no `access` on a resource whose `create` or `update` grants `user` or `public`; an explicit `access`, including `{ write: ['user'] }`, states who may and silences it.
 - B0797 internal-looking field returned to every reader (warning, `backend.rs` `public_field_warnings`): whole-word name heuristic; `private`, `writeonly` or any `visible` (including `['public']`) states the exposure and silences it; `api: false` resources have no readers. Never an error: a name is only a hint.
 - B0792 a job or route handler whose imports need the browser runtime (error, `brain-cli` `backend::handler_bundle_problems`, the same bundling the worker does at start)
 - B0814 browser navigation to a URL built at runtime (warning, `brain-check` `security::client_redirect`): `location.href = x`, `location = x`, `location.assign(x)`, `location.replace(x)`, `window.open(x)`. Accepted: a literal, a value whose host cannot grow, a same-origin path or helper (the B0710 rules) and a value inside `if (new URL(x, location.origin).origin === location.origin)` or after the `!==` form that returns. External destinations (2026-11-03, a payment checkout on another origin): the same two guard forms against a literal host (`new URL(x).host` or `.hostname === 'checkout.example.com'`, `.origin === 'https://checkout.example.com'`) pass when `brain.json` → `"redirects"` (the B0710 list) names that host; an unlisted one keeps B0814 and the message names it. A value the app's own server answered also passes, but only where the checker sees it: a `const` (or `const { url }`) bound to `await f(…)` with `f` a `server:` function of the same file, `await r.json()` of a `const r = await fetch('/fixed/path')`, `(await f()).url`, inside the block of that binding (`origin_guarded`, `server_answers`). A `let`, a fetch of another origin or a built path, and any other call keep B0814.
 - B0815 literal option of a native `list()` call that the resource does not declare (warning, `brain-cli` `list_options`): a `filter` key or operator, a `sort` field or an `include` path missing from `query.jsbrain`, which the backend answers 422 on every call (the rule is `brain-backend` `query::filter_problem`, `query::sort_problem` and `relations::include_path_declared`, the same `parse` applies), and a literal `limit` outside 1..100 or `offset` outside 0..10000, which the native client refuses with 400. The resource is the literal `backend.resource('name')` of the call or of a `const` bound to exactly one resource in the file. Skipped: a call with a spread, a computed key, an unknown resource; a computed operator still reports an undeclared field.
+- B0816 native route handler reads a literal header absent from its sibling route contract (warning, `brain-check::route_headers` and conservative native inference, 2026-11-04). Context/header aliases and literal destructuring are tracked; dynamic keys, mutations and reference escapes remain unknown. Contract reads are bounded and dependency-tracked, including absent files. No header is forwarded automatically; authentication uses ctx.user.
 - B0811 literal iframe or script outside `csp.frameSrc` / `csp.scriptSrc` (warning, `brain-check` `origins::check_embeds`); invalid entries are B0796.
 - B0812 server route environment outside `ctx.env` (warning, `route_executor::env_warnings`): a global `process.env` in any `server/routes/**/*.jsbrain` (`brain_check::env::process_env_offsets`, so comments and strings never count), and a key a route reads that `.brain_env` declares only in `[production]`. Names only, never values.
 - B0813 operation debits a balance the caller chooses (warning, `backend.rs` `debit_subject_warnings`): a `debit` step whose `subject` is a `$` reference other than `$user.*` (`$input.*`, `$<step>.*`). `debit` is the only credit step operations have (no credit, refund or transfer step exists), and the contract only accepts `$` references as subjects.
@@ -167,6 +173,12 @@ COMPILER assigns the next free code there in the same change that emits it, then
 - B0941 `brain doctor` (warning): a non-English locale with the auth email keys unset
 - B0940 `app.brain` without `<head>` (warning): the build and the server write titles and tags before `</head>`, so they would vanish
 - B0749 unconditioned public read of a resource with a state field (warning; silenced by a `where` or `expose_all_rows: true`) · B0734 missing local MCP registration (doctor warning; configuration only) · B0735 invalid backend resource/job contract (error; schema, policy or hook reference) · B0736 placeholder site URL (build and doctor warning): a reserved origin (example.com/org/net, `*.example`, `*.test`, `*.invalid`, localhost, loopback) from `.brain_env` or brain.json is no site outside development, so no sitemap, robots `Sitemap:` line or absolute URL is published; the build names the `sitemap()` routes it skips. An explicit `--site` is used as given. · B0738 role grant admits nobody: an undeclared role, or a signup role no grant names (warning) · B0739 implicit legacy roles kept by an app without a roles file (warning)
+
+Invalid-policy guidance (2026-11-05): contract validation supplies an actionable fix naming declared-role source
+and conditional owner.<ref> alternatives drawn only from the resource's reference fields. The CLI contracts boundary
+adds actual explicitly configured roles on policy errors; implicit legacy discovery reads contracts itself and
+must never be called from this error path. Invalid role configuration never masks the original schema/policy error. Validation changes no grant and retains the existing fail-closed authorization semantics.
+
 - B0740 origin denied by the native backend · B0741 cross-origin RPC or form refused · B0742 native call needs a same-origin POST · B0743 live socket origin refused · B0744 invalid origin declaration · B0745 socket origin outside the HTTP origins · B0746 client call to another origin (warning; info for https) · B0747 browser blocked a cross-origin call (dev console) · B0748 auth public URL outside the allowed origins. Table by code: `docs/backend/proxy-cors.md`. Details go to logs and development answers; production answers carry only the code.
 - B0762 connection failures name the host, database and user tried, never the password, plus where the URL came from (`Boot.source`) and the cause from SQLSTATE and server text (`boot::refusal`, 2026-11-01): 28000 with `pg_hba` is a missing pg_hba.conf line, not a role to create; other 28000 is a missing role or a peer/ident refusal; 28P01 a refused password; a URL without a user uses `PGUSER`, then the system account, as `psql` does (sqlx alone would try `anonymous`). · B0765 queue with no worker reporting to this database in 45 s (read from `_brain_workers`, so another process counts; another database does not) · B0766 queue workers not checked (database unreachable or not migrated) · B0767 schedules with no scheduler · B0768 active jobs in an undeclared queue (all warnings from `brain doctor` and backend startup, liveness from `_brain_workers`, 45 s window) · B0769 job without a handler (warning from `brain check`). · B0788 member read on a `key()` channel · B0789 raw `pg` in a route handler (warnings from `brain check`, 2026-10-31).
 - B0750 declared route hides something (warning): a `server/routes/*` path that overlaps a view, a literal `public/` file or a framework prefix (`/_r`, `/_b`, `/_server`, `/_health`, `/@brain`), or that starts with a parameter; the gateways proxy declared routes on the site origin, so the overlap would hide the other one; a route that starts with a parameter is not proxied.
@@ -187,6 +199,12 @@ Exports: `sig(v, name?)`, `drv(fn)`, `fx(fn)`, `batch(fn)`, `untrack(fn)`, `tpl(
 
 - `sig` and `drv` expose `.v`; codegen rewrites `n` → `n.v` and `n = x` → `n.v = x`. Writing to `drv.v` throws.
 - Writes are batched per microtask; `batch` applies synchronously when it finishes; every `on` handler runs inside `batch`.
+- Native non-bubbling handlers (2026-11-05) use element listeners owned by an fx cleanup. Dialog close/cancel,
+  toggle/beforetoggle, invalid, pointer enter/leave and media events do not depend on document bubbling. A shared
+  eventCall preserves this/error/rejection handling for both paths; direct currentTarget stays native and does not
+  invoke ancestors. Native default cancellation remains subject to the browser's cancelable flag and CloseWatcher
+  activation rules. References: [HTML events](https://html.spec.whatwg.org/multipage/indices.html#events-2),
+  [Pointer Events](https://www.w3.org/TR/pointerevents3/).
 - Owners run first: before a queued effect runs, its owner chain is brought up to date from the top. A `when`/`{#if}` re-evaluates its condition and disposes its block before an effect inside the block runs, so `{#if data.file}{data.file.name}{/if}` never reads `name` of a `file` that became `null`, whatever the subscription order (guard-first scheduling, as in Solid and Svelte).
 - `anchor` = template comment (`<!>` in `tpl`); everything is inserted BEFORE the anchor. Without an anchor, the runtime creates one at the end of `parent`.
 - `fn` of insert/a/b/empty/render may return Node, DocumentFragment, string, number, array or `null`/`false` (empty).
@@ -278,6 +296,18 @@ the check cache).
 **Tests:** `comp/counter.test.brain` (BrainScript + `test()`/`expect()`/`click()`/`type()`) and `brain test`
 runs them in real headless Chrome via CDP, with its own Rust client. The same command audits the
 accessibility tree with `Accessibility.getFullAXTree`. No jsdom or Playwright.
+Headless navigation isolation (2026-11-05): a destroyed pending __brainStep context becomes a failing TestResult
+with the file, registered test name and component-test-specific repair. It is not retried or converted to success.
+The runner closes the owned tab, reloads the same file in a new tab and checks its registered names match before
+continuing later tests. Recovery navigation or a changed test list makes remaining tests explicitly unavailable;
+other files continue. Interrupted runtime/heap diagnostics cannot be complete. Restored pages reinstall inspector
+and error capture; completed/load-failed/recovery tabs close through their own attached target identity only.
+Transport failures retain the existing one-retry policy and do not become ordinary assertion failures.
+
+`brain-cli::testrun::preflight` runs before test-server reuse/start. It compiles current application sources with dev
+codegen and follows explicit local Brain imports plus resolved automatic components, rather than broad watcher
+inventories. Test scripts are parsed for imports and retain browser-provided globals. CSS imports use the CSS checker.
+The bounded graph refuses sources outside the app and stops on current compiler errors before browser assertions.
 
 Test API in `*.test.brain`: `test(name, async () => {…})` · `await mount(Comp, props, options?)` · `await click(sel)` ·
 `await type(sel, text)` · synchronous readers `text(sel)`, `attr(sel, name)`, `hasClass(sel, cls)`, `count(sel)` ·
@@ -290,7 +320,14 @@ swaps); slot text is real DOM, so the accessibility audit sees it. Unknown optio
 the id as written (`new`), later ones get `~2`, `~3` (`new~2`), so `/page#id` anchors work (#268). Computed ids
 (`id={'faq-' + it.id}`, `id="faq-{it.id}"`) get the same suffix at run time through the module helper `$sx`, and so do
 computed references; with computed ids every token of a computed reference is treated as local (#308).
-So two instances never collide and accessibility keeps working in light DOM. B0410 pairs a computed reference with its
+Direct prop IDs/references are caller-owned and bypass suffixing (2026-11-05); lexical each locals that shadow a
+prop remain component-owned. Derived expressions remain local; callers supply unique public IDs.
+Prop defaults selected by omitted/nullish input remain local and receive the suffix, including references to them.
+Stateless inlined UI owns no IDs: its references do not inherit the parent's dynamic-ID scope or defaulted props;
+slot content and subsequent parent nodes restore the parent's ID scope.
+String-literal expression attributes share static-ID rewriting, including SVG fragment references. ARIA IDREF/IDREFS, HTML form,
+table, microdata and popover/command references follow local IDs.
+Local instance IDs do not collide in light DOM. B0410 pairs a computed reference with its
 target by source shape and warns when the target sits in a conditional block the reference is not in.
 
 ## 9. Dev-mode memory inspector (`brain-inspect`, fixed 2026-10-13)
@@ -481,6 +518,9 @@ COMPILER:
 
 TOOLCHAIN:
 - Module graph → exact `<link rel="modulepreload">` per view and `103 Early Hints` in the server snippet.
+  Header selection (2026-11-04) retains styles first within 2048 bytes, then module graph order; HTML and the manifest
+  keep the full graph. Node SSR uses the same selection for final Link and optional 103 hints, logs omitted counts
+  once per route, and gives declared font preloads the same priority as styles.
 - Predictive prefetch of the probable next route by the router (links in view while idle, hover/focus first; §19).
 - Streaming SSR: the `<head>` and the layout go out before `load()` finishes.
 - Critical CSS per view inline; the rest deferred. Views without islands = 0 bytes of JS.
@@ -552,6 +592,11 @@ with a warning in the build and in doctor's `build.budget.warnings`: the HTML ca
 commit can fail on another machine (2026-11-02). Invalid or unknown
 budget fields fail instead of silently disabling enforcement. `mountMs` p95 and `heapMB` remain planned and are
 rejected explicitly until a real browser measurement contract is implemented.
+
+**CDP disconnections (2026-11-04):** call/send writes and closed receive channels use one transport error formatter.
+Broken-pipe/EOF/reset failures identify Chrome and suggest reducing concurrent browser work under load before retry.
+No mutation is automatically replayed. Failed writes still stop only the owned browser session; watchdog deadlines
+and profile cleanup are unchanged. Closed-pipe regressions cover both write APIs and receive EOF with owned helpers.
 
 ## 17. AST editing and migrations (2026-10-28)
 `brain edit` applies checked source-span edits: add-prop, remove-prop, component-file rename, move and extract.
@@ -733,7 +778,26 @@ of documentation. In order of preference:
 
 Each fix is validated with the same run (before/after, same bench sha) and recorded in bench/llm/README.md.
 
+Codex source-generation transport distinguishes message-only non-terminal diagnostic items from tool calls and
+terminal failures. Diagnostic text is discarded; success still requires a completed turn, valid token usage,
+exit 0 and bounded owned output. Infrastructure failure stops queued Codex generations, retains incomplete
+evidence and exits nonzero; it never establishes a first-pass result for unattempted briefs.
+The gate and matched comparison share frozen-run validation: at least twenty complete unique generation rows,
+summary/count agreement and valid matching source hashes. Codex baselines include provider/model/effort/mode;
+legacy non-Codex keys are preserved, and a partial smoke cannot be accepted as a release baseline.
+An uninitialized cohort fails the release gate until a complete reference is reviewed and explicitly accepted.
+
 ## 22. Modern router, loading and services features (fixed 2026-10-13)
+
+RPC authorization boundary (documented 2026-11-04): `rpc()` prepares authoritative identity and calls the function directly; page guards/middleware are not inherited. Each function authorizes ctx.user and native resource policy independently.
+Popup document policy (2026-11-04): `router()` captures whether the initial document head has the Google or Apple
+sign-in opt-in (`content="1"`). After parsing a navigation response, before disposing or swapping the view, a change
+in that opt-in triggers a full navigation in both the Navigation API and History paths. This also covers redirected,
+dynamic and prefetched pages without enumerating static paths. Comments, inert templates and body markers do not
+opt in. Pages with the same policy retain client navigation. `server.mjs` calculates opener and cache headers before
+the HTML 304 branch; that branch preserves the stored CSP nonce by omitting a replacement CSP header.
+Streamed SSR derives the policy from the head it will send, after applying SEO head metadata, for both GET and HEAD.
+
 Coverage against React/Next, Vue/Nuxt, Angular, Svelte/Kit and Astro; all with a single pattern per need.
 
 | Need | BRAINLLM | Status |
@@ -772,6 +836,12 @@ Coverage against React/Next, Vue/Nuxt, Angular, Svelte/Kit and Astro; all with a
   reflects `selected` on options and marks the option matching `<select value={x}>`.
 
 ## 23. CLI and distribution with professional standards (fixed 2026-10-13)
+Option value handling (2026-11-04): known valued flags, including global `--progress`, reject missing values before
+command dispatch. Shared positional selection consumes spaced progress values, ignores the `-q` alias and respects
+`--` termination. Explicit empty/invalid values still belong to each command's validation.
+Check target update (2026-11-04): all positional targets are checked. Explicit files must end in `.brain`, `.jsbrain`
+or `.cssbrain`; other extensions produce actionable usage errors (exit 2), never component-parser diagnostics.
+No targets still means the current app; JSON combines diagnostics from every selected target.
 Upgrade update (2026-10-31): `brain upgrade` returns a migration report from the app's recorded `brainVersion`
 and applies the safe codemods with `--apply` (see Support commands below).
 Identity update (2026-10-28): `brand::Session` adds a circuit-brain ASCII mark and task-specific start/completion
@@ -781,6 +851,20 @@ terminals suppress branding even when rich progress is requested. `NO_COLOR` pre
 Branding writes only stderr, starts no background work, and leaves machine schemas unchanged. See
 [CLI-EXPERIENCE.md](CLI-EXPERIENCE.md).
 
+Browser helper reliability (2026-11-04): `bench/lib/cdp.mjs` probes the read-only debugging endpoint before one target
+creation, attaches domains before navigation, and bounds connect/protocol waits plus pending commands. Closing a
+connection rejects its pending requests. The SSR DOM's Event extends the native Node Event brand, preserving native
+EventTarget/WebSocket interoperability even after the shim installs globals; custom-node dispatch defines targets
+and keeps its own composed path without replacing native EventTarget paths.
+
+Public route precedence (2026-11-04): Node already checks public build output before unguarded parameterized SSR matching.
+A matching route with guards or middleware keeps its security chain ahead of every static/form/twin shortcut, even
+when legacy output collides. Private-output checks and reserved status handling still run; POST uses its transport.
+Dev checks explicit public files before extensionless app-page fallback, including well-known verification files,
+while keeping a matching view's guard/middleware chain authoritative. Rust
+static production already resolves public output before its fallback. Build sweeping removes old non-produced HTML,
+so a route changed from static to guarded SSR does not retain a stale public page.
+
 Local verification update (2026-10-27): `bash scripts/verify.sh` builds the CLI with the lockfile, then runs the
 workspace, runtime, fixtures and English checks. Building first is required because fixtures execute
 `target/debug/brain`; `cargo test` alone can leave that binary stale. The branch/PR verification workflow uses the
@@ -788,7 +872,7 @@ same entry point. Frozen LLM generation runs are checked separately with `bench/
 
 Patterns from Vite, Next, Biome, Turborepo, Cargo and Deno applied to `brain`:
 
-- **Version pinned per project:** `brain new` adds `@christianirack/brainllm` as a devDependency with an exact version and
+- **Version pinned per project:** `brain new` adds `@christianirack/brainllm` as a production dependency with an exact version and
   `run/build/doctor` scripts. A global `brain` **delegates** to the project's local version if it exists (Turborepo/ESLint
   pattern): two projects with different versions coexist and builds are reproducible.
 - **A single config file:** `brain.json` with `"$schema"` (JSON Schema included in the package → autocomplete and
@@ -936,6 +1020,19 @@ quality 11/window 22, content cache keyed by codec/settings, two compression wor
 Static Rust and Node servers negotiate br/gzip weights and exclusions; Caddy enables both, nginx documents ngx_brotli.
 `brain build --report` prints, per view, raw → minified → gz → dcz bytes and what each pass saved. `--strict` turns the warnings that mean an incomplete `dist/` into a failure (`degrades_output`, `main.rs`); a throwing prerender is the case reached in practice, because a missing Node already stops the build.
 
+**Portable static policy (2026-11-04):** `brain new --static` selects a static scaffold in memory and saves
+brain.json output:static. `static_export.rs` resolves the persistent policy for CLI, doctor and MCP; an explicit
+build --static/MCP static:true strengthens it without global state. Backend declarations are checked before the
+build writes dist/. `BuildOptions.static_export` rejects gateway policies, folder guards/middleware, reachable
+server functions, live sitemap/server forms and SSR plans. Build-time paths/load/head/seo remain available.
+Invalid paths parameters and degraded prerenders fail before writing publishable output; a final invariant rejects
+server.mjs/_server artifacts. HTML, Markdown and generated OG destinations use the shared brain-lex URL-path decoder once per segment;
+URLs stay encoded for SEO and links. Encoded separators, dot-segments, invalid UTF-8 and controls fail before output.
+Destinations are checked for file/directory collisions and symlinks; stale cleanup never follows symlinks.
+Static mode forces web extensions and disables the stale-chunk grace on successful
+export, so old SSR output cannot survive. It uses the same SEO, minification and raw-plus-precompressed pipeline;
+optional host configurations are hints, not a portable guarantee of HTTP headers or redirects.
+
 ## 27. AI-driven development: closing the gaps (fixed 2026-10-13)
 Goal: the agent composes verified building blocks and applies changes transactionally; it writes free-form code
 only where the product is unique.
@@ -986,9 +1083,19 @@ Retry-After. Request reads have one total 5 s budget so trickling bytes cannot m
 down owned WebSocket sockets to release their reader threads. Imported-module and token edits invalidate cached parents even if their own mtimes are unchanged. Server-code edits
 restart the sidecar to discard Node's old module versions. Existing cache architecture and remaining work follow.
 
-Audit (2026-10-13): `brain-serve` already keeps an in-memory per-file cache keyed by mtime and drops dependants on
-change (`server.rs` `compile_cached`). Gaps: the cache dies with the process, mtime changes trigger work for identical
-content, granularity is the whole file, `brain build` recompiles everything, and nothing runs in parallel.
+Server capability ownership (2026-11-04): codegen emits `brain_lex::ServerMetadata` from top-level exported
+function ASTs and the same namespace that generates RPC stubs. CLI compilation, pack units and dev compiled units
+carry load/paths/sitemap/forms flags and exact RPC IDs; source examples, comments and nested functions grant nothing.
+Build route classification, production RPC manifests and dev load/sitemap/RPC dispatch consume these facts, never
+search emitted strings. Compiler cache format -3 requires all metadata fields and its budget evicts both old -2 and
+new -3 entries. No-op/style-only HMR preserves the same metadata; script changes invalidate it. Dev refuses duplicate
+RPC owners and incomplete inventories (20,000 entries, 4,096 candidates, 32 directory levels); links and special
+files are not followed. This is module discovery, not arbitrary source evaluation.
+
+Dev cache correctness (2026-11-04): `server.rs::compile_cached` reads and SHA-256 hashes exact source bytes before
+returning an in-memory hit. Equal-length in-place writes with restored mtimes cannot serve stale output, and a
+metadata-only save reuses compiled output. Reads and compiles share the single-flight lock; watchers still invalidate
+dependants. The cache dies with the process and its granularity remains the whole file.
 
 **Dev is never minified, mangled or compressed.** Speed comes from doing less work, not from doing it faster:
 - **Content-hash keys:** every stage result is keyed by a hash of its exact input (source bytes + compiler version +
@@ -1009,6 +1116,45 @@ component edit, ≤ 20 ms to the browser (excluding the OS file-event latency), 
 200-component app ≤ 300 ms with a warm cache.
 
 ## 29. Opinionated architecture and generators (fixed 2026-10-13, Chris: "like the Angular CLI, but for LLMs")
+
+`scaffold::AddOptions.blank` selects minimal noninteractive component markup with a slot, typed props and the normal
+colocated test. CLI `brain add comp --blank` and MCP `brain_add` share this path; all other kinds reject the option
+before mutation, and ordinary component generation retains its existing example template.
+
+Build attribution (2026-11-04): `brain-lex::branding` is the shared landing/comment authority. Own graph JS, token/view
+CSS, dictionaries, locale links and analytics bootstrap add code comments after minification and before content
+hashes. Framework documents and private fixed-name server modules use format-safe attribution before cache/SRI.
+Robots and normal/news/index/dynamic/dev sitemaps are covered; XML attribution follows the declaration and counts
+against sitemap header reservations. Dynamic runtime split headers use the same signature and size accounting.
+`brain-build.json` carries deterministic generator/version/home metadata for all output, including original binary
+and protocol assets whose bytes/schemas stay unchanged; it is reserved and inserted before build-signature/SW work.
+Host hints and cleanup workers retain the signature. Page credit/version-label options do not remove build attribution.
+
+Living brandbooks (2026-11-04): `brain-cli::brandbook` owns a bounded declarative section structure and the
+explicit `design.brain.json.brandbook` editorial contract. A structural AST marker in the real brandbook route is
+expanded by compiler::check and compile_hash before parse/codegen/cache identity; generated markup occupies one
+source line and its diagnostics map to the owned marker with automatic edits removed. Authorial lines stay stable.
+Component-scope collision planning uses the same expanded input. Design/token files and UI directory/file membership
+are dependencies; current facts read live tokens rather than the stored snapshot. Rendering only escapes data and
+lists filenames, never evaluates app modules. Source JSON and authored pages without the marker are preserved.
+New static/ordinary scaffolds include the route and navigation; design-enabled older apps get warning B2202.
+B2203 rejects malformed explicit managed content. Six generic groups cover strategy, voice, identity/product,
+assistant behavior, channels/governance and research; drafts and source observations never imply approval.
+Multilingual managed content (2026-11-05): generated literals reuse registered default-dictionary keys through the
+same B1403 allocator. Only the owned line is transformed. `brandbook.messages` persists original text/key identities
+so default translations can change; explicit fix/add-locale applies the bounded mechanical B1403 design edit.
+Check/build only read design and locale dependencies. Untouched draft prompts stay in the editable contract while
+the public page shows a brief pending notice; all section IDs/titles, authored content, statuses and evidence remain.
+Nested checks allocate new keys with the same reported file scope as the checker, then persist those identities.
+Token category IDs and CSS contexts are code, like token names/values and file paths; locale extraction never
+translates these source facts. Human headings and editorial content still use the normal dictionaries.
+
+Scaffold component tests (2026-11-04): `write_test` parses the component's actual prop AST before creating a test.
+Required strings/any receive example text, numbers zero, booleans false, lists/objects empty containers and functions
+no-op callbacks. Optional/defaulted props remain omitted. Nested application shapes still require authored fixtures.
+Missing/invalid components fail before creating an unusable test file. CLI add and MCP share this implementation.
+
+Scaffold package installation (2026-11-04): the exact compiler pin lives in dependencies because generated start/backend/worker commands execute it in production. Existing devDependency pins remain readable by upgrade/delegation; no existing package manifest is silently moved. Static output still deploys as dist/ only.
 - One folder per kind, flat by kind (predictable beats clever for a model): `views/` (routes, layouts, guards),
   `comp/`, `ui/`, `channels/`, `services/`, `api/`, `types.jsbrain`, `lib/`, `server/`, `tokens.cssbrain`, `app.brain`.
   Large apps may group by feature with the same sub-structure (`features/billing/{views,comp,channels,api}`);
@@ -1046,7 +1192,7 @@ component edit, ≤ 20 ms to the browser (excluding the OS file-event latency), 
   `.brain_env`; in production the key is absent, so `login.brain` says auth is not configured and how to wire a real
   provider, and no demo credential can ever reach a deployed app.
   Folders without code yet hold only that README (git keeps them, `brain doctor` ignores `.md`), never placeholder code
-  that would be dead. The generated project passes `brain doctor`, builds statically and scores ≥ 80 on every page with
+  that would be dead. The generated full app passes `brain doctor`, may include SSR for protected/server routes, and scores ≥ 80 on every page with
   no edit (nav links every view, no orphans). `types.jsbrain` is created by the first `brain add type`.
 - `brain add <kind>` is the only sanctioned way to create a file. Every generator: writes the contract first
   (`<meta props/emits/expose>`, typed stubs), uses `brain/ui` and layout primitives, passes `brain doctor` as
@@ -1137,6 +1283,53 @@ specified elsewhere; ➕ = new in this section.
   `<script src|type>` in `app.brain`'s head as markup. B0126 exempts `*.test.brain`.
 
 ## 32. Dynamic metadata, generated SEO files and WebMCP (fixed 2026-10-13, dynamic sitemap 2026-10-29, imperative tools 2026-10-30)
+
+Evaluated discovery metadata (2026-11-05): pack Page.lastmod carries the merged static/evaluated lastmod value
+from each rendered route to the CLI SEO post step. This keeps load-derived per-page dates consistent with the
+head/JSON-LD instead of rereading only source-text meta attributes. Empty values are omitted; static source values
+remain a compatibility fallback. This does not derive a content-change date or run per-request SSR for a sitemap.
+
+Static layout byte accounting (2026-11-04): local emitted paths are independent of _b. The route graph resolves
+JS/CSS from text and binary maps, including public modules and their relative imports, with hosting-base confinement.
+Service-worker registration is not a page module import: ledger.serviceWorker and kind:service-worker expose its
+actual bytes separately, outside the existing view budget. The default 30 KiB budget and its tests stay unchanged.
+
+Public asset containment and relative graphs (2026-11-04): pack validates the input public tree before graph work
+in static and ordinary modes. Symlinks/special files are refused; depth and entry count are bounded. Cache walks also
+skip non-regular entries rather than following aliases. Raw public JS/MJS/CSS keep authored URLs and dependency
+resolution, like streaming manifests; compiler-owned modules/styles still rewrite before hashing. Planned immutable
+public destinations enter the pre-cache SEO inventory, so download links are not falsely reported absent.
+
+Zero-JS static artifact cleanup (2026-11-04): when every emitted page passes the existing zero-route proof,
+remove compiler-generated JS not reachable from explicit document references and their literal module/URL imports
+before SEO, cache inventories and precompression. This is static-mode-only. Public files are copied afterward and
+remain available to dynamic/external/download references; the disabled-cache cleanup worker is still emitted.
+
+Static artifact doctor (2026-11-04): `brain-cli::static_audit` runs only after a fresh successful static build.
+Doctor compiles into a uniquely reserved private temporary directory and removes it through an owned guard after
+success or failure. Build, payload, SEO and artifact gates inspect that exact candidate; none reads or replaces the
+app's deployment dist/. Old-chunk grace remains owned by explicit deployment builds, not isolated validation.
+Compiler caches and diagnostic feedback may refresh. `build.outputScope` and `outputRetained` describe the evidence;
+an explicit `brain build` still writes deployment output. Release-check retains its environment-specific build.
+It reuses `brain-seo::html::elements` and the packer's literal module/URL reference scanner. The bounded owned CSS
+scan skips comments and strings, handles compact/comment-separated imports, and fails incomplete on escaped URLs.
+Resolution uses ordinary directory indexes, the hosting base and strict percent-decoded confinement, with no app
+server extensionless fallback. Local targets, anchors/sprite IDs, duplicate document IDs, ARIA/HTML ID associations
+and final SHA-384 SRI are checked. ID associations resolve in the same document, only against real IDs (not named
+anchors), and share the bounded reference inventory. The scanner marks nested template contents as outside the
+document ID scope: inert/declarative-shadow fragment IDs cannot satisfy outer references or create false document
+duplicates. Resource declarations inside templates are still inventoried; instantiated fragments/shadow roots need
+browser tests. Stronger unknown
+SRI is incomplete, never a success. Digests are reused per target. External services, dynamic URLs and JS execution
+are explicitly outside this declaration gate. CLI and MCP expose `staticArtifact` and include it in failed gates.
+
+Static build customization (2026-11-04): `brain-pack::asset_layout` validates staticOutput before graph emission.
+JS/CSS/image/other destinations are resolved before imports and content hashes; inlineCss controls stylesheet
+inlining, and fast/small compression uses independent setting-qualified caches. Public originals and foreign SDK
+relative trees retain their identity. Prerender resolves exact emitted URL mappings, not a hardcoded _b prefix.
+An immutable generated-file inventory drives custom cache/SW hints; public files in the same directories are not
+made immutable by a directory-wide rule. SRI, preloads and route ledgers resolve actual local emitted paths.
+
 **Metadata (COMPILER + TOOLCHAIN + RUNTIME)**
 - `<meta seo>` attributes accept expressions over `props` (the `load` result); `jsonld={obj}` serializes to
   `<script type="application/ld+json">` (escaped `</`), and `schema="Article"` stays a shortcut: one node of that
@@ -1186,9 +1379,9 @@ with URL, Markdown copy and lastmod; `crates/brain-seo/src/sections.rs`). Every 
 rendered per request join the sitemap and llms.txt (llms-full.txt leaves them out: they have no prerendered text); no URL at
 all is B1900. `sitemap()` of every view runs at once, an expired list is served while the next is prepared, and a view that
 fails keeps its last good list. **Credit:** `seo.credit` (default true) closes every page, prerendered or a `_server/`
-template, with «By BRAINLLM x.y.z» before `</body>`, outside `#brain-view` so client navigation keeps it; it is added after
+template, with «By BRAINLLM x.y.z» before `</body>`, outside `#brain-view` so client navigation keeps it; its inline padding includes `env(safe-area-inset-bottom)` and does not override app margins (2026-11-04); it is added after
 the SEO audit and the Markdown copies, and its link is `nofollow` because a sitewide footer link reads as a paid widget to search engines. Attribution: next to
-`<meta name="generator">` each page carries `<!-- Built with BRAINLLM x.y.z … Home … Source … -->`, llms.txt and
+`<meta name="generator">` each page carries `<!-- by BRAINLLM https://chrisifm.github.io/BRAINLLM/ -->`, llms.txt and
 llms-full.txt end with `## Built with`, and documents carry `X-Generated-By: BRAINLLM (<home>; <repo>)` from `brain start` and the generated `_headers`, nginx and Caddy configs, without a version.
 All configurable in `brain.json`.
 **Google tags**: from `brain.json` `"google"` only. Analytics/Tag Manager are injected with the CSP nonce and Consent
@@ -1305,8 +1498,30 @@ is opt-in by the file's existence. The build only reads it (generators never wri
 
 ## 34. Production process manager: `brain start` (fixed 2026-10-13, Chris: our own manager, not PM2)
 
+Lifecycle CLI targets (2026-11-04): stop/reload/status accept one optional directory, canonicalize explicit paths
+and resolve the nearest app before connecting. Missing, non-directory and non-app targets fail without cwd fallback.
+The existing per-app socket and deep-path hash fallback are unchanged; no global process search is introduced.
+
+Successful `brain reload` control replies carry optional freshness advice. A read-only timestamp scan compares source
+files to the newest regular output file, bounded to 20,000 entries and 32 levels per tree, skipping symlink traversal,
+generated/cache folders and test-only inputs. Newer source or incomplete coverage is advisory; reload never compiles
+or mutates dist. Timestamps are not a source-hash attestation; environment/provider configuration is not probed.
+
 The `brain` binary runs the app in production. Optional PM2/nginx configuration can be prepared with `brain deploy config` (maintainer request, 2026-10-30; PM2 files pass `BRAIN_ENV_ONLY=file` so `main::apply_env_policy` drops the daemon's environment before any thread exists, and the preview carries a `recipe` that recreates processes, 2026-11-01; `brain deploy check --url`, `crates/brain-cli/src/deploy_check.rs`, reads only `/` and `/health`: B1857, B1891 early hints behind nginx below 1.29, B1892 hop header without `trustPublicProxy`, B1893 health not 200, 2026-11-01); it never installs or activates services. The native manager remains the default:
 one way for the model, `brain build` then `brain start`.
+
+Native nginx previews route the exact `/_brain/health`, `/_brain/health/live` and `/_brain/health/ready` aliases to the frontend gateway,
+ahead of the general `/_brain/` backend prefix. The gateway owns alias mapping and app-page precedence; ordinary
+native API/auth traffic keeps its backend upstream. Existing deployment files remain preserved for explicit review.
+Rust production and dev gateways use the same exact alias map to `/health`, `/health/live` and `/health/ready` before
+native forwarding. Production keeps the base namespace/root probe behavior and existing `/health` app-file precedence;
+GET/HEAD preserve upstream status and no-store responses, with a healthy JSON answer when no backend is configured.
+
+Static gateway rebuilds (2026-11-04): `StaticGateway` keeps an Arc policy snapshot under a short mutex. Metadata
+identity/mtime/length for the output directory, index/not-found pages and host-policy files triggers refresh of cached
+headers, redirects and build validators. Requests clone the snapshot and release the lock before I/O. Recreating
+dist/ therefore recovers without restart and a previous HTML ETag cannot incorrectly return 304 for the new build.
+This does not turn a build into an atomic deployment or hot-reload Node SSR processes; those still use brain reload.
 
 - **Static apps** (no `load`, no `server:`): `brain start` serves `dist/` from Rust with brain-serve's static handler
   (precompressed files, clean URLs, immutable `/_b/`, §31 headers). No Node.
@@ -1345,6 +1560,16 @@ one way for the model, `brain build` then `brain start`.
   loop → exit 1 with log; `--install` output reviewed; static app without Node).
 - A host that already has its own process manager runs `brain start` as one more command; the framework emits no
   config for it.
+
+### Provider profile hints (2026-11-04)
+
+Migration 0027 adds bounded `display_name` and `picture_url` to users, backfilling existing identity names in a
+stable provider/subject order. Verified provider adapters normalize optional name/picture hints before identity login;
+Apple's unsigned first-authorization name remains display-only. `Auth::finish_identity` updates hints in the same
+transaction as session issuance without changing linking or grants. Omitted claims retain stored hints. User reads
+for password/opaque/JWT/refresh/API-key authentication select the same columns; JWT claims remain unchanged.
+`server.mjs` native `safeUser` admits only bounded plain name and credential-free HTTPS picture hints alongside its
+existing authority fields. OpenAPI marks both optional. No image fetch or provider access-token storage is added.
 
 ### Session secrets, rotation and revocation (2026-10-31)
 
@@ -1398,9 +1623,25 @@ is not built · `data: false` → `resource()` keeps no memory cache and every `
 impossible while developing.
 
 **1. HTTP caching** (TOOLCHAIN: `brain start` static, nginx snippet, `_headers` for static hosts; RUNTIME: server.mjs)
+- Static files in both production servers (2026-11-04): full GET and HEAD carry Content-Length and a SHA-256 strong ETag;
+  a byte range carries the same identity validator and an exact Content-Range and Content-Length. If-Range accepts
+  only an exact strong identity ETag; weak, stale, encoded and date validators get the full response. Conditional
+  If-None-Match is evaluated before Range. Precompressed siblings have their own content validator and length.
+  Rust omits Content-Length on 304, for both static HTML and assets, rather than declaring an empty representation.
+  Hashing uses a 64 KiB buffer and a 256-entry metadata cache, with a 30-second cold-hash deadline. Node reads
+  asynchronously, coalesces identical hashes and admits at most eight cold hashes with no queue; saturation answers
+  503. Rust hashes in its existing connection worker. Only the negotiated representation is hashed. Stat, hashing
+  and streaming keep one descriptor, so an atomic replacement cannot combine old headers with new bytes.
+  Transmission uses backpressure and closes on client disconnect. No throughput improvement is claimed.
+- Streaming playlists/manifests (`.m3u8`, `.m3u`, `.mpd`, case insensitive) keep their original public paths in both
+  HTML/CSS and script references, so relative segments, encryption keys and nested playlists remain resolvable.
+  Segments retain their original public path and may also have an immutable copy. The Node and Rust MIME tables
+  cover HLS playlists, fragmented MP4 segments, DASH manifests, MPEG transport streams and WebVTT captions.
+  Both production servers revalidate these unhashed manifests (`no-cache`) instead of retaining a stale playlist.
 - `/_b/*` (content-hashed JS, CSS, fonts, images): `public, max-age=31536000, immutable`.
-- Assets in `public/` that HTML or CSS reference are copied into `/_b/` with a hash and their references rewritten,
-  so they become immutable too. Unreferenced `public/` files: `no-cache` with an ETag (always revalidated, never stale).
+- Relocatable assets in `public/` that HTML or CSS reference are copied into `/_b/` with a hash and their references
+  rewritten, so they become immutable too. Static-host rules revalidate unhashed public files; Node revalidates
+  streaming manifests and uses `public, max-age=3600` for other public assets.
 - HTML: `no-cache` plus a strong `ETag` (the build's content hash) → a repeat visit gets `304` with no body. No
   `no-store` on public pages (it disables bfcache, §19). Anonymous SSR HTML: `no-cache` and a weak ETag of the
   rendered body. SSR HTML rendered with a session cookie (valid or stale): `private, no-store` and no ETag, so Back
@@ -1418,6 +1659,20 @@ impossible while developing.
   has it, then Brotli q5, then gzip; ≥ 1 KiB, never `HEAD`/204/304/`no-transform`; streamed SSR flushes per chunk.
   `compress: false` / `BRAIN_COMPRESS=off` turns it off (docs/PERFORMANCE.md, 2026-10-31).
 
+Document selection and aliases (2026-11-05): generated host headers include URL-encoded physical document aliases,
+including internal error pages. Rust static fallback selects document headers from the actual file, with legacy
+canonical rules accepted only when they resolve to that same file; missing assets served as HTML errors do not
+inherit immutable asset caching. Literal encoded stars remain exact patterns, not wildcard policy grants. Node
+recognizes `.brain` documents and `.jsbrain`/`.cssbrain` assets alongside ordinary extensions, including Markdown
+canonical lookup. Decoded error aliases keep their HTTP status. Production host error routing still requires the
+host configuration described in the deployment guide.
+
+Nonce metadata and cache updates: Node HTML HEAD and 304 omit a newly generated CSP nonce policy while retaining
+stable ETag, opener and cache metadata. RFC 9111 sections 4.3.5 and 3.2 allow a matching HEAD to update a stored GET's
+headers without replacing its body; sending a new nonce would deny that body's scripts after later revalidation.
+The regression models those cache update rules against real GET/HEAD/304 responses; it does not claim a measured
+failure in a particular browser or CDN. GET responses retain fresh per-response script nonces.
+
 **2. Service worker** (RUNTIME writes `runtime/sw/brain-sw.js`; TOOLCHAIN emits `dist/sw.js` with the build manifest)
 - Precache on install: the runtime core, the app shell, every route's entry chunk and CSS, up to `precacheKB`
   (default 2048 KB); the rest is cached on first use. At most 4 downloads run at once (a burst of hundreds tripped
@@ -1426,6 +1681,9 @@ impossible while developing.
 - Strategies: `/_b/*` cache-first (immutable) · page navigations network-first with a 3 s timeout, then the cached
   page, then the offline page (`views/_offline.brain` if present, else a minimal built-in one) · unhashed `public/`
   assets stale-while-revalidate · `/_r/`, non-GET requests and other origins are never touched.
+- Byte-range requests and streaming manifests (`.m3u8`, `.m3u`, `.mpd`, case insensitive) bypass every service-worker
+  cache strategy (2026-11-04), including explicit data routes. The network handles validators and ranges; a cached
+  complete response cannot satisfy a partial request, and a live playlist must not trail one revalidation behind.
 - Navigation Preload is enabled, so the network request starts while the worker boots.
 - Updates: the worker file carries the build hash and is served with `no-cache`. A new worker activates at once
   (`skipWaiting` + `clients.claim`; safe because assets are hashed and HTML is network-first) and keeps the previous
@@ -1471,8 +1729,8 @@ different signature so nothing old stays cached by mistake")
   (`brain-<sig>`), `/_health` (`{"ok":true,"build":"<sig>"}`) and `brain status`. An agent checks a deploy by
   comparing the signature `brain build` printed with the one `/_health` returns.
 - Nothing can stay stale:
-  - HTML, `sw.js` and unhashed `public/` files are `no-cache` (revalidated on every request); everything else is
-    content-hashed, so a changed file has a new URL.
+  - HTML, `sw.js` and streaming manifests are revalidated on every request; static-host rules also revalidate other
+    unhashed public files (Node retains those for up to one hour). Content-hashed files get a new URL when changed.
   - The registration uses `updateViaCache: 'none'`, so the browser never serves `sw.js` or its imports from the HTTP
     cache; the page also calls `registration.update()` on every full load.
   - A new service worker deletes every cache except its own and the previous build's (kept one generation only for
@@ -1590,6 +1848,9 @@ language is one command.
   `fmt.number(n)`, `fmt.money(n, 'USD')` and `fmt.relative(d)` over `Intl` for the current locale; `locale()` returns
   it. Text written straight into markup is allowed in single-language sites; with 2+ locales it is B1403 (warning,
   with an edit that moves the text to a new key in every locale file).
+- Literal builtin `t('key')` calls without placeholder arguments evaluate at component creation without a retained
+  translation effect. Locale switches remain full document loads; reactive placeholders and local helpers still
+  track. Do not hoist runtime dictionary reads to module initialization across SSR/prerender locale jobs.
 - **One language** (2026-10-31): `i18n` with one locale has no prefixes; `brain run` loads its dictionary, sets `lang` and passes it to `load()` and form posts, as `brain build` already did, so `form.*` keys apply in both.
 - **Internal links keep the language** (2026-10-31): a page outside the default language has its `<a href>` and `<form action>` that name a page of the app rewritten to that language (`/about` → `/es/about`, or its `<meta route>`): `LocaleLinks` in brain-pack on the written HTML, `route.hrefs` in server.mjs on rendered bodies and on `redirect()`, and `brain-links.js` (loaded only by interactive pages of those languages, ~610 B gz) on what views mount, and on `go()`/`navigate()` through `__brainHref`. `hreflang` opts a link out, which is how `<LangSwitch>` works. Files, other origins and paths with no page stay. The default language and single-language apps ship nothing. `brain run` covers mounted links and navigation but not translated routes, nor the HTML before scripts run.
 - **What B1403 moves** (2026-10-31): text nodes; a sentence with interpolations as one message with placeholders
@@ -1598,7 +1859,9 @@ language is one command.
   `help`, `hint`, `caption`, `heading`, `message`, `empty`, and `value` on submit/button/reset inputs);
   `<meta seo title/description>` (`<scope>.meta_title`, `<scope>.meta_description`); string literals in markup
   expressions (both branches of `a ? 'x' : 'y'`, the right side of `||`/`??`, `+` concatenations, untagged
-  templates); on the client, `<script>` literals a person reads: the value of a variable markup only displays when it
+  templates). Numeric or unknown `+` subexpressions stay whole placeholders (`i + 1 + ' of ' + n` keeps
+  `i + 1` as one value); parentheses around string literals do not prevent extraction. On the client,
+  `<script>` literals a person reads: the value of a variable markup only displays when it
   reads as prose (a space or a capital), messages of `alert`, `confirm`, `prompt`, `toast.send` and what is assigned to
   `.textContent`, `.innerText`, `.title`, `.placeholder`, `.alt`. A variable the code also reads stays: `t()` would change what
   it compares or sends. Not moved: `app.brain` (static shell, B0132: put translatable chrome in `views/_layout.brain`),
@@ -1612,6 +1875,14 @@ language is one command.
   whole standard (flat JSON, `{var}` placeholders, `one/other/...` plural objects named after `Intl.PluralRules`
   categories), small enough to implement in the compiler and runtime by hand, and the compiler understands it: it
   reads the locale files, checks every `t()` key and placeholder at build time, and resolves static keys itself.
+- Localized link identity (2026-11-05): build/browser/Node look up translated source routes with trailing slashes
+  removed, then preserve a requested slash, query and fragment. A full current-locale prefix segment is already
+  localized even when a dynamic route regex matches it. Root-relative canonical overrides use the same translation
+  table in build and normal/streamed SSR; SSR retains the app base once. Absolute canonical overrides stay explicit.
+- Build-time load context (2026-11-05): the prerender runner installs the job's route, locale, alternates and
+  dictionary before importing its server module or executing load. Existing locale()/t() APIs see that job's
+  language even after awaits and alternating-language jobs; subsequent component rendering shares the context.
+  This does not add a new paths(locale) contract or promise locale-dependent module-level constants are reevaluated.
 - **Only the selected language is loaded; everything else on demand** (Chris 2026-10-13):
   - Prerendered and SSR pages already contain their text in the page's language (static `t('key')` calls are
     resolved at build, so no dictionary is shipped for them).
@@ -1990,6 +2261,15 @@ message payloads, SQL values and credentials are excluded. Public responses cont
 
 
 ## 46. Native evidence, helpers and emitted byte accounting (2026-10-30)
+List/text helpers (2026-11-04): scope maps `range` to `brain-list.js` and `text` to `brain-text.js`, admitted by the
+pure-server import path too. Both stay outside the core. Numeric iteration is half-open, safe-integer and bounded to
+10000 outputs; classic numeric loop syntax is still rejected. OSA distance reuses three bounded typed rows, scans
+only the cutoff band and exits when the row minimum exceeds the cutoff; full-matrix oracle tests cover recycling,
+cutoffs and transpositions. Folding uses platform NFD plus the stated combining-mark range. Fuzzy matching validates
+all candidates, caps aggregate candidate text at 1048576 UTF-16 units, reads a fixed number of array indices rather
+than an overridable iterator, preserves original values/order and derives its cutoff from folded needle length. No persistent
+cache, DOM dependency or locale state is introduced.
+
 
 Native type inference (`brain-check::infer`) consumes literal named schemas through `Ctx.type_shapes`. B2001–B2004
 ship as warnings: proven prop, field, API-body and form/binding inconsistencies. Unknown mutation, alias and dynamic
@@ -2045,11 +2325,20 @@ Bearer credentials are deliberately excluded to match `ctx.user`. Mutations requ
 retry. The response budget is a stricter 2 MiB, independent from media's 20 MiB proxy allowance. Repositories retained
 after their response ends reject further calls. Server-only service/repository modules receive `ctx` explicitly.
 `runtime/test/server-native-resource.test.js` checks actual loopback transport, CRUD, bounds and redacted failures.
+Native OAuth redirect relay (2026-11-05): only GET/HEAD on /_brain/auth/linkedin/start with backend303 and the
+exact https://www.linkedin.com/oauth/v2/authorization origin/path may pass configuredExternal to the final sender.
+Credentials, fragments, raw controls/whitespace/backslashes, other ports/endpoints/methods/statuses stay rejected.
+The native backend still owns configured client/redirect URI, one-use state, nonce and callback verification.
+Google/Apple challenge/token endpoints and the generic OIDC verifier add no external redirect exception.
+
 `nativeAuthBridge.backend(req,res,rid)` builds the frozen `ctx.backend` object for SSR, RPC and the sidecar alike. List
 options map 1:1 to the HTTP query string (`field[op]=value`, `sort`, `cursor`/`after`, `include`, `aggregate`,
 `count`); only unrepresentable shapes fail locally, so the backend stays the single validator. A 422 keeps the
 backend's string field messages as `error.errors` (bounded to 64 entries); other failures stay generic.
 `runtime/test/server-native-queries.test.js` covers the mapping, PATCH and slug redirects.
+Slug access validation (2026-11-04) admits role-restricted writes as well as readonly/public fields. These write grants
+do not hide the slug from readers; private, write-only and visibility-restricted slugs remain invalid. B0794's
+explicit-writer fix therefore applies to unique slug fields without contradicting contract validation.
 Job handlers get an equivalent client from `crates/brain-cli/src/templates/job-runner.mjs` (`jobBackend(env)`): same
 mapping and budgets, but it authenticates with `X-API-Key: BRAIN_JOBS_API_KEY` (no cookies, no `Origin`), refuses a
 non-loopback `BRAIN_BACKEND_URL`, deletes the key from `ctx.env`, and maps network failure or timeout (10 s) to 503.
@@ -2061,7 +2350,8 @@ Search language and weights (`search_config.rs`, migration 0015) travel as trigg
 old default weights, so resources without settings keep byte-identical `tgargs` and the drift check does not fire.
 `migrate` compares the previous `tgargs` and, when they changed, rewrites rows with `UPDATE ... SET data=data` (the
 trigger reindexes; `updated_at` is set by application code, not a trigger). Query paths use `regconfig(r)` in
-`websearch_to_tsquery`. pg_trgm remains required.
+`websearch_to_tsquery`. Before typo fallback, an `EXISTS` probe applies the same authorization and declared filters
+as the page and stops at its first match; the separate exact total is computed only when requested. pg_trgm remains required.
 
 The same bridge exposes `ctx.backend.login(credentials)` for same-origin POST server functions. It calls only the
 fixed native password endpoint, validates native cookie attributes, returns a sanitized user and relays cookies
@@ -2326,7 +2616,7 @@ Opt-outs: brain.json `"speculation": false`, and `data-prefetch="false"` on a li
 ## 55. Accounts generator and catalog (2026-10-31)
 
 `auth_setup.rs` writes the accounts path for `brain add auth` and `brain new --backend` and never overwrites a file.
-`backend::start_for_dev` owns the child of `brain run --backend`: it refuses a port that already answers (B0763), waits
+`backend::start_for_dev` owns the child of `brain run --backend` (startup-deadline cleanup also kills and waits, 2026-11-04): it refuses a port that already answers (B0763), waits
 for `/health/ready` instead of a TCP connect, sets the child's `PUBLIC_SITE_URL` when the dev port differs from the
 declared site, and the printed page URL follows the origin the backend accepts. `build.rs` embeds the closure of
 documents cited by SPEC, guides and manifests, plus `docs/backend/*.md`, and `brain guide docs/<path>` serves them; a
@@ -2349,9 +2639,19 @@ spends it. The operator key is compared by digest and is deliberately missing fr
 
 ## 57. Data maintenance, retired references and per-owner limits (2026-11-01)
 
+Default repair (2026-11-04): `brain-backend::defaults` and `brain data defaults` preview absent/null key counts for
+non-null declared defaults. `--apply` updates at most 1000 rows per field (explicit limit 1..10000), never overwrites
+non-null values, and includes nulls only with `--include-null`. A shared migration advisory lock plus an in-transaction
+recorded-contract recheck protects the source schema; one transaction makes selected-field updates atomic. Keyset
+selection uses `FOR UPDATE SKIP LOCKED`; counts after each field report remaining work, without an implicit retry loop.
+Lock/SQL/total deadlines are 2s/30s/60s. Values are parameter-bound and omitted from reports. Exact-type integration
+covers historical missing keys, explicit-null opt-in, false defaults, batch limits, idempotence and unique-failure
+rollback. The CLI validates option bounds before selecting a database. Contracts also reject defaults incompatible with a field's
+pattern, including text, list elements and object keys; this protects existing migration backfills as well as repair.
+
 `crates/brain-backend/src/maintenance.rs` is `brain data prepare|maintain`: `CREATE STATISTICS` over the expressions of declared filters (`query::statistics_expressions`, named `_brain_st_`, retired when they change), `SET COMPRESSION lz4` plus a keyset rewrite of `pglz` rows under `session_replication_role=replica`, `VACUUM (ANALYZE)`, a warm-up and an `EXPLAIN (ANALYZE,BUFFERS)` gate on the newest page. The gate selects `octet_length(data::text)`, because `SELECT data` alone never opens TOAST and would measure nothing.
 
-An approved contract change runs `relations::retire`: keys not in the contract go (a changed action or target used to leave the old key next to the new one), and so do `ref_*` columns, with their index and the sync trigger, which `install` rebuilds. Values stay in `data`. `install_indexes` drops `_brain_ix_*` indexes of removed filters and sorts on every migrate: they are derived and every write pays for them.
+An approved contract change runs `relations::retire`: keys not in the contract go (a changed action or target used to leave the old key next to the new one), and so do `ref_*` columns, with their index and the sync trigger, which `install` rebuilds. Unchanged recorded contracts run the same retirement during explicit migration, repairing mirrors left by older releases; pending unapproved contract changes remain untouched. Values stay in `data`. `install_indexes` drops `_brain_ix_*` indexes of removed filters and sorts on every migrate: they are derived and every write pays for them.
 
 Lists never open the stored document to filter, sort, count, facet or aggregate (2026-11-02, a 5,700-row jobs table read 46,000 to 75,000 TOAST buffers per home page call): `query.rs` reads `query_keys`, a stored generated copy of `data` (`public._brain_query_keys_v1`) with every string cut at `TEXT_KEY` and lists and objects whole, kept in the row with `STORAGE MAIN` so a wide row moves `data` and the search columns out of line first. `install_keys` adds it under the migration lock, which rewrites the table once with no statement timeout; `db::verify` refuses to serve a database without it (`BDB_SCHEMA_DRIFT`). Equality on a value as long as the key still rechecks `data`, and text facets and `ne` read the whole text when it is longer than the key. Indexes hash the expression, so the migrate that adds the copy replaces every `_brain_ix_*` index. The wider heap can change plans: in `data_queries`, a rare typo is now answered from the trigram index instead of a sequential scan.
 

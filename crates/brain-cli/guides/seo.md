@@ -29,10 +29,10 @@ page text, not after.
   `"authors": { "Ada Lovelace": { "url": "https://…", "sameAs": ["https://www.linkedin.com/in/…"] } }` (B1833).
   The site's own profiles: `"organization": { "name", "logo", "sameAs": [...] }` and `"social": { "x": "@acme", … }`.
 - **Freshness:** show the date in the text `<time datetime="2026-10-01">October 1, 2026</time>`; collections set
-  `date:` and `updated:` in the frontmatter (→ `dateModified`, B1832); views set `<meta seo lastmod="2026-10-13">`.
+  `date:`/`updated:` frontmatter (→ `dateModified`, B1832); view `lastmod="2026-10-13"` or `lastmod={props.updated}` reaches its prerender sitemap URL.
 - **Depth:** no word count is required (B1808 only points at near-empty pages); internal links in and out (B1812 no links out, B1813 orphan page).
   A link to a page the build does not produce fails `brain build` (B1819).
-
+  An absolute HTTP(S) anchor to another site sharing the origin may use `rel="external"`: native navigation, no prefetch. Relative links/assets stay checked; external destinations are not verified.
 ## 3. Declare the page
 ```html
 <meta seo title="Split a bill offline" keyword="split a bill offline" canonical="/split-a-bill-offline" schema="Article"

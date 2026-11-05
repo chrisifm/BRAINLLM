@@ -33,6 +33,7 @@ pub struct Output {
     pub server_js: String,
     /// Names of the `server:` functions, reachable as `POST /_r/<hash>/<name>`.
     pub server_fns: Vec<String>,
+    pub server: brain_lex::ServerMetadata,
     /// Per-block hashes of the compiled source (INTERNALS §28): compare with [`blocks::change`].
     pub blocks: blocks::Blocks,
     /// Source Map v3 (JSON) from `js` lines to `.brain` lines (§18). In dev it is also inlined in `js`.
@@ -185,11 +186,11 @@ fn compile_once(c: &Component, opts: &Options, ctx: &brain_check::Ctx, deps: Vec
     // §22: built-in `<Img>` becomes `<img>` with decoding/loading/fetchpriority set by the compiler.
     let lowered = img::lowered(c);
     let gc = lowered.as_ref().unwrap_or(c);
-    let (js, css, server_js, server_fns, i18n_keys) = generate(gc, opts, &server_srcs, inline, title_template).map_err(|diagnostic| vec![diagnostic])?;
+    let (js, css, server_js, server_fns, i18n_keys, server) = generate(gc, opts, &server_srcs, inline, title_template).map_err(|diagnostic| vec![diagnostic])?;
     let blocks = blocks::blocks(&c.src, Path::new(&c.file));
     let (js, map) = srcmap::finish(&js, &c.file, &c.src, opts.dev && !js.is_empty()).map_err(|diagnostic| vec![diagnostic])?;
     let (server_js, _) = srcmap::finish(&server_js, &c.file, &c.src, opts.dev && !server_js.is_empty()).map_err(|diagnostic| vec![diagnostic])?;
-    Ok(Output { js, css, deps, warnings: diags, names: names(c), server_js, server_fns, blocks, map, i18n_keys })
+    Ok(Output { js, css, deps, warnings: diags, names: names(c), server_js, server_fns, server, blocks, map, i18n_keys })
 }
 
 /// Collects [`Names`] from the style, the markup and the script.
@@ -575,6 +576,12 @@ fn collect_ids(nodes: &[Node], out: &mut HashSet<String>, dyn_ids: &mut bool) {
                     {
                         out.insert(t.clone());
                     }
+                    if a.kind == AttrKind::Plain && a.name == "id"
+                        && let AttrValue::Expr(x) = &a.value
+                        && let Expr::Str { value, .. } = x.unparen()
+                    {
+                        out.insert(value.clone());
+                    }
                     // #308: `id={'faq-' + it.id}` / `id="faq-{it.id}"` needs the per-instance suffix too.
                     if a.kind == AttrKind::Plain
                         && a.name == "id"
@@ -928,7 +935,7 @@ fn auto_imports(code: &str, declared: &HashSet<String>, ui: &BTreeSet<String>, o
     };
     let mut by_mod: Vec<(&str, Vec<&str>)> = Vec::new();
     for (name, module) in scope::EXT_PRIMITIVES {
-        if pure_server && !matches!(*module,"brain-time.js"|"brain-hash.js"|"brain-outbound.js") {continue;}
+        if pure_server && !matches!(*module,"brain-time.js"|"brain-hash.js"|"brain-outbound.js"|"brain-list.js"|"brain-text.js") {continue;}
         if declared.contains(*name) || !used(name) || (matches!(*name, "t" | "locale") && !i18n) || (scope::PRIMITIVES.contains(name) && !author.contains(*name))
             // Emitted by the codegen as calls only; the word in template text is not a use.
             || (matches!(*name, "dyn" | "portal" | "transition" | "lazy" | "fc" | "nx") && !code.contains(&format!("{name}("))) {
@@ -1202,7 +1209,7 @@ fn head_html(g: &mut Gen, nodes: &[Node]) -> String {
     format!("(($esc) => `{}`)((v) => String(v ?? \"\").replace(/[&<>\"]/g, (c) => \"&#\" + c.charCodeAt(0) + \";\"))", s.trim())
 }
 
-fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline: HashMap<String, inline::Inline>, title_template: Option<String>) -> Result<(String, String, String, Vec<String>, Vec<String>), Diag> {
+fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline: HashMap<String, inline::Inline>, title_template: Option<String>) -> Result<(String, String, String, Vec<String>, Vec<String>, brain_lex::ServerMetadata), Diag> {
     let mut top = scope::top_bindings(c);
     let (folded, folded_fx) = if opts.dev || c.kind != FileKind::Component { (HashSet::new(), HashSet::new()) } else { fold_plan(c) };
     for n in &folded {
@@ -1289,16 +1296,24 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
             f.find("channels/").filter(|_| c.kind == FileKind::Module).map(|i| f[i..].to_string())
         },
     };
+    let mut server = brain_lex::ServerMetadata {
+        load: c.script.iter().any(|s| brain_check::exports_fn(s, "load")),
+        paths: c.script.iter().any(|s| brain_check::exports_fn(s, "paths")),
+        sitemap: c.script.iter().any(|s| brain_check::exports_fn(s, "sitemap")),
+        forms: false, rpc: Vec::new(),
+    };
     if g.module {
         g.server_code = c.meta.iter().any(|m| m.name == "server");
         let js = generate_module(&mut g, c, opts);
         if c.meta.iter().any(|m| m.name == "server") {
-            return Ok((String::new(), String::new(), js, Vec::new(), g.i18n_keys.into_iter().collect()));
+            return Ok((String::new(), String::new(), js, Vec::new(), g.i18n_keys.into_iter().collect(), server));
         }
-        return Ok((js, String::new(), String::new(), Vec::new(), g.i18n_keys.into_iter().collect()));
+        return Ok((js, String::new(), String::new(), Vec::new(), g.i18n_keys.into_iter().collect(), brain_lex::ServerMetadata::default()));
     }
     g.server_code = true;
     let (server_js, server_fns) = generate_server(&mut g, c, opts);
+    server.forms = !server_forms(c).is_empty();
+    server.rpc = server_fns.iter().map(|name| format!("{}/{name}", g.hash)).collect();
     g.server_code = false;
     // Private server checkpoints are imported by server_js itself, never leaked into the browser module.
     g.budget_used.clear();
@@ -1517,7 +1532,7 @@ fn generate(c: &Component, opts: &Options, server_srcs: &HashSet<String>, inline
         }
         js.push_str(&format!("define({}, {name}, {});\n", js_str(&tag), js_str(&plain)));
     }
-    Ok((js, css, server_js, server_fns, g.i18n_keys.into_iter().collect()))
+    Ok((js, css, server_js, server_fns, g.i18n_keys.into_iter().collect(), server))
 }
 
 /// Scoped CSS of a component: its `<style>` with mixins expanded, inside `@layer <level>` and `@scope` by `hash`.

@@ -518,7 +518,7 @@ fn dev_options(root: &Temp, env: Option<crate::EnvLoader>) -> crate::Options {
 fn compile_loader(code: &str) -> crate::CompileFn {
     let code = code.to_owned();
     Arc::new(move |_, _| {
-        Ok(crate::Compiled {
+        Ok(crate::Compiled { server: brain_lex::ServerMetadata { load: true, ..Default::default() },
             js: "export default function(){}".into(),
             css: String::new(),
             deps: vec![],

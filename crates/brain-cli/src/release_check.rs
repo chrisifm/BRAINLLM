@@ -29,8 +29,8 @@ fn secrets(root: &Path, env: &str) -> Step {
     Step { name: "secrets", ok: detail.is_empty(), detail }
 }
 
-/// Built here, for this environment: `brain doctor` also writes `dist/`, so a `dist/` found on disk proves nothing about
-/// which environment it holds. A warning about the files does not hold a release back.
+/// Built here, for this environment: doctor validates isolated output; an existing dist/ proves nothing about
+/// which environment it holds. This explicit deployment build remains mandatory.
 fn built_output(root: &Path, env: &str) -> Step {
     let mut step = command("build", root, &["build", "--env", env, "--progress=off"]);
     if step.ok {

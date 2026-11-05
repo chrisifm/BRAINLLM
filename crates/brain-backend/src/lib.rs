@@ -20,6 +20,7 @@ pub mod contract;
 pub mod contract_review;
 pub mod credits;
 pub mod db;
+pub mod defaults;
 pub mod dev_trace;
 pub mod domain;
 pub mod schedules;

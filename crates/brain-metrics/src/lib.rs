@@ -257,9 +257,12 @@ mod tests {
     use super::*;
 
     fn spin(ms: u64) {
-        let t = Instant::now();
+        let started = thread_cpu_ns();
+        let deadline = Instant::now() + std::time::Duration::from_secs(10);
         let mut x = 0u64;
-        while t.elapsed().as_millis() < ms as u128 {
+        // Descheduled workers consume wall time, not CPU. Exercise the same clock the accounting measures.
+        while thread_cpu_ns().saturating_sub(started) < ms.saturating_mul(1_000_000) {
+            assert!(Instant::now() < deadline, "thread CPU clock did not advance within the workload deadline");
             x = std::hint::black_box(x.wrapping_add(1));
         }
     }

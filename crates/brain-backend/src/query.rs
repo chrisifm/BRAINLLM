@@ -1361,10 +1361,15 @@ impl Ctx<'_> {
         q.push_bind(text.to_string()).push(")))=0");
         q.build_query_scalar().fetch_one(&mut **tx).await
     }
-    async fn count(&self, tx: &mut sqlx::Transaction<'_, Postgres>) -> Result<i64, sqlx::Error> {
-        let mut q = QueryBuilder::<Postgres>::new(format!("SELECT count(*) FROM _brain_res_{} t WHERE ", self.r.name));
-        self.push_counted(&mut q);
-        q.build_query_scalar().fetch_one(&mut **tx).await
+    /// Typo fallback needs only existence, under the same authorization and filters as the eventual page and total.
+    fn match_probe(&self) -> QueryBuilder<Postgres> {
+        let mut q = QueryBuilder::<Postgres>::new(format!("SELECT EXISTS(SELECT 1 FROM _brain_res_{} t WHERE ", self.r.name));
+        self.push_where(&mut q);
+        q.push(")");
+        q
+    }
+    async fn has_matches(&self, tx: &mut sqlx::Transaction<'_, Postgres>) -> Result<bool, sqlx::Error> {
+        self.match_probe().build_query_scalar().fetch_one(&mut **tx).await
     }
     /// Typo candidates within [`FUZZY_BUDGET`]; `None` when the budget ran out, which leaves the transaction usable.
     async fn fuzzy(&self, tx: &mut sqlx::Transaction<'_, Postgres>, text: &str) -> Result<Option<Vec<Uuid>>, sqlx::Error> {
@@ -1413,7 +1418,7 @@ async fn resolve_search(tx: &mut sqlx::Transaction<'_, Postgres>, ctx: &mut Ctx<
         return Ok((false, false));
     }
     ctx.matches = Matches::FullText;
-    if ctx.count(tx).await.map_err(in_branch("search.full_text"))? > 0 {
+    if ctx.has_matches(tx).await.map_err(in_branch("search.full_text"))? {
         return Ok((false, false));
     }
     // pg_trgm extracts nothing from punctuation: the scan could only find no rows.
@@ -1837,6 +1842,58 @@ pub fn openapi_parameters(r: &Resource) -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    #[ignore = "requires scripts/backend-check.mjs disposable Postgres"]
+    async fn full_text_probe_stops_at_one_visible_filtered_match() {
+        use sqlx::ConnectOptions;
+        let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Owned disposable Postgres harness required");
+        let options = url.parse::<sqlx::postgres::PgConnectOptions>().unwrap().disable_statement_logging();
+        let pool = sqlx::postgres::PgPoolOptions::new().max_connections(1).connect_with(options).await.unwrap();
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::raw_sql("CREATE EXTENSION IF NOT EXISTS unaccent;
+            CREATE TEMP TABLE _brain_res_probe(owner uuid, query_keys jsonb, search_vector tsvector);
+            INSERT INTO _brain_res_probe SELECT '00000000-0000-0000-0000-000000000001'::uuid,
+                '{\"category\":\"visible\"}'::jsonb, to_tsvector('simple','needle') FROM generate_series(1,2048);
+            ANALYZE _brain_res_probe;").execute(&mut *tx).await.unwrap();
+        let r = Resource {
+            name: "probe".into(), search: vec!["title".into()], fields: Default::default(),
+            policy: Default::default(), hooks: Default::default(), constraints: Default::default(), query: Default::default(),
+        };
+        let resources = BTreeMap::from([(r.name.clone(), r.clone())]);
+        let scope = Scope::Owned { user: Uuid::from_u128(1), direct: true, paths: vec![] };
+        let request = ListRequest { search: "needle".into(), filters: vec![Filter {
+            via: None, field: "category".into(), kind: Kind::Text, op: "eq".into(),
+            values: vec![Operand::Value("visible".into())],
+        }], ..Default::default() };
+        let mut ctx = Ctx { r: &r, resources: &resources, scope: &scope, related: BTreeMap::new(),
+            req: &request, matches: Matches::FullText, owner: None, facet: None, read_once: false };
+        use sqlx::Execute;
+        let mut probe = ctx.match_probe();
+        let sql = format!("EXPLAIN (ANALYZE, FORMAT JSON) {}", probe.sql().as_str());
+        let mut query = probe.build();
+        let args = query.take_arguments().unwrap().unwrap();
+        // Prefix only the contract-built query; request values remain its original bound arguments.
+        let plan: Value = sqlx::query_scalar_with(sqlx::AssertSqlSafe(sql), args)
+            .fetch_one(&mut *tx).await.unwrap();
+        fn scanned_rows(plan: &Value) -> f64 {
+            let own = if plan["Node Type"].as_str().is_some_and(|kind| kind.ends_with("Scan")) {
+                plan["Actual Rows"].as_f64().expect("EXPLAIN scan row count")
+            } else { 0.0 };
+            own + plan["Plans"].as_array().map_or(0.0, |children| children.iter().map(scanned_rows).sum())
+        }
+        assert_eq!(scanned_rows(&plan[0]["Plan"]), 1.0, "the search decision must not count every match: {plan}");
+        assert!(ctx.has_matches(&mut tx).await.unwrap());
+        let hidden = Scope::Owned { user: Uuid::from_u128(2), direct: true, paths: vec![] };
+        ctx.scope = &hidden;
+        assert!(!ctx.has_matches(&mut tx).await.unwrap(), "another owner's full-text matches must not suppress typo fallback");
+        ctx.scope = &scope;
+        let mut filtered = request.clone();
+        filtered.filters[0].values = vec![Operand::Value("other".into())];
+        ctx.req = &filtered;
+        assert!(!ctx.has_matches(&mut tx).await.unwrap(), "the probe must retain declared filters");
+        tx.rollback().await.unwrap();
+        pool.close().await;
+    }
     #[test]
     fn a_short_text_value_is_compared_by_its_key_alone() {
         let filter = |value: String| Filter { via: None, field: "title".into(), kind: Kind::Text, op: "eq".into(), values: vec![Operand::Value(value)] };

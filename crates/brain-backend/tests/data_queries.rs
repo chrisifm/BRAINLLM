@@ -974,6 +974,21 @@ async fn an_approved_contract_retires_the_references_and_indexes_it_dropped() {
     assert_eq!(data["shop"], json!(gone), "the stored value is not touched");
     sqlx::query("UPDATE _brain_res_items SET data=data||'{\"label\":\"x\"}' WHERE id=$1").bind(item).execute(&pool).await.expect("writes do not need the retired column");
 
+    // Older migrations could leave mirrors after the recorded contract already stopped declaring the reference.
+    sqlx::query("ALTER TABLE _brain_res_items ADD COLUMN ref_legacy uuid REFERENCES _brain_res_shops(id)").execute(&pool).await.unwrap();
+    sqlx::query("UPDATE _brain_res_items SET ref_legacy=$1 WHERE id=$2").bind(kept).bind(item).execute(&pool).await.unwrap();
+    let before: Value = sqlx::query_scalar("SELECT data FROM _brain_res_items WHERE id=$1").bind(item).fetch_one(&pool).await.unwrap();
+    let legacy = || sqlx::query_scalar::<_, i64>("SELECT count(*) FROM information_schema.columns WHERE table_name='_brain_res_items' AND column_name='ref_legacy'").fetch_one(&pool);
+    let mut unapproved = items(None, json!({}));
+    unapproved.fields.insert("pending".into(), field("str", false));
+    let pending = db::migrate_approving_only(&pool, &[shops.clone(), unapproved], &[]).await.unwrap();
+    assert_eq!(pending, vec!["items"]);
+    assert_eq!(legacy().await.unwrap(), 1, "a pending unapproved resource must remain untouched");
+    db::migrate(&pool, &[shops.clone(), items(None, json!({}))]).await.unwrap();
+    assert_eq!(legacy().await.unwrap(), 0, "an unchanged approved contract must also retire a legacy reference mirror");
+    let after: Value = sqlx::query_scalar("SELECT data FROM _brain_res_items WHERE id=$1").bind(item).fetch_one(&pool).await.unwrap();
+    assert_eq!(before, after, "retiring a derived mirror must preserve the stored document");
+
     // Declaring it again backfills from the documents; a row whose target is gone refuses the migration cleanly.
     let refused = db::migrate_approving(&pool, &[shops.clone(), items(Some(shop.clone()), json!({}))], &["items".to_string()]).await.unwrap_err();
     assert!(refused.contains("reference missing"), "{refused}");

@@ -34,7 +34,7 @@ fn one_edit_changes_one_view() {
     let compile = move |src: &str, rel: &Path| -> Result<brain_pack::Unit, String> {
         let opts = brain_codegen::Options { dev: false, root: Some(r2.clone()), ..Default::default() };
         let o = brain_codegen::compile_with(src, rel, &opts).map_err(|d| format!("{}: {:?}", rel.display(), d.iter().map(|x| &x.msg).collect::<Vec<_>>()))?;
-        Ok(brain_pack::Unit { js: o.js, css: o.css, server_js: o.server_js, server_fns: o.server_fns })
+        Ok(brain_pack::Unit { js: o.js, css: o.css, server_js: o.server_js, server: o.server, server_fns: o.server_fns })
     };
     let input = brain_pack::Input {
         root: root.clone(),

@@ -360,7 +360,59 @@ pub fn send(root: &Path, cmd: &str) -> Result<String, String> {
     let _ = s.set_read_timeout(Some(Duration::from_secs(40)));
     let mut out = String::new();
     BufReader::new(s).read_line(&mut out).map_err(|e| e.to_string())?;
-    Ok(out.trim().to_string())
+    Ok(control_reply(root, cmd, out.trim()))
+}
+
+fn control_reply(root: &Path, cmd: &str, out: &str) -> String {
+    if cmd == "reload" && let Ok(mut reply) = serde_json::from_str::<serde_json::Value>(out)
+        && reply["ok"] == true && let Some(advice) = reload_freshness(root)
+    {
+        if reply.get("warnings").is_none() { reply["warnings"] = serde_json::json!([]); }
+        if let Some(warnings) = reply["warnings"].as_array_mut() { warnings.push(advice); }
+        return reply.to_string();
+    }
+    out.to_string()
+}
+
+/// Advisory timestamps, not an input-hash attestation. Reload never recompiles source.
+fn reload_freshness(root: &Path) -> Option<serde_json::Value> {
+    fn scan(root: &Path, output: bool, after: Option<SystemTime>) -> Result<Option<(SystemTime, String)>, ()> {
+        let mut pending = vec![(root.to_path_buf(), 0usize)];
+        let mut entries = 0usize;
+        let mut newest = None;
+        while let Some((directory, depth)) = pending.pop() {
+            if depth > 32 { return Err(()); }
+            let mut children = std::fs::read_dir(directory).map_err(|_| ())?.take(20_001usize.saturating_sub(entries)).collect::<Result<Vec<_>, _>>().map_err(|_| ())?;
+            children.sort_by_key(|entry| entry.file_name());
+            for entry in children {
+                entries += 1;
+                if entries > 20_000 { return Err(()); }
+                let path = entry.path();
+                let kind = entry.file_type().map_err(|_| ())?;
+                if kind.is_symlink() { continue; }
+                let name = entry.file_name(); let name = name.to_string_lossy();
+                if !output && (name.starts_with('.') || name == "node_modules" || depth == 0 && matches!(name.as_ref(), "dist" | "target" | "logs" | "docs" | "tests" | "test" | "bench" | "coverage")) { continue; }
+                if kind.is_dir() { pending.push((path, depth + 1)); continue; }
+                if !kind.is_file() { continue; }
+                let relative = path.strip_prefix(root).map_err(|_| ())?.to_string_lossy().replace('\\', "/");
+                let source = relative.starts_with("public/") || (!name.ends_with(".test.brain") && (
+                    matches!(path.extension().and_then(|value| value.to_str()), Some("brain" | "jsbrain" | "cssbrain" | "css" | "js" | "mjs" | "json"))
+                    || relative.starts_with("content/") && name.ends_with(".md")));
+                if !output && !source { continue; }
+                let modified = entry.metadata().and_then(|meta| meta.modified()).map_err(|_| ())?;
+                if after.is_some_and(|stamp| modified > stamp) { return Ok(Some((modified, relative))); }
+                if newest.as_ref().is_none_or(|(stamp, _)| modified > *stamp) { newest = Some((modified, relative)); }
+            }
+        }
+        Ok(if after.is_some() { None } else { newest })
+    }
+    let incomplete = || serde_json::json!({"code":"BUILD_FRESHNESS_INCOMPLETE","message":"Reload uses existing dist; the bounded timestamp scan could not verify source freshness.","fix":"Run brain build before brain reload; use brain run for source development."});
+    let stamp = match scan(&root.join("dist"), true, None) { Ok(Some((stamp, _))) => stamp, Ok(None) => return None, Err(()) => return Some(incomplete()) };
+    match scan(root, false, Some(stamp)) {
+        Ok(Some((_, source))) => Some(serde_json::json!({"code":"BUILD_SOURCES_NEWER","source":source,"message":"A source timestamp is newer than every output file. Reload only uses existing dist and does not compile these changes.","fix":"Run brain build, then brain reload; use brain run for source development. This timestamp advisory does not compare source hashes."})),
+        Ok(None) => None,
+        Err(()) => Some(incomplete()),
+    }
 }
 
 fn manifest_declares_sockets(dist: &Path) -> bool {
@@ -718,6 +770,43 @@ fn sd_quote(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reload_advises_on_newer_sources_without_building_or_changing_status() {
+        let root = std::env::temp_dir().join(format!("brain-reload-freshness-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("dist")).unwrap();
+        std::fs::create_dir_all(root.join("views/docs")).unwrap();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        let write_at = |relative: &str, time: u64| {
+            let path = root.join(relative);
+            std::fs::write(&path, "fixture").unwrap();
+            std::fs::File::open(path).unwrap().set_times(std::fs::FileTimes::new().set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(time))).unwrap();
+        };
+        write_at("dist/index.html", 200);
+        write_at("views/docs/index.brain", 100);
+        write_at("views/example.test.brain", 300);
+        write_at("docs/notes.md", 300);
+        assert!(reload_freshness(&root).is_none(), "test/documentation changes are outside production source");
+        write_at("views/docs/index.brain", 300);
+        let reply = control_reply(&root, "reload", r#"{"ok":true,"generation":2}"#);
+        let reply: serde_json::Value = serde_json::from_str(&reply).unwrap();
+        assert_eq!(reply["ok"], true);
+        assert_eq!(reply["generation"], 2);
+        assert_eq!(reply["warnings"][0]["code"], "BUILD_SOURCES_NEWER");
+        assert_eq!(reply["warnings"][0]["source"], "views/docs/index.brain");
+        assert_eq!(std::fs::read_to_string(root.join("dist/index.html")).unwrap(), "fixture");
+        for command in ["status", "stop"] {
+            assert_eq!(control_reply(&root, command, r#"{"ok":true}"#), r#"{"ok":true}"#);
+        }
+        assert_eq!(control_reply(&root, "reload", r#"{"ok":false}"#), r#"{"ok":false}"#);
+        write_at("dist/index.html", 400);
+        assert!(reload_freshness(&root).is_none());
+        let deep = root.join("public").join(std::iter::repeat_n("nested", 34).collect::<Vec<_>>().join("/"));
+        std::fs::create_dir_all(deep).unwrap();
+        assert_eq!(reload_freshness(&root).unwrap()["code"], "BUILD_FRESHNESS_INCOMPLETE");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     use super::*;
 
     #[test]

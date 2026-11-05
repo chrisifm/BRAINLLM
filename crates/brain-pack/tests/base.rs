@@ -32,7 +32,7 @@ fn every_url_lives_under_the_base() {
     let compile = move |src: &str, rel: &Path| -> Result<brain_pack::Unit, String> {
         let opts = brain_codegen::Options { dev: false, root: Some(r2.clone()), ..Default::default() };
         let o = brain_codegen::compile_with(src, rel, &opts).map_err(|d| format!("{}: {:?}", rel.display(), d.iter().map(|x| &x.msg).collect::<Vec<_>>()))?;
-        Ok(brain_pack::Unit { js: o.js, css: o.css, server_js: o.server_js, server_fns: o.server_fns })
+        Ok(brain_pack::Unit { js: o.js, css: o.css, server_js: o.server_js, server: o.server, server_fns: o.server_fns })
     };
     let input = brain_pack::Input {
         root: root.clone(),
@@ -43,7 +43,7 @@ fn every_url_lives_under_the_base() {
         minify: true,
         site: Some("https://x.dev".into()),
         shim: std::fs::read_to_string(rt.join("shim/dom.js")).ok(),
-        generator: String::new(),
+        generator: "BRAINLLM 0.1.0".into(),
         server_module: None,
         cache: brain_pack::cache::CacheCfg { sw_template: std::fs::read_to_string(rt.join("sw/brain-sw.js")).ok(), ..Default::default() },
         server_mjs: None,
@@ -55,6 +55,7 @@ fn every_url_lives_under_the_base() {
     assert!(!out.files.keys().chain(out.binary.keys()).any(|k| k.starts_with("app/")), "dist/ paths never carry the base");
     for page in ["index.html", "about/index.html"] {
         let html = &out.files[page];
+        assert_eq!(html.matches("<!-- by BRAINLLM https://chrisifm.github.io/BRAINLLM/ -->").count(), 1, "production attribution survives minification and base rewriting in {page}");
         assert!(html.contains("<meta name=\"brain-base\" content=\"/app/\">"), "{html}");
         // every root-relative URL in an attribute is under /app/
         for attr in ["href=\"", "src=\"", "action=\""] {

@@ -204,6 +204,47 @@ fn b1403_merges_text_and_interpolations_into_one_message() {
 }
 
 #[test]
+fn locale_extraction_preserves_numeric_addition_as_one_placeholder() {
+    let root=app("numeric-groups",&["en","es"],&[("i18n/en.json",EN),("i18n/es.json",ES)]);
+    let source=format!("{META}<script>let i = sig(0)\nlet n = sig(4)</script><main><p>{{i + 1}} of {{n}}</p><p>{{i + 1 + ' of ' + n}}</p><p title={{'Step ' + (i + 1)}}>Step preview</p><p>{{('Page ') + (i + 1)}}</p></main>");
+    let (view,dictionary)=extract(&root,"views/steps.brain",&source);
+    let parsed=parse_locale(&dictionary,"en","x");
+    let messages=parsed.entries.values().filter_map(|entry|entry.0.as_plain()).collect::<Vec<_>>();
+    assert!(messages.contains(&"{value} of {n}"),"{dictionary}");
+    assert!(messages.contains(&"Step {value}"),"{dictionary}");
+    assert!(messages.contains(&"Page {value}"),"{dictionary}");
+    assert!(!messages.iter().any(|message|message.contains("{i}{value}")),"numeric addition must not become string concatenation: {dictionary}");
+    assert_eq!(view.matches("value: i + 1").count(),2,"{view}");
+    assert!(view.contains("value: (i + 1)"),"{view}");
+    assert!(view.contains("t('steps.page', { value: (i + 1) })"),"{view}");
+}
+
+#[test]
+fn generated_literal_edits_require_the_exact_scoped_dictionary_entry() {
+    let root=app("known-generated",&["en","es"],&[("i18n/en.json",EN),("i18n/es.json",ES)]);
+    let source="<main><p>Hello world</p><p>Hello world</p></main>";
+    let component=brain_parse::parse(source,Path::new("views/sample.brain")).unwrap();
+    let locale=brain_check::i18n::load(&root).unwrap();
+    assert!(brain_check::known_literal_edits(&component,&locale).is_empty(),"duplicate text must not pretend an unregistered key exists");
+    std::fs::write(root.join("i18n/en.json"),r#"{"sample.hello_world":"Different words","sample.hello_world_2":"Hello world"}"#).unwrap();
+    let locale=brain_check::i18n::load(&root).unwrap();
+    let edits=brain_check::known_literal_edits(&component,&locale);
+    let rewritten=brain_parse::Diag::apply(source,&edits).unwrap();
+    assert_eq!(rewritten,"<main><p>{t('sample.hello_world_2')}</p><p>{t('sample.hello_world_2')}</p></main>");
+    assert_eq!(edits.len(),2);
+    let aliases=std::collections::BTreeMap::from([("Hello world".into(),"sample.hello_world_2".into())]);
+    std::fs::write(root.join("i18n/en.json"),r#"{"sample.hello_world_2":"Reviewed default-language wording"}"#).unwrap();
+    let translated=brain_check::i18n::load(&root).unwrap();
+    let stable=brain_check::known_literal_messages(&component,&translated,&aliases);
+    assert_eq!(stable.len(),2);
+    assert!(stable.iter().all(|message|message.1=="sample.hello_world_2"));
+    let stable_source=brain_parse::Diag::apply(source,&stable.into_iter().map(|message|message.0).collect::<Vec<_>>()).unwrap();
+    brain_parse::parse(&stable_source,Path::new("views/sample.brain")).unwrap();
+    let shadowed=brain_parse::parse(&format!("<script>function t() {{ return 'Local helper' }}</script>{source}"),Path::new("views/sample.brain")).unwrap();
+    assert!(brain_check::known_literal_edits(&shadowed,&locale).is_empty(),"generated calls must not bind a local t helper");
+}
+
+#[test]
 fn b1403_covers_attributes_meta_seo_and_literals_in_expressions() {
     let root = app("attrs", &["en", "es"], &[("i18n/en.json", EN), ("i18n/es.json", ES)]);
     let src = "<meta seo title=\"Latest posts\" description=\"Everything we wrote this year\" keyword=\"posts\">\n<script>\nlet copied = sig(false)\nlet open = sig(true)\nlet city = sig({ name: 'Lima' })\nlet name = sig('Ann')\n</script>\n<main class=\"page wide\">\n<input type=\"search\" name=\"q\" placeholder=\"Search posts\" aria-label=\"Search\">\n<img src=\"/a.png\" alt=\"Team photo\">\n<input type=\"submit\" value=\"Send message\"><input type=\"email\" value=\"hello there\">\n<a href=\"/about\" title=\"About {name}\">x</a>\n<button>{copied ? 'Copied' : 'Copy link'}</button>\n<p>{open ? 'Open now' : 'Closed today'}</p>\n<h2>{'Jobs in ' + city.name}</h2>\n<p>{name || 'Nobody yet'}</p>\n</main>";
