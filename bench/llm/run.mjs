@@ -46,7 +46,7 @@ mkdirSync(join(WORK, 'bin'), { recursive: true }); if (!existsSync(BRAIN)) copyF
 // --spec-file <path>: use that text instead of the served spec (ablation: measure what each section contributes).
 const SPEC_FILE = arg('spec-file', null)
 const SPEC = SPEC_FILE ? readFileSync(SPEC_FILE, 'utf8') : execFileSync(BRAIN, ['spec'], { encoding: 'utf8' })
-if (!SPEC.includes('## Reference component') || !SPEC.includes('## SEO')) { console.error(`ABORT: the served spec is truncated (${SPEC.length} B, missing "## SEO" or "## Reference component")`); process.exit(2) }
+if (!SPEC.includes('## Reference component') || !SPEC.includes('## SEO')) { console.error(`ABORT: the served spec is truncated (${Buffer.byteLength(SPEC, 'utf8')} B, missing "## SEO" or "## Reference component")`); process.exit(2) }
 const SPEC_SHA = execFileSync('shasum', ['-a', '256'], { input: SPEC, encoding: 'utf8' }).slice(0, 12)
 // Primitives that SPEC describes and the checker does not implement yet: a B0111/B0204 on them is a toolchain gap, not an LLM error.
 const AHEAD = /`(form|resource|api|provide|use|key|store|bus|sanitize|mount|click|type|expect|test|text|attr|hasClass|count)` is not declared|bind:value` needs the name of a `sig`|bind:value` only goes on HTML elements, not on components|`bind:api` does not exist/
