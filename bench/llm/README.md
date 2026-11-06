@@ -194,7 +194,7 @@ The explicit release gate passed against the accepted reference without changing
 | Published npm 0.8.12 reference | `92b1599bc6de` | `4df8ceaca9cc` | 20/20 |
 | Frozen 0.10.0 debug candidate | `69fb688f187d` | `f9b9717ceed3` | 20/20 |
 
-The candidate served 77,828 specification bytes with stable spec and scaffold token hashes (`f03e6c811f69`).
+The candidate served 78,089 UTF-8 specification bytes with stable spec and scaffold token hashes (`f03e6c811f69`).
 Local artifact: `results/codex-gpt-6.1-sol-medium-backlog-010-final-20261106.json`. The provider supplied no verified
 monetary charge. These results measure specification-only source generation; optional integrations, real HTTP,
 browser behavior, database concurrency, bounded shutdown and anonymous package installation have separate gates.
