@@ -25,7 +25,7 @@ test('MCP minimal advertises only core tools; backend generates and discovers on
       {method:'tools/call',params:{name:'brain_resource_add',arguments:{name:'posts',fields:'title:str! body:str'}}},
       {method:'tools/call',params:{name:'brain_backend_contract',arguments:{name:'posts'}}},
     ])
-    assert.deepEqual(backend.find(r=>r.id===1).result.tools.map(t=>t.name).sort(),['brain_agent_setup','brain_backend_capabilities','brain_backend_contract','brain_backend_logs','brain_check','brain_doctor','brain_fix','brain_job_add','brain_map','brain_resource_add','brain_spec','brain_test'])
+    assert.deepEqual(backend.find(r=>r.id===1).result.tools.map(t=>t.name).sort(),['brain_agent_setup','brain_backend_capabilities','brain_backend_conform','brain_backend_contract','brain_backend_logs','brain_check','brain_data_backfill','brain_db_audit','brain_doctor','brain_fix','brain_google_setup','brain_job_add','brain_map','brain_resource_add','brain_spec','brain_test','brain_vitals_report'])
     const created=backend.find(r=>r.id===2).result
     assert.notEqual(created.isError,true,JSON.stringify(created))
     assert.ok(existsSync(join(app,'server/resources/posts/schema.jsbrain')))
