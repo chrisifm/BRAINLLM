@@ -6,6 +6,10 @@ step inside ONE Postgres transaction: the result is committed only when every st
 validation, missing record, unique or check constraint) rolls back all the steps. No application code runs: steps are
 literal declarations checked when the app loads (`brain backend schema` fails with the file name and a fix).
 
+Typed inputs may use `id`, `owner`, `created_at`, `updated_at` or `search` as ordinary lowercase keys. For example,
+`input: { id: 'str!' }` can supply a step's `id: '$input.id'`. These input values do not alter the authenticated user
+or record metadata; the step still applies its resource policy and validates the target record identifier.
+
 ## Example: reserve stock and create an order
 
 Full app contracts: [`examples/shop/server`](examples/shop/server). The product action used by the first step

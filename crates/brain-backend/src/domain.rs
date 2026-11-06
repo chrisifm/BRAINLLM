@@ -257,6 +257,11 @@ impl Step {
     }
 }
 
+// Input values are not SQL columns: record metadata names are ordinary keys in this separate namespace.
+fn input_identifier(name: &str) -> bool {
+    crate::contract::identifier(name) || matches!(name, "id" | "owner" | "created_at" | "updated_at" | "search")
+}
+
 /// Field shapes such as `int!` used by action and operation inputs.
 pub fn shape_fields(shapes: &BTreeMap<String, String>) -> Result<BTreeMap<String, Field>, String> {
     if shapes.len() > 32 {
@@ -270,7 +275,7 @@ pub fn shape_fields(shapes: &BTreeMap<String, String>) -> Result<BTreeMap<String
                 required: shape.ends_with('!'),
                 ..Default::default()
             };
-            if !crate::contract::identifier(name) || field.ty().is_none() {
+            if !input_identifier(name) || field.ty().is_none() {
                 return Err(format!("invalid input `{name}: {shape}`; fix: use a declared field type such as int! or str"));
             }
             Ok((name.clone(), field))
@@ -308,7 +313,7 @@ fn reference(s: &str) -> Option<Result<Reference<'_>, String>> {
     }
     let bad = || Err(format!("invalid reference `{s}`; fix: use $input.<field>, $user.id, $now, $now+7d or $steps.<name>.<id|owner|data.field> ($$ escapes a literal $)"));
     Some(if let Some(field) = rest.strip_prefix("input.") {
-        if crate::contract::identifier(field) { Ok(Reference::Input(field)) } else { bad() }
+        if input_identifier(field) { Ok(Reference::Input(field)) } else { bad() }
     } else if let Some(field) = rest.strip_prefix("user.") {
         if matches!(field, "id" | "role" | "email") { Ok(Reference::User(field)) } else { bad() }
     } else if rest == "now" {
@@ -1611,6 +1616,38 @@ pub fn openapi(domain: &Domain, resources: &[Resource], api: &mut Value) {
         }
         let output = json!({"type":"object","required":["operation","result"],"properties":{"operation":{"const":name},"result":{"type":"object","additionalProperties":false,"required":result.keys().collect::<Vec<_>>(),"properties":result}}});
         paths.insert(format!("/_brain/operations/{name}"), json!({"post": post(format!("operation_{name}"), "Declared domain operation: every step runs in ONE Postgres transaction and any failure rolls all of them back.", input_schema(&op.input), output, json!({"x-brain-roles":op.roles,"x-brain-steps":op.steps}))}));
+    }
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+
+    #[test]
+    fn record_metadata_names_are_typed_input_values_and_references() {
+        let names = ["id", "owner", "created_at", "updated_at", "search"];
+        let shapes: BTreeMap<String, String> = names.iter().map(|name| ((*name).into(), "str!".into())).collect();
+        assert_eq!(shape_fields(&shapes).unwrap().len(), names.len());
+        let input: Map<String, Value> = names.iter().map(|name| ((*name).into(), json!(format!("{name}-value")))).collect();
+        assert_eq!(Engine::validate_input(&shapes, &Value::Object(input.clone()), "input").unwrap(), input);
+        let schema = input_schema(&shapes);
+        for name in names {
+            assert!(matches!(reference(&format!("$input.{name}")), Some(Ok(Reference::Input(found))) if found == name));
+            assert_eq!(schema["properties"][name]["type"], "string");
+            assert!(!crate::contract::identifier(name), "record metadata names remain reserved for resource fields");
+        }
+        assert!(Engine::validate_input(&shapes, &json!({}), "input").is_err());
+    }
+
+    #[test]
+    fn input_names_still_reject_prototype_paths_and_invalid_shapes() {
+        for name in ["constructor", "prototype", "__proto__", "x.y", "x-y", "1id", "ID"] {
+            assert!(shape_fields(&BTreeMap::from([(name.into(), "str!".into())])).is_err(), "{name}");
+            assert!(matches!(reference(&format!("$input.{name}")), Some(Err(_))), "{name}");
+        }
+        for shape in ["unknown!", "uuid-str!"] {
+            assert!(shape_fields(&BTreeMap::from([("id".into(), shape.into())])).is_err(), "{shape}");
+        }
     }
 }
 

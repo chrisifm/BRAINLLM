@@ -712,6 +712,10 @@ New families in addition to B00–B11:
 be turned off.
 
 ### 11.1 Server code and RPC (fixed 2026-10-13, COMPILER proposal approved)
+- Typed domain inputs (2026-11-05): domain::input_identifier separates input keys from resource column names.
+  id, owner, created_at, updated_at and search are ordinary typed values for actions, transitions and operations;
+  shape_fields and $input reference parsing share the same bounded admission. Resource identifiers, $user/$steps,
+  row ownership and bound SQL remain separate. Unknown fields, invalid types and prototype names still fail.
 - Native shutdown (2026-11-05): serve_full records one absolute ready-delay/drain deadline on the signal. It drops
   the owned HTTP future before cleanup and bounds socket, webhook worker and pool cleanup by that same deadline.
   db::close_until refuses to wait forever on checked-out connections. CLI-owned CommandRuntime allows at most one

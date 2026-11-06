@@ -1,0 +1,10 @@
+{
+  "id": "typed-input-keys",
+  "kind": "fix",
+  "title": "Typed input names have their own namespace",
+  "why": "Typed domain inputs incorrectly reused resource column name restrictions, rejecting ordinary values such as id and their input references. Input keys now remain separate from record metadata without changing resource policies or JavaScript prototype protections.",
+  "changelog": ["Typed action, transition and operation inputs accept record metadata names"],
+  "guide": "docs/backend/transactions.md",
+  "apis": ["brain backend schema", "brain check"],
+  "affects": ["server/resources/**", "server/operations/**"]
+}

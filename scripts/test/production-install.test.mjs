@@ -13,7 +13,7 @@ test('production npm ci retains the compiler for app and static starters', { tim
   const env = { ...process.env, NODE_ENV: 'production', BRAIN_NO_DELEGATE: '1', npm_config_cache: join(root, 'npm-cache'), npm_config_audit: 'false', npm_config_fund: 'false' }
   const run = (command, args, cwd) => {
     const output = spawnSync(command, args, { cwd, env, encoding: 'utf8', timeout: 30000, maxBuffer: 1024 * 1024 })
-    assert.equal(output.status, 0, `${command} ${args.join(' ')}: ${output.stderr || output.stdout}`)
+    assert.equal(output.status, 0, `${command} ${args.join(' ')}: ${output.stderr || output.stdout}; error=${output.error?.code ?? 'none'}; signal=${output.signal ?? 'none'}`)
     return output.stdout
   }
   try {

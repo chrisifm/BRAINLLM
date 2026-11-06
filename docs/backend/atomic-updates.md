@@ -36,6 +36,11 @@ Values may use `$input.<field>`, `$user.id|role|email`, `$now` and `$now±N{s,m,
 `set`, `increment` and `decrement`. The result is checked against types and `constraints.jsbrain`, so a decrement
 below a `min` answers 422 and never reaches the database.
 
+Typed input keys have their own namespace. `id`, `owner`, `created_at`, `updated_at` and `search` may be declared as
+inputs and read through `$input.<name>`, including transition inputs. Their values never replace record metadata;
+resource columns keep their reserved-name rules. Input names still require lowercase identifiers of at most 48
+characters and reject JavaScript prototype names. Undeclared inputs and invalid types answer 422.
+
 | Outcome | Status |
 |---|---|
 | guard not met on the current row | 409 `GUARD_FAILED`, e.g. `{"stock":"Must be >= 3"}`; nothing written |

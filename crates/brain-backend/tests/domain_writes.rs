@@ -44,6 +44,30 @@ fn shop_domain() -> Domain {
     serde_json::from_value(domain).unwrap()
 }
 
+fn metadata_input_domain() -> Domain {
+    let mut value = serde_json::to_value(shop_domain()).unwrap();
+    value["resources"]["shop_products"]["actions"]["rename_from_input"] = json!({"roles":["admin"],"input":{"id":"str!"},"set":{"name":"$input.id"}});
+    value["resources"]["shop_orders"]["transitions"]["transitions"]["cancel"]["input"] = json!({"id":"str!"});
+    value["resources"]["shop_orders"]["transitions"]["transitions"]["cancel"]["set"] = json!({"reason":"$input.id"});
+    value["operations"]["lookup_by_input"] = json!({"roles":["admin"],"input":{"id":"str!"},"steps":[{"as":"product","read":"shop_products","id":"$input.id"}],"result":["product"]});
+    serde_json::from_value(value).unwrap()
+}
+
+#[test]
+fn metadata_inputs_validate_across_actions_transitions_operations_and_openapi() {
+    let domain = metadata_input_domain();
+    let rs = resources();
+    domain.validate(&rs).unwrap();
+    let mut api = brain_backend::contract::openapi(&rs);
+    domain::openapi(&domain, &rs, &mut api);
+    for path in ["/api/shop_products/{id}/actions/rename_from_input", "/api/shop_orders/{id}/transitions/cancel", "/_brain/operations/lookup_by_input"] {
+        let schema = &api["paths"][path]["post"]["requestBody"]["content"]["application/json"]["schema"];
+        assert_eq!(schema["properties"]["id"]["type"], "string", "{path}: {schema}");
+        assert_eq!(schema["required"], json!(["id"]), "{path}: {schema}");
+        assert_eq!(schema["additionalProperties"], false);
+    }
+}
+
 #[test]
 fn a_stored_field_no_longer_in_the_schema_does_not_block_a_write() {
     let r = products();
@@ -166,6 +190,9 @@ struct Shop {
     run: String,
 }
 async fn shop() -> Shop {
+    shop_with_domain(shop_domain()).await
+}
+async fn shop_with_domain(domain: Domain) -> Shop {
     let url = std::env::var("BRAIN_BACKEND_TEST_URL")
         .expect("Use scripts/backend-check.mjs; no developer database is selected implicitly");
     // Own database: tests here hold row locks and add triggers, and a concurrent fixture's migration would wait on them.
@@ -205,7 +232,7 @@ async fn shop() -> Shop {
         origins: vec!["http://localhost:5182".into()],
         production: true,
     };
-    let (app, _) = brain_backend::http::router_with_domain(pool.clone(), config, shop_domain()).await.unwrap();
+    let (app, _) = brain_backend::http::router_with_domain(pool.clone(), config, domain).await.unwrap();
     let [admin, alice, bob] = <[String; 3]>::try_from(tokens).unwrap();
     Shop { app, pool, admin, alice, bob, run }
 }
@@ -215,6 +242,32 @@ async fn product(s: &Shop, label: &str, extra: Value) -> Value {
     let (status, row) = call(&s.app, "POST", "/api/shop_products", &s.admin, Some(body)).await;
     assert_eq!(status, 200, "{row}");
     row
+}
+
+#[tokio::test]
+#[ignore = "Run scripts/backend-check.mjs against its disposable Postgres cluster"]
+async fn postgres_metadata_input_values_do_not_replace_record_identity_or_ownership() {
+    let s = shop_with_domain(metadata_input_domain()).await;
+    let row = product(&s, "typed-input", json!({})).await;
+    let action = format!("/api/shop_products/{}/actions/rename_from_input", id(&row));
+    let (status, renamed) = call(&s.app, "POST", &action, &s.admin, Some(json!({"id":"A new product name"}))).await;
+    assert_eq!(status, 200, "{renamed}");
+    assert_eq!(renamed["data"]["name"], "A new product name");
+    for key in ["id", "owner", "created_at"] { assert_eq!(renamed[key], row[key], "{key}"); }
+    let (status, found) = call(&s.app, "POST", "/_brain/operations/lookup_by_input", &s.admin, Some(json!({"id":id(&row)}))).await;
+    assert_eq!(status, 200, "{found}");
+    assert_eq!(found["result"]["product"]["id"], row["id"]);
+    let (status, invalid) = call(&s.app, "POST", &action, &s.admin, Some(json!({"id":42}))).await;
+    assert_eq!(status, 422, "{invalid}");
+    let (status, unknown) = call(&s.app, "POST", &action, &s.admin, Some(json!({"id":"Name", "owner":"another-owner"}))).await;
+    assert_eq!(status, 422, "{unknown}");
+    let (status, order) = call(&s.app, "POST", "/api/shop_orders", &s.alice, Some(json!({"product":id(&row),"quantity":1}))).await;
+    assert_eq!(status, 200, "{order}");
+    let transition = format!("/api/shop_orders/{}/transitions/cancel", id(&order));
+    let (status, cancelled) = call(&s.app, "POST", &transition, &s.alice, Some(json!({"id":"Changed plans"}))).await;
+    assert_eq!(status, 200, "{cancelled}");
+    assert_eq!(cancelled["data"]["reason"], "Changed plans");
+    assert_eq!(cancelled["owner"], order["owner"]);
 }
 
 #[tokio::test]

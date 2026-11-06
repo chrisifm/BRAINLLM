@@ -11,6 +11,8 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [0.9.1] - 2026-11-05
 
+- Typed action, transition and operation inputs accept record metadata names such as `id` as ordinary values; `$input.id` resolves within the input namespace while resource columns and JavaScript prototype names retain their restrictions.
+
 - Pure range and text helpers work in job and route handler graphs, including imported server helpers, without false B0792 diagnostics or browser-only runtime admission. Already server-only sources receive a browser-only usage fix instead of redundant metadata advice.
 - Generated HTML describes BRAINLLM as an ultrafast frontend and full-stack web compiler written in Rust; npm discovery metadata names JavaScript, Node.js, SSR, static sites and SEO while explicit compiler branding opt-out remains respected.
 - Native backend shutdown bounds socket, worker and pool cleanup by the drain deadline; CLI runtime teardown cannot wait indefinitely for blocking tasks, and PM2 previews cover declared backend and queue shutdown budgets.
@@ -22,6 +24,7 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 - Reconcile compressed route growth with identical synthetic inputs on 0.8.12 and 0.9.0; keep project budgets and default signatures unchanged.
 - Reproduce held-connection pool shutdown and undersized PM2 timeouts before the fixes; verify migration previews do not execute pending SQL and real native shutdown exits without forced termination.
 - Match production diagnostic privacy assertions to their own call site when database tests log concurrently.
+- Source CI omits test debug symbols before offline native packaging and reports subprocess timeout causes, preserving production-install assertions and deadlines.
 
 ## [0.9.0] - 2026-11-05
 
