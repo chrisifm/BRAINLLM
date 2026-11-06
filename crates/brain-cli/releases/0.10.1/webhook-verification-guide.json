@@ -1,0 +1,16 @@
+{
+  "id": "webhook-verification-guide",
+  "kind": "fix",
+  "title": "Custom webhook verification guide",
+  "why": "The embedded webhook guide explains the existing custom verifier boundary alongside built-in HMAC, including certificate protocol responsibilities and declared header presence.",
+  "changelog": [
+    "Clarify custom webhook verification for certificate and other provider protocols in the embedded guide."
+  ],
+  "guide": "docs/backend/webhooks.md",
+  "apis": [
+    "verify: { scheme: 'custom' }"
+  ],
+  "affects": [
+    "server/routes/**"
+  ]
+}

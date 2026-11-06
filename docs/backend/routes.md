@@ -65,8 +65,9 @@ export default async function verify(ctx) {
 The default export must resolve to the boolean `true` before the handler can run. It receives only
 `rawBody`, `rawBodyEncoding`, explicitly declared headers and the selected environment. It has no
 visitor identity, backend client or system-key authority. Route backend credentials are removed from
-the verifier's environment. B0816 checks literal header reads in both siblings. Every declared header
-must occur once on the incoming request; duplicate values are rejected before verification on every gateway.
+the verifier's environment. B0816 checks literal header reads in both siblings. Duplicate declared header
+values are rejected before verification on every gateway. Declaring a header does not require its presence;
+the verifier must reject missing headers required by its signature protocol.
 
 The application verifier implements the provider's actual protocol: bind the signature to these exact
 body bytes, validate its timestamp and certificate/key chain, pin permitted key endpoints, bound key

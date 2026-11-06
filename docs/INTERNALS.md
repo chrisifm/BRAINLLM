@@ -2775,6 +2775,8 @@ documents cited by SPEC, guides and manifests, plus `docs/backend/*.md`, and `br
 deny list keeps internal documents out. `capabilities.rs` renders `docs/CAPABILITIES.md` from `GUIDES`, `ADD_KINDS`,
 `recipes::list`, the backend inventory and capability manifests; a unit test compares the bytes, so a new manifest needs
 `brain capabilities > docs/CAPABILITIES.md`.
+The embedded webhook guide (2026-11-06) distinguishes built-in HMAC from the existing custom verifier
+boundary; declared headers reject duplicate values, while protocol-required presence is checked by the verifier.
 
 ## 56. SaaS building blocks (2026-10-31)
 

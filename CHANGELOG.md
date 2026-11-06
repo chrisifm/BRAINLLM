@@ -9,6 +9,12 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-11-06
+
+### Documentation
+
+- Clarify custom webhook verification for certificate and other provider protocols in the embedded guide. Distinguish built-in HMAC secrets and methods, optional declared headers, protocol-required checks, missing-secret route disabling and the unchanged Origin protection for unsigned public writes.
+
 ## [0.10.0] - 2026-11-06
 
 Includes the typed input, server helper, discovery metadata, shutdown and migration preview fixes recorded under
@@ -1472,7 +1478,8 @@ These checkout snapshots are not release-binary performance benchmarks.
 - First public npm release for seven native platforms (macOS arm64/x64, Linux x64/arm64/musl, Windows x64/arm64),
   the runtime and the `npm create @christianirack/brainllm` and `npm create @christianirack/brainll` initializers (#5).
 
-[Unreleased]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/chrisifm/BRAINLLM/compare/v0.9.0...v0.10.0
 [0.9.1]: https://github.com/chrisifm/BRAINLLM/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/chrisifm/BRAINLLM/compare/v0.8.12...v0.9.0
