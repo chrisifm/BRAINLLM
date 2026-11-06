@@ -9,6 +9,15 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-11-06
+
+Includes the webhook verification guide corrections recorded under 0.10.1. That source tag was withheld
+from npm after its repeated backend verification exposed an incomplete statistics measurement fixture.
+
+### Fixed
+
+- TOAST read measurements retain every pooled connection, including connections added during checkout, before forcing statistics and reading the counter. One shared deadline bounds collection, flush and read. A deterministic pool-growth regression preserves the original read budget without sleeps or retries.
+
 ## [0.10.1] - 2026-11-06
 
 ### Documentation
@@ -1478,7 +1487,8 @@ These checkout snapshots are not release-binary performance benchmarks.
 - First public npm release for seven native platforms (macOS arm64/x64, Linux x64/arm64/musl, Windows x64/arm64),
   the runtime and the `npm create @christianirack/brainllm` and `npm create @christianirack/brainll` initializers (#5).
 
-[Unreleased]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.2...HEAD
+[0.10.2]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/chrisifm/BRAINLLM/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/chrisifm/BRAINLLM/compare/v0.9.0...v0.10.0
 [0.9.1]: https://github.com/chrisifm/BRAINLLM/compare/v0.9.0...v0.9.1

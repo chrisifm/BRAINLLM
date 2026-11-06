@@ -692,6 +692,46 @@ async fn the_buffer_gate_warns_on_a_list_that_opens_large_documents() {
     assert!(report["warnings"][0].as_str().unwrap().contains("buffers per row"), "{report}");
 }
 
+// Retain every connection before reading cumulative statistics, including connections added while
+// previous checkouts are returning asynchronously. Callers bound the entire collection/flush/read.
+async fn statistics_connections(pool: &sqlx::PgPool) -> Vec<sqlx::pool::PoolConnection<sqlx::Postgres>> {
+    let mut held = Vec::new();
+    while held.len() < pool.size() as usize {
+        held.push(pool.acquire().await.unwrap());
+    }
+    assert_eq!(held.len(), pool.size() as usize, "statistics must cover every pooled connection");
+    held
+}
+
+#[tokio::test]
+#[ignore]
+async fn statistics_measurement_covers_connections_added_during_checkout() {
+    let url = std::env::var("BRAIN_BACKEND_TEST_URL").expect("Owned disposable Postgres harness required");
+    let pool = sqlx::postgres::PgPoolOptions::new().max_connections(2).connect_lazy(&url).unwrap();
+    let mut original = pool.acquire().await.unwrap();
+    let original_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()").fetch_one(&mut *original).await.unwrap();
+    assert_eq!(pool.size(), 1);
+    let returning_pool = pool.clone();
+    // Keep the original connection checked out until collection opens a replacement. This models
+    // an asynchronous pool return without depending on a sleep or scheduler timing.
+    let returning = tokio::spawn(async move {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while returning_pool.size() < 2 { tokio::task::yield_now().await; }
+            original.return_to_pool().await;
+        }).await.expect("owned connection return must finish");
+    });
+    let mut held = tokio::time::timeout(std::time::Duration::from_secs(5), statistics_connections(&pool)).await.expect("statistics collection must finish");
+    returning.await.unwrap();
+    let mut pids = Vec::new();
+    for conn in held.iter_mut() {
+        pids.push(sqlx::query_scalar::<_, i32>("SELECT pg_backend_pid()").fetch_one(&mut **conn).await.unwrap());
+    }
+    assert_eq!(held.len(), 2);
+    assert!(pids.contains(&original_pid), "the returning connection must be included");
+    drop(held);
+    tokio::time::timeout(std::time::Duration::from_secs(5), pool.close()).await.expect("owned pool must close");
+}
+
 #[tokio::test]
 #[ignore]
 async fn lists_filter_sort_and_count_without_opening_the_stored_documents() {
@@ -716,15 +756,13 @@ async fn lists_filter_sort_and_count_without_opening_the_stored_documents() {
     }
     // Every pooled connection flushes its pending statistics, so the count includes the list's own reads.
     let toast = || async {
-        let mut held = Vec::new();
-        for _ in 0..pool.size() {
-            held.push(pool.acquire().await.unwrap());
-        }
-        for conn in held.iter_mut() {
-            sqlx::query("SELECT pg_stat_force_next_flush()").execute(&mut **conn).await.unwrap();
-        }
-        drop(held);
-        sqlx::query_scalar::<_, i64>("SELECT COALESCE(toast_blks_hit,0)+COALESCE(toast_blks_read,0) FROM pg_statio_user_tables WHERE relname='_brain_res_items'").fetch_one(&pool).await.unwrap()
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let mut held = statistics_connections(&pool).await;
+            for conn in held.iter_mut() {
+                sqlx::query("SELECT pg_stat_force_next_flush()").execute(&mut **conn).await.unwrap();
+            }
+            sqlx::query_scalar::<_, i64>("SELECT COALESCE(toast_blks_hit,0)+COALESCE(toast_blks_read,0) FROM pg_statio_user_tables WHERE relname='_brain_res_items'").fetch_one(&mut **held.first_mut().expect("connected fixture pool")).await.unwrap()
+        }).await.expect("statistics collection, flush and read must finish")
     };
     let per_body: i64 = sqlx::query_scalar("SELECT (pg_relation_size(reltoastrelid)/8192/60)::bigint FROM pg_class WHERE relname='_brain_res_items'").fetch_one(&pool).await.unwrap();
     assert!(per_body >= 4, "each body should span several TOAST blocks: {per_body}");

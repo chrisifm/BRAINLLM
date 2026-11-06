@@ -1,0 +1,9 @@
+{
+  "id": "statistics-measurement",
+  "kind": "internal",
+  "title": "Isolated query statistics measurement",
+  "why": "The backend acceptance fixture retains all current pooled connections and reads its cumulative counter under one deadline, including when the pool grows during checkout.",
+  "changelog": [
+    "TOAST read measurements retain every pooled connection"
+  ]
+}
