@@ -3,8 +3,9 @@
 // Network/Emulation domains on the page AND on every service-worker target (throttling and offline must reach the
 // worker's own fetches), and a per-page request ledger.
 import { spawn } from 'node:child_process'
-import { readFileSync, existsSync, rmSync, mkdirSync } from 'node:fs'
+import { rmSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { waitDebuggingAddress } from '../../lib/cdp.mjs'
 
 const CHROME = process.env.BRAIN_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -20,10 +21,23 @@ export async function launchBrowser(profileDir) {
   const proc = spawn(CHROME, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profileDir}`, '--no-first-run', '--use-mock-keychain', '--password-store=basic',
     '--no-default-browser-check', '--disable-background-networking', '--disable-component-update', '--disable-sync', 'about:blank'], { stdio: 'ignore' })
   const portFile = join(profileDir, 'DevToolsActivePort')
-  for (let i = 0; i < 200 && !existsSync(portFile); i++) await sleep(50)
-  const [port, path] = readFileSync(portFile, 'utf8').split('\n')
+  let startupError, address
+  proc.on('error', error => { startupError = error })
+  try {
+    address = await waitDebuggingAddress(portFile, { timeoutMs: 10000, check: () => {
+      if (startupError) throw new Error(`Chrome did not start: ${startupError.code || 'spawn failed'}`)
+      if (proc.exitCode !== null || proc.signalCode !== null) throw new Error('Chrome exited before debugging was ready')
+    } })
+  } catch (error) { proc.kill(); throw error }
+  const { port, path } = address
   const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`)
-  await new Promise((r, j) => { ws.onopen = r; ws.onerror = j })
+  try {
+    await new Promise((r, j) => {
+      const timer = setTimeout(() => { ws.close(); j(new Error('Chrome debugging connection deadline')) }, 5000)
+      ws.onopen = () => { clearTimeout(timer); r() }
+      ws.onerror = () => { clearTimeout(timer); j(new Error('Chrome debugging connection failed')) }
+    })
+  } catch (error) { ws.close(); proc.kill(); throw error }
   let id = 0
   const pending = new Map(), listeners = new Set()
   ws.onmessage = (e) => {

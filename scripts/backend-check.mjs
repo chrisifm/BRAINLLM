@@ -27,6 +27,8 @@ const dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), 'brain-backend-chec
 const pg = process.env.PG_BIN || ''
 const exe = name => pg ? join(pg,name) : name
 let server, test, log, deadline, stopped = false
+const auxiliary = new Set()
+const suspendedOwnedDatabase = new Set()
 const running=child=>child && Number.isInteger(child.pid) && child.exitCode===null && child.signalCode===null
 const sleep = ms => new Promise(resolve => setTimeout(resolve,ms))
 function waitExit(child, ms) {
@@ -67,8 +69,14 @@ async function stop() {
   if (stopped) return
   stopped = true
   clearTimeout(deadline)
+  // Signal handlers exit after stop(), so they cannot rely on a suspended-session fixture's local finally.
+  for (const pid of suspendedOwnedDatabase) {try {process.kill(pid,'SIGCONT')} catch {}}
+  suspendedOwnedDatabase.clear()
   let failure
   try { await terminateOwned(test) } catch(error) { failure=error }
+  for (const child of auxiliary) {
+    try { await terminateOwned(child) } catch(error) { failure=error }
+  }
   if (running(server)) {
     spawnSync(exe('pg_ctl'),['-D',join(dir,'data'),'-m','immediate','-w','-t','10','stop'],{stdio:'ignore',timeout:15000})
     await waitExit(server,1000)
@@ -378,6 +386,7 @@ try {
       if (listening) throw Error('Owned native backend listener survived shutdown')
       console.log('Backend CLI shutdown smoke: PASS (SIGTERM, process exit, closed listener; no forced KILL)')
     } finally {await terminateOwned(test,'SIGINT')}
+    await shutdownUnderSQLLock(binary, cliEnv, port)
   }
   if(process.exitCode===0||process.exitCode===undefined)for(const name of selectedGates) {
     const binary=process.env.BRAIN_BIN||join(process.env.CARGO_TARGET_DIR||join(project,'target'),'debug/brain')
@@ -388,3 +397,147 @@ try {
 finally {await stop()}
 
 function assertId(id){if(typeof id!=="string"||!/^[0-9a-f-]{36}$/.test(id))throw Error("CLI enqueue returned no UUID")}
+
+// Exercise the whole process, not only pool.close(): a proven SQL waiter must not survive the HTTP drain deadline.
+async function shutdownUnderSQLLock(binary, cliEnv, postgresPort) {
+  const database = 'backend_shutdown'
+  const pgArgs = ['-X','-h','127.0.0.1','-p',String(postgresPort),'-U','brain_test','-d',database,'-At','-v','ON_ERROR_STOP=1']
+  const sql = statement => {
+    const result = spawnSync(exe('psql'), [...pgArgs,'-c',statement], {encoding:'utf8',timeout:2000,maxBuffer:65536})
+    if (result.error || result.status !== 0) throw Error('Owned shutdown SQL probe failed')
+    return result.stdout.trim()
+  }
+  run(exe('createdb'), ['-h','127.0.0.1','-p',String(postgresPort),'-U','brain_test',database])
+  const env = {...cliEnv,DATABASE_URL:`postgres://brain_test@127.0.0.1:${postgresPort}/${database}`,PUBLIC_SITE_URL:'https://example.test'}
+  const app = join(dir,'shutdown-app')
+  const cli = (args,cwd) => {
+    const result = spawnSync(binary,args,{cwd,env,encoding:'utf8',timeout:20000,maxBuffer:65536})
+    if (result.error || result.status !== 0) throw Error('Owned shutdown fixture CLI failed: '+(result.stderr || '').slice(0,1000))
+  }
+  cli(['new','shutdown-app','--json'],dir)
+  cli(['add','resource','items','--fields','title:str!','--json'],app)
+  writeFileSync(join(app,'server/resources/items/policy.jsbrain'),"<meta server>\nexport default { read: ['public'], create: ['user'], update: ['owner'], delete: ['owner'] }\n")
+  const readyDelayMs = 250, drainMs = 500, exitMarginMs = 3000
+  writeFileSync(join(app,'server/platform.jsbrain'),`<meta server>\nexport default { shutdown: { readyDelay: '${readyDelayMs}ms', drain: '${drainMs}ms' } }\n`)
+  cli(['backend','migrate','--json'],app)
+  const reservation = net.createServer()
+  await new Promise((ok,no)=>reservation.once('error',no).listen(0,'127.0.0.1',ok))
+  const httpPort = reservation.address().port
+  await new Promise(ok=>reservation.close(ok))
+  const url = `http://127.0.0.1:${httpPort}`
+  let locker, suspendedDatabasePID, lockOutput = '', lockBytes = 0
+  const requestAbort = new AbortController()
+  let pending
+  const startBackend = async () => {
+    test = spawn(binary,['backend','serve','--port',String(httpPort),'--origin','https://example.test'],{cwd:app,env,stdio:['ignore','pipe','pipe'],detached:true})
+    const child = test
+    let output = '', bytes = 0
+    child.once('error',()=>{})
+    const capture = chunk => { bytes += chunk.length; if (bytes <= 65536) output += chunk.toString('utf8') }
+    child.stdout.on('data',capture); child.stderr.on('data',capture)
+    const until = Date.now()+15000
+    while (Date.now()<until) {
+      if (!running(child) || bytes>65536) throw Error('Owned shutdown backend exited or exceeded its output limit: '+output.slice(-2000))
+      try {
+        const response = await fetch(url+'/health/ready',{signal:AbortSignal.timeout(300)})
+        await response.body?.cancel()
+        if (response.status===200) return {child,output:()=>output}
+      } catch {}
+      await sleep(50)
+    }
+    throw Error('Owned shutdown backend did not become ready')
+  }
+  try {
+    const active = await startBackend()
+    locker = spawn(exe('psql'),pgArgs,{stdio:['pipe','pipe','pipe'],detached:true})
+    auxiliary.add(locker); locker.once('error',()=>{}); locker.stdin.on('error',()=>{})
+    locker.stdout.on('data',chunk=>{lockBytes+=chunk.length;if(lockBytes<=4096)lockOutput+=chunk.toString('utf8')})
+    locker.stderr.on('data',chunk=>{lockBytes+=chunk.length})
+    locker.stdin.write("BEGIN; LOCK TABLE public._brain_res_items IN ACCESS EXCLUSIVE MODE; SELECT 'LOCK_READY:' || pg_backend_pid();\n")
+    let lockerPID
+    const lockDeadline = Date.now()+5000
+    while (Date.now()<lockDeadline) {
+      if (!running(locker) || lockBytes>4096) throw Error('Owned SQL locker exited or exceeded its output limit')
+      const match = lockOutput.match(/LOCK_READY:(\d+)/)
+      if (match) { lockerPID=Number(match[1]); break }
+      await sleep(20)
+    }
+    if (!lockerPID) throw Error('Owned SQL lock was not acquired')
+    let settled = false
+    pending = fetch(url+'/api/items',{headers:{Accept:'application/json'},signal:AbortSignal.any([requestAbort.signal,AbortSignal.timeout(15000)])})
+      .then(async response=>{await response.body?.cancel();return response.status},()=>null).finally(()=>{settled=true})
+    let blockedPID, applicationName
+    const blockedDeadline = Date.now()+5000
+    while (Date.now()<blockedDeadline) {
+      if (settled) throw Error('Shutdown HTTP request finished before waiting on the SQL lock')
+      const value = sql(`SELECT json_build_object('pid',a.pid,'application',a.application_name) FROM pg_stat_activity a JOIN pg_locks l ON l.pid=a.pid WHERE a.datname='${database}' AND a.backend_type='client backend' AND a.wait_event_type='Lock' AND l.relation='public._brain_res_items'::regclass AND NOT l.granted AND ${lockerPID}=ANY(pg_blocking_pids(a.pid))`)
+      if (value) {const waiter=JSON.parse(value);blockedPID=waiter.pid;applicationName=waiter.application;break}
+      await sleep(20)
+    }
+    if (!blockedPID || settled) throw Error('Shutdown fixture did not establish a live HTTP request waiting on its owned SQL lock')
+    // The native pool's application_name identifies all its connections, including the idle ones.
+    if (!/^brain:[A-Za-z0-9_.:-]+:http$/.test(applicationName)) throw Error('Blocked request was not owned by the native HTTP pool')
+    const postmasterPID = Number(readFileSync(join(dir,'data/postmaster.pid'),'utf8').split('\n')[0])
+    if (!Number.isSafeInteger(blockedPID) || blockedPID<=1 || blockedPID===postmasterPID || blockedPID===active.child.pid) throw Error('SQL waiter is not a distinct owned database session')
+    // Only this owned cluster's observed waiter is suspended. Otherwise lock_timeout=1s could hide an unbounded
+    // pool close by releasing the connection before our process-exit margin; an unresponsive DB must not do that.
+    if (settled) throw Error('Shutdown HTTP request finished before suspending its owned SQL waiter')
+    process.kill(blockedPID,'SIGSTOP')
+    suspendedDatabasePID = blockedPID
+    suspendedOwnedDatabase.add(blockedPID)
+    if (settled || sql(`SELECT count(*) FROM pg_stat_activity a JOIN pg_locks l ON l.pid=a.pid WHERE a.pid=${blockedPID} AND a.datname='${database}' AND a.application_name='${applicationName}' AND a.backend_type='client backend' AND a.wait_event_type='Lock' AND l.relation='public._brain_res_items'::regclass AND NOT l.granted AND ${lockerPID}=ANY(pg_blocking_pids(a.pid))`)!=='1') throw Error('Suspended database session no longer owns the observed HTTP lock wait')
+    const begin = Date.now()
+    process.kill(active.child.pid,'SIGTERM')
+    await waitExit(active.child,readyDelayMs+drainMs+exitMarginMs)
+    const elapsedMs = Date.now()-begin
+    if (running(active.child) || active.child.signalCode || ![0,2].includes(active.child.exitCode)) {
+      console.error(JSON.stringify({event:'shutdown-deadline-failed',elapsedMs,pid:active.child.pid,blockedDatabasePID:blockedPID,requestPending:!settled,exitCode:active.child.exitCode,signal:active.child.signalCode}))
+      console.error(active.output().slice(-8192))
+      const threads = spawnSync('ps',[...(process.platform==='darwin'?['-M']:['-T']),'-p',String(active.child.pid)],{encoding:'utf8',timeout:2000,maxBuffer:16384})
+      if (threads.stdout) console.error(threads.stdout)
+      if (process.platform==='darwin' && running(active.child)) {
+        const sample = join(dir,'shutdown-sample.txt')
+        spawnSync('sample',[String(active.child.pid),'1','-file',sample],{encoding:'utf8',timeout:5000,maxBuffer:4096})
+        try {console.error(readFileSync(sample,'utf8').slice(0,131072))} catch {}
+      }
+      throw Error('SQL-blocked backend did not exit itself within its shutdown budget; forced termination is not success')
+    }
+    const events = active.output().split('\n').flatMap(line=>{try{return [JSON.parse(line)]}catch{return []}})
+    const draining = events.find(event=>event.event==='backend-draining')
+    if (draining?.readyDelayMs!==readyDelayMs || draining.drainMs!==drainMs || !events.some(event=>event.code==='DRAIN_TIMEOUT')) throw Error('SQL-blocked shutdown did not report its declared drain deadline')
+    // main.rs maps a runtime backend error to exit 2. Accept it only for this diagnosed incomplete pool cleanup.
+    if (active.child.exitCode===2 && !events.some(event=>event.event==='backend-shutdown-incomplete' && event.code==='DRAIN_TIMEOUT' && event.phase==='pool')) throw Error('SQL-blocked shutdown exited with an unrelated backend error')
+    process.kill(suspendedDatabasePID,'SIGCONT')
+    suspendedOwnedDatabase.delete(suspendedDatabasePID)
+    suspendedDatabasePID = undefined
+    const connectionDeadline = Date.now()+2000
+    let connections
+    do {
+      connections = Number(sql(`SELECT count(*) FROM pg_stat_activity WHERE datname='${database}' AND application_name IN ('${applicationName}','${applicationName.replace(/:http$/,':worker')}')`))
+      if (connections===0) break
+      await sleep(25)
+    } while (Date.now()<connectionDeadline)
+    if (connections!==0) throw Error('Native backend Postgres connections survived process shutdown')
+    const released = net.createServer()
+    await new Promise((ok,no)=>released.once('error',no).listen(httpPort,'127.0.0.1',ok))
+    await new Promise(ok=>released.close(ok))
+    locker.stdin.end('ROLLBACK;\n')
+    await waitExit(locker,2000)
+    if (running(locker) || locker.exitCode!==0) throw Error('Owned SQL locker did not release its transaction cleanly')
+    auxiliary.delete(locker)
+    await startBackend()
+    const response = await fetch(url+'/api/items',{headers:{Accept:'application/json'},signal:AbortSignal.timeout(2000)})
+    await response.body?.cancel()
+    if (response.status!==200) throw Error('Restarted backend could not serve its resource on the same port')
+    process.kill(test.pid,'SIGTERM')
+    await waitExit(test,readyDelayMs+drainMs+exitMarginMs)
+    if (running(test) || test.exitCode!==0) throw Error('Restarted idle backend did not exit cleanly without forced termination')
+    console.log(`Backend CLI SQL-blocked shutdown smoke: PASS (observed SQL waiter, unresponsive owned DB connection, SIGTERM exit in ${elapsedMs} ms, closed connections and listener, same-port restart; no forced KILL)`)
+  } finally {
+    if (suspendedDatabasePID) {try {process.kill(suspendedDatabasePID,'SIGCONT')} catch {};suspendedOwnedDatabase.delete(suspendedDatabasePID)}
+    requestAbort.abort()
+    if (pending) await pending
+    await terminateOwned(test)
+    if (locker) {await terminateOwned(locker);auxiliary.delete(locker)}
+  }
+}

@@ -127,13 +127,13 @@ function connect() {
     if (m.type === 'error') return broken(m.diags, receivedAt, m.file, m.all);
     if (m.type === 'diags') return show(m.all, m.file);
     box?.remove();
-    if (m.type === 'reload') return reload(m.path ?? null, receivedAt);
+    if (m.type === 'reload') return reload(m.path ?? null, receivedAt, m.reason === 'watch-overflow' ? m.reason : undefined);
     // one save may change both blocks: swap the stylesheet AND hot-swap the code (state survives)
     if (m.css) swapCss(m.path, receivedAt);
     if (m.js) hot(m.path, receivedAt);
   };
   ws.onclose = () => {
-    const retry = () => fetch(base + '/@brain/ping').then(() => location.reload(), () => setTimeout(retry, 500));
+    const retry = () => fetch(base + '/@brain/ping').then(() => reload(null, now(), 'dev-server-reconnected'), () => setTimeout(retry, 500));
     setTimeout(retry, 500);
   };
 }
@@ -178,6 +178,14 @@ export async function route(data) {
 }
 // `_loading.brain` while the next page's load runs (§22): shown only if the response takes over 150 ms, so fast
 // navigations never flash it
+function documentNavigation(url, reason, error) {
+  // Diagnostics must not interfere with the existing recovery navigation.
+  try {
+    if (arguments.length > 2) report({ type: 'navigation', where: 'dev-router', message: ('Dev navigation failed: ' + String(error?.message ?? error)).slice(0, 500), stack: String(error?.stack ?? '').slice(0, 4096) });
+    applied('reload', null, now(), { mode: 'full-reload', reason });
+  } catch {}
+  location.assign(url);
+}
 let seq = 0;
 async function loading(url, mine) {
   await new Promise((r) => setTimeout(r, 150));
@@ -199,15 +207,17 @@ async function go(url, push) {
   dispatchEvent(new CustomEvent('brain:navigate', { detail: { url } }));
   const mine = ++seq;
   loading(url, mine);
+  let phase = 'fetch';
   try {
     const r = await fetch(url, { headers: { accept: 'text/html' } });
     seq++; // the response arrived: a pending loading state must not mount any more
     // a guard redirected or denied (or the page failed): let the server answer the navigation itself
-    if (r.redirected || r.status !== 200) return location.assign(r.redirected ? r.url : url);
+    if (r.redirected || r.status !== 200) return documentNavigation(r.redirected ? r.url : url, r.redirected ? 'navigation-redirect' : 'navigation-response-status');
+    phase = 'document';
     const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
     const json = doc.getElementById('brain-route');
     // another language: its dictionary and <html lang> come with a full load (as brain-router.js does)
-    if (!json || doc.documentElement.lang !== document.documentElement.lang) return location.assign(url);
+    if (!json || doc.documentElement.lang !== document.documentElement.lang) return documentNavigation(url, !json ? 'navigation-missing-route' : 'navigation-language');
     // the scroll of the page we leave, restored when back/forward returns to it (brain-router.js does the same)
     if (push) history.replaceState({ ...history.state, y: scrollY }, ''), history.pushState({ y: 0 }, '', url);
     here = location.href;
@@ -220,11 +230,12 @@ async function go(url, push) {
     document.querySelector('meta[name="brain-params"]')?.remove();
     const pm = doc.querySelector('meta[name="brain-params"]');
     if (pm) document.head.append(pm);
+    phase = 'route';
     await route(JSON.parse(json.textContent));
     scrollTo(0, push ? 0 : (history.state && history.state.y) || 0);
     if (mine + 1 === seq) landed(url);
-  } catch {
-    location.assign(url);
+  } catch (error) {
+    documentNavigation(url, `navigation-${phase}-failed`, error);
   }
 }
 // After a swap, for assistive technology (as brain-router.js, §19): focus moves to the URL's target, else the page's

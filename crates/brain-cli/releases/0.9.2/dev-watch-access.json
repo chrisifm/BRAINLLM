@@ -1,10 +1,20 @@
 {
   "id": "dev-watch-access",
   "kind": "fix",
-  "title": "Source reads do not overflow the dev mutation watcher",
-  "why": "Linux filesystem access notifications could fill the bounded change queue before they were discarded, causing full reload recovery without a source mutation. Access events are now discarded before admission; real changes and watcher errors keep their existing handling.",
-  "changelog": ["Filter filesystem access notifications before the bounded dev watcher queue"],
+  "title": "Non-source activity does not displace dev source edits",
+  "why": "Reads and framework-owned writes could fill the bounded mutation queue before being ignored, triggering false full reload recovery. Admission now discards resolved non-source activity, preserving symlink aliases, uncertain or large batches, environment edits, real changes, errors and explicit rescan notifications.",
+  "changelog": [
+    "Filter filesystem access notifications before the bounded dev watcher queue",
+    "Ignored runtime traces, logs, generated files and component tests leave capacity for source edits",
+    "Native watcher rescan notifications trigger full cache recovery"
+  ],
   "guide": "docs/INTERNALS.md",
-  "apis": ["brain run", "brain mcp"],
-  "affects": ["views/**", "comp/**"]
+  "apis": [
+    "brain run",
+    "brain mcp"
+  ],
+  "affects": [
+    "views/**",
+    "comp/**"
+  ]
 }

@@ -42,16 +42,20 @@ fn dev_navigation_moves_focus_and_announces_the_title() {
     let router_ready = r#"{"expr":"new Promise(r=>{const t=setInterval(()=>{if(window.__brainDevGo){clearInterval(t);r('router-ready')}},20)})"}"#;
     let ready = tool(&mut call, "brain_eval", router_ready);
     assert!(ready.contains("router-ready"), "{ready}");
-    let marked = tool(&mut call, "brain_eval", r#"{"expr":"globalThis.__brainNavigationDocument='same-document'"}"#);
+    let marked = tool(&mut call, "brain_eval", r#"{"expr":"(()=>{sessionStorage.removeItem('brainNavigationReloads');addEventListener('brain:hmr',e=>{if(e.detail?.mode==='full-reload'){let reasons=JSON.parse(sessionStorage.getItem('brainNavigationReloads')||'[]');reasons.push(String(e.detail.reason).slice(0,80));sessionStorage.setItem('brainNavigationReloads',JSON.stringify(reasons.slice(-8)))}});return globalThis.__brainNavigationDocument='same-document'})()"}"#);
     assert!(marked.contains("same-document"), "{marked}");
     let clicked = tool(&mut call, "brain_click", r##"{"selector":"#b"}"##);
     assert!(!clicked.contains("isError\":true"), "{clicked}");
     let after_navigate = tool(&mut call, "brain_eval", probe);
-    assert!(after_navigate.contains("H1|Posts") && after_navigate.contains("polite|/posts|same-document"), "navigate(): {after_navigate}");
+    assert!(after_navigate.contains("H1|Posts") && after_navigate.contains("polite|/posts|same-document"), "navigate(): {after_navigate}\nserver logs: {}\nbrowser errors: {}\npage: {}",
+        tool(&mut call, "brain_logs", "{}"), tool(&mut call, "brain_errors", "{}"),
+        tool(&mut call, "brain_eval", r#"{"expr":"JSON.stringify({path:location.pathname,reloads:sessionStorage.getItem('brainNavigationReloads'),navigationType:performance.getEntriesByType('navigation')[0]?.type})"}"#));
     let clicked = tool(&mut call, "brain_click", r#"{"selector":"nav a[href='/about']"}"#);
     assert!(!clicked.contains("isError\":true"), "{clicked}");
     let after_link = tool(&mut call, "brain_eval", probe);
-    assert!(after_link.contains("H1|About") && after_link.contains("polite|/about|same-document"), "link: {after_link}");
+    assert!(after_link.contains("H1|About") && after_link.contains("polite|/about|same-document"), "link: {after_link}\nserver logs: {}\nbrowser errors: {}\npage: {}",
+        tool(&mut call, "brain_logs", "{}"), tool(&mut call, "brain_errors", "{}"),
+        tool(&mut call, "brain_eval", r#"{"expr":"JSON.stringify({path:location.pathname,reloads:sessionStorage.getItem('brainNavigationReloads'),navigationType:performance.getEntriesByType('navigation')[0]?.type})"}"#));
     let _ = p.kill();
     let _ = std::fs::remove_dir_all(&tmp);
 }

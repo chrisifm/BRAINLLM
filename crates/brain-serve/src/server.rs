@@ -2688,10 +2688,26 @@ fn ignored(rel: &Path) -> bool {
     })
 }
 
-fn queue_watch_event(tx: &std::sync::mpsc::SyncSender<notify::Result<notify::Event>>, overflow: &AtomicBool, event: notify::Result<notify::Event>) {
+fn queue_watch_event(root: &Path, tx: &std::sync::mpsc::SyncSender<notify::Result<notify::Event>>, overflow: &AtomicBool, event: notify::Result<notify::Event>) {
+    // Native backends can lose events before our channel sees them. Queue even a pathless/access
+    // rescan signal to wake the worker, and use the same full-cache recovery as channel overflow.
+    if matches!(&event, Ok(event) if event.need_rescan()) {
+        overflow.store(true, Ordering::Release);
+    }
     // Linux reports source reads too. Discard them before the bounded mutation queue: overflowing on
     // access events would turn ordinary compilation/imports into a full document reload.
-    if matches!(&event, Ok(event) if event.kind.is_access()) {
+    if matches!(&event, Ok(event) if event.kind.is_access() && !event.need_rescan()) {
+        return;
+    }
+    // Runtime traces/logs and generated output are ignored by on_change too. They must not displace
+    // actual source edits and turn an ignored write burst into lost-mutation recovery.
+    // Match on_change's effective identity, not just a lexical alias such as logs -> views. Resolve
+    // only already-ignored candidates, at most eight paths; missing/uncertain/large batches stay queued.
+    let ignored_path = |path: &Path| path.strip_prefix(root).is_ok_and(|relative| relative != Path::new(".brain_env")
+        && (ignored(relative) || relative.to_string_lossy().ends_with(".test.brain")));
+    if matches!(&event, Ok(event) if !event.need_rescan() && !event.paths.is_empty() && event.paths.len() <= 8
+        && event.paths.iter().all(|path| ignored_path(path))
+        && event.paths.iter().all(|path| path.canonicalize().is_ok_and(|resolved| ignored_path(&resolved)))) {
         return;
     }
     if matches!(tx.try_send(event), Err(std::sync::mpsc::TrySendError::Full(_))) {
@@ -2703,8 +2719,9 @@ fn start_watch(ctx: Arc<Ctx>, threads: &Threads) -> io::Result<notify::Recommend
     let (tx, rx) = std::sync::mpsc::sync_channel(64);
     let overflow = Arc::new(AtomicBool::new(false));
     let overflowed = overflow.clone();
+    let watch_root = ctx.root.clone();
     let mut w = notify::recommended_watcher(move |event| {
-        queue_watch_event(&tx, &overflowed, event);
+        queue_watch_event(&watch_root, &tx, &overflowed, event);
     })
     .map_err(io::Error::other)?;
     w.watch(&ctx.root, RecursiveMode::Recursive)
@@ -2742,7 +2759,7 @@ fn start_watch(ctx: Arc<Ctx>, threads: &Threads) -> io::Result<notify::Recommend
                 ctx.env_cache.lock().unwrap().take();
                 let _ = ctx.env_vars();
                 ctx.sidecar.lock().unwrap().take();
-                broadcast(&ctx.clients, "{\"type\":\"reload\",\"path\":null}");
+                broadcast(&ctx.clients, "{\"type\":\"reload\",\"path\":null,\"reason\":\"watch-overflow\"}");
             }
             paths.sort();
             paths.dedup();
@@ -2907,21 +2924,131 @@ fn on_change(ctx: &Ctx, path: &Path) {
 
 #[cfg(test)]
 mod tests {
+    struct WatchFixture(PathBuf);
+    impl WatchFixture {
+        fn new() -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let path = std::env::temp_dir().join(format!("brain-watch-admission-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+            std::fs::create_dir(&path).unwrap();
+            Self(path.canonicalize().unwrap())
+        }
+        fn file(&self, relative: &str) -> PathBuf {
+            let path = self.0.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "owned fixture").unwrap();
+            path
+        }
+    }
+    impl Drop for WatchFixture { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
+
+    #[test]
+    fn ignored_runtime_writes_do_not_overflow_the_mutation_queue() {
+        use notify::event::ModifyKind;
+        let (tx, rx) = std::sync::mpsc::sync_channel(64);
+        let overflow = AtomicBool::new(false);
+        let fixture = WatchFixture::new();
+        for relative in [".brain/trace/events.jsonl", "logs/app.log", "docs/app/data.md", "dist/chunk.js", "node_modules/example/index.js"] {
+            let path = fixture.file(relative);
+            for _ in 0..128 {
+                let event = notify::Event::new(notify::EventKind::Modify(ModifyKind::Any)).add_path(path.clone());
+                queue_watch_event(&fixture.0, &tx, &overflow, Ok(event));
+            }
+        }
+        assert!(!overflow.load(Ordering::Acquire), "ignored framework writes must not request lost-source recovery");
+        assert!(rx.try_recv().is_err(), "ignored runtime writes must leave capacity for actual source changes");
+    }
+
+    #[test]
+    fn watch_admission_preserves_environment_edits_and_mixed_source_renames() {
+        use notify::event::ModifyKind;
+        let fixture = WatchFixture::new();
+        let root = fixture.0.as_path();
+        let (tx, rx) = std::sync::mpsc::sync_channel(8);
+        let overflow = AtomicBool::new(false);
+        for paths in [vec![root.join(".brain_env")], vec![root.join("views/home.brain")],
+            vec![root.join(".editor-temp"), root.join("views/home.brain")],
+            vec![PathBuf::from("/other/source.brain")], vec![]] {
+            let mut event = notify::Event::new(notify::EventKind::Modify(ModifyKind::Any));
+            event.paths = paths;
+            queue_watch_event(root, &tx, &overflow, Ok(event.clone()));
+            assert_eq!(rx.try_recv().unwrap().unwrap(), event);
+        }
+        for path in [fixture.file("comp/example.test.brain"), fixture.file(".brain/cache/source.js")] {
+            queue_watch_event(root, &tx, &overflow, Ok(notify::Event::new(notify::EventKind::Modify(ModifyKind::Any)).add_path(path)));
+        }
+        assert!(rx.try_recv().is_err());
+        assert!(!overflow.load(Ordering::Acquire));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn watch_admission_keeps_ignored_aliases_to_source_and_environment() {
+        use notify::event::ModifyKind;
+        let fixture = WatchFixture::new();
+        fixture.file("views/home.brain");
+        let env = fixture.file(".brain_env");
+        std::os::unix::fs::symlink(fixture.0.join("views"), fixture.0.join("logs")).unwrap();
+        std::fs::create_dir(fixture.0.join(".brain")).unwrap();
+        std::os::unix::fs::symlink(env, fixture.0.join(".brain/env-alias")).unwrap();
+        let (tx, rx) = std::sync::mpsc::sync_channel(8);
+        let overflow = AtomicBool::new(false);
+        for path in [fixture.0.join("logs/home.brain"), fixture.0.join(".brain/env-alias")] {
+            let event = notify::Event::new(notify::EventKind::Modify(ModifyKind::Any)).add_path(path);
+            queue_watch_event(&fixture.0, &tx, &overflow, Ok(event.clone()));
+            assert_eq!(rx.try_recv().unwrap().unwrap(), event);
+        }
+        assert!(!overflow.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn watch_admission_keeps_uncertain_large_and_rescan_events() {
+        use notify::event::{AccessKind, Flag, ModifyKind};
+        let fixture = WatchFixture::new();
+        let ignored = fixture.file(".brain/cache/source.js");
+        let (tx, rx) = std::sync::mpsc::sync_channel(8);
+        let overflow = AtomicBool::new(false);
+        let mut large = notify::Event::new(notify::EventKind::Modify(ModifyKind::Any));
+        large.paths = vec![ignored.clone(); 9];
+        for event in [large,
+            notify::Event::new(notify::EventKind::Modify(ModifyKind::Any)).add_path(fixture.0.join(".brain/missing")),
+            notify::Event::new(notify::EventKind::Modify(ModifyKind::Any)).add_path(ignored.clone()).set_flag(Flag::Rescan),
+            notify::Event::new(notify::EventKind::Access(AccessKind::Read)).add_path(ignored).set_flag(Flag::Rescan)] {
+            queue_watch_event(&fixture.0, &tx, &overflow, Ok(event.clone()));
+            assert_eq!(rx.try_recv().unwrap().unwrap(), event);
+            assert_eq!(overflow.load(Ordering::Acquire), event.need_rescan());
+            overflow.store(false, Ordering::Release);
+        }
+        assert!(!overflow.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn native_pathless_rescan_wakes_the_worker_and_requests_full_recovery() {
+        use notify::event::{AccessKind, Flag};
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let overflow = AtomicBool::new(false);
+        for kind in [notify::EventKind::Any, notify::EventKind::Access(AccessKind::Read)] {
+            let event = notify::Event::new(kind).set_flag(Flag::Rescan);
+            queue_watch_event(Path::new("/project"), &tx, &overflow, Ok(event.clone()));
+            assert_eq!(rx.try_recv().unwrap().unwrap(), event, "a rescan must wake the consumer without a source path");
+            assert!(overflow.swap(false, Ordering::AcqRel), "the consumer must enter its existing full-cache recovery");
+        }
+    }
+
     #[test]
     fn watch_access_bursts_do_not_consume_mutation_capacity_or_force_reload() {
         use notify::event::{AccessKind, ModifyKind};
         let (tx, rx) = std::sync::mpsc::sync_channel(64);
         let overflow = AtomicBool::new(false);
         for _ in 0..256 {
-            queue_watch_event(&tx, &overflow, Ok(notify::Event::new(notify::EventKind::Access(AccessKind::Read))));
+            queue_watch_event(Path::new("/project"), &tx, &overflow, Ok(notify::Event::new(notify::EventKind::Access(AccessKind::Read))));
         }
         assert!(!overflow.load(Ordering::Acquire), "reading source must not signal lost mutations or reload the document");
         assert!(rx.try_recv().is_err(), "access events must not occupy the bounded mutation queue");
         let changed = notify::Event::new(notify::EventKind::Modify(ModifyKind::Any));
-        queue_watch_event(&tx, &overflow, Ok(changed.clone()));
+        queue_watch_event(Path::new("/project"), &tx, &overflow, Ok(changed.clone()));
         assert_eq!(rx.try_recv().unwrap().unwrap(), changed);
         for _ in 0..65 {
-            queue_watch_event(&tx, &overflow, Ok(changed.clone()));
+            queue_watch_event(Path::new("/project"), &tx, &overflow, Ok(changed.clone()));
         }
         assert!(overflow.load(Ordering::Acquire), "lost real mutations must retain full reload recovery");
     }
@@ -2932,14 +3059,14 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::sync_channel(8);
         let overflow = AtomicBool::new(false);
         for access in [AccessKind::Any, AccessKind::Read, AccessKind::Open(AccessMode::Read), AccessKind::Close(AccessMode::Write), AccessKind::Other] {
-            queue_watch_event(&tx, &overflow, Ok(notify::Event::new(notify::EventKind::Access(access))));
+            queue_watch_event(Path::new("/project"), &tx, &overflow, Ok(notify::Event::new(notify::EventKind::Access(access))));
         }
         assert!(rx.try_recv().is_err());
         for kind in [notify::EventKind::Any, notify::EventKind::Create(CreateKind::Any), notify::EventKind::Modify(ModifyKind::Any), notify::EventKind::Remove(RemoveKind::Any), notify::EventKind::Other] {
-            queue_watch_event(&tx, &overflow, Ok(notify::Event::new(kind)));
+            queue_watch_event(Path::new("/project"), &tx, &overflow, Ok(notify::Event::new(kind)));
             assert_eq!(rx.try_recv().unwrap().unwrap().kind, kind);
         }
-        queue_watch_event(&tx, &overflow, Err(notify::Error::generic("owned watch error")));
+        queue_watch_event(Path::new("/project"), &tx, &overflow, Err(notify::Error::generic("owned watch error")));
         assert!(rx.try_recv().unwrap().is_err());
         assert!(!overflow.load(Ordering::Acquire));
     }
@@ -2995,6 +3122,8 @@ mod tests {
             while seen.len() < 6 && start.elapsed() < Duration::from_secs(10) {
                 match listener.accept() {
                     Ok((mut socket, _)) => {
+                        // BSD sockets inherit the listener's nonblocking mode.
+                        socket.set_nonblocking(false).unwrap();
                         socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
                         let request = http::read_request(socket.try_clone().unwrap()).unwrap();
                         let known = native_proxy::is_probe(&request.path);

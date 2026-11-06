@@ -1,12 +1,63 @@
 // Minimal Chrome DevTools Protocol client (no deps): launches headless Chrome, opens a page, evaluates JS.
 // Node ≥ 22 (global WebSocket). Chrome path: $BRAIN_CHROME or the default macOS install.
 import { spawn } from 'node:child_process'
-import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { mkdtempSync, openSync, readSync, closeSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const CHROME = process.env.BRAIN_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const browserPath = /^\/devtools\/browser(?:\/[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12})?$/i
+
+// Chromium creates this file before its port/browser address is necessarily complete.
+// Bound the read and recognize both supported address forms. The endpoint probe below resolves
+// the ambiguity between a complete bare path and that same prefix of a still-being-written UUID.
+export function readDebuggingAddress(file) {
+  let fd
+  try {
+    fd = openSync(file, 'r')
+    const bytes = Buffer.alloc(256), size = readSync(fd, bytes, 0, bytes.length, 0)
+    if (size === bytes.length) return null
+    const lines = bytes.subarray(0, size).toString('utf8').split(/\r?\n/)
+    if (!(lines.length === 2 || (lines.length === 3 && lines[2] === '')) || !/^\d{1,5}$/.test(lines[0]) || !browserPath.test(lines[1])) return null
+    const port = Number(lines[0])
+    return port >= 1 && port <= 65535 ? { port, path: lines[1] } : null
+  } catch (error) {
+    if (error.code === 'ENOENT') return null
+    throw error
+  } finally { if (fd !== undefined) closeSync(fd) }
+}
+
+export async function waitDebuggingAddress(file, { timeoutMs = 5000, check = () => {} } = {}) {
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000) throw Error('Chrome debugging startup deadline must be 1..30000 ms')
+  const deadline = performance.now() + timeoutMs
+  for (;;) {
+    check()
+    const address = readDebuggingAddress(file)
+    const left = deadline - performance.now()
+    if (left <= 0) throw new Error('Chrome debugging startup deadline')
+    if (address) {
+      try {
+        const response = await fetch(`http://127.0.0.1:${address.port}/json/version`, { redirect: 'error', signal: AbortSignal.timeout(Math.max(1, Math.min(1000, Math.ceil(left)))) })
+        if (!response.ok) { await response.body?.cancel(); throw Error('Chrome debugging endpoint unavailable') }
+        const chunks = []; let bytes = 0
+        for await (const chunk of response.body) {
+          bytes += chunk.length
+          if (bytes > 16384) throw Error('Chrome debugging discovery exceeded its size limit')
+          chunks.push(chunk)
+        }
+        const info = JSON.parse(Buffer.concat(chunks, bytes).toString('utf8'))
+        const target = new URL(info.webSocketDebuggerUrl)
+        if (target.protocol !== 'ws:' || !['127.0.0.1', 'localhost', '[::1]'].includes(target.hostname) || Number(target.port || 80) !== address.port || target.username || target.password || target.search || target.hash || !browserPath.test(target.pathname)) throw Error('Chrome debugging discovery returned a different endpoint')
+        check()
+        if (performance.now() <= deadline) return { port: address.port, path: target.pathname }
+      } catch { /* The same startup budget covers a not-yet-ready discovery endpoint. */ }
+    }
+    const remaining = deadline - performance.now()
+    if (remaining <= 0) throw new Error('Chrome debugging startup deadline')
+    await sleep(Math.min(50, remaining))
+  }
+}
 
 export async function launch() {
   const dir = mkdtempSync(join(tmpdir(), 'qa-cdp-'))
@@ -32,15 +83,10 @@ export async function launch() {
   process.once('exit', close)
   for (const [signal, handler] of signals) process.once(signal, handler)
   try {
-    for (let i = 0; i < 100 && !existsSync(portFile); i++) {
+    const { port } = await waitDebuggingAddress(portFile, { check: () => {
       if (startupError) throw startupError
       if (proc.exitCode !== null || proc.signalCode !== null) throw new Error('Chrome exited before debugging was ready')
-      await sleep(50)
-    }
-    if (startupError) throw startupError
-    if (!existsSync(portFile)) throw new Error('Chrome debugging startup deadline')
-    const port = Number(readFileSync(portFile, 'utf8').split('\n')[0])
-    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Chrome returned an invalid debugging port')
+    } })
     return { port, close }
   } catch (error) { close(); throw error }
 }

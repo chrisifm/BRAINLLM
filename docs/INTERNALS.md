@@ -260,11 +260,27 @@ Shadow DOM, Declarative Shadow DOM for SSR, `adoptedStyleSheets` shared across i
 **HMR with preserved state:** the dev server sends the new module; the runtime re-mounts the instances of that
 `data-b` keeping `sig` values by name. A CSS-only change swaps the sheet without re-mounting. The HMR client emits on `window` the `brain:hmr` event `{kind:'css'|'js'|'reload', file, receivedAt, appliedAt}` (ms epoch = `performance.timeOrigin + performance.now()`); `appliedAt` is taken after the sheet loads (css), after re-mounting (js) or right before reloading (reload).
 
-Dev watcher admission (2026-11-05): access notifications are discarded in the callback before the bounded
-64-event mutation queue. Linux source reads may otherwise fill that queue while compilation runs and falsely
-trigger lost-mutation recovery. Create/modify/remove/unknown events and watcher errors retain admission;
-real mutation overflow still clears caches and reloads clients. The focus navigation regression also retains
-an identity outside the mounted view, so unexpected full document loads cannot pass as client navigation.
+Dev watcher admission (2026-11-05): ordinary access notifications are discarded before the bounded 64-event
+mutation queue. Framework traces/logs, generated outputs and component tests are discarded only when both
+lexical and resolved paths are ignored, with at most eight resolutions per candidate event. Symlink aliases
+to source/environment, missing or uncertain paths, mixed renames, large batches, explicit rescan notifications,
+real changes and errors retain admission. Real mutation overflow still clears caches and reloads clients.
+Native rescan notifications set that same recovery flag before enqueueing, even when the queue has room
+and the notification has no paths. Enqueueing wakes the worker; a full queue already has work pending.
+The focus navigation regression retains a document identity, so a full document load cannot pass as client navigation.
+
+Dev fallback diagnostics (2026-11-05): brain:hmr full-reload reasons distinguish watch-overflow,
+dev-server-reconnected, navigation-redirect, navigation-response-status, navigation-missing-route,
+navigation-language and navigation-fetch/document/route-failed. Destination/query values are not added to
+these events. Caught exceptions use the existing private browser-error relay (message: up to 500 characters,
+stack: up to 4096 characters); diagnostic failures never prevent the original document recovery. Navigation failures
+remain failures in the real-browser gate; bounded reload reasons and server/browser context are appended
+only to the failing assertion, without retrying the action.
+Node CDP readiness (2026-11-05): the three repository browser launchers share a bounded active-port reader
+and a live discovery probe. File existence or a numeric prefix is not readiness. Both bare and UUID browser
+endpoints are valid; the authoritative path comes from the same loopback port's /json/version response,
+with redirects rejected and discovery capped at 16 KiB. The original 5s/10s startup budgets also cover probing;
+the readiness probe creates no target. The Rust test browser still uses the separate debugging pipe.
 
 **Accessibility, verified by `brain check`** (B04xx errors with fix):
 - B0401 `<img>` without `alt`.
@@ -728,6 +744,10 @@ be turned off.
   additional second for blocking-task teardown; this is not a library-wide claim that Rust can cancel arbitrary CPU
   work. Supervised job children retain their own separately bounded queue drain. PM2 backend/queue previews derive
   kill_timeout from their declared budgets plus a margin instead of reusing the frontend's twenty-second value.
+  The disposable PostgreSQL CLI gate establishes a table-lock waiter, suspends only that owned database client
+  process to prevent a database-side timeout from hiding a shutdown wait, and requires autonomous bounded exit.
+  Deadline exhaustion is a diagnosed CLI error (exit 2), not forced termination. The gate resumes that client in
+  both normal and signal cleanup, verifies closed backend connections and listener, then restarts on the same port.
 - Migration boundaries (2026-11-05): db::migration_plan reads and validates the existing migration ledger without
   executing SQL migrations. approve-contract includes it before apply; migrate includes the pre-apply plan in its
   report. The phase is explicitly before-apply; CLI output separately reports observed framework applied,

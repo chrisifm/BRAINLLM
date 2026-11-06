@@ -1,10 +1,11 @@
 // Real Chrome CRUD checks and initial-route payload capture for expanded.mjs outputs.
 import {spawn} from 'node:child_process'
 import {createServer} from 'node:http'
-import {readFileSync,writeFileSync,existsSync,mkdtempSync,rmSync,statSync} from 'node:fs'
+import {readFileSync,writeFileSync,mkdtempSync,rmSync,statSync} from 'node:fs'
 import {join,resolve,sep,extname} from 'node:path'
 import {gzipSync} from 'node:zlib'
 import {once} from 'node:events'
+import {waitDebuggingAddress} from '../lib/cdp.mjs'
 const work=resolve(process.env.BENCH_WORK),out=resolve(process.env.BENCH_OUT)
 const sleep=ms=>new Promise(r=>setTimeout(r,ms))
 const owned=new Set()
@@ -15,10 +16,15 @@ async function until(fn,label,ms=10000){const deadline=Date.now()+ms;while(Date.
 const profile=mkdtempSync(join(work,'chrome-'))
 const chrome=launch(process.env.BRAIN_CHROME||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',['--headless=new','--remote-debugging-port=0',`--user-data-dir=${profile}`,'--use-mock-keychain','--password-store=basic','--no-first-run','--no-default-browser-check','--disable-background-networking','about:blank'])
 chrome.stdout.resume()
+let chromeError
+chrome.on('error',error=>{chromeError=error})
 let page,currentServer,currentProcess
 try{
- await until(()=>existsSync(join(profile,'DevToolsActivePort')),'Chrome start')
- const port=Number(readFileSync(join(profile,'DevToolsActivePort'),'utf8').split('\n')[0])
+ const address=await waitDebuggingAddress(join(profile,'DevToolsActivePort'),{timeoutMs:10000,check:()=>{
+  if(chromeError)throw new Error(`Chrome did not start: ${chromeError.code||'spawn failed'}`)
+  if(chrome.exitCode!==null||chrome.signalCode!==null)throw new Error('Chrome exited before debugging was ready')
+ }})
+ const {port}=address
  async function open(){
   const t=await(await fetch(`http://127.0.0.1:${port}/json/new?about:blank`,{method:'PUT',signal:AbortSignal.timeout(5000)})).json()
   const ws=new WebSocket(t.webSocketDebuggerUrl)

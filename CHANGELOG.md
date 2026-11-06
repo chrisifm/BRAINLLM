@@ -15,10 +15,16 @@ Includes the typed input, server helper, discovery metadata, shutdown and migrat
 0.9.1. That source tag was withheld from npm after its repeated Linux source verification failed.
 
 - Filter filesystem access notifications before the bounded dev watcher queue, so source reads cannot cause false overflow recovery and reload a document during client navigation. Real mutation overflow still triggers recovery, and watcher errors retain their existing handling.
+- Ignored runtime traces, logs, generated files and component tests leave capacity for source edits; uncertain paths, mixed renames, environment changes, symlink aliases and large notification batches remain admitted.
+- Native watcher rescan notifications trigger full cache recovery even without paths or a full mutation queue, preserving changes the operating system could not report individually.
+- Dev navigation fallbacks distinguish watcher overflow, server reconnection, redirects, response status, document mismatch and execution phase; caught exceptions reach the bounded existing browser-error relay without blocking recovery.
 
 ### Tests
 
-- Navigation focus acceptance verifies both the heading and polite announcement within the original document for button and link navigation; an unexpected full reload fails immediately instead of retrying the action.
+- Navigation focus acceptance verifies both the heading and polite announcement within the original document for button and link navigation; an unexpected full reload fails immediately instead of retrying the action, with bounded reload reasons and server/browser failure context.
+- Browser acceptance and both benchmark launchers wait for a complete debugging port and live bounded discovery, including Chromium endpoints with or without a browser UUID, within their existing startup budgets.
+- TCP and Unix socket fixtures restore blocking mode after accepting from a nonblocking listener, preserving bounded request reads on platforms that inherit the listener's mode.
+- Backend CLI acceptance observes an active SQL-blocked request against an unresponsive owned database connection, then requires bounded SIGTERM exit, closed database connections, a released listener and a successful restart on the same port.
 
 ## [0.9.1] - 2026-11-05
 

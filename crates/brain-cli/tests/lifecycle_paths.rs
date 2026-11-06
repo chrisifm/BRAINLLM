@@ -43,6 +43,8 @@ fn controlled(root: &Path, cwd: &Path, command: &str, args: &[&str]) {
                 Err(e) => return Err(format!("no control connection: {e}")),
             }
         };
+        // BSD sockets inherit the listener's nonblocking mode.
+        stream.set_nonblocking(false).unwrap();
         stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         let mut line = String::new();
         BufReader::new(&stream).read_line(&mut line).unwrap();

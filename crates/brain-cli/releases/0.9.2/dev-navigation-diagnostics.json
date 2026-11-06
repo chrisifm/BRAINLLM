@@ -1,0 +1,20 @@
+{
+  "id": "dev-navigation-diagnostics",
+  "kind": "fix",
+  "title": "Dev document fallbacks preserve a diagnosable cause",
+  "why": "Dev route recovery silently replaced a document after a fetch, document parse or route execution failure. Fixed reload reasons and bounded exception relay entries now distinguish that recovery from watcher overflow, intentional redirects and server reconnection without changing navigation or retrying actions.",
+  "changelog": [
+    "Dev navigation fallbacks distinguish watcher overflow"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "apis": [
+    "brain run",
+    "brain mcp",
+    "brain_errors",
+    "brain_logs"
+  ],
+  "affects": [
+    "views/**",
+    "server/**"
+  ]
+}
