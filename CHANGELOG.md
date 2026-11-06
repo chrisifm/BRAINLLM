@@ -15,7 +15,9 @@ Every npm package (`@christianirack/brainllm`, its seven native platform package
 
 - Worker database diagnostics retain finite driver causes, connection error kinds and operation phases without exposing private values. SQLSTATE categories and public error messages remain compatible.
 - Workers recover from bounded pre-SQL pool contention without consuming a job attempt or replaying a statement. Shutdown cancels acquisition and backoff; other database errors remain fail-fast.
-- Worker lease renewal and final database cleanup have finite deadlines. Uncertain leases cancel their handlers without acknowledgment, and dropping a worker cancels its owned liveness and listener tasks.
+- Worker lease renewal and final database cleanup have finite deadlines, including CLI pool closure after a canceled query. Uncertain leases cancel their handlers without acknowledgment, and dropping a worker cancels its owned liveness and listener tasks. A stalled final pool close emits a private diagnostic and exits with code 2 instead of hanging.
+
+- Headless test-page restoration recovers once from a closed CDP transport within the original deadline, retaining earlier results and resuming only tests that have not started. Navigation failures remain failures; transport errors after assertions begin cannot replay completed actions or restart the suite.
 
 ## [0.10.2] - 2026-11-06
 

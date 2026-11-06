@@ -2333,7 +2333,14 @@ pub fn jobs(args: &[String]) -> Result<(), String> {
             }
             _ => unreachable!(),
         }
-        pool.close().await;
+        // A canceled renewal can leave a returning connection waiting for an unresponsive database.
+        // Ending the worker loop is not enough: final pool closure must also have an absolute bound.
+        if !brain_backend::db::close_until(&pool, tokio::time::Instant::now() + std::time::Duration::from_secs(1)).await {
+            brain_backend::log_line!("{}", json!({"schemaVersion":1,"event":"worker-pool-close-deadline",
+                "phase":"pool-close","budgetMs":1000,"private":true,"valuesCaptured":false,
+                "fix":"Inspect database connectivity and locks; the command stopped without waiting indefinitely for a returning connection"}));
+            return Err("Worker database pool close deadline expired; inspect sanitized server diagnostics".into());
+        }
         Ok(())
     })
 }

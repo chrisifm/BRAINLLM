@@ -547,14 +547,20 @@ fn run_headless(
     files: &[PathBuf],
     timeout: Duration,
 ) -> Result<Vec<FileReport>, String> {
-    transport_retry(|| run_headless_once(base, root, files, timeout), Duration::from_secs(2), load_average)
+    transport_retry(|| {
+        let mut started = false;
+        run_headless_once(base, root, files, timeout, &mut started)
+            .map_err(|error| if started { format!("{NO_REPLAY}{error}") } else { error })
+    }, Duration::from_secs(2), load_average)
 }
 
-/// A browser that dies on its pipe ("Broken pipe", "Chrome did not respond") is usually starved by machine load, not a
-/// failed test: run the whole pass once more after `wait`, then name the probable cause with the 1-minute load average.
-/// Any other error is returned as it is, without a retry.
+/// Retry a recognized startup transport failure once, then include the observed load in the diagnostic.
+/// Once a scenario starts, never replay it. Other errors return unchanged, without retry.
+const NO_REPLAY: &str = "Test execution already started; completed or interrupted scenarios were not replayed: ";
+const RESTORATION_FAILED: &str = "Test document restoration failed: ";
 fn transport_retry<T>(mut attempt: impl FnMut() -> Result<T, String>, wait: Duration, load: impl Fn() -> Option<f64>) -> Result<T, String> {
-    let transport = |e: &str| e.contains("CDP transport write failed") || e.contains("Chrome did not respond") || e.starts_with("pipe CDP:");
+    let transport = |e: &str| !e.starts_with(NO_REPLAY) && !e.starts_with(RESTORATION_FAILED)
+        && (e.contains("CDP transport write failed") || e.contains("Chrome did not respond") || e.starts_with("pipe CDP:"));
     match attempt() {
         Err(first) if transport(&first) => {
             std::thread::sleep(wait);
@@ -650,8 +656,57 @@ where F:FnOnce(&mut Chrome,&str,&str,&mut Vec<AxIssue>)->Result<(),String> {
     audited.map_err(BoundStepError::Other)?;
     Ok((result,issues))
 }
-fn restore_test_page(chrome:&mut Chrome,base:&str,file:&str,names:&Json,heap:bool)->Result<Option<(String,Json)>,String> {
-    let (session,plan)=open_test_page(chrome,base,file)?;
+/// Own the browser across restoration; replacing it drops the old process group before launching another.
+struct TestBrowser {
+    chrome: Option<Chrome>,
+    deadline: Instant,
+    recovered: bool,
+}
+impl std::ops::Deref for TestBrowser {
+    type Target = Chrome;
+    fn deref(&self) -> &Chrome { self.chrome.as_ref().expect("live test browser") }
+}
+impl std::ops::DerefMut for TestBrowser {
+    fn deref_mut(&mut self) -> &mut Chrome { self.chrome.as_mut().expect("live test browser") }
+}
+impl TestBrowser {
+    fn launch(timeout: Duration) -> Result<Self, String> {
+        let deadline = Instant::now() + timeout;
+        Ok(Self { chrome: Some(Chrome::launch(timeout).map_err(|error|error.to_string())?), deadline, recovered: false })
+    }
+    fn recover_eof(&mut self, error: &str) -> Result<bool, String> {
+        if self.recovered || !error.starts_with("Chrome closed the CDP transport (Chrome closed the pipe)") { return Ok(false) }
+        self.recovered = true;
+        drop(self.chrome.take());
+        let remaining = self.deadline.checked_duration_since(Instant::now()).filter(|left| !left.is_zero())
+            .ok_or("test browser restoration exhausted the original session deadline")?;
+        self.chrome = Some(Chrome::launch(remaining).map_err(|error|error.to_string())?);
+        Ok(true)
+    }
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, PartialEq)]
+enum TestFaultPoint { Restore, AfterStep }
+#[cfg(test)]
+thread_local! {
+    static TEST_FAULT: std::cell::RefCell<Option<Box<dyn FnMut(TestFaultPoint, &mut Chrome) -> Option<String>>>> = const { std::cell::RefCell::new(None) };
+}
+#[cfg(test)]
+fn test_fault(point: TestFaultPoint, chrome: &mut Chrome) -> Option<String> {
+    TEST_FAULT.with(|hook| hook.borrow_mut().as_mut().and_then(|hook| hook(point, chrome)))
+}
+fn open_restored_page(chrome:&mut TestBrowser,base:&str,file:&str)->Result<(String,Json),String> {
+    #[cfg(test)]
+    if let Some(error)=test_fault(TestFaultPoint::Restore,chrome) { return Err(error) }
+    open_test_page(chrome,base,file)
+}
+fn restore_test_page(chrome:&mut TestBrowser,base:&str,file:&str,names:&Json,heap:bool)->Result<Option<(String,Json)>,String> {
+    let opened=open_restored_page(chrome,base,file);
+    let (session,plan)=match opened {
+        Err(error) if chrome.recover_eof(&error)? => open_restored_page(chrome,base,file)?,
+        result => result?,
+    };
     if plan.get("error").is_some() || plan.get("names")!=Some(names) || plan_id(&plan).is_err() {
         close_test_page(chrome,&session);return Ok(None)
     }
@@ -668,8 +723,9 @@ fn run_headless_once(
     root: &Path,
     files: &[PathBuf],
     timeout: Duration,
+    started: &mut bool,
 ) -> Result<Vec<FileReport>, String> {
-    let mut chrome = Chrome::launch(timeout).map_err(|e| e.to_string())?;
+    let mut chrome = TestBrowser::launch(timeout)?;
     let mut reports = Vec::new();
     'files: for f in files {
         let rel = f
@@ -714,7 +770,12 @@ fn run_headless_once(
             let name=match &names {Json::Arr(names)=>names.get(i).and_then(Json::as_str).unwrap_or("?"),_=>"?"}.to_string();
             let began=Instant::now();let mut unstarted_recovery=false;
             loop {
-                match bound_step(&mut chrome,&session,&loaded,i,&name,audit) {
+                // A transport failure after this boundary must never restart the suite or replay app actions.
+                *started = true;
+                let step = bound_step(&mut chrome,&session,&loaded,i,&name,audit);
+                #[cfg(test)]
+                if let Some(error)=test_fault(TestFaultPoint::AfterStep,&mut chrome) { return Err(error) }
+                match step {
                     Ok((result,issues))=>{
                         rep.tests.push(TestResult {name:name.clone(),ok:result.get("ok")==Some(&Json::Bool(true)),ms:result.get("ms").and_then(|v|if let Json::Num(n)=v{Some(*n)}else{None}).unwrap_or(0.0),error:result.get("error").and_then(Json::as_str).map(str::to_string)});
                         for issue in issues {if !rep.a11y.iter().any(|old|old.code==issue.code && old.role==issue.role && old.node==issue.node){rep.a11y.push(issue)}}
@@ -733,7 +794,7 @@ fn run_headless_once(
                             Ok(Some((next,plan)))=>{session=next;loaded=plan;}
                             Ok(None)=>{rep.load_error=Some(format!("{rel}: could not restore the same registered test list after navigation; remaining tests were not run"));reports.push(rep);continue 'files;}
                             Err(error) if test_navigation(&error)=>{rep.load_error=Some(format!("{rel}: the test module navigated again during recovery; remaining tests were not run; fix: remove navigation from module initialization"));reports.push(rep);continue 'files;}
-                            Err(error)=>return Err(format!("{error}; while restoring {rel} after a test-document navigation")),
+                            Err(error)=>return Err(format!("{RESTORATION_FAILED}{error}; while restoring {rel} after a test-document navigation")),
                         }
                         if started {break;}
                         // The current assertion never began. Restore it once; the failed previous scenario is not replayed.
@@ -899,6 +960,154 @@ mod transport_tests {
         if let Err(BoundStepError::Other(ref error))=result {panic!("unexpected navigation error: {error}")}
         assert!(matches!(result,Err(BoundStepError::Navigation{started:true})),"pending assertion must retain its navigation failure");
         close_test_page(&mut chrome,&session);
+    }
+
+    struct FaultHook;
+    impl FaultHook {
+        fn set(hook: impl FnMut(TestFaultPoint, &mut Chrome) -> Option<String> + 'static) -> Self {
+            TEST_FAULT.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+            Self
+        }
+    }
+    impl Drop for FaultHook {
+        fn drop(&mut self) { TEST_FAULT.with(|slot| *slot.borrow_mut() = None); }
+    }
+    struct ScenarioServer {
+        url: String,
+        counts: std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, usize>>>,
+        changed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+    impl ScenarioServer {
+        fn start() -> Self {
+            use std::io::{Read, Write};
+            use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
+            let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let url=format!("http://{}",listener.local_addr().unwrap());
+            listener.set_nonblocking(true).unwrap();
+            let counts=Arc::new(Mutex::new(std::collections::BTreeMap::<String,usize>::new()));
+            let changed=Arc::new(AtomicBool::new(false));
+            let stop=Arc::new(AtomicBool::new(false));
+            let (events,registry,done)=(counts.clone(),changed.clone(),stop.clone());
+            let thread=std::thread::spawn(move || {
+                let api=include_str!("../../brain-serve/src/test-api.js").replace("import { mount as rtMount } from '/@brain/brain.js';","const rtMount=()=>()=>{};");
+                while !done.load(Ordering::SeqCst) {
+                    let (mut socket,_)=match listener.accept() {Ok(socket)=>socket,Err(error) if error.kind()==std::io::ErrorKind::WouldBlock=>{std::thread::sleep(Duration::from_millis(2));continue},Err(_)=>break};
+                    socket.set_nonblocking(false).unwrap();
+                    socket.set_read_timeout(Some(Duration::from_millis(250))).unwrap();
+                    socket.set_write_timeout(Some(Duration::from_millis(250))).unwrap();
+                    let mut bytes=[0u8;8192];
+                    let n=match socket.read(&mut bytes){Ok(n) if n>0=>n,_=>continue};
+                    let request=String::from_utf8_lossy(&bytes[..n]);
+                    let path=request.split_whitespace().nth(1).unwrap_or("");
+                    let (kind,body)=match path {
+                        "/@brain/test.html" => ("text/html", "<!doctype html><html lang='en'><title>Test</title><main id='root'></main><script type='module' src='/@brain/test-api.js'></script></html>".to_string()),
+                        "/@brain/test-api.js" => ("text/javascript",api.clone()),
+                        "/@brain/brain-err.js" => ("text/javascript","export const errors=[]; export function capture() {}".to_string()),
+                        "/probe.test.brain" => {
+                            let next=if registry.load(Ordering::SeqCst){"changed registry"}else{"later scenario"};
+                            ("text/javascript",format!("test('prior action',async()=>{{await fetch('/count/prior')}}); test('original navigation failure',async()=>{{await fetch('/count/navigation');location.replace('about:blank');await new Promise(()=>{{}})}}); test('{next}',async()=>{{await fetch('/count/later')}});"))
+                        }
+                        "/z-next.test.brain" => ("text/javascript","test('next file',async()=>{await fetch('/count/other')});".to_string()),
+                        path if path.starts_with("/count/") => {
+                            *events.lock().unwrap().entry(path[7..].to_string()).or_default()+=1;
+                            ("text/plain","ok".to_string())
+                        }
+                        _ => ("text/plain","not found".to_string()),
+                    };
+                    let response=format!("HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",body.len());
+                    let _=socket.write_all(response.as_bytes());
+                }
+            });
+            Self{url,counts,changed,stop,thread:Some(thread)}
+        }
+    }
+    impl Drop for ScenarioServer {
+        fn drop(&mut self) {
+            self.stop.store(true,std::sync::atomic::Ordering::SeqCst);
+            if let Some(thread)=self.thread.take(){thread.join().unwrap();}
+        }
+    }
+    const CLOSED_EOF: &str = "Chrome closed the CDP transport (Chrome closed the pipe); fix: retry the command";
+
+    #[test]
+    fn restoration_eof_keeps_failed_navigation_and_never_replays_actions() {
+        use std::sync::atomic::Ordering;
+        for changed in [false,true] {
+            let server=ScenarioServer::start();
+            let registry=server.changed.clone();
+            let mut injected=false;
+            let _hook=FaultHook::set(move |point,_| {
+                if point==TestFaultPoint::Restore && !injected {
+                    injected=true;registry.store(changed,Ordering::SeqCst);Some(CLOSED_EOF.to_string())
+                } else {None}
+            });
+            let files=[PathBuf::from("probe.test.brain"),PathBuf::from("z-next.test.brain")];
+            let reports=run_headless(&server.url,Path::new(""),&files,Duration::from_secs(20)).unwrap();
+            assert_eq!(reports.len(),2);
+            assert!(reports[0].tests[0].ok);
+            assert!(!reports[0].tests[1].ok);
+            assert!(reports[0].tests[1].error.as_ref().unwrap().contains("original navigation failure"));
+            assert_eq!(reports[0].tests.len(),if changed{2}else{3});
+            if changed {assert!(reports[0].load_error.as_ref().unwrap().contains("same registered test list"));}
+            else {assert!(reports[0].tests[2].ok);}
+            assert!(reports[1].tests[0].ok);
+            let counts=server.counts.lock().unwrap();
+            assert_eq!(counts.get("prior"),Some(&1));
+            assert_eq!(counts.get("navigation"),Some(&1));
+            assert_eq!(counts.get("later"),if changed{None}else{Some(&1)});
+            assert_eq!(counts.get("other"),Some(&1));
+        }
+    }
+
+    #[test]
+    fn restoration_failure_and_post_action_transport_errors_cannot_restart_the_suite() {
+        for after_action in [true,false] {
+            let server=ScenarioServer::start();
+            let mut restores=0;
+            let _hook=FaultHook::set(move |point,_| {
+                if after_action && point==TestFaultPoint::AfterStep {
+                    return Some("CDP transport write failed: synthetic closed transport".to_string())
+                }
+                if !after_action && point==TestFaultPoint::Restore {
+                    restores+=1;
+                    return Some(if restores==1{CLOSED_EOF.to_string()}else{"CDP transport write failed: synthetic second restoration failure".to_string()})
+                }
+                None
+            });
+            let files=[PathBuf::from("probe.test.brain"),PathBuf::from("z-next.test.brain")];
+            let failure=run_headless(&server.url,Path::new(""),&files,Duration::from_secs(20)).err().expect("transport failure must remain a failure");
+            let counts=server.counts.lock().unwrap();
+            assert_eq!(counts.get("prior"),Some(&1),"a completed action must not run again after transport failure");
+            assert!(failure.starts_with(NO_REPLAY),"{failure}");
+            if !after_action {assert!(failure.contains(RESTORATION_FAILED));}
+            assert_eq!(counts.get("navigation"),if after_action{None}else{Some(&1)});
+            assert_eq!(counts.get("later"),None);
+            assert_eq!(counts.get("other"),None);
+        }
+    }
+
+    #[test]
+    fn restoration_restarts_once_with_original_deadline_and_reaps_old_browser() {
+        let mut browser=TestBrowser::launch(Duration::from_secs(15)).unwrap();
+        let original_deadline=browser.deadline;
+        let processes=browser.call(None,"SystemInfo.getProcessInfo",Json::Obj(vec![])).unwrap();
+        let Some(Json::Arr(processes))=processes.get("processInfo") else {panic!("browser process inventory missing")};
+        let old_pid=processes.iter().find(|process|process.get("type").and_then(Json::as_str)==Some("browser"))
+            .and_then(|process|process.get("id")).and_then(|id|if let Json::Num(id)=id{Some(*id as i32)}else{None}).unwrap();
+        let page=browser.new_page().unwrap();
+        assert!(browser.recover_eof(CLOSED_EOF).unwrap());
+        assert_eq!(browser.deadline,original_deadline);
+        // The PID came from this owned Chrome and Drop waits for it before launching its replacement.
+        assert_eq!(unsafe{libc::kill(old_pid,0)},-1,"the old browser must be reaped before replacement");
+        assert_eq!(std::io::Error::last_os_error().raw_os_error(),Some(libc::ESRCH));
+        assert!(browser.eval(&page,"1").is_err(),"a session from the discarded browser must not be reused");
+        assert!(!browser.recover_eof(CLOSED_EOF).unwrap(),"only one restoration restart per suite");
+        let mut expired=TestBrowser::launch(Duration::from_secs(15)).unwrap();
+        expired.deadline=Instant::now();
+        assert!(expired.recover_eof(CLOSED_EOF).unwrap_err().contains("original session deadline"));
+        assert!(expired.chrome.is_none(),"the old browser is dropped even when no restart time remains");
     }
 
     #[test]

@@ -102,8 +102,10 @@ A null SQLSTATE alone does not identify the cause. Driver messages, credentials 
 A lease renewal waits at most one second and still observes the attempt timeout and shutdown drain. If renewal
 is uncertain, the handler is canceled without acknowledging or releasing that lease; expiry makes the job
 eligible again. A final acknowledgment or failure update gets at most one second, and worker-row cleanup gets
-one more second. A timeout does not replay an uncertain write. Background liveness and LISTEN tasks are owned
-by the worker and canceled when it is dropped. Persistent acquisition failure and other fatal database errors
+one more second. The CLI then allows one second for final pool closure, including connections still returning
+from canceled queries. Exhaustion emits `worker-pool-close-deadline` and exits with code 2; it never waits forever
+for PostgreSQL to respond. A timeout does not replay an uncertain write. Background liveness and LISTEN tasks
+are owned by the worker and canceled when it is dropped. Persistent acquisition failure and other fatal database errors
 still stop the worker so its process manager can report and restart it. Handlers must remain idempotent.
 
 ## Semantics

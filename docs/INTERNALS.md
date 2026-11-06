@@ -328,7 +328,12 @@ The test API snapshots scenario registration and returns an opaque document/regi
 bind each step, accessibility observation and final feedback to that identity; trusted unload invalidates it before
 a new document can answer. Interrupted observations are discarded. Navigation between steps fails the preceding
 scenario and restores only the not-yet-started next one, once. A changed registry cannot execute a stale index.
-Transport failures retain the existing one-retry policy and do not become ordinary assertion failures.
+Transport failures do not become ordinary assertion failures. If CDP closes specifically while restoring a
+test page after navigation, the runner may replace its owned Chrome once within the original absolute deadline.
+It retains completed reports and the failed navigation scenario, reloads and revalidates the same registry, and
+continues only at the next unstarted test. It never retries the interrupted assertion or restarts the suite for
+this closed-transport recovery. The whole-run transport retry is limited to startup before the first assertion
+begins; a later transport failure cannot replay an already-started scenario.
 
 `brain-cli::testrun::preflight` runs before test-server reuse/start. It compiles current application sources with dev
 codegen and follows explicit local Brain imports plus resolved automatic components, rather than broad watcher
@@ -2335,7 +2340,11 @@ Queue recovery is limited to explicit pre-claim connection acquisition: three at
 and 250/500 ms pauses, all cancellable. A checked-out connection serves both claim statements, which are never
 replayed on error. The public claim API remains fail-fast. Renewals are bounded by one second as well as the
 attempt/drain deadline; uncertainty cancels the handler without ack/release. Final ack/fail and worker-row cleanup
-each have a one-second bound. Drop guards abort liveness and listener tasks on normal or external cancellation.
+each have a one-second bound. The jobs CLI also bounds final pool closure to one second: cancellation can leave
+a returning connection blocked on an unresponsive PostgreSQL process. Expiry emits a fixed private pool-close
+event and returns exit 2 before the bounded command-runtime teardown. Drop guards abort liveness and listener
+tasks on normal or external cancellation. Real-native acceptance suspends only an observed database child of
+the owned postmaster, so PostgreSQL lock_timeout cannot mask an unbounded client close; cleanup always resumes it.
 Regression tests retain a real pool slot, confirm real PostgreSQL row-lock waits and observe listener connections;
 synthetic errors separately cover retry admission, finite exhaustion, cancellation and diagnostic privacy.
 

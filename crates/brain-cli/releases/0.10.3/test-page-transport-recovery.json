@@ -1,0 +1,16 @@
+{
+  "id": "test-page-transport-recovery",
+  "kind": "fix",
+  "title": "Bounded test-page transport recovery without action replay",
+  "why": "A closed browser transport during navigation recovery must not discard earlier test results or replay completed actions. Restoration retains scenario identity and only resumes tests that have not started.",
+  "changelog": [
+    "Headless test-page restoration recovers once from a closed CDP transport"
+  ],
+  "guide": "docs/INTERNALS.md",
+  "apis": [
+    "brain test"
+  ],
+  "affects": [
+    "comp/**/*.test.brain"
+  ]
+}

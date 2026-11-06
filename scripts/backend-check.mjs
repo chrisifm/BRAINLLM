@@ -8,10 +8,11 @@ import net from 'node:net'
 import { createHmac, randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { hasDoctorAdvice } from './gates/doctor-observation.mjs'
+import { workerLifecycle } from './gates/worker-lifecycle.mjs'
 const project = fileURLToPath(new URL('../', import.meta.url))
 const targets=['vitals','session_controls','analytics','api_keys','backend','caching','cluster','data_queries','domain_writes','edge','exact_types','files','imports','foundation','jwt_sessions','links','media','native_openapi','production_shape','query_shape','routes','auth_flows','auth_http','native_sockets','organizations','queues','row_policy','security_matrix','system_keys']
 // Release gates that drive the real binary over real sockets (scripts/gates/<name>.mjs); selectable like a test target.
-const gates=['route-constraints','native-vitals','http-truth-table','failure-logs','captcha-joint','session-boundary','job-diagnostics','custom-route-verifier','database-audit','edge-audit','named-aggregates','redis-cache','computed-backfill']
+const gates=['route-constraints','native-vitals','http-truth-table','failure-logs','captcha-joint','session-boundary','job-diagnostics','custom-route-verifier','database-audit','edge-audit','worker-lifecycle','named-aggregates','redis-cache','computed-backfill']
 // A module missing from `targets` could not be selected and would silently run in every focused pass of another target.
 const declared=[...readFileSync(join(project,'crates/brain-backend/tests/integration.rs'),'utf8').matchAll(/^mod (\w+);/gm)].map(match=>match[1])
 const unlisted=[...declared.filter(name=>!targets.includes(name)),...targets.filter(name=>!declared.includes(name))]
@@ -28,6 +29,7 @@ const pg = process.env.PG_BIN || ''
 const exe = name => pg ? join(pg,name) : name
 let server, test, log, deadline, stopped = false
 const auxiliary = new Set()
+const auxiliaryCleanup = new Set()
 const suspendedOwnedDatabase = new Set()
 const running=child=>child && Number.isInteger(child.pid) && child.exitCode===null && child.signalCode===null
 const sleep = ms => new Promise(resolve => setTimeout(resolve,ms))
@@ -77,6 +79,10 @@ async function stop() {
   for (const child of auxiliary) {
     try { await terminateOwned(child) } catch(error) { failure=error }
   }
+  for (const cleanup of auxiliaryCleanup) {
+    try { await cleanup() } catch(error) { failure=error }
+  }
+  auxiliaryCleanup.clear()
   if (running(server)) {
     spawnSync(exe('pg_ctl'),['-D',join(dir,'data'),'-m','immediate','-w','-t','10','stop'],{stdio:'ignore',timeout:15000})
     await waitExit(server,1000)
@@ -392,6 +398,10 @@ try {
   }
   if(process.exitCode===0||process.exitCode===undefined)for(const name of selectedGates) {
     const binary=process.env.BRAIN_BIN||join(process.env.CARGO_TARGET_DIR||join(project,'target'),'debug/brain')
+    if(name==='worker-lifecycle') {
+      await workerLifecycle({binary,directory:dir,postgresPort:port,postmasterPID:Number(readFileSync(join(dir,'data/postmaster.pid'),'utf8').split('\n')[0]),exe,auxiliary,auxiliaryCleanup,suspendedOwnedDatabase,terminateOwned,waitExit})
+      continue
+    }
     const result=await phase(process.execPath,[join(project,'scripts/gates',name+'.mjs')],{...process.env,BRAIN_BIN:binary,BRAIN_GATE_DATABASE_URL:`postgres://brain_test@127.0.0.1:${port}/postgres`,PG_BIN:pg},12*60*1000,'Release gate '+name)
     if(result!==0){process.exitCode=result;throw Error('Release gate failed: '+name)}
   }
