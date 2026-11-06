@@ -54,6 +54,7 @@ Includes the typed input, server helper, discovery metadata, shutdown and migrat
 
 ### Tests
 
+- Generation benchmark specification sizes count UTF-8 bytes instead of JavaScript string units; historical result artifacts remain unchanged.
 - Navigation focus acceptance verifies both the heading and polite announcement within the original document for button and link navigation; an unexpected full reload fails immediately instead of retrying the action, with bounded reload reasons and server/browser failure context.
 - Browser acceptance and both benchmark launchers wait for a complete debugging port and live bounded discovery, including Chromium endpoints with or without a browser UUID, within their existing startup budgets.
 - TCP and Unix socket fixtures restore blocking mode after accepting from a nonblocking listener, preserving bounded request reads on platforms that inherit the listener's mode.

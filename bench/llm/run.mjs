@@ -183,7 +183,7 @@ const ok = rows.filter((r) => !r.infraFail)
 const pct = (k) => `${ok.filter((r) => r[k]).length}/${ok.length}`
 const codes = {}; for (const r of ok) for (const d of r.tries[0].diags) codes[`${d.code}:${d.kind}`] = (codes[`${d.code}:${d.kind}`] || 0) + 1
 const costs = ok.flatMap((r) => r.tries.map((t) => t.cost))
-const sum = { model: MODEL, provider: PROVIDER, ...(PROVIDER === 'codex' ? { effort: EFFORT, context: 'served-spec-and-brief; CLI built-in instructions still apply', tools: 'disabled-shell-and-web; tool events rejected' } : {}), mode: MODE, briefs: BRIEFS, specSha: SPEC_SHA, binSha: BIN_SHA, specShaEnd: SPEC_END, tokensSha: TOK0, tokensShaEnd: TOK1, stable: SPEC_END === SPEC_SHA && TOK1 === TOK0, specBytes: SPEC.length, fix: FIX, at: new Date().toISOString(), n: ok.length, infraFail: rows.length - ok.length,
+const sum = { model: MODEL, provider: PROVIDER, ...(PROVIDER === 'codex' ? { effort: EFFORT, context: 'served-spec-and-brief; CLI built-in instructions still apply', tools: 'disabled-shell-and-web; tool events rejected' } : {}), mode: MODE, briefs: BRIEFS, specSha: SPEC_SHA, binSha: BIN_SHA, specShaEnd: SPEC_END, tokensSha: TOK0, tokensShaEnd: TOK1, stable: SPEC_END === SPEC_SHA && TOK1 === TOK0, specBytes: Buffer.byteLength(SPEC, 'utf8'), fix: FIX, at: new Date().toISOString(), n: ok.length, infraFail: rows.length - ok.length,
   firstPass: pct('firstPass'), firstPassLang: pct('firstPassLang'), firstOnlyAhead: pct('firstOnlyAhead'), finalPass: pct('finalPass'),
   meanIterations: +(ok.reduce((a, r) => a + r.iterations, 0) / ok.length).toFixed(2),
   costUSD: costs.length && costs.every((c) => Number.isFinite(c)) ? +costs.reduce((a, c) => a + c, 0).toFixed(4) : null, firstTryCodes: codes }
